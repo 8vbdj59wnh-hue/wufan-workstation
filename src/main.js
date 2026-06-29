@@ -192,7 +192,7 @@ function renderLoginPage() {
         </label>
         <div class="form-error" ${loginError === "" ? "hidden" : ""}>${loginError}</div>
         <button class="primary-button" type="submit">登录</button>
-        <p class="deploy-test-note">版本测试：个人Mac部署测试 2026-06-29</p>
+        <p class="deploy-test-note">版本测试：个人Mac自动部署第二次测试 2026-06-29</p>
       </form>
     </main>
   `;
