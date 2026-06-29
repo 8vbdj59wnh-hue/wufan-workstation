@@ -1,0 +1,21 @@
+{
+  "name": "goal-execution-system",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "python3 -m http.server 5173 --bind 0.0.0.0 --directory .",
+    "dev": "echo \"请分别运行 npm run dev:server 和 npm run dev:client\"",
+    "dev:client": "python3 -m http.server 5173 --bind 0.0.0.0 --directory .",
+    "dev:server": "node server/index.js",
+    "backup": "bash scripts/backup.sh",
+    "db:reset": "node server/reset-db.js",
+    "check": "node --check src/main.js && node --check src/modules.js && node --check src/goalsPage.js && node --check src/tasksPage.js && node --check src/contentSchedulePage.js && node --check src/processesPage.js && node --check src/processInstanceDetail.js && node --check src/timePage.js && node --check src/settingsPage.js && node --check src/assessmentPage.js && node --check src/methodologiesPage.js && node --check src/appState.js && node --check src/data/modelOptions.js && node --check src/data/models.js && node --check src/data/mockData.js && node --check src/data/goalValidation.js && node --check src/data/taskUtils.js && node --check server/db.js && node --check server/index.js && node --check server/reset-db.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.11.1",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "multer": "^2.2.0"
+  }
+}

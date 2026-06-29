@@ -1,0 +1,6 @@
+allowBuilds:
+  better-sqlite3: true
+packages:
+  - "."
+onlyBuiltDependencies:
+  - better-sqlite3
