@@ -3,8 +3,6 @@ set -euo pipefail
 
 REMOTE_PATH="/Users/meiyounaichatouyuna/Projects/goal-execution-system"
 MODE="dry-run"
-ALLOW_DIRTY="false"
-SKIP_PREFLIGHT="false"
 REMOTE_HOST=""
 REMOTE_USER=""
 
@@ -18,15 +16,15 @@ Options:
                             Default: /Users/meiyounaichatouyuna/Projects/goal-execution-system
   --execute                 Actually rsync code and restart pm2. Default is dry-run only.
   --dry-run                 Preview rsync changes without modifying the company Mac.
-  --allow-dirty             Allow deploying when the company Mac project has uncommitted changes.
-  --skip-preflight          Skip remote git/log/status checks.
   -h, --help                Show this help.
 
 Safety:
-  - Never syncs data/, uploads/, .env, node_modules/, or .git/
+  - Never syncs data/, uploads/, .env, .env.*, node_modules/, .git/, or backups/
   - Does not use rsync --delete
   - Does not run git reset or git pull on the company Mac
-  - Runs pnpm install when available, otherwise falls back to npm install
+  - Requires existing production data/workstation.db and uploads/
+  - Backs up remote code before execute mode deploys
+  - Runs npm install, pm2 restart all, pm2 status, and local health checks on the company Mac
 USAGE
 }
 
@@ -60,14 +58,6 @@ while [[ $# -gt 0 ]]; do
       MODE="dry-run"
       shift
       ;;
-    --allow-dirty)
-      ALLOW_DIRTY="true"
-      shift
-      ;;
-    --skip-preflight)
-      SKIP_PREFLIGHT="true"
-      shift
-      ;;
     -h|--help)
       usage
       exit 0
@@ -97,41 +87,16 @@ REMOTE_PATH_Q="$(quote_remote "$REMOTE_PATH")"
 echo "Target: ${TARGET}:${REMOTE_PATH}"
 echo "Mode: ${MODE}"
 
-if [[ "$SKIP_PREFLIGHT" != "true" ]]; then
-  echo
-  echo "== SSH and remote project preflight =="
-  remote_login "test -d ${REMOTE_PATH_Q}"
+echo
+echo "== Company Mac safety preflight =="
+remote_login "test -d ${REMOTE_PATH_Q}"
+remote_login "test -f ${REMOTE_PATH_Q}/data/workstation.db && echo DB_OK"
+remote_login "test -d ${REMOTE_PATH_Q}/uploads && echo UPLOADS_OK"
+remote_login "if test -f ${REMOTE_PATH_Q}/.env; then echo ENV_PRESERVED; else echo ENV_NOT_FOUND; fi"
 
-  echo
-  echo "== Company Mac recent commits =="
-  remote_login "git -C ${REMOTE_PATH_Q} log --oneline -5"
-
-  echo
-  echo "== Company Mac HEAD stat =="
-  remote_login "git -C ${REMOTE_PATH_Q} show --stat HEAD"
-
-  echo
-  echo "== Company Mac index.html change in HEAD =="
-  remote_login "git -C ${REMOTE_PATH_Q} show HEAD -- index.html || true"
-
-  echo
-  echo "== Company Mac working tree status =="
-  REMOTE_STATUS="$(remote_login "git -C ${REMOTE_PATH_Q} status --short")"
-  if [[ -n "$REMOTE_STATUS" ]]; then
-    echo "$REMOTE_STATUS"
-    if [[ "$ALLOW_DIRTY" != "true" ]]; then
-      echo
-      echo "Remote working tree is not clean. Review it first or rerun with --allow-dirty." >&2
-      exit 1
-    fi
-  else
-    echo "clean"
-  fi
-
-  echo
-  echo "== Company Mac runtime commands =="
-  remote_login "command -v node && (command -v pnpm || command -v npm) && command -v pm2"
-fi
+echo
+echo "== Company Mac runtime commands =="
+remote_login "command -v node && command -v npm && command -v pm2 && command -v curl"
 
 echo
 echo "== rsync =="
@@ -151,15 +116,37 @@ if [[ "$MODE" == "dry-run" ]]; then
   RSYNC_ARGS+=(--dry-run)
 fi
 
+if [[ "$MODE" == "execute" ]]; then
+  echo
+  echo "== remote code backup =="
+  BACKUP_PATH="$(
+    remote_login "
+      backup_dir=${REMOTE_PATH_Q}/backups/code-\$(date +%Y%m%d-%H%M%S)
+      mkdir -p \"\$backup_dir\"
+      rsync -az \
+        --exclude data/ \
+        --exclude uploads/ \
+        --exclude node_modules/ \
+        --exclude backups/ \
+        --exclude .git/ \
+        --exclude .env \
+        --exclude '.env.*' \
+        ${REMOTE_PATH_Q}/ \"\$backup_dir\"/
+      echo \"\$backup_dir\"
+    "
+  )"
+  echo "Backup: ${BACKUP_PATH}"
+fi
+
 rsync "${RSYNC_ARGS[@]}" ./ "${TARGET}:${REMOTE_PATH}/"
 
 if [[ "$MODE" == "dry-run" ]]; then
   echo
   echo "Dry-run complete. No files were changed on the company Mac."
-  echo "After reviewing the Safari cache fix and rsync preview, rerun with --execute to deploy."
+  echo "Review the rsync preview, then rerun with --execute to deploy."
   exit 0
 fi
 
 echo
 echo "== remote install and pm2 restart =="
-remote_login "cd ${REMOTE_PATH_Q} && if command -v pnpm >/dev/null 2>&1; then pnpm install; elif command -v npm >/dev/null 2>&1; then echo 'pnpm not found; falling back to npm install'; npm install; else echo 'Neither pnpm nor npm found' >&2; exit 1; fi && pm2 restart all && pm2 status"
+remote_login "cd ${REMOTE_PATH_Q} && npm install && pm2 restart all && pm2 status && curl -fsS -I http://127.0.0.1:5173 && curl -fsS http://127.0.0.1:3001/api/health"

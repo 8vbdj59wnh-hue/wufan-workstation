@@ -192,6 +192,7 @@ function renderLoginPage() {
         </label>
         <div class="form-error" ${loginError === "" ? "hidden" : ""}>${loginError}</div>
         <button class="primary-button" type="submit">登录</button>
+        <p class="login-motto">做对的事，把事做对</p>
       </form>
     </main>
   `;
