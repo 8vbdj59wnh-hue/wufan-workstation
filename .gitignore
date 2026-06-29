@@ -1,7 +1,7 @@
 node_modules/
-data/
-uploads/
-backups/
+/data/
+/uploads/
+/backups/
 .DS_Store
 .env
 .env.*

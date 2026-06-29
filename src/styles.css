@@ -176,6 +176,14 @@ textarea {
   padding: 0 10px;
 }
 
+.deploy-test-note {
+  margin: -4px 0 0;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
 .db-warning,
 .db-status {
   border: 1px solid #f8d18c;
