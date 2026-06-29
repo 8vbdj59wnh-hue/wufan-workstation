@@ -1,0 +1,23 @@
+name: Auto Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    defaults:
+      run:
+        working-directory: /Users/meiyounaichatouyuna/Projects/goal-execution-system
+
+    steps:
+      - name: Pull code
+        run: git pull origin main
+
+      - name: Install deps
+        run: npm install
+
+      - name: Restart PM2
+        run: pm2 restart all
