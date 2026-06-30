@@ -306,7 +306,17 @@ function renderTemplateNodes(templateId) {
                   ${canCurrentUser("processes.sortSteps") && index !== nodes.length - 1 ? `<button class="text-button" type="button" data-action="move-node-down" data-node-id="${node.id}" onclick="window.__handleProcessNodeAction?.(this, event)">下移</button>` : ""}
                   ${canCurrentUser("processes.editSteps") ? `<button class="text-button" type="button" data-action="edit-node" data-node-id="${node.id}" onclick="window.__handleProcessNodeAction?.(this, event)">编辑</button>` : ""}
                   ${getMethodologyLinkByNodeId(node.id)}
-                  ${canCurrentUser("processes.editSteps") ? `<button class="text-button danger-button" type="button" data-action="deactivate-node" data-node-id="${node.id}">停用</button>` : ""}
+                  ${
+                    canCurrentUser("processes.editSteps") && node.status === ProcessTemplateNodeStatus.Inactive
+                      ? `<button class="text-button" type="button" data-action="activate-node" data-node-id="${node.id}">启用</button>`
+                      : ""
+                  }
+                  ${
+                    canCurrentUser("processes.editSteps") && node.status !== ProcessTemplateNodeStatus.Inactive
+                      ? `<button class="text-button danger-button" type="button" data-action="deactivate-node" data-node-id="${node.id}">停用</button>`
+                      : ""
+                  }
+                  ${canCurrentUser("processes.editSteps") ? `<button class="text-button danger-button" type="button" data-action="delete-node" data-node-id="${node.id}">删除</button>` : ""}
                 </span>
               </div>
               <div class="detail-grid">
@@ -846,6 +856,50 @@ async function updateTemplateStatus(templateId, status) {
   return true;
 }
 
+async function updateNodeStatus(nodeId, status) {
+  const node = state.processTemplateNodes.find((item) => item.id === nodeId);
+  if (node === undefined) return false;
+
+  const now = getNow();
+  const updatedNode = { ...node, status, updatedAt: now };
+  try {
+    await updatePersistentResource("process-template-nodes", updatedNode.id, updatedNode);
+  } catch (error) {
+    const actionText = status === ProcessTemplateNodeStatus.Active ? "启用" : "停用";
+    console.error(`流程节点${actionText}失败`, error);
+    window.alert(error.message || `流程节点${actionText}失败，请检查本地数据库服务。`);
+    return false;
+  }
+  state.processTemplateNodes = state.processTemplateNodes.map((item) => (item.id === updatedNode.id ? updatedNode : item));
+  return true;
+}
+
+async function deleteNode(nodeId, rerender) {
+  const node = state.processTemplateNodes.find((item) => item.id === nodeId);
+  if (node === undefined) return;
+
+  const generatedTask = state.tasks.find((task) => task.processNodeId === node.id);
+  if (generatedTask !== undefined) {
+    window.alert("该流程节点已经生成过执行任务，为保留历史数据不能删除，请使用停用节点。");
+    return;
+  }
+
+  if (!window.confirm(`确定要删除流程节点「${node.name}」吗？删除后会同时删除该节点的方法论记录。`)) return;
+
+  try {
+    await deletePersistentResource("process-template-nodes", node.id);
+  } catch (error) {
+    console.error("流程节点删除失败", error);
+    window.alert(error.message || "流程节点删除失败，请检查本地数据库服务。");
+    return;
+  }
+
+  state.processTemplateNodes = state.processTemplateNodes.filter((item) => item.id !== node.id);
+  state.methodologies = state.methodologies.filter((methodology) => methodology.processNodeId !== node.id);
+  normalizeProcessStepOrders(node.templateId);
+  rerender();
+}
+
 export function bindProcessesPageEvents(rerender) {
   const page = document.querySelector(".processes-page");
   const templateForm = document.querySelector(".process-template-form");
@@ -896,20 +950,15 @@ export function bindProcessesPageEvents(rerender) {
       if (action === "deactivate-template" && canCurrentUser("processes.editTemplates")) {
         await updateTemplateStatus(actionButton.dataset.templateId, ProcessTemplateStatus.Inactive);
       }
+      if (action === "delete-node" && canCurrentUser("processes.editSteps")) {
+        await deleteNode(actionButton.dataset.nodeId, rerender);
+        return;
+      }
+      if (action === "activate-node" && canCurrentUser("processes.editSteps")) {
+        await updateNodeStatus(actionButton.dataset.nodeId, ProcessTemplateNodeStatus.Active);
+      }
       if (action === "deactivate-node" && canCurrentUser("processes.editSteps")) {
-        const now = getNow();
-        const node = state.processTemplateNodes.find((item) => item.id === actionButton.dataset.nodeId);
-        if (node !== undefined) {
-          const updatedNode = { ...node, status: ProcessTemplateNodeStatus.Inactive, updatedAt: now };
-          try {
-            await updatePersistentResource("process-template-nodes", updatedNode.id, updatedNode);
-          } catch (error) {
-            console.error("流程步骤停用失败", error);
-            window.alert(error.message || "流程步骤停用失败，请检查本地数据库服务。");
-            return;
-          }
-          state.processTemplateNodes = state.processTemplateNodes.map((item) => (item.id === updatedNode.id ? updatedNode : item));
-        }
+        await updateNodeStatus(actionButton.dataset.nodeId, ProcessTemplateNodeStatus.Inactive);
       }
       if (action === "stop-process" && canCurrentUser("processes.editInstances") && window.confirm("确定要终止该流程吗？未完成流程步骤执行任务将自动取消。")) {
         stopProcess(actionButton.dataset.instanceId);

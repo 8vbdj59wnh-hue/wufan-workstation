@@ -864,6 +864,25 @@ export function deleteProcessTemplate(templateId) {
   return { success: true, id: templateId };
 }
 
+export function deleteProcessTemplateNode(nodeId) {
+  const database = getDatabase();
+  const node = database.prepare("SELECT id, name FROM process_template_nodes WHERE id = @id LIMIT 1").get({ id: nodeId });
+  if (node === undefined) throw new Error("未找到要删除的流程节点。");
+
+  const generatedTask = database.prepare("SELECT id FROM tasks WHERE processNodeId = @id LIMIT 1").get({ id: nodeId });
+  if (generatedTask !== undefined) {
+    throw new Error("该流程节点已经生成过执行任务，为保留历史数据不能删除，请使用停用节点。");
+  }
+
+  const remove = database.transaction(() => {
+    database.prepare("DELETE FROM methodologies WHERE processNodeId = @id").run({ id: nodeId });
+    database.prepare("DELETE FROM process_template_nodes WHERE id = @id").run({ id: nodeId });
+  });
+  remove();
+
+  return { success: true, id: nodeId };
+}
+
 export function findLoginUser(username) {
   return getDatabase()
     .prepare("SELECT * FROM persons WHERE lower(username) = lower(@username) LIMIT 1")

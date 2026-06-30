@@ -9,6 +9,7 @@ import {
   cancelProcessInstance,
   databasePath,
   deleteProcessTemplate,
+  deleteProcessTemplateNode,
   findLoginUser,
   findLoginUserById,
   getPublicUser,
@@ -435,6 +436,14 @@ app.delete("/api/process-templates/:id", requirePermission("processes.editTempla
     response.json(deleteProcessTemplate(request.params.id));
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "删除流程失败，请检查本地数据库服务。" });
+  }
+});
+
+app.delete("/api/process-template-nodes/:id", requirePermission("processes.editSteps"), (request, response) => {
+  try {
+    response.json(deleteProcessTemplateNode(request.params.id));
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "删除流程节点失败，请检查本地数据库服务。" });
   }
 });
 
