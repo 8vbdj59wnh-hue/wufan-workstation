@@ -11,10 +11,11 @@ import {
   state,
   stopProcess,
   updatePersistentResource,
-} from "./appState.js?v=20260627-methods1";
-import { hasPermission } from "./permissions.js?v=20260627-methods1";
+} from "./appState.js?v=20260630-attachments1";
+import { hasPermission } from "./permissions.js?v=20260630-attachments1";
 import {
   CategoryType,
+  GoalStatus,
   ProcessAccepterRule,
   ProcessInstanceStatus,
   ProcessOwnerRule,
@@ -34,10 +35,10 @@ import {
   taskStatusNames,
   taskUrgencyNames,
 } from "./data/modelOptions.js";
-import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260627-methods1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260627-methods1";
-import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260627-methods1";
-import { selectTask } from "./tasksPage.js?v=20260627-methods1";
+import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260630-attachments1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-attachments1";
+import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260630-attachments1";
+import { selectTask } from "./tasksPage.js?v=20260630-attachments1";
 
 const today = "2026-06-24";
 let selectedTemplateId = state.processTemplates[0]?.id ?? null;
@@ -47,6 +48,10 @@ let startedProcessFilters = { showDone: false, showCanceled: false };
 
 function canCurrentUser(permissionPath) {
   return hasPermission(getCurrentUser(), permissionPath);
+}
+
+function getActiveGoals() {
+  return state.goals.filter((goal) => goal.status !== GoalStatus.Inactive);
 }
 
 function escapeHtml(value) {
@@ -519,7 +524,7 @@ function renderStartModal() {
         <label><span>标准流程</span><select name="templateId">${renderOptions(state.processTemplates.filter((item) => item.status === ProcessTemplateStatus.Active), template.id, "请选择标准流程")}</select></label>
         <label><span>已发起流程名称</span><input name="name" value="${template.name}" /></label>
         <div class="form-grid">
-          <label><span>关联目标</span><select name="goalId">${renderOptions(goals, "", "请选择目标")}</select></label>
+          <label><span>关联目标</span><select name="goalId">${renderOptions(getActiveGoals(), "", "请选择目标")}</select></label>
           <label><span>发起人</span><select name="initiatorId">${renderOptions(people, "", "请选择发起人")}</select></label>
         </div>
         <label><span>本次流程说明</span><textarea name="description"></textarea></label>
@@ -725,7 +730,7 @@ function submitStart(form, rerender) {
   if (template === null) return setModalError("暂无可发起的标准流程。", rerender);
   const templateId = template.id;
   const name = getFormValue(form, "name") || template.name;
-  const goalId = getFormValue(form, "goalId") || goals[0]?.id || "";
+  const goalId = getFormValue(form, "goalId") || getActiveGoals()[0]?.id || "";
   const initiatorId = getFormValue(form, "initiatorId") || people[0]?.id || "";
   const result = startProcess({
     templateId,

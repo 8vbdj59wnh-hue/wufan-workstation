@@ -1,4 +1,6 @@
-import { resolveAssetUrl, state } from "./appState.js?v=20260627-methods1";
+import { resolveAssetUrl, state } from "./appState.js?v=20260630-attachments1";
+
+const hiddenSystemFieldKeys = new Set(["standardWorkAttachments"]);
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -63,7 +65,7 @@ export function renderWorkFormViewer({ formFields = [], customFields = {} }) {
       value: customFields[field.key],
     })),
     ...Object.entries(customFields)
-      .filter(([key]) => !knownKeys.has(key))
+      .filter(([key]) => !knownKeys.has(key) && !hiddenSystemFieldKeys.has(key))
       .map(([key, value]) => ({
         key,
         label: getExtraLabel(key),

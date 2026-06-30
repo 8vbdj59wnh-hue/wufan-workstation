@@ -1,5 +1,13 @@
-import { getCurrentUser, getProcessNodeStepOrder, resolveAssetUrl, savePersistentData, state, uploadImageFile } from "./appState.js?v=20260627-methods1";
-import { hasPermission } from "./permissions.js?v=20260627-methods1";
+import {
+  getCurrentUser,
+  getProcessNodeStepOrder,
+  resolveAssetUrl,
+  savePersistentData,
+  state,
+  uploadImageFile,
+  uploadStandardWorkAttachment,
+} from "./appState.js?v=20260630-attachments1";
+import { hasPermission } from "./permissions.js?v=20260630-attachments1";
 import {
   CategoryType,
   GoalLevel,
@@ -25,9 +33,9 @@ import {
   taskStatusNames,
   taskUrgencyNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isTaskOverdue } from "./data/taskUtils.js?v=20260627-methods1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260627-methods1";
-import { selectTask } from "./tasksPage.js?v=20260627-methods1";
+import { getPrimaryImageUrl, getTaskQuadrant, isTaskOverdue } from "./data/taskUtils.js?v=20260630-attachments1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-attachments1";
+import { selectTask } from "./tasksPage.js?v=20260630-attachments1";
 
 const categories = state.categories;
 const departments = state.departments;
@@ -40,8 +48,12 @@ let draggedGoalId = null;
 let dragOverGoalId = null;
 let activeGoalTab = "alignment";
 let isSavingGoal = false;
+let showInactiveGoals = false;
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
+const standardWorkAttachmentsKey = "standardWorkAttachments";
+const spreadsheetAttachmentExts = new Set([".xlsx", ".xls", ".csv"]);
+const maxStandardWorkAttachmentSize = 20 * 1024 * 1024;
 let selectedGoalId =
   goals.find((goal) => goal.level === GoalLevel.Company && goal.type === GoalType.Ultimate)?.id ??
   goals[0]?.id ??
@@ -88,6 +100,39 @@ function getChildren(parentGoalId) {
 
 function getGoal(goalId) {
   return goals.find((goal) => goal.id === goalId) ?? null;
+}
+
+function isInactiveGoal(goal) {
+  return goal.status === GoalStatus.Inactive;
+}
+
+function getActiveGoals() {
+  return goals.filter((goal) => !isInactiveGoal(goal));
+}
+
+function getVisibleGoals() {
+  return showInactiveGoals ? goals : getActiveGoals();
+}
+
+function getVisibleGoal(goalId) {
+  const goal = getGoal(goalId);
+  if (goal === null) return null;
+  if (!showInactiveGoals && isInactiveGoal(goal)) return null;
+  return goal;
+}
+
+function getVisibleChildren(parentGoalId) {
+  const visibleGoalIds = new Set(getVisibleGoals().map((goal) => goal.id));
+  return goals.filter((goal) => goal.parentGoalId === parentGoalId && visibleGoalIds.has(goal.id));
+}
+
+function ensureSelectedGoalVisible() {
+  if (selectedGoalId !== null && getVisibleGoal(selectedGoalId) !== null) return;
+  selectedGoalId =
+    getVisibleGoals().find((goal) => goal.level === GoalLevel.Company && goal.type === GoalType.Ultimate)?.id ??
+    getVisibleGoals()[0]?.id ??
+    null;
+  selectedGoalProcessInstanceId = null;
 }
 
 function getTaskCategories() {
@@ -256,7 +301,7 @@ function renderCustomFieldInput(field) {
       <label>
         <span>${field.label}${requiredMark}</span>
         <select name="custom__${field.key}">
-          <option value="">${field.key === "storeId" && options.length === 0 ? "暂无可选店铺，请先到设置 → 店铺管理中新增店铺。" : "请选择"}</option>
+          <option value="">${field.key === "storeId" && options.length === 0 ? "暂无可选店铺，请确认账号有店铺选择权限，或先到设置 → 店铺管理中新增店铺。" : "请选择"}</option>
           ${options.map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join("")}
         </select>
       </label>
@@ -300,6 +345,35 @@ function renderCustomFieldsForm(template) {
       <h3>本次任务信息</h3>
       <div class="form-grid">
         ${fields.map((field) => renderCustomFieldInput(field)).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function getFileExt(filename = "") {
+  const dotIndex = filename.lastIndexOf(".");
+  return dotIndex === -1 ? "" : filename.slice(dotIndex).toLowerCase();
+}
+
+function validateStandardWorkAttachmentFiles(files) {
+  for (const file of files) {
+    const ext = getFileExt(file.name);
+    if (!spreadsheetAttachmentExts.has(ext)) return "表格附件只支持 .xlsx、.xls、.csv。";
+    if (file.size > maxStandardWorkAttachmentSize) return "单个表格附件不能超过 20MB。";
+  }
+  return "";
+}
+
+function renderStandardWorkAttachmentsField() {
+  return `
+    <div class="standard-work-attachments-field">
+      <label>
+        <span>表格附件</span>
+        <input name="standardWorkAttachments" type="file" accept=".xlsx,.xls,.csv" multiple data-standard-work-attachments />
+      </label>
+      <p class="form-note">支持 .xlsx、.xls、.csv，单个文件不超过 20MB。未上传也可以添加工作。</p>
+      <div class="selected-attachment-list" data-selected-standard-work-attachments>
+        <p class="form-note">暂无已选择附件</p>
       </div>
     </div>
   `;
@@ -489,6 +563,7 @@ function renderParentGoalOptions(selectedGoalId) {
   return `
     <option value="">不选择</option>
     ${goals
+      .filter((goal) => !isInactiveGoal(goal) || goal.id === selectedGoalId)
       .map(
         (goal) => `
           <option
@@ -564,7 +639,7 @@ function renderGoalMapCard(goal) {
 }
 
 function renderGoalMapNode(goal) {
-  const children = getChildren(goal.id);
+  const children = getVisibleChildren(goal.id);
 
   return `
     <div class="goal-map-branch">
@@ -583,8 +658,10 @@ function renderGoalMapNode(goal) {
 }
 
 function renderGoalTree() {
-  const rootGoals = goals
-    .filter((goal) => goal.parentGoalId === null)
+  const visibleGoals = getVisibleGoals();
+  const visibleGoalIds = new Set(visibleGoals.map((goal) => goal.id));
+  const rootGoals = visibleGoals
+    .filter((goal) => goal.parentGoalId === null || !visibleGoalIds.has(goal.parentGoalId))
     .sort((left, right) => {
       if (left.level === GoalLevel.Company && left.type === GoalType.Ultimate) return -1;
       if (right.level === GoalLevel.Company && right.type === GoalType.Ultimate) return 1;
@@ -596,12 +673,22 @@ function renderGoalTree() {
       <div class="section-heading">
         <h2>目标对齐图</h2>
       </div>
+      ${renderInactiveGoalToggle()}
       <div class="goal-map-scroll">
         <div class="goal-map">
           ${rootGoals.map((goal) => renderGoalMapNode(goal)).join("")}
         </div>
       </div>
     </section>
+  `;
+}
+
+function renderInactiveGoalToggle() {
+  return `
+    <label class="checkbox-field goal-inactive-toggle">
+      <input type="checkbox" data-goal-toggle-inactive ${showInactiveGoals ? "checked" : ""} />
+      <span>显示停用目标</span>
+    </label>
   `;
 }
 
@@ -791,7 +878,9 @@ function renderGoalDetail() {
         <h2>目标详情：${escapeHtml(goal.name)}</h2>
         <div class="section-actions">
           ${canCurrentUser("goals.edit") ? `<button class="secondary-button" type="button" data-action="edit-goal" data-goal-id="${goal.id}">编辑目标</button>` : ""}
-          ${canCurrentUser("goals.addWork") ? `<button class="primary-button" type="button" data-action="add-goal-task" data-goal-id="${goal.id}">添加未来工作</button>` : ""}
+          ${canCurrentUser("goals.addWork") && !isInactiveGoal(goal) ? `<button class="primary-button" type="button" data-action="add-goal-task" data-goal-id="${goal.id}">添加未来工作</button>` : ""}
+          ${canCurrentUser("goals.delete") && !isInactiveGoal(goal) ? `<button class="secondary-button danger-button" type="button" data-action="deactivate-goal" data-goal-id="${goal.id}">停用目标</button>` : ""}
+          ${canCurrentUser("goals.delete") && isInactiveGoal(goal) ? `<button class="secondary-button" type="button" data-action="activate-goal" data-goal-id="${goal.id}">重新启用</button>` : ""}
         </div>
       </div>
       <div class="detail-block">
@@ -842,11 +931,13 @@ function renderGoalDetail() {
 }
 
 function renderGoalTable() {
+  const visibleGoals = getVisibleGoals();
   return `
     <section class="settings-section">
       <div class="section-heading">
         <h2>目标列表</h2>
       </div>
+      ${renderInactiveGoalToggle()}
       <div class="table-wrap">
         <table class="data-table goal-table">
           <thead>
@@ -865,10 +956,13 @@ function renderGoalTable() {
             </tr>
           </thead>
           <tbody>
-            ${goals
+            ${
+              visibleGoals.length === 0
+                ? `<tr><td colspan="11">暂无可显示目标。</td></tr>`
+                : visibleGoals
               .map(
                 (goal) => `
-                  <tr>
+                  <tr class="${isInactiveGoal(goal) ? "is-inactive" : ""}">
                     <td>
                       <button class="table-link-button" type="button" data-action="select-goal" data-goal-id="${goal.id}">
                         ${escapeHtml(goal.name)}
@@ -891,13 +985,15 @@ function renderGoalTable() {
                             ? renderActionButton("更新当前值", "update-current-value", goal.id)
                             : ""
                         }
-                        ${canCurrentUser("goals.delete") ? renderActionButton("停用", "deactivate-goal", goal.id, "danger-button") : ""}
+                        ${canCurrentUser("goals.delete") && !isInactiveGoal(goal) ? renderActionButton("停用目标", "deactivate-goal", goal.id, "danger-button") : ""}
+                        ${canCurrentUser("goals.delete") && isInactiveGoal(goal) ? renderActionButton("重新启用", "activate-goal", goal.id) : ""}
                       </span>
                     </td>
                   </tr>
                 `,
               )
-              .join("")}
+              .join("")
+            }
           </tbody>
         </table>
       </div>
@@ -1058,6 +1154,34 @@ function renderCurrentValueModal() {
   `;
 }
 
+function renderDeactivateGoalModal() {
+  if (modalState === null || modalState.kind !== "deactivateGoal") return "";
+  const goal = getGoal(modalState.goalId);
+  if (goal === null) return "";
+
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-label="确认停用目标">
+        <div class="modal-header">
+          <div>
+            <h2>确认停用目标？</h2>
+            <p class="form-note">停用后，该目标将默认隐藏，但不会删除历史任务、流程和记录。</p>
+          </div>
+          <button class="icon-button" type="button" data-action="close-goal-modal" aria-label="关闭">×</button>
+        </div>
+        <div class="detail-grid">
+          ${renderDetailField("目标名称", escapeHtml(goal.name))}
+          ${renderDetailField("当前状态", goalStatusNames[goal.status])}
+        </div>
+        <div class="modal-actions">
+          <button class="secondary-button" type="button" data-action="close-goal-modal">取消</button>
+          <button class="primary-button danger-button" type="button" data-action="confirm-deactivate-goal" data-goal-id="${goal.id}">确认停用</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderGoalTaskModal() {
   if (modalState === null || modalState.kind !== "goalTask") return "";
 
@@ -1114,6 +1238,7 @@ function renderGoalTaskModal() {
           </div>
           ${renderTaskTemplateLockedInfo(selectedTemplate)}
           ${renderCustomFieldsForm(selectedTemplate)}
+          ${renderStandardWorkAttachmentsField()}
           <label>
             <span>补充说明</span>
             <textarea name="description" rows="3"></textarea>
@@ -1368,25 +1493,64 @@ function saveCurrentValue(form, rerender) {
   rerender();
 }
 
-function saveGoalTask(form, rerender) {
+async function uploadSelectedStandardWorkAttachments(form) {
+  const input = form.elements.standardWorkAttachments;
+  const files = input?.files === undefined ? [] : Array.from(input.files);
+  const validationError = validateStandardWorkAttachmentFiles(files);
+  if (validationError !== "") throw new Error(validationError);
+
+  const uploaded = [];
+  for (const file of files) {
+    uploaded.push(await uploadStandardWorkAttachment(file));
+  }
+  return uploaded;
+}
+
+async function saveGoalTask(form, rerender) {
   const draft = buildGoalTaskDraft(form, modalState.goalId);
   const error = validateGoalTaskDraft(draft);
 
   if (error !== "") return setModalError(error, rerender);
 
+  let uploadedAttachments = [];
+  try {
+    uploadedAttachments = await uploadSelectedStandardWorkAttachments(form);
+  } catch (uploadError) {
+    return setModalError(uploadError.message ?? "表格附件上传失败。", rerender);
+  }
+
   const displayTitle = buildDisplayTitle(draft.template, draft.customFields);
   const coverImageUrl = getPrimaryImageUrl({ customFields: draft.customFields }) || null;
   const now = getNow();
+  const workPlanId = createId("work-plan");
+  const customFields =
+    uploadedAttachments.length === 0
+      ? draft.customFields
+      : {
+          ...draft.customFields,
+          [standardWorkAttachmentsKey]: uploadedAttachments.map((attachment) => ({
+            originalName: attachment.originalName,
+            filePath: attachment.filePath ?? attachment.url,
+            url: attachment.url,
+            mimeType: attachment.mimeType,
+            ext: attachment.ext ?? getFileExt(attachment.originalName ?? attachment.filename ?? ""),
+            uploadedAt: attachment.uploadedAt ?? now,
+            standardWorkId: draft.template.id,
+            workPlanId,
+            processInstanceId: null,
+            taskIds: [],
+          })),
+        };
 
   selectedGoalId = draft.goalId;
   state.workPlans = [
     {
-      id: createId("work-plan"),
+      id: workPlanId,
       goalId: draft.goalId,
       departmentId: draft.departmentId,
       taskTemplateId: draft.template.id,
       title: draft.title || displayTitle,
-      customFields: draft.customFields,
+      customFields,
       coverImageUrl,
       importance: draft.importance,
       urgency: draft.urgency,
@@ -1406,14 +1570,31 @@ function saveGoalTask(form, rerender) {
   rerender();
 }
 
-function deactivateGoal(goalId, rerender) {
+async function updateGoalStatus(goalId, status, rerender) {
+  const previousGoals = goals.map((goal) => ({ ...goal }));
+  const previousSelectedGoalId = selectedGoalId;
   const now = getNow();
 
   replaceGoals(
     goals.map((goal) =>
-      goal.id === goalId ? { ...goal, status: GoalStatus.Inactive, updatedAt: now } : goal,
+      goal.id === goalId ? { ...goal, status, updatedAt: now } : goal,
     ),
   );
+  if (status === GoalStatus.Inactive && !showInactiveGoals && selectedGoalId === goalId) {
+    ensureSelectedGoalVisible();
+  }
+  if (status !== GoalStatus.Inactive) {
+    selectedGoalId = goalId;
+  }
+
+  const saved = await savePersistentData();
+  if (!saved) {
+    replaceGoals(previousGoals);
+    selectedGoalId = previousSelectedGoalId;
+    window.alert("目标状态保存失败，请检查本地数据库服务。");
+  }
+
+  modalState = null;
   rerender();
 }
 
@@ -1492,6 +1673,8 @@ function handleGoalClick(event, rerender) {
 
   if (action === "add-goal-task") {
     if (!canCurrentUser("goals.addWork")) return;
+    const goal = getGoal(goalId);
+    if (goal === null || isInactiveGoal(goal)) return;
     selectedGoalId = goalId;
     modalState = { kind: "goalTask", goalId, departmentId: "", taskTemplateId: "", title: button.dataset.modalTitle ?? "添加未来工作", error: "" };
     rerender();
@@ -1513,9 +1696,20 @@ function handleGoalClick(event, rerender) {
 
   if (action === "deactivate-goal") {
     if (!canCurrentUser("goals.delete")) return;
-    if (window.confirm("确定要停用该目标吗？停用后历史任务和流程仍会保留。")) {
-      deactivateGoal(goalId, rerender);
-    }
+    modalState = { kind: "deactivateGoal", goalId };
+    rerender();
+    return;
+  }
+
+  if (action === "confirm-deactivate-goal") {
+    if (!canCurrentUser("goals.delete")) return;
+    updateGoalStatus(goalId, GoalStatus.Inactive, rerender);
+    return;
+  }
+
+  if (action === "activate-goal") {
+    if (!canCurrentUser("goals.delete")) return;
+    updateGoalStatus(goalId, GoalStatus.Active, rerender);
     return;
   }
 
@@ -1529,6 +1723,11 @@ function handleGoalClick(event, rerender) {
   if (action === "close-goal-modal") {
     modalState = null;
     rerender();
+    return;
+  }
+
+  if (action === "remove-selected-standard-work-attachment") {
+    removeSelectedStandardWorkAttachment(button);
   }
 }
 
@@ -1631,8 +1830,45 @@ async function handleGoalSubmit(event, rerender) {
   }
 
   if (modalState?.kind === "goalTask") {
-    saveGoalTask(event.target, rerender);
+    await saveGoalTask(event.target, rerender);
   }
+}
+
+function renderSelectedStandardWorkAttachments(input) {
+  const container = input.closest(".standard-work-attachments-field")?.querySelector("[data-selected-standard-work-attachments]");
+  if (container === null || container === undefined) return;
+  const files = Array.from(input.files ?? []);
+  if (files.length === 0) {
+    container.innerHTML = `<p class="form-note">暂无已选择附件</p>`;
+    return;
+  }
+  container.innerHTML = `
+    <ul class="attachment-list editable-attachment-list">
+      ${files
+        .map(
+          (file, index) => `
+            <li>
+              <span>${escapeHtml(file.name)}</span>
+              <button class="text-button" type="button" data-action="remove-selected-standard-work-attachment" data-attachment-index="${index}">删除</button>
+            </li>
+          `,
+        )
+        .join("")}
+    </ul>
+  `;
+}
+
+function removeSelectedStandardWorkAttachment(button) {
+  const field = button.closest(".standard-work-attachments-field");
+  const input = field?.querySelector("[data-standard-work-attachments]");
+  if (input === null || input === undefined) return;
+  const removeIndex = Number(button.dataset.attachmentIndex);
+  const transfer = new DataTransfer();
+  Array.from(input.files ?? []).forEach((file, index) => {
+    if (index !== removeIndex) transfer.items.add(file);
+  });
+  input.files = transfer.files;
+  renderSelectedStandardWorkAttachments(input);
 }
 
 function updateImagePreview(input) {
@@ -1676,6 +1912,13 @@ export function bindGoalsPageEvents(rerender) {
 
   bindGoalTabs(rerender);
   goalsPage.addEventListener("click", (event) => handleGoalClick(event, rerender));
+  goalsPage.addEventListener("change", (event) => {
+    if (event.target.matches("[data-goal-toggle-inactive]")) {
+      showInactiveGoals = event.target.checked;
+      ensureSelectedGoalVisible();
+      rerender();
+    }
+  });
   goalsPage.addEventListener("dragstart", handleGoalDragStart);
   goalsPage.addEventListener("dragenter", handleGoalDragEnter);
   goalsPage.addEventListener("dragover", handleGoalDragOver);
@@ -1710,6 +1953,9 @@ export function bindGoalsPageEvents(rerender) {
       if (event.target.matches("[data-image-upload-key]")) {
         handleImageUpload(event.target);
       }
+      if (event.target.matches("[data-standard-work-attachments]")) {
+        renderSelectedStandardWorkAttachments(event.target);
+      }
     });
   }
   bindLaunchedProcessDetailEvents(goalsPage, rerender, {
@@ -1721,6 +1967,7 @@ export function bindGoalsPageEvents(rerender) {
 }
 
 export function renderGoalsPage() {
+  ensureSelectedGoalVisible();
   const content =
     activeGoalTab === "list"
       ? `
@@ -1745,6 +1992,7 @@ export function renderGoalsPage() {
       ${content}
       ${renderGoalModal()}
       ${renderCurrentValueModal()}
+      ${renderDeactivateGoalModal()}
       ${renderGoalTaskModal()}
     </div>
   `;

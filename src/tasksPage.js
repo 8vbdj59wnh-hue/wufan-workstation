@@ -15,11 +15,13 @@ import {
   updatePersistentResource,
   uploadGenericFile,
   uploadImageFile,
-} from "./appState.js?v=20260627-methods1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260627-methods1";
-import { hasPermission } from "./permissions.js?v=20260627-methods1";
+  uploadStandardWorkAttachment,
+} from "./appState.js?v=20260630-attachments1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-attachments1";
+import { hasPermission } from "./permissions.js?v=20260630-attachments1";
 import {
   CategoryType,
+  GoalStatus,
   ProcessInstanceStatus,
   ProcessAccepterRule,
   ProcessOwnerRule,
@@ -39,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260627-methods1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260627-methods1";
-import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260627-methods1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260627-methods1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-attachments1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-attachments1";
+import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-attachments1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-attachments1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -51,6 +53,11 @@ const departments = state.departments;
 const goals = state.goals;
 const people = state.people;
 const stores = state.stores;
+const standardWorkAttachmentsKey = "standardWorkAttachments";
+const returnRecordsKey = "returnRecords";
+const latestReturnReasonKey = "latestReturnReason";
+const spreadsheetAttachmentExts = new Set([".xlsx", ".xls", ".csv"]);
+const maxStandardWorkAttachmentSize = 20 * 1024 * 1024;
 
 let filters = {
   keyword: "",
@@ -95,6 +102,10 @@ let activeTaskTab = "task-list";
 
 function canCurrentUser(permissionPath) {
   return hasPermission(getCurrentUser(), permissionPath);
+}
+
+function getActiveGoals() {
+  return goals.filter((goal) => goal.status !== GoalStatus.Inactive);
 }
 
 const taskStatusSelectOptions = [
@@ -586,6 +597,70 @@ function getTaskProcessTemplateName(task) {
   return "无";
 }
 
+function getStandardWorkAttachments(customFields = {}) {
+  const attachments = customFields?.[standardWorkAttachmentsKey];
+  return Array.isArray(attachments) ? attachments : [];
+}
+
+function getFileExt(filename = "") {
+  const dotIndex = filename.lastIndexOf(".");
+  return dotIndex === -1 ? "" : filename.slice(dotIndex).toLowerCase();
+}
+
+function validateStandardWorkAttachmentFiles(files) {
+  for (const file of files) {
+    const ext = getFileExt(file.name);
+    if (!spreadsheetAttachmentExts.has(ext)) return "表格附件只支持 .xlsx、.xls、.csv。";
+    if (file.size > maxStandardWorkAttachmentSize) return "单个表格附件不能超过 20MB。";
+  }
+  return "";
+}
+
+function renderStandardWorkAttachmentList(attachments) {
+  if (attachments.length === 0) return `<p class="form-note">暂无附件</p>`;
+  return `
+    <ul class="attachment-list">
+      ${attachments
+        .map((attachment) => {
+          const href = resolveAssetUrl(attachment.filePath ?? attachment.url ?? "");
+          const name = attachment.originalName ?? attachment.filename ?? attachment.filePath ?? "未命名附件";
+          return `
+            <li>
+              <a href="${escapeHtml(href)}" target="_blank" rel="noreferrer" download>${escapeHtml(name)}</a>
+              ${attachment.ext ? `<span>${escapeHtml(attachment.ext)}</span>` : ""}
+            </li>
+          `;
+        })
+        .join("")}
+    </ul>
+  `;
+}
+
+function renderStandardWorkAttachmentsField() {
+  return `
+    <div class="standard-work-attachments-field">
+      <label>
+        <span>表格附件</span>
+        <input name="standardWorkAttachments" type="file" accept=".xlsx,.xls,.csv" multiple data-standard-work-attachments />
+      </label>
+      <p class="form-note">支持 .xlsx、.xls、.csv，单个文件不超过 20MB。未上传也可以发起标准工作。</p>
+      <div class="selected-attachment-list" data-selected-standard-work-attachments>
+        <p class="form-note">暂无已选择附件</p>
+      </div>
+    </div>
+  `;
+}
+
+function renderStandardWorkAttachmentsBlock(customFields = {}) {
+  const attachments = getStandardWorkAttachments(customFields);
+  return `
+    <div class="detail-block">
+      <h3>表格附件</h3>
+      ${renderStandardWorkAttachmentList(attachments)}
+    </div>
+  `;
+}
+
 function getTaskProcessStepName(task) {
   if (task.source !== TaskSource.Process) return "无";
   return getProcessNode(task)?.name ?? task.name;
@@ -610,7 +685,7 @@ function renderCustomFieldInput(field, customFields = {}) {
       <label>
         <span>${field.label}${requiredMark}</span>
         <select name="custom__${field.key}">
-          <option value="">${field.key === "storeId" && options.length === 0 ? "暂无可选店铺，请先到设置 → 店铺管理中新增店铺。" : "请选择"}</option>
+          <option value="">${field.key === "storeId" && options.length === 0 ? "暂无可选店铺，请确认账号有店铺选择权限，或先到设置 → 店铺管理中新增店铺。" : "请选择"}</option>
           ${options.map((option) => `<option value="${escapeHtml(option.value)}" ${option.value === value ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
         </select>
       </label>
@@ -864,6 +939,7 @@ function renderTaskRow(task, index, options = {}) {
         <span class="row-actions">
           ${renderActionButton("查看", "view-task", task.id)}
           ${renderActionButton("表单", "show-task-work-form", task.id)}
+          ${canReturnTask(task) ? renderActionButton("退回重做", "return-task", task.id) : ""}
           ${canEditTask(task) ? renderActionButton("编辑", "edit-task", task.id) : ""}
           ${canCancelTask(task) ? renderActionButton("取消", "cancel-task", task.id, "danger-button") : ""}
           ${canRestoreTask(task) ? renderActionButton("恢复为待执行", "restore-task", task.id) : ""}
@@ -910,6 +986,7 @@ function renderProcessTaskGroupRow(row, index) {
         <span class="row-actions">
           ${renderActionButton("查看", "view-task", task.id)}
           ${renderActionButton("表单", "show-task-work-form", task.id)}
+          ${canReturnTask(task) ? renderActionButton("退回重做", "return-task", task.id) : ""}
           ${canEditTask(task) ? renderActionButton("编辑", "edit-task", task.id) : ""}
           ${canCancelTask(task) ? renderActionButton("取消", "cancel-task", task.id, "danger-button") : ""}
           ${canRestoreTask(task) ? renderActionButton("恢复为待执行", "restore-task", task.id) : ""}
@@ -948,6 +1025,44 @@ function sortProcessTasks(tasks) {
     if (stepDifference !== 0) return stepDifference;
     return String(left.createdAt ?? left.dueDate ?? "").localeCompare(String(right.createdAt ?? right.dueDate ?? ""));
   });
+}
+
+function getOrderedActiveProcessTasks(task) {
+  if (task.source !== TaskSource.Process || task.processInstanceId === null) return null;
+  return sortProcessTasks(getProcessTasks(task.processInstanceId)).filter((item) => item.status !== TaskStatus.Canceled);
+}
+
+function getReturnableProcessTasks(task) {
+  const processTasks = getOrderedActiveProcessTasks(task);
+  if (processTasks === null) return [];
+  const currentIndex = processTasks.findIndex((item) => item.id === task.id);
+  if (currentIndex <= 0) return [];
+  return processTasks.slice(0, currentIndex);
+}
+
+function canReturnTask(task) {
+  if (!canCurrentUser("tasks.changeStatus")) return false;
+  if (task.source !== TaskSource.Process || task.processInstanceId === null) return false;
+  if (isCanceledStatus(task.status)) return false;
+  const instance = getTaskProcessInstance(task);
+  if (instance === null || instance.status !== ProcessInstanceStatus.Running) return false;
+  return getReturnableProcessTasks(task).length > 0;
+}
+
+function getReturnRecords(task) {
+  const records = task.customFields?.[returnRecordsKey];
+  return Array.isArray(records) ? records : [];
+}
+
+function appendReturnRecord(task, record, extraFields = {}) {
+  return {
+    ...task,
+    customFields: {
+      ...(task.customFields ?? {}),
+      ...extraFields,
+      [returnRecordsKey]: [...getReturnRecords(task), record],
+    },
+  };
 }
 
 function getTaskProgressStatusPriority(status) {
@@ -1228,6 +1343,7 @@ function renderClearanceTaskRows(group) {
                   <span class="row-actions">
                     ${renderActionButton("查看", "view-task", task.id)}
                     ${renderActionButton("表单", "show-task-work-form", task.id)}
+                    ${canReturnTask(task) ? renderActionButton("退回重做", "return-task", task.id) : ""}
                     ${canEditTask(task) ? renderActionButton("编辑", "edit-task", task.id) : ""}
                     ${canCancelTask(task) ? renderActionButton("取消", "cancel-task", task.id, "danger-button") : ""}
                     ${canRestoreTask(task) ? renderActionButton("恢复为待执行", "restore-task", task.id) : ""}
@@ -1287,6 +1403,7 @@ function renderClearanceCard(group, index) {
         <span class="row-actions">
           ${currentTask === null ? "" : renderActionButton("查看", "view-task", currentTask.id)}
           ${currentTask === null ? "" : renderActionButton("表单", "show-task-work-form", currentTask.id)}
+          ${currentTask !== null && canReturnTask(currentTask) ? renderActionButton("退回重做", "return-task", currentTask.id) : ""}
           ${group.instance !== null && canRelaunchProcessInstance(group.instance) ? renderProcessActionButton("重新发起", "relaunch-process", group.instance.id) : ""}
         </span>
       </div>
@@ -1312,6 +1429,7 @@ function renderClearancePage() {
     ${renderTaskDetailModal()}
     ${renderTaskModal()}
     ${renderResultModal()}
+    ${renderReturnTaskModal()}
     ${renderWorkFormModal()}
   `;
 }
@@ -1510,7 +1628,7 @@ function renderFilters() {
       <label>
         <span>关联目标</span>
         <select name="goalId">
-          ${renderOptions(goals, filters.goalId, "全部目标")}
+          ${renderOptions(getActiveGoals(), filters.goalId, "全部目标")}
         </select>
       </label>
       <label>
@@ -1725,7 +1843,7 @@ function renderProcessProgressFilters() {
       </label>
       <label>
         <span>关联目标</span>
-        <select name="goalId">${renderOptions(goals, processProgressFilters.goalId, "全部目标")}</select>
+        <select name="goalId">${renderOptions(getActiveGoals(), processProgressFilters.goalId, "全部目标")}</select>
       </label>
       <label>
         <span>标准流程</span>
@@ -1847,7 +1965,8 @@ function renderProcessProgressTable() {
 
 function renderProcessCustomFields(instance) {
   const customFields = instance.customFields ?? {};
-  const entries = Object.entries(customFields).filter(([, value]) => {
+  const entries = Object.entries(customFields).filter(([key, value]) => {
+    if (key === standardWorkAttachmentsKey) return false;
     if (Array.isArray(value)) return value.length > 0;
     return value !== null && value !== undefined && value !== "";
   });
@@ -1973,7 +2092,17 @@ function renderTaskWorkInfo(task, taskTemplate) {
     .map((field) => renderDetailField(field.label, renderWorkInfoValue(field, customFields[field.key])))
     .join("");
   const extraRows = Object.entries(customFields)
-    .filter(([key, value]) => !visibleKeys.has(key) && key !== "storeName" && value !== null && value !== undefined && value !== "")
+    .filter(
+      ([key, value]) =>
+        !visibleKeys.has(key) &&
+        key !== "storeName" &&
+        key !== standardWorkAttachmentsKey &&
+        key !== returnRecordsKey &&
+        key !== latestReturnReasonKey &&
+        value !== null &&
+        value !== undefined &&
+        value !== "",
+    )
     .map(([key, value]) => renderDetailField(getExtraCustomFieldLabel(key), escapeHtml(Array.isArray(value) ? value.join("、") : value)))
     .join("");
 
@@ -1981,32 +2110,62 @@ function renderTaskWorkInfo(task, taskTemplate) {
   return `<div class="detail-grid">${configuredRows}${extraRows}</div>`;
 }
 
+function renderReturnRecordsBlock(task) {
+  const records = getReturnRecords(task);
+  if (records.length === 0) return "";
+
+  return `
+    <div class="detail-block">
+      <h3>退回记录</h3>
+      <div class="return-record-list">
+        ${records
+          .map(
+            (record) => `
+              <div class="return-record-item">
+                <strong>${escapeHtml(record.returnedAt ?? "未记录时间")} ${escapeHtml(record.returnedByName ?? "未记录人员")} 退回到“${escapeHtml(record.toTaskName ?? "上一节点")}”</strong>
+                <p>从“${escapeHtml(record.fromTaskName ?? "当前节点")}”退回；原因：${escapeHtml(record.reason ?? "未填写")}</p>
+                ${
+                  Array.isArray(record.affectedTaskNames) && record.affectedTaskNames.length > 0
+                    ? `<p>影响节点：${record.affectedTaskNames.map((name) => escapeHtml(name)).join("、")}</p>`
+                    : ""
+                }
+              </div>
+            `,
+          )
+          .join("")}
+      </div>
+    </div>
+  `;
+}
+
 function renderStatusActions(task) {
   if (!canCurrentUser("tasks.changeStatus")) return "";
+  const returnAction = canReturnTask(task) ? renderActionButton("退回重做", "return-task", task.id) : "";
   if (task.status === TaskStatus.Waiting) {
-    return `<span class="muted-action">等待前置任务完成</span>`;
+    return `<span class="muted-action">等待前置任务完成</span>${returnAction}`;
   }
 
   if (task.status === TaskStatus.Todo) {
-    return renderActionButton("开始任务", "start-task", task.id);
+    return `${renderActionButton("开始任务", "start-task", task.id)}${returnAction}`;
   }
 
   if (task.status === TaskStatus.Doing && task.needAcceptance) {
-    return renderActionButton("提交验收", "submit-acceptance", task.id);
+    return `${renderActionButton("提交验收", "submit-acceptance", task.id)}${returnAction}`;
   }
 
   if (task.status === TaskStatus.Doing) {
-    return renderActionButton("提交完成", "submit-done", task.id);
+    return `${renderActionButton("提交完成", "submit-done", task.id)}${returnAction}`;
   }
 
   if (task.status === TaskStatus.PendingAcceptance) {
     return `
       ${renderActionButton("验收通过", "accept-task", task.id)}
       ${renderActionButton("验收退回", "reject-task", task.id, "danger-button")}
+      ${returnAction}
     `;
   }
 
-  return "";
+  return returnAction;
 }
 
 function renderTaskSubmitResultDetail(task) {
@@ -2126,6 +2285,7 @@ function renderTaskDetail() {
         <h3>本次工作信息</h3>
         ${renderTaskWorkInfo(selectedTask, taskTemplate)}
       </div>
+      ${renderStandardWorkAttachmentsBlock(getTaskCustomFields(selectedTask))}
       <div class="detail-block">
         <h3>执行要求</h3>
         <p>${escapeHtml(selectedTask.description)}</p>
@@ -2150,6 +2310,7 @@ function renderTaskDetail() {
         <h3>流程信息</h3>
         <p>${processText}</p>
       </div>
+      ${renderReturnRecordsBlock(selectedTask)}
       ${renderTaskSubmitResultDetail(selectedTask)}
       <div class="detail-block">
         <h3>执行结果</h3>
@@ -2264,6 +2425,53 @@ function renderCancelProcessModal() {
   `;
 }
 
+function renderReturnTaskModal() {
+  if (modalState === null || modalState.kind !== "returnTask") return "";
+  const task = getTask(modalState.taskId);
+  if (task === null) return "";
+  const returnableTasks = getReturnableProcessTasks(task);
+
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-label="退回重做">
+        <div class="modal-header">
+          <div>
+            <h2>退回重做</h2>
+            <p class="form-note">请选择要退回的历史节点，并填写退回原因。</p>
+          </div>
+          <button class="icon-button" type="button" data-action="close-task-modal" aria-label="关闭">×</button>
+        </div>
+        <form class="modal-form return-task-form">
+          <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${escapeHtml(modalState.error)}</div>
+          <div class="detail-grid">
+            ${renderDetailField("当前节点", escapeHtml(task.name))}
+          </div>
+          <label>
+            <span>退回到哪个节点</span>
+            <select name="returnTargetTaskId" required>
+              <option value="">请选择历史节点</option>
+              ${returnableTasks
+                .map((targetTask, index) => {
+                  const selected = modalState.returnTargetTaskId === targetTask.id ? "selected" : "";
+                  return `<option value="${targetTask.id}" ${selected}>步骤${index + 1}：${escapeHtml(targetTask.name)}</option>`;
+                })
+                .join("")}
+            </select>
+          </label>
+          <label>
+            <span>退回原因</span>
+            <textarea name="returnReason" rows="4" placeholder="请填写为什么需要该节点重新处理">${escapeHtml(modalState.returnReason ?? "")}</textarea>
+          </label>
+          <div class="modal-actions">
+            <button class="secondary-button" type="button" data-action="close-task-modal">取消</button>
+            <button class="primary-button danger-button" type="submit">确认退回</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
 function getEditingTask() {
   return modalState?.taskId === undefined ? null : getTask(modalState.taskId);
 }
@@ -2326,7 +2534,7 @@ function renderTaskModal() {
                 <div class="form-grid">
                   <label>
                     <span>关联目标</span>
-                    <select name="goalId">${renderOptions(goals, "", "请选择目标")}</select>
+                    <select name="goalId">${renderOptions(getActiveGoals(), "", "请选择目标")}</select>
                   </label>
                   <label>
                     <span>选择标准工作事项</span>
@@ -2341,6 +2549,7 @@ function renderTaskModal() {
                 </div>
                 ${renderTemplateLockedInfo(selectedTemplate)}
                 ${renderCustomFieldsForm(selectedTemplate)}
+                ${renderStandardWorkAttachmentsField()}
               `
           }
           <div class="form-grid">
@@ -2824,7 +3033,7 @@ function buildTaskDraft(form, task) {
       taskTemplateId,
       template,
       customFields,
-      goalId: getFormValue(form, "goalId") || goals[0]?.id || "",
+      goalId: getFormValue(form, "goalId") || getActiveGoals()[0]?.id || "",
       initiatorId: getFormValue(form, "initiatorId") || people[0]?.id || "",
       startDate: getFormValue(form, "startDate") || null,
       dueDate: getFormValue(form, "dueDate") || null,
@@ -2885,7 +3094,20 @@ function setModalError(error) {
   }
 }
 
-function saveTask(form, rerender) {
+async function uploadSelectedStandardWorkAttachments(form) {
+  const input = form.elements.standardWorkAttachments;
+  const files = input?.files === undefined ? [] : Array.from(input.files);
+  const validationError = validateStandardWorkAttachmentFiles(files);
+  if (validationError !== "") throw new Error(validationError);
+
+  const uploaded = [];
+  for (const file of files) {
+    uploaded.push(await uploadStandardWorkAttachment(file));
+  }
+  return uploaded;
+}
+
+async function saveTask(form, rerender) {
   const task = getEditingTask();
   const draft = buildTaskDraft(form, task);
   const isAdd = modalState.mode === "add";
@@ -2894,6 +3116,13 @@ function saveTask(form, rerender) {
   if (error !== "") return setModalError(error, rerender);
 
   if (isAdd) {
+    let uploadedAttachments = [];
+    try {
+      uploadedAttachments = await uploadSelectedStandardWorkAttachments(form);
+    } catch (error) {
+      return setModalError(error.message ?? "表格附件上传失败。", rerender);
+    }
+
     const displayTitle = buildDisplayTitle(draft.template, draft.customFields);
     const coverImageUrl = getPrimaryImageUrl({ customFields: draft.customFields }) || null;
     const description = draft.remark === ""
@@ -2914,6 +3143,25 @@ function saveTask(form, rerender) {
     });
 
     if (result.error !== undefined) return setModalError(result.error, rerender);
+
+    if (uploadedAttachments.length > 0) {
+      const processTaskIds = state.tasks.filter((item) => item.processInstanceId === result.instance.id).map((item) => item.id);
+      const attachments = uploadedAttachments.map((attachment) => ({
+        originalName: attachment.originalName,
+        filePath: attachment.filePath ?? attachment.url,
+        url: attachment.url,
+        mimeType: attachment.mimeType,
+        ext: attachment.ext ?? getFileExt(attachment.originalName ?? attachment.filename ?? ""),
+        uploadedAt: attachment.uploadedAt ?? getNow(),
+        standardWorkId: draft.template.id,
+        processInstanceId: result.instance.id,
+        taskIds: processTaskIds,
+      }));
+      result.instance.customFields = {
+        ...(result.instance.customFields ?? {}),
+        [standardWorkAttachmentsKey]: attachments,
+      };
+    }
 
     selectedProcessInstanceId = result.instance.id;
     selectedTaskId = state.tasks.find((item) => item.processInstanceId === result.instance.id)?.id ?? selectedTaskId;
@@ -3258,6 +3506,85 @@ async function relaunchProcessAsWorkPlan(instanceId, rerender) {
   rerender();
 }
 
+async function returnTaskToSelectedStep(form, rerender) {
+  if (!canCurrentUser("tasks.changeStatus")) return;
+  const task = getTask(modalState.taskId);
+  if (task === null) return;
+  const returnableTasks = getReturnableProcessTasks(task);
+  const targetTaskId = getFormValue(form, "returnTargetTaskId");
+  const targetTask = returnableTasks.find((item) => item.id === targetTaskId) ?? null;
+  const orderedTasks = getOrderedActiveProcessTasks(task) ?? [];
+  const targetIndex = orderedTasks.findIndex((item) => item.id === targetTaskId);
+  const currentIndex = orderedTasks.findIndex((item) => item.id === task.id);
+  const reason = getFormValue(form, "returnReason");
+
+  if (targetTask === null || targetIndex < 0 || currentIndex < 0 || targetIndex >= currentIndex) {
+    setModalError("请选择当前节点之前的历史节点。");
+    return;
+  }
+  if (reason === "") {
+    setModalError("退回原因不能为空。");
+    return;
+  }
+  if (!canReturnTask(task)) {
+    setModalError("当前任务不满足退回条件。");
+    return;
+  }
+
+  const affectedTasks = orderedTasks.slice(targetIndex, currentIndex + 1);
+  const now = getNow();
+  const user = getCurrentUser();
+  const recordId = createId("return-record");
+  const record = {
+    id: recordId,
+    returnedAt: now,
+    returnedBy: user?.id ?? null,
+    returnedByName: user?.name ?? "未记录人员",
+    reason,
+    fromTaskId: task.id,
+    fromTaskName: task.name,
+    fromNodeId: task.processNodeId,
+    toTaskId: targetTask.id,
+    toTaskName: targetTask.name,
+    toNodeId: targetTask.processNodeId,
+    affectedTaskIds: affectedTasks.map((item) => item.id),
+    affectedTaskNames: affectedTasks.map((item) => item.name),
+  };
+  const returnedTasks = affectedTasks.map((affectedTask, index) => {
+    const nextStatus = index === 0 ? TaskStatus.Todo : TaskStatus.Waiting;
+    const extraFields = index === 0 ? { [latestReturnReasonKey]: reason } : {};
+    return appendReturnRecord(
+      {
+        ...affectedTask,
+        status: nextStatus,
+        startDate: nextStatus === TaskStatus.Todo ? (affectedTask.startDate ?? today) : affectedTask.startDate,
+        completedAt: null,
+        updatedAt: now,
+      },
+      record,
+      extraFields,
+    );
+  });
+
+  try {
+    for (const returnedTask of returnedTasks) {
+      await updatePersistentResource("tasks", returnedTask.id, returnedTask);
+    }
+  } catch (error) {
+    console.error("退回重做失败", error);
+    setModalError(error.message || "退回重做失败，请检查本地数据库服务。");
+    return;
+  }
+
+  const returnedTaskMap = new Map(returnedTasks.map((returnedTask) => [returnedTask.id, returnedTask]));
+  state.tasks = state.tasks.map((item) => {
+    return returnedTaskMap.get(item.id) ?? item;
+  });
+  selectedTaskId = targetTask.id;
+  modalState = null;
+  rerender();
+}
+
 function handleTaskAction(action, taskId, rerender) {
   const task = getTask(taskId);
 
@@ -3284,6 +3611,13 @@ function handleTaskAction(action, taskId, rerender) {
 
   if (action === "restore-task") {
     restoreCanceledTask(taskId, rerender);
+    return;
+  }
+
+  if (action === "return-task") {
+    if (!canReturnTask(task)) return;
+    modalState = { kind: "returnTask", taskId, returnReason: "", error: "" };
+    rerender();
     return;
   }
 
@@ -3385,7 +3719,45 @@ function handleTaskSubmit(event, rerender) {
 
   if (modalState?.kind === "task") saveTask(event.target, rerender);
   if (modalState?.kind === "result") saveResult(event.target, rerender);
+  if (modalState?.kind === "returnTask") returnTaskToSelectedStep(event.target, rerender);
   if (modalState?.kind === "taskTemplate") saveTaskTemplate(event.target, rerender);
+}
+
+function renderSelectedStandardWorkAttachments(input) {
+  const container = input.closest(".standard-work-attachments-field")?.querySelector("[data-selected-standard-work-attachments]");
+  if (container === null || container === undefined) return;
+  const files = Array.from(input.files ?? []);
+  if (files.length === 0) {
+    container.innerHTML = `<p class="form-note">暂无已选择附件</p>`;
+    return;
+  }
+  container.innerHTML = `
+    <ul class="attachment-list editable-attachment-list">
+      ${files
+        .map(
+          (file, index) => `
+            <li>
+              <span>${escapeHtml(file.name)}</span>
+              <button class="text-button" type="button" data-action="remove-selected-standard-work-attachment" data-attachment-index="${index}">删除</button>
+            </li>
+          `,
+        )
+        .join("")}
+    </ul>
+  `;
+}
+
+function removeSelectedStandardWorkAttachment(button) {
+  const field = button.closest(".standard-work-attachments-field");
+  const input = field?.querySelector("[data-standard-work-attachments]");
+  if (input === null || input === undefined) return;
+  const removeIndex = Number(button.dataset.attachmentIndex);
+  const transfer = new DataTransfer();
+  Array.from(input.files ?? []).forEach((file, index) => {
+    if (index !== removeIndex) transfer.items.add(file);
+  });
+  input.files = transfer.files;
+  renderSelectedStandardWorkAttachments(input);
 }
 
 function updateImagePreview(input) {
@@ -3427,6 +3799,7 @@ export function bindTasksPageEvents(rerender) {
   const taskForm = document.querySelector(".task-form");
   const taskTemplateForm = document.querySelector(".task-template-form");
   const resultForm = document.querySelector(".result-form");
+  const returnTaskForm = document.querySelector(".return-task-form");
 
   if (tasksPage === null) return;
 
@@ -3519,6 +3892,7 @@ export function bindTasksPageEvents(rerender) {
       });
     }
     if (resultForm !== null) resultForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
+    if (returnTaskForm !== null) returnTaskForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
     return;
   }
 
@@ -3618,6 +3992,11 @@ export function bindTasksPageEvents(rerender) {
         return;
       }
 
+      if (action === "remove-selected-standard-work-attachment") {
+        removeSelectedStandardWorkAttachment(actionButton);
+        return;
+      }
+
       if (action === "show-task-work-form") {
         modalState = { kind: "workForm", taskId: actionButton.dataset.taskId };
         rerender();
@@ -3703,6 +4082,11 @@ export function bindTasksPageEvents(rerender) {
         return;
       }
 
+      if (action === "remove-selected-standard-work-attachment") {
+        removeSelectedStandardWorkAttachment(actionButton);
+        return;
+      }
+
       if (action === "bulk-status") {
         bulkUpdateTaskStatus(actionButton.dataset.status, rerender);
         return;
@@ -3757,10 +4141,14 @@ export function bindTasksPageEvents(rerender) {
       if (event.target.matches("[data-image-upload-key]")) {
         handleImageUpload(event.target);
       }
+      if (event.target.matches("[data-standard-work-attachments]")) {
+        renderSelectedStandardWorkAttachments(event.target);
+      }
     });
   }
   if (taskTemplateForm !== null) taskTemplateForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
   if (resultForm !== null) resultForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
+  if (returnTaskForm !== null) returnTaskForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
 }
 
 export function renderTasksPage() {
@@ -3817,6 +4205,7 @@ export function renderTasksPage() {
               ${renderTaskDetailModal()}
               ${renderTaskModal()}
               ${renderResultModal()}
+              ${renderReturnTaskModal()}
               ${renderWorkFormModal()}
             `
       }

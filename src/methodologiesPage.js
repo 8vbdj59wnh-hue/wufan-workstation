@@ -7,10 +7,82 @@ import {
   updatePersistentResource,
   uploadGenericFile,
   uploadImageFile,
-} from "./appState.js?v=20260627-methods1";
-import { hasPermission } from "./permissions.js?v=20260627-methods1";
+} from "./appState.js?v=20260630-attachments1";
+import { hasPermission } from "./permissions.js?v=20260630-attachments1";
 
-let selectedMethodologyId = state.methodologies[0]?.id ?? null;
+const demoMethodology = {
+  id: "methodology-xhs-image-guide",
+  title: "小红书图文笔记配图制作说明",
+  flowId: "process-content-note-publishing",
+  nodeId: "node-visual-image-production",
+  departmentId: "dept-visual-marketing",
+  flowName: "内容笔记发布流程",
+  nodeName: "视觉制作图片",
+  departmentName: "视觉营销部",
+  positionNames: ["视觉设计", "内容制作"],
+  mediaTypes: ["文字", "图片", "视频"],
+  status: "启用",
+  updatedAt: "2026-06-29",
+  steps: [
+    {
+      id: "method-step-xhs-001",
+      title: "根据笔记主题确认画面情绪",
+      instruction: "先阅读笔记主题、目标人群和卖点，确认画面要表达的情绪，例如松弛、精致、实用或惊喜。",
+      needsImageDemo: true,
+      needsVideoDemo: true,
+    },
+    {
+      id: "method-step-xhs-002",
+      title: "确认账号调性",
+      instruction: "对照账号过往内容，确认色彩、构图、文字比例和生活场景是否保持一致。",
+      needsImageDemo: true,
+      needsVideoDemo: true,
+    },
+    {
+      id: "method-step-xhs-003",
+      title: "选择产品展示角度",
+      instruction: "根据产品核心卖点选择展示角度，保证用户能快速看懂产品是什么、适合什么场景。",
+      needsImageDemo: true,
+      needsVideoDemo: true,
+    },
+    {
+      id: "method-step-xhs-004",
+      title: "制作配图",
+      instruction: "按笔记结构制作首图和辅助图，控制画面信息密度，避免堆砌元素。",
+      needsImageDemo: true,
+      needsVideoDemo: true,
+    },
+    {
+      id: "method-step-xhs-005",
+      title: "对照审核标准自检",
+      instruction: "提交前按完成标准和审核标准逐项检查，确认图片既好看，也服务于转化目的。",
+      needsImageDemo: true,
+      needsVideoDemo: true,
+    },
+  ],
+  completionStandards: [
+    "图片清晰",
+    "风格统一",
+    "产品表达准确",
+    "符合笔记主题",
+    "至少满足“喜欢 / 有用 / 有趣”中的一个",
+  ],
+  reviewStandards: [
+    "是否符合账号调性",
+    "是否自然种草",
+    "是否清楚表达产品",
+    "是否有审美或实用价值",
+  ],
+  commonMistakes: [
+    "图片好看但和主题无关",
+    "产品出现太硬",
+    "风格和账号不一致",
+    "画面信息太乱",
+    "只追求美观但没有转化目的",
+  ],
+};
+
+let selectedMethodologyId = demoMethodology.id;
 let editingId = null;
 let keyword = "";
 let formError = "";
@@ -78,17 +150,36 @@ function syncSelectedFromHash() {
   const hash = window.location.hash.replace(/^#/, "");
   if (!hash.startsWith("methodology-")) return;
   const id = hash.slice("methodology-".length);
-  if (state.methodologies.some((item) => item.id === id)) selectedMethodologyId = id;
+  if (getMethodologies().some((item) => item.id === id)) selectedMethodologyId = id;
+}
+
+function isDetailRoute() {
+  return window.location.hash.replace(/^#/, "").startsWith("methodology-");
+}
+
+function getMethodologies() {
+  const hasDemo = state.methodologies.some((methodology) => methodology.id === demoMethodology.id);
+  return hasDemo ? state.methodologies : [demoMethodology, ...state.methodologies];
 }
 
 function getFilteredMethodologies() {
   const text = keyword.trim().toLowerCase();
-  return state.methodologies.filter((methodology) => {
+  return getMethodologies().filter((methodology) => {
     if (text === "") return true;
     const node = getMethodologyNode(methodology);
     const processTemplateName = findName(state.processTemplates, methodology.processTemplateId, "");
     const standardWorkName = findName(state.taskTemplates, methodology.standardWorkId ?? methodology.taskTemplateId, "");
-    return [methodology.title, node?.name, processTemplateName, standardWorkName]
+    return [
+      methodology.title,
+      methodology.flowName,
+      methodology.nodeName,
+      methodology.departmentName,
+      methodology.positionNames?.join(" "),
+      methodology.mediaTypes?.join(" "),
+      node?.name,
+      processTemplateName,
+      standardWorkName,
+    ]
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(text));
   });
@@ -97,6 +188,16 @@ function getFilteredMethodologies() {
 function renderStepPreview(step, index) {
   const image = step.imageUrl ? `<img class="method-media" src="${resolveAssetUrl(step.imageUrl)}" alt="${escapeHtml(step.title || `步骤${index + 1}`)}" />` : "";
   const video = step.videoUrl ? `<video class="method-media" src="${resolveAssetUrl(step.videoUrl)}" controls></video>` : "";
+  const imageDemo = step.needsImageDemo || step.imageUrl ? `
+    <div class="methodology-step-supplement">
+      <div class="methodology-media-grid">${renderMediaPlaceholder("上传示范图")}</div>
+    </div>
+  ` : "";
+  const videoDemo = step.needsVideoDemo || step.videoUrl ? `
+    <div class="methodology-step-supplement">
+      <div class="methodology-media-grid">${renderMediaPlaceholder("上传示范视频")}</div>
+    </div>
+  ` : "";
   return `
     <article class="method-step">
       <div class="method-step-heading">
@@ -106,6 +207,8 @@ function renderStepPreview(step, index) {
       <p>${escapeHtml(step.instruction || "暂无操作说明")}</p>
       ${image}
       ${video}
+      ${imageDemo}
+      ${videoDemo}
       ${step.notes ? `<p class="form-note">注意事项：${escapeHtml(step.notes)}</p>` : ""}
     </article>
   `;
@@ -131,20 +234,25 @@ function renderMethodologyList() {
       <div class="table-wrap">
         <table class="data-table">
           <thead>
-            <tr><th>方法论标题</th><th>关联流程</th><th>关联节点</th><th>更新时间</th><th>内容状态</th></tr>
+            <tr><th>方法论标题</th><th>适用流程</th><th>适用节点</th><th>适用部门</th><th>内容形式</th><th>状态</th></tr>
           </thead>
           <tbody>
-            ${items.length === 0 ? `<tr><td colspan="5">暂无方法论</td></tr>` : items
+            ${items.length === 0 ? `<tr><td colspan="6">暂无方法论</td></tr>` : items
               .map((item) => {
-                const node = getMethodologyNode(item);
                 const filled = (item.steps ?? []).some((step) => step.instruction || step.imageUrl || step.videoUrl);
+                const node = getMethodologyNode(item);
+                const flowName = item.flowName ?? findName(state.processTemplates, item.processTemplateId, "未关联流程");
+                const nodeName = item.nodeName ?? node?.name ?? "未关联节点";
+                const departmentName = item.departmentName ?? "未设置";
+                const mediaTypes = item.mediaTypes?.join(" / ") ?? "文字";
                 return `
                   <tr class="${item.id === selectedMethodologyId ? "is-selected" : ""}" data-methodology-id="${item.id}">
-                    <td><a href="#methodology-${item.id}">${escapeHtml(item.title)}</a></td>
-                    <td>${escapeHtml(findName(state.processTemplates, item.processTemplateId, "未关联流程"))}</td>
-                    <td>${escapeHtml(node?.name ?? "未关联节点")}</td>
-                    <td>${item.updatedAt ?? "-"}</td>
-                    <td>${filled ? "已填写" : "空内容"}</td>
+                    <td><a class="methodology-title-link" href="#methodology-${item.id}">${escapeHtml(item.title)}</a></td>
+                    <td>${escapeHtml(flowName)}</td>
+                    <td>${escapeHtml(nodeName)}</td>
+                    <td>${escapeHtml(departmentName)}</td>
+                    <td>${escapeHtml(mediaTypes)}</td>
+                    <td>${escapeHtml(item.status ?? (filled ? "已填写" : "空内容"))}</td>
                   </tr>
                 `;
               })
@@ -220,7 +328,59 @@ function renderMethodologyForm(methodology) {
 }
 
 function getSelectedMethodology() {
-  return state.methodologies.find((item) => item.id === selectedMethodologyId) ?? getFilteredMethodologies()[0] ?? state.methodologies[0] ?? null;
+  return getMethodologies().find((item) => item.id === selectedMethodologyId) ?? getFilteredMethodologies()[0] ?? getMethodologies()[0] ?? null;
+}
+
+function renderTextList(items) {
+  return `<ul class="methodology-check-list">${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+}
+
+function renderMediaPlaceholder(label) {
+  return `
+    <article class="methodology-media-placeholder">
+      <strong>${escapeHtml(label)}</strong>
+    </article>
+  `;
+}
+
+function renderOperationalMethodology(methodology) {
+  const node = getMethodologyNode(methodology);
+  const flowName = methodology.flowName ?? findName(state.processTemplates, methodology.processTemplateId, "未关联流程");
+  const nodeName = methodology.nodeName ?? node?.name ?? "未关联节点";
+  const departmentName = methodology.departmentName ?? "未设置";
+  const positions = methodology.positionNames?.join(" / ") ?? "未设置";
+  const mediaTypes = methodology.mediaTypes?.join(" / ") ?? "文字";
+  const completionStandards = methodology.completionStandards ?? [];
+  const reviewStandards = methodology.reviewStandards ?? [];
+  const commonMistakes = methodology.commonMistakes ?? [];
+
+  return `
+    <div class="detail-grid">
+      <div class="detail-field"><span>适用流程</span><strong>${escapeHtml(flowName)}</strong></div>
+      <div class="detail-field"><span>适用节点</span><strong>${escapeHtml(nodeName)}</strong></div>
+      <div class="detail-field"><span>适用部门 / 岗位</span><strong>${escapeHtml(`${departmentName} / ${positions}`)}</strong></div>
+      <div class="detail-field"><span>说明形式</span><strong>${escapeHtml(mediaTypes)}</strong></div>
+      <div class="detail-field"><span>启用状态</span><strong>${escapeHtml(methodology.status ?? "启用")}</strong></div>
+    </div>
+    <section class="methodology-detail-section">
+      <h3>操作步骤</h3>
+      <div class="method-step-list">
+        ${(methodology.steps ?? []).length === 0 ? `<div class="empty-note">暂未填写步骤内容</div>` : methodology.steps.map(renderStepPreview).join("")}
+      </div>
+    </section>
+    <section class="methodology-detail-section">
+      <h3>完成标准</h3>
+      ${renderTextList(completionStandards)}
+    </section>
+    <section class="methodology-detail-section">
+      <h3>审核标准</h3>
+      ${renderTextList(reviewStandards)}
+    </section>
+    <section class="methodology-detail-section">
+      <h3>常见错误</h3>
+      ${renderTextList(commonMistakes)}
+    </section>
+  `;
 }
 
 function renderMethodologyDetail() {
@@ -237,25 +397,19 @@ function renderMethodologyDetail() {
       </section>
     `;
   }
-  const node = getMethodologyNode(selected);
   return `
     <section class="settings-section methodology-detail">
       <div class="section-heading with-actions">
         <div>
           <h2>${escapeHtml(selected.title)}</h2>
-          <p class="form-note">${escapeHtml(selected.description || "暂无简介")}</p>
+          <p class="form-note">绑定流程节点的操作说明书，用于指导员工完成具体节点任务。</p>
         </div>
-        ${canEdit() ? `<button class="primary-button" type="button" data-action="edit-methodology" data-methodology-id="${selected.id}">编辑方法论</button>` : ""}
+        <div class="row-actions">
+          <button class="secondary-button" type="button" data-action="back-to-methodology-list">返回列表</button>
+          ${canEdit() && selected.id !== demoMethodology.id ? `<button class="primary-button" type="button" data-action="edit-methodology" data-methodology-id="${selected.id}">编辑方法论</button>` : ""}
+        </div>
       </div>
-      <div class="detail-grid">
-        <div class="detail-field"><span>关联流程</span><strong>${escapeHtml(findName(state.processTemplates, selected.processTemplateId, "未关联流程"))}</strong></div>
-        <div class="detail-field"><span>关联节点</span><strong>${escapeHtml(node?.name ?? "未关联节点")}</strong></div>
-        <div class="detail-field"><span>关联标准工作</span><strong>${escapeHtml(findName(state.taskTemplates, selected.standardWorkId ?? selected.taskTemplateId, "未关联标准工作"))}</strong></div>
-        <div class="detail-field"><span>更新时间</span><strong>${selected.updatedAt ?? "-"}</strong></div>
-      </div>
-      <div class="method-step-list">
-        ${(selected.steps ?? []).length === 0 ? `<div class="empty-note">暂未填写步骤内容</div>` : selected.steps.map(renderStepPreview).join("")}
-      </div>
+      <div class="methodology-body">${renderOperationalMethodology(selected)}</div>
     </section>
   `;
 }
@@ -378,6 +532,10 @@ export function bindMethodologiesPageEvents(rerender) {
       formError = "";
       rerender();
     }
+    if (action === "back-to-methodology-list") {
+      window.location.hash = "methods";
+      rerender();
+    }
     const index = Number(button.dataset.stepIndex);
     if (action === "add-method-step") mutateStepEditors("add", index, rerender);
     if (action === "remove-method-step") mutateStepEditors("remove", index, rerender);
@@ -400,8 +558,7 @@ export function renderMethodologiesPage(currentUser = null) {
   }
   return `
     <div class="methodologies-page">
-      ${renderMethodologyList()}
-      ${renderMethodologyDetail()}
+      ${isDetailRoute() ? renderMethodologyDetail() : renderMethodologyList()}
     </div>
   `;
 }

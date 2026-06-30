@@ -1,8 +1,9 @@
-import { createId, getCurrentUser, getCurrentWeek, getNow, resolveAssetUrl, state, uploadImageFile } from "./appState.js?v=20260627-methods1";
-import { hasPermission } from "./permissions.js?v=20260627-methods1";
+import { createId, getCurrentUser, getCurrentWeek, getNow, resolveAssetUrl, state, uploadImageFile } from "./appState.js?v=20260630-attachments1";
+import { hasPermission } from "./permissions.js?v=20260630-attachments1";
 import {
   CategoryType,
   ContentScheduleStatus,
+  GoalStatus,
   ProcessAccepterRule,
   ProcessInstanceStatus,
   ProcessOwnerRule,
@@ -60,6 +61,14 @@ let modalState = null;
 
 function canCurrentUser(permissionPath) {
   return hasPermission(getCurrentUser(), permissionPath);
+}
+
+function getActiveGoals() {
+  return goals.filter((goal) => goal.status !== GoalStatus.Inactive);
+}
+
+function getSelectableGoals(selectedGoalId = "") {
+  return goals.filter((goal) => goal.status !== GoalStatus.Inactive || goal.id === selectedGoalId);
 }
 
 function escapeHtml(value) {
@@ -400,7 +409,7 @@ function renderFilters() {
       <label><span>内容目的</span><select name="contentPurpose">${renderStringOptions(contentSchedulePurposeOptions, filters.contentPurpose, "全部目的")}</select></label>
       <label><span>受众人群</span><select name="targetAudience">${renderStringOptions(contentScheduleAudienceOptions, filters.targetAudience, "全部人群")}</select></label>
       <label><span>状态</span><select name="status">${renderStatusOptions(filters.status, "全部状态")}</select></label>
-      <label><span>关联目标</span><select name="goalId">${renderEntityOptions(goals, filters.goalId, "全部目标")}</select></label>
+      <label><span>关联目标</span><select name="goalId">${renderEntityOptions(getActiveGoals(), filters.goalId, "全部目标")}</select></label>
       <label><span>产品关键词</span><input name="productKeyword" value="${escapeAttribute(filters.productKeyword)}" placeholder="搜索产品" /></label>
       <label><span>标题关键词</span><input name="titleKeyword" value="${escapeAttribute(filters.titleKeyword)}" placeholder="搜索标题" /></label>
     </form>
@@ -668,7 +677,7 @@ function renderScheduleModal() {
             <label><span>内容目的</span><select name="contentPurpose">${renderStringOptions(contentSchedulePurposeOptions, normalizeContentPurpose(schedule?.contentPurpose ?? ""), "请选择目的")}</select></label>
             <label><span>受众人群</span><select name="targetAudience">${renderStringOptions(contentScheduleAudienceOptions, normalizeContentAudience(schedule?.targetAudience ?? ""), "请选择人群")}</select></label>
             <label><span>状态</span><select name="status">${renderStatusOptions(normalizeContentScheduleStatus(schedule?.status) || ContentScheduleStatus.PendingSubmit, "请选择状态")}</select></label>
-            <label><span>关联目标</span><select name="goalId">${renderEntityOptions(goals, schedule?.goalId ?? "", "请选择目标")}</select></label>
+            <label><span>关联目标</span><select name="goalId">${renderEntityOptions(getSelectableGoals(schedule?.goalId ?? ""), schedule?.goalId ?? "", "请选择目标")}</select></label>
             <label><span>对应产品</span><input name="product" value="${escapeAttribute(schedule?.product ?? "")}" autocomplete="off" /></label>
           </div>
           ${renderImageField(image)}
@@ -1223,7 +1232,7 @@ function confirmImport(rerender) {
 
   const now = getNow();
   const importedSchedules = validRows.map((row) => {
-    const goalId = goals.find((goal) => goal.name === row.data.关联目标)?.id ?? "goal-marketing-2026-07";
+    const goalId = getActiveGoals().find((goal) => goal.name === row.data.关联目标)?.id ?? getActiveGoals()[0]?.id ?? "goal-marketing-2026-07";
     return {
       id: createId("content-schedule"),
       publishDate: row.data.发布日期,

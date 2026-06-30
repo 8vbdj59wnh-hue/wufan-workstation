@@ -27,10 +27,12 @@ const host = process.env.HOST ?? "0.0.0.0";
 const port = Number(process.env.PORT ?? 3001);
 const imageUploadsDir = path.join(uploadsDir, "images");
 const fileUploadsDir = path.join(uploadsDir, "files");
+const standardWorkAttachmentsDir = path.join(uploadsDir, "standard-work-attachments");
 
 initializeDatabase();
 fs.mkdirSync(imageUploadsDir, { recursive: true });
 fs.mkdirSync(fileUploadsDir, { recursive: true });
+fs.mkdirSync(standardWorkAttachmentsDir, { recursive: true });
 
 const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 const imageStorage = multer.diskStorage({
@@ -85,6 +87,30 @@ const uploadFile = multer({
   fileFilter: (_request, file, callback) => {
     if (!allowedFileTypes.has(file.mimetype)) {
       callback(new Error("只支持图片、PDF、Word、Excel、ZIP 和文本文件。"));
+      return;
+    }
+    callback(null, true);
+  },
+});
+
+const allowedSpreadsheetExts = new Set([".xlsx", ".xls", ".csv"]);
+const spreadsheetStorage = multer.diskStorage({
+  destination: (_request, _file, callback) => {
+    callback(null, standardWorkAttachmentsDir);
+  },
+  filename: (_request, file, callback) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const safeExt = allowedSpreadsheetExts.has(ext) ? ext : "";
+    callback(null, `${Date.now()}-${Math.random().toString(36).slice(2, 10)}${safeExt}`);
+  },
+});
+const uploadSpreadsheet = multer({
+  storage: spreadsheetStorage,
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (_request, file, callback) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (!allowedSpreadsheetExts.has(ext)) {
+      callback(new Error("只支持 .xlsx、.xls、.csv 表格附件。"));
       return;
     }
     callback(null, true);
@@ -149,9 +175,24 @@ function filterByScope(items, user) {
   return items.filter((item) => belongsToUser(item, user));
 }
 
+function canUseStoreOptions(user) {
+  return (
+    hasPermission(user, "settings.viewStores") ||
+    hasPermission(user, "settings.editStores") ||
+    hasPermission(user, "workPlans.launch") ||
+    hasPermission(user, "goals.addWork")
+  );
+}
+
+function canReadResource(resource, user) {
+  if (resource === "stores") return canUseStoreOptions(user);
+  return true;
+}
+
 function filterDataByScope(data, user) {
   const dataScope = getDataScope(user);
-  if (dataScope === "all") return data;
+  const stores = canUseStoreOptions(user) ? (data.stores ?? []) : [];
+  if (dataScope === "all") return { ...data, stores };
 
   const scopedTasks = filterByScope(data.tasks ?? [], user);
   const scopedWorkPlans = filterByScope(data.workPlans ?? [], user);
@@ -168,6 +209,7 @@ function filterDataByScope(data, user) {
   return {
     ...data,
     people: scopedPeople,
+    stores,
     goals: scopedGoals,
     tasks: scopedTasks,
     processInstances: scopedProcessInstances,
@@ -306,6 +348,33 @@ app.post("/api/uploads/file", (request, response) => {
   });
 });
 
+app.post("/api/uploads/standard-work-attachment", (request, response) => {
+  uploadSpreadsheet.single("file")(request, response, (error) => {
+    if (error !== undefined) {
+      const message =
+        error.code === "LIMIT_FILE_SIZE" ? "表格附件大小不能超过 20MB。" : error.message || "表格附件上传失败。";
+      response.status(400).json({ error: message });
+      return;
+    }
+
+    if (request.file === undefined) {
+      response.status(400).json({ error: "请选择要上传的表格附件。" });
+      return;
+    }
+
+    response.json({
+      url: `/uploads/standard-work-attachments/${request.file.filename}`,
+      filePath: `/uploads/standard-work-attachments/${request.file.filename}`,
+      filename: request.file.filename,
+      originalName: request.file.originalname,
+      size: request.file.size,
+      mimeType: request.file.mimetype,
+      ext: path.extname(request.file.originalname).toLowerCase(),
+      uploadedAt: new Date().toISOString(),
+    });
+  });
+});
+
 app.post("/api/process-instances/:id/cancel", requirePermission("processes.editInstances"), (request, response) => {
   try {
     cancelProcessInstance(request.params.id, request.body?.cancelReason ?? "");
@@ -318,6 +387,10 @@ app.post("/api/process-instances/:id/cancel", requirePermission("processes.editI
 
 app.get("/api/:resource", (request, response) => {
   try {
+    if (!canReadResource(request.params.resource, request.user)) {
+      response.status(403).json({ success: false, message: "你没有权限查看该数据" });
+      return;
+    }
     response.json(readRouteResource(request.params.resource));
   } catch (error) {
     response.status(404).json({ error: error.message });

@@ -1,5 +1,6 @@
-import { getNow, getProcessNodeStepOrder, state } from "./appState.js?v=20260627-methods1";
+import { getNow, getProcessNodeStepOrder, resolveAssetUrl, state } from "./appState.js?v=20260630-attachments1";
 import {
+  GoalStatus,
   ProcessInstanceStatus,
   TaskImportance,
   TaskStatus,
@@ -9,14 +10,20 @@ import {
   taskStatusNames,
   taskUrgencyNames,
 } from "./data/modelOptions.js";
-import { getTaskQuadrant, isTaskOverdue } from "./data/taskUtils.js?v=20260627-methods1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260627-methods1";
+import { getTaskQuadrant, isTaskOverdue } from "./data/taskUtils.js?v=20260630-attachments1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-attachments1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
 const departments = state.departments;
 const goals = state.goals;
 const people = state.people;
+const standardWorkAttachmentsKey = "standardWorkAttachments";
+const returnRecordsKey = "returnRecords";
+
+function getSelectableGoals(selectedGoalId = "") {
+  return goals.filter((goal) => goal.status !== GoalStatus.Inactive || goal.id === selectedGoalId);
+}
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -98,7 +105,83 @@ function getFormValue(form, name) {
 }
 
 function getCustomFieldEntries(instance) {
-  return Object.entries(instance.customFields ?? {});
+  return Object.entries(instance.customFields ?? {}).filter(([key]) => key !== standardWorkAttachmentsKey);
+}
+
+function getStandardWorkAttachments(instance) {
+  const attachments = instance.customFields?.[standardWorkAttachmentsKey];
+  return Array.isArray(attachments) ? attachments : [];
+}
+
+function getTaskReturnRecords(task) {
+  const records = task.customFields?.[returnRecordsKey];
+  return Array.isArray(records) ? records : [];
+}
+
+function getInstanceReturnRecords(instanceId) {
+  const records = getInstanceTasks(instanceId).flatMap((task) => getTaskReturnRecords(task));
+  const uniqueRecords = new Map();
+  records.forEach((record) => {
+    if (record?.id !== undefined) uniqueRecords.set(record.id, record);
+  });
+  return [...uniqueRecords.values()].sort((left, right) => String(right.returnedAt ?? "").localeCompare(String(left.returnedAt ?? "")));
+}
+
+function renderReturnRecords(instanceId) {
+  const records = getInstanceReturnRecords(instanceId);
+  if (records.length === 0) return "";
+
+  return `
+    <div class="detail-block">
+      <h3>退回记录</h3>
+      <div class="return-record-list">
+        ${records
+          .map(
+            (record) => `
+              <div class="return-record-item">
+                <strong>${escapeHtml(record.returnedAt ?? "未记录时间")} ${escapeHtml(record.returnedByName ?? "未记录人员")}在“${escapeHtml(record.fromTaskName ?? "当前节点")}”退回到“${escapeHtml(record.toTaskName ?? "目标节点")}”</strong>
+                <p>原因：${escapeHtml(record.reason ?? "未填写")}</p>
+                ${
+                  Array.isArray(record.affectedTaskNames) && record.affectedTaskNames.length > 0
+                    ? `<p>影响节点：${record.affectedTaskNames.map((name) => escapeHtml(name)).join("、")}</p>`
+                    : ""
+                }
+              </div>
+            `,
+          )
+          .join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderStandardWorkAttachments(instance) {
+  const attachments = getStandardWorkAttachments(instance);
+  return `
+    <div class="detail-block">
+      <h3>表格附件</h3>
+      ${
+        attachments.length === 0
+          ? `<p>暂无附件</p>`
+          : `
+            <ul class="attachment-list">
+              ${attachments
+                .map((attachment) => {
+                  const href = resolveAssetUrl(attachment.filePath ?? attachment.url ?? "");
+                  const name = attachment.originalName ?? attachment.filename ?? attachment.filePath ?? "未命名附件";
+                  return `
+                    <li>
+                      <a href="${escapeHtml(href)}" target="_blank" rel="noreferrer" download>${escapeHtml(name)}</a>
+                      ${attachment.ext ? `<span>${escapeHtml(attachment.ext)}</span>` : ""}
+                    </li>
+                  `;
+                })
+                .join("")}
+            </ul>
+          `
+      }
+    </div>
+  `;
 }
 
 function renderCustomFields(instance, editable) {
@@ -211,7 +294,7 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
             </label>
             <label>
               <span>关联目标</span>
-              <select name="goalId" ${editable ? "" : "disabled"}>${renderOptions(goals, instance.goalId, "请选择目标")}</select>
+              <select name="goalId" ${editable ? "" : "disabled"}>${renderOptions(getSelectableGoals(instance.goalId), instance.goalId, "请选择目标")}</select>
             </label>
           </div>
           <div class="detail-grid">
@@ -240,6 +323,8 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
           ${renderCustomFields(instance, editable)}
           <p class="form-note">本表单为发起工作时填写的本次工作要求，不是执行结果。</p>
         </div>
+        ${renderStandardWorkAttachments(instance)}
+        ${renderReturnRecords(instance.id)}
         <div class="detail-block">
           <h3>流程步骤执行任务</h3>
           <div class="table-wrap">

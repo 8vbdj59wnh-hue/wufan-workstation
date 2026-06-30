@@ -22,6 +22,7 @@ Safety:
   - Never syncs data/, uploads/, .env, .env.*, node_modules/, .git/, or backups/
   - Does not use rsync --delete
   - Does not run git reset or git pull on the company Mac
+  - Requires local main branch to be clean and already pushed to GitHub origin/main
   - Requires existing production data/workstation.db and uploads/
   - Backs up remote code before execute mode deploys
   - Runs npm install, pm2 restart all, pm2 status, and local health checks on the company Mac
@@ -34,6 +35,27 @@ quote_remote() {
 
 remote_login() {
   ssh "$TARGET" "zsh -lc $(printf "%q" "export PATH=\"/opt/homebrew/bin:\$PATH\"; $1")"
+}
+
+find_local_node() {
+  if [[ -n "${NODE_BIN:-}" && -x "$NODE_BIN" ]]; then
+    echo "$NODE_BIN"
+    return
+  fi
+  if command -v node >/dev/null 2>&1; then
+    command -v node
+    return
+  fi
+  for candidate in \
+    /opt/homebrew/bin/node \
+    /usr/local/bin/node \
+    "$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
+  do
+    if [[ -x "$candidate" ]]; then
+      echo "$candidate"
+      return
+    fi
+  done
 }
 
 while [[ $# -gt 0 ]]; do
@@ -81,6 +103,30 @@ if [[ ! -d ".git" ]]; then
   exit 1
 fi
 
+current_branch="$(git branch --show-current)"
+if [[ "$current_branch" != "main" ]]; then
+  echo "当前分支不是 main，停止部署。当前分支：${current_branch}" >&2
+  exit 1
+fi
+
+if [[ -n "$(git status --porcelain)" ]]; then
+  echo "当前存在未提交代码，请先提交到 GitHub。" >&2
+  git status --short >&2
+  exit 1
+fi
+
+echo "本次部署基于 GitHub 最新 main 分支。"
+git fetch origin main
+local_head="$(git rev-parse HEAD)"
+origin_head="$(git rev-parse origin/main)"
+if [[ "$local_head" != "$origin_head" ]]; then
+  echo "当前本地 main 与 GitHub origin/main 不一致，停止部署。" >&2
+  echo "请先完成 git push origin main，确保 GitHub 是唯一代码备份中心。" >&2
+  echo "local HEAD:  ${local_head}" >&2
+  echo "origin/main: ${origin_head}" >&2
+  exit 1
+fi
+
 TARGET="${REMOTE_USER}@${REMOTE_HOST}"
 REMOTE_PATH_Q="$(quote_remote "$REMOTE_PATH")"
 
@@ -97,6 +143,15 @@ remote_login "if test -f ${REMOTE_PATH_Q}/.env; then echo ENV_PRESERVED; else ec
 echo
 echo "== Company Mac runtime commands =="
 remote_login "command -v node && command -v npm && command -v pm2 && command -v curl"
+
+echo
+echo "== generate version.json =="
+LOCAL_NODE="$(find_local_node)"
+if [[ -z "$LOCAL_NODE" ]]; then
+  echo "Local node command not found. Cannot generate version.json." >&2
+  exit 1
+fi
+"$LOCAL_NODE" scripts/generate-version.js
 
 echo
 echo "== rsync =="

@@ -1,6 +1,7 @@
-import { getCurrentUser, getCurrentWeek, getNow, resolveAssetUrl, startProcess, state } from "./appState.js?v=20260627-methods1";
-import { hasPermission } from "./permissions.js?v=20260627-methods1";
+import { getCurrentUser, getCurrentWeek, getNow, resolveAssetUrl, startProcess, state } from "./appState.js?v=20260630-attachments1";
+import { hasPermission } from "./permissions.js?v=20260630-attachments1";
 import {
+  GoalStatus,
   ProcessTemplateStatus,
   TaskImportance,
   TaskUrgency,
@@ -9,7 +10,7 @@ import {
   taskUrgencyNames,
   workPlanStatusNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, quadrantNames } from "./data/taskUtils.js?v=20260627-methods1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, quadrantNames } from "./data/taskUtils.js?v=20260630-attachments1";
 
 const currentWeek = getCurrentWeek();
 const departments = state.departments;
@@ -22,6 +23,10 @@ let selectedWeekWorkIds = new Set();
 
 function canCurrentUser(permissionPath) {
   return hasPermission(getCurrentUser(), permissionPath);
+}
+
+function getActiveGoals() {
+  return goals.filter((goal) => goal.status !== GoalStatus.Inactive);
 }
 
 const timeTabHashMap = {
@@ -222,7 +227,7 @@ function renderFilters() {
     <form class="task-filters time-filters">
       <label><span>部门</span><select name="departmentId">${renderOptions(departments, filters.departmentId, "全部部门")}</select></label>
       <label><span>负责人</span><select name="ownerId">${renderOptions(people, filters.ownerId, "全部负责人")}</select></label>
-      <label><span>对齐目标</span><select name="goalId">${renderOptions(goals, filters.goalId, "全部目标")}</select></label>
+      <label><span>对齐目标</span><select name="goalId">${renderOptions(getActiveGoals(), filters.goalId, "全部目标")}</select></label>
       <label>
         <span>工作优先级</span>
         <select name="quadrant">

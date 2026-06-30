@@ -16,7 +16,7 @@ import {
   weeklyReports as initialWeeklyReports,
   methodologies as initialMethodologies,
   workPlans as initialWorkPlans,
-} from "./data/mockData.js?v=20260627-methods1";
+} from "./data/mockData.js?v=20260630-attachments1";
 import {
   CategoryType,
   PersonRole,
@@ -33,7 +33,7 @@ import {
   TaskTemplateStatus,
   TaskUrgency,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260627-methods1";
+import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260630-attachments1";
 
 const apiPort = "3001";
 const apiBaseUrl = `${window.location.protocol}//${window.location.hostname}:${apiPort}`;
@@ -265,6 +265,18 @@ export async function uploadGenericFile(file) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error ?? "文件上传失败。");
+  return data;
+}
+
+export async function uploadStandardWorkAttachment(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await authFetch(`${apiBaseUrl}/api/uploads/standard-work-attachment`, {
+    method: "POST",
+    body: formData,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error ?? "表格附件上传失败。");
   return data;
 }
 
@@ -519,13 +531,22 @@ function normalizeTaskSubmitRequirements() {
 
 export function createOrReuseProcessTemplateForStandardWork({ name, ownerId, departmentId, now = getNow() }) {
   const processName = `${name}流程`;
-  const existingTemplate = state.processTemplates.find((template) => template.name === processName);
+  const legacyProcessNames = new Map([["新品上新流程", ["新品上架链接流程"]]]);
+  const matchingLegacyNames = legacyProcessNames.get(processName) ?? [];
+  const existingTemplate = state.processTemplates.find(
+    (template) => template.name === processName || matchingLegacyNames.includes(template.name),
+  );
 
   if (existingTemplate !== undefined) {
-    if (existingTemplate.status !== ProcessTemplateStatus.Active) {
-      existingTemplate.status = ProcessTemplateStatus.Active;
-      existingTemplate.updatedAt = now;
-    }
+    existingTemplate.name = processName;
+    existingTemplate.purpose = `规范【${name}】的执行过程。`;
+    existingTemplate.applicableDepartmentIds = departmentId ? [departmentId] : [];
+    existingTemplate.ownerId = ownerId;
+    existingTemplate.startCondition = `由${departmentId ? state.departments.find((department) => department.id === departmentId)?.name ?? "负责部门" : "负责部门"}发起【${name}】时。`;
+    existingTemplate.completionCondition = "该标准工作所有流程步骤完成。";
+    existingTemplate.overallStandard = "按流程步骤要求完成，并符合各步骤完成标准和审核标准。";
+    existingTemplate.status = ProcessTemplateStatus.Active;
+    existingTemplate.updatedAt = now;
     return existingTemplate.id;
   }
 
@@ -536,7 +557,7 @@ export function createOrReuseProcessTemplateForStandardWork({ name, ownerId, dep
     purpose: `规范【${name}】的执行过程。`,
     applicableDepartmentIds: departmentId ? [departmentId] : [],
     ownerId,
-    startCondition: `当目标下需要发起【${name}】时。`,
+    startCondition: `由${departmentId ? state.departments.find((department) => department.id === departmentId)?.name ?? "负责部门" : "负责部门"}发起【${name}】时。`,
     completionCondition: "该标准工作所有流程步骤完成。",
     overallStandard: "按流程步骤要求完成，并符合各步骤完成标准和审核标准。",
     status: ProcessTemplateStatus.Active,
@@ -568,6 +589,7 @@ const legacyStandardWorkNames = [
   "新品资料整理",
   "内容质量检查",
   "任务执行检查",
+  "新品上架链接",
 ];
 
 function field(id, label, key, type, required, placeholder = "", options = null, showInList = true, sortOrder = 1) {
@@ -629,10 +651,10 @@ const realStandardWorkDefinitions = [
   },
   {
     id: "task-template-new-product-link",
-    departmentKey: "operation",
-    name: "新品上架链接",
-    description: "根据新品资料完成商品链接创建、信息填写、图片上传和基础设置。",
-    completionStandard: "商品链接完整上线，标题、价格、主图、详情、SKU 等信息准确无误。",
+    departmentKey: "supply",
+    name: "新品上新",
+    description: "由供应链部发起新品上新，协调运营、视觉营销等部门完成上架前后的关键节点。",
+    completionStandard: "新品完成资料需求、图片制作、商品上架、库存成本交期确认，并进入新品孵化。",
     extraFields: [
       field("new-link-product", "产品名称", "productName", "text", false, "请输入产品名称", null, true, 4),
       field("new-link-store", "上架店铺", "storeId", "select", false, "请选择上架店铺", [], true, 5),
@@ -709,6 +731,21 @@ const standardWorkFormDefinitions = {
     ["publishPlatform", "发布平台", "select", false, "请选择发布平台", ["淘宝", "天猫", "小红书", "私域"], true],
     ["dueDate", "期望完成日期", "date", true, "", [], true],
     ["remark", "补充说明", "textarea", false, "其他特殊要求", [], false],
+  ],
+  新品上新: [
+    ["coverImageUrl", "产品图", "image", true, "上传1:1产品图", [], true],
+    ["productName", "产品名称", "text", true, "请输入产品名称", [], true],
+    ["productCategory", "产品分类", "select", false, "请选择产品分类", ["花瓶", "杯具", "家居摆件", "其他"], true],
+    ["productSpec", "产品规格", "textarea", true, "填写尺寸、材质、颜色、包装等", [], false],
+    ["sellingPoints", "产品卖点", "textarea", true, "填写核心卖点", [], false],
+    ["targetStyle", "目标风格", "select", false, "请选择目标风格", ["日式", "北欧", "法式", "侘寂", "新中式", "复古美式", "其他"], true],
+    ["priceRange", "目标价格带", "text", false, "例如100-299、200-599、1000+", [], true],
+    ["storeId", "上架店铺", "select", true, "请选择上架店铺", [], true],
+    ["mainImageRequirement", "主图需求", "textarea", true, "主图要突出什么", [], false],
+    ["detailPageRequirement", "详情页需求", "textarea", true, "详情页要表达什么", [], false],
+    ["buyerShowRequirement", "买家秀需求", "textarea", false, "是否需要买家秀及要求", [], false],
+    ["launchDate", "期望上架日期", "date", true, "", [], true],
+    ["remark", "补充说明", "textarea", false, "其他要求", [], false],
   ],
   新品上架链接: [
     ["coverImageUrl", "产品图", "image", true, "上传1:1产品图", [], true],
@@ -871,7 +908,7 @@ function shouldApplyDefaultFormFields(template, defaultFields) {
 }
 
 function migrateStoreFieldForStandardWork(template) {
-  if (template.name !== "新品上架链接" || !Array.isArray(template.formFields)) return template;
+  if (!["新品上架链接", "新品上新"].includes(template.name) || !Array.isArray(template.formFields)) return template;
   let changed = false;
   const formFields = template.formFields.map((field) => {
     if (field.key !== "platform") return field;
@@ -886,6 +923,118 @@ function migrateStoreFieldForStandardWork(template) {
     };
   });
   return changed ? { ...template, formFields } : template;
+}
+
+function syncNewProductLaunchProcessNodes(templateId, departmentsByKey, now) {
+  const processTemplate = state.processTemplates.find((template) => template.id === templateId);
+  if (processTemplate === undefined) return false;
+
+  const departmentByKey = (key) => departmentsByKey.get(key)?.id ?? null;
+  const nodeDefinitions = [
+    {
+      id: "node-new-product-launch-001",
+      departmentId: departmentByKey("supply"),
+      name: "发起新品上新",
+      description: "供应链部确认新品基础信息，发起新品上新流程。",
+      completionStandard: "新品名称、供应商、基础规格、初步成本和预计交期信息完整。",
+      outputRequirement: "新品上新基础信息",
+    },
+    {
+      id: "node-new-product-launch-002",
+      departmentId: departmentByKey("operation"),
+      name: "提交详情页和买家秀需求",
+      description: "运营根据新品定位提交详情页、买家秀和上架素材需求。",
+      completionStandard: "详情页表达重点、买家秀需求、上架店铺和预计上架时间清楚。",
+      outputRequirement: "详情页和买家秀需求说明",
+    },
+    {
+      id: "node-new-product-launch-003",
+      departmentId: departmentByKey("visual"),
+      name: "制作图片",
+      description: "视觉营销部根据需求制作主图、详情页和买家秀相关图片。",
+      completionStandard: "图片清晰、风格统一、产品表达准确，符合上架和内容使用要求。",
+      outputRequirement: "新品上新图片素材",
+    },
+    {
+      id: "node-new-product-launch-004",
+      departmentId: departmentByKey("operation"),
+      name: "上架产品",
+      description: "运营完成商品链接创建、信息填写、图片上传和基础设置。",
+      completionStandard: "商品链接完整上线，标题、价格、主图、详情、SKU 等信息准确无误。",
+      outputRequirement: "商品上架链接",
+    },
+    {
+      id: "node-new-product-launch-005",
+      departmentId: departmentByKey("supply"),
+      name: "确认库存、成本、交期",
+      description: "供应链部确认新品库存、成本、交期和补货保障。",
+      completionStandard: "库存数量、成本区间、交付时间和补货风险已确认。",
+      outputRequirement: "库存、成本、交期确认结果",
+    },
+    {
+      id: "node-new-product-launch-006",
+      departmentId: departmentByKey("operation"),
+      name: "进入新品孵化",
+      description: "运营将新品纳入新品孵化节奏，开始跟踪内容、流量和转化表现。",
+      completionStandard: "新品孵化计划已建立，核心观察指标和后续动作明确。",
+      outputRequirement: "新品孵化计划",
+    },
+  ];
+
+  let changed = false;
+  const activeNodeIds = new Set(nodeDefinitions.map((node) => node.id));
+  const nodesForTemplate = state.processTemplateNodes.filter((node) => node.templateId === templateId);
+
+  nodeDefinitions.forEach((definition, index) => {
+    const existing = nodesForTemplate.find((node) => node.id === definition.id || node.name === definition.name);
+    const nodeData = normalizeProcessTemplateNode({
+      id: existing?.id ?? definition.id,
+      templateId,
+      stageName: "新品上新流程",
+      stageOrder: index + 1,
+      nodeOrder: 1,
+      stepOrder: index + 1,
+      name: definition.name,
+      ownerRule: ProcessOwnerRule.DepartmentLeader,
+      ownerDepartmentId: definition.departmentId,
+      departmentId: definition.departmentId,
+      ownerPositionId: null,
+      defaultOwnerId: resolveDepartmentOwner(definition.departmentId),
+      ownerId: resolveDepartmentOwner(definition.departmentId),
+      executorId: null,
+      durationDays: 1,
+      description: definition.description,
+      completionStandard: definition.completionStandard,
+      defaultImportance: TaskImportance.Important,
+      defaultUrgency: index === 0 ? TaskUrgency.Urgent : TaskUrgency.NotUrgent,
+      needAcceptance: false,
+      accepterRule: ProcessAccepterRule.None,
+      defaultAccepterId: null,
+      outputRequirement: definition.outputRequirement,
+      status: ProcessTemplateNodeStatus.Active,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    });
+
+    if (existing === undefined) {
+      state.processTemplateNodes = [...state.processTemplateNodes, nodeData];
+      changed = true;
+      return;
+    }
+
+    const updated = { ...existing, ...nodeData, id: existing.id, createdAt: existing.createdAt ?? now };
+    if (JSON.stringify(existing) !== JSON.stringify(updated)) changed = true;
+    state.processTemplateNodes = state.processTemplateNodes.map((node) => (node.id === existing.id ? updated : node));
+    activeNodeIds.add(existing.id);
+  });
+
+  state.processTemplateNodes = state.processTemplateNodes.map((node) => {
+    if (node.templateId !== templateId || activeNodeIds.has(node.id) || node.status === ProcessTemplateNodeStatus.Inactive) return node;
+    changed = true;
+    return { ...node, status: ProcessTemplateNodeStatus.Inactive, updatedAt: now };
+  });
+
+  return changed;
 }
 
 function findDepartmentByNames(names) {
@@ -956,6 +1105,9 @@ export function ensureDefaultStandardWorkLibrary() {
       departmentId,
       now,
     });
+    if (definition.id === "task-template-new-product-link") {
+      changed = syncNewProductLaunchProcessNodes(defaultProcessTemplateId, departmentsByKey, now) || changed;
+    }
     const defaultFormFields = buildStandardWorkFormFields(definition);
     const templateData = {
       name: definition.name,
