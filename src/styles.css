@@ -1616,7 +1616,7 @@ textarea {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
+  min-width: 20px;
   height: 20px;
   border: 1px solid #d1d5db;
   border-radius: 5px;
@@ -1625,7 +1625,7 @@ textarea {
   cursor: pointer;
   font-size: 12px;
   line-height: 1;
-  padding: 0;
+  padding: 0 4px;
 }
 
 .table-sort-button:hover,

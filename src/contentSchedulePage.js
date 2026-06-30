@@ -8,8 +8,8 @@ import {
   state,
   updatePersistentResource,
   uploadImageFile,
-} from "./appState.js?v=20260630-task-due-sort2";
-import { hasPermission } from "./permissions.js?v=20260630-task-due-sort2";
+} from "./appState.js?v=20260630-task-due-sort3";
+import { hasPermission } from "./permissions.js?v=20260630-task-due-sort3";
 import {
   CategoryType,
   ContentScheduleStatus,

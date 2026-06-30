@@ -16,9 +16,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260630-task-due-sort2";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-task-due-sort2";
-import { hasPermission } from "./permissions.js?v=20260630-task-due-sort2";
+} from "./appState.js?v=20260630-task-due-sort3";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-task-due-sort3";
+import { hasPermission } from "./permissions.js?v=20260630-task-due-sort3";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-task-due-sort2";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-due-sort2";
-import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-task-due-sort2";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-task-due-sort2";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-task-due-sort3";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-due-sort3";
+import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-task-due-sort3";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-task-due-sort3";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -1147,7 +1147,7 @@ function getProcessGroupTitle(instance, processTasks) {
 
 function getTaskTableRows() {
   const filteredTasks = getFilteredTasks();
-  if (taskDueDateSort === "asc" || taskDueDateSort === "desc") {
+  if (taskDueDateSort === "asc") {
     return sortTaskTableRows(filteredTasks.map((task, index) => ({ type: "task", task, order: index })));
   }
 
@@ -1194,7 +1194,7 @@ function getRowDueDate(row) {
 
 function sortTaskTableRows(rows) {
   const orderedRows = [...rows];
-  if (taskDueDateSort !== "asc" && taskDueDateSort !== "desc") {
+  if (taskDueDateSort !== "asc") {
     return orderedRows.sort((left, right) => left.order - right.order);
   }
 
@@ -1207,7 +1207,7 @@ function sortTaskTableRows(rows) {
     if (leftMissing) return 1;
     if (rightMissing) return -1;
     const dueDateCompare = String(leftDueDate).localeCompare(String(rightDueDate));
-    if (dueDateCompare !== 0) return taskDueDateSort === "asc" ? dueDateCompare : -dueDateCompare;
+    if (dueDateCompare !== 0) return dueDateCompare;
     return left.order - right.order;
   });
 }
@@ -2503,8 +2503,8 @@ function renderTaskTable() {
   const allVisibleSelected = visibleTaskIds.length > 0 && selectedVisibleCount === visibleTaskIds.length;
   const hasPartialSelection = selectedVisibleCount > 0 && !allVisibleSelected;
   const selectedCount = selectedTaskIds.size;
-  const dueDateSortLabel = taskDueDateSort === "asc" ? "↑" : taskDueDateSort === "desc" ? "↓" : "↕";
-  const dueDateSortTitle = taskDueDateSort === "asc" ? "截止日期递增，点击切换为递减" : taskDueDateSort === "desc" ? "截止日期递减，点击切换为递增" : "按截止日期排序";
+  const dueDateSortLabel = taskDueDateSort === "asc" ? "取消" : "↑";
+  const dueDateSortTitle = taskDueDateSort === "asc" ? "取消截止日期排序，恢复默认顺序" : "按截止日期从早到晚排序";
 
   return `
     <section class="settings-section">
@@ -4996,7 +4996,7 @@ export function bindTasksPageEvents(rerender) {
         return;
       }
       if (action === "toggle-due-date-sort") {
-        taskDueDateSort = taskDueDateSort === "asc" ? "desc" : "asc";
+        taskDueDateSort = taskDueDateSort === "asc" ? "" : "asc";
         rerender();
         return;
       }
