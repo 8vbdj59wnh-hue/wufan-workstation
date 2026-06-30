@@ -12,8 +12,8 @@ import {
   state,
   stopProcess,
   updatePersistentResource,
-} from "./appState.js?v=20260701-process-node-title1";
-import { hasPermission } from "./permissions.js?v=20260701-process-node-title1";
+} from "./appState.js?v=20260701-compact-process-detail1";
+import { hasPermission } from "./permissions.js?v=20260701-compact-process-detail1";
 import {
   CategoryType,
   GoalStatus,
@@ -35,11 +35,11 @@ import {
   taskImportanceNames,
   taskStatusNames,
   taskUrgencyNames,
-} from "./data/modelOptions.js?v=20260701-process-node-title1";
-import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260701-process-node-title1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-process-node-title1";
-import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-process-node-title1";
-import { selectTask } from "./tasksPage.js?v=20260701-process-node-title1";
+} from "./data/modelOptions.js?v=20260701-compact-process-detail1";
+import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260701-compact-process-detail1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-compact-process-detail1";
+import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-compact-process-detail1";
+import { selectTask } from "./tasksPage.js?v=20260701-compact-process-detail1";
 
 const today = "2026-06-24";
 let selectedTemplateId = state.processTemplates[0]?.id ?? null;
@@ -377,23 +377,23 @@ function renderTemplateDetail() {
           ${canCurrentUser("processes.editSteps") ? `<button class="secondary-button" type="button" data-action="add-node" data-template-id="${template.id}" onclick="window.__handleProcessNodeAction?.(this, event)">新增流程步骤</button>` : ""}
         </div>
       </div>
-      <div class="detail-block">
-        <h3>基本信息</h3>
-        <div class="detail-grid">
-          ${renderDetailField("流程名称", template.name)}
-          ${renderDetailField("流程分类", findName(categories, template.categoryId, "未设置"))}
-          ${renderDetailField("适用部门", departmentNames)}
-          ${renderDetailField("流程负责人", findName(people, template.ownerId, "未设置"))}
-          ${renderDetailField("版本号", `v${template.version}`)}
-          ${renderDetailField("状态", processTemplateStatusNames[template.status])}
+      <div class="process-template-summary">
+        <div class="process-template-title-row">
+          <h3>${template.name}</h3>
+          <span class="status-pill ${template.status === ProcessTemplateStatus.Inactive ? "is-inactive" : ""}">${processTemplateStatusNames[template.status]}</span>
         </div>
-      </div>
-      <div class="detail-block">
-        <h3>流程说明</h3>
-        <p>流程目的：${template.purpose}</p>
-        <p>发起条件：${template.startCondition}</p>
-        <p>完成条件：${template.completionCondition}</p>
-        <p>整体标准：${template.overallStandard}</p>
+        <div class="process-template-meta">
+          <span><em>分类</em>${findName(categories, template.categoryId, "未设置")}</span>
+          <span><em>适用部门</em>${departmentNames}</span>
+          <span><em>负责人</em>${findName(people, template.ownerId, "未设置")}</span>
+          <span><em>版本</em>v${template.version}</span>
+        </div>
+        <div class="process-template-copy">
+          <p><strong>目的：</strong>${template.purpose}</p>
+          <p><strong>发起：</strong>${template.startCondition}</p>
+          <p><strong>完成：</strong>${template.completionCondition}</p>
+          <p><strong>标准：</strong>${template.overallStandard}</p>
+        </div>
       </div>
       <div class="detail-block">
         <h3>流程步骤</h3>

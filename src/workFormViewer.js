@@ -1,4 +1,4 @@
-import { resolveAssetUrl, state } from "./appState.js?v=20260701-process-node-title1";
+import { resolveAssetUrl, state } from "./appState.js?v=20260701-compact-process-detail1";
 
 const hiddenSystemFieldKeys = new Set(["standardWorkAttachments"]);
 
