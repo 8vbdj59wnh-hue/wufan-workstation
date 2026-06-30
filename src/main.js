@@ -1,11 +1,11 @@
-import { modules } from "./modules.js?v=20260701-remove-started-processes1";
-import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260701-remove-started-processes1";
-import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260701-remove-started-processes1";
-import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260701-remove-started-processes1";
-import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260701-remove-started-processes1";
-import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260701-remove-started-processes1";
-import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260701-remove-started-processes1";
-import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js?v=20260701-remove-started-processes1";
+import { modules } from "./modules.js?v=20260701-methods-in-processes1";
+import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260701-methods-in-processes1";
+import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260701-methods-in-processes1";
+import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260701-methods-in-processes1";
+import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260701-methods-in-processes1";
+import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260701-methods-in-processes1";
+import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260701-methods-in-processes1";
+import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260701-methods-in-processes1";
 import {
   flushPersistentSave,
   getCurrentUser,
@@ -19,8 +19,8 @@ import {
   markNotificationRead,
   syncTaskNotificationsForCurrentUser,
   validateCurrentSession,
-} from "./appState.js?v=20260701-remove-started-processes1";
-import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260701-remove-started-processes1";
+} from "./appState.js?v=20260701-methods-in-processes1";
+import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260701-methods-in-processes1";
 
 const app = document.querySelector("#app");
 
@@ -30,7 +30,7 @@ const moduleHashMap = {
   processes: "processes",
   time: "time",
   assessment: "assessment",
-  methods: "methods",
+  methods: "processes",
   settings: "settings",
   "task-list": "tasks",
   clearance: "tasks",
@@ -48,8 +48,8 @@ const moduleHashMap = {
   "assessment-stats": "assessment",
   "assessment-reports": "assessment",
   "assessment-problems": "assessment",
-  methodologies: "methods",
-  methods: "methods",
+  methodologies: "processes",
+  methods: "processes",
   organization: "settings",
   people: "settings",
   stores: "settings",
@@ -71,7 +71,7 @@ function scrollToCurrentHashSection() {
 function getModuleIdFromHash() {
   const hash = getRouteHash();
   if (hash.startsWith("process-template-")) return "processes";
-  if (hash.startsWith("methodology-")) return "methods";
+  if (hash.startsWith("methodology-")) return "processes";
   return moduleHashMap[hash] ?? modules[0].id;
 }
 
@@ -198,10 +198,6 @@ function renderPage() {
 
   if (activeModule.id === "assessment") {
     content = renderAssessmentPage();
-  }
-
-  if (activeModule.id === "methods") {
-    content = renderMethodologiesPage(currentUser);
   }
 
   if (activeModule.id === "settings") {
@@ -400,7 +396,7 @@ function render() {
     bindAssessmentPageEvents(render);
   }
 
-  if (activeModuleId === "methods" || document.querySelector(".methodologies-page") !== null) {
+  if (document.querySelector(".methodologies-page") !== null) {
     bindMethodologiesPageEvents(render);
   }
 

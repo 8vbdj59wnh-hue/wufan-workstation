@@ -20,10 +20,6 @@ export const modules = [
     name: "考核",
   },
   {
-    id: "methods",
-    name: "方法论",
-  },
-  {
     id: "settings",
     name: "设置",
   },

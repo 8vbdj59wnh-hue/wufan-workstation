@@ -12,8 +12,8 @@ import {
   state,
   stopProcess,
   updatePersistentResource,
-} from "./appState.js?v=20260701-remove-started-processes1";
-import { hasPermission } from "./permissions.js?v=20260701-remove-started-processes1";
+} from "./appState.js?v=20260701-methods-in-processes1";
+import { hasPermission } from "./permissions.js?v=20260701-methods-in-processes1";
 import {
   CategoryType,
   GoalStatus,
@@ -35,11 +35,11 @@ import {
   taskImportanceNames,
   taskStatusNames,
   taskUrgencyNames,
-} from "./data/modelOptions.js?v=20260701-remove-started-processes1";
-import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260701-remove-started-processes1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-remove-started-processes1";
-import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-remove-started-processes1";
-import { selectTask } from "./tasksPage.js?v=20260701-remove-started-processes1";
+} from "./data/modelOptions.js?v=20260701-methods-in-processes1";
+import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260701-methods-in-processes1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-methods-in-processes1";
+import { getMethodologyLinkByNodeId, renderMethodologiesPage } from "./methodologiesPage.js?v=20260701-methods-in-processes1";
+import { selectTask } from "./tasksPage.js?v=20260701-methods-in-processes1";
 
 const today = "2026-06-24";
 let selectedTemplateId = state.processTemplates[0]?.id ?? null;
@@ -142,6 +142,11 @@ function syncSelectedTemplateFromHash() {
   if (state.processTemplates.some((template) => template.id === templateId)) {
     selectedTemplateId = templateId;
   }
+}
+
+function isMethodologyRoute() {
+  const hash = window.location.hash.replace(/^#/, "");
+  return hash === "methods" || hash === "methodologies" || hash.startsWith("methodology-");
 }
 
 function renderOptions(items, selectedId, emptyLabel) {
@@ -1004,12 +1009,16 @@ export function bindProcessesPageEvents(rerender) {
 
 export function renderProcessesPage() {
   syncSelectedTemplateFromHash();
+  const canViewTemplates = canCurrentUser("processes.viewTemplates");
+  const canViewMethodologies = canCurrentUser("methods.view");
+  const showMethodologies = canViewMethodologies && (isMethodologyRoute() || !canViewTemplates);
   return `
     <div class="processes-page">
       <div class="settings-tabs" aria-label="流程分区">
-        ${canCurrentUser("processes.viewTemplates") ? `<a href="#process-templates">标准流程</a>` : ""}
+        ${canViewTemplates ? `<a href="#process-templates">标准流程</a>` : ""}
+        ${canViewMethodologies ? `<a href="#methods">方法论</a>` : ""}
       </div>
-      ${canCurrentUser("processes.viewTemplates") ? `
+      ${showMethodologies ? renderMethodologiesPage(getCurrentUser()) : canViewTemplates ? `
         <div id="process-templates" class="process-section">
           ${renderTemplateList()}
           ${renderTemplateDetail()}

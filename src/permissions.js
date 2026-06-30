@@ -14,7 +14,7 @@ export const permissionGroups = [
       { key: "processes", label: "可访问流程模块" },
       { key: "priority", label: "可访问优先级模块" },
       { key: "assessment", label: "可访问考核模块" },
-      { key: "methods", label: "可访问方法论模块" },
+      { key: "methods", label: "可访问流程内方法论" },
       { key: "settings", label: "可访问设置模块" },
     ],
   },
@@ -247,6 +247,9 @@ export function hasPermission(userOrPermissions, permissionPath) {
 }
 
 export function canAccessModule(userOrPermissions, moduleId) {
+  if (moduleId === "processes") {
+    return hasPermission(userOrPermissions, "modules.processes") || hasPermission(userOrPermissions, "modules.methods");
+  }
   const modulePermissionMap = {
     goals: "goals",
     tasks: "execution",

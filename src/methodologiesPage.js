@@ -7,8 +7,8 @@ import {
   updatePersistentResource,
   uploadGenericFile,
   uploadImageFile,
-} from "./appState.js?v=20260701-remove-started-processes1";
-import { hasPermission } from "./permissions.js?v=20260701-remove-started-processes1";
+} from "./appState.js?v=20260701-methods-in-processes1";
+import { hasPermission } from "./permissions.js?v=20260701-methods-in-processes1";
 
 const demoMethodology = {
   id: "methodology-xhs-image-guide",
