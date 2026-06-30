@@ -16,9 +16,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260630-clearance-xlsx1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-clearance-xlsx1";
-import { hasPermission } from "./permissions.js?v=20260630-clearance-xlsx1";
+} from "./appState.js?v=20260630-clearance-image1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-clearance-image1";
+import { hasPermission } from "./permissions.js?v=20260630-clearance-image1";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-clearance-xlsx1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-clearance-xlsx1";
-import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-clearance-xlsx1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-clearance-xlsx1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-clearance-image1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-clearance-image1";
+import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-clearance-image1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-clearance-image1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -1668,7 +1668,7 @@ async function unzipXlsxEntries(arrayBuffer) {
     } else {
       throw new Error("xlsx 文件包含暂不支持的压缩格式。");
     }
-    entries.set(name, decoder.decode(bytes));
+    entries.set(name, { bytes, text: decoder.decode(bytes) });
     centralOffset += 46 + fileNameLength + extraLength + commentLength;
   }
 
@@ -1685,15 +1685,15 @@ function getCellColumnIndex(cellRef) {
 }
 
 function getXlsxSharedStrings(entries) {
-  const xml = entries.get("xl/sharedStrings.xml");
-  if (!xml) return [];
+  const xml = entries.get("xl/sharedStrings.xml")?.text;
+  if (xml === undefined) return [];
   const document = new DOMParser().parseFromString(xml, "text/xml");
   return [...document.getElementsByTagName("si")].map(getXmlTextContent);
 }
 
 async function parseClearanceXlsxWorkbook(file) {
   const entries = await unzipXlsxEntries(await file.arrayBuffer());
-  const sheetXml = entries.get("xl/worksheets/sheet1.xml") ?? [...entries.entries()].find(([name]) => name.startsWith("xl/worksheets/"))?.[1];
+  const sheetXml = entries.get("xl/worksheets/sheet1.xml")?.text ?? [...entries.entries()].find(([name]) => name.startsWith("xl/worksheets/"))?.[1]?.text;
   if (!sheetXml) return [];
   const sharedStrings = getXlsxSharedStrings(entries);
   const document = new DOMParser().parseFromString(sheetXml, "text/xml");
@@ -1714,6 +1714,90 @@ async function parseClearanceXlsxWorkbook(file) {
     }
     return values.map((value) => value ?? "");
   });
+}
+
+function normalizeZipPath(basePath, targetPath) {
+  if (!targetPath) return "";
+  if (targetPath.startsWith("/")) return targetPath.replace(/^\/+/, "");
+  const parts = basePath.split("/");
+  parts.pop();
+  for (const part of targetPath.split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") parts.pop();
+    else parts.push(part);
+  }
+  return parts.join("/");
+}
+
+function parseXlsxRelationships(xml) {
+  if (!xml) return new Map();
+  const document = new DOMParser().parseFromString(xml, "text/xml");
+  return new Map(
+    [...document.getElementsByTagName("Relationship")].map((relationship) => [
+      relationship.getAttribute("Id"),
+      relationship.getAttribute("Target") ?? "",
+    ]),
+  );
+}
+
+function getFirstLocalText(element, localName) {
+  const node = element.getElementsByTagNameNS("*", localName)[0] ?? element.getElementsByTagName(localName)[0];
+  return node?.textContent?.trim() ?? "";
+}
+
+function getImageMimeType(fileName) {
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".gif")) return "image/gif";
+  return "image/jpeg";
+}
+
+async function uploadClearanceEmbeddedImages(file) {
+  const entries = await unzipXlsxEntries(await file.arrayBuffer());
+  const sheetPath = entries.has("xl/worksheets/sheet1.xml")
+    ? "xl/worksheets/sheet1.xml"
+    : [...entries.keys()].find((name) => name.startsWith("xl/worksheets/"));
+  const sheetXml = sheetPath ? entries.get(sheetPath)?.text : "";
+  if (!sheetPath || !sheetXml) return new Map();
+
+  const sheetDocument = new DOMParser().parseFromString(sheetXml, "text/xml");
+  const drawingId = sheetDocument.getElementsByTagNameNS("*", "drawing")[0]?.getAttribute("r:id") ?? "";
+  if (drawingId === "") return new Map();
+
+  const sheetRelsPath = normalizeZipPath(sheetPath, `_rels/${sheetPath.split("/").pop()}.rels`);
+  const sheetRelationships = parseXlsxRelationships(entries.get(sheetRelsPath)?.text);
+  const drawingPath = normalizeZipPath(sheetPath, sheetRelationships.get(drawingId));
+  const drawingXml = entries.get(drawingPath)?.text;
+  if (!drawingXml) return new Map();
+
+  const drawingRelsPath = normalizeZipPath(drawingPath, `_rels/${drawingPath.split("/").pop()}.rels`);
+  const drawingRelationships = parseXlsxRelationships(entries.get(drawingRelsPath)?.text);
+  const drawingDocument = new DOMParser().parseFromString(drawingXml, "text/xml");
+  const uploadedByRecordIndex = new Map();
+  const anchors = [
+    ...drawingDocument.getElementsByTagNameNS("*", "twoCellAnchor"),
+    ...drawingDocument.getElementsByTagNameNS("*", "oneCellAnchor"),
+  ];
+
+  for (const anchor of anchors) {
+    const from = anchor.getElementsByTagNameNS("*", "from")[0];
+    const rowIndex = Number.parseInt(getFirstLocalText(from, "row"), 10);
+    if (!Number.isFinite(rowIndex) || rowIndex <= 0) continue;
+    const blip = anchor.getElementsByTagNameNS("*", "blip")[0];
+    const embedId = blip?.getAttribute("r:embed") ?? blip?.getAttribute("embed") ?? "";
+    const mediaPath = normalizeZipPath(drawingPath, drawingRelationships.get(embedId));
+    const media = entries.get(mediaPath);
+    if (!media?.bytes) continue;
+
+    const extension = mediaPath.split(".").pop() || "jpg";
+    const fileName = `clearance-row-${rowIndex + 1}.${extension}`;
+    const imageFile = new File([media.bytes], fileName, { type: getImageMimeType(fileName) });
+    const uploaded = await uploadImageFile(imageFile);
+    uploadedByRecordIndex.set(rowIndex - 1, uploaded.url);
+  }
+
+  return uploadedByRecordIndex;
 }
 
 function clearanceRowsToRecords(rows) {
@@ -1802,8 +1886,10 @@ async function handleClearanceImportFile(file, rerender) {
   try {
     const fileName = file.name.toLowerCase();
     let rows;
+    let embeddedImageUrls = new Map();
     if (fileName.endsWith(".xlsx")) {
       rows = await parseClearanceXlsxWorkbook(file);
+      embeddedImageUrls = await uploadClearanceEmbeddedImages(file);
     } else {
       const text = await file.text();
       rows = text.trimStart().startsWith("<?xml") || text.includes("<Workbook")
@@ -1821,7 +1907,12 @@ async function handleClearanceImportFile(file, rerender) {
     modalState = {
       kind: "clearanceImport",
       fileName: file.name,
-      rows: buildClearanceImportPreviewRows(clearanceRowsToRecords(rows)),
+      rows: buildClearanceImportPreviewRows(
+        clearanceRowsToRecords(rows).map((record, index) => ({
+          ...record,
+          产品图: record.产品图 || embeddedImageUrls.get(index) || "",
+        })),
+      ),
       error: "",
     };
     rerender();
@@ -2044,7 +2135,7 @@ function renderClearancePage() {
       <div class="section-heading">
         <div>
           <h2>库存清仓</h2>
-          <p class="form-note">集中查看库存清仓标准工作产生的流程和执行任务；普通执行任务列表仍会保留这些任务。</p>
+          <p class="form-note">集中查看库存清仓标准工作产生的流程和执行任务；批量导入可在“产品图”列填写图片地址，或在对应行插入图片。</p>
         </div>
         <div class="toolbar-actions">
           ${canCurrentUser("workPlans.launch") ? `<button class="secondary-button" type="button" data-action="download-clearance-template">下载导入模板</button>` : ""}
