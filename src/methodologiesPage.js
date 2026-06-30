@@ -7,8 +7,8 @@ import {
   updatePersistentResource,
   uploadGenericFile,
   uploadImageFile,
-} from "./appState.js?v=20260630-task-attachment-name1";
-import { hasPermission } from "./permissions.js?v=20260630-task-attachment-name1";
+} from "./appState.js?v=20260630-task-prev-files1";
+import { hasPermission } from "./permissions.js?v=20260630-task-prev-files1";
 
 const demoMethodology = {
   id: "methodology-xhs-image-guide",

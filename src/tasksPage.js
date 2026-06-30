@@ -16,9 +16,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260630-task-attachment-name1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-task-attachment-name1";
-import { hasPermission } from "./permissions.js?v=20260630-task-attachment-name1";
+} from "./appState.js?v=20260630-task-prev-files1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-task-prev-files1";
+import { hasPermission } from "./permissions.js?v=20260630-task-prev-files1";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-task-attachment-name1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-attachment-name1";
-import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-task-attachment-name1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-task-attachment-name1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-task-prev-files1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-prev-files1";
+import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-task-prev-files1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-task-prev-files1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -3043,6 +3043,53 @@ function renderTaskSubmitResultDetail(task) {
   `;
 }
 
+function getPreviousProcessTask(task) {
+  if (
+    task.source !== TaskSource.Process ||
+    task.processInstanceId === null ||
+    task.processInstanceId === undefined ||
+    task.processInstanceId === ""
+  ) {
+    return null;
+  }
+  const processTasks = sortProcessTasks(getProcessTasks(task.processInstanceId));
+  const currentIndex = processTasks.findIndex((item) => item.id === task.id);
+  if (currentIndex <= 0) return null;
+  return processTasks[currentIndex - 1] ?? null;
+}
+
+function getTaskSubmittedFiles(task) {
+  if (task === null || task === undefined) return [];
+  const files = [];
+  const seen = new Set();
+  const addFile = (file) => {
+    const key = typeof file === "string" ? file : file?.url ?? file?.filePath ?? file?.filename ?? "";
+    if (key === "" || seen.has(key)) return;
+    seen.add(key);
+    files.push(file);
+  };
+
+  if (Array.isArray(task.submitFiles)) task.submitFiles.forEach(addFile);
+  if (Array.isArray(task.resultAttachments)) task.resultAttachments.forEach(addFile);
+  return files;
+}
+
+function renderPreviousTaskFilesBlock(task) {
+  const previousTask = getPreviousProcessTask(task);
+  if (previousTask === null) return "";
+  const files = getTaskSubmittedFiles(previousTask);
+
+  return `
+    <div class="detail-block">
+      <h3>前步任务提交文件</h3>
+      <p>前步任务：${escapeHtml(previousTask.name)}</p>
+      ${renderAttachmentPreviewList(files, "前步任务暂无提交文件")}
+      <p>提交时间：${previousTask.submittedAt ?? "未提交"}</p>
+      <p>提交人：${findName(people, previousTask.submittedBy, "未记录")}</p>
+    </div>
+  `;
+}
+
 function renderTaskDetail() {
   const selectedTask = getTask(selectedTaskId) ?? getFilteredTasks()[0] ?? null;
 
@@ -3103,6 +3150,7 @@ function renderTaskDetail() {
         </div>
       </div>
       ${renderStandardWorkAttachmentsBlock(getTaskCustomFields(selectedTask))}
+      ${renderPreviousTaskFilesBlock(selectedTask)}
       ${renderTaskSubmitResultDetail(selectedTask)}
       <div class="detail-block">
         <h3>执行结果</h3>
