@@ -1,4 +1,4 @@
-import { resolveAssetUrl, state } from "./appState.js?v=20260630-attachment-name2";
+import { resolveAssetUrl, state } from "./appState.js?v=20260630-submit-file-remove1";
 
 const hiddenSystemFieldKeys = new Set(["standardWorkAttachments"]);
 

@@ -16,9 +16,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260630-attachment-name2";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-attachment-name2";
-import { hasPermission } from "./permissions.js?v=20260630-attachment-name2";
+} from "./appState.js?v=20260630-submit-file-remove1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-submit-file-remove1";
+import { hasPermission } from "./permissions.js?v=20260630-submit-file-remove1";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-attachment-name2";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-attachment-name2";
-import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-attachment-name2";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-attachment-name2";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-submit-file-remove1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-submit-file-remove1";
+import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-submit-file-remove1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-submit-file-remove1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -372,8 +372,11 @@ function renderSubmitResultForm(task) {
     ? `
       <label>
         <span>上传文件</span>
-        <input type="file" name="submitFiles" multiple />
+        <input type="file" name="submitFiles" data-submit-files multiple />
       </label>
+      <div data-selected-submit-files>
+        <p class="form-note">暂无新选择附件</p>
+      </div>
       <div class="submitted-file-list">
         ${requirement.submitFiles.length === 0 ? "<p class=\"form-note\">暂无已上传文件</p>" : requirement.submitFiles.map((file) => `<a href="${escapeHtml(resolveAssetUrl(file.url ?? file))}" target="_blank" rel="noreferrer">${escapeHtml(file.originalName ?? file.filename ?? file.url ?? file)}</a>`).join("")}
       </div>
@@ -4734,6 +4737,43 @@ function removeSelectedStandardWorkAttachment(button) {
   renderSelectedStandardWorkAttachments(input);
 }
 
+function renderSelectedSubmitFiles(input) {
+  const container = input.closest(".submit-result-form")?.querySelector("[data-selected-submit-files]");
+  if (container === null || container === undefined) return;
+  const files = Array.from(input.files ?? []);
+  if (files.length === 0) {
+    container.innerHTML = `<p class="form-note">暂无新选择附件</p>`;
+    return;
+  }
+  container.innerHTML = `
+    <ul class="attachment-list editable-attachment-list">
+      ${files
+        .map(
+          (file, index) => `
+            <li>
+              <span>${escapeHtml(file.name)}</span>
+              <button class="text-button" type="button" data-action="remove-selected-submit-file" data-file-index="${index}">删除</button>
+            </li>
+          `,
+        )
+        .join("")}
+    </ul>
+  `;
+}
+
+function removeSelectedSubmitFile(button) {
+  const form = button.closest(".result-form");
+  const input = form?.querySelector("[data-submit-files]");
+  if (input === null || input === undefined) return;
+  const removeIndex = Number(button.dataset.fileIndex);
+  const transfer = new DataTransfer();
+  Array.from(input.files ?? []).forEach((file, index) => {
+    if (index !== removeIndex) transfer.items.add(file);
+  });
+  input.files = transfer.files;
+  renderSelectedSubmitFiles(input);
+}
+
 function updateImagePreview(input) {
   const preview = input.closest(".image-url-field")?.querySelector(".image-preview-box");
   if (preview === undefined || preview === null) return;
@@ -5079,6 +5119,11 @@ export function bindTasksPageEvents(rerender) {
         return;
       }
 
+      if (action === "remove-selected-submit-file") {
+        removeSelectedSubmitFile(actionButton);
+        return;
+      }
+
       if (action === "bulk-status") {
         bulkUpdateTaskStatus(actionButton.dataset.status, rerender);
         return;
@@ -5154,6 +5199,13 @@ export function bindTasksPageEvents(rerender) {
   }
   if (taskTemplateForm !== null) taskTemplateForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
   if (resultForm !== null) resultForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
+  if (resultForm !== null) {
+    resultForm.addEventListener("change", (event) => {
+      if (event.target.matches("[data-submit-files]")) {
+        renderSelectedSubmitFiles(event.target);
+      }
+    });
+  }
   if (returnTaskForm !== null) returnTaskForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
 }
 

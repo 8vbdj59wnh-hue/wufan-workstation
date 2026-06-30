@@ -7,8 +7,8 @@ import {
   startProcess,
   state,
   updatePersistentResource,
-} from "./appState.js?v=20260630-attachment-name2";
-import { hasPermission } from "./permissions.js?v=20260630-attachment-name2";
+} from "./appState.js?v=20260630-submit-file-remove1";
+import { hasPermission } from "./permissions.js?v=20260630-submit-file-remove1";
 import {
   GoalStatus,
   ProcessTemplateStatus,
@@ -19,7 +19,7 @@ import {
   taskUrgencyNames,
   workPlanStatusNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, quadrantNames } from "./data/taskUtils.js?v=20260630-attachment-name2";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, quadrantNames } from "./data/taskUtils.js?v=20260630-submit-file-remove1";
 
 const currentWeek = getCurrentWeek();
 const departments = state.departments;
