@@ -1,11 +1,11 @@
-import { modules } from "./modules.js?v=20260701-compact-process-detail1";
-import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260701-compact-process-detail1";
-import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260701-compact-process-detail1";
-import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260701-compact-process-detail1";
-import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260701-compact-process-detail1";
-import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260701-compact-process-detail1";
-import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260701-compact-process-detail1";
-import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js?v=20260701-compact-process-detail1";
+import { modules } from "./modules.js?v=20260701-no-process-start1";
+import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260701-no-process-start1";
+import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260701-no-process-start1";
+import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260701-no-process-start1";
+import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260701-no-process-start1";
+import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260701-no-process-start1";
+import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260701-no-process-start1";
+import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js?v=20260701-no-process-start1";
 import {
   flushPersistentSave,
   getCurrentUser,
@@ -19,8 +19,8 @@ import {
   markNotificationRead,
   syncTaskNotificationsForCurrentUser,
   validateCurrentSession,
-} from "./appState.js?v=20260701-compact-process-detail1";
-import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260701-compact-process-detail1";
+} from "./appState.js?v=20260701-no-process-start1";
+import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260701-no-process-start1";
 
 const app = document.querySelector("#app");
 

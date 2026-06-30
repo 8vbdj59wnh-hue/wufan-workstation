@@ -12,8 +12,8 @@ import {
   state,
   stopProcess,
   updatePersistentResource,
-} from "./appState.js?v=20260701-compact-process-detail1";
-import { hasPermission } from "./permissions.js?v=20260701-compact-process-detail1";
+} from "./appState.js?v=20260701-no-process-start1";
+import { hasPermission } from "./permissions.js?v=20260701-no-process-start1";
 import {
   CategoryType,
   GoalStatus,
@@ -35,11 +35,11 @@ import {
   taskImportanceNames,
   taskStatusNames,
   taskUrgencyNames,
-} from "./data/modelOptions.js?v=20260701-compact-process-detail1";
-import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260701-compact-process-detail1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-compact-process-detail1";
-import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-compact-process-detail1";
-import { selectTask } from "./tasksPage.js?v=20260701-compact-process-detail1";
+} from "./data/modelOptions.js?v=20260701-no-process-start1";
+import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260701-no-process-start1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-no-process-start1";
+import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-no-process-start1";
+import { selectTask } from "./tasksPage.js?v=20260701-no-process-start1";
 
 const today = "2026-06-24";
 let selectedTemplateId = state.processTemplates[0]?.id ?? null;
@@ -373,7 +373,6 @@ function renderTemplateDetail() {
               : ""
           }
           ${canCurrentUser("processes.editTemplates") ? `<button class="secondary-button danger-button" type="button" data-action="delete-template" data-template-id="${template.id}">删除流程</button>` : ""}
-          ${canCurrentUser("workPlans.launch") ? `<button class="primary-button" type="button" data-action="start-process" data-template-id="${template.id}">发起标准流程</button>` : ""}
           ${canCurrentUser("processes.editSteps") ? `<button class="secondary-button" type="button" data-action="add-node" data-template-id="${template.id}" onclick="window.__handleProcessNodeAction?.(this, event)">新增流程步骤</button>` : ""}
         </div>
       </div>
