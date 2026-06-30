@@ -1525,6 +1525,13 @@ textarea {
   border-radius: 8px;
   background: #f9fafb;
   padding: 10px;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+}
+
+.standard-work-column.is-drag-over {
+  border-color: #2563eb;
+  background: #eff6ff;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.18);
 }
 
 .standard-work-column-header {
@@ -1558,6 +1565,18 @@ textarea {
   border-radius: 6px;
   background: #ffffff;
   padding: 8px;
+}
+
+.standard-work-card[draggable="true"] {
+  cursor: grab;
+}
+
+.standard-work-card[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.standard-work-card.is-dragging {
+  opacity: 0.48;
 }
 
 .standard-work-card.is-selected {

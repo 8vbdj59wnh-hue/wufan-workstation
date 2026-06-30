@@ -16,9 +16,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260701-avatar1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-avatar1";
-import { hasPermission } from "./permissions.js?v=20260701-avatar1";
+} from "./appState.js?v=20260701-standard-work-drag1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-standard-work-drag1";
+import { hasPermission } from "./permissions.js?v=20260701-standard-work-drag1";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-avatar1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-avatar1";
-import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-avatar1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-avatar1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-standard-work-drag1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-standard-work-drag1";
+import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-standard-work-drag1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-standard-work-drag1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -228,6 +228,8 @@ function getProcessTemplateName(templateId) {
 
 function getStandardWorkValueChain(template) {
   const categoryName = findName(categories, template.categoryId, "");
+  if (standardWorkValueChainColumns.some((column) => column.title === categoryName)) return categoryName;
+
   const departmentName = findName(departments, template.departmentId, "");
   const processName = getProcessTemplateName(template.defaultProcessTemplateId ?? "");
   const searchText = [
@@ -2658,7 +2660,7 @@ function renderTaskTemplateTable(selectedProcessTemplateId = "") {
             .map((column) => {
               const columnTemplates = visibleTemplates.filter((template) => getStandardWorkValueChain(template) === column.title);
               return `
-                <section class="standard-work-column">
+                <section class="standard-work-column" data-standard-work-category="${escapeHtml(column.title)}">
                   <div class="standard-work-column-header">
                     <h3>${column.title}</h3>
                     <span>${columnTemplates.length} 项</span>
@@ -2676,6 +2678,7 @@ function renderTaskTemplateTable(selectedProcessTemplateId = "") {
             .join("")}
         </div>
       </div>
+      <p class="form-note">可拖动标准工作卡片到其他价值链分类中，调整后会保存到标准工作库。</p>
     </section>
   `;
 }
@@ -2691,8 +2694,9 @@ export function renderStandardWorkLibraryPage(selectedProcessTemplateId = "") {
 
 function renderStandardWorkCard(template, selectedProcessTemplateId = "") {
   const isSelected = template.defaultProcessTemplateId !== undefined && template.defaultProcessTemplateId === selectedProcessTemplateId;
+  const draggable = canCurrentUser("settings.editStandardWorks") ? ` draggable="true"` : "";
   return `
-    <article class="standard-work-card ${isSelected ? "is-selected" : ""}" data-standard-work-template-id="${escapeHtml(template.id)}" data-process-template-id="${escapeHtml(template.defaultProcessTemplateId ?? "")}">
+    <article class="standard-work-card ${isSelected ? "is-selected" : ""}"${draggable} data-standard-work-template-id="${escapeHtml(template.id)}" data-process-template-id="${escapeHtml(template.defaultProcessTemplateId ?? "")}">
       <div class="standard-work-card-title">
         <h4>${escapeHtml(template.name)}</h4>
         <span class="status-pill ${template.status === TaskTemplateStatus.Inactive ? "is-inactive" : ""}">${taskTemplateStatusNames[template.status]}</span>
@@ -4735,9 +4739,94 @@ async function handleTaskSubmit(event, rerender) {
   if (modalState?.kind === "taskTemplate") await saveTaskTemplate(event.target, rerender);
 }
 
+async function getOrCreateValueChainCategory(categoryName) {
+  const existingCategory = categories.find((category) => category.type === CategoryType.Task && category.name === categoryName);
+  if (existingCategory !== undefined) return existingCategory;
+
+  const now = getNow();
+  const categoryIndex = standardWorkValueChainColumns.findIndex((column) => column.title === categoryName);
+  const createdCategory = {
+    id: createId("cat-task"),
+    type: CategoryType.Task,
+    name: categoryName,
+    sortOrder: categoryIndex === -1 ? categories.length + 1 : categoryIndex + 1,
+    status: "active",
+    createdAt: now,
+    updatedAt: now,
+  };
+  await createPersistentResource("categories", createdCategory);
+  state.categories.push(createdCategory);
+  return createdCategory;
+}
+
+async function moveStandardWorkToValueChain(templateId, categoryName, rerender) {
+  if (!canCurrentUser("settings.editStandardWorks")) {
+    window.alert("你没有权限调整标准工作分类。");
+    return;
+  }
+
+  const template = getTaskTemplate(templateId);
+  if (template === null || !standardWorkValueChainColumns.some((column) => column.title === categoryName)) return;
+
+  try {
+    const category = await getOrCreateValueChainCategory(categoryName);
+    if (template.categoryId === category.id) return;
+    const updatedTemplate = { ...template, categoryId: category.id, updatedAt: getNow() };
+    await updatePersistentResource("task-templates", updatedTemplate.id, updatedTemplate);
+    state.taskTemplates = state.taskTemplates.map((item) => (item.id === updatedTemplate.id ? updatedTemplate : item));
+    rerender();
+  } catch (error) {
+    console.error("标准工作分类保存失败", error);
+    window.alert(error.message || "标准工作分类保存失败，请检查本地数据库服务。");
+    rerender();
+  }
+}
+
+function clearStandardWorkDragState(host) {
+  host.querySelectorAll(".standard-work-card.is-dragging").forEach((card) => card.classList.remove("is-dragging"));
+  host.querySelectorAll(".standard-work-column.is-drag-over").forEach((column) => column.classList.remove("is-drag-over"));
+}
+
 export function bindStandardWorkLibraryEvents(rerender, container = document) {
   const host = container.querySelector?.(".standard-work-library-host") ?? container;
   const taskTemplateForm = document.querySelector(".task-template-form");
+
+  host.addEventListener("dragstart", (event) => {
+    const card = event.target.closest(".standard-work-card[draggable='true']");
+    if (card === null) return;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", card.dataset.standardWorkTemplateId ?? "");
+    card.classList.add("is-dragging");
+  });
+
+  host.addEventListener("dragend", () => {
+    clearStandardWorkDragState(host);
+  });
+
+  host.addEventListener("dragover", (event) => {
+    const column = event.target.closest("[data-standard-work-category]");
+    if (column === null) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    host.querySelectorAll(".standard-work-column.is-drag-over").forEach((item) => {
+      if (item !== column) item.classList.remove("is-drag-over");
+    });
+    column.classList.add("is-drag-over");
+  });
+
+  host.addEventListener("dragleave", (event) => {
+    const column = event.target.closest("[data-standard-work-category]");
+    if (column !== null && !column.contains(event.relatedTarget)) column.classList.remove("is-drag-over");
+  });
+
+  host.addEventListener("drop", async (event) => {
+    const column = event.target.closest("[data-standard-work-category]");
+    if (column === null) return;
+    event.preventDefault();
+    const templateId = event.dataTransfer.getData("text/plain");
+    clearStandardWorkDragState(host);
+    await moveStandardWorkToValueChain(templateId, column.dataset.standardWorkCategory ?? "", rerender);
+  });
 
   host.addEventListener("click", (event) => {
     const actionButton = event.target.closest("[data-action]");
