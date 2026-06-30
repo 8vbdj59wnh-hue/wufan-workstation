@@ -296,6 +296,22 @@ textarea {
   grid-template-columns: repeat(3, minmax(160px, 1fr));
 }
 
+.task-list-filters {
+  grid-template-columns: minmax(220px, 1.5fr) repeat(4, minmax(120px, 1fr));
+  gap: 10px;
+  padding: 14px;
+}
+
+.task-list-filters .task-filter-options {
+  align-items: center;
+  border-top: 1px solid #eef2f7;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  grid-column: 1 / -1;
+  padding-top: 10px;
+}
+
 .content-schedule-filters {
   grid-template-columns: repeat(5, minmax(140px, 1fr));
 }
@@ -362,6 +378,11 @@ textarea {
   gap: 8px;
   min-height: 36px;
   padding-top: 20px;
+}
+
+.task-list-filters .task-filter-checkbox {
+  min-height: auto;
+  padding-top: 0;
 }
 
 .task-filters .task-filter-checkbox input {

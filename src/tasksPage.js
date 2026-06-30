@@ -16,9 +16,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260630-task-filter-simple1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-task-filter-simple1";
-import { hasPermission } from "./permissions.js?v=20260630-task-filter-simple1";
+} from "./appState.js?v=20260630-task-expand-filter1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-task-expand-filter1";
+import { hasPermission } from "./permissions.js?v=20260630-task-expand-filter1";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-task-filter-simple1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-filter-simple1";
-import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-task-filter-simple1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-task-filter-simple1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-task-expand-filter1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-expand-filter1";
+import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-task-expand-filter1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-task-expand-filter1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -96,6 +96,7 @@ let selectedTaskId = state.tasks[0]?.id ?? null;
 let selectedProcessInstanceId = state.processInstances[0]?.id ?? null;
 let selectedTaskIds = new Set();
 let expandedProcessTaskGroups = new Set();
+let expandAllTaskGroups = false;
 let expandedClearanceGroups = new Set();
 let modalState = null;
 let activeTaskTab = "task-list";
@@ -1175,7 +1176,7 @@ function getTaskTableRows() {
       tasks: sortedTasks,
       instance: state.processInstances.find((item) => item.id === group.processInstanceId) ?? null,
       currentTask,
-      expanded: expandedProcessTaskGroups.has(group.processInstanceId),
+      expanded: expandAllTaskGroups || expandedProcessTaskGroups.has(group.processInstanceId),
     });
   });
 
@@ -2372,7 +2373,7 @@ function canRestoreTask(task) {
 function renderFilters() {
   filters = { ...filters, source: "", goalId: "", categoryId: "", quadrant: "" };
   return `
-    <form class="task-filters" aria-label="任务筛选">
+    <form class="task-filters task-list-filters" aria-label="任务筛选">
       <label>
         <span>关键词</span>
         <input name="keyword" value="${escapeHtml(filters.keyword)}" placeholder="搜索执行任务名称" />
@@ -2391,14 +2392,6 @@ function renderFilters() {
             )
             .join("")}
         </select>
-      </label>
-      <label class="checkbox-field task-filter-checkbox">
-        <input name="showDone" type="checkbox" ${filters.showDone ? "checked" : ""} />
-        <span>显示已完成</span>
-      </label>
-      <label class="checkbox-field task-filter-checkbox">
-        <input name="showCanceled" type="checkbox" ${filters.showCanceled ? "checked" : ""} />
-        <span>显示已取消</span>
       </label>
       <label>
         <span>负责部门</span>
@@ -2420,6 +2413,20 @@ function renderFilters() {
           <option value="no" ${filters.overdue === "no" ? "selected" : ""}>未逾期</option>
         </select>
       </label>
+      <div class="task-filter-options">
+        <label class="checkbox-field task-filter-checkbox">
+          <input name="showDone" type="checkbox" ${filters.showDone ? "checked" : ""} />
+          <span>显示已完成</span>
+        </label>
+        <label class="checkbox-field task-filter-checkbox">
+          <input name="showCanceled" type="checkbox" ${filters.showCanceled ? "checked" : ""} />
+          <span>显示已取消</span>
+        </label>
+        <label class="checkbox-field task-filter-checkbox">
+          <input name="expandAllGroups" type="checkbox" ${expandAllTaskGroups ? "checked" : ""} />
+          <span>全部展开</span>
+        </label>
+      </div>
     </form>
   `;
 }
@@ -3644,6 +3651,7 @@ function updateFilters(form) {
     showDone: formData.has("showDone"),
     showCanceled: formData.has("showCanceled"),
   };
+  expandAllTaskGroups = formData.has("expandAllGroups");
 }
 
 function updateProcessProgressFilters(form) {
@@ -4958,7 +4966,16 @@ export function bindTasksPageEvents(rerender) {
       }
       if (action === "toggle-task-group") {
         const processInstanceId = actionButton.dataset.processInstanceId;
-        expandedProcessTaskGroups = new Set(expandedProcessTaskGroups);
+        if (expandAllTaskGroups) {
+          expandedProcessTaskGroups = new Set(
+            getTaskTableRows()
+              .filter((row) => row.type === "process-group")
+              .map((row) => row.processInstanceId),
+          );
+          expandAllTaskGroups = false;
+        } else {
+          expandedProcessTaskGroups = new Set(expandedProcessTaskGroups);
+        }
         if (expandedProcessTaskGroups.has(processInstanceId)) {
           expandedProcessTaskGroups.delete(processInstanceId);
         } else {
