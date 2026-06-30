@@ -17,7 +17,7 @@ import {
   methodologies as initialMethodologies,
   notifications as initialNotifications,
   workPlans as initialWorkPlans,
-} from "./data/mockData.js?v=20260701-methods-in-processes1";
+} from "./data/mockData.js?v=20260701-standardization-nav1";
 import {
   CategoryType,
   PersonRole,
@@ -33,8 +33,8 @@ import {
   TaskStatus,
   TaskTemplateStatus,
   TaskUrgency,
-} from "./data/modelOptions.js?v=20260701-methods-in-processes1";
-import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260701-methods-in-processes1";
+} from "./data/modelOptions.js?v=20260701-standardization-nav1";
+import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260701-standardization-nav1";
 
 const apiPort = "3001";
 const apiBaseUrl = `${window.location.protocol}//${window.location.hostname}:${apiPort}`;

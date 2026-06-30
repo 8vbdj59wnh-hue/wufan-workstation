@@ -9,7 +9,7 @@ export const modules = [
   },
   {
     id: "processes",
-    name: "流程",
+    name: "标准化",
   },
   {
     id: "time",
