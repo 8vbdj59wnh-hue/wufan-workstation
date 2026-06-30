@@ -7,8 +7,8 @@ import {
   updatePersistentResource,
   uploadGenericFile,
   uploadImageFile,
-} from "./appState.js?v=20260701-compact-standard-work-card1";
-import { hasPermission } from "./permissions.js?v=20260701-compact-standard-work-card1";
+} from "./appState.js?v=20260701-sidebar-no-mark1";
+import { hasPermission } from "./permissions.js?v=20260701-sidebar-no-mark1";
 
 const demoMethodology = {
   id: "methodology-xhs-image-guide",

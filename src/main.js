@@ -1,11 +1,11 @@
-import { modules } from "./modules.js?v=20260701-compact-standard-work-card1";
-import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260701-compact-standard-work-card1";
-import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260701-compact-standard-work-card1";
-import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260701-compact-standard-work-card1";
-import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260701-compact-standard-work-card1";
-import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260701-compact-standard-work-card1";
-import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260701-compact-standard-work-card1";
-import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260701-compact-standard-work-card1";
+import { modules } from "./modules.js?v=20260701-sidebar-no-mark1";
+import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260701-sidebar-no-mark1";
+import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260701-sidebar-no-mark1";
+import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260701-sidebar-no-mark1";
+import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260701-sidebar-no-mark1";
+import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260701-sidebar-no-mark1";
+import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260701-sidebar-no-mark1";
+import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260701-sidebar-no-mark1";
 import {
   flushPersistentSave,
   getCurrentUser,
@@ -19,8 +19,8 @@ import {
   markNotificationRead,
   syncTaskNotificationsForCurrentUser,
   validateCurrentSession,
-} from "./appState.js?v=20260701-compact-standard-work-card1";
-import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260701-compact-standard-work-card1";
+} from "./appState.js?v=20260701-sidebar-no-mark1";
+import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260701-sidebar-no-mark1";
 
 const app = document.querySelector("#app");
 
@@ -144,7 +144,6 @@ function renderSidebar() {
   return `
     <aside class="sidebar">
       <div class="brand">
-        <span class="brand-mark"></span>
         <span class="brand-name"><span>屋范</span><span>极简工作站</span></span>
       </div>
       <nav class="nav" aria-label="主导航">

@@ -1,4 +1,4 @@
-import { getCurrentUser, savePersistentData, state, validateCurrentSession } from "./appState.js?v=20260701-compact-standard-work-card1";
+import { getCurrentUser, savePersistentData, state, validateCurrentSession } from "./appState.js?v=20260701-sidebar-no-mark1";
 import {
   applyPermissionTemplate,
   dataScopeOptions,
@@ -7,7 +7,7 @@ import {
   permissionCount,
   permissionGroups,
   permissionTemplates,
-} from "./permissions.js?v=20260701-compact-standard-work-card1";
+} from "./permissions.js?v=20260701-sidebar-no-mark1";
 import {
   CategoryType,
   PersonRole,
