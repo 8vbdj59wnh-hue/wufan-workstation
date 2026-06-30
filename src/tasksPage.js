@@ -16,9 +16,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260630-task-expand-filter1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-task-expand-filter1";
-import { hasPermission } from "./permissions.js?v=20260630-task-expand-filter1";
+} from "./appState.js?v=20260630-task-list-clean1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-task-list-clean1";
+import { hasPermission } from "./permissions.js?v=20260630-task-list-clean1";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-task-expand-filter1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-expand-filter1";
-import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-task-expand-filter1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-task-expand-filter1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-task-list-clean1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-list-clean1";
+import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-task-list-clean1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-task-list-clean1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -2477,10 +2477,6 @@ function renderTaskTable() {
 
   return `
     <section class="settings-section">
-      <div class="section-heading with-actions">
-        <h2>执行任务列表</h2>
-        <button class="primary-button" type="button" data-action="add-task">发起标准工作</button>
-      </div>
       <div class="bulk-task-bar">
         <strong>已选择 ${selectedCount} 条执行任务</strong>
         <span class="row-actions">
