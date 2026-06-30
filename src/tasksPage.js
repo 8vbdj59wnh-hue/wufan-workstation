@@ -16,9 +16,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260630-stability1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-stability1";
-import { hasPermission } from "./permissions.js?v=20260630-stability1";
+} from "./appState.js?v=20260630-clearance-xlsx1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-clearance-xlsx1";
+import { hasPermission } from "./permissions.js?v=20260630-clearance-xlsx1";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-stability1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-stability1";
-import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-stability1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-stability1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-clearance-xlsx1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-clearance-xlsx1";
+import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-clearance-xlsx1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-clearance-xlsx1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -1373,8 +1373,181 @@ function createClearanceXmlWorkbook(rows) {
 </Workbook>`;
 }
 
+function escapeXml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function getColumnName(index) {
+  let number = index + 1;
+  let name = "";
+  while (number > 0) {
+    const remainder = (number - 1) % 26;
+    name = String.fromCharCode(65 + remainder) + name;
+    number = Math.floor((number - 1) / 26);
+  }
+  return name;
+}
+
+function createSheetCell(value, rowIndex, columnIndex) {
+  const cellRef = `${getColumnName(columnIndex)}${rowIndex}`;
+  return `<c r="${cellRef}" t="inlineStr"><is><t>${escapeXml(value)}</t></is></c>`;
+}
+
+function createClearanceXlsxSheet(rows) {
+  const allRows = [
+    clearanceImportHeaders,
+    ...rows.map((row) => clearanceImportHeaders.map((header) => row[header] ?? "")),
+  ];
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    ${allRows
+      .map((row, rowIndex) => {
+        const excelRowIndex = rowIndex + 1;
+        return `<row r="${excelRowIndex}">${row.map((value, columnIndex) => createSheetCell(value, excelRowIndex, columnIndex)).join("")}</row>`;
+      })
+      .join("")}
+  </sheetData>
+</worksheet>`;
+}
+
+function createCrc32Table() {
+  return Array.from({ length: 256 }, (_, index) => {
+    let value = index;
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    }
+    return value >>> 0;
+  });
+}
+
+const crc32Table = createCrc32Table();
+
+function getCrc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc = crc32Table[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function writeUint16(bytes, value) {
+  bytes.push(value & 0xff, (value >>> 8) & 0xff);
+}
+
+function writeUint32(bytes, value) {
+  bytes.push(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff);
+}
+
+function appendBytes(target, bytes) {
+  for (const byte of bytes) target.push(byte);
+}
+
+function createZipBlob(files) {
+  const encoder = new TextEncoder();
+  const output = [];
+  const centralDirectory = [];
+  const entries = files.map((file) => ({
+    nameBytes: encoder.encode(file.name),
+    dataBytes: encoder.encode(file.content),
+  }));
+
+  for (const entry of entries) {
+    const localHeaderOffset = output.length;
+    const crc = getCrc32(entry.dataBytes);
+    writeUint32(output, 0x04034b50);
+    writeUint16(output, 20);
+    writeUint16(output, 0);
+    writeUint16(output, 0);
+    writeUint16(output, 0);
+    writeUint16(output, 0);
+    writeUint32(output, crc);
+    writeUint32(output, entry.dataBytes.length);
+    writeUint32(output, entry.dataBytes.length);
+    writeUint16(output, entry.nameBytes.length);
+    writeUint16(output, 0);
+    appendBytes(output, entry.nameBytes);
+    appendBytes(output, entry.dataBytes);
+
+    writeUint32(centralDirectory, 0x02014b50);
+    writeUint16(centralDirectory, 20);
+    writeUint16(centralDirectory, 20);
+    writeUint16(centralDirectory, 0);
+    writeUint16(centralDirectory, 0);
+    writeUint16(centralDirectory, 0);
+    writeUint16(centralDirectory, 0);
+    writeUint32(centralDirectory, crc);
+    writeUint32(centralDirectory, entry.dataBytes.length);
+    writeUint32(centralDirectory, entry.dataBytes.length);
+    writeUint16(centralDirectory, entry.nameBytes.length);
+    writeUint16(centralDirectory, 0);
+    writeUint16(centralDirectory, 0);
+    writeUint16(centralDirectory, 0);
+    writeUint16(centralDirectory, 0);
+    writeUint32(centralDirectory, 0);
+    writeUint32(centralDirectory, localHeaderOffset);
+    appendBytes(centralDirectory, entry.nameBytes);
+  }
+
+  const centralDirectoryOffset = output.length;
+  appendBytes(output, centralDirectory);
+  writeUint32(output, 0x06054b50);
+  writeUint16(output, 0);
+  writeUint16(output, 0);
+  writeUint16(output, entries.length);
+  writeUint16(output, entries.length);
+  writeUint32(output, centralDirectory.length);
+  writeUint32(output, centralDirectoryOffset);
+  writeUint16(output, 0);
+
+  return new Blob([new Uint8Array(output)], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+}
+
+function createClearanceXlsxWorkbook(rows) {
+  return createZipBlob([
+    {
+      name: "[Content_Types].xml",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>`,
+    },
+    {
+      name: "_rels/.rels",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`,
+    },
+    {
+      name: "xl/workbook.xml",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="库存清仓导入" sheetId="1" r:id="rId1"/></sheets>
+</workbook>`,
+    },
+    {
+      name: "xl/_rels/workbook.xml.rels",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>`,
+    },
+    { name: "xl/worksheets/sheet1.xml", content: createClearanceXlsxSheet(rows) },
+  ]);
+}
+
 function downloadFile(content, fileName, type) {
-  const blob = new Blob([content], { type });
+  const blob = content instanceof Blob ? content : new Blob([content], { type });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -1403,7 +1576,7 @@ function downloadClearanceImportTemplate() {
       发起人: people[0]?.name ?? "",
     },
   ];
-  downloadFile(createClearanceXmlWorkbook(rows), "库存清仓导入模板.xls", "application/vnd.ms-excel;charset=utf-8");
+  downloadFile(createClearanceXlsxWorkbook(rows), "库存清仓导入模板.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
 }
 
 function parseClearanceDelimitedRows(text) {
@@ -1448,6 +1621,101 @@ function parseClearanceXmlWorkbook(text) {
   );
 }
 
+function findEndOfCentralDirectory(view) {
+  for (let offset = view.byteLength - 22; offset >= 0; offset -= 1) {
+    if (view.getUint32(offset, true) === 0x06054b50) return offset;
+  }
+  return -1;
+}
+
+async function inflateZipEntry(bytes) {
+  if (typeof DecompressionStream === "undefined") {
+    throw new Error("当前浏览器不支持解析压缩 xlsx，请使用系统下载的新模板重试。");
+  }
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+async function unzipXlsxEntries(arrayBuffer) {
+  const view = new DataView(arrayBuffer);
+  const decoder = new TextDecoder();
+  const endOffset = findEndOfCentralDirectory(view);
+  if (endOffset < 0) throw new Error("不是有效的 xlsx 文件。");
+
+  const entryCount = view.getUint16(endOffset + 10, true);
+  let centralOffset = view.getUint32(endOffset + 16, true);
+  const entries = new Map();
+
+  for (let index = 0; index < entryCount; index += 1) {
+    if (view.getUint32(centralOffset, true) !== 0x02014b50) throw new Error("xlsx 文件结构异常。");
+    const method = view.getUint16(centralOffset + 10, true);
+    const compressedSize = view.getUint32(centralOffset + 20, true);
+    const fileNameLength = view.getUint16(centralOffset + 28, true);
+    const extraLength = view.getUint16(centralOffset + 30, true);
+    const commentLength = view.getUint16(centralOffset + 32, true);
+    const localOffset = view.getUint32(centralOffset + 42, true);
+    const name = decoder.decode(new Uint8Array(arrayBuffer, centralOffset + 46, fileNameLength));
+
+    const localNameLength = view.getUint16(localOffset + 26, true);
+    const localExtraLength = view.getUint16(localOffset + 28, true);
+    const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+    const compressedBytes = new Uint8Array(arrayBuffer, dataStart, compressedSize);
+    let bytes;
+    if (method === 0) {
+      bytes = compressedBytes;
+    } else if (method === 8) {
+      bytes = await inflateZipEntry(compressedBytes);
+    } else {
+      throw new Error("xlsx 文件包含暂不支持的压缩格式。");
+    }
+    entries.set(name, decoder.decode(bytes));
+    centralOffset += 46 + fileNameLength + extraLength + commentLength;
+  }
+
+  return entries;
+}
+
+function getXmlTextContent(element) {
+  return [...element.getElementsByTagName("t")].map((node) => node.textContent ?? "").join("");
+}
+
+function getCellColumnIndex(cellRef) {
+  const letters = String(cellRef ?? "").match(/^[A-Z]+/i)?.[0] ?? "";
+  return [...letters.toUpperCase()].reduce((total, letter) => total * 26 + letter.charCodeAt(0) - 64, 0) - 1;
+}
+
+function getXlsxSharedStrings(entries) {
+  const xml = entries.get("xl/sharedStrings.xml");
+  if (!xml) return [];
+  const document = new DOMParser().parseFromString(xml, "text/xml");
+  return [...document.getElementsByTagName("si")].map(getXmlTextContent);
+}
+
+async function parseClearanceXlsxWorkbook(file) {
+  const entries = await unzipXlsxEntries(await file.arrayBuffer());
+  const sheetXml = entries.get("xl/worksheets/sheet1.xml") ?? [...entries.entries()].find(([name]) => name.startsWith("xl/worksheets/"))?.[1];
+  if (!sheetXml) return [];
+  const sharedStrings = getXlsxSharedStrings(entries);
+  const document = new DOMParser().parseFromString(sheetXml, "text/xml");
+  if (document.querySelector("parsererror") !== null) return [];
+
+  return [...document.getElementsByTagName("row")].map((row) => {
+    const values = [];
+    for (const cell of row.getElementsByTagName("c")) {
+      const columnIndex = getCellColumnIndex(cell.getAttribute("r"));
+      if (columnIndex < 0) continue;
+      const type = cell.getAttribute("t");
+      const rawValue = cell.getElementsByTagName("v")[0]?.textContent?.trim() ?? "";
+      let value = rawValue;
+      if (type === "s") value = sharedStrings[Number.parseInt(rawValue, 10)] ?? "";
+      if (type === "inlineStr") value = getXmlTextContent(cell);
+      if (type === "str") value = rawValue;
+      values[columnIndex] = value.trim();
+    }
+    return values.map((value) => value ?? "");
+  });
+}
+
 function clearanceRowsToRecords(rows) {
   const headers = rows[0] ?? [];
   return rows.slice(1).map((row) =>
@@ -1463,10 +1731,28 @@ function normalizeClearanceImportDate(value) {
   const text = String(value ?? "").trim();
   if (text === "") return "";
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
-  const slashMatch = text.match(/^(\d{4})[/.](\d{1,2})[/.](\d{1,2})$/);
-  if (slashMatch === null) return "";
-  const [, year, month, day] = slashMatch;
-  return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  const isoLikeMatch = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T].*)?$/);
+  if (isoLikeMatch !== null) {
+    const [, year, month, day] = isoLikeMatch;
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+  const slashMatch = text.match(/^(\d{4})[/.年](\d{1,2})[/.月](\d{1,2})(?:日)?(?:\s.*)?$/);
+  if (slashMatch !== null) {
+    const [, year, month, day] = slashMatch;
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+  if (/^\d+(\.\d+)?$/.test(text)) {
+    const serial = Number.parseFloat(text);
+    if (serial > 20000 && serial < 80000) {
+      const milliseconds = Math.round((serial - 25569) * 86400 * 1000);
+      const date = new Date(milliseconds);
+      const year = date.getUTCFullYear();
+      const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+      const day = String(date.getUTCDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    }
+  }
+  return "";
 }
 
 function getClearanceGoalByName(name) {
@@ -1514,10 +1800,16 @@ function buildClearanceImportPreviewRows(records) {
 
 async function handleClearanceImportFile(file, rerender) {
   try {
-    const text = await file.text();
-    const rows = text.trimStart().startsWith("<?xml") || text.includes("<Workbook")
-      ? parseClearanceXmlWorkbook(text)
-      : parseClearanceDelimitedRows(text);
+    const fileName = file.name.toLowerCase();
+    let rows;
+    if (fileName.endsWith(".xlsx")) {
+      rows = await parseClearanceXlsxWorkbook(file);
+    } else {
+      const text = await file.text();
+      rows = text.trimStart().startsWith("<?xml") || text.includes("<Workbook")
+        ? parseClearanceXmlWorkbook(text)
+        : parseClearanceDelimitedRows(text);
+    }
     const headers = rows[0] ?? [];
     const missingHeaders = clearanceRequiredImportHeaders.filter((header) => !headers.includes(header));
     if (missingHeaders.length > 0) {
@@ -1534,7 +1826,7 @@ async function handleClearanceImportFile(file, rerender) {
     };
     rerender();
   } catch {
-    modalState = { kind: "clearanceImport", fileName: file.name, rows: [], error: "文件解析失败，请使用系统导出的 xls 模板，或 CSV/TSV 文件。" };
+    modalState = { kind: "clearanceImport", fileName: file.name, rows: [], error: "文件解析失败，请使用系统导出的 xlsx 模板，或 CSV/TSV 文件。" };
     rerender();
   }
 }
@@ -1761,7 +2053,7 @@ function renderClearancePage() {
               ? `
                 <label class="secondary-button file-button">
                   批量导入
-                  <input type="file" data-clearance-file="import" accept=".xls,.xml,.csv,.tsv,.txt" />
+                  <input type="file" data-clearance-file="import" accept=".xlsx,.xls,.xml,.csv,.tsv,.txt" />
                 </label>
               `
               : ""
