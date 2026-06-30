@@ -8,8 +8,8 @@ import {
   state,
   updatePersistentResource,
   uploadImageFile,
-} from "./appState.js?v=20260630-submit-file-remove1";
-import { hasPermission } from "./permissions.js?v=20260630-submit-file-remove1";
+} from "./appState.js?v=20260630-submit-file-remove2";
+import { hasPermission } from "./permissions.js?v=20260630-submit-file-remove2";
 import {
   CategoryType,
   ContentScheduleStatus,

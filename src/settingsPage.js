@@ -1,4 +1,4 @@
-import { getCurrentUser, savePersistentData, state, validateCurrentSession } from "./appState.js?v=20260630-submit-file-remove1";
+import { getCurrentUser, savePersistentData, state, validateCurrentSession } from "./appState.js?v=20260630-submit-file-remove2";
 import {
   applyPermissionTemplate,
   dataScopeOptions,
@@ -7,7 +7,7 @@ import {
   permissionCount,
   permissionGroups,
   permissionTemplates,
-} from "./permissions.js?v=20260630-submit-file-remove1";
+} from "./permissions.js?v=20260630-submit-file-remove2";
 import {
   CategoryType,
   PersonRole,

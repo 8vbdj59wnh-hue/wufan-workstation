@@ -16,9 +16,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260630-submit-file-remove1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-submit-file-remove1";
-import { hasPermission } from "./permissions.js?v=20260630-submit-file-remove1";
+} from "./appState.js?v=20260630-submit-file-remove2";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-submit-file-remove2";
+import { hasPermission } from "./permissions.js?v=20260630-submit-file-remove2";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-submit-file-remove1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-submit-file-remove1";
-import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-submit-file-remove1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-submit-file-remove1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-submit-file-remove2";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-submit-file-remove2";
+import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-submit-file-remove2";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-submit-file-remove2";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -354,6 +354,16 @@ function renderSubmitFieldInput(field, value = "") {
   return `<input ${common} type="${field.type === "url" ? "url" : field.type}" value="${escapeHtml(value)}" placeholder="${escapeHtml(field.placeholder ?? "")}" />`;
 }
 
+function getSubmitFileKey(file) {
+  if (typeof file === "string") return file;
+  return file?.url ?? file?.filePath ?? file?.filename ?? file?.originalName ?? "";
+}
+
+function getVisibleSubmitFiles(files = []) {
+  const removedKeys = new Set(modalState?.removedSubmitFileKeys ?? []);
+  return files.filter((file) => !removedKeys.has(getSubmitFileKey(file)));
+}
+
 function renderSubmitResultForm(task) {
   const requirement = getTaskSubmitRequirement(task);
   if (requirement.submitType === SubmitType.None) {
@@ -378,7 +388,20 @@ function renderSubmitResultForm(task) {
         <p class="form-note">暂无新选择附件</p>
       </div>
       <div class="submitted-file-list">
-        ${requirement.submitFiles.length === 0 ? "<p class=\"form-note\">暂无已上传文件</p>" : requirement.submitFiles.map((file) => `<a href="${escapeHtml(resolveAssetUrl(file.url ?? file))}" target="_blank" rel="noreferrer">${escapeHtml(file.originalName ?? file.filename ?? file.url ?? file)}</a>`).join("")}
+        ${
+          getVisibleSubmitFiles(requirement.submitFiles).length === 0
+            ? "<p class=\"form-note\">暂无已上传文件</p>"
+            : `
+              <ul class="attachment-list editable-attachment-list">
+                ${getVisibleSubmitFiles(requirement.submitFiles).map((file) => `
+                  <li>
+                    <a href="${escapeHtml(resolveAssetUrl(file.url ?? file.filePath ?? file))}" target="_blank" rel="noreferrer">${escapeHtml(normalizeDisplayFileName(file.originalName ?? file.filename ?? file.url ?? file))}</a>
+                    <button class="text-button" type="button" data-action="remove-existing-submit-file" data-file-key="${escapeHtml(encodeURIComponent(getSubmitFileKey(file)))}">删除</button>
+                  </li>
+                `).join("")}
+              </ul>
+            `
+        }
       </div>
     `
     : "";
@@ -4179,7 +4202,7 @@ async function saveResult(form, rerender) {
     return setModalError(error.message ?? "文件上传失败。", rerender);
   }
   const currentRequirement = getTaskSubmitRequirement(task);
-  const submitFiles = [...currentRequirement.submitFiles, ...uploadedFiles];
+  const submitFiles = [...getVisibleSubmitFiles(currentRequirement.submitFiles), ...uploadedFiles];
   const submitLinks = parseSubmitLinks(getFormValue(form, "submitLinks"));
   const submitError = validateSubmittedResult(task, { submitFormData, submitFiles, submitLinks });
   if (submitError !== "") return setModalError(submitError, rerender);
@@ -4774,6 +4797,17 @@ function removeSelectedSubmitFile(button) {
   renderSelectedSubmitFiles(input);
 }
 
+function removeExistingSubmitFile(button, rerender) {
+  if (modalState === null || modalState.kind !== "result") return;
+  const fileKey = decodeURIComponent(button.dataset.fileKey ?? "");
+  if (fileKey === "") return;
+  modalState = {
+    ...modalState,
+    removedSubmitFileKeys: [...new Set([...(modalState.removedSubmitFileKeys ?? []), fileKey])],
+  };
+  rerender();
+}
+
 function updateImagePreview(input) {
   const preview = input.closest(".image-url-field")?.querySelector(".image-preview-box");
   if (preview === undefined || preview === null) return;
@@ -5121,6 +5155,11 @@ export function bindTasksPageEvents(rerender) {
 
       if (action === "remove-selected-submit-file") {
         removeSelectedSubmitFile(actionButton);
+        return;
+      }
+
+      if (action === "remove-existing-submit-file") {
+        removeExistingSubmitFile(actionButton, rerender);
         return;
       }
 
