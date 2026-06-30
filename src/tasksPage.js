@@ -16,9 +16,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260630-task-status-cols1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-task-status-cols1";
-import { hasPermission } from "./permissions.js?v=20260630-task-status-cols1";
+} from "./appState.js?v=20260630-task-compact-cols1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-task-compact-cols1";
+import { hasPermission } from "./permissions.js?v=20260630-task-compact-cols1";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-task-status-cols1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-status-cols1";
-import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-task-status-cols1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-task-status-cols1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-task-compact-cols1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-compact-cols1";
+import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-task-compact-cols1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-task-compact-cols1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -982,10 +982,8 @@ function renderTaskRow(task, index, options = {}) {
       <td class="task-status-column">${renderTaskStatusSelect(task)}</td>
       <td class="task-overdue-column">${renderOverdue(task)}</td>
       <td class="task-belonging-column">${renderTaskBelonging(task)}</td>
-      <td class="task-goal-column"><span class="task-line-clamp">${findName(goals, task.goalId, "未对齐目标")}</span></td>
       <td class="task-department-column">${findName(departments, task.departmentId, "未设置")}</td>
       <td class="task-owner-column">${findName(people, task.ownerId, "未设置")}</td>
-      <td class="task-priority-column"><span class="task-soft-tag">${getTaskQuadrant(task.importance, task.urgency)}</span></td>
       <td class="task-actions-column">
         <span class="row-actions">
           ${renderActionButton("查看", "view-task", task.id)}
@@ -1030,10 +1028,8 @@ function renderProcessTaskGroupRow(row, index) {
           <small>${row.expanded ? `已展开 ${row.tasks.length} 个节点` : `当前任务：${escapeHtml(task.name)}`}</small>
         </div>
       </td>
-      <td class="task-goal-column"><span class="task-line-clamp">${findName(goals, task.goalId, "未对齐目标")}</span></td>
       <td class="task-department-column">${findName(departments, task.departmentId, "未设置")}</td>
       <td class="task-owner-column">${findName(people, task.ownerId, "未设置")}</td>
-      <td class="task-priority-column"><span class="task-soft-tag">${getTaskQuadrant(task.importance, task.urgency)}</span></td>
       <td class="task-actions-column">
         <span class="row-actions">
           ${renderActionButton("查看", "view-task", task.id)}
@@ -2534,17 +2530,15 @@ function renderTaskTable() {
               <th class="task-status-column">状态</th>
               <th class="task-overdue-column">是否逾期</th>
               <th class="task-belonging-column">归属事项</th>
-              <th class="task-goal-column">对齐目标</th>
               <th class="task-department-column">负责部门</th>
               <th class="task-owner-column">负责人</th>
-              <th class="task-priority-column">优先级</th>
               <th class="task-actions-column">操作</th>
             </tr>
           </thead>
           <tbody>
             ${
               tableRows.length === 0
-                ? `<tr><td colspan="13">暂无匹配的执行任务</td></tr>`
+                ? `<tr><td colspan="11">暂无匹配的执行任务</td></tr>`
                 : tableRows
                     .map((row, index) => (row.type === "task" ? renderTaskRow(row.task, index) : renderProcessTaskGroupRow(row, index)))
                     .join("")
