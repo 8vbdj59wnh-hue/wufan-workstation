@@ -39,7 +39,7 @@ import {
 import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260630-attachments1";
 import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-attachments1";
 import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260630-attachments1";
-import { selectTask } from "./tasksPage.js?v=20260630-attachments1";
+import { selectTask } from "./tasksPage.js?v=20260630-standard-work-flow1";
 
 const today = "2026-06-24";
 let selectedTemplateId = state.processTemplates[0]?.id ?? null;

@@ -197,6 +197,12 @@ function getActiveProcessTemplates() {
   return state.processTemplates.filter((template) => template.status === ProcessTemplateStatus.Active);
 }
 
+function getSelectableProcessTemplates(selectedTemplateId = "") {
+  return state.processTemplates.filter(
+    (template) => template.status === ProcessTemplateStatus.Active || template.id === selectedTemplateId,
+  );
+}
+
 function getProcessTemplateName(templateId) {
   return state.processTemplates.find((template) => template.id === templateId)?.name ?? "未绑定标准流程";
 }
@@ -788,6 +794,22 @@ function renderOptions(items, selectedId, emptyLabel) {
           </option>
         `,
       )
+      .join("")}
+  `;
+}
+
+function renderProcessTemplateOptions(selectedId) {
+  return `
+    <option value="">请选择标准流程</option>
+    ${getSelectableProcessTemplates(selectedId)
+      .map((template) => {
+        const statusLabel = template.status === ProcessTemplateStatus.Active ? "" : "（已停用）";
+        return `
+          <option value="${template.id}" ${template.id === selectedId ? "selected" : ""}>
+            ${escapeHtml(template.name)}${statusLabel}
+          </option>
+        `;
+      })
       .join("")}
   `;
 }
@@ -2820,7 +2842,7 @@ function renderTaskTemplateModal() {
                 ? `
                   <label>
                     <span>对应标准流程</span>
-                    <select name="defaultProcessTemplateId">${renderOptions(getActiveProcessTemplates(), template?.defaultProcessTemplateId ?? "", "请选择标准流程")}</select>
+                    <select name="defaultProcessTemplateId">${renderProcessTemplateOptions(template?.defaultProcessTemplateId ?? "")}</select>
                   </label>
                 `
                 : `<p class="form-note">新建标准工作事项时，系统会自动创建同名标准流程，后续可在流程模块中编辑流程步骤。</p>`
@@ -2946,7 +2968,7 @@ function validateTaskTemplateDraft(draft) {
   return "";
 }
 
-function saveTaskTemplate(form, rerender) {
+async function saveTaskTemplate(form, rerender) {
   const draft = buildTaskTemplateDraft(form);
   const formFields = normalizeTemplateFormFields(collectTemplateFormFields(form));
   const error = validateTaskTemplateDraft(draft);
@@ -2963,45 +2985,68 @@ function saveTaskTemplate(form, rerender) {
       departmentId: draft.departmentId,
       now,
     });
-    state.taskTemplates = [
-      {
-        id: createId("task-template"),
-        ...draft,
-        defaultProcessTemplateId,
-        status: TaskTemplateStatus.Active,
-        formFields,
-        createdAt: now,
-        updatedAt: now,
-      },
-      ...state.taskTemplates,
-    ];
+    const defaultProcessTemplate = getProcessTemplateById(defaultProcessTemplateId);
+    const createdTemplate = {
+      id: createId("task-template"),
+      ...draft,
+      defaultProcessTemplateId,
+      status: TaskTemplateStatus.Active,
+      formFields,
+      createdAt: now,
+      updatedAt: now,
+    };
+    try {
+      if (defaultProcessTemplate !== null) {
+        await createPersistentResource("process-templates", defaultProcessTemplate);
+      }
+      await createPersistentResource("task-templates", createdTemplate);
+    } catch (error) {
+      console.error("标准工作事项保存失败", error);
+      return setModalError(error.message || "标准工作事项保存失败，请检查本地数据库服务。", rerender);
+    }
+    state.taskTemplates = [createdTemplate, ...state.taskTemplates];
   } else {
     const oldTemplate = getTaskTemplate(modalState.templateId);
-    const boundProcessTemplate = getProcessTemplateById(oldTemplate?.defaultProcessTemplateId ?? "");
+    if (oldTemplate === null) return setModalError("未找到要编辑的标准工作事项。", rerender);
+    const boundProcessTemplate = getProcessTemplateById(draft.defaultProcessTemplateId || oldTemplate?.defaultProcessTemplateId || "");
     const shouldSyncProcessName =
       oldTemplate !== null &&
       boundProcessTemplate !== null &&
+      draft.defaultProcessTemplateId === oldTemplate.defaultProcessTemplateId &&
       boundProcessTemplate.name === `${oldTemplate.name}流程` &&
       oldTemplate.name !== draft.name;
     const shouldNoticeProcessNameNotSynced =
       oldTemplate !== null &&
       boundProcessTemplate !== null &&
+      draft.defaultProcessTemplateId === oldTemplate.defaultProcessTemplateId &&
       boundProcessTemplate.name !== `${oldTemplate.name}流程` &&
       oldTemplate.name !== draft.name;
 
+    let updatedProcessTemplate = null;
     if (shouldSyncProcessName) {
-      state.processTemplates = state.processTemplates.map((processTemplate) =>
-        processTemplate.id === boundProcessTemplate.id
-          ? { ...processTemplate, name: `${draft.name}流程`, updatedAt: now }
-          : processTemplate,
-      );
+      updatedProcessTemplate = { ...boundProcessTemplate, name: `${draft.name}流程`, updatedAt: now };
     }
     if (shouldNoticeProcessNameNotSynced) {
       window.alert("对应标准流程名称已被单独修改，本次未自动同步流程名称。");
     }
-    state.taskTemplates = state.taskTemplates.map((template) =>
-      template.id === modalState.templateId ? { ...template, ...draft, formFields, updatedAt: now } : template,
-    );
+
+    const updatedTemplate = { ...oldTemplate, ...draft, formFields, updatedAt: now };
+    try {
+      if (updatedProcessTemplate !== null) {
+        await updatePersistentResource("process-templates", updatedProcessTemplate.id, updatedProcessTemplate);
+      }
+      await updatePersistentResource("task-templates", updatedTemplate.id, updatedTemplate);
+    } catch (error) {
+      console.error("标准工作事项保存失败", error);
+      return setModalError(error.message || "标准工作事项保存失败，请检查本地数据库服务。", rerender);
+    }
+
+    if (updatedProcessTemplate !== null) {
+      state.processTemplates = state.processTemplates.map((processTemplate) =>
+        processTemplate.id === updatedProcessTemplate.id ? updatedProcessTemplate : processTemplate,
+      );
+    }
+    state.taskTemplates = state.taskTemplates.map((template) => (template.id === updatedTemplate.id ? updatedTemplate : template));
   }
 
   modalState = null;
@@ -3714,13 +3759,13 @@ function handleTaskTemplateFieldAction(action, index, rerender) {
   return true;
 }
 
-function handleTaskSubmit(event, rerender) {
+async function handleTaskSubmit(event, rerender) {
   event.preventDefault();
 
   if (modalState?.kind === "task") saveTask(event.target, rerender);
   if (modalState?.kind === "result") saveResult(event.target, rerender);
   if (modalState?.kind === "returnTask") returnTaskToSelectedStep(event.target, rerender);
-  if (modalState?.kind === "taskTemplate") saveTaskTemplate(event.target, rerender);
+  if (modalState?.kind === "taskTemplate") await saveTaskTemplate(event.target, rerender);
 }
 
 function renderSelectedStandardWorkAttachments(input) {
