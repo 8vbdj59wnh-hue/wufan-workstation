@@ -8,8 +8,8 @@ import {
   state,
   updatePersistentResource,
   uploadImageFile,
-} from "./appState.js?v=20260701-task-library-standardization1";
-import { hasPermission } from "./permissions.js?v=20260701-task-library-standardization1";
+} from "./appState.js?v=20260701-merged-standard-work-flow1";
+import { hasPermission } from "./permissions.js?v=20260701-merged-standard-work-flow1";
 import {
   CategoryType,
   ContentScheduleStatus,
