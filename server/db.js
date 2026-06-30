@@ -831,6 +831,39 @@ export function replaceAllData(data) {
   replace();
 }
 
+export function deleteProcessTemplate(templateId) {
+  const database = getDatabase();
+  const template = database.prepare("SELECT id, name FROM process_templates WHERE id = @id LIMIT 1").get({ id: templateId });
+  if (template === undefined) throw new Error("未找到要删除的流程。");
+
+  const boundStandardWork = database
+    .prepare("SELECT id, name FROM task_templates WHERE defaultProcessTemplateId = @id LIMIT 1")
+    .get({ id: templateId });
+  if (boundStandardWork !== undefined) {
+    throw new Error("该流程已绑定标准工作事项，请先停用流程，不要删除。");
+  }
+
+  const launchedInstance = database
+    .prepare("SELECT id FROM process_instances WHERE templateId = @id LIMIT 1")
+    .get({ id: templateId });
+  if (launchedInstance !== undefined) {
+    throw new Error("该流程已有发起记录，为保留历史数据不能删除，请使用停用流程。");
+  }
+
+  const remove = database.transaction(() => {
+    database.prepare("DELETE FROM methodologies WHERE processTemplateId = @id").run({ id: templateId });
+    database.prepare(
+      `DELETE FROM methodologies
+       WHERE processNodeId IN (SELECT id FROM process_template_nodes WHERE templateId = @id)`,
+    ).run({ id: templateId });
+    database.prepare("DELETE FROM process_template_nodes WHERE templateId = @id").run({ id: templateId });
+    database.prepare("DELETE FROM process_templates WHERE id = @id").run({ id: templateId });
+  });
+  remove();
+
+  return { success: true, id: templateId };
+}
+
 export function findLoginUser(username) {
   return getDatabase()
     .prepare("SELECT * FROM persons WHERE lower(username) = lower(@username) LIMIT 1")

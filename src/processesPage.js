@@ -1,6 +1,7 @@
 import {
   createPersistentResource,
   createId,
+  deletePersistentResource,
   getCurrentUser,
   getNow,
   getProcessNodeStepOrder,
@@ -96,6 +97,10 @@ function findDepartmentByNames(names) {
 
 function getStandardWorkForTemplate(templateId) {
   return state.taskTemplates.find((template) => template.defaultProcessTemplateId === templateId) ?? null;
+}
+
+function getLaunchedInstancesForTemplate(templateId) {
+  return state.processInstances.filter((instance) => instance.templateId === templateId);
 }
 
 function getTemplateDepartmentId(template) {
@@ -245,6 +250,7 @@ function renderProcessTemplateCard(template, isUncategorized = false) {
         <button class="text-button" type="button" data-action="select-template" data-template-id="${template.id}">查看流程</button>
         ${canCurrentUser("processes.editSteps") ? `<button class="text-button" type="button" data-action="add-node" data-template-id="${template.id}" onclick="window.__handleProcessNodeAction?.(this, event)">编辑流程步骤</button>` : ""}
         ${canCurrentUser("processes.editTemplates") ? `<button class="text-button danger-button" type="button" data-action="deactivate-template" data-template-id="${template.id}">停用流程</button>` : ""}
+        ${canCurrentUser("processes.editTemplates") ? `<button class="text-button danger-button" type="button" data-action="delete-template" data-template-id="${template.id}">删除流程</button>` : ""}
       </div>
     </article>
   `;
@@ -336,6 +342,7 @@ function renderTemplateDetail() {
         <h2>标准流程详情</h2>
         <div class="section-actions">
           ${canCurrentUser("processes.editTemplates") ? `<button class="secondary-button" type="button" data-action="edit-template" data-template-id="${template.id}">编辑流程</button>` : ""}
+          ${canCurrentUser("processes.editTemplates") ? `<button class="secondary-button danger-button" type="button" data-action="delete-template" data-template-id="${template.id}">删除流程</button>` : ""}
           ${canCurrentUser("workPlans.launch") ? `<button class="primary-button" type="button" data-action="start-process" data-template-id="${template.id}">发起标准流程</button>` : ""}
           ${canCurrentUser("processes.editSteps") ? `<button class="secondary-button" type="button" data-action="add-node" data-template-id="${template.id}" onclick="window.__handleProcessNodeAction?.(this, event)">新增流程步骤</button>` : ""}
         </div>
@@ -767,6 +774,41 @@ async function handleProcessNodeAction(actionButton, rerender) {
   return false;
 }
 
+async function deleteTemplate(templateId, rerender) {
+  const template = state.processTemplates.find((item) => item.id === templateId);
+  if (template === undefined) return;
+
+  const standardWork = getStandardWorkForTemplate(template.id);
+  if (standardWork !== null) {
+    window.alert("该流程已绑定标准工作事项，请先停用流程，不要删除。");
+    return;
+  }
+
+  if (getLaunchedInstancesForTemplate(template.id).length > 0) {
+    window.alert("该流程已有发起记录，为保留历史数据不能删除，请使用停用流程。");
+    return;
+  }
+
+  if (!window.confirm(`确定要删除流程「${template.name}」吗？删除后会同时删除该流程的步骤和方法论空记录，且不会影响已发起流程。`)) return;
+
+  try {
+    await deletePersistentResource("process-templates", template.id);
+  } catch (error) {
+    console.error("流程删除失败", error);
+    window.alert(error.message || "流程删除失败，请检查本地数据库服务。");
+    return;
+  }
+
+  const nodeIds = new Set(state.processTemplateNodes.filter((node) => node.templateId === template.id).map((node) => node.id));
+  state.processTemplates = state.processTemplates.filter((item) => item.id !== template.id);
+  state.processTemplateNodes = state.processTemplateNodes.filter((node) => node.templateId !== template.id);
+  state.methodologies = state.methodologies.filter(
+    (methodology) => methodology.processTemplateId !== template.id && !nodeIds.has(methodology.processNodeId),
+  );
+  if (selectedTemplateId === template.id) selectedTemplateId = getVisibleProcessTemplates()[0]?.id ?? null;
+  rerender();
+}
+
 export function bindProcessesPageEvents(rerender) {
   const page = document.querySelector(".processes-page");
   const templateForm = document.querySelector(".process-template-form");
@@ -807,6 +849,10 @@ export function bindProcessesPageEvents(rerender) {
       if (action === "edit-template" && canCurrentUser("processes.editTemplates")) modalState = { kind: "template", id: actionButton.dataset.templateId, error: "" };
       if (action === "start-process" && canCurrentUser("workPlans.launch")) modalState = { kind: "start", templateId: actionButton.dataset.templateId, error: "" };
       if (action === "view-process-instance") selectedInstanceId = actionButton.dataset.instanceId;
+      if (action === "delete-template" && canCurrentUser("processes.editTemplates")) {
+        await deleteTemplate(actionButton.dataset.templateId, rerender);
+        return;
+      }
       if (action === "deactivate-template" && canCurrentUser("processes.editTemplates")) {
         const now = getNow();
         const template = state.processTemplates.find((item) => item.id === actionButton.dataset.templateId);

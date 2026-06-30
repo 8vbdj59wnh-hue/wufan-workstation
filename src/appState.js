@@ -345,6 +345,15 @@ export async function updatePersistentResource(resource, id, item) {
   return data;
 }
 
+export async function deletePersistentResource(resource, id) {
+  const response = await authFetch(`${apiBaseUrl}/api/${resource}/${id}`, {
+    method: "DELETE",
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.message ?? data.error ?? "删除失败，请检查本地数据库服务。");
+  return data;
+}
+
 export function schedulePersistentSave() {
   if (!loadedFromDatabase || isApplyingRemoteData) return;
   hasPendingPersistentChanges = true;

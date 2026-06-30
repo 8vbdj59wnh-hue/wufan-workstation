@@ -8,6 +8,7 @@ import {
   createResource,
   cancelProcessInstance,
   databasePath,
+  deleteProcessTemplate,
   findLoginUser,
   findLoginUserById,
   getPublicUser,
@@ -426,6 +427,14 @@ app.put("/api/:resource/:id", (request, response) => {
     response.json(updateResource(request.params.resource, request.params.id, request.body));
   } catch (error) {
     response.status(404).json({ error: error.message });
+  }
+});
+
+app.delete("/api/process-templates/:id", requirePermission("processes.editTemplates"), (request, response) => {
+  try {
+    response.json(deleteProcessTemplate(request.params.id));
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "删除流程失败，请检查本地数据库服务。" });
   }
 });
 
