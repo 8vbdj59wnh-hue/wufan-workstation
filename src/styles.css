@@ -1605,6 +1605,35 @@ textarea {
   white-space: nowrap !important;
 }
 
+.sortable-table-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.table-sort-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  background: #ffffff;
+  color: #4b5563;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+}
+
+.table-sort-button:hover,
+.table-sort-button.is-active {
+  border-color: #2563eb;
+  color: #1d4ed8;
+}
+
 .task-status-column,
 .task-overdue-column {
   width: 82px;

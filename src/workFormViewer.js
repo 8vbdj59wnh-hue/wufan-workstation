@@ -1,4 +1,4 @@
-import { resolveAssetUrl, state } from "./appState.js?v=20260630-task-detail-actions1";
+import { resolveAssetUrl, state } from "./appState.js?v=20260630-task-due-sort1";
 
 const hiddenSystemFieldKeys = new Set(["standardWorkAttachments"]);
 

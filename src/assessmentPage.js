@@ -5,10 +5,10 @@ import {
   getNow,
   state,
   updatePersistentResource,
-} from "./appState.js?v=20260630-task-detail-actions1";
-import { getDataScope, hasPermission } from "./permissions.js?v=20260630-task-detail-actions1";
+} from "./appState.js?v=20260630-task-due-sort1";
+import { getDataScope, hasPermission } from "./permissions.js?v=20260630-task-due-sort1";
 import { ProcessInstanceStatus, TaskStatus, processInstanceStatusNames, taskStatusNames } from "./data/modelOptions.js";
-import { isCanceledStatus, isDoneStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260630-task-detail-actions1";
+import { isCanceledStatus, isDoneStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260630-task-due-sort1";
 
 const today = new Date().toISOString().slice(0, 10);
 let activeAssessmentTab = "stats";
