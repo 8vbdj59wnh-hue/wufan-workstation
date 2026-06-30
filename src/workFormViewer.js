@@ -1,4 +1,4 @@
-import { resolveAssetUrl, state } from "./appState.js?v=20260630-task-compact-cols1";
+import { resolveAssetUrl, state } from "./appState.js?v=20260630-task-density1";
 
 const hiddenSystemFieldKeys = new Set(["standardWorkAttachments"]);
 

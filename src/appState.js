@@ -16,7 +16,7 @@ import {
   weeklyReports as initialWeeklyReports,
   methodologies as initialMethodologies,
   workPlans as initialWorkPlans,
-} from "./data/mockData.js?v=20260630-task-compact-cols1";
+} from "./data/mockData.js?v=20260630-task-density1";
 import {
   CategoryType,
   PersonRole,
@@ -32,8 +32,8 @@ import {
   TaskStatus,
   TaskTemplateStatus,
   TaskUrgency,
-} from "./data/modelOptions.js?v=20260630-task-compact-cols1";
-import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260630-task-compact-cols1";
+} from "./data/modelOptions.js?v=20260630-task-density1";
+import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260630-task-density1";
 
 const apiPort = "3001";
 const apiBaseUrl = `${window.location.protocol}//${window.location.hostname}:${apiPort}`;
