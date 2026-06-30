@@ -16,9 +16,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260630-clearance-image1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-clearance-image1";
-import { hasPermission } from "./permissions.js?v=20260630-clearance-image1";
+} from "./appState.js?v=20260630-clearance-only1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-clearance-only1";
+import { hasPermission } from "./permissions.js?v=20260630-clearance-only1";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-clearance-image1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-clearance-image1";
-import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-clearance-image1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-clearance-image1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-clearance-only1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-clearance-only1";
+import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-clearance-only1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-clearance-only1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -908,7 +908,7 @@ function matchesFilters(task) {
 }
 
 function getFilteredTasks() {
-  return state.tasks.filter(matchesFilters);
+  return state.tasks.filter((task) => !isClearanceTask(task)).filter(matchesFilters);
 }
 
 function renderOverdue(task) {
