@@ -545,7 +545,7 @@ export function createOrReuseProcessTemplateForStandardWork({ name, ownerId, dep
     existingTemplate.startCondition = `由${departmentId ? state.departments.find((department) => department.id === departmentId)?.name ?? "负责部门" : "负责部门"}发起【${name}】时。`;
     existingTemplate.completionCondition = "该标准工作所有流程步骤完成。";
     existingTemplate.overallStandard = "按流程步骤要求完成，并符合各步骤完成标准和审核标准。";
-    existingTemplate.status = ProcessTemplateStatus.Active;
+    existingTemplate.status = existingTemplate.status ?? ProcessTemplateStatus.Active;
     existingTemplate.updatedAt = now;
     return existingTemplate.id;
   }

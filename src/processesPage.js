@@ -809,9 +809,18 @@ export function bindProcessesPageEvents(rerender) {
       if (action === "view-process-instance") selectedInstanceId = actionButton.dataset.instanceId;
       if (action === "deactivate-template" && canCurrentUser("processes.editTemplates")) {
         const now = getNow();
-        state.processTemplates = state.processTemplates.map((template) =>
-          template.id === actionButton.dataset.templateId ? { ...template, status: ProcessTemplateStatus.Inactive, updatedAt: now } : template,
-        );
+        const template = state.processTemplates.find((item) => item.id === actionButton.dataset.templateId);
+        if (template !== undefined) {
+          const updatedTemplate = { ...template, status: ProcessTemplateStatus.Inactive, updatedAt: now };
+          try {
+            await updatePersistentResource("process-templates", updatedTemplate.id, updatedTemplate);
+          } catch (error) {
+            console.error("流程停用失败", error);
+            window.alert(error.message || "流程停用失败，请检查本地数据库服务。");
+            return;
+          }
+          state.processTemplates = state.processTemplates.map((item) => (item.id === updatedTemplate.id ? updatedTemplate : item));
+        }
       }
       if (action === "deactivate-node" && canCurrentUser("processes.editSteps")) {
         const now = getNow();
