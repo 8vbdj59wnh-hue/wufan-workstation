@@ -16,9 +16,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260630-task-prev-files1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-task-prev-files1";
-import { hasPermission } from "./permissions.js?v=20260630-task-prev-files1";
+} from "./appState.js?v=20260630-attachment-name2";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-attachment-name2";
+import { hasPermission } from "./permissions.js?v=20260630-attachment-name2";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-task-prev-files1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-prev-files1";
-import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-task-prev-files1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-task-prev-files1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-attachment-name2";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-attachment-name2";
+import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-attachment-name2";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-attachment-name2";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -643,18 +643,30 @@ function getFileExt(filename = "") {
   return dotIndex === -1 ? "" : filename.slice(dotIndex).toLowerCase();
 }
 
+function normalizeDisplayFileName(name = "") {
+  if (typeof name !== "string" || name === "") return name;
+  const hasCjk = /[\u3400-\u9fff]/.test(name);
+  if (hasCjk) return name;
+  const looksLikeMojibake = /[ÃÂÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞßæäåçèéêëìíîïðñòóôõöøùúûüýþÿ�]/.test(name);
+  if (!looksLikeMojibake) return name;
+
+  const decoded = new TextDecoder("utf-8", { fatal: false }).decode(Uint8Array.from(name, (char) => char.charCodeAt(0) & 0xff));
+  return /[\u3400-\u9fff]/.test(decoded) ? decoded : name;
+}
+
 function normalizeAttachmentFile(file) {
   if (typeof file === "string") {
+    const name = normalizeDisplayFileName(file.split("/").pop() || file);
     return {
       href: resolveAssetUrl(file),
-      name: file.split("/").pop() || file,
+      name,
       ext: getFileExt(file),
       mimeType: "",
     };
   }
 
   const filePath = file.filePath ?? file.url ?? "";
-  const name = file.originalName ?? file.filename ?? filePath ?? "未命名附件";
+  const name = normalizeDisplayFileName(file.originalName ?? file.filename ?? filePath ?? "未命名附件");
   return {
     href: resolveAssetUrl(filePath),
     name,

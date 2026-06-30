@@ -36,6 +36,13 @@ fs.mkdirSync(imageUploadsDir, { recursive: true });
 fs.mkdirSync(fileUploadsDir, { recursive: true });
 fs.mkdirSync(standardWorkAttachmentsDir, { recursive: true });
 
+function normalizeUploadedFileName(name = "") {
+  const decoded = Buffer.from(name, "latin1").toString("utf8");
+  const originalHasCjk = /[\u3400-\u9fff]/.test(name);
+  const decodedHasCjk = /[\u3400-\u9fff]/.test(decoded);
+  return !originalHasCjk && decodedHasCjk ? decoded : name;
+}
+
 const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 const imageStorage = multer.diskStorage({
   destination: (_request, _file, callback) => {
@@ -345,7 +352,7 @@ app.post("/api/uploads/file", (request, response) => {
     response.json({
       url: `/uploads/files/${request.file.filename}`,
       filename: request.file.filename,
-      originalName: request.file.originalname,
+      originalName: normalizeUploadedFileName(request.file.originalname),
       size: request.file.size,
       mimeType: request.file.mimetype,
     });
@@ -370,10 +377,10 @@ app.post("/api/uploads/standard-work-attachment", (request, response) => {
       url: `/uploads/standard-work-attachments/${request.file.filename}`,
       filePath: `/uploads/standard-work-attachments/${request.file.filename}`,
       filename: request.file.filename,
-      originalName: request.file.originalname,
+      originalName: normalizeUploadedFileName(request.file.originalname),
       size: request.file.size,
       mimeType: request.file.mimetype,
-      ext: path.extname(request.file.originalname).toLowerCase(),
+      ext: path.extname(normalizeUploadedFileName(request.file.originalname)).toLowerCase(),
       uploadedAt: new Date().toISOString(),
     });
   });

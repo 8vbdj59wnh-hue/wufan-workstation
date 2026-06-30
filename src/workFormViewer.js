@@ -1,4 +1,4 @@
-import { resolveAssetUrl, state } from "./appState.js?v=20260630-task-prev-files1";
+import { resolveAssetUrl, state } from "./appState.js?v=20260630-attachment-name2";
 
 const hiddenSystemFieldKeys = new Set(["standardWorkAttachments"]);
 
