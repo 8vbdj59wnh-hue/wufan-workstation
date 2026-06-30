@@ -16,7 +16,7 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260630-state-unified1";
+} from "./appState.js?v=20260630-task-form-persist1";
 import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-attachments1";
 import { hasPermission } from "./permissions.js?v=20260630-attachments1";
 import {
@@ -226,6 +226,18 @@ function getTaskCustomFields(task) {
 function getTaskCoverImage(task) {
   const instance = getTaskProcessInstance(task);
   return getPrimaryImageUrl(task, instance);
+}
+
+function buildUpdatedProcessInstanceForTaskForm(task, customFields, displayTitle, coverImageUrl, now) {
+  const instance = getTaskProcessInstance(task);
+  if (instance === null) return null;
+  return {
+    ...instance,
+    customFields,
+    displayTitle: displayTitle ?? instance.displayTitle ?? instance.name,
+    coverImageUrl: coverImageUrl || instance.coverImageUrl || null,
+    updatedAt: now,
+  };
 }
 
 function getSortedFormFields(template) {
@@ -3216,6 +3228,7 @@ async function saveTask(form, rerender) {
     const template = getTaskTemplateForTask(draft);
     const displayTitle = template === null ? draft.displayTitle ?? null : buildDisplayTitle(template, draft.customFields);
     const coverImageUrl = getPrimaryImageUrl({ customFields: draft.customFields }) || null;
+    const updatedProcessInstance = buildUpdatedProcessInstanceForTaskForm(task, draft.customFields, displayTitle, coverImageUrl, now);
     const updatedTask = {
       ...task,
       customFields: draft.customFields,
@@ -3230,10 +3243,18 @@ async function saveTask(form, rerender) {
       updatedAt: now,
     };
     try {
+      if (updatedProcessInstance !== null) {
+        await updatePersistentResource("process-instances", updatedProcessInstance.id, updatedProcessInstance);
+      }
       await updatePersistentResource("tasks", updatedTask.id, updatedTask);
     } catch (error) {
       console.error("执行任务保存失败", error);
       return setModalError(error.message || "执行任务保存失败，请检查本地数据库服务。", rerender);
+    }
+    if (updatedProcessInstance !== null) {
+      state.processInstances = state.processInstances.map((item) =>
+        item.id === updatedProcessInstance.id ? updatedProcessInstance : item,
+      );
     }
     state.tasks = state.tasks.map((item) => (item.id === updatedTask.id ? updatedTask : item));
   }

@@ -1,4 +1,4 @@
-import { resolveAssetUrl, state } from "./appState.js?v=20260630-state-unified1";
+import { resolveAssetUrl, state } from "./appState.js?v=20260630-task-form-persist1";
 
 const hiddenSystemFieldKeys = new Set(["standardWorkAttachments"]);
 
