@@ -1635,6 +1635,15 @@ textarea {
   word-break: break-word;
 }
 
+.standard-work-step-count {
+  margin-left: auto;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #4b5563;
+  font-weight: 700;
+}
+
 .standard-work-card-actions {
   display: flex;
   flex-wrap: wrap;
