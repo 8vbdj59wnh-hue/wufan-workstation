@@ -14,6 +14,7 @@ import {
   findLoginUserById,
   getPublicUser,
   initializeDatabase,
+  moveTaskTemplateToValueChain,
   readAllData,
   readRouteResource,
   replaceAllData,
@@ -410,6 +411,16 @@ app.post("/api/process-instances/:id/cancel", requirePermission("processes.editI
   } catch (error) {
     console.error("取消流程失败", error);
     response.status(400).json({ success: false, message: error.message || "取消流程失败，请检查本地数据库服务。" });
+  }
+});
+
+app.put("/api/task-templates/:id/value-chain", requirePermission("settings.editStandardWorks"), (request, response) => {
+  try {
+    moveTaskTemplateToValueChain(request.params.id, request.body?.categoryName ?? "");
+    response.json({ success: true, data: filterDataByScope(readAllData(), request.user) });
+  } catch (error) {
+    console.error("标准工作分类保存失败", error);
+    response.status(400).json({ success: false, message: error.message || "标准工作分类保存失败，请检查本地数据库服务。" });
   }
 });
 

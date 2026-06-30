@@ -610,6 +610,32 @@ function ensureStandardWorkValueChainCategories() {
   });
 }
 
+function getOrCreateStandardWorkValueChainCategory(categoryName) {
+  const name = String(categoryName ?? "").trim();
+  const categoryIndex = standardWorkValueChainCategories.indexOf(name);
+  if (categoryIndex === -1) throw new Error("标准工作价值链分类无效。");
+
+  const database = getDatabase();
+  const existingCategory = database.prepare("SELECT id FROM categories WHERE type = 'task' AND name = @name LIMIT 1").get({ name });
+  if (existingCategory !== undefined) return existingCategory;
+
+  const now = new Date().toISOString();
+  const createdCategory = {
+    id: `cat-task-value-chain-${categoryIndex + 1}`,
+    name,
+    sortOrder: categoryIndex + 1,
+    createdAt: now,
+    updatedAt: now,
+  };
+  database
+    .prepare(
+      `INSERT INTO categories (id, type, name, sortOrder, status, createdAt, updatedAt)
+       VALUES (@id, 'task', @name, @sortOrder, 'active', @createdAt, @updatedAt)`,
+    )
+    .run(createdCategory);
+  return createdCategory;
+}
+
 function runLightweightMigrations() {
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS stores (
@@ -854,6 +880,19 @@ export function readResource(resourceKey) {
 
 export function readAllData() {
   return Object.fromEntries(Object.keys(resourceConfigs).map((resourceKey) => [resourceKey, readResource(resourceKey)]));
+}
+
+export function moveTaskTemplateToValueChain(templateId, categoryName) {
+  const database = getDatabase();
+  const template = database.prepare("SELECT id FROM task_templates WHERE id = @id LIMIT 1").get({ id: templateId });
+  if (template === undefined) throw new Error("未找到该标准工作。");
+
+  const category = getOrCreateStandardWorkValueChainCategory(categoryName);
+  const updatedAt = new Date().toISOString();
+  database
+    .prepare("UPDATE task_templates SET categoryId = @categoryId, updatedAt = @updatedAt WHERE id = @id")
+    .run({ id: templateId, categoryId: category.id, updatedAt });
+  return database.prepare("SELECT * FROM task_templates WHERE id = @id LIMIT 1").get({ id: templateId });
 }
 
 export function replaceAllData(data) {

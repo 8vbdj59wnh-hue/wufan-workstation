@@ -8,8 +8,8 @@ import {
   state,
   updatePersistentResource,
   uploadImageFile,
-} from "./appState.js?v=20260701-standard-work-steps1";
-import { hasPermission } from "./permissions.js?v=20260701-standard-work-steps1";
+} from "./appState.js?v=20260701-standard-work-drag-save1";
+import { hasPermission } from "./permissions.js?v=20260701-standard-work-drag-save1";
 import {
   CategoryType,
   ContentScheduleStatus,

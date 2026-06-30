@@ -1,4 +1,4 @@
-import { resolveAssetUrl, state } from "./appState.js?v=20260701-standard-work-steps1";
+import { resolveAssetUrl, state } from "./appState.js?v=20260701-standard-work-drag-save1";
 
 const hiddenSystemFieldKeys = new Set(["standardWorkAttachments"]);
 

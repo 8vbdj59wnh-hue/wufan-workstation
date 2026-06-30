@@ -8,6 +8,7 @@ import {
   getProcessNodeStepOrder,
   getCurrentUser,
   getNow,
+  moveTaskTemplateToValueChain,
   normalizeSubmitRequirement,
   resolveAssetUrl,
   startProcess,
@@ -16,9 +17,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260701-standard-work-steps1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-standard-work-steps1";
-import { hasPermission } from "./permissions.js?v=20260701-standard-work-steps1";
+} from "./appState.js?v=20260701-standard-work-drag-save1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-standard-work-drag-save1";
+import { hasPermission } from "./permissions.js?v=20260701-standard-work-drag-save1";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +42,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-standard-work-steps1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-standard-work-steps1";
-import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-standard-work-steps1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-standard-work-steps1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-standard-work-drag-save1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-standard-work-drag-save1";
+import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-standard-work-drag-save1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-standard-work-drag-save1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -4750,26 +4751,6 @@ async function handleTaskSubmit(event, rerender) {
   if (modalState?.kind === "taskTemplate") await saveTaskTemplate(event.target, rerender);
 }
 
-async function getOrCreateValueChainCategory(categoryName) {
-  const existingCategory = categories.find((category) => category.type === CategoryType.Task && category.name === categoryName);
-  if (existingCategory !== undefined) return existingCategory;
-
-  const now = getNow();
-  const categoryIndex = standardWorkValueChainColumns.findIndex((column) => column.title === categoryName);
-  const createdCategory = {
-    id: createId("cat-task"),
-    type: CategoryType.Task,
-    name: categoryName,
-    sortOrder: categoryIndex === -1 ? categories.length + 1 : categoryIndex + 1,
-    status: "active",
-    createdAt: now,
-    updatedAt: now,
-  };
-  await createPersistentResource("categories", createdCategory);
-  state.categories.push(createdCategory);
-  return createdCategory;
-}
-
 async function moveStandardWorkToValueChain(templateId, categoryName, rerender) {
   if (!canCurrentUser("settings.editStandardWorks")) {
     window.alert("你没有权限调整标准工作分类。");
@@ -4780,11 +4761,7 @@ async function moveStandardWorkToValueChain(templateId, categoryName, rerender) 
   if (template === null || !standardWorkValueChainColumns.some((column) => column.title === categoryName)) return;
 
   try {
-    const category = await getOrCreateValueChainCategory(categoryName);
-    if (template.categoryId === category.id) return;
-    const updatedTemplate = { ...template, categoryId: category.id, updatedAt: getNow() };
-    await updatePersistentResource("task-templates", updatedTemplate.id, updatedTemplate);
-    state.taskTemplates = state.taskTemplates.map((item) => (item.id === updatedTemplate.id ? updatedTemplate : item));
+    await moveTaskTemplateToValueChain(template.id, categoryName);
     rerender();
   } catch (error) {
     console.error("标准工作分类保存失败", error);
