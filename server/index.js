@@ -226,6 +226,7 @@ function getResourceWritePermission(resource, method, body = {}) {
   if (resource === "goals") return method === "POST" ? "goals.create" : "goals.edit";
   if (resource === "work-plans") return body.launchedAt ? "workPlans.launch" : "workPlans.editFuture";
   if (resource === "tasks") {
+    if (method === "POST" && body.source === "process") return "workPlans.launch";
     if (body.submitFormData !== undefined || body.submitFiles !== undefined || body.submitLinks !== undefined) return "tasks.submitResult";
     if (body.status !== undefined) return "tasks.changeStatus";
     return "tasks.changeStatus";
@@ -236,6 +237,7 @@ function getResourceWritePermission(resource, method, body = {}) {
   }
   if (resource === "process-templates") return "processes.editTemplates";
   if (resource === "process-template-nodes") return ["processes.editSteps", "processes.sortSteps"];
+  if (resource === "process-instances") return method === "POST" ? "workPlans.launch" : "processes.editInstances";
   if (resource === "methodologies") return method === "POST" ? "methods.create" : "methods.edit";
   if (resource === "persons" || resource === "people") return "settings.editPeople";
   if (resource === "departments" || resource === "positions") return "settings.editOrg";

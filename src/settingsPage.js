@@ -1,4 +1,4 @@
-import { getCurrentUser, savePersistentData, state, validateCurrentSession } from "./appState.js?v=20260630-task-form-persist1";
+import { getCurrentUser, savePersistentData, state, validateCurrentSession } from "./appState.js?v=20260630-clearance-import1";
 import {
   applyPermissionTemplate,
   dataScopeOptions,

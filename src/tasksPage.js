@@ -16,7 +16,7 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260630-task-form-persist1";
+} from "./appState.js?v=20260630-clearance-import1";
 import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-attachments1";
 import { hasPermission } from "./permissions.js?v=20260630-attachments1";
 import {
@@ -128,6 +128,22 @@ const taskTabHashMap = {
 const clearanceWorkName = "库存清仓";
 const clearanceChannelOptions = ["店铺清仓位", "直播间", "私域", "老客群", "其他"];
 const clearanceWarehouseOptions = ["义乌仓", "山西仓", "其他"];
+const clearanceImportHeaders = [
+  "清仓产品",
+  "SKU / 规格",
+  "当前库存",
+  "仓库",
+  "清仓原因",
+  "建议清仓价",
+  "原售价",
+  "清仓渠道",
+  "期望完成日期",
+  "注意事项",
+  "产品图",
+  "关联目标",
+  "发起人",
+];
+const clearanceRequiredImportHeaders = ["清仓产品", "当前库存", "清仓原因", "清仓渠道", "期望完成日期"];
 
 const standardWorkDepartmentColumns = [
   { title: "视觉部", names: ["视觉部", "视觉营销部"] },
@@ -1329,6 +1345,288 @@ function renderClearanceStats(groups) {
   `;
 }
 
+function createClearanceXmlWorkbook(rows) {
+  const xmlRows = rows
+    .map(
+      (row) => `
+        <Row>
+          ${clearanceImportHeaders
+            .map((header) => `<Cell><Data ss:Type="String">${escapeHtml(row[header] ?? "")}</Data></Cell>`)
+            .join("")}
+        </Row>
+      `,
+    )
+    .join("");
+
+  return `<?xml version="1.0"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+  <Worksheet ss:Name="库存清仓导入">
+    <Table>
+      <Row>${clearanceImportHeaders.map((header) => `<Cell><Data ss:Type="String">${header}</Data></Cell>`).join("")}</Row>
+      ${xmlRows}
+    </Table>
+  </Worksheet>
+</Workbook>`;
+}
+
+function downloadFile(content, fileName, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function downloadClearanceImportTemplate() {
+  const rows = [
+    {
+      清仓产品: "赛里木湖蓝花瓶",
+      "SKU / 规格": "蓝色 / 大号",
+      当前库存: "120",
+      仓库: "义乌仓",
+      清仓原因: "库存周转慢，需要释放仓储空间",
+      建议清仓价: "39",
+      原售价: "69",
+      清仓渠道: "店铺清仓位",
+      期望完成日期: "2026-07-15",
+      注意事项: "注意不要影响主推新品价格心智",
+      产品图: "",
+      关联目标: getActiveGoals()[0]?.name ?? "",
+      发起人: people[0]?.name ?? "",
+    },
+  ];
+  downloadFile(createClearanceXmlWorkbook(rows), "库存清仓导入模板.xls", "application/vnd.ms-excel;charset=utf-8");
+}
+
+function parseClearanceDelimitedRows(text) {
+  const delimiter = text.includes("\t") ? "\t" : ",";
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+    if (char === '"' && inQuotes && next === '"') {
+      cell += '"';
+      index += 1;
+    } else if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === delimiter && !inQuotes) {
+      row.push(cell.trim());
+      cell = "";
+    } else if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && next === "\n") index += 1;
+      row.push(cell.trim());
+      if (row.some((value) => value !== "")) rows.push(row);
+      row = [];
+      cell = "";
+    } else {
+      cell += char;
+    }
+  }
+
+  row.push(cell.trim());
+  if (row.some((value) => value !== "")) rows.push(row);
+  return rows;
+}
+
+function parseClearanceXmlWorkbook(text) {
+  const document = new DOMParser().parseFromString(text, "text/xml");
+  if (document.querySelector("parsererror") !== null) return [];
+  return [...document.querySelectorAll("Row")].map((row) =>
+    [...row.querySelectorAll("Cell")].map((cell) => cell.textContent?.trim() ?? ""),
+  );
+}
+
+function clearanceRowsToRecords(rows) {
+  const headers = rows[0] ?? [];
+  return rows.slice(1).map((row) =>
+    clearanceImportHeaders.reduce((record, header) => {
+      const index = headers.indexOf(header);
+      record[header] = index >= 0 ? row[index] ?? "" : "";
+      return record;
+    }, {}),
+  );
+}
+
+function normalizeClearanceImportDate(value) {
+  const text = String(value ?? "").trim();
+  if (text === "") return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  const slashMatch = text.match(/^(\d{4})[/.](\d{1,2})[/.](\d{1,2})$/);
+  if (slashMatch === null) return "";
+  const [, year, month, day] = slashMatch;
+  return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+}
+
+function getClearanceGoalByName(name) {
+  const text = String(name ?? "").trim();
+  return getActiveGoals().find((goal) => goal.name === text) ?? getActiveGoals()[0] ?? null;
+}
+
+function getClearanceInitiatorByName(name) {
+  const text = String(name ?? "").trim();
+  return people.find((person) => person.name === text || person.account === text || person.username === text) ?? getCurrentUser() ?? people[0] ?? null;
+}
+
+function getClearanceTemplate() {
+  return getActiveTaskTemplates().find((template) => template.name === clearanceWorkName) ?? null;
+}
+
+function buildClearanceImportPreviewRows(records) {
+  const template = getClearanceTemplate();
+  return records.map((record, index) => {
+    const data = { ...record };
+    const rowNumber = index + 2;
+    const errors = [];
+    const dueDate = normalizeClearanceImportDate(data.期望完成日期);
+    const goal = getClearanceGoalByName(data.关联目标);
+    const initiator = getClearanceInitiatorByName(data.发起人);
+
+    if (template === null) errors.push("未找到已启用的【库存清仓】标准工作");
+    for (const header of clearanceRequiredImportHeaders) {
+      if (String(data[header] ?? "").trim() === "") errors.push(`第 ${rowNumber} 行：【${header}】不能为空`);
+    }
+    if (dueDate === "") errors.push(`第 ${rowNumber} 行：【期望完成日期】必须是 YYYY-MM-DD`);
+    if (data.仓库 !== "" && !clearanceWarehouseOptions.includes(data.仓库)) errors.push(`第 ${rowNumber} 行：【仓库】不在固定选项中`);
+    if (data.清仓渠道 !== "" && !clearanceChannelOptions.includes(data.清仓渠道)) errors.push(`第 ${rowNumber} 行：【清仓渠道】不在固定选项中`);
+    if (goal === null) errors.push(`第 ${rowNumber} 行：系统中没有可用目标`);
+    if (initiator === null) errors.push(`第 ${rowNumber} 行：系统中没有可用发起人`);
+    if (data.关联目标 !== "" && goal !== null && goal.name !== data.关联目标) errors.push(`第 ${rowNumber} 行：【关联目标】不存在`);
+    if (data.发起人 !== "" && initiator !== null && ![initiator.name, initiator.account, initiator.username].includes(data.发起人)) {
+      errors.push(`第 ${rowNumber} 行：【发起人】不存在`);
+    }
+
+    data.期望完成日期 = dueDate;
+    return { rowNumber, data, errors };
+  });
+}
+
+async function handleClearanceImportFile(file, rerender) {
+  try {
+    const text = await file.text();
+    const rows = text.trimStart().startsWith("<?xml") || text.includes("<Workbook")
+      ? parseClearanceXmlWorkbook(text)
+      : parseClearanceDelimitedRows(text);
+    const headers = rows[0] ?? [];
+    const missingHeaders = clearanceRequiredImportHeaders.filter((header) => !headers.includes(header));
+    if (missingHeaders.length > 0) {
+      modalState = { kind: "clearanceImport", fileName: file.name, rows: [], error: `缺少必要表头：${missingHeaders.join("、")}` };
+      rerender();
+      return;
+    }
+
+    modalState = {
+      kind: "clearanceImport",
+      fileName: file.name,
+      rows: buildClearanceImportPreviewRows(clearanceRowsToRecords(rows)),
+      error: "",
+    };
+    rerender();
+  } catch {
+    modalState = { kind: "clearanceImport", fileName: file.name, rows: [], error: "文件解析失败，请使用系统导出的 xls 模板，或 CSV/TSV 文件。" };
+    rerender();
+  }
+}
+
+function getClearanceImportCustomFields(data) {
+  return {
+    coverImageUrl: data.产品图 || "",
+    productName: data.清仓产品,
+    sku: data["SKU / 规格"] || "",
+    stockQuantity: data.当前库存,
+    warehouse: data.仓库 || "",
+    clearanceReason: data.清仓原因,
+    suggestedPrice: data.建议清仓价 || "",
+    originalPrice: data.原售价 || "",
+    clearanceChannel: data.清仓渠道,
+    dueDate: data.期望完成日期,
+    notice: data.注意事项 || "",
+  };
+}
+
+async function persistStartedProcess(result) {
+  await createPersistentResource("process-instances", result.instance);
+  const generatedTasks = state.tasks.filter((task) => task.processInstanceId === result.instance.id);
+  for (const task of generatedTasks) {
+    await createPersistentResource("tasks", task);
+  }
+}
+
+async function confirmClearanceImport(rerender) {
+  if (modalState === null || modalState.kind !== "clearanceImport") return;
+  const validRows = modalState.rows.filter((row) => row.errors.length === 0);
+  const failedCount = modalState.rows.length - validRows.length;
+  if (validRows.length === 0) {
+    modalState = { ...modalState, error: "没有可导入的有效行。" };
+    rerender();
+    return;
+  }
+
+  const template = getClearanceTemplate();
+  if (template === null) {
+    modalState = { ...modalState, error: "未找到已启用的【库存清仓】标准工作。" };
+    rerender();
+    return;
+  }
+  if (!template.defaultProcessTemplateId) {
+    modalState = { ...modalState, error: "【库存清仓】标准工作尚未绑定标准流程。" };
+    rerender();
+    return;
+  }
+
+  const originalInstances = [...state.processInstances];
+  const originalTasks = [...state.tasks];
+  const importedInstances = [];
+
+  try {
+    for (const row of validRows) {
+      const customFields = getClearanceImportCustomFields(row.data);
+      const goal = getClearanceGoalByName(row.data.关联目标);
+      const initiator = getClearanceInitiatorByName(row.data.发起人);
+      const displayTitle = buildDisplayTitle(template, customFields);
+      const result = startProcess({
+        templateId: template.defaultProcessTemplateId,
+        taskTemplateId: template.id,
+        customFields,
+        displayTitle,
+        coverImageUrl: getPrimaryImageUrl({ customFields }) || null,
+        name: displayTitle,
+        goalId: goal?.id ?? "",
+        initiatorId: initiator?.id ?? "",
+        description: template.description || `库存清仓：${row.data.清仓产品}`,
+        launchAssignments: buildLaunchAssignments(template.defaultProcessTemplateId, template, initiator?.id ?? ""),
+      });
+
+      if (result.error !== undefined) throw new Error(result.error);
+      await persistStartedProcess(result);
+      importedInstances.push(result.instance);
+    }
+  } catch (error) {
+    state.processInstances = originalInstances;
+    state.tasks = originalTasks;
+    modalState = { ...modalState, error: error.message || "库存清仓导入失败，请检查本地数据库服务。" };
+    rerender();
+    return;
+  }
+
+  selectedProcessInstanceId = importedInstances[0]?.id ?? selectedProcessInstanceId;
+  expandedClearanceGroups = new Set(importedInstances.map((instance) => instance.id));
+  modalState = null;
+  window.alert(`导入完成：成功 ${importedInstances.length} 行，跳过 ${failedCount} 行。`);
+  rerender();
+}
+
 function renderClearanceCover(instance, tasks) {
   const imageUrl = getPrimaryImageUrl(instance, ...tasks);
   if (imageUrl === "") return `<span class="task-cover-placeholder">无图</span>`;
@@ -1452,8 +1750,23 @@ function renderClearancePage() {
     ${renderClearanceFilters()}
     <section class="settings-section clearance-section">
       <div class="section-heading">
-        <h2>库存清仓</h2>
-        <p class="form-note">集中查看库存清仓标准工作产生的流程和执行任务；普通执行任务列表仍会保留这些任务。</p>
+        <div>
+          <h2>库存清仓</h2>
+          <p class="form-note">集中查看库存清仓标准工作产生的流程和执行任务；普通执行任务列表仍会保留这些任务。</p>
+        </div>
+        <div class="toolbar-actions">
+          ${canCurrentUser("workPlans.launch") ? `<button class="secondary-button" type="button" data-action="download-clearance-template">下载导入模板</button>` : ""}
+          ${
+            canCurrentUser("workPlans.launch")
+              ? `
+                <label class="secondary-button file-button">
+                  批量导入
+                  <input type="file" data-clearance-file="import" accept=".xls,.xml,.csv,.tsv,.txt" />
+                </label>
+              `
+              : ""
+          }
+        </div>
       </div>
       ${renderClearanceStats(groups)}
       <div class="clearance-card-list">
@@ -1465,6 +1778,70 @@ function renderClearancePage() {
     ${renderResultModal()}
     ${renderReturnTaskModal()}
     ${renderWorkFormModal()}
+    ${renderClearanceImportModal()}
+  `;
+}
+
+function renderClearanceImportModal() {
+  if (modalState === null || modalState.kind !== "clearanceImport") return "";
+  const rows = modalState.rows ?? [];
+  const validCount = rows.filter((row) => row.errors.length === 0).length;
+  const failedCount = rows.length - validCount;
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <div class="modal-panel wide-modal" role="dialog" aria-modal="true" aria-label="库存清仓批量导入">
+        <div class="modal-header">
+          <div>
+            <h2>库存清仓批量导入</h2>
+            <p class="form-note">${escapeHtml(modalState.fileName ?? "")}｜有效 ${validCount} 行｜错误 ${failedCount} 行</p>
+          </div>
+          <button class="icon-button" type="button" data-action="close-task-modal" aria-label="关闭">×</button>
+        </div>
+        <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${escapeHtml(modalState.error)}</div>
+        <div class="table-wrap import-preview-wrap">
+          <table class="data-table compact-import-table">
+            <thead>
+              <tr>
+                <th>行号</th>
+                <th>清仓产品</th>
+                <th>SKU / 规格</th>
+                <th>库存</th>
+                <th>仓库</th>
+                <th>清仓渠道</th>
+                <th>期望完成日期</th>
+                <th>关联目标</th>
+                <th>校验结果</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${
+                rows.length === 0
+                  ? `<tr><td colspan="9">暂无可预览数据</td></tr>`
+                  : rows
+                      .map((row) => `
+                        <tr class="${row.errors.length > 0 ? "import-row-error" : ""}">
+                          <td>${row.rowNumber}</td>
+                          <td>${escapeHtml(row.data.清仓产品)}</td>
+                          <td>${escapeHtml(row.data["SKU / 规格"])}</td>
+                          <td>${escapeHtml(row.data.当前库存)}</td>
+                          <td>${escapeHtml(row.data.仓库)}</td>
+                          <td>${escapeHtml(row.data.清仓渠道)}</td>
+                          <td>${escapeHtml(row.data.期望完成日期)}</td>
+                          <td>${escapeHtml(row.data.关联目标)}</td>
+                          <td>${row.errors.length === 0 ? "可导入" : escapeHtml(row.errors.join("；"))}</td>
+                        </tr>
+                      `)
+                      .join("")
+              }
+            </tbody>
+          </table>
+        </div>
+        <div class="modal-actions">
+          <button class="secondary-button" type="button" data-action="close-task-modal">取消</button>
+          <button class="primary-button" type="button" data-action="confirm-clearance-import" ${validCount === 0 ? "disabled" : ""}>确认导入有效行</button>
+        </div>
+      </div>
+    </div>
   `;
 }
 
@@ -3914,6 +4291,7 @@ export function bindTasksPageEvents(rerender) {
   const taskTemplateForm = document.querySelector(".task-template-form");
   const resultForm = document.querySelector(".result-form");
   const returnTaskForm = document.querySelector(".return-task-form");
+  const clearanceImportInput = document.querySelector("[data-clearance-file='import']");
 
   if (tasksPage === null) return;
 
@@ -3965,6 +4343,16 @@ export function bindTasksPageEvents(rerender) {
           rerender();
           return;
         }
+        if (action === "download-clearance-template") {
+          if (!canCurrentUser("workPlans.launch")) return;
+          downloadClearanceImportTemplate();
+          return;
+        }
+        if (action === "confirm-clearance-import") {
+          if (!canCurrentUser("workPlans.launch")) return;
+          confirmClearanceImport(rerender);
+          return;
+        }
         if (action === "toggle-clearance-group") {
           const groupId = actionButton.dataset.clearanceGroupId;
           expandedClearanceGroups = new Set(expandedClearanceGroups);
@@ -4007,6 +4395,13 @@ export function bindTasksPageEvents(rerender) {
     }
     if (resultForm !== null) resultForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
     if (returnTaskForm !== null) returnTaskForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
+    if (clearanceImportInput !== null) {
+      clearanceImportInput.addEventListener("change", (event) => {
+        const file = event.target.files?.[0];
+        if (file !== undefined) handleClearanceImportFile(file, rerender);
+        event.target.value = "";
+      });
+    }
     return;
   }
 
