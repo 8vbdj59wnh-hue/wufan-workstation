@@ -16,9 +16,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260630-task-list-clean3";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-task-list-clean3";
-import { hasPermission } from "./permissions.js?v=20260630-task-list-clean3";
+} from "./appState.js?v=20260630-task-detail-layout1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-task-detail-layout1";
+import { hasPermission } from "./permissions.js?v=20260630-task-detail-layout1";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-task-list-clean3";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-list-clean3";
-import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-task-list-clean3";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-task-list-clean3";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-task-detail-layout1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-detail-layout1";
+import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-task-detail-layout1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-task-detail-layout1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -3001,7 +3001,7 @@ function renderTaskDetail() {
   return `
     <section class="settings-section task-detail">
       <div class="section-heading with-actions">
-        <h2>执行任务详情</h2>
+        <h2>${escapeHtml(selectedTask.name)}</h2>
         <div class="section-actions">
           ${canEditTask(selectedTask) ? renderActionButton("编辑", "edit-task", selectedTask.id) : ""}
           ${selectedTask.processNodeId ? getMethodologyLinkByNodeId(selectedTask.processNodeId) : ""}
@@ -3010,75 +3010,72 @@ function renderTaskDetail() {
         </div>
       </div>
       <div class="detail-block">
-        <h3>状态操作</h3>
-        <div class="row-actions">${renderStatusActions(selectedTask) || "<span class=\"muted-action\">暂无可用操作</span>"}</div>
-      </div>
-      <div class="detail-block">
-        <h3>基本信息</h3>
-        <div class="detail-grid">
-          ${renderDetailField("任务名称", escapeHtml(selectedTask.name))}
-          ${renderDetailField("归属标准工作事项", escapeHtml(belonging.standardWorkName))}
-          ${renderDetailField(selectedTask.source === TaskSource.Process ? "本次工作标题" : "本次任务标题", escapeHtml(belonging.title || "无"))}
-          ${renderDetailField("所属标准流程", getTaskProcessTemplateName(selectedTask))}
-          ${renderDetailField("所属流程步骤", getTaskProcessStepName(selectedTask))}
-          ${renderDetailField("关联目标", findName(goals, selectedTask.goalId, "未设置"))}
-          ${renderDetailField("来源", taskSourceNames[selectedTask.source])}
-          ${renderDetailField("负责部门", findName(departments, selectedTask.departmentId, "未设置"))}
-          ${renderDetailField("负责人", findName(people, selectedTask.ownerId, "未设置"))}
-          ${renderDetailField("发起人", findName(people, selectedTask.initiatorId, "未设置"))}
-          ${renderDetailField("截止日期", selectedTask.dueDate ?? "未设置")}
-          ${renderDetailField("计划周", selectedTask.plannedWeek ?? "未安排")}
-          ${renderDetailField("状态", taskStatusNames[selectedTask.status])}
-          ${renderDetailField("四象限", getTaskQuadrant(selectedTask.importance, selectedTask.urgency))}
+        <h3>本次任务信息</h3>
+        <div class="task-work-overview">
+          <div class="task-image-detail">
+            ${
+              coverImageUrl === ""
+                ? `<div class="task-image-empty">暂无产品图片</div>`
+                : `<img src="${escapeHtml(resolveAssetUrl(coverImageUrl))}" alt="相关产品图片" onerror="this.replaceWith(Object.assign(document.createElement('div'), { className: 'task-image-empty', textContent: '图片无法预览' }))" />`
+            }
+          </div>
+          <div class="task-work-main">
+            <div class="detail-grid">
+              ${renderDetailField("本次工作标题", escapeHtml(belonging.title || selectedTask.name || "无"))}
+              ${renderDetailField("归属标准工作", escapeHtml(belonging.standardWorkName))}
+              ${renderDetailField("当前任务节点", escapeHtml(selectedTask.name))}
+              ${renderDetailField("任务来源", taskSourceNames[selectedTask.source])}
+            </div>
+            ${renderTaskWorkInfo(selectedTask, taskTemplate)}
+          </div>
         </div>
-      </div>
-      <div class="detail-block">
-        <h3>相关产品图片</h3>
-        <div class="task-image-detail">
-          ${
-            coverImageUrl === ""
-              ? `<div class="task-image-empty">暂无产品图片</div>`
-              : `<img src="${escapeHtml(resolveAssetUrl(coverImageUrl))}" alt="相关产品图片" onerror="this.replaceWith(Object.assign(document.createElement('div'), { className: 'task-image-empty', textContent: '图片无法预览' }))" />`
-          }
-          <p>${coverImageUrl === "" ? "图片路径：无" : `图片路径：${escapeHtml(coverImageUrl)}`}</p>
-        </div>
-      </div>
-      <div class="detail-block">
-        <h3>本次工作信息</h3>
-        ${renderTaskWorkInfo(selectedTask, taskTemplate)}
       </div>
       ${renderStandardWorkAttachmentsBlock(getTaskCustomFields(selectedTask))}
-      <div class="detail-block">
-        <h3>执行要求</h3>
-        <p>${escapeHtml(selectedTask.description)}</p>
-        <p>${escapeHtml(selectedTask.completionStandard)}</p>
-      </div>
-      ${
-        selectedTask.reviewStandard === undefined || selectedTask.reviewStandard === null || selectedTask.reviewStandard === ""
-          ? ""
-          : `
-            <div class="detail-block">
-              <h3>${selectedTask.source === TaskSource.Process ? "步骤审核标准" : "审核标准"}</h3>
-              <p>${escapeHtml(selectedTask.reviewStandard)}</p>
-            </div>
-          `
-      }
-      <div class="detail-block">
-        <h3>验收信息</h3>
-        <p>是否需要验收：${selectedTask.needAcceptance ? "是" : "否"}</p>
-        <p>验收人：${findName(people, selectedTask.accepterId, "无")}</p>
-      </div>
-      <div class="detail-block">
-        <h3>流程信息</h3>
-        <p>${processText}</p>
-      </div>
-      ${renderReturnRecordsBlock(selectedTask)}
       ${renderTaskSubmitResultDetail(selectedTask)}
       <div class="detail-block">
         <h3>执行结果</h3>
         <p>完成结果说明：${escapeHtml(selectedTask.resultText ?? "暂无")}</p>
         <p>结果附件：${escapeHtml(attachments)}</p>
         <p>完成时间：${selectedTask.completedAt ?? "未完成"}</p>
+      </div>
+      <div class="detail-block">
+        <h3>任务状态</h3>
+        <div class="detail-grid">
+          ${renderDetailField("当前状态", taskStatusNames[selectedTask.status])}
+          ${renderDetailField("执行人", findName(people, selectedTask.ownerId, "未设置"))}
+          ${renderDetailField("负责部门", findName(departments, selectedTask.departmentId, "未设置"))}
+          ${renderDetailField("截止日期", selectedTask.dueDate ?? "未设置")}
+          ${renderDetailField("是否逾期", isTaskOverdue(selectedTask) ? "已逾期" : "未逾期")}
+          ${renderDetailField("计划周", selectedTask.plannedWeek ?? "未安排")}
+          ${renderDetailField("发起人", findName(people, selectedTask.initiatorId, "未设置"))}
+          ${renderDetailField("验收人", selectedTask.needAcceptance ? findName(people, selectedTask.accepterId, "未设置") : "无需验收")}
+        </div>
+        <div class="row-actions task-status-actions">${renderStatusActions(selectedTask) || "<span class=\"muted-action\">暂无可用操作</span>"}</div>
+      </div>
+      <div class="detail-block">
+        <h3>执行要求</h3>
+        <p>流程节点：${getTaskProcessStepName(selectedTask)}</p>
+        <p>任务说明：${escapeHtml(selectedTask.description || "未填写")}</p>
+        <p>完成标准：${escapeHtml(selectedTask.completionStandard || "未填写")}</p>
+        ${
+          selectedTask.reviewStandard === undefined || selectedTask.reviewStandard === null || selectedTask.reviewStandard === ""
+            ? ""
+            : `<p>${selectedTask.source === TaskSource.Process ? "步骤审核标准" : "审核标准"}：${escapeHtml(selectedTask.reviewStandard)}</p>`
+        }
+        <div class="row-actions task-status-actions">
+          ${selectedTask.processNodeId ? getMethodologyLinkByNodeId(selectedTask.processNodeId) : "<span class=\"muted-action\">暂无关联方法论</span>"}
+        </div>
+      </div>
+      ${renderReturnRecordsBlock(selectedTask)}
+      <div class="detail-block">
+        <h3>关联信息</h3>
+        <div class="detail-grid">
+          ${renderDetailField("所属标准流程", getTaskProcessTemplateName(selectedTask))}
+          ${renderDetailField("所属流程步骤", getTaskProcessStepName(selectedTask))}
+          ${renderDetailField("关联目标", findName(goals, selectedTask.goalId, "未设置"))}
+          ${renderDetailField("四象限", getTaskQuadrant(selectedTask.importance, selectedTask.urgency))}
+        </div>
+        <p>${processText}</p>
       </div>
     </section>
   `;

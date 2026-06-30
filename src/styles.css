@@ -2042,6 +2042,23 @@ textarea {
   gap: 10px;
 }
 
+.task-work-overview {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.task-work-main {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.task-status-actions {
+  margin-top: 12px;
+}
+
 .task-image-detail img,
 .task-image-empty {
   width: 120px;
@@ -2587,6 +2604,7 @@ textarea {
   .goal-filters,
   .task-filters,
   .quadrant-grid,
+  .task-work-overview,
   .detail-grid {
     grid-template-columns: 1fr;
   }

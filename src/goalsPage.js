@@ -6,8 +6,8 @@ import {
   state,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260630-task-list-clean3";
-import { hasPermission } from "./permissions.js?v=20260630-task-list-clean3";
+} from "./appState.js?v=20260630-task-detail-layout1";
+import { hasPermission } from "./permissions.js?v=20260630-task-detail-layout1";
 import {
   CategoryType,
   GoalLevel,
@@ -33,9 +33,9 @@ import {
   taskStatusNames,
   taskUrgencyNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isTaskOverdue } from "./data/taskUtils.js?v=20260630-task-list-clean3";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-list-clean3";
-import { selectTask } from "./tasksPage.js?v=20260630-task-list-clean3";
+import { getPrimaryImageUrl, getTaskQuadrant, isTaskOverdue } from "./data/taskUtils.js?v=20260630-task-detail-layout1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-detail-layout1";
+import { selectTask } from "./tasksPage.js?v=20260630-task-detail-layout1";
 
 const categories = state.categories;
 const departments = state.departments;
