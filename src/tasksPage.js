@@ -16,9 +16,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260630-task-action-clean1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-task-action-clean1";
-import { hasPermission } from "./permissions.js?v=20260630-task-action-clean1";
+} from "./appState.js?v=20260630-task-attachment-preview1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-task-attachment-preview1";
+import { hasPermission } from "./permissions.js?v=20260630-task-attachment-preview1";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-task-action-clean1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-action-clean1";
-import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-task-action-clean1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-task-action-clean1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-task-attachment-preview1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-attachment-preview1";
+import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-task-attachment-preview1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-task-attachment-preview1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -643,6 +643,57 @@ function getFileExt(filename = "") {
   return dotIndex === -1 ? "" : filename.slice(dotIndex).toLowerCase();
 }
 
+function normalizeAttachmentFile(file) {
+  if (typeof file === "string") {
+    return {
+      href: resolveAssetUrl(file),
+      name: file.split("/").pop() || file,
+      ext: getFileExt(file),
+      mimeType: "",
+    };
+  }
+
+  const filePath = file.filePath ?? file.url ?? "";
+  const name = file.originalName ?? file.filename ?? filePath ?? "未命名附件";
+  return {
+    href: resolveAssetUrl(filePath),
+    name,
+    ext: file.ext ?? getFileExt(name || filePath),
+    mimeType: file.mimeType ?? "",
+  };
+}
+
+function isPreviewableImageAttachment(file) {
+  const attachment = normalizeAttachmentFile(file);
+  return attachment.mimeType.startsWith("image/") || [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"].includes(attachment.ext);
+}
+
+function renderAttachmentPreviewList(files, emptyText = "暂无附件") {
+  if (!Array.isArray(files) || files.length === 0) return `<p class="form-note">${emptyText}</p>`;
+
+  return `
+    <div class="attachment-preview-grid">
+      ${files
+        .map((file) => {
+          const attachment = normalizeAttachmentFile(file);
+          const isImage = isPreviewableImageAttachment(file);
+          const extText = attachment.ext === "" ? "附件" : attachment.ext.replace(".", "").toUpperCase();
+          return `
+            <a class="attachment-preview-card ${isImage ? "is-image" : ""}" href="${escapeHtml(attachment.href)}" target="_blank" rel="noreferrer">
+              ${
+                isImage
+                  ? `<img src="${escapeHtml(attachment.href)}" alt="${escapeHtml(attachment.name)}" onerror="this.replaceWith(Object.assign(document.createElement('div'), { className: 'attachment-file-icon', textContent: '${escapeHtml(extText)}' }))" />`
+                  : `<span class="attachment-file-icon">${escapeHtml(extText)}</span>`
+              }
+              <span class="attachment-preview-name">${escapeHtml(attachment.name)}</span>
+            </a>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
 function validateStandardWorkAttachmentFiles(files) {
   for (const file of files) {
     const ext = getFileExt(file.name);
@@ -653,23 +704,7 @@ function validateStandardWorkAttachmentFiles(files) {
 }
 
 function renderStandardWorkAttachmentList(attachments) {
-  if (attachments.length === 0) return `<p class="form-note">暂无附件</p>`;
-  return `
-    <ul class="attachment-list">
-      ${attachments
-        .map((attachment) => {
-          const href = resolveAssetUrl(attachment.filePath ?? attachment.url ?? "");
-          const name = attachment.originalName ?? attachment.filename ?? attachment.filePath ?? "未命名附件";
-          return `
-            <li>
-              <a href="${escapeHtml(href)}" target="_blank" rel="noreferrer" download>${escapeHtml(name)}</a>
-              ${attachment.ext ? `<span>${escapeHtml(attachment.ext)}</span>` : ""}
-            </li>
-          `;
-        })
-        .join("")}
-    </ul>
-  `;
+  return renderAttachmentPreviewList(attachments);
 }
 
 function renderStandardWorkAttachmentsField() {
@@ -2981,7 +3016,7 @@ function renderTaskSubmitResultDetail(task) {
         .join("")
     : "";
   const fileRows = includesSubmitPart(requirement.submitType, "file")
-    ? requirement.submitFiles.map((file) => `<a href="${escapeHtml(resolveAssetUrl(file.url ?? file))}" target="_blank" rel="noreferrer">${escapeHtml(file.originalName ?? file.filename ?? file.url ?? file)}</a>`).join("、") || "未上传"
+    ? renderAttachmentPreviewList(requirement.submitFiles, "未上传")
     : "不需要";
   const linkRows = includesSubmitPart(requirement.submitType, "link")
     ? requirement.submitLinks.map((link) => `<a href="${escapeHtml(link)}" target="_blank" rel="noreferrer">${escapeHtml(link)}</a>`).join("、") || "未填写"
@@ -2997,7 +3032,10 @@ function renderTaskSubmitResultDetail(task) {
       <p>提交类型：${submitTypeNames[requirement.submitType] ?? "填写表单"}</p>
       <p>提交说明：${escapeHtml(requirement.submitDescription ?? "")}</p>
       ${formRows === "" ? "" : `<div class="detail-grid">${formRows}</div>`}
-      <p>上传文件：${fileRows}</p>
+      <div class="submit-file-preview">
+        <p>上传文件：</p>
+        ${fileRows}
+      </div>
       <p>提交链接：${linkRows}</p>
       <p>提交时间：${task.submittedAt ?? "未提交"}</p>
       <p>提交人：${findName(people, task.submittedBy, "未记录")}</p>
@@ -3024,10 +3062,7 @@ function renderTaskDetail() {
       ? `已发起流程：${selectedTask.processInstanceId}；流程步骤：${selectedTask.processNodeId}`
       : "无";
   const resultAttachments = selectedTask.resultAttachments ?? [];
-  const attachments =
-    resultAttachments.length > 0
-      ? resultAttachments.join("、")
-      : "无";
+  const attachments = renderAttachmentPreviewList(resultAttachments, "无");
   const taskTemplate = getTaskTemplateForTask(selectedTask);
   const coverImageUrl = getTaskCoverImage(selectedTask);
   const belonging = getTaskBelonging(selectedTask);
@@ -3072,7 +3107,10 @@ function renderTaskDetail() {
       <div class="detail-block">
         <h3>执行结果</h3>
         <p>完成结果说明：${escapeHtml(selectedTask.resultText ?? "暂无")}</p>
-        <p>结果附件：${escapeHtml(attachments)}</p>
+        <div class="submit-file-preview">
+          <p>结果附件：</p>
+          ${attachments}
+        </div>
         <p>完成时间：${selectedTask.completedAt ?? "未完成"}</p>
       </div>
       <div class="detail-block">

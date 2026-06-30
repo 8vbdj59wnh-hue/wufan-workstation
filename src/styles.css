@@ -2043,6 +2043,63 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.attachment-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.attachment-preview-card {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f9fafb;
+  color: #374151;
+  padding: 8px;
+  text-decoration: none;
+}
+
+.attachment-preview-card:hover {
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
+.attachment-preview-card img,
+.attachment-file-icon {
+  width: 100%;
+  height: 84px;
+  border-radius: 6px;
+  background: #ffffff;
+  object-fit: cover;
+}
+
+.attachment-file-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed #cbd5e1;
+  color: #6b7280;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.attachment-preview-name {
+  overflow: hidden;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.submit-file-preview {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .return-record-list {
   display: grid;
   gap: 10px;
