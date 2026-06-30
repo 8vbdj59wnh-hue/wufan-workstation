@@ -1,4 +1,4 @@
-import { resolveAssetUrl, state } from "./appState.js?v=20260701-compact-sidebar1";
+import { resolveAssetUrl, state } from "./appState.js?v=20260701-compact-standard-work-card1";
 
 const hiddenSystemFieldKeys = new Set(["standardWorkAttachments"]);
 

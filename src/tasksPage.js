@@ -16,9 +16,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260701-compact-sidebar1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-compact-sidebar1";
-import { hasPermission } from "./permissions.js?v=20260701-compact-sidebar1";
+} from "./appState.js?v=20260701-compact-standard-work-card1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-compact-standard-work-card1";
+import { hasPermission } from "./permissions.js?v=20260701-compact-standard-work-card1";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-compact-sidebar1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-compact-sidebar1";
-import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-compact-sidebar1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-compact-sidebar1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-compact-standard-work-card1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-compact-standard-work-card1";
+import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-compact-standard-work-card1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-compact-standard-work-card1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -2690,9 +2690,6 @@ export function renderStandardWorkLibraryPage(selectedProcessTemplateId = "") {
 }
 
 function renderStandardWorkCard(template, selectedProcessTemplateId = "") {
-  const processName = template.defaultProcessTemplateId
-    ? getProcessTemplateName(template.defaultProcessTemplateId)
-    : `<span class="status-pill is-danger">未绑定流程</span>`;
   const isSelected = template.defaultProcessTemplateId !== undefined && template.defaultProcessTemplateId === selectedProcessTemplateId;
   return `
     <article class="standard-work-card ${isSelected ? "is-selected" : ""}" data-standard-work-template-id="${escapeHtml(template.id)}" data-process-template-id="${escapeHtml(template.defaultProcessTemplateId ?? "")}">
@@ -2700,14 +2697,7 @@ function renderStandardWorkCard(template, selectedProcessTemplateId = "") {
         <h4>${escapeHtml(template.name)}</h4>
         <span class="status-pill ${template.status === TaskTemplateStatus.Inactive ? "is-inactive" : ""}">${taskTemplateStatusNames[template.status]}</span>
       </div>
-      <div class="standard-work-card-meta">
-        <span>对应标准流程</span>
-        <strong>${processName}</strong>
-      </div>
-      <div class="standard-work-card-meta">
-        <span>负责人</span>
-        <strong>${findName(people, template.ownerId, "未设置")}</strong>
-      </div>
+      <div class="standard-work-card-meta"><span>负责人</span><strong>${findName(people, template.ownerId, "未设置")}</strong></div>
       <div class="standard-work-card-actions">
         ${renderTemplateActionButton("编辑", "edit-task-template", template.id)}
         ${
