@@ -16,9 +16,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260701-merged-standard-work-flow1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-merged-standard-work-flow1";
-import { hasPermission } from "./permissions.js?v=20260701-merged-standard-work-flow1";
+} from "./appState.js?v=20260701-standard-work-select-flow1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-standard-work-select-flow1";
+import { hasPermission } from "./permissions.js?v=20260701-standard-work-select-flow1";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-merged-standard-work-flow1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-merged-standard-work-flow1";
-import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260701-merged-standard-work-flow1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-merged-standard-work-flow1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-standard-work-select-flow1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-standard-work-select-flow1";
+import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260701-standard-work-select-flow1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-standard-work-select-flow1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -2627,7 +2627,7 @@ function renderTaskTable() {
   `;
 }
 
-function renderTaskTemplateTable() {
+function renderTaskTemplateTable(selectedProcessTemplateId = "") {
   const visibleTemplates = state.taskTemplates.filter((template) => !hiddenLegacyStandardWorkNames.includes(template.name));
 
   return `
@@ -2653,7 +2653,7 @@ function renderTaskTemplateTable() {
                     ${
                       columnTemplates.length === 0
                         ? `<div class="empty-note">暂无标准工作事项</div>`
-                        : columnTemplates.map((template) => renderStandardWorkCard(template)).join("")
+                        : columnTemplates.map((template) => renderStandardWorkCard(template, selectedProcessTemplateId)).join("")
                     }
                   </div>
                 </section>
@@ -2666,21 +2666,22 @@ function renderTaskTemplateTable() {
   `;
 }
 
-export function renderStandardWorkLibraryPage() {
+export function renderStandardWorkLibraryPage(selectedProcessTemplateId = "") {
   return `
     <div class="standard-work-library-host">
-      ${renderTaskTemplateTable()}
+      ${renderTaskTemplateTable(selectedProcessTemplateId)}
       ${renderTaskTemplateModal()}
     </div>
   `;
 }
 
-function renderStandardWorkCard(template) {
+function renderStandardWorkCard(template, selectedProcessTemplateId = "") {
   const processName = template.defaultProcessTemplateId
     ? getProcessTemplateName(template.defaultProcessTemplateId)
     : `<span class="status-pill is-danger">未绑定流程</span>`;
+  const isSelected = template.defaultProcessTemplateId !== undefined && template.defaultProcessTemplateId === selectedProcessTemplateId;
   return `
-    <article class="standard-work-card">
+    <article class="standard-work-card ${isSelected ? "is-selected" : ""}" data-standard-work-template-id="${escapeHtml(template.id)}" data-process-template-id="${escapeHtml(template.defaultProcessTemplateId ?? "")}">
       <div class="standard-work-card-title">
         <h4>${escapeHtml(template.name)}</h4>
         <span class="status-pill ${template.status === TaskTemplateStatus.Inactive ? "is-inactive" : ""}">${taskTemplateStatusNames[template.status]}</span>
@@ -4738,7 +4739,14 @@ export function bindStandardWorkLibraryEvents(rerender, container = document) {
   host.addEventListener("click", (event) => {
     const actionButton = event.target.closest("[data-action]");
 
-    if (actionButton === null) return;
+    if (actionButton === null) {
+      const card = event.target.closest("[data-standard-work-template-id]");
+      const processTemplateId = card?.dataset.processTemplateId ?? "";
+      if (processTemplateId !== "") {
+        window.location.hash = `process-template-${processTemplateId}`;
+      }
+      return;
+    }
 
     const action = actionButton.dataset.action;
     if (action === "close-task-modal") {

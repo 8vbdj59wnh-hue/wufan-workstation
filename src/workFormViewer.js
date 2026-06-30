@@ -1,4 +1,4 @@
-import { resolveAssetUrl, state } from "./appState.js?v=20260701-merged-standard-work-flow1";
+import { resolveAssetUrl, state } from "./appState.js?v=20260701-standard-work-select-flow1";
 
 const hiddenSystemFieldKeys = new Set(["standardWorkAttachments"]);
 

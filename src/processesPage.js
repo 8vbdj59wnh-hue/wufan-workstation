@@ -12,8 +12,8 @@ import {
   state,
   stopProcess,
   updatePersistentResource,
-} from "./appState.js?v=20260701-merged-standard-work-flow1";
-import { hasPermission } from "./permissions.js?v=20260701-merged-standard-work-flow1";
+} from "./appState.js?v=20260701-standard-work-select-flow1";
+import { hasPermission } from "./permissions.js?v=20260701-standard-work-select-flow1";
 import {
   CategoryType,
   GoalStatus,
@@ -35,11 +35,11 @@ import {
   taskImportanceNames,
   taskStatusNames,
   taskUrgencyNames,
-} from "./data/modelOptions.js?v=20260701-merged-standard-work-flow1";
-import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260701-merged-standard-work-flow1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-merged-standard-work-flow1";
-import { getMethodologyLinkByNodeId, renderMethodologiesPage } from "./methodologiesPage.js?v=20260701-merged-standard-work-flow1";
-import { bindStandardWorkLibraryEvents, renderStandardWorkLibraryPage, selectTask } from "./tasksPage.js?v=20260701-merged-standard-work-flow1";
+} from "./data/modelOptions.js?v=20260701-standard-work-select-flow1";
+import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260701-standard-work-select-flow1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-standard-work-select-flow1";
+import { getMethodologyLinkByNodeId, renderMethodologiesPage } from "./methodologiesPage.js?v=20260701-standard-work-select-flow1";
+import { bindStandardWorkLibraryEvents, renderStandardWorkLibraryPage, selectTask } from "./tasksPage.js?v=20260701-standard-work-select-flow1";
 
 const today = "2026-06-24";
 let selectedTemplateId = state.processTemplates[0]?.id ?? null;
@@ -943,6 +943,8 @@ export function bindProcessesPageEvents(rerender) {
     const actionButton = event.target.closest("[data-action]");
     if (actionButton !== null) {
       const action = actionButton.dataset.action;
+      if (action === "view-standard-work-process") return;
+      if (action === "add-task-template" || action === "edit-task-template" || action === "deactivate-task-template" || action === "remove-selected-standard-work-attachment" || action === "add-task-template-field" || action === "remove-task-template-field" || action === "move-task-template-field-up" || action === "move-task-template-field-down") return;
       if (action === "close-process-modal") modalState = null;
       if (action === "add-template" && canCurrentUser("processes.editTemplates")) modalState = { kind: "template", error: "" };
       if (action === "select-template") selectedTemplateId = actionButton.dataset.templateId;
@@ -1026,7 +1028,7 @@ export function renderProcessesPage() {
         ? renderMethodologiesPage(getCurrentUser())
         : canViewStandardWorks
           ? `
-            ${renderStandardWorkLibraryPage()}
+            ${renderStandardWorkLibraryPage(selectedTemplateId)}
             ${canViewTemplates ? `
               <div id="process-templates" class="process-section">
                 ${renderTemplateDetail()}
