@@ -16,9 +16,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260630-task-list-clean2";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-task-list-clean2";
-import { hasPermission } from "./permissions.js?v=20260630-task-list-clean2";
+} from "./appState.js?v=20260630-task-list-clean3";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-task-list-clean3";
+import { hasPermission } from "./permissions.js?v=20260630-task-list-clean3";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-task-list-clean2";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-list-clean2";
-import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-task-list-clean2";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-task-list-clean2";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-task-list-clean3";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-list-clean3";
+import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-task-list-clean3";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-task-list-clean3";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -2473,9 +2473,17 @@ function renderTaskTable() {
   const selectedVisibleCount = visibleTaskIds.filter((taskId) => selectedTaskIds.has(taskId)).length;
   const allVisibleSelected = visibleTaskIds.length > 0 && selectedVisibleCount === visibleTaskIds.length;
   const hasPartialSelection = selectedVisibleCount > 0 && !allVisibleSelected;
+  const selectedCount = selectedTaskIds.size;
 
   return `
     <section class="settings-section">
+      <div class="bulk-task-bar">
+        <strong>已选择 ${selectedCount} 条执行任务</strong>
+        <span class="row-actions">
+          <button class="text-button" type="button" data-action="bulk-complete" ${selectedCount === 0 ? "disabled" : ""}>批量完成</button>
+          <button class="text-button danger-button" type="button" data-action="bulk-cancel" ${selectedCount === 0 ? "disabled" : ""}>批量取消</button>
+        </span>
+      </div>
       <div class="table-wrap">
         <table class="data-table task-table">
           <thead>
@@ -5029,10 +5037,6 @@ export function renderTasksPage() {
 
   return `
     <div class="tasks-page">
-      <div class="section-heading with-actions page-toolbar">
-        <h2>执行</h2>
-        ${activeTaskTab === "task-list" && canCurrentUser("workPlans.launch") ? `<button class="primary-button" type="button" data-action="add-task">发起标准工作</button>` : ""}
-      </div>
       <div class="settings-tabs task-subtabs" aria-label="执行页签">
         ${canCurrentUser("tasks.view") ? `<button class="${activeTaskTab === "task-list" ? "is-active" : ""}" type="button" data-task-tab="task-list">执行任务列表</button>` : ""}
         ${canCurrentUser("tasks.view") ? `<button class="${activeTaskTab === "clearance" ? "is-active" : ""}" type="button" data-task-tab="clearance">库存清仓</button>` : ""}

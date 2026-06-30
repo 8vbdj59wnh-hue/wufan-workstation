@@ -1,4 +1,4 @@
-import { resolveAssetUrl, state } from "./appState.js?v=20260630-task-list-clean2";
+import { resolveAssetUrl, state } from "./appState.js?v=20260630-task-list-clean3";
 
 const hiddenSystemFieldKeys = new Set(["standardWorkAttachments"]);
 
