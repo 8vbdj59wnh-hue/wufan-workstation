@@ -16,9 +16,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260701-standard-work-select-flow1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-standard-work-select-flow1";
-import { hasPermission } from "./permissions.js?v=20260701-standard-work-select-flow1";
+} from "./appState.js?v=20260701-no-method-link-card1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-no-method-link-card1";
+import { hasPermission } from "./permissions.js?v=20260701-no-method-link-card1";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-standard-work-select-flow1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-standard-work-select-flow1";
-import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260701-standard-work-select-flow1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-standard-work-select-flow1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-no-method-link-card1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-no-method-link-card1";
+import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-no-method-link-card1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-no-method-link-card1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -2706,7 +2706,6 @@ function renderStandardWorkCard(template, selectedProcessTemplateId = "") {
             ? renderTemplateActionButton("查看流程", "view-standard-work-process", template.id)
             : ""
         }
-        ${getMethodologyLinkByStandardWorkId(template.id)}
       </div>
     </article>
   `;
