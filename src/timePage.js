@@ -1,5 +1,14 @@
-import { getCurrentUser, getCurrentWeek, getNow, resolveAssetUrl, startProcess, state } from "./appState.js?v=20260630-clearance-import1";
-import { hasPermission } from "./permissions.js?v=20260630-attachments1";
+import {
+  createPersistentResource,
+  getCurrentUser,
+  getCurrentWeek,
+  getNow,
+  resolveAssetUrl,
+  startProcess,
+  state,
+  updatePersistentResource,
+} from "./appState.js?v=20260630-stability1";
+import { hasPermission } from "./permissions.js?v=20260630-stability1";
 import {
   GoalStatus,
   ProcessTemplateStatus,
@@ -10,7 +19,7 @@ import {
   taskUrgencyNames,
   workPlanStatusNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, quadrantNames } from "./data/taskUtils.js?v=20260630-attachments1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, quadrantNames } from "./data/taskUtils.js?v=20260630-stability1";
 
 const currentWeek = getCurrentWeek();
 const departments = state.departments;
@@ -392,48 +401,80 @@ function updateFilters(form) {
   };
 }
 
-function updateWorkPlan(workPlanId, patch) {
+async function updateWorkPlan(workPlanId, patch) {
   const now = getNow();
-  state.workPlans = state.workPlans.map((workPlan) =>
-    workPlan.id === workPlanId ? { ...workPlan, ...patch, updatedAt: now } : workPlan,
-  );
+  const workPlan = state.workPlans.find((item) => item.id === workPlanId);
+  if (workPlan === undefined) return false;
+  const updatedWorkPlan = { ...workPlan, ...patch, updatedAt: now };
+  try {
+    await updatePersistentResource("work-plans", workPlanId, updatedWorkPlan);
+  } catch (error) {
+    console.error("工作计划保存失败", error);
+    window.alert(error.message || "工作计划保存失败，请检查本地数据库服务。");
+    return false;
+  }
+  state.workPlans = state.workPlans.map((item) => (item.id === workPlanId ? updatedWorkPlan : item));
+  return true;
 }
 
-function bulkUpdateWorkPlans(workPlanIds, patch) {
+async function bulkUpdateWorkPlans(workPlanIds, patch) {
   const now = getNow();
   const targetIds = new Set(workPlanIds);
-  state.workPlans = state.workPlans.map((workPlan) =>
-    targetIds.has(workPlan.id) ? { ...workPlan, ...patch, updatedAt: now } : workPlan,
-  );
+  const updatedWorkPlans = state.workPlans
+    .filter((workPlan) => targetIds.has(workPlan.id))
+    .map((workPlan) => ({ ...workPlan, ...patch, updatedAt: now }));
+  try {
+    for (const workPlan of updatedWorkPlans) {
+      await updatePersistentResource("work-plans", workPlan.id, workPlan);
+    }
+  } catch (error) {
+    console.error("批量保存工作计划失败", error);
+    window.alert(error.message || "工作计划保存失败，请检查本地数据库服务。");
+    return false;
+  }
+  const updatedMap = new Map(updatedWorkPlans.map((workPlan) => [workPlan.id, workPlan]));
+  state.workPlans = state.workPlans.map((workPlan) => updatedMap.get(workPlan.id) ?? workPlan);
+  return true;
 }
 
-function bulkSetFutureWorksToThisWeek(rerender) {
+async function bulkSetFutureWorksToThisWeek(rerender) {
   const workPlanIds = getVisibleSelectedWorkIds("future");
   if (workPlanIds.length === 0) return;
-  bulkUpdateWorkPlans(workPlanIds, { status: WorkPlanStatus.ThisWeek, plannedWeek: currentWeek });
+  const saved = await bulkUpdateWorkPlans(workPlanIds, { status: WorkPlanStatus.ThisWeek, plannedWeek: currentWeek });
+  if (!saved) return;
   selectedFutureWorkIds = new Set();
   rerender();
 }
 
-function bulkSetWeekWorksToFuture(rerender) {
+async function bulkSetWeekWorksToFuture(rerender) {
   const workPlanIds = getVisibleSelectedWorkIds("week");
   if (workPlanIds.length === 0) return;
-  bulkUpdateWorkPlans(workPlanIds, { status: WorkPlanStatus.Future, plannedWeek: null });
+  const saved = await bulkUpdateWorkPlans(workPlanIds, { status: WorkPlanStatus.Future, plannedWeek: null });
+  if (!saved) return;
   selectedWeekWorkIds = new Set();
   rerender();
 }
 
-function bulkCancelWorkPlans(listType, rerender) {
+async function bulkCancelWorkPlans(listType, rerender) {
   const workPlanIds = getVisibleSelectedWorkIds(listType);
   if (workPlanIds.length === 0) return;
   const message = listType === "future" ? "确定要取消选中的未来工作吗？" : "确定要取消选中的本周工作吗？";
   if (!window.confirm(message)) return;
-  bulkUpdateWorkPlans(workPlanIds, { status: WorkPlanStatus.Canceled, canceledAt: getNow() });
+  const saved = await bulkUpdateWorkPlans(workPlanIds, { status: WorkPlanStatus.Canceled, canceledAt: getNow() });
+  if (!saved) return;
   setSelectionSet(listType, new Set());
   rerender();
 }
 
-function launchWorkPlan(workPlanId) {
+async function persistStartedProcess(result) {
+  await createPersistentResource("process-instances", result.instance);
+  const generatedTasks = state.tasks.filter((task) => task.processInstanceId === result.instance.id);
+  for (const task of generatedTasks) {
+    await createPersistentResource("tasks", task);
+  }
+}
+
+async function launchWorkPlan(workPlanId) {
   const workPlan = state.workPlans.find((item) => item.id === workPlanId);
   if (workPlan === undefined) return;
   const template = getTaskTemplate(workPlan);
@@ -444,6 +485,8 @@ function launchWorkPlan(workPlanId) {
     return window.alert("该标准工作事项绑定的标准流程未启用。");
   }
 
+  const previousProcessInstances = [...state.processInstances];
+  const previousTasks = [...state.tasks];
   const result = startProcess({
     templateId: template.defaultProcessTemplateId,
     taskTemplateId: template.id,
@@ -460,21 +503,28 @@ function launchWorkPlan(workPlanId) {
   if (result.error !== undefined) return window.alert(result.error);
 
   const now = getNow();
-  state.workPlans = state.workPlans.map((item) =>
-    item.id === workPlanId
-      ? {
-          ...item,
-          status: WorkPlanStatus.Launched,
-          processInstanceId: result.instance.id,
-          launchedAt: now,
-          updatedAt: now,
-        }
-      : item,
-  );
+  const updatedWorkPlan = {
+    ...workPlan,
+    status: WorkPlanStatus.Launched,
+    processInstanceId: result.instance.id,
+    launchedAt: now,
+    updatedAt: now,
+  };
+  try {
+    await persistStartedProcess(result);
+    await updatePersistentResource("work-plans", workPlanId, updatedWorkPlan);
+  } catch (error) {
+    state.processInstances = previousProcessInstances;
+    state.tasks = previousTasks;
+    console.error("发起工作保存失败", error);
+    window.alert(error.message || "发起工作失败，请检查本地数据库服务。");
+    return;
+  }
+  state.workPlans = state.workPlans.map((item) => (item.id === workPlanId ? updatedWorkPlan : item));
   window.alert("已发起工作，流程步骤执行任务已进入执行任务列表。");
 }
 
-function editWorkPlan(workPlanId) {
+async function editWorkPlan(workPlanId) {
   const workPlan = state.workPlans.find((item) => item.id === workPlanId);
   if (workPlan === undefined) return;
   const title = window.prompt("请输入本次工作标题", workPlan.title ?? getWorkTitle(workPlan));
@@ -487,7 +537,7 @@ function editWorkPlan(workPlanId) {
   }
   const description = window.prompt("请输入补充说明，可留空", workPlan.description ?? "");
   if (description === null) return;
-  updateWorkPlan(workPlanId, { title: title.trim() || null, dueDate: dueDate || null, description: description || null });
+  await updateWorkPlan(workPlanId, { title: title.trim() || null, dueDate: dueDate || null, description: description || null });
 }
 
 export function bindTimePageEvents(rerender) {
@@ -546,43 +596,43 @@ export function bindTimePageEvents(rerender) {
     }
   });
 
-  page.addEventListener("click", (event) => {
+  page.addEventListener("click", async (event) => {
     if (event.target.closest("[data-work-row-select], [data-work-select-all]") !== null) return;
 
     const button = event.target.closest("[data-action]");
     if (button === null) return;
     const workPlanId = button.dataset.workId;
     if (button.dataset.action === "bulk-set-this-week") {
-      bulkSetFutureWorksToThisWeek(rerender);
+      await bulkSetFutureWorksToThisWeek(rerender);
       return;
     }
     if (button.dataset.action === "bulk-set-future") {
-      bulkSetWeekWorksToFuture(rerender);
+      await bulkSetWeekWorksToFuture(rerender);
       return;
     }
     if (button.dataset.action === "bulk-cancel-future") {
-      bulkCancelWorkPlans("future", rerender);
+      await bulkCancelWorkPlans("future", rerender);
       return;
     }
     if (button.dataset.action === "bulk-cancel-week") {
-      bulkCancelWorkPlans("week", rerender);
+      await bulkCancelWorkPlans("week", rerender);
       return;
     }
-    if (button.dataset.action === "set-this-week") updateWorkPlan(workPlanId, { status: WorkPlanStatus.ThisWeek, plannedWeek: currentWeek });
-    if (button.dataset.action === "set-future") updateWorkPlan(workPlanId, { status: WorkPlanStatus.Future, plannedWeek: null });
+    if (button.dataset.action === "set-this-week") await updateWorkPlan(workPlanId, { status: WorkPlanStatus.ThisWeek, plannedWeek: currentWeek });
+    if (button.dataset.action === "set-future") await updateWorkPlan(workPlanId, { status: WorkPlanStatus.Future, plannedWeek: null });
     if (button.dataset.action === "cancel-work" && window.confirm("确定要取消该工作计划吗？")) {
-      updateWorkPlan(workPlanId, { status: WorkPlanStatus.Canceled, canceledAt: getNow() });
+      await updateWorkPlan(workPlanId, { status: WorkPlanStatus.Canceled, canceledAt: getNow() });
     }
     if (button.dataset.action === "toggle-importance") {
       const workPlan = state.workPlans.find((item) => item.id === workPlanId);
-      updateWorkPlan(workPlanId, { importance: workPlan.importance === TaskImportance.Important ? TaskImportance.NotImportant : TaskImportance.Important });
+      await updateWorkPlan(workPlanId, { importance: workPlan.importance === TaskImportance.Important ? TaskImportance.NotImportant : TaskImportance.Important });
     }
     if (button.dataset.action === "toggle-urgency") {
       const workPlan = state.workPlans.find((item) => item.id === workPlanId);
-      updateWorkPlan(workPlanId, { urgency: workPlan.urgency === TaskUrgency.Urgent ? TaskUrgency.NotUrgent : TaskUrgency.Urgent });
+      await updateWorkPlan(workPlanId, { urgency: workPlan.urgency === TaskUrgency.Urgent ? TaskUrgency.NotUrgent : TaskUrgency.Urgent });
     }
-    if (button.dataset.action === "edit-work") editWorkPlan(workPlanId);
-    if (button.dataset.action === "launch-work") launchWorkPlan(workPlanId);
+    if (button.dataset.action === "edit-work") await editWorkPlan(workPlanId);
+    if (button.dataset.action === "launch-work") await launchWorkPlan(workPlanId);
     rerender();
   });
 }

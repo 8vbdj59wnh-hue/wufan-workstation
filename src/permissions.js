@@ -186,6 +186,29 @@ function getDefaultPermissions(role = "user") {
   return clonePermissions(role === "admin" ? superAdminPermissions : employeePermissions);
 }
 
+function applyLegacyPermissionCompatibility(normalized, source) {
+  const isPermissionManager = source?.modules?.settings === true && source?.settings?.managePermissions === true;
+  if (!isPermissionManager) return;
+
+  if (typeof source.modules?.assessment !== "boolean") normalized.modules.assessment = true;
+  if (typeof source.modules?.methods !== "boolean") normalized.modules.methods = true;
+  if (typeof source.assessment !== "object" || source.assessment === null) {
+    Object.assign(normalized.assessment, {
+      view: true,
+      viewAll: true,
+      fillWeeklyReport: true,
+      editWeeklyReport: true,
+      viewProblems: true,
+      updateProblems: true,
+    });
+  }
+  if (typeof source.methods !== "object" || source.methods === null) {
+    Object.assign(normalized.methods, { view: true, create: true, edit: true });
+  }
+  if (typeof source.settings?.viewStores !== "boolean") normalized.settings.viewStores = true;
+  if (typeof source.settings?.editStores !== "boolean") normalized.settings.editStores = true;
+}
+
 export function normalizePermissions(rawPermissions, role = "user") {
   let source = rawPermissions;
   if (typeof rawPermissions === "string" && rawPermissions.trim() !== "") {
@@ -206,6 +229,7 @@ export function normalizePermissions(rawPermissions, role = "user") {
       }
     }
     if (["self", "department", "all"].includes(source.dataScope)) normalized.dataScope = source.dataScope;
+    applyLegacyPermissionCompatibility(normalized, source);
   }
 
   return normalized;

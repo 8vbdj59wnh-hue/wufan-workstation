@@ -1,4 +1,4 @@
-import { getCurrentUser, savePersistentData, state, validateCurrentSession } from "./appState.js?v=20260630-clearance-import1";
+import { getCurrentUser, savePersistentData, state, validateCurrentSession } from "./appState.js?v=20260630-stability1";
 import {
   applyPermissionTemplate,
   dataScopeOptions,
@@ -7,7 +7,7 @@ import {
   permissionCount,
   permissionGroups,
   permissionTemplates,
-} from "./permissions.js?v=20260630-attachments1";
+} from "./permissions.js?v=20260630-stability1";
 import {
   CategoryType,
   PersonRole,

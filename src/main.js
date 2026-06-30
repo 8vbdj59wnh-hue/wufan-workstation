@@ -1,11 +1,11 @@
-import { modules } from "./modules.js?v=20260630-attachments1";
-import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260630-attachments1";
-import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260630-clearance-import1";
-import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260630-attachments1";
-import { bindTasksPageEvents, renderTasksPage } from "./tasksPage.js?v=20260630-clearance-import1";
-import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260630-attachments1";
-import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260630-attachments1";
-import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js?v=20260630-attachments1";
+import { modules } from "./modules.js?v=20260630-stability1";
+import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260630-stability1";
+import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260630-stability1";
+import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260630-stability1";
+import { bindTasksPageEvents, renderTasksPage } from "./tasksPage.js?v=20260630-stability1";
+import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260630-stability1";
+import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260630-stability1";
+import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js?v=20260630-stability1";
 import {
   flushPersistentSave,
   getCurrentUser,
@@ -14,8 +14,8 @@ import {
   login,
   logout,
   validateCurrentSession,
-} from "./appState.js?v=20260630-clearance-import1";
-import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260630-attachments1";
+} from "./appState.js?v=20260630-stability1";
+import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260630-stability1";
 
 const app = document.querySelector("#app");
 

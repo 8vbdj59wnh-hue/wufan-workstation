@@ -1,5 +1,15 @@
-import { createId, getCurrentUser, getCurrentWeek, getNow, resolveAssetUrl, state, uploadImageFile } from "./appState.js?v=20260630-clearance-import1";
-import { hasPermission } from "./permissions.js?v=20260630-attachments1";
+import {
+  createId,
+  createPersistentResource,
+  getCurrentUser,
+  getCurrentWeek,
+  getNow,
+  resolveAssetUrl,
+  state,
+  updatePersistentResource,
+  uploadImageFile,
+} from "./appState.js?v=20260630-stability1";
+import { hasPermission } from "./permissions.js?v=20260630-stability1";
 import {
   CategoryType,
   ContentScheduleStatus,
@@ -792,7 +802,7 @@ function setModalError(error) {
   }
 }
 
-function saveSchedule(form, rerender) {
+async function saveSchedule(form, rerender) {
   const editingSchedule = modalState.mode === "edit" ? getSchedule(modalState.scheduleId) : null;
   const draft = buildScheduleDraft(form);
   const error = validateScheduleDraft(draft);
@@ -810,11 +820,24 @@ function saveSchedule(form, rerender) {
       createdAt: now,
       updatedAt: now,
     };
+    try {
+      await createPersistentResource("content-schedules", newSchedule);
+    } catch (error) {
+      console.error("内容排期保存失败", error);
+      return setModalError(error.message || "内容排期保存失败，请检查本地数据库服务。", rerender);
+    }
     state.contentSchedules = [newSchedule, ...state.contentSchedules];
     selectedScheduleId = newSchedule.id;
   } else {
+    const updatedSchedule = { ...editingSchedule, ...normalizedDraft, updatedAt: now };
+    try {
+      await updatePersistentResource("content-schedules", updatedSchedule.id, updatedSchedule);
+    } catch (error) {
+      console.error("内容排期保存失败", error);
+      return setModalError(error.message || "内容排期保存失败，请检查本地数据库服务。", rerender);
+    }
     state.contentSchedules = state.contentSchedules.map((schedule) =>
-      schedule.id === editingSchedule.id ? { ...schedule, ...normalizedDraft, updatedAt: now } : schedule,
+      schedule.id === updatedSchedule.id ? updatedSchedule : schedule,
     );
   }
 
@@ -822,23 +845,42 @@ function saveSchedule(form, rerender) {
   rerender();
 }
 
-function cancelSchedule(scheduleId, rerender) {
+async function cancelSchedule(scheduleId, rerender) {
   if (!window.confirm("确定要取消该内容排期吗？取消后历史记录仍会保留。")) return;
+  const schedule = getSchedule(scheduleId);
+  if (schedule === null) return;
   const now = getNow();
-  state.contentSchedules = state.contentSchedules.map((schedule) =>
-    schedule.id === scheduleId ? { ...schedule, status: ContentScheduleStatus.Canceled, updatedAt: now } : schedule,
-  );
+  const updatedSchedule = { ...schedule, status: ContentScheduleStatus.Canceled, updatedAt: now };
+  try {
+    await updatePersistentResource("content-schedules", scheduleId, updatedSchedule);
+  } catch (error) {
+    console.error("内容排期取消失败", error);
+    window.alert(error.message || "内容排期保存失败，请检查本地数据库服务。");
+    return;
+  }
+  state.contentSchedules = state.contentSchedules.map((item) => (item.id === scheduleId ? updatedSchedule : item));
   rerender();
 }
 
-function bulkUpdateScheduleStatus(status, rerender) {
+async function bulkUpdateScheduleStatus(status, rerender) {
   if (selectedScheduleIds.size === 0) return;
   if (status === ContentScheduleStatus.Canceled && !window.confirm("确定要取消选中的内容排期吗？")) return;
 
   const now = getNow();
-  state.contentSchedules = state.contentSchedules.map((schedule) =>
-    selectedScheduleIds.has(schedule.id) ? { ...schedule, status, updatedAt: now } : schedule,
-  );
+  const updatedSchedules = state.contentSchedules
+    .filter((schedule) => selectedScheduleIds.has(schedule.id))
+    .map((schedule) => ({ ...schedule, status, updatedAt: now }));
+  try {
+    for (const schedule of updatedSchedules) {
+      await updatePersistentResource("content-schedules", schedule.id, schedule);
+    }
+  } catch (error) {
+    console.error("批量更新内容排期失败", error);
+    window.alert(error.message || "内容排期保存失败，请检查本地数据库服务。");
+    return;
+  }
+  const updatedMap = new Map(updatedSchedules.map((schedule) => [schedule.id, schedule]));
+  state.contentSchedules = state.contentSchedules.map((schedule) => updatedMap.get(schedule.id) ?? schedule);
   selectedScheduleIds = new Set();
   rerender();
 }
@@ -934,22 +976,29 @@ function buildWorkPlanFromSchedule(schedule, status, fallbackGoalId, now) {
   };
 }
 
-function createWorkPlanFromSchedule(scheduleId, status, rerender) {
+async function createWorkPlanFromSchedule(scheduleId, status, rerender) {
   const schedule = getSchedule(scheduleId);
   if (schedule === null) return;
   const now = getNow();
   const result = buildWorkPlanFromSchedule(schedule, status, null, now);
   if (result.error !== undefined) return window.alert(result.error);
   if (result.skipped === "duplicated") return window.alert("该内容已加入工作计划，已跳过重复创建。");
+  const updatedSchedule = { ...schedule, workPlanId: result.workPlanId, updatedAt: now };
+  try {
+    await createPersistentResource("work-plans", result.workPlan);
+    await updatePersistentResource("content-schedules", updatedSchedule.id, updatedSchedule);
+  } catch (error) {
+    console.error("内容排期加入工作失败", error);
+    window.alert(error.message || "加入工作失败，请检查本地数据库服务。");
+    return;
+  }
   state.workPlans = [result.workPlan, ...state.workPlans];
-  state.contentSchedules = state.contentSchedules.map((item) =>
-    item.id === result.scheduleId ? { ...item, workPlanId: result.workPlanId, updatedAt: now } : item,
-  );
+  state.contentSchedules = state.contentSchedules.map((item) => (item.id === result.scheduleId ? updatedSchedule : item));
   window.alert(status === WorkPlanStatus.ThisWeek ? "已加入本周工作，请到优先级模块发起工作。" : "已加入未来工作，请到优先级模块安排。");
   rerender();
 }
 
-function bulkCreateWorkPlansFromSchedules(status, rerender) {
+async function bulkCreateWorkPlansFromSchedules(status, rerender) {
   const schedules = [...selectedScheduleIds].map(getSchedule).filter(Boolean);
   if (schedules.length === 0) return;
   const fallbackGoalId = getBulkFallbackGoalId(schedules);
@@ -978,10 +1027,24 @@ function bulkCreateWorkPlansFromSchedules(status, rerender) {
   });
 
   if (createdWorkPlans.length > 0) {
+    const updatedSchedules = state.contentSchedules
+      .filter((item) => scheduleWorkPlanMap.has(item.id))
+      .map((item) => ({ ...item, workPlanId: scheduleWorkPlanMap.get(item.id), updatedAt: now }));
+    try {
+      for (const workPlan of createdWorkPlans) {
+        await createPersistentResource("work-plans", workPlan);
+      }
+      for (const schedule of updatedSchedules) {
+        await updatePersistentResource("content-schedules", schedule.id, schedule);
+      }
+    } catch (error) {
+      console.error("批量加入工作失败", error);
+      window.alert(error.message || "批量加入工作失败，请检查本地数据库服务。");
+      return;
+    }
+    const updatedScheduleMap = new Map(updatedSchedules.map((schedule) => [schedule.id, schedule]));
     state.workPlans = [...createdWorkPlans, ...state.workPlans];
-    state.contentSchedules = state.contentSchedules.map((item) =>
-      scheduleWorkPlanMap.has(item.id) ? { ...item, workPlanId: scheduleWorkPlanMap.get(item.id), updatedAt: now } : item,
-    );
+    state.contentSchedules = state.contentSchedules.map((item) => updatedScheduleMap.get(item.id) ?? item);
   }
 
   selectedScheduleIds = new Set();
@@ -994,23 +1057,34 @@ function bulkCreateWorkPlansFromSchedules(status, rerender) {
   rerender();
 }
 
-function bulkCancelSchedules(rerender) {
+async function bulkCancelSchedules(rerender) {
   if (selectedScheduleIds.size === 0) return;
   if (!window.confirm("确定要取消选中的内容排期吗？")) return;
   const now = getNow();
-  state.contentSchedules = state.contentSchedules.map((schedule) =>
-    selectedScheduleIds.has(schedule.id) ? { ...schedule, status: ContentScheduleStatus.Canceled, updatedAt: now } : schedule,
-  );
+  const updatedSchedules = state.contentSchedules
+    .filter((schedule) => selectedScheduleIds.has(schedule.id))
+    .map((schedule) => ({ ...schedule, status: ContentScheduleStatus.Canceled, updatedAt: now }));
+  try {
+    for (const schedule of updatedSchedules) {
+      await updatePersistentResource("content-schedules", schedule.id, schedule);
+    }
+  } catch (error) {
+    console.error("批量取消内容排期失败", error);
+    window.alert(error.message || "内容排期保存失败，请检查本地数据库服务。");
+    return;
+  }
+  const updatedMap = new Map(updatedSchedules.map((schedule) => [schedule.id, schedule]));
+  state.contentSchedules = state.contentSchedules.map((schedule) => updatedMap.get(schedule.id) ?? schedule);
   selectedScheduleIds = new Set();
   rerender();
 }
 
-function generateTaskFromSchedule(scheduleId, rerender) {
-  createWorkPlanFromSchedule(scheduleId, WorkPlanStatus.Future, rerender);
+async function generateTaskFromSchedule(scheduleId, rerender) {
+  await createWorkPlanFromSchedule(scheduleId, WorkPlanStatus.Future, rerender);
 }
 
-function startContentProcess(scheduleId, rerender) {
-  createWorkPlanFromSchedule(scheduleId, WorkPlanStatus.ThisWeek, rerender);
+async function startContentProcess(scheduleId, rerender) {
+  await createWorkPlanFromSchedule(scheduleId, WorkPlanStatus.ThisWeek, rerender);
 }
 
 function createXmlWorkbook(rows) {
@@ -1221,7 +1295,7 @@ async function handleImportFile(file, rerender) {
   }
 }
 
-function confirmImport(rerender) {
+async function confirmImport(rerender) {
   const validRows = modalState.rows.filter((row) => row.errors.length === 0);
   const failedCount = modalState.rows.length - validRows.length;
   if (validRows.length === 0) {
@@ -1256,6 +1330,17 @@ function confirmImport(rerender) {
     };
   });
 
+  try {
+    for (const schedule of importedSchedules) {
+      await createPersistentResource("content-schedules", schedule);
+    }
+  } catch (error) {
+    console.error("内容排期导入失败", error);
+    modalState = { ...modalState, error: error.message || "内容排期导入失败，请检查本地数据库服务。" };
+    rerender();
+    return;
+  }
+
   state.contentSchedules = [...importedSchedules, ...state.contentSchedules];
   selectedScheduleId = importedSchedules[0]?.id ?? selectedScheduleId;
   modalState = null;
@@ -1263,7 +1348,7 @@ function confirmImport(rerender) {
   rerender();
 }
 
-function handleScheduleAction(action, scheduleId, rerender) {
+async function handleScheduleAction(action, scheduleId, rerender) {
   const schedule = getSchedule(scheduleId);
   if (schedule === null) return;
 
@@ -1280,17 +1365,17 @@ function handleScheduleAction(action, scheduleId, rerender) {
   }
   if (action === "cancel-schedule") {
     if (!canCurrentUser("contentSchedules.batchCancel")) return;
-    cancelSchedule(scheduleId, rerender);
+    await cancelSchedule(scheduleId, rerender);
     return;
   }
   if (action === "generate-task") {
     if (!canCurrentUser("contentSchedules.addToFuture")) return;
-    generateTaskFromSchedule(scheduleId, rerender);
+    await generateTaskFromSchedule(scheduleId, rerender);
     return;
   }
   if (action === "start-content-process") {
     if (!canCurrentUser("contentSchedules.addToThisWeek")) return;
-    startContentProcess(scheduleId, rerender);
+    await startContentProcess(scheduleId, rerender);
   }
 }
 
@@ -1320,7 +1405,7 @@ export function bindContentScheduleEvents(rerender) {
     });
   }
 
-  page.addEventListener("click", (event) => {
+  page.addEventListener("click", async (event) => {
     const actionButton = event.target.closest("[data-content-action]");
     if (actionButton !== null) {
       const action = actionButton.dataset.contentAction;
@@ -1352,21 +1437,21 @@ export function bindContentScheduleEvents(rerender) {
       }
       if (action === "confirm-import") {
         if (!canCurrentUser("contentSchedules.import")) return;
-        confirmImport(rerender);
+        await confirmImport(rerender);
         return;
       }
       if (action === "bulk-create-work-plan") {
         if (actionButton.dataset.status === WorkPlanStatus.Future && !canCurrentUser("contentSchedules.addToFuture")) return;
         if (actionButton.dataset.status === WorkPlanStatus.ThisWeek && !canCurrentUser("contentSchedules.addToThisWeek")) return;
-        bulkCreateWorkPlansFromSchedules(actionButton.dataset.status, rerender);
+        await bulkCreateWorkPlansFromSchedules(actionButton.dataset.status, rerender);
         return;
       }
       if (action === "bulk-cancel-schedules") {
         if (!canCurrentUser("contentSchedules.batchCancel")) return;
-        bulkCancelSchedules(rerender);
+        await bulkCancelSchedules(rerender);
         return;
       }
-      handleScheduleAction(action, actionButton.dataset.scheduleId, rerender);
+      await handleScheduleAction(action, actionButton.dataset.scheduleId, rerender);
       return;
     }
 
@@ -1406,9 +1491,9 @@ export function bindContentScheduleEvents(rerender) {
   });
 
   if (scheduleForm !== null) {
-    scheduleForm.addEventListener("submit", (event) => {
+    scheduleForm.addEventListener("submit", async (event) => {
       event.preventDefault();
-      saveSchedule(event.target, rerender);
+      await saveSchedule(event.target, rerender);
     });
   }
 

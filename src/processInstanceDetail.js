@@ -1,4 +1,4 @@
-import { getNow, getProcessNodeStepOrder, resolveAssetUrl, state } from "./appState.js?v=20260630-clearance-import1";
+import { getNow, getProcessNodeStepOrder, resolveAssetUrl, state, updatePersistentResource } from "./appState.js?v=20260630-stability1";
 import {
   GoalStatus,
   ProcessInstanceStatus,
@@ -10,8 +10,8 @@ import {
   taskStatusNames,
   taskUrgencyNames,
 } from "./data/modelOptions.js";
-import { getTaskQuadrant, isTaskOverdue } from "./data/taskUtils.js?v=20260630-attachments1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-attachments1";
+import { getTaskQuadrant, isTaskOverdue } from "./data/taskUtils.js?v=20260630-stability1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-stability1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -364,7 +364,7 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
   const form = detail.querySelector(".launched-process-form");
   if (form === null) return;
 
-  form.addEventListener("submit", (event) => {
+  form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const instanceId = detail.dataset.launchedProcessDetail;
     const instance = getInstance(instanceId);
@@ -389,14 +389,13 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
       if (input !== undefined) customFields[key] = input.value.trim();
     });
 
-    state.processInstances = state.processInstances.map((item) =>
-      item.id === instanceId ? { ...item, name, goalId, description, customFields, updatedAt: now } : item,
-    );
+    const updatedInstance = { ...instance, name, goalId, description, customFields, updatedAt: now };
 
-    state.tasks = state.tasks.map((task) => {
-      if (task.processInstanceId !== instanceId) return task;
-      if (task.status === TaskStatus.Done || task.status === TaskStatus.Canceled) return task;
-
+    const updatedTasks = state.tasks
+      .filter((task) => task.processInstanceId === instanceId)
+      .filter((task) => task.status !== TaskStatus.Done && task.status !== TaskStatus.Canceled)
+      .filter(canEditTask)
+      .map((task) => {
       const plannedWeek = getFormValue(form, `task__${task.id}__plannedWeek`) || null;
 
       return {
@@ -413,6 +412,20 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
         updatedAt: now,
       };
     });
+
+    try {
+      await updatePersistentResource("process-instances", updatedInstance.id, updatedInstance);
+      for (const task of updatedTasks) {
+        await updatePersistentResource("tasks", task.id, task);
+      }
+    } catch (error) {
+      console.error("已发起流程保存失败", error);
+      return showFormError(form, error.message || "已发起流程保存失败，请检查本地数据库服务。");
+    }
+
+    const updatedTaskMap = new Map(updatedTasks.map((task) => [task.id, task]));
+    state.processInstances = state.processInstances.map((item) => (item.id === instanceId ? updatedInstance : item));
+    state.tasks = state.tasks.map((task) => updatedTaskMap.get(task.id) ?? task);
 
     rerender();
   });
