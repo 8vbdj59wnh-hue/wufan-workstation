@@ -1,11 +1,11 @@
-import { modules } from "./modules.js?v=20260701-sidebar-no-mark1";
-import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260701-sidebar-no-mark1";
-import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260701-sidebar-no-mark1";
-import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260701-sidebar-no-mark1";
-import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260701-sidebar-no-mark1";
-import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260701-sidebar-no-mark1";
-import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260701-sidebar-no-mark1";
-import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260701-sidebar-no-mark1";
+import { modules } from "./modules.js?v=20260701-avatar1";
+import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260701-avatar1";
+import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260701-avatar1";
+import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260701-avatar1";
+import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260701-avatar1";
+import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260701-avatar1";
+import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260701-avatar1";
+import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260701-avatar1";
 import {
   flushPersistentSave,
   getCurrentUser,
@@ -17,10 +17,14 @@ import {
   logout,
   markAllNotificationsRead,
   markNotificationRead,
+  resolveAssetUrl,
+  state,
   syncTaskNotificationsForCurrentUser,
+  updateCurrentUserAvatar,
+  uploadImageFile,
   validateCurrentSession,
-} from "./appState.js?v=20260701-sidebar-no-mark1";
-import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260701-sidebar-no-mark1";
+} from "./appState.js?v=20260701-avatar1";
+import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260701-avatar1";
 
 const app = document.querySelector("#app");
 
@@ -140,6 +144,64 @@ function renderNotificationButton() {
   `;
 }
 
+function getCurrentUserProfile(user) {
+  const person = state.people.find((item) => item.id === user?.id);
+  return {
+    ...person,
+    ...user,
+    avatarUrl: user?.avatarUrl || person?.avatarUrl || "",
+  };
+}
+
+function getAvatarInitial(user) {
+  const displayName = user?.name || user?.username || "我";
+  return escapeHtml(displayName.trim().slice(0, 1) || "我");
+}
+
+function renderUserProfile(user) {
+  const profile = getCurrentUserProfile(user);
+  const displayName = profile.name || profile.username || "已登录";
+  const avatarUrl = profile.avatarUrl ? resolveAssetUrl(profile.avatarUrl) : "";
+  return `
+    <div class="user-profile">
+      <label class="user-avatar-control" title="点击更换头像">
+        ${
+          avatarUrl
+            ? `<img class="user-avatar-image" src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(displayName)}头像" />`
+            : `<span class="user-avatar-placeholder">${getAvatarInitial(profile)}</span>`
+        }
+        <input class="visually-hidden" type="file" accept="image/*" data-user-avatar-input />
+      </label>
+      <span class="user-display-name">${escapeHtml(displayName)}</span>
+    </div>
+  `;
+}
+
+async function handleUserAvatarUpload(file) {
+  if (file === undefined) return;
+  try {
+    const uploaded = await uploadImageFile(file);
+    const updatedUser = await updateCurrentUserAvatar(uploaded.url);
+    const person = state.people.find((item) => item.id === updatedUser?.id);
+    if (person !== undefined) {
+      person.avatarUrl = updatedUser.avatarUrl ?? uploaded.url;
+      person.updatedAt = new Date().toISOString();
+    }
+    render();
+  } catch (error) {
+    console.error("头像保存失败", error);
+    window.alert(error.message || "头像保存失败，请检查本地数据库服务。");
+  }
+}
+
+function bindUserAvatarUpload() {
+  document.querySelector("[data-user-avatar-input]")?.addEventListener("change", async (event) => {
+    const input = event.currentTarget;
+    await handleUserAvatarUpload(input.files?.[0]);
+    input.value = "";
+  });
+}
+
 function renderSidebar() {
   return `
     <aside class="sidebar">
@@ -209,7 +271,7 @@ function renderPage() {
         <h1>${activeModule.name}</h1>
         <div class="user-menu">
           ${renderNotificationButton()}
-          <span>${currentUser?.name || currentUser?.username || "已登录"}</span>
+          ${renderUserProfile(currentUser)}
           <button class="text-button" type="button" data-action="logout">退出登录</button>
         </div>
       </header>
@@ -308,7 +370,7 @@ function render() {
           <header class="page-header">
             <h1>系统</h1>
             <div class="user-menu">
-              <span>${currentUser?.name || currentUser?.username || "已登录"}</span>
+              ${renderUserProfile(currentUser)}
               <button class="text-button" type="button" data-action="logout">退出登录</button>
             </div>
           </header>
@@ -321,6 +383,7 @@ function render() {
       loginError = "";
       renderLoginPage();
     });
+    bindUserAvatarUpload();
     return;
   }
 
@@ -348,6 +411,8 @@ function render() {
     loginError = "";
     renderLoginPage();
   });
+
+  bindUserAvatarUpload();
 
   document.querySelector('[data-action="toggle-notifications"]')?.addEventListener("click", () => {
     notificationPanelOpen = !notificationPanelOpen;

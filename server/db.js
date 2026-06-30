@@ -54,6 +54,7 @@ const resourceConfigs = {
       "positionId",
       "directManagerId",
       "role",
+      "avatarUrl",
       "username",
       "canLogin",
       "authRole",
@@ -694,6 +695,7 @@ function runLightweightMigrations() {
   ensureColumn("persons", "lastLoginAt", "TEXT");
   ensureColumn("persons", "mustChangePassword", "INTEGER DEFAULT 0");
   ensureColumn("persons", "permissions", "TEXT");
+  ensureColumn("persons", "avatarUrl", "TEXT");
 }
 
 function publicUser(row) {
@@ -704,6 +706,7 @@ function publicUser(row) {
     name: row.name,
     departmentId: row.departmentId,
     username: row.username,
+    avatarUrl: row.avatarUrl ?? "",
     role,
     canLogin: Boolean(row.canLogin),
     mustChangePassword: Boolean(row.mustChangePassword),
@@ -939,6 +942,14 @@ export function getPublicUser(row) {
 export function touchLastLoginAt(id) {
   const lastLoginAt = new Date().toISOString();
   getDatabase().prepare("UPDATE persons SET lastLoginAt = @lastLoginAt WHERE id = @id").run({ id, lastLoginAt });
+}
+
+export function updateCurrentUserAvatar(id, avatarUrl) {
+  const updatedAt = new Date().toISOString();
+  getDatabase()
+    .prepare("UPDATE persons SET avatarUrl = @avatarUrl, updatedAt = @updatedAt WHERE id = @id")
+    .run({ id, avatarUrl, updatedAt });
+  return findLoginUserById(id);
 }
 
 export function cancelProcessInstance(instanceId, cancelReason = "") {

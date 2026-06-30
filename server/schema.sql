@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS persons (
   positionId TEXT NOT NULL,
   directManagerId TEXT,
   role TEXT NOT NULL,
+  avatarUrl TEXT,
   status TEXT NOT NULL,
   createdAt TEXT,
   updatedAt TEXT

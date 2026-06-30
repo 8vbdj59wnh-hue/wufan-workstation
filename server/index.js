@@ -18,6 +18,7 @@ import {
   readRouteResource,
   replaceAllData,
   touchLastLoginAt,
+  updateCurrentUserAvatar,
   updateResource,
   uploadsDir,
 } from "./db.js";
@@ -296,6 +297,22 @@ app.get("/api/auth/me", requireAuth, (request, response) => {
 });
 
 app.use("/api", requireAuth);
+
+app.put("/api/me/avatar", (request, response) => {
+  try {
+    const avatarUrl = String(request.body?.avatarUrl ?? "").trim();
+    if (avatarUrl !== "" && !avatarUrl.startsWith("/uploads/images/")) {
+      response.status(400).json({ success: false, message: "头像地址不合法。" });
+      return;
+    }
+
+    const updatedUser = updateCurrentUserAvatar(request.user.id, avatarUrl);
+    response.json({ success: true, user: getPublicUser(updatedUser) });
+  } catch (error) {
+    console.error("头像保存失败", error);
+    response.status(500).json({ success: false, message: "头像保存失败，请检查本地数据库服务。" });
+  }
+});
 
 app.get("/api/data", (request, response) => {
   try {

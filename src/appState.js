@@ -17,7 +17,7 @@ import {
   methodologies as initialMethodologies,
   notifications as initialNotifications,
   workPlans as initialWorkPlans,
-} from "./data/mockData.js?v=20260701-sidebar-no-mark1";
+} from "./data/mockData.js?v=20260701-avatar1";
 import {
   CategoryType,
   PersonRole,
@@ -33,8 +33,8 @@ import {
   TaskStatus,
   TaskTemplateStatus,
   TaskUrgency,
-} from "./data/modelOptions.js?v=20260701-sidebar-no-mark1";
-import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260701-sidebar-no-mark1";
+} from "./data/modelOptions.js?v=20260701-avatar1";
+import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260701-avatar1";
 
 const apiPort = "3001";
 const apiBaseUrl = `${window.location.protocol}//${window.location.hostname}:${apiPort}`;
@@ -347,6 +347,20 @@ export async function updatePersistentResource(resource, id, item) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.message ?? data.error ?? "保存失败，请检查本地数据库服务。");
   return data;
+}
+
+export async function updateCurrentUserAvatar(avatarUrl) {
+  const response = await authFetch(`${apiBaseUrl}/api/me/avatar`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ avatarUrl }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success !== true) {
+    throw new Error(data.message ?? data.error ?? "头像保存失败，请检查本地数据库服务。");
+  }
+  currentUser = data.user ?? currentUser;
+  return currentUser;
 }
 
 export async function deletePersistentResource(resource, id) {
