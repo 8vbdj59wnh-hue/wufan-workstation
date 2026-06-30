@@ -16,9 +16,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260630-task-density1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-task-density1";
-import { hasPermission } from "./permissions.js?v=20260630-task-density1";
+} from "./appState.js?v=20260630-task-filter-simple1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-task-filter-simple1";
+import { hasPermission } from "./permissions.js?v=20260630-task-filter-simple1";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-task-density1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-density1";
-import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-task-density1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-task-density1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-task-filter-simple1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-filter-simple1";
+import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-task-filter-simple1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-task-filter-simple1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -2370,6 +2370,7 @@ function canRestoreTask(task) {
 }
 
 function renderFilters() {
+  filters = { ...filters, source: "", goalId: "", categoryId: "", quadrant: "" };
   return `
     <form class="task-filters" aria-label="任务筛选">
       <label>
@@ -2400,12 +2401,6 @@ function renderFilters() {
         <span>显示已取消</span>
       </label>
       <label>
-        <span>任务来源</span>
-        <select name="source">
-          ${renderValueOptions(TaskSource, filters.source, taskSourceNames, "全部来源")}
-        </select>
-      </label>
-      <label>
         <span>负责部门</span>
         <select name="departmentId">
           ${renderOptions(departments, filters.departmentId, "全部部门")}
@@ -2415,33 +2410,6 @@ function renderFilters() {
         <span>负责人</span>
         <select name="ownerId">
           ${renderOptions(people, filters.ownerId, "全部负责人")}
-        </select>
-      </label>
-      <label>
-        <span>关联目标</span>
-        <select name="goalId">
-          ${renderOptions(getActiveGoals(), filters.goalId, "全部目标")}
-        </select>
-      </label>
-      <label>
-        <span>工作分类</span>
-        <select name="categoryId">
-          ${renderOptions(getTaskCategories(), filters.categoryId, "全部工作分类")}
-        </select>
-      </label>
-      <label>
-        <span>四象限</span>
-        <select name="quadrant">
-          <option value="">全部象限</option>
-          ${Object.entries(quadrantNames)
-            .map(
-              ([key, name]) => `
-                <option value="${key}" ${filters.quadrant === key ? "selected" : ""}>
-                  ${name}
-                </option>
-              `,
-            )
-            .join("")}
         </select>
       </label>
       <label>
