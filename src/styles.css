@@ -30,25 +30,25 @@ textarea {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 232px minmax(0, 1fr);
+  grid-template-columns: 132px minmax(0, 1fr);
   min-height: 100vh;
 }
 
 .sidebar {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 18px;
   border-right: 1px solid #e5e7eb;
   background: #ffffff;
-  padding: 20px 14px;
+  padding: 16px 10px;
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 36px;
-  padding: 0 8px;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 4px;
 }
 
 .brand-mark {
@@ -59,13 +59,14 @@ textarea {
 }
 
 .brand-name {
+  display: grid;
+  gap: 2px;
   overflow: hidden;
   color: #111827;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.2;
+  white-space: normal;
 }
 
 .nav {
@@ -76,13 +77,13 @@ textarea {
 
 .nav-item {
   width: 100%;
-  min-height: 40px;
+  min-height: 36px;
   border: 0;
   border-radius: 6px;
   background: transparent;
   color: #4b5563;
   cursor: pointer;
-  padding: 0 12px;
+  padding: 0 8px;
   text-align: left;
 }
 

@@ -1,11 +1,11 @@
-import { modules } from "./modules.js?v=20260701-customer-value-chain1";
-import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260701-customer-value-chain1";
-import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260701-customer-value-chain1";
-import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260701-customer-value-chain1";
-import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260701-customer-value-chain1";
-import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260701-customer-value-chain1";
-import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260701-customer-value-chain1";
-import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260701-customer-value-chain1";
+import { modules } from "./modules.js?v=20260701-compact-sidebar1";
+import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260701-compact-sidebar1";
+import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260701-compact-sidebar1";
+import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260701-compact-sidebar1";
+import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260701-compact-sidebar1";
+import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260701-compact-sidebar1";
+import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260701-compact-sidebar1";
+import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260701-compact-sidebar1";
 import {
   flushPersistentSave,
   getCurrentUser,
@@ -19,8 +19,8 @@ import {
   markNotificationRead,
   syncTaskNotificationsForCurrentUser,
   validateCurrentSession,
-} from "./appState.js?v=20260701-customer-value-chain1";
-import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260701-customer-value-chain1";
+} from "./appState.js?v=20260701-compact-sidebar1";
+import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260701-compact-sidebar1";
 
 const app = document.querySelector("#app");
 
@@ -145,7 +145,7 @@ function renderSidebar() {
     <aside class="sidebar">
       <div class="brand">
         <span class="brand-mark"></span>
-        <span class="brand-name">屋范·极简工作站</span>
+        <span class="brand-name"><span>屋范</span><span>极简工作站</span></span>
       </div>
       <nav class="nav" aria-label="主导航">
         ${getAccessibleModules()

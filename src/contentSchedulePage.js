@@ -8,8 +8,8 @@ import {
   state,
   updatePersistentResource,
   uploadImageFile,
-} from "./appState.js?v=20260701-customer-value-chain1";
-import { hasPermission } from "./permissions.js?v=20260701-customer-value-chain1";
+} from "./appState.js?v=20260701-compact-sidebar1";
+import { hasPermission } from "./permissions.js?v=20260701-compact-sidebar1";
 import {
   CategoryType,
   ContentScheduleStatus,
