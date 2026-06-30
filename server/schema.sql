@@ -271,6 +271,22 @@ CREATE TABLE IF NOT EXISTS methodologies (
   updatedAt TEXT
 );
 
+CREATE TABLE IF NOT EXISTS notifications (
+  id TEXT PRIMARY KEY,
+  userId TEXT NOT NULL,
+  taskId TEXT,
+  processInstanceId TEXT,
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  message TEXT,
+  status TEXT NOT NULL,
+  priority TEXT,
+  dueDate TEXT,
+  readAt TEXT,
+  createdAt TEXT,
+  updatedAt TEXT
+);
+
 CREATE TABLE IF NOT EXISTS content_schedules (
   id TEXT PRIMARY KEY,
   publishDate TEXT,

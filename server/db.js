@@ -21,6 +21,7 @@ import {
   weeklyReportProblems,
   weeklyReports,
   workPlans,
+  notifications,
 } from "../src/data/mockData.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -310,6 +311,24 @@ const resourceConfigs = {
     ],
     jsonFields: ["steps"],
   },
+  notifications: {
+    table: "notifications",
+    columns: [
+      "id",
+      "userId",
+      "taskId",
+      "processInstanceId",
+      "type",
+      "title",
+      "message",
+      "status",
+      "priority",
+      "dueDate",
+      "readAt",
+      "createdAt",
+      "updatedAt",
+    ],
+  },
   contentSchedules: {
     table: "content_schedules",
     columns: [
@@ -377,6 +396,7 @@ const routeResourceMap = {
   "process-template-nodes": "processTemplateNodes",
   "process-instances": "processInstances",
   methodologies: "methodologies",
+  notifications: "notifications",
   "content-schedules": "contentSchedules",
   "work-plans": "workPlans",
 };
@@ -400,6 +420,7 @@ const seedData = {
   })),
   processInstances,
   methodologies: [],
+  notifications,
   contentSchedules,
   workPlans,
 };
@@ -583,6 +604,23 @@ function runLightweightMigrations() {
       taskTemplateId TEXT,
       description TEXT,
       steps TEXT,
+      createdAt TEXT,
+      updatedAt TEXT
+    )
+  `);
+  getDatabase().exec(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      userId TEXT NOT NULL,
+      taskId TEXT,
+      processInstanceId TEXT,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      message TEXT,
+      status TEXT NOT NULL,
+      priority TEXT,
+      dueDate TEXT,
+      readAt TEXT,
       createdAt TEXT,
       updatedAt TEXT
     )

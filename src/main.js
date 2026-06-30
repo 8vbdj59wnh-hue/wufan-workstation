@@ -1,21 +1,26 @@
-import { modules } from "./modules.js?v=20260630-submit-file-remove2";
-import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260630-submit-file-remove2";
-import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260630-submit-file-remove2";
-import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260630-submit-file-remove2";
-import { bindTasksPageEvents, renderTasksPage } from "./tasksPage.js?v=20260630-submit-file-remove2";
-import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260630-submit-file-remove2";
-import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260630-submit-file-remove2";
-import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js?v=20260630-submit-file-remove2";
+import { modules } from "./modules.js?v=20260630-notifications1";
+import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260630-notifications1";
+import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260630-notifications1";
+import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260630-notifications1";
+import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260630-notifications1";
+import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260630-notifications1";
+import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260630-notifications1";
+import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js?v=20260630-notifications1";
 import {
   flushPersistentSave,
   getCurrentUser,
+  getCurrentUserNotifications,
+  getUnreadNotificationCount,
   getPersistenceStatus,
   loadPersistentData,
   login,
   logout,
+  markAllNotificationsRead,
+  markNotificationRead,
+  syncTaskNotificationsForCurrentUser,
   validateCurrentSession,
-} from "./appState.js?v=20260630-submit-file-remove2";
-import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260630-submit-file-remove2";
+} from "./appState.js?v=20260630-notifications1";
+import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260630-notifications1";
 
 const app = document.querySelector("#app");
 
@@ -72,6 +77,7 @@ function getModuleIdFromHash() {
 
 let activeModuleId = getModuleIdFromHash();
 let loginError = "";
+let notificationPanelOpen = false;
 
 function getActiveModule() {
   return modules.find((module) => module.id === activeModuleId) ?? modules[0];
@@ -79,6 +85,55 @@ function getActiveModule() {
 
 function getAccessibleModules() {
   return modules.filter((module) => canAccessModule(getCurrentUser(), module.id));
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function renderNotificationPanel() {
+  if (!notificationPanelOpen) return "";
+  const notifications = getCurrentUserNotifications();
+  return `
+    <div class="notification-panel">
+      <div class="notification-panel-header">
+        <strong>任务提醒</strong>
+        <button class="text-button" type="button" data-action="mark-all-notifications-read">全部已读</button>
+      </div>
+      ${
+        notifications.length === 0
+          ? `<p class="form-note">暂无任务提醒</p>`
+          : notifications
+              .slice(0, 12)
+              .map(
+                (notification) => `
+                  <button class="notification-item ${notification.status === "unread" ? "is-unread" : ""}" type="button" data-action="open-notification-task" data-notification-id="${escapeHtml(notification.id)}" data-task-id="${escapeHtml(notification.taskId ?? "")}">
+                    <span class="notification-title">${escapeHtml(notification.title)}</span>
+                    <span class="notification-message">${escapeHtml(notification.message ?? "")}</span>
+                  </button>
+                `,
+              )
+              .join("")
+      }
+    </div>
+  `;
+}
+
+function renderNotificationButton() {
+  const unreadCount = getUnreadNotificationCount();
+  return `
+    <div class="notification-menu">
+      <button class="icon-button notification-button" type="button" data-action="toggle-notifications" aria-label="任务提醒">
+        <span>提醒</span>
+        ${unreadCount > 0 ? `<span class="notification-badge">${unreadCount}</span>` : ""}
+      </button>
+      ${renderNotificationPanel()}
+    </div>
+  `;
 }
 
 function renderSidebar() {
@@ -154,6 +209,7 @@ function renderPage() {
       <header class="page-header">
         <h1>${activeModule.name}</h1>
         <div class="user-menu">
+          ${renderNotificationButton()}
           <span>${currentUser?.name || currentUser?.username || "已登录"}</span>
           <button class="text-button" type="button" data-action="logout">退出登录</button>
         </div>
@@ -213,6 +269,7 @@ function renderLoginPage() {
 
     loginError = "";
     await loadPersistentData();
+    await syncTaskNotificationsForCurrentUser();
     const firstAccessibleModule = getFirstAccessibleModule(getCurrentUser(), modules);
     window.location.hash = firstAccessibleModule?.id ?? "goals";
     render();
@@ -293,6 +350,28 @@ function render() {
     renderLoginPage();
   });
 
+  document.querySelector('[data-action="toggle-notifications"]')?.addEventListener("click", () => {
+    notificationPanelOpen = !notificationPanelOpen;
+    render();
+  });
+
+  document.querySelector('[data-action="mark-all-notifications-read"]')?.addEventListener("click", async () => {
+    await markAllNotificationsRead();
+    render();
+  });
+
+  document.querySelectorAll('[data-action="open-notification-task"]').forEach((item) => {
+    item.addEventListener("click", async () => {
+      const notificationId = item.dataset.notificationId;
+      const taskId = item.dataset.taskId;
+      if (notificationId) await markNotificationRead(notificationId);
+      if (taskId) selectTask(taskId);
+      notificationPanelOpen = false;
+      window.location.hash = "task-list";
+      render();
+    });
+  });
+
   if (activeModuleId === "settings") {
     bindSettingsPageEvents(render);
   }
@@ -337,5 +416,6 @@ if (currentUser === null) {
   renderLoginPage();
 } else {
   await loadPersistentData();
+  await syncTaskNotificationsForCurrentUser();
   render();
 }

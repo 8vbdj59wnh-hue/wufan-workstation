@@ -1514,6 +1514,9 @@ export const weeklyReportProblems = [];
 /** @type {import("./models.js").Methodology[]} */
 export const methodologies = [];
 
+/** @type {import("./models.js").Notification[]} */
+export const notifications = [];
+
 export const baseMockData = Object.freeze({
   companies,
   departments,
@@ -1524,6 +1527,7 @@ export const baseMockData = Object.freeze({
   weeklyReports,
   weeklyReportProblems,
   methodologies,
+  notifications,
   goals,
   tasks,
   contentSchedules,

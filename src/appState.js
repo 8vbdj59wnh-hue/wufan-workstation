@@ -15,8 +15,9 @@ import {
   weeklyReportProblems as initialWeeklyReportProblems,
   weeklyReports as initialWeeklyReports,
   methodologies as initialMethodologies,
+  notifications as initialNotifications,
   workPlans as initialWorkPlans,
-} from "./data/mockData.js?v=20260630-submit-file-remove2";
+} from "./data/mockData.js?v=20260630-notifications1";
 import {
   CategoryType,
   PersonRole,
@@ -32,8 +33,8 @@ import {
   TaskStatus,
   TaskTemplateStatus,
   TaskUrgency,
-} from "./data/modelOptions.js?v=20260630-submit-file-remove2";
-import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260630-submit-file-remove2";
+} from "./data/modelOptions.js?v=20260630-notifications1";
+import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260630-notifications1";
 
 const apiPort = "3001";
 const apiBaseUrl = `${window.location.protocol}//${window.location.hostname}:${apiPort}`;
@@ -67,6 +68,7 @@ export const state = {
   weeklyReports: initialWeeklyReports.map((report) => ({ ...report })),
   weeklyReportProblems: initialWeeklyReportProblems.map((problem) => ({ ...problem })),
   methodologies: initialMethodologies.map((methodology) => ({ ...methodology })),
+  notifications: initialNotifications.map((notification) => ({ ...notification })),
 };
 
 normalizeTaskSubmitRequirements();
@@ -124,6 +126,7 @@ export function getDataSnapshot() {
     weeklyReports: state.weeklyReports,
     weeklyReportProblems: state.weeklyReportProblems,
     methodologies: state.methodologies,
+    notifications: state.notifications,
   };
 }
 
@@ -151,6 +154,7 @@ export function applyDataSnapshot(data) {
   replaceArray(state.weeklyReports, data.weeklyReports);
   replaceArray(state.weeklyReportProblems, data.weeklyReportProblems);
   replaceArray(state.methodologies, data.methodologies);
+  replaceArray(state.notifications, data.notifications);
   isApplyingRemoteData = false;
   ensureTaskTemplatesHaveProcessTemplates();
   ensureDefaultStandardWorkLibrary();
@@ -390,6 +394,128 @@ export function createId(prefix) {
 
 export function getNow() {
   return new Date().toISOString();
+}
+
+function getTodayDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function getReminderTask(taskId) {
+  return state.tasks.find((task) => task.id === taskId) ?? null;
+}
+
+function isTaskReminderActive(task) {
+  return [TaskStatus.Todo, TaskStatus.Doing, TaskStatus.PendingAcceptance].includes(task?.status);
+}
+
+function getTaskReminderType(task) {
+  if (task?.status === TaskStatus.PendingAcceptance) return "pending_acceptance";
+  if (task?.dueDate && task.dueDate < getTodayDate()) return "overdue";
+  if (task?.dueDate) {
+    const dueTime = new Date(`${task.dueDate}T00:00:00`).getTime();
+    const todayTime = new Date(`${getTodayDate()}T00:00:00`).getTime();
+    const days = Math.round((dueTime - todayTime) / 86400000);
+    if (days <= 1) return "due_soon";
+  }
+  return "assigned";
+}
+
+function getTaskReminderTitle(type) {
+  if (type === "overdue") return "任务已逾期";
+  if (type === "due_soon") return "任务即将到期";
+  if (type === "pending_acceptance") return "任务待验收";
+  return "你有待处理任务";
+}
+
+function getTaskReminderPriority(type) {
+  if (type === "overdue") return "high";
+  if (type === "due_soon" || type === "pending_acceptance") return "medium";
+  return "normal";
+}
+
+function getTaskReminderId(userId, taskId, type) {
+  return `notification-${userId}-${taskId}-${type}`;
+}
+
+function buildTaskNotification(userId, task, type) {
+  const now = getNow();
+  return {
+    id: getTaskReminderId(userId, task.id, type),
+    userId,
+    taskId: task.id,
+    processInstanceId: task.processInstanceId ?? null,
+    type,
+    title: getTaskReminderTitle(type),
+    message: task.dueDate ? `${task.name}｜截止 ${task.dueDate}` : task.name,
+    status: "unread",
+    priority: getTaskReminderPriority(type),
+    dueDate: task.dueDate ?? null,
+    readAt: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export function getCurrentUserNotifications() {
+  const user = getCurrentUser();
+  if (user === null) return [];
+  return state.notifications
+    .filter((notification) => notification.userId === user.id)
+    .filter((notification) => {
+      const task = getReminderTask(notification.taskId);
+      return task === null || isTaskReminderActive(task);
+    })
+    .sort((left, right) => {
+      const statusOrder = left.status === "unread" && right.status !== "unread" ? -1 : left.status !== "unread" && right.status === "unread" ? 1 : 0;
+      if (statusOrder !== 0) return statusOrder;
+      const priorityOrder = { high: 0, medium: 1, normal: 2 };
+      const leftPriority = priorityOrder[left.priority] ?? 3;
+      const rightPriority = priorityOrder[right.priority] ?? 3;
+      if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+      return String(right.createdAt ?? "").localeCompare(String(left.createdAt ?? ""));
+    });
+}
+
+export function getUnreadNotificationCount() {
+  return getCurrentUserNotifications().filter((notification) => notification.status === "unread").length;
+}
+
+export async function markNotificationRead(notificationId) {
+  const notification = state.notifications.find((item) => item.id === notificationId);
+  if (notification === undefined || notification.status === "read") return notification ?? null;
+  const now = getNow();
+  const updatedNotification = { ...notification, status: "read", readAt: now, updatedAt: now };
+  await updatePersistentResource("notifications", notificationId, updatedNotification);
+  state.notifications = state.notifications.map((item) => (item.id === notificationId ? updatedNotification : item));
+  return updatedNotification;
+}
+
+export async function markAllNotificationsRead() {
+  const unreadNotifications = getCurrentUserNotifications().filter((notification) => notification.status === "unread");
+  for (const notification of unreadNotifications) {
+    await markNotificationRead(notification.id);
+  }
+}
+
+export async function syncTaskNotificationsForCurrentUser() {
+  const user = getCurrentUser();
+  if (user === null || !loadedFromDatabase) return;
+  const reminders = state.tasks
+    .filter((task) => task.ownerId === user.id)
+    .filter((task) => isTaskReminderActive(task))
+    .map((task) => buildTaskNotification(user.id, task, getTaskReminderType(task)));
+
+  for (const reminder of reminders) {
+    const existing = state.notifications.find((notification) => notification.id === reminder.id);
+    if (existing !== undefined) continue;
+    try {
+      await createPersistentResource("notifications", reminder);
+      state.notifications = [reminder, ...state.notifications];
+    } catch (error) {
+      console.error("任务提醒生成失败", error);
+      return;
+    }
+  }
 }
 
 function createSubmitField(key, label, type, required = false, options = null, placeholder = "") {
