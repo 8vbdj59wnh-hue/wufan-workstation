@@ -1,4 +1,4 @@
-import { resolveAssetUrl, state } from "./appState.js?v=20260630-clearance-only1";
+import { resolveAssetUrl, state } from "./appState.js?v=20260630-task-name-col1";
 
 const hiddenSystemFieldKeys = new Set(["standardWorkAttachments"]);
 

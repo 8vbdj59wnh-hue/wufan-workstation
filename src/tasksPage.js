@@ -16,9 +16,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260630-clearance-only1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-clearance-only1";
-import { hasPermission } from "./permissions.js?v=20260630-clearance-only1";
+} from "./appState.js?v=20260630-task-name-col1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-task-name-col1";
+import { hasPermission } from "./permissions.js?v=20260630-task-name-col1";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-clearance-only1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-clearance-only1";
-import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-clearance-only1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-clearance-only1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-task-name-col1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-name-col1";
+import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-task-name-col1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-task-name-col1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -976,8 +976,8 @@ function renderTaskRow(task, index, options = {}) {
         </label>
       </td>
       <td class="task-cover-column">${renderCoverImage(task)}</td>
-      <td class="task-belonging-column">${renderTaskBelonging(task)}</td>
       <td class="task-name-column">${prefix}<span class="task-line-clamp task-name-text">${escapeHtml(task.name)}</span></td>
+      <td class="task-belonging-column">${renderTaskBelonging(task)}</td>
       <td class="task-goal-column"><span class="task-line-clamp">${findName(goals, task.goalId, "未对齐目标")}</span></td>
       <td class="task-department-column">${findName(departments, task.departmentId, "未设置")}</td>
       <td class="task-owner-column">${findName(people, task.ownerId, "未设置")}</td>
@@ -1017,6 +1017,7 @@ function renderProcessTaskGroupRow(row, index) {
         </div>
       </td>
       <td class="task-cover-column">${renderCoverImage(task)}</td>
+      <td class="task-name-column"><span class="task-line-clamp task-name-text">${escapeHtml(task.name)}</span></td>
       <td class="task-belonging-column">
         <div class="task-belonging">
           <strong>${escapeHtml(title)}</strong>
@@ -1024,7 +1025,6 @@ function renderProcessTaskGroupRow(row, index) {
           <small>${row.expanded ? `已展开 ${row.tasks.length} 个节点` : `当前任务：${escapeHtml(task.name)}`}</small>
         </div>
       </td>
-      <td class="task-name-column"><span class="task-line-clamp task-name-text">${escapeHtml(task.name)}</span></td>
       <td class="task-goal-column"><span class="task-line-clamp">${findName(goals, task.goalId, "未对齐目标")}</span></td>
       <td class="task-department-column">${findName(departments, task.departmentId, "未设置")}</td>
       <td class="task-owner-column">${findName(people, task.ownerId, "未设置")}</td>
@@ -2526,8 +2526,8 @@ function renderTaskTable() {
                 </label>
               </th>
               <th class="task-cover-column">产品图</th>
-              <th class="task-belonging-column">归属事项</th>
               <th class="task-name-column">任务名</th>
+              <th class="task-belonging-column">归属事项</th>
               <th class="task-goal-column">对齐目标</th>
               <th class="task-department-column">负责部门</th>
               <th class="task-owner-column">负责人</th>
