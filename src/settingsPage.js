@@ -1,4 +1,4 @@
-import { getCurrentUser, savePersistentData, state, validateCurrentSession } from "./appState.js?v=20260630-attachments1";
+import { getCurrentUser, savePersistentData, state, validateCurrentSession } from "./appState.js?v=20260630-state-unified1";
 import {
   applyPermissionTemplate,
   dataScopeOptions,

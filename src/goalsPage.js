@@ -6,7 +6,7 @@ import {
   state,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260630-attachments1";
+} from "./appState.js?v=20260630-state-unified1";
 import { hasPermission } from "./permissions.js?v=20260630-attachments1";
 import {
   CategoryType,
@@ -35,7 +35,7 @@ import {
 } from "./data/modelOptions.js";
 import { getPrimaryImageUrl, getTaskQuadrant, isTaskOverdue } from "./data/taskUtils.js?v=20260630-attachments1";
 import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-attachments1";
-import { selectTask } from "./tasksPage.js?v=20260630-standard-work-flow1";
+import { selectTask } from "./tasksPage.js?v=20260630-state-unified1";
 
 const categories = state.categories;
 const departments = state.departments;

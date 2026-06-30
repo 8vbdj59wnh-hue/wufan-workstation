@@ -12,7 +12,7 @@ import {
   state,
   stopProcess,
   updatePersistentResource,
-} from "./appState.js?v=20260630-process-node-persist1";
+} from "./appState.js?v=20260630-state-unified1";
 import { hasPermission } from "./permissions.js?v=20260630-attachments1";
 import {
   CategoryType,
@@ -39,7 +39,7 @@ import {
 import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260630-attachments1";
 import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-attachments1";
 import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260630-attachments1";
-import { selectTask } from "./tasksPage.js?v=20260630-task-persist1";
+import { selectTask } from "./tasksPage.js?v=20260630-state-unified1";
 
 const today = "2026-06-24";
 let selectedTemplateId = state.processTemplates[0]?.id ?? null;
