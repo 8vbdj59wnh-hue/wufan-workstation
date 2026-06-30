@@ -16,9 +16,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260701-no-method-link-card1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-no-method-link-card1";
-import { hasPermission } from "./permissions.js?v=20260701-no-method-link-card1";
+} from "./appState.js?v=20260701-value-chain-standard-work1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-value-chain-standard-work1";
+import { hasPermission } from "./permissions.js?v=20260701-value-chain-standard-work1";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-no-method-link-card1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-no-method-link-card1";
-import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-no-method-link-card1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-no-method-link-card1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-value-chain-standard-work1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-value-chain-standard-work1";
+import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-value-chain-standard-work1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-value-chain-standard-work1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -146,12 +146,15 @@ const clearanceImportHeaders = [
 ];
 const clearanceRequiredImportHeaders = ["清仓产品", "当前库存", "清仓原因", "清仓渠道", "期望完成日期"];
 
-const standardWorkDepartmentColumns = [
-  { title: "视觉部", names: ["视觉部", "视觉营销部"] },
-  { title: "供应链", names: ["供应链", "供应链部"] },
-  { title: "运营部", names: ["运营部"] },
-  { title: "产品部", names: ["产品部"] },
-  { title: "综合部", names: ["综合部"] },
+const standardWorkValueChainColumns = [
+  { title: "基础设施维护", keywords: ["基础", "设施", "行政", "财务", "系统", "设备", "账号", "数据", "检查"], departmentNames: ["综合部", "行政部", "财务部"] },
+  { title: "人力资产管理", keywords: ["人力", "人员", "员工", "招聘", "入职", "培训", "绩效", "考核", "岗位"], departmentNames: ["人事部", "人力资源部"] },
+  { title: "产品研发", keywords: ["新品开发", "产品研发", "产品设计", "包装设计", "研发", "设计", "打样", "选品", "新品资料"], departmentNames: ["产品部"] },
+  { title: "供应链管理", keywords: ["供应链", "供应商", "采购", "库存", "清仓", "补货", "仓库", "交期", "物流"], departmentNames: ["供应链", "供应链部"] },
+  { title: "品牌营销", keywords: ["品牌", "营销", "内容", "笔记", "小红书", "买家秀", "拍摄", "素材", "投放"], departmentNames: ["视觉部", "视觉营销部", "市场部", "品牌部"] },
+  { title: "渠道销售", keywords: ["渠道", "销售", "上架", "店铺", "平台", "直播", "私域", "运营"], departmentNames: ["运营部", "渠道部", "销售部"] },
+  { title: "售后服务", keywords: ["售后", "客服", "退换", "退款", "客诉", "维修"], departmentNames: ["客服部", "售后部"] },
+  { title: "老客维护", keywords: ["老客", "会员", "复购", "社群", "客户维护", "回访"], departmentNames: ["会员部", "客户成功部"] },
 ];
 
 const hiddenLegacyStandardWorkNames = [
@@ -224,8 +227,21 @@ function getProcessTemplateName(templateId) {
   return state.processTemplates.find((template) => template.id === templateId)?.name ?? "未绑定标准流程";
 }
 
-function findDepartmentByNames(names) {
-  return departments.find((department) => names.includes(department.name)) ?? null;
+function getStandardWorkValueChain(template) {
+  const categoryName = findName(categories, template.categoryId, "");
+  const departmentName = findName(departments, template.departmentId, "");
+  const processName = getProcessTemplateName(template.defaultProcessTemplateId ?? "");
+  const searchText = [
+    template.name,
+    categoryName,
+    departmentName,
+    processName === "未绑定标准流程" ? "" : processName,
+  ].join(" ");
+
+  return standardWorkValueChainColumns.find((column) =>
+    column.keywords.some((keyword) => searchText.includes(keyword)) ||
+    column.departmentNames.includes(departmentName),
+  )?.title ?? "基础设施维护";
 }
 
 function getTaskTemplateForTask(task) {
@@ -2639,10 +2655,9 @@ function renderTaskTemplateTable(selectedProcessTemplateId = "") {
       </div>
       <div class="standard-work-board-wrap">
         <div class="standard-work-board">
-          ${standardWorkDepartmentColumns
+          ${standardWorkValueChainColumns
             .map((column) => {
-              const department = findDepartmentByNames(column.names);
-              const columnTemplates = visibleTemplates.filter((template) => template.departmentId === department?.id);
+              const columnTemplates = visibleTemplates.filter((template) => getStandardWorkValueChain(template) === column.title);
               return `
                 <section class="standard-work-column">
                   <div class="standard-work-column-header">

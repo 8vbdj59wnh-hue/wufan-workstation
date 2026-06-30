@@ -1,4 +1,4 @@
-import { resolveAssetUrl, state } from "./appState.js?v=20260701-no-method-link-card1";
+import { resolveAssetUrl, state } from "./appState.js?v=20260701-value-chain-standard-work1";
 
 const hiddenSystemFieldKeys = new Set(["standardWorkAttachments"]);
 
