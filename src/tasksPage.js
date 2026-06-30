@@ -16,9 +16,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260630-task-due-sort3";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-task-due-sort3";
-import { hasPermission } from "./permissions.js?v=20260630-task-due-sort3";
+} from "./appState.js?v=20260630-task-action-label1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-task-action-label1";
+import { hasPermission } from "./permissions.js?v=20260630-task-action-label1";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-task-due-sort3";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-due-sort3";
-import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-task-due-sort3";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-task-due-sort3";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-task-action-label1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-action-label1";
+import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-task-action-label1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-task-action-label1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -988,7 +988,7 @@ function renderTaskRow(task, index, options = {}) {
       <td class="task-owner-column">${findName(people, task.ownerId, "未设置")}</td>
       <td class="task-actions-column">
         <span class="row-actions">
-          ${renderActionButton("查看", "view-task", task.id)}
+          ${renderActionButton("查看任务详情", "view-task", task.id)}
           ${renderActionButton("表单", "show-task-work-form", task.id)}
           ${canReturnTask(task) ? renderActionButton("退回重做", "return-task", task.id) : ""}
           ${canEditTask(task) ? renderActionButton("编辑", "edit-task", task.id) : ""}
@@ -1034,7 +1034,7 @@ function renderProcessTaskGroupRow(row, index) {
       <td class="task-owner-column">${findName(people, task.ownerId, "未设置")}</td>
       <td class="task-actions-column">
         <span class="row-actions">
-          ${renderActionButton("查看", "view-task", task.id)}
+          ${renderActionButton("查看任务详情", "view-task", task.id)}
           ${renderActionButton("表单", "show-task-work-form", task.id)}
           ${canReturnTask(task) ? renderActionButton("退回重做", "return-task", task.id) : ""}
           ${canEditTask(task) ? renderActionButton("编辑", "edit-task", task.id) : ""}
