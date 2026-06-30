@@ -1373,7 +1373,7 @@ export function startProcess({
   return { instance };
 }
 
-export function advanceProcessAfterTaskDone(taskId) {
+export async function advanceProcessAfterTaskDone(taskId) {
   const task = state.tasks.find((item) => item.id === taskId);
   if (task === undefined || task.source !== TaskSource.Process || task.status !== TaskStatus.Done) return;
 
@@ -1397,28 +1397,23 @@ export function advanceProcessAfterTaskDone(taskId) {
   const today = now.slice(0, 10);
 
   if (nextTask !== undefined && nextTask.status === TaskStatus.Waiting) {
-    state.tasks = state.tasks.map((item) => {
-      const node = state.processTemplateNodes.find((candidate) => candidate.id === nextTask.processNodeId);
-      if (item.id === nextTask.id) {
-        return {
-          ...item,
-          status: TaskStatus.Todo,
-          startDate: today,
-          dueDate: addDays(today, node.durationDays),
-          updatedAt: now,
-        };
-      }
-      return item;
-    });
+    const node = state.processTemplateNodes.find((candidate) => candidate.id === nextTask.processNodeId);
+    const updatedNextTask = {
+      ...nextTask,
+      status: TaskStatus.Todo,
+      startDate: today,
+      dueDate: addDays(today, node?.durationDays ?? 0),
+      updatedAt: now,
+    };
+    await updatePersistentResource("tasks", updatedNextTask.id, updatedNextTask);
+    state.tasks = state.tasks.map((item) => (item.id === updatedNextTask.id ? updatedNextTask : item));
     return;
   }
 
   if (instanceTasks.every((item) => item.status === TaskStatus.Done)) {
-    state.processInstances = state.processInstances.map((item) =>
-      item.id === instance.id
-        ? { ...item, status: ProcessInstanceStatus.Done, completedAt: now, updatedAt: now }
-        : item,
-    );
+    const updatedInstance = { ...instance, status: ProcessInstanceStatus.Done, completedAt: now, updatedAt: now };
+    await updatePersistentResource("process-instances", updatedInstance.id, updatedInstance);
+    state.processInstances = state.processInstances.map((item) => (item.id === updatedInstance.id ? updatedInstance : item));
   }
 }
 

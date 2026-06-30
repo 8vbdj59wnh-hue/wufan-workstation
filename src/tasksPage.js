@@ -16,7 +16,7 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260630-attachments1";
+} from "./appState.js?v=20260630-task-persist1";
 import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-attachments1";
 import { hasPermission } from "./permissions.js?v=20260630-attachments1";
 import {
@@ -3216,23 +3216,26 @@ async function saveTask(form, rerender) {
     const template = getTaskTemplateForTask(draft);
     const displayTitle = template === null ? draft.displayTitle ?? null : buildDisplayTitle(template, draft.customFields);
     const coverImageUrl = getPrimaryImageUrl({ customFields: draft.customFields }) || null;
-    state.tasks = state.tasks.map((item) =>
-      item.id === modalState.taskId
-        ? {
-            ...item,
-            customFields: draft.customFields,
-            displayTitle,
-            coverImageUrl,
-            description: draft.description,
-            importance: draft.importance,
-            urgency: draft.urgency,
-            startDate: draft.startDate,
-            dueDate: draft.dueDate,
-            plannedWeek: draft.plannedWeek,
-            updatedAt: now,
-          }
-        : item,
-    );
+    const updatedTask = {
+      ...task,
+      customFields: draft.customFields,
+      displayTitle,
+      coverImageUrl,
+      description: draft.description,
+      importance: draft.importance,
+      urgency: draft.urgency,
+      startDate: draft.startDate,
+      dueDate: draft.dueDate,
+      plannedWeek: draft.plannedWeek,
+      updatedAt: now,
+    };
+    try {
+      await updatePersistentResource("tasks", updatedTask.id, updatedTask);
+    } catch (error) {
+      console.error("执行任务保存失败", error);
+      return setModalError(error.message || "执行任务保存失败，请检查本地数据库服务。", rerender);
+    }
+    state.tasks = state.tasks.map((item) => (item.id === updatedTask.id ? updatedTask : item));
   }
 
   modalState = null;
@@ -3312,25 +3315,33 @@ async function saveResult(form, rerender) {
         : null;
   const resultAttachments = submitFiles.map((file) => file.url ?? file);
 
-  state.tasks = state.tasks.map((task) =>
-    task.id === modalState.taskId
-      ? {
-          ...task,
-          resultText,
-          resultAttachments,
-          submitFormData,
-          submitFiles,
-          submitLinks,
-          submittedAt: now,
-          submittedBy: task.ownerId,
-          status: nextStatus,
-          completedAt,
-          updatedAt: now,
-        }
-      : task,
-  );
+  const updatedTask = {
+    ...task,
+    resultText,
+    resultAttachments,
+    submitFormData,
+    submitFiles,
+    submitLinks,
+    submittedAt: now,
+    submittedBy: task.ownerId,
+    status: nextStatus,
+    completedAt,
+    updatedAt: now,
+  };
+  try {
+    await updatePersistentResource("tasks", updatedTask.id, updatedTask);
+  } catch (error) {
+    console.error("任务结果保存失败", error);
+    return setModalError(error.message || "任务结果保存失败，请检查本地数据库服务。", rerender);
+  }
+  state.tasks = state.tasks.map((item) => (item.id === updatedTask.id ? updatedTask : item));
   if (nextStatus === TaskStatus.Done) {
-    advanceProcessAfterTaskDone(modalState.taskId);
+    try {
+      await advanceProcessAfterTaskDone(modalState.taskId);
+    } catch (error) {
+      console.error("流程推进保存失败", error);
+      return setModalError(error.message || "流程推进保存失败，请检查本地数据库服务。", rerender);
+    }
   }
   modalState = null;
   rerender();
@@ -3411,7 +3422,14 @@ async function updateTaskStatus(taskId, status, rerender) {
 
   state.tasks = state.tasks.map((item) => (item.id === taskId ? updatedTask : item));
   if (status === TaskStatus.Done) {
-    advanceProcessAfterTaskDone(taskId);
+    try {
+      await advanceProcessAfterTaskDone(taskId);
+    } catch (error) {
+      console.error("流程推进保存失败", error);
+      window.alert(error.message || "流程推进保存失败，请检查本地数据库服务。");
+      rerender();
+      return;
+    }
   }
   rerender();
 }
@@ -3423,20 +3441,16 @@ function getTaskStatusChangeError(task, status) {
   return "";
 }
 
-function updateTaskStatusDirect(taskId, status, now) {
-  state.tasks = state.tasks.map((task) =>
-    task.id === taskId
-      ? {
-          ...task,
-          status,
-          updatedAt: now,
-          completedAt: status === TaskStatus.Done ? now : null,
-        }
-      : task,
-  );
+function buildTaskStatusUpdate(task, status, now) {
+  return {
+    ...task,
+    status,
+    updatedAt: now,
+    completedAt: status === TaskStatus.Done ? now : null,
+  };
 }
 
-function bulkUpdateTaskStatus(status, rerender) {
+async function bulkUpdateTaskStatus(status, rerender) {
   if (status === TaskStatus.Done && !canCurrentUser("tasks.batchComplete")) return;
   if (status === TaskStatus.Canceled && !canCurrentUser("tasks.batchCancel")) return;
   const selectedTasks = [...selectedTaskIds].map(getTask).filter(Boolean);
@@ -3445,7 +3459,7 @@ function bulkUpdateTaskStatus(status, rerender) {
 
   const now = getNow();
   const skipped = [];
-  let changedCount = 0;
+  const updatedTasks = [];
   selectedTasks.forEach((task) => {
     const error = getTaskStatusChangeError(task, status);
     if (error !== "") {
@@ -3456,20 +3470,44 @@ function bulkUpdateTaskStatus(status, rerender) {
       skipped.push(task.name);
       return;
     }
-    updateTaskStatusDirect(task.id, status, now);
-    if (status === TaskStatus.Done) advanceProcessAfterTaskDone(task.id);
-    changedCount += 1;
+    updatedTasks.push(buildTaskStatusUpdate(task, status, now));
   });
+
+  try {
+    for (const updatedTask of updatedTasks) {
+      await updatePersistentResource("tasks", updatedTask.id, updatedTask);
+    }
+  } catch (error) {
+    console.error("批量修改任务状态失败", error);
+    window.alert(error.message || "任务状态保存失败，请检查本地数据库服务。");
+    rerender();
+    return;
+  }
+
+  const updatedTaskMap = new Map(updatedTasks.map((task) => [task.id, task]));
+  state.tasks = state.tasks.map((task) => updatedTaskMap.get(task.id) ?? task);
+  if (status === TaskStatus.Done) {
+    try {
+      for (const task of updatedTasks) {
+        await advanceProcessAfterTaskDone(task.id);
+      }
+    } catch (error) {
+      console.error("流程推进保存失败", error);
+      window.alert(error.message || "流程推进保存失败，请检查本地数据库服务。");
+      rerender();
+      return;
+    }
+  }
 
   selectedTaskIds = new Set();
   if (skipped.length > 0) {
-    const reason = status === TaskStatus.Done ? "部分任务因前置步骤未完成或提交结果不完整，未能完成。" : `已修改 ${changedCount} 条任务，跳过 ${skipped.length} 条不可修改任务。`;
+    const reason = status === TaskStatus.Done ? "部分任务因前置步骤未完成或提交结果不完整，未能完成。" : `已修改 ${updatedTasks.length} 条任务，跳过 ${skipped.length} 条不可修改任务。`;
     window.alert(reason);
   }
   rerender();
 }
 
-function cancelTask(taskId, rerender) {
+async function cancelTask(taskId, rerender) {
   const task = getTask(taskId);
 
   if (task.source === TaskSource.Process) {
@@ -3482,9 +3520,15 @@ function cancelTask(taskId, rerender) {
   if (!window.confirm("确定要取消该任务吗？取消后历史记录仍会保留。")) return;
 
   const now = getNow();
-  state.tasks = state.tasks.map((item) =>
-    item.id === taskId ? { ...item, status: TaskStatus.Canceled, updatedAt: now } : item,
-  );
+  const updatedTask = { ...task, status: TaskStatus.Canceled, updatedAt: now };
+  try {
+    await updatePersistentResource("tasks", taskId, updatedTask);
+  } catch (error) {
+    console.error("取消任务失败", error);
+    window.alert(error.message || "任务状态保存失败，请检查本地数据库服务。");
+    return;
+  }
+  state.tasks = state.tasks.map((item) => (item.id === taskId ? updatedTask : item));
   rerender();
 }
 
@@ -3630,7 +3674,7 @@ async function returnTaskToSelectedStep(form, rerender) {
   rerender();
 }
 
-function handleTaskAction(action, taskId, rerender) {
+async function handleTaskAction(action, taskId, rerender) {
   const task = getTask(taskId);
 
   if (task === null) return;
@@ -3650,12 +3694,12 @@ function handleTaskAction(action, taskId, rerender) {
   }
 
   if (action === "cancel-task") {
-    cancelTask(taskId, rerender);
+    await cancelTask(taskId, rerender);
     return;
   }
 
   if (action === "restore-task") {
-    restoreCanceledTask(taskId, rerender);
+    await restoreCanceledTask(taskId, rerender);
     return;
   }
 
@@ -3667,7 +3711,7 @@ function handleTaskAction(action, taskId, rerender) {
   }
 
   if (action === "start-task" && task.status === TaskStatus.Todo) {
-    updateTaskStatus(taskId, TaskStatus.Doing, rerender);
+    await updateTaskStatus(taskId, TaskStatus.Doing, rerender);
     return;
   }
 
@@ -3678,18 +3722,22 @@ function handleTaskAction(action, taskId, rerender) {
   }
 
   if (action === "accept-task" && task.status === TaskStatus.PendingAcceptance) {
-    updateTaskStatus(taskId, TaskStatus.Done, rerender);
+    await updateTaskStatus(taskId, TaskStatus.Done, rerender);
     return;
   }
 
   if (action === "reject-task" && task.status === TaskStatus.PendingAcceptance) {
     window.alert("验收已退回，任务状态恢复为进行中。");
     const now = getNow();
-    state.tasks = state.tasks.map((item) =>
-      item.id === taskId
-        ? { ...item, status: TaskStatus.Doing, completedAt: null, updatedAt: now }
-        : item,
-    );
+    const updatedTask = { ...task, status: TaskStatus.Doing, completedAt: null, updatedAt: now };
+    try {
+      await updatePersistentResource("tasks", taskId, updatedTask);
+    } catch (error) {
+      console.error("退回任务保存失败", error);
+      window.alert(error.message || "任务状态保存失败，请检查本地数据库服务。");
+      return;
+    }
+    state.tasks = state.tasks.map((item) => (item.id === taskId ? updatedTask : item));
     rerender();
   }
 }
@@ -3762,9 +3810,9 @@ function handleTaskTemplateFieldAction(action, index, rerender) {
 async function handleTaskSubmit(event, rerender) {
   event.preventDefault();
 
-  if (modalState?.kind === "task") saveTask(event.target, rerender);
-  if (modalState?.kind === "result") saveResult(event.target, rerender);
-  if (modalState?.kind === "returnTask") returnTaskToSelectedStep(event.target, rerender);
+  if (modalState?.kind === "task") await saveTask(event.target, rerender);
+  if (modalState?.kind === "result") await saveResult(event.target, rerender);
+  if (modalState?.kind === "returnTask") await returnTaskToSelectedStep(event.target, rerender);
   if (modalState?.kind === "taskTemplate") await saveTaskTemplate(event.target, rerender);
 }
 
