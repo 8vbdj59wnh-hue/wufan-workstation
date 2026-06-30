@@ -1319,7 +1319,7 @@ textarea {
 
 .task-table {
   table-layout: fixed;
-  min-width: 1320px;
+  min-width: 1410px;
 }
 
 .task-table th,
@@ -1554,6 +1554,11 @@ textarea {
 
 .task-name-column {
   width: 190px;
+}
+
+.task-executor-column {
+  width: 90px;
+  white-space: nowrap !important;
 }
 
 .task-goal-column {

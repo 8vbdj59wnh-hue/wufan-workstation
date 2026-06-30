@@ -1,4 +1,4 @@
-import { resolveAssetUrl, state } from "./appState.js?v=20260630-task-name-col1";
+import { resolveAssetUrl, state } from "./appState.js?v=20260630-task-executor-col1";
 
 const hiddenSystemFieldKeys = new Set(["standardWorkAttachments"]);
 
