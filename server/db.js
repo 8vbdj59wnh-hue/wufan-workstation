@@ -30,6 +30,15 @@ export const dataDir = path.join(projectRoot, "data");
 export const uploadsDir = path.join(projectRoot, "uploads");
 export const databasePath = path.join(dataDir, "workstation.db");
 const schemaPath = path.join(__dirname, "schema.sql");
+const standardWorkValueChainCategories = [
+  "基础设施维护",
+  "人力资产管理",
+  "产品研发",
+  "供应链管理",
+  "品牌营销",
+  "渠道销售",
+  "客户维护",
+];
 
 const resourceConfigs = {
   companies: {
@@ -580,6 +589,27 @@ function ensureColumn(table, column, definition) {
   if (!hasColumn) getDatabase().exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }
 
+function ensureStandardWorkValueChainCategories() {
+  const database = getDatabase();
+  const now = new Date().toISOString();
+  const insertCategory = database.prepare(
+    `INSERT INTO categories (id, type, name, sortOrder, status, createdAt, updatedAt)
+     VALUES (@id, 'task', @name, @sortOrder, 'active', @createdAt, @updatedAt)`,
+  );
+  const findCategory = database.prepare("SELECT id FROM categories WHERE type = 'task' AND name = @name LIMIT 1");
+
+  standardWorkValueChainCategories.forEach((name, index) => {
+    if (findCategory.get({ name }) !== undefined) return;
+    insertCategory.run({
+      id: `cat-task-value-chain-${index + 1}`,
+      name,
+      sortOrder: index + 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+  });
+}
+
 function runLightweightMigrations() {
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS stores (
@@ -696,6 +726,7 @@ function runLightweightMigrations() {
   ensureColumn("persons", "mustChangePassword", "INTEGER DEFAULT 0");
   ensureColumn("persons", "permissions", "TEXT");
   ensureColumn("persons", "avatarUrl", "TEXT");
+  ensureStandardWorkValueChainCategories();
 }
 
 function publicUser(row) {
