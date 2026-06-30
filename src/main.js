@@ -1,11 +1,11 @@
-import { modules } from "./modules.js?v=20260630-notifications1";
-import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260630-notifications1";
-import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260630-notifications1";
-import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260630-notifications1";
-import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260630-notifications1";
-import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260630-notifications1";
-import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260630-notifications1";
-import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js?v=20260630-notifications1";
+import { modules } from "./modules.js?v=20260701-notification-icon1";
+import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260701-notification-icon1";
+import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260701-notification-icon1";
+import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260701-notification-icon1";
+import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260701-notification-icon1";
+import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260701-notification-icon1";
+import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260701-notification-icon1";
+import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js?v=20260701-notification-icon1";
 import {
   flushPersistentSave,
   getCurrentUser,
@@ -19,8 +19,8 @@ import {
   markNotificationRead,
   syncTaskNotificationsForCurrentUser,
   validateCurrentSession,
-} from "./appState.js?v=20260630-notifications1";
-import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260630-notifications1";
+} from "./appState.js?v=20260701-notification-icon1";
+import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260701-notification-icon1";
 
 const app = document.querySelector("#app");
 
@@ -127,8 +127,12 @@ function renderNotificationButton() {
   const unreadCount = getUnreadNotificationCount();
   return `
     <div class="notification-menu">
-      <button class="icon-button notification-button" type="button" data-action="toggle-notifications" aria-label="任务提醒">
-        <span>提醒</span>
+      <button class="icon-button notification-button" type="button" data-action="toggle-notifications" aria-label="任务提醒" title="任务提醒">
+        <svg class="notification-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 10v4h3l6 4V6l-6 4H4Z" />
+          <path d="M16 9.2a4 4 0 0 1 0 5.6" />
+          <path d="M18.7 6.5a8 8 0 0 1 0 11" />
+        </svg>
         ${unreadCount > 0 ? `<span class="notification-badge">${unreadCount}</span>` : ""}
       </button>
       ${renderNotificationPanel()}

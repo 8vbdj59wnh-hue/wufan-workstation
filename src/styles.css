@@ -135,12 +135,25 @@ textarea {
 
 .notification-button {
   position: relative;
-  gap: 4px;
-  width: auto;
-  padding: 0 10px;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+}
+
+.notification-icon {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
 }
 
 .notification-badge {
+  position: absolute;
+  top: -5px;
+  right: -6px;
   display: inline-grid;
   min-width: 18px;
   height: 18px;

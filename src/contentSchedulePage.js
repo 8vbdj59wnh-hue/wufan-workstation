@@ -8,8 +8,8 @@ import {
   state,
   updatePersistentResource,
   uploadImageFile,
-} from "./appState.js?v=20260630-notifications1";
-import { hasPermission } from "./permissions.js?v=20260630-notifications1";
+} from "./appState.js?v=20260701-notification-icon1";
+import { hasPermission } from "./permissions.js?v=20260701-notification-icon1";
 import {
   CategoryType,
   ContentScheduleStatus,
