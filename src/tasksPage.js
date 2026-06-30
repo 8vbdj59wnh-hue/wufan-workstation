@@ -16,9 +16,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260630-task-attachment-preview1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-task-attachment-preview1";
-import { hasPermission } from "./permissions.js?v=20260630-task-attachment-preview1";
+} from "./appState.js?v=20260630-task-attachment-name1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-task-attachment-name1";
+import { hasPermission } from "./permissions.js?v=20260630-task-attachment-name1";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-task-attachment-preview1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-attachment-preview1";
-import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-task-attachment-preview1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-task-attachment-preview1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-task-attachment-name1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-attachment-name1";
+import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-task-attachment-name1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-task-attachment-name1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -4134,7 +4134,7 @@ async function saveResult(form, rerender) {
       : modalState.action === "submit-result"
         ? task.completedAt ?? null
         : null;
-  const resultAttachments = submitFiles.map((file) => file.url ?? file);
+  const resultAttachments = submitFiles;
 
   const updatedTask = {
     ...task,
