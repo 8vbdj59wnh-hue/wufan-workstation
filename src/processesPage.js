@@ -12,8 +12,8 @@ import {
   state,
   stopProcess,
   updatePersistentResource,
-} from "./appState.js?v=20260701-process-node-meta1";
-import { hasPermission } from "./permissions.js?v=20260701-process-node-meta1";
+} from "./appState.js?v=20260701-process-node-meta2";
+import { hasPermission } from "./permissions.js?v=20260701-process-node-meta2";
 import {
   CategoryType,
   GoalStatus,
@@ -35,11 +35,11 @@ import {
   taskImportanceNames,
   taskStatusNames,
   taskUrgencyNames,
-} from "./data/modelOptions.js?v=20260701-process-node-meta1";
-import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260701-process-node-meta1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-process-node-meta1";
-import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-process-node-meta1";
-import { selectTask } from "./tasksPage.js?v=20260701-process-node-meta1";
+} from "./data/modelOptions.js?v=20260701-process-node-meta2";
+import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260701-process-node-meta2";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-process-node-meta2";
+import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-process-node-meta2";
+import { selectTask } from "./tasksPage.js?v=20260701-process-node-meta2";
 
 const today = "2026-06-24";
 let selectedTemplateId = state.processTemplates[0]?.id ?? null;
@@ -322,7 +322,6 @@ function renderTemplateNodes(templateId) {
                 </span>
               </div>
               <div class="process-node-meta">
-                <span><em>步骤</em>${getStepLabel(stepOrder)}</span>
                 <span><em>负责部门</em>${findName(departments, node.departmentId ?? node.ownerDepartmentId, "未设置")}</span>
                 <span><em>负责人</em>${findName(people, node.ownerId ?? node.defaultOwnerId, "未设置")}</span>
                 <span><em>执行人</em>${findName(people, node.executorId, "同负责人")}</span>
