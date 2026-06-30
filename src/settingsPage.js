@@ -1,4 +1,4 @@
-import { getCurrentUser, savePersistentData, state, validateCurrentSession } from "./appState.js?v=20260630-task-list-clean1";
+import { getCurrentUser, savePersistentData, state, validateCurrentSession } from "./appState.js?v=20260630-task-list-clean2";
 import {
   applyPermissionTemplate,
   dataScopeOptions,
@@ -7,7 +7,7 @@ import {
   permissionCount,
   permissionGroups,
   permissionTemplates,
-} from "./permissions.js?v=20260630-task-list-clean1";
+} from "./permissions.js?v=20260630-task-list-clean2";
 import {
   CategoryType,
   PersonRole,

@@ -12,8 +12,8 @@ import {
   state,
   stopProcess,
   updatePersistentResource,
-} from "./appState.js?v=20260630-task-list-clean1";
-import { hasPermission } from "./permissions.js?v=20260630-task-list-clean1";
+} from "./appState.js?v=20260630-task-list-clean2";
+import { hasPermission } from "./permissions.js?v=20260630-task-list-clean2";
 import {
   CategoryType,
   GoalStatus,
@@ -35,11 +35,11 @@ import {
   taskImportanceNames,
   taskStatusNames,
   taskUrgencyNames,
-} from "./data/modelOptions.js?v=20260630-task-list-clean1";
-import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260630-task-list-clean1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-list-clean1";
-import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260630-task-list-clean1";
-import { selectTask } from "./tasksPage.js?v=20260630-task-list-clean1";
+} from "./data/modelOptions.js?v=20260630-task-list-clean2";
+import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260630-task-list-clean2";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-list-clean2";
+import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260630-task-list-clean2";
+import { selectTask } from "./tasksPage.js?v=20260630-task-list-clean2";
 
 const today = "2026-06-24";
 let selectedTemplateId = state.processTemplates[0]?.id ?? null;
