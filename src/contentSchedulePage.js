@@ -8,8 +8,8 @@ import {
   state,
   updatePersistentResource,
   uploadImageFile,
-} from "./appState.js?v=20260701-compact-process-node1";
-import { hasPermission } from "./permissions.js?v=20260701-compact-process-node1";
+} from "./appState.js?v=20260701-process-node-meta1";
+import { hasPermission } from "./permissions.js?v=20260701-process-node-meta1";
 import {
   CategoryType,
   ContentScheduleStatus,

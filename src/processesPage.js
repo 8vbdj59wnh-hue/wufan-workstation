@@ -12,8 +12,8 @@ import {
   state,
   stopProcess,
   updatePersistentResource,
-} from "./appState.js?v=20260701-compact-process-node1";
-import { hasPermission } from "./permissions.js?v=20260701-compact-process-node1";
+} from "./appState.js?v=20260701-process-node-meta1";
+import { hasPermission } from "./permissions.js?v=20260701-process-node-meta1";
 import {
   CategoryType,
   GoalStatus,
@@ -35,11 +35,11 @@ import {
   taskImportanceNames,
   taskStatusNames,
   taskUrgencyNames,
-} from "./data/modelOptions.js?v=20260701-compact-process-node1";
-import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260701-compact-process-node1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-compact-process-node1";
-import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-compact-process-node1";
-import { selectTask } from "./tasksPage.js?v=20260701-compact-process-node1";
+} from "./data/modelOptions.js?v=20260701-process-node-meta1";
+import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260701-process-node-meta1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-process-node-meta1";
+import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-process-node-meta1";
+import { selectTask } from "./tasksPage.js?v=20260701-process-node-meta1";
 
 const today = "2026-06-24";
 let selectedTemplateId = state.processTemplates[0]?.id ?? null;
@@ -321,13 +321,13 @@ function renderTemplateNodes(templateId) {
                   ${canCurrentUser("processes.editSteps") ? `<button class="text-button danger-button" type="button" data-action="delete-node" data-node-id="${node.id}">删除</button>` : ""}
                 </span>
               </div>
-              <div class="detail-grid">
-                ${renderDetailField("步骤", getStepLabel(stepOrder))}
-                ${renderDetailField("负责部门", findName(departments, node.departmentId ?? node.ownerDepartmentId, "未设置"))}
-                ${renderDetailField("负责人", findName(people, node.ownerId ?? node.defaultOwnerId, "未设置"))}
-                ${renderDetailField("执行人", findName(people, node.executorId, "同负责人"))}
-                ${renderDetailField("限时完成", `${node.durationDays} 天`)}
-                ${renderDetailField("状态", processTemplateNodeStatusNames[node.status])}
+              <div class="process-node-meta">
+                <span><em>步骤</em>${getStepLabel(stepOrder)}</span>
+                <span><em>负责部门</em>${findName(departments, node.departmentId ?? node.ownerDepartmentId, "未设置")}</span>
+                <span><em>负责人</em>${findName(people, node.ownerId ?? node.defaultOwnerId, "未设置")}</span>
+                <span><em>执行人</em>${findName(people, node.executorId, "同负责人")}</span>
+                <span><em>限时</em>${node.durationDays} 天</span>
+                <span><em>状态</em>${processTemplateNodeStatusNames[node.status]}</span>
               </div>
               <div class="process-node-copy">
                 <p><strong>步骤说明：</strong>${node.description}</p>
