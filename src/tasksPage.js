@@ -16,9 +16,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260701-value-chain-row1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-value-chain-row1";
-import { hasPermission } from "./permissions.js?v=20260701-value-chain-row1";
+} from "./appState.js?v=20260701-customer-value-chain1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-customer-value-chain1";
+import { hasPermission } from "./permissions.js?v=20260701-customer-value-chain1";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-value-chain-row1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-value-chain-row1";
-import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-value-chain-row1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-value-chain-row1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-customer-value-chain1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-customer-value-chain1";
+import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-customer-value-chain1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-customer-value-chain1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -153,8 +153,7 @@ const standardWorkValueChainColumns = [
   { title: "供应链管理", keywords: ["供应链", "供应商", "采购", "库存", "清仓", "补货", "仓库", "交期", "物流"], departmentNames: ["供应链", "供应链部"] },
   { title: "品牌营销", keywords: ["品牌", "营销", "内容", "笔记", "小红书", "买家秀", "拍摄", "素材", "投放"], departmentNames: ["视觉部", "视觉营销部", "市场部", "品牌部"] },
   { title: "渠道销售", keywords: ["渠道", "销售", "上架", "店铺", "平台", "直播", "私域", "运营"], departmentNames: ["运营部", "渠道部", "销售部"] },
-  { title: "售后服务", keywords: ["售后", "客服", "退换", "退款", "客诉", "维修"], departmentNames: ["客服部", "售后部"] },
-  { title: "老客维护", keywords: ["老客", "会员", "复购", "社群", "客户维护", "回访"], departmentNames: ["会员部", "客户成功部"] },
+  { title: "客户维护", keywords: ["客户", "老客", "会员", "复购", "社群", "回访", "售后", "客服", "退换", "退款", "客诉", "维修"], departmentNames: ["会员部", "客户成功部", "客服部", "售后部"] },
 ];
 
 const hiddenLegacyStandardWorkNames = [

@@ -1465,7 +1465,7 @@ textarea {
 
 .standard-work-board {
   display: grid;
-  grid-template-columns: repeat(8, 180px);
+  grid-template-columns: repeat(7, 180px);
   gap: 10px;
   min-width: max-content;
 }

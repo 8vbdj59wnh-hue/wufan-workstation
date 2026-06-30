@@ -1,4 +1,4 @@
-import { resolveAssetUrl, state } from "./appState.js?v=20260701-value-chain-row1";
+import { resolveAssetUrl, state } from "./appState.js?v=20260701-customer-value-chain1";
 
 const hiddenSystemFieldKeys = new Set(["standardWorkAttachments"]);
 
