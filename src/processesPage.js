@@ -249,7 +249,16 @@ function renderProcessTemplateCard(template, isUncategorized = false) {
       <div class="standard-work-card-actions">
         <button class="text-button" type="button" data-action="select-template" data-template-id="${template.id}">查看流程</button>
         ${canCurrentUser("processes.editSteps") ? `<button class="text-button" type="button" data-action="add-node" data-template-id="${template.id}" onclick="window.__handleProcessNodeAction?.(this, event)">编辑流程步骤</button>` : ""}
-        ${canCurrentUser("processes.editTemplates") ? `<button class="text-button danger-button" type="button" data-action="deactivate-template" data-template-id="${template.id}">停用流程</button>` : ""}
+        ${
+          canCurrentUser("processes.editTemplates") && template.status === ProcessTemplateStatus.Inactive
+            ? `<button class="text-button" type="button" data-action="activate-template" data-template-id="${template.id}">启用流程</button>`
+            : ""
+        }
+        ${
+          canCurrentUser("processes.editTemplates") && template.status !== ProcessTemplateStatus.Inactive
+            ? `<button class="text-button danger-button" type="button" data-action="deactivate-template" data-template-id="${template.id}">停用流程</button>`
+            : ""
+        }
         ${canCurrentUser("processes.editTemplates") ? `<button class="text-button danger-button" type="button" data-action="delete-template" data-template-id="${template.id}">删除流程</button>` : ""}
       </div>
     </article>
@@ -342,6 +351,16 @@ function renderTemplateDetail() {
         <h2>标准流程详情</h2>
         <div class="section-actions">
           ${canCurrentUser("processes.editTemplates") ? `<button class="secondary-button" type="button" data-action="edit-template" data-template-id="${template.id}">编辑流程</button>` : ""}
+          ${
+            canCurrentUser("processes.editTemplates") && template.status === ProcessTemplateStatus.Inactive
+              ? `<button class="secondary-button" type="button" data-action="activate-template" data-template-id="${template.id}">启用流程</button>`
+              : ""
+          }
+          ${
+            canCurrentUser("processes.editTemplates") && template.status !== ProcessTemplateStatus.Inactive
+              ? `<button class="secondary-button danger-button" type="button" data-action="deactivate-template" data-template-id="${template.id}">停用流程</button>`
+              : ""
+          }
           ${canCurrentUser("processes.editTemplates") ? `<button class="secondary-button danger-button" type="button" data-action="delete-template" data-template-id="${template.id}">删除流程</button>` : ""}
           ${canCurrentUser("workPlans.launch") ? `<button class="primary-button" type="button" data-action="start-process" data-template-id="${template.id}">发起标准流程</button>` : ""}
           ${canCurrentUser("processes.editSteps") ? `<button class="secondary-button" type="button" data-action="add-node" data-template-id="${template.id}" onclick="window.__handleProcessNodeAction?.(this, event)">新增流程步骤</button>` : ""}
@@ -809,6 +828,24 @@ async function deleteTemplate(templateId, rerender) {
   rerender();
 }
 
+async function updateTemplateStatus(templateId, status) {
+  const template = state.processTemplates.find((item) => item.id === templateId);
+  if (template === undefined) return false;
+
+  const now = getNow();
+  const updatedTemplate = { ...template, status, updatedAt: now };
+  try {
+    await updatePersistentResource("process-templates", updatedTemplate.id, updatedTemplate);
+  } catch (error) {
+    const actionText = status === ProcessTemplateStatus.Active ? "启用" : "停用";
+    console.error(`流程${actionText}失败`, error);
+    window.alert(error.message || `流程${actionText}失败，请检查本地数据库服务。`);
+    return false;
+  }
+  state.processTemplates = state.processTemplates.map((item) => (item.id === updatedTemplate.id ? updatedTemplate : item));
+  return true;
+}
+
 export function bindProcessesPageEvents(rerender) {
   const page = document.querySelector(".processes-page");
   const templateForm = document.querySelector(".process-template-form");
@@ -853,20 +890,11 @@ export function bindProcessesPageEvents(rerender) {
         await deleteTemplate(actionButton.dataset.templateId, rerender);
         return;
       }
+      if (action === "activate-template" && canCurrentUser("processes.editTemplates")) {
+        await updateTemplateStatus(actionButton.dataset.templateId, ProcessTemplateStatus.Active);
+      }
       if (action === "deactivate-template" && canCurrentUser("processes.editTemplates")) {
-        const now = getNow();
-        const template = state.processTemplates.find((item) => item.id === actionButton.dataset.templateId);
-        if (template !== undefined) {
-          const updatedTemplate = { ...template, status: ProcessTemplateStatus.Inactive, updatedAt: now };
-          try {
-            await updatePersistentResource("process-templates", updatedTemplate.id, updatedTemplate);
-          } catch (error) {
-            console.error("流程停用失败", error);
-            window.alert(error.message || "流程停用失败，请检查本地数据库服务。");
-            return;
-          }
-          state.processTemplates = state.processTemplates.map((item) => (item.id === updatedTemplate.id ? updatedTemplate : item));
-        }
+        await updateTemplateStatus(actionButton.dataset.templateId, ProcessTemplateStatus.Inactive);
       }
       if (action === "deactivate-node" && canCurrentUser("processes.editSteps")) {
         const now = getNow();
