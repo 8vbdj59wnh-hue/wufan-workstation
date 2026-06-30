@@ -1,11 +1,11 @@
-import { modules } from "./modules.js?v=20260701-nav-order1";
-import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260701-nav-order1";
-import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260701-nav-order1";
-import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260701-nav-order1";
-import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260701-nav-order1";
-import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260701-nav-order1";
-import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260701-nav-order1";
-import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260701-nav-order1";
+import { modules } from "./modules.js?v=20260701-task-library-standardization1";
+import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260701-task-library-standardization1";
+import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260701-task-library-standardization1";
+import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260701-task-library-standardization1";
+import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260701-task-library-standardization1";
+import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260701-task-library-standardization1";
+import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260701-task-library-standardization1";
+import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260701-task-library-standardization1";
 import {
   flushPersistentSave,
   getCurrentUser,
@@ -19,8 +19,8 @@ import {
   markNotificationRead,
   syncTaskNotificationsForCurrentUser,
   validateCurrentSession,
-} from "./appState.js?v=20260701-nav-order1";
-import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260701-nav-order1";
+} from "./appState.js?v=20260701-task-library-standardization1";
+import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260701-task-library-standardization1";
 
 const app = document.querySelector("#app");
 
@@ -35,7 +35,7 @@ const moduleHashMap = {
   "task-list": "tasks",
   clearance: "tasks",
   "process-progress": "tasks",
-  "task-library": "tasks",
+  "task-library": "processes",
   "content-schedule": "tasks",
   "process-templates": "processes",
   "started-processes": "processes",

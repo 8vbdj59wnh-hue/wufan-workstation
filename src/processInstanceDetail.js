@@ -1,4 +1,4 @@
-import { getNow, getProcessNodeStepOrder, resolveAssetUrl, state, updatePersistentResource } from "./appState.js?v=20260701-nav-order1";
+import { getNow, getProcessNodeStepOrder, resolveAssetUrl, state, updatePersistentResource } from "./appState.js?v=20260701-task-library-standardization1";
 import {
   GoalStatus,
   ProcessInstanceStatus,
@@ -10,8 +10,8 @@ import {
   taskStatusNames,
   taskUrgencyNames,
 } from "./data/modelOptions.js";
-import { getTaskQuadrant, isTaskOverdue } from "./data/taskUtils.js?v=20260701-nav-order1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-nav-order1";
+import { getTaskQuadrant, isTaskOverdue } from "./data/taskUtils.js?v=20260701-task-library-standardization1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-task-library-standardization1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;

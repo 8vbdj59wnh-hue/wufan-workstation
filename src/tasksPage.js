@@ -16,9 +16,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260701-nav-order1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-nav-order1";
-import { hasPermission } from "./permissions.js?v=20260701-nav-order1";
+} from "./appState.js?v=20260701-task-library-standardization1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-task-library-standardization1";
+import { hasPermission } from "./permissions.js?v=20260701-task-library-standardization1";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-nav-order1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-nav-order1";
-import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260701-nav-order1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-nav-order1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-task-library-standardization1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-task-library-standardization1";
+import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260701-task-library-standardization1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-task-library-standardization1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -123,7 +123,6 @@ const taskTabHashMap = {
   "task-list": "task-list",
   clearance: "clearance",
   "process-progress": "process-progress",
-  "task-library": "task-library",
   "content-schedule": "content-schedule",
 };
 
@@ -2667,6 +2666,15 @@ function renderTaskTemplateTable() {
   `;
 }
 
+export function renderStandardWorkLibraryPage() {
+  return `
+    <div class="standard-work-library-host">
+      ${renderTaskTemplateTable()}
+      ${renderTaskTemplateModal()}
+    </div>
+  `;
+}
+
 function renderStandardWorkCard(template) {
   const processName = template.defaultProcessTemplateId
     ? getProcessTemplateName(template.defaultProcessTemplateId)
@@ -4723,6 +4731,41 @@ async function handleTaskSubmit(event, rerender) {
   if (modalState?.kind === "taskTemplate") await saveTaskTemplate(event.target, rerender);
 }
 
+export function bindStandardWorkLibraryEvents(rerender, container = document) {
+  const host = container.querySelector?.(".standard-work-library-host") ?? container;
+  const taskTemplateForm = document.querySelector(".task-template-form");
+
+  host.addEventListener("click", (event) => {
+    const actionButton = event.target.closest("[data-action]");
+
+    if (actionButton === null) return;
+
+    const action = actionButton.dataset.action;
+    if (action === "close-task-modal") {
+      modalState = null;
+      rerender();
+      return;
+    }
+
+    if (action === "remove-selected-standard-work-attachment") {
+      removeSelectedStandardWorkAttachment(actionButton);
+      return;
+    }
+
+    if (action === "show-task-work-form") {
+      modalState = { kind: "workForm", taskId: actionButton.dataset.taskId };
+      rerender();
+      return;
+    }
+    if (handleTaskTemplateFieldAction(action, Number(actionButton.dataset.fieldIndex ?? -1), rerender)) return;
+    handleTaskTemplateAction(action, actionButton.dataset.templateId, rerender);
+  });
+
+  if (taskTemplateForm !== null) {
+    taskTemplateForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
+  }
+}
+
 function renderSelectedStandardWorkAttachments(input) {
   const container = input.closest(".standard-work-attachments-field")?.querySelector("[data-selected-standard-work-attachments]");
   if (container === null || container === undefined) return;
@@ -5046,35 +5089,7 @@ export function bindTasksPageEvents(rerender) {
   }
 
   if (activeTaskTab === "task-library") {
-    tasksPage.addEventListener("click", (event) => {
-      const actionButton = event.target.closest("[data-action]");
-
-      if (actionButton === null) return;
-
-      const action = actionButton.dataset.action;
-      if (action === "close-task-modal") {
-        modalState = null;
-        rerender();
-        return;
-      }
-
-      if (action === "remove-selected-standard-work-attachment") {
-        removeSelectedStandardWorkAttachment(actionButton);
-        return;
-      }
-
-      if (action === "show-task-work-form") {
-        modalState = { kind: "workForm", taskId: actionButton.dataset.taskId };
-        rerender();
-        return;
-      }
-      if (handleTaskTemplateFieldAction(action, Number(actionButton.dataset.fieldIndex ?? -1), rerender)) return;
-      handleTaskTemplateAction(action, actionButton.dataset.templateId, rerender);
-    });
-
-    if (taskTemplateForm !== null) {
-      taskTemplateForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
-    }
+    bindStandardWorkLibraryEvents(rerender, tasksPage);
     return;
   }
 
@@ -5250,16 +5265,17 @@ export function bindTasksPageEvents(rerender) {
 
 export function renderTasksPage() {
   syncTaskTabFromHash();
+  if (activeTaskTab === "task-library") activeTaskTab = "task-list";
   if (activeTaskTab === "task-list" && !canCurrentUser("tasks.view")) activeTaskTab = "process-progress";
   if (activeTaskTab === "clearance" && !canCurrentUser("tasks.view")) activeTaskTab = "process-progress";
-  if (activeTaskTab === "process-progress" && !canCurrentUser("tasks.viewProcessProgress")) activeTaskTab = "task-library";
-  if (activeTaskTab === "task-library" && !canCurrentUser("settings.viewStandardWorks")) activeTaskTab = "content-schedule";
+  if (activeTaskTab === "process-progress" && !canCurrentUser("tasks.viewProcessProgress")) {
+    activeTaskTab = canCurrentUser("tasks.view") ? "task-list" : "content-schedule";
+  }
   if (activeTaskTab === "content-schedule" && !canCurrentUser("contentSchedules.view")) activeTaskTab = "task-list";
   const canViewActiveTab =
     (activeTaskTab === "task-list" && canCurrentUser("tasks.view")) ||
     (activeTaskTab === "clearance" && canCurrentUser("tasks.view")) ||
     (activeTaskTab === "process-progress" && canCurrentUser("tasks.viewProcessProgress")) ||
-    (activeTaskTab === "task-library" && canCurrentUser("settings.viewStandardWorks")) ||
     (activeTaskTab === "content-schedule" && canCurrentUser("contentSchedules.view"));
 
   return `
@@ -5268,7 +5284,6 @@ export function renderTasksPage() {
         ${canCurrentUser("tasks.view") ? `<button class="${activeTaskTab === "task-list" ? "is-active" : ""}" type="button" data-task-tab="task-list">执行任务列表</button>` : ""}
         ${canCurrentUser("tasks.view") ? `<button class="${activeTaskTab === "clearance" ? "is-active" : ""}" type="button" data-task-tab="clearance">库存清仓</button>` : ""}
         ${canCurrentUser("tasks.viewProcessProgress") ? `<button class="${activeTaskTab === "process-progress" ? "is-active" : ""}" type="button" data-task-tab="process-progress">标准工作流程进度</button>` : ""}
-        ${canCurrentUser("settings.viewStandardWorks") ? `<button class="${activeTaskTab === "task-library" ? "is-active" : ""}" type="button" data-task-tab="task-library">标准工作库</button>` : ""}
         ${canCurrentUser("contentSchedules.view") ? `<button class="${activeTaskTab === "content-schedule" ? "is-active" : ""}" type="button" data-task-tab="content-schedule">内容排期</button>` : ""}
       </div>
       ${
@@ -5285,11 +5300,6 @@ export function renderTasksPage() {
               ${renderProcessProgressDetail()}
               ${renderWorkFormModal()}
               ${renderCancelProcessModal()}
-            `
-          : activeTaskTab === "task-library"
-            ? `
-              ${renderTaskTemplateTable()}
-              ${renderTaskTemplateModal()}
             `
             : `
               ${renderFilters()}

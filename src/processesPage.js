@@ -12,8 +12,8 @@ import {
   state,
   stopProcess,
   updatePersistentResource,
-} from "./appState.js?v=20260701-nav-order1";
-import { hasPermission } from "./permissions.js?v=20260701-nav-order1";
+} from "./appState.js?v=20260701-task-library-standardization1";
+import { hasPermission } from "./permissions.js?v=20260701-task-library-standardization1";
 import {
   CategoryType,
   GoalStatus,
@@ -35,11 +35,11 @@ import {
   taskImportanceNames,
   taskStatusNames,
   taskUrgencyNames,
-} from "./data/modelOptions.js?v=20260701-nav-order1";
-import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260701-nav-order1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-nav-order1";
-import { getMethodologyLinkByNodeId, renderMethodologiesPage } from "./methodologiesPage.js?v=20260701-nav-order1";
-import { selectTask } from "./tasksPage.js?v=20260701-nav-order1";
+} from "./data/modelOptions.js?v=20260701-task-library-standardization1";
+import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260701-task-library-standardization1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-task-library-standardization1";
+import { getMethodologyLinkByNodeId, renderMethodologiesPage } from "./methodologiesPage.js?v=20260701-task-library-standardization1";
+import { bindStandardWorkLibraryEvents, renderStandardWorkLibraryPage, selectTask } from "./tasksPage.js?v=20260701-task-library-standardization1";
 
 const today = "2026-06-24";
 let selectedTemplateId = state.processTemplates[0]?.id ?? null;
@@ -147,6 +147,10 @@ function syncSelectedTemplateFromHash() {
 function isMethodologyRoute() {
   const hash = window.location.hash.replace(/^#/, "");
   return hash === "methods" || hash === "methodologies" || hash.startsWith("methodology-");
+}
+
+function isStandardWorkLibraryRoute() {
+  return window.location.hash.replace(/^#/, "") === "task-library";
 }
 
 function renderOptions(items, selectedId, emptyLabel) {
@@ -913,6 +917,10 @@ export function bindProcessesPageEvents(rerender) {
   const startForm = document.querySelector(".process-start-form");
   const startedProcessFilterForm = document.querySelector(".started-process-filters");
   if (page === null) return;
+  if (isStandardWorkLibraryRoute()) {
+    bindStandardWorkLibraryEvents(rerender, page);
+    return;
+  }
 
   window.__handleProcessNodeAction = async (button, event) => {
     event?.preventDefault();
@@ -1009,16 +1017,19 @@ export function bindProcessesPageEvents(rerender) {
 
 export function renderProcessesPage() {
   syncSelectedTemplateFromHash();
+  const canViewStandardWorks = canCurrentUser("settings.viewStandardWorks");
   const canViewTemplates = canCurrentUser("processes.viewTemplates");
   const canViewMethodologies = canCurrentUser("methods.view");
-  const showMethodologies = canViewMethodologies && (isMethodologyRoute() || !canViewTemplates);
+  const showStandardWorkLibrary = canViewStandardWorks && (isStandardWorkLibraryRoute() || (!canViewTemplates && !canViewMethodologies));
+  const showMethodologies = canViewMethodologies && !showStandardWorkLibrary && (isMethodologyRoute() || !canViewTemplates);
   return `
     <div class="processes-page">
       <div class="settings-tabs" aria-label="流程分区">
+        ${canViewStandardWorks ? `<a href="#task-library">标准工作库</a>` : ""}
         ${canViewTemplates ? `<a href="#process-templates">标准流程</a>` : ""}
         ${canViewMethodologies ? `<a href="#methods">方法论</a>` : ""}
       </div>
-      ${showMethodologies ? renderMethodologiesPage(getCurrentUser()) : canViewTemplates ? `
+      ${showStandardWorkLibrary ? renderStandardWorkLibraryPage() : showMethodologies ? renderMethodologiesPage(getCurrentUser()) : canViewTemplates ? `
         <div id="process-templates" class="process-section">
           ${renderTemplateList()}
           ${renderTemplateDetail()}

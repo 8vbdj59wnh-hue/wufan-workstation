@@ -248,7 +248,9 @@ export function hasPermission(userOrPermissions, permissionPath) {
 
 export function canAccessModule(userOrPermissions, moduleId) {
   if (moduleId === "processes") {
-    return hasPermission(userOrPermissions, "modules.processes") || hasPermission(userOrPermissions, "modules.methods");
+    return hasPermission(userOrPermissions, "modules.processes") ||
+      hasPermission(userOrPermissions, "modules.methods") ||
+      hasPermission(userOrPermissions, "settings.viewStandardWorks");
   }
   const modulePermissionMap = {
     goals: "goals",
