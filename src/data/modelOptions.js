@@ -81,6 +81,7 @@ export const ProcessTemplateStatus = Object.freeze({
 export const ProcessTemplateNodeStatus = Object.freeze({
   Active: "active",
   Inactive: "inactive",
+  Deleted: "deleted",
 });
 
 export const ProcessOwnerRule = Object.freeze({
@@ -262,6 +263,7 @@ export const processTemplateStatusNames = Object.freeze({
 export const processTemplateNodeStatusNames = Object.freeze({
   [ProcessTemplateNodeStatus.Active]: "启用",
   [ProcessTemplateNodeStatus.Inactive]: "停用",
+  [ProcessTemplateNodeStatus.Deleted]: "已删除",
 });
 
 export const processOwnerRuleNames = Object.freeze({

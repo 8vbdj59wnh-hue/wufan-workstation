@@ -1,6 +1,6 @@
 import { modules } from "./modules.js?v=20260630-attachments1";
 import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260630-attachments1";
-import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260630-process-node-actions1";
+import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260630-process-node-persist1";
 import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260630-attachments1";
 import { bindTasksPageEvents, renderTasksPage } from "./tasksPage.js?v=20260630-standard-work-flow1";
 import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260630-attachments1";
@@ -15,7 +15,7 @@ import {
   logout,
   schedulePersistentSave,
   validateCurrentSession,
-} from "./appState.js?v=20260630-attachments1";
+} from "./appState.js?v=20260630-process-node-persist1";
 import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260630-attachments1";
 
 const app = document.querySelector("#app");

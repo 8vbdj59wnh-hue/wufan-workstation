@@ -875,8 +875,9 @@ export function deleteProcessTemplateNode(nodeId) {
   }
 
   const remove = database.transaction(() => {
-    database.prepare("DELETE FROM methodologies WHERE processNodeId = @id").run({ id: nodeId });
-    database.prepare("DELETE FROM process_template_nodes WHERE id = @id").run({ id: nodeId });
+    database
+      .prepare("UPDATE process_template_nodes SET status = 'deleted', updatedAt = @updatedAt WHERE id = @id")
+      .run({ id: nodeId, updatedAt: new Date().toISOString() });
   });
   remove();
 

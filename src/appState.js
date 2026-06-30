@@ -32,7 +32,7 @@ import {
   TaskStatus,
   TaskTemplateStatus,
   TaskUrgency,
-} from "./data/modelOptions.js";
+} from "./data/modelOptions.js?v=20260630-process-node-persist1";
 import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260630-attachments1";
 
 const apiPort = "3001";
@@ -1020,7 +1020,7 @@ function syncNewProductLaunchProcessNodes(templateId, departmentsByKey, now) {
       accepterRule: ProcessAccepterRule.None,
       defaultAccepterId: null,
       outputRequirement: definition.outputRequirement,
-      status: ProcessTemplateNodeStatus.Active,
+      status: existing?.status ?? ProcessTemplateNodeStatus.Active,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     });
@@ -1038,7 +1038,14 @@ function syncNewProductLaunchProcessNodes(templateId, departmentsByKey, now) {
   });
 
   state.processTemplateNodes = state.processTemplateNodes.map((node) => {
-    if (node.templateId !== templateId || activeNodeIds.has(node.id) || node.status === ProcessTemplateNodeStatus.Inactive) return node;
+    if (
+      node.templateId !== templateId ||
+      activeNodeIds.has(node.id) ||
+      node.status === ProcessTemplateNodeStatus.Inactive ||
+      node.status === ProcessTemplateNodeStatus.Deleted
+    ) {
+      return node;
+    }
     changed = true;
     return { ...node, status: ProcessTemplateNodeStatus.Inactive, updatedAt: now };
   });

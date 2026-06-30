@@ -12,7 +12,7 @@ import {
   state,
   stopProcess,
   updatePersistentResource,
-} from "./appState.js?v=20260630-attachments1";
+} from "./appState.js?v=20260630-process-node-persist1";
 import { hasPermission } from "./permissions.js?v=20260630-attachments1";
 import {
   CategoryType,
@@ -35,7 +35,7 @@ import {
   taskImportanceNames,
   taskStatusNames,
   taskUrgencyNames,
-} from "./data/modelOptions.js";
+} from "./data/modelOptions.js?v=20260630-process-node-persist1";
 import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260630-attachments1";
 import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-attachments1";
 import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260630-attachments1";
@@ -118,7 +118,9 @@ function getProcessCategories() {
 }
 
 function getTemplateNodes(templateId) {
-  return sortProcessNodes(state.processTemplateNodes.filter((node) => node.templateId === templateId));
+  return sortProcessNodes(
+    state.processTemplateNodes.filter((node) => node.templateId === templateId && node.status !== ProcessTemplateNodeStatus.Deleted),
+  );
 }
 
 function shouldShowTemplate(template) {
@@ -894,8 +896,9 @@ async function deleteNode(nodeId, rerender) {
     return;
   }
 
-  state.processTemplateNodes = state.processTemplateNodes.filter((item) => item.id !== node.id);
-  state.methodologies = state.methodologies.filter((methodology) => methodology.processNodeId !== node.id);
+  state.processTemplateNodes = state.processTemplateNodes.map((item) =>
+    item.id === node.id ? { ...item, status: ProcessTemplateNodeStatus.Deleted, updatedAt: getNow() } : item,
+  );
   normalizeProcessStepOrders(node.templateId);
   rerender();
 }
