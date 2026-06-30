@@ -1,4 +1,4 @@
-import { getCurrentUser, savePersistentData, state, validateCurrentSession } from "./appState.js?v=20260701-notification-icon1";
+import { getCurrentUser, savePersistentData, state, validateCurrentSession } from "./appState.js?v=20260701-compact-process-node1";
 import {
   applyPermissionTemplate,
   dataScopeOptions,
@@ -7,7 +7,7 @@ import {
   permissionCount,
   permissionGroups,
   permissionTemplates,
-} from "./permissions.js?v=20260701-notification-icon1";
+} from "./permissions.js?v=20260701-compact-process-node1";
 import {
   CategoryType,
   PersonRole,
