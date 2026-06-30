@@ -2059,6 +2059,11 @@ textarea {
   margin-top: 12px;
 }
 
+.task-primary-actions {
+  border-bottom: 1px solid #e5e7eb;
+  padding: 0 18px 14px;
+}
+
 .task-image-detail img,
 .task-image-empty {
   width: 120px;

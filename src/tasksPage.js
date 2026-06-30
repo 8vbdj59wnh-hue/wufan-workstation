@@ -16,9 +16,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260630-task-detail-layout1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-task-detail-layout1";
-import { hasPermission } from "./permissions.js?v=20260630-task-detail-layout1";
+} from "./appState.js?v=20260630-task-detail-actions1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260630-task-detail-actions1";
+import { hasPermission } from "./permissions.js?v=20260630-task-detail-actions1";
 import {
   CategoryType,
   GoalStatus,
@@ -41,10 +41,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-task-detail-layout1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-detail-layout1";
-import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-task-detail-layout1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-task-detail-layout1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260630-task-detail-actions1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260630-task-detail-actions1";
+import { getMethodologyLinkByNodeId, getMethodologyLinkByStandardWorkId } from "./methodologiesPage.js?v=20260630-task-detail-actions1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260630-task-detail-actions1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -3009,6 +3009,9 @@ function renderTaskDetail() {
           ${canRestoreTask(selectedTask) ? renderActionButton("恢复为待执行", "restore-task", selectedTask.id) : ""}
         </div>
       </div>
+      <div class="task-primary-actions">
+        <div class="row-actions">${renderStatusActions(selectedTask) || "<span class=\"muted-action\">暂无可用操作</span>"}</div>
+      </div>
       <div class="detail-block">
         <h3>本次任务信息</h3>
         <div class="task-work-overview">
@@ -3050,7 +3053,6 @@ function renderTaskDetail() {
           ${renderDetailField("发起人", findName(people, selectedTask.initiatorId, "未设置"))}
           ${renderDetailField("验收人", selectedTask.needAcceptance ? findName(people, selectedTask.accepterId, "未设置") : "无需验收")}
         </div>
-        <div class="row-actions task-status-actions">${renderStatusActions(selectedTask) || "<span class=\"muted-action\">暂无可用操作</span>"}</div>
       </div>
       <div class="detail-block">
         <h3>执行要求</h3>

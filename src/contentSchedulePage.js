@@ -8,8 +8,8 @@ import {
   state,
   updatePersistentResource,
   uploadImageFile,
-} from "./appState.js?v=20260630-task-detail-layout1";
-import { hasPermission } from "./permissions.js?v=20260630-task-detail-layout1";
+} from "./appState.js?v=20260630-task-detail-actions1";
+import { hasPermission } from "./permissions.js?v=20260630-task-detail-actions1";
 import {
   CategoryType,
   ContentScheduleStatus,
