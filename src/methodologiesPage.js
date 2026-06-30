@@ -7,8 +7,8 @@ import {
   updatePersistentResource,
   uploadGenericFile,
   uploadImageFile,
-} from "./appState.js?v=20260701-standardization-nav1";
-import { hasPermission } from "./permissions.js?v=20260701-standardization-nav1";
+} from "./appState.js?v=20260701-nav-order1";
+import { hasPermission } from "./permissions.js?v=20260701-nav-order1";
 
 const demoMethodology = {
   id: "methodology-xhs-image-guide",

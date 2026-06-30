@@ -12,8 +12,8 @@ import {
   state,
   stopProcess,
   updatePersistentResource,
-} from "./appState.js?v=20260701-standardization-nav1";
-import { hasPermission } from "./permissions.js?v=20260701-standardization-nav1";
+} from "./appState.js?v=20260701-nav-order1";
+import { hasPermission } from "./permissions.js?v=20260701-nav-order1";
 import {
   CategoryType,
   GoalStatus,
@@ -35,11 +35,11 @@ import {
   taskImportanceNames,
   taskStatusNames,
   taskUrgencyNames,
-} from "./data/modelOptions.js?v=20260701-standardization-nav1";
-import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260701-standardization-nav1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-standardization-nav1";
-import { getMethodologyLinkByNodeId, renderMethodologiesPage } from "./methodologiesPage.js?v=20260701-standardization-nav1";
-import { selectTask } from "./tasksPage.js?v=20260701-standardization-nav1";
+} from "./data/modelOptions.js?v=20260701-nav-order1";
+import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260701-nav-order1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-nav-order1";
+import { getMethodologyLinkByNodeId, renderMethodologiesPage } from "./methodologiesPage.js?v=20260701-nav-order1";
+import { selectTask } from "./tasksPage.js?v=20260701-nav-order1";
 
 const today = "2026-06-24";
 let selectedTemplateId = state.processTemplates[0]?.id ?? null;

@@ -4,16 +4,16 @@ export const modules = [
     name: "目标",
   },
   {
+    id: "time",
+    name: "优先级",
+  },
+  {
     id: "tasks",
     name: "执行",
   },
   {
     id: "processes",
     name: "标准化",
-  },
-  {
-    id: "time",
-    name: "优先级",
   },
   {
     id: "assessment",

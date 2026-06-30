@@ -1,4 +1,4 @@
-import { resolveAssetUrl, state } from "./appState.js?v=20260701-standardization-nav1";
+import { resolveAssetUrl, state } from "./appState.js?v=20260701-nav-order1";
 
 const hiddenSystemFieldKeys = new Set(["standardWorkAttachments"]);
 
