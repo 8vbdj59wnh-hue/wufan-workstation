@@ -17,7 +17,7 @@ import {
   methodologies as initialMethodologies,
   notifications as initialNotifications,
   workPlans as initialWorkPlans,
-} from "./data/mockData.js?v=20260701-process-node-actions1";
+} from "./data/mockData.js?v=20260701-process-node-sync1";
 import {
   CategoryType,
   PersonRole,
@@ -33,8 +33,8 @@ import {
   TaskStatus,
   TaskTemplateStatus,
   TaskUrgency,
-} from "./data/modelOptions.js?v=20260701-process-node-actions1";
-import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260701-process-node-actions1";
+} from "./data/modelOptions.js?v=20260701-process-node-sync1";
+import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260701-process-node-sync1";
 
 const apiPort = "3001";
 const apiBaseUrl = `${window.location.protocol}//${window.location.hostname}:${apiPort}`;
@@ -1159,13 +1159,14 @@ function syncNewProductLaunchProcessNodes(templateId, departmentsByKey, now) {
   ];
 
   let changed = false;
-  const activeNodeIds = new Set(nodeDefinitions.map((node) => node.id));
   const nodesForTemplate = state.processTemplateNodes.filter((node) => node.templateId === templateId);
 
   nodeDefinitions.forEach((definition, index) => {
     const existing = nodesForTemplate.find((node) => node.id === definition.id || node.name === definition.name);
+    if (existing !== undefined) return;
+
     const nodeData = normalizeProcessTemplateNode({
-      id: existing?.id ?? definition.id,
+      id: definition.id,
       templateId,
       stageName: "新品上新流程",
       stageOrder: index + 1,
@@ -1188,34 +1189,13 @@ function syncNewProductLaunchProcessNodes(templateId, departmentsByKey, now) {
       accepterRule: ProcessAccepterRule.None,
       defaultAccepterId: null,
       outputRequirement: definition.outputRequirement,
-      status: existing?.status ?? ProcessTemplateNodeStatus.Active,
-      createdAt: existing?.createdAt ?? now,
+      status: ProcessTemplateNodeStatus.Active,
+      createdAt: now,
       updatedAt: now,
     });
 
-    if (existing === undefined) {
-      state.processTemplateNodes = [...state.processTemplateNodes, nodeData];
-      changed = true;
-      return;
-    }
-
-    const updated = { ...existing, ...nodeData, id: existing.id, createdAt: existing.createdAt ?? now };
-    if (JSON.stringify(existing) !== JSON.stringify(updated)) changed = true;
-    state.processTemplateNodes = state.processTemplateNodes.map((node) => (node.id === existing.id ? updated : node));
-    activeNodeIds.add(existing.id);
-  });
-
-  state.processTemplateNodes = state.processTemplateNodes.map((node) => {
-    if (
-      node.templateId !== templateId ||
-      activeNodeIds.has(node.id) ||
-      node.status === ProcessTemplateNodeStatus.Inactive ||
-      node.status === ProcessTemplateNodeStatus.Deleted
-    ) {
-      return node;
-    }
+    state.processTemplateNodes = [...state.processTemplateNodes, nodeData];
     changed = true;
-    return { ...node, status: ProcessTemplateNodeStatus.Inactive, updatedAt: now };
   });
 
   return changed;
