@@ -17,9 +17,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260701-standard-work-dnd1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-standard-work-dnd1";
-import { hasPermission } from "./permissions.js?v=20260701-standard-work-dnd1";
+} from "./appState.js?v=20260701-standard-work-dnd2";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-standard-work-dnd2";
+import { hasPermission } from "./permissions.js?v=20260701-standard-work-dnd2";
 import {
   CategoryType,
   GoalStatus,
@@ -42,10 +42,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-standard-work-dnd1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-standard-work-dnd1";
-import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-standard-work-dnd1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-standard-work-dnd1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-standard-work-dnd2";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-standard-work-dnd2";
+import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-standard-work-dnd2";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-standard-work-dnd2";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -102,6 +102,7 @@ let taskDueDateSort = "";
 let expandedClearanceGroups = new Set();
 let modalState = null;
 let activeTaskTab = "task-list";
+let standardWorkMoveStatus = null;
 
 function canCurrentUser(permissionPath) {
   return hasPermission(getCurrentUser(), permissionPath);
@@ -250,6 +251,40 @@ function getStandardWorkValueChain(template) {
     column.keywords.some((keyword) => searchText.includes(keyword)) ||
     column.departmentNames.includes(departmentName),
   )?.title ?? "基础设施维护";
+}
+
+function getStandardWorkValueChainCategory(categoryName) {
+  return getTaskCategories().find((category) => category.name === categoryName) ?? null;
+}
+
+function renderStandardWorkValueChainSelect(template) {
+  if (!canCurrentUser("settings.editStandardWorks")) return "";
+  const currentValueChain = getStandardWorkValueChain(template);
+  return `
+    <label class="standard-work-category-select">
+      <span>价值链</span>
+      <select data-action="change-standard-work-value-chain" data-template-id="${escapeHtml(template.id)}">
+        ${standardWorkValueChainColumns
+          .map(
+            (column) => `
+              <option value="${escapeHtml(column.title)}" ${column.title === currentValueChain ? "selected" : ""}>
+                ${escapeHtml(column.title)}
+              </option>
+            `,
+          )
+          .join("")}
+      </select>
+    </label>
+  `;
+}
+
+function renderStandardWorkMoveStatus() {
+  if (standardWorkMoveStatus === null) return "";
+  return `
+    <p class="standard-work-move-status is-${escapeHtml(standardWorkMoveStatus.type)}">
+      ${escapeHtml(standardWorkMoveStatus.message)}
+    </p>
+  `;
 }
 
 function getTaskTemplateForTask(task) {
@@ -2661,6 +2696,7 @@ function renderTaskTemplateTable(selectedProcessTemplateId = "") {
         <p class="form-note">标准工作库用于维护公司允许发起的标准工作事项。标准工作事项不是员工直接执行的任务，而是发起流程或生成执行任务的入口。</p>
         <button class="primary-button" type="button" data-action="add-task-template">新增标准工作事项</button>
       </div>
+      ${renderStandardWorkMoveStatus()}
       <div class="standard-work-board-wrap">
         <div class="standard-work-board">
           ${standardWorkValueChainColumns
@@ -2715,6 +2751,7 @@ function renderStandardWorkCard(template, selectedProcessTemplateId = "") {
         <strong>${findName(people, template.ownerId, "未设置")}</strong>
         <span class="standard-work-step-count">${stepCount} 步</span>
       </div>
+      ${renderStandardWorkValueChainSelect(template)}
       <div class="standard-work-card-actions">
         ${renderTemplateActionButton("编辑", "edit-task-template", template.id)}
         ${
@@ -4822,15 +4859,23 @@ async function moveStandardWorkToValueChain(templateId, categoryName, rerender) 
   }
 
   const template = getTaskTemplate(templateId);
-  if (template === null || !standardWorkValueChainColumns.some((column) => column.title === categoryName)) return;
+  const category = getStandardWorkValueChainCategory(categoryName);
+  if (template === null || category === null || !standardWorkValueChainColumns.some((column) => column.title === categoryName)) return;
 
+  const previousCategoryId = template.categoryId ?? null;
+  template.categoryId = category.id;
+  standardWorkMoveStatus = { type: "saving", message: `正在保存到「${categoryName}」...` };
+  rerender();
   try {
     await moveTaskTemplateToValueChain(template.id, categoryName);
     const updatedTemplate = getTaskTemplate(template.id);
-    const category = getTaskCategories().find((item) => item.name === categoryName);
-    if (updatedTemplate !== null && category !== undefined) updatedTemplate.categoryId = category.id;
+    if (updatedTemplate !== null) updatedTemplate.categoryId = category.id;
+    standardWorkMoveStatus = { type: "success", message: `已保存到「${categoryName}」，刷新后仍会保留。` };
     rerender();
   } catch (error) {
+    const currentTemplate = getTaskTemplate(templateId);
+    if (currentTemplate !== null) currentTemplate.categoryId = previousCategoryId;
+    standardWorkMoveStatus = { type: "error", message: "分类保存失败，已恢复原分类。" };
     console.error("标准工作分类保存失败", error);
     window.alert(error.message || "标准工作分类保存失败，请检查本地数据库服务。");
     rerender();
@@ -4898,6 +4943,12 @@ export function bindStandardWorkLibraryEvents(rerender, container = document) {
     await moveStandardWorkToValueChain(templateId, column.dataset.standardWorkCategory ?? "", rerender);
     draggedStandardWorkTemplateId = "";
     didDragStandardWorkCard = false;
+  });
+
+  host.addEventListener("change", async (event) => {
+    const select = event.target.closest("[data-action='change-standard-work-value-chain']");
+    if (select === null) return;
+    await moveStandardWorkToValueChain(select.dataset.templateId ?? "", select.value ?? "", rerender);
   });
 
   host.addEventListener("click", (event) => {
