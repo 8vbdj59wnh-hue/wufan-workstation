@@ -676,7 +676,11 @@ function renderScheduleModal() {
       <div class="modal-panel wide-modal" role="dialog" aria-modal="true" aria-label="${modalState.mode === "edit" ? "编辑排期" : "新增排期"}">
         <div class="modal-header">
           <h2>${modalState.mode === "edit" ? "编辑排期" : "新增排期"}</h2>
-          <button class="icon-button" type="button" data-content-action="close-content-modal" aria-label="关闭">×</button>
+          <div class="modal-header-actions">
+            <button class="secondary-button" type="button" data-content-action="close-content-modal">取消</button>
+            <button class="primary-button" type="button" data-action="submit-modal-form">保存</button>
+            <button class="icon-button" type="button" data-content-action="close-content-modal" aria-label="关闭">×</button>
+          </div>
         </div>
         <form class="modal-form content-schedule-form">
           <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${modalState.error}</div>

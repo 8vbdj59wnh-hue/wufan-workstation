@@ -495,7 +495,11 @@ function renderReportModal() {
       <div class="modal-panel wide-modal" role="dialog" aria-modal="true" aria-label="目标推进周报">
         <div class="modal-header">
           <h2>${readonly ? "查看周报" : "填写周报"}</h2>
-          <button class="icon-button" type="button" data-assessment-action="close-modal" aria-label="关闭">×</button>
+          <div class="modal-header-actions">
+            <button class="secondary-button" type="button" data-assessment-action="close-modal">取消</button>
+            ${readonly ? "" : `<button class="secondary-button" type="button" data-action="submit-modal-form" data-submit-intent="draft">保存草稿</button><button class="primary-button" type="button" data-action="submit-modal-form" data-submit-intent="submitted">提交周报</button>`}
+            <button class="icon-button" type="button" data-assessment-action="close-modal" aria-label="关闭">×</button>
+          </div>
         </div>
         <form class="modal-form assessment-report-form">
           <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${escapeHtml(modalState.error ?? "")}</div>
@@ -547,7 +551,11 @@ function renderProblemModal() {
       <div class="modal-panel wide-modal" role="dialog" aria-modal="true" aria-label="问题记录">
         <div class="modal-header">
           <h2>${readonly ? "查看问题" : "维护问题"}</h2>
-          <button class="icon-button" type="button" data-assessment-action="close-modal" aria-label="关闭">×</button>
+          <div class="modal-header-actions">
+            <button class="secondary-button" type="button" data-assessment-action="close-modal">取消</button>
+            ${readonly ? "" : `<button class="primary-button" type="button" data-action="submit-modal-form">保存问题</button>`}
+            <button class="icon-button" type="button" data-assessment-action="close-modal" aria-label="关闭">×</button>
+          </div>
         </div>
         <form class="modal-form assessment-problem-form">
           <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${escapeHtml(modalState.error ?? "")}</div>

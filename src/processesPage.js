@@ -495,7 +495,14 @@ function renderTemplateModal() {
   const applicableDepartmentIds = Array.isArray(template?.applicableDepartmentIds) ? template.applicableDepartmentIds : [];
   return `
     <div class="modal-backdrop"><div class="modal-panel wide-modal">
-      <div class="modal-header"><h2>${template ? "编辑标准流程" : "新增标准流程"}</h2><button class="icon-button" type="button" data-action="close-process-modal">×</button></div>
+      <div class="modal-header">
+        <h2>${template ? "编辑标准流程" : "新增标准流程"}</h2>
+        <div class="modal-header-actions">
+          <button class="secondary-button" type="button" data-action="close-process-modal">取消</button>
+          <button class="primary-button" type="button" data-action="submit-modal-form">保存</button>
+          <button class="icon-button" type="button" data-action="close-process-modal">×</button>
+        </div>
+      </div>
       <form class="modal-form process-template-form">
         <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${modalState.error}</div>
         <label><span>流程名称</span><input name="name" value="${template?.name ?? ""}" /></label>
@@ -522,7 +529,14 @@ function renderNodeModal() {
   const submitFieldsJson = JSON.stringify(submitRequirement.submitFields ?? [], null, 2);
   return `
     <div class="modal-backdrop"><div class="modal-panel wide-modal">
-      <div class="modal-header"><h2>${node ? "编辑流程步骤" : "新增流程步骤"}</h2><button class="icon-button" type="button" data-action="close-process-modal">×</button></div>
+      <div class="modal-header">
+        <h2>${node ? "编辑流程步骤" : "新增流程步骤"}</h2>
+        <div class="modal-header-actions">
+          <button class="secondary-button" type="button" data-action="close-process-modal">取消</button>
+          <button class="primary-button" type="button" data-action="submit-modal-form">保存</button>
+          <button class="icon-button" type="button" data-action="close-process-modal">×</button>
+        </div>
+      </div>
       <form class="modal-form process-node-form">
         <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${modalState.error}</div>
         <div class="form-grid">
@@ -560,7 +574,14 @@ function renderStartModal() {
   const template = state.processTemplates.find((item) => item.id === modalState.templateId);
   return `
     <div class="modal-backdrop"><div class="modal-panel wide-modal">
-      <div class="modal-header"><h2>发起标准流程</h2><button class="icon-button" type="button" data-action="close-process-modal">×</button></div>
+      <div class="modal-header">
+        <h2>发起标准流程</h2>
+        <div class="modal-header-actions">
+          <button class="secondary-button" type="button" data-action="close-process-modal">取消</button>
+          <button class="primary-button" type="button" data-action="submit-modal-form">发起</button>
+          <button class="icon-button" type="button" data-action="close-process-modal">×</button>
+        </div>
+      </div>
       <form class="modal-form process-start-form">
         <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${modalState.error}</div>
         <label><span>标准流程</span><select name="templateId">${renderOptions(state.processTemplates.filter((item) => item.status === ProcessTemplateStatus.Active), template.id, "请选择标准流程")}</select></label>

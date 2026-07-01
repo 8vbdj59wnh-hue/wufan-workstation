@@ -2700,6 +2700,20 @@ textarea {
   line-height: 1.35;
 }
 
+.modal-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.modal-header-actions .primary-button,
+.modal-header-actions .secondary-button {
+  min-height: 30px;
+  padding: 0 10px;
+}
+
 .modal-form {
   display: grid;
   gap: 14px;
@@ -2791,6 +2805,13 @@ textarea {
   justify-content: flex-end;
   border-top: 1px solid #e5e7eb;
   margin: 4px -18px -18px;
+  padding: 14px 18px;
+}
+
+.top-form-actions {
+  border-top: 0;
+  border-bottom: 1px solid #e5e7eb;
+  margin: -18px -18px 4px;
   padding: 14px 18px;
 }
 

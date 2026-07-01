@@ -17,9 +17,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260701-clearance-prev-result1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-clearance-prev-result1";
-import { hasPermission } from "./permissions.js?v=20260701-clearance-prev-result1";
+} from "./appState.js?v=20260701-top-form-actions1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-top-form-actions1";
+import { hasPermission } from "./permissions.js?v=20260701-top-form-actions1";
 import {
   CategoryType,
   GoalStatus,
@@ -42,10 +42,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-clearance-prev-result1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-clearance-prev-result1";
-import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-clearance-prev-result1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-clearance-prev-result1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-top-form-actions1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-top-form-actions1";
+import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-top-form-actions1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-top-form-actions1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -3502,7 +3502,11 @@ function renderTaskModal() {
       <div class="modal-panel wide-modal" role="dialog" aria-modal="true" aria-label="${isEdit ? "编辑执行任务" : "发起标准工作"}">
         <div class="modal-header">
           <h2>${isEdit ? "编辑执行任务" : "发起标准工作"}</h2>
-          <button class="icon-button" type="button" data-action="close-task-modal" aria-label="关闭">×</button>
+          <div class="modal-header-actions">
+            <button class="secondary-button" type="button" data-action="close-task-modal">取消</button>
+            <button class="primary-button" type="button" data-action="submit-modal-form">保存</button>
+            <button class="icon-button" type="button" data-action="close-task-modal" aria-label="关闭">×</button>
+          </div>
         </div>
         <form class="modal-form task-form">
           <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${modalState.error}</div>
@@ -3606,7 +3610,11 @@ function renderResultModal() {
       <div class="modal-panel wide-modal" role="dialog" aria-modal="true" aria-label="${title}">
         <div class="modal-header">
           <h2>${title}</h2>
-          <button class="icon-button" type="button" data-action="close-task-modal" aria-label="关闭">×</button>
+          <div class="modal-header-actions">
+            <button class="secondary-button" type="button" data-action="close-task-modal">取消</button>
+            <button class="primary-button" type="button" data-action="submit-modal-form">保存</button>
+            <button class="icon-button" type="button" data-action="close-task-modal" aria-label="关闭">×</button>
+          </div>
         </div>
         <form class="modal-form result-form">
           <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${modalState.error}</div>
@@ -3798,7 +3806,11 @@ function renderTaskTemplateModal() {
       <div class="modal-panel wide-modal" role="dialog" aria-modal="true" aria-label="${isEdit ? "编辑标准工作事项" : "新增标准工作事项"}">
         <div class="modal-header">
           <h2>${isEdit ? "编辑标准工作事项" : "新增标准工作事项"}</h2>
-          <button class="icon-button" type="button" data-action="close-task-modal" aria-label="关闭">×</button>
+          <div class="modal-header-actions">
+            <button class="secondary-button" type="button" data-action="close-task-modal">取消</button>
+            <button class="primary-button" type="button" data-action="submit-modal-form">保存</button>
+            <button class="icon-button" type="button" data-action="close-task-modal" aria-label="关闭">×</button>
+          </div>
         </div>
         <form class="modal-form task-template-form">
           <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${modalState.error}</div>

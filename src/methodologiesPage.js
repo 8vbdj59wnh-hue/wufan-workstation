@@ -311,6 +311,10 @@ function renderMethodologyForm(methodology) {
   return `
     <form class="modal-form methodology-form">
       <div class="form-error" ${formError === "" ? "hidden" : ""}>${escapeHtml(formError)}</div>
+      <div class="modal-actions top-form-actions">
+        <button class="secondary-button" type="button" data-action="cancel-methodology-edit">取消</button>
+        <button class="primary-button" type="submit">保存方法论</button>
+      </div>
       <label><span>关联流程节点</span><select name="processNodeId">${renderNodeOptions(methodology.processNodeId ?? "")}</select></label>
       <label><span>方法论标题</span><input name="title" value="${escapeHtml(methodology.title ?? "")}" /></label>
       <label><span>简介</span><textarea name="description">${escapeHtml(methodology.description ?? "")}</textarea></label>

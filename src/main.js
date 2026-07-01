@@ -1,11 +1,11 @@
-import { modules } from "./modules.js?v=20260701-clearance-prev-result1";
-import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260701-clearance-prev-result1";
-import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260701-clearance-prev-result1";
-import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260701-clearance-prev-result1";
-import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260701-clearance-prev-result1";
-import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260701-clearance-prev-result1";
-import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260701-clearance-prev-result1";
-import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260701-clearance-prev-result1";
+import { modules } from "./modules.js?v=20260701-top-form-actions1";
+import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260701-top-form-actions1";
+import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260701-top-form-actions1";
+import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260701-top-form-actions1";
+import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260701-top-form-actions1";
+import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260701-top-form-actions1";
+import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260701-top-form-actions1";
+import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260701-top-form-actions1";
 import {
   flushPersistentSave,
   getCurrentUser,
@@ -23,8 +23,8 @@ import {
   updateCurrentUserAvatar,
   uploadImageFile,
   validateCurrentSession,
-} from "./appState.js?v=20260701-clearance-prev-result1";
-import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260701-clearance-prev-result1";
+} from "./appState.js?v=20260701-top-form-actions1";
+import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260701-top-form-actions1";
 
 const app = document.querySelector("#app");
 
@@ -492,6 +492,31 @@ window.addEventListener("hashchange", render);
 window.addEventListener("pagehide", flushPersistentSave);
 window.addEventListener("beforeunload", flushPersistentSave);
 window.addEventListener("persistence-status-change", updatePersistenceBanner);
+document.addEventListener(
+  "click",
+  (event) => {
+    if (!(event.target instanceof Element)) return;
+    const button = event.target.closest('[data-action="submit-modal-form"]');
+    if (button === null) return;
+    const form = button.closest(".modal-panel")?.querySelector("form");
+    if (form === undefined || form === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const submitIntent = button.dataset.submitIntent ?? "";
+    const submitter =
+      submitIntent === ""
+        ? null
+        : Array.from(form.querySelectorAll('[type="submit"][data-submit-intent]')).find(
+            (item) => item.dataset.submitIntent === submitIntent,
+          ) ?? null;
+    if (submitter instanceof HTMLElement) {
+      form.requestSubmit(submitter);
+      return;
+    }
+    form.requestSubmit();
+  },
+  true,
+);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") flushPersistentSave();
 });

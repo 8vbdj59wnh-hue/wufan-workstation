@@ -1069,7 +1069,11 @@ function renderModal() {
       <div class="modal-panel" role="dialog" aria-modal="true" aria-label="${getModalTitle()}">
         <div class="modal-header">
           <h2>${getModalTitle()}</h2>
-          <button class="icon-button" type="button" data-action="close-modal" aria-label="关闭">×</button>
+          <div class="modal-header-actions">
+            <button class="secondary-button" type="button" data-action="close-modal">取消</button>
+            <button class="primary-button" type="button" data-action="submit-modal-form">保存</button>
+            <button class="icon-button" type="button" data-action="close-modal" aria-label="关闭">×</button>
+          </div>
         </div>
         <form class="modal-form" data-form-entity="${modalState.entity}">
           <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${modalState.error}</div>

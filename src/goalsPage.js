@@ -1022,7 +1022,11 @@ function renderGoalModal() {
       <div class="modal-panel wide-modal" role="dialog" aria-modal="true" aria-label="${isEdit ? "编辑目标" : "新增目标"}">
         <div class="modal-header">
           <h2>${isEdit ? "编辑目标" : "新增目标"}</h2>
-          <button class="icon-button" type="button" data-action="close-goal-modal" aria-label="关闭">×</button>
+          <div class="modal-header-actions">
+            <button class="secondary-button" type="button" data-action="close-goal-modal">取消</button>
+            <button class="primary-button" type="button" data-action="submit-modal-form" ${isSavingGoal ? "disabled" : ""}>${isSavingGoal ? "保存中..." : isEdit ? "保存修改" : "保存"}</button>
+            <button class="icon-button" type="button" data-action="close-goal-modal" aria-label="关闭">×</button>
+          </div>
         </div>
         <form class="modal-form goal-form" data-editing-goal-id="${goal?.id ?? ""}">
           <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${modalState.error}</div>
@@ -1136,7 +1140,11 @@ function renderCurrentValueModal() {
       <div class="modal-panel" role="dialog" aria-modal="true" aria-label="更新当前值">
         <div class="modal-header">
           <h2>更新当前值</h2>
-          <button class="icon-button" type="button" data-action="close-goal-modal" aria-label="关闭">×</button>
+          <div class="modal-header-actions">
+            <button class="secondary-button" type="button" data-action="close-goal-modal">取消</button>
+            <button class="primary-button" type="button" data-action="submit-modal-form">保存</button>
+            <button class="icon-button" type="button" data-action="close-goal-modal" aria-label="关闭">×</button>
+          </div>
         </div>
         <form class="modal-form current-value-form">
           <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${modalState.error}</div>
@@ -1202,7 +1210,11 @@ function renderGoalTaskModal() {
       <div class="modal-panel wide-modal" role="dialog" aria-modal="true" aria-label="${escapeHtml(modalState.title ?? "添加未来工作")}">
         <div class="modal-header">
           <h2>${escapeHtml(modalState.title ?? "添加未来工作")}</h2>
-          <button class="icon-button" type="button" data-action="close-goal-modal" aria-label="关闭">×</button>
+          <div class="modal-header-actions">
+            <button class="secondary-button" type="button" data-action="close-goal-modal">取消</button>
+            <button class="primary-button" type="button" data-action="submit-modal-form">保存</button>
+            <button class="icon-button" type="button" data-action="close-goal-modal" aria-label="关闭">×</button>
+          </div>
         </div>
         <form class="modal-form goal-task-form">
           <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${modalState.error}</div>
