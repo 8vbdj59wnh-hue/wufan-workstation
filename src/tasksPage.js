@@ -17,9 +17,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260701-task-belonging-order1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-task-belonging-order1";
-import { hasPermission } from "./permissions.js?v=20260701-task-belonging-order1";
+} from "./appState.js?v=20260701-clearance-prev-result1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-clearance-prev-result1";
+import { hasPermission } from "./permissions.js?v=20260701-clearance-prev-result1";
 import {
   CategoryType,
   GoalStatus,
@@ -42,10 +42,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-task-belonging-order1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-task-belonging-order1";
-import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-task-belonging-order1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-task-belonging-order1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-clearance-prev-result1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-clearance-prev-result1";
+import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-clearance-prev-result1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-clearance-prev-result1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -3140,20 +3140,62 @@ function getTaskSubmittedFiles(task) {
   return files;
 }
 
-function renderPreviousTaskFilesBlock(task) {
+function renderSubmittedFormDataRows(task) {
+  const formData = task?.submitFormData && typeof task.submitFormData === "object" ? task.submitFormData : {};
+  const fields = getSubmitFields(task ?? {});
+  const labelByKey = new Map(fields.map((field) => [field.key, field.label || field.key]));
+  const rows = Object.entries(formData)
+    .filter(([, value]) => {
+      if (Array.isArray(value)) return value.length > 0;
+      return value !== null && value !== undefined && value !== "";
+    })
+    .map(([key, value]) => {
+      const displayValue = Array.isArray(value) ? value.join("、") : typeof value === "object" ? JSON.stringify(value) : value;
+      return renderDetailField(escapeHtml(labelByKey.get(key) ?? key), escapeHtml(displayValue));
+    })
+    .join("");
+
+  return rows === "" ? `<p class="form-note">前步任务暂无表单提交内容。</p>` : `<div class="detail-grid">${rows}</div>`;
+}
+
+function renderSubmittedLinks(task) {
+  const links = Array.isArray(task?.submitLinks) ? task.submitLinks.filter(Boolean) : [];
+  if (links.length === 0) return "未填写";
+  return links
+    .map((link) => `<a href="${escapeHtml(link)}" target="_blank" rel="noreferrer">${escapeHtml(link)}</a>`)
+    .join("、");
+}
+
+function renderPreviousTaskSubmissionBlock(task) {
   const previousTask = getPreviousProcessTask(task);
   if (previousTask === null) return "";
   const files = getTaskSubmittedFiles(previousTask);
+  const resultText = previousTask.resultText === null || previousTask.resultText === undefined || previousTask.resultText === ""
+    ? "暂无"
+    : previousTask.resultText;
 
   return `
     <div class="detail-block">
-      <h3>前步任务提交文件</h3>
-      <p>前步任务：${escapeHtml(previousTask.name)}</p>
-      ${renderAttachmentPreviewList(files, "前步任务暂无提交文件")}
-      <p>提交时间：${previousTask.submittedAt ?? "未提交"}</p>
-      <p>提交人：${findName(people, previousTask.submittedBy, "未记录")}</p>
+      <h3>前步任务提交结果</h3>
+      <div class="detail-grid">
+        ${renderDetailField("前步任务", escapeHtml(previousTask.name))}
+        ${renderDetailField("任务状态", escapeHtml(taskStatusNames[previousTask.status] ?? previousTask.status ?? "未记录"))}
+        ${renderDetailField("提交时间", escapeHtml(previousTask.submittedAt ?? "未提交"))}
+        ${renderDetailField("提交人", escapeHtml(findName(people, previousTask.submittedBy, "未记录")))}
+      </div>
+      <p>结果说明：${escapeHtml(resultText)}</p>
+      ${renderSubmittedFormDataRows(previousTask)}
+      <p>提交链接：${renderSubmittedLinks(previousTask)}</p>
+      <div class="submit-file-preview">
+        <p>提交文件：</p>
+        ${renderAttachmentPreviewList(files, "前步任务暂无提交文件")}
+      </div>
     </div>
   `;
+}
+
+function renderPreviousTaskFilesBlock(task) {
+  return renderPreviousTaskSubmissionBlock(task);
 }
 
 function renderTaskDetail() {
@@ -3334,6 +3376,7 @@ function renderWorkFormModal() {
             ? `<p class="form-note">当前执行任务：${escapeHtml(task.name)}</p>`
             : ""
         }
+        ${task === null ? "" : renderPreviousTaskSubmissionBlock(task)}
       </div>
     </div>
   `;
