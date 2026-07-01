@@ -1,4 +1,4 @@
-import { resolveAssetUrl, state } from "./appState.js?v=20260701-process-node-sync1";
+import { resolveAssetUrl, state } from "./appState.js?v=20260701-no-cache-client1";
 
 const hiddenSystemFieldKeys = new Set(["standardWorkAttachments"]);
 
