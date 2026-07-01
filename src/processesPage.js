@@ -13,8 +13,8 @@ import {
   stopProcess,
   updateProcessTemplateNodeStatus,
   updatePersistentResource,
-} from "./appState.js?v=20260701-task-belonging-order1";
-import { hasPermission } from "./permissions.js?v=20260701-task-belonging-order1";
+} from "./appState.js?v=20260701-standard-work-visible1";
+import { hasPermission } from "./permissions.js?v=20260701-standard-work-visible1";
 import {
   CategoryType,
   GoalStatus,
@@ -36,11 +36,11 @@ import {
   taskImportanceNames,
   taskStatusNames,
   taskUrgencyNames,
-} from "./data/modelOptions.js?v=20260701-task-belonging-order1";
-import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260701-task-belonging-order1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-task-belonging-order1";
-import { getMethodologyLinkByNodeId, renderMethodologiesPage } from "./methodologiesPage.js?v=20260701-task-belonging-order1";
-import { bindStandardWorkLibraryEvents, renderStandardWorkLibraryPage, selectTask } from "./tasksPage.js?v=20260701-task-belonging-order1";
+} from "./data/modelOptions.js?v=20260701-standard-work-visible1";
+import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260701-standard-work-visible1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-standard-work-visible1";
+import { getMethodologyLinkByNodeId, renderMethodologiesPage } from "./methodologiesPage.js?v=20260701-standard-work-visible1";
+import { bindStandardWorkLibraryEvents, renderStandardWorkLibraryPage, selectTask } from "./tasksPage.js?v=20260701-standard-work-visible1";
 
 const today = "2026-06-24";
 let selectedTemplateId = state.processTemplates[0]?.id ?? null;
@@ -1037,8 +1037,8 @@ export function bindProcessesPageEvents(rerender) {
 
 export function renderProcessesPage() {
   syncSelectedTemplateFromHash();
-  const canViewStandardWorks = canCurrentUser("settings.viewStandardWorks");
   const canViewTemplates = canCurrentUser("processes.viewTemplates");
+  const canViewStandardWorks = canCurrentUser("settings.viewStandardWorks") || canViewTemplates;
   const canViewMethodologies = canCurrentUser("methods.view");
   const showMethodologies = canViewMethodologies && isMethodologyRoute();
   return `
