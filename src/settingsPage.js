@@ -1,4 +1,4 @@
-import { getCurrentUser, savePersistentData, state, validateCurrentSession } from "./appState.js?v=20260701-task-owner-edit2";
+import { getCurrentUser, savePersistentData, state, validateCurrentSession } from "./appState.js?v=20260701-task-owner-note1";
 import {
   applyPermissionTemplate,
   dataScopeOptions,
@@ -7,7 +7,7 @@ import {
   permissionCount,
   permissionGroups,
   permissionTemplates,
-} from "./permissions.js?v=20260701-task-owner-edit2";
+} from "./permissions.js?v=20260701-task-owner-note1";
 import {
   CategoryType,
   PersonRole,

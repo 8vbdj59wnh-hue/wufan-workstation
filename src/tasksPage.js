@@ -17,9 +17,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260701-task-owner-edit2";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-task-owner-edit2";
-import { hasPermission } from "./permissions.js?v=20260701-task-owner-edit2";
+} from "./appState.js?v=20260701-task-owner-note1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-task-owner-note1";
+import { hasPermission } from "./permissions.js?v=20260701-task-owner-note1";
 import {
   CategoryType,
   GoalStatus,
@@ -42,10 +42,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-task-owner-edit2";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-task-owner-edit2";
-import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-task-owner-edit2";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-task-owner-edit2";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-task-owner-note1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-task-owner-note1";
+import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-task-owner-note1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-task-owner-note1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -3466,7 +3466,7 @@ function renderTaskModal() {
           ${
             isEdit
               ? `
-                ${isProcessTask ? "<p class=\"form-note\">流程步骤生成的执行任务，其步骤完成标准来自标准流程，普通编辑中不允许修改。</p>" : "<p class=\"form-note\">执行任务来自标准工作库，任务名称、负责部门、负责人和标准完成要求已锁定。</p>"}
+                ${isProcessTask ? "<p class=\"form-note\">流程步骤生成的执行任务，其步骤完成标准来自标准流程；本次执行人可以按实际人员调整。</p>" : "<p class=\"form-note\">执行任务来自标准工作库，任务名称、负责部门和标准完成要求已锁定；本次执行人可以调整。</p>"}
                 <div class="detail-grid">
                   ${renderDetailField("任务名称", escapeHtml(task?.name ?? ""))}
                   ${renderDetailField("关联目标", findName(goals, task?.goalId ?? null, "未设置"))}
@@ -3476,7 +3476,7 @@ function renderTaskModal() {
                 </div>
                 <div class="form-grid">
                   <label>
-                    <span>执行人 / 负责人</span>
+                    <span>执行人</span>
                     <select name="ownerId">${renderOptions(people, task?.ownerId ?? "", "请选择执行人")}</select>
                   </label>
                 </div>
