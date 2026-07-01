@@ -17,9 +17,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260701-workplan-save1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-workplan-save1";
-import { hasPermission } from "./permissions.js?v=20260701-workplan-save1";
+} from "./appState.js?v=20260701-task-owner-edit1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-task-owner-edit1";
+import { hasPermission } from "./permissions.js?v=20260701-task-owner-edit1";
 import {
   CategoryType,
   GoalStatus,
@@ -42,10 +42,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-workplan-save1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-workplan-save1";
-import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-workplan-save1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-workplan-save1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-task-owner-edit1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-task-owner-edit1";
+import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-task-owner-edit1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-task-owner-edit1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -3472,7 +3472,6 @@ function renderTaskModal() {
                   ${renderDetailField("关联目标", findName(goals, task?.goalId ?? null, "未设置"))}
                   ${renderDetailField("工作分类", findName(categories, task?.categoryId ?? null, "未设置"))}
                   ${renderDetailField("负责部门", findName(departments, task?.departmentId ?? null, "未设置"))}
-                  ${renderDetailField("负责人", findName(people, task?.ownerId ?? null, "未设置"))}
                   ${renderDetailField(isProcessTask ? "步骤完成标准" : "标准完成要求", escapeHtml(task?.completionStandard ?? ""))}
                 </div>
                 ${renderCustomFieldsForm(editTemplate, getTaskCustomFields(task))}
@@ -3515,6 +3514,10 @@ function renderTaskModal() {
             ${
               isEdit
                 ? `
+                  <label>
+                    <span>执行人</span>
+                    <select name="ownerId">${renderOptions(people, task?.ownerId ?? "", "请选择执行人")}</select>
+                  </label>
                   <label>
                     <span>重要性</span>
                     <select name="importance">${renderValueOptions(TaskImportance, task?.importance ?? "", taskImportanceNames, "请选择重要性")}</select>
@@ -4018,6 +4021,7 @@ function buildTaskDraft(form, task) {
   return {
     ...task,
     customFields,
+    ownerId: getFormValue(form, "ownerId") || task.ownerId,
     description: getFormValue(form, "description"),
     importance: getFormValue(form, "importance") || task.importance,
     urgency: getFormValue(form, "urgency") || task.urgency,
@@ -4148,6 +4152,7 @@ async function saveTask(form, rerender) {
       customFields: draft.customFields,
       displayTitle,
       coverImageUrl,
+      ownerId: draft.ownerId,
       description: draft.description,
       importance: draft.importance,
       urgency: draft.urgency,
