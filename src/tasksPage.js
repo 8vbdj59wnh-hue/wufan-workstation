@@ -17,9 +17,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260701-stability1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-stability1";
-import { hasPermission } from "./permissions.js?v=20260701-stability1";
+} from "./appState.js?v=20260701-standard-work-dnd1";
+import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260701-standard-work-dnd1";
+import { hasPermission } from "./permissions.js?v=20260701-standard-work-dnd1";
 import {
   CategoryType,
   GoalStatus,
@@ -42,10 +42,10 @@ import {
   taskUrgencyNames,
   submitTypeNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-stability1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-stability1";
-import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-stability1";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-stability1";
+import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260701-standard-work-dnd1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-standard-work-dnd1";
+import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260701-standard-work-dnd1";
+import { renderWorkFormViewer } from "./workFormViewer.js?v=20260701-standard-work-dnd1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -2672,11 +2672,12 @@ function renderTaskTemplateTable(selectedProcessTemplateId = "") {
                     <h3>${column.title}</h3>
                     <span>${columnTemplates.length} 项</span>
                   </div>
-                  <div class="standard-work-card-list">
+                  <div class="standard-work-card-list" data-standard-work-drop-zone="${escapeHtml(column.title)}">
                     ${
                       columnTemplates.length === 0
-                        ? `<div class="empty-note">暂无标准工作事项</div>`
-                        : columnTemplates.map((template) => renderStandardWorkCard(template, selectedProcessTemplateId)).join("")
+                        ? `<div class="standard-work-drop-hint">拖到这里</div>`
+                        : `${columnTemplates.map((template) => renderStandardWorkCard(template, selectedProcessTemplateId)).join("")}
+                          <div class="standard-work-drop-hint">拖到这里归入${escapeHtml(column.title)}</div>`
                     }
                   </div>
                 </section>
@@ -4825,6 +4826,9 @@ async function moveStandardWorkToValueChain(templateId, categoryName, rerender) 
 
   try {
     await moveTaskTemplateToValueChain(template.id, categoryName);
+    const updatedTemplate = getTaskTemplate(template.id);
+    const category = getTaskCategories().find((item) => item.name === categoryName);
+    if (updatedTemplate !== null && category !== undefined) updatedTemplate.categoryId = category.id;
     rerender();
   } catch (error) {
     console.error("标准工作分类保存失败", error);
@@ -4838,6 +4842,13 @@ function clearStandardWorkDragState(host) {
   host.querySelectorAll(".standard-work-column.is-drag-over").forEach((column) => column.classList.remove("is-drag-over"));
 }
 
+function getStandardWorkDropColumn(target) {
+  return target?.closest?.("[data-standard-work-category]") ?? null;
+}
+
+let draggedStandardWorkTemplateId = "";
+let didDragStandardWorkCard = false;
+
 export function bindStandardWorkLibraryEvents(rerender, container = document) {
   const host = container.querySelector?.(".standard-work-library-host") ?? container;
   const taskTemplateForm = document.querySelector(".task-template-form");
@@ -4845,20 +4856,28 @@ export function bindStandardWorkLibraryEvents(rerender, container = document) {
   host.addEventListener("dragstart", (event) => {
     const card = event.target.closest(".standard-work-card[draggable='true']");
     if (card === null) return;
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", card.dataset.standardWorkTemplateId ?? "");
+    draggedStandardWorkTemplateId = card.dataset.standardWorkTemplateId ?? "";
+    didDragStandardWorkCard = true;
+    if (event.dataTransfer !== null) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", draggedStandardWorkTemplateId);
+    }
     card.classList.add("is-dragging");
   });
 
   host.addEventListener("dragend", () => {
     clearStandardWorkDragState(host);
+    draggedStandardWorkTemplateId = "";
+    window.setTimeout(() => {
+      didDragStandardWorkCard = false;
+    }, 0);
   });
 
   host.addEventListener("dragover", (event) => {
-    const column = event.target.closest("[data-standard-work-category]");
+    const column = getStandardWorkDropColumn(event.target);
     if (column === null) return;
     event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
+    if (event.dataTransfer !== null) event.dataTransfer.dropEffect = "move";
     host.querySelectorAll(".standard-work-column.is-drag-over").forEach((item) => {
       if (item !== column) item.classList.remove("is-drag-over");
     });
@@ -4866,20 +4885,28 @@ export function bindStandardWorkLibraryEvents(rerender, container = document) {
   });
 
   host.addEventListener("dragleave", (event) => {
-    const column = event.target.closest("[data-standard-work-category]");
+    const column = getStandardWorkDropColumn(event.target);
     if (column !== null && !column.contains(event.relatedTarget)) column.classList.remove("is-drag-over");
   });
 
   host.addEventListener("drop", async (event) => {
-    const column = event.target.closest("[data-standard-work-category]");
+    const column = getStandardWorkDropColumn(event.target);
     if (column === null) return;
     event.preventDefault();
-    const templateId = event.dataTransfer.getData("text/plain");
+    const templateId = event.dataTransfer?.getData("text/plain") || draggedStandardWorkTemplateId;
     clearStandardWorkDragState(host);
     await moveStandardWorkToValueChain(templateId, column.dataset.standardWorkCategory ?? "", rerender);
+    draggedStandardWorkTemplateId = "";
+    didDragStandardWorkCard = false;
   });
 
   host.addEventListener("click", (event) => {
+    if (didDragStandardWorkCard) {
+      event.preventDefault();
+      didDragStandardWorkCard = false;
+      return;
+    }
+
     const actionButton = event.target.closest("[data-action]");
 
     if (actionButton === null) {
