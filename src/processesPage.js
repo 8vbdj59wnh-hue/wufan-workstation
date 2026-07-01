@@ -13,8 +13,8 @@ import {
   stopProcess,
   updateProcessTemplateNodeStatus,
   updatePersistentResource,
-} from "./appState.js?v=20260701-process-node-status1";
-import { hasPermission } from "./permissions.js?v=20260701-process-node-status1";
+} from "./appState.js?v=20260701-process-node-actions1";
+import { hasPermission } from "./permissions.js?v=20260701-process-node-actions1";
 import {
   CategoryType,
   GoalStatus,
@@ -36,11 +36,11 @@ import {
   taskImportanceNames,
   taskStatusNames,
   taskUrgencyNames,
-} from "./data/modelOptions.js?v=20260701-process-node-status1";
-import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260701-process-node-status1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-process-node-status1";
-import { getMethodologyLinkByNodeId, renderMethodologiesPage } from "./methodologiesPage.js?v=20260701-process-node-status1";
-import { bindStandardWorkLibraryEvents, renderStandardWorkLibraryPage, selectTask } from "./tasksPage.js?v=20260701-process-node-status1";
+} from "./data/modelOptions.js?v=20260701-process-node-actions1";
+import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260701-process-node-actions1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-process-node-actions1";
+import { getMethodologyLinkByNodeId, renderMethodologiesPage } from "./methodologiesPage.js?v=20260701-process-node-actions1";
+import { bindStandardWorkLibraryEvents, renderStandardWorkLibraryPage, selectTask } from "./tasksPage.js?v=20260701-process-node-actions1";
 
 const today = "2026-06-24";
 let selectedTemplateId = state.processTemplates[0]?.id ?? null;
@@ -316,15 +316,15 @@ function renderTemplateNodes(templateId) {
                   ${getMethodologyLinkByNodeId(node.id)}
                   ${
                     canCurrentUser("processes.editSteps") && node.status === ProcessTemplateNodeStatus.Inactive
-                      ? `<button class="text-button" type="button" data-action="activate-node" data-node-id="${node.id}">启用</button>`
+                      ? `<button class="text-button" type="button" data-action="activate-node" data-node-id="${node.id}" onclick="window.__handleProcessNodeAction?.(this, event)">启用</button>`
                       : ""
                   }
                   ${
                     canCurrentUser("processes.editSteps") && node.status !== ProcessTemplateNodeStatus.Inactive
-                      ? `<button class="text-button danger-button" type="button" data-action="deactivate-node" data-node-id="${node.id}">停用</button>`
+                      ? `<button class="text-button danger-button" type="button" data-action="deactivate-node" data-node-id="${node.id}" onclick="window.__handleProcessNodeAction?.(this, event)">停用</button>`
                       : ""
                   }
-                  ${canCurrentUser("processes.editSteps") ? `<button class="text-button danger-button" type="button" data-action="delete-node" data-node-id="${node.id}">删除</button>` : ""}
+                  ${canCurrentUser("processes.editSteps") ? `<button class="text-button danger-button" type="button" data-action="delete-node" data-node-id="${node.id}" onclick="window.__handleProcessNodeAction?.(this, event)">删除</button>` : ""}
                 </span>
               </div>
               <div class="process-node-meta">
@@ -806,6 +806,20 @@ async function handleProcessNodeAction(actionButton, rerender) {
     rerender();
     return true;
   }
+  if (action === "activate-node") {
+    await updateNodeStatus(actionButton.dataset.nodeId, ProcessTemplateNodeStatus.Active);
+    rerender();
+    return true;
+  }
+  if (action === "deactivate-node") {
+    await updateNodeStatus(actionButton.dataset.nodeId, ProcessTemplateNodeStatus.Inactive);
+    rerender();
+    return true;
+  }
+  if (action === "delete-node") {
+    await deleteNode(actionButton.dataset.nodeId, rerender);
+    return true;
+  }
   return false;
 }
 
@@ -922,7 +936,7 @@ export function bindProcessesPageEvents(rerender) {
   };
 
   page.addEventListener("click", async (event) => {
-    const actionButton = event.target.closest('button[data-action="add-node"], button[data-action="edit-node"], button[data-action="move-node-up"], button[data-action="move-node-down"]');
+    const actionButton = event.target.closest('button[data-action="add-node"], button[data-action="edit-node"], button[data-action="move-node-up"], button[data-action="move-node-down"], button[data-action="activate-node"], button[data-action="deactivate-node"], button[data-action="delete-node"]');
     if (actionButton === null) return;
     event.preventDefault();
     event.stopPropagation();
@@ -958,16 +972,6 @@ export function bindProcessesPageEvents(rerender) {
       }
       if (action === "deactivate-template" && canCurrentUser("processes.editTemplates")) {
         await updateTemplateStatus(actionButton.dataset.templateId, ProcessTemplateStatus.Inactive);
-      }
-      if (action === "delete-node" && canCurrentUser("processes.editSteps")) {
-        await deleteNode(actionButton.dataset.nodeId, rerender);
-        return;
-      }
-      if (action === "activate-node" && canCurrentUser("processes.editSteps")) {
-        await updateNodeStatus(actionButton.dataset.nodeId, ProcessTemplateNodeStatus.Active);
-      }
-      if (action === "deactivate-node" && canCurrentUser("processes.editSteps")) {
-        await updateNodeStatus(actionButton.dataset.nodeId, ProcessTemplateNodeStatus.Inactive);
       }
       if (action === "stop-process" && canCurrentUser("processes.editInstances") && window.confirm("确定要终止该流程吗？未完成流程步骤执行任务将自动取消。")) {
         stopProcess(actionButton.dataset.instanceId);

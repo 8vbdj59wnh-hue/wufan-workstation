@@ -1,11 +1,11 @@
-import { modules } from "./modules.js?v=20260701-process-node-status1";
-import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260701-process-node-status1";
-import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260701-process-node-status1";
-import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260701-process-node-status1";
-import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260701-process-node-status1";
-import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260701-process-node-status1";
-import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260701-process-node-status1";
-import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260701-process-node-status1";
+import { modules } from "./modules.js?v=20260701-process-node-actions1";
+import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260701-process-node-actions1";
+import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260701-process-node-actions1";
+import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260701-process-node-actions1";
+import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260701-process-node-actions1";
+import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260701-process-node-actions1";
+import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260701-process-node-actions1";
+import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260701-process-node-actions1";
 import {
   flushPersistentSave,
   getCurrentUser,
@@ -23,8 +23,8 @@ import {
   updateCurrentUserAvatar,
   uploadImageFile,
   validateCurrentSession,
-} from "./appState.js?v=20260701-process-node-status1";
-import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260701-process-node-status1";
+} from "./appState.js?v=20260701-process-node-actions1";
+import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260701-process-node-actions1";
 
 const app = document.querySelector("#app");
 
