@@ -134,7 +134,33 @@ app.use(express.json({ limit: "20mb" }));
 app.use("/uploads", express.static(uploadsDir));
 
 app.get("/api/health", (_request, response) => {
-  response.json({ ok: true, databasePath });
+  try {
+    fs.accessSync(databasePath, fs.constants.R_OK | fs.constants.W_OK);
+    fs.accessSync(uploadsDir, fs.constants.R_OK | fs.constants.W_OK);
+    const data = readAllData();
+    response.json({
+      ok: true,
+      databasePath,
+      databaseWritable: true,
+      uploadsDir,
+      uploadsWritable: true,
+      counts: {
+        goals: data.goals?.length ?? 0,
+        workPlans: data.workPlans?.length ?? 0,
+        tasks: data.tasks?.length ?? 0,
+        processTemplates: data.processTemplates?.length ?? 0,
+        processTemplateNodes: data.processTemplateNodes?.length ?? 0,
+        taskTemplates: data.taskTemplates?.length ?? 0,
+      },
+    });
+  } catch (error) {
+    response.status(500).json({
+      ok: false,
+      databasePath,
+      uploadsDir,
+      message: error.message || "本地数据库或上传目录不可用。",
+    });
+  }
 });
 
 function getBearerToken(request) {

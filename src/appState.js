@@ -17,7 +17,7 @@ import {
   methodologies as initialMethodologies,
   notifications as initialNotifications,
   workPlans as initialWorkPlans,
-} from "./data/mockData.js?v=20260701-data-consistency1";
+} from "./data/mockData.js?v=20260701-stability1";
 import {
   CategoryType,
   PersonRole,
@@ -33,8 +33,8 @@ import {
   TaskStatus,
   TaskTemplateStatus,
   TaskUrgency,
-} from "./data/modelOptions.js?v=20260701-data-consistency1";
-import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260701-data-consistency1";
+} from "./data/modelOptions.js?v=20260701-stability1";
+import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260701-stability1";
 
 const apiPort = "3001";
 const apiBaseUrl = `${window.location.protocol}//${window.location.hostname}:${apiPort}`;
@@ -171,13 +171,14 @@ export async function loadPersistentData() {
       kind: "success",
       message: "当前数据已连接本地数据库。",
     };
-  } catch {
+  } catch (error) {
     persistenceAvailable = false;
     loadedFromDatabase = false;
     persistenceStatus = {
-      kind: "warning",
-      message: "本地数据库服务未启动，当前使用模拟数据，刷新后数据会丢失。",
+      kind: "error",
+      message: "本地数据库服务异常，系统已停止进入业务页面，避免使用模拟数据造成误操作。",
     };
+    throw new Error(`数据库数据加载失败：${error.message ?? "无法连接本地数据库服务"}`);
   }
 }
 

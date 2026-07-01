@@ -1,11 +1,11 @@
-import { modules } from "./modules.js?v=20260701-data-consistency1";
-import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260701-data-consistency1";
-import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260701-data-consistency1";
-import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260701-data-consistency1";
-import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260701-data-consistency1";
-import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260701-data-consistency1";
-import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260701-data-consistency1";
-import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260701-data-consistency1";
+import { modules } from "./modules.js?v=20260701-stability1";
+import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260701-stability1";
+import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260701-stability1";
+import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260701-stability1";
+import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260701-stability1";
+import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260701-stability1";
+import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260701-stability1";
+import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260701-stability1";
 import {
   flushPersistentSave,
   getCurrentUser,
@@ -23,8 +23,8 @@ import {
   updateCurrentUserAvatar,
   uploadImageFile,
   validateCurrentSession,
-} from "./appState.js?v=20260701-data-consistency1";
-import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260701-data-consistency1";
+} from "./appState.js?v=20260701-stability1";
+import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260701-stability1";
 
 const app = document.querySelector("#app");
 
@@ -469,6 +469,7 @@ function render() {
 
 function renderStartupError(error) {
   console.error("系统启动失败", error);
+  const message = error?.message ?? "页面初始化没有完成，请刷新页面；如果反复出现，请联系管理员。";
   app.innerHTML = `
     <main class="login-page">
       <section class="login-panel">
@@ -476,7 +477,9 @@ function renderStartupError(error) {
           <span class="brand-mark"></span>
           <h1>系统加载失败</h1>
         </div>
-        <p class="form-error">页面初始化没有完成，请刷新页面；如果反复出现，请联系管理员。</p>
+        <p class="form-error">${escapeHtml(message)}</p>
+        <p class="form-note">为避免误用模拟数据，系统没有进入业务页面。请先确认后端服务和 SQLite 数据库正常。</p>
+        <button class="primary-button" type="button" onclick="window.location.reload()">重新加载</button>
       </section>
     </main>
   `;
