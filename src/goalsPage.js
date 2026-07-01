@@ -1,4 +1,5 @@
 import {
+  createPersistentResource,
   getCurrentUser,
   getProcessNodeStepOrder,
   resolveAssetUrl,
@@ -6,8 +7,8 @@ import {
   state,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260701-no-cache-client1";
-import { hasPermission } from "./permissions.js?v=20260701-no-cache-client1";
+} from "./appState.js?v=20260701-workplan-save1";
+import { hasPermission } from "./permissions.js?v=20260701-workplan-save1";
 import {
   CategoryType,
   GoalLevel,
@@ -33,9 +34,9 @@ import {
   taskStatusNames,
   taskUrgencyNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isTaskOverdue } from "./data/taskUtils.js?v=20260701-no-cache-client1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-no-cache-client1";
-import { selectTask } from "./tasksPage.js?v=20260701-no-cache-client1";
+import { getPrimaryImageUrl, getTaskQuadrant, isTaskOverdue } from "./data/taskUtils.js?v=20260701-workplan-save1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-workplan-save1";
+import { selectTask } from "./tasksPage.js?v=20260701-workplan-save1";
 
 const categories = state.categories;
 const departments = state.departments;
@@ -1542,30 +1543,36 @@ async function saveGoalTask(form, rerender) {
           })),
         };
 
+  const workPlan = {
+    id: workPlanId,
+    goalId: draft.goalId,
+    departmentId: draft.departmentId,
+    taskTemplateId: draft.template.id,
+    title: draft.title || displayTitle,
+    customFields,
+    coverImageUrl,
+    importance: draft.importance,
+    urgency: draft.urgency,
+    status: WorkPlanStatus.Future,
+    plannedWeek: null,
+    dueDate: draft.dueDate,
+    description: draft.description,
+    processInstanceId: null,
+    createdAt: now,
+    updatedAt: now,
+    launchedAt: null,
+    canceledAt: null,
+  };
+
+  try {
+    await createPersistentResource("work-plans", workPlan);
+  } catch (error) {
+    console.error("未来工作保存失败", error);
+    return setModalError(error.message || "未来工作保存失败，请检查本地数据库服务。", rerender);
+  }
+
   selectedGoalId = draft.goalId;
-  state.workPlans = [
-    {
-      id: workPlanId,
-      goalId: draft.goalId,
-      departmentId: draft.departmentId,
-      taskTemplateId: draft.template.id,
-      title: draft.title || displayTitle,
-      customFields,
-      coverImageUrl,
-      importance: draft.importance,
-      urgency: draft.urgency,
-      status: WorkPlanStatus.Future,
-      plannedWeek: null,
-      dueDate: draft.dueDate,
-      description: draft.description,
-      processInstanceId: null,
-      createdAt: now,
-      updatedAt: now,
-      launchedAt: null,
-      canceledAt: null,
-    },
-    ...state.workPlans,
-  ];
+  state.workPlans = [workPlan, ...state.workPlans];
   modalState = null;
   rerender();
 }

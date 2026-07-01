@@ -5,10 +5,10 @@ import {
   getNow,
   state,
   updatePersistentResource,
-} from "./appState.js?v=20260701-no-cache-client1";
-import { getDataScope, hasPermission } from "./permissions.js?v=20260701-no-cache-client1";
+} from "./appState.js?v=20260701-workplan-save1";
+import { getDataScope, hasPermission } from "./permissions.js?v=20260701-workplan-save1";
 import { ProcessInstanceStatus, TaskStatus, processInstanceStatusNames, taskStatusNames } from "./data/modelOptions.js";
-import { isCanceledStatus, isDoneStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260701-no-cache-client1";
+import { isCanceledStatus, isDoneStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260701-workplan-save1";
 
 const today = new Date().toISOString().slice(0, 10);
 let activeAssessmentTab = "stats";
