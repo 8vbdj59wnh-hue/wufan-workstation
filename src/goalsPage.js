@@ -3,12 +3,12 @@ import {
   getCurrentUser,
   getProcessNodeStepOrder,
   resolveAssetUrl,
-  savePersistentData,
   state,
+  updatePersistentResource,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260701-task-belonging-order1";
-import { hasPermission } from "./permissions.js?v=20260701-task-belonging-order1";
+} from "./appState.js?v=20260701-data-consistency1";
+import { hasPermission } from "./permissions.js?v=20260701-data-consistency1";
 import {
   CategoryType,
   GoalLevel,
@@ -34,9 +34,9 @@ import {
   taskStatusNames,
   taskUrgencyNames,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isTaskOverdue } from "./data/taskUtils.js?v=20260701-task-belonging-order1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-task-belonging-order1";
-import { selectTask } from "./tasksPage.js?v=20260701-task-belonging-order1";
+import { getPrimaryImageUrl, getTaskQuadrant, isTaskOverdue } from "./data/taskUtils.js?v=20260701-data-consistency1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-data-consistency1";
+import { selectTask } from "./tasksPage.js?v=20260701-data-consistency1";
 
 const categories = state.categories;
 const departments = state.departments;
@@ -1393,7 +1393,7 @@ function validateDraggedGoalAlignment(draggedGoal, targetGoal) {
   return "";
 }
 
-function alignGoalToParent(draggedGoalId, targetGoalId, rerender) {
+async function alignGoalToParent(draggedGoalId, targetGoalId, rerender) {
   const draggedGoal = getGoal(draggedGoalId);
   const targetGoal = getGoal(targetGoalId);
   if (draggedGoal === null || targetGoal === null) return;
@@ -1406,20 +1406,31 @@ function alignGoalToParent(draggedGoalId, targetGoalId, rerender) {
 
   if (!window.confirm(`确定将「${draggedGoal.name}」对齐到「${targetGoal.name}」吗？`)) return;
 
+  const previousGoals = goals.map((goal) => ({ ...goal }));
+  const previousSelectedGoalId = selectedGoalId;
   const now = getNow();
+  const updatedGoal = {
+    ...draggedGoal,
+    parentGoalId: targetGoalId,
+    updatedAt: now,
+  };
   replaceGoals(
     goals.map((goal) =>
       goal.id === draggedGoalId
-        ? {
-            ...goal,
-            parentGoalId: targetGoalId,
-            updatedAt: now,
-          }
+        ? updatedGoal
         : goal,
     ),
   );
   selectedGoalId = draggedGoalId;
   selectedGoalProcessInstanceId = null;
+  try {
+    await updatePersistentResource("goals", draggedGoalId, updatedGoal);
+  } catch (error) {
+    console.error("目标对齐保存失败", error);
+    replaceGoals(previousGoals);
+    selectedGoalId = previousSelectedGoalId;
+    window.alert(error.message || "目标对齐保存失败，请检查本地数据库服务。");
+  }
   rerender();
 }
 
@@ -1448,61 +1459,93 @@ async function saveGoal(form, rerender) {
   if (modalState.mode === "add") {
     const now = getNow();
     const goalId = createId("goal");
+    const newGoal = {
+      id: goalId,
+      ...draft,
+      status: GoalStatus.Active,
+      createdAt: now,
+      updatedAt: now,
+    };
 
     replaceGoals([
       ...goals,
-      {
-        id: goalId,
-        ...draft,
-        status: GoalStatus.Active,
-        createdAt: now,
-        updatedAt: now,
-      },
+      newGoal,
     ]);
     selectedGoalId = goalId;
+    try {
+      await createPersistentResource("goals", newGoal);
+    } catch (error) {
+      console.error("新增目标保存失败", error);
+      isSavingGoal = false;
+      replaceGoals(previousGoals);
+      selectedGoalId = previousSelectedGoalId;
+      modalState = {
+        ...modalState,
+        error: "新增目标失败，请检查本地数据库服务。",
+      };
+      rerender();
+      return;
+    }
   } else {
     const now = getNow();
+    const updatedGoal = {
+      ...getGoal(modalState.goalId),
+      ...draft,
+      updatedAt: now,
+    };
 
     replaceGoals(
       goals.map((goal) =>
-        goal.id === modalState.goalId ? { ...goal, ...draft, updatedAt: now } : goal,
+        goal.id === modalState.goalId ? updatedGoal : goal,
       ),
     );
+    try {
+      await updatePersistentResource("goals", modalState.goalId, updatedGoal);
+    } catch (error) {
+      console.error("目标保存失败", error);
+      isSavingGoal = false;
+      replaceGoals(previousGoals);
+      selectedGoalId = previousSelectedGoalId;
+      modalState = {
+        ...modalState,
+        error: "保存目标失败，请检查本地数据库服务。",
+      };
+      rerender();
+      return;
+    }
   }
 
-  const saved = await savePersistentData();
   isSavingGoal = false;
-
-  if (!saved) {
-    replaceGoals(previousGoals);
-    selectedGoalId = previousSelectedGoalId;
-    modalState = {
-      ...modalState,
-      error: modalState.mode === "add" ? "新增目标失败，请检查本地数据库服务。" : "保存目标失败，请检查本地数据库服务。",
-    };
-    rerender();
-    return;
-  }
-
   modalState = null;
   rerender();
 }
 
-function saveCurrentValue(form, rerender) {
+async function saveCurrentValue(form, rerender) {
   const currentValue = parseNullableNumber(getFormValue(form, "currentValue"));
 
   if (Number.isNaN(currentValue)) {
     return setModalError("当前值必须是数字。", rerender);
   }
 
+  const goal = getGoal(modalState.goalId);
+  if (goal === null) return;
+  const previousGoals = goals.map((item) => ({ ...item }));
   const now = getNow();
+  const updatedGoal = { ...goal, currentValue, updatedAt: now };
 
   replaceGoals(
     goals.map((goal) =>
-      goal.id === modalState.goalId ? { ...goal, currentValue, updatedAt: now } : goal,
+      goal.id === modalState.goalId ? updatedGoal : goal,
     ),
   );
-  modalState = null;
+  try {
+    await updatePersistentResource("goals", updatedGoal.id, updatedGoal);
+    modalState = null;
+  } catch (error) {
+    console.error("目标当前值保存失败", error);
+    replaceGoals(previousGoals);
+    modalState = { ...modalState, error: error.message || "目标当前值保存失败，请检查本地数据库服务。" };
+  }
   rerender();
 }
 
@@ -1593,10 +1636,13 @@ async function updateGoalStatus(goalId, status, rerender) {
   const previousGoals = goals.map((goal) => ({ ...goal }));
   const previousSelectedGoalId = selectedGoalId;
   const now = getNow();
+  const goal = getGoal(goalId);
+  if (goal === null) return;
+  const updatedGoal = { ...goal, status, updatedAt: now };
 
   replaceGoals(
     goals.map((goal) =>
-      goal.id === goalId ? { ...goal, status, updatedAt: now } : goal,
+      goal.id === goalId ? updatedGoal : goal,
     ),
   );
   if (status === GoalStatus.Inactive && !showInactiveGoals && selectedGoalId === goalId) {
@@ -1606,11 +1652,13 @@ async function updateGoalStatus(goalId, status, rerender) {
     selectedGoalId = goalId;
   }
 
-  const saved = await savePersistentData();
-  if (!saved) {
+  try {
+    await updatePersistentResource("goals", goalId, updatedGoal);
+  } catch (error) {
+    console.error("目标状态保存失败", error);
     replaceGoals(previousGoals);
     selectedGoalId = previousSelectedGoalId;
-    window.alert("目标状态保存失败，请检查本地数据库服务。");
+    window.alert(error.message || "目标状态保存失败，请检查本地数据库服务。");
   }
 
   modalState = null;
@@ -1811,7 +1859,7 @@ function handleGoalDragLeave(event) {
   dropCard.classList.remove("is-drag-over");
 }
 
-function handleGoalDrop(event, rerender) {
+async function handleGoalDrop(event, rerender) {
   const dropCard = event.target.closest(".goal-map-card[data-goal-drop-id]");
   if (dropCard === null) return;
   event.preventDefault();
@@ -1826,7 +1874,7 @@ function handleGoalDrop(event, rerender) {
   if (droppedGoalId === null || droppedGoalId === "" || targetGoalId === droppedGoalId) {
     return;
   }
-  alignGoalToParent(droppedGoalId, targetGoalId, rerender);
+  await alignGoalToParent(droppedGoalId, targetGoalId, rerender);
 }
 
 function handleGoalDragEnd() {
@@ -1845,7 +1893,7 @@ async function handleGoalSubmit(event, rerender) {
   }
 
   if (modalState?.kind === "currentValue") {
-    saveCurrentValue(event.target, rerender);
+    await saveCurrentValue(event.target, rerender);
   }
 
   if (modalState?.kind === "goalTask") {
