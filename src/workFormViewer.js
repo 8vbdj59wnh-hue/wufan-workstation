@@ -1,4 +1,4 @@
-import { resolveAssetUrl, state } from "./appState.js?v=20260701-task-owner-edit1";
+import { resolveAssetUrl, state } from "./appState.js?v=20260701-task-owner-edit2";
 
 const hiddenSystemFieldKeys = new Set(["standardWorkAttachments"]);
 
