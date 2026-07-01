@@ -11,9 +11,10 @@ import {
   startProcess,
   state,
   stopProcess,
+  updateProcessTemplateNodeStatus,
   updatePersistentResource,
-} from "./appState.js?v=20260701-standard-work-drag-save1";
-import { hasPermission } from "./permissions.js?v=20260701-standard-work-drag-save1";
+} from "./appState.js?v=20260701-process-node-status1";
+import { hasPermission } from "./permissions.js?v=20260701-process-node-status1";
 import {
   CategoryType,
   GoalStatus,
@@ -35,11 +36,11 @@ import {
   taskImportanceNames,
   taskStatusNames,
   taskUrgencyNames,
-} from "./data/modelOptions.js?v=20260701-standard-work-drag-save1";
-import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260701-standard-work-drag-save1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-standard-work-drag-save1";
-import { getMethodologyLinkByNodeId, renderMethodologiesPage } from "./methodologiesPage.js?v=20260701-standard-work-drag-save1";
-import { bindStandardWorkLibraryEvents, renderStandardWorkLibraryPage, selectTask } from "./tasksPage.js?v=20260701-standard-work-drag-save1";
+} from "./data/modelOptions.js?v=20260701-process-node-status1";
+import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260701-process-node-status1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260701-process-node-status1";
+import { getMethodologyLinkByNodeId, renderMethodologiesPage } from "./methodologiesPage.js?v=20260701-process-node-status1";
+import { bindStandardWorkLibraryEvents, renderStandardWorkLibraryPage, selectTask } from "./tasksPage.js?v=20260701-process-node-status1";
 
 const today = "2026-06-24";
 let selectedTemplateId = state.processTemplates[0]?.id ?? null;
@@ -865,17 +866,14 @@ async function updateNodeStatus(nodeId, status) {
   const node = state.processTemplateNodes.find((item) => item.id === nodeId);
   if (node === undefined) return false;
 
-  const now = getNow();
-  const updatedNode = { ...node, status, updatedAt: now };
   try {
-    await updatePersistentResource("process-template-nodes", updatedNode.id, updatedNode);
+    await updateProcessTemplateNodeStatus(node.id, status);
   } catch (error) {
     const actionText = status === ProcessTemplateNodeStatus.Active ? "启用" : "停用";
     console.error(`流程节点${actionText}失败`, error);
     window.alert(error.message || `流程节点${actionText}失败，请检查本地数据库服务。`);
     return false;
   }
-  state.processTemplateNodes = state.processTemplateNodes.map((item) => (item.id === updatedNode.id ? updatedNode : item));
   return true;
 }
 

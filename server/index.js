@@ -20,6 +20,7 @@ import {
   replaceAllData,
   touchLastLoginAt,
   updateCurrentUserAvatar,
+  updateProcessTemplateNodeStatus,
   updateResource,
   uploadsDir,
 } from "./db.js";
@@ -421,6 +422,16 @@ app.put("/api/task-templates/:id/value-chain", requirePermission("settings.editS
   } catch (error) {
     console.error("标准工作分类保存失败", error);
     response.status(400).json({ success: false, message: error.message || "标准工作分类保存失败，请检查本地数据库服务。" });
+  }
+});
+
+app.patch("/api/process-template-nodes/:id/status", requirePermission("processes.editSteps"), (request, response) => {
+  try {
+    updateProcessTemplateNodeStatus(request.params.id, request.body?.status ?? "");
+    response.json({ success: true, data: filterDataByScope(readAllData(), request.user) });
+  } catch (error) {
+    console.error("流程节点状态保存失败", error);
+    response.status(400).json({ success: false, message: error.message || "流程节点状态保存失败，请检查本地数据库服务。" });
   }
 });
 

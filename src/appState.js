@@ -17,7 +17,7 @@ import {
   methodologies as initialMethodologies,
   notifications as initialNotifications,
   workPlans as initialWorkPlans,
-} from "./data/mockData.js?v=20260701-standard-work-drag-save1";
+} from "./data/mockData.js?v=20260701-process-node-status1";
 import {
   CategoryType,
   PersonRole,
@@ -33,8 +33,8 @@ import {
   TaskStatus,
   TaskTemplateStatus,
   TaskUrgency,
-} from "./data/modelOptions.js?v=20260701-standard-work-drag-save1";
-import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260701-standard-work-drag-save1";
+} from "./data/modelOptions.js?v=20260701-process-node-status1";
+import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260701-process-node-status1";
 
 const apiPort = "3001";
 const apiBaseUrl = `${window.location.protocol}//${window.location.hostname}:${apiPort}`;
@@ -336,6 +336,20 @@ export async function moveTaskTemplateToValueChain(templateId, categoryName) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.success !== true) {
     throw new Error(data.message ?? data.error ?? "标准工作分类保存失败，请检查本地数据库服务。");
+  }
+  if (data.data !== undefined) applyDataSnapshot(data.data);
+  return data;
+}
+
+export async function updateProcessTemplateNodeStatus(nodeId, status) {
+  const response = await authFetch(`${apiBaseUrl}/api/process-template-nodes/${nodeId}/status`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success !== true) {
+    throw new Error(data.message ?? data.error ?? "流程节点状态保存失败，请检查本地数据库服务。");
   }
   if (data.data !== undefined) applyDataSnapshot(data.data);
   return data;

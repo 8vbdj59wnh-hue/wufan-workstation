@@ -895,6 +895,21 @@ export function moveTaskTemplateToValueChain(templateId, categoryName) {
   return database.prepare("SELECT * FROM task_templates WHERE id = @id LIMIT 1").get({ id: templateId });
 }
 
+export function updateProcessTemplateNodeStatus(nodeId, status) {
+  const nextStatus = String(status ?? "").trim();
+  if (!["active", "inactive"].includes(nextStatus)) throw new Error("流程节点状态无效。");
+
+  const database = getDatabase();
+  const node = database.prepare("SELECT id FROM process_template_nodes WHERE id = @id LIMIT 1").get({ id: nodeId });
+  if (node === undefined) throw new Error("未找到该流程节点。");
+
+  const updatedAt = new Date().toISOString();
+  database
+    .prepare("UPDATE process_template_nodes SET status = @status, updatedAt = @updatedAt WHERE id = @id")
+    .run({ id: nodeId, status: nextStatus, updatedAt });
+  return database.prepare("SELECT * FROM process_template_nodes WHERE id = @id LIMIT 1").get({ id: nodeId });
+}
+
 export function replaceAllData(data) {
   const database = getDatabase();
   const peopleItems = data.people ?? data.persons ?? [];
