@@ -6,7 +6,7 @@ export LANG="${LANG:-en_US.UTF-8}"
 export LC_ALL="${LC_ALL:-en_US.UTF-8}"
 
 PROJECT_DIR="/Users/meiyounaichatouyuna/Projects/goal-execution-system"
-BACKUP_ROOT="/Volumes/dianyi888.i234.me/home/Drive/屋范工作站备份"
+BACKUP_ROOT="/Users/meiyounaichatouyuna/WufanWorkstationBackups"
 DB_SRC="$PROJECT_DIR/data/workstation.db"
 UPLOADS_SRC="$PROJECT_DIR/uploads"
 
@@ -40,6 +40,35 @@ run_step() {
   return "$code"
 }
 
+require_file() {
+  local file="$1"
+  local label="$2"
+  if [[ -s "$file" ]]; then
+    log "OK verify $label: $file"
+    return 0
+  fi
+  log "FAIL verify $label missing or empty: $file"
+  return 1
+}
+
+verify_uploads_archive() {
+  if tar -tzf "$UPLOADS_DEST" >/dev/null 2>> "$LOG_FILE"; then
+    log "OK verify uploads archive readable: $UPLOADS_DEST"
+    return 0
+  fi
+  log "FAIL verify uploads archive unreadable: $UPLOADS_DEST"
+  return 1
+}
+
+verify_git_bundle() {
+  if git -C "$PROJECT_DIR" bundle verify "$BUNDLE_DEST" >> "$LOG_FILE" 2>&1; then
+    log "OK verify git bundle: $BUNDLE_DEST"
+    return 0
+  fi
+  log "FAIL verify git bundle: $BUNDLE_DEST"
+  return 1
+}
+
 cleanup_old_backups() {
   local dir="$1"
   local pattern="$2"
@@ -60,6 +89,7 @@ if [[ ! -f "$DB_SRC" ]]; then
   status=1
 else
   run_step "database backup: $DB_DEST" sqlite3 "$DB_SRC" ".backup '$DB_DEST'" || status=1
+  require_file "$DB_DEST" "database backup" || status=1
 fi
 
 if [[ ! -d "$UPLOADS_SRC" ]]; then
@@ -67,6 +97,8 @@ if [[ ! -d "$UPLOADS_SRC" ]]; then
   status=1
 else
   run_step "uploads archive: $UPLOADS_DEST" tar -czf "$UPLOADS_DEST" -C "$PROJECT_DIR" uploads || status=1
+  require_file "$UPLOADS_DEST" "uploads archive" || status=1
+  verify_uploads_archive || status=1
 fi
 
 if [[ ! -d "$PROJECT_DIR/.git" ]]; then
@@ -74,6 +106,8 @@ if [[ ! -d "$PROJECT_DIR/.git" ]]; then
   status=1
 else
   run_step "git bundle: $BUNDLE_DEST" git -C "$PROJECT_DIR" bundle create "$BUNDLE_DEST" main || status=1
+  require_file "$BUNDLE_DEST" "git bundle" || status=1
+  verify_git_bundle || status=1
 fi
 
 cleanup_old_backups "$DB_DIR" "workstation-*.db" "database"
