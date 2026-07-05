@@ -83,7 +83,10 @@ const allowedFileTypes = new Set([
   "video/mp4",
   "video/quicktime",
   "video/webm",
+  "application/illustrator",
+  "application/postscript",
 ]);
+const allowedFileExts = new Set([".jpg", ".jpeg", ".png", ".webp", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".txt", ".mp4", ".mov", ".webm", ".psd", ".ai", ".fig"]);
 const fileStorage = multer.diskStorage({
   destination: (_request, _file, callback) => {
     callback(null, fileUploadsDir);
@@ -97,7 +100,8 @@ const uploadFile = multer({
   storage: fileStorage,
   limits: { fileSize: 20 * 1024 * 1024 },
   fileFilter: (_request, file, callback) => {
-    if (!allowedFileTypes.has(file.mimetype)) {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (!allowedFileTypes.has(file.mimetype) && !allowedFileExts.has(ext)) {
       callback(new Error("只支持图片、PDF、Word、Excel、ZIP 和文本文件。"));
       return;
     }
@@ -352,7 +356,18 @@ app.get("/api/data", (request, response) => {
 
 app.post("/api/data", requirePermission("settings.managePermissions"), (request, response) => {
   try {
-    replaceAllData(request.body ?? {});
+    const fullSnapshotSaveAllowed =
+      request.get("x-wufan-full-data-save") === "true" && request.body?.__confirmFullSnapshotReplace === true;
+    if (!fullSnapshotSaveAllowed) {
+      response.status(409).json({
+        success: false,
+        message: "全量覆盖保存已停用，请使用单条资源保存接口，避免刷新或局部状态覆盖数据库。",
+      });
+      return;
+    }
+
+    const { __confirmFullSnapshotReplace: _confirm, ...snapshot } = request.body ?? {};
+    replaceAllData(snapshot);
     response.json({ ok: true, savedAt: new Date().toISOString() });
   } catch (error) {
     response.status(500).json({ error: error.message || "保存本地数据库失败。" });
@@ -443,7 +458,12 @@ app.post("/api/process-instances/:id/cancel", requirePermission("processes.editI
 
 app.put("/api/task-templates/:id/value-chain", requirePermission("settings.editStandardWorks"), (request, response) => {
   try {
-    moveTaskTemplateToValueChain(request.params.id, request.body?.categoryName ?? "");
+    moveTaskTemplateToValueChain(
+      request.params.id,
+      request.body?.categoryName ?? "",
+      request.body?.categoryId ?? "",
+      request.body?.valueChainId ?? "",
+    );
     response.json({ success: true, data: filterDataByScope(readAllData(), request.user) });
   } catch (error) {
     console.error("标准工作分类保存失败", error);

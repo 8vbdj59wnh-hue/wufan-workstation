@@ -18,6 +18,7 @@ import {
   stores,
   taskTemplates,
   tasks,
+  templates,
   weeklyReportProblems,
   weeklyReports,
   workPlans,
@@ -33,12 +34,23 @@ const schemaPath = path.join(__dirname, "schema.sql");
 const standardWorkValueChainCategories = [
   "基础设施维护",
   "人力资产管理",
-  "产品研发",
+  "产品开发与淘汰",
   "供应链管理",
   "品牌营销",
   "渠道销售",
   "客户维护",
 ];
+const standardWorkValueChainModules = [
+  { id: "infrastructure_maintenance", name: "基础设施维护" },
+  { id: "human_asset_management", name: "人力资产管理" },
+  { id: "product_development", name: "产品开发与淘汰" },
+  { id: "supply_chain_management", name: "供应链管理" },
+  { id: "brand_marketing", name: "品牌营销" },
+  { id: "channel_sales", name: "渠道销售" },
+  { id: "customer_maintenance", name: "客户维护" },
+];
+const defaultTaskImportance = "important";
+const defaultTaskUrgency = "not_urgent";
 
 const resourceConfigs = {
   companies: {
@@ -182,6 +194,7 @@ const resourceConfigs = {
       "name",
       "goalId",
       "taskTemplateId",
+      "templateId",
       "source",
       "processInstanceId",
       "processNodeId",
@@ -321,6 +334,11 @@ const resourceConfigs = {
     ],
     jsonFields: ["steps"],
   },
+  templates: {
+    table: "templates",
+    columns: ["id", "name", "previewImage", "sourceFile", "tags", "fileType", "createdAt", "updatedAt"],
+    jsonFields: ["previewImage", "sourceFile", "tags"],
+  },
   notifications: {
     table: "notifications",
     columns: [
@@ -356,6 +374,7 @@ const resourceConfigs = {
       "hashtags",
       "status",
       "goalId",
+      "templateId",
       "taskId",
       "processInstanceId",
       "workPlanId",
@@ -406,6 +425,7 @@ const routeResourceMap = {
   "process-template-nodes": "processTemplateNodes",
   "process-instances": "processInstances",
   methodologies: "methodologies",
+  templates: "templates",
   notifications: "notifications",
   "content-schedules": "contentSchedules",
   "work-plans": "workPlans",
@@ -422,6 +442,7 @@ const seedData = {
   weeklyReportProblems,
   goals,
   taskTemplates,
+  templates,
   tasks,
   processTemplates,
   processTemplateNodes: processTemplateNodes.map((node) => ({
@@ -445,6 +466,33 @@ function cloneJson(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function mergePatchValue(existingValue, patchValue) {
+  if (patchValue === undefined) return existingValue;
+  if (isPlainObject(existingValue) && isPlainObject(patchValue)) {
+    const merged = { ...existingValue };
+    for (const key of Object.keys(patchValue)) {
+      merged[key] = mergePatchValue(existingValue[key], patchValue[key]);
+    }
+    return merged;
+  }
+  return patchValue;
+}
+
+function mergeExistingItem(resourceKey, id, patch) {
+  const existing = readExistingItem(resourceKey, id);
+  if (existing === null) throw new Error("未找到要更新的数据。");
+  const merged = { ...existing, id };
+  for (const key of Object.keys(patch ?? {})) {
+    if (key === "id") continue;
+    merged[key] = mergePatchValue(existing[key], patch[key]);
+  }
+  return merged;
+}
+
 function encodeItem(item, config) {
   const jsonFields = new Set(config.jsonFields ?? []);
   const booleanFields = new Set(config.booleanFields ?? []);
@@ -452,6 +500,12 @@ function encodeItem(item, config) {
 
   for (const column of config.columns) {
     let value = item[column] ?? null;
+    if ((config.table === "tasks" || config.table === "work_plans") && column === "importance" && (value === null || value === "")) {
+      value = defaultTaskImportance;
+    }
+    if ((config.table === "tasks" || config.table === "work_plans") && column === "urgency" && (value === null || value === "")) {
+      value = defaultTaskUrgency;
+    }
     if (jsonFields.has(column)) value = JSON.stringify(value ?? (column.endsWith("s") ? [] : {}));
     if (booleanFields.has(column)) value = value ? 1 : 0;
     encoded[column] = value;
@@ -476,6 +530,9 @@ function decodeRow(row, config) {
     permissions: null,
     relatedGoalIds: [],
     steps: [],
+    previewImage: {},
+    sourceFile: {},
+    tags: {},
   };
 
   for (const field of jsonFields) {
@@ -494,8 +551,29 @@ function decodeRow(row, config) {
   return decoded;
 }
 
+function hasTemplateTags(tags) {
+  if (Array.isArray(tags)) return tags.length > 0;
+  if (tags === null || tags === undefined || typeof tags !== "object") return false;
+  return Object.values(tags).some((value) => Array.isArray(value) && value.length > 0);
+}
+
+function validateTemplateItem(item) {
+  const previewImage = item.previewImage;
+  const sourceFile = item.sourceFile;
+  if (String(item.id ?? "").trim() === "") throw new Error("模板 id 不能为空。");
+  if (String(item.name ?? "").trim() === "") throw new Error("模板名称不能为空。");
+  if (previewImage === null || typeof previewImage !== "object" || String(previewImage.fileUrl ?? "").trim() === "") {
+    throw new Error("模板预览图不能为空。");
+  }
+  if (sourceFile === null || typeof sourceFile !== "object" || String(sourceFile.fileUrl ?? "").trim() === "") {
+    throw new Error("模板源文件不能为空。");
+  }
+  if (!hasTemplateTags(item.tags)) throw new Error("模板标签不能为空。");
+}
+
 function insertItem(resourceKey, item) {
   const config = resourceConfigs[resourceKey];
+  if (resourceKey === "templates") validateTemplateItem(item);
   const encoded = encodeItem(item, config);
   const columns = config.columns;
   const placeholders = columns.map((column) => `@${column}`).join(", ");
@@ -515,6 +593,33 @@ function insertItem(resourceKey, item) {
   if (resourceKey === "processTemplateNodes") {
     ensureMethodologyForProcessNode(item);
   }
+}
+
+const preservedCustomFieldKeys = ["standardWorkAttachments"];
+
+function readExistingItem(resourceKey, id) {
+  const config = resourceConfigs[resourceKey];
+  if (config === undefined || !config.columns.includes("id")) return null;
+  const row = getDatabase().prepare(`SELECT * FROM ${config.table} WHERE id = @id LIMIT 1`).get({ id });
+  return row === undefined ? null : decodeRow(row, config);
+}
+
+function mergePreservedCustomFields(resourceKey, id, item) {
+  if (!["tasks", "processInstances"].includes(resourceKey)) return item;
+  if (item.customFields === undefined || item.customFields === null || typeof item.customFields !== "object" || Array.isArray(item.customFields)) return item;
+
+  const existing = readExistingItem(resourceKey, id);
+  const existingCustomFields = existing?.customFields;
+  if (existingCustomFields === null || existingCustomFields === undefined || typeof existingCustomFields !== "object" || Array.isArray(existingCustomFields)) return item;
+
+  const customFields = { ...item.customFields };
+  for (const key of preservedCustomFieldKeys) {
+    if (!Object.prototype.hasOwnProperty.call(customFields, key) && Object.prototype.hasOwnProperty.call(existingCustomFields, key)) {
+      customFields[key] = existingCustomFields[key];
+    }
+  }
+
+  return { ...item, customFields };
 }
 
 function getMethodologyTitle(nodeName) {
@@ -592,6 +697,41 @@ function ensureColumn(table, column, definition) {
 function ensureStandardWorkValueChainCategories() {
   const database = getDatabase();
   const now = new Date().toISOString();
+  const legacyProductCategory = database
+    .prepare("SELECT id FROM categories WHERE type = 'task' AND name = '产品研发' LIMIT 1")
+    .get();
+  const previousProductCategory = database
+    .prepare("SELECT id FROM categories WHERE type = 'task' AND name = '产品开发' LIMIT 1")
+    .get();
+  const canonicalProductCategory = database
+    .prepare("SELECT id FROM categories WHERE type = 'task' AND name = '产品开发与淘汰' LIMIT 1")
+    .get();
+
+  if (legacyProductCategory !== undefined && canonicalProductCategory === undefined) {
+    database
+      .prepare("UPDATE categories SET name = '产品开发与淘汰', updatedAt = @updatedAt WHERE id = @id")
+      .run({ id: legacyProductCategory.id, updatedAt: now });
+  } else if (previousProductCategory !== undefined && canonicalProductCategory === undefined) {
+    database
+      .prepare("UPDATE categories SET name = '产品开发与淘汰', updatedAt = @updatedAt WHERE id = @id")
+      .run({ id: previousProductCategory.id, updatedAt: now });
+  } else if (legacyProductCategory !== undefined && canonicalProductCategory !== undefined) {
+    database
+      .prepare("UPDATE task_templates SET categoryId = @canonicalId, updatedAt = @updatedAt WHERE categoryId = @legacyId")
+      .run({ canonicalId: canonicalProductCategory.id, legacyId: legacyProductCategory.id, updatedAt: now });
+    database
+      .prepare("UPDATE categories SET status = 'inactive', updatedAt = @updatedAt WHERE id = @id")
+      .run({ id: legacyProductCategory.id, updatedAt: now });
+  }
+  if (previousProductCategory !== undefined && canonicalProductCategory !== undefined) {
+    database
+      .prepare("UPDATE task_templates SET categoryId = @canonicalId, updatedAt = @updatedAt WHERE categoryId = @previousId")
+      .run({ canonicalId: canonicalProductCategory.id, previousId: previousProductCategory.id, updatedAt: now });
+    database
+      .prepare("UPDATE categories SET status = 'inactive', updatedAt = @updatedAt WHERE id = @id")
+      .run({ id: previousProductCategory.id, updatedAt: now });
+  }
+
   const insertCategory = database.prepare(
     `INSERT INTO categories (id, type, name, sortOrder, status, createdAt, updatedAt)
      VALUES (@id, 'task', @name, @sortOrder, 'active', @createdAt, @updatedAt)`,
@@ -608,6 +748,16 @@ function ensureStandardWorkValueChainCategories() {
       updatedAt: now,
     });
   });
+
+  const activeTaskCategories = database
+    .prepare("SELECT id, name FROM categories WHERE type = 'task' AND status <> 'inactive'")
+    .all();
+  const deactivateCategory = database.prepare("UPDATE categories SET status = 'inactive', updatedAt = @updatedAt WHERE id = @id");
+  for (const category of activeTaskCategories) {
+    if (!standardWorkValueChainCategories.includes(category.name)) {
+      deactivateCategory.run({ id: category.id, updatedAt: now });
+    }
+  }
 }
 
 function getOrCreateStandardWorkValueChainCategory(categoryName) {
@@ -636,6 +786,42 @@ function getOrCreateStandardWorkValueChainCategory(categoryName) {
   return createdCategory;
 }
 
+function resolveStandardWorkValueChainCategory(categoryName, categoryId = "") {
+  const id = String(categoryId ?? "").trim();
+  if (id !== "") {
+    const category = getDatabase()
+      .prepare("SELECT id, name FROM categories WHERE id = @id AND type = 'task' AND status <> 'inactive' LIMIT 1")
+      .get({ id });
+    if (category === undefined) throw new Error("标准工作价值链分类不存在。");
+    return category;
+  }
+
+  return getOrCreateStandardWorkValueChainCategory(categoryName);
+}
+
+function resolveStandardWorkValueChainCategoryFromPayload(categoryName = "", categoryId = "", valueChainId = "") {
+  const id = String(categoryId ?? "").trim();
+  if (id !== "") return resolveStandardWorkValueChainCategory(categoryName, id);
+
+  const moduleId = String(valueChainId ?? "").trim();
+  if (moduleId !== "") {
+    const module = standardWorkValueChainModules.find((item) => item.id === moduleId);
+    if (module === undefined) {
+      return resolveStandardWorkValueChainCategory(categoryName, moduleId);
+    }
+    return getOrCreateStandardWorkValueChainCategory(module.name);
+  }
+
+  return resolveStandardWorkValueChainCategory(categoryName, "");
+}
+
+function readTaskTemplateCategoryId(templateId) {
+  const row = getDatabase()
+    .prepare("SELECT categoryId FROM task_templates WHERE id = @id LIMIT 1")
+    .get({ id: templateId });
+  return row?.categoryId ?? null;
+}
+
 function runLightweightMigrations() {
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS stores (
@@ -662,6 +848,18 @@ function runLightweightMigrations() {
       description TEXT,
       steps TEXT,
       createdAt TEXT,
+      updatedAt TEXT
+    )
+  `);
+  getDatabase().exec(`
+    CREATE TABLE IF NOT EXISTS templates (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      previewImage TEXT NOT NULL,
+      sourceFile TEXT NOT NULL,
+      tags TEXT NOT NULL,
+      fileType TEXT,
+      createdAt TEXT NOT NULL,
       updatedAt TEXT
     )
   `);
@@ -740,9 +938,11 @@ function runLightweightMigrations() {
   ensureColumn("tasks", "submittedAt", "TEXT");
   ensureColumn("tasks", "submittedBy", "TEXT");
   ensureColumn("tasks", "cancelReason", "TEXT");
+  ensureColumn("tasks", "templateId", "TEXT");
   ensureColumn("process_instances", "canceledAt", "TEXT");
   ensureColumn("process_instances", "cancelReason", "TEXT");
   ensureColumn("content_schedules", "workPlanId", "TEXT");
+  ensureColumn("content_schedules", "templateId", "TEXT");
   ensureColumn("work_plans", "departmentId", "TEXT");
   ensureColumn("persons", "username", "TEXT");
   ensureColumn("persons", "passwordHash", "TEXT");
@@ -872,8 +1072,14 @@ export function readResource(resourceKey) {
   const config = resourceConfigs[resourceKey];
   if (config === undefined) throw new Error(`Unknown resource: ${resourceKey}`);
   const columns = config.columns.join(", ");
+  const orderBy =
+    resourceKey === "categories"
+      ? " ORDER BY sortOrder ASC, name ASC, id ASC"
+      : resourceKey === "templates"
+        ? " ORDER BY createdAt DESC, id DESC"
+        : "";
   return getDatabase()
-    .prepare(`SELECT ${columns} FROM ${config.table}`)
+    .prepare(`SELECT ${columns} FROM ${config.table}${orderBy}`)
     .all()
     .map((row) => decodeRow(row, config));
 }
@@ -882,16 +1088,18 @@ export function readAllData() {
   return Object.fromEntries(Object.keys(resourceConfigs).map((resourceKey) => [resourceKey, readResource(resourceKey)]));
 }
 
-export function moveTaskTemplateToValueChain(templateId, categoryName) {
+export function moveTaskTemplateToValueChain(templateId, categoryName = "", categoryId = "", valueChainId = "") {
   const database = getDatabase();
   const template = database.prepare("SELECT id FROM task_templates WHERE id = @id LIMIT 1").get({ id: templateId });
   if (template === undefined) throw new Error("未找到该标准工作。");
 
-  const category = getOrCreateStandardWorkValueChainCategory(categoryName);
+  const category = resolveStandardWorkValueChainCategoryFromPayload(categoryName, categoryId, valueChainId);
   const updatedAt = new Date().toISOString();
   database
     .prepare("UPDATE task_templates SET categoryId = @categoryId, updatedAt = @updatedAt WHERE id = @id")
     .run({ id: templateId, categoryId: category.id, updatedAt });
+  const savedCategoryId = readTaskTemplateCategoryId(templateId);
+  if (savedCategoryId !== category.id) throw new Error("标准工作分类保存失败。");
   return database.prepare("SELECT * FROM task_templates WHERE id = @id LIMIT 1").get({ id: templateId });
 }
 
@@ -1093,8 +1301,10 @@ export function createResource(routeResource, item) {
 export function updateResource(routeResource, id, item) {
   const resourceKey = routeResourceMap[routeResource];
   if (resourceKey === undefined) throw new Error(`Unknown resource: ${routeResource}`);
-  insertItem(resourceKey, { ...item, id });
-  return { ...item, id };
+  const mergedItem = mergeExistingItem(resourceKey, id, item);
+  const nextItem = mergePreservedCustomFields(resourceKey, id, mergedItem);
+  insertItem(resourceKey, nextItem);
+  return nextItem;
 }
 
 export function readRouteResource(routeResource) {

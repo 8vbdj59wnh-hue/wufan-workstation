@@ -12,12 +12,13 @@ import {
   stores as initialStores,
   taskTemplates as initialTaskTemplates,
   tasks as initialTasks,
+  templates as initialTemplates,
   weeklyReportProblems as initialWeeklyReportProblems,
   weeklyReports as initialWeeklyReports,
   methodologies as initialMethodologies,
   notifications as initialNotifications,
   workPlans as initialWorkPlans,
-} from "./data/mockData.js?v=20260701-standard-work-dnd2";
+} from "./data/mockData.js?v=20260701-standard-work-dnd3";
 import {
   CategoryType,
   PersonRole,
@@ -33,8 +34,10 @@ import {
   TaskStatus,
   TaskTemplateStatus,
   TaskUrgency,
-} from "./data/modelOptions.js?v=20260701-standard-work-dnd2";
-import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260701-standard-work-dnd2";
+  getValueModuleName,
+  inferValueModuleIdFromText,
+} from "./data/modelOptions.js?v=20260701-standard-work-dnd3";
+import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260701-standard-work-dnd3";
 
 const apiPort = "3001";
 const apiBaseUrl = `${window.location.protocol}//${window.location.hostname}:${apiPort}`;
@@ -69,6 +72,7 @@ export const state = {
   weeklyReportProblems: initialWeeklyReportProblems.map((problem) => ({ ...problem })),
   methodologies: initialMethodologies.map((methodology) => ({ ...methodology })),
   notifications: initialNotifications.map((notification) => ({ ...notification })),
+  templates: initialTemplates.map((template) => ({ ...template })),
 };
 
 normalizeTaskSubmitRequirements();
@@ -127,6 +131,7 @@ export function getDataSnapshot() {
     weeklyReportProblems: state.weeklyReportProblems,
     methodologies: state.methodologies,
     notifications: state.notifications,
+    templates: state.templates,
   };
 }
 
@@ -155,6 +160,7 @@ export function applyDataSnapshot(data) {
   replaceArray(state.weeklyReportProblems, data.weeklyReportProblems);
   replaceArray(state.methodologies, data.methodologies);
   replaceArray(state.notifications, data.notifications);
+  replaceArray(state.templates, data.templates);
   isApplyingRemoteData = false;
   ensureTaskTemplatesHaveProcessTemplates();
   ensureDefaultStandardWorkLibrary();
@@ -285,35 +291,36 @@ export async function uploadStandardWorkAttachment(file) {
   return data;
 }
 
-export async function savePersistentData() {
-  if (!loadedFromDatabase || isApplyingRemoteData) return false;
-  const payload = JSON.stringify(getDataSnapshot());
+export async function loadTemplates() {
+  const response = await authFetch(`${apiBaseUrl}/api/templates`);
+  const data = await response.json().catch(() => []);
+  if (!response.ok) throw new Error(data.message ?? data.error ?? "模板列表读取失败，请检查本地数据库服务。");
+  replaceArray(state.templates, data);
+  return state.templates;
+}
 
-  try {
-    const response = await authFetch(`${apiBaseUrl}/api/data`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payload,
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    hasPendingPersistentChanges = false;
-    persistenceAvailable = true;
-    persistenceStatus = {
-      kind: "success",
-      message: "当前数据已连接本地数据库。",
-    };
-    return true;
-  } catch (error) {
-    console.error("数据保存失败", error);
-    hasPendingPersistentChanges = true;
-    persistenceAvailable = false;
-    persistenceStatus = {
-      kind: "error",
-      message: "数据保存失败，请检查本地数据库服务是否启动。",
-    };
-    notifyPersistenceStatusChange();
-    return false;
-  }
+export async function createTemplate(template) {
+  const data = await createPersistentResource("templates", template);
+  state.templates.unshift(cloneItem(data));
+  return data;
+}
+
+export async function updateTemplate(templateId, template) {
+  const data = await updatePersistentResource("templates", templateId, template);
+  const index = state.templates.findIndex((item) => item.id === templateId);
+  if (index >= 0) state.templates.splice(index, 1, cloneItem(data));
+  return data;
+}
+
+export async function savePersistentData() {
+  console.warn("全量数据保存已停用，请使用单条资源接口保存，避免局部前端状态覆盖数据库。");
+  hasPendingPersistentChanges = false;
+  persistenceAvailable = loadedFromDatabase;
+  persistenceStatus = {
+    kind: loadedFromDatabase ? "success" : "error",
+    message: loadedFromDatabase ? "当前数据已连接本地数据库。" : "本地数据库服务异常，系统已停止进入业务页面。",
+  };
+  return false;
 }
 
 export async function cancelProcessInstance(instanceId, cancelReason = "") {
@@ -328,11 +335,13 @@ export async function cancelProcessInstance(instanceId, cancelReason = "") {
   return data;
 }
 
-export async function moveTaskTemplateToValueChain(templateId, categoryName) {
+export async function moveTaskTemplateToValueChain(templateId, category) {
+  const categoryName = typeof category === "string" ? category : category?.name ?? "";
+  const categoryId = typeof category === "string" ? undefined : category?.id;
   const response = await authFetch(`${apiBaseUrl}/api/task-templates/${templateId}/value-chain`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ categoryName }),
+    body: JSON.stringify({ categoryName, categoryId }),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.success !== true) {
@@ -402,33 +411,12 @@ export async function deletePersistentResource(resource, id) {
 }
 
 export function schedulePersistentSave() {
-  if (!loadedFromDatabase || isApplyingRemoteData) return;
-  hasPendingPersistentChanges = true;
-  window.clearTimeout(saveTimer);
-  saveTimer = window.setTimeout(() => {
-    savePersistentData();
-  }, 0);
+  hasPendingPersistentChanges = false;
 }
 
 export function flushPersistentSave() {
-  if (!loadedFromDatabase || isApplyingRemoteData || !hasPendingPersistentChanges) return;
   window.clearTimeout(saveTimer);
-  const payload = JSON.stringify(getDataSnapshot());
-  const url = `${apiBaseUrl}/api/data`;
-
-  fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${getAuthToken()}` },
-    body: payload,
-    keepalive: true,
-  }).catch(() => {
-    hasPendingPersistentChanges = true;
-    persistenceAvailable = false;
-    persistenceStatus = {
-      kind: "error",
-      message: "保存失败，请检查本地数据库服务。",
-    };
-  });
+  hasPendingPersistentChanges = false;
 }
 
 export function createId(prefix) {
@@ -1236,7 +1224,18 @@ function resolveDepartmentOwner(departmentId) {
 }
 
 function getDefaultTaskCategoryId() {
-  return state.categories.find((category) => category.type === CategoryType.Task)?.id ?? null;
+  return (
+    state.categories
+      .filter((category) => category.type === CategoryType.Task && category.status !== Status.Inactive)
+      .sort((left, right) => (left.sortOrder ?? 9999) - (right.sortOrder ?? 9999))[0]?.id ?? null
+  );
+}
+
+function isValidTaskCategoryId(categoryId) {
+  if (categoryId === null || categoryId === undefined || categoryId === "") return false;
+  return state.categories.some(
+    (category) => category.id === categoryId && category.type === CategoryType.Task && category.status !== Status.Inactive,
+  );
 }
 
 function buildStandardWorkFormFields(definition) {
@@ -1264,33 +1263,41 @@ export function ensureDefaultStandardWorkLibrary() {
     const ownerId = resolveDepartmentOwner(departmentId);
     const existingRaw = state.taskTemplates.find((template) => template.name === definition.name || template.id === definition.id);
     const existing = existingRaw === undefined ? undefined : migrateStoreFieldForStandardWork(existingRaw);
+    const isNewTemplate = existing === undefined;
     const defaultProcessTemplateId = createOrReuseProcessTemplateForStandardWork({
       name: definition.name,
       ownerId,
       departmentId,
       now,
     });
-    if (definition.id === "task-template-new-product-link") {
+    if (isNewTemplate && definition.id === "task-template-new-product-link") {
       changed = syncNewProductLaunchProcessNodes(defaultProcessTemplateId, departmentsByKey, now) || changed;
     }
     const defaultFormFields = buildStandardWorkFormFields(definition);
+    const defaultValueChainName = getValueModuleName(inferValueModuleIdFromText(definition.name), "");
+    const defaultValueChainCategoryId =
+      state.categories.find((category) => category.type === CategoryType.Task && category.status !== Status.Inactive && category.name === defaultValueChainName)?.id
+      ?? defaultCategoryId;
+    const categoryId = isNewTemplate
+      ? defaultValueChainCategoryId
+      : existing.categoryId ?? defaultValueChainCategoryId;
     const templateData = {
-      name: definition.name,
-      categoryId: defaultCategoryId,
-      departmentId,
-      ownerId,
-      description: definition.description,
-      completionStandard: definition.completionStandard,
-      importance: TaskImportance.Important,
-      urgency: TaskUrgency.NotUrgent,
-      needAcceptance: false,
-      accepterId: null,
-      defaultProcessTemplateId,
-      status: TaskTemplateStatus.Active,
-      updatedAt: now,
+      name: existing?.name ?? definition.name,
+      categoryId,
+      departmentId: existing?.departmentId ?? departmentId,
+      ownerId: existing?.ownerId ?? ownerId,
+      description: existing?.description ?? definition.description,
+      completionStandard: existing?.completionStandard ?? definition.completionStandard,
+      importance: existing?.importance ?? TaskImportance.Important,
+      urgency: existing?.urgency ?? TaskUrgency.NotUrgent,
+      needAcceptance: existing?.needAcceptance ?? false,
+      accepterId: existing?.accepterId ?? null,
+      defaultProcessTemplateId: existing?.defaultProcessTemplateId ?? defaultProcessTemplateId,
+      status: existing?.status ?? TaskTemplateStatus.Active,
+      updatedAt: existing?.updatedAt ?? now,
     };
 
-    if (existing === undefined) {
+    if (isNewTemplate) {
       state.taskTemplates = [
         ...state.taskTemplates,
         {
@@ -1308,7 +1315,7 @@ export function ensureDefaultStandardWorkLibrary() {
       ...existing,
       ...templateData,
       id: existing.id,
-      formFields: shouldApplyDefaultFormFields(existing, defaultFormFields) ? defaultFormFields : existing.formFields,
+      formFields: existing.formFields,
       createdAt: existing.createdAt ?? now,
     });
     const hasChanged = JSON.stringify(existing) !== JSON.stringify(updated);
@@ -1522,48 +1529,81 @@ export function startProcess({
   return { instance };
 }
 
-export async function advanceProcessAfterTaskDone(taskId) {
-  const task = state.tasks.find((item) => item.id === taskId);
-  if (task === undefined || task.source !== TaskSource.Process || task.status !== TaskStatus.Done) return;
-
-  const instance = state.processInstances.find((item) => item.id === task.processInstanceId);
-  if (instance === undefined || instance.status !== ProcessInstanceStatus.Running) return;
-
-  const instanceTasks = state.tasks.filter((item) => item.processInstanceId === instance.id);
-  const taskNode = state.processTemplateNodes.find((node) => node.id === task.processNodeId);
-  if (taskNode === undefined) return;
-
-  const orderedTasks = instanceTasks
-    .filter((item) => item.status !== TaskStatus.Canceled)
+function getOrderedProcessInstanceTasks(instanceId) {
+  return state.tasks
+    .filter((item) => item.processInstanceId === instanceId && item.status !== TaskStatus.Canceled)
     .sort((left, right) => {
       const leftNode = state.processTemplateNodes.find((node) => node.id === left.processNodeId);
       const rightNode = state.processTemplateNodes.find((node) => node.id === right.processNodeId);
       return getProcessNodeStepOrder(leftNode ?? {}) - getProcessNodeStepOrder(rightNode ?? {});
     });
-  const currentIndex = orderedTasks.findIndex((item) => item.id === taskId);
-  const nextTask = orderedTasks[currentIndex + 1];
+}
+
+function arePreviousProcessTasksDone(orderedTasks, taskIndex) {
+  if (taskIndex < 0) return false;
+  return orderedTasks.slice(0, taskIndex).every((item) => item.status === TaskStatus.Done);
+}
+
+async function activateWaitingProcessTask(task) {
   const now = getNow();
   const today = now.slice(0, 10);
+  const node = state.processTemplateNodes.find((candidate) => candidate.id === task.processNodeId);
+  const updatedTask = {
+    ...task,
+    status: TaskStatus.Todo,
+    startDate: task.startDate ?? today,
+    dueDate: task.dueDate ?? addDays(today, node?.durationDays ?? 0),
+    plannedWeek: task.plannedWeek ?? getCurrentWeek(new Date(`${today}T00:00:00+08:00`)),
+    updatedAt: now,
+  };
+  await updatePersistentResource("tasks", updatedTask.id, updatedTask);
+  state.tasks = state.tasks.map((item) => (item.id === updatedTask.id ? updatedTask : item));
+  return updatedTask;
+}
 
-  if (nextTask !== undefined && nextTask.status === TaskStatus.Waiting) {
-    const node = state.processTemplateNodes.find((candidate) => candidate.id === nextTask.processNodeId);
-    const updatedNextTask = {
-      ...nextTask,
-      status: TaskStatus.Todo,
-      startDate: today,
-      dueDate: addDays(today, node?.durationDays ?? 0),
-      updatedAt: now,
-    };
-    await updatePersistentResource("tasks", updatedNextTask.id, updatedNextTask);
-    state.tasks = state.tasks.map((item) => (item.id === updatedNextTask.id ? updatedNextTask : item));
-    return;
+export async function refreshProcessTaskReadiness(processInstanceId) {
+  const instance = state.processInstances.find((item) => item.id === processInstanceId);
+  if (instance === undefined || instance.status !== ProcessInstanceStatus.Running) return null;
+
+  const orderedTasks = getOrderedProcessInstanceTasks(instance.id);
+  const nextTask = orderedTasks.find((item) => item.status !== TaskStatus.Done);
+
+  if (nextTask !== undefined) {
+    const nextIndex = orderedTasks.findIndex((item) => item.id === nextTask.id);
+    if (nextTask.status === TaskStatus.Waiting && arePreviousProcessTasksDone(orderedTasks, nextIndex)) {
+      return activateWaitingProcessTask(nextTask);
+    }
+    return null;
   }
 
-  if (instanceTasks.every((item) => item.status === TaskStatus.Done)) {
+  if (orderedTasks.length > 0 && orderedTasks.every((item) => item.status === TaskStatus.Done)) {
+    const now = getNow();
     const updatedInstance = { ...instance, status: ProcessInstanceStatus.Done, completedAt: now, updatedAt: now };
     await updatePersistentResource("process-instances", updatedInstance.id, updatedInstance);
     state.processInstances = state.processInstances.map((item) => (item.id === updatedInstance.id ? updatedInstance : item));
   }
+  return null;
+}
+
+export async function ensureTaskReadyForExecution(taskId) {
+  const task = state.tasks.find((item) => item.id === taskId);
+  if (task === undefined || task.source !== TaskSource.Process || task.status !== TaskStatus.Waiting) return task ?? null;
+
+  const instance = state.processInstances.find((item) => item.id === task.processInstanceId);
+  if (instance === undefined || instance.status !== ProcessInstanceStatus.Running) return task;
+
+  const orderedTasks = getOrderedProcessInstanceTasks(instance.id);
+  const taskIndex = orderedTasks.findIndex((item) => item.id === taskId);
+  if (arePreviousProcessTasksDone(orderedTasks, taskIndex)) {
+    return activateWaitingProcessTask(task);
+  }
+  return task;
+}
+
+export async function advanceProcessAfterTaskDone(taskId) {
+  const task = state.tasks.find((item) => item.id === taskId);
+  if (task === undefined || task.source !== TaskSource.Process || task.status !== TaskStatus.Done) return;
+  await refreshProcessTaskReadiness(task.processInstanceId);
 }
 
 export function stopProcess(instanceId) {
