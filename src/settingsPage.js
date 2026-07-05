@@ -1,4 +1,4 @@
-import { getCurrentUser, savePersistentData, state, validateCurrentSession } from "./appState.js?v=20260701-standard-work-dnd2";
+import { createPersistentResource, getCurrentUser, state, updatePersistentResource, validateCurrentSession } from "./appState.js?v=20260701-standard-work-dnd3";
 import {
   applyPermissionTemplate,
   dataScopeOptions,
@@ -7,7 +7,7 @@ import {
   permissionCount,
   permissionGroups,
   permissionTemplates,
-} from "./permissions.js?v=20260701-standard-work-dnd2";
+} from "./permissions.js?v=20260701-standard-work-dnd3";
 import {
   CategoryType,
   PersonRole,
@@ -57,6 +57,34 @@ function replaceCategories(nextCategories) {
 function replaceStores(nextStores) {
   state.stores.splice(0, state.stores.length, ...nextStores);
   stores = state.stores;
+}
+
+const settingsResourceByEntity = {
+  department: "departments",
+  position: "positions",
+  person: "persons",
+  category: "categories",
+  store: "stores",
+};
+
+function upsertItem(items, item) {
+  const exists = items.some((current) => current.id === item.id);
+  return exists
+    ? items.map((current) => (current.id === item.id ? item : current))
+    : [...items, item];
+}
+
+function stripSensitivePersonFields(person) {
+  const { password: _password, passwordHash: _passwordHash, ...safePerson } = person;
+  return safePerson;
+}
+
+async function persistSettingsEntity(entity, item, mode = "edit") {
+  const resource = settingsResourceByEntity[entity];
+  if (resource === undefined) throw new Error("未知设置资源，无法保存。");
+  return mode === "add"
+    ? createPersistentResource(resource, item)
+    : updatePersistentResource(resource, item.id, item);
 }
 
 function sortByOrder(left, right) {
@@ -585,7 +613,7 @@ function renderCategorySection() {
     <section class="settings-section" id="categories">
       <div class="section-heading with-actions">
         <h2>分类设置</h2>
-        ${canCurrentUser("settings.editCategories") ? `<button class="primary-button" type="button" data-action="add" data-entity="category">新增分类</button>` : ""}
+        <p class="form-note">分类体系已统一为 7 大价值链模块，不再新增自定义分类。</p>
       </div>
       <div class="category-layout">
         ${renderCategoryTable(CategoryType.Task)}
@@ -1104,78 +1132,82 @@ function setModalError(error) {
   }
 }
 
-function saveDepartment(form, rerender) {
+async function saveDepartment(form, rerender) {
   const name = getFormValue(form, "name");
   const leaderId = getFormValue(form, "leaderId") || null;
   const sortOrder = parseSortOrder(getFormValue(form, "sortOrder"));
 
   if (sortOrder === null) return setModalError("排序必须是数字。", rerender);
 
-  if (modalState.mode === "add") {
-    const now = getNow();
-    replaceDepartments([
-      ...departments,
-      {
-        id: createId("dept"),
-        companyId: companies[0].id,
-        name,
-        leaderId,
-        parentDepartmentId: null,
-        sortOrder,
-        status: Status.Active,
-        createdAt: now,
-        updatedAt: now,
-      },
-    ]);
-  } else {
-    const now = getNow();
-    replaceDepartments(
-      departments.map((department) =>
-        department.id === modalState.id
-          ? { ...department, name, leaderId, sortOrder, updatedAt: now }
-          : department,
-      ),
-    );
-  }
+  const now = getNow();
+  const item =
+    modalState.mode === "add"
+      ? {
+          id: createId("dept"),
+          companyId: companies[0].id,
+          name,
+          leaderId,
+          parentDepartmentId: null,
+          sortOrder,
+          status: Status.Active,
+          createdAt: now,
+          updatedAt: now,
+        }
+      : {
+          ...(departments.find((department) => department.id === modalState.id) ?? {}),
+          id: modalState.id,
+          name,
+          leaderId,
+          sortOrder,
+          updatedAt: now,
+        };
 
-  modalState = null;
-  rerender();
+  try {
+    const savedDepartment = await persistSettingsEntity("department", item, modalState.mode);
+    replaceDepartments(upsertItem(departments, savedDepartment));
+    modalState = null;
+    rerender();
+  } catch (error) {
+    setModalError(error.message || "部门保存失败，请检查本地数据库服务。", rerender);
+  }
 }
 
-function savePosition(form, rerender) {
+async function savePosition(form, rerender) {
   const name = getFormValue(form, "name");
   const departmentId = getFormValue(form, "departmentId");
   const sortOrder = parseSortOrder(getFormValue(form, "sortOrder"));
 
   if (sortOrder === null) return setModalError("排序必须是数字。", rerender);
 
-  if (modalState.mode === "add") {
-    const now = getNow();
-    replacePositions([
-      ...positions,
-      {
-        id: createId("pos"),
-        departmentId,
-        name,
-        sortOrder,
-        status: Status.Active,
-        createdAt: now,
-        updatedAt: now,
-      },
-    ]);
-  } else {
-    const now = getNow();
-    replacePositions(
-      positions.map((position) =>
-        position.id === modalState.id
-          ? { ...position, departmentId, name, sortOrder, updatedAt: now }
-          : position,
-      ),
-    );
-  }
+  const now = getNow();
+  const item =
+    modalState.mode === "add"
+      ? {
+          id: createId("pos"),
+          departmentId,
+          name,
+          sortOrder,
+          status: Status.Active,
+          createdAt: now,
+          updatedAt: now,
+        }
+      : {
+          ...(positions.find((position) => position.id === modalState.id) ?? {}),
+          id: modalState.id,
+          departmentId,
+          name,
+          sortOrder,
+          updatedAt: now,
+        };
 
-  modalState = null;
-  rerender();
+  try {
+    const savedPosition = await persistSettingsEntity("position", item, modalState.mode);
+    replacePositions(upsertItem(positions, savedPosition));
+    modalState = null;
+    rerender();
+  } catch (error) {
+    setModalError(error.message || "岗位保存失败，请检查本地数据库服务。", rerender);
+  }
 }
 
 async function savePerson(form, rerender) {
@@ -1204,77 +1236,61 @@ async function savePerson(form, rerender) {
   if (canLogin && modalState.mode === "add" && password === "") return setModalError("新增可登录人员必须设置密码。", rerender);
   if (canLogin && editingPerson?.canLogin !== true && password === "") return setModalError("启用登录时必须设置新密码。", rerender);
 
-  const previousPeople = people.map((person) => ({ ...person }));
+  const now = getNow();
+  const item =
+    modalState.mode === "add"
+      ? {
+          id: createId("person"),
+          name,
+          account,
+          departmentId,
+          positionId,
+          directManagerId,
+          role,
+          username,
+          canLogin,
+          authRole,
+          lastLoginAt: null,
+          mustChangePassword: false,
+          status: Status.Active,
+          createdAt: now,
+          updatedAt: now,
+          ...(password === "" ? {} : { password }),
+        }
+      : {
+          ...(editingPerson ?? {}),
+          id: modalState.id,
+          name,
+          account,
+          departmentId,
+          positionId,
+          directManagerId,
+          role,
+          username,
+          canLogin,
+          authRole,
+          ...(password === "" ? {} : { password }),
+          mustChangePassword: password === "" ? editingPerson?.mustChangePassword ?? false : false,
+          updatedAt: now,
+        };
 
-  if (modalState.mode === "add") {
-    const now = getNow();
-    const person = {
-      id: createId("person"),
-      name,
-      account,
-      departmentId,
-      positionId,
-      directManagerId,
-      role,
-      username,
-      canLogin,
-      authRole,
-      lastLoginAt: null,
-      mustChangePassword: false,
-      status: Status.Active,
-      createdAt: now,
-      updatedAt: now,
-    };
-    if (password !== "") person.password = password;
-    replacePeople([
-      ...people,
-      person,
-    ]);
-  } else {
-    const now = getNow();
-    replacePeople(
-      people.map((person) =>
-        person.id === modalState.id
-          ? {
-              ...person,
-              name,
-              account,
-              departmentId,
-              positionId,
-              directManagerId,
-              role,
-              username,
-              canLogin,
-              authRole,
-              ...(password === "" ? {} : { password }),
-              mustChangePassword: password === "" ? person.mustChangePassword : false,
-              updatedAt: now,
-            }
-          : person,
-      ),
-    );
-  }
-
-  if (!hasManageablePermissionAdmin()) {
-    replacePeople(previousPeople);
+  const safeDraft = stripSensitivePersonFields(item);
+  const nextPeople = upsertItem(people, safeDraft);
+  if (!hasManageablePermissionAdmin(nextPeople)) {
     return setModalError("系统至少需要保留一个权限管理员。", rerender);
   }
 
-  const saved = await savePersistentData();
-  if (!saved) {
-    replacePeople(previousPeople);
-    return setModalError("账号保存失败，请检查本地数据库服务。", rerender);
+  try {
+    const savedPerson = await persistSettingsEntity("person", item, modalState.mode);
+    replacePeople(upsertItem(people, stripSensitivePersonFields(savedPerson)));
+    modalState = null;
+    rerender();
+  } catch (error) {
+    setModalError(error.message || "账号保存失败，请检查本地数据库服务。", rerender);
   }
-
-  replacePeople(people.map((person) => {
-    const { password: _password, ...safePerson } = person;
-    return safePerson;
-  }));
-  modalState = null;
-  rerender();
 }
 
-function saveCategory(form, rerender) {
+async function saveCategory(form, rerender) {
   const category = categories.find((item) => item.id === modalState.id);
   const name = getFormValue(form, "name");
   const type =
@@ -1285,31 +1301,34 @@ function saveCategory(form, rerender) {
 
   if (sortOrder === null) return setModalError("排序必须是数字。", rerender);
 
-  if (modalState.mode === "add") {
-    const now = getNow();
-    replaceCategories([
-      ...categories,
-      {
-        id: createId("cat"),
-        type,
-        name,
-        sortOrder,
-        status: Status.Active,
-        createdAt: now,
-        updatedAt: now,
-      },
-    ]);
-  } else {
-    const now = getNow();
-    replaceCategories(
-      categories.map((item) =>
-        item.id === modalState.id ? { ...item, name, sortOrder, updatedAt: now } : item,
-      ),
-    );
-  }
+  const now = getNow();
+  const item =
+    modalState.mode === "add"
+      ? {
+          id: createId("cat"),
+          type,
+          name,
+          sortOrder,
+          status: Status.Active,
+          createdAt: now,
+          updatedAt: now,
+        }
+      : {
+          ...(category ?? {}),
+          id: modalState.id,
+          name,
+          sortOrder,
+          updatedAt: now,
+        };
 
-  modalState = null;
-  rerender();
+  try {
+    const savedCategory = await persistSettingsEntity("category", item, modalState.mode);
+    replaceCategories(upsertItem(categories, savedCategory));
+    modalState = null;
+    rerender();
+  } catch (error) {
+    setModalError(error.message || "分类保存失败，请检查本地数据库服务。", rerender);
+  }
 }
 
 async function saveStore(form, rerender) {
@@ -1324,43 +1343,42 @@ async function saveStore(form, rerender) {
   if (name === "") return setModalError("店铺名称不能为空。", rerender);
   if (platform === "") return setModalError("请选择所属平台。", rerender);
 
-  const previousStores = stores.map((store) => ({ ...store }));
   const now = getNow();
+  const item =
+    modalState.mode === "add"
+      ? {
+          id: createId("store"),
+          name,
+          platform,
+          brand,
+          type,
+          ownerId,
+          status,
+          remark,
+          createdAt: now,
+          updatedAt: now,
+        }
+      : {
+          ...(stores.find((store) => store.id === modalState.id) ?? {}),
+          id: modalState.id,
+          name,
+          platform,
+          brand,
+          type,
+          ownerId,
+          status,
+          remark,
+          updatedAt: now,
+        };
 
-  if (modalState.mode === "add") {
-    replaceStores([
-      ...stores,
-      {
-        id: createId("store"),
-        name,
-        platform,
-        brand,
-        type,
-        ownerId,
-        status,
-        remark,
-        createdAt: now,
-        updatedAt: now,
-      },
-    ]);
-  } else {
-    replaceStores(
-      stores.map((store) =>
-        store.id === modalState.id
-          ? { ...store, name, platform, brand, type, ownerId, status, remark, updatedAt: now }
-          : store,
-      ),
-    );
+  try {
+    const savedStore = await persistSettingsEntity("store", item, modalState.mode);
+    replaceStores(upsertItem(stores, savedStore));
+    modalState = null;
+    rerender();
+  } catch (error) {
+    setModalError(error.message || "店铺保存失败，请检查本地数据库服务。", rerender);
   }
-
-  const saved = await savePersistentData();
-  if (!saved) {
-    replaceStores(previousStores);
-    return setModalError("店铺保存失败，请检查本地数据库服务。", rerender);
-  }
-
-  modalState = null;
-  rerender();
 }
 
 function validateDepartmentDrop(draggedDepartmentId, targetDepartmentId) {
@@ -1369,7 +1387,7 @@ function validateDepartmentDrop(draggedDepartmentId, targetDepartmentId) {
   return "";
 }
 
-function alignDepartmentToParent(draggedDepartmentId, targetDepartmentId, rerender) {
+async function alignDepartmentToParent(draggedDepartmentId, targetDepartmentId, rerender) {
   const draggedDepartment = departments.find((department) => department.id === draggedDepartmentId);
   const targetDepartment = departments.find((department) => department.id === targetDepartmentId);
   if (draggedDepartment === undefined || targetDepartment === undefined) return;
@@ -1383,21 +1401,22 @@ function alignDepartmentToParent(draggedDepartmentId, targetDepartmentId, rerend
   if (!window.confirm(`确定将「${draggedDepartment.name}」调整为「${targetDepartment.name}」的下级部门吗？`)) return;
 
   const now = getNow();
-  replaceDepartments(
-    departments.map((department) =>
-      department.id === draggedDepartmentId
-        ? {
-            ...department,
-            parentDepartmentId: targetDepartmentId,
-            updatedAt: now,
-          }
-        : department,
-    ),
-  );
-  rerender();
+  const item = {
+    ...draggedDepartment,
+    parentDepartmentId: targetDepartmentId,
+    updatedAt: now,
+  };
+
+  try {
+    const savedDepartment = await persistSettingsEntity("department", item);
+    replaceDepartments(upsertItem(departments, savedDepartment));
+    rerender();
+  } catch (saveError) {
+    window.alert(saveError.message || "部门调整保存失败，请检查本地数据库服务。");
+  }
 }
 
-function alignPersonToDepartment(personId, targetDepartmentId, rerender) {
+async function alignPersonToDepartment(personId, targetDepartmentId, rerender) {
   const person = people.find((item) => item.id === personId);
   const targetDepartment = departments.find((department) => department.id === targetDepartmentId);
   if (person === undefined || targetDepartment === undefined) return;
@@ -1410,80 +1429,70 @@ function alignPersonToDepartment(personId, targetDepartmentId, rerender) {
   if (!window.confirm(`确定将「${person.name}」调整到「${targetDepartment.name}」吗？`)) return;
 
   const now = getNow();
-  replacePeople(
-    people.map((item) =>
-      item.id === personId
-        ? {
-            ...item,
-            departmentId: targetDepartmentId,
-            updatedAt: now,
-          }
-        : item,
-    ),
-  );
-  rerender();
+  const item = {
+    ...person,
+    departmentId: targetDepartmentId,
+    updatedAt: now,
+  };
+
+  try {
+    const savedPerson = await persistSettingsEntity("person", item);
+    replacePeople(upsertItem(people, stripSensitivePersonFields(savedPerson)));
+    rerender();
+  } catch (saveError) {
+    window.alert(saveError.message || "人员部门调整保存失败，请检查本地数据库服务。");
+  }
 }
 
-function deactivateEntity(entity, id) {
+async function deactivateEntity(entity, id, rerender) {
   const now = getNow();
+  const collectionByEntity = {
+    department: departments,
+    position: positions,
+    person: people,
+    category: categories,
+    store: stores,
+  };
+  const replaceByEntity = {
+    department: replaceDepartments,
+    position: replacePositions,
+    person: replacePeople,
+    category: replaceCategories,
+    store: replaceStores,
+  };
+  const item = collectionByEntity[entity]?.find((current) => current.id === id);
+  if (item === undefined) return;
 
-  if (entity === "department") {
-    replaceDepartments(
-      departments.map((department) =>
-        department.id === id
-          ? { ...department, status: Status.Inactive, updatedAt: now }
-          : department,
-      ),
-    );
-  }
-
-  if (entity === "position") {
-    replacePositions(
-      positions.map((position) =>
-        position.id === id ? { ...position, status: Status.Inactive, updatedAt: now } : position,
-      ),
-    );
-  }
-
+  const nextItem = { ...item, status: Status.Inactive, updatedAt: now };
   if (entity === "person") {
-    const nextPeople = people.map((person) =>
-      person.id === id ? { ...person, status: Status.Inactive, updatedAt: now } : person,
-    );
+    const nextPeople = people.map((person) => (person.id === id ? nextItem : person));
     if (!hasManageablePermissionAdmin(nextPeople)) {
       window.alert("系统至少需要保留一个权限管理员。");
       return;
     }
-    replacePeople(
-      nextPeople,
-    );
   }
 
-  if (entity === "category") {
-    replaceCategories(
-      categories.map((category) =>
-        category.id === id ? { ...category, status: Status.Inactive, updatedAt: now } : category,
-      ),
-    );
-  }
-
-  if (entity === "store") {
-    replaceStores(
-      stores.map((store) =>
-        store.id === id ? { ...store, status: Status.Inactive, updatedAt: now } : store,
-      ),
-    );
+  try {
+    const savedItem = await persistSettingsEntity(entity, nextItem);
+    const stateItem = entity === "person" ? stripSensitivePersonFields(savedItem) : savedItem;
+    replaceByEntity[entity](upsertItem(collectionByEntity[entity], stateItem));
+    rerender();
+  } catch (error) {
+    window.alert(error.message || "停用保存失败，请检查本地数据库服务。");
   }
 }
 
 async function activateEntity(entity, id, rerender) {
   const now = getNow();
   if (entity !== "store") return;
-  const previousStores = stores.map((store) => ({ ...store }));
-  replaceStores(stores.map((store) => (store.id === id ? { ...store, status: Status.Active, updatedAt: now } : store)));
-  const saved = await savePersistentData();
-  if (!saved) {
-    replaceStores(previousStores);
-    window.alert("店铺状态保存失败，请检查本地数据库服务。");
+  const store = stores.find((item) => item.id === id);
+  if (store === undefined) return;
+
+  try {
+    const savedStore = await persistSettingsEntity("store", { ...store, status: Status.Active, updatedAt: now });
+    replaceStores(upsertItem(stores, savedStore));
+  } catch (error) {
+    window.alert(error.message || "店铺状态保存失败，请检查本地数据库服务。");
   }
   rerender();
 }
@@ -1548,7 +1557,7 @@ function handleDepartmentDragLeave(event) {
   dropCard.classList.remove("is-drag-over");
 }
 
-function handleDepartmentDrop(event, rerender) {
+async function handleDepartmentDrop(event, rerender) {
   const dropCard = event.target.closest(".organization-map-card[data-department-drop-id]");
   if (dropCard === null) return;
   event.preventDefault();
@@ -1565,11 +1574,11 @@ function handleDepartmentDrop(event, rerender) {
     card.classList.remove("is-dragging", "is-drag-over");
   });
   if (droppedPersonId !== null && droppedPersonId !== "") {
-    alignPersonToDepartment(droppedPersonId, targetDepartmentId, rerender);
+    await alignPersonToDepartment(droppedPersonId, targetDepartmentId, rerender);
     return;
   }
   if (droppedDepartmentId === null || droppedDepartmentId === "" || targetDepartmentId === droppedDepartmentId) return;
-  alignDepartmentToParent(droppedDepartmentId, targetDepartmentId, rerender);
+  await alignDepartmentToParent(droppedDepartmentId, targetDepartmentId, rerender);
 }
 
 function handleDepartmentDragEnd() {
@@ -1596,11 +1605,11 @@ function getDeactivateMessage(entity) {
 async function handleFormSubmit(event, rerender) {
   event.preventDefault();
 
-  if (modalState.entity === "department") return saveDepartment(event.target, rerender);
-  if (modalState.entity === "position") return savePosition(event.target, rerender);
-  if (modalState.entity === "person") return savePerson(event.target, rerender);
-  if (modalState.entity === "category") return saveCategory(event.target, rerender);
-  if (modalState.entity === "store") return saveStore(event.target, rerender);
+  if (modalState.entity === "department") return await saveDepartment(event.target, rerender);
+  if (modalState.entity === "position") return await savePosition(event.target, rerender);
+  if (modalState.entity === "person") return await savePerson(event.target, rerender);
+  if (modalState.entity === "category") return await saveCategory(event.target, rerender);
+  if (modalState.entity === "store") return await saveStore(event.target, rerender);
 }
 
 function collectPermissionDraft(form, currentPermissions) {
@@ -1624,33 +1633,24 @@ async function savePermissions(form, rerender) {
   }
 
   const nextPermissions = collectPermissionDraft(form, getActivePermissionDraft(person));
-  const previousPeople = people.map((item) => ({ ...item }));
-  replacePeople(
-    people.map((item) =>
-      item.id === person.id
-        ? { ...item, permissions: nextPermissions, updatedAt: getNow() }
-        : item,
-    ),
-  );
+  const nextPerson = { ...person, permissions: nextPermissions, updatedAt: getNow() };
+  const nextPeople = people.map((item) => (item.id === person.id ? nextPerson : item));
 
-  if (!hasManageablePermissionAdmin()) {
-    replacePeople(previousPeople);
+  if (!hasManageablePermissionAdmin(nextPeople)) {
     permissionSaveMessage = "系统至少需要保留一个权限管理员。";
     rerender();
     return;
   }
 
-  const saved = await savePersistentData();
-  if (!saved) {
-    replacePeople(previousPeople);
-    permissionSaveMessage = "权限保存失败，请检查本地数据库服务。";
-    rerender();
-    return;
+  try {
+    const savedPerson = await persistSettingsEntity("person", nextPerson);
+    replacePeople(upsertItem(people, stripSensitivePersonFields(savedPerson)));
+    permissionDraft = { personId: person.id, permissions: nextPermissions };
+    permissionSaveMessage = "权限已保存";
+    if (person.id === getCurrentUser()?.id) await validateCurrentSession();
+  } catch (error) {
+    permissionSaveMessage = error.message || "权限保存失败，请检查本地数据库服务。";
   }
-
-  permissionDraft = { personId: person.id, permissions: nextPermissions };
-  permissionSaveMessage = "权限已保存";
-  if (person.id === getCurrentUser()?.id) await validateCurrentSession();
   rerender();
 }
 
@@ -1719,16 +1719,7 @@ export function bindSettingsPageEvents(rerender) {
     }
 
     if (action === "deactivate" && window.confirm(getDeactivateMessage(entity))) {
-      const previousStores = stores.map((store) => ({ ...store }));
-      deactivateEntity(entity, id);
-      if (entity === "store") {
-        const saved = await savePersistentData();
-        if (!saved) {
-          replaceStores(previousStores);
-          window.alert("店铺状态保存失败，请检查本地数据库服务。");
-        }
-      }
-      rerender();
+      await deactivateEntity(entity, id, rerender);
     }
   });
   settingsPage.addEventListener("dragstart", handleDepartmentDragStart);
