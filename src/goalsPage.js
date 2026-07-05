@@ -30,16 +30,18 @@ import {
   goalTypeNames,
   metricDirectionNames,
   processInstanceStatusNames,
-  taskImportanceNames,
   taskStatusNames,
-  taskUrgencyNames,
+  getValueModuleName,
+  inferValueModuleIdFromText,
+  isValueModuleId,
+  ValueModule,
 } from "./data/modelOptions.js";
 import { getPrimaryImageUrl, getTaskQuadrant, isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
 import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260705-state-singleton1";
 import { selectTask } from "./tasksPage.js?v=20260705-state-singleton1";
 
-const categories = state.categories;
 const departments = state.departments;
+const categories = state.categories;
 const people = state.people;
 const stores = state.stores;
 let goals = state.goals;
@@ -136,21 +138,43 @@ function ensureSelectedGoalVisible() {
   selectedGoalProcessInstanceId = null;
 }
 
-function getTaskCategories() {
-  return categories.filter((category) => category.type === CategoryType.Task);
-}
-
 function getActiveTaskTemplates() {
   return state.taskTemplates.filter((template) => template.status === TaskTemplateStatus.Active);
 }
 
-function getActiveDepartments() {
-  return departments.filter((department) => department.status === "active");
+function sortCategoriesBySortOrder(left, right) {
+  return (left.sortOrder ?? 9999) - (right.sortOrder ?? 9999) || left.name.localeCompare(right.name, "zh-Hans-CN");
 }
 
-function getActiveTaskTemplatesByDepartment(departmentId) {
-  if (!departmentId) return [];
-  return getActiveTaskTemplates().filter((template) => template.departmentId === departmentId);
+function getTaskCategories() {
+  return categories
+    .filter((category) => category.type === CategoryType.Task && category.status !== "inactive")
+    .sort(sortCategoriesBySortOrder);
+}
+
+function inferValueModuleIdForTemplate(template) {
+  if (template === null || template === undefined) return ValueModule.InfrastructureMaintenance;
+  const categoryName = categories.find((category) => category.id === template.categoryId && category.type === CategoryType.Task)?.name ?? "";
+  const searchableText = `${categoryName} ${template.name ?? ""}`.toLowerCase();
+  return inferValueModuleIdFromText(searchableText);
+}
+
+function getActiveTaskTemplatesByCategory(categoryId) {
+  if (!getTaskCategories().some((category) => category.id === categoryId)) return [];
+  return getActiveTaskTemplates().filter((template) => template.categoryId === categoryId);
+}
+
+function getTaskTemplateValueModuleName(template) {
+  return getValueModuleName(inferValueModuleIdForTemplate(template));
+}
+
+function withValueModuleCustomFields(customFields, valueModuleId) {
+  const normalizedValueModuleId = isValueModuleId(valueModuleId) ? valueModuleId : ValueModule.InfrastructureMaintenance;
+  return {
+    ...customFields,
+    valueModuleId: normalizedValueModuleId,
+    valueModuleName: getValueModuleName(normalizedValueModuleId),
+  };
 }
 
 function getTaskTemplate(templateId) {
@@ -499,12 +523,10 @@ function renderTaskTemplateLockedInfo(template) {
   return `
     <div class="locked-template-info">
       ${renderDetailField("标准工作名称", escapeHtml(template.name))}
-      ${renderDetailField("工作分类", findName(categories, template.categoryId, "未设置"))}
+      ${renderDetailField("价值链模块", getTaskTemplateValueModuleName(template))}
       ${renderDetailField("对应标准流程", getProcessTemplateName(template.defaultProcessTemplateId))}
       ${renderDetailField("负责部门", findName(departments, template.departmentId, "未设置"))}
       ${renderDetailField("负责人", findName(people, template.ownerId, "未设置"))}
-      ${renderDetailField("重要性", taskImportanceNames[template.importance])}
-      ${renderDetailField("紧急性", taskUrgencyNames[template.urgency])}
       ${renderDetailField("需要验收", template.needAcceptance ? "是" : "否")}
       ${renderDetailField("验收人", findName(people, template.accepterId, "无"))}
       ${renderDetailField("任务说明", escapeHtml(template.description))}
@@ -1195,14 +1217,14 @@ function renderGoalTaskModal() {
   if (modalState === null || modalState.kind !== "goalTask") return "";
 
   const goal = getGoal(modalState.goalId);
-  const selectedDepartmentId = modalState.departmentId ?? "";
-  const availableTemplates = getActiveTaskTemplatesByDepartment(selectedDepartmentId);
+  const selectedCategoryId = modalState.categoryId ?? "";
+  const availableTemplates = getActiveTaskTemplatesByCategory(selectedCategoryId);
   const selectedTemplate = availableTemplates.find((template) => template.id === modalState.taskTemplateId) ?? null;
   const templateHint =
-    selectedDepartmentId === ""
-      ? "请先选择部门"
+    selectedCategoryId === ""
+      ? "请先选择价值链模块"
       : availableTemplates.length === 0
-        ? "该部门暂无标准工作事项，请先到标准工作库中添加。"
+        ? "该价值链模块暂无标准工作事项，请先到标准工作库中添加。"
         : "请选择标准工作事项";
 
   return `
@@ -1221,28 +1243,20 @@ function renderGoalTaskModal() {
           <p class="form-note">自动对齐目标：${escapeHtml(goal?.name ?? "未选择目标")}</p>
           <div class="form-grid">
             <label>
-              <span>选择部门</span>
-              <select name="departmentId" data-goal-work-department-select>
-                ${renderOptions(getActiveDepartments(), selectedDepartmentId, "请选择部门")}
+              <span>选择价值链模块</span>
+              <select name="categoryId" data-goal-work-value-module-select>
+                ${renderOptions(getTaskCategories(), selectedCategoryId, "请选择价值链模块")}
               </select>
             </label>
             <label>
               <span>标准工作事项</span>
-              <select name="taskTemplateId" data-goal-task-template-select ${selectedDepartmentId === "" ? "disabled" : ""}>
+              <select name="taskTemplateId" data-goal-task-template-select ${selectedCategoryId === "" ? "disabled" : ""}>
                 ${renderOptions(availableTemplates, modalState.taskTemplateId ?? "", templateHint)}
               </select>
             </label>
             <label>
               <span>本次工作标题</span>
               <input name="title" placeholder="可留空，系统会根据填写信息生成" autocomplete="off" />
-            </label>
-            <label>
-              <span>重要性</span>
-              <select name="importance">${renderValueOptions(TaskImportance, selectedTemplate?.importance ?? TaskImportance.Important, taskImportanceNames)}</select>
-            </label>
-            <label>
-              <span>紧急性</span>
-              <select name="urgency">${renderValueOptions(TaskUrgency, selectedTemplate?.urgency ?? TaskUrgency.NotUrgent, taskUrgencyNames)}</select>
             </label>
             <label>
               <span>期望完成日期</span>
@@ -1300,25 +1314,29 @@ function buildGoalDraft(form) {
 }
 
 function buildGoalTaskDraft(form, goalId) {
-  const selectedDepartmentId = getFormValue(form, "departmentId");
+  const selectedCategoryId = getFormValue(form, "categoryId");
   let taskTemplateId = getFormValue(form, "taskTemplateId");
   let template = getTaskTemplate(taskTemplateId);
+  const categoryTemplates = getActiveTaskTemplatesByCategory(selectedCategoryId);
   if (template === null) {
-    template = getActiveTaskTemplatesByDepartment(selectedDepartmentId)[0] ?? getActiveTaskTemplates()[0] ?? null;
+    template = categoryTemplates[0] ?? null;
     taskTemplateId = template?.id ?? "";
   }
-  const departmentId = selectedDepartmentId || template?.departmentId || "";
-  const customFields = template === null ? {} : collectCustomFields(form, template);
+  const departmentId = template?.departmentId || "";
+  const valueModuleId = inferValueModuleIdForTemplate(template);
+  const customFields = withValueModuleCustomFields(template === null ? {} : collectCustomFields(form, template), valueModuleId);
 
   return {
     goalId,
     departmentId,
+    valueModuleId,
+    valueModuleName: getValueModuleName(valueModuleId),
     taskTemplateId,
     template,
     customFields,
     title: getFormValue(form, "title") || null,
-    importance: getFormValue(form, "importance"),
-    urgency: getFormValue(form, "urgency"),
+    importance: TaskImportance.Important,
+    urgency: TaskUrgency.NotUrgent,
     dueDate: getFormValue(form, "dueDate") || null,
     description: getFormValue(form, "description") || null,
   };
@@ -1743,7 +1761,7 @@ function handleGoalClick(event, rerender) {
     const goal = getGoal(goalId);
     if (goal === null || isInactiveGoal(goal)) return;
     selectedGoalId = goalId;
-    modalState = { kind: "goalTask", goalId, departmentId: "", taskTemplateId: "", title: button.dataset.modalTitle ?? "添加未来工作", error: "" };
+    modalState = { kind: "goalTask", goalId, categoryId: "", taskTemplateId: "", title: button.dataset.modalTitle ?? "添加未来工作", error: "" };
     rerender();
     return;
   }
@@ -2009,8 +2027,8 @@ export function bindGoalsPageEvents(rerender) {
       if (event.target.name?.startsWith("custom__")) updateImagePreview(event.target);
     });
     goalTaskForm.addEventListener("change", (event) => {
-      if (event.target.matches("[data-goal-work-department-select]")) {
-        modalState = { ...modalState, departmentId: event.target.value, taskTemplateId: "", error: "" };
+      if (event.target.matches("[data-goal-work-value-module-select]")) {
+        modalState = { ...modalState, categoryId: event.target.value, taskTemplateId: "", error: "" };
         rerender();
       }
       if (event.target.matches("[data-goal-task-template-select]")) {

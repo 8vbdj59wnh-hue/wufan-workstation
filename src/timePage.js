@@ -17,6 +17,10 @@ import {
   WorkPlanStatus,
   taskImportanceNames,
   taskUrgencyNames,
+  getValueModuleName,
+  inferValueModuleIdFromText,
+  isValueModuleId,
+  valueModuleList,
   workPlanStatusNames,
 } from "./data/modelOptions.js";
 import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, quadrantNames } from "./data/taskUtils.js?v=20260705-state-singleton1";
@@ -25,7 +29,7 @@ const currentWeek = getCurrentWeek();
 const departments = state.departments;
 const goals = state.goals;
 const people = state.people;
-let filters = { departmentId: "", ownerId: "", goalId: "", quadrant: "", status: "", showDone: false, showCanceled: false };
+let filters = { valueModuleId: "", ownerId: "", goalId: "", quadrant: "", status: "", showDone: false, showCanceled: false };
 let activeTimeTab = "future-works";
 let selectedFutureWorkIds = new Set();
 let selectedWeekWorkIds = new Set();
@@ -74,6 +78,21 @@ function getTaskTemplate(workPlan) {
 
 function getWorkDepartmentId(workPlan) {
   return workPlan.departmentId ?? getTaskTemplate(workPlan)?.departmentId ?? null;
+}
+
+function inferValueModuleIdForWorkPlan(workPlan) {
+  const customFields = workPlan.customFields ?? {};
+  if (isValueModuleId(customFields.valueModuleId)) return customFields.valueModuleId;
+  const template = getTaskTemplate(workPlan);
+  const categoryName = state.categories.find((category) => category.id === template?.categoryId)?.name ?? "";
+  const searchText = `${categoryName} ${workPlan.title ?? ""} ${template?.name ?? ""}`.toLowerCase();
+  return inferValueModuleIdFromText(searchText);
+}
+
+function getWorkValueModuleName(workPlan) {
+  const customFields = workPlan.customFields ?? {};
+  const valueModuleId = inferValueModuleIdForWorkPlan(workPlan);
+  return customFields.valueModuleName || getValueModuleName(valueModuleId);
 }
 
 function getProcessTemplate(templateId) {
@@ -135,7 +154,7 @@ function matchesFilters(workPlan) {
   const template = getTaskTemplate(workPlan);
   if (filters.status === "" && isDoneStatus(workPlan.status) && !filters.showDone) return false;
   if (filters.status === "" && isCanceledStatus(workPlan.status) && !filters.showCanceled) return false;
-  if (filters.departmentId !== "" && getWorkDepartmentId(workPlan) !== filters.departmentId) return false;
+  if (filters.valueModuleId !== "" && inferValueModuleIdForWorkPlan(workPlan) !== filters.valueModuleId) return false;
   if (filters.ownerId !== "" && template?.ownerId !== filters.ownerId) return false;
   if (filters.goalId !== "" && workPlan.goalId !== filters.goalId) return false;
   if (filters.quadrant !== "" && getQuadrantKey(workPlan) !== filters.quadrant) return false;
@@ -234,7 +253,7 @@ function renderWorkBulkBar(listType) {
 function renderFilters() {
   return `
     <form class="task-filters time-filters">
-      <label><span>部门</span><select name="departmentId">${renderOptions(departments, filters.departmentId, "全部部门")}</select></label>
+      <label><span>价值链模块</span><select name="valueModuleId">${renderOptions(valueModuleList, filters.valueModuleId, "全部价值链模块")}</select></label>
       <label><span>负责人</span><select name="ownerId">${renderOptions(people, filters.ownerId, "全部负责人")}</select></label>
       <label><span>对齐目标</span><select name="goalId">${renderOptions(getActiveGoals(), filters.goalId, "全部目标")}</select></label>
       <label>
@@ -273,7 +292,7 @@ function renderWorkRow(workPlan, actions = "", listType = null, index = 0) {
       <td><strong>${escapeHtml(getWorkTitle(workPlan))}</strong></td>
       <td>${findName(goals, workPlan.goalId, "未对齐目标")}</td>
       <td>${escapeHtml(template?.name ?? "未关联标准工作")}</td>
-      <td>${findName(departments, getWorkDepartmentId(workPlan), "未设置")}</td>
+      <td>${escapeHtml(getWorkValueModuleName(workPlan))}</td>
       <td>${findName(people, template?.ownerId ?? null, "未设置")}</td>
       <td><span class="task-soft-tag">${getTaskQuadrant(workPlan.importance, workPlan.urgency)}</span></td>
       <td>${workPlan.dueDate ?? "未设置"}</td>
@@ -291,7 +310,7 @@ function renderFutureWorks() {
       ${renderWorkBulkBar("future")}
       <div class="table-wrap">
         <table class="data-table task-table">
-          <thead><tr>${renderWorkSelectHeader(workPlans, "future")}<th>产品图</th><th>工作事项</th><th>对齐目标</th><th>标准工作事项</th><th>负责部门</th><th>负责人</th><th>优先级</th><th>期望完成日期</th><th>状态</th><th>操作</th></tr></thead>
+          <thead><tr>${renderWorkSelectHeader(workPlans, "future")}<th>产品图</th><th>工作事项</th><th>对齐目标</th><th>标准工作事项</th><th>价值链模块</th><th>负责人</th><th>优先级</th><th>期望完成日期</th><th>状态</th><th>操作</th></tr></thead>
           <tbody>
             ${workPlans.length === 0 ? `<tr><td colspan="11">暂无未来工作</td></tr>` : workPlans
               .map((workPlan, index) =>
@@ -367,7 +386,7 @@ function renderThisWeekWorks() {
       ${renderWorkBulkBar("week")}
       <div class="table-wrap">
         <table class="data-table task-table">
-          <thead><tr>${renderWorkSelectHeader(workPlans, "week")}<th>产品图</th><th>工作事项</th><th>对齐目标</th><th>标准工作事项</th><th>负责部门</th><th>负责人</th><th>优先级</th><th>期望完成日期</th><th>状态</th><th>操作</th></tr></thead>
+          <thead><tr>${renderWorkSelectHeader(workPlans, "week")}<th>产品图</th><th>工作事项</th><th>对齐目标</th><th>标准工作事项</th><th>价值链模块</th><th>负责人</th><th>优先级</th><th>期望完成日期</th><th>状态</th><th>操作</th></tr></thead>
           <tbody>
             ${workPlans.length === 0 ? `<tr><td colspan="11">暂无本周工作</td></tr>` : workPlans
               .map((workPlan, index) =>
@@ -391,7 +410,7 @@ function renderThisWeekWorks() {
 function updateFilters(form) {
   const data = new FormData(form);
   filters = {
-    departmentId: data.get("departmentId")?.toString() ?? "",
+    valueModuleId: data.get("valueModuleId")?.toString() ?? "",
     ownerId: data.get("ownerId")?.toString() ?? "",
     goalId: data.get("goalId")?.toString() ?? "",
     quadrant: data.get("quadrant")?.toString() ?? "",
