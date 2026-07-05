@@ -230,7 +230,7 @@ export const categories = [
     type: CategoryType.Task,
     name: "重点任务",
     sortOrder: 1,
-    status: Status.Active,
+    status: Status.Inactive,
     createdAt: timestamp,
     updatedAt: timestamp,
   },
@@ -239,7 +239,7 @@ export const categories = [
     type: CategoryType.Task,
     name: "日常任务",
     sortOrder: 2,
-    status: Status.Active,
+    status: Status.Inactive,
     createdAt: timestamp,
     updatedAt: timestamp,
   },
@@ -1517,6 +1517,8 @@ export const methodologies = [];
 /** @type {import("./models.js").Notification[]} */
 export const notifications = [];
 
+export const templates = [];
+
 export const baseMockData = Object.freeze({
   companies,
   departments,
@@ -1528,6 +1530,7 @@ export const baseMockData = Object.freeze({
   weeklyReportProblems,
   methodologies,
   notifications,
+  templates,
   goals,
   tasks,
   contentSchedules,

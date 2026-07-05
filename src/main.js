@@ -1,11 +1,12 @@
-import { modules } from "./modules.js?v=20260701-standard-work-dnd2";
-import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260701-standard-work-dnd2";
-import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260701-standard-work-dnd2";
-import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260701-standard-work-dnd2";
-import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260701-standard-work-dnd2";
-import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260701-standard-work-dnd2";
-import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260701-standard-work-dnd2";
-import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260701-standard-work-dnd2";
+import { modules } from "./modules.js?v=20260701-standard-work-dnd3";
+import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260701-standard-work-dnd3";
+import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260701-standard-work-dnd3";
+import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260701-standard-work-dnd3";
+import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260704-process-readiness1";
+import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260701-standard-work-dnd3";
+import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260701-standard-work-dnd3";
+import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260701-standard-work-dnd3";
+import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js?v=20260703-template-card1";
 import {
   flushPersistentSave,
   getCurrentUser,
@@ -23,8 +24,8 @@ import {
   updateCurrentUserAvatar,
   uploadImageFile,
   validateCurrentSession,
-} from "./appState.js?v=20260701-standard-work-dnd2";
-import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260701-standard-work-dnd2";
+} from "./appState.js?v=20260704-process-readiness1";
+import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260704-content-actions1";
 
 const app = document.querySelector("#app");
 
@@ -34,6 +35,8 @@ const moduleHashMap = {
   processes: "processes",
   time: "time",
   assessment: "assessment",
+  templateCenter: "templateCenter",
+  "template-center": "templateCenter",
   methods: "processes",
   settings: "settings",
   "task-list": "tasks",
@@ -261,6 +264,10 @@ function renderPage() {
     content = renderAssessmentPage();
   }
 
+  if (activeModule.id === "templateCenter") {
+    content = renderTemplateCenterPage();
+  }
+
   if (activeModule.id === "settings") {
     content = renderSettingsPage();
   }
@@ -458,6 +465,10 @@ function render() {
 
   if (activeModuleId === "assessment") {
     bindAssessmentPageEvents(render);
+  }
+
+  if (activeModuleId === "templateCenter") {
+    bindTemplateCenterPageEvents(render);
   }
 
   if (document.querySelector(".methodologies-page") !== null) {

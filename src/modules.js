@@ -20,6 +20,10 @@ export const modules = [
     name: "考核",
   },
   {
+    id: "templateCenter",
+    name: "模板中心",
+  },
+  {
     id: "settings",
     name: "设置",
   },

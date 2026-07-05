@@ -15,6 +15,52 @@ export const CategoryType = Object.freeze({
   Process: "process",
 });
 
+export const valueModuleList = Object.freeze([
+  { id: "infrastructure_maintenance", name: "基础设施维护" },
+  { id: "human_asset_management", name: "人力资产管理" },
+  { id: "product_development", name: "产品开发与淘汰" },
+  { id: "supply_chain_management", name: "供应链管理" },
+  { id: "brand_marketing", name: "品牌营销" },
+  { id: "channel_sales", name: "渠道销售" },
+  { id: "customer_maintenance", name: "客户维护" },
+]);
+
+export const ValueModule = Object.freeze({
+  InfrastructureMaintenance: valueModuleList[0].id,
+  HumanAssetManagement: valueModuleList[1].id,
+  ProductDevelopment: valueModuleList[2].id,
+  SupplyChainManagement: valueModuleList[3].id,
+  BrandMarketing: valueModuleList[4].id,
+  ChannelSales: valueModuleList[5].id,
+  CustomerMaintenance: valueModuleList[6].id,
+});
+
+export const valueModuleNames = Object.freeze(
+  Object.fromEntries(valueModuleList.map((module) => [module.id, module.name])),
+);
+
+export function isValueModuleId(valueModuleId) {
+  return valueModuleList.some((module) => module.id === valueModuleId);
+}
+
+export function getValueModuleName(valueModuleId, fallback = "基础设施维护") {
+  return valueModuleNames[valueModuleId] ?? fallback;
+}
+
+export function inferValueModuleIdFromText(text) {
+  const searchText = String(text ?? "").toLowerCase();
+
+  if (/基础设施维护|基础设施|行政|财务|系统|设备|账号|数据|检查/.test(searchText)) return ValueModule.InfrastructureMaintenance;
+  if (/人力资产管理|人力|人员|员工|招聘|入职|培训|绩效|考核|岗位/.test(searchText)) return ValueModule.HumanAssetManagement;
+  if (/新品开发|产品开发与淘汰|产品开发|产品研发|产品包装|包装设计|生命周期|淘汰|研发|设计打样|打样|选品/.test(searchText)) return ValueModule.ProductDevelopment;
+  if (/库存清仓|清仓|供应链管理|供应链|供应商|采购|库存|补货|仓库|交期|物流/.test(searchText)) return ValueModule.SupplyChainManagement;
+  if (/发布内容|内容笔记|发布笔记|笔记|小红书|买家秀|拍摄|素材|投放|视觉|内容|品牌营销|品牌|营销/.test(searchText)) return ValueModule.BrandMarketing;
+  if (/上架|上新|店铺|平台|渠道销售|渠道|销售|直播|私域|运营/.test(searchText)) return ValueModule.ChannelSales;
+  if (/客户维护|客服|客户|老客|会员|复购|社群|售后|回访|退换|退款|客诉|维修/.test(searchText)) return ValueModule.CustomerMaintenance;
+
+  return ValueModule.InfrastructureMaintenance;
+}
+
 export const GoalLevel = Object.freeze({
   Company: "company",
   Department: "department",
@@ -177,8 +223,8 @@ export const personRoleNames = Object.freeze({
 });
 
 export const categoryTypeNames = Object.freeze({
-  [CategoryType.Task]: "工作分类",
-  [CategoryType.Process]: "流程分类",
+  [CategoryType.Task]: "价值链模块",
+  [CategoryType.Process]: "流程价值链模块",
 });
 
 export const statusNames = Object.freeze({
