@@ -1,4 +1,4 @@
-import { getNow, getProcessNodeStepOrder, resolveAssetUrl, state, updatePersistentResource } from "./appState.js?v=20260705-state-singleton1";
+import { getNow, getProcessNodeStepOrder, resolveAssetUrl, state, updatePersistentResource, uploadStandardWorkAttachment } from "./appState.js?v=20260705-state-singleton1";
 import {
   GoalStatus,
   ProcessInstanceStatus,
@@ -20,6 +20,8 @@ const goals = state.goals;
 const people = state.people;
 const standardWorkAttachmentsKey = "standardWorkAttachments";
 const returnRecordsKey = "returnRecords";
+const spreadsheetAttachmentExts = new Set([".xlsx", ".xls", ".csv"]);
+const maxStandardWorkAttachmentSize = 20 * 1024 * 1024;
 
 function getSelectableGoals(selectedGoalId = "") {
   return goals.filter((goal) => goal.status !== GoalStatus.Inactive || goal.id === selectedGoalId);
@@ -31,6 +33,11 @@ function escapeHtml(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function getFileExt(filename) {
+  const index = String(filename ?? "").lastIndexOf(".");
+  return index === -1 ? "" : String(filename).slice(index).toLowerCase();
 }
 
 function findName(items, id, fallback) {
@@ -113,6 +120,15 @@ function getStandardWorkAttachments(instance) {
   return Array.isArray(attachments) ? attachments : [];
 }
 
+function validateStandardWorkAttachmentFiles(files) {
+  for (const file of files) {
+    const ext = getFileExt(file.name);
+    if (!spreadsheetAttachmentExts.has(ext)) return "表格附件只支持 .xlsx、.xls、.csv。";
+    if (file.size > maxStandardWorkAttachmentSize) return "单个表格附件不能超过 20MB。";
+  }
+  return "";
+}
+
 function getTaskReturnRecords(task) {
   const records = task.customFields?.[returnRecordsKey];
   return Array.isArray(records) ? records : [];
@@ -180,6 +196,49 @@ function renderStandardWorkAttachments(instance) {
             </ul>
           `
       }
+    </div>
+  `;
+}
+
+function renderEditableStandardWorkAttachments(instance, editable) {
+  const attachments = getStandardWorkAttachments(instance);
+  if (!editable) return renderStandardWorkAttachments(instance);
+
+  return `
+    <div class="detail-block standard-work-attachments-field">
+      <h3>表格附件</h3>
+      <p class="form-note">支持 .xlsx、.xls、.csv，单个文件不超过 20MB。新增附件会追加到已有附件；删除只移除关联，不删除 uploads 里的实际文件。</p>
+      <div data-existing-standard-work-attachments>
+        ${
+          attachments.length === 0
+            ? `<p class="form-note">暂无已有附件</p>`
+            : `
+              <ul class="attachment-list editable-attachment-list">
+                ${attachments
+                  .map((attachment, index) => {
+                    const href = resolveAssetUrl(attachment.filePath ?? attachment.url ?? "");
+                    const name = attachment.originalName ?? attachment.filename ?? attachment.filePath ?? "未命名附件";
+                    return `
+                      <li data-existing-attachment-item>
+                        <input type="hidden" name="existingStandardWorkAttachment" value="${escapeHtml(JSON.stringify(attachment))}" />
+                        <a href="${escapeHtml(href)}" target="_blank" rel="noreferrer" download>${escapeHtml(name)}</a>
+                        ${attachment.ext ? `<span>${escapeHtml(attachment.ext)}</span>` : ""}
+                        <button class="text-button danger-button" type="button" data-action="remove-existing-standard-work-attachment" data-attachment-index="${index}">删除关联</button>
+                      </li>
+                    `;
+                  })
+                  .join("")}
+              </ul>
+            `
+        }
+      </div>
+      <label>
+        <span>新增表格附件</span>
+        <input name="standardWorkAttachments" type="file" accept=".xlsx,.xls,.csv" multiple data-standard-work-attachments />
+      </label>
+      <div class="selected-attachment-list" data-selected-standard-work-attachments>
+        <p class="form-note">暂无新选择附件</p>
+      </div>
     </div>
   `;
 }
@@ -323,7 +382,7 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
           ${renderCustomFields(instance, editable)}
           <p class="form-note">本表单为发起工作时填写的本次工作要求，不是执行结果。</p>
         </div>
-        ${renderStandardWorkAttachments(instance)}
+        ${renderEditableStandardWorkAttachments(instance, editable)}
         ${renderReturnRecords(instance.id)}
         <div class="detail-block">
           <h3>流程步骤执行任务</h3>
@@ -351,14 +410,101 @@ function showFormError(form, error) {
   }
 }
 
+function collectExistingStandardWorkAttachments(form) {
+  return [...form.querySelectorAll("[name='existingStandardWorkAttachment']")]
+    .map((input) => {
+      try {
+        return JSON.parse(input.value);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
+async function uploadSelectedStandardWorkAttachments(form, instanceId) {
+  const input = form.elements.standardWorkAttachments;
+  const files = input?.files === undefined ? [] : Array.from(input.files);
+  const validationError = validateStandardWorkAttachmentFiles(files);
+  if (validationError !== "") throw new Error(validationError);
+
+  const uploaded = [];
+  for (const file of files) {
+    const attachment = await uploadStandardWorkAttachment(file);
+    uploaded.push({
+      originalName: attachment.originalName,
+      filePath: attachment.filePath ?? attachment.url,
+      url: attachment.url,
+      mimeType: attachment.mimeType,
+      ext: attachment.ext ?? getFileExt(attachment.originalName ?? attachment.filename ?? ""),
+      uploadedAt: attachment.uploadedAt ?? getNow(),
+      processInstanceId: instanceId,
+    });
+  }
+  return uploaded;
+}
+
+function renderSelectedStandardWorkAttachments(input) {
+  const container = input.closest(".standard-work-attachments-field")?.querySelector("[data-selected-standard-work-attachments]");
+  if (container === null || container === undefined) return;
+  const files = Array.from(input.files ?? []);
+  if (files.length === 0) {
+    container.innerHTML = `<p class="form-note">暂无新选择附件</p>`;
+    return;
+  }
+  container.innerHTML = `
+    <ul class="attachment-list editable-attachment-list">
+      ${files
+        .map(
+          (file, index) => `
+            <li>
+              <span>${escapeHtml(file.name)}</span>
+              <button class="text-button" type="button" data-action="remove-selected-standard-work-attachment" data-attachment-index="${index}">删除</button>
+            </li>
+          `,
+        )
+        .join("")}
+    </ul>
+  `;
+}
+
+function removeSelectedStandardWorkAttachment(button) {
+  const field = button.closest(".standard-work-attachments-field");
+  const input = field?.querySelector("[data-standard-work-attachments]");
+  if (input === null || input === undefined) return;
+  const removeIndex = Number(button.dataset.attachmentIndex);
+  const transfer = new DataTransfer();
+  Array.from(input.files ?? []).forEach((file, index) => {
+    if (index !== removeIndex) transfer.items.add(file);
+  });
+  input.files = transfer.files;
+  renderSelectedStandardWorkAttachments(input);
+}
+
 export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
   const detail = root.querySelector("[data-launched-process-detail]");
   if (detail === null) return;
 
   detail.addEventListener("click", (event) => {
+    const actionButton = event.target.closest("[data-action]");
+    if (actionButton?.dataset.action === "remove-existing-standard-work-attachment") {
+      actionButton.closest("[data-existing-attachment-item]")?.remove();
+      return;
+    }
+    if (actionButton?.dataset.action === "remove-selected-standard-work-attachment") {
+      removeSelectedStandardWorkAttachment(actionButton);
+      return;
+    }
+
     const taskButton = event.target.closest("[data-launched-process-task-id]");
     if (taskButton === null) return;
     options.onTaskSelect?.(taskButton.dataset.launchedProcessTaskId);
+  });
+
+  detail.addEventListener("change", (event) => {
+    if (event.target.matches("[data-standard-work-attachments]")) {
+      renderSelectedStandardWorkAttachments(event.target);
+    }
   });
 
   const form = detail.querySelector(".launched-process-form");
@@ -388,6 +534,13 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
       const input = form.elements[`custom__${key}`];
       if (input !== undefined) customFields[key] = input.value.trim();
     });
+    try {
+      const existingAttachments = collectExistingStandardWorkAttachments(form);
+      const uploadedAttachments = await uploadSelectedStandardWorkAttachments(form, instanceId);
+      customFields[standardWorkAttachmentsKey] = [...existingAttachments, ...uploadedAttachments];
+    } catch (error) {
+      return showFormError(form, error.message || "表格附件上传失败。");
+    }
 
     const updatedInstance = { ...instance, name, goalId, description, customFields, updatedAt: now };
 

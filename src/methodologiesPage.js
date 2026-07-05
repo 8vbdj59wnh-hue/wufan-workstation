@@ -9,6 +9,7 @@ import {
   uploadImageFile,
 } from "./appState.js?v=20260705-state-singleton1";
 import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
+import { getValueModuleName, inferValueModuleIdFromText, isValueModuleId } from "./data/modelOptions.js?v=20260705-state-singleton1";
 
 const demoMethodology = {
   id: "methodology-xhs-image-guide",
@@ -126,6 +127,26 @@ function getMethodologyNode(methodology) {
   return state.processTemplateNodes.find((node) => node.id === methodology.processNodeId) ?? null;
 }
 
+function getMethodologyValueModuleName(methodology) {
+  const processTemplate = state.processTemplates.find((template) => template.id === methodology.processTemplateId) ?? null;
+  const standardWork = state.taskTemplates.find((template) => template.id === (methodology.standardWorkId ?? methodology.taskTemplateId)) ??
+    getStandardWorkForTemplate(processTemplate?.id ?? "");
+  const explicitValueModuleId = methodology.valueModuleId ?? methodology.customFields?.valueModuleId ?? processTemplate?.valueModuleId ?? "";
+  if (isValueModuleId(explicitValueModuleId)) return getValueModuleName(explicitValueModuleId);
+  const standardWorkCategoryName = state.categories.find((category) => category.id === standardWork?.categoryId)?.name ?? "";
+  const node = getMethodologyNode(methodology);
+  const valueModuleId = inferValueModuleIdFromText([
+    standardWorkCategoryName,
+    standardWork?.name,
+    processTemplate?.name,
+    node?.name,
+    methodology.flowName,
+    methodology.nodeName,
+    methodology.title,
+  ].filter(Boolean).join(" "));
+  return getValueModuleName(valueModuleId);
+}
+
 function getMethodologyTitleFromNode(nodeName) {
   return `${String(nodeName ?? "").replaceAll("+", "").trim()}操作说明`;
 }
@@ -234,20 +255,22 @@ function renderMethodologyList() {
       <div class="table-wrap">
         <table class="data-table">
           <thead>
-            <tr><th>方法论标题</th><th>适用流程</th><th>适用节点</th><th>适用部门</th><th>内容形式</th><th>状态</th></tr>
+            <tr><th>方法论标题</th><th>价值链模块</th><th>适用流程</th><th>适用节点</th><th>适用部门</th><th>内容形式</th><th>状态</th></tr>
           </thead>
           <tbody>
-            ${items.length === 0 ? `<tr><td colspan="6">暂无方法论</td></tr>` : items
+            ${items.length === 0 ? `<tr><td colspan="7">暂无方法论</td></tr>` : items
               .map((item) => {
                 const filled = (item.steps ?? []).some((step) => step.instruction || step.imageUrl || step.videoUrl);
                 const node = getMethodologyNode(item);
                 const flowName = item.flowName ?? findName(state.processTemplates, item.processTemplateId, "未关联流程");
                 const nodeName = item.nodeName ?? node?.name ?? "未关联节点";
                 const departmentName = item.departmentName ?? "未设置";
+                const valueModuleName = getMethodologyValueModuleName(item);
                 const mediaTypes = item.mediaTypes?.join(" / ") ?? "文字";
                 return `
                   <tr class="${item.id === selectedMethodologyId ? "is-selected" : ""}" data-methodology-id="${item.id}">
                     <td><a class="methodology-title-link" href="#methodology-${item.id}">${escapeHtml(item.title)}</a></td>
+                    <td>${escapeHtml(valueModuleName)}</td>
                     <td>${escapeHtml(flowName)}</td>
                     <td>${escapeHtml(nodeName)}</td>
                     <td>${escapeHtml(departmentName)}</td>
@@ -349,6 +372,7 @@ function renderMediaPlaceholder(label) {
 
 function renderOperationalMethodology(methodology) {
   const node = getMethodologyNode(methodology);
+  const valueModuleName = getMethodologyValueModuleName(methodology);
   const flowName = methodology.flowName ?? findName(state.processTemplates, methodology.processTemplateId, "未关联流程");
   const nodeName = methodology.nodeName ?? node?.name ?? "未关联节点";
   const departmentName = methodology.departmentName ?? "未设置";
@@ -360,6 +384,7 @@ function renderOperationalMethodology(methodology) {
 
   return `
     <div class="detail-grid">
+      <div class="detail-field"><span>价值链模块</span><strong>${escapeHtml(valueModuleName)}</strong></div>
       <div class="detail-field"><span>适用流程</span><strong>${escapeHtml(flowName)}</strong></div>
       <div class="detail-field"><span>适用节点</span><strong>${escapeHtml(nodeName)}</strong></div>
       <div class="detail-field"><span>适用部门 / 岗位</span><strong>${escapeHtml(`${departmentName} / ${positions}`)}</strong></div>

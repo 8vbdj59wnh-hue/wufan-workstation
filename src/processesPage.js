@@ -27,6 +27,9 @@ import {
   TaskImportance,
   TaskStatus,
   TaskUrgency,
+  getValueModuleName,
+  inferValueModuleIdFromText,
+  isValueModuleId,
   processAccepterRuleNames,
   processInstanceStatusNames,
   processOwnerRuleNames,
@@ -36,6 +39,7 @@ import {
   taskImportanceNames,
   taskStatusNames,
   taskUrgencyNames,
+  valueModuleList,
 } from "./data/modelOptions.js?v=20260705-state-singleton1";
 import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
 import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260705-state-singleton1";
@@ -73,13 +77,6 @@ const people = state.people;
 const positions = state.positions;
 
 const stepNumberNames = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
-const processDepartmentColumns = [
-  { title: "视觉部", names: ["视觉部", "视觉营销部"] },
-  { title: "供应链", names: ["供应链", "供应链部"] },
-  { title: "运营部", names: ["运营部"] },
-  { title: "产品部", names: ["产品部"] },
-  { title: "综合部", names: ["综合部"] },
-];
 
 function shouldShowStartedProcess(instance) {
   if (isDoneStatus(instance.status)) return startedProcessFilters.showDone;
@@ -92,10 +89,6 @@ function findName(items, id, fallback) {
   return items.find((item) => item.id === id)?.name ?? fallback;
 }
 
-function findDepartmentByNames(names) {
-  return departments.find((department) => names.includes(department.name)) ?? null;
-}
-
 function getStandardWorkForTemplate(templateId) {
   return state.taskTemplates.find((template) => template.defaultProcessTemplateId === templateId) ?? null;
 }
@@ -104,18 +97,25 @@ function getLaunchedInstancesForTemplate(templateId) {
   return state.processInstances.filter((instance) => instance.templateId === templateId);
 }
 
-function getTemplateDepartmentId(template) {
-  const standardWork = getStandardWorkForTemplate(template.id);
-  if (standardWork?.departmentId) return standardWork.departmentId;
-  return template.applicableDepartmentIds?.[0] ?? null;
-}
-
 function getActiveTemplateNodeCount(templateId) {
   return state.processTemplateNodes.filter((node) => node.templateId === templateId && node.status === ProcessTemplateNodeStatus.Active).length;
 }
 
-function getProcessCategories() {
-  return categories.filter((category) => category.type === CategoryType.Process);
+function getValueChainCategoryByModuleId(valueModuleId) {
+  const moduleName = getValueModuleName(valueModuleId, "");
+  return categories.find((category) => category.type === CategoryType.Task && category.status !== "inactive" && category.name === moduleName) ?? null;
+}
+
+function getProcessTemplateValueModuleId(template) {
+  const standardWork = getStandardWorkForTemplate(template.id);
+  const standardWorkCategoryName = categories.find((category) => category.id === standardWork?.categoryId)?.name ?? "";
+  const explicitValueModuleId = template.valueModuleId ?? template.customFields?.valueModuleId ?? "";
+  if (isValueModuleId(explicitValueModuleId)) return explicitValueModuleId;
+  return inferValueModuleIdFromText(`${standardWorkCategoryName} ${standardWork?.name ?? ""} ${template.name ?? ""}`);
+}
+
+function getProcessTemplateValueModuleName(template) {
+  return getValueModuleName(getProcessTemplateValueModuleId(template));
 }
 
 function getTemplateNodes(templateId) {
@@ -195,15 +195,14 @@ function renderTemplateList() {
       </div>
       <div class="standard-work-board-wrap">
         <div class="standard-work-board process-template-board">
-          ${processDepartmentColumns
-            .map((column) => {
-              const department = findDepartmentByNames(column.names);
-              const templates = getVisibleProcessTemplates().filter((template) => getTemplateDepartmentId(template) === department?.id);
+          ${valueModuleList
+            .map((module) => {
+              const templates = getVisibleProcessTemplates().filter((template) => getProcessTemplateValueModuleId(template) === module.id);
               templates.forEach((template) => categorizedTemplateIds.add(template.id));
               return `
                 <section class="standard-work-column">
                   <div class="standard-work-column-header">
-                    <h3>${column.title}</h3>
+                    <h3>${module.name}</h3>
                     <span>${templates.length} 个</span>
                   </div>
                   <div class="standard-work-card-list">
@@ -388,7 +387,7 @@ function renderTemplateDetail() {
           <span class="status-pill ${template.status === ProcessTemplateStatus.Inactive ? "is-inactive" : ""}">${processTemplateStatusNames[template.status]}</span>
         </div>
         <div class="process-template-meta">
-          <span><em>分类</em>${findName(categories, template.categoryId, "未设置")}</span>
+          <span><em>价值链模块</em>${getProcessTemplateValueModuleName(template)}</span>
           <span><em>适用部门</em>${departmentNames}</span>
           <span><em>负责人</em>${findName(people, template.ownerId, "未设置")}</span>
           <span><em>版本</em>v${template.version}</span>
@@ -493,6 +492,7 @@ function renderTemplateModal() {
   if (modalState?.kind !== "template") return "";
   const template = modalState.id ? state.processTemplates.find((item) => item.id === modalState.id) : null;
   const applicableDepartmentIds = Array.isArray(template?.applicableDepartmentIds) ? template.applicableDepartmentIds : [];
+  const selectedValueModuleId = template === null ? "" : getProcessTemplateValueModuleId(template);
   return `
     <div class="modal-backdrop"><div class="modal-panel wide-modal">
       <div class="modal-header">
@@ -507,7 +507,7 @@ function renderTemplateModal() {
         <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${modalState.error}</div>
         <label><span>流程名称</span><input name="name" value="${template?.name ?? ""}" /></label>
         <div class="form-grid">
-          <label><span>流程分类</span><select name="categoryId">${renderOptions(getProcessCategories(), template?.categoryId ?? "", "请选择流程分类")}</select></label>
+          <label><span>价值链模块</span><select name="valueModuleId">${renderOptions(valueModuleList, selectedValueModuleId, "请选择价值链模块")}</select></label>
           <label><span>流程负责人</span><select name="ownerId">${renderOptions(people, template?.ownerId ?? "", "请选择负责人")}</select></label>
         </div>
         <label><span>适用部门</span><select name="applicableDepartmentIds" multiple>${departments.map((department) => `<option value="${department.id}" ${applicableDepartmentIds.includes(department.id) ? "selected" : ""}>${department.name}</option>`).join("")}</select></label>
@@ -608,9 +608,11 @@ function setModalError(error) {
 
 async function saveTemplate(form, rerender) {
   const data = new FormData(form);
+  const valueModuleId = getFormValue(form, "valueModuleId");
+  const valueChainCategory = getValueChainCategoryByModuleId(valueModuleId);
   const draft = {
     name: getFormValue(form, "name"),
-    categoryId: getFormValue(form, "categoryId") || null,
+    categoryId: valueChainCategory?.id ?? null,
     applicableDepartmentIds: data.getAll("applicableDepartmentIds").map(String),
     ownerId: getFormValue(form, "ownerId"),
     purpose: getFormValue(form, "purpose"),
@@ -620,6 +622,7 @@ async function saveTemplate(form, rerender) {
     status: getFormValue(form, "status") || ProcessTemplateStatus.Active,
   };
   if (draft.name === "") return setModalError("请填写流程名称。");
+  if (!isValueModuleId(valueModuleId) || valueChainCategory === null) return setModalError("请选择有效的价值链模块。");
   if (draft.ownerId === "") return setModalError("请选择流程负责人。");
   const now = getNow();
   if (modalState.id) {
@@ -727,21 +730,25 @@ async function saveNode(form, rerender) {
     state.processTemplateNodes = [...state.processTemplateNodes, createdNode];
     if (!state.methodologies.some((methodology) => methodology.processNodeId === createdNode.id)) {
       const standardWork = getStandardWorkForTemplate(createdNode.templateId);
-      state.methodologies = [
-        {
-          id: `methodology-${createdNode.id}`,
-          title: `${createdNode.name.replaceAll("+", "").trim()}操作说明`,
-          processTemplateId: createdNode.templateId,
-          processNodeId: createdNode.id,
-          standardWorkId: standardWork?.id ?? "",
-          taskTemplateId: standardWork?.id ?? "",
-          description: "",
-          steps: [],
-          createdAt: createdNode.createdAt,
-          updatedAt: createdNode.updatedAt,
-        },
-        ...state.methodologies,
-      ];
+      const methodology = {
+        id: `methodology-${createdNode.id}`,
+        title: `${createdNode.name.replaceAll("+", "").trim()}操作说明`,
+        processTemplateId: createdNode.templateId,
+        processNodeId: createdNode.id,
+        standardWorkId: standardWork?.id ?? "",
+        taskTemplateId: standardWork?.id ?? "",
+        description: "",
+        steps: [],
+        createdAt: createdNode.createdAt,
+        updatedAt: createdNode.updatedAt,
+      };
+      try {
+        await createPersistentResource("methodologies", methodology);
+        state.methodologies = [methodology, ...state.methodologies];
+      } catch (error) {
+        console.error("方法论自动生成失败", error);
+        window.alert(error.message || "流程步骤已保存，但方法论自动生成失败，请稍后到方法论中补建。");
+      }
     }
   }
   normalizeProcessStepOrders(selectedTemplateId);
