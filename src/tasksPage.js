@@ -4,10 +4,12 @@ import {
   createPersistentResource,
   createOrReuseProcessTemplateForStandardWork,
   createId,
+  ensureTaskReadyForExecution,
   getCurrentWeek,
   getProcessNodeStepOrder,
   getCurrentUser,
   getNow,
+  loadTemplates,
   moveTaskTemplateToValueChain,
   normalizeSubmitRequirement,
   resolveAssetUrl,
@@ -41,6 +43,10 @@ import {
   taskTemplateStatusNames,
   taskUrgencyNames,
   submitTypeNames,
+  getValueModuleName,
+  inferValueModuleIdFromText,
+  isValueModuleId,
+  ValueModule,
 } from "./data/modelOptions.js";
 import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260705-state-singleton1";
 import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260705-state-singleton1";
@@ -83,6 +89,7 @@ let processProgressFilters = {
   initiatorId: "",
   showDone: false,
   showCanceled: false,
+  showStockClearance: false,
 };
 let clearanceFilters = {
   keyword: "",
@@ -103,6 +110,16 @@ let expandedClearanceGroups = new Set();
 let modalState = null;
 let activeTaskTab = "task-list";
 let standardWorkMoveStatus = null;
+let visualTemplatesLoaded = state.templates.length > 0;
+let visualTemplatesLoading = false;
+
+const templateTagCategories = [
+  { id: "brand", label: "品牌" },
+  { id: "platform", label: "平台" },
+  { id: "tone", label: "调性" },
+  { id: "format", label: "形式" },
+  { id: "usage", label: "用途" },
+];
 
 function canCurrentUser(permissionPath) {
   return hasPermission(getCurrentUser(), permissionPath);
@@ -148,16 +165,6 @@ const clearanceImportHeaders = [
 ];
 const clearanceRequiredImportHeaders = ["清仓产品", "当前库存", "清仓原因", "清仓渠道", "期望完成日期"];
 
-const standardWorkValueChainColumns = [
-  { title: "基础设施维护", keywords: ["基础", "设施", "行政", "财务", "系统", "设备", "账号", "数据", "检查"], departmentNames: ["综合部", "行政部", "财务部"] },
-  { title: "人力资产管理", keywords: ["人力", "人员", "员工", "招聘", "入职", "培训", "绩效", "考核", "岗位"], departmentNames: ["人事部", "人力资源部"] },
-  { title: "产品研发", keywords: ["新品开发", "产品研发", "产品设计", "包装设计", "研发", "设计", "打样", "选品", "新品资料"], departmentNames: ["产品部"] },
-  { title: "供应链管理", keywords: ["供应链", "供应商", "采购", "库存", "清仓", "补货", "仓库", "交期", "物流"], departmentNames: ["供应链", "供应链部"] },
-  { title: "品牌营销", keywords: ["品牌", "营销", "内容", "笔记", "小红书", "买家秀", "拍摄", "素材", "投放"], departmentNames: ["视觉部", "视觉营销部", "市场部", "品牌部"] },
-  { title: "渠道销售", keywords: ["渠道", "销售", "上架", "店铺", "平台", "直播", "私域", "运营"], departmentNames: ["运营部", "渠道部", "销售部"] },
-  { title: "客户维护", keywords: ["客户", "老客", "会员", "复购", "社群", "回访", "售后", "客服", "退换", "退款", "客诉", "维修"], departmentNames: ["会员部", "客户成功部", "客服部", "售后部"] },
-];
-
 const hiddenLegacyStandardWorkNames = [
   "小红书笔记发布",
   "买家秀图片制作",
@@ -192,10 +199,98 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
+function escapeAttribute(value) {
+  return escapeHtml(value).replaceAll("'", "&#39;");
+}
+
 function findName(items, id, fallback) {
   if (id === null) return fallback;
 
   return items.find((item) => item.id === id)?.name ?? fallback;
+}
+
+function createEmptyTemplateTags() {
+  return Object.fromEntries(templateTagCategories.map((category) => [category.id, []]));
+}
+
+function addUniqueTemplateTag(list, tag) {
+  const normalizedTag = String(tag ?? "").trim();
+  if (normalizedTag === "") return list;
+  return list.includes(normalizedTag) ? list : [...list, normalizedTag];
+}
+
+function normalizeVisualTemplateTags(tags) {
+  const normalizedTags = createEmptyTemplateTags();
+  if (Array.isArray(tags)) {
+    tags.forEach((tag) => {
+      normalizedTags.usage = addUniqueTemplateTag(normalizedTags.usage, tag);
+    });
+    return normalizedTags;
+  }
+  if (tags && typeof tags === "object") {
+    templateTagCategories.forEach((category) => {
+      if (Array.isArray(tags[category.id])) {
+        tags[category.id].forEach((tag) => {
+          normalizedTags[category.id] = addUniqueTemplateTag(normalizedTags[category.id], tag);
+        });
+      }
+    });
+  }
+  return normalizedTags;
+}
+
+function getFlatVisualTemplateTags(tags) {
+  return templateTagCategories.flatMap((category) => normalizeVisualTemplateTags(tags)[category.id] ?? []);
+}
+
+function getVisualTemplateName(template) {
+  const nameFromTags = getFlatVisualTemplateTags(template?.tags).filter(Boolean).join(" ");
+  return nameFromTags || template?.name || "未命名模板";
+}
+
+function getVisualTemplateById(templateId) {
+  if (!templateId) return null;
+  return state.templates.find((template) => template.id === templateId) ?? null;
+}
+
+function getVisualTemplatePreviewImage(template) {
+  if (template?.previewImage && typeof template.previewImage === "object") return template.previewImage;
+  return { fileName: "", fileUrl: "" };
+}
+
+function getVisualTemplateSourceFile(template) {
+  if (template?.sourceFile && typeof template.sourceFile === "object") return template.sourceFile;
+  return { fileName: "", fileUrl: "" };
+}
+
+function getVisualTemplateFilterTags() {
+  const groupedTags = createEmptyTemplateTags();
+  state.templates.forEach((template) => {
+    const tags = normalizeVisualTemplateTags(template.tags);
+    templateTagCategories.forEach((category) => {
+      tags[category.id].forEach((tag) => {
+        groupedTags[category.id] = addUniqueTemplateTag(groupedTags[category.id], tag);
+      });
+    });
+  });
+  return groupedTags;
+}
+
+function getFilteredVisualTemplates() {
+  const query = (modalState?.templateQuery ?? "").trim().toLowerCase();
+  const selectedTags = normalizeVisualTemplateTags(modalState?.templateTagFilters ?? {});
+  return state.templates.filter((template) => {
+    const tags = normalizeVisualTemplateTags(template.tags);
+    const flatTags = getFlatVisualTemplateTags(tags);
+    const searchableText = `${getVisualTemplateName(template)} ${flatTags.join(" ")}`.toLowerCase();
+    if (query !== "" && !searchableText.includes(query)) return false;
+    return templateTagCategories.every((category) => {
+      const requiredTags = selectedTags[category.id] ?? [];
+      if (requiredTags.length === 0) return true;
+      const templateTags = tags[category.id] ?? [];
+      return requiredTags.every((tag) => templateTags.includes(tag));
+    });
+  });
 }
 
 function getTask(taskId) {
@@ -203,7 +298,13 @@ function getTask(taskId) {
 }
 
 function getTaskCategories() {
-  return categories.filter((category) => category.type === CategoryType.Task);
+  return categories
+    .filter((category) => category.type === CategoryType.Task && category.status !== "inactive")
+    .sort((left, right) => (left.sortOrder ?? 9999) - (right.sortOrder ?? 9999) || left.name.localeCompare(right.name, "zh-Hans-CN"));
+}
+
+function getStandardWorkValueChainColumns() {
+  return getTaskCategories().map((category) => ({ id: category.id, title: category.name }));
 }
 
 function getActiveTaskTemplates() {
@@ -235,39 +336,52 @@ function getStandardWorkStepCount(template) {
 }
 
 function getStandardWorkValueChain(template) {
-  const categoryName = findName(categories, template.categoryId, "");
-  if (standardWorkValueChainColumns.some((column) => column.title === categoryName)) return categoryName;
+  return getTaskCategories().find((category) => category.id === template?.categoryId)?.name ?? getValueModuleName(inferValueModuleIdForTemplate(template));
+}
 
-  const departmentName = findName(departments, template.departmentId, "");
+function inferValueModuleIdForTemplate(template) {
+  if (template === null || template === undefined) return ValueModule.InfrastructureMaintenance;
+  const category = categories.find((item) => item.id === template.categoryId && item.type === CategoryType.Task);
+  if (category !== undefined) return inferValueModuleIdFromText(category.name);
   const processName = getProcessTemplateName(template.defaultProcessTemplateId ?? "");
   const searchText = [
     template.name,
-    categoryName,
-    departmentName,
     processName === "未绑定标准流程" ? "" : processName,
   ].join(" ");
-
-  return standardWorkValueChainColumns.find((column) =>
-    column.keywords.some((keyword) => searchText.includes(keyword)) ||
-    column.departmentNames.includes(departmentName),
-  )?.title ?? "基础设施维护";
+  return inferValueModuleIdFromText(searchText);
 }
 
-function getStandardWorkValueChainCategory(categoryName) {
-  return getTaskCategories().find((category) => category.name === categoryName) ?? null;
+function getActiveTaskTemplatesByCategory(categoryId) {
+  if (!getTaskCategories().some((category) => category.id === categoryId)) return [];
+  return getActiveTaskTemplates().filter((template) => template.categoryId === categoryId);
+}
+
+function withValueModuleCustomFields(customFields, valueModuleId) {
+  const normalizedValueModuleId = isValueModuleId(valueModuleId) ? valueModuleId : ValueModule.InfrastructureMaintenance;
+  return {
+    ...customFields,
+    valueModuleId: normalizedValueModuleId,
+    valueModuleName: getValueModuleName(normalizedValueModuleId),
+  };
+}
+
+function getTaskTemplateValueChainCategoryId(template) {
+  if (template === null || template === undefined) return "";
+  if (getTaskCategories().some((category) => category.id === template.categoryId)) return template.categoryId;
+  return getTaskCategories().find((category) => category.name === getStandardWorkValueChain(template))?.id ?? "";
 }
 
 function renderStandardWorkValueChainSelect(template) {
   if (!canCurrentUser("settings.editStandardWorks")) return "";
-  const currentValueChain = getStandardWorkValueChain(template);
+  const currentCategoryId = getTaskTemplateValueChainCategoryId(template);
   return `
     <label class="standard-work-category-select">
       <span>价值链</span>
       <select data-action="change-standard-work-value-chain" data-template-id="${escapeHtml(template.id)}">
-        ${standardWorkValueChainColumns
+        ${getStandardWorkValueChainColumns()
           .map(
             (column) => `
-              <option value="${escapeHtml(column.title)}" ${column.title === currentValueChain ? "selected" : ""}>
+              <option value="${escapeHtml(column.id)}" ${column.id === currentCategoryId ? "selected" : ""}>
                 ${escapeHtml(column.title)}
               </option>
             `,
@@ -299,6 +413,19 @@ function getTaskCustomFields(task) {
   return instance?.customFields ?? task.customFields ?? {};
 }
 
+function mergePreservedTaskCustomFields(previousCustomFields = {}, nextCustomFields = {}) {
+  const preservedKeys = [standardWorkAttachmentsKey];
+  return preservedKeys.reduce(
+    (result, key) => {
+      if (!Object.prototype.hasOwnProperty.call(result, key) && Object.prototype.hasOwnProperty.call(previousCustomFields, key)) {
+        result[key] = previousCustomFields[key];
+      }
+      return result;
+    },
+    { ...nextCustomFields },
+  );
+}
+
 function getTaskCoverImage(task) {
   const instance = getTaskProcessInstance(task);
   return getPrimaryImageUrl(task, instance);
@@ -307,9 +434,10 @@ function getTaskCoverImage(task) {
 function buildUpdatedProcessInstanceForTaskForm(task, customFields, displayTitle, coverImageUrl, now) {
   const instance = getTaskProcessInstance(task);
   if (instance === null) return null;
+  const mergedCustomFields = mergePreservedTaskCustomFields(instance.customFields ?? {}, customFields);
   return {
     ...instance,
-    customFields,
+    customFields: mergedCustomFields,
     displayTitle: displayTitle ?? instance.displayTitle ?? instance.name,
     coverImageUrl: coverImageUrl || instance.coverImageUrl || null,
     updatedAt: now,
@@ -1209,6 +1337,17 @@ function sortProcessTasks(tasks) {
 function getOrderedActiveProcessTasks(task) {
   if (task.source !== TaskSource.Process || task.processInstanceId === null) return null;
   return sortProcessTasks(getProcessTasks(task.processInstanceId)).filter((item) => item.status !== TaskStatus.Canceled);
+}
+
+function canActivateWaitingProcessTask(task) {
+  if (task.status !== TaskStatus.Waiting) return false;
+  const instance = getTaskProcessInstance(task);
+  if (instance === null || instance.status !== ProcessInstanceStatus.Running) return false;
+  const processTasks = getOrderedActiveProcessTasks(task);
+  if (processTasks === null) return false;
+  const currentIndex = processTasks.findIndex((item) => item.id === task.id);
+  if (currentIndex < 0) return false;
+  return processTasks.slice(0, currentIndex).every((item) => isDoneStatus(item.status));
 }
 
 function getReturnableProcessTasks(task) {
@@ -2470,6 +2609,10 @@ function getStandardWorkName(instance) {
   return getTaskTemplate(taskTemplateId)?.name ?? "未关联标准工作";
 }
 
+function isStockClearanceProcessInstance(instance) {
+  return getStandardWorkName(instance) === "库存清仓";
+}
+
 function getProcessDisplayTitle(instance) {
   return instance.displayTitle ?? instance.name;
 }
@@ -2497,7 +2640,10 @@ function matchesProcessProgressFilters(instance) {
   const currentOwnerIds = getCurrentSteps(instance.id).map((task) => task.ownerId);
   const overdue = isProcessOverdue(instance.id);
   const keyword = processProgressFilters.keyword;
+  const isStockClearance = isStockClearanceProcessInstance(instance);
 
+  if (processProgressFilters.showStockClearance && !isStockClearance) return false;
+  if (!processProgressFilters.showStockClearance && isStockClearance) return false;
   if (keyword !== "" && !`${title} ${templateName} ${goalName}`.includes(keyword)) return false;
   if (processProgressFilters.goalId !== "" && instance.goalId !== processProgressFilters.goalId) return false;
   if (processProgressFilters.templateId !== "" && instance.templateId !== processProgressFilters.templateId) return false;
@@ -2699,16 +2845,16 @@ function renderTaskTemplateTable(selectedProcessTemplateId = "") {
       ${renderStandardWorkMoveStatus()}
       <div class="standard-work-board-wrap">
         <div class="standard-work-board">
-          ${standardWorkValueChainColumns
+          ${getStandardWorkValueChainColumns()
             .map((column) => {
-              const columnTemplates = visibleTemplates.filter((template) => getStandardWorkValueChain(template) === column.title);
+              const columnTemplates = visibleTemplates.filter((template) => template.categoryId === column.id);
               return `
-                <section class="standard-work-column" data-standard-work-category="${escapeHtml(column.title)}">
+                <section class="standard-work-column" data-standard-work-category-id="${escapeHtml(column.id)}">
                   <div class="standard-work-column-header">
                     <h3>${column.title}</h3>
                     <span>${columnTemplates.length} 项</span>
                   </div>
-                  <div class="standard-work-card-list" data-standard-work-drop-zone="${escapeHtml(column.title)}">
+                  <div class="standard-work-card-list" data-standard-work-drop-zone="${escapeHtml(column.id)}">
                     ${
                       columnTemplates.length === 0
                         ? `<div class="standard-work-drop-hint">拖到这里</div>`
@@ -2811,6 +2957,10 @@ function renderProcessProgressFilters() {
       <label class="checkbox-field task-filter-checkbox">
         <input name="showCanceled" type="checkbox" ${processProgressFilters.showCanceled ? "checked" : ""} />
         <span>显示已取消</span>
+      </label>
+      <label class="checkbox-field task-filter-checkbox">
+        <input name="showStockClearance" type="checkbox" ${processProgressFilters.showStockClearance ? "checked" : ""} />
+        <span>显示库存清仓</span>
       </label>
       <p class="form-note">已取消的数据默认隐藏，可勾选显示已取消查看。</p>
     </form>
@@ -3077,6 +3227,9 @@ function renderStatusActions(task) {
   if (!canCurrentUser("tasks.changeStatus")) return "";
   const returnAction = canReturnTask(task) ? renderActionButton("退回重做", "return-task", task.id) : "";
   if (task.status === TaskStatus.Waiting) {
+    if (canActivateWaitingProcessTask(task)) {
+      return `${renderActionButton("开始任务", "start-task", task.id)}${returnAction}`;
+    }
     return `<span class="muted-action">等待前置任务完成</span>${returnAction}`;
   }
 
@@ -3236,6 +3389,158 @@ function renderPreviousTaskFilesBlock(task) {
   return renderPreviousTaskSubmissionBlock(task);
 }
 
+function renderVisualTemplateDownloadLink(label, file, variant = "") {
+  const fileUrl = file?.fileUrl ?? file?.url ?? "";
+  if (!fileUrl) return `<span class="muted-action">${escapeHtml(label)}</span>`;
+  return `
+    <a class="text-button ${variant}" href="${escapeAttribute(resolveAssetUrl(fileUrl))}" download="${escapeAttribute(file.fileName ?? "")}" target="_blank" rel="noreferrer">
+      ${escapeHtml(label)}
+    </a>
+  `;
+}
+
+function renderTaskLinkedTemplateSummary(templateId, mode = "form") {
+  const template = getVisualTemplateById(templateId);
+  const previewImage = getVisualTemplatePreviewImage(template);
+  if (template === null) {
+    return `<div class="content-template-summary is-empty"><span>未关联</span></div>`;
+  }
+  return `
+    <div class="content-template-summary ${mode === "detail" ? "is-detail" : ""}">
+      <button class="content-template-thumb" type="button" data-action="preview-task-linked-template" data-template-id="${escapeAttribute(template.id)}">
+        ${
+          previewImage.fileUrl
+            ? `<img src="${escapeAttribute(resolveAssetUrl(previewImage.fileUrl))}" alt="${escapeAttribute(getVisualTemplateName(template))}" />`
+            : `<span>无预览</span>`
+        }
+      </button>
+      <div class="content-template-meta">
+        <strong>${escapeHtml(getVisualTemplateName(template))}</strong>
+        ${
+          mode === "detail"
+            ? `<div class="row-actions">
+                ${renderVisualTemplateDownloadLink("下载图片", previewImage)}
+                ${renderVisualTemplateDownloadLink("下载源文件", getVisualTemplateSourceFile(template))}
+              </div>`
+            : ""
+        }
+      </div>
+    </div>
+  `;
+}
+
+function renderTaskTemplateLinkField(templateId) {
+  return `
+    <div class="content-template-field">
+      <span>关联模板</span>
+      <div class="content-template-control">
+        <input type="hidden" name="templateId" value="${escapeAttribute(templateId ?? "")}" />
+        ${renderTaskLinkedTemplateSummary(templateId)}
+        <div class="row-actions">
+          <button class="secondary-button" type="button" data-action="open-task-template-picker">更换模板</button>
+          ${templateId ? `<button class="text-button danger-button" type="button" data-action="clear-task-template">取消关联</button>` : ""}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderTaskLinkedTemplatePreviewModal() {
+  const previewTemplate = getVisualTemplateById(modalState?.templatePreviewId ?? "");
+  if (previewTemplate === null) return "";
+  const previewImage = getVisualTemplatePreviewImage(previewTemplate);
+  return `
+    <div class="modal-backdrop content-template-preview-backdrop" role="presentation">
+      <div class="modal-panel content-template-preview-modal" role="dialog" aria-modal="true" aria-label="预览模板">
+        <div class="modal-header">
+          <h2>${escapeHtml(getVisualTemplateName(previewTemplate))}</h2>
+          <button class="icon-button" type="button" data-action="close-task-linked-template-preview" aria-label="关闭">×</button>
+        </div>
+        <div class="content-template-preview-body">
+          ${previewImage.fileUrl ? `<img src="${escapeAttribute(resolveAssetUrl(previewImage.fileUrl))}" alt="${escapeAttribute(getVisualTemplateName(previewTemplate))}" />` : `<span>无预览</span>`}
+        </div>
+        <div class="row-actions">
+          ${renderVisualTemplateDownloadLink("下载图片", previewImage)}
+          ${renderVisualTemplateDownloadLink("下载源文件", getVisualTemplateSourceFile(previewTemplate))}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderTaskTemplatePicker() {
+  if (modalState?.templatePickerOpen !== true) return "";
+  const selectedTags = normalizeVisualTemplateTags(modalState.templateTagFilters ?? {});
+  const groupedTags = getVisualTemplateFilterTags();
+  const visibleTemplates = getFilteredVisualTemplates();
+  const previewTemplate = getVisualTemplateById(modalState.templatePreviewId ?? "");
+
+  return `
+    <div class="modal-backdrop content-template-picker-backdrop" role="presentation">
+      <div class="modal-panel extra-wide-modal" role="dialog" aria-modal="true" aria-label="选择模板">
+        <div class="modal-header">
+          <h2>选择模板</h2>
+          <button class="icon-button" type="button" data-action="close-task-template-picker" aria-label="关闭">×</button>
+        </div>
+        <div class="content-template-picker">
+          <div class="content-template-picker-toolbar">
+            <input data-task-template-picker-search value="${escapeAttribute(modalState.templateQuery ?? "")}" autocomplete="off" />
+          </div>
+          <div class="content-template-picker-layout">
+            <aside class="content-template-picker-filters">
+              ${templateTagCategories.map((category) => `
+                <div class="content-template-filter-group">
+                  <h3>${escapeHtml(category.label)}</h3>
+                  <div class="template-tag-cloud">
+                    ${(groupedTags[category.id] ?? []).map((tag) => {
+                      const active = (selectedTags[category.id] ?? []).includes(tag);
+                      return `<button class="${active ? "is-active" : ""}" type="button" data-task-template-picker-tag="${escapeAttribute(tag)}" data-task-template-picker-category="${category.id}">${escapeHtml(tag)}</button>`;
+                    }).join("")}
+                  </div>
+                </div>
+              `).join("")}
+            </aside>
+            <div class="content-template-picker-main">
+              ${visualTemplatesLoading ? `<div class="empty-detail">模板加载中</div>` : ""}
+              ${
+                !visualTemplatesLoading && visibleTemplates.length === 0
+                  ? `<div class="empty-detail">暂无模板</div>`
+                  : `<div class="content-template-picker-grid">
+                      ${visibleTemplates.map((template) => {
+                        const previewImage = getVisualTemplatePreviewImage(template);
+                        return `
+                          <article class="content-template-option ${modalState.templateId === template.id ? "is-selected" : ""}">
+                            <button class="content-template-option-thumb" type="button" data-action="preview-task-template-option" data-template-id="${escapeAttribute(template.id)}">
+                              ${previewImage.fileUrl ? `<img src="${escapeAttribute(resolveAssetUrl(previewImage.fileUrl))}" alt="${escapeAttribute(getVisualTemplateName(template))}" />` : `<span>无预览</span>`}
+                            </button>
+                            <h3>${escapeHtml(getVisualTemplateName(template))}</h3>
+                            <button class="primary-button" type="button" data-action="select-task-template-option" data-template-id="${escapeAttribute(template.id)}">选择</button>
+                          </article>
+                        `;
+                      }).join("")}
+                    </div>`
+              }
+            </div>
+          </div>
+        </div>
+      </div>
+      ${
+        previewTemplate === null
+          ? ""
+          : `<div class="modal-panel content-template-preview-modal" role="dialog" aria-modal="true" aria-label="预览模板">
+              <div class="modal-header">
+                <h2>${escapeHtml(getVisualTemplateName(previewTemplate))}</h2>
+                <button class="icon-button" type="button" data-action="close-task-template-preview" aria-label="关闭">×</button>
+              </div>
+              <div class="content-template-preview-body">
+                ${getVisualTemplatePreviewImage(previewTemplate).fileUrl ? `<img src="${escapeAttribute(resolveAssetUrl(getVisualTemplatePreviewImage(previewTemplate).fileUrl))}" alt="${escapeAttribute(getVisualTemplateName(previewTemplate))}" />` : `<span>无预览</span>`}
+              </div>
+            </div>`
+      }
+    </div>
+  `;
+}
+
 function renderTaskDetail() {
   const selectedTask = getTask(selectedTaskId) ?? getFilteredTasks()[0] ?? null;
 
@@ -3294,6 +3599,10 @@ function renderTaskDetail() {
             ${renderTaskWorkInfo(selectedTask, taskTemplate)}
           </div>
         </div>
+      </div>
+      <div class="detail-block">
+        <h3>关联模板</h3>
+        ${renderTaskLinkedTemplateSummary(selectedTask.templateId ?? "", "detail")}
       </div>
       ${renderStandardWorkAttachmentsBlock(getTaskCustomFields(selectedTask))}
       ${renderPreviousTaskFilesBlock(selectedTask)}
@@ -3361,6 +3670,7 @@ function renderTaskDetailModal() {
         </div>
         <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${modalState.error}</div>
         ${renderTaskDetail()}
+        ${renderTaskLinkedTemplatePreviewModal()}
       </div>
     </div>
   `;
@@ -3512,12 +3822,10 @@ function renderTemplateLockedInfo(template) {
   return `
     <div class="locked-template-info">
       ${renderDetailField("标准工作名称", escapeHtml(template.name))}
-      ${renderDetailField("工作分类", findName(categories, template.categoryId, "未设置"))}
+      ${renderDetailField("价值链模块", getStandardWorkValueChain(template))}
       ${renderDetailField("对应标准流程", getProcessTemplateName(template.defaultProcessTemplateId))}
       ${renderDetailField("负责部门", findName(departments, template.departmentId, "未设置"))}
       ${renderDetailField("负责人", findName(people, template.ownerId, "未设置"))}
-      ${renderDetailField("重要性", taskImportanceNames[template.importance])}
-      ${renderDetailField("紧急性", taskUrgencyNames[template.urgency])}
       ${renderDetailField("需要验收", template.needAcceptance ? "是" : "否")}
       ${renderDetailField("验收人", findName(people, template.accepterId, "无"))}
       ${renderDetailField("标准任务说明", escapeHtml(template.description))}
@@ -3532,8 +3840,21 @@ function renderTaskModal() {
   const task = getEditingTask();
   const isEdit = modalState.mode === "edit";
   const isProcessTask = task?.source === TaskSource.Process;
-  const selectedTemplate = getTaskTemplate(modalState.taskTemplateId ?? "");
+  const draft = modalState.draft ?? {};
+  const effectiveTask = isEdit && task !== null
+    ? { ...task, ...draft, customFields: draft.customFields ?? task.customFields }
+    : task;
+  const selectedVisualTemplateId = modalState.templateId ?? draft.templateId ?? task?.templateId ?? "";
+  const selectedCategoryId = modalState.categoryId ?? "";
+  const availableTemplates = getActiveTaskTemplatesByCategory(selectedCategoryId);
+  const selectedTemplate = availableTemplates.find((template) => template.id === modalState.taskTemplateId) ?? null;
   const editTemplate = task === null ? null : getTaskTemplateForTask(task);
+  const templateHint =
+    selectedCategoryId === ""
+      ? "请先选择价值链模块"
+      : availableTemplates.length === 0
+        ? "该价值链模块暂无标准工作事项"
+        : "请选择标准工作事项";
 
   return `
     <div class="modal-backdrop" role="presentation">
@@ -3555,18 +3876,19 @@ function renderTaskModal() {
                 <div class="detail-grid">
                   ${renderDetailField("任务名称", escapeHtml(task?.name ?? ""))}
                   ${renderDetailField("关联目标", findName(goals, task?.goalId ?? null, "未设置"))}
-                  ${renderDetailField("工作分类", findName(categories, task?.categoryId ?? null, "未设置"))}
+                  ${renderDetailField("价值链模块", getStandardWorkValueChain(editTemplate))}
                   ${renderDetailField("负责部门", findName(departments, task?.departmentId ?? null, "未设置"))}
                   ${renderDetailField("负责人", findName(people, task?.ownerId ?? null, "未设置"))}
                   ${renderDetailField(isProcessTask ? "步骤完成标准" : "标准完成要求", escapeHtml(task?.completionStandard ?? ""))}
                 </div>
+                ${renderTaskTemplateLinkField(selectedVisualTemplateId)}
                 <div class="form-grid">
                   <label>
                     <span>执行人</span>
-                    <select name="ownerId">${renderOptions(people, task?.ownerId ?? "", "请选择执行人")}</select>
+                    <select name="ownerId">${renderOptions(people, effectiveTask?.ownerId ?? "", "请选择执行人")}</select>
                   </label>
                 </div>
-                ${renderCustomFieldsForm(editTemplate, getTaskCustomFields(task))}
+                ${renderCustomFieldsForm(editTemplate, getTaskCustomFields(effectiveTask))}
               `
               : `
                 <div class="form-grid">
@@ -3575,9 +3897,15 @@ function renderTaskModal() {
                     <select name="goalId">${renderOptions(getActiveGoals(), "", "请选择目标")}</select>
                   </label>
                   <label>
+                    <span>选择价值链模块</span>
+                    <select name="categoryId" data-task-value-module-select>
+                      ${renderOptions(getTaskCategories(), selectedCategoryId, "请选择价值链模块")}
+                    </select>
+                  </label>
+                  <label>
                     <span>选择标准工作事项</span>
-                    <select name="taskTemplateId" data-task-template-select>
-                      ${renderOptions(getActiveTaskTemplates(), modalState.taskTemplateId ?? "", "请选择标准工作事项")}
+                    <select name="taskTemplateId" data-task-template-select ${selectedCategoryId === "" ? "disabled" : ""}>
+                      ${renderOptions(availableTemplates, modalState.taskTemplateId ?? "", templateHint)}
                     </select>
                   </label>
                   <label>
@@ -3593,26 +3921,26 @@ function renderTaskModal() {
           <div class="form-grid">
             <label>
               <span>计划开始日期</span>
-              <input name="startDate" type="date" value="${task?.startDate ?? ""}" />
+              <input name="startDate" type="date" value="${effectiveTask?.startDate ?? ""}" />
             </label>
             <label>
               <span>截止日期</span>
-              <input name="dueDate" type="date" value="${task?.dueDate ?? ""}" />
+              <input name="dueDate" type="date" value="${effectiveTask?.dueDate ?? ""}" />
             </label>
             <label>
               <span>计划周</span>
-              <input name="plannedWeek" value="${task?.plannedWeek ?? ""}" placeholder="例如 2026-W27" autocomplete="off" />
+              <input name="plannedWeek" value="${effectiveTask?.plannedWeek ?? ""}" placeholder="例如 2026-W27" autocomplete="off" />
             </label>
             ${
               isEdit
                 ? `
                   <label>
                     <span>重要性</span>
-                    <select name="importance">${renderValueOptions(TaskImportance, task?.importance ?? "", taskImportanceNames, "请选择重要性")}</select>
+                    <select name="importance">${renderValueOptions(TaskImportance, effectiveTask?.importance ?? "", taskImportanceNames, "请选择重要性")}</select>
                   </label>
                   <label>
                     <span>紧急性</span>
-                    <select name="urgency">${renderValueOptions(TaskUrgency, task?.urgency ?? "", taskUrgencyNames, "请选择紧急性")}</select>
+                    <select name="urgency">${renderValueOptions(TaskUrgency, effectiveTask?.urgency ?? "", taskUrgencyNames, "请选择紧急性")}</select>
                   </label>
                 `
                 : ""
@@ -3620,13 +3948,14 @@ function renderTaskModal() {
           </div>
           <label>
             <span>${isEdit ? "补充说明 / 任务说明" : "补充说明"}</span>
-            <textarea name="${isEdit ? "description" : "remark"}" rows="3">${escapeHtml(task?.description ?? "")}</textarea>
+            <textarea name="${isEdit ? "description" : "remark"}" rows="3">${escapeHtml(effectiveTask?.description ?? "")}</textarea>
           </label>
           <div class="modal-actions">
             <button class="secondary-button" type="button" data-action="close-task-modal">取消</button>
             <button class="primary-button" type="submit">保存</button>
           </div>
         </form>
+        ${renderTaskTemplatePicker()}
       </div>
     </div>
   `;
@@ -3858,8 +4187,8 @@ function renderTaskTemplateModal() {
           </label>
           <div class="form-grid">
             <label>
-              <span>工作分类</span>
-              <select name="categoryId">${renderOptions(getTaskCategories(), template?.categoryId ?? "", "请选择分类")}</select>
+              <span>价值链模块</span>
+              <select name="categoryId">${renderOptions(getTaskCategories(), getTaskTemplateValueChainCategoryId(template), "请选择价值链模块")}</select>
             </label>
             ${
               isEdit
@@ -3947,6 +4276,7 @@ function updateProcessProgressFilters(form) {
     initiatorId: formData.get("initiatorId")?.toString() ?? "",
     showDone: formData.has("showDone"),
     showCanceled: formData.has("showCanceled"),
+    showStockClearance: formData.has("showStockClearance"),
   };
 }
 
@@ -3983,6 +4313,7 @@ function buildTaskTemplateDraft(form) {
 }
 
 function validateTaskTemplateDraft(draft) {
+  if (!getTaskCategories().some((category) => category.id === draft.categoryId)) return "标准工作必须选择有效的价值链模块。";
   if (modalState.mode === "edit") {
     if (draft.defaultProcessTemplateId !== "") {
       const processTemplate = getProcessTemplateById(draft.defaultProcessTemplateId);
@@ -4090,19 +4421,23 @@ function deactivateTaskTemplate(templateId, rerender) {
 
 function buildTaskDraft(form, task) {
   if (task === null) {
+    const selectedCategoryId = getFormValue(form, "categoryId");
     let taskTemplateId = getFormValue(form, "taskTemplateId");
     let template = getTaskTemplate(taskTemplateId);
     if (template === null) {
-      template = getActiveTaskTemplates()[0] ?? null;
+      template = getActiveTaskTemplatesByCategory(selectedCategoryId)[0] ?? getActiveTaskTemplates()[0] ?? null;
       taskTemplateId = template?.id ?? "";
     }
     const remark = getFormValue(form, "remark");
-    const customFields = template === null ? {} : collectCustomFields(form, template);
+    const valueModuleId = inferValueModuleIdForTemplate(template);
+    const customFields = withValueModuleCustomFields(template === null ? {} : collectCustomFields(form, template), valueModuleId);
 
     return {
       taskTemplateId,
       template,
       customFields,
+      valueModuleId,
+      valueModuleName: getValueModuleName(valueModuleId),
       goalId: getFormValue(form, "goalId") || getActiveGoals()[0]?.id || "",
       initiatorId: getFormValue(form, "initiatorId") || people[0]?.id || "",
       startDate: getFormValue(form, "startDate") || null,
@@ -4112,11 +4447,13 @@ function buildTaskDraft(form, task) {
     };
   }
   const template = getTaskTemplateForTask(task);
-  const customFields = template === null ? getTaskCustomFields(task) : collectCustomFields(form, template);
+  const previousCustomFields = getTaskCustomFields(task);
+  const customFields = template === null ? previousCustomFields : mergePreservedTaskCustomFields(previousCustomFields, collectCustomFields(form, template));
 
   return {
     ...task,
     customFields,
+    templateId: getFormValue(form, "templateId") || modalState?.templateId || task.templateId || "",
     ownerId: getFormValue(form, "ownerId") || task.ownerId,
     description: getFormValue(form, "description"),
     importance: getFormValue(form, "importance") || task.importance,
@@ -4129,6 +4466,7 @@ function buildTaskDraft(form, task) {
 
 function validateTaskDraft(draft, isAdd) {
   if (isAdd) {
+    if (!isValueModuleId(draft.valueModuleId)) return "必须选择价值链模块。";
     if (draft.taskTemplateId === "" || draft.template === null) return "必须选择启用的标准工作事项。";
     if (draft.template.status !== TaskTemplateStatus.Active) return "停用的标准工作事项不能用于发起标准工作。";
     if (!draft.template.defaultProcessTemplateId) return "该标准工作事项尚未绑定标准流程，请先到标准工作库中配置。";
@@ -4199,6 +4537,8 @@ async function saveTask(form, rerender) {
     const description = draft.remark === ""
       ? draft.template.description
       : `${draft.template.description}\n补充说明：${draft.remark}`;
+    const originalInstances = [...state.processInstances];
+    const originalTasks = [...state.tasks];
 
     const result = startProcess({
       templateId: draft.template.defaultProcessTemplateId,
@@ -4234,6 +4574,15 @@ async function saveTask(form, rerender) {
       };
     }
 
+    try {
+      await persistStartedProcess(result);
+    } catch (error) {
+      console.error("发起标准工作保存失败", error);
+      state.processInstances = originalInstances;
+      state.tasks = originalTasks;
+      return setModalError(error.message || "发起标准工作保存失败，请检查本地数据库服务。", rerender);
+    }
+
     selectedProcessInstanceId = result.instance.id;
     selectedTaskId = state.tasks.find((item) => item.processInstanceId === result.instance.id)?.id ?? selectedTaskId;
     activeTaskTab = "process-progress";
@@ -4248,6 +4597,7 @@ async function saveTask(form, rerender) {
       customFields: draft.customFields,
       displayTitle,
       coverImageUrl,
+      templateId: draft.templateId ?? task.templateId ?? "",
       ownerId: draft.ownerId,
       description: draft.description,
       importance: draft.importance,
@@ -4276,6 +4626,133 @@ async function saveTask(form, rerender) {
 
   modalState = null;
   rerender();
+}
+
+function readCurrentTaskModalDraft() {
+  const form = document.querySelector(".task-form");
+  if (form === null || modalState?.kind !== "task") return modalState?.draft ?? {};
+  const task = getEditingTask();
+  if (task === null) return modalState.draft ?? {};
+  return buildTaskDraft(form, task);
+}
+
+async function ensureVisualTemplatesLoaded(rerender) {
+  if (visualTemplatesLoaded || visualTemplatesLoading) return;
+  visualTemplatesLoading = true;
+  try {
+    await loadTemplates();
+    visualTemplatesLoaded = true;
+  } catch (error) {
+    console.error("模板列表读取失败", error);
+    modalState = { ...modalState, error: error.message || "模板列表读取失败，请检查本地数据库服务。" };
+  } finally {
+    visualTemplatesLoading = false;
+    rerender();
+  }
+}
+
+async function handleTaskTemplateLinkAction(action, actionButton, rerender) {
+  if (action === "open-task-template-picker") {
+    if (modalState?.kind !== "task") return true;
+    const draft = readCurrentTaskModalDraft();
+    modalState = {
+      ...modalState,
+      draft,
+      templateId: draft.templateId ?? modalState.templateId ?? "",
+      templatePickerOpen: true,
+      templateQuery: modalState.templateQuery ?? "",
+      templateTagFilters: modalState.templateTagFilters ?? createEmptyTemplateTags(),
+      templatePreviewId: "",
+    };
+    rerender();
+    await ensureVisualTemplatesLoaded(rerender);
+    return true;
+  }
+  if (action === "close-task-template-picker") {
+    modalState = {
+      ...modalState,
+      draft: readCurrentTaskModalDraft(),
+      templatePickerOpen: false,
+      templatePreviewId: "",
+    };
+    rerender();
+    return true;
+  }
+  if (action === "clear-task-template") {
+    modalState = { ...modalState, draft: { ...readCurrentTaskModalDraft(), templateId: "" }, templateId: "" };
+    rerender();
+    return true;
+  }
+  if (action === "select-task-template-option") {
+    const templateId = actionButton.dataset.templateId ?? "";
+    modalState = {
+      ...modalState,
+      draft: { ...readCurrentTaskModalDraft(), templateId },
+      templateId,
+      templatePickerOpen: false,
+      templatePreviewId: "",
+    };
+    rerender();
+    return true;
+  }
+  if (action === "preview-task-template-option") {
+    modalState = {
+      ...modalState,
+      draft: modalState?.kind === "task" ? readCurrentTaskModalDraft() : modalState?.draft,
+      templatePreviewId: actionButton.dataset.templateId ?? "",
+    };
+    rerender();
+    return true;
+  }
+  if (action === "close-task-template-preview") {
+    modalState = {
+      ...modalState,
+      draft: modalState?.kind === "task" ? readCurrentTaskModalDraft() : modalState?.draft,
+      templatePreviewId: "",
+    };
+    rerender();
+    return true;
+  }
+  if (action === "preview-task-linked-template") {
+    modalState = { ...modalState, templatePreviewId: actionButton.dataset.templateId ?? "" };
+    rerender();
+    return true;
+  }
+  if (action === "close-task-linked-template-preview") {
+    modalState = { ...modalState, templatePreviewId: "" };
+    rerender();
+    return true;
+  }
+  return false;
+}
+
+function handleTaskTemplatePickerTagClick(templateTagButton, rerender) {
+  if (templateTagButton === null || modalState?.kind !== "task") return false;
+  const categoryId = templateTagButton.dataset.taskTemplatePickerCategory;
+  const tag = templateTagButton.dataset.taskTemplatePickerTag;
+  const currentFilters = normalizeVisualTemplateTags(modalState.templateTagFilters ?? {});
+  const currentTags = currentFilters[categoryId] ?? [];
+  const nextTags = currentTags.includes(tag)
+    ? currentTags.filter((item) => item !== tag)
+    : [...currentTags, tag];
+  modalState = {
+    ...modalState,
+    draft: readCurrentTaskModalDraft(),
+    templateTagFilters: { ...currentFilters, [categoryId]: nextTags },
+  };
+  rerender();
+  return true;
+}
+
+function handleTaskTemplatePickerSearchInput(searchInput, rerender) {
+  if (searchInput === null || modalState?.kind !== "task") return false;
+  modalState = {
+    ...modalState,
+    draft: readCurrentTaskModalDraft(),
+    templateQuery: searchInput.value,
+  };
+  rerender();
+  return true;
 }
 
 function parseAttachments(value) {
@@ -4385,9 +4862,22 @@ async function saveResult(form, rerender) {
 
 async function updateTaskStatus(taskId, status, rerender) {
   if (!canCurrentUser("tasks.changeStatus")) return;
-  const task = getTask(taskId);
+  let task = getTask(taskId);
 
   if (task === null) return;
+
+  if (task.source === TaskSource.Process && task.status === TaskStatus.Waiting && status !== TaskStatus.Canceled) {
+    try {
+      await ensureTaskReadyForExecution(taskId);
+      task = getTask(taskId);
+    } catch (error) {
+      console.error("流程任务激活失败", error);
+      window.alert(error.message || "流程任务激活失败，请检查本地数据库服务。");
+      rerender();
+      return;
+    }
+    if (task === null) return;
+  }
 
   if (task.status === status) {
     rerender();
@@ -4496,18 +4986,29 @@ async function bulkUpdateTaskStatus(status, rerender) {
   const now = getNow();
   const skipped = [];
   const updatedTasks = [];
-  selectedTasks.forEach((task) => {
+  for (const selectedTask of selectedTasks) {
+    let task = selectedTask;
+    if (task.source === TaskSource.Process && task.status === TaskStatus.Waiting && status !== TaskStatus.Canceled) {
+      try {
+        await ensureTaskReadyForExecution(task.id);
+        task = getTask(task.id) ?? task;
+      } catch (error) {
+        console.error("流程任务激活失败", error);
+        skipped.push(task.name);
+        continue;
+      }
+    }
     const error = getTaskStatusChangeError(task, status);
     if (error !== "") {
       skipped.push(task.name);
-      return;
+      continue;
     }
     if ([TaskStatus.Done, TaskStatus.PendingAcceptance].includes(status) && !hasValidSubmittedResult(task)) {
       skipped.push(task.name);
-      return;
+      continue;
     }
     updatedTasks.push(buildTaskStatusUpdate(task, status, now));
-  });
+  }
 
   try {
     for (const updatedTask of updatedTasks) {
@@ -4724,7 +5225,7 @@ async function handleTaskAction(action, taskId, rerender) {
 
   if (action === "edit-task") {
     if (!canEditTask(task)) return;
-    modalState = { kind: "task", mode: "edit", taskId, error: "" };
+    modalState = { kind: "task", mode: "edit", taskId, templateId: task.templateId ?? "", error: "" };
     rerender();
     return;
   }
@@ -4746,7 +5247,7 @@ async function handleTaskAction(action, taskId, rerender) {
     return;
   }
 
-  if (action === "start-task" && task.status === TaskStatus.Todo) {
+  if (action === "start-task" && (task.status === TaskStatus.Todo || task.status === TaskStatus.Waiting)) {
     await updateTaskStatus(taskId, TaskStatus.Doing, rerender);
     return;
   }
@@ -4852,32 +5353,32 @@ async function handleTaskSubmit(event, rerender) {
   if (modalState?.kind === "taskTemplate") await saveTaskTemplate(event.target, rerender);
 }
 
-async function moveStandardWorkToValueChain(templateId, categoryName, rerender) {
+async function moveStandardWorkToValueChain(templateId, categoryId, rerender) {
   if (!canCurrentUser("settings.editStandardWorks")) {
-    window.alert("你没有权限调整标准工作分类。");
+    window.alert("你没有权限调整标准工作的价值链模块。");
     return;
   }
 
   const template = getTaskTemplate(templateId);
-  const category = getStandardWorkValueChainCategory(categoryName);
-  if (template === null || category === null || !standardWorkValueChainColumns.some((column) => column.title === categoryName)) return;
+  const category = getTaskCategories().find((item) => item.id === categoryId) ?? null;
+  if (template === null || category === null) return;
 
   const previousCategoryId = template.categoryId ?? null;
   template.categoryId = category.id;
-  standardWorkMoveStatus = { type: "saving", message: `正在保存到「${categoryName}」...` };
+  standardWorkMoveStatus = { type: "saving", message: `正在保存到「${category.name}」...` };
   rerender();
   try {
-    await moveTaskTemplateToValueChain(template.id, categoryName);
+    await moveTaskTemplateToValueChain(template.id, { id: category.id, name: category.name });
     const updatedTemplate = getTaskTemplate(template.id);
     if (updatedTemplate !== null) updatedTemplate.categoryId = category.id;
-    standardWorkMoveStatus = { type: "success", message: `已保存到「${categoryName}」，刷新后仍会保留。` };
+    standardWorkMoveStatus = { type: "success", message: `已保存到「${category.name}」，刷新后仍会保留。` };
     rerender();
   } catch (error) {
     const currentTemplate = getTaskTemplate(templateId);
     if (currentTemplate !== null) currentTemplate.categoryId = previousCategoryId;
     standardWorkMoveStatus = { type: "error", message: "分类保存失败，已恢复原分类。" };
-    console.error("标准工作分类保存失败", error);
-    window.alert(error.message || "标准工作分类保存失败，请检查本地数据库服务。");
+    console.error("标准工作价值链模块保存失败", error);
+    window.alert(error.message || "标准工作价值链模块保存失败，请检查本地数据库服务。");
     rerender();
   }
 }
@@ -4888,7 +5389,7 @@ function clearStandardWorkDragState(host) {
 }
 
 function getStandardWorkDropColumn(target) {
-  return target?.closest?.("[data-standard-work-category]") ?? null;
+  return target?.closest?.("[data-standard-work-category-id]") ?? null;
 }
 
 let draggedStandardWorkTemplateId = "";
@@ -4940,7 +5441,7 @@ export function bindStandardWorkLibraryEvents(rerender, container = document) {
     event.preventDefault();
     const templateId = event.dataTransfer?.getData("text/plain") || draggedStandardWorkTemplateId;
     clearStandardWorkDragState(host);
-    await moveStandardWorkToValueChain(templateId, column.dataset.standardWorkCategory ?? "", rerender);
+    await moveStandardWorkToValueChain(templateId, column.dataset.standardWorkCategoryId ?? "", rerender);
     draggedStandardWorkTemplateId = "";
     didDragStandardWorkCard = false;
   });
@@ -5160,12 +5661,14 @@ export function bindTasksPageEvents(rerender) {
       updateTaskStatus(statusSelect.dataset.taskId, statusSelect.value, rerender);
     });
 
-    tasksPage.addEventListener("click", (event) => {
+    tasksPage.addEventListener("click", async (event) => {
       if (event.target.closest("[data-task-status-select]") !== null) return;
       const actionButton = event.target.closest("[data-action]");
 
       if (actionButton !== null) {
         const action = actionButton.dataset.action;
+
+        if (await handleTaskTemplateLinkAction(action, actionButton, rerender)) return;
 
         if (action === "close-task-modal") {
           modalState = null;
@@ -5201,10 +5704,16 @@ export function bindTasksPageEvents(rerender) {
         return;
       }
 
+      if (handleTaskTemplatePickerTagClick(event.target.closest("[data-task-template-picker-tag]"), rerender)) return;
+
       const row = event.target.closest("[data-row-task-id]");
       if (row === null) return;
       selectedTaskId = row.dataset.rowTaskId;
       rerender();
+    });
+
+    tasksPage.addEventListener("input", (event) => {
+      if (handleTaskTemplatePickerSearchInput(event.target.closest("[data-task-template-picker-search]"), rerender)) return;
     });
 
     if (taskForm !== null) taskForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
@@ -5213,6 +5722,10 @@ export function bindTasksPageEvents(rerender) {
         if (event.target.name?.startsWith("custom__")) updateImagePreview(event.target);
       });
       taskForm.addEventListener("change", (event) => {
+        if (event.target.matches("[data-task-value-module-select]")) {
+          modalState = { ...modalState, categoryId: event.target.value, taskTemplateId: "", error: "" };
+          rerender();
+        }
         if (event.target.matches("[data-task-template-select]")) {
           modalState = { ...modalState, taskTemplateId: event.target.value };
           rerender();
@@ -5371,17 +5884,19 @@ export function bindTasksPageEvents(rerender) {
 
     updateTaskStatus(statusSelect.dataset.taskId, statusSelect.value, rerender);
   });
-  tasksPage.addEventListener("click", (event) => {
+  tasksPage.addEventListener("click", async (event) => {
     if (event.target.closest("[data-task-row-select], [data-task-select-all]") !== null) return;
     if (event.target.closest("[data-task-status-select]") !== null) return;
 
     const actionButton = event.target.closest("[data-action]");
 
-    if (actionButton !== null) {
-      const action = actionButton.dataset.action;
+      if (actionButton !== null) {
+        const action = actionButton.dataset.action;
+
+      if (await handleTaskTemplateLinkAction(action, actionButton, rerender)) return;
 
       if (action === "add-task") {
-        modalState = { kind: "task", mode: "add", taskTemplateId: "", error: "" };
+        modalState = { kind: "task", mode: "add", categoryId: "", taskTemplateId: "", error: "" };
         rerender();
         return;
       }
@@ -5454,6 +5969,8 @@ export function bindTasksPageEvents(rerender) {
       return;
     }
 
+    if (handleTaskTemplatePickerTagClick(event.target.closest("[data-task-template-picker-tag]"), rerender)) return;
+
     const row = event.target.closest("[data-row-task-id]");
 
     if (row === null) return;
@@ -5463,11 +5980,18 @@ export function bindTasksPageEvents(rerender) {
   });
 
   if (taskForm !== null) taskForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
+  tasksPage.addEventListener("input", (event) => {
+    if (handleTaskTemplatePickerSearchInput(event.target.closest("[data-task-template-picker-search]"), rerender)) return;
+  });
   if (taskForm !== null) {
     taskForm.addEventListener("input", (event) => {
       if (event.target.name?.startsWith("custom__")) updateImagePreview(event.target);
     });
     taskForm.addEventListener("change", (event) => {
+      if (event.target.matches("[data-task-value-module-select]")) {
+        modalState = { ...modalState, categoryId: event.target.value, taskTemplateId: "", error: "" };
+        rerender();
+      }
       if (event.target.matches("[data-task-template-select]")) {
         modalState = { ...modalState, taskTemplateId: event.target.value };
         rerender();
