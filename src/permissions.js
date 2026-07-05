@@ -151,7 +151,16 @@ Object.assign(bossPermissions.goals, { view: true, create: true, edit: true, vie
 Object.assign(bossPermissions.workPlans, { viewFuture: true, joinThisWeek: true, viewThisWeek: true, launch: true });
 Object.assign(bossPermissions.tasks, { view: true, viewDetail: true, viewForm: true, viewProcessProgress: true });
 Object.assign(bossPermissions.processes, { viewInstances: true, viewForm: true });
-Object.assign(bossPermissions.contentSchedules, { view: true });
+Object.assign(bossPermissions.contentSchedules, {
+  view: true,
+  create: true,
+  edit: true,
+  import: true,
+  export: true,
+  addToFuture: true,
+  addToThisWeek: true,
+  batchCancel: true,
+});
 Object.assign(bossPermissions.assessment, { view: true, viewAll: true, viewProblems: true, updateProblems: true });
 Object.assign(bossPermissions.methods, { view: true });
 Object.assign(bossPermissions.settings, { viewOrg: true, viewPeople: true, viewStandardWorks: true, viewStores: true });
@@ -209,6 +218,24 @@ function applyLegacyPermissionCompatibility(normalized, source) {
   if (typeof source.settings?.editStores !== "boolean") normalized.settings.editStores = true;
 }
 
+function canAutoGrantContentScheduleOperations(role) {
+  return ["admin", "system_admin", "company_manager"].includes(role);
+}
+
+function applyContentSchedulePermissionCompatibility(normalized, source, role) {
+  if (source.contentSchedules?.view === true && canAutoGrantContentScheduleOperations(role)) {
+    Object.assign(normalized.contentSchedules, {
+      create: true,
+      edit: true,
+      import: true,
+      export: true,
+      addToFuture: true,
+      addToThisWeek: true,
+      batchCancel: true,
+    });
+  }
+}
+
 export function normalizePermissions(rawPermissions, role = "user") {
   let source = rawPermissions;
   if (typeof rawPermissions === "string" && rawPermissions.trim() !== "") {
@@ -230,6 +257,7 @@ export function normalizePermissions(rawPermissions, role = "user") {
     }
     if (["self", "department", "all"].includes(source.dataScope)) normalized.dataScope = source.dataScope;
     applyLegacyPermissionCompatibility(normalized, source);
+    applyContentSchedulePermissionCompatibility(normalized, source, role);
   }
 
   return normalized;
@@ -246,7 +274,22 @@ export function hasPermission(userOrPermissions, permissionPath) {
   return normalized[group]?.[key] === true;
 }
 
+function canAccessTemplateCenter(userOrPermissions) {
+  if (userOrPermissions === null || userOrPermissions === undefined) return false;
+  const role = userOrPermissions.role ?? userOrPermissions.authRole ?? "user";
+  if (["admin", "system_admin", "company_manager"].includes(role)) return true;
+  if (hasPermission(userOrPermissions, "settings.viewStandardWorks")) return true;
+
+  // 临时兼容：模板中心还没有独立权限项，先按视觉/营销/运营/渠道相关部门开放。
+  const departmentId = String(userOrPermissions.departmentId ?? "").toLowerCase();
+  const departmentName = String(userOrPermissions.departmentName ?? userOrPermissions.department ?? "").toLowerCase();
+  const allowedDepartmentIds = new Set(["dept-marketing", "dept-channel", "dept-operation", "dept-visual", "dept-visual-marketing"]);
+  if (allowedDepartmentIds.has(departmentId)) return true;
+  return /视觉|营销|运营|渠道|内容/.test(departmentName);
+}
+
 export function canAccessModule(userOrPermissions, moduleId) {
+  if (moduleId === "templateCenter") return canAccessTemplateCenter(userOrPermissions);
   if (moduleId === "processes") {
     return hasPermission(userOrPermissions, "modules.processes") ||
       hasPermission(userOrPermissions, "modules.methods") ||
