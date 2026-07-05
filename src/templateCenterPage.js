@@ -6,7 +6,7 @@ import {
   updateTemplate,
   uploadGenericFile,
   uploadImageFile,
-} from "./appState.js?v=20260701-standard-work-dnd3";
+} from "./appState.js?v=20260705-state-singleton1";
 
 const materialTypeNames = {
   image: "图片",

@@ -1,4 +1,4 @@
-import { createPersistentResource, getCurrentUser, state, updatePersistentResource, validateCurrentSession } from "./appState.js?v=20260701-standard-work-dnd3";
+import { createPersistentResource, getCurrentUser, state, updatePersistentResource, validateCurrentSession } from "./appState.js?v=20260705-state-singleton1";
 import {
   applyPermissionTemplate,
   dataScopeOptions,
@@ -7,7 +7,7 @@ import {
   permissionCount,
   permissionGroups,
   permissionTemplates,
-} from "./permissions.js?v=20260701-standard-work-dnd3";
+} from "./permissions.js?v=20260705-state-singleton1";
 import {
   CategoryType,
   PersonRole,

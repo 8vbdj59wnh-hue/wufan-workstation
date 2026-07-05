@@ -18,7 +18,7 @@ import {
   methodologies as initialMethodologies,
   notifications as initialNotifications,
   workPlans as initialWorkPlans,
-} from "./data/mockData.js?v=20260701-standard-work-dnd3";
+} from "./data/mockData.js?v=20260705-state-singleton1";
 import {
   CategoryType,
   PersonRole,
@@ -36,8 +36,8 @@ import {
   TaskUrgency,
   getValueModuleName,
   inferValueModuleIdFromText,
-} from "./data/modelOptions.js?v=20260701-standard-work-dnd3";
-import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260701-standard-work-dnd3";
+} from "./data/modelOptions.js?v=20260705-state-singleton1";
+import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260705-state-singleton1";
 
 const apiPort = "3001";
 const apiBaseUrl = `${window.location.protocol}//${window.location.hostname}:${apiPort}`;

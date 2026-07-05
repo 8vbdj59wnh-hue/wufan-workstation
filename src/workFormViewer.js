@@ -1,4 +1,4 @@
-import { resolveAssetUrl, state } from "./appState.js?v=20260701-standard-work-dnd2";
+import { resolveAssetUrl, state } from "./appState.js?v=20260705-state-singleton1";
 
 const hiddenSystemFieldKeys = new Set(["standardWorkAttachments"]);
 

@@ -1,12 +1,12 @@
-import { modules } from "./modules.js?v=20260701-standard-work-dnd3";
-import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260701-standard-work-dnd3";
-import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260701-standard-work-dnd3";
-import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260701-standard-work-dnd3";
-import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260704-process-readiness1";
-import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260701-standard-work-dnd3";
-import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260701-standard-work-dnd3";
-import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260701-standard-work-dnd3";
-import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js?v=20260703-template-card1";
+import { modules } from "./modules.js?v=20260705-state-singleton1";
+import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260705-state-singleton1";
+import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260705-state-singleton1";
+import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260705-state-singleton1";
+import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260705-state-singleton1";
+import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260705-state-singleton1";
+import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260705-state-singleton1";
+import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260705-state-singleton1";
+import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js?v=20260705-state-singleton1";
 import {
   flushPersistentSave,
   getCurrentUser,
@@ -24,8 +24,8 @@ import {
   updateCurrentUserAvatar,
   uploadImageFile,
   validateCurrentSession,
-} from "./appState.js?v=20260704-process-readiness1";
-import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260704-content-actions1";
+} from "./appState.js?v=20260705-state-singleton1";
+import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260705-state-singleton1";
 
 const app = document.querySelector("#app");
 
