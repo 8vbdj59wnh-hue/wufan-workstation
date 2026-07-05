@@ -4,6 +4,7 @@ import {
   getCurrentUser,
   getCurrentWeek,
   getNow,
+  loadTemplates,
   resolveAssetUrl,
   state,
   updatePersistentResource,
@@ -68,6 +69,16 @@ let filters = {
 let selectedScheduleId = state.contentSchedules[0]?.id ?? null;
 let selectedScheduleIds = new Set();
 let modalState = null;
+let contentTemplatesLoaded = false;
+let contentTemplatesLoading = false;
+
+const templateTagCategories = [
+  { id: "brand", label: "品牌" },
+  { id: "platform", label: "平台" },
+  { id: "tone", label: "调性" },
+  { id: "format", label: "形式" },
+  { id: "usage", label: "用途" },
+];
 
 function canCurrentUser(permissionPath) {
   return hasPermission(getCurrentUser(), permissionPath);
@@ -106,8 +117,103 @@ function getSchedule(scheduleId) {
   return state.contentSchedules.find((item) => item.id === scheduleId) ?? null;
 }
 
+function createEmptyTemplateTags() {
+  return Object.fromEntries(templateTagCategories.map((category) => [category.id, []]));
+}
+
+function addUniqueTemplateTag(list, tag) {
+  const normalizedTag = String(tag ?? "").trim();
+  if (normalizedTag === "") return list;
+  return list.includes(normalizedTag) ? list : [...list, normalizedTag];
+}
+
+function normalizeTemplateTags(tags) {
+  const normalizedTags = createEmptyTemplateTags();
+  if (Array.isArray(tags)) {
+    tags.forEach((tag) => {
+      normalizedTags.usage = addUniqueTemplateTag(normalizedTags.usage, tag);
+    });
+    return normalizedTags;
+  }
+  if (tags && typeof tags === "object") {
+    templateTagCategories.forEach((category) => {
+      if (Array.isArray(tags[category.id])) {
+        tags[category.id].forEach((tag) => {
+          normalizedTags[category.id] = addUniqueTemplateTag(normalizedTags[category.id], tag);
+        });
+      }
+    });
+  }
+  return normalizedTags;
+}
+
+function getFlatTemplateTags(tags) {
+  return templateTagCategories.flatMap((category) => normalizeTemplateTags(tags)[category.id] ?? []);
+}
+
+function getTemplateName(template) {
+  const nameFromTags = getFlatTemplateTags(template?.tags).filter(Boolean).join(" ");
+  return nameFromTags || template?.name || "未命名模板";
+}
+
+function getTemplatePreviewImage(template) {
+  if (template?.previewImage && typeof template.previewImage === "object") return template.previewImage;
+  return { fileName: "", fileUrl: "" };
+}
+
+function getTemplateSourceFile(template) {
+  if (template?.sourceFile && typeof template.sourceFile === "object") return template.sourceFile;
+  return { fileName: "", fileUrl: "" };
+}
+
+function getTemplateDownloadLinks(template) {
+  const previewImage = getTemplatePreviewImage(template);
+  const sourceFile = getTemplateSourceFile(template);
+  return `
+    <div class="row-actions">
+      ${previewImage.fileUrl ? `<a class="text-button" href="${escapeAttribute(resolveAssetUrl(previewImage.fileUrl))}" download="${escapeAttribute(previewImage.fileName || "template-preview")}">图片</a>` : ""}
+      ${sourceFile.fileUrl ? `<a class="text-button" href="${escapeAttribute(resolveAssetUrl(sourceFile.fileUrl))}" download="${escapeAttribute(sourceFile.fileName || "template-source")}">源文件</a>` : ""}
+    </div>
+  `;
+}
+
+function getSelectedContentTemplate(templateId) {
+  if (!templateId) return null;
+  return state.templates.find((template) => template.id === templateId) ?? null;
+}
+
+function getTemplateFilterTags() {
+  const groupedTags = createEmptyTemplateTags();
+  state.templates.forEach((template) => {
+    const tags = normalizeTemplateTags(template.tags);
+    templateTagCategories.forEach((category) => {
+      tags[category.id].forEach((tag) => {
+        groupedTags[category.id] = addUniqueTemplateTag(groupedTags[category.id], tag);
+      });
+    });
+  });
+  return groupedTags;
+}
+
+function getFilteredContentTemplates() {
+  const query = (modalState?.templateQuery ?? "").trim().toLowerCase();
+  const selectedTags = normalizeTemplateTags(modalState?.templateTagFilters ?? {});
+  return state.templates.filter((template) => {
+    const tags = normalizeTemplateTags(template.tags);
+    const flatTags = getFlatTemplateTags(tags);
+    const searchableText = `${getTemplateName(template)} ${flatTags.join(" ")}`.toLowerCase();
+    if (query !== "" && !searchableText.includes(query)) return false;
+    return templateTagCategories.every((category) => {
+      const requiredTags = selectedTags[category.id] ?? [];
+      if (requiredTags.length === 0) return true;
+      const templateTags = tags[category.id] ?? [];
+      return requiredTags.every((tag) => templateTags.includes(tag));
+    });
+  });
+}
+
 function getTaskCategories() {
-  return categories.filter((category) => category.type === CategoryType.Task);
+  return categories.filter((category) => category.type === CategoryType.Task && category.status !== "inactive");
 }
 
 function getDefaultContentTaskTemplate() {
@@ -398,6 +504,7 @@ function matchesFilters(schedule) {
   if (filters.contentType !== "" && normalizeContentType(schedule.contentType) !== filters.contentType) return false;
   if (filters.contentPurpose !== "" && normalizeContentPurpose(schedule.contentPurpose) !== filters.contentPurpose) return false;
   if (filters.targetAudience !== "" && normalizeContentAudience(schedule.targetAudience) !== filters.targetAudience) return false;
+  if (filters.status === "" && normalizeContentScheduleStatus(schedule.status) === ContentScheduleStatus.Canceled) return false;
   if (filters.status !== "" && normalizeContentScheduleStatus(schedule.status) !== filters.status) return false;
   if (filters.goalId !== "" && schedule.goalId !== filters.goalId) return false;
   if (filters.productKeyword !== "" && !schedule.product.includes(filters.productKeyword)) return false;
@@ -573,7 +680,7 @@ function renderScheduleTable() {
                               ${schedule.status !== ContentScheduleStatus.Canceled && canCurrentUser("contentSchedules.edit") ? renderActionButton("编辑", "edit-schedule", schedule.id) : ""}
                               ${schedule.status !== ContentScheduleStatus.Canceled && canCurrentUser("contentSchedules.addToFuture") ? renderActionButton("加入未来工作", "generate-task", schedule.id) : ""}
                               ${schedule.status !== ContentScheduleStatus.Canceled && canCurrentUser("contentSchedules.addToThisWeek") ? renderActionButton("加入本周工作", "start-content-process", schedule.id) : ""}
-                              ${schedule.status !== ContentScheduleStatus.Canceled && canCurrentUser("contentSchedules.batchCancel") ? renderActionButton("取消", "cancel-schedule", schedule.id, "danger-button") : ""}
+                              ${schedule.status !== ContentScheduleStatus.Canceled && canCurrentUser("contentSchedules.batchCancel") ? renderActionButton("删除", "cancel-schedule", schedule.id, "danger-button") : ""}
                             </span>
                           </td>
                         </tr>
@@ -641,7 +748,124 @@ function renderScheduleDetail() {
         <p>参考场景：${escapeHtml(schedule.scene || "未填写")}</p>
         <p>话题：${escapeHtml(schedule.hashtags || "未填写")}</p>
       </div>
+      <div class="detail-block">
+        <h3>关联模板</h3>
+        ${renderLinkedTemplateSummary(schedule.templateId ?? "", "detail")}
+      </div>
     </section>
+  `;
+}
+
+function renderScheduleTags(schedule) {
+  const tags = [
+    normalizeContentType(schedule.contentType),
+    normalizeContentPurpose(schedule.contentPurpose),
+    normalizeContentAudience(schedule.targetAudience),
+    schedule.account,
+    getStatusName(schedule.status),
+  ].filter(Boolean);
+  return `
+    <div class="content-schedule-tags">
+      ${tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}
+    </div>
+  `;
+}
+
+function renderViewScheduleTemplate(schedule) {
+  const template = getSelectedContentTemplate(schedule.templateId ?? "");
+  const previewImage = getTemplatePreviewImage(template);
+  if (template === null) {
+    return `<div class="content-template-summary is-empty"><span>未关联</span></div>`;
+  }
+  return `
+    <div class="content-template-summary is-detail">
+      <button class="content-template-thumb" type="button" data-content-action="preview-linked-template" data-template-id="${escapeAttribute(template.id)}">
+        ${
+          previewImage.fileUrl
+            ? `<img src="${escapeAttribute(resolveAssetUrl(previewImage.fileUrl))}" alt="${escapeAttribute(getTemplateName(template))}" />`
+            : `<span>无预览</span>`
+        }
+      </button>
+      <div class="content-template-meta">
+        <strong>${escapeHtml(getTemplateName(template))}</strong>
+        ${getTemplateDownloadLinks(template)}
+      </div>
+    </div>
+  `;
+}
+
+function renderLinkedTemplatePreviewModal() {
+  const previewTemplate = getSelectedContentTemplate(modalState?.templatePreviewId ?? "");
+  if (previewTemplate === null) return "";
+  const previewImage = getTemplatePreviewImage(previewTemplate);
+  return `
+    <div class="modal-backdrop content-template-preview-backdrop" role="presentation">
+      <div class="modal-panel content-template-preview-modal" role="dialog" aria-modal="true" aria-label="预览模板">
+        <div class="modal-header">
+          <h2>${escapeHtml(getTemplateName(previewTemplate))}</h2>
+          <button class="icon-button" type="button" data-content-action="close-linked-template-preview" aria-label="关闭">×</button>
+        </div>
+        <div class="content-template-preview-body">
+          ${previewImage.fileUrl ? `<img src="${escapeAttribute(resolveAssetUrl(previewImage.fileUrl))}" alt="${escapeAttribute(getTemplateName(previewTemplate))}" />` : `<span>无预览</span>`}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderScheduleViewModal() {
+  if (modalState === null || modalState.kind !== "viewSchedule") return "";
+  const schedule = getSchedule(modalState.scheduleId);
+  if (schedule === null) return "";
+
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <div class="modal-panel wide-modal" role="dialog" aria-modal="true" aria-label="排期详情">
+        <div class="modal-header">
+          <h2>排期详情</h2>
+          <div class="modal-header-actions">
+            ${schedule.status !== ContentScheduleStatus.Canceled && canCurrentUser("contentSchedules.edit") ? `<button class="secondary-button" type="button" data-content-action="edit-schedule-from-view" data-schedule-id="${escapeAttribute(schedule.id)}">编辑</button>` : ""}
+            <button class="icon-button" type="button" data-content-action="close-content-modal" aria-label="关闭">×</button>
+          </div>
+        </div>
+        <div class="modal-form content-schedule-view-modal">
+          <div class="content-schedule-view-hero">
+            <div class="content-image-preview">
+              ${
+                schedule.productImage
+                  ? `<img src="${escapeAttribute(resolveAssetUrl(schedule.productImage))}" alt="1:1 产品主图预览" />`
+                  : `<span>暂无图片</span>`
+              }
+            </div>
+            <div class="content-schedule-view-title">
+              <h3>${escapeHtml(schedule.title || "未填写标题")}</h3>
+              ${renderScheduleTags(schedule)}
+            </div>
+          </div>
+          <div class="detail-grid">
+            ${renderDetailField("发布日期", schedule.publishDate || "未填写")}
+            ${renderDetailField("发布账号", escapeHtml(schedule.account || "未填写"))}
+            ${renderDetailField("内容类型", escapeHtml(normalizeContentType(schedule.contentType) || "未填写"))}
+            ${renderDetailField("内容目的", escapeHtml(normalizeContentPurpose(schedule.contentPurpose) || "未填写"))}
+            ${renderDetailField("受众人群", escapeHtml(normalizeContentAudience(schedule.targetAudience) || "未填写"))}
+            ${renderDetailField("对应产品", escapeHtml(schedule.product || "未填写"))}
+            ${renderDetailField("状态", getStatusName(schedule.status))}
+            ${renderDetailField("关联目标", findName(goals, schedule.goalId, "未关联"))}
+          </div>
+          <div class="detail-block">
+            <h3>内容</h3>
+            <p>文案：${escapeHtml(schedule.copywriting || "未填写")}</p>
+            <p>参考场景：${escapeHtml(schedule.scene || "未填写")}</p>
+            <p>话题：${escapeHtml(schedule.hashtags || "未填写")}</p>
+          </div>
+          <div class="detail-block">
+            <h3>关联模板</h3>
+            ${renderViewScheduleTemplate(schedule)}
+          </div>
+        </div>
+      </div>
+      ${renderLinkedTemplatePreviewModal()}
+    </div>
   `;
 }
 
@@ -665,11 +889,126 @@ function renderImageField(image) {
   `;
 }
 
+function renderLinkedTemplateSummary(templateId, mode = "form") {
+  const template = getSelectedContentTemplate(templateId);
+  const previewImage = getTemplatePreviewImage(template);
+  if (template === null) {
+    return `<div class="content-template-summary is-empty"><span>未关联</span></div>`;
+  }
+  return `
+    <div class="content-template-summary ${mode === "detail" ? "is-detail" : ""}">
+      <div class="content-template-thumb">
+        ${
+          previewImage.fileUrl
+            ? `<img src="${escapeAttribute(resolveAssetUrl(previewImage.fileUrl))}" alt="${escapeAttribute(getTemplateName(template))}" />`
+            : `<span>无预览</span>`
+        }
+      </div>
+      <div class="content-template-meta">
+        <strong>${escapeHtml(getTemplateName(template))}</strong>
+      </div>
+    </div>
+  `;
+}
+
+function renderTemplateLinkField(templateId) {
+  return `
+    <div class="content-template-field">
+      <span>关联模板</span>
+      <div class="content-template-control">
+        ${renderLinkedTemplateSummary(templateId)}
+        <div class="row-actions">
+          <button class="secondary-button" type="button" data-content-action="open-template-picker">关联模板</button>
+          ${templateId ? `<button class="text-button danger-button" type="button" data-content-action="clear-linked-template">取消关联</button>` : ""}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderContentTemplatePicker() {
+  if (modalState?.templatePickerOpen !== true) return "";
+  const selectedTags = normalizeTemplateTags(modalState.templateTagFilters ?? {});
+  const groupedTags = getTemplateFilterTags();
+  const visibleTemplates = getFilteredContentTemplates();
+  const previewTemplate = getSelectedContentTemplate(modalState.templatePreviewId ?? "");
+
+  return `
+    <div class="modal-backdrop content-template-picker-backdrop" role="presentation">
+      <div class="modal-panel extra-wide-modal" role="dialog" aria-modal="true" aria-label="选择模板">
+        <div class="modal-header">
+          <h2>选择模板</h2>
+          <button class="icon-button" type="button" data-content-action="close-template-picker" aria-label="关闭">×</button>
+        </div>
+        <div class="content-template-picker">
+          <div class="content-template-picker-toolbar">
+            <input data-template-picker-search value="${escapeAttribute(modalState.templateQuery ?? "")}" autocomplete="off" />
+          </div>
+          <div class="content-template-picker-layout">
+            <aside class="content-template-picker-filters">
+              ${templateTagCategories.map((category) => `
+                <div class="content-template-filter-group">
+                  <h3>${escapeHtml(category.label)}</h3>
+                  <div class="template-tag-cloud">
+                    ${(groupedTags[category.id] ?? []).map((tag) => {
+                      const active = (selectedTags[category.id] ?? []).includes(tag);
+                      return `<button class="${active ? "is-active" : ""}" type="button" data-template-picker-tag="${escapeAttribute(tag)}" data-template-picker-category="${category.id}">${escapeHtml(tag)}</button>`;
+                    }).join("")}
+                  </div>
+                </div>
+              `).join("")}
+            </aside>
+            <div class="content-template-picker-main">
+              ${contentTemplatesLoading ? `<div class="empty-detail">模板加载中</div>` : ""}
+              ${
+                !contentTemplatesLoading && visibleTemplates.length === 0
+                  ? `<div class="empty-detail">暂无模板</div>`
+                  : `<div class="content-template-picker-grid">
+                      ${visibleTemplates.map((template) => {
+                        const previewImage = getTemplatePreviewImage(template);
+                        return `
+                          <article class="content-template-option ${modalState.templateId === template.id ? "is-selected" : ""}">
+                            <button class="content-template-option-thumb" type="button" data-content-action="preview-template-option" data-template-id="${escapeAttribute(template.id)}">
+                              ${previewImage.fileUrl ? `<img src="${escapeAttribute(resolveAssetUrl(previewImage.fileUrl))}" alt="${escapeAttribute(getTemplateName(template))}" />` : `<span>无预览</span>`}
+                            </button>
+                            <h3>${escapeHtml(getTemplateName(template))}</h3>
+                            <button class="primary-button" type="button" data-content-action="select-template-option" data-template-id="${escapeAttribute(template.id)}">选择</button>
+                          </article>
+                        `;
+                      }).join("")}
+                    </div>`
+              }
+            </div>
+          </div>
+        </div>
+      </div>
+      ${
+        previewTemplate === null
+          ? ""
+          : `<div class="modal-panel content-template-preview-modal" role="dialog" aria-modal="true" aria-label="预览模板">
+              <div class="modal-header">
+                <h2>${escapeHtml(getTemplateName(previewTemplate))}</h2>
+                <button class="icon-button" type="button" data-content-action="close-template-preview" aria-label="关闭">×</button>
+              </div>
+              <div class="content-template-preview-body">
+                ${getTemplatePreviewImage(previewTemplate).fileUrl ? `<img src="${escapeAttribute(resolveAssetUrl(getTemplatePreviewImage(previewTemplate).fileUrl))}" alt="${escapeAttribute(getTemplateName(previewTemplate))}" />` : `<span>无预览</span>`}
+              </div>
+            </div>`
+      }
+    </div>
+  `;
+}
+
+function getScheduleModalDraftValue(schedule, key, fallback = "") {
+  return modalState?.draft?.[key] ?? schedule?.[key] ?? fallback;
+}
+
 function renderScheduleModal() {
   if (modalState === null || modalState.kind !== "schedule") return "";
 
   const schedule = modalState.mode === "edit" ? getSchedule(modalState.scheduleId) : null;
   const image = modalState.productImage ?? schedule?.productImage ?? "";
+  const linkedTemplateId = modalState.templateId ?? getScheduleModalDraftValue(schedule, "templateId", "");
 
   return `
     <div class="modal-backdrop" role="presentation">
@@ -685,21 +1024,22 @@ function renderScheduleModal() {
         <form class="modal-form content-schedule-form">
           <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${modalState.error}</div>
           <div class="form-grid">
-            <label><span>发布日期</span><input name="publishDate" type="date" value="${schedule?.publishDate ?? ""}" /></label>
-            <label><span>发布账号</span><select name="account">${renderStringOptions(contentScheduleAccountOptions, schedule?.account ?? "", "请选择账号")}</select></label>
-            <label><span>内容类型</span><select name="contentType">${renderStringOptions(contentScheduleTypeOptions, normalizeContentType(schedule?.contentType ?? ""), "请选择类型")}</select></label>
-            <label><span>内容目的</span><select name="contentPurpose">${renderStringOptions(contentSchedulePurposeOptions, normalizeContentPurpose(schedule?.contentPurpose ?? ""), "请选择目的")}</select></label>
-            <label><span>受众人群</span><select name="targetAudience">${renderStringOptions(contentScheduleAudienceOptions, normalizeContentAudience(schedule?.targetAudience ?? ""), "请选择人群")}</select></label>
-            <label><span>状态</span><select name="status">${renderStatusOptions(normalizeContentScheduleStatus(schedule?.status) || ContentScheduleStatus.PendingSubmit, "请选择状态")}</select></label>
-            <label><span>关联目标</span><select name="goalId">${renderEntityOptions(getSelectableGoals(schedule?.goalId ?? ""), schedule?.goalId ?? "", "请选择目标")}</select></label>
-            <label><span>对应产品</span><input name="product" value="${escapeAttribute(schedule?.product ?? "")}" autocomplete="off" /></label>
+            <label><span>发布日期</span><input name="publishDate" type="date" value="${getScheduleModalDraftValue(schedule, "publishDate")}" /></label>
+            <label><span>发布账号</span><select name="account">${renderStringOptions(contentScheduleAccountOptions, getScheduleModalDraftValue(schedule, "account"), "请选择账号")}</select></label>
+            <label><span>内容类型</span><select name="contentType">${renderStringOptions(contentScheduleTypeOptions, normalizeContentType(getScheduleModalDraftValue(schedule, "contentType")), "请选择类型")}</select></label>
+            <label><span>内容目的</span><select name="contentPurpose">${renderStringOptions(contentSchedulePurposeOptions, normalizeContentPurpose(getScheduleModalDraftValue(schedule, "contentPurpose")), "请选择目的")}</select></label>
+            <label><span>受众人群</span><select name="targetAudience">${renderStringOptions(contentScheduleAudienceOptions, normalizeContentAudience(getScheduleModalDraftValue(schedule, "targetAudience")), "请选择人群")}</select></label>
+            <label><span>状态</span><select name="status">${renderStatusOptions(normalizeContentScheduleStatus(getScheduleModalDraftValue(schedule, "status")) || ContentScheduleStatus.PendingSubmit, "请选择状态")}</select></label>
+            <label><span>关联目标</span><select name="goalId">${renderEntityOptions(getSelectableGoals(getScheduleModalDraftValue(schedule, "goalId")), getScheduleModalDraftValue(schedule, "goalId"), "请选择目标")}</select></label>
+            <label><span>对应产品</span><input name="product" value="${escapeAttribute(getScheduleModalDraftValue(schedule, "product"))}" autocomplete="off" /></label>
           </div>
           ${renderImageField(image)}
-          <label><span>标题</span><input name="title" value="${escapeAttribute(schedule?.title ?? "")}" autocomplete="off" /></label>
-          <label><span>文案</span><textarea name="copywriting" rows="4">${escapeHtml(schedule?.copywriting ?? "")}</textarea></label>
+          ${renderTemplateLinkField(linkedTemplateId)}
+          <label><span>标题</span><input name="title" value="${escapeAttribute(getScheduleModalDraftValue(schedule, "title"))}" autocomplete="off" /></label>
+          <label><span>文案</span><textarea name="copywriting" rows="4">${escapeHtml(getScheduleModalDraftValue(schedule, "copywriting"))}</textarea></label>
           <div class="form-grid">
-            <label><span>参考场景</span><input name="scene" value="${escapeAttribute(schedule?.scene ?? "")}" autocomplete="off" /></label>
-            <label><span>#话题</span><input name="hashtags" value="${escapeAttribute(schedule?.hashtags ?? "")}" autocomplete="off" /></label>
+            <label><span>参考场景</span><input name="scene" value="${escapeAttribute(getScheduleModalDraftValue(schedule, "scene"))}" autocomplete="off" /></label>
+            <label><span>#话题</span><input name="hashtags" value="${escapeAttribute(getScheduleModalDraftValue(schedule, "hashtags"))}" autocomplete="off" /></label>
           </div>
           <div class="modal-actions">
             <button class="secondary-button" type="button" data-content-action="close-content-modal">取消</button>
@@ -707,6 +1047,7 @@ function renderScheduleModal() {
           </div>
         </form>
       </div>
+      ${renderContentTemplatePicker()}
     </div>
   `;
 }
@@ -785,6 +1126,7 @@ function buildScheduleDraft(form) {
     hashtags: getFormValue(form, "hashtags"),
     status: normalizeContentScheduleStatus(getFormValue(form, "status")),
     goalId: getFormValue(form, "goalId"),
+    templateId: modalState?.templateId ?? "",
   };
 }
 
@@ -847,6 +1189,26 @@ async function saveSchedule(form, rerender) {
 
   modalState = null;
   rerender();
+}
+
+function readCurrentScheduleModalDraft() {
+  const form = document.querySelector(".content-schedule-form");
+  return form === null ? modalState?.draft ?? {} : buildScheduleDraft(form);
+}
+
+async function ensureTemplateOptionsLoaded(rerender) {
+  if (contentTemplatesLoaded || contentTemplatesLoading) return;
+  contentTemplatesLoading = true;
+  try {
+    await loadTemplates();
+    contentTemplatesLoaded = true;
+  } catch (error) {
+    console.error("模板列表读取失败", error);
+    modalState = { ...modalState, error: error.message || "模板列表读取失败，请检查本地数据库服务。" };
+  } finally {
+    contentTemplatesLoading = false;
+    rerender();
+  }
 }
 
 async function cancelSchedule(scheduleId, rerender) {
@@ -1357,13 +1719,20 @@ async function handleScheduleAction(action, scheduleId, rerender) {
   if (schedule === null) return;
 
   if (action === "view-schedule") {
-    selectedScheduleId = scheduleId;
+    modalState = { kind: "viewSchedule", scheduleId, templatePreviewId: "" };
     rerender();
     return;
   }
   if (action === "edit-schedule") {
     if (!canCurrentUser("contentSchedules.edit")) return;
-    modalState = { kind: "schedule", mode: "edit", scheduleId, productImage: schedule.productImage, error: "" };
+    modalState = {
+      kind: "schedule",
+      mode: "edit",
+      scheduleId,
+      productImage: schedule.productImage,
+      templateId: schedule.templateId ?? "",
+      error: "",
+    };
     rerender();
     return;
   }
@@ -1415,7 +1784,7 @@ export function bindContentScheduleEvents(rerender) {
       const action = actionButton.dataset.contentAction;
       if (action === "add-schedule") {
         if (!canCurrentUser("contentSchedules.create")) return;
-        modalState = { kind: "schedule", mode: "add", productImage: "", error: "" };
+        modalState = { kind: "schedule", mode: "add", productImage: "", templateId: "", error: "" };
         rerender();
         return;
       }
@@ -1424,8 +1793,87 @@ export function bindContentScheduleEvents(rerender) {
         rerender();
         return;
       }
+      if (action === "edit-schedule-from-view") {
+        const schedule = getSchedule(actionButton.dataset.scheduleId);
+        if (schedule === null || !canCurrentUser("contentSchedules.edit")) return;
+        modalState = {
+          kind: "schedule",
+          mode: "edit",
+          scheduleId: schedule.id,
+          productImage: schedule.productImage,
+          templateId: schedule.templateId ?? "",
+          error: "",
+        };
+        rerender();
+        return;
+      }
       if (action === "remove-image") {
         modalState = { ...modalState, productImage: "" };
+        rerender();
+        return;
+      }
+      if (action === "open-template-picker") {
+        if (modalState?.kind !== "schedule") return;
+        modalState = {
+          ...modalState,
+          draft: readCurrentScheduleModalDraft(),
+          templateId: modalState.templateId ?? readCurrentScheduleModalDraft().templateId ?? "",
+          templatePickerOpen: true,
+          templateQuery: modalState.templateQuery ?? "",
+          templateTagFilters: modalState.templateTagFilters ?? createEmptyTemplateTags(),
+          templatePreviewId: "",
+        };
+        rerender();
+        await ensureTemplateOptionsLoaded(rerender);
+        return;
+      }
+      if (action === "close-template-picker") {
+        modalState = {
+          ...modalState,
+          draft: readCurrentScheduleModalDraft(),
+          templatePickerOpen: false,
+          templatePreviewId: "",
+        };
+        rerender();
+        return;
+      }
+      if (action === "clear-linked-template") {
+        modalState = { ...modalState, draft: readCurrentScheduleModalDraft(), templateId: "" };
+        rerender();
+        return;
+      }
+      if (action === "select-template-option") {
+        modalState = {
+          ...modalState,
+          draft: readCurrentScheduleModalDraft(),
+          templateId: actionButton.dataset.templateId ?? "",
+          templatePickerOpen: false,
+          templatePreviewId: "",
+        };
+        rerender();
+        return;
+      }
+      if (action === "preview-template-option") {
+        modalState = {
+          ...modalState,
+          draft: readCurrentScheduleModalDraft(),
+          templatePreviewId: actionButton.dataset.templateId ?? "",
+        };
+        rerender();
+        return;
+      }
+      if (action === "close-template-preview") {
+        modalState = { ...modalState, draft: readCurrentScheduleModalDraft(), templatePreviewId: "" };
+        rerender();
+        return;
+      }
+      if (action === "preview-linked-template") {
+        modalState = { ...modalState, templatePreviewId: actionButton.dataset.templateId ?? "" };
+        rerender();
+        return;
+      }
+      if (action === "close-linked-template-preview") {
+        modalState = { ...modalState, templatePreviewId: "" };
         rerender();
         return;
       }
@@ -1459,6 +1907,24 @@ export function bindContentScheduleEvents(rerender) {
       return;
     }
 
+    const templateTagButton = event.target.closest("[data-template-picker-tag]");
+    if (templateTagButton !== null && modalState?.kind === "schedule") {
+      const categoryId = templateTagButton.dataset.templatePickerCategory;
+      const tag = templateTagButton.dataset.templatePickerTag;
+      const currentFilters = normalizeTemplateTags(modalState.templateTagFilters ?? {});
+      const currentTags = currentFilters[categoryId] ?? [];
+      const nextTags = currentTags.includes(tag)
+        ? currentTags.filter((item) => item !== tag)
+        : [...currentTags, tag];
+      modalState = {
+        ...modalState,
+        draft: readCurrentScheduleModalDraft(),
+        templateTagFilters: { ...currentFilters, [categoryId]: nextTags },
+      };
+      rerender();
+      return;
+    }
+
     if (event.target.closest("[data-content-schedule-row-select], [data-content-schedule-select-all]") !== null) return;
 
     const row = event.target.closest("[data-schedule-row-id]");
@@ -1467,7 +1933,30 @@ export function bindContentScheduleEvents(rerender) {
     rerender();
   });
 
+  page.addEventListener("input", (event) => {
+    const searchInput = event.target.closest("[data-template-picker-search]");
+    if (searchInput !== null && modalState?.kind === "schedule") {
+      modalState = {
+        ...modalState,
+        draft: readCurrentScheduleModalDraft(),
+        templateQuery: searchInput.value,
+      };
+      rerender();
+    }
+  });
+
   page.addEventListener("change", (event) => {
+    const searchInput = event.target.closest("[data-template-picker-search]");
+    if (searchInput !== null && modalState?.kind === "schedule") {
+      modalState = {
+        ...modalState,
+        draft: readCurrentScheduleModalDraft(),
+        templateQuery: searchInput.value,
+      };
+      rerender();
+      return;
+    }
+
     const selectAll = event.target.closest("[data-content-schedule-select-all]");
     if (selectAll !== null) {
       const visibleIds = getFilteredSchedules().map((schedule) => schedule.id);
@@ -1531,7 +2020,7 @@ export function renderContentSchedulePage() {
     <div class="content-schedule-page">
       ${renderFilters()}
       ${renderScheduleTable()}
-      ${renderScheduleDetail()}
+      ${renderScheduleViewModal()}
       ${renderScheduleModal()}
       ${renderImportModal()}
     </div>
