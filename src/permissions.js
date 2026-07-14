@@ -298,6 +298,7 @@ export function canAccessModule(userOrPermissions, moduleId) {
   const modulePermissionMap = {
     goals: "goals",
     tasks: "execution",
+    scheduleBoard: "execution",
     processes: "processes",
     time: "priority",
     assessment: "assessment",

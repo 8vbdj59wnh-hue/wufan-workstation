@@ -12,6 +12,10 @@ export const modules = [
     name: "执行",
   },
   {
+    id: "scheduleBoard",
+    name: "排期看板",
+  },
+  {
     id: "processes",
     name: "标准化",
   },

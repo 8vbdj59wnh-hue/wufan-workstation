@@ -3,6 +3,7 @@ import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260705-
 import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260705-state-singleton1";
 import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260705-state-singleton1";
 import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260705-state-singleton1";
+import { bindScheduleBoardPageEvents, renderScheduleBoardPage } from "./scheduleBoardPage.js?v=20260705-state-singleton1";
 import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260705-state-singleton1";
 import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260705-state-singleton1";
 import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260705-state-singleton1";
@@ -32,6 +33,9 @@ const app = document.querySelector("#app");
 const moduleHashMap = {
   goals: "goals",
   tasks: "tasks",
+  scheduleBoard: "scheduleBoard",
+  "schedule-board": "scheduleBoard",
+  "task-schedule-board": "scheduleBoard",
   processes: "processes",
   time: "time",
   assessment: "assessment",
@@ -252,6 +256,10 @@ function renderPage() {
     content = renderTasksPage();
   }
 
+  if (activeModule.id === "scheduleBoard") {
+    content = renderScheduleBoardPage();
+  }
+
   if (activeModule.id === "processes") {
     content = renderProcessesPage();
   }
@@ -453,6 +461,10 @@ function render() {
 
   if (activeModuleId === "tasks") {
     bindTasksPageEvents(render);
+  }
+
+  if (activeModuleId === "scheduleBoard") {
+    bindScheduleBoardPageEvents(render);
   }
 
   if (activeModuleId === "processes" || document.querySelector(".processes-page") !== null) {
