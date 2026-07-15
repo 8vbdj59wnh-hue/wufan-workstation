@@ -24,6 +24,7 @@ import {
   workPlans,
   notifications,
   issuesRequirements,
+  standardWorkForms,
 } from "../src/data/mockData.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -342,6 +343,11 @@ const resourceConfigs = {
     columns: ["id", "name", "previewImage", "sourceFile", "tags", "fileType", "createdAt", "updatedAt"],
     jsonFields: ["previewImage", "sourceFile", "tags"],
   },
+  standardWorkForms: {
+    table: "standard_work_forms",
+    columns: ["id", "standardWorkId", "formSchema", "createdAt", "updatedAt"],
+    jsonFields: ["formSchema"],
+  },
   notifications: {
     table: "notifications",
     columns: [
@@ -448,6 +454,7 @@ const routeResourceMap = {
   "process-instances": "processInstances",
   methodologies: "methodologies",
   templates: "templates",
+  "standard-work-forms": "standardWorkForms",
   notifications: "notifications",
   "issues-requirements": "issuesRequirements",
   "content-schedules": "contentSchedules",
@@ -476,6 +483,7 @@ const seedData = {
   methodologies: [],
   notifications,
   issuesRequirements,
+  standardWorkForms,
   contentSchedules,
   workPlans,
 };
@@ -936,6 +944,15 @@ function runLightweightMigrations() {
     )
   `);
   getDatabase().exec(`
+    CREATE TABLE IF NOT EXISTS standard_work_forms (
+      id TEXT PRIMARY KEY,
+      standardWorkId TEXT NOT NULL,
+      formSchema TEXT,
+      createdAt TEXT,
+      updatedAt TEXT
+    )
+  `);
+  getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS issues_requirements (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
@@ -1151,6 +1168,8 @@ export function readResource(resourceKey) {
       ? " ORDER BY sortOrder ASC, name ASC, id ASC"
       : resourceKey === "templates"
         ? " ORDER BY createdAt DESC, id DESC"
+        : resourceKey === "standardWorkForms"
+          ? " ORDER BY updatedAt DESC, createdAt DESC, id DESC"
         : resourceKey === "issuesRequirements"
           ? " ORDER BY createdAt DESC, id DESC"
         : "";

@@ -1521,6 +1521,8 @@ export const templates = [];
 
 export const issuesRequirements = [];
 
+export const standardWorkForms = [];
+
 export const baseMockData = Object.freeze({
   companies,
   departments,
@@ -1534,6 +1536,7 @@ export const baseMockData = Object.freeze({
   notifications,
   templates,
   issuesRequirements,
+  standardWorkForms,
   goals,
   tasks,
   contentSchedules,

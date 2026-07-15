@@ -24,6 +24,7 @@ let people = state.people;
 let categories = state.categories;
 let stores = state.stores;
 let issuesRequirements = state.issuesRequirements;
+let standardWorkForms = state.standardWorkForms;
 let modalState = null;
 let activeOrganizationTab = "chart";
 let permissionFilters = { keyword: "", departmentId: "", loginOnly: false };
@@ -35,6 +36,10 @@ let permissionSaveMessage = "";
 let draggedDepartmentId = null;
 let dragOverDepartmentId = null;
 let draggedPersonId = null;
+let activeFormDesignStandardWorkId = "";
+let activeFormDesignFieldId = "";
+let draggedFormFieldId = null;
+let draggedFormComponentType = null;
 
 function replaceDepartments(nextDepartments) {
   state.departments.splice(0, state.departments.length, ...nextDepartments);
@@ -66,6 +71,11 @@ function replaceIssuesRequirements(nextItems) {
   issuesRequirements = state.issuesRequirements;
 }
 
+function replaceStandardWorkForms(nextForms) {
+  state.standardWorkForms.splice(0, state.standardWorkForms.length, ...nextForms);
+  standardWorkForms = state.standardWorkForms;
+}
+
 const settingsResourceByEntity = {
   department: "departments",
   position: "positions",
@@ -73,6 +83,7 @@ const settingsResourceByEntity = {
   category: "categories",
   store: "stores",
   issueRequirement: "issues-requirements",
+  standardWorkForm: "standard-work-forms",
 };
 
 function upsertItem(items, item) {
@@ -1232,6 +1243,274 @@ function renderStoreForm() {
   `;
 }
 
+const formDesignerFieldTypes = [
+  ["text", "文本"],
+  ["textarea", "多行文本"],
+  ["number", "数字"],
+  ["date", "日期"],
+  ["datetime_hour", "截止时间"],
+  ["person", "人员选择"],
+  ["image", "图片上传"],
+  ["file", "文件上传"],
+  ["table", "表格"],
+  ["select", "下拉选择"],
+  ["multi_select", "多选"],
+];
+
+const formDesignerFieldTypeMeta = Object.freeze({
+  text: { label: "文本", width: 6 },
+  textarea: { label: "多行文本", width: 12 },
+  number: { label: "数字", width: 4 },
+  date: { label: "日期", width: 6 },
+  datetime_hour: { label: "截止时间", width: 6 },
+  person: { label: "人员", width: 6 },
+  image: { label: "图片", width: 12 },
+  file: { label: "附件", width: 12 },
+  table: { label: "表格", width: 12 },
+  select: { label: "下拉", width: 6 },
+  multi_select: { label: "多选", width: 6 },
+});
+
+function getDefaultFieldWidth(type) {
+  return formDesignerFieldTypeMeta[type]?.width ?? 6;
+}
+
+function normalizeFieldWidth(field) {
+  const width = Number(field.width ?? field.gridSpan);
+  return [4, 6, 12].includes(width) ? width : getDefaultFieldWidth(field.type);
+}
+
+function getValueChainCategories() {
+  const valueChainNames = ["基础设施维护", "人力资产管理", "产品开发与淘汰", "供应链管理", "品牌营销", "渠道销售", "客户维护"];
+  return valueChainNames
+    .map((name) => categories.find((category) => category.type === CategoryType.Task && category.name === name))
+    .filter(Boolean);
+}
+
+function getStandardWorksForFormDesign() {
+  return [...state.taskTemplates]
+    .filter((template) => template.status !== Status.Inactive)
+    .sort((left, right) => {
+      const leftCategory = categories.find((category) => category.id === left.categoryId)?.sortOrder ?? 999;
+      const rightCategory = categories.find((category) => category.id === right.categoryId)?.sortOrder ?? 999;
+      if (leftCategory !== rightCategory) return leftCategory - rightCategory;
+      return String(left.name ?? "").localeCompare(String(right.name ?? ""), "zh-Hans-CN");
+    });
+}
+
+function getSelectedFormDesignStandardWork() {
+  const standardWorks = getStandardWorksForFormDesign();
+  if (standardWorks.length === 0) return null;
+  if (activeFormDesignStandardWorkId === "" || !standardWorks.some((item) => item.id === activeFormDesignStandardWorkId)) {
+    activeFormDesignStandardWorkId = standardWorks[0].id;
+  }
+  return standardWorks.find((item) => item.id === activeFormDesignStandardWorkId) ?? standardWorks[0];
+}
+
+function findStandardWorkForm(standardWorkId) {
+  return standardWorkForms.find((form) => form.standardWorkId === standardWorkId) ?? null;
+}
+
+function normalizeFormDesignerFields(fields = []) {
+  return [...fields]
+    .map((field, index) => ({
+      fieldId: field.fieldId || field.id || createId("form-field"),
+      label: field.label || "",
+      type: field.type || "text",
+      required: field.required === true,
+      order: Number.isFinite(Number(field.order ?? field.sortOrder)) ? Number(field.order ?? field.sortOrder) : index + 1,
+      defaultValue: field.defaultValue ?? "",
+      placeholder: field.placeholder ?? "",
+      width: normalizeFieldWidth(field),
+      options: Array.isArray(field.options) ? field.options : [],
+    }))
+    .sort((left, right) => left.order - right.order)
+    .map((field, index) => ({ ...field, order: index + 1 }));
+}
+
+function getFormDesignDraftFields() {
+  const standardWork = getSelectedFormDesignStandardWork();
+  if (standardWork === null) return [];
+  const form = findStandardWorkForm(standardWork.id);
+  return normalizeFormDesignerFields(form?.formSchema?.fields ?? standardWork.formFields ?? []);
+}
+
+function renderFormFieldTypeOptions(selectedType) {
+  return formDesignerFieldTypes
+    .map(([value, label]) => `<option value="${value}" ${selectedType === value ? "selected" : ""}>${label}</option>`)
+    .join("");
+}
+
+function renderUnifiedFormControl(field, mode, value = "") {
+  const readonly = mode === "readonly";
+  const preview = mode === "design";
+  const disabled = readonly || preview ? "disabled" : "";
+  const placeholder = escapeHtml(field.placeholder ?? "");
+  const currentValue = value || field.defaultValue || "";
+  if (field.type === "textarea") return `<textarea placeholder="${placeholder}" ${disabled}>${escapeHtml(currentValue)}</textarea>`;
+  if (field.type === "number") return `<input type="number" value="${escapeHtml(currentValue)}" placeholder="${placeholder}" ${disabled} />`;
+  if (field.type === "date") return `<input type="date" value="${escapeHtml(currentValue)}" ${disabled} />`;
+  if (field.type === "datetime_hour") return `<div class="form-renderer-datetime"><input type="date" ${disabled} /><select ${disabled}>${Array.from({ length: 24 }, (_, hour) => {
+    const value = `${String(hour).padStart(2, "0")}:00`;
+    return `<option value="${value}">${value}</option>`;
+  }).join("")}</select></div>`;
+  if (field.type === "person") return `<select ${disabled}>${renderOptions(people, currentValue, "请选择人员")}</select>`;
+  if (field.type === "select") {
+    return `<select ${disabled}><option value="">请选择</option>${field.options.map((option) => `<option value="${escapeHtml(option)}" ${option === currentValue ? "selected" : ""}>${escapeHtml(option)}</option>`).join("")}</select>`;
+  }
+  if (field.type === "multi_select") {
+    const values = Array.isArray(value) ? value : String(currentValue).split(",").map((item) => item.trim()).filter(Boolean);
+    return `<div class="form-renderer-choice-list">${field.options.map((option) => `<label><input type="checkbox" ${values.includes(option) ? "checked" : ""} ${disabled} /> <span>${escapeHtml(option)}</span></label>`).join("") || `<span class="form-note">请在右侧配置选项</span>`}</div>`;
+  }
+  if (field.type === "image") {
+    return readonly && currentValue
+      ? `<img class="form-renderer-image-preview" src="${escapeHtml(resolveAssetUrl(currentValue))}" alt="${escapeHtml(field.label)}" />`
+      : `<input type="file" accept="image/*" ${disabled} />`;
+  }
+  if (field.type === "file") {
+    return readonly && currentValue
+      ? `<a href="${escapeHtml(resolveAssetUrl(currentValue))}" target="_blank" rel="noreferrer">查看附件</a>`
+      : `<input type="file" ${disabled} />`;
+  }
+  if (field.type === "table") return `<div class="form-renderer-table-placeholder">表格字段</div>`;
+  return `<input type="text" value="${escapeHtml(currentValue)}" placeholder="${placeholder}" ${disabled} />`;
+}
+
+function renderUnifiedFormRenderer(fields, { mode = "design", values = {} } = {}) {
+  const normalizedFields = normalizeFormDesignerFields(fields);
+  if (normalizedFields.length === 0) return `<div class="empty-detail form-renderer-empty">从左侧字段组件库拖入字段，开始搭建表单。</div>`;
+  return `
+    <div class="form-renderer form-renderer-${mode}">
+      ${normalizedFields.map((field) => `
+        <div
+          class="form-renderer-field is-width-${field.width} ${mode === "design" && field.fieldId === activeFormDesignFieldId ? "is-selected" : ""}"
+          data-form-field-id="${escapeHtml(field.fieldId)}"
+          draggable="${mode === "design" ? "true" : "false"}"
+        >
+          ${
+            mode === "design"
+              ? `<div class="form-renderer-field-actions">
+                  <button class="text-button" type="button" data-action="select-form-field" data-field-id="${escapeHtml(field.fieldId)}">编辑</button>
+                  <button class="text-button" type="button" data-action="copy-form-field" data-field-id="${escapeHtml(field.fieldId)}">复制</button>
+                  <button class="text-button" type="button" data-action="move-form-field-up" data-field-id="${escapeHtml(field.fieldId)}">上移</button>
+                  <button class="text-button" type="button" data-action="move-form-field-down" data-field-id="${escapeHtml(field.fieldId)}">下移</button>
+                  <button class="text-button danger-link" type="button" data-action="remove-form-field" data-field-id="${escapeHtml(field.fieldId)}">删除</button>
+                </div>`
+              : ""
+          }
+          <label>
+            <span>${escapeHtml(field.label || "未命名字段")}${field.required ? `<em>*</em>` : ""}</span>
+            ${renderUnifiedFormControl(field, mode, values[field.fieldId] ?? values[field.key] ?? "")}
+          </label>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderFormDesignStandardWorkOptions() {
+  const standardWorks = getStandardWorksForFormDesign();
+  const grouped = getValueChainCategories().map((category) => ({
+    category,
+    works: standardWorks.filter((work) => work.categoryId === category.id),
+  }));
+  const uncategorized = standardWorks.filter((work) => !grouped.some((group) => group.works.some((item) => item.id === work.id)));
+  const groups = uncategorized.length > 0 ? [...grouped, { category: { id: "uncategorized", name: "未分类" }, works: uncategorized }] : grouped;
+  return groups.map(({ category, works }) => `
+    <optgroup label="${escapeHtml(category.name)}">
+      ${works.map((work) => `<option value="${escapeHtml(work.id)}" ${work.id === activeFormDesignStandardWorkId ? "selected" : ""}>${escapeHtml(work.name)}</option>`).join("")}
+    </optgroup>
+  `).join("");
+}
+
+function renderFormComponentLibrary() {
+  return `
+    <div class="form-component-library" aria-label="字段组件库">
+      <h3>字段组件</h3>
+      <div class="form-component-card-list">
+        ${formDesignerFieldTypes.map(([type, label]) => `
+          <button class="form-component-card" type="button" draggable="true" data-action="add-form-field-type" data-component-type="${escapeHtml(type)}">
+            <span>${escapeHtml(label)}</span>
+            <em>${getDefaultFieldWidth(type) === 12 ? "单排" : getDefaultFieldWidth(type) === 6 ? "双排" : "三排"}</em>
+          </button>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderFormDesignEditor() {
+  const standardWork = getSelectedFormDesignStandardWork();
+  if (standardWork === null) return `<div class="empty-detail">暂无标准工作，请先维护标准工作库。</div>`;
+  const fields = getFormDesignRenderFields();
+  const selectedField = fields.find((field) => field.fieldId === activeFormDesignFieldId) ?? fields[0] ?? null;
+  if (selectedField !== null && activeFormDesignFieldId === "") activeFormDesignFieldId = selectedField.fieldId;
+  return `
+    <form class="form-designer-editor" data-standard-work-id="${escapeHtml(standardWork.id)}">
+      <div class="form-designer-context">
+        <div>
+          <h3>${escapeHtml(standardWork.name)}</h3>
+          <p class="form-note">${escapeHtml(categories.find((category) => category.id === standardWork.categoryId)?.name ?? "未分类")}</p>
+        </div>
+        <label class="form-designer-work-select">
+          <span>标准工作</span>
+          <select name="formDesignStandardWorkId">${renderFormDesignStandardWorkOptions()}</select>
+        </label>
+      </div>
+      <div class="form-designer-workspace">
+        ${renderFormComponentLibrary()}
+        <div class="form-designer-preview">
+          ${renderUnifiedFormRenderer(fields, { mode: "design" })}
+        </div>
+        <aside class="form-designer-property-panel">
+          ${renderFormDesignPropertyPanel(selectedField)}
+        </aside>
+      </div>
+      <div class="modal-actions">
+        <button class="primary-button" type="submit">保存表单结构</button>
+      </div>
+    </form>
+  `;
+}
+
+function renderFormDesignPropertyPanel(field) {
+  if (field === null) {
+    return `
+      <h3>字段属性</h3>
+      <p class="form-note">请选择字段，或点击“添加字段”。</p>
+    `;
+  }
+  return `
+    <h3>字段属性</h3>
+    <input type="hidden" name="activeFieldId" value="${escapeHtml(field.fieldId)}" />
+    <label><span>字段名称</span><input name="propertyLabel" value="${escapeHtml(field.label)}" autocomplete="off" /></label>
+    <label><span>字段类型</span><select name="propertyType">${renderFormFieldTypeOptions(field.type)}</select></label>
+    <label><span>是否必填</span><select name="propertyRequired"><option value="false" ${field.required ? "" : "selected"}>否</option><option value="true" ${field.required ? "selected" : ""}>是</option></select></label>
+    <label><span>默认值</span><input name="propertyDefaultValue" value="${escapeHtml(field.defaultValue ?? "")}" autocomplete="off" /></label>
+    <label><span>提示文字</span><input name="propertyPlaceholder" value="${escapeHtml(field.placeholder ?? "")}" autocomplete="off" /></label>
+    <label><span>字段宽度</span><select name="propertyWidth"><option value="12" ${field.width === 12 ? "selected" : ""}>单排（12）</option><option value="6" ${field.width === 6 ? "selected" : ""}>双排（6）</option><option value="4" ${field.width === 4 ? "selected" : ""}>三排（4）</option></select></label>
+    <label><span>选项内容</span><textarea name="propertyOptions" rows="5" placeholder="下拉、多选使用，每行或逗号分隔">${escapeHtml((field.options ?? []).join("\n"))}</textarea></label>
+  `;
+}
+
+function renderFormDesignSection() {
+  return `
+    <section class="settings-section" id="form-design">
+      <div class="section-heading">
+        <div>
+          <h2>表单设计</h2>
+          <p class="form-note">为每一个标准工作维护独立执行表单，后续执行任务可逐步接入。</p>
+        </div>
+      </div>
+      <div class="form-designer-layout">
+        <div class="form-designer-panel">
+          ${renderFormDesignEditor()}
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function getEditingIssueRequirement() {
   return issuesRequirements.find((item) => item.id === modalState?.id) ?? null;
 }
@@ -1989,10 +2268,170 @@ async function savePermissions(form, rerender) {
   rerender();
 }
 
+function parseFieldOptions(value) {
+  return String(value ?? "")
+    .split(/,|，|\n/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function applyFormDesignerPropertyPanel(fields) {
+  const panel = document.querySelector(".form-designer-property-panel");
+  const activeFieldId = panel?.querySelector("[name='activeFieldId']")?.value ?? "";
+  if (panel === null || activeFieldId === "") return fields;
+  return fields.map((field) =>
+    field.fieldId === activeFieldId
+      ? {
+          ...field,
+          label: panel.querySelector("[name='propertyLabel']")?.value.trim() ?? field.label,
+          type: panel.querySelector("[name='propertyType']")?.value || field.type,
+          required: panel.querySelector("[name='propertyRequired']")?.value === "true",
+          defaultValue: panel.querySelector("[name='propertyDefaultValue']")?.value ?? "",
+          placeholder: panel.querySelector("[name='propertyPlaceholder']")?.value ?? "",
+          width: Number(panel.querySelector("[name='propertyWidth']")?.value ?? field.width),
+          options: parseFieldOptions(panel.querySelector("[name='propertyOptions']")?.value ?? ""),
+        }
+      : field,
+  );
+}
+
+function getCurrentFormDesignFields() {
+  return normalizeFormDesignerFields(applyFormDesignerPropertyPanel(getFormDesignRenderFields()));
+}
+
+function setFormDesignDraftFields(fields, activeFieldId = activeFormDesignFieldId) {
+  modalState = {
+    kind: "formDesignerDraft",
+    standardWorkId: activeFormDesignStandardWorkId,
+    draftFields: normalizeFormDesignerFields(fields),
+  };
+  activeFormDesignFieldId = activeFieldId;
+}
+
+function getFormDesignRenderFields() {
+  if (modalState?.kind === "formDesignerDraft" && modalState.standardWorkId === activeFormDesignStandardWorkId) {
+    return normalizeFormDesignerFields(modalState.draftFields);
+  }
+  return getFormDesignDraftFields();
+}
+
+async function saveStandardWorkForm(form, rerender) {
+  if (!canCurrentUser("settings.editStandardWorkForms")) return;
+  const standardWorkId = form.dataset.standardWorkId ?? "";
+  const standardWork = state.taskTemplates.find((template) => template.id === standardWorkId);
+  if (standardWork === undefined) return;
+  const fields = getCurrentFormDesignFields();
+  const existingForm = findStandardWorkForm(standardWorkId);
+  const now = getNow();
+  const item = {
+    ...(existingForm ?? {}),
+    id: existingForm?.id ?? createId("standard-work-form"),
+    standardWorkId,
+    formSchema: { fields },
+    createdAt: existingForm?.createdAt ?? now,
+    updatedAt: now,
+  };
+
+  try {
+    const savedForm = existingForm === null
+      ? await createPersistentResource("standard-work-forms", item)
+      : await updatePersistentResource("standard-work-forms", item.id, item);
+    replaceStandardWorkForms(upsertItem(standardWorkForms, savedForm));
+    modalState = null;
+  } catch (error) {
+    window.alert(error.message || "表单结构保存失败，请检查本地数据库服务。");
+  }
+  rerender();
+}
+
+function updateFormDesignerFields(transform) {
+  setFormDesignDraftFields(transform(getCurrentFormDesignFields()));
+}
+
+function createFormDesignerField(type = "text", order = 1) {
+  const normalizedType = formDesignerFieldTypeMeta[type] ? type : "text";
+  const fieldId = createId("form-field");
+  return {
+    fieldId,
+    label: formDesignerFieldTypeMeta[normalizedType]?.label ?? "新字段",
+    type: normalizedType,
+    required: false,
+    order,
+    defaultValue: "",
+    placeholder: "",
+    width: getDefaultFieldWidth(normalizedType),
+    options: [],
+  };
+}
+
+function addFormDesignerField(type = "text") {
+  let fieldId = "";
+  updateFormDesignerFields((fields) => [
+    ...fields,
+    (() => {
+      const field = createFormDesignerField(type, fields.length + 1);
+      fieldId = field.fieldId;
+      return field;
+    })(),
+  ]);
+  activeFormDesignFieldId = fieldId;
+}
+
+function copyFormDesignerField(fieldId) {
+  let copiedFieldId = "";
+  updateFormDesignerFields((fields) => {
+    const index = fields.findIndex((field) => field.fieldId === fieldId);
+    if (index < 0) return fields;
+    copiedFieldId = createId("form-field");
+    const copiedField = {
+      ...fields[index],
+      fieldId: copiedFieldId,
+      label: `${fields[index].label || "未命名字段"} 副本`,
+      order: index + 2,
+    };
+    const nextFields = [...fields];
+    nextFields.splice(index + 1, 0, copiedField);
+    return nextFields;
+  });
+  if (copiedFieldId !== "") activeFormDesignFieldId = copiedFieldId;
+}
+
+function removeFormDesignerField(fieldId) {
+  updateFormDesignerFields((fields) => {
+    const nextFields = fields.filter((field) => field.fieldId !== fieldId);
+    if (activeFormDesignFieldId === fieldId) activeFormDesignFieldId = nextFields[0]?.fieldId ?? "";
+    return nextFields;
+  });
+}
+
+function moveFormDesignerField(fieldId, direction) {
+  updateFormDesignerFields((fields) => {
+    const index = fields.findIndex((field) => field.fieldId === fieldId);
+    const targetIndex = index + direction;
+    if (index < 0 || targetIndex < 0 || targetIndex >= fields.length) return fields;
+    const nextFields = [...fields];
+    [nextFields[index], nextFields[targetIndex]] = [nextFields[targetIndex], nextFields[index]];
+    return nextFields;
+  });
+}
+
+function reorderFormDesignerField(draggedId, targetId) {
+  updateFormDesignerFields((fields) => {
+    const draggedIndex = fields.findIndex((field) => field.fieldId === draggedId);
+    const targetIndex = fields.findIndex((field) => field.fieldId === targetId);
+    if (draggedIndex < 0 || targetIndex < 0 || draggedIndex === targetIndex) return fields;
+    const nextFields = [...fields];
+    const [dragged] = nextFields.splice(draggedIndex, 1);
+    nextFields.splice(targetIndex, 0, dragged);
+    return nextFields;
+  });
+}
+
 export function bindSettingsPageEvents(rerender) {
   const settingsPage = document.querySelector(".settings-page");
   const form = document.querySelector(".modal-form");
   const permissionForm = document.querySelector(".permission-editor-form");
+  const formDesignerForm = document.querySelector(".form-designer-editor");
 
   if (settingsPage === null) return;
 
@@ -2030,11 +2469,67 @@ export function bindSettingsPageEvents(rerender) {
 
     const button = event.target.closest("[data-action]");
 
+    const formFieldCard = event.target.closest(".form-renderer-field[data-form-field-id]");
+    if (button === null && formFieldCard !== null) {
+      setFormDesignDraftFields(getCurrentFormDesignFields(), formFieldCard.dataset.formFieldId ?? "");
+      rerender();
+      return;
+    }
+
     if (button === null) return;
 
     const action = button.dataset.action;
     const entity = button.dataset.entity;
     const id = button.dataset.id;
+
+    if (action === "select-form-standard-work") {
+      activeFormDesignStandardWorkId = button.dataset.standardWorkId ?? "";
+      modalState = null;
+      rerender();
+      return;
+    }
+
+    if (action === "add-form-field") {
+      addFormDesignerField();
+      rerender();
+      return;
+    }
+
+    if (action === "add-form-field-type") {
+      addFormDesignerField(button.dataset.componentType ?? "text");
+      rerender();
+      return;
+    }
+
+    if (action === "select-form-field") {
+      setFormDesignDraftFields(getCurrentFormDesignFields(), button.dataset.fieldId ?? "");
+      rerender();
+      return;
+    }
+
+    if (action === "remove-form-field") {
+      removeFormDesignerField(button.dataset.fieldId ?? "");
+      rerender();
+      return;
+    }
+
+    if (action === "copy-form-field") {
+      copyFormDesignerField(button.dataset.fieldId ?? "");
+      rerender();
+      return;
+    }
+
+    if (action === "move-form-field-up") {
+      moveFormDesignerField(button.dataset.fieldId ?? "", -1);
+      rerender();
+      return;
+    }
+
+    if (action === "move-form-field-down") {
+      moveFormDesignerField(button.dataset.fieldId ?? "", 1);
+      rerender();
+      return;
+    }
 
     if (action === "close-modal") {
       modalState = null;
@@ -2087,9 +2582,76 @@ export function bindSettingsPageEvents(rerender) {
   settingsPage.addEventListener("dragleave", handleDepartmentDragLeave);
   settingsPage.addEventListener("drop", (event) => handleDepartmentDrop(event, rerender));
   settingsPage.addEventListener("dragend", handleDepartmentDragEnd);
+  settingsPage.addEventListener("dragstart", (event) => {
+    const componentCard = event.target.closest(".form-component-card[data-component-type]");
+    if (componentCard !== null) {
+      draggedFormComponentType = componentCard.dataset.componentType ?? "text";
+      draggedFormFieldId = null;
+      event.dataTransfer.effectAllowed = "copy";
+      event.dataTransfer.setData("text/plain", draggedFormComponentType);
+      return;
+    }
+
+    const fieldRow = event.target.closest(".form-renderer-field[data-form-field-id]");
+    if (fieldRow === null) return;
+    setFormDesignDraftFields(getCurrentFormDesignFields(), fieldRow.dataset.formFieldId ?? "");
+    draggedFormFieldId = fieldRow.dataset.formFieldId;
+    draggedFormComponentType = null;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", draggedFormFieldId);
+  });
+  settingsPage.addEventListener("dragover", (event) => {
+    if (draggedFormComponentType !== null) {
+      if (event.target.closest(".form-designer-preview") === null) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+      return;
+    }
+
+    if (draggedFormFieldId === null) return;
+    if (event.target.closest(".form-renderer-field[data-form-field-id]") === null) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+  });
+  settingsPage.addEventListener("drop", (event) => {
+    if (draggedFormComponentType !== null) {
+      if (event.target.closest(".form-designer-preview") === null) return;
+      event.preventDefault();
+      addFormDesignerField(draggedFormComponentType);
+      draggedFormComponentType = null;
+      rerender();
+      return;
+    }
+
+    if (draggedFormFieldId === null) return;
+    const fieldRow = event.target.closest(".form-renderer-field[data-form-field-id]");
+    if (fieldRow === null) return;
+    event.preventDefault();
+    reorderFormDesignerField(draggedFormFieldId, fieldRow.dataset.formFieldId ?? "");
+    draggedFormFieldId = null;
+    rerender();
+  });
+  settingsPage.addEventListener("dragend", () => {
+    draggedFormFieldId = null;
+    draggedFormComponentType = null;
+  });
 
   if (form !== null) {
     form.addEventListener("submit", (event) => handleFormSubmit(event, rerender));
+  }
+
+  if (formDesignerForm !== null) {
+    formDesignerForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      saveStandardWorkForm(event.currentTarget, rerender);
+    });
+
+    formDesignerForm.querySelector("[name='formDesignStandardWorkId']")?.addEventListener("change", (event) => {
+      activeFormDesignStandardWorkId = event.target.value;
+      activeFormDesignFieldId = "";
+      modalState = null;
+      rerender();
+    });
   }
 
   settingsPage.querySelectorAll("[name='permissionKeyword'], [name='permissionDepartmentId'], [name='permissionLoginOnly']").forEach((input) => {
@@ -2158,6 +2720,7 @@ export function renderSettingsPage() {
         ${canCurrentUser("settings.viewPeople") ? `<a href="#people">人员管理</a>` : ""}
         ${canCurrentUser("settings.managePermissions") ? `<a href="#permissions">权限管理</a>` : ""}
         ${canCurrentUser("settings.viewStores") ? `<a href="#stores">店铺管理</a>` : ""}
+        ${canCurrentUser("settings.viewStandardWorks") || canCurrentUser("settings.editStandardWorkForms") ? `<a href="#form-design">表单设计</a>` : ""}
         ${canCurrentUser("settings.editStandardWorkForms") ? `<a href="#issues-requirements">需求与问题中心</a>` : ""}
         <a href="#categories">分类设置</a>
       </div>
@@ -2165,6 +2728,7 @@ export function renderSettingsPage() {
       ${canCurrentUser("settings.viewPeople") ? renderPeopleSection() : ""}
       ${canCurrentUser("settings.managePermissions") ? renderPermissionSection() : ""}
       ${canCurrentUser("settings.viewStores") ? renderStoreSection() : ""}
+      ${canCurrentUser("settings.viewStandardWorks") || canCurrentUser("settings.editStandardWorkForms") ? renderFormDesignSection() : ""}
       ${canCurrentUser("settings.editStandardWorkForms") ? renderIssuesRequirementsSection() : ""}
       ${renderCategorySection()}
       ${renderModal()}

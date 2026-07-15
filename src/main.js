@@ -67,6 +67,8 @@ const moduleHashMap = {
   people: "settings",
   stores: "settings",
   categories: "settings",
+  "form-design": "settings",
+  "settings/form-design": "settings",
   "issues-requirements": "settings",
   "settings/issues-requirements": "settings",
 };

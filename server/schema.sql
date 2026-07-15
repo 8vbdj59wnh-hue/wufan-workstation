@@ -274,6 +274,14 @@ CREATE TABLE IF NOT EXISTS methodologies (
   updatedAt TEXT
 );
 
+CREATE TABLE IF NOT EXISTS standard_work_forms (
+  id TEXT PRIMARY KEY,
+  standardWorkId TEXT NOT NULL,
+  formSchema TEXT,
+  createdAt TEXT,
+  updatedAt TEXT
+);
+
 CREATE TABLE IF NOT EXISTS notifications (
   id TEXT PRIMARY KEY,
   userId TEXT NOT NULL,
