@@ -306,6 +306,7 @@ const resourceConfigs = {
       "description",
       "status",
       "startedAt",
+      "dueDate",
       "completedAt",
       "stoppedAt",
       "canceledAt",
@@ -939,6 +940,7 @@ function runLightweightMigrations() {
   ensureColumn("tasks", "submittedBy", "TEXT");
   ensureColumn("tasks", "cancelReason", "TEXT");
   ensureColumn("tasks", "templateId", "TEXT");
+  ensureColumn("process_instances", "dueDate", "TEXT");
   ensureColumn("process_instances", "canceledAt", "TEXT");
   ensureColumn("process_instances", "cancelReason", "TEXT");
   ensureColumn("content_schedules", "workPlanId", "TEXT");

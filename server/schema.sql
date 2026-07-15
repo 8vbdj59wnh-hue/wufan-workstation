@@ -248,6 +248,7 @@ CREATE TABLE IF NOT EXISTS process_instances (
   description TEXT,
   status TEXT NOT NULL,
   startedAt TEXT,
+  dueDate TEXT,
   completedAt TEXT,
   stoppedAt TEXT,
   canceledAt TEXT,
