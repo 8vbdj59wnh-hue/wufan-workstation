@@ -49,6 +49,10 @@ let expandedSlotKey = "";
 const savingWorkPlanIds = new Set();
 const previewSize = 172;
 const previewGap = 12;
+const slotBaseHeight = 50;
+const slotLabelHeight = 23;
+const slotCardHeight = 29;
+const slotCardGap = 3;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -603,13 +607,32 @@ function hideSchedulePreview() {
   if (preview !== null) preview.classList.add("is-hidden");
 }
 
-function renderTimeSlot(rows, dayKey, slot) {
+function getSlotMinHeight(cardCount) {
+  if (cardCount <= 1) return slotBaseHeight;
+  return Math.max(slotBaseHeight, slotLabelHeight + cardCount * slotCardHeight + (cardCount - 1) * slotCardGap);
+}
+
+function buildSlotHeightMap(rows, days) {
+  const dayKeys = new Set(days.map((day) => day.key));
+  return buildTimeSlots().reduce((result, slot) => {
+    const maxCardCount = days.reduce((maxCount, day) => {
+      const count = rows.filter((row) => row.processInstance !== null && row.dueDateKey === day.key && row.dueSlotHour === slot.startHour).length;
+      return Math.max(maxCount, count);
+    }, 0);
+    result.set(slot.startHour, getSlotMinHeight(dayKeys.size === 0 ? 0 : maxCardCount));
+    return result;
+  }, new Map());
+}
+
+function renderTimeSlot(rows, dayKey, slot, slotHeights) {
   const slotRows = rows.filter((row) => row.processInstance !== null && row.dueDateKey === dayKey && row.dueSlotHour === slot.startHour);
+  const slotMinHeight = slotHeights.get(slot.startHour) ?? slotBaseHeight;
   return `
     <div
       class="schedule-time-slot"
       data-schedule-date="${escapeAttribute(dayKey)}"
       data-schedule-hour="${escapeAttribute(slot.endHour)}"
+      style="--schedule-slot-min-height: ${slotMinHeight}px;"
       title="${escapeAttribute(slot.label)}"
     >
       <span class="schedule-time-slot-label">${escapeHtml(slot.label)}</span>
@@ -620,11 +643,11 @@ function renderTimeSlot(rows, dayKey, slot) {
   `;
 }
 
-function renderDateColumn(rows, day) {
+function renderDateColumn(rows, day, slotHeights) {
   const slots = buildTimeSlots();
   return `
     <div class="schedule-board-cell ${day.isToday ? "is-today" : ""} ${day.isWeekend ? "is-weekend" : ""}" data-schedule-day="${escapeAttribute(day.key)}">
-      ${slots.map((slot) => renderTimeSlot(rows, day.key, slot)).join("")}
+      ${slots.map((slot) => renderTimeSlot(rows, day.key, slot, slotHeights)).join("")}
     </div>
   `;
 }
@@ -670,9 +693,11 @@ function renderBoardRows(rows, days) {
     `;
   }
 
+  const slotHeights = buildSlotHeightMap(rows, days);
+
   return `
     <div class="schedule-board-row schedule-calendar-row">
-      ${filters.noDueDateOnly ? renderNoDueDateColumn(rows) : days.map((day) => renderDateColumn(rows, day)).join("")}
+      ${filters.noDueDateOnly ? renderNoDueDateColumn(rows) : days.map((day) => renderDateColumn(rows, day, slotHeights)).join("")}
     </div>
   `;
 }

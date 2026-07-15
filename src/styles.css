@@ -3899,7 +3899,7 @@ button.content-template-thumb {
 }
 
 .schedule-time-slot {
-  min-height: var(--schedule-slot-height);
+  min-height: var(--schedule-slot-min-height, var(--schedule-slot-height));
   border: 0;
   border-bottom: 1px solid #edf0f3;
   border-radius: 0;
