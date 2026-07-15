@@ -1603,7 +1603,7 @@ function renderModalFields() {
 }
 
 function renderModal() {
-  if (modalState === null) return "";
+  if (modalState === null || modalState.kind === "formDesignerDraft") return "";
   const isReadonly = modalState.mode === "view";
 
   return `
