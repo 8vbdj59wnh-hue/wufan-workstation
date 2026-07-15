@@ -151,6 +151,8 @@ const taskTabHashMap = {
   clearance: "clearance",
   "process-progress": "process-progress",
   "content-schedule": "content-schedule",
+  contentSchedule: "content-schedule",
+  contentSchedules: "content-schedule",
 };
 
 const clearanceWorkName = "库存清仓";
@@ -5677,6 +5679,7 @@ export function bindTasksPageEvents(rerender) {
         return;
       }
       window.location.hash = activeTaskTab;
+      rerender();
     });
   });
 

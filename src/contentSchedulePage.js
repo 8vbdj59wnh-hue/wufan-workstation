@@ -498,8 +498,11 @@ function compressProductImage(file) {
 }
 
 function matchesFilters(schedule) {
-  if (filters.dateFrom !== "" && schedule.publishDate < filters.dateFrom) return false;
-  if (filters.dateTo !== "" && schedule.publishDate > filters.dateTo) return false;
+  const publishDate = schedule.publishDate ?? "";
+  const product = schedule.product ?? "";
+  const title = schedule.title ?? "";
+  if (filters.dateFrom !== "" && publishDate < filters.dateFrom) return false;
+  if (filters.dateTo !== "" && publishDate > filters.dateTo) return false;
   if (filters.account !== "" && schedule.account !== filters.account) return false;
   if (filters.contentType !== "" && normalizeContentType(schedule.contentType) !== filters.contentType) return false;
   if (filters.contentPurpose !== "" && normalizeContentPurpose(schedule.contentPurpose) !== filters.contentPurpose) return false;
@@ -507,13 +510,15 @@ function matchesFilters(schedule) {
   if (filters.status === "" && normalizeContentScheduleStatus(schedule.status) === ContentScheduleStatus.Canceled) return false;
   if (filters.status !== "" && normalizeContentScheduleStatus(schedule.status) !== filters.status) return false;
   if (filters.goalId !== "" && schedule.goalId !== filters.goalId) return false;
-  if (filters.productKeyword !== "" && !schedule.product.includes(filters.productKeyword)) return false;
-  if (filters.titleKeyword !== "" && !schedule.title.includes(filters.titleKeyword)) return false;
+  if (filters.productKeyword !== "" && !product.includes(filters.productKeyword)) return false;
+  if (filters.titleKeyword !== "" && !title.includes(filters.titleKeyword)) return false;
   return true;
 }
 
 function getFilteredSchedules() {
-  return state.contentSchedules.filter(matchesFilters).sort((left, right) => left.publishDate.localeCompare(right.publishDate));
+  return state.contentSchedules
+    .filter(matchesFilters)
+    .sort((left, right) => (left.publishDate ?? "").localeCompare(right.publishDate ?? ""));
 }
 
 function renderFilters() {

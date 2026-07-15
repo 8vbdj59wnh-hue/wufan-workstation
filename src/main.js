@@ -2,7 +2,7 @@ import { modules } from "./modules.js?v=20260705-state-singleton1";
 import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260705-state-singleton1";
 import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260705-state-singleton1";
 import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260705-state-singleton1";
-import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260705-state-singleton1";
+import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260715-content-schedule-nav1";
 import { bindScheduleBoardPageEvents, renderScheduleBoardPage } from "./scheduleBoardPage.js?v=20260705-state-singleton1";
 import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260705-state-singleton1";
 import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260705-state-singleton1";
@@ -48,6 +48,8 @@ const moduleHashMap = {
   "process-progress": "tasks",
   "task-library": "processes",
   "content-schedule": "tasks",
+  contentSchedule: "tasks",
+  contentSchedules: "tasks",
   "process-templates": "processes",
   "started-processes": "processes",
   "future-tasks": "time",
