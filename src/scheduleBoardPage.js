@@ -106,10 +106,11 @@ function buildBoardDays() {
 function buildTimeSlots() {
   const slots = [];
   for (let hour = workdayStartHour; hour < workdayEndHour; hour += timeSlotHours) {
+    const endHour = Math.min(hour + timeSlotHours, workdayEndHour);
     slots.push({
       startHour: hour,
-      endHour: Math.min(hour + timeSlotHours, workdayEndHour),
-      label: `${String(hour).padStart(2, "0")}-${String(Math.min(hour + timeSlotHours, workdayEndHour)).padStart(2, "0")}`,
+      endHour,
+      label: `${formatHour(hour)}—${formatHour(endHour)}`,
     });
   }
   return slots;
