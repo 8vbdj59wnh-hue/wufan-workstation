@@ -322,6 +322,7 @@
  * @property {string | null} ownerPositionId
  * @property {string | null} defaultOwnerId
  * @property {number} durationDays
+ * @property {number} durationMinutes
  * @property {string} description
  * @property {string} completionStandard
  * @property {string | null} reviewStandard

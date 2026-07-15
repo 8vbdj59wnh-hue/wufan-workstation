@@ -218,6 +218,7 @@ CREATE TABLE IF NOT EXISTS process_template_nodes (
   ownerPositionId TEXT,
   defaultOwnerId TEXT,
   durationDays INTEGER NOT NULL,
+  durationMinutes INTEGER,
   description TEXT,
   completionStandard TEXT,
   reviewStandard TEXT,

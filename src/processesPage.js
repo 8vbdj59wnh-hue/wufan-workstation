@@ -330,7 +330,7 @@ function renderTemplateNodes(templateId) {
                 <span><em>负责部门</em>${findName(departments, node.departmentId ?? node.ownerDepartmentId, "未设置")}</span>
                 <span><em>负责人</em>${findName(people, node.ownerId ?? node.defaultOwnerId, "未设置")}</span>
                 <span><em>执行人</em>${findName(people, node.executorId, "同负责人")}</span>
-                <span><em>限时</em>${node.durationDays} 天</span>
+                <span><em>执行时长</em>${node.durationMinutes ?? (Number(node.durationDays ?? 1) * 1440)} 分钟</span>
                 <span><em>状态</em>${processTemplateNodeStatusNames[node.status]}</span>
               </div>
               <div class="process-node-copy">
@@ -544,7 +544,7 @@ function renderNodeModal() {
           <label><span>负责部门</span><select name="departmentId">${renderOptions(departments, node?.departmentId ?? node?.ownerDepartmentId ?? "", "请选择部门")}</select></label>
           <label><span>负责人</span><select name="ownerId">${renderOptions(people, node?.ownerId ?? node?.defaultOwnerId ?? "", "请选择负责人")}</select></label>
           <label><span>执行人</span><select name="executorId">${renderOptions(people, node?.executorId ?? "", "同负责人")}</select></label>
-          <label><span>限时完成（天）</span><input name="durationDays" value="${node?.durationDays ?? 1}" /></label>
+          <label><span>执行时长（分钟）</span><input name="durationMinutes" type="number" min="1" step="1" value="${node?.durationMinutes ?? (Number(node?.durationDays ?? 1) * 1440)}" /></label>
           <label><span>状态</span><select name="status">${renderValueOptions(ProcessTemplateNodeStatus, node?.status ?? ProcessTemplateNodeStatus.Active, processTemplateNodeStatusNames, "请选择状态")}</select></label>
         </div>
         <label><span>步骤说明</span><textarea name="description">${node?.description ?? ""}</textarea></label>
@@ -652,7 +652,8 @@ async function saveTemplate(form, rerender) {
 }
 
 async function saveNode(form, rerender) {
-  const durationDays = Number(getFormValue(form, "durationDays"));
+  const durationMinutes = Number(getFormValue(form, "durationMinutes"));
+  const durationDays = Math.max(1, Math.ceil((Number.isFinite(durationMinutes) ? durationMinutes : 1440) / 1440));
   let submitFields = [];
   try {
     submitFields = JSON.parse(getFormValue(form, "submitFieldsJson") || "[]");
@@ -679,6 +680,7 @@ async function saveNode(form, rerender) {
     ownerPositionId: null,
     defaultOwnerId: getFormValue(form, "ownerId"),
     durationDays,
+    durationMinutes,
     description: getFormValue(form, "description"),
     completionStandard: getFormValue(form, "completionStandard"),
     reviewStandard: null,
@@ -706,7 +708,7 @@ async function saveNode(form, rerender) {
   if (shouldInferSubmitForNewNode) {
     Object.assign(draft, normalizeSubmitRequirement({ name: draft.name }));
   }
-  if (!Number.isFinite(durationDays)) draft.durationDays = 1;
+  if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) return setModalError("请填写大于 0 的执行时长（分钟）。");
   const now = getNow();
   if (modalState.id) {
     const existingNode = state.processTemplateNodes.find((node) => node.id === modalState.id);

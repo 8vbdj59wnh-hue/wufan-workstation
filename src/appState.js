@@ -669,6 +669,8 @@ export function normalizeSubmitRequirement(item) {
 }
 
 function normalizeProcessTemplateNode(node) {
+  const durationDays = Number(node.durationDays ?? 1);
+  const durationMinutes = Number(node.durationMinutes ?? durationDays * 1440);
   const base = {
     reviewStandard: "按步骤完成标准和输出要求进行审核。",
     stepOrder: node.stepOrder ?? node.stageOrder ?? node.nodeOrder ?? 1,
@@ -676,11 +678,50 @@ function normalizeProcessTemplateNode(node) {
     ownerId: node.ownerId ?? node.defaultOwnerId ?? null,
     executorId: node.executorId ?? null,
     ...node,
+    durationDays: Number.isFinite(durationDays) && durationDays > 0 ? durationDays : 1,
+    durationMinutes: Number.isFinite(durationMinutes) && durationMinutes > 0 ? Math.round(durationMinutes) : 1440,
   };
   return {
     ...base,
     ...normalizeSubmitRequirement(base),
   };
+}
+
+export function getProcessNodeDurationMinutes(node) {
+  const durationMinutes = Number(node?.durationMinutes);
+  if (Number.isFinite(durationMinutes) && durationMinutes > 0) return Math.round(durationMinutes);
+  const durationDays = Number(node?.durationDays);
+  if (Number.isFinite(durationDays) && durationDays > 0) return Math.round(durationDays * 1440);
+  return 1440;
+}
+
+function formatBusinessMinuteIsoFromDate(date) {
+  const shifted = new Date(date.getTime() + 8 * 60 * 60 * 1000);
+  return `${shifted.toISOString().slice(0, 16)}:00+08:00`;
+}
+
+function parseBusinessDateTime(value) {
+  if (value instanceof Date) return value;
+  const rawValue = String(value ?? "").trim();
+  if (rawValue === "") return new Date();
+  const parsed = new Date(rawValue.length === 10 ? `${rawValue}T00:00:00+08:00` : rawValue);
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
+export function getBusinessMinuteNow() {
+  return formatBusinessMinuteIsoFromDate(new Date());
+}
+
+export function addMinutesToBusinessDateTime(value, minutes) {
+  const baseDate = parseBusinessDateTime(value);
+  const durationMinutes = Number(minutes);
+  const nextDate = new Date(baseDate.getTime() + (Number.isFinite(durationMinutes) ? durationMinutes : 0) * 60 * 1000);
+  return formatBusinessMinuteIsoFromDate(nextDate);
+}
+
+function getProcessExpectedFinishAt(nodes, startAt) {
+  const totalMinutes = nodes.reduce((sum, node) => sum + getProcessNodeDurationMinutes(node), 0);
+  return addMinutesToBusinessDateTime(startAt, totalMinutes);
 }
 
 function normalizeTaskSubmitRequirements() {
@@ -1176,6 +1217,7 @@ function syncNewProductLaunchProcessNodes(templateId, departmentsByKey, now) {
       ownerId: resolveDepartmentOwner(definition.departmentId),
       executorId: null,
       durationDays: 1,
+      durationMinutes: 1440,
       description: definition.description,
       completionStandard: definition.completionStandard,
       defaultImportance: TaskImportance.Important,
@@ -1463,7 +1505,9 @@ export function startProcess({
   }
 
   const now = getNow();
-  const today = now.slice(0, 10);
+  const taskStartAt = getBusinessMinuteNow();
+  const taskStartDate = taskStartAt.slice(0, 10);
+  const expectedFinishAt = getProcessExpectedFinishAt(nodes, taskStartAt);
   const primaryCoverImageUrl = coverImageUrl || getPrimaryImageUrl({ customFields });
   const instance = {
     id: createId("process-instance"),
@@ -1504,9 +1548,9 @@ export function startProcess({
       outputRequirement: null,
       importance: node.defaultImportance ?? "important",
       urgency: node.defaultUrgency ?? "not_urgent",
-      startDate: activeNow ? today : null,
-      dueDate: activeNow ? addDays(today, node.durationDays) : null,
-      plannedWeek: activeNow ? getCurrentWeek(new Date(`${today}T00:00:00+08:00`)) : null,
+      startDate: activeNow ? taskStartAt : null,
+      dueDate: activeNow ? addMinutesToBusinessDateTime(taskStartAt, getProcessNodeDurationMinutes(node)) : null,
+      plannedWeek: activeNow ? getCurrentWeek(new Date(`${taskStartDate}T00:00:00+08:00`)) : null,
       needAcceptance: false,
       accepterId: null,
       status: activeNow ? TaskStatus.Todo : TaskStatus.Waiting,
@@ -1532,7 +1576,7 @@ export function startProcess({
 
   state.processInstances = [instance, ...state.processInstances];
   state.tasks = [...generatedTasks, ...state.tasks];
-  return { instance };
+  return { instance, expectedFinishAt };
 }
 
 export async function launchWorkPlanAsProcess(workPlanId, { dueDate = null } = {}) {
@@ -1572,6 +1616,9 @@ export async function launchWorkPlanAsProcess(workPlanId, { dueDate = null } = {
     updatedAt: now,
   };
   const syncedDueDate = launchedInstance.dueDate ?? null;
+  if (syncedDueDate !== null && result.expectedFinishAt !== undefined && new Date(result.expectedFinishAt).getTime() > new Date(syncedDueDate).getTime()) {
+    window.alert("流程预计完成时间超过项目截止时间，请关注排期。");
+  }
   const generatedTasks = state.tasks.filter((task) => task.processInstanceId === result.instance.id);
   const launchedWorkPlan = {
     ...workPlan,
@@ -1623,16 +1670,16 @@ function arePreviousProcessTasksDone(orderedTasks, taskIndex) {
   return orderedTasks.slice(0, taskIndex).every((item) => item.status === TaskStatus.Done);
 }
 
-async function activateWaitingProcessTask(task) {
+async function activateWaitingProcessTask(task, startAt = getBusinessMinuteNow()) {
   const now = getNow();
-  const today = now.slice(0, 10);
+  const startDate = String(startAt ?? "").slice(0, 10) || now.slice(0, 10);
   const node = state.processTemplateNodes.find((candidate) => candidate.id === task.processNodeId);
   const updatedTask = {
     ...task,
     status: TaskStatus.Todo,
-    startDate: task.startDate ?? today,
-    dueDate: task.dueDate ?? addDays(today, node?.durationDays ?? 0),
-    plannedWeek: task.plannedWeek ?? getCurrentWeek(new Date(`${today}T00:00:00+08:00`)),
+    startDate: startAt,
+    dueDate: addMinutesToBusinessDateTime(startAt, getProcessNodeDurationMinutes(node)),
+    plannedWeek: task.plannedWeek ?? getCurrentWeek(new Date(`${startDate}T00:00:00+08:00`)),
     updatedAt: now,
   };
   await updatePersistentResource("tasks", updatedTask.id, updatedTask);
@@ -1650,7 +1697,8 @@ export async function refreshProcessTaskReadiness(processInstanceId) {
   if (nextTask !== undefined) {
     const nextIndex = orderedTasks.findIndex((item) => item.id === nextTask.id);
     if (nextTask.status === TaskStatus.Waiting && arePreviousProcessTasksDone(orderedTasks, nextIndex)) {
-      return activateWaitingProcessTask(nextTask);
+      const previousTask = orderedTasks[nextIndex - 1];
+      return activateWaitingProcessTask(nextTask, previousTask?.completedAt ?? getBusinessMinuteNow());
     }
     return null;
   }
@@ -1674,7 +1722,8 @@ export async function ensureTaskReadyForExecution(taskId) {
   const orderedTasks = getOrderedProcessInstanceTasks(instance.id);
   const taskIndex = orderedTasks.findIndex((item) => item.id === taskId);
   if (arePreviousProcessTasksDone(orderedTasks, taskIndex)) {
-    return activateWaitingProcessTask(task);
+    const previousTask = orderedTasks[taskIndex - 1];
+    return activateWaitingProcessTask(task, previousTask?.completedAt ?? getBusinessMinuteNow());
   }
   return task;
 }

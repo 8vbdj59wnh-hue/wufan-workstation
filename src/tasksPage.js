@@ -48,7 +48,7 @@ import {
   isValueModuleId,
   ValueModule,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260705-state-singleton1";
+import { getPrimaryImageUrl, getTaskQuadrant, hasTaskOverdueRecord, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260705-state-singleton1";
 import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260705-state-singleton1";
 import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260705-state-singleton1";
 import { renderWorkFormViewer } from "./workFormViewer.js?v=20260705-state-singleton1";
@@ -1167,7 +1167,7 @@ function matchesTaskStatusFilter(task, selectedStatus) {
 }
 
 function matchesFilters(task) {
-  const overdue = isTaskOverdue(task, today);
+  const overdue = isTaskOverdue(task, today) || hasTaskOverdueRecord(task);
   const shouldShowDone = filters.showDone || filters.status === TaskStatus.Done;
   const shouldShowCanceled = filters.showCanceled || filters.status === TaskStatus.Canceled;
   const belonging = getTaskBelonging(task);
@@ -1202,9 +1202,32 @@ function getFilteredTasks() {
 }
 
 function renderOverdue(task) {
-  return isTaskOverdue(task, today)
+  return isTaskOverdue(task, today) || hasTaskOverdueRecord(task)
     ? `<span class="status-pill is-danger">已逾期</span>`
     : `<span class="status-pill">未逾期</span>`;
+}
+
+function parseTaskComparableTime(value, dateMode = "start") {
+  const rawValue = String(value ?? "").trim();
+  if (rawValue === "") return null;
+  const fallbackTime = dateMode === "end" ? "T23:59:59+08:00" : "T00:00:00+08:00";
+  const parsed = new Date(rawValue.length === 10 ? `${rawValue}${fallbackTime}` : rawValue);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
+}
+
+function markTaskOverdueRecordIfNeeded(task, referenceTime = getNow()) {
+  if (task.dueDate === null || task.status === TaskStatus.Canceled || hasTaskOverdueRecord(task)) return task;
+  const dueTime = parseTaskComparableTime(task.dueDate, "end");
+  const currentTime = parseTaskComparableTime(referenceTime);
+  if (dueTime === null || currentTime === null || currentTime <= dueTime) return task;
+  return {
+    ...task,
+    customFields: {
+      ...(task.customFields ?? {}),
+      assessmentOverdueRecordedAt: referenceTime,
+      assessmentOverdueDueDate: task.dueDate,
+    },
+  };
 }
 
 function getTaskStatusClass(status) {
@@ -1238,7 +1261,7 @@ function renderTaskStatusSelect(task) {
         .map(
           (option) => `
             <option value="${option.value}" ${option.value === value ? "selected" : ""}>
-              ${option.label}
+              ${option.value === TaskStatus.Done && option.value === value && hasTaskOverdueRecord(task) ? "已完成（超时）" : option.label}
             </option>
           `,
         )
@@ -1538,7 +1561,7 @@ function matchesClearanceStatus(status, selectedStatus, overdue) {
 function matchesClearanceFilters(group) {
   const info = getClearanceDisplayInfo(group.instance, group.tasks);
   const status = getClearanceStatus(group.instance, group.tasks);
-  const overdue = group.tasks.some((task) => isTaskOverdue(task, today));
+  const overdue = group.tasks.some((task) => isTaskOverdue(task, today) || hasTaskOverdueRecord(task));
   const shouldShowDone = clearanceFilters.showDone || clearanceFilters.status === TaskStatus.Done;
   const shouldShowCanceled = clearanceFilters.showCanceled || clearanceFilters.status === TaskStatus.Canceled;
   const currentOwnerIds = group.currentTask === null ? group.tasks.map((task) => task.ownerId) : [group.currentTask.ownerId];
@@ -1611,7 +1634,7 @@ function getClearanceStats(groups) {
       if (isDoneStatus(status)) result.done += 1;
       else if (isCanceledStatus(status) || status === ProcessInstanceStatus.Stopped) result.canceled += 1;
       else result.running += 1;
-      if (group.tasks.some((task) => isTaskOverdue(task, today))) result.overdue += 1;
+      if (group.tasks.some((task) => isTaskOverdue(task, today) || hasTaskOverdueRecord(task))) result.overdue += 1;
       result.total += 1;
       return result;
     },
@@ -2605,7 +2628,7 @@ function getWaitingProcessTasks(processInstanceId) {
 }
 
 function isProcessOverdue(processInstanceId) {
-  return getProcessTasks(processInstanceId).some((task) => task.status !== TaskStatus.Done && task.status !== TaskStatus.Canceled && isTaskOverdue(task, today));
+  return getProcessTasks(processInstanceId).some((task) => task.status !== TaskStatus.Canceled && (isTaskOverdue(task, today) || hasTaskOverdueRecord(task)));
 }
 
 function getProcessCurrentStepText(instance) {
@@ -3673,7 +3696,7 @@ function renderTaskDetail() {
           ${renderDetailField("执行人", findName(people, selectedTask.ownerId, "未设置"))}
           ${renderDetailField("负责部门", findName(departments, selectedTask.departmentId, "未设置"))}
           ${renderDetailField("截止时间", formatBusinessMinuteDateTime(selectedTask.dueDate))}
-          ${renderDetailField("是否逾期", isTaskOverdue(selectedTask) ? "已逾期" : "未逾期")}
+          ${renderDetailField("是否逾期", isTaskOverdue(selectedTask) || hasTaskOverdueRecord(selectedTask) ? "已逾期" : "未逾期")}
           ${renderDetailField("计划周", selectedTask.plannedWeek ?? "未安排")}
           ${renderDetailField("发起人", findName(people, selectedTask.initiatorId, "未设置"))}
           ${renderDetailField("验收人", selectedTask.needAcceptance ? findName(people, selectedTask.accepterId, "未设置") : "无需验收")}
@@ -4883,7 +4906,7 @@ async function saveResult(form, rerender) {
         : null;
   const resultAttachments = submitFiles;
 
-  const updatedTask = {
+  const updatedTask = markTaskOverdueRecordIfNeeded({
     ...task,
     resultText,
     resultAttachments,
@@ -4895,7 +4918,7 @@ async function saveResult(form, rerender) {
     status: nextStatus,
     completedAt,
     updatedAt: now,
-  };
+  }, completedAt ?? now);
   try {
     await updatePersistentResource("tasks", updatedTask.id, updatedTask);
   } catch (error) {
@@ -4985,12 +5008,12 @@ async function updateTaskStatus(taskId, status, rerender) {
   }
 
   const now = getNow();
-  const updatedTask = {
+  const updatedTask = markTaskOverdueRecordIfNeeded({
     ...task,
     status,
     updatedAt: now,
     completedAt: status === TaskStatus.Done ? now : null,
-  };
+  }, now);
 
   try {
     await updatePersistentResource("tasks", taskId, updatedTask);
@@ -5023,12 +5046,12 @@ function getTaskStatusChangeError(task, status) {
 }
 
 function buildTaskStatusUpdate(task, status, now) {
-  return {
+  return markTaskOverdueRecordIfNeeded({
     ...task,
     status,
     updatedAt: now,
     completedAt: status === TaskStatus.Done ? now : null,
-  };
+  }, now);
 }
 
 async function bulkUpdateTaskStatus(status, rerender) {

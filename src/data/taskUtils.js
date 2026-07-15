@@ -27,7 +27,22 @@ export function isTaskOverdue(task, currentDate) {
   if (task.dueDate === null) return false;
   if (task.status === TaskStatus.Done || task.status === TaskStatus.Canceled) return false;
 
-  return currentDate > task.dueDate;
+  const dueTime = parseComparableTime(task.dueDate, "end");
+  const currentTime = parseComparableTime(currentDate ?? new Date().toISOString(), "start");
+  if (dueTime === null || currentTime === null) return false;
+  return currentTime > dueTime;
+}
+
+function parseComparableTime(value, dateMode = "start") {
+  const rawValue = String(value ?? "").trim();
+  if (rawValue === "") return null;
+  const fallbackTime = dateMode === "end" ? "T23:59:59+08:00" : "T00:00:00+08:00";
+  const parsed = new Date(rawValue.length === 10 ? `${rawValue}${fallbackTime}` : rawValue);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
+}
+
+export function hasTaskOverdueRecord(task) {
+  return Boolean(task?.customFields?.assessmentOverdueRecordedAt);
 }
 
 export function isDoneStatus(status) {

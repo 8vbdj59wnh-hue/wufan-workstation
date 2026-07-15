@@ -273,6 +273,7 @@ const resourceConfigs = {
       "ownerPositionId",
       "defaultOwnerId",
       "durationDays",
+      "durationMinutes",
       "description",
       "completionStandard",
       "reviewStandard",
@@ -645,6 +646,37 @@ function mergePreservedCustomFields(resourceKey, id, item) {
   return { ...item, customFields };
 }
 
+function parseComparableTime(value) {
+  const rawValue = String(value ?? "").trim();
+  if (rawValue === "") return null;
+  const parsed = new Date(rawValue.length === 10 ? `${rawValue}T23:59:59+08:00` : rawValue);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
+}
+
+function markTaskOverdueOnce(task) {
+  if (task === null || task === undefined || task.status === "canceled" || task.dueDate === null) return task;
+  const dueTime = parseComparableTime(task.dueDate);
+  if (dueTime === null) return task;
+  const completedTime = parseComparableTime(task.completedAt);
+  const referenceTime = completedTime ?? Date.now();
+  if (referenceTime <= dueTime) return task;
+
+  const customFields =
+    task.customFields !== null && typeof task.customFields === "object" && !Array.isArray(task.customFields)
+      ? { ...task.customFields }
+      : {};
+  if (customFields.assessmentOverdueRecordedAt) return task;
+
+  return {
+    ...task,
+    customFields: {
+      ...customFields,
+      assessmentOverdueRecordedAt: new Date().toISOString(),
+      assessmentOverdueDueDate: task.dueDate,
+    },
+  };
+}
+
 function getMethodologyTitle(nodeName) {
   return `${String(nodeName ?? "").replaceAll("+", "").trim()}操作说明`;
 }
@@ -964,6 +996,7 @@ function runLightweightMigrations() {
   ensureColumn("process_template_nodes", "departmentId", "TEXT");
   ensureColumn("process_template_nodes", "ownerId", "TEXT");
   ensureColumn("process_template_nodes", "executorId", "TEXT");
+  ensureColumn("process_template_nodes", "durationMinutes", "INTEGER");
   ensureColumn("process_template_nodes", "submitType", "TEXT");
   ensureColumn("process_template_nodes", "submitDescription", "TEXT");
   ensureColumn("process_template_nodes", "submitFields", "TEXT");
@@ -1383,7 +1416,8 @@ export function updateResource(routeResource, id, item) {
   const resourceKey = routeResourceMap[routeResource];
   if (resourceKey === undefined) throw new Error(`Unknown resource: ${routeResource}`);
   const mergedItem = mergeExistingItem(resourceKey, id, item);
-  const nextItem = mergePreservedCustomFields(resourceKey, id, mergedItem);
+  const preservedItem = mergePreservedCustomFields(resourceKey, id, mergedItem);
+  const nextItem = resourceKey === "tasks" ? markTaskOverdueOnce(preservedItem) : preservedItem;
   insertItem(resourceKey, nextItem);
   return nextItem;
 }
