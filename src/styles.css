@@ -4008,9 +4008,10 @@ button.content-template-thumb {
   position: fixed;
   z-index: 10000;
   display: grid;
-  place-items: center;
+  grid-template-rows: 172px auto;
+  gap: 8px;
   width: 172px;
-  height: 172px;
+  min-height: 200px;
   padding: 8px;
   border: 1px solid #e5e7eb;
   border-radius: 10px;
@@ -4021,6 +4022,13 @@ button.content-template-thumb {
 
 .schedule-hover-preview.is-hidden {
   display: none;
+}
+
+.schedule-hover-preview-media {
+  display: grid;
+  place-items: center;
+  width: 172px;
+  height: 172px;
 }
 
 .schedule-hover-preview img {
@@ -4041,6 +4049,19 @@ button.content-template-thumb {
   background: #f9fafb;
   color: #9ca3af;
   font-size: 13px;
+}
+
+.schedule-hover-preview-progress {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  color: #4b5563;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .schedule-process-block.is-waiting {

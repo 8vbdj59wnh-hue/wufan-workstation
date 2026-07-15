@@ -3,6 +3,7 @@ import { selectTask } from "./tasksPage.js?v=20260705-state-singleton1";
 import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260705-state-singleton1";
 import {
   ProcessInstanceStatus,
+  TaskStatus,
   WorkPlanStatus,
   getValueModuleName,
   inferValueModuleIdFromText,
@@ -544,12 +545,20 @@ function getProcessCardTitle(row) {
   return row.processInstance?.displayTitle ?? row.processInstance?.name ?? row.title;
 }
 
+function getProcessCurrentProgressText(tasks) {
+  if (tasks.length === 0) return "暂无进度";
+  const currentTask = tasks.find((task) => task.status !== TaskStatus.Done && task.status !== TaskStatus.Canceled);
+  if (currentTask === undefined) return "已完成";
+  return currentTask.name ?? "未命名任务";
+}
+
 function renderProcessBlock(row) {
   if (row.processInstance === null) return "";
   const canDrag = canDragProcess(row);
   const title = getProcessCardTitle(row);
   const previewImage = getProcessPreviewImage(row);
   const valueModuleClass = getValueModuleCardClass(row.valueModuleId);
+  const progressText = getProcessCurrentProgressText(row.tasks);
   return `
     <button
       class="schedule-process-block ${getProcessStatusClass(row)} ${valueModuleClass} ${savingWorkPlanIds.has(row.workPlan.id) ? "is-saving" : ""}"
@@ -559,6 +568,7 @@ function renderProcessBlock(row) {
       data-schedule-drag-type="process-instance"
       data-schedule-preview-title="${escapeAttribute(title)}"
       data-schedule-preview-image="${escapeAttribute(previewImage === "" ? "" : resolveAssetUrl(previewImage))}"
+      data-schedule-preview-progress="${escapeAttribute(progressText)}"
       draggable="${canDrag ? "true" : "false"}"
       title="${escapeAttribute(title)}"
       aria-label="${escapeAttribute(title)}"
@@ -599,12 +609,21 @@ function showSchedulePreview(button) {
   const preview = getPreviewElement();
   const imageUrl = button.dataset.schedulePreviewImage ?? "";
   const title = button.dataset.schedulePreviewTitle ?? "";
+  const progressText = button.dataset.schedulePreviewProgress ?? "暂无进度";
   preview.classList.remove("is-hidden");
-  preview.innerHTML = imageUrl === ""
-    ? `<div class="schedule-hover-preview-empty">无预览图</div>`
-    : `<img src="${escapeAttribute(imageUrl)}" alt="${escapeAttribute(title)}" />`;
+  preview.innerHTML = `
+    <div class="schedule-hover-preview-media">
+      ${
+        imageUrl === ""
+          ? `<div class="schedule-hover-preview-empty">无预览图</div>`
+          : `<img src="${escapeAttribute(imageUrl)}" alt="${escapeAttribute(title)}" />`
+      }
+    </div>
+    <div class="schedule-hover-preview-progress" title="${escapeAttribute(`当前进度：${progressText}`)}">当前进度：${escapeHtml(progressText)}</div>
+  `;
   preview.querySelector("img")?.addEventListener("error", () => {
-    preview.innerHTML = `<div class="schedule-hover-preview-empty">无预览图</div>`;
+    const media = preview.querySelector(".schedule-hover-preview-media");
+    if (media !== null) media.innerHTML = `<div class="schedule-hover-preview-empty">无预览图</div>`;
   }, { once: true });
   positionSchedulePreview(preview, button);
 }
