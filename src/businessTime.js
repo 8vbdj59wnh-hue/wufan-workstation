@@ -1,6 +1,7 @@
 const businessTimezoneOffset = "+08:00";
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 const hourPattern = /^(?:[01]\d|2[0-3]):00$/;
+const minutePattern = /^(?:[01]\d|2[0-3]):(?:00|05|10|15|20|25|30|35|40|45|50|55)$/;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -16,6 +17,10 @@ export function getBusinessDatePart(value) {
 
 export function getBusinessHourPart(value) {
   return getBusinessDueDateParts(value).hour;
+}
+
+export function getBusinessMinutePart(value) {
+  return getBusinessMinuteDateParts(value).time;
 }
 
 export function getBusinessDueDateParts(value) {
@@ -41,6 +46,15 @@ export function getBusinessDueDateParts(value) {
   return { date: `${shiftedYear}-${shiftedMonth}-${shiftedDay}`, hour: "00:00" };
 }
 
+export function getBusinessMinuteDateParts(value) {
+  const rawValue = String(value ?? "").trim();
+  const date = rawValue.match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? "";
+  if (date === "") return { date: "", time: "" };
+  const match = rawValue.match(/T(\d{2}):(\d{2})/);
+  if (match === null) return { date, time: "" };
+  return { date, time: `${match[1]}:${match[2]}` };
+}
+
 export function getBusinessStartDateParts(value) {
   const rawValue = String(value ?? "").trim();
   const date = rawValue.match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? "";
@@ -55,6 +69,17 @@ export function renderBusinessHourOptions(selectedHour = "", emptyLabel = "未�
   for (let hour = 0; hour < 24; hour += 1) {
     const value = `${String(hour).padStart(2, "0")}:00`;
     options.push(`<option value="${value}" ${value === selectedHour ? "selected" : ""}>${value}</option>`);
+  }
+  return options.join("");
+}
+
+export function renderBusinessMinuteOptions(selectedTime = "", emptyLabel = "未设置") {
+  const options = [`<option value="">${escapeHtml(emptyLabel)}</option>`];
+  for (let hour = 0; hour < 24; hour += 1) {
+    for (let minute = 0; minute < 60; minute += 5) {
+      const value = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+      options.push(`<option value="${value}" ${value === selectedTime ? "selected" : ""}>${value}</option>`);
+    }
   }
   return options.join("");
 }
@@ -79,6 +104,20 @@ export function collectBusinessDateTime(form, name, label = "截止时间") {
   return { value: `${date}T${hour}:00${businessTimezoneOffset}`, error: "" };
 }
 
+export function collectBusinessMinuteDateTime(form, name, label = "截止时间") {
+  const data = form instanceof FormData ? form : new FormData(form);
+  const date = data.get(`${name}Date`)?.toString().trim() ?? "";
+  const time = data.get(`${name}Time`)?.toString().trim() ?? "";
+
+  if (date === "" && time === "") return { value: null, error: "" };
+  if (date === "") return { value: null, error: `请选择${label}日期。` };
+  if (!datePattern.test(date)) return { value: null, error: `${label}日期格式不正确。` };
+  if (time === "") return { value: null, error: `请选择${label}时间。` };
+  if (!minutePattern.test(time)) return { value: null, error: `${label}只能选择 5 分钟粒度的时间。` };
+
+  return { value: `${date}T${time}:00${businessTimezoneOffset}`, error: "" };
+}
+
 export function formatBusinessDateTime(value, emptyLabel = "未设置") {
   const rawValue = String(value ?? "").trim();
   if (rawValue === "") return emptyLabel;
@@ -88,4 +127,13 @@ export function formatBusinessDateTime(value, emptyLabel = "未设置") {
 
   const hour = getBusinessHourPart(rawValue);
   return hour === "" ? date : `${date} ${hour}`;
+}
+
+export function formatBusinessMinuteDateTime(value, emptyLabel = "未设置") {
+  const rawValue = String(value ?? "").trim();
+  if (rawValue === "") return emptyLabel;
+
+  const { date, time } = getBusinessMinuteDateParts(rawValue);
+  if (date === "") return rawValue;
+  return time === "" ? date : `${date} ${time}`;
 }

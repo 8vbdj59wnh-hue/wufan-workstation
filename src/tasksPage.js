@@ -54,11 +54,15 @@ import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260705-st
 import { renderWorkFormViewer } from "./workFormViewer.js?v=20260705-state-singleton1";
 import {
   collectBusinessDateTime,
+  collectBusinessMinuteDateTime,
   formatBusinessDateTime,
+  formatBusinessMinuteDateTime,
   getBusinessDatePart,
   getBusinessHourPart,
+  getBusinessMinutePart,
   isBusinessDueDateField,
   renderBusinessHourOptions,
+  renderBusinessMinuteOptions,
 } from "./businessTime.js?v=20260705-state-singleton1";
 
 const today = "2026-06-24";
@@ -1273,7 +1277,7 @@ function renderTaskRow(task, index, options = {}) {
       <td class="task-belonging-column">${renderTaskBelonging(task)}</td>
       <td class="task-name-column">${prefix}<span class="task-line-clamp task-name-text">${escapeHtml(task.name)}</span></td>
       <td class="task-executor-column">${findName(people, task.ownerId, "未设置")}</td>
-      <td class="task-date-column">${formatBusinessDateTime(task.dueDate)}</td>
+      <td class="task-date-column">${formatBusinessMinuteDateTime(task.dueDate)}</td>
       <td class="task-date-column">${getTaskProjectDueDateText(task)}</td>
       <td class="task-status-column">${renderTaskStatusSelect(task)}</td>
       <td class="task-overdue-column">${renderOverdue(task)}</td>
@@ -1319,7 +1323,7 @@ function renderProcessTaskGroupRow(row, index) {
       </td>
       <td class="task-name-column"><span class="task-line-clamp task-name-text">${escapeHtml(task.name)}</span></td>
       <td class="task-executor-column">${findName(people, task.ownerId, "未设置")}</td>
-      <td class="task-date-column">${formatBusinessDateTime(task.dueDate)}</td>
+      <td class="task-date-column">${formatBusinessMinuteDateTime(task.dueDate)}</td>
       <td class="task-date-column">${getTaskProjectDueDateText(task)}</td>
       <td class="task-status-column">${renderTaskStatusSelect(task)}</td>
       <td class="task-overdue-column">${renderOverdue(task)}</td>
@@ -1900,7 +1904,7 @@ function downloadClearanceImportTemplate() {
       建议清仓价: "39",
       原售价: "69",
       清仓渠道: "店铺清仓位",
-      截止时间: "2026-07-15",
+      截止时间: "2026-07-15 16:30",
       注意事项: "注意不要影响主推新品价格心智",
       产品图: "",
       关联目标: getActiveGoals()[0]?.name ?? "",
@@ -2145,6 +2149,11 @@ function clearanceRowsToRecords(rows) {
 function normalizeClearanceImportDate(value) {
   const text = String(value ?? "").trim();
   if (text === "") return "";
+  const dateTimeMatch = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})[ T]([01]?\d|2[0-3]):([0-5]\d)(?::\d{2})?(?:[+-]\d{2}:?\d{2}|Z)?$/);
+  if (dateTimeMatch !== null) {
+    const [, year, month, day, hour, minute] = dateTimeMatch;
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T${hour.padStart(2, "0")}:${minute}:00+08:00`;
+  }
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
   const isoLikeMatch = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T].*)?$/);
   if (isoLikeMatch !== null) {
@@ -2203,7 +2212,7 @@ function buildClearanceImportPreviewRows(records) {
       }
       if (String(data[header] ?? "").trim() === "") errors.push(`第 ${rowNumber} 行：【${header}】不能为空`);
     }
-    if (dueDate === "") errors.push(`第 ${rowNumber} 行：【截止时间】必须是 YYYY-MM-DD`);
+    if (dueDate === "") errors.push(`第 ${rowNumber} 行：【截止时间】必须是 YYYY-MM-DD 或 YYYY-MM-DD HH:mm`);
     if (data.仓库 !== "" && !clearanceWarehouseOptions.includes(data.仓库)) errors.push(`第 ${rowNumber} 行：【仓库】不在固定选项中`);
     if (data.清仓渠道 !== "" && !clearanceChannelOptions.includes(data.清仓渠道)) errors.push(`第 ${rowNumber} 行：【清仓渠道】不在固定选项中`);
     if (goal === null) errors.push(`第 ${rowNumber} 行：系统中没有可用目标`);
@@ -2387,7 +2396,7 @@ function renderClearanceTaskRows(group) {
                 <td>${escapeHtml(task.name)}</td>
                 <td>${findName(departments, task.departmentId, "未设置")}</td>
                 <td>${findName(people, task.ownerId, "未设置")}</td>
-                <td>${formatBusinessDateTime(task.dueDate)}</td>
+                <td>${formatBusinessMinuteDateTime(task.dueDate)}</td>
                 <td>${renderTaskStatusSelect(task)}</td>
                 <td>${renderOverdue(task)}</td>
                 <td>
@@ -2416,7 +2425,7 @@ function renderClearanceCard(group, index) {
   const expandedIcon = group.expanded ? "▾" : "▸";
   const currentTaskName = currentTask === null ? getProcessCurrentStepText(group.instance ?? {}) : currentTask.name;
   const currentOwner = currentTask === null ? "未设置" : findName(people, currentTask.ownerId, "未设置");
-  const currentDueDate = formatBusinessDateTime(currentTask?.dueDate ?? info.dueDate, "未填写");
+  const currentDueDate = formatBusinessMinuteDateTime(currentTask?.dueDate ?? info.dueDate, "未填写");
   const currentStatus = currentTask === null ? processInstanceStatusNames[status] ?? status : taskStatusNames[currentTask.status] ?? currentTask.status;
 
   return `
@@ -2440,7 +2449,7 @@ function renderClearanceCard(group, index) {
             <span><b>建议清仓价</b>${renderClearanceValue(info.suggestedPrice)}</span>
             <span><b>原售价</b>${renderClearanceValue(info.originalPrice)}</span>
             <span><b>清仓渠道</b>${renderClearanceValue(info.clearanceChannel)}</span>
-            <span><b>截止时间</b>${renderClearanceValue(info.dueDate)}</span>
+            <span><b>截止时间</b>${renderClearanceValue(formatBusinessMinuteDateTime(info.dueDate, ""))}</span>
           </div>
           ${info.notice === "" ? "" : `<p class="form-note">备注：${escapeHtml(info.notice)}</p>`}
         </div>
@@ -2632,7 +2641,7 @@ function getProcessCurrentDueDate(instance) {
     .filter((date) => date !== null)
     .sort();
 
-  return formatBusinessDateTime(dueDates[0]);
+  return formatBusinessMinuteDateTime(dueDates[0]);
 }
 
 function getProcessTemplate(instance) {
@@ -3147,7 +3156,7 @@ function renderProcessStepProgress(instance) {
                   <td>${getProcessNodeStepOrder(node ?? {})}</td>
                   <td>${findName(people, task.ownerId, "未设置")}</td>
                   <td><span class="status-pill">${taskStatusNames[task.status]}</span></td>
-                  <td>${formatBusinessDateTime(task.dueDate)}</td>
+                  <td>${formatBusinessMinuteDateTime(task.dueDate)}</td>
                   <td>${renderOverdue(task)}</td>
                   <td class="wide-text">${escapeHtml(task.completionStandard ?? node?.completionStandard ?? "-")}</td>
                   <td class="wide-text">${escapeHtml(task.reviewStandard ?? node?.reviewStandard ?? "-")}</td>
@@ -3663,7 +3672,7 @@ function renderTaskDetail() {
           ${renderDetailField("当前状态", taskStatusNames[selectedTask.status])}
           ${renderDetailField("执行人", findName(people, selectedTask.ownerId, "未设置"))}
           ${renderDetailField("负责部门", findName(departments, selectedTask.departmentId, "未设置"))}
-          ${renderDetailField("截止时间", formatBusinessDateTime(selectedTask.dueDate))}
+          ${renderDetailField("截止时间", formatBusinessMinuteDateTime(selectedTask.dueDate))}
           ${renderDetailField("是否逾期", isTaskOverdue(selectedTask) ? "已逾期" : "未逾期")}
           ${renderDetailField("计划周", selectedTask.plannedWeek ?? "未安排")}
           ${renderDetailField("发起人", findName(people, selectedTask.initiatorId, "未设置"))}
@@ -3967,7 +3976,7 @@ function renderTaskModal() {
             <label>
               <span>截止时间</span>
               <input name="dueDateDate" type="date" value="${escapeHtml(getBusinessDatePart(effectiveTask?.dueDate))}" />
-              <select name="dueDateHour">${renderBusinessHourOptions(getBusinessHourPart(effectiveTask?.dueDate), "请选择小时")}</select>
+              <select name="dueDateTime">${renderBusinessMinuteOptions(getBusinessMinutePart(effectiveTask?.dueDate), "请选择时间")}</select>
             </label>
             <label>
               <span>计划周</span>
@@ -4462,7 +4471,7 @@ function deactivateTaskTemplate(templateId, rerender) {
 }
 
 function buildTaskDraft(form, task) {
-  const dueDateResult = collectBusinessDateTime(form, "dueDate");
+  const dueDateResult = collectBusinessMinuteDateTime(form, "dueDate");
   if (task === null) {
     const selectedCategoryId = getFormValue(form, "categoryId");
     let taskTemplateId = getFormValue(form, "taskTemplateId");

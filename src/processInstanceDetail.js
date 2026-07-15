@@ -14,10 +14,14 @@ import { getTaskQuadrant, isTaskOverdue } from "./data/taskUtils.js?v=20260705-s
 import { renderWorkFormViewer } from "./workFormViewer.js?v=20260705-state-singleton1";
 import {
   collectBusinessDateTime,
+  collectBusinessMinuteDateTime,
   formatBusinessDateTime,
+  formatBusinessMinuteDateTime,
   getBusinessDatePart,
   getBusinessHourPart,
+  getBusinessMinutePart,
   renderBusinessHourOptions,
+  renderBusinessMinuteOptions,
 } from "./businessTime.js?v=20260705-state-singleton1";
 
 const today = "2026-06-24";
@@ -294,7 +298,7 @@ function renderStepTask(task, editable) {
         <td>${findName(people, task.ownerId, "未设置")}</td>
         <td>${findName(departments, task.departmentId, "未设置")}</td>
         <td><span class="status-pill">${taskStatusNames[task.status]}</span></td>
-        <td>${formatBusinessDateTime(task.dueDate)}</td>
+        <td>${formatBusinessMinuteDateTime(task.dueDate)}</td>
         <td>${isTaskOverdue(task, today) ? "已逾期" : "未逾期"}</td>
         <td>${getTaskQuadrant(task.importance, task.urgency)}</td>
         <td class="wide-text">${escapeHtml(task.completionStandard ?? node?.completionStandard ?? "-")}</td>
@@ -315,7 +319,7 @@ function renderStepTask(task, editable) {
       <td><span class="status-pill">${taskStatusNames[task.status]}</span></td>
       <td>
         <input name="task__${task.id}__dueDateDate" type="date" value="${escapeHtml(getBusinessDatePart(task.dueDate))}" />
-        <select name="task__${task.id}__dueDateHour">${renderBusinessHourOptions(getBusinessHourPart(task.dueDate), "小时")}</select>
+        <select name="task__${task.id}__dueDateTime">${renderBusinessMinuteOptions(getBusinessMinutePart(task.dueDate), "时间")}</select>
       </td>
       <td>${isTaskOverdue(task, today) ? "已逾期" : "未逾期"}</td>
       <td>
@@ -541,7 +545,7 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
     const instanceDueDateResult = collectBusinessDateTime(form, "instanceDueDate");
     if (instanceDueDateResult.error !== "") return showFormError(form, instanceDueDateResult.error);
     const taskDueDateResults = new Map(
-      editableTasks.map((task) => [task.id, collectBusinessDateTime(form, `task__${task.id}__dueDate`)]),
+      editableTasks.map((task) => [task.id, collectBusinessMinuteDateTime(form, `task__${task.id}__dueDate`)]),
     );
     const invalidTaskDueDate = [...taskDueDateResults.values()].find((result) => result.error !== "");
     if (invalidTaskDueDate !== undefined) return showFormError(form, invalidTaskDueDate.error);
