@@ -1275,6 +1275,24 @@ function getDefaultFieldWidth(type) {
   return formDesignerFieldTypeMeta[type]?.width ?? 6;
 }
 
+function resolveFormDesignerFieldType(typeOrLabel) {
+  const value = String(typeOrLabel ?? "").trim();
+  if (formDesignerFieldTypeMeta[value] !== undefined) return value;
+  return formDesignerFieldTypes.find(([type, label]) => type === value || label === value)?.[0] ?? "text";
+}
+
+function getFormDesignerFieldTypeLabel(type) {
+  const normalizedType = resolveFormDesignerFieldType(type);
+  return formDesignerFieldTypeMeta[normalizedType]?.label
+    ?? formDesignerFieldTypes.find(([fieldType]) => fieldType === normalizedType)?.[1]
+    ?? "新字段";
+}
+
+function isBlankFormDesignerLabel(label) {
+  const value = String(label ?? "").trim();
+  return value === "" || value === "undefined" || value === "null";
+}
+
 function normalizeFieldWidth(field) {
   const width = Number(field.width ?? field.gridSpan);
   return [4, 6, 12].includes(width) ? width : getDefaultFieldWidth(field.type);
@@ -1313,17 +1331,20 @@ function findStandardWorkForm(standardWorkId) {
 
 function normalizeFormDesignerFields(fields = []) {
   return [...fields]
-    .map((field, index) => ({
-      fieldId: field.fieldId || field.id || createId("form-field"),
-      label: field.label || "",
-      type: field.type || "text",
-      required: field.required === true,
-      order: Number.isFinite(Number(field.order ?? field.sortOrder)) ? Number(field.order ?? field.sortOrder) : index + 1,
-      defaultValue: field.defaultValue ?? "",
-      placeholder: field.placeholder ?? "",
-      width: normalizeFieldWidth(field),
-      options: Array.isArray(field.options) ? field.options : [],
-    }))
+    .map((field, index) => {
+      const type = resolveFormDesignerFieldType(field.type);
+      return {
+        fieldId: field.fieldId || field.id || createId("form-field"),
+        label: isBlankFormDesignerLabel(field.label) ? getFormDesignerFieldTypeLabel(type) : field.label,
+        type,
+        required: field.required === true,
+        order: Number.isFinite(Number(field.order ?? field.sortOrder)) ? Number(field.order ?? field.sortOrder) : index + 1,
+        defaultValue: field.defaultValue ?? "",
+        placeholder: field.placeholder ?? "",
+        width: normalizeFieldWidth({ ...field, type }),
+        options: Array.isArray(field.options) ? field.options : [],
+      };
+    })
     .sort((left, right) => left.order - right.order)
     .map((field, index) => ({ ...field, order: index + 1 }));
 }
@@ -2357,11 +2378,11 @@ function updateFormDesignerFields(transform) {
 }
 
 function createFormDesignerField(type = "text", order = 1) {
-  const normalizedType = formDesignerFieldTypeMeta[type] ? type : "text";
+  const normalizedType = resolveFormDesignerFieldType(type);
   const fieldId = createId("form-field");
   return {
     fieldId,
-    label: formDesignerFieldTypeMeta[normalizedType]?.label ?? "新字段",
+    label: getFormDesignerFieldTypeLabel(normalizedType),
     type: normalizedType,
     required: false,
     order,
