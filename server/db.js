@@ -1293,6 +1293,43 @@ export function cancelProcessInstance(instanceId, cancelReason = "") {
   cancel();
 }
 
+export function launchWorkPlanWithProcess(workPlanId, { processInstance, tasks: generatedTasks = [], workPlan: launchedWorkPlan }) {
+  const database = getDatabase();
+  const existingWorkPlan = readExistingItem("workPlans", workPlanId);
+  if (existingWorkPlan === null) throw new Error("未找到该未来工作。");
+  if (existingWorkPlan.processInstanceId || existingWorkPlan.status === "launched") throw new Error("该工作已经发起，不能重复发起。");
+  if (!["future", "this_week"].includes(existingWorkPlan.status)) throw new Error("只有未来工作或本周工作可以发起。");
+  if (!processInstance?.id) throw new Error("缺少已发起工作数据。");
+  if (!Array.isArray(generatedTasks) || generatedTasks.length === 0) throw new Error("缺少流程步骤执行任务。");
+  if (generatedTasks.some((task) => task.processInstanceId !== processInstance.id)) throw new Error("执行任务与已发起工作不匹配。");
+
+  const now = new Date().toISOString();
+  const nextProcessInstance = {
+    ...processInstance,
+    dueDate: processInstance.dueDate ?? existingWorkPlan.dueDate ?? null,
+    updatedAt: now,
+  };
+  const nextWorkPlan = {
+    ...existingWorkPlan,
+    ...(launchedWorkPlan ?? {}),
+    id: workPlanId,
+    status: "launched",
+    processInstanceId: processInstance.id,
+    dueDate: existingWorkPlan.dueDate ?? null,
+    launchedAt: launchedWorkPlan?.launchedAt ?? now,
+    updatedAt: now,
+  };
+
+  const launch = database.transaction(() => {
+    insertItem("processInstances", nextProcessInstance);
+    for (const task of generatedTasks) insertItem("tasks", task);
+    insertItem("workPlans", nextWorkPlan);
+  });
+  launch();
+
+  return { instance: nextProcessInstance, workPlan: nextWorkPlan, tasks: generatedTasks };
+}
+
 export function createResource(routeResource, item) {
   const resourceKey = routeResourceMap[routeResource];
   if (resourceKey === undefined) throw new Error(`Unknown resource: ${routeResource}`);

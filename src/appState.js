@@ -34,6 +34,7 @@ import {
   TaskStatus,
   TaskTemplateStatus,
   TaskUrgency,
+  WorkPlanStatus,
   getValueModuleName,
   inferValueModuleIdFromText,
 } from "./data/modelOptions.js?v=20260705-state-singleton1";
@@ -1527,6 +1528,78 @@ export function startProcess({
   state.processInstances = [instance, ...state.processInstances];
   state.tasks = [...generatedTasks, ...state.tasks];
   return { instance };
+}
+
+export async function launchWorkPlanAsProcess(workPlanId, { dueDate = null } = {}) {
+  const workPlan = state.workPlans.find((item) => item.id === workPlanId);
+  if (workPlan === undefined) throw new Error("未找到该未来工作。");
+  if (workPlan.processInstanceId || workPlan.status === WorkPlanStatus.Launched) {
+    throw new Error("该工作已经发起，不能重复发起。");
+  }
+
+  const taskTemplate = state.taskTemplates.find((template) => template.id === workPlan.taskTemplateId);
+  if (taskTemplate === undefined) throw new Error("该工作计划未关联标准工作事项。");
+  if (!taskTemplate.defaultProcessTemplateId) throw new Error("该标准工作事项尚未绑定标准流程。");
+
+  const previousProcessInstances = [...state.processInstances];
+  const previousTasks = [...state.tasks];
+  const previousWorkPlans = [...state.workPlans];
+  const now = getNow();
+  const title = workPlan.title || taskTemplate.name || "未命名工作";
+  const result = startProcess({
+    templateId: taskTemplate.defaultProcessTemplateId,
+    taskTemplateId: taskTemplate.id,
+    customFields: workPlan.customFields ?? {},
+    displayTitle: title,
+    coverImageUrl: getPrimaryImageUrl(workPlan) || null,
+    name: title,
+    goalId: workPlan.goalId,
+    initiatorId: taskTemplate.ownerId,
+    description: workPlan.description || `由未来工作发起：${title}`,
+    launchAssignments: { owner: {}, accepter: {} },
+  });
+
+  if (result.error !== undefined) throw new Error(result.error);
+
+  const launchedInstance = {
+    ...result.instance,
+    dueDate: dueDate ?? result.instance.dueDate ?? null,
+    updatedAt: now,
+  };
+  const generatedTasks = state.tasks.filter((task) => task.processInstanceId === result.instance.id);
+  const launchedWorkPlan = {
+    ...workPlan,
+    status: WorkPlanStatus.Launched,
+    processInstanceId: launchedInstance.id,
+    dueDate: workPlan.dueDate ?? null,
+    launchedAt: now,
+    updatedAt: now,
+  };
+
+  state.processInstances = state.processInstances.map((instance) => (instance.id === launchedInstance.id ? launchedInstance : instance));
+
+  try {
+    const response = await authFetch(`${apiBaseUrl}/api/work-plans/${workPlanId}/launch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        processInstance: launchedInstance,
+        tasks: generatedTasks,
+        workPlan: launchedWorkPlan,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.success !== true) {
+      throw new Error(data.message ?? data.error ?? "发起工作失败，请检查本地数据库服务。");
+    }
+    if (data.data !== undefined) applyDataSnapshot(data.data);
+    return { instance: launchedInstance, workPlan: launchedWorkPlan, tasks: generatedTasks };
+  } catch (error) {
+    state.processInstances = previousProcessInstances;
+    state.tasks = previousTasks;
+    state.workPlans = previousWorkPlans;
+    throw error;
+  }
 }
 
 function getOrderedProcessInstanceTasks(instanceId) {
