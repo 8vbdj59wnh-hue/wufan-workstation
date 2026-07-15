@@ -289,6 +289,22 @@ CREATE TABLE IF NOT EXISTS notifications (
   updatedAt TEXT
 );
 
+CREATE TABLE IF NOT EXISTS issues_requirements (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  type TEXT NOT NULL,
+  module TEXT,
+  description TEXT,
+  attachments TEXT,
+  submitterId TEXT,
+  status TEXT NOT NULL,
+  solution TEXT,
+  completedBy TEXT,
+  completedAt TEXT,
+  createdAt TEXT,
+  updatedAt TEXT
+);
+
 CREATE TABLE IF NOT EXISTS content_schedules (
   id TEXT PRIMARY KEY,
   publishDate TEXT,

@@ -1519,6 +1519,8 @@ export const notifications = [];
 
 export const templates = [];
 
+export const issuesRequirements = [];
+
 export const baseMockData = Object.freeze({
   companies,
   departments,
@@ -1531,6 +1533,7 @@ export const baseMockData = Object.freeze({
   methodologies,
   notifications,
   templates,
+  issuesRequirements,
   goals,
   tasks,
   contentSchedules,

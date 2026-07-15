@@ -287,6 +287,7 @@ function getResourceWritePermission(resource, method, body = {}) {
   if (resource === "weekly-reports") return method === "POST" ? "assessment.fillWeeklyReport" : "assessment.editWeeklyReport";
   if (resource === "weekly-report-problems") return method === "POST" ? "assessment.updateProblems" : "assessment.updateProblems";
   if (resource === "content-schedules") return method === "POST" ? "contentSchedules.create" : "contentSchedules.edit";
+  if (resource === "issues-requirements") return "settings.editStandardWorkForms";
   return null;
 }
 

@@ -518,6 +518,28 @@ textarea {
   color: #111827;
 }
 
+.issue-attachment-list,
+.selected-attachment-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.issue-attachment-list a {
+  padding: 3px 7px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #f9fafb;
+  color: #374151;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.issue-attachment-upload {
+  display: grid;
+  gap: 8px;
+}
+
 .task-filters .task-filter-checkbox {
   align-items: center;
   display: flex;

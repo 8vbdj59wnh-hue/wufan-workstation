@@ -65,6 +65,8 @@ const moduleHashMap = {
   people: "settings",
   stores: "settings",
   categories: "settings",
+  "issues-requirements": "settings",
+  "settings/issues-requirements": "settings",
 };
 
 function getRouteHash() {
@@ -74,8 +76,9 @@ function getRouteHash() {
 function scrollToCurrentHashSection() {
   const hash = getRouteHash();
   if (hash === "") return;
+  const sectionId = hash.includes("/") ? hash.split("/").at(-1) : hash;
   window.requestAnimationFrame(() => {
-    document.getElementById(hash)?.scrollIntoView({ block: "start" });
+    document.getElementById(sectionId)?.scrollIntoView({ block: "start" });
   });
 }
 

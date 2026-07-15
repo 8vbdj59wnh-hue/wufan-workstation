@@ -23,6 +23,7 @@ import {
   weeklyReports,
   workPlans,
   notifications,
+  issuesRequirements,
 } from "../src/data/mockData.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -358,6 +359,25 @@ const resourceConfigs = {
       "updatedAt",
     ],
   },
+  issuesRequirements: {
+    table: "issues_requirements",
+    columns: [
+      "id",
+      "title",
+      "type",
+      "module",
+      "description",
+      "attachments",
+      "submitterId",
+      "status",
+      "solution",
+      "completedBy",
+      "completedAt",
+      "createdAt",
+      "updatedAt",
+    ],
+    jsonFields: ["attachments"],
+  },
   contentSchedules: {
     table: "content_schedules",
     columns: [
@@ -428,6 +448,7 @@ const routeResourceMap = {
   methodologies: "methodologies",
   templates: "templates",
   notifications: "notifications",
+  "issues-requirements": "issuesRequirements",
   "content-schedules": "contentSchedules",
   "work-plans": "workPlans",
 };
@@ -453,6 +474,7 @@ const seedData = {
   processInstances,
   methodologies: [],
   notifications,
+  issuesRequirements,
   contentSchedules,
   workPlans,
 };
@@ -882,6 +904,23 @@ function runLightweightMigrations() {
     )
   `);
   getDatabase().exec(`
+    CREATE TABLE IF NOT EXISTS issues_requirements (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      type TEXT NOT NULL,
+      module TEXT,
+      description TEXT,
+      attachments TEXT,
+      submitterId TEXT,
+      status TEXT NOT NULL,
+      solution TEXT,
+      completedBy TEXT,
+      completedAt TEXT,
+      createdAt TEXT,
+      updatedAt TEXT
+    )
+  `);
+  getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS weekly_reports (
       id TEXT PRIMARY KEY,
       weekStart TEXT NOT NULL,
@@ -1079,6 +1118,8 @@ export function readResource(resourceKey) {
       ? " ORDER BY sortOrder ASC, name ASC, id ASC"
       : resourceKey === "templates"
         ? " ORDER BY createdAt DESC, id DESC"
+        : resourceKey === "issuesRequirements"
+          ? " ORDER BY createdAt DESC, id DESC"
         : "";
   return getDatabase()
     .prepare(`SELECT ${columns} FROM ${config.table}${orderBy}`)

@@ -1,4 +1,4 @@
-import { createPersistentResource, getCurrentUser, state, updatePersistentResource, validateCurrentSession } from "./appState.js?v=20260705-state-singleton1";
+import { createPersistentResource, getCurrentUser, resolveAssetUrl, state, updatePersistentResource, uploadGenericFile, validateCurrentSession } from "./appState.js?v=20260705-state-singleton1";
 import {
   applyPermissionTemplate,
   dataScopeOptions,
@@ -23,10 +23,12 @@ let positions = state.positions;
 let people = state.people;
 let categories = state.categories;
 let stores = state.stores;
+let issuesRequirements = state.issuesRequirements;
 let modalState = null;
 let activeOrganizationTab = "chart";
 let permissionFilters = { keyword: "", departmentId: "", loginOnly: false };
 let storeFilters = { keyword: "", platform: "", status: "" };
+let issueFilters = { keyword: "", type: "", status: "", module: "" };
 let selectedPermissionPersonId = null;
 let permissionDraft = null;
 let permissionSaveMessage = "";
@@ -59,12 +61,18 @@ function replaceStores(nextStores) {
   stores = state.stores;
 }
 
+function replaceIssuesRequirements(nextItems) {
+  state.issuesRequirements.splice(0, state.issuesRequirements.length, ...nextItems);
+  issuesRequirements = state.issuesRequirements;
+}
+
 const settingsResourceByEntity = {
   department: "departments",
   position: "positions",
   person: "persons",
   category: "categories",
   store: "stores",
+  issueRequirement: "issues-requirements",
 };
 
 function upsertItem(items, item) {
@@ -102,6 +110,30 @@ function getNow() {
 function findName(items, id, fallback) {
   return items.find((item) => item.id === id)?.name ?? fallback;
 }
+
+const issueRequirementTypes = [
+  { value: "requirement", label: "需求" },
+  { value: "issue", label: "问题" },
+];
+
+const issueRequirementStatuses = [
+  { value: "pending", label: "待处理" },
+  { value: "processing", label: "处理中" },
+  { value: "verifying", label: "待验证" },
+  { value: "done", label: "已完成" },
+];
+
+const issueRequirementModules = [
+  { value: "目标", label: "目标" },
+  { value: "优先级", label: "优先级" },
+  { value: "执行任务", label: "执行任务" },
+  { value: "流程/标准化", label: "流程/标准化" },
+  { value: "内容排期", label: "内容排期" },
+  { value: "模板中心", label: "模板中心" },
+  { value: "设置", label: "设置" },
+  { value: "权限", label: "权限" },
+  { value: "其他", label: "其他" },
+];
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -231,6 +263,30 @@ function renderActionButton(label, action, entity, id, variant = "") {
     >
       ${label}
     </button>
+  `;
+}
+
+function renderSimpleValueOptions(items, selectedValue, emptyLabel) {
+  const emptyOption = emptyLabel === undefined ? "" : `<option value="">${emptyLabel}</option>`;
+  return `${emptyOption}${items
+    .map((item) => `<option value="${escapeHtml(item.value)}" ${item.value === selectedValue ? "selected" : ""}>${escapeHtml(item.label)}</option>`)
+    .join("")}`;
+}
+
+function getIssueRequirementTypeName(type) {
+  return issueRequirementTypes.find((item) => item.value === type)?.label ?? type;
+}
+
+function getIssueRequirementStatusName(status) {
+  return issueRequirementStatuses.find((item) => item.value === status)?.label ?? status;
+}
+
+function renderDetailField(label, value) {
+  return `
+    <div class="detail-item">
+      <span>${escapeHtml(label)}</span>
+      <strong>${value}</strong>
+    </div>
   `;
 }
 
@@ -719,6 +775,100 @@ function renderStoreSection() {
   `;
 }
 
+function getFilteredIssuesRequirements() {
+  const keyword = issueFilters.keyword.trim().toLowerCase();
+  return [...issuesRequirements]
+    .filter((item) => item.status !== "deleted")
+    .filter((item) => {
+      if (issueFilters.type !== "" && item.type !== issueFilters.type) return false;
+      if (issueFilters.status !== "" && item.status !== issueFilters.status) return false;
+      if (issueFilters.module !== "" && item.module !== issueFilters.module) return false;
+      if (keyword === "") return true;
+      return [item.title, item.module, item.description, findName(people, item.submitterId, "")]
+        .join(" ")
+        .toLowerCase()
+        .includes(keyword);
+    })
+    .sort((left, right) => String(right.createdAt ?? "").localeCompare(String(left.createdAt ?? "")));
+}
+
+function renderIssueAttachmentList(attachments = []) {
+  if (!Array.isArray(attachments) || attachments.length === 0) return `<span class="muted-action">无附件</span>`;
+  return `
+    <div class="issue-attachment-list">
+      ${attachments.map((attachment) => {
+        const url = resolveAssetUrl(attachment.url ?? attachment.filePath ?? "");
+        return `
+          <a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">
+            ${escapeHtml(attachment.originalName ?? attachment.filename ?? "附件")}
+          </a>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderIssuesRequirementsSection() {
+  const items = getFilteredIssuesRequirements();
+  const canEdit = canCurrentUser("settings.editStandardWorkForms");
+  return `
+    <section class="settings-section" id="issues-requirements">
+      <div class="section-heading with-actions">
+        <div>
+          <h2>需求与问题中心</h2>
+          <p class="form-note">用于开发阶段收集系统问题和优化需求，形成闭环管理。</p>
+        </div>
+        ${canEdit ? `<button class="primary-button" type="button" data-action="add" data-entity="issueRequirement">新增需求/问题</button>` : ""}
+      </div>
+      <form class="task-filters issue-filters" aria-label="需求与问题筛选">
+        <label><span>关键词</span><input name="issueKeyword" value="${escapeHtml(issueFilters.keyword)}" placeholder="标题、描述、提交人" /></label>
+        <label><span>类型</span><select name="issueType">${renderSimpleValueOptions(issueRequirementTypes, issueFilters.type, "全部类型")}</select></label>
+        <label><span>所属模块</span><select name="issueModule">${renderSimpleValueOptions(issueRequirementModules, issueFilters.module, "全部模块")}</select></label>
+        <label><span>状态</span><select name="issueStatus">${renderSimpleValueOptions(issueRequirementStatuses, issueFilters.status, "全部状态")}</select></label>
+      </form>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>标题</th>
+              <th>类型</th>
+              <th>所属模块</th>
+              <th>提交人</th>
+              <th>状态</th>
+              <th>时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${
+              items.length === 0
+                ? `<tr><td colspan="7">暂无需求或问题。</td></tr>`
+                : items.map((item) => `
+                    <tr>
+                      <td>${escapeHtml(item.title)}</td>
+                      <td>${escapeHtml(getIssueRequirementTypeName(item.type))}</td>
+                      <td>${escapeHtml(item.module ?? "-")}</td>
+                      <td>${escapeHtml(findName(people, item.submitterId, "未设置"))}</td>
+                      <td>${escapeHtml(getIssueRequirementStatusName(item.status))}</td>
+                      <td>${escapeHtml(item.createdAt ?? "-")}</td>
+                      <td>
+                        <span class="row-actions">
+                          <button class="text-button" type="button" data-action="view-issue" data-id="${escapeHtml(item.id)}">查看</button>
+                          ${canEdit ? `<button class="text-button" type="button" data-action="edit" data-entity="issueRequirement" data-id="${escapeHtml(item.id)}">编辑</button>` : ""}
+                          ${canEdit && item.status !== "done" ? `<button class="text-button" type="button" data-action="complete-issue" data-id="${escapeHtml(item.id)}">完成</button>` : ""}
+                          ${canEdit ? `<button class="text-button danger-link" type="button" data-action="delete-issue" data-id="${escapeHtml(item.id)}">删除</button>` : ""}
+                        </span>
+                      </td>
+                    </tr>
+                  `).join("")
+            }
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
 function getFilteredPermissionPeople() {
   const keyword = permissionFilters.keyword.trim().toLowerCase();
   return people.filter((person) => {
@@ -874,6 +1024,8 @@ function renderPermissionSection() {
 }
 
 function getModalTitle() {
+  if (modalState.mode === "view") return "查看需求/问题";
+  if (modalState.mode === "complete") return "完成需求/问题";
   const actionName = modalState.mode === "add" ? "新增" : "编辑";
   const entityNames = {
     department: "部门",
@@ -881,6 +1033,7 @@ function getModalTitle() {
     person: "人员",
     category: "分类",
     store: "店铺",
+    issueRequirement: "需求/问题",
   };
 
   return `${actionName}${entityNames[modalState.entity]}`;
@@ -1079,18 +1232,79 @@ function renderStoreForm() {
   `;
 }
 
+function getEditingIssueRequirement() {
+  return issuesRequirements.find((item) => item.id === modalState?.id) ?? null;
+}
+
+function renderIssueAttachmentUpload(currentAttachments = []) {
+  return `
+    <div class="issue-attachment-upload">
+      <label>
+        <span>附件</span>
+        <input name="issueAttachments" type="file" multiple />
+      </label>
+      <div class="selected-attachment-list">
+        ${renderIssueAttachmentList(currentAttachments)}
+      </div>
+    </div>
+  `;
+}
+
+function renderIssueRequirementForm() {
+  const item = getEditingIssueRequirement();
+  const isView = modalState.mode === "view";
+  const isComplete = modalState.mode === "complete";
+  const attachments = modalState.attachments ?? item?.attachments ?? [];
+
+  if (isView) {
+    return `
+      <div class="detail-grid">
+        ${renderDetailField("标题", escapeHtml(item?.title ?? ""))}
+        ${renderDetailField("类型", escapeHtml(getIssueRequirementTypeName(item?.type ?? "")))}
+        ${renderDetailField("所属模块", escapeHtml(item?.module ?? "-"))}
+        ${renderDetailField("提交人", escapeHtml(findName(people, item?.submitterId, "未设置")))}
+        ${renderDetailField("状态", escapeHtml(getIssueRequirementStatusName(item?.status ?? "")))}
+        ${renderDetailField("创建时间", escapeHtml(item?.createdAt ?? "-"))}
+      </div>
+      <div class="detail-block"><h3>描述</h3><p>${escapeHtml(item?.description ?? "无")}</p></div>
+      <div class="detail-block"><h3>附件</h3>${renderIssueAttachmentList(item?.attachments ?? [])}</div>
+      <div class="detail-block"><h3>处理方案</h3><p>${escapeHtml(item?.solution ?? "未填写")}</p></div>
+    `;
+  }
+
+  if (isComplete) {
+    return `
+      <div class="detail-block"><h3>${escapeHtml(item?.title ?? "")}</h3><p>${escapeHtml(item?.description ?? "")}</p></div>
+      <label><span>解决方案</span><textarea name="solution" rows="5">${escapeHtml(item?.solution ?? "")}</textarea></label>
+      <label><span>完成人</span><select name="completedBy">${renderOptions(people, item?.completedBy ?? getCurrentUser()?.id ?? "", "请选择完成人")}</select></label>
+    `;
+  }
+
+  return `
+    <label><span>标题</span><input name="title" value="${escapeHtml(item?.title ?? "")}" autocomplete="off" /></label>
+    <label><span>类型</span><select name="type">${renderSimpleValueOptions(issueRequirementTypes, item?.type ?? "requirement")}</select></label>
+    <label><span>所属模块</span><select name="module">${renderSimpleValueOptions(issueRequirementModules, item?.module ?? "", "请选择模块")}</select></label>
+    <label><span>提交人</span><select name="submitterId">${renderOptions(people, item?.submitterId ?? getCurrentUser()?.id ?? "", "请选择提交人")}</select></label>
+    <label><span>状态</span><select name="status">${renderSimpleValueOptions(issueRequirementStatuses, item?.status ?? "pending")}</select></label>
+    <label><span>描述</span><textarea name="description" rows="5">${escapeHtml(item?.description ?? "")}</textarea></label>
+    ${renderIssueAttachmentUpload(attachments)}
+  `;
+}
+
 function renderModalFields() {
   if (modalState.entity === "department") return renderDepartmentForm();
   if (modalState.entity === "position") return renderPositionForm();
   if (modalState.entity === "person") return renderPersonForm();
   if (modalState.entity === "category") return renderCategoryForm();
   if (modalState.entity === "store") return renderStoreForm();
+  if (modalState.entity === "issueRequirement") return renderIssueRequirementForm();
 
   return "";
 }
 
 function renderModal() {
   if (modalState === null) return "";
+  const isReadonly = modalState.mode === "view";
 
   return `
     <div class="modal-backdrop" role="presentation">
@@ -1099,7 +1313,7 @@ function renderModal() {
           <h2>${getModalTitle()}</h2>
           <div class="modal-header-actions">
             <button class="secondary-button" type="button" data-action="close-modal">取消</button>
-            <button class="primary-button" type="button" data-action="submit-modal-form">保存</button>
+            ${isReadonly ? "" : `<button class="primary-button" type="button" data-action="submit-modal-form">保存</button>`}
             <button class="icon-button" type="button" data-action="close-modal" aria-label="关闭">×</button>
           </div>
         </div>
@@ -1108,7 +1322,7 @@ function renderModal() {
           ${renderModalFields()}
           <div class="modal-actions">
             <button class="secondary-button" type="button" data-action="close-modal">取消</button>
-            <button class="primary-button" type="submit">保存</button>
+            ${isReadonly ? "" : `<button class="primary-button" type="submit">保存</button>`}
           </div>
         </form>
       </div>
@@ -1381,6 +1595,126 @@ async function saveStore(form, rerender) {
   }
 }
 
+async function uploadIssueAttachments(files = []) {
+  const uploaded = [];
+  for (const file of files) {
+    const result = await uploadGenericFile(file);
+    uploaded.push({
+      originalName: result.originalName ?? result.filename ?? file.name,
+      filename: result.filename ?? "",
+      filePath: result.filePath ?? result.url ?? "",
+      url: result.url ?? result.filePath ?? "",
+      mimeType: result.mimeType ?? file.type,
+      uploadedAt: result.uploadedAt ?? getNow(),
+    });
+  }
+  return uploaded;
+}
+
+async function saveIssueRequirement(form, rerender) {
+  const current = getEditingIssueRequirement();
+  const now = getNow();
+
+  if (modalState.mode === "complete") {
+    const solution = getFormValue(form, "solution");
+    const completedBy = getFormValue(form, "completedBy");
+    if (solution === "") return setModalError("请填写解决方案。", rerender);
+    if (completedBy === "") return setModalError("请选择完成人。", rerender);
+    const item = {
+      ...(current ?? {}),
+      id: modalState.id,
+      solution,
+      completedBy,
+      completedAt: now,
+      status: "done",
+      updatedAt: now,
+    };
+    try {
+      const saved = await persistSettingsEntity("issueRequirement", item);
+      replaceIssuesRequirements(upsertItem(issuesRequirements, saved));
+      modalState = null;
+      rerender();
+    } catch (error) {
+      setModalError(error.message || "需求/问题保存失败，请检查本地数据库服务。", rerender);
+    }
+    return;
+  }
+
+  const title = getFormValue(form, "title");
+  const type = getFormValue(form, "type");
+  const module = getFormValue(form, "module");
+  const submitterId = getFormValue(form, "submitterId");
+  const status = getFormValue(form, "status") || "pending";
+  const description = getFormValue(form, "description");
+
+  if (title === "") return setModalError("标题不能为空。", rerender);
+  if (!["requirement", "issue"].includes(type)) return setModalError("请选择类型。", rerender);
+  if (module === "") return setModalError("请选择所属模块。", rerender);
+  if (submitterId === "") return setModalError("请选择提交人。", rerender);
+  if (!issueRequirementStatuses.some((item) => item.value === status)) return setModalError("状态无效。", rerender);
+
+  let uploadedAttachments = [];
+  const input = form.elements.issueAttachments;
+  const files = input?.files === undefined ? [] : Array.from(input.files);
+  try {
+    uploadedAttachments = await uploadIssueAttachments(files);
+  } catch (error) {
+    return setModalError(error.message || "附件上传失败。", rerender);
+  }
+
+  const item =
+    modalState.mode === "add"
+      ? {
+          id: createId("issue"),
+          title,
+          type,
+          module,
+          description,
+          attachments: [...(modalState.attachments ?? []), ...uploadedAttachments],
+          submitterId,
+          status,
+          solution: "",
+          completedBy: "",
+          completedAt: null,
+          createdAt: now,
+          updatedAt: now,
+        }
+      : {
+          ...(current ?? {}),
+          id: modalState.id,
+          title,
+          type,
+          module,
+          description,
+          attachments: [...(modalState.attachments ?? current?.attachments ?? []), ...uploadedAttachments],
+          submitterId,
+          status,
+          updatedAt: now,
+        };
+
+  try {
+    const saved = await persistSettingsEntity("issueRequirement", item, modalState.mode);
+    replaceIssuesRequirements(upsertItem(issuesRequirements, saved));
+    modalState = null;
+    rerender();
+  } catch (error) {
+    setModalError(error.message || "需求/问题保存失败，请检查本地数据库服务。", rerender);
+  }
+}
+
+async function softDeleteIssueRequirement(id, rerender) {
+  const item = issuesRequirements.find((issue) => issue.id === id);
+  if (item === undefined) return;
+  const updated = { ...item, status: "deleted", updatedAt: getNow() };
+  try {
+    const saved = await persistSettingsEntity("issueRequirement", updated);
+    replaceIssuesRequirements(upsertItem(issuesRequirements, saved));
+    rerender();
+  } catch (error) {
+    window.alert(error.message || "删除失败，请检查本地数据库服务。");
+  }
+}
+
 function validateDepartmentDrop(draggedDepartmentId, targetDepartmentId) {
   if (draggedDepartmentId === targetDepartmentId) return "部门不能调整为自己的下级。";
   if (createsDepartmentCycle(draggedDepartmentId, targetDepartmentId)) return "不能形成循环部门关系。";
@@ -1610,6 +1944,7 @@ async function handleFormSubmit(event, rerender) {
   if (modalState.entity === "person") return await savePerson(event.target, rerender);
   if (modalState.entity === "category") return await saveCategory(event.target, rerender);
   if (modalState.entity === "store") return await saveStore(event.target, rerender);
+  if (modalState.entity === "issueRequirement") return await saveIssueRequirement(event.target, rerender);
 }
 
 function collectPermissionDraft(form, currentPermissions) {
@@ -1707,8 +2042,32 @@ export function bindSettingsPageEvents(rerender) {
       return;
     }
 
+    if (action === "view-issue") {
+      modalState = { mode: "view", entity: "issueRequirement", id, error: "" };
+      rerender();
+      return;
+    }
+
+    if (action === "complete-issue") {
+      modalState = { mode: "complete", entity: "issueRequirement", id, error: "" };
+      rerender();
+      return;
+    }
+
+    if (action === "delete-issue" && window.confirm("确定要删除该记录吗？删除后列表将不再显示。")) {
+      await softDeleteIssueRequirement(id, rerender);
+      return;
+    }
+
     if (action === "add" || action === "edit") {
-      modalState = { mode: action, entity, id, error: "" };
+      const issueRequirement = entity === "issueRequirement" ? issuesRequirements.find((item) => item.id === id) : null;
+      modalState = {
+        mode: action,
+        entity,
+        id,
+        error: "",
+        ...(entity === "issueRequirement" ? { attachments: issueRequirement?.attachments ?? [] } : {}),
+      };
       rerender();
       return;
     }
@@ -1769,6 +2128,20 @@ export function bindSettingsPageEvents(rerender) {
     });
   });
 
+  settingsPage.querySelectorAll("[name='issueKeyword'], [name='issueType'], [name='issueModule'], [name='issueStatus']").forEach((input) => {
+    const updateIssueFilters = () => {
+      issueFilters = {
+        keyword: settingsPage.querySelector("[name='issueKeyword']")?.value ?? "",
+        type: settingsPage.querySelector("[name='issueType']")?.value ?? "",
+        module: settingsPage.querySelector("[name='issueModule']")?.value ?? "",
+        status: settingsPage.querySelector("[name='issueStatus']")?.value ?? "",
+      };
+      rerender();
+    };
+    input.addEventListener("input", updateIssueFilters);
+    input.addEventListener("change", updateIssueFilters);
+  });
+
   if (permissionForm !== null) {
     permissionForm.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -1785,12 +2158,14 @@ export function renderSettingsPage() {
         ${canCurrentUser("settings.viewPeople") ? `<a href="#people">人员管理</a>` : ""}
         ${canCurrentUser("settings.managePermissions") ? `<a href="#permissions">权限管理</a>` : ""}
         ${canCurrentUser("settings.viewStores") ? `<a href="#stores">店铺管理</a>` : ""}
+        ${canCurrentUser("settings.editStandardWorkForms") ? `<a href="#issues-requirements">需求与问题中心</a>` : ""}
         <a href="#categories">分类设置</a>
       </div>
       ${canCurrentUser("settings.viewOrg") ? renderOrganizationSection() : ""}
       ${canCurrentUser("settings.viewPeople") ? renderPeopleSection() : ""}
       ${canCurrentUser("settings.managePermissions") ? renderPermissionSection() : ""}
       ${canCurrentUser("settings.viewStores") ? renderStoreSection() : ""}
+      ${canCurrentUser("settings.editStandardWorkForms") ? renderIssuesRequirementsSection() : ""}
       ${renderCategorySection()}
       ${renderModal()}
     </div>

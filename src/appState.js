@@ -17,6 +17,7 @@ import {
   weeklyReports as initialWeeklyReports,
   methodologies as initialMethodologies,
   notifications as initialNotifications,
+  issuesRequirements as initialIssuesRequirements,
   workPlans as initialWorkPlans,
 } from "./data/mockData.js?v=20260705-state-singleton1";
 import {
@@ -74,6 +75,7 @@ export const state = {
   methodologies: initialMethodologies.map((methodology) => ({ ...methodology })),
   notifications: initialNotifications.map((notification) => ({ ...notification })),
   templates: initialTemplates.map((template) => ({ ...template })),
+  issuesRequirements: initialIssuesRequirements.map((item) => ({ ...item })),
 };
 
 normalizeTaskSubmitRequirements();
@@ -133,6 +135,7 @@ export function getDataSnapshot() {
     methodologies: state.methodologies,
     notifications: state.notifications,
     templates: state.templates,
+    issuesRequirements: state.issuesRequirements,
   };
 }
 
@@ -162,6 +165,7 @@ export function applyDataSnapshot(data) {
   replaceArray(state.methodologies, data.methodologies);
   replaceArray(state.notifications, data.notifications);
   replaceArray(state.templates, data.templates);
+  replaceArray(state.issuesRequirements, data.issuesRequirements ?? initialIssuesRequirements);
   isApplyingRemoteData = false;
   ensureTaskTemplatesHaveProcessTemplates();
   ensureDefaultStandardWorkLibrary();
