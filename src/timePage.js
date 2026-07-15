@@ -24,6 +24,13 @@ import {
   workPlanStatusNames,
 } from "./data/modelOptions.js";
 import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, quadrantNames } from "./data/taskUtils.js?v=20260705-state-singleton1";
+import {
+  collectBusinessDateTime,
+  formatBusinessDateTime,
+  getBusinessDatePart,
+  getBusinessHourPart,
+  renderBusinessHourOptions,
+} from "./businessTime.js?v=20260705-state-singleton1";
 
 const currentWeek = getCurrentWeek();
 const departments = state.departments;
@@ -295,7 +302,7 @@ function renderWorkRow(workPlan, actions = "", listType = null, index = 0) {
       <td>${escapeHtml(getWorkValueModuleName(workPlan))}</td>
       <td>${findName(people, template?.ownerId ?? null, "未设置")}</td>
       <td><span class="task-soft-tag">${getTaskQuadrant(workPlan.importance, workPlan.urgency)}</span></td>
-      <td>${workPlan.dueDate ?? "未设置"}</td>
+      <td>${formatBusinessDateTime(workPlan.dueDate)}</td>
       <td><span class="status-pill">${workPlanStatusNames[workPlan.status]}</span></td>
       <td><span class="row-actions">${actions}</span></td>
     </tr>
@@ -310,7 +317,7 @@ function renderFutureWorks() {
       ${renderWorkBulkBar("future")}
       <div class="table-wrap">
         <table class="data-table task-table">
-          <thead><tr>${renderWorkSelectHeader(workPlans, "future")}<th>产品图</th><th>工作事项</th><th>对齐目标</th><th>标准工作事项</th><th>价值链模块</th><th>负责人</th><th>优先级</th><th>期望完成日期</th><th>状态</th><th>操作</th></tr></thead>
+          <thead><tr>${renderWorkSelectHeader(workPlans, "future")}<th>产品图</th><th>工作事项</th><th>对齐目标</th><th>标准工作事项</th><th>价值链模块</th><th>负责人</th><th>优先级</th><th>截止时间</th><th>状态</th><th>操作</th></tr></thead>
           <tbody>
             ${workPlans.length === 0 ? `<tr><td colspan="11">暂无未来工作</td></tr>` : workPlans
               .map((workPlan, index) =>
@@ -358,7 +365,7 @@ function renderPriorityQuadrants() {
                         <div class="row-actions">${renderCover(workPlan)}</div>
                         <strong>${escapeHtml(getWorkTitle(workPlan))}</strong>
                         <p>${findName(goals, workPlan.goalId, "未对齐目标")} · ${escapeHtml(template?.name ?? "未关联标准工作")}</p>
-                        <p>${findName(people, template?.ownerId ?? null, "未设置")} · ${workPlan.dueDate ?? "未设置"} · ${workPlanStatusNames[workPlan.status]}</p>
+                        <p>${findName(people, template?.ownerId ?? null, "未设置")} · ${formatBusinessDateTime(workPlan.dueDate)} · ${workPlanStatusNames[workPlan.status]}</p>
                         <div class="row-actions">
                           <button class="text-button" type="button" data-action="toggle-importance" data-work-id="${workPlan.id}">${taskImportanceNames[workPlan.importance]}</button>
                           <button class="text-button" type="button" data-action="toggle-urgency" data-work-id="${workPlan.id}">${taskUrgencyNames[workPlan.urgency]}</button>
@@ -386,7 +393,7 @@ function renderThisWeekWorks() {
       ${renderWorkBulkBar("week")}
       <div class="table-wrap">
         <table class="data-table task-table">
-          <thead><tr>${renderWorkSelectHeader(workPlans, "week")}<th>产品图</th><th>工作事项</th><th>对齐目标</th><th>标准工作事项</th><th>价值链模块</th><th>负责人</th><th>优先级</th><th>期望完成日期</th><th>状态</th><th>操作</th></tr></thead>
+          <thead><tr>${renderWorkSelectHeader(workPlans, "week")}<th>产品图</th><th>工作事项</th><th>对齐目标</th><th>标准工作事项</th><th>价值链模块</th><th>负责人</th><th>优先级</th><th>截止时间</th><th>状态</th><th>操作</th></tr></thead>
           <tbody>
             ${workPlans.length === 0 ? `<tr><td colspan="11">暂无本周工作</td></tr>` : workPlans
               .map((workPlan, index) =>
@@ -425,9 +432,26 @@ async function updateWorkPlan(workPlanId, patch) {
   const workPlan = state.workPlans.find((item) => item.id === workPlanId);
   if (workPlan === undefined) return false;
   const updatedWorkPlan = { ...workPlan, ...patch, updatedAt: now };
+  const shouldSyncProcessDueDate = Object.prototype.hasOwnProperty.call(patch, "dueDate") && workPlan.processInstanceId;
+  const processInstance = shouldSyncProcessDueDate
+    ? state.processInstances.find((item) => item.id === workPlan.processInstanceId)
+    : undefined;
+  const previousProcessInstance = processInstance === undefined ? null : { ...processInstance };
+  let savedWorkPlan = false;
   try {
     await updatePersistentResource("work-plans", workPlanId, updatedWorkPlan);
+    savedWorkPlan = true;
+    if (shouldSyncProcessDueDate && processInstance !== undefined) {
+      const savedInstance = await updatePersistentResource("process-instances", processInstance.id, { dueDate: updatedWorkPlan.dueDate ?? null });
+      state.processInstances = state.processInstances.map((item) => (item.id === processInstance.id ? { ...item, ...savedInstance } : item));
+    }
   } catch (error) {
+    if (savedWorkPlan) {
+      await updatePersistentResource("work-plans", workPlanId, { dueDate: workPlan.dueDate ?? null }).catch(() => {});
+    }
+    if (previousProcessInstance !== null) {
+      state.processInstances = state.processInstances.map((item) => (item.id === previousProcessInstance.id ? previousProcessInstance : item));
+    }
     console.error("工作计划保存失败", error);
     window.alert(error.message || "工作计划保存失败，请检查本地数据库服务。");
     return false;
@@ -522,10 +546,13 @@ async function launchWorkPlan(workPlanId) {
   if (result.error !== undefined) return window.alert(result.error);
 
   const now = getNow();
+  const syncedDueDate = workPlan.dueDate ?? result.instance.dueDate ?? null;
+  result.instance = { ...result.instance, dueDate: syncedDueDate, updatedAt: now };
   const updatedWorkPlan = {
     ...workPlan,
     status: WorkPlanStatus.Launched,
     processInstanceId: result.instance.id,
+    dueDate: syncedDueDate,
     launchedAt: now,
     updatedAt: now,
   };
@@ -543,20 +570,82 @@ async function launchWorkPlan(workPlanId) {
   window.alert("已发起工作，流程步骤执行任务已进入执行任务列表。");
 }
 
+function requestWorkPlanEditDraft(workPlan) {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML = `
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-label="编辑工作">
+        <div class="modal-header">
+          <h2>编辑工作</h2>
+          <button class="icon-button" type="button" data-action="cancel-work-plan-edit" aria-label="关闭">×</button>
+        </div>
+        <form class="modal-form work-plan-edit-form">
+          <div class="form-error" hidden></div>
+          <label>
+            <span>本次工作标题</span>
+            <input name="title" value="${escapeHtml(workPlan.title ?? getWorkTitle(workPlan))}" autocomplete="off" />
+          </label>
+          <div class="form-grid">
+            <label>
+              <span>截止时间日期</span>
+              <input name="dueDateDate" type="date" value="${escapeHtml(getBusinessDatePart(workPlan.dueDate))}" />
+            </label>
+            <label>
+              <span>截止时间小时</span>
+              <select name="dueDateHour">${renderBusinessHourOptions(getBusinessHourPart(workPlan.dueDate), "请选择小时")}</select>
+            </label>
+          </div>
+          <label>
+            <span>补充说明</span>
+            <textarea name="description" rows="3">${escapeHtml(workPlan.description ?? "")}</textarea>
+          </label>
+          <div class="modal-actions">
+            <button class="secondary-button" type="button" data-action="cancel-work-plan-edit">取消</button>
+            <button class="primary-button" type="submit">保存</button>
+          </div>
+        </form>
+      </div>
+    `;
+
+    const close = (value) => {
+      backdrop.remove();
+      resolve(value);
+    };
+
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop || event.target.closest("[data-action='cancel-work-plan-edit']")) close(null);
+    });
+    backdrop.querySelector("form")?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const dueDateResult = collectBusinessDateTime(form, "dueDate");
+      const error = form.querySelector(".form-error");
+      if (dueDateResult.error !== "") {
+        if (error !== null) {
+          error.textContent = dueDateResult.error;
+          error.hidden = false;
+        }
+        return;
+      }
+      close({
+        title: getFormValue(form, "title").trim() || null,
+        dueDate: dueDateResult.value,
+        description: getFormValue(form, "description") || null,
+      });
+    });
+
+    document.body.append(backdrop);
+    backdrop.querySelector("input[name='title']")?.focus();
+  });
+}
+
 async function editWorkPlan(workPlanId) {
   const workPlan = state.workPlans.find((item) => item.id === workPlanId);
   if (workPlan === undefined) return;
-  const title = window.prompt("请输入本次工作标题", workPlan.title ?? getWorkTitle(workPlan));
-  if (title === null) return;
-  const dueDate = window.prompt("请输入期望完成日期，例如 2026-07-03，可留空", workPlan.dueDate ?? "");
-  if (dueDate === null) return;
-  if (dueDate !== "" && Number.isNaN(Date.parse(`${dueDate}T00:00:00+08:00`))) {
-    window.alert("期望完成日期格式不正确。");
-    return;
-  }
-  const description = window.prompt("请输入补充说明，可留空", workPlan.description ?? "");
-  if (description === null) return;
-  await updateWorkPlan(workPlanId, { title: title.trim() || null, dueDate: dueDate || null, description: description || null });
+  const draft = await requestWorkPlanEditDraft(workPlan);
+  if (draft === null) return;
+  await updateWorkPlan(workPlanId, draft);
 }
 
 export function bindTimePageEvents(rerender) {

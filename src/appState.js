@@ -20,6 +20,7 @@ import {
   issuesRequirements as initialIssuesRequirements,
   workPlans as initialWorkPlans,
 } from "./data/mockData.js?v=20260705-state-singleton1";
+import { formatBusinessDateTime } from "./businessTime.js?v=20260705-state-singleton1";
 import {
   CategoryType,
   PersonRole,
@@ -482,7 +483,7 @@ function buildTaskNotification(userId, task, type) {
     processInstanceId: task.processInstanceId ?? null,
     type,
     title: getTaskReminderTitle(type),
-    message: task.dueDate ? `${task.name}｜截止 ${task.dueDate}` : task.name,
+    message: task.dueDate ? `${task.name}｜截止时间 ${formatBusinessDateTime(task.dueDate)}` : task.name,
     status: "unread",
     priority: getTaskReminderPriority(type),
     dueDate: task.dueDate ?? null,
@@ -841,7 +842,7 @@ const realStandardWorkDefinitions = [
     extraFields: [
       field("new-dev-product", "产品名称", "productName", "text", false, "请输入产品名称", null, true, 4),
       field("new-dev-direction", "产品方向", "productDirection", "text", false, "请输入产品方向", null, true, 5),
-      field("new-dev-date", "预计完成日期", "expectedDoneDate", "date", false, "", null, true, 6),
+      field("new-dev-date", "截止时间", "expectedDoneDate", "datetime_hour", false, "", null, true, 6),
     ],
   },
   {
@@ -900,7 +901,7 @@ const standardWorkFormDefinitions = {
     ["imageRequirement", "图片要求", "textarea", true, "填写构图、光线、产品比例、是否插花等要求", [], false],
     ["needPublish", "是否需要发布", "select", false, "请选择", ["是", "否"], true],
     ["publishPlatform", "发布平台", "select", false, "请选择发布平台", ["淘宝", "天猫", "小红书", "私域"], true],
-    ["dueDate", "期望完成日期", "date", true, "", [], true],
+    ["dueDate", "截止时间", "datetime_hour", true, "", [], true],
     ["remark", "补充说明", "textarea", false, "其他特殊要求", [], false],
   ],
   新品上新: [
@@ -943,7 +944,7 @@ const standardWorkFormDefinitions = {
     ["suggestedPrice", "建议清仓价", "number", false, "请输入建议清仓价", [], true],
     ["originalPrice", "原售价", "number", false, "请输入原售价", [], true],
     ["clearanceChannel", "清仓渠道", "select", true, "请选择清仓渠道", ["店铺清仓位", "直播间", "私域", "老客群", "其他"], true],
-    ["dueDate", "期望完成日期", "date", true, "", [], true],
+    ["dueDate", "截止时间", "datetime_hour", true, "", [], true],
     ["notice", "注意事项", "textarea", false, "填写售后、品牌影响等注意事项", [], false],
   ],
   "新品开发": [
@@ -967,7 +968,7 @@ const standardWorkFormDefinitions = {
     ["currentProblem", "当前问题", "textarea", true, "现在哪里不好", [], false],
     ["referenceStyle", "参考风格", "textarea", false, "填写参考链接或风格说明", [], false],
     ["highlightProducts", "需要突出产品", "textarea", false, "哪些产品要重点展示", [], false],
-    ["dueDate", "期望完成日期", "date", true, "", [], true],
+    ["dueDate", "截止时间", "datetime_hour", true, "", [], true],
     ["remark", "补充要求", "textarea", false, "其他要求", [], false],
   ],
   产品包装设计: [
@@ -980,7 +981,7 @@ const standardWorkFormDefinitions = {
     ["materialRequirement", "材质要求", "textarea", false, "纸盒、泡沫、珍珠棉等", [], false],
     ["styleRequirement", "风格要求", "textarea", true, "极简、高级、自然、复古等", [], false],
     ["costRequirement", "成本要求", "text", false, "单个包装成本限制", [], true],
-    ["dueDate", "期望完成日期", "date", true, "", [], true],
+    ["dueDate", "截止时间", "datetime_hour", true, "", [], true],
     ["remark", "补充说明", "textarea", false, "其他要求", [], false],
   ],
   人员招聘: [
@@ -1004,7 +1005,7 @@ const standardWorkFormDefinitions = {
     ["problems", "存在问题", "textarea", true, "填写阻碍、偏差、风险", [], false],
     ["coordinationNeeded", "需要协调事项", "textarea", false, "需要其他部门或总经办支持什么", [], false],
     ["nextActions", "下一步动作", "textarea", true, "下一阶段要做什么", [], false],
-    ["dueDate", "截止日期", "date", false, "下次检查时间", [], true],
+    ["dueDate", "截止时间", "datetime_hour", false, "下次检查时间", [], true],
     ["remark", "补充说明", "textarea", false, "其他说明", [], false],
   ],
   执行任务检查: [
@@ -1015,7 +1016,7 @@ const standardWorkFormDefinitions = {
     ["foundProblems", "发现问题", "textarea", false, "检查后填写发现的问题", [], false],
     ["impactLevel", "影响程度", "select", false, "请选择影响程度", ["轻微", "一般", "严重"], true],
     ["rectificationRequirement", "整改要求", "textarea", false, "发现问题后的整改要求", [], false],
-    ["rectificationDueDate", "整改截止日期", "date", false, "", [], true],
+    ["rectificationDueDate", "整改截止时间", "datetime_hour", false, "", [], true],
     ["remark", "补充说明", "textarea", false, "其他说明", [], false],
   ],
 };
@@ -1567,15 +1568,16 @@ export async function launchWorkPlanAsProcess(workPlanId, { dueDate = null } = {
 
   const launchedInstance = {
     ...result.instance,
-    dueDate: dueDate ?? result.instance.dueDate ?? null,
+    dueDate: dueDate ?? workPlan.dueDate ?? result.instance.dueDate ?? null,
     updatedAt: now,
   };
+  const syncedDueDate = launchedInstance.dueDate ?? null;
   const generatedTasks = state.tasks.filter((task) => task.processInstanceId === result.instance.id);
   const launchedWorkPlan = {
     ...workPlan,
     status: WorkPlanStatus.Launched,
     processInstanceId: launchedInstance.id,
-    dueDate: workPlan.dueDate ?? null,
+    dueDate: syncedDueDate,
     launchedAt: now,
     updatedAt: now,
   };

@@ -39,6 +39,12 @@ import {
 import { getPrimaryImageUrl, getTaskQuadrant, isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
 import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260705-state-singleton1";
 import { selectTask } from "./tasksPage.js?v=20260705-state-singleton1";
+import {
+  collectBusinessDateTime,
+  formatBusinessDateTime,
+  isBusinessDueDateField,
+  renderBusinessHourOptions,
+} from "./businessTime.js?v=20260705-state-singleton1";
 
 const departments = state.departments;
 const categories = state.categories;
@@ -357,6 +363,16 @@ function renderCustomFieldInput(field) {
     `;
   }
 
+  if (isBusinessDueDateField(field)) {
+    return `
+      <label>
+        <span>${field.label}${requiredMark}</span>
+        <input name="custom__${field.key}Date" type="date" />
+        <select name="custom__${field.key}Hour">${renderBusinessHourOptions("", "请选择小时")}</select>
+      </label>
+    `;
+  }
+
   const inputType = field.type === "date" ? "date" : field.type === "number" ? "number" : field.type === "url" ? "url" : "text";
   return `<label><span>${field.label}${requiredMark}</span><input name="custom__${field.key}" type="${inputType}" placeholder="${escapeHtml(field.placeholder ?? "")}" /></label>`;
 }
@@ -407,7 +423,10 @@ function renderStandardWorkAttachmentsField() {
 function collectCustomFields(form, template) {
   const formData = new FormData(form);
   return getSortedFormFields(template).reduce((result, field) => {
-    if (field.type === "multi_select") {
+    if (isBusinessDueDateField(field)) {
+      const dateTime = collectBusinessDateTime(form, `custom__${field.key}`, field.label);
+      result[field.key] = dateTime.error === "" ? dateTime.value ?? "" : `__INVALID_BUSINESS_TIME__:${dateTime.error}`;
+    } else if (field.type === "multi_select") {
       result[field.key] = formData.getAll(`custom__${field.key}`).map((item) => item.toString());
     } else {
       result[field.key] = getFormValue(form, `custom__${field.key}`);
@@ -425,8 +444,10 @@ function validateCustomFields(customFields, template) {
     const value = customFields[field.key];
     const isEmpty = Array.isArray(value) ? value.length === 0 : value === "";
     if (isEmpty) continue;
+    if (typeof value === "string" && value.startsWith("__INVALID_BUSINESS_TIME__:")) return value.replace("__INVALID_BUSINESS_TIME__:", "");
     if (field.type === "number" && Number.isNaN(Number(value))) return `${field.label}必须是数字。`;
-    if (field.type === "date" && Number.isNaN(Date.parse(`${value}T00:00:00+08:00`))) return `${field.label}必须是合法日期。`;
+    if (isBusinessDueDateField(field) && !String(value).includes("T")) return `${field.label}必须选择日期和整点小时。`;
+    if (field.type === "date" && !isBusinessDueDateField(field) && Number.isNaN(Date.parse(`${value}T00:00:00+08:00`))) return `${field.label}必须是合法日期。`;
     if (field.type === "url" && !isValidUrl(value)) return `${field.label}必须是有效链接。`;
     if (field.type === "image" && !isValidImagePath(value)) return `${field.label}必须是上传后的图片路径。`;
     if (field.type === "select" && !getDynamicFieldOptions(field).some((option) => option.value === value)) return `${field.label}必须选择有效选项。`;
@@ -798,7 +819,7 @@ function renderGoalTaskTable(goal) {
             <th>负责人</th>
             <th>负责部门</th>
             <th>四象限</th>
-            <th>截止日期</th>
+            <th>截止时间</th>
             <th>状态</th>
             <th>是否逾期</th>
           </tr>
@@ -815,7 +836,7 @@ function renderGoalTaskTable(goal) {
                         <td>${findName(people, task.ownerId, "未设置")}</td>
                         <td>${findName(departments, task.departmentId, "未设置")}</td>
                         <td>${getTaskQuadrant(task.importance, task.urgency)}</td>
-                        <td>${task.dueDate ?? "未设置"}</td>
+                        <td>${formatBusinessDateTime(task.dueDate)}</td>
                         <td><span class="status-pill">${taskStatusNames[task.status]}</span></td>
                         <td>${renderTaskOverdue(task)}</td>
                       </tr>
@@ -1259,8 +1280,12 @@ function renderGoalTaskModal() {
               <input name="title" placeholder="可留空，系统会根据填写信息生成" autocomplete="off" />
             </label>
             <label>
-              <span>期望完成日期</span>
-              <input name="dueDate" type="date" />
+              <span>截止时间日期</span>
+              <input name="dueDateDate" type="date" />
+            </label>
+            <label>
+              <span>截止时间小时</span>
+              <select name="dueDateHour">${renderBusinessHourOptions("", "请选择小时")}</select>
             </label>
           </div>
           ${renderTaskTemplateLockedInfo(selectedTemplate)}
@@ -1326,6 +1351,7 @@ function buildGoalTaskDraft(form, goalId) {
   const valueModuleId = inferValueModuleIdForTemplate(template);
   const customFields = withValueModuleCustomFields(template === null ? {} : collectCustomFields(form, template), valueModuleId);
 
+  const dueDateResult = collectBusinessDateTime(form, "dueDate");
   return {
     goalId,
     departmentId,
@@ -1337,7 +1363,8 @@ function buildGoalTaskDraft(form, goalId) {
     title: getFormValue(form, "title") || null,
     importance: TaskImportance.Important,
     urgency: TaskUrgency.NotUrgent,
-    dueDate: getFormValue(form, "dueDate") || null,
+    dueDate: dueDateResult.value,
+    dueDateError: dueDateResult.error,
     description: getFormValue(form, "description") || null,
   };
 }
@@ -1349,7 +1376,7 @@ function validateGoalTaskDraft(draft) {
   if (!draft.template.defaultProcessTemplateId) return "该标准工作事项尚未绑定标准流程，请先到标准工作库中配置。";
   const customError = validateCustomFields(draft.customFields, draft.template);
   if (customError !== "") return customError;
-  if (draft.dueDate !== null && Number.isNaN(Date.parse(`${draft.dueDate}T00:00:00+08:00`))) return "期望完成日期必须是合法日期。";
+  if (draft.dueDateError !== "") return draft.dueDateError;
 
   return "";
 }

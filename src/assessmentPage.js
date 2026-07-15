@@ -9,6 +9,7 @@ import {
 import { getDataScope, hasPermission } from "./permissions.js?v=20260705-state-singleton1";
 import { ProcessInstanceStatus, TaskStatus, processInstanceStatusNames, taskStatusNames } from "./data/modelOptions.js";
 import { isCanceledStatus, isDoneStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
+import { formatBusinessDateTime } from "./businessTime.js?v=20260705-state-singleton1";
 
 const today = new Date().toISOString().slice(0, 10);
 let activeAssessmentTab = "stats";
@@ -597,10 +598,10 @@ function renderPersonDetailModal() {
         <div class="modal-form">
           <p class="form-note">${range.startDate} 至 ${range.endDate}</p>
           <div class="table-wrap"><table class="data-table">
-            <thead><tr><th>任务名</th><th>所属流程</th><th>对齐目标</th><th>负责部门</th><th>状态</th><th>截止日期</th><th>完成时间</th><th>是否逾期</th><th>提交结果</th></tr></thead>
+            <thead><tr><th>任务名</th><th>所属流程</th><th>对齐目标</th><th>负责部门</th><th>状态</th><th>截止时间</th><th>完成时间</th><th>是否逾期</th><th>提交结果</th></tr></thead>
             <tbody>${tasks.length === 0 ? `<tr><td colspan="9">暂无任务明细</td></tr>` : tasks.map((task) => {
               const process = state.processInstances.find((item) => item.id === task.processInstanceId);
-              return `<tr><td>${escapeHtml(task.name)}</td><td>${escapeHtml(process?.name ?? "无")}</td><td>${findName(state.goals, task.goalId, "未对齐目标")}</td><td>${findName(state.departments, task.departmentId)}</td><td>${taskStatusNames[task.status] ?? task.status}</td><td>${task.dueDate ?? "未设置"}</td><td>${task.completedAt ?? "未完成"}</td><td>${isTaskOverdue(task, today) ? "已逾期" : "否"}</td><td>${hasSubmittedResult(task) ? "是" : "否"}</td></tr>`;
+              return `<tr><td>${escapeHtml(task.name)}</td><td>${escapeHtml(process?.name ?? "无")}</td><td>${findName(state.goals, task.goalId, "未对齐目标")}</td><td>${findName(state.departments, task.departmentId)}</td><td>${taskStatusNames[task.status] ?? task.status}</td><td>${formatBusinessDateTime(task.dueDate)}</td><td>${task.completedAt ?? "未完成"}</td><td>${isTaskOverdue(task, today) ? "已逾期" : "否"}</td><td>${hasSubmittedResult(task) ? "是" : "否"}</td></tr>`;
             }).join("")}</tbody>
           </table></div>
         </div>

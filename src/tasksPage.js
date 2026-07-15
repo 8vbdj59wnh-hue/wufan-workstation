@@ -52,6 +52,14 @@ import { getPrimaryImageUrl, getTaskQuadrant, isCanceledStatus, isDoneStatus, is
 import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260705-state-singleton1";
 import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260705-state-singleton1";
 import { renderWorkFormViewer } from "./workFormViewer.js?v=20260705-state-singleton1";
+import {
+  collectBusinessDateTime,
+  formatBusinessDateTime,
+  getBusinessDatePart,
+  getBusinessHourPart,
+  isBusinessDueDateField,
+  renderBusinessHourOptions,
+} from "./businessTime.js?v=20260705-state-singleton1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -157,13 +165,13 @@ const clearanceImportHeaders = [
   "建议清仓价",
   "原售价",
   "清仓渠道",
-  "期望完成日期",
+  "截止时间",
   "注意事项",
   "产品图",
   "关联目标",
   "发起人",
 ];
-const clearanceRequiredImportHeaders = ["清仓产品", "当前库存", "清仓原因", "清仓渠道", "期望完成日期"];
+const clearanceRequiredImportHeaders = ["清仓产品", "当前库存", "清仓原因", "清仓渠道", "截止时间"];
 
 const hiddenLegacyStandardWorkNames = [
   "小红书笔记发布",
@@ -832,7 +840,7 @@ function getClearanceDisplayInfo(instance, tasks = []) {
     suggestedPrice: getClearanceField(customFields, ["suggestedPrice", "clearancePrice", "建议清仓价"]),
     originalPrice: getClearanceField(customFields, ["originalPrice", "price", "原售价"]),
     clearanceChannel: getClearanceField(customFields, ["clearanceChannel", "channel", "清仓渠道"]),
-    dueDate: getClearanceField(customFields, ["dueDate", "expectedDate", "期望完成日期"]) || instance?.dueDate || fallbackTask.dueDate || "",
+    dueDate: getClearanceField(customFields, ["dueDate", "expectedDate", "截止时间", "期望完成日期"]) || instance?.dueDate || fallbackTask.dueDate || "",
     notice: getClearanceField(customFields, ["notice", "remark", "备注", "说明"]),
   };
 }
@@ -1014,6 +1022,16 @@ function renderCustomFieldInput(field, customFields = {}) {
     `;
   }
 
+  if (isBusinessDueDateField(field)) {
+    return `
+      <label>
+        <span>${field.label}${requiredMark}</span>
+        <input name="custom__${field.key}Date" type="date" value="${escapeHtml(getBusinessDatePart(value))}" />
+        <select name="custom__${field.key}Hour">${renderBusinessHourOptions(getBusinessHourPart(value), "请选择小时")}</select>
+      </label>
+    `;
+  }
+
   const inputType = field.type === "date" ? "date" : field.type === "number" ? "number" : field.type === "url" ? "url" : "text";
   return `
     <label>
@@ -1040,7 +1058,10 @@ function renderCustomFieldsForm(template, customFields = {}) {
 function collectCustomFields(form, template) {
   const formData = new FormData(form);
   return getSortedFormFields(template).reduce((result, field) => {
-    if (field.type === "multi_select") {
+    if (isBusinessDueDateField(field)) {
+      const dateTime = collectBusinessDateTime(form, `custom__${field.key}`, field.label);
+      result[field.key] = dateTime.error === "" ? dateTime.value ?? "" : `__INVALID_BUSINESS_TIME__:${dateTime.error}`;
+    } else if (field.type === "multi_select") {
       result[field.key] = formData.getAll(`custom__${field.key}`).map((item) => item.toString());
     } else {
       result[field.key] = getFormValue(form, `custom__${field.key}`);
@@ -1058,8 +1079,10 @@ function validateCustomFields(customFields, template) {
     const value = customFields[field.key];
     const isEmpty = Array.isArray(value) ? value.length === 0 : value === "";
     if (isEmpty) continue;
+    if (typeof value === "string" && value.startsWith("__INVALID_BUSINESS_TIME__:")) return value.replace("__INVALID_BUSINESS_TIME__:", "");
     if (field.type === "number" && Number.isNaN(Number(value))) return `${field.label}必须是数字。`;
-    if (field.type === "date" && Number.isNaN(Date.parse(`${value}T00:00:00+08:00`))) return `${field.label}必须是合法日期。`;
+    if (isBusinessDueDateField(field) && !String(value).includes("T")) return `${field.label}必须选择日期和整点小时。`;
+    if (field.type === "date" && !isBusinessDueDateField(field) && Number.isNaN(Date.parse(`${value}T00:00:00+08:00`))) return `${field.label}必须是合法日期。`;
     if (field.type === "url" && !isValidUrl(value)) return `${field.label}必须是有效链接。`;
     if (field.type === "image" && !isValidImagePath(value)) return `${field.label}必须是上传后的图片路径。`;
     if (field.type === "select" && !getDynamicFieldOptions(field).some((option) => option.value === value)) return `${field.label}必须选择有效选项。`;
@@ -1218,6 +1241,14 @@ function renderTaskStatusSelect(task) {
   `;
 }
 
+function getTaskProjectDueDateText(task) {
+  const instanceId = task.processInstanceId ?? "";
+  if (instanceId === "") return "-";
+  const instance = state.processInstances.find((item) => item.id === instanceId) ?? null;
+  if (instance?.dueDate === undefined || instance.dueDate === null || instance.dueDate === "") return "-";
+  return formatBusinessDateTime(instance.dueDate, "-");
+}
+
 function renderTaskRow(task, index, options = {}) {
   const rowClass = [
     task.id === selectedTaskId ? "is-selected" : "",
@@ -1240,7 +1271,8 @@ function renderTaskRow(task, index, options = {}) {
       <td class="task-belonging-column">${renderTaskBelonging(task)}</td>
       <td class="task-name-column">${prefix}<span class="task-line-clamp task-name-text">${escapeHtml(task.name)}</span></td>
       <td class="task-executor-column">${findName(people, task.ownerId, "未设置")}</td>
-      <td class="task-date-column">${task.dueDate ?? "未设置"}</td>
+      <td class="task-date-column">${formatBusinessDateTime(task.dueDate)}</td>
+      <td class="task-date-column">${getTaskProjectDueDateText(task)}</td>
       <td class="task-status-column">${renderTaskStatusSelect(task)}</td>
       <td class="task-overdue-column">${renderOverdue(task)}</td>
       <td class="task-department-column">${findName(departments, task.departmentId, "未设置")}</td>
@@ -1285,7 +1317,8 @@ function renderProcessTaskGroupRow(row, index) {
       </td>
       <td class="task-name-column"><span class="task-line-clamp task-name-text">${escapeHtml(task.name)}</span></td>
       <td class="task-executor-column">${findName(people, task.ownerId, "未设置")}</td>
-      <td class="task-date-column">${task.dueDate ?? "未设置"}</td>
+      <td class="task-date-column">${formatBusinessDateTime(task.dueDate)}</td>
+      <td class="task-date-column">${getTaskProjectDueDateText(task)}</td>
       <td class="task-status-column">${renderTaskStatusSelect(task)}</td>
       <td class="task-overdue-column">${renderOverdue(task)}</td>
       <td class="task-department-column">${findName(departments, task.departmentId, "未设置")}</td>
@@ -1865,7 +1898,7 @@ function downloadClearanceImportTemplate() {
       建议清仓价: "39",
       原售价: "69",
       清仓渠道: "店铺清仓位",
-      期望完成日期: "2026-07-15",
+      截止时间: "2026-07-15",
       注意事项: "注意不要影响主推新品价格心智",
       产品图: "",
       关联目标: getActiveGoals()[0]?.name ?? "",
@@ -2155,15 +2188,20 @@ function buildClearanceImportPreviewRows(records) {
     const data = { ...record };
     const rowNumber = index + 2;
     const errors = [];
-    const dueDate = normalizeClearanceImportDate(data.期望完成日期);
+    const dueDateFieldValue = data.截止时间 ?? data.期望完成日期;
+    const dueDate = normalizeClearanceImportDate(dueDateFieldValue);
     const goal = getClearanceGoalByName(data.关联目标);
     const initiator = getClearanceInitiatorByName(data.发起人);
 
     if (template === null) errors.push("未找到已启用的【库存清仓】标准工作");
     for (const header of clearanceRequiredImportHeaders) {
+      if (header === "截止时间") {
+        if (String(data.截止时间 ?? data.期望完成日期 ?? "").trim() === "") errors.push(`第 ${rowNumber} 行：【截止时间】不能为空`);
+        continue;
+      }
       if (String(data[header] ?? "").trim() === "") errors.push(`第 ${rowNumber} 行：【${header}】不能为空`);
     }
-    if (dueDate === "") errors.push(`第 ${rowNumber} 行：【期望完成日期】必须是 YYYY-MM-DD`);
+    if (dueDate === "") errors.push(`第 ${rowNumber} 行：【截止时间】必须是 YYYY-MM-DD`);
     if (data.仓库 !== "" && !clearanceWarehouseOptions.includes(data.仓库)) errors.push(`第 ${rowNumber} 行：【仓库】不在固定选项中`);
     if (data.清仓渠道 !== "" && !clearanceChannelOptions.includes(data.清仓渠道)) errors.push(`第 ${rowNumber} 行：【清仓渠道】不在固定选项中`);
     if (goal === null) errors.push(`第 ${rowNumber} 行：系统中没有可用目标`);
@@ -2173,7 +2211,7 @@ function buildClearanceImportPreviewRows(records) {
       errors.push(`第 ${rowNumber} 行：【发起人】不存在`);
     }
 
-    data.期望完成日期 = dueDate;
+    data.截止时间 = dueDate;
     return { rowNumber, data, errors };
   });
 }
@@ -2229,7 +2267,7 @@ function getClearanceImportCustomFields(data) {
     suggestedPrice: data.建议清仓价 || "",
     originalPrice: data.原售价 || "",
     clearanceChannel: data.清仓渠道,
-    dueDate: data.期望完成日期,
+    dueDate: data.截止时间,
     notice: data.注意事项 || "",
   };
 }
@@ -2333,7 +2371,7 @@ function renderClearanceTaskRows(group) {
             <th>任务名</th>
             <th>负责部门</th>
             <th>负责人</th>
-            <th>截止日期</th>
+            <th>截止时间</th>
             <th>状态</th>
             <th>是否逾期</th>
             <th>操作</th>
@@ -2347,7 +2385,7 @@ function renderClearanceTaskRows(group) {
                 <td>${escapeHtml(task.name)}</td>
                 <td>${findName(departments, task.departmentId, "未设置")}</td>
                 <td>${findName(people, task.ownerId, "未设置")}</td>
-                <td>${task.dueDate ?? "未设置"}</td>
+                <td>${formatBusinessDateTime(task.dueDate)}</td>
                 <td>${renderTaskStatusSelect(task)}</td>
                 <td>${renderOverdue(task)}</td>
                 <td>
@@ -2376,7 +2414,7 @@ function renderClearanceCard(group, index) {
   const expandedIcon = group.expanded ? "▾" : "▸";
   const currentTaskName = currentTask === null ? getProcessCurrentStepText(group.instance ?? {}) : currentTask.name;
   const currentOwner = currentTask === null ? "未设置" : findName(people, currentTask.ownerId, "未设置");
-  const currentDueDate = (currentTask?.dueDate ?? info.dueDate) || "未填写";
+  const currentDueDate = formatBusinessDateTime(currentTask?.dueDate ?? info.dueDate, "未填写");
   const currentStatus = currentTask === null ? processInstanceStatusNames[status] ?? status : taskStatusNames[currentTask.status] ?? currentTask.status;
 
   return `
@@ -2400,7 +2438,7 @@ function renderClearanceCard(group, index) {
             <span><b>建议清仓价</b>${renderClearanceValue(info.suggestedPrice)}</span>
             <span><b>原售价</b>${renderClearanceValue(info.originalPrice)}</span>
             <span><b>清仓渠道</b>${renderClearanceValue(info.clearanceChannel)}</span>
-            <span><b>期望完成日期</b>${renderClearanceValue(info.dueDate)}</span>
+            <span><b>截止时间</b>${renderClearanceValue(info.dueDate)}</span>
           </div>
           ${info.notice === "" ? "" : `<p class="form-note">备注：${escapeHtml(info.notice)}</p>`}
         </div>
@@ -2408,7 +2446,7 @@ function renderClearanceCard(group, index) {
       <div class="clearance-current-row">
         <span><b>当前任务节点</b>${escapeHtml(currentTaskName ?? "暂无执行任务")}</span>
         <span><b>当前负责人</b>${escapeHtml(currentOwner)}</span>
-        <span><b>截止日期</b>${escapeHtml(currentDueDate)}</span>
+        <span><b>截止时间</b>${escapeHtml(currentDueDate)}</span>
         <span><b>任务状态</b>${escapeHtml(currentStatus)}</span>
         <span>${currentTask === null ? `<span class="status-pill">无任务</span>` : renderOverdue(currentTask)}</span>
         <span class="row-actions">
@@ -2487,7 +2525,7 @@ function renderClearanceImportModal() {
                 <th>库存</th>
                 <th>仓库</th>
                 <th>清仓渠道</th>
-                <th>期望完成日期</th>
+                <th>截止时间</th>
                 <th>关联目标</th>
                 <th>校验结果</th>
               </tr>
@@ -2505,7 +2543,7 @@ function renderClearanceImportModal() {
                           <td>${escapeHtml(row.data.当前库存)}</td>
                           <td>${escapeHtml(row.data.仓库)}</td>
                           <td>${escapeHtml(row.data.清仓渠道)}</td>
-                          <td>${escapeHtml(row.data.期望完成日期)}</td>
+                          <td>${escapeHtml(row.data.截止时间)}</td>
                           <td>${escapeHtml(row.data.关联目标)}</td>
                           <td>${row.errors.length === 0 ? "可导入" : escapeHtml(row.errors.join("；"))}</td>
                         </tr>
@@ -2592,7 +2630,7 @@ function getProcessCurrentDueDate(instance) {
     .filter((date) => date !== null)
     .sort();
 
-  return dueDates[0] ?? "未设置";
+  return formatBusinessDateTime(dueDates[0]);
 }
 
 function getProcessTemplate(instance) {
@@ -2779,7 +2817,7 @@ function renderTaskTable() {
   const hasPartialSelection = selectedVisibleCount > 0 && !allVisibleSelected;
   const selectedCount = selectedTaskIds.size;
   const dueDateSortLabel = taskDueDateSort === "asc" ? "取消" : "↑";
-  const dueDateSortTitle = taskDueDateSort === "asc" ? "取消截止日期排序，恢复默认顺序" : "按截止日期从早到晚排序";
+  const dueDateSortTitle = taskDueDateSort === "asc" ? "取消任务截止时间排序，恢复默认顺序" : "按任务截止时间从早到晚排序";
 
   return `
     <section class="settings-section">
@@ -2806,10 +2844,11 @@ function renderTaskTable() {
               <th class="task-executor-column">执行人</th>
               <th class="task-date-column">
                 <span class="sortable-table-header">
-                  <span>截止日期</span>
+                  <span>任务截止时间</span>
                   <button class="table-sort-button ${taskDueDateSort === "" ? "" : "is-active"}" type="button" data-action="toggle-due-date-sort" title="${dueDateSortTitle}" aria-label="${dueDateSortTitle}">${dueDateSortLabel}</button>
                 </span>
               </th>
+              <th class="task-date-column">项目截止时间</th>
               <th class="task-status-column">状态</th>
               <th class="task-overdue-column">是否逾期</th>
               <th class="task-department-column">负责部门</th>
@@ -2820,7 +2859,7 @@ function renderTaskTable() {
           <tbody>
             ${
               tableRows.length === 0
-                ? `<tr><td colspan="11">暂无匹配的执行任务</td></tr>`
+                ? `<tr><td colspan="12">暂无匹配的执行任务</td></tr>`
                 : tableRows
                     .map((row, index) => (row.type === "task" ? renderTaskRow(row.task, index) : renderProcessTaskGroupRow(row, index)))
                     .join("")
@@ -2993,7 +3032,7 @@ function renderProcessProgressTable() {
               <th>当前步骤</th>
               <th>步骤进度</th>
               <th>当前负责人</th>
-              <th>当前步骤截止时间</th>
+              <th>截止时间</th>
               <th>状态</th>
               <th>是否逾期</th>
               <th>发起人</th>
@@ -3106,7 +3145,7 @@ function renderProcessStepProgress(instance) {
                   <td>${getProcessNodeStepOrder(node ?? {})}</td>
                   <td>${findName(people, task.ownerId, "未设置")}</td>
                   <td><span class="status-pill">${taskStatusNames[task.status]}</span></td>
-                  <td>${task.dueDate ?? "未设置"}</td>
+                  <td>${formatBusinessDateTime(task.dueDate)}</td>
                   <td>${renderOverdue(task)}</td>
                   <td class="wide-text">${escapeHtml(task.completionStandard ?? node?.completionStandard ?? "-")}</td>
                   <td class="wide-text">${escapeHtml(task.reviewStandard ?? node?.reviewStandard ?? "-")}</td>
@@ -3622,7 +3661,7 @@ function renderTaskDetail() {
           ${renderDetailField("当前状态", taskStatusNames[selectedTask.status])}
           ${renderDetailField("执行人", findName(people, selectedTask.ownerId, "未设置"))}
           ${renderDetailField("负责部门", findName(departments, selectedTask.departmentId, "未设置"))}
-          ${renderDetailField("截止日期", selectedTask.dueDate ?? "未设置")}
+          ${renderDetailField("截止时间", formatBusinessDateTime(selectedTask.dueDate))}
           ${renderDetailField("是否逾期", isTaskOverdue(selectedTask) ? "已逾期" : "未逾期")}
           ${renderDetailField("计划周", selectedTask.plannedWeek ?? "未安排")}
           ${renderDetailField("发起人", findName(people, selectedTask.initiatorId, "未设置"))}
@@ -3924,8 +3963,9 @@ function renderTaskModal() {
               <input name="startDate" type="date" value="${effectiveTask?.startDate ?? ""}" />
             </label>
             <label>
-              <span>截止日期</span>
-              <input name="dueDate" type="date" value="${effectiveTask?.dueDate ?? ""}" />
+              <span>截止时间</span>
+              <input name="dueDateDate" type="date" value="${escapeHtml(getBusinessDatePart(effectiveTask?.dueDate))}" />
+              <select name="dueDateHour">${renderBusinessHourOptions(getBusinessHourPart(effectiveTask?.dueDate), "请选择小时")}</select>
             </label>
             <label>
               <span>计划周</span>
@@ -4005,7 +4045,7 @@ function getEditingTaskTemplate() {
   return modalState?.templateId === undefined ? null : getTaskTemplate(modalState.templateId);
 }
 
-const templateFieldTypes = ["text", "textarea", "select", "date", "number", "image", "file", "link"];
+const templateFieldTypes = ["text", "textarea", "select", "date", "datetime_hour", "number", "image", "file", "link"];
 
 function normalizeTemplateFormFields(fields = []) {
   return [...fields]
@@ -4420,6 +4460,7 @@ function deactivateTaskTemplate(templateId, rerender) {
 }
 
 function buildTaskDraft(form, task) {
+  const dueDateResult = collectBusinessDateTime(form, "dueDate");
   if (task === null) {
     const selectedCategoryId = getFormValue(form, "categoryId");
     let taskTemplateId = getFormValue(form, "taskTemplateId");
@@ -4441,7 +4482,8 @@ function buildTaskDraft(form, task) {
       goalId: getFormValue(form, "goalId") || getActiveGoals()[0]?.id || "",
       initiatorId: getFormValue(form, "initiatorId") || people[0]?.id || "",
       startDate: getFormValue(form, "startDate") || null,
-      dueDate: getFormValue(form, "dueDate") || null,
+      dueDate: dueDateResult.value,
+      dueDateError: dueDateResult.error,
       plannedWeek: getFormValue(form, "plannedWeek") || null,
       remark,
     };
@@ -4459,7 +4501,8 @@ function buildTaskDraft(form, task) {
     importance: getFormValue(form, "importance") || task.importance,
     urgency: getFormValue(form, "urgency") || task.urgency,
     startDate: getFormValue(form, "startDate") || null,
-    dueDate: getFormValue(form, "dueDate") || null,
+    dueDate: dueDateResult.value,
+    dueDateError: dueDateResult.error,
     plannedWeek: getFormValue(form, "plannedWeek") || null,
   };
 }
@@ -4484,8 +4527,9 @@ function validateTaskDraft(draft, isAdd) {
     }
   }
 
+  if (draft.dueDateError !== "") return draft.dueDateError;
   if (draft.startDate !== null && draft.dueDate !== null && draft.startDate > draft.dueDate) {
-    return "计划开始日期不能晚于截止日期。";
+    return "计划开始时间不能晚于截止时间。";
   }
   if (draft.plannedWeek !== null && !plannedWeekPattern.test(draft.plannedWeek)) {
     return "计划周格式应为 YYYY-WW，例如 2026-W27。";

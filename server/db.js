@@ -1345,9 +1345,10 @@ export function launchWorkPlanWithProcess(workPlanId, { processInstance, tasks: 
   if (generatedTasks.some((task) => task.processInstanceId !== processInstance.id)) throw new Error("执行任务与已发起工作不匹配。");
 
   const now = new Date().toISOString();
+  const syncedDueDate = processInstance.dueDate ?? launchedWorkPlan?.dueDate ?? existingWorkPlan.dueDate ?? null;
   const nextProcessInstance = {
     ...processInstance,
-    dueDate: processInstance.dueDate ?? existingWorkPlan.dueDate ?? null,
+    dueDate: syncedDueDate,
     updatedAt: now,
   };
   const nextWorkPlan = {
@@ -1356,7 +1357,7 @@ export function launchWorkPlanWithProcess(workPlanId, { processInstance, tasks: 
     id: workPlanId,
     status: "launched",
     processInstanceId: processInstance.id,
-    dueDate: existingWorkPlan.dueDate ?? null,
+    dueDate: syncedDueDate,
     launchedAt: launchedWorkPlan?.launchedAt ?? now,
     updatedAt: now,
   };

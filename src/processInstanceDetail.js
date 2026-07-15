@@ -12,6 +12,13 @@ import {
 } from "./data/modelOptions.js";
 import { getTaskQuadrant, isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
 import { renderWorkFormViewer } from "./workFormViewer.js?v=20260705-state-singleton1";
+import {
+  collectBusinessDateTime,
+  formatBusinessDateTime,
+  getBusinessDatePart,
+  getBusinessHourPart,
+  renderBusinessHourOptions,
+} from "./businessTime.js?v=20260705-state-singleton1";
 
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
@@ -287,7 +294,7 @@ function renderStepTask(task, editable) {
         <td>${findName(people, task.ownerId, "未设置")}</td>
         <td>${findName(departments, task.departmentId, "未设置")}</td>
         <td><span class="status-pill">${taskStatusNames[task.status]}</span></td>
-        <td>${task.dueDate ?? "未设置"}</td>
+        <td>${formatBusinessDateTime(task.dueDate)}</td>
         <td>${isTaskOverdue(task, today) ? "已逾期" : "未逾期"}</td>
         <td>${getTaskQuadrant(task.importance, task.urgency)}</td>
         <td class="wide-text">${escapeHtml(task.completionStandard ?? node?.completionStandard ?? "-")}</td>
@@ -306,7 +313,10 @@ function renderStepTask(task, editable) {
       <td><select name="task__${task.id}__ownerId">${renderOptions(people, task.ownerId, "请选择负责人")}</select></td>
       <td><select name="task__${task.id}__departmentId">${renderOptions(departments, task.departmentId, "请选择部门")}</select></td>
       <td><span class="status-pill">${taskStatusNames[task.status]}</span></td>
-      <td><input name="task__${task.id}__dueDate" type="date" value="${task.dueDate ?? ""}" /></td>
+      <td>
+        <input name="task__${task.id}__dueDateDate" type="date" value="${escapeHtml(getBusinessDatePart(task.dueDate))}" />
+        <select name="task__${task.id}__dueDateHour">${renderBusinessHourOptions(getBusinessHourPart(task.dueDate), "小时")}</select>
+      </td>
       <td>${isTaskOverdue(task, today) ? "已逾期" : "未逾期"}</td>
       <td>
         <select name="task__${task.id}__importance">${renderValueOptions(TaskImportance, task.importance, taskImportanceNames, "重要性")}</select>
@@ -355,6 +365,14 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
               <span>关联目标</span>
               <select name="goalId" ${editable ? "" : "disabled"}>${renderOptions(getSelectableGoals(instance.goalId), instance.goalId, "请选择目标")}</select>
             </label>
+            <label>
+              <span>截止时间日期</span>
+              <input name="instanceDueDateDate" type="date" value="${escapeHtml(getBusinessDatePart(instance.dueDate))}" ${editable ? "" : "disabled"} />
+            </label>
+            <label>
+              <span>截止时间小时</span>
+              <select name="instanceDueDateHour" ${editable ? "" : "disabled"}>${renderBusinessHourOptions(getBusinessHourPart(instance.dueDate), "请选择小时")}</select>
+            </label>
           </div>
           <div class="detail-grid">
             ${renderDetailField("标准工作事项", escapeHtml(taskTemplate?.name ?? "未关联标准工作事项"))}
@@ -390,7 +408,7 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
             <table class="data-table process-instance-task-table">
               <thead>
                 <tr>
-                  <th>步骤名称</th><th>步骤</th><th>负责人</th><th>负责部门</th><th>状态</th><th>截止日期</th><th>是否逾期</th><th>四象限</th><th>步骤完成标准</th><th>步骤审核标准</th><th>输出结果 / 执行安排</th><th>完成时间</th><th>操作</th>
+                  <th>步骤名称</th><th>步骤</th><th>负责人</th><th>负责部门</th><th>状态</th><th>截止时间</th><th>是否逾期</th><th>四象限</th><th>步骤完成标准</th><th>步骤审核标准</th><th>输出结果 / 执行安排</th><th>完成时间</th><th>操作</th>
                 </tr>
               </thead>
               <tbody>${tasks.map((task) => renderStepTask(task, editable)).join("")}</tbody>
@@ -520,6 +538,13 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
     const goalId = getFormValue(form, "goalId");
     const description = getFormValue(form, "description");
     const editableTasks = getInstanceTasks(instanceId).filter(canEditTask);
+    const instanceDueDateResult = collectBusinessDateTime(form, "instanceDueDate");
+    if (instanceDueDateResult.error !== "") return showFormError(form, instanceDueDateResult.error);
+    const taskDueDateResults = new Map(
+      editableTasks.map((task) => [task.id, collectBusinessDateTime(form, `task__${task.id}__dueDate`)]),
+    );
+    const invalidTaskDueDate = [...taskDueDateResults.values()].find((result) => result.error !== "");
+    if (invalidTaskDueDate !== undefined) return showFormError(form, invalidTaskDueDate.error);
     const invalidPlannedWeek = editableTasks
       .map((task) => getFormValue(form, `task__${task.id}__plannedWeek`) || null)
       .find((plannedWeek) => plannedWeek !== null && !plannedWeekPattern.test(plannedWeek));
@@ -542,7 +567,8 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
       return showFormError(form, error.message || "表格附件上传失败。");
     }
 
-    const updatedInstance = { ...instance, name, goalId, description, customFields, updatedAt: now };
+    const updatedInstance = { ...instance, name, goalId, description, dueDate: instanceDueDateResult.value, customFields, updatedAt: now };
+    const linkedWorkPlan = state.workPlans.find((workPlan) => workPlan.processInstanceId === instance.id) ?? null;
 
     const updatedTasks = state.tasks
       .filter((task) => task.processInstanceId === instanceId)
@@ -556,7 +582,7 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
         goalId: oldGoalId === goalId ? task.goalId : goalId,
         ownerId: getFormValue(form, `task__${task.id}__ownerId`) || task.ownerId,
         departmentId: getFormValue(form, `task__${task.id}__departmentId`) || task.departmentId,
-        dueDate: getFormValue(form, `task__${task.id}__dueDate`) || null,
+        dueDate: taskDueDateResults.get(task.id)?.value ?? null,
         plannedWeek,
         importance: getFormValue(form, `task__${task.id}__importance`) || task.importance,
         urgency: getFormValue(form, `task__${task.id}__urgency`) || task.urgency,
@@ -568,6 +594,9 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
 
     try {
       await updatePersistentResource("process-instances", updatedInstance.id, updatedInstance);
+      if (linkedWorkPlan !== null) {
+        await updatePersistentResource("work-plans", linkedWorkPlan.id, { dueDate: updatedInstance.dueDate ?? null });
+      }
       for (const task of updatedTasks) {
         await updatePersistentResource("tasks", task.id, task);
       }
@@ -578,6 +607,11 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
 
     const updatedTaskMap = new Map(updatedTasks.map((task) => [task.id, task]));
     state.processInstances = state.processInstances.map((item) => (item.id === instanceId ? updatedInstance : item));
+    if (linkedWorkPlan !== null) {
+      state.workPlans = state.workPlans.map((item) =>
+        item.id === linkedWorkPlan.id ? { ...item, dueDate: updatedInstance.dueDate ?? null } : item,
+      );
+    }
     state.tasks = state.tasks.map((task) => updatedTaskMap.get(task.id) ?? task);
 
     rerender();

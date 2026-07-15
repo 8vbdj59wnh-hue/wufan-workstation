@@ -21,6 +21,15 @@ const timeSlotHours = 2;
 const launchedStatusFilter = "launched";
 const completedStatusFilter = "completed";
 const futureWorkStatuses = new Set([WorkPlanStatus.Future, WorkPlanStatus.ThisWeek]);
+const hiddenProcessStatuses = new Set([
+  ProcessInstanceStatus.Done,
+  ProcessInstanceStatus.Canceled,
+  ProcessInstanceStatus.Stopped,
+  ProcessInstanceStatus.Terminated,
+  "canceled",
+  "cancelled",
+  "terminated",
+]);
 
 const filters = {
   keyword: "",
@@ -388,7 +397,7 @@ function buildFutureRows() {
 }
 
 function buildLaunchedRows() {
-  return buildRows().filter((row) => row.processInstance !== null);
+  return buildRows().filter((row) => row.processInstance !== null && !hiddenProcessStatuses.has(row.processInstance.status));
 }
 
 function isDueDateInBoard(row, dayKeys) {
@@ -488,7 +497,7 @@ function renderFilters() {
       </label>
       <label class="inline-checkbox">
         <input type="checkbox" name="noDueDateOnly" ${filters.noDueDateOnly ? "checked" : ""} />
-        <span>只看无截止日期</span>
+        <span>只看无截止时间</span>
       </label>
     </section>
   `;
@@ -671,7 +680,7 @@ function renderBoardRows(rows, days) {
     return `
       <div class="schedule-board-empty">
         <h2>暂无匹配已发起工作</h2>
-        <p>请调整筛选条件，或查看无截止日期工作。</p>
+        <p>请调整筛选条件，或查看无截止时间工作。</p>
       </div>
     `;
   }
@@ -685,7 +694,7 @@ function renderBoardRows(rows, days) {
 
 function renderBoardHeader(days) {
   const dayHeaders = filters.noDueDateOnly
-    ? `<div class="schedule-day-header is-unscheduled">无截止日期</div>`
+    ? `<div class="schedule-day-header is-unscheduled">无截止时间</div>`
     : days
         .map(
           (day) => `
@@ -711,7 +720,7 @@ function renderSummary(futureRows, launchedRows, days) {
     <div class="schedule-board-summary">
       <span>未来工作 ${futureRows.length}</span>
       <span>已发起 ${launchedRows.length}</span>
-      <span>无截止日期 ${noDueDateCount}</span>
+      <span>无截止时间 ${noDueDateCount}</span>
       <span>超出30天 ${outOfRangeCount}</span>
     </div>
   `;
@@ -744,25 +753,37 @@ async function moveLaunchedProcessDueDate(processInstanceId, targetDate, targetH
   if (row === null || row.processInstance === null) return;
   if (!canDragProcess(row)) return;
   const nextDueDate = buildScheduledDueDate(targetDate, targetHour);
-  if (row.dueDate === nextDueDate) return;
+  if (row.dueDate === nextDueDate && row.workPlan.dueDate === nextDueDate) return;
 
   const instanceIndex = state.processInstances.findIndex((instance) => instance.id === row.processInstance.id);
+  const workPlanIndex = state.workPlans.findIndex((workPlan) => workPlan.id === row.workPlan.id);
   if (instanceIndex < 0) return;
 
-  const previousDueDate = state.processInstances[instanceIndex].dueDate ?? "";
+  const previousInstanceDueDate = state.processInstances[instanceIndex].dueDate ?? null;
+  const previousWorkPlanDueDate = workPlanIndex >= 0 ? state.workPlans[workPlanIndex].dueDate ?? null : null;
 
   savingWorkPlanIds.add(row.workPlan.id);
   state.processInstances[instanceIndex] = { ...state.processInstances[instanceIndex], dueDate: nextDueDate };
+  if (workPlanIndex >= 0) state.workPlans[workPlanIndex] = { ...state.workPlans[workPlanIndex], dueDate: nextDueDate };
   rerender();
 
   try {
     const savedInstance = await updatePersistentResource("process-instances", row.processInstance.id, { dueDate: nextDueDate });
+    const savedWorkPlan = await updatePersistentResource("work-plans", row.workPlan.id, { dueDate: nextDueDate });
     const savedIndex = state.processInstances.findIndex((instance) => instance.id === row.processInstance.id);
     if (savedIndex >= 0) state.processInstances[savedIndex] = { ...state.processInstances[savedIndex], ...savedInstance };
+    const savedWorkPlanIndex = state.workPlans.findIndex((workPlan) => workPlan.id === row.workPlan.id);
+    if (savedWorkPlanIndex >= 0) state.workPlans[savedWorkPlanIndex] = { ...state.workPlans[savedWorkPlanIndex], ...savedWorkPlan };
   } catch (error) {
+    await Promise.allSettled([
+      updatePersistentResource("process-instances", row.processInstance.id, { dueDate: previousInstanceDueDate }),
+      updatePersistentResource("work-plans", row.workPlan.id, { dueDate: previousWorkPlanDueDate }),
+    ]);
     const rollbackIndex = state.processInstances.findIndex((instance) => instance.id === row.processInstance.id);
-    if (rollbackIndex >= 0) state.processInstances[rollbackIndex] = { ...state.processInstances[rollbackIndex], dueDate: previousDueDate };
-    window.alert(error.message || "截止日期保存失败，请检查本地数据库服务。");
+    if (rollbackIndex >= 0) state.processInstances[rollbackIndex] = { ...state.processInstances[rollbackIndex], dueDate: previousInstanceDueDate };
+    const rollbackWorkPlanIndex = state.workPlans.findIndex((workPlan) => workPlan.id === row.workPlan.id);
+    if (rollbackWorkPlanIndex >= 0) state.workPlans[rollbackWorkPlanIndex] = { ...state.workPlans[rollbackWorkPlanIndex], dueDate: previousWorkPlanDueDate };
+    window.alert(error.message || "截止时间保存失败，请检查本地数据库服务。");
   } finally {
     savingWorkPlanIds.delete(row.workPlan.id);
     draggedSourceId = null;
