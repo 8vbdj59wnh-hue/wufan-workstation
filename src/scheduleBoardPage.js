@@ -605,10 +605,6 @@ function hideSchedulePreview() {
 
 function renderTimeSlot(rows, dayKey, slot) {
   const slotRows = rows.filter((row) => row.processInstance !== null && row.dueDateKey === dayKey && row.dueSlotHour === slot.startHour);
-  const slotKey = `${dayKey}-${slot.startHour}`;
-  const isExpanded = expandedSlotKey === slotKey;
-  const visibleRows = isExpanded ? slotRows : slotRows.slice(0, 3);
-  const hiddenCount = slotRows.length - visibleRows.length;
   return `
     <div
       class="schedule-time-slot"
@@ -618,18 +614,7 @@ function renderTimeSlot(rows, dayKey, slot) {
     >
       <span class="schedule-time-slot-label">${escapeHtml(slot.label)}</span>
       <div class="schedule-time-slot-items">
-        ${visibleRows.map(renderProcessBlock).join("")}
-        ${hiddenCount > 0 ? `
-          <button
-            class="schedule-slot-more"
-            type="button"
-            data-schedule-slot-more="${escapeAttribute(slotKey)}"
-            title="展开当天全部工作"
-          >
-            <span>……</span>
-            <strong>+${hiddenCount}</strong>
-          </button>
-        ` : ""}
+        ${slotRows.map(renderProcessBlock).join("")}
       </div>
     </div>
   `;
@@ -840,12 +825,6 @@ export function renderScheduleBoardPage() {
   const columnCount = filters.noDueDateOnly ? 1 : boardDayCount;
   return `
     <section class="schedule-board-page" style="--schedule-day-count: ${columnCount};">
-      <div class="page-toolbar">
-        <div>
-          <h2>排期看板</h2>
-          <p class="form-note">左侧为未发起未来工作，右侧为已发起工作排期。</p>
-        </div>
-      </div>
       ${renderFilters()}
       ${renderSummary(futureRows, launchedRows, days)}
       <div class="schedule-board-layout">

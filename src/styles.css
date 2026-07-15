@@ -3603,7 +3603,7 @@ button.content-template-thumb {
 
 .schedule-board-page {
   --schedule-day-width: 128px;
-  --schedule-slot-height: 104px;
+  --schedule-slot-height: 50px;
   display: grid;
   gap: 16px;
 }
@@ -3899,20 +3899,19 @@ button.content-template-thumb {
 }
 
 .schedule-time-slot {
-  height: var(--schedule-slot-height);
-  min-height: 0;
+  min-height: var(--schedule-slot-height);
   border: 0;
   border-bottom: 1px solid #edf0f3;
   border-radius: 0;
   background: rgba(255, 255, 255, 0.82);
   box-sizing: border-box;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .schedule-time-slot {
   position: relative;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
   padding: 4px 5px;
 }
 
@@ -3933,7 +3932,7 @@ button.content-template-thumb {
   gap: 3px;
   min-height: 0;
   overflow-x: hidden;
-  overflow-y: hidden;
+  overflow-y: visible;
   padding-right: 0;
 }
 
@@ -3943,7 +3942,8 @@ button.content-template-thumb {
 }
 
 .schedule-process-block {
-  display: block;
+  display: flex;
+  align-items: center;
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
@@ -3973,6 +3973,8 @@ button.content-template-thumb {
 
 .schedule-process-block strong {
   display: block;
+  width: 100%;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
