@@ -4069,6 +4069,46 @@ button.content-template-thumb {
   opacity: 0.72;
 }
 
+.schedule-process-block.is-value-infrastructure-maintenance {
+  background: #eef2ff;
+  border-color: #c7d2fe;
+}
+
+.schedule-process-block.is-value-human-asset-management {
+  background: #fdf2f8;
+  border-color: #fbcfe8;
+}
+
+.schedule-process-block.is-value-product-development {
+  background: #ecfeff;
+  border-color: #a5f3fc;
+}
+
+.schedule-process-block.is-value-supply-chain-management {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.schedule-process-block.is-value-brand-marketing {
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.schedule-process-block.is-value-channel-sales {
+  background: #fefce8;
+  border-color: #fde68a;
+}
+
+.schedule-process-block.is-value-customer-maintenance {
+  background: #f5f3ff;
+  border-color: #ddd6fe;
+}
+
+.schedule-process-block.is-value-default {
+  background: #f3f4f6;
+  border-color: #e5e7eb;
+}
+
 .schedule-board-empty {
   display: grid;
   gap: 6px;

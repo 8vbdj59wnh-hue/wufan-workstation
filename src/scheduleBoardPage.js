@@ -527,6 +527,11 @@ function getProcessStatusClass(row) {
   return "is-doing";
 }
 
+function getValueModuleCardClass(valueModuleId) {
+  if (valueModuleList.some((module) => module.id === valueModuleId)) return `is-value-${valueModuleId.replaceAll("_", "-")}`;
+  return "is-value-default";
+}
+
 function canDragProcess(row) {
   return row.processInstance !== null && row.processInstance.status === ProcessInstanceStatus.Running && !savingWorkPlanIds.has(row.workPlan.id);
 }
@@ -544,9 +549,10 @@ function renderProcessBlock(row) {
   const canDrag = canDragProcess(row);
   const title = getProcessCardTitle(row);
   const previewImage = getProcessPreviewImage(row);
+  const valueModuleClass = getValueModuleCardClass(row.valueModuleId);
   return `
     <button
-      class="schedule-process-block ${getProcessStatusClass(row)} ${savingWorkPlanIds.has(row.workPlan.id) ? "is-saving" : ""}"
+      class="schedule-process-block ${getProcessStatusClass(row)} ${valueModuleClass} ${savingWorkPlanIds.has(row.workPlan.id) ? "is-saving" : ""}"
       type="button"
       data-schedule-process-id="${escapeAttribute(row.processInstance.id)}"
       data-schedule-work-plan-id="${escapeAttribute(row.workPlan.id)}"
