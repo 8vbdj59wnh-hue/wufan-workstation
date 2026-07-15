@@ -2315,6 +2315,14 @@ function getFormDesignRenderFields() {
   return getFormDesignDraftFields();
 }
 
+function selectFormDesignerField(fieldId) {
+  const fields = getCurrentFormDesignFields();
+  const selectedFieldId = fields.some((field) => field.fieldId === fieldId)
+    ? fieldId
+    : fields[0]?.fieldId ?? "";
+  setFormDesignDraftFields(fields, selectedFieldId);
+}
+
 async function saveStandardWorkForm(form, rerender) {
   if (!canCurrentUser("settings.editStandardWorkForms")) return;
   const standardWorkId = form.dataset.standardWorkId ?? "";
@@ -2471,7 +2479,7 @@ export function bindSettingsPageEvents(rerender) {
 
     const formFieldCard = event.target.closest(".form-renderer-field[data-form-field-id]");
     if (button === null && formFieldCard !== null) {
-      setFormDesignDraftFields(getCurrentFormDesignFields(), formFieldCard.dataset.formFieldId ?? "");
+      selectFormDesignerField(formFieldCard.dataset.formFieldId ?? "");
       rerender();
       return;
     }
@@ -2481,6 +2489,11 @@ export function bindSettingsPageEvents(rerender) {
     const action = button.dataset.action;
     const entity = button.dataset.entity;
     const id = button.dataset.id;
+    const isFormDesignerAction = button.closest(".form-designer-editor") !== null;
+
+    if (isFormDesignerAction) {
+      event.preventDefault();
+    }
 
     if (action === "select-form-standard-work") {
       activeFormDesignStandardWorkId = button.dataset.standardWorkId ?? "";
@@ -2502,7 +2515,7 @@ export function bindSettingsPageEvents(rerender) {
     }
 
     if (action === "select-form-field") {
-      setFormDesignDraftFields(getCurrentFormDesignFields(), button.dataset.fieldId ?? "");
+      selectFormDesignerField(button.dataset.fieldId ?? "");
       rerender();
       return;
     }
