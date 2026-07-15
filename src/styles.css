@@ -3726,6 +3726,34 @@ button.content-template-thumb {
   overflow: auto;
 }
 
+.schedule-value-legend {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #ffffff;
+}
+
+.schedule-value-legend-item {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  box-sizing: border-box;
+  color: #111827;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .schedule-board-grid {
   min-width: calc(var(--schedule-day-count, 30) * var(--schedule-day-width));
 }
@@ -4090,37 +4118,44 @@ button.content-template-thumb {
   opacity: 0.72;
 }
 
-.schedule-process-block.is-value-infrastructure-maintenance {
+.schedule-process-block.is-value-infrastructure-maintenance,
+.schedule-value-legend-item.is-value-infrastructure-maintenance {
   background: #eef2ff;
   border-color: #c7d2fe;
 }
 
-.schedule-process-block.is-value-human-asset-management {
+.schedule-process-block.is-value-human-asset-management,
+.schedule-value-legend-item.is-value-human-asset-management {
   background: #fdf2f8;
   border-color: #fbcfe8;
 }
 
-.schedule-process-block.is-value-product-development {
+.schedule-process-block.is-value-product-development,
+.schedule-value-legend-item.is-value-product-development {
   background: #ecfeff;
   border-color: #a5f3fc;
 }
 
-.schedule-process-block.is-value-supply-chain-management {
+.schedule-process-block.is-value-supply-chain-management,
+.schedule-value-legend-item.is-value-supply-chain-management {
   background: #f0fdf4;
   border-color: #bbf7d0;
 }
 
-.schedule-process-block.is-value-brand-marketing {
+.schedule-process-block.is-value-brand-marketing,
+.schedule-value-legend-item.is-value-brand-marketing {
   background: #fff7ed;
   border-color: #fed7aa;
 }
 
-.schedule-process-block.is-value-channel-sales {
+.schedule-process-block.is-value-channel-sales,
+.schedule-value-legend-item.is-value-channel-sales {
   background: #fefce8;
   border-color: #fde68a;
 }
 
-.schedule-process-block.is-value-customer-maintenance {
+.schedule-process-block.is-value-customer-maintenance,
+.schedule-value-legend-item.is-value-customer-maintenance {
   background: #f5f3ff;
   border-color: #ddd6fe;
 }

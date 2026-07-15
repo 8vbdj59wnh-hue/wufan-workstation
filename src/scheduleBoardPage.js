@@ -533,6 +533,19 @@ function getValueModuleCardClass(valueModuleId) {
   return "is-value-default";
 }
 
+function getValueModuleLegendLabel(valueModuleId, fallbackName) {
+  const labels = {
+    infrastructure_maintenance: "基础设施",
+    human_asset_management: "人力资产",
+    product_development: "产品开发",
+    supply_chain_management: "供应链管理",
+    brand_marketing: "品牌营销",
+    channel_sales: "渠道销售",
+    customer_maintenance: "客户维护",
+  };
+  return labels[valueModuleId] ?? fallbackName;
+}
+
 function canDragProcess(row) {
   return row.processInstance !== null && row.processInstance.status === ProcessInstanceStatus.Running && !savingWorkPlanIds.has(row.workPlan.id);
 }
@@ -776,6 +789,19 @@ function renderFutureWorkList(rows) {
   `;
 }
 
+function renderValueChainLegend() {
+  return `
+    <div class="schedule-value-legend" aria-label="价值链颜色说明">
+      ${valueModuleList
+        .map((module) => {
+          const className = getValueModuleCardClass(module.id);
+          return `<span class="schedule-value-legend-item ${className}">${escapeHtml(getValueModuleLegendLabel(module.id, module.name))}</span>`;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
 function findRowByWorkPlanId(workPlanId) {
   return buildRows().find((row) => row.workPlan.id === workPlanId) ?? null;
 }
@@ -881,6 +907,7 @@ export function renderScheduleBoardPage() {
       <div class="schedule-board-layout">
         ${renderFutureWorkList(futureRows)}
         <div class="schedule-board-shell">
+          ${renderValueChainLegend()}
           <div class="schedule-board-grid">
             ${renderBoardHeader(days)}
             ${renderBoardRows(launchedRows, days)}
