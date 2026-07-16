@@ -84,6 +84,7 @@ let filters = {
   source: "",
   departmentId: "",
   ownerId: "",
+  executorId: "",
   goalId: "",
   categoryId: "",
   quadrant: "",
@@ -1188,6 +1189,7 @@ function matchesFilters(task) {
   if (filters.source !== "" && task.source !== filters.source) return false;
   if (filters.departmentId !== "" && task.departmentId !== filters.departmentId) return false;
   if (filters.ownerId !== "" && task.ownerId !== filters.ownerId) return false;
+  if (filters.executorId !== "" && task.executorId !== filters.executorId) return false;
   if (filters.goalId !== "" && task.goalId !== filters.goalId) return false;
   if (filters.categoryId !== "" && task.categoryId !== filters.categoryId) return false;
   if (filters.quadrant !== "" && getQuadrantKey(task) !== filters.quadrant) return false;
@@ -2782,6 +2784,12 @@ function renderFilters() {
         </select>
       </label>
       <label>
+        <span>执行人</span>
+        <select name="executorId">
+          ${renderOptions(people, filters.executorId, "全部执行人")}
+        </select>
+      </label>
+      <label>
         <span>是否逾期</span>
         <select name="overdue">
           <option value="">全部</option>
@@ -4327,6 +4335,7 @@ function updateFilters(form) {
     source: formData.get("source")?.toString() ?? "",
     departmentId: formData.get("departmentId")?.toString() ?? "",
     ownerId: formData.get("ownerId")?.toString() ?? "",
+    executorId: formData.get("executorId")?.toString() ?? "",
     goalId: formData.get("goalId")?.toString() ?? "",
     categoryId: formData.get("categoryId")?.toString() ?? "",
     quadrant: formData.get("quadrant")?.toString() ?? "",
