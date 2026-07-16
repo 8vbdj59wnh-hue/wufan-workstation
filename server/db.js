@@ -432,6 +432,7 @@ const resourceConfigs = {
       "coverImageUrl",
       "importance",
       "urgency",
+      "workType",
       "status",
       "plannedWeek",
       "dueDate",
@@ -552,6 +553,9 @@ function encodeItem(item, config) {
     if ((config.table === "tasks" || config.table === "work_plans") && column === "urgency" && (value === null || value === "")) {
       value = defaultTaskUrgency;
     }
+    if (config.table === "work_plans" && column === "workType" && (value === null || value === "")) {
+      value = "normal";
+    }
     if (jsonFields.has(column)) value = JSON.stringify(value ?? (column.endsWith("s") ? [] : {}));
     if (booleanFields.has(column)) value = value ? 1 : 0;
     encoded[column] = value;
@@ -592,6 +596,9 @@ function decodeRow(row, config) {
 
   for (const field of booleanFields) {
     decoded[field] = Boolean(row[field]);
+  }
+  if (config.table === "work_plans" && (decoded.workType === null || decoded.workType === "" || decoded.workType === undefined)) {
+    decoded.workType = "normal";
   }
 
   return decoded;
@@ -1087,6 +1094,7 @@ function runLightweightMigrations() {
   ensureColumn("content_schedules", "workPlanId", "TEXT");
   ensureColumn("content_schedules", "templateId", "TEXT");
   ensureColumn("work_plans", "departmentId", "TEXT");
+  ensureColumn("work_plans", "workType", "TEXT DEFAULT 'normal'");
   ensureColumn("persons", "username", "TEXT");
   ensureColumn("persons", "passwordHash", "TEXT");
   ensureColumn("persons", "canLogin", "INTEGER DEFAULT 0");
@@ -1464,6 +1472,7 @@ export function launchWorkPlanWithProcess(workPlanId, { processInstance, tasks: 
     ...existingWorkPlan,
     ...(launchedWorkPlan ?? {}),
     id: workPlanId,
+    workType: launchedWorkPlan?.workType ?? existingWorkPlan.workType ?? "normal",
     status: "launched",
     processInstanceId: processInstance.id,
     dueDate: syncedDueDate,

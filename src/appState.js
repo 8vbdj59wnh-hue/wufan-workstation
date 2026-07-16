@@ -39,6 +39,7 @@ import {
   TaskStatus,
   TaskTemplateStatus,
   TaskUrgency,
+  WorkType,
   WorkPlanStatus,
   getValueModuleName,
   inferValueModuleIdFromText,
@@ -73,7 +74,7 @@ export const state = {
   processTemplates: initialProcessTemplates.map((template) => ({ ...template })),
   processTemplateNodes: initialProcessTemplateNodes.map((node) => normalizeProcessTemplateNode(node)),
   processInstances: initialProcessInstances.map((instance) => ({ ...instance })),
-  workPlans: initialWorkPlans.map((workPlan) => ({ ...workPlan })),
+  workPlans: initialWorkPlans.map((workPlan) => normalizeWorkPlan(workPlan)),
   weeklyReports: initialWeeklyReports.map((report) => ({ ...report })),
   weeklyReportProblems: initialWeeklyReportProblems.map((problem) => ({ ...problem })),
   methodologies: initialMethodologies.map((methodology) => ({ ...methodology })),
@@ -118,6 +119,13 @@ function normalizeDepartment(department) {
   return {
     ...department,
     parentDepartmentId: department.parentDepartmentId ?? null,
+  };
+}
+
+function normalizeWorkPlan(workPlan) {
+  return {
+    ...workPlan,
+    workType: workPlan.workType || WorkType.Normal,
   };
 }
 
@@ -169,7 +177,7 @@ export function applyDataSnapshot(data) {
   normalizeTaskSubmitRequirements();
   replaceArray(state.processInstances, data.processInstances);
   replaceArray(state.contentSchedules, data.contentSchedules);
-  replaceArray(state.workPlans, data.workPlans);
+  replaceArray(state.workPlans, (data.workPlans ?? []).map((workPlan) => normalizeWorkPlan(workPlan)));
   replaceArray(state.weeklyReports, data.weeklyReports);
   replaceArray(state.weeklyReportProblems, data.weeklyReportProblems);
   replaceArray(state.methodologies, data.methodologies);
@@ -1634,6 +1642,7 @@ export async function launchWorkPlanAsProcess(workPlanId, { dueDate = null } = {
   const generatedTasks = state.tasks.filter((task) => task.processInstanceId === result.instance.id);
   const launchedWorkPlan = {
     ...workPlan,
+    workType: workPlan.workType || WorkType.Normal,
     status: WorkPlanStatus.Launched,
     processInstanceId: launchedInstance.id,
     dueDate: syncedDueDate,

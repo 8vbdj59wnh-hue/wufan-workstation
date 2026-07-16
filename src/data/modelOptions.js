@@ -169,6 +169,11 @@ export const WorkPlanStatus = Object.freeze({
   Canceled: "canceled",
 });
 
+export const WorkType = Object.freeze({
+  Normal: "normal",
+  Rectification: "rectification",
+});
+
 export const SubmitType = Object.freeze({
   None: "none",
   Form: "form",
@@ -349,4 +354,9 @@ export const workPlanStatusNames = Object.freeze({
   [WorkPlanStatus.ThisWeek]: "本周工作",
   [WorkPlanStatus.Launched]: "已发起",
   [WorkPlanStatus.Canceled]: "已取消",
+});
+
+export const workTypeNames = Object.freeze({
+  [WorkType.Normal]: "普通工作",
+  [WorkType.Rectification]: "整改工作",
 });

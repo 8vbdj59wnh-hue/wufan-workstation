@@ -365,6 +365,7 @@ CREATE TABLE IF NOT EXISTS work_plans (
   coverImageUrl TEXT,
   importance TEXT NOT NULL,
   urgency TEXT NOT NULL,
+  workType TEXT DEFAULT 'normal',
   status TEXT NOT NULL,
   plannedWeek TEXT,
   dueDate TEXT,

@@ -15,6 +15,7 @@ import {
   TaskImportance,
   TaskUrgency,
   WorkPlanStatus,
+  WorkType,
   taskImportanceNames,
   taskUrgencyNames,
   getValueModuleName,
@@ -550,6 +551,7 @@ async function launchWorkPlan(workPlanId) {
   result.instance = { ...result.instance, dueDate: syncedDueDate, updatedAt: now };
   const updatedWorkPlan = {
     ...workPlan,
+    workType: workPlan.workType || WorkType.Normal,
     status: WorkPlanStatus.Launched,
     processInstanceId: result.instance.id,
     dueDate: syncedDueDate,

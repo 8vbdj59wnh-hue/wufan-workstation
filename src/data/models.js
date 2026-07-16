@@ -374,6 +374,7 @@
  * @property {string | null} coverImageUrl
  * @property {TaskImportanceValue} importance
  * @property {TaskUrgencyValue} urgency
+ * @property {"normal" | "rectification"} workType
  * @property {WorkPlanStatusValue} status
  * @property {string | null} plannedWeek
  * @property {string | null} dueDate
