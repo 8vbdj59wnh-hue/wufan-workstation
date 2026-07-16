@@ -84,7 +84,7 @@ export function renderWorkFormViewer({ formFields = [], customFields = {} }) {
       })),
   ];
 
-  if (rows.length === 0 || rows.every((row) => isEmptyValue(row.value))) {
+  if (rows.length === 0 || (fields.length === 0 && rows.every((row) => isEmptyValue(row.value)))) {
     return `<p>暂无本次工作表单信息。</p>`;
   }
 

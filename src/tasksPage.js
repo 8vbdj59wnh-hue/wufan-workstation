@@ -3913,7 +3913,7 @@ function renderWorkFormModal() {
         </div>
         <div class="detail-block">
           ${renderWorkFormViewer({
-            formFields: taskTemplate?.formFields ?? [],
+            formFields: getSortedFormFields(taskTemplate),
             customFields,
           })}
         </div>
