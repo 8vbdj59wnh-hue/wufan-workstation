@@ -21,7 +21,7 @@ export const modules = [
   },
   {
     id: "assessment",
-    name: "考核",
+    name: "工作结果",
   },
   {
     id: "templateCenter",

@@ -240,7 +240,7 @@ function renderAssessmentTabs() {
     ["problems", "问题汇总", "assessment-problems"],
   ];
   return `
-    <div class="settings-tabs task-subtabs" aria-label="考核页签">
+    <div class="settings-tabs task-subtabs" aria-label="工作结果页签">
       ${tabs.map(([key, label, hash]) => `<button class="${activeAssessmentTab === key ? "is-active" : ""}" type="button" data-assessment-tab="${key}" data-hash="${hash}">${label}</button>`).join("")}
     </div>
   `;
@@ -361,7 +361,7 @@ function renderStatsPage() {
     <section class="settings-section">
       <div class="section-heading">
         <h2>工作统计</h2>
-        <p class="form-note">统计只展示工作数量和状态，不做绩效打分、工资奖金计算或员工排名。</p>
+        <p class="form-note">统计只展示工作数量和状态，用于观察工作结果、工作分析和推进趋势，不做员工排名。</p>
       </div>
       ${renderMetricCards(tasks, processes)}
     </section>
@@ -848,14 +848,14 @@ export function bindAssessmentPageEvents(rerender) {
 export function renderAssessmentPage() {
   syncAssessmentTabFromHash();
   if (!canCurrentUser("assessment.view")) {
-    return `<section class="placeholder"><h2>你没有权限访问考核模块</h2><p>请联系管理员调整账号权限。</p></section>`;
+    return `<section class="placeholder"><h2>你没有权限访问工作结果模块</h2><p>请联系管理员调整账号权限。</p></section>`;
   }
   return `
     <div class="assessment-page">
       <div class="section-heading with-actions page-toolbar">
         <div>
-          <h2>考核</h2>
-          <p class="form-note">第一版只做目标推进周报、工作统计和问题意识，不做绩效打分、工资奖金或员工排名。</p>
+          <h2>工作结果</h2>
+          <p class="form-note">第一版只做目标推进周报、工作统计和问题意识，用于工作分析和趋势观察，不做员工排名。</p>
         </div>
       </div>
       ${renderAssessmentTabs()}
