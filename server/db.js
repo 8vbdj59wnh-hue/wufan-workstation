@@ -1480,7 +1480,9 @@ export function launchWorkPlanWithProcess(workPlanId, { processInstance, tasks: 
     updatedAt: now,
   };
   const sourceTaskId = nextWorkPlan.workType === "rectification" ? nextWorkPlan.customFields?.sourceTaskId ?? null : null;
-  if (sourceTaskId !== null && sourceTaskId !== "") {
+  const sourceProcessInstanceId = nextWorkPlan.workType === "rectification" ? nextWorkPlan.customFields?.sourceProcessInstanceId ?? null : null;
+  const sourceType = nextWorkPlan.workType === "rectification" ? nextWorkPlan.customFields?.sourceType ?? null : null;
+  if ((sourceTaskId !== null && sourceTaskId !== "") || (sourceProcessInstanceId !== null && sourceProcessInstanceId !== "" && sourceType !== null && sourceType !== "")) {
     const duplicatedRectification = database
       .prepare(
         `SELECT wp.id
@@ -1489,11 +1491,19 @@ export function launchWorkPlanWithProcess(workPlanId, { processInstance, tasks: 
          WHERE wp.id <> @workPlanId
            AND wp.workType = 'rectification'
            AND COALESCE(wp.status, '') <> 'canceled'
-           AND json_extract(wp.customFields, '$.sourceTaskId') = @sourceTaskId
+           AND (
+             (@sourceTaskId <> '' AND json_extract(wp.customFields, '$.sourceTaskId') = @sourceTaskId)
+             OR (
+               @sourceProcessInstanceId <> ''
+               AND @sourceType <> ''
+               AND json_extract(wp.customFields, '$.sourceProcessInstanceId') = @sourceProcessInstanceId
+               AND json_extract(wp.customFields, '$.sourceType') = @sourceType
+             )
+           )
            AND COALESCE(pi.status, '') NOT IN ('done', 'stopped', 'canceled')
          LIMIT 1`,
       )
-      .get({ workPlanId, sourceTaskId });
+      .get({ workPlanId, sourceTaskId: sourceTaskId ?? "", sourceProcessInstanceId: sourceProcessInstanceId ?? "", sourceType: sourceType ?? "" });
     if (duplicatedRectification !== undefined) throw new Error("该来源任务已存在未完成的整改工作，不能重复发起。");
   }
 

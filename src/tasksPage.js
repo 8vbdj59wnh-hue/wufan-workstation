@@ -9,10 +9,13 @@ import {
   getProcessNodeStepOrder,
   getCurrentUser,
   getNow,
+  hasOpenRectificationWorkForSource,
   getRectificationSubmitFields,
+  launchRectificationWorkForSource,
   loadTemplates,
   moveTaskTemplateToValueChain,
   normalizeSubmitRequirement,
+  recordRectificationTriggerFailure,
   resolveAssetUrl,
   sortProcessNodes,
   startProcess,
@@ -1399,6 +1402,40 @@ function markTaskOverdueRecordIfNeeded(task, referenceTime = getNow()) {
       assessmentOverdueDueDate: task.dueDate,
     },
   };
+}
+
+function didRecordTaskOverdue(previousTask, nextTask) {
+  return !hasTaskOverdueRecord(previousTask) && hasTaskOverdueRecord(nextTask);
+}
+
+async function triggerRectificationForTaskException(task, sourceType, problemSummary) {
+  if (task === null || task === undefined) return null;
+  if (hasOpenRectificationWorkForSource({ sourceTaskId: task.id, sourceProcessInstanceId: task.processInstanceId ?? null, sourceType })) return null;
+  try {
+    return await launchRectificationWorkForSource({
+      sourceTaskId: task.id,
+      sourceProcessInstanceId: task.processInstanceId ?? null,
+      sourceType,
+      problemSummary,
+    });
+  } catch (error) {
+    console.error("自动发起整改工作失败", error);
+    try {
+      await recordRectificationTriggerFailure(task.id, sourceType, error);
+    } catch (recordError) {
+      console.error("整改触发失败记录保存失败", recordError);
+    }
+    return null;
+  }
+}
+
+async function triggerOverdueRectificationIfNeeded(previousTask, nextTask) {
+  if (!didRecordTaskOverdue(previousTask, nextTask)) return null;
+  return triggerRectificationForTaskException(
+    nextTask,
+    "overdue_task",
+    `任务“${nextTask.name}”首次确认超时，需要发起整改。`,
+  );
 }
 
 function getTaskStatusClass(status) {
@@ -5177,6 +5214,7 @@ async function saveResult(form, rerender) {
     return setModalError(error.message || "任务结果保存失败，请检查本地数据库服务。", rerender);
   }
   state.tasks = state.tasks.map((item) => (item.id === updatedTask.id ? updatedTask : item));
+  await triggerOverdueRectificationIfNeeded(task, updatedTask);
   if (nextStatus === TaskStatus.Done) {
     try {
       await advanceProcessAfterTaskDone(modalState.taskId);
@@ -5276,6 +5314,7 @@ async function updateTaskStatus(taskId, status, rerender) {
   }
 
   state.tasks = state.tasks.map((item) => (item.id === taskId ? updatedTask : item));
+  await triggerOverdueRectificationIfNeeded(task, updatedTask);
   if (status === TaskStatus.Done) {
     try {
       await advanceProcessAfterTaskDone(taskId);
@@ -5352,6 +5391,10 @@ async function bulkUpdateTaskStatus(status, rerender) {
 
   const updatedTaskMap = new Map(updatedTasks.map((task) => [task.id, task]));
   state.tasks = state.tasks.map((task) => updatedTaskMap.get(task.id) ?? task);
+  const previousTaskMap = new Map(selectedTasks.map((task) => [task.id, task]));
+  for (const updatedTask of updatedTasks) {
+    await triggerOverdueRectificationIfNeeded(previousTaskMap.get(updatedTask.id), updatedTask);
+  }
   if (status === TaskStatus.Done) {
     try {
       for (const task of updatedTasks) {
@@ -5535,6 +5578,13 @@ async function returnTaskToSelectedStep(form, rerender) {
   state.tasks = state.tasks.map((item) => {
     return returnedTaskMap.get(item.id) ?? item;
   });
+  for (const returnedTask of returnedTasks) {
+    const previousRecordCount = getReturnRecords(affectedTasks.find((item) => item.id === returnedTask.id) ?? {}).length;
+    const nextRecordCount = getReturnRecords(returnedTask).length;
+    if (previousRecordCount < 2 && nextRecordCount >= 2) {
+      await triggerRectificationForTaskException(returnedTask, "rework_twice", `任务“${returnedTask.name}”连续返工达到 ${nextRecordCount} 次，需要发起整改。`);
+    }
+  }
   selectedTaskId = targetTask.id;
   modalState = null;
   rerender();
@@ -5600,7 +5650,22 @@ async function handleTaskAction(action, taskId, rerender, actionButton = null) {
   if (action === "reject-task" && task.status === TaskStatus.PendingAcceptance) {
     window.alert("验收已退回，任务状态恢复为进行中。");
     const now = getNow();
-    const updatedTask = { ...task, status: TaskStatus.Doing, completedAt: null, updatedAt: now };
+    const rejectRecord = {
+      id: createId("review-reject"),
+      rejectedAt: now,
+      rejectedBy: getCurrentUser()?.id ?? null,
+      rejectedByName: getCurrentUser()?.name ?? "未记录人员",
+    };
+    const updatedTask = {
+      ...task,
+      status: TaskStatus.Doing,
+      completedAt: null,
+      updatedAt: now,
+      customFields: {
+        ...(task.customFields ?? {}),
+        reviewRejectRecords: [...(Array.isArray(task.customFields?.reviewRejectRecords) ? task.customFields.reviewRejectRecords : []), rejectRecord],
+      },
+    };
     try {
       await updatePersistentResource("tasks", taskId, updatedTask);
     } catch (error) {
@@ -5609,6 +5674,7 @@ async function handleTaskAction(action, taskId, rerender, actionButton = null) {
       return;
     }
     state.tasks = state.tasks.map((item) => (item.id === taskId ? updatedTask : item));
+    await triggerRectificationForTaskException(updatedTask, "acceptance_rejected", `任务“${updatedTask.name}”审核退回，需要发起整改。`);
     rerender();
   }
 }

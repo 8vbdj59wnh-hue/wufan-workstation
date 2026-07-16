@@ -1880,6 +1880,136 @@ export async function launchWorkPlanAsProcess(workPlanId, { dueDate = null } = {
   }
 }
 
+function getRectificationTaskExecutorId(task) {
+  return task?.executorId ?? task?.assigneeId ?? task?.ownerId ?? null;
+}
+
+function getRectificationSourceProcessInstance(task, processInstanceId = null) {
+  const instanceId = processInstanceId ?? task?.processInstanceId ?? null;
+  if (!instanceId) return null;
+  return state.processInstances.find((instance) => instance.id === instanceId) ?? null;
+}
+
+function getRectificationSourceStandardWorkId(task, processInstance = null) {
+  return processInstance?.taskTemplateId ?? processInstance?.standardWorkId ?? task?.taskTemplateId ?? null;
+}
+
+export function hasOpenRectificationWorkForSource({ sourceTaskId = null, sourceProcessInstanceId = null, sourceType = "" } = {}) {
+  return state.workPlans.some((workPlan) => {
+    if (workPlan.workType !== WorkType.Rectification) return false;
+    if (workPlan.status === WorkPlanStatus.Canceled) return false;
+    const customFields = workPlan.customFields ?? {};
+    const taskMatched = sourceTaskId !== null && sourceTaskId !== "" && customFields.sourceTaskId === sourceTaskId;
+    const processMatched =
+      sourceProcessInstanceId !== null &&
+      sourceProcessInstanceId !== "" &&
+      customFields.sourceProcessInstanceId === sourceProcessInstanceId &&
+      (sourceType === "" || customFields.sourceType === sourceType);
+    if (!taskMatched && !processMatched) return false;
+    const instance = state.processInstances.find((item) => item.id === workPlan.processInstanceId);
+    return instance?.status !== ProcessInstanceStatus.Done && instance?.status !== ProcessInstanceStatus.Stopped && instance?.status !== "canceled";
+  });
+}
+
+const rectificationSourceLabels = {
+  overdue_task: "任务超时",
+  acceptance_rejected: "审核退回",
+  rework_twice: "连续返工",
+  project_delayed: "项目延期",
+  manual: "人工创建整改",
+};
+
+export async function launchRectificationWorkForSource({ sourceTaskId = null, sourceProcessInstanceId = null, sourceType = "manual", problemSummary = "" } = {}) {
+  const sourceTask = sourceTaskId ? state.tasks.find((task) => task.id === sourceTaskId) ?? null : null;
+  const sourceProcessInstance = getRectificationSourceProcessInstance(sourceTask, sourceProcessInstanceId);
+  if (sourceTask === null && sourceProcessInstance === null) throw new Error("未找到整改来源。");
+  if (hasOpenRectificationWorkForSource({ sourceTaskId, sourceProcessInstanceId: sourceProcessInstance?.id ?? sourceProcessInstanceId, sourceType })) {
+    throw new Error("该异常来源已存在未完成的整改工作，不能重复发起。");
+  }
+
+  const rectificationTemplate = state.taskTemplates.find((template) => template.id === RectificationWorkTemplate.TaskTemplateId) ?? null;
+  if (rectificationTemplate === null || !rectificationTemplate.defaultProcessTemplateId) {
+    throw new Error("整改工作标准模板尚未初始化，请刷新系统后重试。");
+  }
+
+  const now = getNow();
+  const sourceStandardWorkId = getRectificationSourceStandardWorkId(sourceTask, sourceProcessInstance);
+  const sourceExecutorId = getRectificationTaskExecutorId(sourceTask);
+  const sourceOwnerId = sourceTask?.ownerId ?? null;
+  const rectificationObject = sourceTask?.name ?? sourceProcessInstance?.name ?? sourceProcessInstance?.displayTitle ?? "异常工作";
+  const sourceLabel = rectificationSourceLabels[sourceType] ?? rectificationSourceLabels.manual;
+  const workPlan = {
+    id: createId("work-plan"),
+    goalId: sourceTask?.goalId ?? sourceProcessInstance?.goalId ?? null,
+    departmentId: sourceTask?.departmentId ?? rectificationTemplate.departmentId ?? null,
+    taskTemplateId: RectificationWorkTemplate.TaskTemplateId,
+    title: `整改：${rectificationObject}`,
+    customFields: {
+      rectificationSource: sourceLabel,
+      sourceType,
+      sourceTaskId,
+      sourceProcessInstanceId: sourceProcessInstance?.id ?? sourceProcessInstanceId,
+      sourceStandardWorkId,
+      sourceExecutorId,
+      sourceOwnerId,
+      rectificationObject,
+      problemSummary: problemSummary || `${sourceLabel}异常需要发起整改：${rectificationObject}`,
+    },
+    coverImageUrl: sourceTask?.coverImageUrl ?? sourceProcessInstance?.coverImageUrl ?? null,
+    importance: TaskImportance.Important,
+    urgency: TaskUrgency.Urgent,
+    workType: WorkType.Rectification,
+    status: WorkPlanStatus.ThisWeek,
+    plannedWeek: "",
+    dueDate: null,
+    description: `由系统针对${sourceLabel}异常自动发起整改：${rectificationObject}`,
+    processInstanceId: null,
+    createdAt: now,
+    updatedAt: now,
+    launchedAt: null,
+    canceledAt: null,
+  };
+
+  await createPersistentResource("work-plans", workPlan);
+  state.workPlans = [workPlan, ...state.workPlans];
+  try {
+    return await launchWorkPlanAsProcess(workPlan.id);
+  } catch (error) {
+    const canceledWorkPlan = {
+      ...workPlan,
+      status: WorkPlanStatus.Canceled,
+      canceledAt: getNow(),
+      updatedAt: getNow(),
+      customFields: {
+        ...(workPlan.customFields ?? {}),
+        rectificationLaunchFailure: error?.message ?? String(error ?? "整改工作发起失败"),
+      },
+    };
+    await updatePersistentResource("work-plans", workPlan.id, canceledWorkPlan).catch(() => {});
+    state.workPlans = state.workPlans.map((item) => (item.id === workPlan.id ? canceledWorkPlan : item));
+    throw error;
+  }
+}
+
+export async function recordRectificationTriggerFailure(taskId, sourceType, error) {
+  const task = state.tasks.find((item) => item.id === taskId) ?? null;
+  if (task === null) return null;
+  const now = getNow();
+  const failure = {
+    sourceType,
+    failedAt: now,
+    message: error?.message ?? String(error ?? "整改工作自动触发失败"),
+  };
+  const customFields = {
+    ...(task.customFields ?? {}),
+    rectificationTriggerFailures: [...(Array.isArray(task.customFields?.rectificationTriggerFailures) ? task.customFields.rectificationTriggerFailures : []), failure],
+  };
+  const updatedTask = { ...task, customFields, updatedAt: now };
+  const savedTask = await updatePersistentResource("tasks", taskId, updatedTask);
+  state.tasks = state.tasks.map((item) => (item.id === taskId ? savedTask : item));
+  return savedTask;
+}
+
 function getOrderedProcessInstanceTasks(instanceId) {
   return state.tasks
     .filter((item) => item.processInstanceId === instanceId && item.status !== TaskStatus.Canceled)

@@ -3,17 +3,15 @@ import {
   createPersistentResource,
   getCurrentUser,
   getNow,
-  launchWorkPlanAsProcess,
+  hasOpenRectificationWorkForSource,
+  launchRectificationWorkForSource,
   state,
   updatePersistentResource,
 } from "./appState.js?v=20260705-state-singleton1";
 import { getDataScope, hasPermission } from "./permissions.js?v=20260705-state-singleton1";
 import {
   ProcessInstanceStatus,
-  RectificationWorkTemplate,
-  TaskImportance,
   TaskStatus,
-  TaskUrgency,
   WorkPlanStatus,
   WorkType,
   processInstanceStatusNames,
@@ -226,31 +224,8 @@ function hasSubmittedResult(task) {
   return Boolean(task.submittedAt || task.resultText || (task.submitFiles ?? []).length > 0 || (task.submitLinks ?? []).length > 0);
 }
 
-function getTaskExecutorId(task) {
-  return task?.executorId ?? task?.assigneeId ?? task?.ownerId ?? null;
-}
-
-function getSourceProcessInstance(task) {
-  return state.processInstances.find((instance) => instance.id === task?.processInstanceId) ?? null;
-}
-
-function getSourceStandardWorkId(task) {
-  const instance = getSourceProcessInstance(task);
-  return instance?.taskTemplateId ?? instance?.standardWorkId ?? task?.taskTemplateId ?? null;
-}
-
 function hasOpenRectificationWorkForTask(taskId) {
-  return state.workPlans.some((workPlan) => {
-    if (workPlan.workType !== WorkType.Rectification) return false;
-    if (workPlan.customFields?.sourceTaskId !== taskId) return false;
-    if (workPlan.status === WorkPlanStatus.Canceled) return false;
-    const instance = state.processInstances.find((item) => item.id === workPlan.processInstanceId);
-    return instance?.status !== ProcessInstanceStatus.Done && instance?.status !== ProcessInstanceStatus.Stopped;
-  });
-}
-
-function getRectificationTemplate() {
-  return state.taskTemplates.find((template) => template.id === RectificationWorkTemplate.TaskTemplateId) ?? null;
+  return hasOpenRectificationWorkForSource({ sourceTaskId: taskId });
 }
 
 function getProcessTasks(processInstanceId) {
@@ -915,51 +890,13 @@ async function launchRectificationWorkFromTask(taskId, rerender) {
   if (!isTaskAssessmentOverdue(sourceTask)) return window.alert("只有异常或逾期任务可以发起整改工作。");
   if (hasOpenRectificationWorkForTask(sourceTask.id)) return window.alert("该任务已经存在未完成的整改工作，不能重复发起。");
 
-  const rectificationTemplate = getRectificationTemplate();
-  if (rectificationTemplate === null || !rectificationTemplate.defaultProcessTemplateId) {
-    return window.alert("整改工作标准模板尚未初始化，请刷新系统后重试。");
-  }
-
-  const now = getNow();
-  const sourceProcessInstance = getSourceProcessInstance(sourceTask);
-  const sourceStandardWorkId = getSourceStandardWorkId(sourceTask);
-  const sourceExecutorId = getTaskExecutorId(sourceTask);
-  const workPlan = {
-    id: createId("work-plan"),
-    goalId: sourceTask.goalId ?? sourceProcessInstance?.goalId ?? null,
-    departmentId: sourceTask.departmentId ?? rectificationTemplate.departmentId ?? null,
-    taskTemplateId: RectificationWorkTemplate.TaskTemplateId,
-    title: `整改：${sourceTask.name}`,
-    customFields: {
-      rectificationSource: "人工创建整改",
-      sourceType: "overdue_task",
+  try {
+    await launchRectificationWorkForSource({
       sourceTaskId: sourceTask.id,
       sourceProcessInstanceId: sourceTask.processInstanceId ?? null,
-      sourceStandardWorkId,
-      sourceExecutorId,
-      sourceOwnerId: sourceTask.ownerId ?? null,
-      rectificationObject: sourceTask.name,
+      sourceType: "overdue_task",
       problemSummary: `任务“${sourceTask.name}”已逾期，需要发起整改。`,
-    },
-    coverImageUrl: sourceTask.coverImageUrl ?? sourceProcessInstance?.coverImageUrl ?? null,
-    importance: TaskImportance.Important,
-    urgency: TaskUrgency.Urgent,
-    workType: WorkType.Rectification,
-    status: WorkPlanStatus.ThisWeek,
-    plannedWeek: "",
-    dueDate: null,
-    description: `由工作结果模块针对异常任务发起整改：${sourceTask.name}`,
-    processInstanceId: null,
-    createdAt: now,
-    updatedAt: now,
-    launchedAt: null,
-    canceledAt: null,
-  };
-
-  try {
-    await createPersistentResource("work-plans", workPlan);
-    state.workPlans = [workPlan, ...state.workPlans];
-    await launchWorkPlanAsProcess(workPlan.id);
+    });
     window.alert("整改工作已发起。");
   } catch (error) {
     console.error("发起整改工作失败", error);
