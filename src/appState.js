@@ -1289,6 +1289,43 @@ function rectificationSubmitField(key, label, type = "textarea", required = true
   };
 }
 
+const rectificationNodeSubmitFields = {
+  情况说明: [
+    rectificationSubmitField("whatHappened", "发生了什么", "textarea", true, "描述问题经过、影响范围和当前状态", [], 1),
+    rectificationSubmitField("whyHappened", "为什么发生", "textarea", true, "说明直接原因和背景因素", [], 2),
+    rectificationSubmitField("whyNotAvoided", "为什么没有提前避免", "textarea", true, "说明预警、检查或协同中缺失的环节", [], 3),
+  ],
+  原因分析: [
+    rectificationSubmitField("causeAttribution", "问题归因", "multi_select", true, "请选择问题归因", ["人员能力", "标准工作", "流程设计", "资源不足", "外部原因", "其它"], 1),
+    rectificationSubmitField("causeAnalysis", "原因分析", "textarea", true, "从人员、标准、流程、资源等角度分析根因", [], 2),
+  ],
+  改善措施: [
+    rectificationSubmitField("improvementActions", "改善措施", "textarea", true, "列出具体改善动作、预期结果和检查方式", [], 1),
+    rectificationSubmitField("improvementOwner", "措施负责人", "person", true, "请选择措施负责人", [], 2),
+    rectificationSubmitField("improvementDueAt", "完成时间", "datetime_hour", true, "", [], 3),
+  ],
+  标准优化: [
+    rectificationSubmitField("needStandardUpdate", "是否需要优化标准", "select", true, "请选择", ["需要", "不需要"], 1),
+    rectificationSubmitField("standardUpdateScope", "优化范围", "multi_select", true, "请选择优化范围", ["标准工作", "流程", "表单", "完成标准", "无需优化"], 2),
+    rectificationSubmitField("standardUpdateNote", "优化说明", "textarea", false, "说明需要优化的内容，或无需优化的理由", [], 3),
+  ],
+  效果验证: [
+    rectificationSubmitField("verificationResult", "验证结果", "select", true, "请选择验证结果", ["已解决", "部分改善", "无改善"], 1),
+    rectificationSubmitField("verificationNote", "验证说明", "textarea", true, "说明验证方式、效果和仍需关注的问题", [], 2),
+  ],
+  持续应用: [
+    rectificationSubmitField("rectificationSummary", "整改总结", "textarea", true, "总结本次整改结论和关键经验", [], 1),
+    rectificationSubmitField("continuousApplicationRequirement", "后续执行要求", "textarea", true, "说明后续如何持续执行、检查和复盘", [], 2),
+  ],
+};
+
+export function getRectificationSubmitFields(nodeName) {
+  return (rectificationNodeSubmitFields[nodeName] ?? []).map((field) => ({
+    ...field,
+    options: Array.isArray(field.options) ? [...field.options] : [],
+  }));
+}
+
 function syncRectificationProcessNodes(templateId, ownerId, departmentId, now) {
   const processTemplate = state.processTemplates.find((template) => template.id === templateId);
   if (processTemplate === undefined) return false;
@@ -1305,11 +1342,7 @@ function syncRectificationProcessNodes(templateId, ownerId, departmentId, now) {
       completionStandard: "完整填写发生了什么、为什么发生、为什么没有提前避免。",
       outputRequirement: "整改情况说明",
       submitDescription: "请如实说明情况，作为后续原因分析和改善措施的依据。",
-      submitFields: [
-        rectificationSubmitField("whatHappened", "发生了什么", "textarea", true, "描述问题经过、影响范围和当前状态", [], 1),
-        rectificationSubmitField("whyHappened", "为什么发生", "textarea", true, "说明直接原因和背景因素", [], 2),
-        rectificationSubmitField("whyNotAvoided", "为什么没有提前避免", "textarea", true, "说明预警、检查或协同中缺失的环节", [], 3),
-      ],
+      submitFields: getRectificationSubmitFields("情况说明"),
     },
     {
       id: "node-rectification-002",
@@ -1319,9 +1352,7 @@ function syncRectificationProcessNodes(templateId, ownerId, departmentId, now) {
       completionStandard: "完成原因分析，区分直接原因、管理原因和标准缺口。",
       outputRequirement: "原因分析结论",
       submitDescription: "请完成负责人原因分析。",
-      submitFields: [
-        rectificationSubmitField("causeAnalysis", "原因分析", "textarea", true, "从人员、流程、标准、资源等角度分析根因", [], 1),
-      ],
+      submitFields: getRectificationSubmitFields("原因分析"),
     },
     {
       id: "node-rectification-003",
@@ -1331,9 +1362,7 @@ function syncRectificationProcessNodes(templateId, ownerId, departmentId, now) {
       completionStandard: "改善措施具体、可执行，并能对应前一步原因分析。",
       outputRequirement: "改善措施",
       submitDescription: "请填写准备采取的改善措施。",
-      submitFields: [
-        rectificationSubmitField("improvementActions", "准备采取哪些改善措施", "textarea", true, "列出具体动作、责任人和预期结果", [], 1),
-      ],
+      submitFields: getRectificationSubmitFields("改善措施"),
     },
     {
       id: "node-rectification-004",
@@ -1343,10 +1372,7 @@ function syncRectificationProcessNodes(templateId, ownerId, departmentId, now) {
       completionStandard: "已判断是否需要标准优化，并记录理由。",
       outputRequirement: "标准优化判断",
       submitDescription: "请判断是否需要更新标准工作。",
-      submitFields: [
-        rectificationSubmitField("needStandardUpdate", "是否更新标准工作", "select", true, "请选择", ["需要", "暂不需要"], 1),
-        rectificationSubmitField("standardUpdateNote", "标准优化说明", "textarea", false, "说明需要更新的标准或暂不更新的理由", [], 2),
-      ],
+      submitFields: getRectificationSubmitFields("标准优化"),
     },
     {
       id: "node-rectification-005",
@@ -1356,9 +1382,7 @@ function syncRectificationProcessNodes(templateId, ownerId, departmentId, now) {
       completionStandard: "完成效果验证，并记录验证结果。",
       outputRequirement: "效果验证结果",
       submitDescription: "请填写改善效果验证结果。",
-      submitFields: [
-        rectificationSubmitField("verificationResult", "验证结果", "textarea", true, "说明改善措施是否有效、是否仍有残留风险", [], 1),
-      ],
+      submitFields: getRectificationSubmitFields("效果验证"),
     },
     {
       id: "node-rectification-006",
@@ -1368,9 +1392,7 @@ function syncRectificationProcessNodes(templateId, ownerId, departmentId, now) {
       completionStandard: "确认整改措施已进入日常执行或管理动作。",
       outputRequirement: "持续应用确认",
       submitDescription: "请确认整改结果如何持续应用。",
-      submitFields: [
-        rectificationSubmitField("continuousApplication", "持续应用说明", "textarea", true, "说明后续如何持续应用和检查", [], 1),
-      ],
+      submitFields: getRectificationSubmitFields("持续应用"),
     },
   ];
 

@@ -9,6 +9,7 @@ import {
   getProcessNodeStepOrder,
   getCurrentUser,
   getNow,
+  getRectificationSubmitFields,
   loadTemplates,
   moveTaskTemplateToValueChain,
   normalizeSubmitRequirement,
@@ -37,6 +38,7 @@ import {
   TaskTemplateStatus,
   TaskUrgency,
   WorkPlanStatus,
+  RectificationWorkTemplate,
   processInstanceStatusNames,
   taskImportanceNames,
   taskSourceNames,
@@ -576,12 +578,25 @@ function includesSubmitPart(submitType, part) {
 function getTaskSubmitRequirement(task) {
   const node = state.processTemplateNodes.find((item) => item.id === task.processNodeId);
   const normalized = normalizeSubmitRequirement(task.submitType ? task : (node ?? task));
+  const rectificationFields = getRectificationTaskSubmitFields(task);
   return {
     ...normalized,
+    submitFields: rectificationFields.length > 0 ? rectificationFields : normalized.submitFields,
     submitFormData: task.submitFormData && typeof task.submitFormData === "object" ? task.submitFormData : {},
     submitFiles: Array.isArray(task.submitFiles) ? task.submitFiles : [],
     submitLinks: Array.isArray(task.submitLinks) ? task.submitLinks : [],
   };
+}
+
+function isRectificationExecutionTask(task) {
+  const instance = getTaskProcessInstance(task);
+  return instance?.taskTemplateId === RectificationWorkTemplate.TaskTemplateId;
+}
+
+function getRectificationTaskSubmitFields(task) {
+  if (!isRectificationExecutionTask(task)) return [];
+  const node = state.processTemplateNodes.find((item) => item.id === task.processNodeId);
+  return getRectificationSubmitFields(node?.name ?? task.name);
 }
 
 function getSubmitFields(task) {
@@ -591,6 +606,8 @@ function getSubmitFields(task) {
 function getSubmitFieldValue(formData, field) {
   const value = formData?.[field.key];
   if (Array.isArray(value)) return value.join("、");
+  if (field.type === "person") return findName(people, value, value ?? "");
+  if (field.type === "datetime_hour") return formatBusinessDateTime(value, "");
   return value ?? "";
 }
 
@@ -615,6 +632,17 @@ function renderSubmitFieldInput(field, value = "") {
   if (field.type === "multi_select") {
     const values = Array.isArray(value) ? value : String(value).split("、").filter(Boolean);
     return `<select ${common} multiple>${options.map((option) => `<option value="${escapeHtml(option)}" ${values.includes(option) ? "selected" : ""}>${escapeHtml(option)}</option>`).join("")}</select>`;
+  }
+  if (field.type === "person") {
+    return `<select ${common}><option value="">请选择</option>${people.map((person) => `<option value="${escapeHtml(person.id)}" ${person.id === value ? "selected" : ""}>${escapeHtml(person.name)}</option>`).join("")}</select>`;
+  }
+  if (field.type === "datetime_hour") {
+    return `
+      <div class="business-time-input">
+        <input type="date" name="${escapeHtml(name)}Date" value="${escapeHtml(getBusinessDatePart(value))}" />
+        <select name="${escapeHtml(name)}Hour">${renderBusinessHourOptions(getBusinessHourPart(value), "请选择小时")}</select>
+      </div>
+    `;
   }
   return `<input ${common} type="${field.type === "url" ? "url" : field.type}" value="${escapeHtml(value)}" placeholder="${escapeHtml(field.placeholder ?? "")}" />`;
 }
@@ -4975,6 +5003,9 @@ function collectSubmitFormData(form, task) {
     const inputName = `submit__${field.key}`;
     if (field.type === "multi_select") {
       formData[field.key] = new FormData(form).getAll(inputName).map(String);
+    } else if (field.type === "datetime_hour") {
+      const result = collectBusinessDateTime(form, inputName, field.label);
+      formData[field.key] = result.value ?? "";
     } else {
       formData[field.key] = getFormValue(form, inputName);
     }
@@ -5040,6 +5071,12 @@ async function saveResult(form, rerender) {
     submitFormData,
     submitFiles,
     submitLinks,
+    customFields: isRectificationExecutionTask(task)
+      ? {
+          ...(task.customFields ?? {}),
+          ...submitFormData,
+        }
+      : task.customFields,
     submittedAt: now,
     submittedBy: task.ownerId,
     status: nextStatus,
