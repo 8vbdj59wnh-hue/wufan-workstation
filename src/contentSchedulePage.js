@@ -437,17 +437,21 @@ function renderStatusOptions(selectedStatus, emptyLabel) {
 }
 
 function normalizeImportDate(value) {
-  const trimmedValue = value.trim();
+  const trimmedValue = String(value ?? "").trim();
+  if (trimmedValue === "") return "";
   let year = 0;
   let month = 0;
   let day = 0;
-  const fullDateMatch = trimmedValue.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  const fullDateMatch = trimmedValue.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::\d{2})?(?:\.\d{1,3})?(?:Z|[+-]\d{2}:?\d{2})?)?$/);
   const monthDayMatch = trimmedValue.match(/^(\d{1,2})月(\d{1,2})日$/);
 
   if (fullDateMatch) {
     year = Number(fullDateMatch[1]);
     month = Number(fullDateMatch[2]);
     day = Number(fullDateMatch[3]);
+    const hour = fullDateMatch[4] === undefined ? 0 : Number(fullDateMatch[4]);
+    const minute = fullDateMatch[5] === undefined ? 0 : Number(fullDateMatch[5]);
+    if (hour > 23 || minute > 59) return null;
   } else if (monthDayMatch) {
     year = 2026;
     month = Number(monthDayMatch[1]);
