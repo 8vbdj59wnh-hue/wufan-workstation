@@ -4454,6 +4454,76 @@ button.content-template-thumb {
   text-align: center;
 }
 
+.template-tag-admin-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.4fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.template-tag-admin-panel {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.compact-heading {
+  margin: 0;
+}
+
+.template-tag-admin-groups {
+  display: grid;
+  gap: 12px;
+}
+
+.template-tag-admin-group {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.template-tag-admin-group h4 {
+  margin: 0;
+  color: #111827;
+  font-size: 14px;
+}
+
+.template-tag-admin-list {
+  display: grid;
+  gap: 8px;
+}
+
+.template-tag-admin-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 7px;
+  background: #f9fafb;
+}
+
+.template-tag-admin-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-tag-admin-item small {
+  color: #6b7280;
+}
+
+.template-tag-admin-item.is-inactive,
+.muted-row {
+  color: #9ca3af;
+  background: #f3f4f6;
+}
+
 @media (max-width: 720px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -4499,7 +4569,8 @@ button.content-template-thumb {
   .permission-check-grid,
   .form-designer-layout,
   .form-designer-workspace,
-  .template-center-layout {
+  .template-center-layout,
+  .template-tag-admin-layout {
     grid-template-columns: 1fr;
   }
 

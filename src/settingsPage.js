@@ -25,6 +25,8 @@ let categories = state.categories;
 let stores = state.stores;
 let issuesRequirements = state.issuesRequirements;
 let standardWorkForms = state.standardWorkForms;
+let templateTagCategories = state.templateTagCategories;
+let templateTags = state.templateTags;
 let modalState = null;
 let activeOrganizationTab = "chart";
 let permissionFilters = { keyword: "", departmentId: "", loginOnly: false };
@@ -76,6 +78,16 @@ function replaceStandardWorkForms(nextForms) {
   standardWorkForms = state.standardWorkForms;
 }
 
+function replaceTemplateTagCategories(nextCategories) {
+  state.templateTagCategories.splice(0, state.templateTagCategories.length, ...nextCategories);
+  templateTagCategories = state.templateTagCategories;
+}
+
+function replaceTemplateTags(nextTags) {
+  state.templateTags.splice(0, state.templateTags.length, ...nextTags);
+  templateTags = state.templateTags;
+}
+
 const settingsResourceByEntity = {
   department: "departments",
   position: "positions",
@@ -84,6 +96,8 @@ const settingsResourceByEntity = {
   store: "stores",
   issueRequirement: "issues-requirements",
   standardWorkForm: "standard-work-forms",
+  templateTagCategory: "template-tag-categories",
+  templateTag: "template-tags",
 };
 
 function upsertItem(items, item) {
@@ -690,6 +704,94 @@ function renderCategorySection() {
   `;
 }
 
+function getSortedTemplateTagCategories({ includeInactive = true } = {}) {
+  return templateTagCategories
+    .filter((category) => includeInactive || category.status !== Status.Inactive)
+    .slice()
+    .sort((left, right) => sortByOrder(left, right) || left.name.localeCompare(right.name, "zh-Hans-CN"));
+}
+
+function getTemplateTagsByCategory(categoryId) {
+  return templateTags
+    .filter((tag) => tag.categoryId === categoryId)
+    .slice()
+    .sort((left, right) => sortByOrder(left, right) || left.name.localeCompare(right.name, "zh-Hans-CN"));
+}
+
+function renderTemplateTagStatusActions(entity, item) {
+  if (!canCurrentUser("settings.editStandardWorkForms")) return "";
+  return item.status === Status.Inactive
+    ? `<button class="text-button" type="button" data-action="activate" data-entity="${entity}" data-id="${escapeHtml(item.id)}">启用</button>`
+    : `<button class="text-button danger-text" type="button" data-action="deactivate" data-entity="${entity}" data-id="${escapeHtml(item.id)}">停用</button>`;
+}
+
+function renderTemplateTagManagementSection() {
+  const canEdit = canCurrentUser("settings.editStandardWorkForms");
+  const categories = getSortedTemplateTagCategories();
+
+  return `
+    <section class="settings-section" id="template-tags">
+      <div class="section-heading with-actions">
+        <div>
+          <h2>模板标签管理</h2>
+          <p class="form-note">停用后不会出现在模板上传和编辑选择中，历史模板已使用标签仍会保留显示。</p>
+        </div>
+        ${canEdit ? `<button class="primary-button" type="button" data-action="add" data-entity="templateTagCategory">新增分类</button>` : ""}
+      </div>
+      <div class="template-tag-admin-layout">
+        <div class="template-tag-admin-panel">
+          <h3>标签分类</h3>
+          <div class="table-wrap">
+            <table class="data-table compact-table">
+              <thead>
+                <tr><th>分类名称</th><th>排序</th><th>状态</th><th>操作</th></tr>
+              </thead>
+              <tbody>
+                ${categories.map((category) => `
+                  <tr class="${category.status === Status.Inactive ? "muted-row" : ""}">
+                    <td>${escapeHtml(category.name)}</td>
+                    <td>${escapeHtml(category.sortOrder ?? "")}</td>
+                    <td>${escapeHtml(statusNames[category.status] ?? category.status)}</td>
+                    <td class="row-actions">
+                      ${canEdit ? `<button class="text-button" type="button" data-action="edit" data-entity="templateTagCategory" data-id="${escapeHtml(category.id)}">编辑</button>` : ""}
+                      ${renderTemplateTagStatusActions("templateTagCategory", category)}
+                    </td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="template-tag-admin-panel">
+          <div class="section-heading with-actions compact-heading">
+            <h3>标签</h3>
+            ${canEdit ? `<button class="secondary-button" type="button" data-action="add" data-entity="templateTag">新增标签</button>` : ""}
+          </div>
+          <div class="template-tag-admin-groups">
+            ${categories.map((category) => `
+              <div class="template-tag-admin-group">
+                <h4>${escapeHtml(category.name)}${category.status === Status.Inactive ? "（已停用）" : ""}</h4>
+                <div class="template-tag-admin-list">
+                  ${getTemplateTagsByCategory(category.id).map((tag) => `
+                    <div class="template-tag-admin-item ${tag.status === Status.Inactive ? "is-inactive" : ""}">
+                      <span>${escapeHtml(tag.name)}</span>
+                      <small>${escapeHtml(statusNames[tag.status] ?? tag.status)}</small>
+                      <div class="row-actions">
+                        ${canEdit ? `<button class="text-button" type="button" data-action="edit" data-entity="templateTag" data-id="${escapeHtml(tag.id)}">编辑</button>` : ""}
+                        ${renderTemplateTagStatusActions("templateTag", tag)}
+                      </div>
+                    </div>
+                  `).join("") || `<p class="form-note">暂无标签</p>`}
+                </div>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function getFilteredStores() {
   const keyword = storeFilters.keyword.trim().toLowerCase();
   return stores
@@ -1045,6 +1147,8 @@ function getModalTitle() {
     category: "分类",
     store: "店铺",
     issueRequirement: "需求/问题",
+    templateTagCategory: "模板标签分类",
+    templateTag: "模板标签",
   };
 
   return `${actionName}${entityNames[modalState.entity]}`;
@@ -1194,6 +1298,54 @@ function renderCategoryForm() {
     <label>
       <span>排序</span>
       <input name="sortOrder" value="${category?.sortOrder ?? categories.length + 1}" inputmode="numeric" />
+    </label>
+  `;
+}
+
+function renderTemplateTagCategoryForm() {
+  const category =
+    modalState.mode === "edit"
+      ? templateTagCategories.find((item) => item.id === modalState.id)
+      : null;
+
+  return `
+    <label>
+      <span>分类名称</span>
+      <input name="name" value="${escapeHtml(category?.name ?? "")}" autocomplete="off" />
+    </label>
+    <label>
+      <span>排序</span>
+      <input name="sortOrder" value="${escapeHtml(category?.sortOrder ?? (templateTagCategories.length + 1) * 10)}" inputmode="numeric" />
+    </label>
+  `;
+}
+
+function renderTemplateTagForm() {
+  const tag =
+    modalState.mode === "edit"
+      ? templateTags.find((item) => item.id === modalState.id)
+      : null;
+  const activeCategories = getSortedTemplateTagCategories({ includeInactive: false });
+  const currentCategory = tag === null || tag === undefined ? null : templateTagCategories.find((category) => category.id === tag.categoryId);
+  const selectableCategories = currentCategory !== null && currentCategory !== undefined && !activeCategories.some((category) => category.id === currentCategory.id)
+    ? [...activeCategories, currentCategory].sort((left, right) => sortByOrder(left, right) || left.name.localeCompare(right.name, "zh-Hans-CN"))
+    : activeCategories;
+  const selectedCategoryId = tag?.categoryId ?? selectableCategories[0]?.id ?? "";
+
+  return `
+    <label>
+      <span>所属分类</span>
+      <select name="categoryId">
+        ${selectableCategories.map((category) => `<option value="${escapeHtml(category.id)}" ${category.id === selectedCategoryId ? "selected" : ""}>${escapeHtml(category.name)}${category.status === Status.Inactive ? "（已停用）" : ""}</option>`).join("")}
+      </select>
+    </label>
+    <label>
+      <span>标签名称</span>
+      <input name="name" value="${escapeHtml(tag?.name ?? "")}" autocomplete="off" />
+    </label>
+    <label>
+      <span>排序</span>
+      <input name="sortOrder" value="${escapeHtml(tag?.sortOrder ?? (templateTags.length + 1) * 10)}" inputmode="numeric" />
     </label>
   `;
 }
@@ -1596,6 +1748,8 @@ function renderModalFields() {
   if (modalState.entity === "position") return renderPositionForm();
   if (modalState.entity === "person") return renderPersonForm();
   if (modalState.entity === "category") return renderCategoryForm();
+  if (modalState.entity === "templateTagCategory") return renderTemplateTagCategoryForm();
+  if (modalState.entity === "templateTag") return renderTemplateTagForm();
   if (modalState.entity === "store") return renderStoreForm();
   if (modalState.entity === "issueRequirement") return renderIssueRequirementForm();
 
@@ -1845,6 +1999,88 @@ async function saveCategory(form, rerender) {
   }
 }
 
+async function saveTemplateTagCategory(form, rerender) {
+  const name = getFormValue(form, "name");
+  const sortOrder = parseSortOrder(getFormValue(form, "sortOrder"));
+
+  if (name === "") return setModalError("分类名称不能为空。", rerender);
+  if (sortOrder === null) return setModalError("排序必须是数字。", rerender);
+  if (templateTagCategories.some((category) => category.id !== modalState.id && category.name === name)) {
+    return setModalError("标签分类名称不能重复。", rerender);
+  }
+
+  const now = getNow();
+  const item =
+    modalState.mode === "add"
+      ? {
+          id: createId("template-tag-category"),
+          name,
+          status: Status.Active,
+          sortOrder,
+          createdAt: now,
+          updatedAt: now,
+        }
+      : {
+          ...(templateTagCategories.find((category) => category.id === modalState.id) ?? {}),
+          id: modalState.id,
+          name,
+          sortOrder,
+          updatedAt: now,
+        };
+
+  try {
+    const savedCategory = await persistSettingsEntity("templateTagCategory", item, modalState.mode);
+    replaceTemplateTagCategories(upsertItem(templateTagCategories, savedCategory));
+    modalState = null;
+    rerender();
+  } catch (error) {
+    setModalError(error.message || "模板标签分类保存失败，请检查本地数据库服务。", rerender);
+  }
+}
+
+async function saveTemplateTag(form, rerender) {
+  const categoryId = getFormValue(form, "categoryId");
+  const name = getFormValue(form, "name");
+  const sortOrder = parseSortOrder(getFormValue(form, "sortOrder"));
+
+  if (categoryId === "") return setModalError("请选择所属分类。", rerender);
+  if (name === "") return setModalError("标签名称不能为空。", rerender);
+  if (sortOrder === null) return setModalError("排序必须是数字。", rerender);
+  if (templateTags.some((tag) => tag.id !== modalState.id && tag.categoryId === categoryId && tag.name === name)) {
+    return setModalError("同一分类下标签名称不能重复。", rerender);
+  }
+
+  const now = getNow();
+  const item =
+    modalState.mode === "add"
+      ? {
+          id: createId("template-tag"),
+          categoryId,
+          name,
+          status: Status.Active,
+          sortOrder,
+          createdAt: now,
+          updatedAt: now,
+        }
+      : {
+          ...(templateTags.find((tag) => tag.id === modalState.id) ?? {}),
+          id: modalState.id,
+          categoryId,
+          name,
+          sortOrder,
+          updatedAt: now,
+        };
+
+  try {
+    const savedTag = await persistSettingsEntity("templateTag", item, modalState.mode);
+    replaceTemplateTags(upsertItem(templateTags, savedTag));
+    modalState = null;
+    rerender();
+  } catch (error) {
+    setModalError(error.message || "模板标签保存失败，请检查本地数据库服务。", rerender);
+  }
+}
+
 async function saveStore(form, rerender) {
   const name = getFormValue(form, "name");
   const platform = getFormValue(form, "platform");
@@ -2086,6 +2322,8 @@ async function deactivateEntity(entity, id, rerender) {
     person: people,
     category: categories,
     store: stores,
+    templateTagCategory: templateTagCategories,
+    templateTag: templateTags,
   };
   const replaceByEntity = {
     department: replaceDepartments,
@@ -2093,6 +2331,8 @@ async function deactivateEntity(entity, id, rerender) {
     person: replacePeople,
     category: replaceCategories,
     store: replaceStores,
+    templateTagCategory: replaceTemplateTagCategories,
+    templateTag: replaceTemplateTags,
   };
   const item = collectionByEntity[entity]?.find((current) => current.id === id);
   if (item === undefined) return;
@@ -2118,15 +2358,24 @@ async function deactivateEntity(entity, id, rerender) {
 
 async function activateEntity(entity, id, rerender) {
   const now = getNow();
-  if (entity !== "store") return;
-  const store = stores.find((item) => item.id === id);
-  if (store === undefined) return;
+  const collectionByEntity = {
+    store: stores,
+    templateTagCategory: templateTagCategories,
+    templateTag: templateTags,
+  };
+  const replaceByEntity = {
+    store: replaceStores,
+    templateTagCategory: replaceTemplateTagCategories,
+    templateTag: replaceTemplateTags,
+  };
+  const item = collectionByEntity[entity]?.find((current) => current.id === id);
+  if (item === undefined) return;
 
   try {
-    const savedStore = await persistSettingsEntity("store", { ...store, status: Status.Active, updatedAt: now });
-    replaceStores(upsertItem(stores, savedStore));
+    const savedItem = await persistSettingsEntity(entity, { ...item, status: Status.Active, updatedAt: now });
+    replaceByEntity[entity](upsertItem(collectionByEntity[entity], savedItem));
   } catch (error) {
-    window.alert(error.message || "店铺状态保存失败，请检查本地数据库服务。");
+    window.alert(error.message || "状态保存失败，请检查本地数据库服务。");
   }
   rerender();
 }
@@ -2231,6 +2480,8 @@ function getDeactivateMessage(entity) {
     person: "人员",
     category: "分类",
     store: "店铺",
+    templateTagCategory: "模板标签分类",
+    templateTag: "模板标签",
   };
 
   return `确定要停用该${entityNames[entity]}吗？停用后历史数据仍会保留。`;
@@ -2243,6 +2494,8 @@ async function handleFormSubmit(event, rerender) {
   if (modalState.entity === "position") return await savePosition(event.target, rerender);
   if (modalState.entity === "person") return await savePerson(event.target, rerender);
   if (modalState.entity === "category") return await saveCategory(event.target, rerender);
+  if (modalState.entity === "templateTagCategory") return await saveTemplateTagCategory(event.target, rerender);
+  if (modalState.entity === "templateTag") return await saveTemplateTag(event.target, rerender);
   if (modalState.entity === "store") return await saveStore(event.target, rerender);
   if (modalState.entity === "issueRequirement") return await saveIssueRequirement(event.target, rerender);
 }
@@ -2755,6 +3008,7 @@ export function renderSettingsPage() {
         ${canCurrentUser("settings.managePermissions") ? `<a href="#permissions">权限管理</a>` : ""}
         ${canCurrentUser("settings.viewStores") ? `<a href="#stores">店铺管理</a>` : ""}
         ${canCurrentUser("settings.viewStandardWorks") || canCurrentUser("settings.editStandardWorkForms") ? `<a href="#form-design">表单设计</a>` : ""}
+        ${canCurrentUser("settings.editStandardWorkForms") ? `<a href="#template-tags">模板标签管理</a>` : ""}
         ${canCurrentUser("settings.editStandardWorkForms") ? `<a href="#issues-requirements">需求与问题中心</a>` : ""}
         <a href="#categories">分类设置</a>
       </div>
@@ -2763,6 +3017,7 @@ export function renderSettingsPage() {
       ${canCurrentUser("settings.managePermissions") ? renderPermissionSection() : ""}
       ${canCurrentUser("settings.viewStores") ? renderStoreSection() : ""}
       ${canCurrentUser("settings.viewStandardWorks") || canCurrentUser("settings.editStandardWorkForms") ? renderFormDesignSection() : ""}
+      ${canCurrentUser("settings.editStandardWorkForms") ? renderTemplateTagManagementSection() : ""}
       ${canCurrentUser("settings.editStandardWorkForms") ? renderIssuesRequirementsSection() : ""}
       ${renderCategorySection()}
       ${renderModal()}

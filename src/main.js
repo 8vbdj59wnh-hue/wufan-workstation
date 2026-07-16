@@ -70,6 +70,8 @@ const moduleHashMap = {
   categories: "settings",
   "form-design": "settings",
   "settings/form-design": "settings",
+  "template-tags": "settings",
+  "settings/template-tags": "settings",
   "issues-requirements": "settings",
   "settings/issues-requirements": "settings",
 };

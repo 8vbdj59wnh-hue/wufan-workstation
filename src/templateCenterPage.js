@@ -16,22 +16,6 @@ const materialTypeNames = {
   zip: "压缩包",
 };
 
-const tagCategories = [
-  { id: "brand", label: "品牌 Brand" },
-  { id: "platform", label: "平台 Platform" },
-  { id: "tone", label: "调性 Tone" },
-  { id: "format", label: "形式 Format" },
-  { id: "usage", label: "用途 Usage" },
-];
-
-let tagLibrary = {
-  brand: ["半然", "点意", "青未", "今也", "屋范", "chicfun", "南颜", "南屿"],
-  platform: ["淘宝", "小红书", "抖音"],
-  usage: ["首页", "详情页", "主图", "sku图", "笔记", "买家秀"],
-  format: ["图片", "视频"],
-  tone: ["品牌感", "网红感", "活人感", "专家感"],
-};
-
 let filters = {
   keyword: "",
   selectedTags: createEmptyTags(),
@@ -51,7 +35,7 @@ let templateError = "";
 let templateUploading = false;
 
 function createEmptyTags() {
-  return Object.fromEntries(tagCategories.map((category) => [category.id, []]));
+  return Object.fromEntries(getTemplateTagCategories({ includeInactive: true }).map((category) => [category.id, []]));
 }
 
 function escapeHtml(value) {
@@ -114,9 +98,34 @@ function hasTag(tags, tag) {
   return tags.some((item) => item.toLowerCase() === normalizedTag);
 }
 
+function sortTemplateTagItem(left, right) {
+  return (left.sortOrder ?? 0) - (right.sortOrder ?? 0) || String(left.name ?? "").localeCompare(String(right.name ?? ""), "zh-Hans-CN") || String(left.id ?? "").localeCompare(String(right.id ?? ""));
+}
+
+function getTemplateTagCategories({ includeInactive = false } = {}) {
+  return (state.templateTagCategories ?? [])
+    .filter((category) => includeInactive || category.status !== "inactive")
+    .slice()
+    .sort(sortTemplateTagItem)
+    .map((category) => ({
+      ...category,
+      label: category.name,
+    }));
+}
+
+function getTemplateTagsByCategory(categoryId, { includeInactive = false } = {}) {
+  return (state.templateTags ?? [])
+    .filter((tag) => tag.categoryId === categoryId)
+    .filter((tag) => includeInactive || tag.status !== "inactive")
+    .slice()
+    .sort(sortTemplateTagItem)
+    .map((tag) => tag.name);
+}
+
 function findTagCategory(tagName) {
   const normalizedTag = normalizeTagName(tagName);
-  return tagCategories.find((category) => hasTag(tagLibrary[category.id] ?? [], normalizedTag))?.id ?? null;
+  return getTemplateTagCategories({ includeInactive: true })
+    .find((category) => hasTag(getTemplateTagsByCategory(category.id, { includeInactive: true }), normalizedTag))?.id ?? null;
 }
 
 function mapLegacyTagToFinal(tagName) {
@@ -163,13 +172,13 @@ function normalizeMaterialTags(tags) {
   if (Array.isArray(tags)) {
     tags.forEach(addMappedTag);
   } else if (tags && typeof tags === "object") {
-    tagCategories.forEach((category) => {
+    getTemplateTagCategories({ includeInactive: true }).forEach((category) => {
       if (Array.isArray(tags[category.id])) {
         tags[category.id].forEach(addMappedTag);
       }
     });
     Object.entries(tags).forEach(([categoryId, value]) => {
-      if (tagCategories.some((category) => category.id === categoryId)) return;
+      if (getTemplateTagCategories({ includeInactive: true }).some((category) => category.id === categoryId)) return;
       if (Array.isArray(value)) value.forEach(addMappedTag);
     });
   }
@@ -183,7 +192,7 @@ function getMaterialTags(material) {
 
 function generateTemplateName(tags) {
   const normalizedTags = normalizeMaterialTags(tags);
-  const selectedTags = tagCategories.flatMap((category) => normalizedTags[category.id] ?? []);
+  const selectedTags = getTemplateTagCategories({ includeInactive: true }).flatMap((category) => normalizedTags[category.id] ?? []);
   return selectedTags.filter(Boolean).join(" ") || "未命名模板";
 }
 
@@ -231,7 +240,7 @@ function getMaterialUploadTime(material) {
 }
 
 function getFlatTags(tags) {
-  return tagCategories.flatMap((category) => tags[category.id] ?? [])
+  return getTemplateTagCategories({ includeInactive: true }).flatMap((category) => tags[category.id] ?? [])
     .filter((tag, index, list) => list.findIndex((item) => item.toLowerCase() === tag.toLowerCase()) === index);
 }
 
@@ -256,7 +265,7 @@ function getFilteredMaterials() {
 
     if (keyword !== "" && !searchableText.includes(keyword)) return false;
 
-    return tagCategories.every((category) => {
+    return getTemplateTagCategories({ includeInactive: true }).every((category) => {
       const selectedTags = filters.selectedTags[category.id] ?? [];
       if (selectedTags.length === 0) return true;
       return selectedTags.every((tag) => hasTag(materialTags[category.id] ?? [], tag));
@@ -271,7 +280,7 @@ function renderTagSelector({ scope, selectedTags }) {
     <div class="template-tag-input" data-tag-scope="${escapeHtml(scope)}">
       ${flatSelectedTags.length === 0 ? "" : `
         <div class="template-tag-input-pills">
-          ${tagCategories.map((category) => (selectedTags[category.id] ?? []).map((tag) => `
+          ${getTemplateTagCategories({ includeInactive: true }).map((category) => (selectedTags[category.id] ?? []).map((tag) => `
                 <span class="template-tag-pill">
                   ${escapeHtml(tag)}
                   <button type="button" data-action="remove-template-input-tag" data-tag-scope="${escapeHtml(scope)}" data-category-id="${escapeHtml(category.id)}" data-tag="${escapeHtml(tag)}" aria-label="删除标签 ${escapeHtml(tag)}">×</button>
@@ -280,12 +289,12 @@ function renderTagSelector({ scope, selectedTags }) {
         </div>
       `}
       <div class="template-tag-group-list">
-        ${tagCategories.map((category) => {
-          const tags = (tagLibrary[category.id] ?? [])
+        ${getTemplateTagCategories().map((category) => {
+          const tags = getTemplateTagsByCategory(category.id)
             .filter((tag) => !hasTag(selectedTags[category.id] ?? [], tag));
           return `
             <div class="template-tag-group">
-              <h3>${escapeHtml(category.label)}</h3>
+              <h3>${escapeHtml(category.name)}</h3>
               <div class="template-tag-suggestions">
                 ${tags.map((tag) => `<button type="button" data-action="select-template-library-tag" data-tag-scope="${escapeHtml(scope)}" data-category-id="${escapeHtml(category.id)}" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</button>`).join("")}
               </div>
@@ -300,11 +309,11 @@ function renderTagSelector({ scope, selectedTags }) {
 function renderTagLibraryFilter() {
   return `
     <div class="template-tag-group-list">
-      ${tagCategories.map((category) => `
+      ${getTemplateTagCategories().map((category) => `
         <div class="template-tag-group">
-          <h3>${escapeHtml(category.label)}</h3>
+          <h3>${escapeHtml(category.name)}</h3>
           <div class="template-tag-cloud">
-            ${(tagLibrary[category.id] ?? []).map((tag) => `<button class="${hasTag(filters.selectedTags[category.id] ?? [], tag) ? "is-active" : ""}" type="button" data-template-filter-tag="${escapeHtml(tag)}" data-category-id="${escapeHtml(category.id)}">${escapeHtml(tag)}</button>`).join("")}
+            ${getTemplateTagsByCategory(category.id).map((tag) => `<button class="${hasTag(filters.selectedTags[category.id] ?? [], tag) ? "is-active" : ""}" type="button" data-template-filter-tag="${escapeHtml(tag)}" data-category-id="${escapeHtml(category.id)}">${escapeHtml(tag)}</button>`).join("")}
           </div>
         </div>
       `).join("")}
