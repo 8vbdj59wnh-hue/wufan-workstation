@@ -21,6 +21,7 @@ import {
 } from "./data/modelOptions.js";
 import { hasTaskOverdueRecord, isCanceledStatus, isDoneStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
 import { formatBusinessDateTime } from "./businessTime.js?v=20260705-state-singleton1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260705-state-singleton1";
 
 const today = new Date().toISOString().slice(0, 10);
 let activeAssessmentTab = "stats";
@@ -44,12 +45,19 @@ let problemFilters = {
   departmentId: "",
   problemType: "",
 };
+let rectificationFilters = {
+  status: "",
+  ownerId: "",
+  executorId: "",
+  sourceType: "",
+};
 
 const tabHashMap = {
   assessment: "stats",
   "assessment-stats": "stats",
   "assessment-reports": "reports",
   "assessment-problems": "problems",
+  "assessment-rectifications": "rectifications",
 };
 
 const weeklyReportQuestionLabels = {
@@ -78,6 +86,13 @@ const problemStatusNames = {
 
 const problemTypeOptions = ["目标不清晰", "流程问题", "人员问题", "沟通问题", "产品问题", "供应链问题", "内容问题", "库存问题", "效率问题", "其他"];
 const impactLevelOptions = ["轻微", "一般", "严重"];
+const rectificationSourceTypeNames = {
+  overdue_task: "逾期任务",
+  returned_task: "审核退回",
+  rework_task: "连续返工",
+  delayed_process: "项目延期",
+  manual: "人工创建整改",
+};
 
 function canCurrentUser(permissionPath) {
   return hasPermission(getCurrentUser(), permissionPath);
@@ -238,6 +253,71 @@ function getRectificationTemplate() {
   return state.taskTemplates.find((template) => template.id === RectificationWorkTemplate.TaskTemplateId) ?? null;
 }
 
+function getProcessTasks(processInstanceId) {
+  if (!processInstanceId) return [];
+  return state.tasks
+    .filter((task) => task.processInstanceId === processInstanceId)
+    .sort((left, right) => {
+      const leftNode = state.processTemplateNodes.find((node) => node.id === left.processNodeId);
+      const rightNode = state.processTemplateNodes.find((node) => node.id === right.processNodeId);
+      const leftOrder = Number(leftNode?.stepOrder ?? leftNode?.stageOrder ?? leftNode?.nodeOrder ?? 1);
+      const rightOrder = Number(rightNode?.stepOrder ?? rightNode?.stageOrder ?? rightNode?.nodeOrder ?? 1);
+      return leftOrder - rightOrder;
+    });
+}
+
+function getRectificationRows() {
+  return state.workPlans
+    .filter((workPlan) => workPlan.workType === WorkType.Rectification)
+    .map((workPlan) => {
+      const processInstance = state.processInstances.find((instance) => instance.id === workPlan.processInstanceId) ?? null;
+      const tasks = getProcessTasks(processInstance?.id);
+      const sourceTask = state.tasks.find((task) => task.id === workPlan.customFields?.sourceTaskId) ?? null;
+      const sourceStandardWorkId = workPlan.customFields?.sourceStandardWorkId ?? sourceTask?.taskTemplateId ?? processInstance?.taskTemplateId ?? "";
+      const sourceStandardWork = state.taskTemplates.find((template) => template.id === sourceStandardWorkId) ?? null;
+      const currentTask = tasks.find((task) => !isDoneStatus(task.status) && !isCanceledStatus(task.status)) ?? null;
+      const sourceType = workPlan.customFields?.sourceType ?? "manual";
+      const status =
+        processInstance?.status === ProcessInstanceStatus.Done
+          ? "done"
+          : processInstance?.status === ProcessInstanceStatus.Stopped || processInstance?.status === "canceled" || workPlan.status === WorkPlanStatus.Canceled
+            ? "canceled"
+            : currentTask?.name ?? "pending";
+      const statusLabel =
+        status === "done"
+          ? "已完成"
+          : status === "canceled"
+            ? "已取消"
+            : status === "pending"
+              ? "未开始"
+              : status;
+      return {
+        workPlan,
+        processInstance,
+        tasks,
+        sourceTask,
+        sourceStandardWork,
+        currentTask,
+        sourceType,
+        status,
+        statusLabel,
+        ownerId: workPlan.customFields?.sourceOwnerId ?? currentTask?.ownerId ?? sourceTask?.ownerId ?? "",
+        executorId: workPlan.customFields?.sourceExecutorId ?? currentTask?.executorId ?? sourceTask?.executorId ?? sourceTask?.assigneeId ?? "",
+      };
+    });
+}
+
+function getFilteredRectificationRows() {
+  return getRectificationRows().filter((row) => {
+    if (!isVisibleByAssessmentScope({ ...row.workPlan, ownerId: row.ownerId, submitterId: row.executorId })) return false;
+    if (rectificationFilters.status !== "" && row.status !== rectificationFilters.status) return false;
+    if (rectificationFilters.ownerId !== "" && row.ownerId !== rectificationFilters.ownerId) return false;
+    if (rectificationFilters.executorId !== "" && row.executorId !== rectificationFilters.executorId) return false;
+    if (rectificationFilters.sourceType !== "" && row.sourceType !== rectificationFilters.sourceType) return false;
+    return true;
+  });
+}
+
 function getReportWeekStart() {
   return reportFilters.weekStart || getWeekRange().weekStart;
 }
@@ -276,11 +356,19 @@ function renderAssessmentTabs() {
     ["stats", "工作统计", "assessment-stats"],
     ["reports", "目标推进周报", "assessment-reports"],
     ["problems", "问题汇总", "assessment-problems"],
+    ["rectifications", "整改工作", "assessment-rectifications"],
   ];
   return `
     <div class="settings-tabs task-subtabs" aria-label="工作结果页签">
       ${tabs.map(([key, label, hash]) => `<button class="${activeAssessmentTab === key ? "is-active" : ""}" type="button" data-assessment-tab="${key}" data-hash="${hash}">${label}</button>`).join("")}
     </div>
+  `;
+}
+
+function renderValueOptions(values, selectedValue, labels, emptyLabel) {
+  return `
+    <option value="">${emptyLabel}</option>
+    ${values.map((value) => `<option value="${escapeHtml(value)}" ${value === selectedValue ? "selected" : ""}>${escapeHtml(labels[value] ?? value)}</option>`).join("")}
   `;
 }
 
@@ -500,6 +588,67 @@ function renderProblemsPage() {
   `;
 }
 
+function renderRectificationFilters() {
+  const rows = getRectificationRows();
+  const statusOptions = [...new Set(rows.map((row) => row.status))].filter(Boolean);
+  const sourceTypeOptions = [...new Set(rows.map((row) => row.sourceType))].filter(Boolean);
+  return `
+    <form class="assessment-rectification-filters task-filters">
+      <label><span>状态</span><select name="status">${renderValueOptions(statusOptions, rectificationFilters.status, Object.fromEntries(rows.map((row) => [row.status, row.statusLabel])), "全部状态")}</select></label>
+      <label><span>负责人</span><select name="ownerId">${renderOptions(getScopedPeople(), rectificationFilters.ownerId, "全部负责人")}</select></label>
+      <label><span>执行人</span><select name="executorId">${renderOptions(getScopedPeople(), rectificationFilters.executorId, "全部执行人")}</select></label>
+      <label><span>来源类型</span><select name="sourceType">${renderValueOptions(sourceTypeOptions, rectificationFilters.sourceType, rectificationSourceTypeNames, "全部来源")}</select></label>
+    </form>
+  `;
+}
+
+function renderRectificationPage() {
+  const rows = getFilteredRectificationRows();
+  return `
+    <section class="settings-section">
+      <div class="section-heading">
+        <h2>整改工作</h2>
+        <p class="form-note">只展示由工作结果或异常来源发起的整改工作，详情继续复用已发起流程详情。</p>
+      </div>
+      ${renderRectificationFilters()}
+      <div class="table-wrap"><table class="data-table">
+        <thead>
+          <tr>
+            <th>整改工作名称</th>
+            <th>来源任务</th>
+            <th>来源标准工作</th>
+            <th>来源类型</th>
+            <th>执行人</th>
+            <th>负责人</th>
+            <th>当前流程步骤</th>
+            <th>整改状态</th>
+            <th>截止时间</th>
+            <th>发起时间</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.length === 0 ? `<tr><td colspan="11">暂无整改工作</td></tr>` : rows.map((row) => `
+            <tr>
+              <td>${escapeHtml(row.processInstance?.name ?? row.workPlan.title ?? "未命名整改工作")}</td>
+              <td>${escapeHtml(row.sourceTask?.name ?? row.workPlan.customFields?.sourceTaskId ?? "-")}</td>
+              <td>${escapeHtml(row.sourceStandardWork?.name ?? row.workPlan.customFields?.sourceStandardWorkId ?? "-")}</td>
+              <td>${escapeHtml(rectificationSourceTypeNames[row.sourceType] ?? row.sourceType)}</td>
+              <td>${findName(state.people, row.executorId, "-")}</td>
+              <td>${findName(state.people, row.ownerId, "-")}</td>
+              <td>${escapeHtml(row.currentTask?.name ?? (row.status === "done" ? "已完成" : row.status === "canceled" ? "已取消" : "未开始"))}</td>
+              <td><span class="status-pill">${escapeHtml(row.statusLabel)}</span></td>
+              <td>${formatBusinessDateTime(row.processInstance?.dueDate ?? row.workPlan.dueDate)}</td>
+              <td>${row.processInstance?.startedAt ?? row.workPlan.launchedAt ?? row.workPlan.createdAt ?? "-"}</td>
+              <td>${row.processInstance === null ? "-" : `<button class="text-button" type="button" data-assessment-action="view-rectification" data-process-instance-id="${escapeHtml(row.processInstance.id)}">查看详情</button>`}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table></div>
+    </section>
+  `;
+}
+
 function getReport(reportId) {
   return state.weeklyReports.find((report) => report.id === reportId) ?? null;
 }
@@ -654,8 +803,27 @@ function renderPersonDetailModal() {
   `;
 }
 
+function renderRectificationDetailModal() {
+  if (modalState?.kind !== "rectificationDetail") return "";
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <div class="modal-panel wide-modal" role="dialog" aria-modal="true" aria-label="整改工作详情">
+        <div class="modal-header">
+          <h2>整改工作详情</h2>
+          <button class="icon-button" type="button" data-assessment-action="close-modal" aria-label="关闭">×</button>
+        </div>
+        <div class="modal-form">
+          ${renderLaunchedProcessDetail(modalState.processInstanceId, {
+            emptyHtml: `<div class="empty-detail">未找到该整改工作详情。</div>`,
+          })}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderModals() {
-  return `${renderReportModal()}${renderProblemModal()}${renderPersonDetailModal()}`;
+  return `${renderReportModal()}${renderProblemModal()}${renderPersonDetailModal()}${renderRectificationDetailModal()}`;
 }
 
 function getFormValue(form, name) {
@@ -842,6 +1010,16 @@ function updateProblemFilters(form) {
   };
 }
 
+function updateRectificationFilters(form) {
+  const formData = new FormData(form);
+  rectificationFilters = {
+    status: formData.get("status")?.toString() ?? "",
+    ownerId: formData.get("ownerId")?.toString() ?? "",
+    executorId: formData.get("executorId")?.toString() ?? "",
+    sourceType: formData.get("sourceType")?.toString() ?? "",
+  };
+}
+
 function syncAssessmentTabFromHash() {
   activeAssessmentTab = tabHashMap[window.location.hash.replace(/^#/, "")] ?? activeAssessmentTab;
 }
@@ -875,6 +1053,12 @@ export function bindAssessmentPageEvents(rerender) {
   const problemForm = document.querySelector(".assessment-problem-filters");
   problemForm?.addEventListener("change", () => {
     updateProblemFilters(problemForm);
+    rerender();
+  });
+
+  const rectificationForm = document.querySelector(".assessment-rectification-filters");
+  rectificationForm?.addEventListener("change", () => {
+    updateRectificationFilters(rectificationForm);
     rerender();
   });
 
@@ -931,6 +1115,11 @@ export function bindAssessmentPageEvents(rerender) {
     }
     if (action === "launch-rectification") {
       launchRectificationWorkFromTask(button.dataset.taskId, rerender);
+      return;
+    }
+    if (action === "view-rectification") {
+      modalState = { kind: "rectificationDetail", processInstanceId: button.dataset.processInstanceId };
+      rerender();
     }
   });
 
@@ -946,6 +1135,11 @@ export function bindAssessmentPageEvents(rerender) {
     event.preventDefault();
     saveProblem(assessmentProblemForm, rerender);
   });
+
+  const rectificationDetail = document.querySelector("[data-launched-process-detail]");
+  if (rectificationDetail !== null) {
+    bindLaunchedProcessDetailEvents(document, rerender);
+  }
 }
 
 export function renderAssessmentPage() {
@@ -967,7 +1161,9 @@ export function renderAssessmentPage() {
           ? renderReportsPage()
           : activeAssessmentTab === "problems"
             ? canCurrentUser("assessment.viewProblems") ? renderProblemsPage() : `<section class="settings-section"><div class="empty-detail">你没有权限查看问题汇总。</div></section>`
-            : renderStatsPage()
+            : activeAssessmentTab === "rectifications"
+              ? renderRectificationPage()
+              : renderStatsPage()
       }
       ${renderModals()}
     </div>

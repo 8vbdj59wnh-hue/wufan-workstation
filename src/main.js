@@ -62,6 +62,7 @@ const moduleHashMap = {
   "assessment-stats": "assessment",
   "assessment-reports": "assessment",
   "assessment-problems": "assessment",
+  "assessment-rectifications": "assessment",
   methodologies: "processes",
   methods: "processes",
   organization: "settings",
