@@ -599,6 +599,12 @@ function isRectificationStandardOptimizationTask(task) {
   return (node?.name ?? task.name) === "标准优化";
 }
 
+function isRectificationEffectVerificationTask(task) {
+  if (!isRectificationExecutionTask(task)) return false;
+  const node = state.processTemplateNodes.find((item) => item.id === task.processNodeId);
+  return (node?.name ?? task.name) === "效果验证";
+}
+
 function getRectificationTaskSubmitFields(task) {
   if (!isRectificationExecutionTask(task)) return [];
   const node = state.processTemplateNodes.find((item) => item.id === task.processNodeId);
@@ -617,7 +623,7 @@ function getSubmitFieldValue(formData, field) {
   return value ?? "";
 }
 
-function validateSubmittedResult(task, nextData = {}) {
+function validateSubmittedResult(task, nextData = {}, options = {}) {
   if (!isRectificationExecutionTask(task)) return "";
   const formData = nextData.submitFormData ?? task.submitFormData ?? {};
   for (const field of getSubmitFields(task)) {
@@ -636,6 +642,11 @@ function validateSubmittedResult(task, nextData = {}) {
     if (needStandardUpdate === "不需要" && !scope.includes("无需优化")) {
       return "不需要优化时，请在优化范围中选择“无需优化”。";
     }
+  }
+  if (isRectificationEffectVerificationTask(task) && options.allowBlockedVerification !== true) {
+    const verificationResult = String(formData.verificationResult ?? "").trim();
+    if (verificationResult === "部分改善") return "验证结果为“部分改善”，请退回到改善措施节点继续补充改善措施。";
+    if (verificationResult === "无改善") return "验证结果为“无改善”，请退回到改善措施节点重新制定改善措施。";
   }
   return "";
 }
@@ -5112,7 +5123,9 @@ async function saveResult(form, rerender) {
   const currentRequirement = getTaskSubmitRequirement(task);
   const submitFiles = [...getVisibleSubmitFiles(currentRequirement.submitFiles), ...uploadedFiles];
   const submitLinks = parseSubmitLinks(getFormValue(form, "submitLinks"));
-  const submitError = validateSubmittedResult(task, { submitFormData, submitFiles, submitLinks });
+  const submitError = validateSubmittedResult(task, { submitFormData, submitFiles, submitLinks }, {
+    allowBlockedVerification: modalState.action === "submit-result",
+  });
   if (submitError !== "") return setModalError(submitError, rerender);
 
   const now = getNow();

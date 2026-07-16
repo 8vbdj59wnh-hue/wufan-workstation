@@ -1890,6 +1890,10 @@ function getOrderedProcessInstanceTasks(instanceId) {
     });
 }
 
+function isRectificationProcessInstance(instance) {
+  return instance?.taskTemplateId === RectificationWorkTemplate.TaskTemplateId;
+}
+
 function arePreviousProcessTasksDone(orderedTasks, taskIndex) {
   if (taskIndex < 0) return false;
   return orderedTasks.slice(0, taskIndex).every((item) => item.status === TaskStatus.Done);
@@ -1933,6 +1937,14 @@ export async function refreshProcessTaskReadiness(processInstanceId) {
     const updatedInstance = { ...instance, status: ProcessInstanceStatus.Done, completedAt: now, updatedAt: now };
     await updatePersistentResource("process-instances", updatedInstance.id, updatedInstance);
     state.processInstances = state.processInstances.map((item) => (item.id === updatedInstance.id ? updatedInstance : item));
+    if (isRectificationProcessInstance(updatedInstance)) {
+      const workPlan = state.workPlans.find((item) => item.processInstanceId === updatedInstance.id);
+      if (workPlan !== undefined) {
+        const updatedWorkPlan = { ...workPlan, status: WorkPlanStatus.Done, updatedAt: now };
+        await updatePersistentResource("work-plans", updatedWorkPlan.id, updatedWorkPlan);
+        state.workPlans = state.workPlans.map((item) => (item.id === updatedWorkPlan.id ? updatedWorkPlan : item));
+      }
+    }
   }
   return null;
 }

@@ -166,6 +166,7 @@ export const WorkPlanStatus = Object.freeze({
   Future: "future",
   ThisWeek: "this_week",
   Launched: "launched",
+  Done: "done",
   Canceled: "canceled",
 });
 
@@ -358,6 +359,7 @@ export const workPlanStatusNames = Object.freeze({
   [WorkPlanStatus.Future]: "未来工作",
   [WorkPlanStatus.ThisWeek]: "本周工作",
   [WorkPlanStatus.Launched]: "已发起",
+  [WorkPlanStatus.Done]: "已完成",
   [WorkPlanStatus.Canceled]: "已取消",
 });
 
