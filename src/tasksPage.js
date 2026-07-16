@@ -13,6 +13,7 @@ import {
   moveTaskTemplateToValueChain,
   normalizeSubmitRequirement,
   resolveAssetUrl,
+  sortProcessNodes,
   startProcess,
   state,
   updatePersistentResource,
