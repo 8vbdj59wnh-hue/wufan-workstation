@@ -569,6 +569,58 @@ function renderNodeModal() {
   `;
 }
 
+function renderWorkflowNodesModal() {
+  if (modalState?.kind !== "workflowNodes") return "";
+  const template = state.processTemplates.find((item) => item.id === modalState.templateId);
+  if (template === undefined) return "";
+  const nodes = getTemplateNodes(template.id);
+  return `
+    <div class="modal-backdrop"><div class="modal-panel wide-modal">
+      <div class="modal-header">
+        <h2>${escapeHtml(template.name)} · 流程节点</h2>
+        <div class="modal-header-actions">
+          <button class="secondary-button" type="button" data-action="close-process-modal">关闭</button>
+          <button class="icon-button" type="button" data-action="close-process-modal">×</button>
+        </div>
+      </div>
+      ${
+        nodes.length === 0
+          ? `<p class="empty-state">暂无流程节点</p>`
+          : `
+            <div class="process-node-list">
+              ${nodes
+                .map((node, index) => {
+                  const stepOrder = getProcessNodeStepOrder(node);
+                  const ownerName = findName(people, node.ownerId ?? node.defaultOwnerId, "未设置");
+                  const executorName = findName(people, node.executorId, ownerName === "未设置" ? "未设置" : ownerName);
+                  const durationMinutes = node.durationMinutes ?? (Number(node.durationDays ?? 1) * 1440);
+                  return `
+                    <article class="process-node">
+                      <div class="process-node-header">
+                        <div class="process-node-title">
+                          <strong>${getStepLabel(stepOrder || index + 1)}</strong>
+                          <h4>${escapeHtml(node.name || "未命名任务")}</h4>
+                        </div>
+                      </div>
+                      <div class="process-node-meta">
+                        <span><em>负责人</em>${escapeHtml(ownerName)}</span>
+                        <span><em>执行人</em>${escapeHtml(executorName)}</span>
+                        <span><em>执行时长</em>${escapeHtml(durationMinutes)} 分钟</span>
+                      </div>
+                      <div class="process-node-copy">
+                        <p><strong>完成标准：</strong>${escapeHtml(node.completionStandard || "未填写")}</p>
+                      </div>
+                    </article>
+                  `;
+                })
+                .join("")}
+            </div>
+          `
+      }
+    </div></div>
+  `;
+}
+
 function renderStartModal() {
   if (modalState?.kind !== "start") return "";
   const template = state.processTemplates.find((item) => item.id === modalState.templateId);
@@ -989,7 +1041,7 @@ export function bindProcessesPageEvents(rerender) {
       if (action === "add-task-template" || action === "edit-task-template" || action === "deactivate-task-template" || action === "remove-selected-standard-work-attachment" || action === "add-task-template-field" || action === "remove-task-template-field" || action === "move-task-template-field-up" || action === "move-task-template-field-down") return;
       if (action === "close-process-modal") modalState = null;
       if (action === "add-template" && canCurrentUser("processes.editTemplates")) modalState = { kind: "template", error: "" };
-      if (action === "select-template") selectedTemplateId = actionButton.dataset.templateId;
+      if (action === "select-template") modalState = { kind: "workflowNodes", templateId: actionButton.dataset.templateId };
       if (action === "edit-template" && canCurrentUser("processes.editTemplates")) modalState = { kind: "template", id: actionButton.dataset.templateId, error: "" };
       if (action === "start-process" && canCurrentUser("workPlans.launch")) modalState = { kind: "start", templateId: actionButton.dataset.templateId, error: "" };
       if (action === "view-process-instance") selectedInstanceId = actionButton.dataset.instanceId;
@@ -1076,6 +1128,7 @@ export function renderProcessesPage() {
             : ""}
       ${renderTemplateModal()}
       ${renderNodeModal()}
+      ${renderWorkflowNodesModal()}
       ${renderStartModal()}
     </div>
   `;
