@@ -224,6 +224,34 @@ function findName(items, id, fallback) {
   return items.find((item) => item.id === id)?.name ?? fallback;
 }
 
+function resolvePersonId(value) {
+  const normalizedValue = String(value ?? "").trim();
+  if (normalizedValue === "") return "";
+  return people.find((person) => [person.id, person.name, person.account, person.username].includes(normalizedValue))?.id ?? "";
+}
+
+function getTaskExecutorId(task) {
+  const customFields = task.customFields && typeof task.customFields === "object" ? task.customFields : {};
+  const node = task.processNodeId === undefined || task.processNodeId === null ? null : state.processTemplateNodes.find((item) => item.id === task.processNodeId) ?? null;
+  const candidates = [
+    task.executorId,
+    task.assigneeId,
+    task.executor,
+    task.assignee,
+    customFields.executorId,
+    customFields.assigneeId,
+    customFields.executorName,
+    customFields.assigneeName,
+    node?.executorId,
+  ];
+
+  for (const candidate of candidates) {
+    const personId = resolvePersonId(candidate);
+    if (personId !== "") return personId;
+  }
+  return "";
+}
+
 function createEmptyTemplateTags() {
   return Object.fromEntries(templateTagCategories.map((category) => [category.id, []]));
 }
@@ -1189,7 +1217,7 @@ function matchesFilters(task) {
   if (filters.source !== "" && task.source !== filters.source) return false;
   if (filters.departmentId !== "" && task.departmentId !== filters.departmentId) return false;
   if (filters.ownerId !== "" && task.ownerId !== filters.ownerId) return false;
-  if (filters.executorId !== "" && task.executorId !== filters.executorId) return false;
+  if (filters.executorId !== "" && getTaskExecutorId(task) !== filters.executorId) return false;
   if (filters.goalId !== "" && task.goalId !== filters.goalId) return false;
   if (filters.categoryId !== "" && task.categoryId !== filters.categoryId) return false;
   if (filters.quadrant !== "" && getQuadrantKey(task) !== filters.quadrant) return false;
