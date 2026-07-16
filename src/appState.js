@@ -13,6 +13,8 @@ import {
   taskTemplates as initialTaskTemplates,
   tasks as initialTasks,
   templates as initialTemplates,
+  templateTagCategories as initialTemplateTagCategories,
+  templateTags as initialTemplateTags,
   weeklyReportProblems as initialWeeklyReportProblems,
   weeklyReports as initialWeeklyReports,
   methodologies as initialMethodologies,
@@ -77,6 +79,8 @@ export const state = {
   methodologies: initialMethodologies.map((methodology) => ({ ...methodology })),
   notifications: initialNotifications.map((notification) => ({ ...notification })),
   templates: initialTemplates.map((template) => ({ ...template })),
+  templateTagCategories: initialTemplateTagCategories.map((category) => ({ ...category })),
+  templateTags: initialTemplateTags.map((tag) => ({ ...tag })),
   issuesRequirements: initialIssuesRequirements.map((item) => ({ ...item })),
   standardWorkForms: initialStandardWorkForms.map((form) => ({ ...form })),
 };
@@ -138,6 +142,8 @@ export function getDataSnapshot() {
     methodologies: state.methodologies,
     notifications: state.notifications,
     templates: state.templates,
+    templateTagCategories: state.templateTagCategories,
+    templateTags: state.templateTags,
     issuesRequirements: state.issuesRequirements,
     standardWorkForms: state.standardWorkForms,
   };
@@ -169,6 +175,8 @@ export function applyDataSnapshot(data) {
   replaceArray(state.methodologies, data.methodologies);
   replaceArray(state.notifications, data.notifications);
   replaceArray(state.templates, data.templates);
+  replaceArray(state.templateTagCategories, data.templateTagCategories ?? initialTemplateTagCategories);
+  replaceArray(state.templateTags, data.templateTags ?? initialTemplateTags);
   replaceArray(state.issuesRequirements, data.issuesRequirements ?? initialIssuesRequirements);
   replaceArray(state.standardWorkForms, data.standardWorkForms ?? initialStandardWorkForms);
   isApplyingRemoteData = false;

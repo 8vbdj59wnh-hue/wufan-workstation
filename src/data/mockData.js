@@ -1519,6 +1519,62 @@ export const notifications = [];
 
 export const templates = [];
 
+export const templateTagCategories = [
+  { id: "brand", name: "品牌", status: Status.Active, sortOrder: 10, createdAt: timestamp, updatedAt: timestamp },
+  { id: "platform", name: "平台", status: Status.Active, sortOrder: 20, createdAt: timestamp, updatedAt: timestamp },
+  { id: "tone", name: "调性", status: Status.Active, sortOrder: 30, createdAt: timestamp, updatedAt: timestamp },
+  { id: "format", name: "形式", status: Status.Active, sortOrder: 40, createdAt: timestamp, updatedAt: timestamp },
+  { id: "usage", name: "用途", status: Status.Active, sortOrder: 50, createdAt: timestamp, updatedAt: timestamp },
+];
+
+export const templateTags = [
+  ...["半然", "点意", "青未", "今也", "屋范", "chicfun", "南颜", "南屿"].map((name, index) => ({
+    id: `template-tag-brand-${index + 1}`,
+    categoryId: "brand",
+    name,
+    status: Status.Active,
+    sortOrder: (index + 1) * 10,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  })),
+  ...["淘宝", "小红书", "抖音"].map((name, index) => ({
+    id: `template-tag-platform-${index + 1}`,
+    categoryId: "platform",
+    name,
+    status: Status.Active,
+    sortOrder: (index + 1) * 10,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  })),
+  ...["品牌感", "网红感", "活人感", "专家感"].map((name, index) => ({
+    id: `template-tag-tone-${index + 1}`,
+    categoryId: "tone",
+    name,
+    status: Status.Active,
+    sortOrder: (index + 1) * 10,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  })),
+  ...["图片", "视频"].map((name, index) => ({
+    id: `template-tag-format-${index + 1}`,
+    categoryId: "format",
+    name,
+    status: Status.Active,
+    sortOrder: (index + 1) * 10,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  })),
+  ...["首页", "详情页", "主图", "sku图", "笔记", "买家秀"].map((name, index) => ({
+    id: `template-tag-usage-${index + 1}`,
+    categoryId: "usage",
+    name,
+    status: Status.Active,
+    sortOrder: (index + 1) * 10,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  })),
+];
+
 export const issuesRequirements = [];
 
 export const standardWorkForms = [];
@@ -1535,6 +1591,8 @@ export const baseMockData = Object.freeze({
   methodologies,
   notifications,
   templates,
+  templateTagCategories,
+  templateTags,
   issuesRequirements,
   standardWorkForms,
   goals,

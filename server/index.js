@@ -288,6 +288,7 @@ function getResourceWritePermission(resource, method, body = {}) {
   if (resource === "weekly-report-problems") return method === "POST" ? "assessment.updateProblems" : "assessment.updateProblems";
   if (resource === "content-schedules") return method === "POST" ? "contentSchedules.create" : "contentSchedules.edit";
   if (resource === "standard-work-forms") return "settings.editStandardWorkForms";
+  if (resource === "template-tag-categories" || resource === "template-tags") return "settings.editStandardWorkForms";
   if (resource === "issues-requirements") return "settings.editStandardWorkForms";
   return null;
 }

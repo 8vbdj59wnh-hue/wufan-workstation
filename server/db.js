@@ -19,6 +19,8 @@ import {
   taskTemplates,
   tasks,
   templates,
+  templateTagCategories,
+  templateTags,
   weeklyReportProblems,
   weeklyReports,
   workPlans,
@@ -343,6 +345,14 @@ const resourceConfigs = {
     columns: ["id", "name", "previewImage", "sourceFile", "tags", "fileType", "createdAt", "updatedAt"],
     jsonFields: ["previewImage", "sourceFile", "tags"],
   },
+  templateTagCategories: {
+    table: "template_tag_categories",
+    columns: ["id", "name", "status", "sortOrder", "createdAt", "updatedAt"],
+  },
+  templateTags: {
+    table: "template_tags",
+    columns: ["id", "categoryId", "name", "status", "sortOrder", "createdAt", "updatedAt"],
+  },
   standardWorkForms: {
     table: "standard_work_forms",
     columns: ["id", "standardWorkId", "formSchema", "createdAt", "updatedAt"],
@@ -454,6 +464,8 @@ const routeResourceMap = {
   "process-instances": "processInstances",
   methodologies: "methodologies",
   templates: "templates",
+  "template-tag-categories": "templateTagCategories",
+  "template-tags": "templateTags",
   "standard-work-forms": "standardWorkForms",
   notifications: "notifications",
   "issues-requirements": "issuesRequirements",
@@ -473,6 +485,8 @@ const seedData = {
   goals,
   taskTemplates,
   templates,
+  templateTagCategories,
+  templateTags,
   tasks,
   processTemplates,
   processTemplateNodes: processTemplateNodes.map((node) => ({
@@ -741,6 +755,23 @@ function seedInitialData() {
   seed();
 }
 
+function insertMissingSeedItem(resourceKey, item) {
+  const config = resourceConfigs[resourceKey];
+  const exists = getDatabase()
+    .prepare(`SELECT id FROM ${config.table} WHERE id = @id LIMIT 1`)
+    .get({ id: item.id });
+  if (exists === undefined) insertItem(resourceKey, cloneJson(item));
+}
+
+function ensureDefaultTemplateTags() {
+  const database = getDatabase();
+  const ensureDefaults = database.transaction(() => {
+    for (const category of templateTagCategories) insertMissingSeedItem("templateTagCategories", category);
+    for (const tag of templateTags) insertMissingSeedItem("templateTags", tag);
+  });
+  ensureDefaults();
+}
+
 function isDatabaseEmpty() {
   return Object.values(resourceConfigs).every((config) => {
     const result = getDatabase().prepare(`SELECT COUNT(*) AS count FROM ${config.table}`).get();
@@ -923,6 +954,27 @@ function runLightweightMigrations() {
       tags TEXT NOT NULL,
       fileType TEXT,
       createdAt TEXT NOT NULL,
+      updatedAt TEXT
+    )
+  `);
+  getDatabase().exec(`
+    CREATE TABLE IF NOT EXISTS template_tag_categories (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      status TEXT NOT NULL,
+      sortOrder INTEGER,
+      createdAt TEXT,
+      updatedAt TEXT
+    )
+  `);
+  getDatabase().exec(`
+    CREATE TABLE IF NOT EXISTS template_tags (
+      id TEXT PRIMARY KEY,
+      categoryId TEXT NOT NULL,
+      name TEXT NOT NULL,
+      status TEXT NOT NULL,
+      sortOrder INTEGER,
+      createdAt TEXT,
       updatedAt TEXT
     )
   `);
@@ -1156,6 +1208,7 @@ export function initializeDatabase({ reset = false } = {}) {
     backfillMethodologiesForProcessNodes();
   }
 
+  ensureDefaultTemplateTags();
   ensureDefaultAdmin();
 }
 
@@ -1166,6 +1219,10 @@ export function readResource(resourceKey) {
   const orderBy =
     resourceKey === "categories"
       ? " ORDER BY sortOrder ASC, name ASC, id ASC"
+      : resourceKey === "templateTagCategories"
+        ? " ORDER BY sortOrder ASC, name ASC, id ASC"
+      : resourceKey === "templateTags"
+        ? " ORDER BY categoryId ASC, sortOrder ASC, name ASC, id ASC"
       : resourceKey === "templates"
         ? " ORDER BY createdAt DESC, id DESC"
         : resourceKey === "standardWorkForms"

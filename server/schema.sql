@@ -274,6 +274,25 @@ CREATE TABLE IF NOT EXISTS methodologies (
   updatedAt TEXT
 );
 
+CREATE TABLE IF NOT EXISTS template_tag_categories (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL,
+  sortOrder INTEGER,
+  createdAt TEXT,
+  updatedAt TEXT
+);
+
+CREATE TABLE IF NOT EXISTS template_tags (
+  id TEXT PRIMARY KEY,
+  categoryId TEXT NOT NULL,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL,
+  sortOrder INTEGER,
+  createdAt TEXT,
+  updatedAt TEXT
+);
+
 CREATE TABLE IF NOT EXISTS standard_work_forms (
   id TEXT PRIMARY KEY,
   standardWorkId TEXT NOT NULL,
