@@ -10,6 +10,13 @@ import {
   updatePersistentResource,
   uploadImageFile,
 } from "./appState.js?v=20260705-state-singleton1";
+import {
+  collectBusinessDateTime,
+  formatBusinessDateTime,
+  getBusinessDatePart,
+  getBusinessHourPart,
+  renderBusinessHourOptions,
+} from "./businessTime.js?v=20260705-state-singleton1";
 import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
 import {
   CategoryType,
@@ -447,6 +454,8 @@ function normalizeImportDate(value) {
   let year = 0;
   let month = 0;
   let day = 0;
+  let hour = 0;
+  let minute = 0;
   const fullDateMatch = trimmedValue.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::\d{2})?(?:\.\d{1,3})?(?:Z|[+-]\d{2}:?\d{2})?)?$/);
   const monthDayMatch = trimmedValue.match(/^(\d{1,2})月(\d{1,2})日$/);
 
@@ -454,8 +463,8 @@ function normalizeImportDate(value) {
     year = Number(fullDateMatch[1]);
     month = Number(fullDateMatch[2]);
     day = Number(fullDateMatch[3]);
-    const hour = fullDateMatch[4] === undefined ? 0 : Number(fullDateMatch[4]);
-    const minute = fullDateMatch[5] === undefined ? 0 : Number(fullDateMatch[5]);
+    hour = fullDateMatch[4] === undefined ? 0 : Number(fullDateMatch[4]);
+    minute = fullDateMatch[5] === undefined ? 0 : Number(fullDateMatch[5]);
     if (hour > 23 || minute > 59) return null;
   } else if (monthDayMatch) {
     year = 2026;
@@ -468,7 +477,21 @@ function normalizeImportDate(value) {
   const date = new Date(year, month - 1, day);
   if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
 
-  return [String(year).padStart(4, "0"), String(month).padStart(2, "0"), String(day).padStart(2, "0")].join("-");
+  if (minute > 0) {
+    hour += 1;
+    minute = 0;
+  }
+  if (hour >= 24) {
+    date.setDate(date.getDate() + 1);
+    hour = 0;
+  }
+
+  const normalizedDate = [
+    String(date.getFullYear()).padStart(4, "0"),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+  return `${normalizedDate}T${String(hour).padStart(2, "0")}:00:00+08:00`;
 }
 
 function compressProductImage(file) {
@@ -507,7 +530,7 @@ function compressProductImage(file) {
 }
 
 function matchesFilters(schedule) {
-  const publishDate = schedule.publishDate ?? "";
+  const publishDate = getBusinessDatePart(schedule.publishDate) || (schedule.publishDate ?? "");
   const product = schedule.product ?? "";
   const title = schedule.title ?? "";
   if (filters.dateFrom !== "" && publishDate < filters.dateFrom) return false;
@@ -615,7 +638,7 @@ function renderScheduleTable() {
       <div class="section-heading with-actions">
         <div>
           <h2>内容排期表</h2>
-          <p class="form-note">导入支持“发布日期”填写日期（YYYY-MM-DD）或日期+时间（YYYY-MM-DD HH:mm），当前排期仍按日期保存。</p>
+          <p class="form-note">导入支持“发布日期”填写日期（YYYY-MM-DD）或日期+时间（YYYY-MM-DD HH:mm），保存时统一为日期+整点小时。</p>
         </div>
         <div class="section-actions">
           ${canCurrentUser("contentSchedules.import") ? `<button class="secondary-button" type="button" data-content-action="download-template">下载导入模板</button>` : ""}
@@ -683,7 +706,7 @@ function renderScheduleTable() {
                             </label>
                           </td>
                           <td class="content-image-column">${renderImageCell(schedule)}</td>
-                          <td>${schedule.publishDate}</td>
+                          <td>${formatBusinessDateTime(schedule.publishDate, "-")}</td>
                           <td>${escapeHtml(schedule.account)}</td>
                           <td>${escapeHtml(normalizeContentType(schedule.contentType))}</td>
                           <td>${escapeHtml(normalizeContentPurpose(schedule.contentPurpose))}</td>
@@ -748,7 +771,7 @@ function renderScheduleDetail() {
         </div>
         <div class="detail-grid">
           ${renderDetailField("标题", escapeHtml(schedule.title))}
-          ${renderDetailField("发布日期", schedule.publishDate)}
+          ${renderDetailField("发布日期", formatBusinessDateTime(schedule.publishDate, "未填写"))}
           ${renderDetailField("发布账号", escapeHtml(schedule.account))}
           ${renderDetailField("内容类型", escapeHtml(normalizeContentType(schedule.contentType)))}
           ${renderDetailField("内容目的", escapeHtml(normalizeContentPurpose(schedule.contentPurpose)))}
@@ -860,7 +883,7 @@ function renderScheduleViewModal() {
             </div>
           </div>
           <div class="detail-grid">
-            ${renderDetailField("发布日期", schedule.publishDate || "未填写")}
+            ${renderDetailField("发布日期", formatBusinessDateTime(schedule.publishDate, "未填写"))}
             ${renderDetailField("发布账号", escapeHtml(schedule.account || "未填写"))}
             ${renderDetailField("内容类型", escapeHtml(normalizeContentType(schedule.contentType) || "未填写"))}
             ${renderDetailField("内容目的", escapeHtml(normalizeContentPurpose(schedule.contentPurpose) || "未填写"))}
@@ -1026,6 +1049,7 @@ function renderScheduleModal() {
   const schedule = modalState.mode === "edit" ? getSchedule(modalState.scheduleId) : null;
   const image = modalState.productImage ?? schedule?.productImage ?? "";
   const linkedTemplateId = modalState.templateId ?? getScheduleModalDraftValue(schedule, "templateId", "");
+  const publishDateValue = getScheduleModalDraftValue(schedule, "publishDate");
 
   return `
     <div class="modal-backdrop" role="presentation">
@@ -1041,7 +1065,14 @@ function renderScheduleModal() {
         <form class="modal-form content-schedule-form">
           <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${modalState.error}</div>
           <div class="form-grid">
-            <label><span>发布日期</span><input name="publishDate" type="date" value="${getScheduleModalDraftValue(schedule, "publishDate")}" /></label>
+            <label>
+              <span>发布日期</span>
+              <input name="publishDateDate" type="date" value="${escapeAttribute(getBusinessDatePart(publishDateValue))}" />
+            </label>
+            <label>
+              <span>发布时间</span>
+              <select name="publishDateHour">${renderBusinessHourOptions(getBusinessHourPart(publishDateValue), "请选择小时")}</select>
+            </label>
             <label><span>发布账号</span><select name="account">${renderStringOptions(contentScheduleAccountOptions, getScheduleModalDraftValue(schedule, "account"), "请选择账号")}</select></label>
             <label><span>内容类型</span><select name="contentType">${renderStringOptions(contentScheduleTypeOptions, normalizeContentType(getScheduleModalDraftValue(schedule, "contentType")), "请选择类型")}</select></label>
             <label><span>内容目的</span><select name="contentPurpose">${renderStringOptions(contentSchedulePurposeOptions, normalizeContentPurpose(getScheduleModalDraftValue(schedule, "contentPurpose")), "请选择目的")}</select></label>
@@ -1091,7 +1122,7 @@ function renderImportModal() {
                     (row) => `
                       <tr>
                         <td>${row.rowNumber}</td>
-                        <td>${escapeHtml(row.data.发布日期)}</td>
+                        <td>${escapeHtml(formatBusinessDateTime(row.data.发布日期, ""))}</td>
                         <td>${escapeHtml(row.data.标题)}</td>
                         <td>${escapeHtml(row.data.状态)}</td>
                         <td>${row.errors.length === 0 ? "可导入" : escapeHtml(row.errors.join("；"))}</td>
@@ -1129,8 +1160,10 @@ function updateFilters(form) {
 }
 
 function buildScheduleDraft(form) {
+  const publishDateResult = collectBusinessDateTime(form, "publishDate", "发布日期");
   return {
-    publishDate: getFormValue(form, "publishDate"),
+    publishDate: publishDateResult.value ?? "",
+    publishDateError: publishDateResult.error,
     account: getFormValue(form, "account"),
     contentType: normalizeContentType(getFormValue(form, "contentType")),
     contentPurpose: normalizeContentPurpose(getFormValue(form, "contentPurpose")),
@@ -1148,6 +1181,7 @@ function buildScheduleDraft(form) {
 }
 
 function validateScheduleDraft(draft) {
+  if (draft.publishDateError !== "") return draft.publishDateError;
   if (draft.publishDate !== "" && normalizeImportDate(draft.publishDate) === null) return "发布日期必须是合法日期。";
   if (draft.contentType !== "" && !contentScheduleTypeOptions.includes(draft.contentType)) return "内容类型不在固定选项中。";
   if (draft.contentPurpose !== "" && !contentSchedulePurposeOptions.includes(draft.contentPurpose)) return "内容目的不在固定选项中。";
@@ -1172,7 +1206,8 @@ async function saveSchedule(form, rerender) {
   if (error !== "") return setModalError(error, rerender);
 
   const now = getNow();
-  const normalizedDraft = { ...draft, publishDate: normalizeImportDate(draft.publishDate) };
+  const { publishDateError: _publishDateError, ...cleanDraft } = draft;
+  const normalizedDraft = { ...cleanDraft, publishDate: normalizeImportDate(cleanDraft.publishDate) };
   if (modalState.mode === "add") {
     const newSchedule = {
       id: createId("content-schedule"),
@@ -1347,7 +1382,7 @@ function buildWorkPlanFromSchedule(schedule, status, fallbackGoalId, now) {
       status,
       plannedWeek: status === WorkPlanStatus.ThisWeek ? getCurrentWeek() : null,
       dueDate: schedule.publishDate || null,
-      description: `由内容排期创建：${schedule.publishDate} ${schedule.account} ${schedule.title}`,
+      description: `由内容排期创建：${formatBusinessDateTime(schedule.publishDate, "")} ${schedule.account} ${schedule.title}`,
       processInstanceId: null,
       createdAt: now,
       updatedAt: now,
@@ -1512,7 +1547,7 @@ function downloadFile(content, fileName, type) {
 
 function getExportRows(schedules) {
   return schedules.map((schedule) => ({
-    发布日期: schedule.publishDate,
+    发布日期: formatBusinessDateTime(schedule.publishDate, ""),
     发布账号: schedule.account,
     内容类型: normalizeContentType(schedule.contentType),
     内容目的: normalizeContentPurpose(schedule.contentPurpose),
