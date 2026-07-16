@@ -12,6 +12,7 @@ const materialTypeNames = {
   image: "图片",
   video: "视频",
   design: "设计文件",
+  pdf: "PDF",
   zip: "压缩包",
 };
 
@@ -79,6 +80,7 @@ function detectFileType(file) {
   if (file.type.startsWith("image/") || ["jpg", "jpeg", "png", "webp"].includes(ext)) return "image";
   if (file.type.startsWith("video/") || ["mp4", "mov"].includes(ext)) return "video";
   if (["psd", "ai", "fig"].includes(ext)) return "design";
+  if (ext === "pdf") return "pdf";
   if (ext === "zip") return "zip";
   return null;
 }
@@ -86,6 +88,7 @@ function detectFileType(file) {
 function detectSourceFileType(file) {
   const ext = getFileExt(file.name);
   if (["psd", "ai", "fig"].includes(ext)) return "design";
+  if (ext === "pdf") return "pdf";
   if (ext === "zip") return "zip";
   return null;
 }
@@ -208,6 +211,12 @@ function getSourceFile(material) {
     fileName: material.fileName ?? "源文件",
     fileUrl: material.fileUrl ?? "",
   };
+}
+
+function getMaterialFileTypeLabel(material) {
+  const sourceExt = getFileExt(getSourceFile(material).fileName);
+  if (["psd", "ai", "fig", "pdf", "zip"].includes(sourceExt)) return sourceExt.toUpperCase();
+  return materialTypeNames[material.fileType] ?? "文件";
 }
 
 function getMaterials() {
@@ -349,7 +358,7 @@ function renderMaterialCard(material) {
           ${previewDownloadAction}
           ${sourceDownloadAction}
         </div>
-        <p class="template-material-time">${escapeHtml(getMaterialUploadTime(material))}</p>
+        <p class="template-material-time">${escapeHtml(getMaterialFileTypeLabel(material))} · ${escapeHtml(getMaterialUploadTime(material))}</p>
       </div>
     </article>
   `;
@@ -369,7 +378,7 @@ function renderPreviewModal() {
         <div class="modal-header">
           <div>
             <h2>${escapeHtml(getMaterialName(material))}</h2>
-            <p class="form-note">${materialTypeNames[material.fileType]} · ${escapeHtml(getMaterialUploadTime(material))}</p>
+            <p class="form-note">${escapeHtml(getMaterialFileTypeLabel(material))} · ${escapeHtml(getMaterialUploadTime(material))}</p>
           </div>
           <button class="icon-button" type="button" data-action="close-template-preview" aria-label="关闭">×</button>
         </div>
@@ -414,7 +423,7 @@ function renderEditTagsModal() {
             <label class="template-file-picker">
               <span>替换源文件</span>
               ${renderUploadFileState(null, sourceFile.fileName)}
-              <input data-template-edit-source-upload type="file" accept=".psd,.ai,.fig,.zip,application/zip" />
+              <input data-template-edit-source-upload type="file" accept=".psd,.ai,.fig,.pdf,.zip,application/pdf,application/zip" />
             </label>
           </div>
           ${renderTagSelector({
@@ -451,7 +460,7 @@ export function renderTemplateCenterPage() {
           <label class="template-file-picker">
             <span>源文件</span>
             ${renderUploadFileState(uploadDraft.sourceFile, "")}
-            <input data-template-source-upload type="file" accept=".psd,.ai,.fig,.zip,application/zip" />
+            <input data-template-source-upload type="file" accept=".psd,.ai,.fig,.pdf,.zip,application/pdf,application/zip" />
           </label>
           <button class="primary-button template-upload-submit" type="button" data-action="create-template-from-upload" ${canCreateTemplate ? "" : "disabled"}>上传模板</button>
         </div>

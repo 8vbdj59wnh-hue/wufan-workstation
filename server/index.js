@@ -103,7 +103,7 @@ const uploadFile = multer({
   fileFilter: (_request, file, callback) => {
     const ext = path.extname(file.originalname).toLowerCase();
     if (!allowedFileTypes.has(file.mimetype) && !allowedFileExts.has(ext)) {
-      callback(new Error("只支持图片、PDF、Word、Excel、ZIP 和文本文件。"));
+      callback(new Error("只支持图片、PSD、AI、FIG、PDF、Word、Excel、ZIP、视频和文本文件。"));
       return;
     }
     callback(null, true);
