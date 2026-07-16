@@ -378,6 +378,10 @@ function getStandardWorkStepCount(template) {
   return state.processTemplateNodes.filter((node) => node.templateId === processTemplateId).length;
 }
 
+function getStandardWorkProcessNodes(processTemplateId) {
+  return sortProcessNodes(state.processTemplateNodes.filter((node) => node.templateId === processTemplateId));
+}
+
 function getStandardWorkValueChain(template) {
   return getTaskCategories().find((category) => category.id === template?.categoryId)?.name ?? getValueModuleName(inferValueModuleIdForTemplate(template));
 }
@@ -2987,7 +2991,61 @@ export function renderStandardWorkLibraryPage(selectedProcessTemplateId = "") {
     <div class="standard-work-library-host">
       ${renderTaskTemplateTable(selectedProcessTemplateId)}
       ${renderTaskTemplateModal()}
+      ${renderStandardWorkProcessModal()}
     </div>
+  `;
+}
+
+function renderStandardWorkProcessModal() {
+  if (modalState?.kind !== "standardWorkProcess") return "";
+  const template = getTaskTemplate(modalState.templateId);
+  if (template === null) return "";
+  const processTemplateId = template.defaultProcessTemplateId ?? "";
+  const nodes = getStandardWorkProcessNodes(processTemplateId);
+  return `
+    <div class="modal-backdrop"><div class="modal-panel wide-modal">
+      <div class="modal-header">
+        <h2>${escapeHtml(template.name)} · 流程节点</h2>
+        <div class="modal-header-actions">
+          <button class="secondary-button" type="button" data-action="close-task-modal">关闭</button>
+          <button class="icon-button" type="button" data-action="close-task-modal" aria-label="关闭">×</button>
+        </div>
+      </div>
+      ${
+        nodes.length === 0
+          ? `<p class="empty-state">暂无流程节点</p>`
+          : `
+            <div class="process-node-list">
+              ${nodes
+                .map((node, index) => {
+                  const stepOrder = getProcessNodeStepOrder(node) || index + 1;
+                  const ownerName = findName(people, node.ownerId ?? node.defaultOwnerId, "未设置");
+                  const executorName = findName(people, node.executorId, ownerName === "未设置" ? "未设置" : ownerName);
+                  const durationMinutes = node.durationMinutes ?? (Number(node.durationDays ?? 1) * 1440);
+                  return `
+                    <article class="process-node">
+                      <div class="process-node-header">
+                        <div class="process-node-title">
+                          <strong>${escapeHtml(`步骤${stepOrder}`)}</strong>
+                          <h4>${escapeHtml(node.name || "未命名任务")}</h4>
+                        </div>
+                      </div>
+                      <div class="process-node-meta">
+                        <span><em>负责人</em>${escapeHtml(ownerName)}</span>
+                        <span><em>执行人</em>${escapeHtml(executorName)}</span>
+                        <span><em>执行时长</em>${escapeHtml(durationMinutes)} 分钟</span>
+                      </div>
+                      <div class="process-node-copy">
+                        <p><strong>完成标准：</strong>${escapeHtml(node.completionStandard || "未填写")}</p>
+                      </div>
+                    </article>
+                  `;
+                })
+                .join("")}
+            </div>
+          `
+      }
+    </div></div>
   `;
 }
 
@@ -5416,7 +5474,8 @@ function handleTaskTemplateAction(action, templateId, rerender) {
   if (action === "view-standard-work-process") {
     const template = getTaskTemplate(templateId);
     if (template?.defaultProcessTemplateId) {
-      window.location.hash = `process-template-${template.defaultProcessTemplateId}`;
+      modalState = { kind: "standardWorkProcess", templateId };
+      rerender();
     }
   }
 }
