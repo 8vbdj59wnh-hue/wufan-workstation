@@ -2118,6 +2118,150 @@ button.content-template-thumb {
   margin-top: 4px;
 }
 
+.person-profile-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+}
+
+.person-profile-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+}
+
+.person-profile-header {
+  align-items: center;
+  border-bottom: 1px solid #eef2f7;
+  display: flex;
+  justify-content: space-between;
+  padding-bottom: 10px;
+}
+
+.person-profile-header h3,
+.person-profile-block h4 {
+  color: #111827;
+  margin: 0;
+}
+
+.person-profile-header p {
+  color: #64748b;
+  font-size: 13px;
+  margin: 4px 0 0;
+}
+
+.person-profile-block {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.person-profile-metrics {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+}
+
+.person-profile-metrics.compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.person-profile-metrics div,
+.person-profile-trends > div {
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.person-profile-metrics span,
+.person-profile-trend-item span {
+  color: #64748b;
+  display: block;
+  font-size: 12px;
+}
+
+.person-profile-metrics strong {
+  color: #111827;
+  display: block;
+  font-size: 18px;
+  line-height: 1.2;
+  margin-top: 4px;
+}
+
+.person-profile-list {
+  display: grid;
+  gap: 6px;
+}
+
+.person-profile-list-item {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #eef2f7;
+  border-radius: 6px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  padding: 8px;
+}
+
+.person-profile-list-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.person-profile-list-item em {
+  color: #64748b;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.person-profile-trends {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.person-profile-trends > div {
+  display: grid;
+  gap: 8px;
+}
+
+.person-profile-trends > div > strong {
+  color: #111827;
+  font-size: 14px;
+}
+
+.person-profile-trend-item {
+  display: grid;
+  gap: 4px;
+}
+
+.person-profile-trend-item strong {
+  color: #111827;
+  font-size: 17px;
+}
+
+.person-profile-trend-item em {
+  color: #64748b;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.person-profile-trend-item em.is-up {
+  color: #047857;
+}
+
+.person-profile-trend-item em.is-down {
+  color: #b45309;
+}
+
 .clearance-card-list {
   display: grid;
   gap: 14px;

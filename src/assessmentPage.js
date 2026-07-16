@@ -56,6 +56,7 @@ const tabHashMap = {
   "assessment-reports": "reports",
   "assessment-problems": "problems",
   "assessment-rectifications": "rectifications",
+  "assessment-person-profiles": "personProfiles",
 };
 
 const weeklyReportQuestionLabels = {
@@ -194,6 +195,37 @@ function getTaskPeriodDate(task) {
   return task.completedAt ?? task.updatedAt ?? task.createdAt ?? task.dueDate;
 }
 
+function parseBusinessDate(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const text = String(value);
+  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(text)
+    ? `${text}T00:00:00+08:00`
+    : text.includes("T") || /[+-]\d{2}:\d{2}$/.test(text)
+      ? text
+      : `${text.replace(" ", "T")}+08:00`;
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function parseBusinessDeadline(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const text = String(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    const date = new Date(`${text}T23:59:59+08:00`);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  return parseBusinessDate(text);
+}
+
+function getComparableTaskDate(task) {
+  return parseBusinessDate(getTaskPeriodDate(task)) ?? parseBusinessDate(task.dueDate);
+}
+
+function dateInWindow(value, start, end) {
+  const date = parseBusinessDate(value);
+  return date !== null && date >= start && date < end;
+}
+
 function isTaskAssessmentOverdue(task) {
   return isTaskOverdue(task, today) || hasTaskOverdueRecord(task);
 }
@@ -239,6 +271,156 @@ function getProcessTasks(processInstanceId) {
       const rightOrder = Number(rightNode?.stepOrder ?? rightNode?.stageOrder ?? rightNode?.nodeOrder ?? 1);
       return leftOrder - rightOrder;
     });
+}
+
+function getTaskPersonIds(task) {
+  return new Set(
+    [task.executorId, task.assigneeId, task.ownerId, task.responsiblePersonId, task.responsiblePerson]
+      .filter((value) => value !== null && value !== undefined && value !== ""),
+  );
+}
+
+function getTaskExecutorIds(task) {
+  return new Set(
+    [task.executorId, task.assigneeId, task.responsiblePersonId, task.responsiblePerson]
+      .filter((value) => value !== null && value !== undefined && value !== ""),
+  );
+}
+
+function isTaskRelatedToPerson(task, personId) {
+  return getTaskPersonIds(task).has(personId);
+}
+
+function isTaskExecutedByPerson(task, personId) {
+  return getTaskExecutorIds(task).has(personId);
+}
+
+function getProcessInstanceByWorkPlan(workPlan) {
+  return state.processInstances.find((instance) => instance.id === workPlan.processInstanceId) ?? null;
+}
+
+function getWorkPlanTasks(workPlan) {
+  const processInstance = getProcessInstanceByWorkPlan(workPlan);
+  return processInstance === null ? [] : getProcessTasks(processInstance.id);
+}
+
+function isWorkPlanRelatedToPerson(workPlan, personId) {
+  if ([workPlan.ownerId, workPlan.executorId, workPlan.assigneeId, workPlan.submitterId].includes(personId)) return true;
+  if ([workPlan.customFields?.sourceExecutorId, workPlan.customFields?.sourceOwnerId].includes(personId)) return true;
+  const processInstance = getProcessInstanceByWorkPlan(workPlan);
+  if ([processInstance?.ownerId, processInstance?.executorId, processInstance?.submitterId].includes(personId)) return true;
+  return getWorkPlanTasks(workPlan).some((task) => isTaskRelatedToPerson(task, personId));
+}
+
+function getTaskReturnCount(task) {
+  return Array.isArray(task.customFields?.returnRecords) ? task.customFields.returnRecords.length : 0;
+}
+
+function getTaskRejectCount(task) {
+  return Array.isArray(task.customFields?.reviewRejectRecords) ? task.customFields.reviewRejectRecords.length : 0;
+}
+
+function isTaskCompletedOnTime(task) {
+  const completedAt = parseBusinessDate(task.completedAt);
+  const dueDate = parseBusinessDeadline(task.dueDate);
+  return completedAt !== null && dueDate !== null && completedAt <= dueDate;
+}
+
+function formatPercent(value) {
+  if (value === null || Number.isNaN(value)) return "-";
+  return `${Math.round(value)}%`;
+}
+
+function getWorkPlanRecordDate(workPlan) {
+  return workPlan.launchedAt ?? workPlan.createdAt ?? workPlan.updatedAt ?? workPlan.dueDate;
+}
+
+function getWorkPlanStatusLabel(workPlan, processInstance) {
+  if (workPlan.status === WorkPlanStatus.Done || processInstance?.status === ProcessInstanceStatus.Done) return "已完成";
+  if (workPlan.status === WorkPlanStatus.Canceled || processInstance?.status === ProcessInstanceStatus.Stopped || processInstance?.status === "canceled") return "已取消";
+  if (workPlan.status === WorkPlanStatus.Launched) return "已发起";
+  if (workPlan.status === WorkPlanStatus.ThisWeek) return "本周工作";
+  return "未来工作";
+}
+
+function getPersonWorkPlans(personId) {
+  return state.workPlans.filter((workPlan) => isWorkPlanRelatedToPerson(workPlan, personId));
+}
+
+function getPersonTasks(personId) {
+  return state.tasks.filter((task) => isTaskExecutedByPerson(task, personId));
+}
+
+function getPersonPeriodSummary(personId, days, offsetDays = 0) {
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
+  end.setDate(end.getDate() - offsetDays);
+  const start = new Date(end);
+  start.setDate(end.getDate() - days + 1);
+  start.setHours(0, 0, 0, 0);
+  const tasks = getPersonTasks(personId).filter((task) => {
+    const date = getComparableTaskDate(task);
+    return date !== null && date >= start && date <= end;
+  });
+  const completedWithDue = tasks.filter((task) => isDoneStatus(task.status) && parseBusinessDate(task.completedAt) !== null && parseBusinessDeadline(task.dueDate) !== null);
+  const workPlans = getPersonWorkPlans(personId).filter((workPlan) => dateInWindow(getWorkPlanRecordDate(workPlan), start, end));
+  const rectificationWorks = workPlans.filter((workPlan) => workPlan.workType === WorkType.Rectification);
+  return {
+    completedTasks: tasks.filter((task) => isDoneStatus(task.status)).length,
+    onTimeRate: completedWithDue.length === 0 ? null : (completedWithDue.filter(isTaskCompletedOnTime).length / completedWithDue.length) * 100,
+    rectificationRate: workPlans.length === 0 ? null : (rectificationWorks.length / workPlans.length) * 100,
+  };
+}
+
+function renderTrendValue(label, current, previous, formatter = (value) => value) {
+  const hasValue = current !== null && current !== undefined && !Number.isNaN(current);
+  const hasPrevious = previous !== null && previous !== undefined && !Number.isNaN(previous);
+  const delta = hasValue && hasPrevious ? current - previous : null;
+  const deltaLabel = delta === null ? "无上期数据" : `${delta > 0 ? "↑" : delta < 0 ? "↓" : "→"}${formatter(Math.abs(delta))}`;
+  return `
+    <div class="person-profile-trend-item">
+      <span>${escapeHtml(label)}</span>
+      <strong>${hasValue ? formatter(current) : "-"}</strong>
+      <em class="${delta === null ? "" : delta > 0 ? "is-up" : delta < 0 ? "is-down" : ""}">${escapeHtml(deltaLabel)}</em>
+    </div>
+  `;
+}
+
+function getPersonProfile(person) {
+  const tasks = getPersonTasks(person.id);
+  const workPlans = getPersonWorkPlans(person.id);
+  const normalWorks = workPlans.filter((workPlan) => workPlan.workType !== WorkType.Rectification);
+  const rectificationWorks = workPlans.filter((workPlan) => workPlan.workType === WorkType.Rectification);
+  const completedTasks = tasks.filter((task) => isDoneStatus(task.status));
+  const completedWithDue = completedTasks.filter((task) => parseBusinessDate(task.completedAt) !== null && parseBusinessDeadline(task.dueDate) !== null);
+  const rectificationRows = getRectificationRows().filter((row) => isWorkPlanRelatedToPerson(row.workPlan, person.id));
+  const recentRectifications = rectificationRows
+    .slice()
+    .sort((left, right) => String(right.processInstance?.startedAt ?? right.workPlan.launchedAt ?? right.workPlan.createdAt ?? "").localeCompare(String(left.processInstance?.startedAt ?? left.workPlan.launchedAt ?? left.workPlan.createdAt ?? "")))
+    .slice(0, 3);
+  const records = workPlans
+    .slice()
+    .sort((left, right) => String(getWorkPlanRecordDate(right) ?? "").localeCompare(String(getWorkPlanRecordDate(left) ?? "")))
+    .slice(0, 8);
+  const current30 = getPersonPeriodSummary(person.id, 30);
+  const previous30 = getPersonPeriodSummary(person.id, 30, 30);
+  const current90 = getPersonPeriodSummary(person.id, 90);
+  const previous90 = getPersonPeriodSummary(person.id, 90, 90);
+  return {
+    tasks,
+    workPlans,
+    normalWorks,
+    rectificationWorks,
+    completedTasks,
+    onTimeRate: completedWithDue.length === 0 ? null : (completedWithDue.filter(isTaskCompletedOnTime).length / completedWithDue.length) * 100,
+    overdueCount: tasks.filter(isTaskAssessmentOverdue).length,
+    returnCount: tasks.reduce((sum, task) => sum + getTaskReturnCount(task), 0),
+    rejectCount: tasks.reduce((sum, task) => sum + getTaskRejectCount(task), 0),
+    rectificationRows,
+    recentRectifications,
+    records,
+    trends: { current30, previous30, current90, previous90 },
+  };
 }
 
 function getRectificationRows() {
@@ -332,6 +514,7 @@ function renderAssessmentTabs() {
     ["reports", "目标推进周报", "assessment-reports"],
     ["problems", "问题汇总", "assessment-problems"],
     ["rectifications", "整改工作", "assessment-rectifications"],
+    ["personProfiles", "人员档案", "assessment-person-profiles"],
   ];
   return `
     <div class="settings-tabs task-subtabs" aria-label="工作结果页签">
@@ -624,6 +807,109 @@ function renderRectificationPage() {
   `;
 }
 
+function renderPersonProfileMetric(label, value) {
+  return `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`;
+}
+
+function renderPersonProfileCard(person) {
+  const profile = getPersonProfile(person);
+  const departmentName = findName(state.departments, person.departmentId);
+  const positionName = findName(state.positions, person.positionId, "未设置岗位");
+  const rectificationRunning = profile.rectificationRows.filter((row) => row.status !== "done" && row.status !== "canceled").length;
+  const rectificationDone = profile.rectificationRows.filter((row) => row.status === "done").length;
+  return `
+    <article class="person-profile-card">
+      <header class="person-profile-header">
+        <div>
+          <h3>${escapeHtml(person.name)}</h3>
+          <p>${escapeHtml(departmentName)} · ${escapeHtml(positionName)}</p>
+        </div>
+      </header>
+      <section class="person-profile-block">
+        <h4>工作结果</h4>
+        <div class="person-profile-metrics">
+          ${renderPersonProfileMetric("普通工作数量", profile.normalWorks.length)}
+          ${renderPersonProfileMetric("整改工作数量", profile.rectificationWorks.length)}
+          ${renderPersonProfileMetric("完成任务数", profile.completedTasks.length)}
+          ${renderPersonProfileMetric("准时率", formatPercent(profile.onTimeRate))}
+          ${renderPersonProfileMetric("超时次数", profile.overdueCount)}
+          ${renderPersonProfileMetric("返工次数", profile.returnCount)}
+          ${renderPersonProfileMetric("验收退回次数", profile.rejectCount)}
+        </div>
+      </section>
+      <section class="person-profile-block">
+        <h4>整改情况</h4>
+        <div class="person-profile-metrics compact">
+          ${renderPersonProfileMetric("发起整改次数", profile.rectificationRows.length)}
+          ${renderPersonProfileMetric("已完成整改", rectificationDone)}
+          ${renderPersonProfileMetric("整改中", rectificationRunning)}
+        </div>
+        <div class="person-profile-list">
+          ${profile.recentRectifications.length === 0 ? `<p class="form-note">暂无最近整改记录</p>` : profile.recentRectifications.map((row) => `
+            <div class="person-profile-list-item">
+              <span>${escapeHtml(row.processInstance?.name ?? row.workPlan.title ?? "未命名整改工作")}</span>
+              <em>${escapeHtml(row.statusLabel)}</em>
+              ${row.processInstance === null ? "" : `<button class="text-button" type="button" data-assessment-action="view-person-profile-process" data-process-instance-id="${escapeHtml(row.processInstance.id)}">查看</button>`}
+            </div>
+          `).join("")}
+        </div>
+      </section>
+      <section class="person-profile-block">
+        <h4>成长趋势</h4>
+        <div class="person-profile-trends">
+          <div>
+            <strong>近30天</strong>
+            ${renderTrendValue("准时率", profile.trends.current30.onTimeRate, profile.trends.previous30.onTimeRate, formatPercent)}
+            ${renderTrendValue("整改率", profile.trends.current30.rectificationRate, profile.trends.previous30.rectificationRate, formatPercent)}
+            ${renderTrendValue("完成任务", profile.trends.current30.completedTasks, profile.trends.previous30.completedTasks, (value) => String(Math.round(value)))}
+          </div>
+          <div>
+            <strong>近90天</strong>
+            ${renderTrendValue("准时率", profile.trends.current90.onTimeRate, profile.trends.previous90.onTimeRate, formatPercent)}
+            ${renderTrendValue("整改率", profile.trends.current90.rectificationRate, profile.trends.previous90.rectificationRate, formatPercent)}
+            ${renderTrendValue("完成任务", profile.trends.current90.completedTasks, profile.trends.previous90.completedTasks, (value) => String(Math.round(value)))}
+          </div>
+        </div>
+      </section>
+      <section class="person-profile-block">
+        <h4>工作记录</h4>
+        <div class="table-wrap compact-table"><table class="data-table">
+          <thead><tr><th>类型</th><th>工作</th><th>状态</th><th>时间</th><th>操作</th></tr></thead>
+          <tbody>
+            ${profile.records.length === 0 ? `<tr><td colspan="5">暂无工作记录</td></tr>` : profile.records.map((workPlan) => {
+              const processInstance = getProcessInstanceByWorkPlan(workPlan);
+              return `
+                <tr>
+                  <td>${workPlan.workType === WorkType.Rectification ? "整改工作" : "普通工作"}</td>
+                  <td>${escapeHtml(processInstance?.name ?? workPlan.title ?? "未命名工作")}</td>
+                  <td>${escapeHtml(getWorkPlanStatusLabel(workPlan, processInstance))}</td>
+                  <td>${escapeHtml(formatBusinessDateTime(getWorkPlanRecordDate(workPlan)))}</td>
+                  <td>${processInstance === null ? "-" : `<button class="text-button" type="button" data-assessment-action="view-person-profile-process" data-process-instance-id="${escapeHtml(processInstance.id)}">查看详情</button>`}</td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table></div>
+      </section>
+    </article>
+  `;
+}
+
+function renderPersonProfilesPage() {
+  const people = getScopedPeople();
+  return `
+    <section class="settings-section">
+      <div class="section-heading">
+        <h2>人员档案</h2>
+        <p class="form-note">人员档案从现有工作、流程和执行任务中汇总，用于观察工作结果和成长趋势，不做评分、排名或奖惩。</p>
+      </div>
+      <div class="person-profile-grid">
+        ${people.length === 0 ? `<div class="empty-detail">暂无可查看人员</div>` : people.map(renderPersonProfileCard).join("")}
+      </div>
+    </section>
+  `;
+}
+
 function getReport(reportId) {
   return state.weeklyReports.find((report) => report.id === reportId) ?? null;
 }
@@ -797,8 +1083,27 @@ function renderRectificationDetailModal() {
   `;
 }
 
+function renderPersonProfileProcessModal() {
+  if (modalState?.kind !== "personProfileProcessDetail") return "";
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <div class="modal-panel wide-modal" role="dialog" aria-modal="true" aria-label="工作详情">
+        <div class="modal-header">
+          <h2>工作详情</h2>
+          <button class="icon-button" type="button" data-assessment-action="close-modal" aria-label="关闭">×</button>
+        </div>
+        <div class="modal-form">
+          ${renderLaunchedProcessDetail(modalState.processInstanceId, {
+            emptyHtml: `<div class="empty-detail">未找到该工作详情。</div>`,
+          })}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderModals() {
-  return `${renderReportModal()}${renderProblemModal()}${renderPersonDetailModal()}${renderRectificationDetailModal()}`;
+  return `${renderReportModal()}${renderProblemModal()}${renderPersonDetailModal()}${renderRectificationDetailModal()}${renderPersonProfileProcessModal()}`;
 }
 
 function getFormValue(form, name) {
@@ -1057,6 +1362,11 @@ export function bindAssessmentPageEvents(rerender) {
     if (action === "view-rectification") {
       modalState = { kind: "rectificationDetail", processInstanceId: button.dataset.processInstanceId };
       rerender();
+      return;
+    }
+    if (action === "view-person-profile-process") {
+      modalState = { kind: "personProfileProcessDetail", processInstanceId: button.dataset.processInstanceId };
+      rerender();
     }
   });
 
@@ -1100,7 +1410,9 @@ export function renderAssessmentPage() {
             ? canCurrentUser("assessment.viewProblems") ? renderProblemsPage() : `<section class="settings-section"><div class="empty-detail">你没有权限查看问题汇总。</div></section>`
             : activeAssessmentTab === "rectifications"
               ? renderRectificationPage()
-              : renderStatsPage()
+              : activeAssessmentTab === "personProfiles"
+                ? renderPersonProfilesPage()
+                : renderStatsPage()
       }
       ${renderModals()}
     </div>

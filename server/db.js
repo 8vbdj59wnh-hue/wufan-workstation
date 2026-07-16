@@ -205,6 +205,7 @@ const resourceConfigs = {
       "categoryId",
       "departmentId",
       "ownerId",
+      "executorId",
       "initiatorId",
       "description",
       "completionStandard",

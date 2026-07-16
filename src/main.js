@@ -5,7 +5,7 @@ import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=
 import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260715-content-schedule-nav1";
 import { bindScheduleBoardPageEvents, renderScheduleBoardPage } from "./scheduleBoardPage.js?v=20260705-state-singleton1";
 import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260705-state-singleton1";
-import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260705-state-singleton1";
+import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260717-person-profiles2";
 import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260705-state-singleton1";
 import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js?v=20260705-state-singleton1";
 import { attachThumbnailHoverPreview } from "./thumbnailPreview.js?v=20260705-state-singleton1";
@@ -63,6 +63,7 @@ const moduleHashMap = {
   "assessment-reports": "assessment",
   "assessment-problems": "assessment",
   "assessment-rectifications": "assessment",
+  "assessment-person-profiles": "assessment",
   methodologies: "processes",
   methods: "processes",
   organization: "settings",
