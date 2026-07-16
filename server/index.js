@@ -87,7 +87,7 @@ const allowedFileTypes = new Set([
   "application/illustrator",
   "application/postscript",
 ]);
-const allowedFileExts = new Set([".jpg", ".jpeg", ".png", ".webp", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".txt", ".mp4", ".mov", ".webm", ".psd", ".ai", ".fig"]);
+const allowedFileExts = new Set([".jpg", ".jpeg", ".png", ".webp", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".txt", ".mp4", ".mov", ".webm", ".psd", ".psb", ".ai", ".fig"]);
 const fileStorage = multer.diskStorage({
   destination: (_request, _file, callback) => {
     callback(null, fileUploadsDir);
@@ -103,7 +103,7 @@ const uploadFile = multer({
   fileFilter: (_request, file, callback) => {
     const ext = path.extname(file.originalname).toLowerCase();
     if (!allowedFileTypes.has(file.mimetype) && !allowedFileExts.has(ext)) {
-      callback(new Error("只支持图片、PSD、AI、FIG、PDF、Word、Excel、ZIP、视频和文本文件。"));
+      callback(new Error("只支持图片、PSD、PSB、AI、FIG、PDF、Word、Excel、ZIP、视频和文本文件。"));
       return;
     }
     callback(null, true);
