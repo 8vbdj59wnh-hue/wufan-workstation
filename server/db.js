@@ -1479,6 +1479,23 @@ export function launchWorkPlanWithProcess(workPlanId, { processInstance, tasks: 
     launchedAt: launchedWorkPlan?.launchedAt ?? now,
     updatedAt: now,
   };
+  const sourceTaskId = nextWorkPlan.workType === "rectification" ? nextWorkPlan.customFields?.sourceTaskId ?? null : null;
+  if (sourceTaskId !== null && sourceTaskId !== "") {
+    const duplicatedRectification = database
+      .prepare(
+        `SELECT wp.id
+         FROM work_plans wp
+         LEFT JOIN process_instances pi ON pi.id = wp.processInstanceId
+         WHERE wp.id <> @workPlanId
+           AND wp.workType = 'rectification'
+           AND COALESCE(wp.status, '') <> 'canceled'
+           AND json_extract(wp.customFields, '$.sourceTaskId') = @sourceTaskId
+           AND COALESCE(pi.status, '') NOT IN ('done', 'stopped', 'canceled')
+         LIMIT 1`,
+      )
+      .get({ workPlanId, sourceTaskId });
+    if (duplicatedRectification !== undefined) throw new Error("该来源任务已存在未完成的整改工作，不能重复发起。");
+  }
 
   const launch = database.transaction(() => {
     insertItem("processInstances", nextProcessInstance);

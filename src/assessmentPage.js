@@ -3,11 +3,22 @@ import {
   createPersistentResource,
   getCurrentUser,
   getNow,
+  launchWorkPlanAsProcess,
   state,
   updatePersistentResource,
 } from "./appState.js?v=20260705-state-singleton1";
 import { getDataScope, hasPermission } from "./permissions.js?v=20260705-state-singleton1";
-import { ProcessInstanceStatus, TaskStatus, processInstanceStatusNames, taskStatusNames } from "./data/modelOptions.js";
+import {
+  ProcessInstanceStatus,
+  RectificationWorkTemplate,
+  TaskImportance,
+  TaskStatus,
+  TaskUrgency,
+  WorkPlanStatus,
+  WorkType,
+  processInstanceStatusNames,
+  taskStatusNames,
+} from "./data/modelOptions.js";
 import { hasTaskOverdueRecord, isCanceledStatus, isDoneStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
 import { formatBusinessDateTime } from "./businessTime.js?v=20260705-state-singleton1";
 
@@ -198,6 +209,33 @@ function getFilteredStatsProcessInstances() {
 
 function hasSubmittedResult(task) {
   return Boolean(task.submittedAt || task.resultText || (task.submitFiles ?? []).length > 0 || (task.submitLinks ?? []).length > 0);
+}
+
+function getTaskExecutorId(task) {
+  return task?.executorId ?? task?.assigneeId ?? task?.ownerId ?? null;
+}
+
+function getSourceProcessInstance(task) {
+  return state.processInstances.find((instance) => instance.id === task?.processInstanceId) ?? null;
+}
+
+function getSourceStandardWorkId(task) {
+  const instance = getSourceProcessInstance(task);
+  return instance?.taskTemplateId ?? instance?.standardWorkId ?? task?.taskTemplateId ?? null;
+}
+
+function hasOpenRectificationWorkForTask(taskId) {
+  return state.workPlans.some((workPlan) => {
+    if (workPlan.workType !== WorkType.Rectification) return false;
+    if (workPlan.customFields?.sourceTaskId !== taskId) return false;
+    if (workPlan.status === WorkPlanStatus.Canceled) return false;
+    const instance = state.processInstances.find((item) => item.id === workPlan.processInstanceId);
+    return instance?.status !== ProcessInstanceStatus.Done && instance?.status !== ProcessInstanceStatus.Stopped;
+  });
+}
+
+function getRectificationTemplate() {
+  return state.taskTemplates.find((template) => template.id === RectificationWorkTemplate.TaskTemplateId) ?? null;
 }
 
 function getReportWeekStart() {
@@ -602,10 +640,12 @@ function renderPersonDetailModal() {
         <div class="modal-form">
           <p class="form-note">${range.startDate} 至 ${range.endDate}</p>
           <div class="table-wrap"><table class="data-table">
-            <thead><tr><th>任务名</th><th>所属流程</th><th>对齐目标</th><th>负责部门</th><th>状态</th><th>截止时间</th><th>完成时间</th><th>是否逾期</th><th>提交结果</th></tr></thead>
-            <tbody>${tasks.length === 0 ? `<tr><td colspan="9">暂无任务明细</td></tr>` : tasks.map((task) => {
+            <thead><tr><th>任务名</th><th>所属流程</th><th>对齐目标</th><th>负责部门</th><th>状态</th><th>截止时间</th><th>完成时间</th><th>是否逾期</th><th>提交结果</th><th>操作</th></tr></thead>
+            <tbody>${tasks.length === 0 ? `<tr><td colspan="10">暂无任务明细</td></tr>` : tasks.map((task) => {
               const process = state.processInstances.find((item) => item.id === task.processInstanceId);
-              return `<tr><td>${escapeHtml(task.name)}</td><td>${escapeHtml(process?.name ?? "无")}</td><td>${findName(state.goals, task.goalId, "未对齐目标")}</td><td>${findName(state.departments, task.departmentId)}</td><td>${taskStatusNames[task.status] ?? task.status}</td><td>${formatBusinessDateTime(task.dueDate)}</td><td>${task.completedAt ?? "未完成"}</td><td>${isTaskAssessmentOverdue(task) ? "已逾期" : "否"}</td><td>${hasSubmittedResult(task) ? "是" : "否"}</td></tr>`;
+              const canLaunchRectification = isTaskAssessmentOverdue(task);
+              const hasRectification = hasOpenRectificationWorkForTask(task.id);
+              return `<tr><td>${escapeHtml(task.name)}</td><td>${escapeHtml(process?.name ?? "无")}</td><td>${findName(state.goals, task.goalId, "未对齐目标")}</td><td>${findName(state.departments, task.departmentId)}</td><td>${taskStatusNames[task.status] ?? task.status}</td><td>${formatBusinessDateTime(task.dueDate)}</td><td>${task.completedAt ?? "未完成"}</td><td>${canLaunchRectification ? "已逾期" : "否"}</td><td>${hasSubmittedResult(task) ? "是" : "否"}</td><td>${canLaunchRectification ? `<button class="text-button" type="button" data-assessment-action="launch-rectification" data-task-id="${task.id}" ${hasRectification ? "disabled" : ""}>${hasRectification ? "已发起整改" : "发起整改工作"}</button>` : "-"}</td></tr>`;
             }).join("")}</tbody>
           </table></div>
         </div>
@@ -697,6 +737,65 @@ async function saveProblem(form, rerender) {
   } catch (error) {
     console.error("问题保存失败", error);
     return setModalError(error.message || "问题保存失败，请检查本地数据库服务。", rerender);
+  }
+  rerender();
+}
+
+async function launchRectificationWorkFromTask(taskId, rerender) {
+  const sourceTask = state.tasks.find((task) => task.id === taskId) ?? null;
+  if (sourceTask === null) return window.alert("未找到来源任务。");
+  if (!isTaskAssessmentOverdue(sourceTask)) return window.alert("只有异常或逾期任务可以发起整改工作。");
+  if (hasOpenRectificationWorkForTask(sourceTask.id)) return window.alert("该任务已经存在未完成的整改工作，不能重复发起。");
+
+  const rectificationTemplate = getRectificationTemplate();
+  if (rectificationTemplate === null || !rectificationTemplate.defaultProcessTemplateId) {
+    return window.alert("整改工作标准模板尚未初始化，请刷新系统后重试。");
+  }
+
+  const now = getNow();
+  const sourceProcessInstance = getSourceProcessInstance(sourceTask);
+  const sourceStandardWorkId = getSourceStandardWorkId(sourceTask);
+  const sourceExecutorId = getTaskExecutorId(sourceTask);
+  const workPlan = {
+    id: createId("work-plan"),
+    goalId: sourceTask.goalId ?? sourceProcessInstance?.goalId ?? null,
+    departmentId: sourceTask.departmentId ?? rectificationTemplate.departmentId ?? null,
+    taskTemplateId: RectificationWorkTemplate.TaskTemplateId,
+    title: `整改：${sourceTask.name}`,
+    customFields: {
+      rectificationSource: "人工创建整改",
+      sourceType: "overdue_task",
+      sourceTaskId: sourceTask.id,
+      sourceProcessInstanceId: sourceTask.processInstanceId ?? null,
+      sourceStandardWorkId,
+      sourceExecutorId,
+      sourceOwnerId: sourceTask.ownerId ?? null,
+      rectificationObject: sourceTask.name,
+      problemSummary: `任务“${sourceTask.name}”已逾期，需要发起整改。`,
+    },
+    coverImageUrl: sourceTask.coverImageUrl ?? sourceProcessInstance?.coverImageUrl ?? null,
+    importance: TaskImportance.Important,
+    urgency: TaskUrgency.Urgent,
+    workType: WorkType.Rectification,
+    status: WorkPlanStatus.ThisWeek,
+    plannedWeek: "",
+    dueDate: null,
+    description: `由工作结果模块针对异常任务发起整改：${sourceTask.name}`,
+    processInstanceId: null,
+    createdAt: now,
+    updatedAt: now,
+    launchedAt: null,
+    canceledAt: null,
+  };
+
+  try {
+    await createPersistentResource("work-plans", workPlan);
+    state.workPlans = [workPlan, ...state.workPlans];
+    await launchWorkPlanAsProcess(workPlan.id);
+    window.alert("整改工作已发起。");
+  } catch (error) {
+    console.error("发起整改工作失败", error);
+    window.alert(error.message || "发起整改工作失败，请检查本地数据库服务。");
   }
   rerender();
 }
@@ -828,6 +927,10 @@ export function bindAssessmentPageEvents(rerender) {
     if (action === "view-person-detail") {
       modalState = { kind: "personDetail", personId: button.dataset.personId };
       rerender();
+      return;
+    }
+    if (action === "launch-rectification") {
+      launchRectificationWorkFromTask(button.dataset.taskId, rerender);
     }
   });
 

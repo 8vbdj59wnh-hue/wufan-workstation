@@ -1793,6 +1793,10 @@ export async function launchWorkPlanAsProcess(workPlanId, { dueDate = null } = {
   const previousWorkPlans = [...state.workPlans];
   const now = getNow();
   const title = workPlan.title || taskTemplate.name || "未命名工作";
+  const rectificationSourceExecutorId =
+    workPlan.workType === WorkType.Rectification
+      ? workPlan.customFields?.sourceExecutorId ?? workPlan.customFields?.sourceOwnerId ?? null
+      : null;
   const result = startProcess({
     templateId: taskTemplate.defaultProcessTemplateId,
     taskTemplateId: taskTemplate.id,
@@ -1801,7 +1805,7 @@ export async function launchWorkPlanAsProcess(workPlanId, { dueDate = null } = {
     coverImageUrl: getPrimaryImageUrl(workPlan) || null,
     name: title,
     goalId: workPlan.goalId,
-    initiatorId: taskTemplate.ownerId,
+    initiatorId: rectificationSourceExecutorId ?? taskTemplate.ownerId,
     description: workPlan.description || `由未来工作发起：${title}`,
     launchAssignments: { owner: {}, accepter: {} },
   });
