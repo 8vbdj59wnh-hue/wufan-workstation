@@ -493,7 +493,30 @@ function buildUpdatedProcessInstanceForTaskForm(task, customFields, displayTitle
 }
 
 function getSortedFormFields(template) {
-  return [...(template?.formFields ?? [])].sort((left, right) => left.sortOrder - right.sortOrder);
+  const standardWorkForm = state.standardWorkForms.find((form) => form.standardWorkId === template?.id);
+  const schemaFields = standardWorkForm?.formSchema?.fields;
+  const sourceFields = Array.isArray(schemaFields) && schemaFields.length > 0 ? schemaFields : template?.formFields ?? [];
+  return sourceFields.map(normalizeExecutionFormField).sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0));
+}
+
+function normalizeExecutionFormField(field, index) {
+  const typeMap = {
+    multi: "multi_select",
+    checkbox: "multi_select",
+    attachment: "file",
+  };
+  const type = typeMap[field.type] ?? field.type ?? "text";
+  return {
+    ...field,
+    id: field.id ?? field.fieldId ?? field.key ?? `field-${index + 1}`,
+    key: field.key ?? field.fieldId ?? field.id ?? `field-${index + 1}`,
+    label: field.label ?? "未命名字段",
+    type,
+    required: field.required === true,
+    placeholder: field.placeholder ?? "",
+    options: Array.isArray(field.options) ? field.options : [],
+    sortOrder: Number.isFinite(Number(field.sortOrder ?? field.order)) ? Number(field.sortOrder ?? field.order) : index + 1,
+  };
 }
 
 function getCustomFieldValue(customFields, field) {
@@ -501,6 +524,8 @@ function getCustomFieldValue(customFields, field) {
   if (Array.isArray(value)) return value.join("、");
   if (field.key === "departmentId") return findName(departments, value, "");
   if (field.key === "interviewerId") return findName(people, value, "");
+  if (field.type === "department") return findName(departments, value, "");
+  if (field.type === "person") return findName(people, value, "");
   if (field.key === "storeId") return customFields.storeName || findName(stores, value, customFields.platform ?? "");
   return value ?? "";
 }
@@ -514,7 +539,13 @@ function getDynamicFieldOptions(field) {
   if (field.key === "departmentId") {
     return departments.filter((department) => department.status === "active").map((department) => ({ value: department.id, label: department.name }));
   }
+  if (field.type === "department") {
+    return departments.filter((department) => department.status === "active").map((department) => ({ value: department.id, label: department.name }));
+  }
   if (field.key === "interviewerId") {
+    return people.filter((person) => person.status === "active").map((person) => ({ value: person.id, label: person.name }));
+  }
+  if (field.type === "person") {
     return people.filter((person) => person.status === "active").map((person) => ({ value: person.id, label: person.name }));
   }
   if (field.key === "storeId") {
@@ -1022,7 +1053,7 @@ function renderCustomFieldInput(field, customFields = {}) {
     `;
   }
 
-  if (field.type === "select") {
+  if (field.type === "select" || field.type === "person" || field.type === "department") {
     const options = getDynamicFieldOptions(field);
     return `
       <label>

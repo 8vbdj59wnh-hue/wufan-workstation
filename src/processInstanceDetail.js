@@ -90,6 +90,38 @@ function getTaskTemplate(instance) {
   return state.taskTemplates.find((template) => template.id === (instance.taskTemplateId ?? instance.standardWorkId)) ?? null;
 }
 
+function normalizeExecutionFormField(field, index) {
+  const typeMap = {
+    multi: "multi_select",
+    checkbox: "multi_select",
+    attachment: "file",
+  };
+  const type = typeMap[field.type] ?? field.type ?? "text";
+  return {
+    ...field,
+    id: field.id ?? field.fieldId ?? field.key ?? `field-${index + 1}`,
+    key: field.key ?? field.fieldId ?? field.id ?? `field-${index + 1}`,
+    label: field.label ?? "未命名字段",
+    type,
+    required: field.required === true,
+    placeholder: field.placeholder ?? "",
+    options: Array.isArray(field.options) ? field.options : [],
+    sortOrder: Number.isFinite(Number(field.sortOrder ?? field.order)) ? Number(field.sortOrder ?? field.order) : index + 1,
+  };
+}
+
+function getStandardWorkFormFields(standardWorkId, fallbackFields = []) {
+  const standardWorkForm = state.standardWorkForms.find((form) => form.standardWorkId === standardWorkId);
+  const schemaFields = standardWorkForm?.formSchema?.fields;
+  const sourceFields = Array.isArray(schemaFields) && schemaFields.length > 0 ? schemaFields : fallbackFields;
+  return sourceFields.map(normalizeExecutionFormField).sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0));
+}
+
+function getInstanceFormFields(instance) {
+  const taskTemplate = getTaskTemplate(instance);
+  return getStandardWorkFormFields(taskTemplate?.id ?? instance.standardWorkId ?? instance.taskTemplateId, taskTemplate?.formFields ?? []);
+}
+
 function getInstanceTasks(instanceId) {
   return state.tasks
     .filter((task) => task.processInstanceId === instanceId)
@@ -256,14 +288,14 @@ function renderEditableStandardWorkAttachments(instance, editable) {
 
 function renderCustomFields(instance, editable) {
   const entries = getCustomFieldEntries(instance);
-  const taskTemplate = getTaskTemplate(instance);
-  const fieldLabels = new Map((taskTemplate?.formFields ?? []).map((field) => [field.key, field.label]));
+  const formFields = getInstanceFormFields(instance);
+  const fieldLabels = new Map(formFields.map((field) => [field.key, field.label]));
 
   if (entries.length === 0) return `<p>暂无本次工作差异信息</p>`;
 
   if (!editable) {
     return renderWorkFormViewer({
-      formFields: taskTemplate?.formFields ?? [],
+      formFields,
       customFields: instance.customFields ?? {},
     });
   }

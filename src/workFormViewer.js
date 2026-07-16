@@ -29,6 +29,16 @@ function renderValue(field, value, customFields = {}) {
     return escapeHtml(customFields.storeName || store?.name || customFields.platform || textValue);
   }
 
+  if (field?.type === "person") {
+    const person = state.people.find((item) => item.id === textValue);
+    return escapeHtml(person?.name ?? textValue);
+  }
+
+  if (field?.type === "department") {
+    const department = state.departments.find((item) => item.id === textValue);
+    return escapeHtml(department?.name ?? textValue);
+  }
+
   if (field?.type === "image") {
     return `
       <a href="${escapeHtml(resolveAssetUrl(textValue))}" target="_blank" rel="noreferrer">
