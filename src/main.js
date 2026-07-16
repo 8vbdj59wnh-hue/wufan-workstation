@@ -8,6 +8,7 @@ import { bindTimePageEvents, renderTimePage } from "./timePage.js?v=20260705-sta
 import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260705-state-singleton1";
 import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260705-state-singleton1";
 import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js?v=20260705-state-singleton1";
+import { attachThumbnailHoverPreview } from "./thumbnailPreview.js?v=20260705-state-singleton1";
 import {
   flushPersistentSave,
   getCurrentUser,
@@ -494,6 +495,7 @@ function render() {
     bindMethodologiesPageEvents(render);
   }
 
+  attachThumbnailHoverPreview();
   scrollToCurrentHashSection();
 }
 

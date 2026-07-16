@@ -3659,7 +3659,7 @@ function renderTaskDetail() {
             ${
               coverImageUrl === ""
                 ? `<div class="task-image-empty">暂无产品图片</div>`
-                : `<img src="${escapeHtml(resolveAssetUrl(coverImageUrl))}" alt="相关产品图片" onerror="this.replaceWith(Object.assign(document.createElement('div'), { className: 'task-image-empty', textContent: '图片无法预览' }))" />`
+                : `<img class="task-cover-thumb" src="${escapeHtml(resolveAssetUrl(coverImageUrl))}" alt="相关产品图片" onerror="this.replaceWith(Object.assign(document.createElement('div'), { className: 'task-image-empty', textContent: '图片无法预览' }))" />`
             }
           </div>
           <div class="task-work-main">
