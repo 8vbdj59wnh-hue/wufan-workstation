@@ -53,6 +53,11 @@ const exportHeaders = [
   "状态",
   "关联目标",
 ];
+const importTemplateHeaders = exportHeaders.map((header) => (header === "发布日期" ? "发布日期（日期+时间）" : header));
+const importHeaderAliases = {
+  发布日期: ["发布日期", "发布日期（日期+时间）"],
+  受众人群: ["受众人群", "对应人群"],
+};
 
 let filters = {
   dateFrom: "",
@@ -608,7 +613,10 @@ function renderScheduleTable() {
   return `
     <section class="settings-section">
       <div class="section-heading with-actions">
-        <h2>内容排期表</h2>
+        <div>
+          <h2>内容排期表</h2>
+          <p class="form-note">导入支持“发布日期”填写日期（YYYY-MM-DD）或日期+时间（YYYY-MM-DD HH:mm），当前排期仍按日期保存。</p>
+        </div>
         <div class="section-actions">
           ${canCurrentUser("contentSchedules.import") ? `<button class="secondary-button" type="button" data-content-action="download-template">下载导入模板</button>` : ""}
           ${canCurrentUser("contentSchedules.import") ? `
@@ -1462,12 +1470,12 @@ async function startContentProcess(scheduleId, rerender) {
   await createWorkPlanFromSchedule(scheduleId, WorkPlanStatus.ThisWeek, rerender);
 }
 
-function createXmlWorkbook(rows) {
+function createXmlWorkbook(rows, headers = exportHeaders) {
   const xmlRows = rows
     .map(
       (row) => `
         <Row>
-          ${exportHeaders
+          ${headers
             .map((header) => `<Cell><Data ss:Type="String">${escapeHtml(row[header] ?? "")}</Data></Cell>`)
             .join("")}
         </Row>
@@ -1483,7 +1491,7 @@ function createXmlWorkbook(rows) {
  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
   <Worksheet ss:Name="内容排期">
     <Table>
-      <Row>${exportHeaders.map((header) => `<Cell><Data ss:Type="String">${header}</Data></Cell>`).join("")}</Row>
+      <Row>${headers.map((header) => `<Cell><Data ss:Type="String">${header}</Data></Cell>`).join("")}</Row>
       ${xmlRows}
     </Table>
   </Worksheet>
@@ -1531,7 +1539,7 @@ function exportSchedules() {
 function downloadTemplate() {
   const rows = [
     {
-      发布日期: "2026-07-03",
+      "发布日期（日期+时间）": "2026-07-20 10:00",
       发布账号: "阿柚",
       内容类型: "图文笔记",
       内容目的: "种草引流",
@@ -1545,7 +1553,7 @@ function downloadTemplate() {
       关联目标: "提高内容互动转化效率",
     },
   ];
-  downloadFile(createXmlWorkbook(rows), "半然内容排期导入模板.xls", "application/vnd.ms-excel;charset=utf-8");
+  downloadFile(createXmlWorkbook(rows, importTemplateHeaders), "半然内容排期导入模板.xls", "application/vnd.ms-excel;charset=utf-8");
 }
 
 function parseDelimitedRows(text) {
@@ -1592,9 +1600,13 @@ function parseXmlWorkbook(text) {
 
 function rowsToRecords(rows) {
   const headers = rows[0] ?? [];
+  const findHeaderIndex = (header) => {
+    const aliases = importHeaderAliases[header] ?? [header];
+    return aliases.map((alias) => headers.indexOf(alias)).find((index) => index >= 0) ?? -1;
+  };
   return rows.slice(1).map((row) =>
     exportHeaders.reduce((record, header) => {
-      const index = header === "受众人群" && !headers.includes("受众人群") ? headers.indexOf("对应人群") : headers.indexOf(header);
+      const index = findHeaderIndex(header);
       record[header] = index >= 0 ? row[index] ?? "" : "";
       return record;
     }, {}),
@@ -1602,8 +1614,7 @@ function rowsToRecords(rows) {
 }
 
 function hasImportHeader(headers, header) {
-  if (header === "受众人群") return headers.includes("受众人群") || headers.includes("对应人群");
-  return headers.includes(header);
+  return (importHeaderAliases[header] ?? [header]).some((alias) => headers.includes(alias));
 }
 
 function buildImportPreviewRows(records) {
