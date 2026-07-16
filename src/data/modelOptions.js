@@ -174,6 +174,11 @@ export const WorkType = Object.freeze({
   Rectification: "rectification",
 });
 
+export const RectificationWorkTemplate = Object.freeze({
+  TaskTemplateId: "task-template-rectification-work",
+  ProcessTemplateId: "process-template-rectification-work",
+});
+
 export const SubmitType = Object.freeze({
   None: "none",
   Form: "form",

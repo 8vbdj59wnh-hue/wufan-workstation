@@ -144,8 +144,12 @@ function ensureSelectedGoalVisible() {
   selectedGoalProcessInstanceId = null;
 }
 
+function isSelectableGoalWorkTemplate(template) {
+  return template.name !== "整改工作";
+}
+
 function getActiveTaskTemplates() {
-  return state.taskTemplates.filter((template) => template.status === TaskTemplateStatus.Active);
+  return state.taskTemplates.filter((template) => template.status === TaskTemplateStatus.Active && isSelectableGoalWorkTemplate(template));
 }
 
 function sortCategoriesBySortOrder(left, right) {

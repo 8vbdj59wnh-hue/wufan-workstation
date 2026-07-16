@@ -39,6 +39,7 @@ import {
   TaskStatus,
   TaskTemplateStatus,
   TaskUrgency,
+  RectificationWorkTemplate,
   WorkType,
   WorkPlanStatus,
   getValueModuleName,
@@ -762,12 +763,12 @@ function normalizeTaskSubmitRequirements() {
   });
 }
 
-export function createOrReuseProcessTemplateForStandardWork({ name, ownerId, departmentId, now = getNow() }) {
+export function createOrReuseProcessTemplateForStandardWork({ name, ownerId, departmentId, now = getNow(), templateId = null }) {
   const processName = `${name}流程`;
   const legacyProcessNames = new Map([["新品上新流程", ["新品上架链接流程"]]]);
   const matchingLegacyNames = legacyProcessNames.get(processName) ?? [];
   const existingTemplate = state.processTemplates.find(
-    (template) => template.name === processName || matchingLegacyNames.includes(template.name),
+    (template) => template.id === templateId || template.name === processName || matchingLegacyNames.includes(template.name),
   );
 
   if (existingTemplate !== undefined) {
@@ -784,7 +785,7 @@ export function createOrReuseProcessTemplateForStandardWork({ name, ownerId, dep
   }
 
   const processTemplate = {
-    id: createId("process-template"),
+    id: templateId ?? createId("process-template"),
     name: processName,
     categoryId: null,
     purpose: `规范【${name}】的执行过程。`,
@@ -838,6 +839,14 @@ function baseStandardWorkFields(prefix) {
 }
 
 const realStandardWorkDefinitions = [
+  {
+    id: RectificationWorkTemplate.TaskTemplateId,
+    processTemplateId: RectificationWorkTemplate.ProcessTemplateId,
+    departmentKey: "admin",
+    name: "整改工作",
+    description: "用于对超时、退回、返工、延期或人工指定问题进行闭环整改的标准工作。",
+    completionStandard: "完成情况说明、原因分析、改善措施、标准优化判断、效果验证和持续应用确认。",
+  },
   {
     id: "task-template-store-decoration",
     departmentKey: "visual",
@@ -943,6 +952,14 @@ const realStandardWorkDefinitions = [
 ];
 
 const standardWorkFormDefinitions = {
+  整改工作: [
+    ["rectificationSource", "整改来源", "select", true, "请选择整改来源", ["超时", "审核退回", "连续返工", "项目延期", "人工创建整改", "其他"], true],
+    ["relatedTaskId", "关联任务ID", "text", false, "可填写关联执行任务 ID", [], true],
+    ["relatedProcessInstanceId", "关联工作ID", "text", false, "可填写关联已发起工作 ID", [], true],
+    ["rectificationObject", "整改对象", "text", true, "例如某个任务、流程、标准工作或具体事项", [], true],
+    ["problemSummary", "问题摘要", "textarea", true, "简要说明需要整改的问题", [], false],
+    ["dueDate", "截止时间", "datetime_hour", true, "", [], true],
+  ],
   发布内容笔记: [
     ["coverImageUrl", "产品图", "image", false, "上传1:1产品图", [], true],
     ["publishDate", "发布日期", "date", true, "", [], true],
@@ -1258,6 +1275,160 @@ function syncNewProductLaunchProcessNodes(templateId, departmentsByKey, now) {
   return changed;
 }
 
+function rectificationSubmitField(key, label, type = "textarea", required = true, placeholder = "", options = [], sortOrder = 1) {
+  return {
+    id: `rectification-${key}`,
+    key,
+    label,
+    type,
+    required,
+    placeholder,
+    options,
+    showInList: false,
+    sortOrder,
+  };
+}
+
+function syncRectificationProcessNodes(templateId, ownerId, departmentId, now) {
+  const processTemplate = state.processTemplates.find((template) => template.id === templateId);
+  if (processTemplate === undefined) return false;
+
+  const fixedNodes = [
+    {
+      id: "node-rectification-001",
+      name: "情况说明",
+      ownerRule: ProcessOwnerRule.Initiator,
+      ownerId: null,
+      defaultOwnerId: null,
+      durationMinutes: 30,
+      description: "执行人说明问题经过、发生原因，以及为什么没有提前避免。",
+      completionStandard: "完整填写发生了什么、为什么发生、为什么没有提前避免。",
+      outputRequirement: "整改情况说明",
+      submitDescription: "请如实说明情况，作为后续原因分析和改善措施的依据。",
+      submitFields: [
+        rectificationSubmitField("whatHappened", "发生了什么", "textarea", true, "描述问题经过、影响范围和当前状态", [], 1),
+        rectificationSubmitField("whyHappened", "为什么发生", "textarea", true, "说明直接原因和背景因素", [], 2),
+        rectificationSubmitField("whyNotAvoided", "为什么没有提前避免", "textarea", true, "说明预警、检查或协同中缺失的环节", [], 3),
+      ],
+    },
+    {
+      id: "node-rectification-002",
+      name: "原因分析",
+      durationMinutes: 60,
+      description: "负责人分析问题根因，明确责任和改进方向。",
+      completionStandard: "完成原因分析，区分直接原因、管理原因和标准缺口。",
+      outputRequirement: "原因分析结论",
+      submitDescription: "请完成负责人原因分析。",
+      submitFields: [
+        rectificationSubmitField("causeAnalysis", "原因分析", "textarea", true, "从人员、流程、标准、资源等角度分析根因", [], 1),
+      ],
+    },
+    {
+      id: "node-rectification-003",
+      name: "改善措施",
+      durationMinutes: 120,
+      description: "负责人制定改善动作，明确后续执行方式。",
+      completionStandard: "改善措施具体、可执行，并能对应前一步原因分析。",
+      outputRequirement: "改善措施",
+      submitDescription: "请填写准备采取的改善措施。",
+      submitFields: [
+        rectificationSubmitField("improvementActions", "准备采取哪些改善措施", "textarea", true, "列出具体动作、责任人和预期结果", [], 1),
+      ],
+    },
+    {
+      id: "node-rectification-004",
+      name: "标准优化",
+      durationMinutes: 60,
+      description: "负责人判断是否需要更新标准工作。本阶段只保留入口，不直接更新标准。",
+      completionStandard: "已判断是否需要标准优化，并记录理由。",
+      outputRequirement: "标准优化判断",
+      submitDescription: "请判断是否需要更新标准工作。",
+      submitFields: [
+        rectificationSubmitField("needStandardUpdate", "是否更新标准工作", "select", true, "请选择", ["需要", "暂不需要"], 1),
+        rectificationSubmitField("standardUpdateNote", "标准优化说明", "textarea", false, "说明需要更新的标准或暂不更新的理由", [], 2),
+      ],
+    },
+    {
+      id: "node-rectification-005",
+      name: "效果验证",
+      durationMinutes: 1440,
+      description: "负责人验证改善措施是否产生效果。",
+      completionStandard: "完成效果验证，并记录验证结果。",
+      outputRequirement: "效果验证结果",
+      submitDescription: "请填写改善效果验证结果。",
+      submitFields: [
+        rectificationSubmitField("verificationResult", "验证结果", "textarea", true, "说明改善措施是否有效、是否仍有残留风险", [], 1),
+      ],
+    },
+    {
+      id: "node-rectification-006",
+      name: "持续应用",
+      durationMinutes: 30,
+      description: "负责人确认整改结果可以持续应用，整改工作完成。",
+      completionStandard: "确认整改措施已进入日常执行或管理动作。",
+      outputRequirement: "持续应用确认",
+      submitDescription: "请确认整改结果如何持续应用。",
+      submitFields: [
+        rectificationSubmitField("continuousApplication", "持续应用说明", "textarea", true, "说明后续如何持续应用和检查", [], 1),
+      ],
+    },
+  ];
+
+  let changed = false;
+  const nodesForTemplate = state.processTemplateNodes.filter((node) => node.templateId === templateId);
+
+  fixedNodes.forEach((definition, index) => {
+    const existing = nodesForTemplate.find((node) => node.id === definition.id || node.name === definition.name);
+    const nodeData = normalizeProcessTemplateNode({
+      ...(existing ?? {}),
+      id: existing?.id ?? definition.id,
+      templateId,
+      stageName: "整改工作流程",
+      stageOrder: index + 1,
+      nodeOrder: 1,
+      stepOrder: index + 1,
+      name: definition.name,
+      ownerRule: definition.ownerRule ?? ProcessOwnerRule.FixedPerson,
+      ownerDepartmentId: departmentId,
+      departmentId,
+      ownerPositionId: null,
+      defaultOwnerId: definition.defaultOwnerId ?? ownerId,
+      ownerId: definition.ownerId === undefined ? ownerId : definition.ownerId,
+      executorId: null,
+      durationDays: Math.max(1 / 1440, definition.durationMinutes / 1440),
+      durationMinutes: definition.durationMinutes,
+      description: definition.description,
+      completionStandard: definition.completionStandard,
+      defaultImportance: TaskImportance.Important,
+      defaultUrgency: index === 0 ? TaskUrgency.Urgent : TaskUrgency.NotUrgent,
+      needAcceptance: false,
+      accepterRule: ProcessAccepterRule.None,
+      defaultAccepterId: null,
+      outputRequirement: definition.outputRequirement,
+      submitType: SubmitType.Form,
+      submitDescription: definition.submitDescription,
+      submitFields: definition.submitFields,
+      status: ProcessTemplateNodeStatus.Active,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    });
+
+    if (existing === undefined) {
+      state.processTemplateNodes = [...state.processTemplateNodes, nodeData];
+      changed = true;
+      return;
+    }
+
+    const hasChanged = JSON.stringify(existing) !== JSON.stringify(nodeData);
+    if (hasChanged) {
+      state.processTemplateNodes = state.processTemplateNodes.map((node) => (node.id === existing.id ? nodeData : node));
+      changed = true;
+    }
+  });
+
+  return changed;
+}
+
 function findDepartmentByNames(names) {
   return state.departments.find((department) => names.includes(department.name)) ?? null;
 }
@@ -1337,9 +1508,13 @@ export function ensureDefaultStandardWorkLibrary() {
       ownerId,
       departmentId,
       now,
+      templateId: definition.processTemplateId ?? null,
     });
     if (isNewTemplate && definition.id === "task-template-new-product-link") {
       changed = syncNewProductLaunchProcessNodes(defaultProcessTemplateId, departmentsByKey, now) || changed;
+    }
+    if (definition.id === RectificationWorkTemplate.TaskTemplateId) {
+      changed = syncRectificationProcessNodes(defaultProcessTemplateId, ownerId, departmentId, now) || changed;
     }
     const defaultFormFields = buildStandardWorkFormFields(definition);
     const defaultValueChainName = getValueModuleName(inferValueModuleIdFromText(definition.name), "");
@@ -1360,7 +1535,10 @@ export function ensureDefaultStandardWorkLibrary() {
       urgency: existing?.urgency ?? TaskUrgency.NotUrgent,
       needAcceptance: existing?.needAcceptance ?? false,
       accepterId: existing?.accepterId ?? null,
-      defaultProcessTemplateId: existing?.defaultProcessTemplateId ?? defaultProcessTemplateId,
+      defaultProcessTemplateId:
+        definition.id === RectificationWorkTemplate.TaskTemplateId
+          ? defaultProcessTemplateId
+          : existing?.defaultProcessTemplateId ?? defaultProcessTemplateId,
       status: existing?.status ?? TaskTemplateStatus.Active,
       updatedAt: existing?.updatedAt ?? now,
     };
