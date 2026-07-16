@@ -1471,6 +1471,11 @@ function getStandardWorksForFormDesign() {
 function getSelectedFormDesignStandardWork() {
   const standardWorks = getStandardWorksForFormDesign();
   if (standardWorks.length === 0) return null;
+  const pendingStandardWorkId = window.sessionStorage?.getItem("wufanFormDesignStandardWorkId") ?? "";
+  if (pendingStandardWorkId !== "" && standardWorks.some((item) => item.id === pendingStandardWorkId)) {
+    activeFormDesignStandardWorkId = pendingStandardWorkId;
+    window.sessionStorage?.removeItem("wufanFormDesignStandardWorkId");
+  }
   if (activeFormDesignStandardWorkId === "" || !standardWorks.some((item) => item.id === activeFormDesignStandardWorkId)) {
     activeFormDesignStandardWorkId = standardWorks[0].id;
   }

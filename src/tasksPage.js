@@ -593,6 +593,12 @@ function isRectificationExecutionTask(task) {
   return instance?.taskTemplateId === RectificationWorkTemplate.TaskTemplateId;
 }
 
+function isRectificationStandardOptimizationTask(task) {
+  if (!isRectificationExecutionTask(task)) return false;
+  const node = state.processTemplateNodes.find((item) => item.id === task.processNodeId);
+  return (node?.name ?? task.name) === "标准优化";
+}
+
 function getRectificationTaskSubmitFields(task) {
   if (!isRectificationExecutionTask(task)) return [];
   const node = state.processTemplateNodes.find((item) => item.id === task.processNodeId);
@@ -612,6 +618,25 @@ function getSubmitFieldValue(formData, field) {
 }
 
 function validateSubmittedResult(task, nextData = {}) {
+  if (!isRectificationExecutionTask(task)) return "";
+  const formData = nextData.submitFormData ?? task.submitFormData ?? {};
+  for (const field of getSubmitFields(task)) {
+    if (field.required !== true) continue;
+    const value = formData[field.key];
+    const isEmpty = Array.isArray(value) ? value.length === 0 : String(value ?? "").trim() === "";
+    if (isEmpty) return `请填写${field.label}。`;
+  }
+  if (isRectificationStandardOptimizationTask(task)) {
+    const needStandardUpdate = String(formData.needStandardUpdate ?? "").trim();
+    const scope = Array.isArray(formData.standardUpdateScope) ? formData.standardUpdateScope : [];
+    if (needStandardUpdate === "") return "请选择是否需要优化标准。";
+    if (needStandardUpdate === "需要" && (scope.length === 0 || scope.includes("无需优化"))) {
+      return "请选择需要优化的具体范围。";
+    }
+    if (needStandardUpdate === "不需要" && !scope.includes("无需优化")) {
+      return "不需要优化时，请在优化范围中选择“无需优化”。";
+    }
+  }
   return "";
 }
 
@@ -645,6 +670,46 @@ function renderSubmitFieldInput(field, value = "") {
     `;
   }
   return `<input ${common} type="${field.type === "url" ? "url" : field.type}" value="${escapeHtml(value)}" placeholder="${escapeHtml(field.placeholder ?? "")}" />`;
+}
+
+function getRectificationSourceTask(task) {
+  const instance = getTaskProcessInstance(task);
+  const workPlan = state.workPlans.find((item) => item.processInstanceId === instance?.id) ?? null;
+  const sourceTaskId = workPlan?.customFields?.sourceTaskId ?? instance?.customFields?.sourceTaskId ?? task.customFields?.sourceTaskId ?? "";
+  return state.tasks.find((item) => item.id === sourceTaskId) ?? null;
+}
+
+function getRectificationSourceStandardWork(task) {
+  const instance = getTaskProcessInstance(task);
+  const workPlan = state.workPlans.find((item) => item.processInstanceId === instance?.id) ?? null;
+  const sourceTask = getRectificationSourceTask(task);
+  const sourceProcessInstance = state.processInstances.find(
+    (item) => item.id === (workPlan?.customFields?.sourceProcessInstanceId ?? instance?.customFields?.sourceProcessInstanceId ?? ""),
+  ) ?? null;
+  const sourceStandardWorkId =
+    workPlan?.customFields?.sourceStandardWorkId ??
+    instance?.customFields?.sourceStandardWorkId ??
+    sourceTask?.taskTemplateId ??
+    sourceProcessInstance?.taskTemplateId ??
+    "";
+  return getTaskTemplate(sourceStandardWorkId) ?? null;
+}
+
+function renderStandardOptimizationActions(task) {
+  if (!isRectificationStandardOptimizationTask(task)) return "";
+  const sourceStandardWork = getRectificationSourceStandardWork(task);
+  return `
+    <div class="submit-result-form standard-optimization-actions">
+      <strong>立即优化标准</strong>
+      <p class="form-note">来源标准工作：${escapeHtml(sourceStandardWork?.name ?? "未定位到来源标准工作")}</p>
+      <div class="button-row">
+        <button class="secondary-button" type="button" data-action="open-standard-optimization-target" data-task-id="${escapeHtml(task.id)}" data-target="standard-work" ${sourceStandardWork === null ? "disabled" : ""}>修改标准工作</button>
+        <button class="secondary-button" type="button" data-action="open-standard-optimization-target" data-task-id="${escapeHtml(task.id)}" data-target="process" ${sourceStandardWork?.defaultProcessTemplateId ? "" : "disabled"}>修改流程</button>
+        <button class="secondary-button" type="button" data-action="open-standard-optimization-target" data-task-id="${escapeHtml(task.id)}" data-target="form" ${sourceStandardWork === null ? "disabled" : ""}>修改表单</button>
+        <button class="secondary-button" type="button" data-action="open-standard-optimization-target" data-task-id="${escapeHtml(task.id)}" data-target="completion-standard" ${sourceStandardWork?.defaultProcessTemplateId ? "" : "disabled"}>修改完成标准</button>
+      </div>
+    </div>
+  `;
 }
 
 function getSubmitFileKey(file) {
@@ -711,6 +776,7 @@ function renderSubmitResultForm(task) {
     <div class="submit-result-form">
       <p class="form-note">${escapeHtml(requirement.submitDescription ?? "")}</p>
       ${fields}
+      ${renderStandardOptimizationActions(task)}
       ${fileArea}
       ${linkArea}
     </div>
@@ -5063,6 +5129,19 @@ async function saveResult(form, rerender) {
         ? task.completedAt ?? null
         : null;
   const resultAttachments = submitFiles;
+  const nextCustomFields = isRectificationExecutionTask(task)
+    ? {
+        ...(task.customFields ?? {}),
+        ...submitFormData,
+      }
+    : task.customFields;
+  if (isRectificationStandardOptimizationTask(task)) {
+    nextCustomFields.standardOptimizationApplied = submitFormData.needStandardUpdate === "需要" ? "是" : "否";
+    nextCustomFields.standardOptimizationScope = submitFormData.standardUpdateScope ?? [];
+    nextCustomFields.standardOptimizationNote = submitFormData.standardUpdateNote ?? "";
+    nextCustomFields.standardOptimizationAt = now;
+    nextCustomFields.standardOptimizationOperatorId = getCurrentUser()?.personId ?? getCurrentUser()?.id ?? task.ownerId ?? "";
+  }
 
   const updatedTask = markTaskOverdueRecordIfNeeded({
     ...task,
@@ -5071,12 +5150,7 @@ async function saveResult(form, rerender) {
     submitFormData,
     submitFiles,
     submitLinks,
-    customFields: isRectificationExecutionTask(task)
-      ? {
-          ...(task.customFields ?? {}),
-          ...submitFormData,
-        }
-      : task.customFields,
+    customFields: nextCustomFields,
     submittedAt: now,
     submittedBy: task.ownerId,
     status: nextStatus,
@@ -5453,10 +5527,15 @@ async function returnTaskToSelectedStep(form, rerender) {
   rerender();
 }
 
-async function handleTaskAction(action, taskId, rerender) {
+async function handleTaskAction(action, taskId, rerender, actionButton = null) {
   const task = getTask(taskId);
 
   if (task === null) return;
+
+  if (action === "open-standard-optimization-target") {
+    openStandardOptimizationTarget(task, actionButton?.dataset.target ?? "");
+    return;
+  }
 
   if (action === "view-task") {
     selectedTaskId = taskId;
@@ -5518,6 +5597,31 @@ async function handleTaskAction(action, taskId, rerender) {
     }
     state.tasks = state.tasks.map((item) => (item.id === taskId ? updatedTask : item));
     rerender();
+  }
+}
+
+function openStandardOptimizationTarget(task, target) {
+  const sourceStandardWork = getRectificationSourceStandardWork(task);
+  if (sourceStandardWork === null) {
+    window.alert("未定位到来源标准工作。");
+    return;
+  }
+  if (target === "form") {
+    window.sessionStorage?.setItem("wufanFormDesignStandardWorkId", sourceStandardWork.id);
+    window.location.hash = "settings/form-design";
+    return;
+  }
+  if (target === "standard-work") {
+    window.sessionStorage?.setItem("wufanStandardWorkFocusId", sourceStandardWork.id);
+    window.location.hash = "task-library";
+    return;
+  }
+  if (target === "process" || target === "completion-standard") {
+    if (!sourceStandardWork.defaultProcessTemplateId) {
+      window.alert("该标准工作尚未绑定流程。");
+      return;
+    }
+    window.location.hash = `process-template-${sourceStandardWork.defaultProcessTemplateId}`;
   }
 }
 
@@ -6209,7 +6313,7 @@ export function bindTasksPageEvents(rerender) {
         return;
       }
 
-      handleTaskAction(action, actionButton.dataset.taskId, rerender);
+      handleTaskAction(action, actionButton.dataset.taskId, rerender, actionButton);
       return;
     }
 
