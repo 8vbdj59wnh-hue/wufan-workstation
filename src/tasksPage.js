@@ -71,7 +71,16 @@ import {
   renderBusinessMinuteOptions,
 } from "./businessTime.js?v=20260705-state-singleton1";
 
-const today = "2026-06-24";
+function getTodayDateInShanghai() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+const today = getTodayDateInShanghai();
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
 const categories = state.categories;
 const departments = state.departments;
@@ -128,6 +137,7 @@ let taskDueDateSort = "";
 let expandedClearanceGroups = new Set();
 let modalState = null;
 let activeTaskTab = "task-list";
+let taskListView = "today";
 let standardWorkMoveStatus = null;
 let visualTemplatesLoaded = state.templates.length > 0;
 let visualTemplatesLoading = false;
@@ -149,11 +159,18 @@ function getActiveGoals() {
 }
 
 const taskStatusSelectOptions = [
-  { value: TaskStatus.Todo, label: "待执行" },
-  { value: TaskStatus.Doing, label: "执行中" },
+  { value: TaskStatus.Todo, label: "待处理" },
+  { value: TaskStatus.Doing, label: "进行中" },
   { value: TaskStatus.PendingAcceptance, label: "待审核" },
   { value: TaskStatus.Done, label: "已完成" },
   { value: TaskStatus.Canceled, label: "已取消" },
+];
+
+const taskListViewOptions = [
+  { value: "today", label: "今天" },
+  { value: "mine", label: "我的" },
+  { value: "overdue", label: "逾期" },
+  { value: "all", label: "全部" },
 ];
 
 const taskTabHashMap = {
@@ -1371,8 +1388,44 @@ function matchesFilters(task) {
   return true;
 }
 
+function isUnfinishedTask(task) {
+  return !isDoneStatus(task.status) && !isCanceledStatus(task.status);
+}
+
+function isTaskDueToday(task) {
+  return getBusinessDatePart(task.dueDate) === today;
+}
+
+function isTaskInProgressToday(task) {
+  return task.status === TaskStatus.Doing;
+}
+
+function isTaskOverdueForView(task) {
+  return isTaskOverdue(task, today) || hasTaskOverdueRecord(task);
+}
+
+function matchesTaskListView(task) {
+  if (taskListView === "all") return true;
+
+  if (taskListView === "today") {
+    return isUnfinishedTask(task) && (isTaskDueToday(task) || isTaskInProgressToday(task));
+  }
+
+  if (taskListView === "mine") {
+    const currentUser = getCurrentUser();
+    const currentPersonId = currentUser?.personId ?? currentUser?.id ?? "";
+    return currentPersonId !== "" && isUnfinishedTask(task) && getTaskExecutorId(task) === currentPersonId;
+  }
+
+  if (taskListView === "overdue") {
+    return isUnfinishedTask(task) && isTaskOverdueForView(task);
+  }
+
+  return true;
+}
+
 function getFilteredTasks() {
-  return state.tasks.filter((task) => !isClearanceTask(task)).filter(matchesFilters);
+  return state.tasks.filter((task) => !isClearanceTask(task)).filter(matchesTaskListView).filter(matchesFilters);
 }
 
 function renderOverdue(task) {
@@ -2956,11 +3009,60 @@ function canRestoreTask(task) {
 
 function renderFilters() {
   filters = { ...filters, source: "", goalId: "", categoryId: "", quadrant: "" };
+  if (taskListView === "overdue" && filters.overdue !== "") filters = { ...filters, overdue: "" };
+  const isFullView = taskListView === "all";
+  const peopleFilters = `
+    <label>
+      <span>负责部门</span>
+      <select name="departmentId">
+        ${renderOptions(departments, filters.departmentId, "全部部门")}
+      </select>
+    </label>
+    <label>
+      <span>负责人</span>
+      <select name="ownerId">
+        ${renderOptions(people, filters.ownerId, "全部负责人")}
+      </select>
+    </label>
+    <label>
+      <span>执行人</span>
+      <select name="executorId">
+        ${renderOptions(people, filters.executorId, "全部执行人")}
+      </select>
+    </label>
+  `;
+  const overdueFilter = `
+    <label>
+      <span>是否逾期</span>
+      <select name="overdue">
+        <option value="">全部</option>
+        <option value="yes" ${filters.overdue === "yes" ? "selected" : ""}>已逾期</option>
+        <option value="no" ${filters.overdue === "no" ? "selected" : ""}>未逾期</option>
+      </select>
+    </label>
+  `;
+  const filterOptions = `
+    <div class="task-filter-options">
+      <label class="checkbox-field task-filter-checkbox">
+        <input name="showDone" type="checkbox" ${filters.showDone ? "checked" : ""} />
+        <span>显示已完成</span>
+      </label>
+      <label class="checkbox-field task-filter-checkbox">
+        <input name="showCanceled" type="checkbox" ${filters.showCanceled ? "checked" : ""} />
+        <span>显示已取消</span>
+      </label>
+      <label class="checkbox-field task-filter-checkbox">
+        <input name="expandAllGroups" type="checkbox" ${expandAllTaskGroups ? "checked" : ""} />
+        <span>全部展开</span>
+      </label>
+    </div>
+  `;
+
   return `
-    <form class="task-filters task-list-filters" aria-label="任务筛选">
+    <form class="task-filters task-list-filters ${isFullView ? "" : "is-compact"}" aria-label="任务筛选">
       <label>
         <span>关键词</span>
-        <input name="keyword" value="${escapeHtml(filters.keyword)}" placeholder="搜索执行任务名称" />
+        <input name="keyword" value="${escapeHtml(filters.keyword)}" placeholder="搜索任务名称" />
       </label>
       <label>
         <span>任务状态</span>
@@ -2977,47 +3079,41 @@ function renderFilters() {
             .join("")}
         </select>
       </label>
-      <label>
-        <span>负责部门</span>
-        <select name="departmentId">
-          ${renderOptions(departments, filters.departmentId, "全部部门")}
-        </select>
-      </label>
-      <label>
-        <span>负责人</span>
-        <select name="ownerId">
-          ${renderOptions(people, filters.ownerId, "全部负责人")}
-        </select>
-      </label>
-      <label>
-        <span>执行人</span>
-        <select name="executorId">
-          ${renderOptions(people, filters.executorId, "全部执行人")}
-        </select>
-      </label>
-      <label>
-        <span>是否逾期</span>
-        <select name="overdue">
-          <option value="">全部</option>
-          <option value="yes" ${filters.overdue === "yes" ? "selected" : ""}>已逾期</option>
-          <option value="no" ${filters.overdue === "no" ? "selected" : ""}>未逾期</option>
-        </select>
-      </label>
-      <div class="task-filter-options">
-        <label class="checkbox-field task-filter-checkbox">
-          <input name="showDone" type="checkbox" ${filters.showDone ? "checked" : ""} />
-          <span>显示已完成</span>
-        </label>
-        <label class="checkbox-field task-filter-checkbox">
-          <input name="showCanceled" type="checkbox" ${filters.showCanceled ? "checked" : ""} />
-          <span>显示已取消</span>
-        </label>
-        <label class="checkbox-field task-filter-checkbox">
-          <input name="expandAllGroups" type="checkbox" ${expandAllTaskGroups ? "checked" : ""} />
-          <span>全部展开</span>
-        </label>
-      </div>
+      ${taskListView === "overdue" ? "" : overdueFilter}
+      ${
+        isFullView
+          ? `${peopleFilters}${filterOptions}`
+          : `
+            <details class="task-more-filters">
+              <summary>更多筛选</summary>
+              <div class="task-more-filter-grid">
+                ${peopleFilters}
+                ${filterOptions}
+              </div>
+            </details>
+          `
+      }
     </form>
+  `;
+}
+
+function renderTaskListViewSwitch() {
+  return `
+    <div class="task-list-view-switch" aria-label="任务视图">
+      ${taskListViewOptions
+        .map(
+          (option) => `
+            <button
+              class="${taskListView === option.value ? "is-active" : ""}"
+              type="button"
+              data-task-list-view="${option.value}"
+            >
+              ${option.label}
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
   `;
 }
 
@@ -3070,7 +3166,7 @@ function renderTaskTable() {
   return `
     <section class="settings-section">
       <div class="bulk-task-bar">
-        <strong>已选择 ${selectedCount} 条执行任务</strong>
+        <strong>已选择 ${selectedCount} 条任务</strong>
         <span class="row-actions">
           <button class="text-button" type="button" data-action="bulk-complete" ${selectedCount === 0 ? "disabled" : ""}>批量完成</button>
           <button class="text-button danger-button" type="button" data-action="bulk-cancel" ${selectedCount === 0 ? "disabled" : ""}>批量取消</button>
@@ -6063,6 +6159,15 @@ export function bindTasksPageEvents(rerender) {
     });
   });
 
+  document.querySelectorAll("[data-task-list-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      taskListView = button.dataset.taskListView;
+      const firstRow = getTaskTableRows()[0];
+      selectedTaskId = firstRow?.type === "process-group" ? firstRow.currentTask.id : firstRow?.task.id ?? null;
+      rerender();
+    });
+  });
+
   if (activeTaskTab === "content-schedule") {
     bindContentScheduleEvents(rerender);
     return;
@@ -6446,8 +6551,8 @@ export function bindTasksPageEvents(rerender) {
 export function renderTasksPage() {
   syncTaskTabFromHash();
   if (activeTaskTab === "task-library") activeTaskTab = "task-list";
-  if (activeTaskTab === "task-list" && !canCurrentUser("tasks.view")) activeTaskTab = "process-progress";
-  if (activeTaskTab === "clearance" && !canCurrentUser("tasks.view")) activeTaskTab = "process-progress";
+  if (activeTaskTab === "task-list" && !canCurrentUser("tasks.view")) activeTaskTab = canCurrentUser("contentSchedules.view") ? "content-schedule" : "task-list";
+  if (activeTaskTab === "clearance" && !canCurrentUser("tasks.view")) activeTaskTab = canCurrentUser("contentSchedules.view") ? "content-schedule" : "task-list";
   if (activeTaskTab === "process-progress" && !canCurrentUser("tasks.viewProcessProgress")) {
     activeTaskTab = canCurrentUser("tasks.view") ? "task-list" : "content-schedule";
   }
@@ -6460,10 +6565,9 @@ export function renderTasksPage() {
 
   return `
     <div class="tasks-page">
-      <div class="settings-tabs task-subtabs" aria-label="执行页签">
-        ${canCurrentUser("tasks.view") ? `<button class="${activeTaskTab === "task-list" ? "is-active" : ""}" type="button" data-task-tab="task-list">执行任务列表</button>` : ""}
+      <div class="settings-tabs task-subtabs" aria-label="任务页签">
+        ${canCurrentUser("tasks.view") ? `<button class="${activeTaskTab === "task-list" ? "is-active" : ""}" type="button" data-task-tab="task-list">任务</button>` : ""}
         ${canCurrentUser("tasks.view") ? `<button class="${activeTaskTab === "clearance" ? "is-active" : ""}" type="button" data-task-tab="clearance">库存清仓</button>` : ""}
-        ${canCurrentUser("tasks.viewProcessProgress") ? `<button class="${activeTaskTab === "process-progress" ? "is-active" : ""}" type="button" data-task-tab="process-progress">标准工作流程进度</button>` : ""}
         ${canCurrentUser("contentSchedules.view") ? `<button class="${activeTaskTab === "content-schedule" ? "is-active" : ""}" type="button" data-task-tab="content-schedule">内容排期</button>` : ""}
       </div>
       ${
@@ -6482,6 +6586,7 @@ export function renderTasksPage() {
               ${renderCancelProcessModal()}
             `
             : `
+              ${renderTaskListViewSwitch()}
               ${renderFilters()}
               ${renderTaskTable()}
               ${renderTaskDetail()}
