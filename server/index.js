@@ -60,7 +60,7 @@ const imageStorage = multer.diskStorage({
 });
 const uploadImage = multer({
   storage: imageStorage,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_request, file, callback) => {
     if (!allowedImageTypes.has(file.mimetype)) {
       callback(new Error("只支持 JPG、PNG、WebP 图片。"));
@@ -99,7 +99,7 @@ const fileStorage = multer.diskStorage({
 });
 const uploadFile = multer({
   storage: fileStorage,
-  limits: { fileSize: 20 * 1024 * 1024 },
+  limits: { fileSize: 600 * 1024 * 1024 },
   fileFilter: (_request, file, callback) => {
     const ext = path.extname(file.originalname).toLowerCase();
     if (!allowedFileTypes.has(file.mimetype) && !allowedFileExts.has(ext)) {
@@ -382,8 +382,8 @@ app.post("/api/uploads/image", (request, response) => {
   uploadImage.single("image")(request, response, (error) => {
     if (error !== undefined) {
       const message =
-        error.code === "LIMIT_FILE_SIZE" ? "图片大小不能超过 5MB。" : error.message || "图片上传失败。";
-      response.status(400).json({ error: message });
+        error.code === "LIMIT_FILE_SIZE" ? "图片大小不能超过 10MB。" : error.message || "图片上传失败。";
+      response.status(error.code === "LIMIT_FILE_SIZE" ? 413 : 400).json({ error: message });
       return;
     }
 
@@ -403,8 +403,8 @@ app.post("/api/uploads/file", (request, response) => {
   uploadFile.single("file")(request, response, (error) => {
     if (error !== undefined) {
       const message =
-        error.code === "LIMIT_FILE_SIZE" ? "文件大小不能超过 20MB。" : error.message || "文件上传失败。";
-      response.status(400).json({ error: message });
+        error.code === "LIMIT_FILE_SIZE" ? "源文件超过上传限制，请压缩后上传，当前限制为600MB。" : error.message || "文件上传失败。";
+      response.status(error.code === "LIMIT_FILE_SIZE" ? 413 : 400).json({ error: message });
       return;
     }
 

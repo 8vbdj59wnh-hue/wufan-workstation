@@ -254,6 +254,27 @@ function isValidTemplatePayload(payload) {
     && hasAnyTag(payload.tags);
 }
 
+function getTemplateErrorText(error) {
+  return String(error?.message ?? error ?? "").trim();
+}
+
+function normalizeTemplateUploadError(error, { fileKind = "source" } = {}) {
+  const message = getTemplateErrorText(error);
+  const lowerMessage = message.toLowerCase();
+  if (lowerMessage.includes("failed to fetch") || lowerMessage.includes("fetch failed") || lowerMessage.includes("networkerror")) {
+    return "无法连接后端服务，请确认当前访问地址正确，并检查 3001 端口是否可访问。";
+  }
+  if (message.includes("401") || message.includes("未登录") || message.includes("登录") || lowerMessage.includes("unauthorized")) {
+    return "登录已过期，请重新登录后再上传。";
+  }
+  if (message.includes("413") || lowerMessage.includes("too large") || lowerMessage.includes("size") || message.includes("超过")) {
+    return fileKind === "preview"
+      ? "预览图超过上传限制，请压缩后上传，当前限制为10MB。"
+      : "源文件超过上传限制，请压缩后上传，当前限制为600MB。";
+  }
+  return message || "未知错误";
+}
+
 function getFilteredMaterials() {
   const keyword = filters.keyword.trim().toLowerCase();
 
@@ -608,27 +629,39 @@ export function bindTemplateCenterPageEvents(rerender) {
     templateError = "";
     rerender();
     try {
-      const [previewUpload, sourceUpload] = await Promise.all([
-        uploadImageFile(uploadDraft.previewFile),
-        uploadGenericFile(uploadDraft.sourceFile),
-      ]);
+      let previewUpload;
+      try {
+        previewUpload = await uploadImageFile(uploadDraft.previewFile);
+      } catch (error) {
+        throw new Error(`预览图上传失败：${normalizeTemplateUploadError(error, { fileKind: "preview" })}`);
+      }
+      let sourceUpload;
+      try {
+        sourceUpload = await uploadGenericFile(uploadDraft.sourceFile);
+      } catch (error) {
+        throw new Error(`源文件上传失败：${normalizeTemplateUploadError(error, { fileKind: "source" })}`);
+      }
       const now = new Date().toISOString();
-      await createTemplate({
-        id: createId("template-material"),
-        name: templateName,
-        previewImage: {
-          fileName: uploadDraft.previewFile.name,
-          fileUrl: previewUpload.url,
-        },
-        sourceFile: {
-          fileName: sourceUpload.originalName ?? uploadDraft.sourceFile.name,
-          fileUrl: sourceUpload.url,
-        },
-        fileType: sourceFileType,
-        tags,
-        createdAt: now,
-        updatedAt: now,
-      });
+      try {
+        await createTemplate({
+          id: createId("template-material"),
+          name: templateName,
+          previewImage: {
+            fileName: uploadDraft.previewFile.name,
+            fileUrl: previewUpload.url,
+          },
+          sourceFile: {
+            fileName: sourceUpload.originalName ?? uploadDraft.sourceFile.name,
+            fileUrl: sourceUpload.url,
+          },
+          fileType: sourceFileType,
+          tags,
+          createdAt: now,
+          updatedAt: now,
+        });
+      } catch (error) {
+        throw new Error(`模板信息保存失败：${normalizeTemplateUploadError(error, { fileKind: "source" })}`);
+      }
       uploadDraft = {
         previewFile: null,
         sourceFile: null,
@@ -639,7 +672,7 @@ export function bindTemplateCenterPageEvents(rerender) {
       templatesLoaded = true;
     } catch (error) {
       console.error("模板保存失败", error);
-      templateError = "模板保存失败，请检查本地数据库服务。";
+      templateError = getTemplateErrorText(error) || "模板保存失败，请检查本地数据库服务。";
     } finally {
       templateUploading = false;
       rerender();
