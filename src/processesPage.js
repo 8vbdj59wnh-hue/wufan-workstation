@@ -139,10 +139,20 @@ function getStepLabel(stepOrder) {
 
 function syncSelectedTemplateFromHash() {
   const hash = window.location.hash.replace(/^#/, "");
-  if (!hash.startsWith("process-template-")) return;
-  const templateId = hash.slice("process-template-".length);
-  if (state.processTemplates.some((template) => template.id === templateId)) {
-    selectedTemplateId = templateId;
+  if (hash.startsWith("process-template-")) {
+    const templateId = hash.slice("process-template-".length);
+    if (state.processTemplates.some((template) => template.id === templateId)) {
+      selectedTemplateId = templateId;
+    }
+    return;
+  }
+  const focusedStandardWorkId = window.sessionStorage?.getItem("wufanStandardWorkFocusId") ?? "";
+  if (focusedStandardWorkId !== "") {
+    const standardWork = state.taskTemplates.find((template) => template.id === focusedStandardWorkId) ?? null;
+    if (standardWork?.defaultProcessTemplateId && state.processTemplates.some((template) => template.id === standardWork.defaultProcessTemplateId)) {
+      selectedTemplateId = standardWork.defaultProcessTemplateId;
+    }
+    window.sessionStorage?.removeItem("wufanStandardWorkFocusId");
   }
 }
 
@@ -344,7 +354,7 @@ function renderTemplateNodes(templateId) {
 
 function renderTemplateDetail() {
   const visibleTemplates = getVisibleProcessTemplates();
-  const template = visibleTemplates.find((item) => item.id === selectedTemplateId) ?? visibleTemplates[0] ?? state.processTemplates[0];
+  const template = state.processTemplates.find((item) => item.id === selectedTemplateId) ?? visibleTemplates[0] ?? state.processTemplates[0];
   if (template === undefined) {
     return `
       <section class="settings-section process-detail">

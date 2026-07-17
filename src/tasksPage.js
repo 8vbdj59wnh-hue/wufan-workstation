@@ -3322,7 +3322,7 @@ function renderStandardWorkProcessModal() {
 function renderStandardWorkCard(template, selectedProcessTemplateId = "") {
   const isSelected = template.defaultProcessTemplateId !== undefined && template.defaultProcessTemplateId === selectedProcessTemplateId;
   const draggable = canCurrentUser("settings.editStandardWorks") ? ` draggable="true"` : "";
-  const stepCount = getStandardWorkStepCount(template);
+  const departmentName = findName(departments, template.departmentId, "未设置");
   return `
     <article class="standard-work-card ${isSelected ? "is-selected" : ""}"${draggable} data-standard-work-template-id="${escapeHtml(template.id)}" data-process-template-id="${escapeHtml(template.defaultProcessTemplateId ?? "")}">
       <div class="standard-work-card-title">
@@ -3330,23 +3330,16 @@ function renderStandardWorkCard(template, selectedProcessTemplateId = "") {
         <span class="status-pill ${template.status === TaskTemplateStatus.Inactive ? "is-inactive" : ""}">${taskTemplateStatusNames[template.status]}</span>
       </div>
       <div class="standard-work-card-meta">
-        <span>负责人</span>
-        <strong>${findName(people, template.ownerId, "未设置")}</strong>
-        <span class="standard-work-step-count">${stepCount} 步</span>
+        <span>所属价值链</span>
+        <strong>${escapeHtml(getStandardWorkValueChain(template))}</strong>
       </div>
-      ${renderStandardWorkValueChainSelect(template)}
+      <div class="standard-work-card-meta">
+        <span>责任部门</span>
+        <strong>${departmentName}</strong>
+      </div>
       <div class="standard-work-card-actions">
+        ${renderTemplateActionButton("查看", "view-task-template", template.id)}
         ${renderTemplateActionButton("编辑", "edit-task-template", template.id)}
-        ${
-          template.status === TaskTemplateStatus.Active
-            ? renderTemplateActionButton("停用", "deactivate-task-template", template.id, "danger-button")
-            : ""
-        }
-        ${
-          template.defaultProcessTemplateId
-            ? renderTemplateActionButton("查看流程", "view-standard-work-process", template.id)
-            : ""
-        }
       </div>
     </article>
   `;
@@ -4650,6 +4643,16 @@ function renderTaskTemplateModal() {
               <span>默认验收人</span>
               <select name="accepterId">${renderOptions(people, template?.accepterId ?? "", "无")}</select>
             </label>
+            ${
+              isEdit
+                ? `
+                  <label>
+                    <span>状态</span>
+                    <select name="status">${renderValueOptions(TaskTemplateStatus, template?.status ?? TaskTemplateStatus.Active, taskTemplateStatusNames, "请选择状态")}</select>
+                  </label>
+                `
+                : ""
+            }
             <label>
               <span>默认重要性</span>
               <select name="importance">${renderValueOptions(TaskImportance, template?.importance ?? "", taskImportanceNames, "请选择重要性")}</select>
@@ -4748,6 +4751,7 @@ function buildTaskTemplateDraft(form) {
     urgency: getFormValue(form, "urgency"),
     needAcceptance: formData.has("needAcceptance"),
     accepterId: getFormValue(form, "accepterId") || null,
+    status: getFormValue(form, "status") || TaskTemplateStatus.Active,
   };
 }
 
@@ -5814,8 +5818,13 @@ function handleTaskTemplateAction(action, templateId, rerender) {
     return;
   }
 
-  if (action === "deactivate-task-template") {
-    deactivateTaskTemplate(templateId, rerender);
+  if (action === "view-task-template") {
+    const template = getTaskTemplate(templateId);
+    if (template !== null) {
+      window.sessionStorage?.setItem("wufanStandardWorkFocusId", template.id);
+      window.location.hash = "task-library";
+      rerender();
+    }
     return;
   }
 
