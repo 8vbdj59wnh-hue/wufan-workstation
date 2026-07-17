@@ -17,7 +17,7 @@ const demoMethodology = {
   flowId: "process-content-note-publishing",
   nodeId: "node-visual-image-production",
   departmentId: "dept-visual-marketing",
-  flowName: "内容笔记发布流程",
+  flowName: "内容笔记发布标准",
   nodeName: "视觉制作图片",
   departmentName: "视觉营销部",
   positionNames: ["视觉设计", "内容制作"],
@@ -242,27 +242,27 @@ function renderMethodologyList() {
       <div class="section-heading with-actions">
         <div>
           <h2>方法论列表</h2>
-          <p class="form-note">按流程节点沉淀标准操作说明，员工可在任务中查看。</p>
+          <p class="form-note">按标准节点沉淀标准操作说明，员工可在任务中查看。</p>
         </div>
         ${canCreate() ? `<button class="primary-button" type="button" data-action="create-methodology">新增方法论</button>` : ""}
       </div>
       <form class="task-filters methodology-search">
         <label>
           <span>搜索</span>
-          <input name="keyword" value="${escapeHtml(keyword)}" placeholder="标题 / 流程节点 / 标准工作 / 流程" />
+          <input name="keyword" value="${escapeHtml(keyword)}" placeholder="标题 / 标准节点 / 关键行动 / 标准" />
         </label>
       </form>
       <div class="table-wrap">
         <table class="data-table">
           <thead>
-            <tr><th>方法论标题</th><th>价值链模块</th><th>适用流程</th><th>适用节点</th><th>适用部门</th><th>内容形式</th><th>状态</th></tr>
+            <tr><th>方法论标题</th><th>价值链模块</th><th>适用标准</th><th>适用节点</th><th>适用部门</th><th>内容形式</th><th>状态</th></tr>
           </thead>
           <tbody>
             ${items.length === 0 ? `<tr><td colspan="7">暂无方法论</td></tr>` : items
               .map((item) => {
                 const filled = (item.steps ?? []).some((step) => step.instruction || step.imageUrl || step.videoUrl);
                 const node = getMethodologyNode(item);
-                const flowName = item.flowName ?? findName(state.processTemplates, item.processTemplateId, "未关联流程");
+                const flowName = item.flowName ?? findName(state.processTemplates, item.processTemplateId, "未关联标准");
                 const nodeName = item.nodeName ?? node?.name ?? "未关联节点";
                 const departmentName = item.departmentName ?? "未设置";
                 const valueModuleName = getMethodologyValueModuleName(item);
@@ -289,11 +289,11 @@ function renderMethodologyList() {
 
 function renderNodeOptions(selectedId) {
   return `
-    <option value="">请选择流程节点</option>
+    <option value="">请选择标准节点</option>
     ${state.processTemplateNodes
       .map((node) => {
         const template = state.processTemplates.find((item) => item.id === node.templateId);
-        return `<option value="${node.id}" ${node.id === selectedId ? "selected" : ""}>${escapeHtml(template?.name ?? "未关联流程")} / ${escapeHtml(node.name)}</option>`;
+        return `<option value="${node.id}" ${node.id === selectedId ? "selected" : ""}>${escapeHtml(template?.name ?? "未关联标准")} / ${escapeHtml(node.name)}</option>`;
       })
       .join("")}
   `;
@@ -338,7 +338,7 @@ function renderMethodologyForm(methodology) {
         <button class="secondary-button" type="button" data-action="cancel-methodology-edit">取消</button>
         <button class="primary-button" type="submit">保存方法论</button>
       </div>
-      <label><span>关联流程节点</span><select name="processNodeId">${renderNodeOptions(methodology.processNodeId ?? "")}</select></label>
+      <label><span>关联标准节点</span><select name="processNodeId">${renderNodeOptions(methodology.processNodeId ?? "")}</select></label>
       <label><span>方法论标题</span><input name="title" value="${escapeHtml(methodology.title ?? "")}" /></label>
       <label><span>简介</span><textarea name="description">${escapeHtml(methodology.description ?? "")}</textarea></label>
       <div class="section-heading with-actions">
@@ -373,7 +373,7 @@ function renderMediaPlaceholder(label) {
 function renderOperationalMethodology(methodology) {
   const node = getMethodologyNode(methodology);
   const valueModuleName = getMethodologyValueModuleName(methodology);
-  const flowName = methodology.flowName ?? findName(state.processTemplates, methodology.processTemplateId, "未关联流程");
+  const flowName = methodology.flowName ?? findName(state.processTemplates, methodology.processTemplateId, "未关联标准");
   const nodeName = methodology.nodeName ?? node?.name ?? "未关联节点";
   const departmentName = methodology.departmentName ?? "未设置";
   const positions = methodology.positionNames?.join(" / ") ?? "未设置";
@@ -385,7 +385,7 @@ function renderOperationalMethodology(methodology) {
   return `
     <div class="detail-grid">
       <div class="detail-field"><span>价值链模块</span><strong>${escapeHtml(valueModuleName)}</strong></div>
-      <div class="detail-field"><span>适用流程</span><strong>${escapeHtml(flowName)}</strong></div>
+      <div class="detail-field"><span>适用标准</span><strong>${escapeHtml(flowName)}</strong></div>
       <div class="detail-field"><span>适用节点</span><strong>${escapeHtml(nodeName)}</strong></div>
       <div class="detail-field"><span>适用部门 / 岗位</span><strong>${escapeHtml(`${departmentName} / ${positions}`)}</strong></div>
       <div class="detail-field"><span>说明形式</span><strong>${escapeHtml(mediaTypes)}</strong></div>
@@ -431,7 +431,7 @@ function renderMethodologyDetail() {
       <div class="section-heading with-actions">
         <div>
           <h2>${escapeHtml(selected.title)}</h2>
-          <p class="form-note">绑定流程节点的操作说明书，用于指导员工完成具体节点任务。</p>
+          <p class="form-note">绑定标准节点的操作说明书，用于指导员工完成具体节点任务。</p>
         </div>
         <div class="row-actions">
           <button class="secondary-button" type="button" data-action="back-to-methodology-list">返回列表</button>
@@ -472,7 +472,7 @@ async function saveMethodology(form, rerender) {
   const nodeId = new FormData(form).get("processNodeId")?.toString() ?? "";
   const node = state.processTemplateNodes.find((item) => item.id === nodeId) ?? null;
   if (node === null) {
-    formError = "请选择关联流程节点。";
+    formError = "请选择关联标准节点。";
     rerender();
     return;
   }

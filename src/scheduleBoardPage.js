@@ -245,7 +245,7 @@ function getWorkTitle(workPlan) {
   const template = getTaskTemplate(workPlan);
   if (workPlan.title) return workPlan.title;
   const objectName = getWorkObjectName(workPlan);
-  if (objectName !== "") return `${objectName}｜${template?.name ?? "标准工作"}`;
+  if (objectName !== "") return `${objectName}｜${template?.name ?? "关键行动"}`;
   return template?.name ?? "未命名工作";
 }
 
@@ -379,7 +379,7 @@ function buildRows() {
         tasks,
         template,
         title: getWorkTitle(workPlan),
-        standardWorkName: template?.name ?? "未关联标准工作",
+        standardWorkName: template?.name ?? "未关联关键行动",
         goalName: findName(state.goals, workPlan.goalId, "未对齐目标"),
         valueModuleId: getValueModuleId(workPlan),
         valueModuleName: getValueModuleName(getValueModuleId(workPlan)),
@@ -486,8 +486,8 @@ function renderFilters() {
         <select name="valueModuleId">${renderOptions(valueModuleList, filters.valueModuleId, "全部价值链")}</select>
       </label>
       <label>
-        <span>标准工作</span>
-        <select name="standardWorkId">${renderOptions(standardWorks, filters.standardWorkId, "全部标准工作")}</select>
+        <span>关键行动</span>
+        <select name="standardWorkId">${renderOptions(standardWorks, filters.standardWorkId, "全部关键行动")}</select>
       </label>
       <label>
         <span>负责人</span>
@@ -726,7 +726,7 @@ function renderBoardRows(rows, days) {
   if (rows.length === 0) {
     return `
       <div class="schedule-board-empty">
-        <h2>暂无匹配已发起工作</h2>
+        <h2>暂无匹配已发起关键行动</h2>
         <p>请调整筛选条件，或查看无截止时间工作。</p>
       </div>
     `;
@@ -882,13 +882,13 @@ function renderProcessDetailModal() {
   if (selectedProcessInstanceId === null) return "";
   return `
     <div class="modal-backdrop" role="presentation">
-      <div class="modal-panel wide-modal schedule-process-modal" role="dialog" aria-modal="true" aria-label="已发起工作详情">
+      <div class="modal-panel wide-modal schedule-process-modal" role="dialog" aria-modal="true" aria-label="已发起关键行动详情">
         <div class="modal-header">
-          <h2>已发起工作详情</h2>
+          <h2>已发起关键行动详情</h2>
           <button class="icon-button" type="button" data-action="close-schedule-process-modal" aria-label="关闭">×</button>
         </div>
         ${renderLaunchedProcessDetail(selectedProcessInstanceId, {
-          emptyHtml: `<section class="placeholder"><h2>未找到已发起工作</h2></section>`,
+          emptyHtml: `<section class="placeholder"><h2>未找到已发起关键行动</h2></section>`,
         })}
       </div>
     </div>

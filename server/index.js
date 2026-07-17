@@ -194,7 +194,7 @@ function requireAuth(request, response, next) {
 function requirePermission(permissionPath) {
   return (request, response, next) => {
     if (!hasPermission(request.user, permissionPath)) {
-      response.status(403).json({ success: false, message: "你没有权限执行该操作" });
+      response.status(403).json({ success: false, message: "你没有权限进行该操作" });
       return;
     }
     next();
@@ -455,8 +455,8 @@ app.post("/api/process-instances/:id/cancel", requirePermission("processes.editI
     cancelProcessInstance(request.params.id, request.body?.cancelReason ?? "");
     response.json({ success: true, data: filterDataByScope(readAllData(), request.user) });
   } catch (error) {
-    console.error("取消流程失败", error);
-    response.status(400).json({ success: false, message: error.message || "取消流程失败，请检查本地数据库服务。" });
+    console.error("取消关键行动失败", error);
+    response.status(400).json({ success: false, message: error.message || "取消关键行动失败，请检查本地数据库服务。" });
   }
 });
 
@@ -465,8 +465,8 @@ app.post("/api/work-plans/:id/launch", requirePermission("workPlans.launch"), (r
     launchWorkPlanWithProcess(request.params.id, request.body ?? {});
     response.json({ success: true, data: filterDataByScope(readAllData(), request.user) });
   } catch (error) {
-    console.error("发起工作失败", error);
-    response.status(400).json({ success: false, message: error.message || "发起工作失败，请检查本地数据库服务。" });
+    console.error("发起关键行动失败", error);
+    response.status(400).json({ success: false, message: error.message || "发起关键行动失败，请检查本地数据库服务。" });
   }
 });
 
@@ -480,8 +480,8 @@ app.put("/api/task-templates/:id/value-chain", requirePermission("settings.editS
     );
     response.json({ success: true, data: filterDataByScope(readAllData(), request.user) });
   } catch (error) {
-    console.error("标准工作分类保存失败", error);
-    response.status(400).json({ success: false, message: error.message || "标准工作分类保存失败，请检查本地数据库服务。" });
+    console.error("关键行动分类保存失败", error);
+    response.status(400).json({ success: false, message: error.message || "关键行动分类保存失败，请检查本地数据库服务。" });
   }
 });
 
@@ -490,8 +490,8 @@ app.patch("/api/process-template-nodes/:id/status", requirePermission("processes
     updateProcessTemplateNodeStatus(request.params.id, request.body?.status ?? "");
     response.json({ success: true, data: filterDataByScope(readAllData(), request.user) });
   } catch (error) {
-    console.error("流程节点状态保存失败", error);
-    response.status(400).json({ success: false, message: error.message || "流程节点状态保存失败，请检查本地数据库服务。" });
+    console.error("标准节点状态保存失败", error);
+    response.status(400).json({ success: false, message: error.message || "标准节点状态保存失败，请检查本地数据库服务。" });
   }
 });
 
@@ -514,7 +514,7 @@ app.post("/api/:resource", (request, response) => {
       ? permission.some((item) => hasPermission(request.user, item))
       : permission === null || hasPermission(request.user, permission);
     if (!allowed) {
-      response.status(403).json({ success: false, message: "你没有权限执行该操作" });
+      response.status(403).json({ success: false, message: "你没有权限进行该操作" });
       return;
     }
     response.status(201).json(createResource(request.params.resource, request.body));
@@ -530,7 +530,7 @@ app.put("/api/:resource/:id", (request, response) => {
       ? permission.some((item) => hasPermission(request.user, item))
       : permission === null || hasPermission(request.user, permission);
     if (!allowed) {
-      response.status(403).json({ success: false, message: "你没有权限执行该操作" });
+      response.status(403).json({ success: false, message: "你没有权限进行该操作" });
       return;
     }
     response.json(updateResource(request.params.resource, request.params.id, request.body));
@@ -543,7 +543,7 @@ app.delete("/api/process-templates/:id", requirePermission("processes.editTempla
   try {
     response.json(deleteProcessTemplate(request.params.id));
   } catch (error) {
-    response.status(400).json({ success: false, message: error.message || "删除流程失败，请检查本地数据库服务。" });
+    response.status(400).json({ success: false, message: error.message || "删除标准失败，请检查本地数据库服务。" });
   }
 });
 
@@ -551,7 +551,7 @@ app.delete("/api/process-template-nodes/:id", requirePermission("processes.editS
   try {
     response.json(deleteProcessTemplateNode(request.params.id));
   } catch (error) {
-    response.status(400).json({ success: false, message: error.message || "删除流程节点失败，请检查本地数据库服务。" });
+    response.status(400).json({ success: false, message: error.message || "删除标准节点失败，请检查本地数据库服务。" });
   }
 });
 

@@ -865,7 +865,7 @@ function ensureStandardWorkValueChainCategories() {
 function getOrCreateStandardWorkValueChainCategory(categoryName) {
   const name = String(categoryName ?? "").trim();
   const categoryIndex = standardWorkValueChainCategories.indexOf(name);
-  if (categoryIndex === -1) throw new Error("标准工作价值链分类无效。");
+  if (categoryIndex === -1) throw new Error("关键行动价值链分类无效。");
 
   const database = getDatabase();
   const existingCategory = database.prepare("SELECT id FROM categories WHERE type = 'task' AND name = @name LIMIT 1").get({ name });
@@ -894,7 +894,7 @@ function resolveStandardWorkValueChainCategory(categoryName, categoryId = "") {
     const category = getDatabase()
       .prepare("SELECT id, name FROM categories WHERE id = @id AND type = 'task' AND status <> 'inactive' LIMIT 1")
       .get({ id });
-    if (category === undefined) throw new Error("标准工作价值链分类不存在。");
+    if (category === undefined) throw new Error("关键行动价值链分类不存在。");
     return category;
   }
 
@@ -1252,7 +1252,7 @@ export function readAllData() {
 export function moveTaskTemplateToValueChain(templateId, categoryName = "", categoryId = "", valueChainId = "") {
   const database = getDatabase();
   const template = database.prepare("SELECT id FROM task_templates WHERE id = @id LIMIT 1").get({ id: templateId });
-  if (template === undefined) throw new Error("未找到该标准工作。");
+  if (template === undefined) throw new Error("未找到该关键行动。");
 
   const category = resolveStandardWorkValueChainCategoryFromPayload(categoryName, categoryId, valueChainId);
   const updatedAt = new Date().toISOString();
@@ -1260,17 +1260,17 @@ export function moveTaskTemplateToValueChain(templateId, categoryName = "", cate
     .prepare("UPDATE task_templates SET categoryId = @categoryId, updatedAt = @updatedAt WHERE id = @id")
     .run({ id: templateId, categoryId: category.id, updatedAt });
   const savedCategoryId = readTaskTemplateCategoryId(templateId);
-  if (savedCategoryId !== category.id) throw new Error("标准工作分类保存失败。");
+  if (savedCategoryId !== category.id) throw new Error("关键行动分类保存失败。");
   return database.prepare("SELECT * FROM task_templates WHERE id = @id LIMIT 1").get({ id: templateId });
 }
 
 export function updateProcessTemplateNodeStatus(nodeId, status) {
   const nextStatus = String(status ?? "").trim();
-  if (!["active", "inactive"].includes(nextStatus)) throw new Error("流程节点状态无效。");
+  if (!["active", "inactive"].includes(nextStatus)) throw new Error("标准节点状态无效。");
 
   const database = getDatabase();
   const node = database.prepare("SELECT id FROM process_template_nodes WHERE id = @id LIMIT 1").get({ id: nodeId });
-  if (node === undefined) throw new Error("未找到该流程节点。");
+  if (node === undefined) throw new Error("未找到该标准节点。");
 
   const updatedAt = new Date().toISOString();
   database
@@ -1329,20 +1329,20 @@ export function replaceAllData(data) {
 export function deleteProcessTemplate(templateId) {
   const database = getDatabase();
   const template = database.prepare("SELECT id, name FROM process_templates WHERE id = @id LIMIT 1").get({ id: templateId });
-  if (template === undefined) throw new Error("未找到要删除的流程。");
+  if (template === undefined) throw new Error("未找到要删除的标准。");
 
   const boundStandardWork = database
     .prepare("SELECT id, name FROM task_templates WHERE defaultProcessTemplateId = @id LIMIT 1")
     .get({ id: templateId });
   if (boundStandardWork !== undefined) {
-    throw new Error("该流程已绑定标准工作事项，请先停用流程，不要删除。");
+    throw new Error("该关键行动已绑定关键行动，请先停用标准，不要删除。");
   }
 
   const launchedInstance = database
     .prepare("SELECT id FROM process_instances WHERE templateId = @id LIMIT 1")
     .get({ id: templateId });
   if (launchedInstance !== undefined) {
-    throw new Error("该流程已有发起记录，为保留历史数据不能删除，请使用停用流程。");
+    throw new Error("该关键行动已有发起记录，为保留历史数据不能删除，请使用停用标准。");
   }
 
   const remove = database.transaction(() => {
@@ -1362,11 +1362,11 @@ export function deleteProcessTemplate(templateId) {
 export function deleteProcessTemplateNode(nodeId) {
   const database = getDatabase();
   const node = database.prepare("SELECT id, name FROM process_template_nodes WHERE id = @id LIMIT 1").get({ id: nodeId });
-  if (node === undefined) throw new Error("未找到要删除的流程节点。");
+  if (node === undefined) throw new Error("未找到要删除的标准节点。");
 
   const generatedTask = database.prepare("SELECT id FROM tasks WHERE processNodeId = @id LIMIT 1").get({ id: nodeId });
   if (generatedTask !== undefined) {
-    throw new Error("该流程节点已经生成过执行任务，为保留历史数据不能删除，请使用停用节点。");
+    throw new Error("该标准节点已经生成过任务，为保留历史数据不能删除，请使用停用节点。");
   }
 
   const remove = database.transaction(() => {
@@ -1409,9 +1409,9 @@ export function updateCurrentUserAvatar(id, avatarUrl) {
 export function cancelProcessInstance(instanceId, cancelReason = "") {
   const database = getDatabase();
   const instance = database.prepare("SELECT * FROM process_instances WHERE id = @id LIMIT 1").get({ id: instanceId });
-  if (instance === undefined) throw new Error("未找到该已发起流程。");
-  if (["done", "completed"].includes(instance.status)) throw new Error("已完成流程不能取消。");
-  if (["canceled", "stopped"].includes(instance.status)) throw new Error("该流程已取消或已终止。");
+  if (instance === undefined) throw new Error("未找到该已发起关键行动。");
+  if (["done", "completed"].includes(instance.status)) throw new Error("已完成关键行动不能取消。");
+  if (["canceled", "stopped"].includes(instance.status)) throw new Error("该关键行动已取消或已终止。");
 
   const now = new Date().toISOString();
   const reason = String(cancelReason ?? "").trim() || null;
@@ -1458,9 +1458,9 @@ export function launchWorkPlanWithProcess(workPlanId, { processInstance, tasks: 
   if (existingWorkPlan === null) throw new Error("未找到该未来工作。");
   if (existingWorkPlan.processInstanceId || existingWorkPlan.status === "launched") throw new Error("该工作已经发起，不能重复发起。");
   if (!["future", "this_week"].includes(existingWorkPlan.status)) throw new Error("只有未来工作或本周工作可以发起。");
-  if (!processInstance?.id) throw new Error("缺少已发起工作数据。");
-  if (!Array.isArray(generatedTasks) || generatedTasks.length === 0) throw new Error("缺少流程步骤执行任务。");
-  if (generatedTasks.some((task) => task.processInstanceId !== processInstance.id)) throw new Error("执行任务与已发起工作不匹配。");
+  if (!processInstance?.id) throw new Error("缺少已发起关键行动数据。");
+  if (!Array.isArray(generatedTasks) || generatedTasks.length === 0) throw new Error("缺少标准步骤任务。");
+  if (generatedTasks.some((task) => task.processInstanceId !== processInstance.id)) throw new Error("任务与已发起关键行动不匹配。");
 
   const now = new Date().toISOString();
   const syncedDueDate = processInstance.dueDate ?? launchedWorkPlan?.dueDate ?? existingWorkPlan.dueDate ?? null;
@@ -1505,7 +1505,7 @@ export function launchWorkPlanWithProcess(workPlanId, { processInstance, tasks: 
          LIMIT 1`,
       )
       .get({ workPlanId, sourceTaskId: sourceTaskId ?? "", sourceProcessInstanceId: sourceProcessInstanceId ?? "", sourceType: sourceType ?? "" });
-    if (duplicatedRectification !== undefined) throw new Error("该来源任务已存在未完成的整改工作，不能重复发起。");
+    if (duplicatedRectification !== undefined) throw new Error("该来源任务已存在未完成的改善工作，不能重复发起。");
   }
 
   const launch = database.transaction(() => {

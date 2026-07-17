@@ -151,8 +151,8 @@ const issueRequirementStatuses = [
 const issueRequirementModules = [
   { value: "目标", label: "目标" },
   { value: "优先级", label: "优先级" },
-  { value: "执行任务", label: "执行任务" },
-  { value: "流程/标准化", label: "流程/标准化" },
+  { value: "任务", label: "任务" },
+  { value: "关键行动", label: "关键行动" },
   { value: "内容排期", label: "内容排期" },
   { value: "模板中心", label: "模板中心" },
   { value: "设置", label: "设置" },
@@ -1619,7 +1619,7 @@ function renderFormComponentLibrary() {
 
 function renderFormDesignEditor() {
   const standardWork = getSelectedFormDesignStandardWork();
-  if (standardWork === null) return `<div class="empty-detail">暂无标准工作，请先维护标准工作库。</div>`;
+  if (standardWork === null) return `<div class="empty-detail">暂无关键行动，请先维护关键行动库。</div>`;
   const fields = getFormDesignRenderFields();
   const selectedField = fields.find((field) => field.fieldId === activeFormDesignFieldId) ?? fields[0] ?? null;
   if (selectedField !== null && activeFormDesignFieldId === "") activeFormDesignFieldId = selectedField.fieldId;
@@ -1631,7 +1631,7 @@ function renderFormDesignEditor() {
           <p class="form-note">${escapeHtml(categories.find((category) => category.id === standardWork.categoryId)?.name ?? "未分类")}</p>
         </div>
         <label class="form-designer-work-select">
-          <span>标准工作</span>
+          <span>关键行动</span>
           <select name="formDesignStandardWorkId">${renderFormDesignStandardWorkOptions()}</select>
         </label>
       </div>
@@ -1677,7 +1677,7 @@ function renderFormDesignSection() {
       <div class="section-heading">
         <div>
           <h2>表单设计</h2>
-          <p class="form-note">为每一个标准工作维护独立执行表单，后续执行任务可逐步接入。</p>
+          <p class="form-note">为每一个关键行动维护独立任务表单，后续任务可逐步接入。</p>
         </div>
       </div>
       <div class="form-designer-layout">

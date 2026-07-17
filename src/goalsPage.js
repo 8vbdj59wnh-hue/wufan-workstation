@@ -145,7 +145,7 @@ function ensureSelectedGoalVisible() {
 }
 
 function isSelectableGoalWorkTemplate(template) {
-  return template.name !== "整改工作";
+  return template.name !== "改善工作";
 }
 
 function getActiveTaskTemplates() {
@@ -241,7 +241,7 @@ function isProcessInstanceOverdue(instance) {
 
 function getStandardWorkName(instance) {
   const taskTemplateId = instance.taskTemplateId ?? instance.standardWorkId ?? null;
-  return getTaskTemplate(taskTemplateId ?? "")?.name ?? "未关联标准工作事项";
+  return getTaskTemplate(taskTemplateId ?? "")?.name ?? "未关联关键行动";
 }
 
 function getProcessTemplateById(templateId) {
@@ -249,7 +249,7 @@ function getProcessTemplateById(templateId) {
 }
 
 function getProcessTemplateName(templateId) {
-  return state.processTemplates.find((template) => template.id === templateId)?.name ?? "未绑定标准流程";
+  return state.processTemplates.find((template) => template.id === templateId)?.name ?? "未绑定关键行动标准流程";
 }
 
 function getSortedFormFields(template) {
@@ -416,7 +416,7 @@ function renderStandardWorkAttachmentsField() {
         <span>表格附件</span>
         <input name="standardWorkAttachments" type="file" accept=".xlsx,.xls,.csv" multiple data-standard-work-attachments />
       </label>
-      <p class="form-note">支持 .xlsx、.xls、.csv，单个文件不超过 20MB。未上传也可以添加工作。</p>
+      <p class="form-note">支持 .xlsx、.xls、.csv，单个文件不超过 20MB。未上传也可以发起关键行动。</p>
       <div class="selected-attachment-list" data-selected-standard-work-attachments>
         <p class="form-note">暂无已选择附件</p>
       </div>
@@ -542,14 +542,14 @@ function renderTaskOverdue(task) {
 
 function renderTaskTemplateLockedInfo(template) {
   if (template === null) {
-    return `<p class="form-note">请选择标准工作事项后查看自动带出的锁定信息。</p>`;
+    return `<p class="form-note">请选择关键行动后查看自动带出的锁定信息。</p>`;
   }
 
   return `
     <div class="locked-template-info">
-      ${renderDetailField("标准工作名称", escapeHtml(template.name))}
+      ${renderDetailField("关键行动名称", escapeHtml(template.name))}
       ${renderDetailField("价值链模块", getTaskTemplateValueModuleName(template))}
-      ${renderDetailField("对应标准流程", getProcessTemplateName(template.defaultProcessTemplateId))}
+      ${renderDetailField("对应关键行动标准流程", getProcessTemplateName(template.defaultProcessTemplateId))}
       ${renderDetailField("负责部门", findName(departments, template.departmentId, "未设置"))}
       ${renderDetailField("负责人", findName(people, template.ownerId, "未设置"))}
       ${renderDetailField("需要验收", template.needAcceptance ? "是" : "否")}
@@ -674,9 +674,9 @@ function renderGoalMapCard(goal) {
                 draggable="false"
                 data-action="add-goal-task"
                 data-goal-id="${goal.id}"
-                data-modal-title="添加工作"
+                data-modal-title="发起关键行动"
               >
-                添加工作
+                发起关键行动
               </button>
             </div>
           `
@@ -819,7 +819,7 @@ function renderGoalTaskTable(goal) {
       <table class="data-table compact-goal-task-table">
         <thead>
           <tr>
-            <th>执行任务名称</th>
+            <th>任务名称</th>
             <th>负责人</th>
             <th>负责部门</th>
             <th>四象限</th>
@@ -831,7 +831,7 @@ function renderGoalTaskTable(goal) {
         <tbody>
           ${
             goalTasks.length === 0
-              ? `<tr><td colspan="7">暂无关联执行任务</td></tr>`
+              ? `<tr><td colspan="7">暂无关联任务</td></tr>`
               : goalTasks
                   .map(
                     (task) => `
@@ -858,7 +858,7 @@ function renderGoalProcessTable(goal) {
   const instances = state.processInstances.filter((instance) => instance.goalId === goal.id);
 
   if (instances.length === 0) {
-    return `<div class="empty-detail">暂无已发起流程</div>`;
+    return `<div class="empty-detail">暂无已发起关键行动</div>`;
   }
 
   return `
@@ -867,8 +867,8 @@ function renderGoalProcessTable(goal) {
         <thead>
           <tr>
             <th>本次工作标题</th>
-            <th>标准工作事项</th>
-            <th>标准流程</th>
+            <th>关键行动</th>
+            <th>关键行动标准流程</th>
             <th>当前步骤</th>
             <th>步骤进度</th>
             <th>当前负责人</th>
@@ -886,7 +886,7 @@ function renderGoalProcessTable(goal) {
                 <tr class="${instance.id === selectedGoalProcessInstanceId ? "is-selected" : ""}">
                   <td>${escapeHtml(instance.displayTitle ?? instance.name)}</td>
                   <td>${escapeHtml(getStandardWorkName(instance))}</td>
-                  <td>${escapeHtml(getProcessTemplate(instance)?.name ?? "未知流程")}</td>
+                  <td>${escapeHtml(getProcessTemplate(instance)?.name ?? "未知标准")}</td>
                   <td>${escapeHtml(getProcessCurrentStepText(instance))}</td>
                   <td>${getProcessProgress(instance)}</td>
                   <td>${escapeHtml(getProcessCurrentOwners(instance))}</td>
@@ -963,11 +963,11 @@ function renderGoalDetail() {
         canCurrentUser("goals.viewRelatedData")
           ? `
             <div class="detail-block">
-              <h3>目标下的执行任务</h3>
+              <h3>目标下的任务</h3>
               ${renderGoalTaskTable(goal)}
             </div>
             <div class="detail-block">
-              <h3>已发起流程</h3>
+              <h3>已发起关键行动</h3>
               ${renderGoalProcessTable(goal)}
             </div>
             ${selectedGoalProcessInstance === undefined ? "" : renderLaunchedProcessDetail(selectedGoalProcessInstance.id, { emptyHtml: "" })}
@@ -1221,7 +1221,7 @@ function renderDeactivateGoalModal() {
         <div class="modal-header">
           <div>
             <h2>确认停用目标？</h2>
-            <p class="form-note">停用后，该目标将默认隐藏，但不会删除历史任务、流程和记录。</p>
+            <p class="form-note">停用后，该目标将默认隐藏，但不会删除历史任务、关键行动和记录。</p>
           </div>
           <button class="icon-button" type="button" data-action="close-goal-modal" aria-label="关闭">×</button>
         </div>
@@ -1249,8 +1249,8 @@ function renderGoalTaskModal() {
     selectedCategoryId === ""
       ? "请先选择价值链模块"
       : availableTemplates.length === 0
-        ? "该价值链模块暂无标准工作事项，请先到标准工作库中添加。"
-        : "请选择标准工作事项";
+        ? "该价值链模块暂无关键行动，请先到关键行动库中添加。"
+        : "请选择关键行动";
 
   return `
     <div class="modal-backdrop" role="presentation">
@@ -1274,7 +1274,7 @@ function renderGoalTaskModal() {
               </select>
             </label>
             <label>
-              <span>标准工作事项</span>
+              <span>关键行动</span>
               <select name="taskTemplateId" data-goal-task-template-select ${selectedCategoryId === "" ? "disabled" : ""}>
                 ${renderOptions(availableTemplates, modalState.taskTemplateId ?? "", templateHint)}
               </select>
@@ -1375,9 +1375,9 @@ function buildGoalTaskDraft(form, goalId) {
 
 function validateGoalTaskDraft(draft) {
   if (getGoal(draft.goalId) === null) return "当前目标必须存在。";
-  if (draft.taskTemplateId === "" || draft.template === null) return "必须选择启用的标准工作事项。";
-  if (draft.template.status !== TaskTemplateStatus.Active) return "停用的标准工作事项不能用于添加未来工作。";
-  if (!draft.template.defaultProcessTemplateId) return "该标准工作事项尚未绑定标准流程，请先到标准工作库中配置。";
+  if (draft.taskTemplateId === "" || draft.template === null) return "必须选择启用的关键行动。";
+  if (draft.template.status !== TaskTemplateStatus.Active) return "停用的关键行动不能用于添加未来工作。";
+  if (!draft.template.defaultProcessTemplateId) return "该关键行动尚未绑定关键行动标准流程，请先到关键行动库中配置。";
   const customError = validateCustomFields(draft.customFields, draft.template);
   if (customError !== "") return customError;
   if (draft.dueDateError !== "") return draft.dueDateError;
@@ -2077,7 +2077,7 @@ export function bindGoalsPageEvents(rerender) {
   bindLaunchedProcessDetailEvents(goalsPage, rerender, {
     onTaskSelect: (taskId) => {
       selectTask(taskId);
-      window.alert("已选中该执行任务，请切换到执行查看详情。");
+      window.alert("已选中该任务，请切换到任务查看详情。");
     },
   });
 }

@@ -357,7 +357,7 @@ export async function cancelProcessInstance(instanceId, cancelReason = "") {
     body: JSON.stringify({ cancelReason }),
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.message ?? "取消流程失败，请检查本地数据库服务。");
+  if (!response.ok) throw new Error(data.message ?? "取消关键行动失败，请检查本地数据库服务。");
   if (data.data !== undefined) applyDataSnapshot(data.data);
   return data;
 }
@@ -372,7 +372,7 @@ export async function moveTaskTemplateToValueChain(templateId, category) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.success !== true) {
-    throw new Error(data.message ?? data.error ?? "标准工作分类保存失败，请检查本地数据库服务。");
+    throw new Error(data.message ?? data.error ?? "关键行动分类保存失败，请检查本地数据库服务。");
   }
   if (data.data !== undefined) applyDataSnapshot(data.data);
   return data;
@@ -386,7 +386,7 @@ export async function updateProcessTemplateNodeStatus(nodeId, status) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.success !== true) {
-    throw new Error(data.message ?? data.error ?? "流程节点状态保存失败，请检查本地数据库服务。");
+    throw new Error(data.message ?? data.error ?? "标准节点状态保存失败，请检查本地数据库服务。");
   }
   if (data.data !== undefined) applyDataSnapshot(data.data);
   return data;
@@ -764,8 +764,8 @@ function normalizeTaskSubmitRequirements() {
 }
 
 export function createOrReuseProcessTemplateForStandardWork({ name, ownerId, departmentId, now = getNow(), templateId = null }) {
-  const processName = `${name}流程`;
-  const legacyProcessNames = new Map([["新品上新流程", ["新品上架链接流程"]]]);
+  const processName = `${name}标准`;
+  const legacyProcessNames = new Map([["新品上新标准", ["新品上架链接标准"]]]);
   const matchingLegacyNames = legacyProcessNames.get(processName) ?? [];
   const existingTemplate = state.processTemplates.find(
     (template) => template.id === templateId || template.name === processName || matchingLegacyNames.includes(template.name),
@@ -773,12 +773,12 @@ export function createOrReuseProcessTemplateForStandardWork({ name, ownerId, dep
 
   if (existingTemplate !== undefined) {
     existingTemplate.name = processName;
-    existingTemplate.purpose = `规范【${name}】的执行过程。`;
+    existingTemplate.purpose = `规范【${name}】的任务推进过程。`;
     existingTemplate.applicableDepartmentIds = departmentId ? [departmentId] : [];
     existingTemplate.ownerId = ownerId;
     existingTemplate.startCondition = `由${departmentId ? state.departments.find((department) => department.id === departmentId)?.name ?? "负责部门" : "负责部门"}发起【${name}】时。`;
-    existingTemplate.completionCondition = "该标准工作所有流程步骤完成。";
-    existingTemplate.overallStandard = "按流程步骤要求完成，并符合各步骤完成标准和审核标准。";
+    existingTemplate.completionCondition = "该关键行动所有标准步骤完成。";
+    existingTemplate.overallStandard = "按标准步骤要求完成，并符合各步骤完成标准和审核标准。";
     existingTemplate.status = existingTemplate.status ?? ProcessTemplateStatus.Active;
     existingTemplate.updatedAt = now;
     return existingTemplate.id;
@@ -788,12 +788,12 @@ export function createOrReuseProcessTemplateForStandardWork({ name, ownerId, dep
     id: templateId ?? createId("process-template"),
     name: processName,
     categoryId: null,
-    purpose: `规范【${name}】的执行过程。`,
+    purpose: `规范【${name}】的任务推进过程。`,
     applicableDepartmentIds: departmentId ? [departmentId] : [],
     ownerId,
     startCondition: `由${departmentId ? state.departments.find((department) => department.id === departmentId)?.name ?? "负责部门" : "负责部门"}发起【${name}】时。`,
-    completionCondition: "该标准工作所有流程步骤完成。",
-    overallStandard: "按流程步骤要求完成，并符合各步骤完成标准和审核标准。",
+    completionCondition: "该关键行动所有标准步骤完成。",
+    overallStandard: "按标准步骤要求完成，并符合各步骤完成标准和审核标准。",
     status: ProcessTemplateStatus.Active,
     version: 1,
     createdAt: now,
@@ -822,7 +822,7 @@ const legacyStandardWorkNames = [
   "重点产品补货计划跟进",
   "新品资料整理",
   "内容质量检查",
-  "任务执行检查",
+  "任务推进检查",
   "新品上架链接",
 ];
 
@@ -843,8 +843,8 @@ const realStandardWorkDefinitions = [
     id: RectificationWorkTemplate.TaskTemplateId,
     processTemplateId: RectificationWorkTemplate.ProcessTemplateId,
     departmentKey: "admin",
-    name: "整改工作",
-    description: "用于对超时、退回、返工、延期或人工指定问题进行闭环整改的标准工作。",
+    name: "改善工作",
+    description: "用于对超时、退回、返工、延期或人工指定问题进行闭环改善的关键行动。",
     completionStandard: "完成情况说明、原因分析、改善措施、标准优化判断、效果验证和持续应用确认。",
   },
   {
@@ -866,7 +866,7 @@ const realStandardWorkDefinitions = [
     departmentKey: "supply",
     name: "库存清仓",
     description: "针对滞销、积压或阶段性清仓产品制定并推进清仓方案。",
-    completionStandard: "明确清仓产品、库存数量、清仓策略、执行进度和结果反馈。",
+    completionStandard: "明确清仓产品、库存数量、清仓策略、任务进度和结果反馈。",
   },
   {
     id: "task-template-publish-buyer-show",
@@ -919,7 +919,7 @@ const realStandardWorkDefinitions = [
     id: "task-template-recruitment",
     departmentKey: "admin",
     name: "人员招聘",
-    description: "根据部门用人需求推进招聘流程。",
+    description: "根据部门用人需求推进招聘标准。",
     completionStandard: "完成招聘需求确认、人才画像、招聘发布、面试、试用判断和档案建立。",
     extraFields: [
       field("recruitment-position", "招聘岗位", "recruitPosition", "text", false, "请输入招聘岗位", null, true, 4),
@@ -931,7 +931,7 @@ const realStandardWorkDefinitions = [
     id: "task-template-goal-alignment",
     departmentKey: "admin",
     name: "目标对齐",
-    description: "组织公司或部门进行目标拆解和目标对齐，确保目标、标准工作和执行方向一致。",
+    description: "组织公司或部门进行目标拆解和目标对齐，确保目标、关键行动和任务方向一致。",
     completionStandard: "完成目标确认、部门对齐、责任人确认和后续工作安排。",
     extraFields: [
       field("goal-align-object", "对齐对象", "alignmentObject", "text", false, "请输入对齐对象", null, true, 4),
@@ -941,9 +941,9 @@ const realStandardWorkDefinitions = [
   {
     id: "task-template-task-check",
     departmentKey: "admin",
-    name: "执行任务检查",
-    description: "检查公司各部门执行任务推进情况，发现阻碍和延期问题。",
-    completionStandard: "完成任务执行检查、问题记录、责任确认和处理反馈。",
+    name: "任务检查",
+    description: "检查公司各部门任务推进情况，发现阻碍和延期问题。",
+    completionStandard: "完成任务推进检查、问题记录、责任确认和处理反馈。",
     extraFields: [
       field("task-check-dept", "检查部门", "checkDepartment", "select", false, "", [], true, 4),
       field("task-check-period", "检查周期", "checkPeriod", "select", false, "", ["每日", "每周", "每月"], true, 5),
@@ -952,12 +952,12 @@ const realStandardWorkDefinitions = [
 ];
 
 const standardWorkFormDefinitions = {
-  整改工作: [
-    ["rectificationSource", "整改来源", "select", true, "请选择整改来源", ["超时", "审核退回", "连续返工", "项目延期", "人工创建整改", "其他"], true],
-    ["relatedTaskId", "关联任务ID", "text", false, "可填写关联执行任务 ID", [], true],
-    ["relatedProcessInstanceId", "关联工作ID", "text", false, "可填写关联已发起工作 ID", [], true],
-    ["rectificationObject", "整改对象", "text", true, "例如某个任务、流程、标准工作或具体事项", [], true],
-    ["problemSummary", "问题摘要", "textarea", true, "简要说明需要整改的问题", [], false],
+  改善工作: [
+    ["rectificationSource", "改善来源", "select", true, "请选择改善来源", ["超时", "审核退回", "连续返工", "项目延期", "人工创建改善", "其他"], true],
+    ["relatedTaskId", "关联任务ID", "text", false, "可填写关联任务 ID", [], true],
+    ["relatedProcessInstanceId", "关联工作ID", "text", false, "可填写关联已发起关键行动 ID", [], true],
+    ["rectificationObject", "改善对象", "text", true, "例如某个任务、标准、关键行动或具体事项", [], true],
+    ["problemSummary", "问题摘要", "textarea", true, "简要说明需要改善的问题", [], false],
     ["dueDate", "截止时间", "datetime_hour", true, "", [], true],
   ],
   发布内容笔记: [
@@ -1086,15 +1086,15 @@ const standardWorkFormDefinitions = {
     ["dueDate", "截止时间", "datetime_hour", false, "下次检查时间", [], true],
     ["remark", "补充说明", "textarea", false, "其他说明", [], false],
   ],
-  执行任务检查: [
+  任务检查: [
     ["checkPeriod", "检查周期", "select", true, "请选择检查周期", ["每日", "每周", "每月", "临时"], true],
     ["checkScope", "检查范围", "textarea", true, "检查哪些部门、哪些任务", [], false],
     ["departmentId", "被检查部门", "select", false, "请选择部门", [], true],
     ["checkFocus", "检查重点", "textarea", true, "进度、逾期、卡点、质量等", [], false],
     ["foundProblems", "发现问题", "textarea", false, "检查后填写发现的问题", [], false],
     ["impactLevel", "影响程度", "select", false, "请选择影响程度", ["轻微", "一般", "严重"], true],
-    ["rectificationRequirement", "整改要求", "textarea", false, "发现问题后的整改要求", [], false],
-    ["rectificationDueDate", "整改截止时间", "datetime_hour", false, "", [], true],
+    ["rectificationRequirement", "改善要求", "textarea", false, "发现问题后的改善要求", [], false],
+    ["rectificationDueDate", "改善截止时间", "datetime_hour", false, "", [], true],
     ["remark", "补充说明", "textarea", false, "其他说明", [], false],
   ],
 };
@@ -1185,7 +1185,7 @@ function syncNewProductLaunchProcessNodes(templateId, departmentsByKey, now) {
       id: "node-new-product-launch-001",
       departmentId: departmentByKey("supply"),
       name: "发起新品上新",
-      description: "供应链部确认新品基础信息，发起新品上新流程。",
+      description: "供应链部确认新品基础信息，发起新品上新标准。",
       completionStandard: "新品名称、供应商、基础规格、初步成本和预计交期信息完整。",
       outputRequirement: "新品上新基础信息",
     },
@@ -1241,7 +1241,7 @@ function syncNewProductLaunchProcessNodes(templateId, departmentsByKey, now) {
     const nodeData = normalizeProcessTemplateNode({
       id: definition.id,
       templateId,
-      stageName: "新品上新流程",
+      stageName: "新品上新标准",
       stageOrder: index + 1,
       nodeOrder: 1,
       stepOrder: index + 1,
@@ -1296,8 +1296,8 @@ const rectificationNodeSubmitFields = {
     rectificationSubmitField("whyNotAvoided", "为什么没有提前避免", "textarea", true, "说明预警、检查或协同中缺失的环节", [], 3),
   ],
   原因分析: [
-    rectificationSubmitField("causeAttribution", "问题归因", "multi_select", true, "请选择问题归因", ["人员能力", "标准工作", "流程设计", "资源不足", "外部原因", "其它"], 1),
-    rectificationSubmitField("causeAnalysis", "原因分析", "textarea", true, "从人员、标准、流程、资源等角度分析根因", [], 2),
+    rectificationSubmitField("causeAttribution", "问题归因", "multi_select", true, "请选择问题归因", ["人员能力", "关键行动", "标准设计", "资源不足", "外部原因", "其它"], 1),
+    rectificationSubmitField("causeAnalysis", "原因分析", "textarea", true, "从人员、标准、资源等角度分析根因", [], 2),
   ],
   改善措施: [
     rectificationSubmitField("improvementActions", "改善措施", "textarea", true, "列出具体改善动作、预期结果和检查方式", [], 1),
@@ -1306,7 +1306,7 @@ const rectificationNodeSubmitFields = {
   ],
   标准优化: [
     rectificationSubmitField("needStandardUpdate", "是否需要优化标准", "select", true, "请选择", ["需要", "不需要"], 1),
-    rectificationSubmitField("standardUpdateScope", "优化范围", "multi_select", true, "请选择优化范围", ["标准工作", "流程", "表单", "完成标准", "无需优化"], 2),
+    rectificationSubmitField("standardUpdateScope", "优化范围", "multi_select", true, "请选择优化范围", ["关键行动", "标准", "表单", "完成标准", "无需优化"], 2),
     rectificationSubmitField("standardUpdateNote", "优化说明", "textarea", false, "说明需要优化的内容，或无需优化的理由", [], 3),
   ],
   效果验证: [
@@ -1314,8 +1314,8 @@ const rectificationNodeSubmitFields = {
     rectificationSubmitField("verificationNote", "验证说明", "textarea", true, "说明验证方式、效果和仍需关注的问题", [], 2),
   ],
   持续应用: [
-    rectificationSubmitField("rectificationSummary", "整改总结", "textarea", true, "总结本次整改结论和关键经验", [], 1),
-    rectificationSubmitField("continuousApplicationRequirement", "后续执行要求", "textarea", true, "说明后续如何持续执行、检查和复盘", [], 2),
+    rectificationSubmitField("rectificationSummary", "改善总结", "textarea", true, "总结本次改善结论和关键经验", [], 1),
+    rectificationSubmitField("continuousApplicationRequirement", "后续任务要求", "textarea", true, "说明后续如何持续落实、检查和复盘", [], 2),
   ],
 };
 
@@ -1340,7 +1340,7 @@ function syncRectificationProcessNodes(templateId, ownerId, departmentId, now) {
       durationMinutes: 30,
       description: "执行人说明问题经过、发生原因，以及为什么没有提前避免。",
       completionStandard: "完整填写发生了什么、为什么发生、为什么没有提前避免。",
-      outputRequirement: "整改情况说明",
+      outputRequirement: "改善情况说明",
       submitDescription: "请如实说明情况，作为后续原因分析和改善措施的依据。",
       submitFields: getRectificationSubmitFields("情况说明"),
     },
@@ -1358,8 +1358,8 @@ function syncRectificationProcessNodes(templateId, ownerId, departmentId, now) {
       id: "node-rectification-003",
       name: "改善措施",
       durationMinutes: 120,
-      description: "负责人制定改善动作，明确后续执行方式。",
-      completionStandard: "改善措施具体、可执行，并能对应前一步原因分析。",
+      description: "负责人制定改善动作，明确后续落实方式。",
+      completionStandard: "改善措施具体、可落地，并能对应前一步原因分析。",
       outputRequirement: "改善措施",
       submitDescription: "请填写准备采取的改善措施。",
       submitFields: getRectificationSubmitFields("改善措施"),
@@ -1368,10 +1368,10 @@ function syncRectificationProcessNodes(templateId, ownerId, departmentId, now) {
       id: "node-rectification-004",
       name: "标准优化",
       durationMinutes: 60,
-      description: "负责人判断是否需要更新标准工作。本阶段只保留入口，不直接更新标准。",
+      description: "负责人判断是否需要更新关键行动。本阶段只保留入口，不直接更新标准。",
       completionStandard: "已判断是否需要标准优化，并记录理由。",
       outputRequirement: "标准优化判断",
-      submitDescription: "请判断是否需要更新标准工作。",
+      submitDescription: "请判断是否需要更新关键行动。",
       submitFields: getRectificationSubmitFields("标准优化"),
     },
     {
@@ -1388,10 +1388,10 @@ function syncRectificationProcessNodes(templateId, ownerId, departmentId, now) {
       id: "node-rectification-006",
       name: "持续应用",
       durationMinutes: 30,
-      description: "负责人确认整改结果可以持续应用，整改工作完成。",
-      completionStandard: "确认整改措施已进入日常执行或管理动作。",
+      description: "负责人确认改善结果可以持续应用，改善工作完成。",
+      completionStandard: "确认改善措施已进入日常落实或管理动作。",
       outputRequirement: "持续应用确认",
-      submitDescription: "请确认整改结果如何持续应用。",
+      submitDescription: "请确认改善结果如何持续应用。",
       submitFields: getRectificationSubmitFields("持续应用"),
     },
   ];
@@ -1405,7 +1405,7 @@ function syncRectificationProcessNodes(templateId, ownerId, departmentId, now) {
       ...(existing ?? {}),
       id: existing?.id ?? definition.id,
       templateId,
-      stageName: "整改工作流程",
+      stageName: "改善工作标准",
       stageOrder: index + 1,
       nodeOrder: 1,
       stepOrder: index + 1,
@@ -1632,7 +1632,7 @@ export function normalizeProcessStepOrders(templateId) {
     return {
       ...node,
       stepOrder,
-      stageName: "默认流程",
+      stageName: "默认标准",
       stageOrder: stepOrder,
       nodeOrder: stepOrder,
       departmentId: node.departmentId ?? node.ownerDepartmentId ?? null,
@@ -1709,19 +1709,19 @@ export function startProcess({
 }) {
   const template = state.processTemplates.find((item) => item.id === templateId);
   if (template === undefined || template.status !== ProcessTemplateStatus.Active) {
-    return { error: "只能发起启用状态的标准流程。" };
+    return { error: "只能发起启用状态的关键行动标准流程。" };
   }
 
   const nodes = state.processTemplateNodes
     .filter((node) => node.templateId === templateId && node.status === ProcessTemplateNodeStatus.Active)
     .sort((left, right) => getProcessNodeStepOrder(left) - getProcessNodeStepOrder(right));
   if (nodes.length === 0) {
-    return { error: "该标准流程尚未配置流程步骤，请先到流程模块中编辑步骤。" };
+    return { error: "该关键行动标准流程尚未配置标准步骤，请先到关键行动模块中编辑步骤。" };
   }
 
   for (const node of nodes) {
     const ownerId = resolveOwner(node, initiatorId, launchAssignments);
-    if (ownerId === null) return { error: `流程步骤“${node.name}”无法解析负责人。` };
+    if (ownerId === null) return { error: `标准步骤“${node.name}”无法解析负责人。` };
   }
 
   const now = getNow();
@@ -1807,8 +1807,8 @@ export async function launchWorkPlanAsProcess(workPlanId, { dueDate = null } = {
   }
 
   const taskTemplate = state.taskTemplates.find((template) => template.id === workPlan.taskTemplateId);
-  if (taskTemplate === undefined) throw new Error("该工作计划未关联标准工作事项。");
-  if (!taskTemplate.defaultProcessTemplateId) throw new Error("该标准工作事项尚未绑定标准流程。");
+  if (taskTemplate === undefined) throw new Error("该关键行动计划未关联关键行动。");
+  if (!taskTemplate.defaultProcessTemplateId) throw new Error("该关键行动尚未绑定关键行动标准流程。");
 
   const previousProcessInstances = [...state.processInstances];
   const previousTasks = [...state.tasks];
@@ -1841,7 +1841,7 @@ export async function launchWorkPlanAsProcess(workPlanId, { dueDate = null } = {
   };
   const syncedDueDate = launchedInstance.dueDate ?? null;
   if (syncedDueDate !== null && result.expectedFinishAt !== undefined && new Date(result.expectedFinishAt).getTime() > new Date(syncedDueDate).getTime()) {
-    window.alert("流程预计完成时间超过项目截止时间，请关注排期。");
+    window.alert("预计完成时间超过项目截止时间，请关注排期。");
   }
   const generatedTasks = state.tasks.filter((task) => task.processInstanceId === result.instance.id);
   const launchedWorkPlan = {
@@ -1868,7 +1868,7 @@ export async function launchWorkPlanAsProcess(workPlanId, { dueDate = null } = {
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data.success !== true) {
-      throw new Error(data.message ?? data.error ?? "发起工作失败，请检查本地数据库服务。");
+      throw new Error(data.message ?? data.error ?? "发起关键行动失败，请检查本地数据库服务。");
     }
     if (data.data !== undefined) applyDataSnapshot(data.data);
     return { instance: launchedInstance, workPlan: launchedWorkPlan, tasks: generatedTasks };
@@ -1916,20 +1916,20 @@ const rectificationSourceLabels = {
   acceptance_rejected: "审核退回",
   rework_twice: "连续返工",
   project_delayed: "项目延期",
-  manual: "人工创建整改",
+  manual: "人工创建改善",
 };
 
 export async function launchRectificationWorkForSource({ sourceTaskId = null, sourceProcessInstanceId = null, sourceType = "manual", problemSummary = "" } = {}) {
   const sourceTask = sourceTaskId ? state.tasks.find((task) => task.id === sourceTaskId) ?? null : null;
   const sourceProcessInstance = getRectificationSourceProcessInstance(sourceTask, sourceProcessInstanceId);
-  if (sourceTask === null && sourceProcessInstance === null) throw new Error("未找到整改来源。");
+  if (sourceTask === null && sourceProcessInstance === null) throw new Error("未找到改善来源。");
   if (hasOpenRectificationWorkForSource({ sourceTaskId, sourceProcessInstanceId: sourceProcessInstance?.id ?? sourceProcessInstanceId, sourceType })) {
-    throw new Error("该异常来源已存在未完成的整改工作，不能重复发起。");
+    throw new Error("该异常来源已存在未完成的改善工作，不能重复发起。");
   }
 
   const rectificationTemplate = state.taskTemplates.find((template) => template.id === RectificationWorkTemplate.TaskTemplateId) ?? null;
   if (rectificationTemplate === null || !rectificationTemplate.defaultProcessTemplateId) {
-    throw new Error("整改工作标准模板尚未初始化，请刷新系统后重试。");
+    throw new Error("改善工作标准模板尚未初始化，请刷新系统后重试。");
   }
 
   const now = getNow();
@@ -1943,7 +1943,7 @@ export async function launchRectificationWorkForSource({ sourceTaskId = null, so
     goalId: sourceTask?.goalId ?? sourceProcessInstance?.goalId ?? null,
     departmentId: sourceTask?.departmentId ?? rectificationTemplate.departmentId ?? null,
     taskTemplateId: RectificationWorkTemplate.TaskTemplateId,
-    title: `整改：${rectificationObject}`,
+    title: `改善：${rectificationObject}`,
     customFields: {
       rectificationSource: sourceLabel,
       sourceType,
@@ -1953,7 +1953,7 @@ export async function launchRectificationWorkForSource({ sourceTaskId = null, so
       sourceExecutorId,
       sourceOwnerId,
       rectificationObject,
-      problemSummary: problemSummary || `${sourceLabel}异常需要发起整改：${rectificationObject}`,
+      problemSummary: problemSummary || `${sourceLabel}异常需要发起改善：${rectificationObject}`,
     },
     coverImageUrl: sourceTask?.coverImageUrl ?? sourceProcessInstance?.coverImageUrl ?? null,
     importance: TaskImportance.Important,
@@ -1962,7 +1962,7 @@ export async function launchRectificationWorkForSource({ sourceTaskId = null, so
     status: WorkPlanStatus.ThisWeek,
     plannedWeek: "",
     dueDate: null,
-    description: `由系统针对${sourceLabel}异常自动发起整改：${rectificationObject}`,
+    description: `由系统针对${sourceLabel}异常自动发起改善：${rectificationObject}`,
     processInstanceId: null,
     createdAt: now,
     updatedAt: now,
@@ -1982,7 +1982,7 @@ export async function launchRectificationWorkForSource({ sourceTaskId = null, so
       updatedAt: getNow(),
       customFields: {
         ...(workPlan.customFields ?? {}),
-        rectificationLaunchFailure: error?.message ?? String(error ?? "整改工作发起失败"),
+        rectificationLaunchFailure: error?.message ?? String(error ?? "改善工作发起失败"),
       },
     };
     await updatePersistentResource("work-plans", workPlan.id, canceledWorkPlan).catch(() => {});
@@ -1998,7 +1998,7 @@ export async function recordRectificationTriggerFailure(taskId, sourceType, erro
   const failure = {
     sourceType,
     failedAt: now,
-    message: error?.message ?? String(error ?? "整改工作自动触发失败"),
+    message: error?.message ?? String(error ?? "改善工作自动触发失败"),
   };
   const customFields = {
     ...(task.customFields ?? {}),

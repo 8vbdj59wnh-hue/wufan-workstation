@@ -213,7 +213,7 @@ const hiddenLegacyStandardWorkNames = [
   "重点产品补货计划跟进",
   "新品资料整理",
   "内容质量检查",
-  "任务执行检查",
+  "任务推进检查",
 ];
 
 function getTaskTabFromHash() {
@@ -1573,7 +1573,7 @@ function renderTaskRow(task, index, options = {}) {
           ${canReturnTask(task) ? renderActionButton("退回重做", "return-task", task.id) : ""}
           ${canEditTask(task) ? renderActionButton("编辑", "edit-task", task.id) : ""}
           ${canCancelTask(task) ? renderActionButton("取消", "cancel-task", task.id, "danger-button") : ""}
-          ${canRestoreTask(task) ? renderActionButton("恢复为待执行", "restore-task", task.id) : ""}
+          ${canRestoreTask(task) ? renderActionButton("恢复为待处理", "restore-task", task.id) : ""}
         </span>
       </td>
     </tr>
@@ -1590,7 +1590,7 @@ function renderProcessTaskGroupRow(row, index) {
     <tr class="task-process-group-row ${selected}" data-row-task-id="${task.id}" data-process-task-group-id="${row.processInstanceId}">
       <td class="task-select-column">
         <div class="task-group-control">
-          <button class="icon-button task-group-toggle" type="button" data-action="toggle-task-group" data-process-instance-id="${row.processInstanceId}" aria-label="${row.expanded ? "折叠流程任务" : "展开流程任务"}">${expandedIcon}</button>
+          <button class="icon-button task-group-toggle" type="button" data-action="toggle-task-group" data-process-instance-id="${row.processInstanceId}" aria-label="${row.expanded ? "折叠标准任务" : "展开标准任务"}">${expandedIcon}</button>
           <label class="task-row-select">
             <input type="checkbox" data-task-row-select data-task-id="${task.id}" ${selectedTaskIds.has(task.id) ? "checked" : ""} />
             <span>${index + 1}</span>
@@ -1619,7 +1619,7 @@ function renderProcessTaskGroupRow(row, index) {
           ${canReturnTask(task) ? renderActionButton("退回重做", "return-task", task.id) : ""}
           ${canEditTask(task) ? renderActionButton("编辑", "edit-task", task.id) : ""}
           ${canCancelTask(task) ? renderActionButton("取消", "cancel-task", task.id, "danger-button") : ""}
-          ${canRestoreTask(task) ? renderActionButton("恢复为待执行", "restore-task", task.id) : ""}
+          ${canRestoreTask(task) ? renderActionButton("恢复为待处理", "restore-task", task.id) : ""}
         </span>
       </td>
     </tr>
@@ -1733,7 +1733,7 @@ function getProcessGroupTitle(instance, processTasks) {
   if (instance?.name) return instance.name;
   if (instance !== null && instance !== undefined) return getStandardWorkName(instance);
   const template = getTaskTemplateForTask(processTasks[0] ?? {});
-  return template?.name ?? "未命名流程";
+  return template?.name ?? "未命名标准";
 }
 
 function getTaskTableRows() {
@@ -2488,7 +2488,7 @@ function buildClearanceImportPreviewRows(records) {
     const goal = getClearanceGoalByName(data.关联目标);
     const initiator = getClearanceInitiatorByName(data.发起人);
 
-    if (template === null) errors.push("未找到已启用的【库存清仓】标准工作");
+    if (template === null) errors.push("未找到已启用的【库存清仓】关键行动");
     for (const header of clearanceRequiredImportHeaders) {
       if (header === "截止时间") {
         if (String(data.截止时间 ?? data.期望完成日期 ?? "").trim() === "") errors.push(`第 ${rowNumber} 行：【截止时间】不能为空`);
@@ -2587,12 +2587,12 @@ async function confirmClearanceImport(rerender) {
 
   const template = getClearanceTemplate();
   if (template === null) {
-    modalState = { ...modalState, error: "未找到已启用的【库存清仓】标准工作。" };
+    modalState = { ...modalState, error: "未找到已启用的【库存清仓】关键行动。" };
     rerender();
     return;
   }
   if (!template.defaultProcessTemplateId) {
-    modalState = { ...modalState, error: "【库存清仓】标准工作尚未绑定标准流程。" };
+    modalState = { ...modalState, error: "【库存清仓】关键行动尚未绑定关键行动标准流程。" };
     rerender();
     return;
   }
@@ -2655,7 +2655,7 @@ function renderClearanceCover(instance, tasks) {
 function renderClearanceTaskRows(group) {
   if (!group.expanded) return "";
   if (group.tasks.length === 0) {
-    return `<div class="empty-detail compact-empty">暂无流程步骤任务</div>`;
+    return `<div class="empty-detail compact-empty">暂无标准步骤任务</div>`;
   }
   return `
     <div class="table-wrap clearance-task-table-wrap">
@@ -2690,7 +2690,7 @@ function renderClearanceTaskRows(group) {
                     ${canReturnTask(task) ? renderActionButton("退回重做", "return-task", task.id) : ""}
                     ${canEditTask(task) ? renderActionButton("编辑", "edit-task", task.id) : ""}
                     ${canCancelTask(task) ? renderActionButton("取消", "cancel-task", task.id, "danger-button") : ""}
-                    ${canRestoreTask(task) ? renderActionButton("恢复为待执行", "restore-task", task.id) : ""}
+                    ${canRestoreTask(task) ? renderActionButton("恢复为待处理", "restore-task", task.id) : ""}
                   </span>
                 </td>
               </tr>
@@ -2739,7 +2739,7 @@ function renderClearanceCard(group, index) {
         </div>
       </div>
       <div class="clearance-current-row">
-        <span><b>当前任务节点</b>${escapeHtml(currentTaskName ?? "暂无执行任务")}</span>
+        <span><b>当前任务节点</b>${escapeHtml(currentTaskName ?? "暂无任务")}</span>
         <span><b>当前负责人</b>${escapeHtml(currentOwner)}</span>
         <span><b>截止时间</b>${escapeHtml(currentDueDate)}</span>
         <span><b>任务状态</b>${escapeHtml(currentStatus)}</span>
@@ -2764,7 +2764,7 @@ function renderClearancePage() {
       <div class="section-heading">
         <div>
           <h2>库存清仓</h2>
-          <p class="form-note">集中查看库存清仓标准工作产生的流程和执行任务；批量导入可在“产品图”列填写图片地址，或在对应行插入图片。</p>
+          <p class="form-note">集中查看库存清仓关键行动产生的标准步骤和任务；批量导入可在“产品图”列填写图片地址，或在对应行插入图片。</p>
         </div>
         <div class="toolbar-actions">
           ${canCurrentUser("workPlans.launch") ? `<button class="secondary-button" type="button" data-action="download-clearance-template">下载导入模板</button>` : ""}
@@ -2904,7 +2904,7 @@ function getProcessCurrentStepText(instance) {
 
   if (getWaitingProcessTasks(instance.id).length > 0) return "等待前置";
 
-  return "暂无执行任务";
+  return "暂无任务";
 }
 
 function getProcessCurrentOwners(instance) {
@@ -2938,8 +2938,8 @@ function getProcessTemplateById(templateId) {
 
 function getStandardWorkName(instance) {
   const taskTemplateId = instance.taskTemplateId ?? instance.standardWorkId ?? null;
-  if (taskTemplateId === null) return "未关联标准工作";
-  return getTaskTemplate(taskTemplateId)?.name ?? "未关联标准工作";
+  if (taskTemplateId === null) return "未关联关键行动";
+  return getTaskTemplate(taskTemplateId)?.name ?? "未关联关键行动";
 }
 
 function isStockClearanceProcessInstance(instance) {
@@ -3203,7 +3203,7 @@ function renderTaskTable() {
           <tbody>
             ${
               tableRows.length === 0
-                ? `<tr><td colspan="12">暂无匹配的执行任务</td></tr>`
+                ? `<tr><td colspan="12">暂无匹配的任务</td></tr>`
                 : tableRows
                     .map((row, index) => (row.type === "task" ? renderTaskRow(row.task, index) : renderProcessTaskGroupRow(row, index)))
                     .join("")
@@ -3221,9 +3221,9 @@ function renderTaskTemplateTable(selectedProcessTemplateId = "") {
   return `
     <section class="settings-section">
       <div class="section-heading with-actions">
-        <h2>标准工作库</h2>
-        <p class="form-note">标准工作库用于维护公司允许发起的标准工作事项。标准工作事项不是员工直接执行的任务，而是发起流程或生成执行任务的入口。</p>
-        <button class="primary-button" type="button" data-action="add-task-template">新增标准工作事项</button>
+        <h2>关键行动库</h2>
+        <p class="form-note">关键行动是公司长期实践验证有效、能够持续推进目标实现，并沉淀下来的行动。关键行动不是普通关键行动，只有经过验证、值得长期保留、能够持续帮助公司实现目标的行动，才会沉淀为关键行动。</p>
+        <button class="primary-button" type="button" data-action="add-task-template">新增关键行动</button>
       </div>
       ${renderStandardWorkMoveStatus()}
       <div class="standard-work-board-wrap">
@@ -3251,7 +3251,7 @@ function renderTaskTemplateTable(selectedProcessTemplateId = "") {
             .join("")}
         </div>
       </div>
-      <p class="form-note">可拖动标准工作卡片到其他价值链分类中，调整后会保存到标准工作库。</p>
+      <p class="form-note">可拖动关键行动卡片到其他价值链分类中，调整后会保存到关键行动库。</p>
     </section>
   `;
 }
@@ -3275,7 +3275,7 @@ function renderStandardWorkProcessModal() {
   return `
     <div class="modal-backdrop"><div class="modal-panel wide-modal">
       <div class="modal-header">
-        <h2>${escapeHtml(template.name)} · 流程节点</h2>
+        <h2>${escapeHtml(template.name)} · 标准节点</h2>
         <div class="modal-header-actions">
           <button class="secondary-button" type="button" data-action="close-task-modal">关闭</button>
           <button class="icon-button" type="button" data-action="close-task-modal" aria-label="关闭">×</button>
@@ -3283,7 +3283,7 @@ function renderStandardWorkProcessModal() {
       </div>
       ${
         nodes.length === 0
-          ? `<p class="empty-state">暂无流程节点</p>`
+          ? `<p class="empty-state">暂无标准节点</p>`
           : `
             <div class="process-node-list">
               ${nodes
@@ -3303,7 +3303,7 @@ function renderStandardWorkProcessModal() {
                       <div class="process-node-meta">
                         <span><em>负责人</em>${escapeHtml(ownerName)}</span>
                         <span><em>执行人</em>${escapeHtml(executorName)}</span>
-                        <span><em>执行时长</em>${escapeHtml(durationMinutes)} 分钟</span>
+                        <span><em>任务时长</em>${escapeHtml(durationMinutes)} 分钟</span>
                       </div>
                       <div class="process-node-copy">
                         <p><strong>完成标准：</strong>${escapeHtml(node.completionStandard || "未填写")}</p>
@@ -3354,18 +3354,18 @@ function renderStandardWorkCard(template, selectedProcessTemplateId = "") {
 
 function renderProcessProgressFilters() {
   return `
-    <form class="process-progress-filters task-filters" aria-label="标准工作流程进度筛选">
+    <form class="process-progress-filters task-filters" aria-label="关键行动进度筛选">
       <label>
         <span>关键词</span>
-        <input name="keyword" value="${escapeHtml(processProgressFilters.keyword)}" placeholder="搜索本次工作、标准流程、目标" />
+        <input name="keyword" value="${escapeHtml(processProgressFilters.keyword)}" placeholder="搜索本次工作、关键行动标准流程、目标" />
       </label>
       <label>
         <span>关联目标</span>
         <select name="goalId">${renderOptions(getActiveGoals(), processProgressFilters.goalId, "全部目标")}</select>
       </label>
       <label>
-        <span>标准流程</span>
-        <select name="templateId">${renderOptions(state.processTemplates, processProgressFilters.templateId, "全部标准流程")}</select>
+        <span>关键行动标准流程</span>
+        <select name="templateId">${renderOptions(state.processTemplates, processProgressFilters.templateId, "全部关键行动标准流程")}</select>
       </label>
       <label>
         <span>状态</span>
@@ -3416,7 +3416,7 @@ function renderProcessProgressTable() {
   return `
     <section class="settings-section">
       <div class="section-heading">
-        <h2>标准工作流程进度</h2>
+        <h2>关键行动进度</h2>
       </div>
       <div class="table-wrap">
         <table class="data-table process-progress-table">
@@ -3424,9 +3424,9 @@ function renderProcessProgressTable() {
             <tr>
               <th class="task-cover-column">产品图</th>
               <th>本次工作标题</th>
-              <th>标准工作事项</th>
+              <th>关键行动</th>
               <th>关联目标</th>
-              <th>标准流程</th>
+              <th>关键行动标准流程</th>
               <th>当前步骤</th>
               <th>步骤进度</th>
               <th>当前负责人</th>
@@ -3441,7 +3441,7 @@ function renderProcessProgressTable() {
           <tbody>
             ${
               instances.length === 0
-                ? `<tr><td colspan="14">暂无匹配的已发起流程</td></tr>`
+                ? `<tr><td colspan="14">暂无匹配的已发起关键行动</td></tr>`
                 : instances
                     .map((instance) => {
                       const progress = getProcessProgress(instance.id);
@@ -3464,7 +3464,7 @@ function renderProcessProgressTable() {
                             ${renderProcessActionButton("表单", "show-process-work-form", instance.id)}
                             ${
                               canCancelProcessInstance(instance)
-                                ? renderProcessActionButton("取消流程", "cancel-process", instance.id, "danger-button")
+                                ? renderProcessActionButton("取消关键行动", "cancel-process", instance.id, "danger-button")
                                 : ""
                             }
                             ${
@@ -3512,7 +3512,7 @@ function renderProcessStepProgress(instance) {
   const tasks = sortProcessTasks(getProcessTasks(instance.id));
 
   if (tasks.length === 0) {
-    return `<div class="empty-detail">暂无流程步骤执行任务</div>`;
+    return `<div class="empty-detail">暂无标准步骤任务</div>`;
   }
 
   return `
@@ -3549,7 +3549,7 @@ function renderProcessStepProgress(instance) {
                   <td class="wide-text">${escapeHtml(task.reviewStandard ?? node?.reviewStandard ?? "-")}</td>
                   <td class="wide-text">${escapeHtml(task.resultText ?? "暂无")}</td>
                   <td>${task.completedAt ?? "未完成"}</td>
-                  <td><button class="text-button" type="button" data-action="open-process-task" data-task-id="${task.id}">查看执行任务</button></td>
+                  <td><button class="text-button" type="button" data-action="open-process-task" data-task-id="${task.id}">查看任务</button></td>
                 </tr>
               `;
             })
@@ -3570,8 +3570,8 @@ function renderProcessProgressDetail() {
   if (instance === null) {
     return `
       <section class="settings-section task-detail">
-        <div class="section-heading"><h2>流程进度详情</h2></div>
-        <div class="empty-detail">暂无已发起流程</div>
+        <div class="section-heading"><h2>关键行动进度详情</h2></div>
+        <div class="empty-detail">暂无已发起关键行动</div>
       </section>
     `;
   }
@@ -3985,7 +3985,7 @@ function renderTaskDetail() {
     return `
       <section class="settings-section task-detail">
         <div class="section-heading">
-          <h2>执行任务详情</h2>
+          <h2>任务详情</h2>
         </div>
         <div class="empty-detail">暂无匹配任务</div>
       </section>
@@ -3994,7 +3994,7 @@ function renderTaskDetail() {
 
   const processText =
     selectedTask.source === TaskSource.Process
-      ? `已发起流程：${selectedTask.processInstanceId}；流程步骤：${selectedTask.processNodeId}`
+      ? `已发起关键行动：${selectedTask.processInstanceId}；标准步骤：${selectedTask.processNodeId}`
       : "无";
   const resultAttachments = selectedTask.resultAttachments ?? [];
   const attachments = renderAttachmentPreviewList(resultAttachments, "无");
@@ -4010,7 +4010,7 @@ function renderTaskDetail() {
           ${canEditTask(selectedTask) ? renderActionButton("编辑", "edit-task", selectedTask.id) : ""}
           ${selectedTask.processNodeId ? getMethodologyLinkByNodeId(selectedTask.processNodeId) : ""}
           ${canCancelTask(selectedTask) ? renderActionButton("取消", "cancel-task", selectedTask.id, "danger-button") : ""}
-          ${canRestoreTask(selectedTask) ? renderActionButton("恢复为待执行", "restore-task", selectedTask.id) : ""}
+          ${canRestoreTask(selectedTask) ? renderActionButton("恢复为待处理", "restore-task", selectedTask.id) : ""}
         </div>
       </div>
       <div class="task-primary-actions">
@@ -4029,7 +4029,7 @@ function renderTaskDetail() {
           <div class="task-work-main">
             <div class="detail-grid">
               ${renderDetailField("本次工作标题", escapeHtml(belonging.title || selectedTask.name || "无"))}
-              ${renderDetailField("归属标准工作", escapeHtml(belonging.standardWorkName))}
+              ${renderDetailField("归属关键行动", escapeHtml(belonging.standardWorkName))}
               ${renderDetailField("当前任务节点", escapeHtml(selectedTask.name))}
               ${renderDetailField("任务来源", taskSourceNames[selectedTask.source])}
             </div>
@@ -4045,7 +4045,7 @@ function renderTaskDetail() {
       ${renderPreviousTaskFilesBlock(selectedTask)}
       ${renderTaskSubmitResultDetail(selectedTask)}
       <div class="detail-block">
-        <h3>执行结果</h3>
+        <h3>任务结果</h3>
         <p>完成结果说明：${escapeHtml(selectedTask.resultText ?? "暂无")}</p>
         <div class="submit-file-preview">
           <p>结果附件：</p>
@@ -4067,8 +4067,8 @@ function renderTaskDetail() {
         </div>
       </div>
       <div class="detail-block">
-        <h3>执行要求</h3>
-        <p>流程节点：${getTaskProcessStepName(selectedTask)}</p>
+        <h3>任务要求</h3>
+        <p>标准节点：${getTaskProcessStepName(selectedTask)}</p>
         <p>任务说明：${escapeHtml(selectedTask.description || "未填写")}</p>
         <p>完成标准：${escapeHtml(selectedTask.completionStandard || "未填写")}</p>
         ${
@@ -4084,8 +4084,8 @@ function renderTaskDetail() {
       <div class="detail-block">
         <h3>关联信息</h3>
         <div class="detail-grid">
-          ${renderDetailField("所属标准流程", getTaskProcessTemplateName(selectedTask))}
-          ${renderDetailField("所属流程步骤", getTaskProcessStepName(selectedTask))}
+          ${renderDetailField("所属关键行动标准流程", getTaskProcessTemplateName(selectedTask))}
+          ${renderDetailField("所属标准步骤", getTaskProcessStepName(selectedTask))}
           ${renderDetailField("关联目标", findName(goals, selectedTask.goalId, "未设置"))}
           ${renderDetailField("四象限", getTaskQuadrant(selectedTask.importance, selectedTask.urgency))}
         </div>
@@ -4100,9 +4100,9 @@ function renderTaskDetailModal() {
 
   return `
     <div class="modal-backdrop" role="presentation">
-      <div class="modal-panel wide-modal task-detail-modal" role="dialog" aria-modal="true" aria-label="执行任务详情">
+      <div class="modal-panel wide-modal task-detail-modal" role="dialog" aria-modal="true" aria-label="任务详情">
         <div class="modal-header">
-          <h2>执行任务详情</h2>
+          <h2>任务详情</h2>
           <button class="icon-button" type="button" data-action="close-task-modal" aria-label="关闭">×</button>
         </div>
         <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${modalState.error}</div>
@@ -4142,7 +4142,7 @@ function renderWorkFormModal() {
           <div>
             <h2>本次工作表单</h2>
             <p class="form-note">
-              ${escapeHtml(taskTemplate?.name ?? "未关联标准工作事项")}
+              ${escapeHtml(taskTemplate?.name ?? "未关联关键行动")}
               ${instance === null ? "" : `｜${escapeHtml(instance.displayTitle ?? instance.name)}`}
               ${instance?.goalId ? `｜${escapeHtml(findName(goals, instance.goalId, "未设置目标"))}` : ""}
             </p>
@@ -4155,10 +4155,10 @@ function renderWorkFormModal() {
             customFields,
           })}
         </div>
-        <p class="form-note">本表单为发起工作时填写的本次工作要求，不是执行结果。</p>
+        <p class="form-note">本表单为发起关键行动时填写的本次工作要求，不是任务结果。</p>
         ${
           task !== null
-            ? `<p class="form-note">当前执行任务：${escapeHtml(task.name)}</p>`
+            ? `<p class="form-note">当前任务：${escapeHtml(task.name)}</p>`
             : ""
         }
         ${task === null ? "" : renderPreviousTaskSubmissionBlock(task)}
@@ -4174,18 +4174,18 @@ function renderCancelProcessModal() {
 
   return `
     <div class="modal-backdrop" role="presentation">
-      <div class="modal-panel" role="dialog" aria-modal="true" aria-label="取消流程">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-label="取消关键行动">
         <div class="modal-header">
           <div>
-            <h2>取消流程</h2>
+            <h2>取消关键行动</h2>
             <p class="form-note">${escapeHtml(getProcessDisplayTitle(instance))}</p>
           </div>
           <button class="icon-button" type="button" data-action="close-task-modal" aria-label="关闭">×</button>
         </div>
         <form class="modal-form cancel-process-form">
           <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${escapeHtml(modalState.error)}</div>
-          <p>确定要取消这个流程吗？</p>
-          <p class="form-note">取消后，该流程下所有未完成的执行任务都会一并取消；已完成任务会保留完成状态。</p>
+          <p>确定要取消这个关键行动吗？</p>
+          <p class="form-note">取消后，该关键行动下所有未完成的任务都会一并取消；已完成任务会保留完成状态。</p>
           <label>
             <span>取消原因</span>
             <textarea name="cancelReason" rows="4" placeholder="可填写：需求取消、产品取消、目标调整、信息填写错误、重复发起或其他原因">${escapeHtml(modalState.cancelReason ?? "")}</textarea>
@@ -4253,14 +4253,14 @@ function getEditingTask() {
 
 function renderTemplateLockedInfo(template) {
   if (template === null) {
-    return `<p class="form-note">请选择标准工作事项后查看自动带出的锁定信息。</p>`;
+    return `<p class="form-note">请选择关键行动后查看自动带出的锁定信息。</p>`;
   }
 
   return `
     <div class="locked-template-info">
-      ${renderDetailField("标准工作名称", escapeHtml(template.name))}
+      ${renderDetailField("关键行动名称", escapeHtml(template.name))}
       ${renderDetailField("价值链模块", getStandardWorkValueChain(template))}
-      ${renderDetailField("对应标准流程", getProcessTemplateName(template.defaultProcessTemplateId))}
+      ${renderDetailField("对应关键行动标准流程", getProcessTemplateName(template.defaultProcessTemplateId))}
       ${renderDetailField("负责部门", findName(departments, template.departmentId, "未设置"))}
       ${renderDetailField("负责人", findName(people, template.ownerId, "未设置"))}
       ${renderDetailField("需要验收", template.needAcceptance ? "是" : "否")}
@@ -4290,14 +4290,14 @@ function renderTaskModal() {
     selectedCategoryId === ""
       ? "请先选择价值链模块"
       : availableTemplates.length === 0
-        ? "该价值链模块暂无标准工作事项"
-        : "请选择标准工作事项";
+        ? "该价值链模块暂无关键行动"
+        : "请选择关键行动";
 
   return `
     <div class="modal-backdrop" role="presentation">
-      <div class="modal-panel wide-modal" role="dialog" aria-modal="true" aria-label="${isEdit ? "编辑执行任务" : "发起标准工作"}">
+      <div class="modal-panel wide-modal" role="dialog" aria-modal="true" aria-label="${isEdit ? "编辑任务" : "发起关键行动"}">
         <div class="modal-header">
-          <h2>${isEdit ? "编辑执行任务" : "发起标准工作"}</h2>
+          <h2>${isEdit ? "编辑任务" : "发起关键行动"}</h2>
           <div class="modal-header-actions">
             <button class="secondary-button" type="button" data-action="close-task-modal">取消</button>
             <button class="primary-button" type="button" data-action="submit-modal-form">保存</button>
@@ -4309,7 +4309,7 @@ function renderTaskModal() {
           ${
             isEdit
               ? `
-                ${isProcessTask ? "<p class=\"form-note\">流程步骤生成的执行任务，其步骤完成标准来自标准流程；本次执行人可以按实际人员调整。</p>" : "<p class=\"form-note\">执行任务来自标准工作库，任务名称、负责部门和标准完成要求已锁定；本次执行人可以调整。</p>"}
+                ${isProcessTask ? "<p class=\"form-note\">标准步骤生成的任务，其步骤完成标准来自关键行动标准流程；本次执行人可以按实际人员调整。</p>" : "<p class=\"form-note\">任务来自关键行动库，任务名称、负责部门和标准完成要求已锁定；本次执行人可以调整。</p>"}
                 <div class="detail-grid">
                   ${renderDetailField("任务名称", escapeHtml(task?.name ?? ""))}
                   ${renderDetailField("关联目标", findName(goals, task?.goalId ?? null, "未设置"))}
@@ -4340,7 +4340,7 @@ function renderTaskModal() {
                     </select>
                   </label>
                   <label>
-                    <span>选择标准工作事项</span>
+                    <span>选择关键行动</span>
                     <select name="taskTemplateId" data-task-template-select ${selectedCategoryId === "" ? "disabled" : ""}>
                       ${renderOptions(availableTemplates, modalState.taskTemplateId ?? "", templateHint)}
                     </select>
@@ -4549,7 +4549,7 @@ function renderTemplateFormFieldEditor() {
         <h3>定制表单</h3>
         <button class="secondary-button" type="button" data-action="add-task-template-field">新增字段</button>
       </div>
-      <p class="form-note">选择该标准工作事项添加未来工作时，会按这里配置的字段显示表单，填写内容保存到本次工作信息。</p>
+      <p class="form-note">选择该关键行动添加未来工作时，会按这里配置的字段显示表单，填写内容保存到本次工作信息。</p>
       <div class="template-field-editor">
         ${
           fields.length === 0
@@ -4608,9 +4608,9 @@ function renderTaskTemplateModal() {
 
   return `
     <div class="modal-backdrop" role="presentation">
-      <div class="modal-panel wide-modal" role="dialog" aria-modal="true" aria-label="${isEdit ? "编辑标准工作事项" : "新增标准工作事项"}">
+      <div class="modal-panel wide-modal" role="dialog" aria-modal="true" aria-label="${isEdit ? "编辑关键行动" : "新增关键行动"}">
         <div class="modal-header">
-          <h2>${isEdit ? "编辑标准工作事项" : "新增标准工作事项"}</h2>
+          <h2>${isEdit ? "编辑关键行动" : "新增关键行动"}</h2>
           <div class="modal-header-actions">
             <button class="secondary-button" type="button" data-action="close-task-modal">取消</button>
             <button class="primary-button" type="button" data-action="submit-modal-form">保存</button>
@@ -4620,7 +4620,7 @@ function renderTaskTemplateModal() {
         <form class="modal-form task-template-form">
           <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${modalState.error}</div>
           <label>
-            <span>标准工作名称</span>
+            <span>关键行动名称</span>
             <input name="name" value="${escapeHtml(template?.name ?? "")}" autocomplete="off" />
           </label>
           <div class="form-grid">
@@ -4632,11 +4632,11 @@ function renderTaskTemplateModal() {
               isEdit
                 ? `
                   <label>
-                    <span>对应标准流程</span>
+                    <span>对应关键行动标准流程</span>
                     <select name="defaultProcessTemplateId">${renderProcessTemplateOptions(template?.defaultProcessTemplateId ?? "")}</select>
                   </label>
                 `
-                : `<p class="form-note">新建标准工作事项时，系统会自动创建同名标准流程，后续可在流程模块中编辑流程步骤。</p>`
+                : `<p class="form-note">新建关键行动时，系统会自动创建同名关键行动标准流程，后续可在关键行动模块中编辑标准步骤。</p>`
             }
             <label>
               <span>固定负责部门</span>
@@ -4752,11 +4752,11 @@ function buildTaskTemplateDraft(form) {
 }
 
 function validateTaskTemplateDraft(draft) {
-  if (!getTaskCategories().some((category) => category.id === draft.categoryId)) return "标准工作必须选择有效的价值链模块。";
+  if (!getTaskCategories().some((category) => category.id === draft.categoryId)) return "关键行动必须选择有效的价值链模块。";
   if (modalState.mode === "edit") {
     if (draft.defaultProcessTemplateId !== "") {
       const processTemplate = getProcessTemplateById(draft.defaultProcessTemplateId);
-      if (processTemplate === null || processTemplate.status !== ProcessTemplateStatus.Active) return "对应标准流程必须是启用状态。";
+      if (processTemplate === null || processTemplate.status !== ProcessTemplateStatus.Active) return "对应关键行动标准流程必须是启用状态。";
     }
   }
 
@@ -4796,33 +4796,33 @@ async function saveTaskTemplate(form, rerender) {
       }
       await createPersistentResource("task-templates", createdTemplate);
     } catch (error) {
-      console.error("标准工作事项保存失败", error);
-      return setModalError(error.message || "标准工作事项保存失败，请检查本地数据库服务。", rerender);
+      console.error("关键行动保存失败", error);
+      return setModalError(error.message || "关键行动保存失败，请检查本地数据库服务。", rerender);
     }
     state.taskTemplates = [createdTemplate, ...state.taskTemplates];
   } else {
     const oldTemplate = getTaskTemplate(modalState.templateId);
-    if (oldTemplate === null) return setModalError("未找到要编辑的标准工作事项。", rerender);
+    if (oldTemplate === null) return setModalError("未找到要编辑的关键行动。", rerender);
     const boundProcessTemplate = getProcessTemplateById(draft.defaultProcessTemplateId || oldTemplate?.defaultProcessTemplateId || "");
     const shouldSyncProcessName =
       oldTemplate !== null &&
       boundProcessTemplate !== null &&
       draft.defaultProcessTemplateId === oldTemplate.defaultProcessTemplateId &&
-      boundProcessTemplate.name === `${oldTemplate.name}流程` &&
+      boundProcessTemplate.name === `${oldTemplate.name}标准` &&
       oldTemplate.name !== draft.name;
     const shouldNoticeProcessNameNotSynced =
       oldTemplate !== null &&
       boundProcessTemplate !== null &&
       draft.defaultProcessTemplateId === oldTemplate.defaultProcessTemplateId &&
-      boundProcessTemplate.name !== `${oldTemplate.name}流程` &&
+      boundProcessTemplate.name !== `${oldTemplate.name}标准` &&
       oldTemplate.name !== draft.name;
 
     let updatedProcessTemplate = null;
     if (shouldSyncProcessName) {
-      updatedProcessTemplate = { ...boundProcessTemplate, name: `${draft.name}流程`, updatedAt: now };
+      updatedProcessTemplate = { ...boundProcessTemplate, name: `${draft.name}标准`, updatedAt: now };
     }
     if (shouldNoticeProcessNameNotSynced) {
-      window.alert("对应标准流程名称已被单独修改，本次未自动同步流程名称。");
+      window.alert("对应关键行动标准标准名称已被单独修改，本次未自动同步标准名称。");
     }
 
     const updatedTemplate = { ...oldTemplate, ...draft, formFields, updatedAt: now };
@@ -4832,8 +4832,8 @@ async function saveTaskTemplate(form, rerender) {
       }
       await updatePersistentResource("task-templates", updatedTemplate.id, updatedTemplate);
     } catch (error) {
-      console.error("标准工作事项保存失败", error);
-      return setModalError(error.message || "标准工作事项保存失败，请检查本地数据库服务。", rerender);
+      console.error("关键行动保存失败", error);
+      return setModalError(error.message || "关键行动保存失败，请检查本地数据库服务。", rerender);
     }
 
     if (updatedProcessTemplate !== null) {
@@ -4849,7 +4849,7 @@ async function saveTaskTemplate(form, rerender) {
 }
 
 function deactivateTaskTemplate(templateId, rerender) {
-  if (!window.confirm("确定要停用该标准工作事项吗？停用后不能用于发起标准工作。停用标准工作事项不会删除对应标准流程，也不会影响历史已发起流程。")) return;
+  if (!window.confirm("确定要停用该关键行动吗？停用后不能用于发起关键行动。停用关键行动不会删除对应关键行动标准流程，也不会影响历史已发起关键行动。")) return;
 
   const now = getNow();
   state.taskTemplates = state.taskTemplates.map((template) =>
@@ -4909,11 +4909,11 @@ function buildTaskDraft(form, task) {
 function validateTaskDraft(draft, isAdd) {
   if (isAdd) {
     if (!isValueModuleId(draft.valueModuleId)) return "必须选择价值链模块。";
-    if (draft.taskTemplateId === "" || draft.template === null) return "必须选择启用的标准工作事项。";
-    if (draft.template.status !== TaskTemplateStatus.Active) return "停用的标准工作事项不能用于发起标准工作。";
-    if (!draft.template.defaultProcessTemplateId) return "该标准工作事项尚未绑定标准流程，请先到标准工作库中配置。";
+    if (draft.taskTemplateId === "" || draft.template === null) return "必须选择启用的关键行动。";
+    if (draft.template.status !== TaskTemplateStatus.Active) return "停用的关键行动不能用于发起关键行动。";
+    if (!draft.template.defaultProcessTemplateId) return "该关键行动尚未绑定关键行动标准流程，请先到关键行动库中配置。";
     const processTemplate = getProcessTemplateById(draft.template.defaultProcessTemplateId);
-    if (processTemplate === null || processTemplate.status !== ProcessTemplateStatus.Active) return "该标准工作事项绑定的标准流程未启用。";
+    if (processTemplate === null || processTemplate.status !== ProcessTemplateStatus.Active) return "该关键行动绑定的关键行动标准流程未启用。";
     const customError = validateCustomFields(draft.customFields, draft.template);
     if (customError !== "") return customError;
   }
@@ -5020,10 +5020,10 @@ async function saveTask(form, rerender) {
     try {
       await persistStartedProcess(result);
     } catch (error) {
-      console.error("发起标准工作保存失败", error);
+      console.error("发起关键行动保存失败", error);
       state.processInstances = originalInstances;
       state.tasks = originalTasks;
-      return setModalError(error.message || "发起标准工作保存失败，请检查本地数据库服务。", rerender);
+      return setModalError(error.message || "发起关键行动保存失败，请检查本地数据库服务。", rerender);
     }
 
     selectedProcessInstanceId = result.instance.id;
@@ -5056,8 +5056,8 @@ async function saveTask(form, rerender) {
       }
       await updatePersistentResource("tasks", updatedTask.id, updatedTask);
     } catch (error) {
-      console.error("执行任务保存失败", error);
-      return setModalError(error.message || "执行任务保存失败，请检查本地数据库服务。", rerender);
+      console.error("任务保存失败", error);
+      return setModalError(error.message || "任务保存失败，请检查本地数据库服务。", rerender);
     }
     if (updatedProcessInstance !== null) {
       state.processInstances = state.processInstances.map((item) =>
@@ -5315,8 +5315,8 @@ async function saveResult(form, rerender) {
     try {
       await advanceProcessAfterTaskDone(modalState.taskId);
     } catch (error) {
-      console.error("流程推进保存失败", error);
-      return setModalError(error.message || "流程推进保存失败，请检查本地数据库服务。", rerender);
+      console.error("关键行动推进保存失败", error);
+      return setModalError(error.message || "关键行动推进保存失败，请检查本地数据库服务。", rerender);
     }
   }
   modalState = null;
@@ -5334,8 +5334,8 @@ async function updateTaskStatus(taskId, status, rerender) {
       await ensureTaskReadyForExecution(taskId);
       task = getTask(taskId);
     } catch (error) {
-      console.error("流程任务激活失败", error);
-      window.alert(error.message || "流程任务激活失败，请检查本地数据库服务。");
+      console.error("标准任务激活失败", error);
+      window.alert(error.message || "标准任务激活失败，请检查本地数据库服务。");
       rerender();
       return;
     }
@@ -5347,7 +5347,7 @@ async function updateTaskStatus(taskId, status, rerender) {
     return;
   }
 
-  if (isDoneStatus(task.status) && !window.confirm("该任务已完成，确定要修改它的状态吗？修改后可能影响流程记录。")) {
+  if (isDoneStatus(task.status) && !window.confirm("该任务已完成，确定要修改它的状态吗？修改后可能影响关键行动记录。")) {
     rerender();
     return;
   }
@@ -5356,7 +5356,7 @@ async function updateTaskStatus(taskId, status, rerender) {
     const instance = getTaskProcessInstance(task);
     const message =
       instance !== null && isCanceledStatus(instance.status) && status !== TaskStatus.Canceled
-        ? "所属流程已取消，建议重新发起流程。是否仍要仅修改该任务状态？"
+        ? "所属关键行动已取消，建议重新发起关键行动。是否仍要仅修改该任务状态？"
         : "该任务已取消，确定要修改它的状态吗？";
     if (!window.confirm(message)) {
       rerender();
@@ -5386,7 +5386,7 @@ async function updateTaskStatus(taskId, status, rerender) {
     status === TaskStatus.Canceled &&
     !isDoneStatus(task.status) &&
     !isCanceledStatus(task.status) &&
-    !window.confirm("确定要取消该执行任务吗？取消后历史记录仍会保留。")
+    !window.confirm("确定要取消该任务吗？取消后历史记录仍会保留。")
   ) {
     rerender();
     return;
@@ -5415,8 +5415,8 @@ async function updateTaskStatus(taskId, status, rerender) {
     try {
       await advanceProcessAfterTaskDone(taskId);
     } catch (error) {
-      console.error("流程推进保存失败", error);
-      window.alert(error.message || "流程推进保存失败，请检查本地数据库服务。");
+      console.error("关键行动推进保存失败", error);
+      window.alert(error.message || "关键行动推进保存失败，请检查本地数据库服务。");
       rerender();
       return;
     }
@@ -5426,7 +5426,7 @@ async function updateTaskStatus(taskId, status, rerender) {
 
 function getTaskStatusChangeError(task, status) {
   if (task.source === TaskSource.Process && task.status === TaskStatus.Waiting && status !== TaskStatus.Canceled) {
-    return "前置步骤未完成，当前步骤暂不能执行。";
+    return "前置步骤未完成，当前步骤暂不能处理。";
   }
   return "";
 }
@@ -5445,7 +5445,7 @@ async function bulkUpdateTaskStatus(status, rerender) {
   if (status === TaskStatus.Canceled && !canCurrentUser("tasks.batchCancel")) return;
   const selectedTasks = [...selectedTaskIds].map(getTask).filter(Boolean);
   if (selectedTasks.length === 0) return;
-  if (status === TaskStatus.Canceled && !window.confirm("确定要取消选中的执行任务吗？")) return;
+  if (status === TaskStatus.Canceled && !window.confirm("确定要取消选中的任务吗？")) return;
 
   const now = getNow();
   const skipped = [];
@@ -5457,7 +5457,7 @@ async function bulkUpdateTaskStatus(status, rerender) {
         await ensureTaskReadyForExecution(task.id);
         task = getTask(task.id) ?? task;
       } catch (error) {
-        console.error("流程任务激活失败", error);
+        console.error("标准任务激活失败", error);
         skipped.push(task.name);
         continue;
       }
@@ -5497,8 +5497,8 @@ async function bulkUpdateTaskStatus(status, rerender) {
         await advanceProcessAfterTaskDone(task.id);
       }
     } catch (error) {
-      console.error("流程推进保存失败", error);
-      window.alert(error.message || "流程推进保存失败，请检查本地数据库服务。");
+      console.error("关键行动推进保存失败", error);
+      window.alert(error.message || "关键行动推进保存失败，请检查本地数据库服务。");
       rerender();
       return;
     }
@@ -5516,7 +5516,7 @@ async function cancelTask(taskId, rerender) {
   const task = getTask(taskId);
 
   if (task.source === TaskSource.Process) {
-    window.alert("流程步骤生成的执行任务不能单独取消，需要在流程中终止。");
+    window.alert("标准步骤生成的任务不能单独取消，需要在关键行动中终止。");
     return;
   }
 
@@ -5542,14 +5542,14 @@ async function restoreCanceledTask(taskId, rerender) {
   if (task === null || !canRestoreTask(task)) return;
   const instance = getTaskProcessInstance(task);
   if (instance !== null && isCanceledStatus(instance.status)) {
-    window.alert("所属流程已取消，请重新发起流程。");
+    window.alert("所属关键行动已取消，请重新发起关键行动。");
     return;
   }
   if (instance !== null && instance.status !== ProcessInstanceStatus.Running) {
-    window.alert("所属流程不是进行中状态，不能单独恢复该任务。");
+    window.alert("所属关键行动不是进行中状态，不能单独恢复该任务。");
     return;
   }
-  if (!window.confirm("确定要将该执行任务恢复为待执行吗？")) return;
+  if (!window.confirm("确定要将该任务恢复为待处理吗？")) return;
   const now = getNow();
   const restoredTask = { ...task, status: TaskStatus.Todo, startDate: task.startDate ?? today, updatedAt: now, cancelReason: null };
   try {
@@ -5566,7 +5566,7 @@ async function restoreCanceledTask(taskId, rerender) {
 async function relaunchProcessAsWorkPlan(instanceId, rerender) {
   const instance = state.processInstances.find((item) => item.id === instanceId) ?? null;
   if (!canRelaunchProcessInstance(instance)) return;
-  if (!window.confirm("确定基于该流程重新发起一条新工作吗？重新发起会创建一条新的工作，原取消记录会保留。")) return;
+  if (!window.confirm("确定基于该关键行动重新发起一条新工作吗？重新发起会创建一条新的工作，原取消记录会保留。")) return;
   const now = getNow();
   const workPlan = {
     id: createId("work-plan"),
@@ -5596,7 +5596,7 @@ async function relaunchProcessAsWorkPlan(instanceId, rerender) {
     return;
   }
   state.workPlans = [workPlan, ...state.workPlans];
-  window.alert("已创建新的本周工作，请在本周工作中点击“发起工作”。");
+  window.alert("已创建新的本周工作，请在本周工作中点击“发起关键行动”。");
   rerender();
 }
 
@@ -5678,7 +5678,7 @@ async function returnTaskToSelectedStep(form, rerender) {
     const previousRecordCount = getReturnRecords(affectedTasks.find((item) => item.id === returnedTask.id) ?? {}).length;
     const nextRecordCount = getReturnRecords(returnedTask).length;
     if (previousRecordCount < 2 && nextRecordCount >= 2) {
-      await triggerRectificationForTaskException(returnedTask, "rework_twice", `任务“${returnedTask.name}”连续返工达到 ${nextRecordCount} 次，需要发起整改。`);
+      await triggerRectificationForTaskException(returnedTask, "rework_twice", `任务“${returnedTask.name}”连续返工达到 ${nextRecordCount} 次，需要发起改善。`);
     }
   }
   selectedTaskId = targetTask.id;
@@ -5770,7 +5770,7 @@ async function handleTaskAction(action, taskId, rerender, actionButton = null) {
       return;
     }
     state.tasks = state.tasks.map((item) => (item.id === taskId ? updatedTask : item));
-    await triggerRectificationForTaskException(updatedTask, "acceptance_rejected", `任务“${updatedTask.name}”审核退回，需要发起整改。`);
+    await triggerRectificationForTaskException(updatedTask, "acceptance_rejected", `任务“${updatedTask.name}”审核退回，需要发起改善。`);
     rerender();
   }
 }
@@ -5778,7 +5778,7 @@ async function handleTaskAction(action, taskId, rerender, actionButton = null) {
 function openStandardOptimizationTarget(task, target) {
   const sourceStandardWork = getRectificationSourceStandardWork(task);
   if (sourceStandardWork === null) {
-    window.alert("未定位到来源标准工作。");
+    window.alert("未定位到来源关键行动。");
     return;
   }
   if (target === "form") {
@@ -5793,7 +5793,7 @@ function openStandardOptimizationTarget(task, target) {
   }
   if (target === "process" || target === "completion-standard") {
     if (!sourceStandardWork.defaultProcessTemplateId) {
-      window.alert("该标准工作尚未绑定流程。");
+      window.alert("该关键行动尚未绑定标准。");
       return;
     }
     window.location.hash = `process-template-${sourceStandardWork.defaultProcessTemplateId}`;
@@ -5877,7 +5877,7 @@ async function handleTaskSubmit(event, rerender) {
 
 async function moveStandardWorkToValueChain(templateId, categoryId, rerender) {
   if (!canCurrentUser("settings.editStandardWorks")) {
-    window.alert("你没有权限调整标准工作的价值链模块。");
+    window.alert("你没有权限调整关键行动的价值链模块。");
     return;
   }
 
@@ -5899,8 +5899,8 @@ async function moveStandardWorkToValueChain(templateId, categoryId, rerender) {
     const currentTemplate = getTaskTemplate(templateId);
     if (currentTemplate !== null) currentTemplate.categoryId = previousCategoryId;
     standardWorkMoveStatus = { type: "error", message: "分类保存失败，已恢复原分类。" };
-    console.error("标准工作价值链模块保存失败", error);
-    window.alert(error.message || "标准工作价值链模块保存失败，请检查本地数据库服务。");
+    console.error("关键行动价值链模块保存失败", error);
+    window.alert(error.message || "关键行动价值链模块保存失败，请检查本地数据库服务。");
     rerender();
   }
 }
@@ -6308,7 +6308,7 @@ export function bindTasksPageEvents(rerender) {
       if (actionButton !== null && actionButton.dataset.action === "cancel-process") {
         const instance = state.processInstances.find((item) => item.id === actionButton.dataset.processInstanceId) ?? null;
         if (!canCancelProcessInstance(instance)) {
-          window.alert(instance?.status === ProcessInstanceStatus.Done ? "已完成流程不能取消。" : "该流程当前不能取消。");
+          window.alert(instance?.status === ProcessInstanceStatus.Done ? "已完成关键行动不能取消。" : "该关键行动当前不能取消。");
           return;
         }
         modalState = { kind: "cancelProcess", instanceId: instance.id, cancelReason: "", error: "" };
@@ -6342,11 +6342,11 @@ export function bindTasksPageEvents(rerender) {
           await cancelProcessInstance(modalState.instanceId, cancelReason);
           modalState = null;
         } catch (error) {
-          console.error("取消流程失败", error);
+          console.error("取消关键行动失败", error);
           modalState = {
             ...modalState,
             cancelReason,
-            error: error.message || "取消流程失败，请检查本地数据库服务。",
+            error: error.message || "取消关键行动失败，请检查本地数据库服务。",
           };
         }
         rerender();

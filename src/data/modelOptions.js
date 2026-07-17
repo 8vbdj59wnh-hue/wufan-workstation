@@ -235,7 +235,7 @@ export const personRoleNames = Object.freeze({
 
 export const categoryTypeNames = Object.freeze({
   [CategoryType.Task]: "价值链模块",
-  [CategoryType.Process]: "流程价值链模块",
+  [CategoryType.Process]: "关键行动价值链模块",
 });
 
 export const statusNames = Object.freeze({
@@ -273,8 +273,8 @@ export const goalStatusNames = Object.freeze({
 });
 
 export const taskSourceNames = Object.freeze({
-  [TaskSource.Direct]: "标准工作发起",
-  [TaskSource.Process]: "流程步骤生成",
+  [TaskSource.Direct]: "关键行动发起",
+  [TaskSource.Process]: "标准步骤生成",
 });
 
 export const taskImportanceNames = Object.freeze({
@@ -288,9 +288,9 @@ export const taskUrgencyNames = Object.freeze({
 });
 
 export const taskStatusNames = Object.freeze({
-  [TaskStatus.Waiting]: "待执行",
-  [TaskStatus.Todo]: "待执行",
-  [TaskStatus.Doing]: "执行中",
+  [TaskStatus.Waiting]: "待处理",
+  [TaskStatus.Todo]: "待处理",
+  [TaskStatus.Doing]: "进行中",
   [TaskStatus.PendingAcceptance]: "待审核",
   [TaskStatus.Done]: "已完成",
   [TaskStatus.Canceled]: "已取消",
@@ -364,6 +364,6 @@ export const workPlanStatusNames = Object.freeze({
 });
 
 export const workTypeNames = Object.freeze({
-  [WorkType.Normal]: "普通工作",
-  [WorkType.Rectification]: "整改工作",
+  [WorkType.Normal]: "普通关键行动",
+  [WorkType.Rectification]: "改善工作",
 });

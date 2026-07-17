@@ -337,7 +337,7 @@ function renderStepTask(task, editable) {
         <td class="wide-text">${escapeHtml(task.reviewStandard ?? node?.reviewStandard ?? "-")}</td>
         <td class="wide-text">${escapeHtml(task.resultText ?? "暂无")}</td>
         <td>${task.completedAt ?? "未完成"}</td>
-        <td><button class="text-button" type="button" data-launched-process-task-id="${task.id}">查看执行任务</button></td>
+        <td><button class="text-button" type="button" data-launched-process-task-id="${task.id}">查看任务</button></td>
       </tr>
     `;
   }
@@ -366,7 +366,7 @@ function renderStepTask(task, editable) {
         <textarea name="task__${task.id}__description" rows="2">${escapeHtml(task.description ?? "")}</textarea>
       </td>
       <td>${task.completedAt ?? "未完成"}</td>
-      <td><button class="text-button" type="button" data-launched-process-task-id="${task.id}">查看执行任务</button></td>
+      <td><button class="text-button" type="button" data-launched-process-task-id="${task.id}">查看任务</button></td>
     </tr>
   `;
 }
@@ -385,7 +385,7 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
   return `
     <section class="settings-section process-detail launched-process-detail" data-launched-process-detail="${instance.id}">
       <div class="section-heading with-actions">
-        <h2>已发起流程详情：${escapeHtml(instance.displayTitle ?? instance.name)}</h2>
+        <h2>已发起关键行动详情：${escapeHtml(instance.displayTitle ?? instance.name)}</h2>
         ${editable ? `<button class="primary-button" type="submit" form="launched-process-form-${instance.id}">保存修改</button>` : `<span class="muted-action">只读</span>`}
       </div>
       <form id="launched-process-form-${instance.id}" class="launched-process-form">
@@ -394,7 +394,7 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
           <h3>基本信息</h3>
           <div class="form-grid">
             <label>
-              <span>本次流程名称</span>
+              <span>本次标准名称</span>
               <input name="name" value="${escapeHtml(instance.name)}" ${editable ? "" : "disabled"} />
             </label>
             <label>
@@ -411,8 +411,8 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
             </label>
           </div>
           <div class="detail-grid">
-            ${renderDetailField("标准工作事项", escapeHtml(taskTemplate?.name ?? "未关联标准工作事项"))}
-            ${renderDetailField("标准流程", `${escapeHtml(template?.name ?? "未设置")} v${instance.templateVersion}`)}
+            ${renderDetailField("关键行动", escapeHtml(taskTemplate?.name ?? "未关联关键行动"))}
+            ${renderDetailField("关键行动标准流程", `${escapeHtml(template?.name ?? "未设置")} v${instance.templateVersion}`)}
             ${renderDetailField("发起人", findName(people, instance.initiatorId, "未设置"))}
             ${renderDetailField("状态", processInstanceStatusNames[instance.status])}
             ${renderDetailField("步骤进度", getProgress(instance.id))}
@@ -427,24 +427,24 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
             }
           </div>
           <label>
-            <span>本次流程说明</span>
+            <span>本次关键行动说明</span>
             <textarea name="description" rows="3" ${editable ? "" : "disabled"}>${escapeHtml(instance.description ?? "")}</textarea>
           </label>
         </div>
         <div class="detail-block">
           <h3>本次工作表单</h3>
           ${renderCustomFields(instance, editable)}
-          <p class="form-note">本表单为发起工作时填写的本次工作要求，不是执行结果。</p>
+          <p class="form-note">本表单为发起关键行动时填写的本次工作要求，不是任务结果。</p>
         </div>
         ${renderEditableStandardWorkAttachments(instance, editable)}
         ${renderReturnRecords(instance.id)}
         <div class="detail-block">
-          <h3>流程步骤执行任务</h3>
+          <h3>标准步骤任务</h3>
           <div class="table-wrap">
             <table class="data-table process-instance-task-table">
               <thead>
                 <tr>
-                  <th>步骤名称</th><th>步骤</th><th>负责人</th><th>负责部门</th><th>状态</th><th>截止时间</th><th>是否逾期</th><th>四象限</th><th>步骤完成标准</th><th>步骤审核标准</th><th>输出结果 / 执行安排</th><th>完成时间</th><th>操作</th>
+                  <th>步骤名称</th><th>步骤</th><th>负责人</th><th>负责部门</th><th>状态</th><th>截止时间</th><th>是否逾期</th><th>四象限</th><th>步骤完成标准</th><th>步骤审核标准</th><th>输出结果 / 任务安排</th><th>完成时间</th><th>操作</th>
                 </tr>
               </thead>
               <tbody>${tasks.map((task) => renderStepTask(task, editable)).join("")}</tbody>
@@ -637,8 +637,8 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
         await updatePersistentResource("tasks", task.id, task);
       }
     } catch (error) {
-      console.error("已发起流程保存失败", error);
-      return showFormError(form, error.message || "已发起流程保存失败，请检查本地数据库服务。");
+      console.error("已发起关键行动保存失败", error);
+      return showFormError(form, error.message || "已发起关键行动保存失败，请检查本地数据库服务。");
     }
 
     const updatedTaskMap = new Map(updatedTasks.map((task) => [task.id, task]));

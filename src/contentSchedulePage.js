@@ -591,22 +591,22 @@ function renderScheduleFlowStatus(schedule) {
   if (schedule.workPlanId) {
     const workPlan = state.workPlans.find((item) => item.id === schedule.workPlanId);
     if (workPlan !== undefined) {
-      return `<span class="status-pill">${workPlanStatusNames[workPlan.status] ?? "已加入工作计划"}</span>`;
+      return `<span class="status-pill">${workPlanStatusNames[workPlan.status] ?? "已加入关键行动计划"}</span>`;
     }
   }
 
   if (schedule.processInstanceId !== null) {
     const instance = state.processInstances.find((item) => item.id === schedule.processInstanceId);
-    if (instance === undefined) return `<span class="status-pill is-inactive">流程已失效</span>`;
+    if (instance === undefined) return `<span class="status-pill is-inactive">关键行动已失效</span>`;
 
     const statusText =
       instance.status === ProcessInstanceStatus.Running
-        ? "流程进行中"
+        ? "关键行动进行中"
         : instance.status === ProcessInstanceStatus.Done
-          ? "流程已完成"
+          ? "关键行动已完成"
           : instance.status === ProcessInstanceStatus.Stopped
-            ? "流程已终止"
-            : `流程${processInstanceStatusNames[instance.status] ?? "未知"}`;
+            ? "关键行动已终止"
+            : `关键行动${processInstanceStatusNames[instance.status] ?? "未知"}`;
     const progressText = getProcessProgressText(instance.id);
 
     return `
@@ -655,7 +655,7 @@ function renderScheduleTable() {
       <div class="bulk-task-bar">
         <strong>已选择 ${selectedCount} 条内容</strong>
         ${canCurrentUser("contentSchedules.addToFuture") ? `<button class="secondary-button" type="button" data-content-action="bulk-create-work-plan" data-status="${WorkPlanStatus.Future}" ${selectedCount === 0 ? "disabled" : ""}>加入未来工作</button>` : ""}
-        ${canCurrentUser("contentSchedules.addToThisWeek") ? `<button class="secondary-button" type="button" data-content-action="bulk-create-work-plan" data-status="${WorkPlanStatus.ThisWeek}" ${selectedCount === 0 ? "disabled" : ""}>加入本周工作</button>` : ""}
+        ${canCurrentUser("contentSchedules.addToThisWeek") ? `<button class="secondary-button" type="button" data-content-action="bulk-create-work-plan" data-status="${WorkPlanStatus.ThisWeek}" ${selectedCount === 0 ? "disabled" : ""}>加入本周关键行动</button>` : ""}
         ${canCurrentUser("contentSchedules.batchCancel") ? `<button class="secondary-button danger-button" type="button" data-content-action="bulk-cancel-schedules" ${selectedCount === 0 ? "disabled" : ""}>批量取消</button>` : ""}
       </div>
       <div class="table-wrap">
@@ -682,7 +682,7 @@ function renderScheduleTable() {
               <th>受众人群</th>
               <th>标题</th>
               <th>内容文案</th>
-              <th>流程状态</th>
+              <th>关键行动状态</th>
               <th>操作</th>
             </tr>
           </thead>
@@ -719,7 +719,7 @@ function renderScheduleTable() {
                               ${renderActionButton("查看", "view-schedule", schedule.id)}
                               ${schedule.status !== ContentScheduleStatus.Canceled && canCurrentUser("contentSchedules.edit") ? renderActionButton("编辑", "edit-schedule", schedule.id) : ""}
                               ${schedule.status !== ContentScheduleStatus.Canceled && canCurrentUser("contentSchedules.addToFuture") ? renderActionButton("加入未来工作", "generate-task", schedule.id) : ""}
-                              ${schedule.status !== ContentScheduleStatus.Canceled && canCurrentUser("contentSchedules.addToThisWeek") ? renderActionButton("加入本周工作", "start-content-process", schedule.id) : ""}
+                              ${schedule.status !== ContentScheduleStatus.Canceled && canCurrentUser("contentSchedules.addToThisWeek") ? renderActionButton("加入本周关键行动", "start-content-process", schedule.id) : ""}
                               ${schedule.status !== ContentScheduleStatus.Canceled && canCurrentUser("contentSchedules.batchCancel") ? renderActionButton("删除", "cancel-schedule", schedule.id, "danger-button") : ""}
                             </span>
                           </td>
@@ -758,7 +758,7 @@ function renderScheduleDetail() {
         <div class="section-actions">
           ${schedule.status !== ContentScheduleStatus.Canceled && canCurrentUser("contentSchedules.edit") ? renderActionButton("编辑", "edit-schedule", schedule.id) : ""}
           ${schedule.status !== ContentScheduleStatus.Canceled && canCurrentUser("contentSchedules.addToFuture") ? renderActionButton("加入未来工作", "generate-task", schedule.id) : ""}
-          ${schedule.status !== ContentScheduleStatus.Canceled && canCurrentUser("contentSchedules.addToThisWeek") ? renderActionButton("加入本周工作", "start-content-process", schedule.id) : ""}
+          ${schedule.status !== ContentScheduleStatus.Canceled && canCurrentUser("contentSchedules.addToThisWeek") ? renderActionButton("加入本周关键行动", "start-content-process", schedule.id) : ""}
         </div>
       </div>
       <div class="content-detail-layout">
@@ -779,7 +779,7 @@ function renderScheduleDetail() {
           ${renderDetailField("对应产品", escapeHtml(schedule.product || "未填写"))}
           ${renderDetailField("状态", getStatusName(schedule.status))}
           ${renderDetailField("关联目标", findName(goals, schedule.goalId, "未关联"))}
-          ${renderDetailField("生成执行任务", schedule.taskId === null ? "未生成" : findName(state.tasks, schedule.taskId, "已生成"))}
+          ${renderDetailField("生成任务", schedule.taskId === null ? "未生成" : findName(state.tasks, schedule.taskId, "已生成"))}
         </div>
       </div>
       <div class="detail-block">
@@ -1330,9 +1330,9 @@ function buildWorkPlanFromSchedule(schedule, status, fallbackGoalId, now) {
   if (isScheduleAlreadyInWorkPlan(schedule)) return { skipped: "duplicated" };
   const template = getContentTaskTemplate(schedule);
   if (template === null && normalizeContentType(schedule.contentType) === "电商视觉") {
-    return { error: "电商视觉需要手动选择标准工作事项。" };
+    return { error: "电商视觉需要手动选择关键行动。" };
   }
-  if (template === null) return { error: "未找到对应标准工作事项，请先到标准工作库配置。" };
+  if (template === null) return { error: "未找到对应关键行动，请先到关键行动库配置。" };
   const goalId = schedule.goalId || fallbackGoalId;
   if (!goalId) return { error: "内容排期缺少对齐目标。" };
   const normalizedContentType = normalizeContentType(schedule.contentType);
@@ -1400,7 +1400,7 @@ async function createWorkPlanFromSchedule(scheduleId, status, rerender) {
   const now = getNow();
   const result = buildWorkPlanFromSchedule(schedule, status, null, now);
   if (result.error !== undefined) return window.alert(result.error);
-  if (result.skipped === "duplicated") return window.alert("该内容已加入工作计划，已跳过重复创建。");
+  if (result.skipped === "duplicated") return window.alert("该内容已加入关键行动计划，已跳过重复创建。");
   const updatedSchedule = { ...schedule, workPlanId: result.workPlanId, updatedAt: now };
   try {
     await createPersistentResource("work-plans", result.workPlan);
@@ -1412,7 +1412,7 @@ async function createWorkPlanFromSchedule(scheduleId, status, rerender) {
   }
   state.workPlans = [result.workPlan, ...state.workPlans];
   state.contentSchedules = state.contentSchedules.map((item) => (item.id === result.scheduleId ? updatedSchedule : item));
-  window.alert(status === WorkPlanStatus.ThisWeek ? "已加入本周工作，请到优先级模块发起工作。" : "已加入未来工作，请到优先级模块安排。");
+  window.alert(status === WorkPlanStatus.ThisWeek ? "已加入本周关键行动，请到优先级模块发起关键行动。" : "已加入未来工作，请到优先级模块安排。");
   rerender();
 }
 
@@ -1468,9 +1468,9 @@ async function bulkCreateWorkPlansFromSchedules(status, rerender) {
   selectedScheduleIds = new Set();
   const targetText = status === WorkPlanStatus.ThisWeek ? "本周工作" : "未来工作";
   const messages = [`已加入 ${createdWorkPlans.length} 条${targetText}。`];
-  if (duplicatedCount > 0) messages.push("部分内容已加入工作计划，已跳过重复创建。");
-  if (manualSelectCount > 0) messages.push("电商视觉需要手动选择标准工作事项，已跳过。");
-  if (errorCount > 0) messages.push("部分内容未找到对应标准工作事项，请先到标准工作库配置。");
+  if (duplicatedCount > 0) messages.push("部分内容已加入关键行动计划，已跳过重复创建。");
+  if (manualSelectCount > 0) messages.push("电商视觉需要手动选择关键行动，已跳过。");
+  if (errorCount > 0) messages.push("部分内容未找到对应关键行动，请先到关键行动库配置。");
   window.alert(messages.join("\n"));
   rerender();
 }

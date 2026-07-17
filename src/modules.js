@@ -9,7 +9,7 @@ export const modules = [
   },
   {
     id: "tasks",
-    name: "执行",
+    name: "任务",
   },
   {
     id: "scheduleBoard",
@@ -17,7 +17,7 @@ export const modules = [
   },
   {
     id: "processes",
-    name: "标准化",
+    name: "关键行动",
   },
   {
     id: "assessment",

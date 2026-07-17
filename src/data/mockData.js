@@ -246,7 +246,7 @@ export const categories = [
   {
     id: "cat-process-approval",
     type: CategoryType.Process,
-    name: "审批流程",
+    name: "审批标准",
     sortOrder: 1,
     status: Status.Active,
     createdAt: timestamp,
@@ -255,7 +255,7 @@ export const categories = [
   {
     id: "cat-process-operation",
     type: CategoryType.Process,
-    name: "运营流程",
+    name: "运营标准",
     sortOrder: 2,
     status: Status.Active,
     createdAt: timestamp,
@@ -965,13 +965,13 @@ export const taskTemplates = [
   },
   {
     id: "task-template-execution-check",
-    name: "任务执行检查",
+    name: "任务推进检查",
     categoryId: "cat-task-routine",
     defaultProcessTemplateId: "process-template-recruiting",
     departmentId: "dept-admin",
     ownerId: "person-001",
-    description: "检查任务执行进度，识别阻碍并推动闭环。",
-    completionStandard: "检查任务执行进度，记录阻碍，并提交任务执行情况。",
+    description: "检查任务推进进度，识别阻碍并推动闭环。",
+    completionStandard: "检查任务推进进度，记录阻碍，并提交任务推进情况。",
     importance: TaskImportance.NotImportant,
     urgency: TaskUrgency.NotUrgent,
     needAcceptance: false,
@@ -991,7 +991,7 @@ export const taskTemplates = [
 export const processTemplates = [
   {
     id: "process-template-content-note",
-    name: "内容笔记发布流程",
+    name: "内容笔记发布标准",
     categoryId: "cat-process-operation",
     purpose: "规范小红书内容从需求到发布的过程。",
     applicableDepartmentIds: ["dept-marketing"],
@@ -1006,7 +1006,7 @@ export const processTemplates = [
   },
   {
     id: "process-template-buyer-show",
-    name: "买家秀图片制作流程",
+    name: "买家秀图片制作标准",
     categoryId: "cat-process-operation",
     purpose: "规范买家秀图片从需求到交付的过程。",
     applicableDepartmentIds: ["dept-marketing"],
@@ -1021,7 +1021,7 @@ export const processTemplates = [
   },
   {
     id: "process-template-recruiting",
-    name: "人员招聘流程",
+    name: "人员招聘标准",
     categoryId: "cat-process-approval",
     purpose: "规范人员招聘和试用期判断过程。",
     applicableDepartmentIds: ["dept-admin"],
@@ -1161,7 +1161,7 @@ export const processTemplateNodes = [
   {
     id: "node-content-006",
     templateId: "process-template-content-note",
-    stageName: "发布执行",
+    stageName: "发布任务",
     stageOrder: 5,
     nodeOrder: 2,
     name: "提取素材并发布",
@@ -1219,7 +1219,7 @@ export const processTemplateNodes = [
     defaultOwnerId: "person-004",
     durationDays: 2,
     description: "确认产品型号、卖点和适合的生活场景。",
-    completionStandard: "产品信息准确，场景建议可执行。",
+    completionStandard: "产品信息准确，场景建议可落地。",
     defaultImportance: TaskImportance.Important,
     defaultUrgency: TaskUrgency.NotUrgent,
     needAcceptance: true,

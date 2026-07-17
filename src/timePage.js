@@ -135,7 +135,7 @@ function getWorkTitle(workPlan) {
   const template = getTaskTemplate(workPlan);
   if (workPlan.title) return workPlan.title;
   const objectName = getWorkObjectName(workPlan);
-  if (objectName !== "") return `${objectName}｜${template?.name ?? "标准工作"}`;
+  if (objectName !== "") return `${objectName}｜${template?.name ?? "关键行动"}`;
   return template?.name ?? "未命名工作";
 }
 
@@ -252,7 +252,7 @@ function renderWorkBulkBar(listType) {
   return `
       <div class="bulk-task-bar">
       <strong>已选择 ${selectedCount} 条本周工作</strong>
-      ${canCurrentUser("workPlans.batchOperate") && canCurrentUser("workPlans.returnToFuture") ? `<button class="secondary-button" type="button" data-action="bulk-set-future" ${selectedCount === 0 ? "disabled" : ""}>批量退回未来工作</button>` : ""}
+      ${canCurrentUser("workPlans.batchOperate") && canCurrentUser("workPlans.returnToFuture") ? `<button class="secondary-button" type="button" data-action="bulk-set-future" ${selectedCount === 0 ? "disabled" : ""}>批量退回未来关键行动</button>` : ""}
       ${canCurrentUser("workPlans.batchOperate") && canCurrentUser("workPlans.cancelFuture") ? `<button class="secondary-button danger-button" type="button" data-action="bulk-cancel-week" ${selectedCount === 0 ? "disabled" : ""}>批量取消</button>` : ""}
     </div>
   `;
@@ -299,7 +299,7 @@ function renderWorkRow(workPlan, actions = "", listType = null, index = 0) {
       <td class="task-cover-column">${renderCover(workPlan)}</td>
       <td><strong>${escapeHtml(getWorkTitle(workPlan))}</strong></td>
       <td>${findName(goals, workPlan.goalId, "未对齐目标")}</td>
-      <td>${escapeHtml(template?.name ?? "未关联标准工作")}</td>
+      <td>${escapeHtml(template?.name ?? "未关联关键行动")}</td>
       <td>${escapeHtml(getWorkValueModuleName(workPlan))}</td>
       <td>${findName(people, template?.ownerId ?? null, "未设置")}</td>
       <td><span class="task-soft-tag">${getTaskQuadrant(workPlan.importance, workPlan.urgency)}</span></td>
@@ -318,7 +318,7 @@ function renderFutureWorks() {
       ${renderWorkBulkBar("future")}
       <div class="table-wrap">
         <table class="data-table task-table">
-          <thead><tr>${renderWorkSelectHeader(workPlans, "future")}<th>产品图</th><th>工作事项</th><th>对齐目标</th><th>标准工作事项</th><th>价值链模块</th><th>负责人</th><th>优先级</th><th>截止时间</th><th>状态</th><th>操作</th></tr></thead>
+          <thead><tr>${renderWorkSelectHeader(workPlans, "future")}<th>产品图</th><th>工作事项</th><th>对齐目标</th><th>关键行动</th><th>价值链模块</th><th>负责人</th><th>优先级</th><th>截止时间</th><th>状态</th><th>操作</th></tr></thead>
           <tbody>
             ${workPlans.length === 0 ? `<tr><td colspan="11">暂无未来工作</td></tr>` : workPlans
               .map((workPlan, index) =>
@@ -326,7 +326,7 @@ function renderFutureWorks() {
                   workPlan,
                   isCanceledStatus(workPlan.status)
                     ? `${canCurrentUser("workPlans.editFuture") ? `<button class="text-button" type="button" data-action="set-future" data-work-id="${workPlan.id}">重新加入未来工作</button>` : ""}`
-                    : `${canCurrentUser("workPlans.editFuture") ? `<button class="text-button" type="button" data-action="edit-work" data-work-id="${workPlan.id}">编辑</button>` : ""}${canCurrentUser("workPlans.joinThisWeek") ? `<button class="text-button" type="button" data-action="set-this-week" data-work-id="${workPlan.id}">加入本周工作</button>` : ""}${canCurrentUser("workPlans.cancelFuture") ? `<button class="text-button danger-button" type="button" data-action="cancel-work" data-work-id="${workPlan.id}">取消</button>` : ""}`,
+                    : `${canCurrentUser("workPlans.editFuture") ? `<button class="text-button" type="button" data-action="edit-work" data-work-id="${workPlan.id}">编辑</button>` : ""}${canCurrentUser("workPlans.joinThisWeek") ? `<button class="text-button" type="button" data-action="set-this-week" data-work-id="${workPlan.id}">加入本周关键行动</button>` : ""}${canCurrentUser("workPlans.cancelFuture") ? `<button class="text-button danger-button" type="button" data-action="cancel-work" data-work-id="${workPlan.id}">取消</button>` : ""}`,
                   "future",
                   index,
                 ),
@@ -365,12 +365,12 @@ function renderPriorityQuadrants() {
                       <article class="task-card">
                         <div class="row-actions">${renderCover(workPlan)}</div>
                         <strong>${escapeHtml(getWorkTitle(workPlan))}</strong>
-                        <p>${findName(goals, workPlan.goalId, "未对齐目标")} · ${escapeHtml(template?.name ?? "未关联标准工作")}</p>
+                        <p>${findName(goals, workPlan.goalId, "未对齐目标")} · ${escapeHtml(template?.name ?? "未关联关键行动")}</p>
                         <p>${findName(people, template?.ownerId ?? null, "未设置")} · ${formatBusinessDateTime(workPlan.dueDate)} · ${workPlanStatusNames[workPlan.status]}</p>
                         <div class="row-actions">
                           <button class="text-button" type="button" data-action="toggle-importance" data-work-id="${workPlan.id}">${taskImportanceNames[workPlan.importance]}</button>
                           <button class="text-button" type="button" data-action="toggle-urgency" data-work-id="${workPlan.id}">${taskUrgencyNames[workPlan.urgency]}</button>
-                          ${workPlan.status === WorkPlanStatus.Future ? `<button class="text-button" type="button" data-action="set-this-week" data-work-id="${workPlan.id}">加入本周工作</button>` : `<button class="text-button" type="button" data-action="set-future" data-work-id="${workPlan.id}">退回未来工作</button>`}
+                          ${workPlan.status === WorkPlanStatus.Future ? `<button class="text-button" type="button" data-action="set-this-week" data-work-id="${workPlan.id}">加入本周关键行动</button>` : `<button class="text-button" type="button" data-action="set-future" data-work-id="${workPlan.id}">退回未来关键行动</button>`}
                           <button class="text-button danger-button" type="button" data-action="cancel-work" data-work-id="${workPlan.id}">取消</button>
                         </div>
                       </article>
@@ -394,15 +394,15 @@ function renderThisWeekWorks() {
       ${renderWorkBulkBar("week")}
       <div class="table-wrap">
         <table class="data-table task-table">
-          <thead><tr>${renderWorkSelectHeader(workPlans, "week")}<th>产品图</th><th>工作事项</th><th>对齐目标</th><th>标准工作事项</th><th>价值链模块</th><th>负责人</th><th>优先级</th><th>截止时间</th><th>状态</th><th>操作</th></tr></thead>
+          <thead><tr>${renderWorkSelectHeader(workPlans, "week")}<th>产品图</th><th>工作事项</th><th>对齐目标</th><th>关键行动</th><th>价值链模块</th><th>负责人</th><th>优先级</th><th>截止时间</th><th>状态</th><th>操作</th></tr></thead>
           <tbody>
             ${workPlans.length === 0 ? `<tr><td colspan="11">暂无本周工作</td></tr>` : workPlans
               .map((workPlan, index) =>
                 renderWorkRow(
                   workPlan,
                   isCanceledStatus(workPlan.status)
-                    ? `${canCurrentUser("workPlans.joinThisWeek") ? `<button class="text-button" type="button" data-action="set-this-week" data-work-id="${workPlan.id}">重新加入本周工作</button>` : ""}`
-                    : `${canCurrentUser("workPlans.editFuture") ? `<button class="text-button" type="button" data-action="edit-work" data-work-id="${workPlan.id}">编辑</button>` : ""}${canCurrentUser("workPlans.launch") ? `<button class="text-button" type="button" data-action="launch-work" data-work-id="${workPlan.id}">发起工作</button>` : ""}${canCurrentUser("workPlans.returnToFuture") ? `<button class="text-button" type="button" data-action="set-future" data-work-id="${workPlan.id}">退回未来工作</button>` : ""}${canCurrentUser("workPlans.cancelFuture") ? `<button class="text-button danger-button" type="button" data-action="cancel-work" data-work-id="${workPlan.id}">取消</button>` : ""}`,
+                    ? `${canCurrentUser("workPlans.joinThisWeek") ? `<button class="text-button" type="button" data-action="set-this-week" data-work-id="${workPlan.id}">重新加入本周关键行动</button>` : ""}`
+                    : `${canCurrentUser("workPlans.editFuture") ? `<button class="text-button" type="button" data-action="edit-work" data-work-id="${workPlan.id}">编辑</button>` : ""}${canCurrentUser("workPlans.launch") ? `<button class="text-button" type="button" data-action="launch-work" data-work-id="${workPlan.id}">发起关键行动</button>` : ""}${canCurrentUser("workPlans.returnToFuture") ? `<button class="text-button" type="button" data-action="set-future" data-work-id="${workPlan.id}">退回未来关键行动</button>` : ""}${canCurrentUser("workPlans.cancelFuture") ? `<button class="text-button danger-button" type="button" data-action="cancel-work" data-work-id="${workPlan.id}">取消</button>` : ""}`,
                   "week",
                   index,
                 ),
@@ -453,8 +453,8 @@ async function updateWorkPlan(workPlanId, patch) {
     if (previousProcessInstance !== null) {
       state.processInstances = state.processInstances.map((item) => (item.id === previousProcessInstance.id ? previousProcessInstance : item));
     }
-    console.error("工作计划保存失败", error);
-    window.alert(error.message || "工作计划保存失败，请检查本地数据库服务。");
+    console.error("关键行动计划保存失败", error);
+    window.alert(error.message || "关键行动计划保存失败，请检查本地数据库服务。");
     return false;
   }
   state.workPlans = state.workPlans.map((item) => (item.id === workPlanId ? updatedWorkPlan : item));
@@ -472,8 +472,8 @@ async function bulkUpdateWorkPlans(workPlanIds, patch) {
       await updatePersistentResource("work-plans", workPlan.id, workPlan);
     }
   } catch (error) {
-    console.error("批量保存工作计划失败", error);
-    window.alert(error.message || "工作计划保存失败，请检查本地数据库服务。");
+    console.error("批量保存关键行动计划失败", error);
+    window.alert(error.message || "关键行动计划保存失败，请检查本地数据库服务。");
     return false;
   }
   const updatedMap = new Map(updatedWorkPlans.map((workPlan) => [workPlan.id, workPlan]));
@@ -522,11 +522,11 @@ async function launchWorkPlan(workPlanId) {
   const workPlan = state.workPlans.find((item) => item.id === workPlanId);
   if (workPlan === undefined) return;
   const template = getTaskTemplate(workPlan);
-  if (template === null) return window.alert("该工作计划未关联标准工作事项。");
-  if (!template.defaultProcessTemplateId) return window.alert("该标准工作事项尚未绑定标准流程。");
+  if (template === null) return window.alert("该关键行动计划未关联关键行动。");
+  if (!template.defaultProcessTemplateId) return window.alert("该关键行动尚未绑定关键行动标准流程。");
   const processTemplate = getProcessTemplate(template.defaultProcessTemplateId);
   if (processTemplate === null || processTemplate.status !== ProcessTemplateStatus.Active) {
-    return window.alert("该标准工作事项绑定的标准流程未启用。");
+    return window.alert("该关键行动绑定的关键行动标准流程未启用。");
   }
 
   const previousProcessInstances = [...state.processInstances];
@@ -564,12 +564,12 @@ async function launchWorkPlan(workPlanId) {
   } catch (error) {
     state.processInstances = previousProcessInstances;
     state.tasks = previousTasks;
-    console.error("发起工作保存失败", error);
-    window.alert(error.message || "发起工作失败，请检查本地数据库服务。");
+    console.error("发起关键行动保存失败", error);
+    window.alert(error.message || "发起关键行动失败，请检查本地数据库服务。");
     return;
   }
   state.workPlans = state.workPlans.map((item) => (item.id === workPlanId ? updatedWorkPlan : item));
-  window.alert("已发起工作，流程步骤执行任务已进入执行任务列表。");
+  window.alert("已发起关键行动，标准步骤任务已进入任务列表。");
 }
 
 function requestWorkPlanEditDraft(workPlan) {
@@ -730,7 +730,7 @@ export function bindTimePageEvents(rerender) {
     }
     if (button.dataset.action === "set-this-week") await updateWorkPlan(workPlanId, { status: WorkPlanStatus.ThisWeek, plannedWeek: currentWeek });
     if (button.dataset.action === "set-future") await updateWorkPlan(workPlanId, { status: WorkPlanStatus.Future, plannedWeek: null });
-    if (button.dataset.action === "cancel-work" && window.confirm("确定要取消该工作计划吗？")) {
+    if (button.dataset.action === "cancel-work" && window.confirm("确定要取消该关键行动计划吗？")) {
       await updateWorkPlan(workPlanId, { status: WorkPlanStatus.Canceled, canceledAt: getNow() });
     }
     if (button.dataset.action === "toggle-importance") {
