@@ -27,6 +27,7 @@ import {
   TaskImportance,
   TaskStatus,
   TaskUrgency,
+  WorkType,
   getValueModuleName,
   inferValueModuleIdFromText,
   isValueModuleId,
@@ -43,7 +44,7 @@ import {
 } from "./data/modelOptions.js?v=20260705-state-singleton1";
 import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
 import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260705-state-singleton1";
-import { getMethodologyLinkByNodeId, renderMethodologiesPage } from "./methodologiesPage.js?v=20260705-state-singleton1";
+import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260705-state-singleton1";
 import { bindStandardWorkLibraryEvents, renderStandardWorkLibraryPage, selectTask } from "./tasksPage.js?v=20260705-state-singleton1";
 
 const today = "2026-06-24";
@@ -145,11 +146,6 @@ function syncSelectedTemplateFromHash() {
   }
 }
 
-function isMethodologyRoute() {
-  const hash = window.location.hash.replace(/^#/, "");
-  return hash === "methods" || hash === "methodologies" || hash.startsWith("methodology-");
-}
-
 function renderOptions(items, selectedId, emptyLabel) {
   return `
     <option value="">${emptyLabel}</option>
@@ -185,13 +181,13 @@ function renderTemplateList() {
   return `
     <section class="settings-section">
       <div class="section-heading with-actions">
-        <h2>标准流程</h2>
-        <p class="form-note">标准流程通常由标准工作事项自动创建。如需新增标准流程，请优先到标准工作库新增标准工作事项。</p>
+        <h2>关键行动标准流程</h2>
+        <p class="form-note">关键行动标准流程通常由关键行动自动创建。如需新增关键行动标准流程，请优先到关键行动库新增关键行动。</p>
         <label class="checkbox-field process-filter-checkbox">
           <input type="checkbox" data-show-inactive-processes ${showInactiveTemplates ? "checked" : ""} />
-          <span>显示停用流程</span>
+          <span>显示停用标准</span>
         </label>
-        ${canCurrentUser("processes.editTemplates") ? `<button class="primary-button" type="button" data-action="add-template">新增标准流程</button>` : ""}
+        ${canCurrentUser("processes.editTemplates") ? `<button class="primary-button" type="button" data-action="add-template">新增关键行动标准流程</button>` : ""}
       </div>
       <div class="standard-work-board-wrap">
         <div class="standard-work-board process-template-board">
@@ -208,7 +204,7 @@ function renderTemplateList() {
                   <div class="standard-work-card-list">
                     ${
                       templates.length === 0
-                        ? `<div class="empty-note">${showInactiveTemplates ? "暂无标准流程" : "暂无启用流程"}</div>`
+                        ? `<div class="empty-note">${showInactiveTemplates ? "暂无关键行动标准流程" : "暂无启用标准"}</div>`
                         : templates.map((template) => renderProcessTemplateCard(template)).join("")
                     }
                   </div>
@@ -237,16 +233,16 @@ function renderProcessTemplateCard(template, isUncategorized = false) {
         <span class="status-pill ${template.status === ProcessTemplateStatus.Inactive ? "is-inactive" : ""}">${processTemplateStatusNames[template.status]}</span>
       </div>
       <div class="standard-work-card-meta">
-        <span>对应标准工作事项</span>
-        <strong>${standardWork?.name ?? "未绑定标准工作事项"}</strong>
+        <span>对应关键行动</span>
+        <strong>${standardWork?.name ?? "未绑定关键行动"}</strong>
       </div>
-      ${isUncategorized ? `<p class="form-note">该流程未绑定标准工作事项或部门。</p>` : ""}
+      ${isUncategorized ? `<p class="form-note">该关键行动未绑定关键行动或部门。</p>` : ""}
       <div class="standard-work-card-meta">
-        <span>流程负责人</span>
+        <span>标准负责人</span>
         <strong>${findName(people, template.ownerId, "未设置")}</strong>
       </div>
       <div class="standard-work-card-meta">
-        <span>流程步骤</span>
+        <span>标准步骤</span>
         <strong>${renderTemplateStepCount(template.id)}</strong>
       </div>
       <div class="standard-work-card-meta">
@@ -254,19 +250,19 @@ function renderProcessTemplateCard(template, isUncategorized = false) {
         <strong>v${template.version} · ${template.updatedAt}</strong>
       </div>
       <div class="standard-work-card-actions">
-        <button class="text-button" type="button" data-action="select-template" data-template-id="${template.id}">查看流程</button>
-        ${canCurrentUser("processes.editSteps") ? `<button class="text-button" type="button" data-action="add-node" data-template-id="${template.id}" onclick="window.__handleProcessNodeAction?.(this, event)">编辑流程步骤</button>` : ""}
+        <button class="text-button" type="button" data-action="select-template" data-template-id="${template.id}">查看标准</button>
+        ${canCurrentUser("processes.editSteps") ? `<button class="text-button" type="button" data-action="add-node" data-template-id="${template.id}" onclick="window.__handleProcessNodeAction?.(this, event)">编辑标准步骤</button>` : ""}
         ${
           canCurrentUser("processes.editTemplates") && template.status === ProcessTemplateStatus.Inactive
-            ? `<button class="text-button" type="button" data-action="activate-template" data-template-id="${template.id}">启用流程</button>`
+            ? `<button class="text-button" type="button" data-action="activate-template" data-template-id="${template.id}">启用标准</button>`
             : ""
         }
         ${
           canCurrentUser("processes.editTemplates") && template.status !== ProcessTemplateStatus.Inactive
-            ? `<button class="text-button danger-button" type="button" data-action="deactivate-template" data-template-id="${template.id}">停用流程</button>`
+            ? `<button class="text-button danger-button" type="button" data-action="deactivate-template" data-template-id="${template.id}">停用标准</button>`
             : ""
         }
-        ${canCurrentUser("processes.editTemplates") ? `<button class="text-button danger-button" type="button" data-action="delete-template" data-template-id="${template.id}">删除流程</button>` : ""}
+        ${canCurrentUser("processes.editTemplates") ? `<button class="text-button danger-button" type="button" data-action="delete-template" data-template-id="${template.id}">删除标准</button>` : ""}
       </div>
     </article>
   `;
@@ -278,7 +274,7 @@ function renderUncategorizedTemplateColumn(categorizedTemplateIds) {
   return `
     <section class="standard-work-column">
       <div class="standard-work-column-header">
-        <h3>未分类流程</h3>
+        <h3>未分类标准</h3>
         <span>${templates.length} 个</span>
       </div>
       <div class="standard-work-card-list">
@@ -330,7 +326,7 @@ function renderTemplateNodes(templateId) {
                 <span><em>负责部门</em>${findName(departments, node.departmentId ?? node.ownerDepartmentId, "未设置")}</span>
                 <span><em>负责人</em>${findName(people, node.ownerId ?? node.defaultOwnerId, "未设置")}</span>
                 <span><em>执行人</em>${findName(people, node.executorId, "同负责人")}</span>
-                <span><em>执行时长</em>${node.durationMinutes ?? (Number(node.durationDays ?? 1) * 1440)} 分钟</span>
+                <span><em>任务时长</em>${node.durationMinutes ?? (Number(node.durationDays ?? 1) * 1440)} 分钟</span>
                 <span><em>状态</em>${processTemplateNodeStatusNames[node.status]}</span>
               </div>
               <div class="process-node-copy">
@@ -352,56 +348,127 @@ function renderTemplateDetail() {
   if (template === undefined) {
     return `
       <section class="settings-section process-detail">
-        <div class="section-heading"><h2>标准流程详情</h2></div>
-        <div class="empty-note">暂无标准流程</div>
+        <div class="section-heading"><h2>关键行动详情</h2></div>
+        <div class="empty-note">暂无关键行动</div>
       </section>
     `;
   }
+  const standardWork = getStandardWorkForTemplate(template.id);
   const departmentNames = template.applicableDepartmentIds
     .map((departmentId) => findName(departments, departmentId, "未设置"))
     .join("、");
+  const standardWorkDepartment = findName(departments, standardWork?.departmentId ?? "", "未设置");
+  const rectificationRecords = standardWork === null
+    ? []
+    : state.workPlans
+        .filter((workPlan) =>
+          workPlan.workType === WorkType.Rectification &&
+          (
+            workPlan.customFields?.sourceStandardWorkId === standardWork.id ||
+            workPlan.taskTemplateId === standardWork.id
+          ),
+        )
+        .slice()
+        .sort((left, right) => String(right.createdAt ?? "").localeCompare(String(left.createdAt ?? "")))
+        .slice(0, 5);
+  const relatedInstances = state.processInstances.filter((instance) =>
+    instance.templateId === template.id ||
+    instance.taskTemplateId === standardWork?.id ||
+    instance.standardWorkId === standardWork?.id
+  );
+  const launchCount = relatedInstances.length;
+  const improvementCount = rectificationRecords.length;
 
   return `
     <section class="settings-section process-detail">
       <div class="section-heading with-actions">
-        <h2>标准流程详情</h2>
+        <h2>关键行动详情</h2>
         <div class="section-actions">
-          ${canCurrentUser("processes.editTemplates") ? `<button class="secondary-button" type="button" data-action="edit-template" data-template-id="${template.id}">编辑流程</button>` : ""}
+          ${canCurrentUser("processes.editTemplates") ? `<button class="secondary-button" type="button" data-action="edit-template" data-template-id="${template.id}">编辑标准</button>` : ""}
           ${
             canCurrentUser("processes.editTemplates") && template.status === ProcessTemplateStatus.Inactive
-              ? `<button class="secondary-button" type="button" data-action="activate-template" data-template-id="${template.id}">启用流程</button>`
+              ? `<button class="secondary-button" type="button" data-action="activate-template" data-template-id="${template.id}">启用标准</button>`
               : ""
           }
           ${
             canCurrentUser("processes.editTemplates") && template.status !== ProcessTemplateStatus.Inactive
-              ? `<button class="secondary-button danger-button" type="button" data-action="deactivate-template" data-template-id="${template.id}">停用流程</button>`
+              ? `<button class="secondary-button danger-button" type="button" data-action="deactivate-template" data-template-id="${template.id}">停用标准</button>`
               : ""
           }
-          ${canCurrentUser("processes.editTemplates") ? `<button class="secondary-button danger-button" type="button" data-action="delete-template" data-template-id="${template.id}">删除流程</button>` : ""}
-          ${canCurrentUser("processes.editSteps") ? `<button class="secondary-button" type="button" data-action="add-node" data-template-id="${template.id}" onclick="window.__handleProcessNodeAction?.(this, event)">新增流程步骤</button>` : ""}
+          ${canCurrentUser("processes.editTemplates") ? `<button class="secondary-button danger-button" type="button" data-action="delete-template" data-template-id="${template.id}">删除标准</button>` : ""}
+          ${canCurrentUser("processes.editSteps") ? `<button class="secondary-button" type="button" data-action="add-node" data-template-id="${template.id}" onclick="window.__handleProcessNodeAction?.(this, event)">新增标准步骤</button>` : ""}
         </div>
       </div>
+      <p class="key-action-position-note">关键行动：部门长期实践验证有效、能够持续推进目标实现、可以反复发起工作事项的标准模板。</p>
       <div class="process-template-summary">
         <div class="process-template-title-row">
-          <h3>${template.name}</h3>
+          <h3>${standardWork?.name ?? template.name}</h3>
           <span class="status-pill ${template.status === ProcessTemplateStatus.Inactive ? "is-inactive" : ""}">${processTemplateStatusNames[template.status]}</span>
         </div>
-        <div class="process-template-meta">
-          <span><em>价值链模块</em>${getProcessTemplateValueModuleName(template)}</span>
-          <span><em>适用部门</em>${departmentNames}</span>
-          <span><em>负责人</em>${findName(people, template.ownerId, "未设置")}</span>
-          <span><em>版本</em>v${template.version}</span>
-        </div>
-        <div class="process-template-copy">
-          <p><strong>目的：</strong>${template.purpose}</p>
-          <p><strong>发起：</strong>${template.startCondition}</p>
-          <p><strong>完成：</strong>${template.completionCondition}</p>
-          <p><strong>标准：</strong>${template.overallStandard}</p>
+        <div class="key-action-detail-section">
+          <h3>基本信息</h3>
+          <div class="process-template-meta">
+            <span><em>名称</em>${standardWork?.name ?? template.name}</span>
+            <span><em>所属价值链</em>${getProcessTemplateValueModuleName(template)}</span>
+            <span><em>责任部门</em>${standardWorkDepartment}</span>
+            <span><em>负责人</em>${findName(people, template.ownerId, "未设置")}</span>
+            <span><em>启用 / 停用</em>${processTemplateStatusNames[template.status]}</span>
+            <span><em>当前版本</em>v${template.version}</span>
+          </div>
         </div>
       </div>
-      <div class="detail-block">
-        <h3>流程步骤</h3>
+      <div class="detail-block key-action-detail-section">
+        <h3>行动流程</h3>
+        <div class="process-template-copy key-action-completion-copy">
+          <p><strong>关键行动说明：</strong>${standardWork?.description ?? template.purpose}</p>
+          <p><strong>发起条件：</strong>${template.startCondition}</p>
+          <p><strong>完成条件：</strong>${template.completionCondition}</p>
+          <p><strong>完成标准：</strong>${standardWork?.completionStandard ?? template.overallStandard}</p>
+        </div>
         ${renderTemplateNodes(template.id)}
+      </div>
+      <div class="detail-block key-action-detail-section">
+        <h3>改善记录</h3>
+        ${
+          rectificationRecords.length === 0
+            ? `<p class="empty-note">暂无改善记录</p>`
+            : `<div class="compact-record-list">
+                ${rectificationRecords.map((record) => {
+                  const customFields = record.customFields ?? {};
+                  const editorName = findName(people, record.ownerId ?? customFields.sourceOwnerId ?? "", "未记录");
+                  return `
+                  <div class="compact-record-item">
+                    <strong>${record.createdAt ?? "-"}</strong>
+                    <span>原因：${customFields.sourceType ?? customFields.rectificationSource ?? "未记录"}</span>
+                    <span>改善内容：${customFields.problemSummary ?? record.title ?? record.name ?? "未记录"}</span>
+                    <span>修改人：${editorName}</span>
+                  </div>
+                `;
+                }).join("")}
+              </div>`
+        }
+      </div>
+      <div class="detail-block key-action-detail-section">
+        <h3>版本</h3>
+        <div class="compact-record-list">
+          <div class="compact-record-item">
+            <strong>v${template.version}</strong>
+            <span>当前版本 · ${template.updatedAt ?? "-"}</span>
+          </div>
+          <div class="compact-record-item">
+            <strong>版本历史</strong>
+            <span>已预留，后续接入完整版本记录。</span>
+          </div>
+        </div>
+      </div>
+      <div class="detail-block key-action-detail-section">
+        <h3>使用情况</h3>
+        <div class="key-action-usage-grid">
+          <div><span>发起次数</span><strong>${launchCount}</strong></div>
+          <div><span>正常完成率</span><strong>-</strong><em>待接入完整统计</em></div>
+          <div><span>异常完成率</span><strong>-</strong><em>待接入完整统计</em></div>
+          <div><span>改善次数</span><strong>${improvementCount}</strong></div>
+        </div>
       </div>
     </section>
   `;
@@ -425,16 +492,16 @@ function renderStartedProcesses() {
   if (state.processInstances.length === 0) {
     return `
       <section class="settings-section">
-        <div class="section-heading"><h2>已发起流程</h2></div>
-        <div class="empty-detail">暂未发起流程，下一步将实现流程发起功能。</div>
+        <div class="section-heading"><h2>已发起关键行动</h2></div>
+        <div class="empty-detail">暂未发起关键行动，下一步将实现关键行动发起功能。</div>
       </section>
     `;
   }
 
   return `
     <section class="settings-section">
-      <div class="section-heading"><h2>已发起流程</h2></div>
-      <form class="task-filters started-process-filters" aria-label="已发起流程筛选">
+      <div class="section-heading"><h2>已发起关键行动</h2></div>
+      <form class="task-filters started-process-filters" aria-label="已发起关键行动筛选">
         <label class="checkbox-field task-filter-checkbox">
           <input name="showDone" type="checkbox" ${startedProcessFilters.showDone ? "checked" : ""} />
           <span>显示已完成</span>
@@ -448,10 +515,10 @@ function renderStartedProcesses() {
       <div class="table-wrap">
         <table class="data-table process-table">
           <thead>
-            <tr><th>已发起流程名称</th><th>标准流程</th><th>关联目标</th><th>发起人</th><th>当前步骤</th><th>步骤进度</th><th>状态</th><th>发起时间</th><th>完成时间</th><th>操作</th></tr>
+            <tr><th>已发起关键行动名称</th><th>关键行动标准流程</th><th>关联目标</th><th>发起人</th><th>当前步骤</th><th>步骤进度</th><th>状态</th><th>发起时间</th><th>完成时间</th><th>操作</th></tr>
           </thead>
           <tbody>
-            ${visibleInstances.length === 0 ? `<tr><td colspan="10">暂无匹配的已发起流程</td></tr>` : visibleInstances
+            ${visibleInstances.length === 0 ? `<tr><td colspan="10">暂无匹配的已发起关键行动</td></tr>` : visibleInstances
               .map((instance) => {
                 const instanceTasks = getInstanceTasks(instance.id);
                 const doneCount = instanceTasks.filter((task) => task.status === TaskStatus.Done).length;
@@ -496,7 +563,7 @@ function renderTemplateModal() {
   return `
     <div class="modal-backdrop"><div class="modal-panel wide-modal">
       <div class="modal-header">
-        <h2>${template ? "编辑标准流程" : "新增标准流程"}</h2>
+        <h2>${template ? "编辑关键行动标准流程" : "新增关键行动标准流程"}</h2>
         <div class="modal-header-actions">
           <button class="secondary-button" type="button" data-action="close-process-modal">取消</button>
           <button class="primary-button" type="button" data-action="submit-modal-form">保存</button>
@@ -505,13 +572,13 @@ function renderTemplateModal() {
       </div>
       <form class="modal-form process-template-form">
         <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${modalState.error}</div>
-        <label><span>流程名称</span><input name="name" value="${template?.name ?? ""}" /></label>
+        <label><span>标准名称</span><input name="name" value="${template?.name ?? ""}" /></label>
         <div class="form-grid">
           <label><span>价值链模块</span><select name="valueModuleId">${renderOptions(valueModuleList, selectedValueModuleId, "请选择价值链模块")}</select></label>
-          <label><span>流程负责人</span><select name="ownerId">${renderOptions(people, template?.ownerId ?? "", "请选择负责人")}</select></label>
+          <label><span>标准负责人</span><select name="ownerId">${renderOptions(people, template?.ownerId ?? "", "请选择负责人")}</select></label>
         </div>
         <label><span>适用部门</span><select name="applicableDepartmentIds" multiple>${departments.map((department) => `<option value="${department.id}" ${applicableDepartmentIds.includes(department.id) ? "selected" : ""}>${department.name}</option>`).join("")}</select></label>
-        <label><span>流程目的</span><textarea name="purpose">${template?.purpose ?? ""}</textarea></label>
+        <label><span>标准目的</span><textarea name="purpose">${template?.purpose ?? ""}</textarea></label>
         <label><span>发起条件</span><textarea name="startCondition">${template?.startCondition ?? ""}</textarea></label>
         <label><span>完成条件</span><textarea name="completionCondition">${template?.completionCondition ?? ""}</textarea></label>
         <label><span>整体标准</span><textarea name="overallStandard">${template?.overallStandard ?? ""}</textarea></label>
@@ -530,7 +597,7 @@ function renderNodeModal() {
   return `
     <div class="modal-backdrop"><div class="modal-panel wide-modal">
       <div class="modal-header">
-        <h2>${node ? "编辑流程步骤" : "新增流程步骤"}</h2>
+        <h2>${node ? "编辑标准步骤" : "新增标准步骤"}</h2>
         <div class="modal-header-actions">
           <button class="secondary-button" type="button" data-action="close-process-modal">取消</button>
           <button class="primary-button" type="button" data-action="submit-modal-form">保存</button>
@@ -544,7 +611,7 @@ function renderNodeModal() {
           <label><span>负责部门</span><select name="departmentId">${renderOptions(departments, node?.departmentId ?? node?.ownerDepartmentId ?? "", "请选择部门")}</select></label>
           <label><span>负责人</span><select name="ownerId">${renderOptions(people, node?.ownerId ?? node?.defaultOwnerId ?? "", "请选择负责人")}</select></label>
           <label><span>执行人</span><select name="executorId">${renderOptions(people, node?.executorId ?? "", "同负责人")}</select></label>
-          <label><span>执行时长（分钟）</span><input name="durationMinutes" type="number" min="1" step="1" value="${node?.durationMinutes ?? (Number(node?.durationDays ?? 1) * 1440)}" /></label>
+          <label><span>任务时长（分钟）</span><input name="durationMinutes" type="number" min="1" step="1" value="${node?.durationMinutes ?? (Number(node?.durationDays ?? 1) * 1440)}" /></label>
           <label><span>状态</span><select name="status">${renderValueOptions(ProcessTemplateNodeStatus, node?.status ?? ProcessTemplateNodeStatus.Active, processTemplateNodeStatusNames, "请选择状态")}</select></label>
         </div>
         <label><span>步骤说明</span><textarea name="description">${node?.description ?? ""}</textarea></label>
@@ -577,7 +644,7 @@ function renderWorkflowNodesModal() {
   return `
     <div class="modal-backdrop"><div class="modal-panel wide-modal">
       <div class="modal-header">
-        <h2>${escapeHtml(template.name)} · 流程节点</h2>
+        <h2>${escapeHtml(template.name)} · 标准节点</h2>
         <div class="modal-header-actions">
           <button class="secondary-button" type="button" data-action="close-process-modal">关闭</button>
           <button class="icon-button" type="button" data-action="close-process-modal">×</button>
@@ -585,7 +652,7 @@ function renderWorkflowNodesModal() {
       </div>
       ${
         nodes.length === 0
-          ? `<p class="empty-state">暂无流程节点</p>`
+          ? `<p class="empty-state">暂无标准节点</p>`
           : `
             <div class="process-node-list">
               ${nodes
@@ -605,7 +672,7 @@ function renderWorkflowNodesModal() {
                       <div class="process-node-meta">
                         <span><em>负责人</em>${escapeHtml(ownerName)}</span>
                         <span><em>执行人</em>${escapeHtml(executorName)}</span>
-                        <span><em>执行时长</em>${escapeHtml(durationMinutes)} 分钟</span>
+                        <span><em>任务时长</em>${escapeHtml(durationMinutes)} 分钟</span>
                       </div>
                       <div class="process-node-copy">
                         <p><strong>完成标准：</strong>${escapeHtml(node.completionStandard || "未填写")}</p>
@@ -627,7 +694,7 @@ function renderStartModal() {
   return `
     <div class="modal-backdrop"><div class="modal-panel wide-modal">
       <div class="modal-header">
-        <h2>发起标准流程</h2>
+        <h2>发起关键行动标准流程</h2>
         <div class="modal-header-actions">
           <button class="secondary-button" type="button" data-action="close-process-modal">取消</button>
           <button class="primary-button" type="button" data-action="submit-modal-form">发起</button>
@@ -636,13 +703,13 @@ function renderStartModal() {
       </div>
       <form class="modal-form process-start-form">
         <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${modalState.error}</div>
-        <label><span>标准流程</span><select name="templateId">${renderOptions(state.processTemplates.filter((item) => item.status === ProcessTemplateStatus.Active), template.id, "请选择标准流程")}</select></label>
-        <label><span>已发起流程名称</span><input name="name" value="${template.name}" /></label>
+        <label><span>关键行动标准流程</span><select name="templateId">${renderOptions(state.processTemplates.filter((item) => item.status === ProcessTemplateStatus.Active), template.id, "请选择关键行动标准流程")}</select></label>
+        <label><span>已发起关键行动名称</span><input name="name" value="${template.name}" /></label>
         <div class="form-grid">
           <label><span>关联目标</span><select name="goalId">${renderOptions(getActiveGoals(), "", "请选择目标")}</select></label>
           <label><span>发起人</span><select name="initiatorId">${renderOptions(people, "", "请选择发起人")}</select></label>
         </div>
-        <label><span>本次流程说明</span><textarea name="description"></textarea></label>
+        <label><span>本次关键行动说明</span><textarea name="description"></textarea></label>
         <div class="modal-actions"><button class="secondary-button" type="button" data-action="close-process-modal">取消</button><button class="primary-button" type="submit">发起</button></div>
       </form>
     </div></div>
@@ -673,19 +740,19 @@ async function saveTemplate(form, rerender) {
     overallStandard: getFormValue(form, "overallStandard"),
     status: getFormValue(form, "status") || ProcessTemplateStatus.Active,
   };
-  if (draft.name === "") return setModalError("请填写流程名称。");
+  if (draft.name === "") return setModalError("请填写标准名称。");
   if (!isValueModuleId(valueModuleId) || valueChainCategory === null) return setModalError("请选择有效的价值链模块。");
-  if (draft.ownerId === "") return setModalError("请选择流程负责人。");
+  if (draft.ownerId === "") return setModalError("请选择标准负责人。");
   const now = getNow();
   if (modalState.id) {
     const existingTemplate = state.processTemplates.find((template) => template.id === modalState.id);
-    if (existingTemplate === undefined) return setModalError("未找到要编辑的流程模板。");
+    if (existingTemplate === undefined) return setModalError("未找到要编辑的关键行动标准流程。");
     const updatedTemplate = { ...existingTemplate, ...draft, version: existingTemplate.version + 1, updatedAt: now };
     try {
       await updatePersistentResource("process-templates", existingTemplate.id, updatedTemplate);
     } catch (error) {
-      console.error("流程模板保存失败", error);
-      return setModalError(error.message || "流程模板保存失败，请检查本地数据库服务。");
+      console.error("关键行动标准流程保存失败", error);
+      return setModalError(error.message || "关键行动标准流程保存失败，请检查本地数据库服务。");
     }
     state.processTemplates = state.processTemplates.map((template) => (template.id === existingTemplate.id ? updatedTemplate : template));
   } else {
@@ -693,8 +760,8 @@ async function saveTemplate(form, rerender) {
     try {
       await createPersistentResource("process-templates", template);
     } catch (error) {
-      console.error("流程模板保存失败", error);
-      return setModalError(error.message || "流程模板保存失败，请检查本地数据库服务。");
+      console.error("关键行动标准流程保存失败", error);
+      return setModalError(error.message || "关键行动标准流程保存失败，请检查本地数据库服务。");
     }
     state.processTemplates = [template, ...state.processTemplates];
     selectedTemplateId = template.id;
@@ -721,7 +788,7 @@ async function saveNode(form, rerender) {
   const draft = {
     name: getFormValue(form, "name"),
     stepOrder: nextStepOrder,
-    stageName: "默认流程",
+    stageName: "默认标准",
     stageOrder: nextStepOrder,
     nodeOrder: nextStepOrder,
     departmentId: getFormValue(form, "departmentId"),
@@ -760,17 +827,17 @@ async function saveNode(form, rerender) {
   if (shouldInferSubmitForNewNode) {
     Object.assign(draft, normalizeSubmitRequirement({ name: draft.name }));
   }
-  if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) return setModalError("请填写大于 0 的执行时长（分钟）。");
+  if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) return setModalError("请填写大于 0 的任务时长（分钟）。");
   const now = getNow();
   if (modalState.id) {
     const existingNode = state.processTemplateNodes.find((node) => node.id === modalState.id);
-    if (existingNode === undefined) return setModalError("未找到要编辑的流程步骤。");
+    if (existingNode === undefined) return setModalError("未找到要编辑的标准步骤。");
     const updatedNode = { ...existingNode, ...draft, updatedAt: now };
     try {
       await updatePersistentResource("process-template-nodes", existingNode.id, updatedNode);
     } catch (error) {
-      console.error("流程步骤保存失败", error);
-      return setModalError(error.message || "流程步骤保存失败，请检查本地数据库服务。");
+      console.error("标准步骤保存失败", error);
+      return setModalError(error.message || "标准步骤保存失败，请检查本地数据库服务。");
     }
     state.processTemplateNodes = state.processTemplateNodes.map((node) => (node.id === existingNode.id ? updatedNode : node));
   } else {
@@ -778,8 +845,8 @@ async function saveNode(form, rerender) {
     try {
       await createPersistentResource("process-template-nodes", createdNode);
     } catch (error) {
-      console.error("流程步骤保存失败", error);
-      return setModalError(error.message || "流程步骤保存失败，请检查本地数据库服务。");
+      console.error("标准步骤保存失败", error);
+      return setModalError(error.message || "标准步骤保存失败，请检查本地数据库服务。");
     }
     state.processTemplateNodes = [...state.processTemplateNodes, createdNode];
     if (!state.methodologies.some((methodology) => methodology.processNodeId === createdNode.id)) {
@@ -801,7 +868,7 @@ async function saveNode(form, rerender) {
         state.methodologies = [methodology, ...state.methodologies];
       } catch (error) {
         console.error("方法论自动生成失败", error);
-        window.alert(error.message || "流程步骤已保存，但方法论自动生成失败，请稍后到方法论中补建。");
+        window.alert(error.message || "标准步骤已保存，但方法论自动生成失败，请稍后到方法论中补建。");
       }
     }
   }
@@ -841,8 +908,8 @@ async function moveNode(nodeId, direction) {
       await updatePersistentResource("process-template-nodes", changedNode.id, changedNode);
     }
   } catch (error) {
-    console.error("流程步骤排序保存失败", error);
-    window.alert(error.message || "流程步骤排序保存失败，请检查本地数据库服务。");
+    console.error("标准步骤排序保存失败", error);
+    window.alert(error.message || "标准步骤排序保存失败，请检查本地数据库服务。");
     return;
   }
   state.processTemplateNodes = updatedNodes;
@@ -851,7 +918,7 @@ async function moveNode(nodeId, direction) {
 
 function submitStart(form, rerender) {
   const template = state.processTemplates.find((item) => item.id === getFormValue(form, "templateId")) ?? state.processTemplates.find((item) => item.status === ProcessTemplateStatus.Active) ?? null;
-  if (template === null) return setModalError("暂无可发起的标准流程。", rerender);
+  if (template === null) return setModalError("暂无可发起的关键行动标准。", rerender);
   const templateId = template.id;
   const name = getFormValue(form, "name") || template.name;
   const goalId = getFormValue(form, "goalId") || getActiveGoals()[0]?.id || "";
@@ -911,22 +978,22 @@ async function deleteTemplate(templateId, rerender) {
 
   const standardWork = getStandardWorkForTemplate(template.id);
   if (standardWork !== null) {
-    window.alert("该流程已绑定标准工作事项，请先停用流程，不要删除。");
+    window.alert("该关键行动已绑定关键行动，请先停用标准，不要删除。");
     return;
   }
 
   if (getLaunchedInstancesForTemplate(template.id).length > 0) {
-    window.alert("该流程已有发起记录，为保留历史数据不能删除，请使用停用流程。");
+    window.alert("该关键行动已有发起记录，为保留历史数据不能删除，请使用停用标准。");
     return;
   }
 
-  if (!window.confirm(`确定要删除流程「${template.name}」吗？删除后会同时删除该流程的步骤和方法论空记录，且不会影响已发起流程。`)) return;
+  if (!window.confirm(`确定要删除标准「${template.name}」吗？删除后会同时删除该关键行动的步骤和方法论空记录，且不会影响已发起关键行动。`)) return;
 
   try {
     await deletePersistentResource("process-templates", template.id);
   } catch (error) {
-    console.error("流程删除失败", error);
-    window.alert(error.message || "流程删除失败，请检查本地数据库服务。");
+    console.error("标准删除失败", error);
+    window.alert(error.message || "标准删除失败，请检查本地数据库服务。");
     return;
   }
 
@@ -950,8 +1017,8 @@ async function updateTemplateStatus(templateId, status) {
     await updatePersistentResource("process-templates", updatedTemplate.id, updatedTemplate);
   } catch (error) {
     const actionText = status === ProcessTemplateStatus.Active ? "启用" : "停用";
-    console.error(`流程${actionText}失败`, error);
-    window.alert(error.message || `流程${actionText}失败，请检查本地数据库服务。`);
+    console.error(`标准${actionText}失败`, error);
+    window.alert(error.message || `标准${actionText}失败，请检查本地数据库服务。`);
     return false;
   }
   state.processTemplates = state.processTemplates.map((item) => (item.id === updatedTemplate.id ? updatedTemplate : item));
@@ -966,8 +1033,8 @@ async function updateNodeStatus(nodeId, status) {
     await updateProcessTemplateNodeStatus(node.id, status);
   } catch (error) {
     const actionText = status === ProcessTemplateNodeStatus.Active ? "启用" : "停用";
-    console.error(`流程节点${actionText}失败`, error);
-    window.alert(error.message || `流程节点${actionText}失败，请检查本地数据库服务。`);
+    console.error(`标准节点${actionText}失败`, error);
+    window.alert(error.message || `标准节点${actionText}失败，请检查本地数据库服务。`);
     return false;
   }
   return true;
@@ -979,17 +1046,17 @@ async function deleteNode(nodeId, rerender) {
 
   const generatedTask = state.tasks.find((task) => task.processNodeId === node.id);
   if (generatedTask !== undefined) {
-    window.alert("该流程节点已经生成过执行任务，为保留历史数据不能删除，请使用停用节点。");
+    window.alert("该标准节点已经生成过任务，为保留历史数据不能删除，请使用停用节点。");
     return;
   }
 
-  if (!window.confirm(`确定要删除流程节点「${node.name}」吗？删除后会同时删除该节点的方法论记录。`)) return;
+  if (!window.confirm(`确定要删除标准节点「${node.name}」吗？删除后会同时删除该节点的方法论记录。`)) return;
 
   try {
     await deletePersistentResource("process-template-nodes", node.id);
   } catch (error) {
-    console.error("流程节点删除失败", error);
-    window.alert(error.message || "流程节点删除失败，请检查本地数据库服务。");
+    console.error("标准节点删除失败", error);
+    window.alert(error.message || "标准节点删除失败，请检查本地数据库服务。");
     return;
   }
 
@@ -1055,12 +1122,12 @@ export function bindProcessesPageEvents(rerender) {
       if (action === "deactivate-template" && canCurrentUser("processes.editTemplates")) {
         await updateTemplateStatus(actionButton.dataset.templateId, ProcessTemplateStatus.Inactive);
       }
-      if (action === "stop-process" && canCurrentUser("processes.editInstances") && window.confirm("确定要终止该流程吗？未完成流程步骤执行任务将自动取消。")) {
+      if (action === "stop-process" && canCurrentUser("processes.editInstances") && window.confirm("确定要终止该关键行动吗？未完成标准步骤任务将自动取消。")) {
         stopProcess(actionButton.dataset.instanceId);
       }
       if (action === "select-process-task") {
         selectTask(actionButton.dataset.taskId);
-        window.alert("已选中该任务，请切换到执行查看详情。");
+        window.alert("已选中该任务，请切换到任务查看详情。");
       }
       rerender();
       return;
@@ -1091,7 +1158,7 @@ export function bindProcessesPageEvents(rerender) {
   bindLaunchedProcessDetailEvents(page, rerender, {
     onTaskSelect: (taskId) => {
       selectTask(taskId);
-      window.alert("已选中该执行任务，请切换到执行查看详情。");
+      window.alert("已选中该任务，请切换到任务查看详情。");
     },
   });
 }
@@ -1100,17 +1167,12 @@ export function renderProcessesPage() {
   syncSelectedTemplateFromHash();
   const canViewTemplates = canCurrentUser("processes.viewTemplates");
   const canViewStandardWorks = canCurrentUser("settings.viewStandardWorks") || canViewTemplates;
-  const canViewMethodologies = canCurrentUser("methods.view");
-  const showMethodologies = canViewMethodologies && isMethodologyRoute();
   return `
     <div class="processes-page">
-      <div class="settings-tabs" aria-label="流程分区">
-        ${canViewStandardWorks ? `<a href="#task-library">标准工作库</a>` : ""}
-        ${canViewMethodologies ? `<a href="#methods">方法论</a>` : ""}
+      <div class="settings-tabs" aria-label="关键行动分区">
+        ${canViewStandardWorks ? `<a href="#task-library">关键行动库</a>` : ""}
       </div>
-      ${showMethodologies
-        ? renderMethodologiesPage(getCurrentUser())
-        : canViewStandardWorks
+      ${canViewStandardWorks
           ? `
             ${renderStandardWorkLibraryPage(selectedTemplateId)}
             ${canViewTemplates ? `

@@ -375,7 +375,7 @@ function getSelectableProcessTemplates(selectedTemplateId = "") {
 }
 
 function getProcessTemplateName(templateId) {
-  return state.processTemplates.find((template) => template.id === templateId)?.name ?? "未绑定标准流程";
+  return state.processTemplates.find((template) => template.id === templateId)?.name ?? "未绑定关键行动标准流程";
 }
 
 function getStandardWorkStepCount(template) {
@@ -399,7 +399,7 @@ function inferValueModuleIdForTemplate(template) {
   const processName = getProcessTemplateName(template.defaultProcessTemplateId ?? "");
   const searchText = [
     template.name,
-    processName === "未绑定标准流程" ? "" : processName,
+    processName === "未绑定关键行动标准流程" ? "" : processName,
   ].join(" ");
   return inferValueModuleIdFromText(searchText);
 }
@@ -715,10 +715,10 @@ function renderStandardOptimizationActions(task) {
   return `
     <div class="submit-result-form standard-optimization-actions">
       <strong>立即优化标准</strong>
-      <p class="form-note">来源标准工作：${escapeHtml(sourceStandardWork?.name ?? "未定位到来源标准工作")}</p>
+      <p class="form-note">来源关键行动：${escapeHtml(sourceStandardWork?.name ?? "未定位到来源关键行动")}</p>
       <div class="button-row">
-        <button class="secondary-button" type="button" data-action="open-standard-optimization-target" data-task-id="${escapeHtml(task.id)}" data-target="standard-work" ${sourceStandardWork === null ? "disabled" : ""}>修改标准工作</button>
-        <button class="secondary-button" type="button" data-action="open-standard-optimization-target" data-task-id="${escapeHtml(task.id)}" data-target="process" ${sourceStandardWork?.defaultProcessTemplateId ? "" : "disabled"}>修改流程</button>
+        <button class="secondary-button" type="button" data-action="open-standard-optimization-target" data-task-id="${escapeHtml(task.id)}" data-target="standard-work" ${sourceStandardWork === null ? "disabled" : ""}>修改关键行动</button>
+        <button class="secondary-button" type="button" data-action="open-standard-optimization-target" data-task-id="${escapeHtml(task.id)}" data-target="process" ${sourceStandardWork?.defaultProcessTemplateId ? "" : "disabled"}>修改标准</button>
         <button class="secondary-button" type="button" data-action="open-standard-optimization-target" data-task-id="${escapeHtml(task.id)}" data-target="form" ${sourceStandardWork === null ? "disabled" : ""}>修改表单</button>
         <button class="secondary-button" type="button" data-action="open-standard-optimization-target" data-task-id="${escapeHtml(task.id)}" data-target="completion-standard" ${sourceStandardWork?.defaultProcessTemplateId ? "" : "disabled"}>修改完成标准</button>
       </div>
@@ -902,7 +902,7 @@ function getTaskBelonging(task) {
       taskTemplate?.name ??
       (getStandardWorkNameFromTitle(task.displayTitle) ||
         getStandardWorkNameFromTitle(title) ||
-        "未关联标准工作");
+        "未关联关键行动");
     const objectName =
       getObjectFromFields(taskFields) ||
       getObjectFromFields(instance.customFields) ||
@@ -934,7 +934,7 @@ function getTaskBelonging(task) {
     };
   }
 
-  const standardWorkName = getStandardWorkNameFromTitle(task.displayTitle) || "未关联标准工作";
+  const standardWorkName = getStandardWorkNameFromTitle(task.displayTitle) || "未关联关键行动";
   return {
     objectName:
       getObjectFromFields(taskFields) ||
@@ -953,7 +953,7 @@ function renderTaskBelonging(task) {
     belonging.objectName === belonging.standardWorkName
       ? ""
       : `<span>${escapeHtml(belonging.standardWorkName)}</span>`;
-  const mutedClass = belonging.standardWorkName === "未关联标准工作" ? " is-muted" : "";
+  const mutedClass = belonging.standardWorkName === "未关联关键行动" ? " is-muted" : "";
 
   return `
     <div class="task-belonging${mutedClass}">
@@ -1010,7 +1010,7 @@ function getClearanceDisplayInfo(instance, tasks = []) {
   const fallbackBelonging = tasks[0] ? getTaskBelonging(tasks[0]) : null;
 
   return {
-    title: instance === null ? fallbackBelonging?.title ?? fallbackTask.displayTitle ?? fallbackTask.name ?? "未命名清仓流程" : getProcessDisplayTitle(instance),
+    title: instance === null ? fallbackBelonging?.title ?? fallbackTask.displayTitle ?? fallbackTask.name ?? "未命名清仓关键行动" : getProcessDisplayTitle(instance),
     productName: getClearanceField(customFields, ["productName", "product", "productTitle", "objectName", "itemName"]) || fallbackBelonging?.objectName || "",
     sku: getClearanceField(customFields, ["sku", "SKU", "spec", "规格"]),
     stockQuantity: getClearanceField(customFields, ["stockQuantity", "stock", "inventory", "库存数量", "当前库存"]),
@@ -1125,7 +1125,7 @@ function renderStandardWorkAttachmentsField() {
         <span>表格附件</span>
         <input name="standardWorkAttachments" type="file" accept=".xlsx,.xls,.csv" multiple data-standard-work-attachments />
       </label>
-      <p class="form-note">支持 .xlsx、.xls、.csv，单个文件不超过 20MB。未上传也可以发起标准工作。</p>
+      <p class="form-note">支持 .xlsx、.xls、.csv，单个文件不超过 20MB。未上传也可以发起关键行动。</p>
       <div class="selected-attachment-list" data-selected-standard-work-attachments>
         <p class="form-note">暂无已选择附件</p>
       </div>
@@ -1291,7 +1291,7 @@ function renderOptions(items, selectedId, emptyLabel) {
 
 function renderProcessTemplateOptions(selectedId) {
   return `
-    <option value="">请选择标准流程</option>
+    <option value="">请选择关键行动标准流程</option>
     ${getSelectableProcessTemplates(selectedId)
       .map((template) => {
         const statusLabel = template.status === ProcessTemplateStatus.Active ? "" : "（已停用）";
@@ -1419,11 +1419,11 @@ async function triggerRectificationForTaskException(task, sourceType, problemSum
       problemSummary,
     });
   } catch (error) {
-    console.error("自动发起整改工作失败", error);
+    console.error("自动发起改善工作失败", error);
     try {
       await recordRectificationTriggerFailure(task.id, sourceType, error);
     } catch (recordError) {
-      console.error("整改触发失败记录保存失败", recordError);
+      console.error("改善触发失败记录保存失败", recordError);
     }
     return null;
   }
@@ -1434,7 +1434,7 @@ async function triggerOverdueRectificationIfNeeded(previousTask, nextTask) {
   return triggerRectificationForTaskException(
     nextTask,
     "overdue_task",
-    `任务“${nextTask.name}”首次确认超时，需要发起整改。`,
+    `任务“${nextTask.name}”首次确认超时，需要发起改善。`,
   );
 }
 
@@ -1454,7 +1454,7 @@ function renderTaskStatusSelect(task) {
       ? "没有修改任务状态的权限。"
       :
     task.source === TaskSource.Process && task.status === TaskStatus.Waiting
-      ? "前置步骤未完成，当前步骤暂不能执行。"
+      ? "前置步骤未完成，当前步骤暂不能处理。"
       : "";
 
   return `
