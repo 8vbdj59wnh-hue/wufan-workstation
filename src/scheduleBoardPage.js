@@ -476,7 +476,7 @@ function renderFilters() {
   const activePeople = state.people.filter((person) => person.status !== "inactive");
   const standardWorks = state.taskTemplates.filter((template) => template.status !== "inactive");
   return `
-    <section class="schedule-board-filters" aria-label="排期看板筛选">
+    <section class="schedule-board-filters" aria-label="关键行动筛选">
       <label>
         <span>关键词</span>
         <input name="keyword" value="${escapeAttribute(filters.keyword)}" autocomplete="off" />
