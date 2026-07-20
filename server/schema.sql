@@ -329,6 +329,10 @@ CREATE TABLE IF NOT EXISTS issues_requirements (
   solution TEXT,
   completedBy TEXT,
   completedAt TEXT,
+  latestReply TEXT,
+  latestReplyAt TEXT,
+  latestReplyBy TEXT,
+  replyRecords TEXT,
   createdAt TEXT,
   updatedAt TEXT
 );

@@ -921,6 +921,53 @@ function renderIssueAttachmentList(attachments = []) {
   `;
 }
 
+function getIssueReplyRecords(item) {
+  return Array.isArray(item?.replyRecords) ? item.replyRecords : [];
+}
+
+function getIssueLatestReplyText(item) {
+  const latestReply = String(item?.latestReply ?? "").trim();
+  if (latestReply === "") return "暂无回复";
+  return latestReply.length > 30 ? `${latestReply.slice(0, 30)}…` : latestReply;
+}
+
+function renderIssueCommunicationRecords(item) {
+  const records = [
+    {
+      id: `${item?.id ?? "issue"}-submit`,
+      type: "submit",
+      label: "提交",
+      content: item?.description ?? "",
+      time: item?.createdAt ?? "",
+      personId: item?.submitterId ?? "",
+    },
+    ...getIssueReplyRecords(item).map((record) => ({
+      id: record.id,
+      type: "reply",
+      label: "回复",
+      content: record.content ?? "",
+      time: record.repliedAt ?? "",
+      personId: record.repliedBy ?? "",
+    })),
+  ].sort((left, right) => String(left.time ?? "").localeCompare(String(right.time ?? "")));
+
+  return `
+    <div class="issue-communication-list">
+      ${records
+        .map((record) => `
+          <article class="issue-communication-item is-${escapeHtml(record.type)}">
+            <div>
+              <strong>${escapeHtml(record.label)}：</strong>
+              <span>${escapeHtml(record.content || "无内容")}</span>
+            </div>
+            <small>${escapeHtml(findName(people, record.personId, "未知人员"))} · ${escapeHtml(record.time || "-")}</small>
+          </article>
+        `)
+        .join("")}
+    </div>
+  `;
+}
+
 function renderIssuesRequirementsSection() {
   const items = getFilteredIssuesRequirements();
   const canEdit = canCurrentUser("settings.editStandardWorkForms");
@@ -948,6 +995,7 @@ function renderIssuesRequirementsSection() {
               <th>所属模块</th>
               <th>提交人</th>
               <th>状态</th>
+              <th>最新回复</th>
               <th>时间</th>
               <th>操作</th>
             </tr>
@@ -955,7 +1003,7 @@ function renderIssuesRequirementsSection() {
           <tbody>
             ${
               items.length === 0
-                ? `<tr><td colspan="7">暂无需求或问题。</td></tr>`
+                ? `<tr><td colspan="8">暂无需求或问题。</td></tr>`
                 : items.map((item) => `
                     <tr>
                       <td>${escapeHtml(item.title)}</td>
@@ -963,10 +1011,12 @@ function renderIssuesRequirementsSection() {
                       <td>${escapeHtml(item.module ?? "-")}</td>
                       <td>${escapeHtml(findName(people, item.submitterId, "未设置"))}</td>
                       <td>${escapeHtml(getIssueRequirementStatusName(item.status))}</td>
+                      <td title="${escapeHtml(item.latestReply ?? "")}">${escapeHtml(getIssueLatestReplyText(item))}</td>
                       <td>${escapeHtml(item.createdAt ?? "-")}</td>
                       <td>
                         <span class="row-actions">
                           <button class="text-button" type="button" data-action="view-issue" data-id="${escapeHtml(item.id)}">查看</button>
+                          ${canEdit ? `<button class="text-button" type="button" data-action="reply-issue" data-id="${escapeHtml(item.id)}">回复</button>` : ""}
                           ${canEdit ? `<button class="text-button" type="button" data-action="edit" data-entity="issueRequirement" data-id="${escapeHtml(item.id)}">编辑</button>` : ""}
                           ${canEdit && item.status !== "done" ? `<button class="text-button" type="button" data-action="complete-issue" data-id="${escapeHtml(item.id)}">完成</button>` : ""}
                           ${canEdit ? `<button class="text-button danger-link" type="button" data-action="delete-issue" data-id="${escapeHtml(item.id)}">删除</button>` : ""}
@@ -1138,6 +1188,7 @@ function renderPermissionSection() {
 
 function getModalTitle() {
   if (modalState.mode === "view") return "查看需求/问题";
+  if (modalState.mode === "reply") return "回复需求/问题";
   if (modalState.mode === "complete") return "完成需求/问题";
   const actionName = modalState.mode === "add" ? "新增" : "编辑";
   const entityNames = {
@@ -1711,6 +1762,7 @@ function renderIssueRequirementForm() {
   const item = getEditingIssueRequirement();
   const isView = modalState.mode === "view";
   const isComplete = modalState.mode === "complete";
+  const isReply = modalState.mode === "reply";
   const attachments = modalState.attachments ?? item?.attachments ?? [];
 
   if (isView) {
@@ -1726,6 +1778,14 @@ function renderIssueRequirementForm() {
       <div class="detail-block"><h3>描述</h3><p>${escapeHtml(item?.description ?? "无")}</p></div>
       <div class="detail-block"><h3>附件</h3>${renderIssueAttachmentList(item?.attachments ?? [])}</div>
       <div class="detail-block"><h3>处理方案</h3><p>${escapeHtml(item?.solution ?? "未填写")}</p></div>
+      <div class="detail-block"><h3>沟通记录</h3>${renderIssueCommunicationRecords(item)}</div>
+    `;
+  }
+
+  if (isReply) {
+    return `
+      <div class="detail-block"><h3>${escapeHtml(item?.title ?? "")}</h3><p>${escapeHtml(item?.description ?? "")}</p></div>
+      <label><span>回复内容</span><textarea name="replyContent" rows="6" placeholder="请输入回复内容"></textarea></label>
     `;
   }
 
@@ -1764,6 +1824,7 @@ function renderModalFields() {
 function renderModal() {
   if (modalState === null || modalState.kind === "formDesignerDraft") return "";
   const isReadonly = modalState.mode === "view";
+  const submitLabel = modalState.mode === "reply" ? "发送回复" : "保存";
 
   return `
     <div class="modal-backdrop" role="presentation">
@@ -1772,7 +1833,7 @@ function renderModal() {
           <h2>${getModalTitle()}</h2>
           <div class="modal-header-actions">
             <button class="secondary-button" type="button" data-action="close-modal">取消</button>
-            ${isReadonly ? "" : `<button class="primary-button" type="button" data-action="submit-modal-form">保存</button>`}
+            ${isReadonly ? "" : `<button class="primary-button" type="button" data-action="submit-modal-form">${submitLabel}</button>`}
             <button class="icon-button" type="button" data-action="close-modal" aria-label="关闭">×</button>
           </div>
         </div>
@@ -1781,7 +1842,7 @@ function renderModal() {
           ${renderModalFields()}
           <div class="modal-actions">
             <button class="secondary-button" type="button" data-action="close-modal">取消</button>
-            ${isReadonly ? "" : `<button class="primary-button" type="submit">保存</button>`}
+            ${isReadonly ? "" : `<button class="primary-button" type="submit">${submitLabel}</button>`}
           </div>
         </form>
       </div>
@@ -2156,6 +2217,38 @@ async function saveIssueRequirement(form, rerender) {
   const current = getEditingIssueRequirement();
   const now = getNow();
 
+  if (modalState.mode === "reply") {
+    if (current === null) return setModalError("需求/问题不存在。", rerender);
+    const replyContent = getFormValue(form, "replyContent");
+    if (replyContent === "") return setModalError("请填写回复内容。", rerender);
+
+    const currentUser = getCurrentUser();
+    const replyRecord = {
+      id: createId("reply"),
+      content: replyContent,
+      repliedAt: now,
+      repliedBy: currentUser?.id ?? "",
+    };
+    const item = {
+      ...current,
+      replyRecords: [...getIssueReplyRecords(current), replyRecord],
+      latestReply: replyContent,
+      latestReplyAt: now,
+      latestReplyBy: replyRecord.repliedBy,
+      updatedAt: now,
+    };
+
+    try {
+      const saved = await persistSettingsEntity("issueRequirement", item);
+      replaceIssuesRequirements(upsertItem(issuesRequirements, saved));
+      modalState = null;
+      rerender();
+    } catch (error) {
+      setModalError(error.message || "回复保存失败，请检查本地数据库服务。", rerender);
+    }
+    return;
+  }
+
   if (modalState.mode === "complete") {
     const solution = getFormValue(form, "solution");
     const completedBy = getFormValue(form, "completedBy");
@@ -2217,6 +2310,10 @@ async function saveIssueRequirement(form, rerender) {
           solution: "",
           completedBy: "",
           completedAt: null,
+          latestReply: "",
+          latestReplyAt: null,
+          latestReplyBy: "",
+          replyRecords: [],
           createdAt: now,
           updatedAt: now,
         }
@@ -2831,6 +2928,12 @@ export function bindSettingsPageEvents(rerender) {
 
     if (action === "view-issue") {
       modalState = { mode: "view", entity: "issueRequirement", id, error: "" };
+      rerender();
+      return;
+    }
+
+    if (action === "reply-issue") {
+      modalState = { mode: "reply", entity: "issueRequirement", id, error: "" };
       rerender();
       return;
     }

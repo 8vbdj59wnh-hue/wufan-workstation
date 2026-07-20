@@ -391,10 +391,14 @@ const resourceConfigs = {
       "solution",
       "completedBy",
       "completedAt",
+      "latestReply",
+      "latestReplyAt",
+      "latestReplyBy",
+      "replyRecords",
       "createdAt",
       "updatedAt",
     ],
-    jsonFields: ["attachments"],
+    jsonFields: ["attachments", "replyRecords"],
   },
   contentSchedules: {
     table: "content_schedules",
@@ -584,6 +588,7 @@ function decodeRow(row, config) {
     previewImage: {},
     sourceFile: {},
     tags: {},
+    replyRecords: [],
   };
 
   for (const field of jsonFields) {
@@ -1025,6 +1030,10 @@ function runLightweightMigrations() {
       solution TEXT,
       completedBy TEXT,
       completedAt TEXT,
+      latestReply TEXT,
+      latestReplyAt TEXT,
+      latestReplyBy TEXT,
+      replyRecords TEXT,
       createdAt TEXT,
       updatedAt TEXT
     )
@@ -1096,6 +1105,10 @@ function runLightweightMigrations() {
   ensureColumn("content_schedules", "templateId", "TEXT");
   ensureColumn("work_plans", "departmentId", "TEXT");
   ensureColumn("work_plans", "workType", "TEXT DEFAULT 'normal'");
+  ensureColumn("issues_requirements", "latestReply", "TEXT");
+  ensureColumn("issues_requirements", "latestReplyAt", "TEXT");
+  ensureColumn("issues_requirements", "latestReplyBy", "TEXT");
+  ensureColumn("issues_requirements", "replyRecords", "TEXT");
   ensureColumn("persons", "username", "TEXT");
   ensureColumn("persons", "passwordHash", "TEXT");
   ensureColumn("persons", "canLogin", "INTEGER DEFAULT 0");

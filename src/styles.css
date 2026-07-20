@@ -610,6 +610,24 @@ textarea {
   gap: 8px;
 }
 
+.issue-communication-list {
+  display: grid;
+  gap: 10px;
+}
+
+.issue-communication-item {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px 12px;
+}
+
+.issue-communication-item small {
+  color: #6b7280;
+}
+
 .task-filters .task-filter-checkbox {
   align-items: center;
   display: flex;
