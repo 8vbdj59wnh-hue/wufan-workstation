@@ -898,8 +898,12 @@ async function moveNode(nodeId, direction) {
 
   const reorderedNodes = [...nodes];
   [reorderedNodes[currentIndex], reorderedNodes[targetIndex]] = [reorderedNodes[targetIndex], reorderedNodes[currentIndex]];
+  await persistContiguousNodeOrder(node.templateId, reorderedNodes);
+}
+
+async function persistContiguousNodeOrder(templateId, orderedNodes = getTemplateNodes(templateId)) {
   const now = getNow();
-  const orderById = new Map(reorderedNodes.map((item, index) => [item.id, index + 1]));
+  const orderById = new Map(orderedNodes.map((item, index) => [item.id, index + 1]));
 
   const updatedNodes = state.processTemplateNodes.map((item) => {
     const stepOrder = orderById.get(item.id);
@@ -923,7 +927,7 @@ async function moveNode(nodeId, direction) {
     return;
   }
   state.processTemplateNodes = updatedNodes;
-  normalizeProcessStepOrders(node.templateId);
+  normalizeProcessStepOrders(templateId);
 }
 
 function submitStart(form, rerender) {
@@ -1073,7 +1077,7 @@ async function deleteNode(nodeId, rerender) {
   state.processTemplateNodes = state.processTemplateNodes.map((item) =>
     item.id === node.id ? { ...item, status: ProcessTemplateNodeStatus.Deleted, updatedAt: getNow() } : item,
   );
-  normalizeProcessStepOrders(node.templateId);
+  await persistContiguousNodeOrder(node.templateId);
   rerender();
 }
 
