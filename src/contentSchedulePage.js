@@ -26,12 +26,12 @@ import {
   ProcessInstanceStatus,
   ProcessOwnerRule,
   ProcessTemplateStatus,
+  Status,
   TaskStatus,
   TaskTemplateStatus,
   TaskImportance,
   TaskUrgency,
   WorkPlanStatus,
-  contentScheduleAccountOptions,
   contentScheduleAudienceOptions,
   contentSchedulePurposeOptions,
   contentScheduleStatusNames,
@@ -433,6 +433,15 @@ function renderEntityOptions(items, selectedId, emptyLabel) {
   `;
 }
 
+function getActivePublishingAccountNames(selectedAccount = "") {
+  const names = state.publishingAccounts
+    .filter((account) => account.status === Status.Active)
+    .map((account) => account.name)
+    .filter((name) => String(name ?? "").trim() !== "");
+  if (selectedAccount !== "" && !names.includes(selectedAccount)) return [...names, selectedAccount];
+  return names;
+}
+
 function renderStatusOptions(selectedStatus, emptyLabel) {
   return `
     <option value="">${emptyLabel}</option>
@@ -558,7 +567,7 @@ function renderFilters() {
     <form class="content-schedule-filters" aria-label="内容排期筛选">
       <label><span>开始日期</span><input name="dateFrom" type="date" value="${filters.dateFrom}" /></label>
       <label><span>结束日期</span><input name="dateTo" type="date" value="${filters.dateTo}" /></label>
-      <label><span>发布账号</span><select name="account">${renderStringOptions(contentScheduleAccountOptions, filters.account, "全部账号")}</select></label>
+      <label><span>发布账号</span><select name="account">${renderStringOptions(getActivePublishingAccountNames(filters.account), filters.account, "全部账号")}</select></label>
       <label><span>内容类型</span><select name="contentType">${renderStringOptions(contentScheduleTypeOptions, filters.contentType, "全部类型")}</select></label>
       <label><span>内容目的</span><select name="contentPurpose">${renderStringOptions(contentSchedulePurposeOptions, filters.contentPurpose, "全部目的")}</select></label>
       <label><span>受众人群</span><select name="targetAudience">${renderStringOptions(contentScheduleAudienceOptions, filters.targetAudience, "全部人群")}</select></label>
@@ -1073,7 +1082,7 @@ function renderScheduleModal() {
               <span>发布时间</span>
               <select name="publishDateHour">${renderBusinessHourOptions(getBusinessHourPart(publishDateValue), "请选择小时")}</select>
             </label>
-            <label><span>发布账号</span><select name="account">${renderStringOptions(contentScheduleAccountOptions, getScheduleModalDraftValue(schedule, "account"), "请选择账号")}</select></label>
+            <label><span>发布账号</span><select name="account">${renderStringOptions(getActivePublishingAccountNames(getScheduleModalDraftValue(schedule, "account")), getScheduleModalDraftValue(schedule, "account"), "请选择账号")}</select></label>
             <label><span>内容类型</span><select name="contentType">${renderStringOptions(contentScheduleTypeOptions, normalizeContentType(getScheduleModalDraftValue(schedule, "contentType")), "请选择类型")}</select></label>
             <label><span>内容目的</span><select name="contentPurpose">${renderStringOptions(contentSchedulePurposeOptions, normalizeContentPurpose(getScheduleModalDraftValue(schedule, "contentPurpose")), "请选择目的")}</select></label>
             <label><span>受众人群</span><select name="targetAudience">${renderStringOptions(contentScheduleAudienceOptions, normalizeContentAudience(getScheduleModalDraftValue(schedule, "targetAudience")), "请选择人群")}</select></label>

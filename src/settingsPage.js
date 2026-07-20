@@ -23,6 +23,7 @@ let positions = state.positions;
 let people = state.people;
 let categories = state.categories;
 let stores = state.stores;
+let publishingAccounts = state.publishingAccounts;
 let issuesRequirements = state.issuesRequirements;
 let standardWorkForms = state.standardWorkForms;
 let templateTagCategories = state.templateTagCategories;
@@ -68,6 +69,11 @@ function replaceStores(nextStores) {
   stores = state.stores;
 }
 
+function replacePublishingAccounts(nextAccounts) {
+  state.publishingAccounts.splice(0, state.publishingAccounts.length, ...nextAccounts);
+  publishingAccounts = state.publishingAccounts;
+}
+
 function replaceIssuesRequirements(nextItems) {
   state.issuesRequirements.splice(0, state.issuesRequirements.length, ...nextItems);
   issuesRequirements = state.issuesRequirements;
@@ -94,6 +100,7 @@ const settingsResourceByEntity = {
   person: "persons",
   category: "categories",
   store: "stores",
+  publishingAccount: "publishing-accounts",
   issueRequirement: "issues-requirements",
   standardWorkForm: "standard-work-forms",
   templateTagCategory: "template-tag-categories",
@@ -234,11 +241,21 @@ function renderAuthRoleName(role) {
 }
 
 const storePlatformOptions = ["淘宝", "天猫", "小红书", "抖音", "拼多多", "私域", "其他"];
+const publishingAccountPlatformOptions = ["小红书", "抖音", "视频号", "公众号", "淘宝", "天猫", "私域", "其他"];
 
 function renderStorePlatformOptions(selectedPlatform, emptyLabel = "全部平台") {
   return `
     <option value="">${emptyLabel}</option>
     ${storePlatformOptions
+      .map((platform) => `<option value="${platform}" ${platform === selectedPlatform ? "selected" : ""}>${platform}</option>`)
+      .join("")}
+  `;
+}
+
+function renderPublishingAccountPlatformOptions(selectedPlatform, emptyLabel = "全部平台") {
+  return `
+    <option value="">${emptyLabel}</option>
+    ${publishingAccountPlatformOptions
       .map((platform) => `<option value="${platform}" ${platform === selectedPlatform ? "selected" : ""}>${platform}</option>`)
       .join("")}
   `;
@@ -888,6 +905,74 @@ function renderStoreSection() {
   `;
 }
 
+function getSortedPublishingAccounts() {
+  return [...publishingAccounts].sort((left, right) => {
+    const platformCompare = String(left.platform ?? "").localeCompare(String(right.platform ?? ""), "zh-Hans-CN");
+    if (platformCompare !== 0) return platformCompare;
+    return String(left.name ?? "").localeCompare(String(right.name ?? ""), "zh-Hans-CN");
+  });
+}
+
+function renderPublishingAccountSection() {
+  const canEdit = canCurrentUser("settings.editStandardWorkForms");
+  const accounts = getSortedPublishingAccounts();
+  return `
+    <section class="settings-section" id="publishing-accounts">
+      <div class="section-heading with-actions">
+        <div>
+          <h2>发布账号管理</h2>
+          <p class="form-note">维护内容排期可选择的发布账号；停用后不再提供新排期选择，历史排期仍保留原账号。</p>
+        </div>
+        ${canEdit ? `<button class="primary-button" type="button" data-action="add" data-entity="publishingAccount">新增发布账号</button>` : ""}
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>账号名称</th>
+              <th>所属平台</th>
+              <th>负责人</th>
+              <th>状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${
+              accounts.length === 0
+                ? `<tr><td colspan="5">暂无发布账号，请点击“新增发布账号”维护。</td></tr>`
+                : accounts
+                    .map((account) => `
+                      <tr class="${account.status === Status.Inactive ? "muted-row" : ""}">
+                        <td>${escapeHtml(account.name)}</td>
+                        <td>${escapeHtml(account.platform || "-")}</td>
+                        <td>${findName(people, account.ownerId, "未设置")}</td>
+                        <td>${renderStatus(account.status)}</td>
+                        <td>
+                          <span class="row-actions">
+                            ${canEdit ? renderActionButton("编辑", "edit", "publishingAccount", account.id) : ""}
+                            ${
+                              canEdit && account.status === Status.Active
+                                ? renderActionButton("停用", "deactivate", "publishingAccount", account.id, "danger-button")
+                                : ""
+                            }
+                            ${
+                              canEdit && account.status === Status.Inactive
+                                ? renderActionButton("启用", "activate", "publishingAccount", account.id)
+                                : ""
+                            }
+                          </span>
+                        </td>
+                      </tr>
+                    `)
+                    .join("")
+            }
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
 function getFilteredIssuesRequirements() {
   const keyword = issueFilters.keyword.trim().toLowerCase();
   return [...issuesRequirements]
@@ -1197,6 +1282,7 @@ function getModalTitle() {
     person: "人员",
     category: "分类",
     store: "店铺",
+    publishingAccount: "发布账号",
     issueRequirement: "需求/问题",
     templateTagCategory: "模板标签分类",
     templateTag: "模板标签",
@@ -1441,6 +1527,39 @@ function renderStoreForm() {
       <select name="status">
         <option value="${Status.Active}" ${store?.status !== Status.Inactive ? "selected" : ""}>启用</option>
         <option value="${Status.Inactive}" ${store?.status === Status.Inactive ? "selected" : ""}>停用</option>
+      </select>
+    </label>
+  `;
+}
+
+function renderPublishingAccountForm() {
+  const account =
+    modalState.mode === "edit"
+      ? publishingAccounts.find((item) => item.id === modalState.id)
+      : null;
+
+  return `
+    <label>
+      <span>账号名称</span>
+      <input name="name" value="${escapeHtml(account?.name ?? "")}" autocomplete="off" />
+    </label>
+    <label>
+      <span>所属平台</span>
+      <select name="platform">
+        ${renderPublishingAccountPlatformOptions(account?.platform ?? "", "请选择平台")}
+      </select>
+    </label>
+    <label>
+      <span>负责人</span>
+      <select name="ownerId">
+        ${renderOptions(people, account?.ownerId ?? "", "未设置")}
+      </select>
+    </label>
+    <label>
+      <span>状态</span>
+      <select name="status">
+        <option value="${Status.Active}" ${account?.status !== Status.Inactive ? "selected" : ""}>启用</option>
+        <option value="${Status.Inactive}" ${account?.status === Status.Inactive ? "selected" : ""}>停用</option>
       </select>
     </label>
   `;
@@ -1816,6 +1935,7 @@ function renderModalFields() {
   if (modalState.entity === "templateTagCategory") return renderTemplateTagCategoryForm();
   if (modalState.entity === "templateTag") return renderTemplateTagForm();
   if (modalState.entity === "store") return renderStoreForm();
+  if (modalState.entity === "publishingAccount") return renderPublishingAccountForm();
   if (modalState.entity === "issueRequirement") return renderIssueRequirementForm();
 
   return "";
@@ -2197,6 +2317,50 @@ async function saveStore(form, rerender) {
   }
 }
 
+async function savePublishingAccount(form, rerender) {
+  const name = getFormValue(form, "name");
+  const platform = getFormValue(form, "platform");
+  const ownerId = getFormValue(form, "ownerId") || null;
+  const status = getFormValue(form, "status") || Status.Active;
+
+  if (name === "") return setModalError("账号名称不能为空。", rerender);
+  if (platform === "") return setModalError("请选择所属平台。", rerender);
+
+  const duplicated = publishingAccounts.some((account) => account.name === name && account.platform === platform && account.id !== modalState.id);
+  if (duplicated) return setModalError("同一平台下账号名称不能重复。", rerender);
+
+  const now = getNow();
+  const item =
+    modalState.mode === "add"
+      ? {
+          id: createId("publishing-account"),
+          name,
+          platform,
+          ownerId,
+          status,
+          createdAt: now,
+          updatedAt: now,
+        }
+      : {
+          ...(publishingAccounts.find((account) => account.id === modalState.id) ?? {}),
+          id: modalState.id,
+          name,
+          platform,
+          ownerId,
+          status,
+          updatedAt: now,
+        };
+
+  try {
+    const savedAccount = await persistSettingsEntity("publishingAccount", item, modalState.mode);
+    replacePublishingAccounts(upsertItem(publishingAccounts, savedAccount));
+    modalState = null;
+    rerender();
+  } catch (error) {
+    setModalError(error.message || "发布账号保存失败，请检查本地数据库服务。", rerender);
+  }
+}
+
 async function uploadIssueAttachments(files = []) {
   const uploaded = [];
   for (const file of files) {
@@ -2424,6 +2588,7 @@ async function deactivateEntity(entity, id, rerender) {
     person: people,
     category: categories,
     store: stores,
+    publishingAccount: publishingAccounts,
     templateTagCategory: templateTagCategories,
     templateTag: templateTags,
   };
@@ -2433,6 +2598,7 @@ async function deactivateEntity(entity, id, rerender) {
     person: replacePeople,
     category: replaceCategories,
     store: replaceStores,
+    publishingAccount: replacePublishingAccounts,
     templateTagCategory: replaceTemplateTagCategories,
     templateTag: replaceTemplateTags,
   };
@@ -2462,11 +2628,13 @@ async function activateEntity(entity, id, rerender) {
   const now = getNow();
   const collectionByEntity = {
     store: stores,
+    publishingAccount: publishingAccounts,
     templateTagCategory: templateTagCategories,
     templateTag: templateTags,
   };
   const replaceByEntity = {
     store: replaceStores,
+    publishingAccount: replacePublishingAccounts,
     templateTagCategory: replaceTemplateTagCategories,
     templateTag: replaceTemplateTags,
   };
@@ -2582,6 +2750,7 @@ function getDeactivateMessage(entity) {
     person: "人员",
     category: "分类",
     store: "店铺",
+    publishingAccount: "发布账号",
     templateTagCategory: "模板标签分类",
     templateTag: "模板标签",
   };
@@ -2599,6 +2768,7 @@ async function handleFormSubmit(event, rerender) {
   if (modalState.entity === "templateTagCategory") return await saveTemplateTagCategory(event.target, rerender);
   if (modalState.entity === "templateTag") return await saveTemplateTag(event.target, rerender);
   if (modalState.entity === "store") return await saveStore(event.target, rerender);
+  if (modalState.entity === "publishingAccount") return await savePublishingAccount(event.target, rerender);
   if (modalState.entity === "issueRequirement") return await saveIssueRequirement(event.target, rerender);
 }
 
@@ -3115,6 +3285,7 @@ export function renderSettingsPage() {
         ${canCurrentUser("settings.viewPeople") ? `<a href="#people">人员管理</a>` : ""}
         ${canCurrentUser("settings.managePermissions") ? `<a href="#permissions">权限管理</a>` : ""}
         ${canCurrentUser("settings.viewStores") ? `<a href="#stores">店铺管理</a>` : ""}
+        ${canCurrentUser("settings.editStandardWorkForms") ? `<a href="#publishing-accounts">发布账号管理</a>` : ""}
         ${canCurrentUser("settings.viewStandardWorks") || canCurrentUser("settings.editStandardWorkForms") ? `<a href="#form-design">表单设计</a>` : ""}
         ${canCurrentUser("settings.editStandardWorkForms") ? `<a href="#template-tags">模板标签管理</a>` : ""}
         ${canCurrentUser("settings.editStandardWorkForms") ? `<a href="#issues-requirements">需求与问题中心</a>` : ""}
@@ -3124,6 +3295,7 @@ export function renderSettingsPage() {
       ${canCurrentUser("settings.viewPeople") ? renderPeopleSection() : ""}
       ${canCurrentUser("settings.managePermissions") ? renderPermissionSection() : ""}
       ${canCurrentUser("settings.viewStores") ? renderStoreSection() : ""}
+      ${canCurrentUser("settings.editStandardWorkForms") ? renderPublishingAccountSection() : ""}
       ${canCurrentUser("settings.viewStandardWorks") || canCurrentUser("settings.editStandardWorkForms") ? renderFormDesignSection() : ""}
       ${canCurrentUser("settings.editStandardWorkForms") ? renderTemplateTagManagementSection() : ""}
       ${canCurrentUser("settings.editStandardWorkForms") ? renderIssuesRequirementsSection() : ""}

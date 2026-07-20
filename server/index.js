@@ -227,15 +227,26 @@ function canUseStoreOptions(user) {
   );
 }
 
+function canUsePublishingAccountOptions(user) {
+  return (
+    hasPermission(user, "settings.editStandardWorkForms") ||
+    hasPermission(user, "contentSchedules.view") ||
+    hasPermission(user, "contentSchedules.create") ||
+    hasPermission(user, "contentSchedules.edit")
+  );
+}
+
 function canReadResource(resource, user) {
   if (resource === "stores") return canUseStoreOptions(user);
+  if (resource === "publishing-accounts") return canUsePublishingAccountOptions(user);
   return true;
 }
 
 function filterDataByScope(data, user) {
   const dataScope = getDataScope(user);
   const stores = canUseStoreOptions(user) ? (data.stores ?? []) : [];
-  if (dataScope === "all") return { ...data, stores };
+  const publishingAccounts = canUsePublishingAccountOptions(user) ? (data.publishingAccounts ?? []) : [];
+  if (dataScope === "all") return { ...data, stores, publishingAccounts };
 
   const scopedTasks = filterByScope(data.tasks ?? [], user);
   const scopedWorkPlans = filterByScope(data.workPlans ?? [], user);
@@ -253,6 +264,7 @@ function filterDataByScope(data, user) {
     ...data,
     people: scopedPeople,
     stores,
+    publishingAccounts,
     goals: scopedGoals,
     tasks: scopedTasks,
     processInstances: scopedProcessInstances,
@@ -284,6 +296,7 @@ function getResourceWritePermission(resource, method, body = {}) {
   if (resource === "departments" || resource === "positions") return "settings.editOrg";
   if (resource === "categories") return "settings.editCategories";
   if (resource === "stores") return "settings.editStores";
+  if (resource === "publishing-accounts") return "settings.editStandardWorkForms";
   if (resource === "weekly-reports") return method === "POST" ? "assessment.fillWeeklyReport" : "assessment.editWeeklyReport";
   if (resource === "weekly-report-problems") return method === "POST" ? "assessment.updateProblems" : "assessment.updateProblems";
   if (resource === "content-schedules") return method === "POST" ? "contentSchedules.create" : "contentSchedules.edit";

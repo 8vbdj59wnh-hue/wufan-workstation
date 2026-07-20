@@ -5,6 +5,7 @@ import {
   departments as initialDepartments,
   goals as initialGoals,
   people as initialPeople,
+  publishingAccounts as initialPublishingAccounts,
   positions as initialPositions,
   processInstances as initialProcessInstances,
   processTemplateNodes as initialProcessTemplateNodes,
@@ -68,6 +69,7 @@ export const state = {
   people: initialPeople.map((person) => ({ ...person })),
   categories: initialCategories.map((category) => ({ ...category })),
   stores: initialStores.map((store) => ({ ...store })),
+  publishingAccounts: initialPublishingAccounts.map((account) => ({ ...account })),
   goals: initialGoals.map((goal) => ({ ...goal })),
   tasks: initialTasks.map((task) => ({ ...task })),
   taskTemplates: initialTaskTemplates.map((template) => ({ ...template })),
@@ -138,6 +140,7 @@ export function getDataSnapshot() {
     people: state.people,
     categories: state.categories,
     stores: state.stores,
+    publishingAccounts: state.publishingAccounts,
     goals: state.goals,
     taskTemplates: state.taskTemplates,
     tasks: state.tasks,
@@ -166,6 +169,7 @@ export function applyDataSnapshot(data) {
   replaceArray(state.people, data.people ?? data.persons);
   replaceArray(state.categories, data.categories);
   replaceArray(state.stores, data.stores);
+  replaceArray(state.publishingAccounts, data.publishingAccounts ?? initialPublishingAccounts);
   replaceArray(state.goals, data.goals);
   replaceArray(state.taskTemplates, data.taskTemplates);
   replaceArray(state.tasks, data.tasks);

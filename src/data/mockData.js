@@ -1505,6 +1505,13 @@ export const workPlans = [];
 /** @type {import("./models.js").Store[]} */
 export const stores = [];
 
+export const publishingAccounts = [
+  { id: "publishing-account-001", name: "半然官方号", platform: "小红书", ownerId: "person-005", status: Status.Active, createdAt: timestamp, updatedAt: timestamp },
+  { id: "publishing-account-002", name: "阿柚", platform: "小红书", ownerId: "person-005", status: Status.Active, createdAt: timestamp, updatedAt: timestamp },
+  { id: "publishing-account-003", name: "小茉", platform: "小红书", ownerId: "person-005", status: Status.Active, createdAt: timestamp, updatedAt: timestamp },
+  { id: "publishing-account-004", name: "小满", platform: "小红书", ownerId: "person-005", status: Status.Active, createdAt: timestamp, updatedAt: timestamp },
+];
+
 /** @type {import("./models.js").WeeklyReport[]} */
 export const weeklyReports = [];
 

@@ -11,6 +11,7 @@ import {
   departments,
   goals,
   people,
+  publishingAccounts,
   positions,
   processInstances,
   processTemplateNodes,
@@ -100,6 +101,10 @@ const resourceConfigs = {
   stores: {
     table: "stores",
     columns: ["id", "name", "platform", "brand", "type", "ownerId", "status", "remark", "createdAt", "updatedAt"],
+  },
+  publishingAccounts: {
+    table: "publishing_accounts",
+    columns: ["id", "name", "platform", "ownerId", "status", "createdAt", "updatedAt"],
   },
   weeklyReports: {
     table: "weekly_reports",
@@ -460,6 +465,7 @@ const routeResourceMap = {
   people: "people",
   categories: "categories",
   stores: "stores",
+  "publishing-accounts": "publishingAccounts",
   "weekly-reports": "weeklyReports",
   "weekly-report-problems": "weeklyReportProblems",
   goals: "goals",
@@ -486,6 +492,7 @@ const seedData = {
   people,
   categories,
   stores,
+  publishingAccounts,
   weeklyReports,
   weeklyReportProblems,
   goals,
@@ -785,6 +792,14 @@ function ensureDefaultTemplateTags() {
   ensureDefaults();
 }
 
+function ensureDefaultPublishingAccounts() {
+  const database = getDatabase();
+  const ensureDefaults = database.transaction(() => {
+    for (const account of publishingAccounts) insertMissingSeedItem("publishingAccounts", account);
+  });
+  ensureDefaults();
+}
+
 function isDatabaseEmpty() {
   return Object.values(resourceConfigs).every((config) => {
     const result = getDatabase().prepare(`SELECT COUNT(*) AS count FROM ${config.table}`).get();
@@ -940,6 +955,17 @@ function runLightweightMigrations() {
       ownerId TEXT,
       status TEXT NOT NULL,
       remark TEXT,
+      createdAt TEXT,
+      updatedAt TEXT
+    )
+  `);
+  getDatabase().exec(`
+    CREATE TABLE IF NOT EXISTS publishing_accounts (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      platform TEXT,
+      ownerId TEXT,
+      status TEXT NOT NULL,
       createdAt TEXT,
       updatedAt TEXT
     )
@@ -1231,6 +1257,7 @@ export function initializeDatabase({ reset = false } = {}) {
   }
 
   ensureDefaultTemplateTags();
+  ensureDefaultPublishingAccounts();
   ensureDefaultAdmin();
 }
 
@@ -1241,6 +1268,8 @@ export function readResource(resourceKey) {
   const orderBy =
     resourceKey === "categories"
       ? " ORDER BY sortOrder ASC, name ASC, id ASC"
+      : resourceKey === "publishingAccounts"
+        ? " ORDER BY platform ASC, name ASC, id ASC"
       : resourceKey === "templateTagCategories"
         ? " ORDER BY sortOrder ASC, name ASC, id ASC"
       : resourceKey === "templateTags"

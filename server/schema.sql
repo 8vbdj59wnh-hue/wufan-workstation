@@ -65,6 +65,16 @@ CREATE TABLE IF NOT EXISTS stores (
   updatedAt TEXT
 );
 
+CREATE TABLE IF NOT EXISTS publishing_accounts (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  platform TEXT,
+  ownerId TEXT,
+  status TEXT NOT NULL,
+  createdAt TEXT,
+  updatedAt TEXT
+);
+
 CREATE TABLE IF NOT EXISTS weekly_reports (
   id TEXT PRIMARY KEY,
   weekStart TEXT NOT NULL,
