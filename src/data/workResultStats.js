@@ -116,8 +116,8 @@ export function getWorkPlanStatusLabel(workPlan, processInstance) {
   if (workPlan.status === WorkPlanStatus.Done || processInstance?.status === ProcessInstanceStatus.Done) return "已完成";
   if (workPlan.status === WorkPlanStatus.Canceled || processInstance?.status === ProcessInstanceStatus.Stopped || processInstance?.status === "canceled") return "已取消";
   if (workPlan.status === WorkPlanStatus.Launched) return "已发起";
-  if (workPlan.status === WorkPlanStatus.ThisWeek) return "本周工作";
-  return "未来工作";
+  if (workPlan.status === WorkPlanStatus.ThisWeek) return "待发起工作计划";
+  return "待发起工作计划";
 }
 
 export function isRectificationDone(workPlan, processInstance) {

@@ -1701,9 +1701,9 @@ export function cancelProcessInstance(instanceId, cancelReason = "") {
 export function launchWorkPlanWithProcess(workPlanId, { processInstance, tasks: generatedTasks = [], workPlan: launchedWorkPlan }) {
   const database = getDatabase();
   const existingWorkPlan = readExistingItem("workPlans", workPlanId);
-  if (existingWorkPlan === null) throw new Error("未找到该未来工作。");
+  if (existingWorkPlan === null) throw new Error("未找到该待发起工作计划。");
   if (existingWorkPlan.processInstanceId || existingWorkPlan.status === "launched") throw new Error("该工作已经发起，不能重复发起。");
-  if (!["future", "this_week"].includes(existingWorkPlan.status)) throw new Error("只有未来工作或本周工作可以发起。");
+  if (!["future", "this_week"].includes(existingWorkPlan.status)) throw new Error("只有待发起工作计划可以发起。");
   if (!processInstance?.id) throw new Error("缺少已发起关键行动数据。");
   if (!Array.isArray(generatedTasks) || generatedTasks.length === 0) throw new Error("缺少标准步骤任务。");
   if (generatedTasks.some((task) => task.processInstanceId !== processInstance.id)) throw new Error("任务与已发起关键行动不匹配。");

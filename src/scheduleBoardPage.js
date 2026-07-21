@@ -767,7 +767,7 @@ function renderSummary(futureRows, launchedRows, days) {
   const outOfRangeCount = launchedRows.filter((row) => row.processInstance !== null && row.dueDateKey !== "" && !isDueDateInBoard(row, dayKeys)).length;
   return `
     <div class="schedule-board-summary">
-      <span>未来工作 ${futureRows.length}</span>
+      <span>待发起工作计划 ${futureRows.length}</span>
       <span>已发起 ${launchedRows.length}</span>
       <span>无截止时间 ${noDueDateCount}</span>
       <span>超出30天 ${outOfRangeCount}</span>
@@ -777,13 +777,13 @@ function renderSummary(futureRows, launchedRows, days) {
 
 function renderFutureWorkList(rows) {
   return `
-    <aside class="schedule-future-panel" aria-label="未来工作">
+    <aside class="schedule-future-panel" aria-label="待发起工作计划">
       <div class="schedule-future-panel-header">
-        <h3>未来工作</h3>
+        <h3>待发起工作计划</h3>
         <span>${rows.length}</span>
       </div>
       <div class="schedule-future-list">
-        ${rows.length === 0 ? `<p class="schedule-future-empty">暂无匹配未来工作</p>` : rows.map(renderWorkCell).join("")}
+        ${rows.length === 0 ? `<p class="schedule-future-empty">暂无匹配待发起工作计划</p>` : rows.map(renderWorkCell).join("")}
       </div>
     </aside>
   `;

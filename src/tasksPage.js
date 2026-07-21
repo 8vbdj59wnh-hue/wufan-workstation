@@ -6505,7 +6505,7 @@ async function relaunchProcessAsWorkPlan(instanceId, rerender) {
     return;
   }
   state.workPlans = [workPlan, ...state.workPlans];
-  window.alert("已创建新的本周工作，请在本周工作中点击“发起关键行动”。");
+  window.alert("已创建新的待发起工作计划。");
   rerender();
 }
 

@@ -1880,7 +1880,7 @@ export function startProcess({
 
 export async function launchWorkPlanAsProcess(workPlanId, { dueDate = null } = {}) {
   const workPlan = state.workPlans.find((item) => item.id === workPlanId);
-  if (workPlan === undefined) throw new Error("未找到该未来工作。");
+  if (workPlan === undefined) throw new Error("未找到该待发起工作计划。");
   if (workPlan.processInstanceId || workPlan.status === WorkPlanStatus.Launched) {
     throw new Error("该工作已经发起，不能重复发起。");
   }
@@ -1907,7 +1907,7 @@ export async function launchWorkPlanAsProcess(workPlanId, { dueDate = null } = {
     name: title,
     goalId: workPlan.goalId,
     initiatorId: rectificationSourceExecutorId ?? taskTemplate.ownerId,
-    description: workPlan.description || `由未来工作发起：${title}`,
+    description: workPlan.description || `由待发起工作计划发起：${title}`,
     launchAssignments: { owner: {}, accepter: {} },
   });
 
