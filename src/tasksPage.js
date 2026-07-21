@@ -17,6 +17,7 @@ import {
   getLatestStandardWorkFormFields,
   hasOpenRectificationWorkForSource,
   getRectificationSubmitFields,
+  launchWorkPlanDraftAsProcess,
   launchRectificationWorkForSource,
   loadTemplates,
   moveTaskTemplateToValueChain,
@@ -24,7 +25,6 @@ import {
   recordRectificationTriggerFailure,
   resolveAssetUrl,
   sortProcessNodes,
-  startProcess,
   startExecutionGroup as startExecutionGroupResource,
   state,
   updatePersistentResource,
@@ -3016,14 +3016,6 @@ function getClearanceImportCustomFields(data) {
   };
 }
 
-async function persistStartedProcess(result) {
-  await createPersistentResource("process-instances", result.instance);
-  const generatedTasks = state.tasks.filter((task) => task.processInstanceId === result.instance.id);
-  for (const task of generatedTasks) {
-    await createPersistentResource("tasks", task);
-  }
-}
-
 async function confirmClearanceImport(rerender) {
   if (modalState === null || modalState.kind !== "clearanceImport") return;
   const validRows = modalState.rows.filter((row) => row.errors.length === 0);
@@ -3046,8 +3038,6 @@ async function confirmClearanceImport(rerender) {
     return;
   }
 
-  const originalInstances = [...state.processInstances];
-  const originalTasks = [...state.tasks];
   const importedInstances = [];
 
   try {
@@ -3056,26 +3046,32 @@ async function confirmClearanceImport(rerender) {
       const goal = getClearanceGoalByName(row.data.关联目标);
       const initiator = getClearanceInitiatorByName(row.data.发起人);
       const displayTitle = buildDisplayTitle(template, customFields);
-      const result = startProcess({
-        templateId: template.defaultProcessTemplateId,
-        taskTemplateId: template.id,
-        customFields,
-        displayTitle,
-        coverImageUrl: getPrimaryImageUrl({ customFields }) || null,
-        name: displayTitle,
+      const workPlan = {
+        id: createId("work-plan"),
         goalId: goal?.id ?? "",
-        initiatorId: initiator?.id ?? "",
+        departmentId: template.departmentId ?? null,
+        taskTemplateId: template.id,
+        title: displayTitle,
+        customFields,
+        coverImageUrl: getPrimaryImageUrl({ customFields }) || null,
+        status: WorkPlanStatus.ThisWeek,
+        plannedWeek: getCurrentWeek(),
+        dueDate: customFields.dueDate || null,
         description: template.description || `库存清仓：${row.data.清仓产品}`,
+        processInstanceId: null,
+        createdAt: getNow(),
+        updatedAt: getNow(),
+        launchedAt: null,
+        canceledAt: null,
+      };
+      const result = await launchWorkPlanDraftAsProcess(workPlan, {
+        dueDate: workPlan.dueDate,
+        initiatorId: initiator?.id ?? "",
         launchAssignments: buildLaunchAssignments(template.defaultProcessTemplateId, template, initiator?.id ?? ""),
       });
-
-      if (result.error !== undefined) throw new Error(result.error);
-      await persistStartedProcess(result);
       importedInstances.push(result.instance);
     }
   } catch (error) {
-    state.processInstances = originalInstances;
-    state.tasks = originalTasks;
     modalState = { ...modalState, error: error.message || "库存清仓导入失败，请检查本地数据库服务。" };
     rerender();
     return;
@@ -5735,54 +5731,58 @@ async function saveTask(form, rerender) {
     const description = draft.remark === ""
       ? draft.template.description
       : `${draft.template.description}\n补充说明：${draft.remark}`;
-    const originalInstances = [...state.processInstances];
-    const originalTasks = [...state.tasks];
-
-    const result = startProcess({
-      templateId: draft.template.defaultProcessTemplateId,
-      taskTemplateId: draft.template.id,
-      customFields: draft.customFields,
-      displayTitle,
-      coverImageUrl,
-      name: displayTitle,
+    const now = getNow();
+    const workPlanId = createId("work-plan");
+    const customFields =
+      uploadedAttachments.length === 0
+        ? draft.customFields
+        : {
+            ...draft.customFields,
+            [standardWorkAttachmentsKey]: uploadedAttachments.map((attachment) => ({
+              originalName: attachment.originalName,
+              filePath: attachment.filePath ?? attachment.url,
+              url: attachment.url,
+              mimeType: attachment.mimeType,
+              ext: attachment.ext ?? getFileExt(attachment.originalName ?? attachment.filename ?? ""),
+              uploadedAt: attachment.uploadedAt ?? now,
+              standardWorkId: draft.template.id,
+              workPlanId,
+              processInstanceId: null,
+              taskIds: [],
+            })),
+          };
+    const workPlan = {
+      id: workPlanId,
       goalId: draft.goalId,
-      initiatorId: draft.initiatorId,
+      departmentId: draft.template.departmentId ?? null,
+      taskTemplateId: draft.template.id,
+      title: displayTitle,
+      customFields,
+      coverImageUrl,
+      status: WorkPlanStatus.ThisWeek,
+      plannedWeek: draft.plannedWeek ?? getCurrentWeek(),
+      dueDate: draft.dueDate,
       description,
-      launchAssignments: buildLaunchAssignments(draft.template.defaultProcessTemplateId, draft.template, draft.initiatorId),
-    });
-
-    if (result.error !== undefined) return setModalError(result.error, rerender);
-
-    if (uploadedAttachments.length > 0) {
-      const processTaskIds = state.tasks.filter((item) => item.processInstanceId === result.instance.id).map((item) => item.id);
-      const attachments = uploadedAttachments.map((attachment) => ({
-        originalName: attachment.originalName,
-        filePath: attachment.filePath ?? attachment.url,
-        url: attachment.url,
-        mimeType: attachment.mimeType,
-        ext: attachment.ext ?? getFileExt(attachment.originalName ?? attachment.filename ?? ""),
-        uploadedAt: attachment.uploadedAt ?? getNow(),
-        standardWorkId: draft.template.id,
-        processInstanceId: result.instance.id,
-        taskIds: processTaskIds,
-      }));
-      result.instance.customFields = {
-        ...(result.instance.customFields ?? {}),
-        [standardWorkAttachmentsKey]: attachments,
-      };
-    }
+      processInstanceId: null,
+      createdAt: now,
+      updatedAt: now,
+      launchedAt: null,
+      canceledAt: null,
+    };
 
     try {
-      await persistStartedProcess(result);
+      const result = await launchWorkPlanDraftAsProcess(workPlan, {
+        dueDate: workPlan.dueDate,
+        initiatorId: draft.initiatorId,
+        launchAssignments: buildLaunchAssignments(draft.template.defaultProcessTemplateId, draft.template, draft.initiatorId),
+      });
+      selectedProcessInstanceId = result.instance.id;
+      selectedTaskId = state.tasks.find((item) => item.processInstanceId === result.instance.id)?.id ?? selectedTaskId;
     } catch (error) {
       console.error("发起关键行动保存失败", error);
-      state.processInstances = originalInstances;
-      state.tasks = originalTasks;
       return setModalError(error.message || "发起关键行动保存失败，请检查本地数据库服务。", rerender);
     }
 
-    selectedProcessInstanceId = result.instance.id;
-    selectedTaskId = state.tasks.find((item) => item.processInstanceId === result.instance.id)?.id ?? selectedTaskId;
     activeTaskTab = "process-progress";
   } else {
     const now = getNow();

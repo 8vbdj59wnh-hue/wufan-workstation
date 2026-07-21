@@ -799,6 +799,8 @@ export function addMinutesToBusinessDateTime(value, minutes) {
   return formatBusinessMinuteIsoFromDate(nextDate);
 }
 
+const standardWorkAttachmentsKey = "standardWorkAttachments";
+
 function getProcessExpectedFinishAt(nodes, startAt) {
   const totalMinutes = nodes.reduce((sum, node) => sum + getProcessNodeDurationMinutes(node), 0);
   return addMinutesToBusinessDateTime(startAt, totalMinutes);
@@ -1878,7 +1880,22 @@ export function startProcess({
   return { instance, expectedFinishAt };
 }
 
-export async function launchWorkPlanAsProcess(workPlanId, { dueDate = null } = {}) {
+function enrichStandardWorkAttachments(customFields, { standardWorkId, workPlanId, processInstanceId, taskIds }) {
+  const attachments = customFields?.[standardWorkAttachmentsKey];
+  if (!Array.isArray(attachments) || attachments.length === 0) return customFields;
+  return {
+    ...customFields,
+    [standardWorkAttachmentsKey]: attachments.map((attachment) => ({
+      ...attachment,
+      standardWorkId: attachment.standardWorkId ?? standardWorkId,
+      workPlanId: attachment.workPlanId ?? workPlanId,
+      processInstanceId: attachment.processInstanceId ?? processInstanceId,
+      taskIds: Array.isArray(attachment.taskIds) && attachment.taskIds.length > 0 ? attachment.taskIds : taskIds,
+    })),
+  };
+}
+
+export async function launchWorkPlanAsProcess(workPlanId, { dueDate = null, initiatorId = null, launchAssignments = null } = {}) {
   const workPlan = state.workPlans.find((item) => item.id === workPlanId);
   if (workPlan === undefined) throw new Error("未找到该待发起工作计划。");
   if (workPlan.processInstanceId || workPlan.status === WorkPlanStatus.Launched) {
@@ -1898,6 +1915,7 @@ export async function launchWorkPlanAsProcess(workPlanId, { dueDate = null } = {
     workPlan.workType === WorkType.Rectification
       ? workPlan.customFields?.sourceExecutorId ?? workPlan.customFields?.sourceOwnerId ?? null
       : null;
+  const resolvedInitiatorId = initiatorId ?? rectificationSourceExecutorId ?? taskTemplate.ownerId;
   const result = startProcess({
     templateId: taskTemplate.defaultProcessTemplateId,
     taskTemplateId: taskTemplate.id,
@@ -1906,9 +1924,9 @@ export async function launchWorkPlanAsProcess(workPlanId, { dueDate = null } = {
     coverImageUrl: getPrimaryImageUrl(workPlan) || null,
     name: title,
     goalId: workPlan.goalId,
-    initiatorId: rectificationSourceExecutorId ?? taskTemplate.ownerId,
+    initiatorId: resolvedInitiatorId,
     description: workPlan.description || `由待发起工作计划发起：${title}`,
-    launchAssignments: { owner: {}, accepter: {} },
+    launchAssignments: launchAssignments ?? { owner: {}, accepter: {} },
   });
 
   if (result.error !== undefined) throw new Error(result.error);
@@ -1923,12 +1941,20 @@ export async function launchWorkPlanAsProcess(workPlanId, { dueDate = null } = {
     window.alert("预计完成时间超过项目截止时间，请关注排期。");
   }
   const generatedTasks = state.tasks.filter((task) => task.processInstanceId === result.instance.id);
+  const taskIds = generatedTasks.map((task) => task.id);
+  launchedInstance.customFields = enrichStandardWorkAttachments(launchedInstance.customFields ?? {}, {
+    standardWorkId: taskTemplate.id,
+    workPlanId: workPlan.id,
+    processInstanceId: launchedInstance.id,
+    taskIds,
+  });
   const launchedWorkPlan = {
     ...workPlan,
     workType: workPlan.workType || WorkType.Normal,
     status: WorkPlanStatus.Launched,
     processInstanceId: launchedInstance.id,
     dueDate: syncedDueDate,
+    customFields: launchedInstance.customFields,
     launchedAt: now,
     updatedAt: now,
   };
@@ -1954,6 +1980,23 @@ export async function launchWorkPlanAsProcess(workPlanId, { dueDate = null } = {
   } catch (error) {
     state.processInstances = previousProcessInstances;
     state.tasks = previousTasks;
+    state.workPlans = previousWorkPlans;
+    throw error;
+  }
+}
+
+export async function launchWorkPlanDraftAsProcess(workPlan, options = {}) {
+  const previousWorkPlans = [...state.workPlans];
+  const existingIndex = state.workPlans.findIndex((item) => item.id === workPlan.id);
+  if (existingIndex >= 0) {
+    state.workPlans = state.workPlans.map((item) => (item.id === workPlan.id ? workPlan : item));
+  } else {
+    state.workPlans = [workPlan, ...state.workPlans];
+  }
+
+  try {
+    return await launchWorkPlanAsProcess(workPlan.id, options);
+  } catch (error) {
     state.workPlans = previousWorkPlans;
     throw error;
   }

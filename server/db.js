@@ -1701,25 +1701,27 @@ export function cancelProcessInstance(instanceId, cancelReason = "") {
 export function launchWorkPlanWithProcess(workPlanId, { processInstance, tasks: generatedTasks = [], workPlan: launchedWorkPlan }) {
   const database = getDatabase();
   const existingWorkPlan = readExistingItem("workPlans", workPlanId);
-  if (existingWorkPlan === null) throw new Error("未找到该待发起工作计划。");
-  if (existingWorkPlan.processInstanceId || existingWorkPlan.status === "launched") throw new Error("该工作已经发起，不能重复发起。");
-  if (!["future", "this_week"].includes(existingWorkPlan.status)) throw new Error("只有待发起工作计划可以发起。");
+  const incomingWorkPlan = launchedWorkPlan?.id === workPlanId ? launchedWorkPlan : null;
+  const baseWorkPlan = existingWorkPlan ?? incomingWorkPlan;
+  if (baseWorkPlan === null) throw new Error("未找到该待发起工作计划。");
+  if (baseWorkPlan.processInstanceId || baseWorkPlan.status === "launched") throw new Error("该工作已经发起，不能重复发起。");
+  if (!["future", "this_week"].includes(baseWorkPlan.status)) throw new Error("只有待发起工作计划可以发起。");
   if (!processInstance?.id) throw new Error("缺少已发起关键行动数据。");
   if (!Array.isArray(generatedTasks) || generatedTasks.length === 0) throw new Error("缺少标准步骤任务。");
   if (generatedTasks.some((task) => task.processInstanceId !== processInstance.id)) throw new Error("任务与已发起关键行动不匹配。");
 
   const now = new Date().toISOString();
-  const syncedDueDate = processInstance.dueDate ?? launchedWorkPlan?.dueDate ?? existingWorkPlan.dueDate ?? null;
+  const syncedDueDate = processInstance.dueDate ?? launchedWorkPlan?.dueDate ?? baseWorkPlan.dueDate ?? null;
   const nextProcessInstance = {
     ...processInstance,
     dueDate: syncedDueDate,
     updatedAt: now,
   };
   const nextWorkPlan = {
-    ...existingWorkPlan,
+    ...baseWorkPlan,
     ...(launchedWorkPlan ?? {}),
     id: workPlanId,
-    workType: launchedWorkPlan?.workType ?? existingWorkPlan.workType ?? "normal",
+    workType: launchedWorkPlan?.workType ?? baseWorkPlan.workType ?? "normal",
     status: "launched",
     processInstanceId: processInstance.id,
     dueDate: syncedDueDate,
