@@ -8,6 +8,7 @@ import {
   formatProcessStepLabel,
   getCurrentWeek,
   getProcessNodeStepOrder,
+  getProcessNodeDurationMinutes,
   getCurrentUser,
   getNow,
   hasOpenRectificationWorkForSource,
@@ -3628,6 +3629,205 @@ function renderTaskWorkInfo(task, taskTemplate) {
   return `<div class="detail-grid">${configuredRows}${extraRows}</div>`;
 }
 
+function getTaskActionContext(task) {
+  const instance = getTaskProcessInstance(task);
+  const taskTemplate = instance === null ? getTaskTemplateForTask(task) : getTaskTemplate(instance.taskTemplateId ?? instance.standardWorkId ?? "");
+  const customFields = instance?.customFields ?? {};
+  const title = instance === null ? "未关联关键行动" : getProcessDisplayTitle(instance);
+  const objectName =
+    instance === null
+      ? ""
+      : getObjectFromFields(customFields) || parseObjectFromTitle(title, taskTemplate?.name ?? "") || "未填写对象";
+
+  return {
+    instance,
+    taskTemplate,
+    customFields,
+    title,
+    objectName,
+  };
+}
+
+function renderActionHero(task, context) {
+  const { instance, taskTemplate, objectName, title } = context;
+  if (instance === null) {
+    return `
+      <div class="task-action-hero is-unlinked">
+        <div>
+          <span class="eyebrow">未关联关键行动</span>
+          <h2>${escapeHtml(task.name)}</h2>
+          <p>该任务没有关联已发起关键行动，以下仅展示当前任务自身信息。</p>
+        </div>
+      </div>
+    `;
+  }
+
+  const ownerNames = getProcessCurrentOwners(instance);
+
+  return `
+    <div class="task-action-hero">
+      <div>
+        <span class="eyebrow">当前关键行动</span>
+        <h2>${escapeHtml(title)}</h2>
+        <p>${escapeHtml(taskTemplate?.name ?? "未关联关键行动")}${objectName === "" ? "" : `｜${escapeHtml(objectName)}`}</p>
+      </div>
+      <div class="task-action-summary">
+        ${renderDetailField("整体状态", processInstanceStatusNames[instance.status] ?? instance.status)}
+        ${renderDetailField("关联目标", findName(goals, instance.goalId, "未设置"))}
+        ${renderDetailField("行动负责人", escapeHtml(ownerNames))}
+        ${renderDetailField("本次截止时间", formatBusinessDateTime(instance.dueDate))}
+      </div>
+    </div>
+  `;
+}
+
+function renderActionPublicInfo(task, context) {
+  const { instance, taskTemplate, customFields } = context;
+  if (instance === null) {
+    return `
+      <div class="detail-block">
+        <h3>关键行动信息</h3>
+        <p class="form-note">未关联关键行动。</p>
+      </div>
+    `;
+  }
+
+  const coverImageUrl = getTaskCoverImage(task);
+  const startedAt = instance.startedAt ?? instance.launchedAt ?? instance.createdAt ?? "";
+
+  return `
+    <div class="detail-block">
+      <h3>关键行动信息</h3>
+      <div class="task-work-overview">
+        <div class="task-image-detail">
+          ${
+            coverImageUrl === ""
+              ? `<div class="task-image-empty">暂无产品图片</div>`
+              : `<img class="task-cover-thumb" src="${escapeHtml(resolveAssetUrl(coverImageUrl))}" alt="相关产品图片" onerror="this.replaceWith(Object.assign(document.createElement('div'), { className: 'task-image-empty', textContent: '图片无法预览' }))" />`
+          }
+        </div>
+        <div class="task-work-main">
+          <div class="detail-grid">
+            ${renderDetailField("关键行动名称", escapeHtml(taskTemplate?.name ?? "未关联关键行动"))}
+            ${renderDetailField("关联目标", findName(goals, instance.goalId, "未设置"))}
+            ${renderDetailField("本次发起说明", escapeHtml(instance.description || "未填写"))}
+            ${renderDetailField("本次开始时间", escapeHtml(startedAt || "未记录"))}
+            ${renderDetailField("本次截止时间", formatBusinessDateTime(instance.dueDate))}
+            ${renderDetailField("发起人", findName(people, instance.initiatorId, "未设置"))}
+          </div>
+          ${renderWorkFormViewer({
+            formFields: getSortedFormFields(taskTemplate),
+            customFields,
+          })}
+        </div>
+      </div>
+    </div>
+    ${renderStandardWorkAttachmentsBlock(customFields)}
+  `;
+}
+
+function getActionProgressItems(task, context) {
+  const instanceTasks =
+    context.instance === null ? [] : sortProcessTasks(getProcessTasks(context.instance.id)).filter((item) => item.status !== TaskStatus.Canceled);
+  if (instanceTasks.length > 0) {
+    return instanceTasks.map((item, index) => ({
+      ...item,
+      isCurrent: item.id === task.id,
+      stepLabel: formatProcessStepLabel(index + 1),
+    }));
+  }
+
+  const templateId = context.instance?.templateId ?? context.taskTemplate?.defaultProcessTemplateId ?? "";
+  if (templateId === "") return [];
+  return sortProcessNodes(
+    state.processTemplateNodes.filter((node) => node.templateId === templateId && node.status !== ProcessTemplateNodeStatus.Deleted),
+  ).map((node, index) => ({
+    id: node.id,
+    name: node.name,
+    status: node.id === task.processNodeId ? task.status : TaskStatus.Waiting,
+    isCurrent: node.id === task.processNodeId,
+    stepLabel: formatProcessStepLabel(index + 1),
+  }));
+}
+
+function getActionProgressMarker(item) {
+  if (item.status === TaskStatus.Done) return "✓";
+  if (item.isCurrent) return "▶";
+  if (isTaskOverdue(item) || hasTaskOverdueRecord(item)) return "!";
+  return "○";
+}
+
+function getActionProgressClass(item) {
+  if (item.isCurrent) return " is-current";
+  if (item.status === TaskStatus.Done) return " is-done";
+  if (item.status === TaskStatus.Canceled) return " is-canceled";
+  if (isTaskOverdue(item) || hasTaskOverdueRecord(item)) return " is-alert";
+  return "";
+}
+
+function renderActionProgress(task, context) {
+  if (context.instance === null) return "";
+  const progressItems = getActionProgressItems(task, context);
+
+  return `
+    <div class="detail-block">
+      <h3>行动进度</h3>
+      ${
+        progressItems.length === 0
+          ? `<p>暂无行动进度。</p>`
+          : `<ol class="action-progress-list">
+              ${progressItems
+                .map(
+                  (item) => `
+                    <li class="action-progress-item${getActionProgressClass(item)}">
+                      <span class="action-progress-marker">${getActionProgressMarker(item)}</span>
+                      <strong>${escapeHtml(item.stepLabel)}</strong>
+                      <span title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span>
+                      <em>${escapeHtml(taskStatusNames[item.status] ?? item.status ?? "未开始")}</em>
+                    </li>
+                  `,
+                )
+                .join("")}
+            </ol>`
+      }
+      <p class="form-note">行动进度优先读取本次已发起关键行动下实际生成的任务；历史数据缺失时才回退当前关键行动标准流程。</p>
+    </div>
+  `;
+}
+
+function renderCurrentTaskSection(task) {
+  const node = getProcessNode(task);
+  const requirement = getTaskSubmitRequirement(task);
+  const durationMinutes = getProcessNodeDurationMinutes(node ?? {});
+
+  return `
+    <div class="detail-block current-task-block">
+      <h3>当前任务</h3>
+      <div class="detail-grid">
+        ${renderDetailField("当前步骤", escapeHtml(getTaskProcessStepName(task)))}
+        ${renderDetailField("任务名称", escapeHtml(task.name))}
+        ${renderDetailField("负责人", findName(people, task.ownerId, "未设置"))}
+        ${renderDetailField("执行人", findName(people, task.executorId ?? task.ownerId, "未设置"))}
+        ${renderDetailField("规定时限", durationMinutes > 0 ? `${durationMinutes} 分钟` : "未设置")}
+        ${renderDetailField("截止时间", formatBusinessMinuteDateTime(task.dueDate))}
+        ${renderDetailField("状态", taskStatusNames[task.status] ?? task.status)}
+        ${renderDetailField("负责部门", findName(departments, task.departmentId, "未设置"))}
+      </div>
+      <p>节点说明：${escapeHtml(task.description || "未填写")}</p>
+      <p>完成标准：${escapeHtml(task.completionStandard || "未填写")}</p>
+      ${
+        task.reviewStandard === undefined || task.reviewStandard === null || task.reviewStandard === ""
+          ? ""
+          : `<p>${task.source === TaskSource.Process ? "步骤审核标准" : "审核标准"}：${escapeHtml(task.reviewStandard)}</p>`
+      }
+      <p>提交要求：${escapeHtml(submitTypeNames[requirement.submitType] ?? "填写表单")} ${requirement.submitDescription ? `｜${escapeHtml(requirement.submitDescription)}` : ""}</p>
+      <div class="row-actions task-status-actions">
+        ${task.processNodeId ? getMethodologyLinkByNodeId(task.processNodeId) : "<span class=\"muted-action\">暂无关联方法论</span>"}
+      </div>
+    </div>
+  `;
+}
+
 function renderReturnRecordsBlock(task) {
   const records = getReturnRecords(task);
   if (records.length === 0) return "";
@@ -3988,20 +4188,17 @@ function renderTaskDetail() {
     `;
   }
 
-  const processText =
-    selectedTask.source === TaskSource.Process
-      ? `已发起关键行动：${selectedTask.processInstanceId}；标准步骤：${selectedTask.processNodeId}`
-      : "无";
   const resultAttachments = selectedTask.resultAttachments ?? [];
   const attachments = renderAttachmentPreviewList(resultAttachments, "无");
-  const taskTemplate = getTaskTemplateForTask(selectedTask);
-  const coverImageUrl = getTaskCoverImage(selectedTask);
-  const belonging = getTaskBelonging(selectedTask);
+  const actionContext = getTaskActionContext(selectedTask);
 
   return `
     <section class="settings-section task-detail">
-      <div class="section-heading with-actions">
-        <h2>${escapeHtml(selectedTask.name)}</h2>
+      <div class="section-heading with-actions task-action-heading">
+        <div>
+          <h2>${escapeHtml(actionContext.instance === null ? selectedTask.name : actionContext.title)}</h2>
+          <p class="form-note">${actionContext.instance === null ? "未关联关键行动" : `当前步骤：${escapeHtml(selectedTask.name)}`}</p>
+        </div>
         <div class="section-actions">
           ${canEditTask(selectedTask) ? renderActionButton("编辑", "edit-task", selectedTask.id) : ""}
           ${selectedTask.processNodeId ? getMethodologyLinkByNodeId(selectedTask.processNodeId) : ""}
@@ -4012,32 +4209,10 @@ function renderTaskDetail() {
       <div class="task-primary-actions">
         <div class="row-actions">${renderStatusActions(selectedTask) || "<span class=\"muted-action\">暂无可用操作</span>"}</div>
       </div>
-      <div class="detail-block">
-        <h3>本次任务信息</h3>
-        <div class="task-work-overview">
-          <div class="task-image-detail">
-            ${
-              coverImageUrl === ""
-                ? `<div class="task-image-empty">暂无产品图片</div>`
-                : `<img class="task-cover-thumb" src="${escapeHtml(resolveAssetUrl(coverImageUrl))}" alt="相关产品图片" onerror="this.replaceWith(Object.assign(document.createElement('div'), { className: 'task-image-empty', textContent: '图片无法预览' }))" />`
-            }
-          </div>
-          <div class="task-work-main">
-            <div class="detail-grid">
-              ${renderDetailField("本次工作标题", escapeHtml(belonging.title || selectedTask.name || "无"))}
-              ${renderDetailField("归属关键行动", escapeHtml(belonging.standardWorkName))}
-              ${renderDetailField("当前任务节点", escapeHtml(selectedTask.name))}
-              ${renderDetailField("任务来源", taskSourceNames[selectedTask.source])}
-            </div>
-            ${renderTaskWorkInfo(selectedTask, taskTemplate)}
-          </div>
-        </div>
-      </div>
-      <div class="detail-block">
-        <h3>关联模板</h3>
-        ${renderTaskLinkedTemplateSummary(selectedTask.templateId ?? "", "detail")}
-      </div>
-      ${renderStandardWorkAttachmentsBlock(getTaskCustomFields(selectedTask))}
+      ${renderActionHero(selectedTask, actionContext)}
+      ${renderActionPublicInfo(selectedTask, actionContext)}
+      ${renderActionProgress(selectedTask, actionContext)}
+      ${renderCurrentTaskSection(selectedTask)}
       ${renderPreviousTaskFilesBlock(selectedTask)}
       ${renderTaskSubmitResultDetail(selectedTask)}
       <div class="detail-block">
@@ -4049,43 +4224,20 @@ function renderTaskDetail() {
         </div>
         <p>完成时间：${selectedTask.completedAt ?? "未完成"}</p>
       </div>
-      <div class="detail-block">
-        <h3>任务状态</h3>
-        <div class="detail-grid">
-          ${renderDetailField("当前状态", taskStatusNames[selectedTask.status])}
-          ${renderDetailField("执行人", findName(people, selectedTask.ownerId, "未设置"))}
-          ${renderDetailField("负责部门", findName(departments, selectedTask.departmentId, "未设置"))}
-          ${renderDetailField("截止时间", formatBusinessMinuteDateTime(selectedTask.dueDate))}
-          ${renderDetailField("是否逾期", isTaskOverdue(selectedTask) || hasTaskOverdueRecord(selectedTask) ? "已逾期" : "未逾期")}
-          ${renderDetailField("计划周", selectedTask.plannedWeek ?? "未安排")}
-          ${renderDetailField("发起人", findName(people, selectedTask.initiatorId, "未设置"))}
-          ${renderDetailField("验收人", selectedTask.needAcceptance ? findName(people, selectedTask.accepterId, "未设置") : "无需验收")}
-        </div>
-      </div>
-      <div class="detail-block">
-        <h3>任务要求</h3>
-        <p>标准节点：${getTaskProcessStepName(selectedTask)}</p>
-        <p>任务说明：${escapeHtml(selectedTask.description || "未填写")}</p>
-        <p>完成标准：${escapeHtml(selectedTask.completionStandard || "未填写")}</p>
-        ${
-          selectedTask.reviewStandard === undefined || selectedTask.reviewStandard === null || selectedTask.reviewStandard === ""
-            ? ""
-            : `<p>${selectedTask.source === TaskSource.Process ? "步骤审核标准" : "审核标准"}：${escapeHtml(selectedTask.reviewStandard)}</p>`
-        }
-        <div class="row-actions task-status-actions">
-          ${selectedTask.processNodeId ? getMethodologyLinkByNodeId(selectedTask.processNodeId) : "<span class=\"muted-action\">暂无关联方法论</span>"}
-        </div>
-      </div>
       ${renderReturnRecordsBlock(selectedTask)}
       <div class="detail-block">
         <h3>关联信息</h3>
         <div class="detail-grid">
-          ${renderDetailField("所属关键行动标准流程", getTaskProcessTemplateName(selectedTask))}
-          ${renderDetailField("所属标准步骤", getTaskProcessStepName(selectedTask))}
+          ${renderDetailField("所属关键行动标准流程", escapeHtml(getTaskProcessTemplateName(selectedTask)))}
+          ${renderDetailField("所属标准步骤", escapeHtml(getTaskProcessStepName(selectedTask)))}
           ${renderDetailField("关联目标", findName(goals, selectedTask.goalId, "未设置"))}
           ${renderDetailField("四象限", getTaskQuadrant(selectedTask.importance, selectedTask.urgency))}
         </div>
-        <p>${processText}</p>
+        <p>${
+          selectedTask.source === TaskSource.Process
+            ? `已发起关键行动：${escapeHtml(selectedTask.processInstanceId ?? "无")}；标准步骤：${escapeHtml(selectedTask.processNodeId ?? "无")}`
+            : "无"
+        }</p>
       </div>
     </section>
   `;

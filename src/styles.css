@@ -3164,6 +3164,121 @@ button.content-template-thumb {
   padding: 0 18px 14px;
 }
 
+.task-action-heading .form-note {
+  margin: 4px 0 0;
+}
+
+.task-action-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+  gap: 18px;
+  padding: 18px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #f8fafc;
+}
+
+.task-action-hero.is-unlinked {
+  grid-template-columns: 1fr;
+  background: #fff7ed;
+}
+
+.task-action-hero h2 {
+  margin: 4px 0 8px;
+  color: #111827;
+  font-size: 22px;
+  line-height: 1.25;
+}
+
+.task-action-hero p {
+  margin: 0;
+  color: #4b5563;
+}
+
+.task-action-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  align-content: start;
+}
+
+.action-progress-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.action-progress-item {
+  display: grid;
+  grid-template-columns: 28px 72px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 42px;
+  padding: 9px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.action-progress-item.is-current {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.action-progress-item.is-done {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.action-progress-item.is-alert {
+  border-color: #fed7aa;
+  background: #fff7ed;
+}
+
+.action-progress-item.is-canceled {
+  color: #9ca3af;
+  background: #f9fafb;
+}
+
+.action-progress-marker {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 999px;
+  background: #e5e7eb;
+  color: #374151;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.action-progress-item.is-current .action-progress-marker {
+  background: #2563eb;
+  color: #fff;
+}
+
+.action-progress-item.is-done .action-progress-marker {
+  background: #16a34a;
+  color: #fff;
+}
+
+.action-progress-item span[title] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.action-progress-item em {
+  color: #6b7280;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.current-task-block {
+  background: #fff;
+}
+
 .task-image-detail img,
 .task-image-empty {
   width: 120px;
