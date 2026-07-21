@@ -2170,6 +2170,62 @@ function createClearanceXlsxWorkbook(rows) {
   ]);
 }
 
+function createSimpleXlsxSheet(headers, rows, leadingRows = []) {
+  const allRows = [
+    ...leadingRows,
+    headers,
+    ...rows.map((row) => headers.map((header) => row[header] ?? "")),
+  ];
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    ${allRows
+      .map((row, rowIndex) => {
+        const excelRowIndex = rowIndex + 1;
+        return `<row r="${excelRowIndex}">${row.map((value, columnIndex) => createSheetCell(value, excelRowIndex, columnIndex)).join("")}</row>`;
+      })
+      .join("")}
+  </sheetData>
+</worksheet>`;
+}
+
+function createSimpleXlsxWorkbook(sheetName, headers, rows, leadingRows = []) {
+  return createZipBlob([
+    {
+      name: "[Content_Types].xml",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>`,
+    },
+    {
+      name: "_rels/.rels",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`,
+    },
+    {
+      name: "xl/workbook.xml",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="${escapeXml(sheetName)}" sheetId="1" r:id="rId1"/></sheets>
+</workbook>`,
+    },
+    {
+      name: "xl/_rels/workbook.xml.rels",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>`,
+    },
+    { name: "xl/worksheets/sheet1.xml", content: createSimpleXlsxSheet(headers, rows, leadingRows) },
+  ]);
+}
+
 function downloadFile(content, fileName, type) {
   const blob = content instanceof Blob ? content : new Blob([content], { type });
   const url = URL.createObjectURL(blob);
@@ -2338,6 +2394,316 @@ async function parseClearanceXlsxWorkbook(file) {
     }
     return values.map((value) => value ?? "");
   });
+}
+
+const standardFlowImportHeaders = ["关键行动名称", "步骤序号", "步骤名称", "执行部门", "执行人", "时限", "完成标准", "说明"];
+const standardFlowRequiredHeaders = ["关键行动名称", "步骤序号", "步骤名称", "执行部门"];
+
+function hasConfiguredStandardFlow(template) {
+  if (!template?.defaultProcessTemplateId) return false;
+  return state.processTemplateNodes.some((node) => node.templateId === template.defaultProcessTemplateId && node.status !== ProcessTemplateNodeStatus.Deleted);
+}
+
+function getUnconfiguredStandardWorks() {
+  return state.taskTemplates
+    .filter((template) => !hiddenLegacyStandardWorkNames.includes(template.name))
+    .filter((template) => template.status !== TaskTemplateStatus.Inactive)
+    .filter((template) => !hasConfiguredStandardFlow(template))
+    .sort((left, right) => left.name.localeCompare(right.name, "zh-Hans-CN"));
+}
+
+function downloadStandardFlowTemplate() {
+  const templates = getUnconfiguredStandardWorks();
+  if (templates.length === 0) {
+    window.alert("暂无未配置标准流程的关键行动。");
+    return;
+  }
+  const leadingRows = [
+    ["填写说明：同一关键行动可以复制该行填写多个步骤；步骤序号从 1 开始连续填写；空白行会忽略；执行部门必须使用系统已有名称。"],
+    ["时限单位：分钟。例如 30、60、120、1440。执行人可留空，系统会按部门负责人或关键行动负责人兜底。"],
+    [],
+  ];
+  const rows = templates.map((template) => ({
+    关键行动名称: template.name,
+    步骤序号: "",
+    步骤名称: "",
+    执行部门: "",
+    执行人: "",
+    时限: "",
+    完成标准: "",
+    说明: "",
+  }));
+  downloadFile(
+    createSimpleXlsxWorkbook("标准流程模板", standardFlowImportHeaders, rows, leadingRows),
+    "行动标准待配置模板.xlsx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  );
+}
+
+function getStandardFlowHeaderRowIndex(rows) {
+  return rows.findIndex((row) => standardFlowRequiredHeaders.every((header) => row.includes(header)));
+}
+
+function standardFlowRowsToRecords(rows, headerRowIndex = 0) {
+  const headers = rows[headerRowIndex] ?? [];
+  return rows.slice(headerRowIndex + 1).map((row, rowIndex) =>
+    standardFlowImportHeaders.reduce((record, header) => {
+      const index = headers.indexOf(header);
+      record[header] = index >= 0 ? row[index] ?? "" : "";
+      return record;
+    }, { __rowNumber: headerRowIndex + rowIndex + 2 }),
+  );
+}
+
+function parseStandardFlowDelimitedRows(text) {
+  return parseClearanceDelimitedRows(text);
+}
+
+async function parseStandardFlowFile(file) {
+  const fileName = file.name.toLowerCase();
+  if (fileName.endsWith(".xlsx")) return parseClearanceXlsxWorkbook(file);
+  const text = await file.text();
+  return text.trimStart().startsWith("<?xml") || text.includes("<Workbook")
+    ? parseClearanceXmlWorkbook(text)
+    : parseStandardFlowDelimitedRows(text);
+}
+
+function normalizeStandardFlowRecord(record) {
+  const normalized = standardFlowImportHeaders.reduce((result, header) => {
+    result[header] = String(record[header] ?? "").trim();
+    return result;
+  }, {});
+  normalized.__rowNumber = record.__rowNumber;
+  return normalized;
+}
+
+function isBlankStandardFlowRecord(record) {
+  return standardFlowImportHeaders.every((header) => String(record[header] ?? "").trim() === "");
+}
+
+function isReservedStandardFlowBlankRow(record) {
+  return String(record.关键行动名称 ?? "").trim() !== "" &&
+    ["步骤序号", "步骤名称", "执行部门", "执行人", "时限", "完成标准", "说明"].every((header) => String(record[header] ?? "").trim() === "");
+}
+
+function getDepartmentByName(name) {
+  const text = String(name ?? "").trim();
+  return departments.find((department) => department.name === text) ?? null;
+}
+
+function getPersonByName(name) {
+  const text = String(name ?? "").trim();
+  if (text === "") return null;
+  return people.find((person) => [person.name, person.account, person.username].includes(text)) ?? null;
+}
+
+function normalizeStandardFlowDuration(value) {
+  const text = String(value ?? "").trim();
+  if (text === "") return 1440;
+  const number = Number(text.replace(/分钟|分/g, ""));
+  return Number.isFinite(number) && number > 0 ? Math.round(number) : null;
+}
+
+function buildStandardFlowImportPreviewRows(records) {
+  const stepOrdersByTemplate = new Map();
+  const previewRows = records
+    .map(normalizeStandardFlowRecord)
+    .filter((record) => !isBlankStandardFlowRecord(record) && !isReservedStandardFlowBlankRow(record))
+    .map((record) => {
+      const rowNumber = Number(record.__rowNumber) || 2;
+      const errors = [];
+      const template = state.taskTemplates.find((item) => item.name === record.关键行动名称) ?? null;
+      const department = getDepartmentByName(record.执行部门);
+      const executor = getPersonByName(record.执行人);
+      const durationMinutes = normalizeStandardFlowDuration(record.时限);
+      const stepOrder = Number(record.步骤序号);
+
+      if (template === null) errors.push(`第 ${rowNumber} 行：关键行动不存在`);
+      if (template !== null && hasConfiguredStandardFlow(template)) errors.push(`第 ${rowNumber} 行：【${template.name}】已配置标准流程，本轮不支持更新模式`);
+      if (record.步骤序号 === "") errors.push(`第 ${rowNumber} 行：【步骤序号】不能为空`);
+      if (record.步骤序号 !== "" && (!Number.isInteger(stepOrder) || stepOrder <= 0)) errors.push(`第 ${rowNumber} 行：【步骤序号】必须是正整数`);
+      if (record.步骤名称 === "") errors.push(`第 ${rowNumber} 行：【步骤名称】不能为空`);
+      if (record.执行部门 === "") errors.push(`第 ${rowNumber} 行：【执行部门】不能为空`);
+      if (record.执行部门 !== "" && department === null) errors.push(`第 ${rowNumber} 行：【执行部门】不存在`);
+      if (record.执行人 !== "" && executor === null) errors.push(`第 ${rowNumber} 行：【执行人】不存在`);
+      if (durationMinutes === null) errors.push(`第 ${rowNumber} 行：【时限】必须是分钟数字`);
+      if (template !== null && Number.isInteger(stepOrder) && stepOrder > 0) {
+        const key = template.id;
+        const orders = stepOrdersByTemplate.get(key) ?? new Set();
+        if (orders.has(stepOrder)) errors.push(`第 ${rowNumber} 行：【${template.name}】步骤序号 ${stepOrder} 重复`);
+        orders.add(stepOrder);
+        stepOrdersByTemplate.set(key, orders);
+      }
+
+      return {
+        rowNumber,
+        record,
+        template,
+        department,
+        executor,
+        durationMinutes: durationMinutes ?? 1440,
+        stepOrder: Number.isInteger(stepOrder) && stepOrder > 0 ? stepOrder : 1,
+        errors,
+      };
+    });
+  const rowsByTemplate = previewRows.reduce((result, row) => {
+    if (row.template === null) return result;
+    result.set(row.template.id, [...(result.get(row.template.id) ?? []), row]);
+    return result;
+  }, new Map());
+  rowsByTemplate.forEach((rows) => {
+    const validOrderRows = rows.filter((row) => Number.isInteger(row.stepOrder) && row.stepOrder > 0);
+    const uniqueOrders = [...new Set(validOrderRows.map((row) => row.stepOrder))].sort((left, right) => left - right);
+    const expectedOrders = Array.from({ length: uniqueOrders.length }, (_, index) => index + 1);
+    const isContinuous = uniqueOrders.length > 0 && uniqueOrders.every((order, index) => order === expectedOrders[index]);
+    if (!isContinuous) {
+      const firstRow = rows[0];
+      firstRow.errors.push(`第 ${firstRow.rowNumber} 行：【${firstRow.template.name}】步骤序号必须从 1 开始连续填写，当前为 ${uniqueOrders.join("、") || "空"}`);
+    }
+  });
+  return previewRows;
+}
+
+async function handleStandardFlowImportFile(file, rerender) {
+  try {
+    const rows = await parseStandardFlowFile(file);
+    const headerRowIndex = getStandardFlowHeaderRowIndex(rows);
+    const headers = headerRowIndex >= 0 ? rows[headerRowIndex] ?? [] : [];
+    const missingHeaders = standardFlowRequiredHeaders.filter((header) => !headers.includes(header));
+    if (missingHeaders.length > 0) {
+      modalState = { kind: "standardFlowImport", fileName: file.name, rows: [], error: `缺少必要表头：${missingHeaders.join("、")}` };
+      rerender();
+      return;
+    }
+    const previewRows = buildStandardFlowImportPreviewRows(standardFlowRowsToRecords(rows, headerRowIndex));
+    modalState = {
+      kind: "standardFlowImport",
+      fileName: file.name,
+      rows: previewRows,
+      error: previewRows.length === 0 ? "没有可导入的有效步骤行。" : "",
+    };
+    rerender();
+  } catch {
+    modalState = { kind: "standardFlowImport", fileName: file.name, rows: [], error: "文件解析失败，请使用系统导出的 xlsx 模板，或 CSV/TSV 文件。" };
+    rerender();
+  }
+}
+
+function getStandardFlowFallbackOwnerId(template, department) {
+  return department?.leaderId ?? template.ownerId ?? getCurrentUser()?.id ?? people[0]?.id ?? null;
+}
+
+function buildImportedProcessNode(row, processTemplateId, now, stepOrder = row.stepOrder) {
+  const ownerId = row.executor?.id ?? getStandardFlowFallbackOwnerId(row.template, row.department);
+  const submitDefaults = normalizeSubmitRequirement({ name: row.record.步骤名称 });
+  return {
+    id: createId("process-node"),
+    templateId: processTemplateId,
+    name: row.record.步骤名称,
+    stepOrder,
+    stageName: "默认标准",
+    stageOrder: stepOrder,
+    nodeOrder: stepOrder,
+    departmentId: row.department?.id ?? "",
+    ownerId,
+    executorId: row.executor?.id ?? ownerId,
+    ownerRule: ProcessOwnerRule.FixedPerson,
+    ownerDepartmentId: row.department?.id ?? "",
+    ownerPositionId: null,
+    defaultOwnerId: ownerId,
+    durationDays: Math.max(1, Math.ceil(row.durationMinutes / 1440)),
+    durationMinutes: row.durationMinutes,
+    description: row.record.说明,
+    completionStandard: row.record.完成标准,
+    reviewStandard: null,
+    defaultImportance: TaskImportance.Important,
+    defaultUrgency: TaskUrgency.NotUrgent,
+    needAcceptance: false,
+    accepterRule: ProcessAccepterRule.None,
+    defaultAccepterId: null,
+    outputRequirement: null,
+    ...submitDefaults,
+    status: ProcessTemplateNodeStatus.Active,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+async function confirmStandardFlowImport(rerender) {
+  if (modalState === null || modalState.kind !== "standardFlowImport") return;
+  const invalidRows = modalState.rows.filter((row) => row.errors.length > 0);
+  if (invalidRows.length > 0) {
+    modalState = { ...modalState, error: "存在校验错误，请修正后重新导入；本次没有写入任何标准流程。" };
+    rerender();
+    return;
+  }
+  if (modalState.rows.length === 0) {
+    modalState = { ...modalState, error: "没有可导入的有效步骤行。" };
+    rerender();
+    return;
+  }
+
+  const rowsByTemplateId = modalState.rows.reduce((result, row) => {
+    const key = row.template.id;
+    result.set(key, [...(result.get(key) ?? []), row]);
+    return result;
+  }, new Map());
+  const originalProcessTemplates = [...state.processTemplates];
+  const originalProcessTemplateNodes = [...state.processTemplateNodes];
+  const originalTaskTemplates = [...state.taskTemplates];
+  const now = getNow();
+
+  try {
+    for (const [templateId, rows] of rowsByTemplateId.entries()) {
+      const template = getTaskTemplate(templateId);
+      if (template === null) throw new Error("导入过程中未找到关键行动。");
+      if (hasConfiguredStandardFlow(template)) throw new Error(`【${template.name}】已配置标准流程，本轮不支持更新模式。`);
+
+      const beforeProcessTemplateIds = new Set(state.processTemplates.map((item) => item.id));
+      const processTemplateId = createOrReuseProcessTemplateForStandardWork({
+        name: template.name,
+        ownerId: template.ownerId,
+        departmentId: template.departmentId,
+        now,
+        templateId: template.defaultProcessTemplateId || null,
+      });
+      const processTemplate = state.processTemplates.find((item) => item.id === processTemplateId);
+      if (processTemplate === undefined) throw new Error(`【${template.name}】标准流程创建失败。`);
+      if (!beforeProcessTemplateIds.has(processTemplateId)) {
+        await createPersistentResource("process-templates", processTemplate);
+      } else {
+        await updatePersistentResource("process-templates", processTemplate.id, processTemplate);
+      }
+
+      if (template.defaultProcessTemplateId !== processTemplateId) {
+        const updatedTemplate = { ...template, defaultProcessTemplateId: processTemplateId, updatedAt: now };
+        await updatePersistentResource("task-templates", updatedTemplate.id, updatedTemplate);
+        state.taskTemplates = state.taskTemplates.map((item) => (item.id === updatedTemplate.id ? updatedTemplate : item));
+      }
+
+      const nodes = rows
+        .slice()
+        .sort((left, right) => left.stepOrder - right.stepOrder)
+        .map((row, index) => buildImportedProcessNode(row, processTemplateId, now, index + 1));
+      for (const node of nodes) {
+        await createPersistentResource("process-template-nodes", node);
+      }
+      state.processTemplateNodes = [...state.processTemplateNodes, ...nodes];
+    }
+  } catch (error) {
+    state.processTemplates = originalProcessTemplates;
+    state.processTemplateNodes = originalProcessTemplateNodes;
+    state.taskTemplates = originalTaskTemplates;
+    modalState = { ...modalState, error: error.message || "行动标准导入失败，请检查本地数据库服务。" };
+    rerender();
+    return;
+  }
+
+  const importedTemplateCount = rowsByTemplateId.size;
+  const importedNodeCount = modalState.rows.length;
+  modalState = null;
+  window.alert(`导入完成：已为 ${importedTemplateCount} 个关键行动生成 ${importedNodeCount} 个标准节点。`);
+  rerender();
 }
 
 function normalizeZipPath(basePath, targetPath) {
@@ -3222,13 +3588,20 @@ function renderTaskTable() {
 
 function renderTaskTemplateTable(selectedProcessTemplateId = "") {
   const visibleTemplates = state.taskTemplates.filter((template) => !hiddenLegacyStandardWorkNames.includes(template.name));
+  const canConfigureStandards = canCurrentUser("settings.editStandardWorks");
 
   return `
     <section class="settings-section">
       <div class="section-heading with-actions">
-        <h2>关键行动库</h2>
-        <p class="form-note">关键行动是公司长期实践验证有效、能够持续推进目标实现，并沉淀下来的行动。关键行动不是普通关键行动，只有经过验证、值得长期保留、能够持续帮助公司实现目标的行动，才会沉淀为关键行动。</p>
-        <button class="primary-button" type="button" data-action="add-task-template">新增关键行动</button>
+        <div>
+          <h2>关键行动库</h2>
+          <p class="form-note">关键行动是公司长期实践验证有效、能够持续推进目标实现，并沉淀下来的行动。关键行动不是普通关键行动，只有经过验证、值得长期保留、能够持续帮助公司实现目标的行动，才会沉淀为关键行动。</p>
+        </div>
+        <div class="toolbar-actions">
+          ${canConfigureStandards ? `<button class="secondary-button" type="button" data-action="download-standard-flow-template">导出待配置模板</button>` : ""}
+          ${canConfigureStandards ? `<label class="secondary-button file-button">导入模板<input type="file" data-standard-flow-file="import" accept=".xlsx,.xls,.xml,.csv,.tsv,.txt" /></label>` : ""}
+          <button class="primary-button" type="button" data-action="add-task-template">新增关键行动</button>
+        </div>
       </div>
       ${renderStandardWorkMoveStatus()}
       <div class="standard-work-board-wrap">
@@ -3267,7 +3640,55 @@ export function renderStandardWorkLibraryPage(selectedProcessTemplateId = "") {
       ${renderTaskTemplateTable(selectedProcessTemplateId)}
       ${renderTaskTemplateModal()}
       ${renderStandardWorkProcessModal()}
+      ${renderStandardFlowImportModal()}
     </div>
+  `;
+}
+
+function renderStandardFlowImportModal() {
+  if (modalState?.kind !== "standardFlowImport") return "";
+  const invalidCount = modalState.rows.filter((row) => row.errors.length > 0).length;
+  const validCount = modalState.rows.length - invalidCount;
+  return `
+    <div class="modal-backdrop"><div class="modal-panel wide-modal">
+      <div class="modal-header">
+        <div>
+          <h2>导入关键行动标准流程</h2>
+          <p class="form-note">${escapeHtml(modalState.fileName)}，共 ${modalState.rows.length} 行，可导入 ${validCount} 行。</p>
+        </div>
+        <button class="icon-button" type="button" data-action="close-task-modal" aria-label="关闭">×</button>
+      </div>
+      ${modalState.error ? `<div class="form-error">${escapeHtml(modalState.error)}</div>` : ""}
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr><th>行号</th><th>关键行动</th><th>序号</th><th>步骤名称</th><th>执行部门</th><th>执行人</th><th>时限</th><th>状态</th></tr>
+          </thead>
+          <tbody>
+            ${
+              modalState.rows.length === 0
+                ? `<tr><td colspan="8">暂无可导入步骤</td></tr>`
+                : modalState.rows.map((row) => `
+                  <tr>
+                    <td>${row.rowNumber}</td>
+                    <td>${escapeHtml(row.record.关键行动名称)}</td>
+                    <td>${escapeHtml(row.record.步骤序号)}</td>
+                    <td>${escapeHtml(row.record.步骤名称)}</td>
+                    <td>${escapeHtml(row.record.执行部门)}</td>
+                    <td>${escapeHtml(row.record.执行人 || "-")}</td>
+                    <td>${escapeHtml(row.record.时限 || "1440")}</td>
+                    <td>${row.errors.length === 0 ? "可导入" : escapeHtml(row.errors.join("；"))}</td>
+                  </tr>
+                `).join("")
+            }
+          </tbody>
+        </table>
+      </div>
+      <div class="modal-actions">
+        <button class="secondary-button" type="button" data-action="close-task-modal">取消</button>
+        <button class="primary-button" type="button" data-action="confirm-standard-flow-import" ${validCount === 0 || invalidCount > 0 ? "disabled" : ""}>确认导入</button>
+      </div>
+    </div></div>
   `;
 }
 
@@ -6173,6 +6594,14 @@ export function bindStandardWorkLibraryEvents(rerender, container = document) {
       rerender();
       return;
     }
+    if (action === "download-standard-flow-template") {
+      downloadStandardFlowTemplate();
+      return;
+    }
+    if (action === "confirm-standard-flow-import") {
+      confirmStandardFlowImport(rerender);
+      return;
+    }
     if (handleTaskTemplateFieldAction(action, Number(actionButton.dataset.fieldIndex ?? -1), rerender)) return;
     handleTaskTemplateAction(action, actionButton.dataset.templateId, rerender);
   });
@@ -6180,6 +6609,13 @@ export function bindStandardWorkLibraryEvents(rerender, container = document) {
   if (taskTemplateForm !== null) {
     taskTemplateForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
   }
+
+  host.querySelector("[data-standard-flow-file='import']")?.addEventListener("change", (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file === undefined) return;
+    handleStandardFlowImportFile(file, rerender);
+  });
 }
 
 function renderSelectedStandardWorkAttachments(input) {
