@@ -63,6 +63,13 @@ import {
   ValueModule,
 } from "./data/modelOptions.js";
 import { getPrimaryImageUrl, getTaskQuadrant, hasTaskOverdueRecord, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260705-state-singleton1";
+import {
+  getCurrentExecutor as selectCurrentExecutor,
+  getCurrentProcessTask as selectCurrentProcessTask,
+  getProcessProgress as selectProcessProgress,
+  isProcessInstanceOverdue as selectProcessInstanceOverdue,
+  sortProcessInstanceTasks,
+} from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
 import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260705-state-singleton1";
 import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260705-state-singleton1";
 import { renderWorkFormViewer } from "./workFormViewer.js?v=20260705-state-singleton1";
@@ -1789,27 +1796,9 @@ function appendReturnRecord(task, record, extraFields = {}) {
   };
 }
 
-function getTaskProgressStatusPriority(status) {
-  if (status === TaskStatus.Doing) return 1;
-  if (status === TaskStatus.PendingAcceptance) return 2;
-  if (status === TaskStatus.Todo) return 3;
-  if (status === TaskStatus.Waiting) return 4;
-  return 9;
-}
-
 function getCurrentTaskOfProcess(processTasks) {
-  const activeTasks = processTasks.filter((task) => !isDoneStatus(task.status) && !isCanceledStatus(task.status));
-  if (activeTasks.length === 0) return null;
-
-  return sortProcessTasks(activeTasks).sort((left, right) => {
-    const leftNode = getProcessNode(left);
-    const rightNode = getProcessNode(right);
-    const stepDifference = getProcessNodeStepOrder(leftNode ?? left) - getProcessNodeStepOrder(rightNode ?? right);
-    if (stepDifference !== 0) return stepDifference;
-    const statusDifference = getTaskProgressStatusPriority(left.status) - getTaskProgressStatusPriority(right.status);
-    if (statusDifference !== 0) return statusDifference;
-    return String(left.createdAt ?? left.dueDate ?? "").localeCompare(String(right.createdAt ?? right.dueDate ?? ""));
-  })[0] ?? null;
+  const processInstanceId = processTasks.find((task) => task.processInstanceId)?.processInstanceId ?? "";
+  return selectCurrentProcessTask(processInstanceId, state);
 }
 
 function getProcessGroupTitle(instance, processTasks) {
@@ -1846,7 +1835,7 @@ function getTaskTableRows() {
   });
 
   processGroups.forEach((group) => {
-    const sortedTasks = sortProcessTasks(group.tasks);
+    const sortedTasks = sortProcessInstanceTasks(group.tasks, state);
     const currentTask = getCurrentTaskOfProcess(sortedTasks) ?? sortedTasks[sortedTasks.length - 1] ?? sortedTasks[0] ?? null;
     if (currentTask === null) return;
 
@@ -3311,22 +3300,13 @@ function getVisibleTaskIdsFromRows(rows) {
 }
 
 function getProcessProgress(processInstanceId) {
-  const processTasks = getProcessTasks(processInstanceId);
-  const done = processTasks.filter((task) => task.status === TaskStatus.Done).length;
-  const total = processTasks.length;
-
-  return { done, total, text: `${done}/${total}` };
+  const progress = selectProcessProgress(processInstanceId, state);
+  return { done: progress.completed, total: progress.total, text: `${progress.completed}/${progress.total}` };
 }
 
 function getCurrentSteps(processInstanceId) {
-  const processTasks = sortProcessTasks(getProcessTasks(processInstanceId));
-  const executableTasks = processTasks.filter((task) => task.status !== TaskStatus.Done && task.status !== TaskStatus.Canceled && task.status !== TaskStatus.Waiting);
-
-  if (executableTasks.length > 0) {
-    return [executableTasks[0]];
-  }
-
-  return [];
+  const currentTask = selectCurrentProcessTask(processInstanceId, state);
+  return currentTask === null ? [] : [currentTask];
 }
 
 function getWaitingProcessTasks(processInstanceId) {
@@ -3334,7 +3314,7 @@ function getWaitingProcessTasks(processInstanceId) {
 }
 
 function isProcessOverdue(processInstanceId) {
-  return getProcessTasks(processInstanceId).some((task) => task.status !== TaskStatus.Canceled && (isTaskOverdue(task, today) || hasTaskOverdueRecord(task)));
+  return selectProcessInstanceOverdue(processInstanceId, state, today);
 }
 
 function getProcessCurrentStepText(instance) {
@@ -3353,11 +3333,8 @@ function getProcessCurrentStepText(instance) {
 }
 
 function getProcessCurrentOwners(instance) {
-  const ownerNames = Array.from(
-    new Set(getCurrentSteps(instance.id).map((task) => findName(people, task.ownerId, "未设置"))),
-  ).filter(Boolean);
-
-  if (ownerNames.length > 0) return ownerNames.join("、");
+  const currentExecutor = selectCurrentExecutor(instance.id, state);
+  if (currentExecutor.personId !== "") return findName(people, currentExecutor.personId, "未设置");
   if (instance.status === ProcessInstanceStatus.Done) return "已完成";
   if (instance.status === ProcessInstanceStatus.Canceled) return "已取消";
   if (instance.status === ProcessInstanceStatus.Stopped) return "已终止";

@@ -11,6 +11,7 @@ import {
   taskUrgencyNames,
 } from "./data/modelOptions.js";
 import { getTaskQuadrant, isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
+import { getProcessProgress as selectProcessProgress } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
 import { renderWorkFormViewer } from "./workFormViewer.js?v=20260705-state-singleton1";
 import {
   collectBusinessDateTime,
@@ -135,9 +136,8 @@ function getNode(nodeId) {
 }
 
 function getProgress(instanceId) {
-  const tasks = getInstanceTasks(instanceId);
-  const done = tasks.filter((task) => task.status === TaskStatus.Done).length;
-  return `${done}/${tasks.length}`;
+  const progress = selectProcessProgress(instanceId, state);
+  return `${progress.completed}/${progress.total}`;
 }
 
 function canEditInstance(instance) {

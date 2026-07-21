@@ -19,6 +19,10 @@ import {
 } from "./data/modelOptions.js";
 import { hasTaskOverdueRecord, isCanceledStatus, isDoneStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
 import {
+  getCurrentExecutor as selectCurrentExecutor,
+  getCurrentProcessTask as selectCurrentProcessTask,
+} from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
+import {
   getPeriodWorkResultSummary,
   getProcessInstanceByWorkPlan as getStatsProcessInstanceByWorkPlan,
   getWorkPlanRecordDate as getStatsWorkPlanRecordDate,
@@ -315,7 +319,8 @@ function getRectificationRows() {
       const sourceTask = state.tasks.find((task) => task.id === workPlan.customFields?.sourceTaskId) ?? null;
       const sourceStandardWorkId = workPlan.customFields?.sourceStandardWorkId ?? sourceTask?.taskTemplateId ?? processInstance?.taskTemplateId ?? "";
       const sourceStandardWork = state.taskTemplates.find((template) => template.id === sourceStandardWorkId) ?? null;
-      const currentTask = tasks.find((task) => !isDoneStatus(task.status) && !isCanceledStatus(task.status)) ?? null;
+      const currentTask = processInstance === null ? null : selectCurrentProcessTask(processInstance.id, state);
+      const currentExecutor = processInstance === null ? { personId: "" } : selectCurrentExecutor(processInstance.id, state);
       const sourceType = workPlan.customFields?.sourceType ?? "manual";
       const status =
         processInstance?.status === ProcessInstanceStatus.Done
@@ -342,7 +347,7 @@ function getRectificationRows() {
         status,
         statusLabel,
         ownerId: workPlan.customFields?.sourceOwnerId ?? currentTask?.ownerId ?? sourceTask?.ownerId ?? "",
-        executorId: workPlan.customFields?.sourceExecutorId ?? currentTask?.executorId ?? sourceTask?.executorId ?? sourceTask?.assigneeId ?? "",
+        executorId: workPlan.customFields?.sourceExecutorId ?? currentExecutor.personId ?? sourceTask?.executorId ?? sourceTask?.assigneeId ?? "",
       };
     });
 }

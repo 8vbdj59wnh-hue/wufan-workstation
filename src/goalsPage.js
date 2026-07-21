@@ -38,6 +38,12 @@ import {
   ValueModule,
 } from "./data/modelOptions.js";
 import { getPrimaryImageUrl, getTaskQuadrant, isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
+import {
+  getCurrentExecutor as selectCurrentExecutor,
+  getCurrentProcessTask as selectCurrentProcessTask,
+  getProcessProgress as selectProcessProgress,
+  isProcessInstanceOverdue as selectProcessInstanceOverdue,
+} from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
 import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260705-state-singleton1";
 import { selectTask } from "./tasksPage.js?v=20260705-state-singleton1";
 import {
@@ -205,22 +211,14 @@ function getProcessTasks(processInstanceId) {
 }
 
 function getProcessProgress(instance) {
-  const tasks = getProcessTasks(instance.id);
-  const done = tasks.filter((task) => task.status === TaskStatus.Done).length;
-  return `${done}/${tasks.length}`;
+  const progress = selectProcessProgress(instance.id, state);
+  return `${progress.completed}/${progress.total}`;
 }
 
 function getCurrentProcessTasks(instance) {
   if (instance.status !== "running") return [];
-  const tasks = getProcessTasks(instance.id)
-    .filter((task) => task.status !== TaskStatus.Done && task.status !== TaskStatus.Canceled && task.status !== TaskStatus.Waiting)
-    .sort((left, right) => {
-      const leftNode = getProcessNode(left);
-      const rightNode = getProcessNode(right);
-      return getProcessNodeStepOrder(leftNode ?? {}) - getProcessNodeStepOrder(rightNode ?? {});
-    });
-  if (tasks.length === 0) return [];
-  return [tasks[0]];
+  const currentTask = selectCurrentProcessTask(instance.id, state);
+  return currentTask === null ? [] : [currentTask];
 }
 
 function getProcessCurrentStepText(instance) {
@@ -232,12 +230,12 @@ function getProcessCurrentStepText(instance) {
 }
 
 function getProcessCurrentOwners(instance) {
-  const owners = Array.from(new Set(getCurrentProcessTasks(instance).map((task) => findName(people, task.ownerId, "未设置"))));
-  return owners.length === 0 ? "-" : owners.join("、");
+  const currentExecutor = selectCurrentExecutor(instance.id, state);
+  return currentExecutor.personId === "" ? "-" : findName(people, currentExecutor.personId, "未设置");
 }
 
 function isProcessInstanceOverdue(instance) {
-  return getProcessTasks(instance.id).some((task) => task.status !== TaskStatus.Done && task.status !== TaskStatus.Canceled && isTaskOverdue(task, today));
+  return selectProcessInstanceOverdue(instance.id, state, today);
 }
 
 function getStandardWorkName(instance) {

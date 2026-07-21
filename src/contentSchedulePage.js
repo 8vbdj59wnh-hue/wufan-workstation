@@ -40,6 +40,11 @@ import {
   taskStatusNames,
   workPlanStatusNames,
 } from "./data/modelOptions.js";
+import {
+  getCurrentProcessTask as selectCurrentProcessTask,
+  getProcessProgress as selectProcessProgress,
+  isProcessInstanceOverdue as selectProcessInstanceOverdue,
+} from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
 
 const defaultDepartmentId = "dept-marketing";
 const defaultOwnerId = "person-005";
@@ -637,14 +642,6 @@ function getInstanceTasks(instanceId) {
     });
 }
 
-function getCurrentContentTask(tasks) {
-  return (
-    tasks.find((task) => task.status === TaskStatus.Doing || task.status === TaskStatus.Todo || task.status === TaskStatus.PendingAcceptance) ??
-    tasks.find((task) => task.status === TaskStatus.Waiting) ??
-    null
-  );
-}
-
 function getAliasedField(fields, keys, fallback = "") {
   for (const key of keys) {
     const value = fields?.[key];
@@ -670,17 +667,11 @@ function normalizeContentNoteFields(instance, workPlan) {
   };
 }
 
-function isTaskOverdueForContent(task) {
-  if (task === null || task.dueDate === "" || task.dueDate === null || task.dueDate === undefined) return false;
-  if ([TaskStatus.Done, TaskStatus.Canceled].includes(task.status)) return false;
-  return new Date(task.dueDate).getTime() < Date.now();
-}
-
 function getContentNoteStatus(instance, tasks) {
   if (instance.status === ProcessInstanceStatus.Stopped || instance.status === "canceled") return "已取消";
   if (instance.status === ProcessInstanceStatus.Done) return "已发布";
-  const currentTask = getCurrentContentTask(tasks);
-  if (isTaskOverdueForContent(currentTask)) return "已超时";
+  const currentTask = selectCurrentProcessTask(instance.id, state);
+  if (selectProcessInstanceOverdue(instance.id, state)) return "已超时";
   const taskName = currentTask?.name ?? "";
   if (currentTask?.status === TaskStatus.PendingAcceptance || taskName.includes("审核")) return "待审核";
   if (taskName.includes("发布")) return "待发布";
@@ -697,7 +688,7 @@ function buildContentNoteItem(instance) {
     instance,
     workPlan,
     tasks,
-    currentTask: getCurrentContentTask(tasks),
+    currentTask: selectCurrentProcessTask(instance.id, state),
     goalId: instance.goalId ?? workPlan?.goalId ?? "",
     ...fields,
     status: getContentNoteStatus(instance, tasks),
@@ -719,10 +710,9 @@ function getContentNoteItems() {
 }
 
 function getProcessProgressText(processInstanceId) {
-  const processTasks = state.tasks.filter((task) => task.processInstanceId === processInstanceId);
-  if (processTasks.length === 0) return "";
-  const doneCount = processTasks.filter((task) => task.status === TaskStatus.Done).length;
-  return `${doneCount}/${processTasks.length}`;
+  const progress = selectProcessProgress(processInstanceId, state);
+  if (progress.total === 0) return "";
+  return `${progress.completed}/${progress.total}`;
 }
 
 function renderScheduleFlowStatus(schedule) {

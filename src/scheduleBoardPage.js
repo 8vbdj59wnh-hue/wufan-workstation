@@ -13,6 +13,12 @@ import {
   workPlanStatusNames,
 } from "./data/modelOptions.js?v=20260705-state-singleton1";
 import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260705-state-singleton1";
+import {
+  getCurrentExecutor as selectCurrentExecutor,
+  getCurrentProcessTask as selectCurrentProcessTask,
+  getProcessProgress as selectProcessProgress,
+  isProcessInstanceOverdue as selectProcessInstanceOverdue,
+} from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
 
 const dayMs = 24 * 60 * 60 * 1000;
 const boardDayCount = 30;
@@ -76,12 +82,6 @@ function formatDate(date) {
 
 function formatHour(hour) {
   return `${String(hour).padStart(2, "0")}:00`;
-}
-
-function parseDate(value) {
-  if (typeof value !== "string" || value.trim() === "") return null;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function getTodayDate() {
@@ -345,6 +345,15 @@ function getProcessDueDate(workPlan, processInstance, tasks) {
   return getLatestTaskDueDate(tasks);
 }
 
+function getProcessStartDate(workPlan, processInstance) {
+  return processInstance?.startAt ?? processInstance?.startedAt ?? processInstance?.launchedAt ?? workPlan.launchedAt ?? processInstance?.createdAt ?? workPlan.createdAt ?? "";
+}
+
+function isProcessRowOverdue(row) {
+  if (row.processInstance === null) return false;
+  return selectProcessInstanceOverdue(row.processInstance.id, state);
+}
+
 function buildScheduledDueDate(targetDate, targetDueHour) {
   if (targetDueHour >= workdayEndHour) {
     return `${shiftDateKey(targetDate, 1)}T00:00:00+08:00`;
@@ -372,6 +381,9 @@ function buildRows() {
       const template = getTaskTemplate(workPlan);
       const dueDate = processInstance === null ? "" : getProcessDueDate(workPlan, processInstance, tasks);
       const duePlacement = getDueDatePlacement(dueDate);
+      const progress = processInstance === null ? null : selectProcessProgress(processInstance.id, state);
+      const currentTask = processInstance === null ? null : selectCurrentProcessTask(processInstance.id, state);
+      const currentExecutor = processInstance === null ? { personId: "" } : selectCurrentExecutor(processInstance.id, state);
       return {
         id: workPlan.id,
         workPlan,
@@ -392,8 +404,12 @@ function buildRows() {
         dueDate,
         dueDateKey: duePlacement.dateKey,
         dueSlotHour: duePlacement.slotHour,
-        progressText: getProcessProgress(tasks),
+        progressText: progress === null ? getProcessProgress(tasks) : `${progress.completed}/${progress.total}`,
         ownerSummary: getOwnerSummary(tasks, getOwnerId(workPlan)),
+        startDate: getProcessStartDate(workPlan, processInstance),
+        currentTask,
+        currentTaskName: currentTask?.name ?? (tasks.length === 0 ? "" : "已完成"),
+        currentExecutorName: currentExecutor.personId === "" ? "" : findName(state.people, currentExecutor.personId, "未设置"),
       };
     });
 }
@@ -560,9 +576,10 @@ function getProcessCardTitle(row) {
 
 function getProcessCurrentProgressText(tasks) {
   if (tasks.length === 0) return "暂无进度";
-  const currentTask = tasks.find((task) => task.status !== TaskStatus.Done && task.status !== TaskStatus.Canceled);
-  if (currentTask === undefined) return "已完成";
-  return currentTask.name ?? "未命名任务";
+  const processInstanceId = tasks[0]?.processInstanceId ?? "";
+  const progress = selectProcessProgress(processInstanceId, state);
+  if (progress.current === null && progress.total > 0 && progress.completed === progress.total) return "已完成";
+  return progress.current?.name ?? "暂无任务";
 }
 
 function renderProcessBlock(row) {
