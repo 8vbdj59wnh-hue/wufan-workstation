@@ -744,6 +744,33 @@ function parseComparableTime(value) {
   return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
 }
 
+function formatBusinessMinuteIsoFromDate(date) {
+  const shifted = new Date(date.getTime() + 8 * 60 * 60 * 1000);
+  return `${shifted.toISOString().slice(0, 16)}:00+08:00`;
+}
+
+function parseBusinessDateTime(value) {
+  if (value instanceof Date) return value;
+  const rawValue = String(value ?? "").trim();
+  if (rawValue === "") return new Date();
+  const parsed = new Date(rawValue.length === 10 ? `${rawValue}T00:00:00+08:00` : rawValue);
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
+function addMinutesToBusinessDateTime(value, minutes) {
+  const baseDate = parseBusinessDateTime(value);
+  const durationMinutes = Number(minutes);
+  const nextDate = new Date(baseDate.getTime() + (Number.isFinite(durationMinutes) ? durationMinutes : 0) * 60 * 1000);
+  return formatBusinessMinuteIsoFromDate(nextDate);
+}
+
+function getCurrentWeek(date = new Date()) {
+  const targetDate = new Date(date);
+  const firstDay = new Date(targetDate.getFullYear(), 0, 1);
+  const pastDays = Math.floor((targetDate - firstDay) / 86400000);
+  return `${targetDate.getFullYear()}-W${String(Math.ceil((pastDays + firstDay.getDay() + 1) / 7)).padStart(2, "0")}`;
+}
+
 function markTaskOverdueOnce(task) {
   if (task === null || task === undefined || task.status === "canceled" || task.dueDate === null) return task;
   const dueTime = parseComparableTime(task.dueDate);
@@ -766,6 +793,117 @@ function markTaskOverdueOnce(task) {
       assessmentOverdueDueDate: task.dueDate,
     },
   };
+}
+
+function getProcessNodeStepOrder(node) {
+  return Number(node?.stepOrder ?? node?.stageOrder ?? node?.nodeOrder ?? 9999);
+}
+
+function getOrderedProcessInstanceTasks(processInstanceId) {
+  return readResource("tasks")
+    .filter((task) => task.processInstanceId === processInstanceId && task.status !== "canceled")
+    .sort((left, right) => {
+      const leftNode = readExistingItem("processTemplateNodes", left.processNodeId);
+      const rightNode = readExistingItem("processTemplateNodes", right.processNodeId);
+      const stepDifference = getProcessNodeStepOrder(leftNode ?? left) - getProcessNodeStepOrder(rightNode ?? right);
+      if (stepDifference !== 0) return stepDifference;
+      return String(left.createdAt ?? "").localeCompare(String(right.createdAt ?? ""));
+    });
+}
+
+function includesSubmitPart(submitType, part) {
+  if (submitType === "none") return false;
+  return String(submitType ?? "").split("_").includes(part);
+}
+
+function getTaskSubmitRequirement(task) {
+  const node = task?.processNodeId ? readExistingItem("processTemplateNodes", task.processNodeId) : null;
+  return {
+    submitType: task?.submitType || node?.submitType || "none",
+    submitFields: Array.isArray(task?.submitFields) ? task.submitFields : Array.isArray(node?.submitFields) ? node.submitFields : [],
+    submitFormData: task?.submitFormData && typeof task.submitFormData === "object" && !Array.isArray(task.submitFormData) ? task.submitFormData : {},
+    submitFiles: Array.isArray(task?.submitFiles) ? task.submitFiles : [],
+    submitLinks: Array.isArray(task?.submitLinks) ? task.submitLinks : [],
+  };
+}
+
+function validateExecutionGroupTaskSubmission(task) {
+  const requirement = getTaskSubmitRequirement(task);
+  if (requirement.submitType === "none") return "";
+  if (includesSubmitPart(requirement.submitType, "form")) {
+    for (const field of requirement.submitFields) {
+      if (field?.required !== true) continue;
+      const value = requirement.submitFormData[field.key];
+      const isEmpty = Array.isArray(value) ? value.length === 0 : String(value ?? "").trim() === "";
+      if (isEmpty) return `请先填写${field.label ?? field.key}`;
+    }
+  }
+  if (includesSubmitPart(requirement.submitType, "file") && requirement.submitFiles.length === 0) return "请先上传提交文件";
+  if (includesSubmitPart(requirement.submitType, "link") && requirement.submitLinks.length === 0) return "请先填写提交链接";
+  return "";
+}
+
+function activateWaitingProcessTaskInTransaction(task, startAt) {
+  const now = new Date().toISOString();
+  const startDate = String(startAt ?? "").slice(0, 10) || now.slice(0, 10);
+  const node = task.processNodeId ? readExistingItem("processTemplateNodes", task.processNodeId) : null;
+  const updatedTask = {
+    ...task,
+    status: "todo",
+    startDate: startAt,
+    dueDate: addMinutesToBusinessDateTime(startAt, getTaskDurationMinutes(task)),
+    plannedWeek: task.plannedWeek ?? getCurrentWeek(new Date(`${startDate}T00:00:00+08:00`)),
+    updatedAt: now,
+  };
+  if (node === null) updatedTask.dueDate = task.dueDate ?? null;
+  insertItem("tasks", updatedTask);
+  return updatedTask;
+}
+
+function refreshProcessTaskReadinessInTransaction(processInstanceId, referenceAt = new Date().toISOString()) {
+  const instance = readExistingItem("processInstances", processInstanceId);
+  if (instance === null || instance.status !== "running") return null;
+
+  const orderedTasks = getOrderedProcessInstanceTasks(instance.id);
+  const nextTask = orderedTasks.find((task) => task.status !== "done");
+  if (nextTask !== undefined) {
+    const nextIndex = orderedTasks.findIndex((task) => task.id === nextTask.id);
+    const previousTasksDone = nextIndex > 0 && orderedTasks.slice(0, nextIndex).every((task) => task.status === "done");
+    if (nextTask.status === "waiting" && previousTasksDone) {
+      const previousTask = orderedTasks[nextIndex - 1];
+      return activateWaitingProcessTaskInTransaction(nextTask, previousTask?.completedAt ?? referenceAt);
+    }
+    return null;
+  }
+
+  if (orderedTasks.length > 0 && orderedTasks.every((task) => task.status === "done")) {
+    const updatedInstance = { ...instance, status: "done", completedAt: referenceAt, updatedAt: referenceAt };
+    insertItem("processInstances", updatedInstance);
+    const workPlans = readResource("workPlans").filter((workPlan) => workPlan.processInstanceId === updatedInstance.id);
+    for (const workPlan of workPlans) {
+      if (workPlan.status === "canceled") continue;
+      insertItem("workPlans", { ...workPlan, status: "done", updatedAt: referenceAt });
+    }
+  }
+  return null;
+}
+
+function ensureExecutionGroupTaskCanComplete(task, completedTaskIds, groupTaskIds = new Set()) {
+  if (task === null) throw new Error("执行组成员任务不存在。");
+  if (task.status === "canceled") throw new Error(`${task.name}：已取消，不能完成执行组。`);
+  if (task.status === "done" || task.status === "pending_acceptance") return task;
+  if (task.status === "waiting") {
+    const orderedTasks = getOrderedProcessInstanceTasks(task.processInstanceId);
+    const taskIndex = orderedTasks.findIndex((item) => item.id === task.id);
+    if (taskIndex === -1) throw new Error(`${task.name}：未找到对应的流程顺序，不能完成执行组。`);
+    const previousTasksDone = orderedTasks
+      .slice(0, taskIndex)
+      .every((item) => item.status === "done" || completedTaskIds.has(item.id) || groupTaskIds.has(item.id));
+    if (!previousTasksDone) throw new Error(`${task.name}：前置步骤未完成，当前步骤暂不能处理。`);
+  }
+  const submitError = validateExecutionGroupTaskSubmission(task);
+  if (submitError !== "") throw new Error(`${task.name}：${submitError}。`);
+  return task;
 }
 
 function getMethodologyTitle(nodeName) {
@@ -1471,20 +1609,89 @@ export function completeExecutionGroup(groupId, payload = {}) {
   const completeGroup = database.transaction(() => {
     const group = readExistingItem("executionGroups", groupId);
     if (group === null) throw new Error("未找到执行组。");
+    if (group.status === "done") return group;
+    if (group.status === "canceled") throw new Error("已取消的执行组不能完成。");
     if (group.status !== "doing") throw new Error("只有执行中的执行组可以完成。");
+    if (group.startedAt === null || group.startedAt === undefined || group.startedAt === "") throw new Error("执行组尚未记录开始时间，不能完成。");
+
     const taskIds = Array.isArray(group.taskIds) ? group.taskIds : [];
+    if (taskIds.length < 2) throw new Error("执行组成员任务不足，不能完成。");
+
+    const linkedTasks = readResource("tasks").filter((task) => task.executionGroupId === group.id);
+    const linkedTaskIds = new Set(linkedTasks.map((task) => task.id));
+    const groupTaskIds = new Set(taskIds);
+    const mismatchedTaskIds = [
+      ...taskIds.filter((taskId) => !linkedTaskIds.has(taskId)),
+      ...linkedTasks.map((task) => task.id).filter((taskId) => !groupTaskIds.has(taskId)),
+    ];
+    if (mismatchedTaskIds.length > 0) throw new Error(`执行组成员关联不一致：${[...new Set(mismatchedTaskIds)].join("、")}`);
+
     const tasksInGroup = taskIds.map((taskId) => readExistingItem("tasks", taskId));
-    const invalidTasks = tasksInGroup.filter((task) => task === null || !["done", "pending_acceptance"].includes(task.status));
-    if (invalidTasks.length > 0) throw new Error("成员任务尚未全部进入完成或待验收状态，不能完成执行组。");
+    const missingTaskIds = taskIds.filter((_taskId, index) => tasksInGroup[index] === null);
+    if (missingTaskIds.length > 0) throw new Error(`未找到执行组成员任务：${missingTaskIds.join("、")}`);
+
+    const standardWorkIds = new Set(tasksInGroup.map(getTaskStandardWorkId).filter(Boolean));
+    if (standardWorkIds.size !== 1) throw new Error("执行组成员不再属于同一关键行动，不能完成。");
+    const ownerIds = new Set(tasksInGroup.map((task) => task.ownerId).filter(Boolean));
+    if (ownerIds.size !== 1 || ownerIds.values().next().value !== group.ownerId) throw new Error("执行组成员负责人不一致，不能完成。");
+    const executorIds = new Set(tasksInGroup.map((task) => task.executorId).filter(Boolean));
+    if (executorIds.size !== 1 || executorIds.values().next().value !== group.executorId) throw new Error("执行组成员执行人不一致，不能完成。");
+
+    const standardTotalMinutes = tasksInGroup.reduce((total, task) => total + getTaskDurationMinutes(task), 0);
+    if (standardTotalMinutes <= 0) throw new Error("执行组成员缺少有效规定时长，不能完成。");
+
     const endedAt = payload.endedAt || new Date().toISOString();
-    const actualTotalMinutes = Number.isFinite(Number(payload.actualTotalMinutes))
-      ? Math.round(Number(payload.actualTotalMinutes))
-      : Math.max(0, Math.round((new Date(endedAt).getTime() - new Date(group.startedAt).getTime()) / 60000));
-    const standardTotalMinutes = Number(group.standardTotalMinutes) || 0;
+    const actualTotalMinutes = Math.max(0, Math.round((new Date(endedAt).getTime() - new Date(group.startedAt).getTime()) / 60000));
+    const completedTaskIds = new Set(tasksInGroup.filter((task) => task.status === "done").map((task) => task.id));
+    const sortedTasks = [...tasksInGroup].sort((left, right) => {
+      const leftInstance = left.processInstanceId ?? "";
+      const rightInstance = right.processInstanceId ?? "";
+      if (leftInstance !== rightInstance) return leftInstance.localeCompare(rightInstance);
+      const leftNode = left.processNodeId ? readExistingItem("processTemplateNodes", left.processNodeId) : null;
+      const rightNode = right.processNodeId ? readExistingItem("processTemplateNodes", right.processNodeId) : null;
+      const stepDifference = getProcessNodeStepOrder(leftNode ?? left) - getProcessNodeStepOrder(rightNode ?? right);
+      if (stepDifference !== 0) return stepDifference;
+      return String(left.createdAt ?? "").localeCompare(String(right.createdAt ?? ""));
+    });
+    const affectedProcessInstanceIds = new Set(sortedTasks.map((task) => task.processInstanceId).filter(Boolean));
+
+    for (const selectedTask of sortedTasks) {
+      let task = readExistingItem("tasks", selectedTask.id);
+      ensureExecutionGroupTaskCanComplete(task, completedTaskIds, groupTaskIds);
+      if (task.status === "done" || task.status === "pending_acceptance") continue;
+      if (task.status === "waiting") {
+        const orderedTasks = getOrderedProcessInstanceTasks(task.processInstanceId);
+        const taskIndex = orderedTasks.findIndex((item) => item.id === task.id);
+        const previousTask = orderedTasks[taskIndex - 1];
+        task = activateWaitingProcessTaskInTransaction(task, previousTask?.completedAt ?? endedAt);
+      }
+
+      const requirement = getTaskSubmitRequirement(task);
+      const shouldMarkSubmitted = requirement.submitType !== "none";
+      const nextStatus = task.needAcceptance ? "pending_acceptance" : "done";
+      const updatedTask = markTaskOverdueOnce({
+        ...task,
+        status: nextStatus,
+        submittedAt: shouldMarkSubmitted ? task.submittedAt ?? endedAt : task.submittedAt,
+        submittedBy: shouldMarkSubmitted ? task.submittedBy ?? task.ownerId : task.submittedBy,
+        completedAt: nextStatus === "done" ? endedAt : null,
+        updatedAt: endedAt,
+      });
+      insertItem("tasks", updatedTask);
+      if (updatedTask.status === "done") {
+        completedTaskIds.add(updatedTask.id);
+      }
+    }
+
+    for (const processInstanceId of affectedProcessInstanceIds) {
+      refreshProcessTaskReadinessInTransaction(processInstanceId, endedAt);
+    }
+
     const updatedGroup = {
       ...group,
       status: "done",
       endedAt,
+      standardTotalMinutes,
       actualTotalMinutes,
       savedMinutes: standardTotalMinutes - actualTotalMinutes,
       updatedAt: endedAt,

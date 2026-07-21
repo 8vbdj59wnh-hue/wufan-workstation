@@ -6347,72 +6347,14 @@ async function completeExecutionGroup(groupId, rerender) {
     rerender();
     return;
   }
-  const tasks = sortExecutionGroupTasks(getExecutionGroupTasks(group));
-  const endedAt = getNow();
-  const actualTotalMinutes = getExecutionGroupActualMinutes(group, endedAt);
-  const affectedProcessInstanceIds = new Set(tasks.map((task) => task.processInstanceId).filter(Boolean));
-  const affectedTaskIds = new Set(tasks.map((task) => task.id));
-  state.tasks
-    .filter((task) => affectedProcessInstanceIds.has(task.processInstanceId))
-    .forEach((task) => affectedTaskIds.add(task.id));
-  const previousTasks = state.tasks.filter((task) => affectedTaskIds.has(task.id)).map((task) => ({ ...task }));
-  const previousProcessInstances = state.processInstances
-    .filter((instance) => affectedProcessInstanceIds.has(instance.id))
-    .map((instance) => ({ ...instance }));
-  const previousWorkPlans = state.workPlans
-    .filter((workPlan) => affectedProcessInstanceIds.has(workPlan.processInstanceId))
-    .map((workPlan) => ({ ...workPlan }));
+  const actualTotalMinutes = getExecutionGroupActualMinutes(group);
 
   if (!window.confirm(`确定完成该执行组吗？\n实际总时长：${actualTotalMinutes} 分钟\n系统将逐条完成成员任务。`)) return;
 
   try {
-    for (const selectedTask of tasks) {
-      let task = getTask(selectedTask.id) ?? selectedTask;
-      if (isDoneStatus(task.status) || task.status === TaskStatus.PendingAcceptance) continue;
-      if (task.source === TaskSource.Process && task.status === TaskStatus.Waiting) {
-        await ensureTaskReadyForExecution(task.id);
-        task = getTask(task.id) ?? task;
-      }
-      const nextStatus = task.needAcceptance ? TaskStatus.PendingAcceptance : TaskStatus.Done;
-      const requirement = getTaskSubmitRequirement(task);
-      const shouldMarkSubmitted = requirement.submitType !== SubmitType.None;
-      const updatedTask = buildTaskStatusUpdate({
-        ...task,
-        submittedAt: shouldMarkSubmitted ? task.submittedAt ?? endedAt : task.submittedAt,
-        submittedBy: shouldMarkSubmitted ? task.submittedBy ?? task.ownerId : task.submittedBy,
-      }, nextStatus, endedAt);
-      const savedTask = await updatePersistentResource("tasks", updatedTask.id, updatedTask);
-      state.tasks = state.tasks.map((item) => (item.id === savedTask.id ? savedTask : item));
-      await triggerOverdueRectificationIfNeeded(task, savedTask);
-      if (nextStatus === TaskStatus.Done) await advanceProcessAfterTaskDone(savedTask.id);
-    }
-    await completeExecutionGroupResource(groupId, { endedAt, actualTotalMinutes });
+    await completeExecutionGroupResource(groupId);
   } catch (error) {
     console.error("执行组完成失败", error);
-    for (const previousTask of previousTasks) {
-      try {
-        await updatePersistentResource("tasks", previousTask.id, previousTask);
-      } catch (rollbackError) {
-        console.error("执行组任务回滚失败", rollbackError);
-      }
-    }
-    for (const previousInstance of previousProcessInstances) {
-      try {
-        await updatePersistentResource("process-instances", previousInstance.id, previousInstance);
-      } catch (rollbackError) {
-        console.error("执行组关键行动回滚失败", rollbackError);
-      }
-    }
-    for (const previousWorkPlan of previousWorkPlans) {
-      try {
-        await updatePersistentResource("work-plans", previousWorkPlan.id, previousWorkPlan);
-      } catch (rollbackError) {
-        console.error("执行组未来工作回滚失败", rollbackError);
-      }
-    }
-    state.tasks = state.tasks.map((task) => previousTasks.find((item) => item.id === task.id) ?? task);
-    state.processInstances = state.processInstances.map((instance) => previousProcessInstances.find((item) => item.id === instance.id) ?? instance);
-    state.workPlans = state.workPlans.map((workPlan) => previousWorkPlans.find((item) => item.id === workPlan.id) ?? workPlan);
     modalState = { kind: "executionGroupDetail", groupId, error: error.message || "执行组完成失败，请检查本地数据库服务。" };
     rerender();
     return;
