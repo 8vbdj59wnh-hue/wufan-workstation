@@ -134,6 +134,27 @@ function normalizeWorkPlan(workPlan) {
   };
 }
 
+function getStandardWorkFormTime(form) {
+  const timestamp = Date.parse(form?.updatedAt ?? form?.createdAt ?? "");
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+export function getLatestStandardWorkForm(standardWorkId) {
+  if (standardWorkId === null || standardWorkId === undefined || standardWorkId === "") return null;
+  return [...state.standardWorkForms]
+    .filter((form) => form.standardWorkId === standardWorkId)
+    .sort((left, right) =>
+      getStandardWorkFormTime(right) - getStandardWorkFormTime(left) ||
+      String(right.id ?? "").localeCompare(String(left.id ?? "")),
+    )[0] ?? null;
+}
+
+export function getLatestStandardWorkFormFields(standardWorkId, fallbackFields = []) {
+  const form = getLatestStandardWorkForm(standardWorkId);
+  const schemaFields = form?.formSchema?.fields;
+  return Array.isArray(schemaFields) && schemaFields.length > 0 ? schemaFields : fallbackFields;
+}
+
 export function getDataSnapshot() {
   return {
     companies: state.companies,
@@ -872,7 +893,7 @@ function baseStandardWorkFields(prefix) {
   return [
     field(`${prefix}-work-object`, "工作对象", "workObject", "text", true, "例如产品名、页面名、岗位名、事项名", null, true, 1),
     field(`${prefix}-cover`, "相关产品1:1图片", "coverImageUrl", "image", false, "", null, true, 2),
-    field(`${prefix}-requirement`, "本次工作要求", "workRequirement", "textarea", false, "补充本次工作的特殊要求", null, false, 3),
+    field(`${prefix}-requirement`, "本次关键行动要求", "workRequirement", "textarea", false, "补充本次关键行动的特殊要求", null, false, 3),
   ];
 }
 

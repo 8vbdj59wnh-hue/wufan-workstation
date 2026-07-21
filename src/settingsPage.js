@@ -1,4 +1,4 @@
-import { createPersistentResource, getCurrentUser, resolveAssetUrl, state, updatePersistentResource, uploadGenericFile, validateCurrentSession } from "./appState.js?v=20260705-state-singleton1";
+import { createPersistentResource, getCurrentUser, getLatestStandardWorkForm, resolveAssetUrl, state, updatePersistentResource, uploadGenericFile, validateCurrentSession } from "./appState.js?v=20260705-state-singleton1";
 import {
   applyPermissionTemplate,
   dataScopeOptions,
@@ -1653,7 +1653,7 @@ function getSelectedFormDesignStandardWork() {
 }
 
 function findStandardWorkForm(standardWorkId) {
-  return standardWorkForms.find((form) => form.standardWorkId === standardWorkId) ?? null;
+  return getLatestStandardWorkForm(standardWorkId);
 }
 
 function normalizeFormDesignerFields(fields = []) {
@@ -1846,8 +1846,8 @@ function renderFormDesignSection() {
     <section class="settings-section" id="form-design">
       <div class="section-heading">
         <div>
-          <h2>表单设计</h2>
-          <p class="form-note">为每一个关键行动维护独立任务表单，后续任务可逐步接入。</p>
+          <h2>关键行动公共表单</h2>
+          <p class="form-note">该表单在发起关键行动时填写，同一关键行动下所有任务共享。</p>
         </div>
       </div>
       <div class="form-designer-layout">
@@ -3335,10 +3335,10 @@ function getSettingsSubmodules() {
     },
     {
       id: "form-design",
-      title: "表单设计",
+      title: "关键行动公共表单",
       group: "业务配置",
       icon: "表",
-      description: "为关键行动配置标准填写表单。",
+      description: "该表单在发起关键行动时填写，同一关键行动下所有任务共享。",
       canView: () => canCurrentUser("settings.viewStandardWorks") || canCurrentUser("settings.editStandardWorkForms"),
       render: renderFormDesignSection,
     },

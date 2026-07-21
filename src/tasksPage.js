@@ -14,6 +14,7 @@ import {
   getProcessNodeDurationMinutes,
   getCurrentUser,
   getNow,
+  getLatestStandardWorkFormFields,
   hasOpenRectificationWorkForSource,
   getRectificationSubmitFields,
   launchRectificationWorkForSource,
@@ -489,20 +490,9 @@ function getTaskTemplateForTask(task) {
 
 function getTaskCustomFields(task) {
   const instance = getTaskProcessInstance(task);
-  return instance?.customFields ?? task.customFields ?? {};
-}
-
-function mergePreservedTaskCustomFields(previousCustomFields = {}, nextCustomFields = {}) {
-  const preservedKeys = [standardWorkAttachmentsKey];
-  return preservedKeys.reduce(
-    (result, key) => {
-      if (!Object.prototype.hasOwnProperty.call(result, key) && Object.prototype.hasOwnProperty.call(previousCustomFields, key)) {
-        result[key] = previousCustomFields[key];
-      }
-      return result;
-    },
-    { ...nextCustomFields },
-  );
+  const instanceFields = instance?.customFields && typeof instance.customFields === "object" ? instance.customFields : null;
+  if (instanceFields !== null && Object.keys(instanceFields).length > 0) return instanceFields;
+  return task?.customFields && typeof task.customFields === "object" ? task.customFields : {};
 }
 
 function getTaskCoverImage(task) {
@@ -510,23 +500,8 @@ function getTaskCoverImage(task) {
   return getPrimaryImageUrl(task, instance);
 }
 
-function buildUpdatedProcessInstanceForTaskForm(task, customFields, displayTitle, coverImageUrl, now) {
-  const instance = getTaskProcessInstance(task);
-  if (instance === null) return null;
-  const mergedCustomFields = mergePreservedTaskCustomFields(instance.customFields ?? {}, customFields);
-  return {
-    ...instance,
-    customFields: mergedCustomFields,
-    displayTitle: displayTitle ?? instance.displayTitle ?? instance.name,
-    coverImageUrl: coverImageUrl || instance.coverImageUrl || null,
-    updatedAt: now,
-  };
-}
-
 function getSortedFormFields(template) {
-  const standardWorkForm = state.standardWorkForms.find((form) => form.standardWorkId === template?.id);
-  const schemaFields = standardWorkForm?.formSchema?.fields;
-  const sourceFields = Array.isArray(schemaFields) && schemaFields.length > 0 ? schemaFields : template?.formFields ?? [];
+  const sourceFields = getLatestStandardWorkFormFields(template?.id, template?.formFields ?? []);
   return sourceFields.map(normalizeExecutionFormField).sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0));
 }
 
@@ -1252,7 +1227,7 @@ function renderCustomFieldsForm(template, customFields = {}) {
 
   return `
     <div class="template-custom-fields">
-      <h3>本次任务信息</h3>
+      <h3>本次关键行动信息</h3>
       <div class="form-grid">
         ${fields.map((field) => renderCustomFieldInput(field, customFields)).join("")}
       </div>
@@ -4018,7 +3993,7 @@ function renderProcessCustomFields(instance) {
   const fieldLabels = new Map(getSortedFormFields(taskTemplate).map((field) => [field.key, field.label]));
 
   if (entries.length === 0) {
-    return `<p>暂无本次工作差异信息</p>`;
+    return `<p>暂无关键行动公共信息</p>`;
   }
 
   return `
@@ -4150,14 +4125,14 @@ function renderTaskWorkInfo(task, taskTemplate) {
     .map(([key, value]) => renderDetailField(getExtraCustomFieldLabel(key), escapeHtml(Array.isArray(value) ? value.join("、") : value)))
     .join("");
 
-  if (configuredRows === "" && extraRows === "") return `<p>暂无本次工作信息</p>`;
+  if (configuredRows === "" && extraRows === "") return `<p>暂无关键行动公共信息</p>`;
   return `<div class="detail-grid">${configuredRows}${extraRows}</div>`;
 }
 
 function getTaskActionContext(task) {
   const instance = getTaskProcessInstance(task);
   const taskTemplate = instance === null ? getTaskTemplateForTask(task) : getTaskTemplate(instance.taskTemplateId ?? instance.standardWorkId ?? "");
-  const customFields = instance?.customFields ?? {};
+  const customFields = getTaskCustomFields(task);
   const title = instance === null ? "未关联关键行动" : getProcessDisplayTitle(instance);
   const objectName =
     instance === null
@@ -4900,7 +4875,7 @@ function getWorkFormModalData() {
   const instanceId = modalState.instanceId ?? task?.processInstanceId ?? null;
   const instance = instanceId === null ? null : state.processInstances.find((item) => item.id === instanceId) ?? null;
   const taskTemplate = instance === null ? getTaskTemplateForTask(task) : getTaskTemplate(instance.taskTemplateId ?? instance.standardWorkId ?? "");
-  const customFields = instance?.customFields ?? task?.customFields ?? {};
+  const customFields = task === null ? instance?.customFields ?? {} : getTaskCustomFields(task);
 
   return {
     task,
@@ -4918,10 +4893,10 @@ function renderWorkFormModal() {
 
   return `
     <div class="modal-backdrop" role="presentation">
-      <div class="modal-panel wide-modal" role="dialog" aria-modal="true" aria-label="本次工作表单">
+      <div class="modal-panel wide-modal" role="dialog" aria-modal="true" aria-label="关键行动公共信息">
         <div class="modal-header">
           <div>
-            <h2>本次工作表单</h2>
+            <h2>关键行动公共信息</h2>
             <p class="form-note">
               ${escapeHtml(taskTemplate?.name ?? "未关联关键行动")}
               ${instance === null ? "" : `｜${escapeHtml(instance.displayTitle ?? instance.name)}`}
@@ -4936,7 +4911,7 @@ function renderWorkFormModal() {
             customFields,
           })}
         </div>
-        <p class="form-note">本表单为发起关键行动时填写的本次工作要求，不是任务结果。</p>
+        <p class="form-note">该信息在发起关键行动时填写，同一关键行动下所有任务共享。</p>
         ${
           task !== null
             ? `<p class="form-note">当前任务：${escapeHtml(task.name)}</p>`
@@ -5106,7 +5081,6 @@ function renderTaskModal() {
                     <select name="ownerId">${renderOptions(people, effectiveTask?.ownerId ?? "", "请选择执行人")}</select>
                   </label>
                 </div>
-                ${renderCustomFieldsForm(editTemplate, getTaskCustomFields(effectiveTask))}
               `
               : `
                 <div class="form-grid">
@@ -5268,11 +5242,11 @@ function createDefaultTemplateFormFields() {
     },
     {
       id: createId("field"),
-      label: "本次工作要求",
+      label: "本次关键行动要求",
       key: "workRequirement",
       type: "textarea",
       required: false,
-      placeholder: "补充本次工作的特殊要求",
+      placeholder: "补充本次关键行动的特殊要求",
       options: [],
       showInList: false,
       sortOrder: 3,
@@ -5330,7 +5304,7 @@ function renderTemplateFormFieldEditor() {
         <h3>定制表单</h3>
         <button class="secondary-button" type="button" data-action="add-task-template-field">新增字段</button>
       </div>
-      <p class="form-note">选择该关键行动添加未来工作时，会按这里配置的字段显示表单，填写内容保存到本次工作信息。</p>
+      <p class="form-note">发起该关键行动时，会按这里配置的字段显示表单，填写内容保存为关键行动公共信息。</p>
       <div class="template-field-editor">
         ${
           fields.length === 0
@@ -5679,13 +5653,9 @@ function buildTaskDraft(form, task) {
       remark,
     };
   }
-  const template = getTaskTemplateForTask(task);
-  const previousCustomFields = getTaskCustomFields(task);
-  const customFields = template === null ? previousCustomFields : mergePreservedTaskCustomFields(previousCustomFields, collectCustomFields(form, template));
-
   return {
     ...task,
-    customFields,
+    customFields: task.customFields && typeof task.customFields === "object" ? task.customFields : {},
     templateId: getFormValue(form, "templateId") || modalState?.templateId || task.templateId || "",
     ownerId: getFormValue(form, "ownerId") || task.ownerId,
     description: getFormValue(form, "description"),
@@ -5710,13 +5680,6 @@ function validateTaskDraft(draft, isAdd) {
     if (customError !== "") return customError;
   }
 
-  if (!isAdd) {
-    const template = getTaskTemplateForTask(draft);
-    if (template !== null) {
-      const customError = validateCustomFields(draft.customFields, template);
-      if (customError !== "") return customError;
-    }
-  }
 
   if (draft.dueDateError !== "") return draft.dueDateError;
   if (draft.startDate !== null && draft.dueDate !== null && draft.startDate > draft.dueDate) {
@@ -5823,15 +5786,11 @@ async function saveTask(form, rerender) {
     activeTaskTab = "process-progress";
   } else {
     const now = getNow();
-    const template = getTaskTemplateForTask(draft);
-    const displayTitle = template === null ? draft.displayTitle ?? null : buildDisplayTitle(template, draft.customFields);
-    const coverImageUrl = getPrimaryImageUrl({ customFields: draft.customFields }) || null;
-    const updatedProcessInstance = buildUpdatedProcessInstanceForTaskForm(task, draft.customFields, displayTitle, coverImageUrl, now);
     const updatedTask = {
       ...task,
-      customFields: draft.customFields,
-      displayTitle,
-      coverImageUrl,
+      customFields: task.customFields && typeof task.customFields === "object" ? task.customFields : {},
+      displayTitle: task.displayTitle ?? null,
+      coverImageUrl: task.coverImageUrl ?? null,
       templateId: draft.templateId ?? task.templateId ?? "",
       ownerId: draft.ownerId,
       description: draft.description,
@@ -5843,18 +5802,10 @@ async function saveTask(form, rerender) {
       updatedAt: now,
     };
     try {
-      if (updatedProcessInstance !== null) {
-        await updatePersistentResource("process-instances", updatedProcessInstance.id, updatedProcessInstance);
-      }
       await updatePersistentResource("tasks", updatedTask.id, updatedTask);
     } catch (error) {
       console.error("任务保存失败", error);
       return setModalError(error.message || "任务保存失败，请检查本地数据库服务。", rerender);
-    }
-    if (updatedProcessInstance !== null) {
-      state.processInstances = state.processInstances.map((item) =>
-        item.id === updatedProcessInstance.id ? updatedProcessInstance : item,
-      );
     }
     state.tasks = state.tasks.map((item) => (item.id === updatedTask.id ? updatedTask : item));
   }
@@ -6067,12 +6018,7 @@ async function saveResult(form, rerender) {
         ? task.completedAt ?? null
         : null;
   const resultAttachments = submitFiles;
-  const nextCustomFields = isRectificationExecutionTask(task)
-    ? {
-        ...(task.customFields ?? {}),
-        ...submitFormData,
-      }
-    : task.customFields;
+  const nextCustomFields = task.customFields && typeof task.customFields === "object" ? { ...task.customFields } : {};
   if (isRectificationStandardOptimizationTask(task)) {
     nextCustomFields.standardOptimizationApplied = submitFormData.needStandardUpdate === "需要" ? "是" : "否";
     nextCustomFields.standardOptimizationScope = submitFormData.standardUpdateScope ?? [];

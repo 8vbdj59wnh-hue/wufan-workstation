@@ -1,4 +1,4 @@
-import { formatProcessStepLabel, getNow, getProcessNodeStepOrder, resolveAssetUrl, state, updatePersistentResource, uploadStandardWorkAttachment } from "./appState.js?v=20260705-state-singleton1";
+import { formatProcessStepLabel, getLatestStandardWorkFormFields, getNow, getProcessNodeStepOrder, resolveAssetUrl, state, updatePersistentResource, uploadStandardWorkAttachment } from "./appState.js?v=20260705-state-singleton1";
 import {
   GoalStatus,
   ProcessInstanceStatus,
@@ -111,9 +111,7 @@ function normalizeExecutionFormField(field, index) {
 }
 
 function getStandardWorkFormFields(standardWorkId, fallbackFields = []) {
-  const standardWorkForm = state.standardWorkForms.find((form) => form.standardWorkId === standardWorkId);
-  const schemaFields = standardWorkForm?.formSchema?.fields;
-  const sourceFields = Array.isArray(schemaFields) && schemaFields.length > 0 ? schemaFields : fallbackFields;
+  const sourceFields = getLatestStandardWorkFormFields(standardWorkId, fallbackFields);
   return sourceFields.map(normalizeExecutionFormField).sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0));
 }
 
@@ -289,9 +287,7 @@ function renderEditableStandardWorkAttachments(instance, editable) {
 function renderCustomFields(instance, editable) {
   const entries = getCustomFieldEntries(instance);
   const formFields = getInstanceFormFields(instance);
-  const fieldLabels = new Map(formFields.map((field) => [field.key, field.label]));
-
-  if (entries.length === 0) return `<p>暂无本次工作差异信息</p>`;
+  const configuredKeys = new Set(formFields.map((field) => field.key));
 
   if (!editable) {
     return renderWorkFormViewer({
@@ -300,22 +296,33 @@ function renderCustomFields(instance, editable) {
     });
   }
 
-  return `
-    <div class="form-grid">
-      ${entries
-        .map(([key, value]) => {
-          const label = fieldLabels.get(key) ?? key;
-          const textValue = Array.isArray(value) ? value.join("、") : value;
-          return `
-            <label>
-              <span>${escapeHtml(label)}</span>
-              <input name="custom__${escapeHtml(key)}" value="${escapeHtml(textValue)}" />
-            </label>
-          `;
-        })
-        .join("")}
-    </div>
-  `;
+  const configuredInputs = formFields
+    .map((field) => {
+      const value = instance.customFields?.[field.key];
+      const textValue = Array.isArray(value) ? value.join("、") : value ?? "";
+      return `
+        <label>
+          <span>${escapeHtml(field.label)}</span>
+          <input name="custom__${escapeHtml(field.key)}" value="${escapeHtml(textValue)}" />
+        </label>
+      `;
+    })
+    .join("");
+  const extraInputs = entries
+    .filter(([key]) => !configuredKeys.has(key))
+    .map(([key, value]) => {
+      const textValue = Array.isArray(value) ? value.join("、") : value;
+      return `
+        <label>
+          <span>${escapeHtml(key)}</span>
+          <input name="custom__${escapeHtml(key)}" value="${escapeHtml(textValue)}" />
+        </label>
+      `;
+    })
+    .join("");
+
+  if (configuredInputs === "" && extraInputs === "") return `<p>暂无关键行动公共信息</p>`;
+  return `<div class="form-grid">${configuredInputs}${extraInputs}</div>`;
 }
 
 function renderStepTask(task, editable, stepIndex) {
@@ -433,9 +440,9 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
           </label>
         </div>
         <div class="detail-block">
-          <h3>本次工作表单</h3>
+          <h3>关键行动公共信息</h3>
           ${renderCustomFields(instance, editable)}
-          <p class="form-note">本表单为发起关键行动时填写的本次工作要求，不是任务结果。</p>
+          <p class="form-note">该信息在发起关键行动时填写，同一关键行动下所有任务共享。</p>
         </div>
         ${renderEditableStandardWorkAttachments(instance, editable)}
         ${renderReturnRecords(instance.id)}
@@ -592,7 +599,8 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
     const now = getNow();
     const oldGoalId = instance.goalId;
     const customFields = { ...(instance.customFields ?? {}) };
-    Object.keys(customFields).forEach((key) => {
+    const customKeys = new Set([...Object.keys(customFields), ...getInstanceFormFields(instance).map((field) => field.key)]);
+    customKeys.forEach((key) => {
       const input = form.elements[`custom__${key}`];
       if (input !== undefined) customFields[key] = input.value.trim();
     });

@@ -811,7 +811,7 @@ function renderPriorityIssues() {
 
 function getRectificationVerificationResult(row) {
   const verificationTask = row.tasks.find((task) => task.name === "效果验证") ?? null;
-  return verificationTask?.customFields?.verificationResult ?? "";
+  return verificationTask?.submitFormData?.verificationResult ?? verificationTask?.customFields?.verificationResult ?? "";
 }
 
 function getImprovementProgressGroups() {

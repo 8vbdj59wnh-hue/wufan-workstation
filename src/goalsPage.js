@@ -2,6 +2,7 @@ import {
   createPersistentResource,
   getCurrentUser,
   getProcessNodeStepOrder,
+  getLatestStandardWorkFormFields,
   resolveAssetUrl,
   state,
   updatePersistentResource,
@@ -253,7 +254,8 @@ function getProcessTemplateName(templateId) {
 }
 
 function getSortedFormFields(template) {
-  return [...(template?.formFields ?? [])].sort((left, right) => left.sortOrder - right.sortOrder);
+  const fields = [...getLatestStandardWorkFormFields(template?.id, template?.formFields ?? [])];
+  return fields.sort((left, right) => left.sortOrder - right.sortOrder);
 }
 
 function getCustomFieldValue(customFields, field) {
@@ -387,7 +389,7 @@ function renderCustomFieldsForm(template) {
 
   return `
     <div class="template-custom-fields">
-      <h3>本次任务信息</h3>
+      <h3>本次关键行动信息</h3>
       <div class="form-grid">
         ${fields.map((field) => renderCustomFieldInput(field)).join("")}
       </div>
