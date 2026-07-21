@@ -1848,10 +1848,6 @@ button.content-template-thumb {
   font-weight: 600;
 }
 
-.task-template-table {
-  min-width: 1180px;
-}
-
 .standard-work-board-wrap {
   overflow-x: auto;
   padding-bottom: 4px;
@@ -2030,37 +2026,6 @@ button.content-template-thumb {
   font-size: 12px;
   line-height: 1.2;
   word-break: break-word;
-}
-
-.standard-work-step-count {
-  margin-left: auto;
-  padding: 2px 5px;
-  border-radius: 999px;
-  background: #f3f4f6;
-  color: #4b5563;
-  font-weight: 700;
-}
-
-.standard-work-category-select {
-  display: grid;
-  gap: 4px;
-}
-
-.standard-work-category-select span {
-  color: #6b7280;
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.standard-work-category-select select {
-  width: 100%;
-  min-height: 30px;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  background: #fff;
-  color: #111827;
-  font-size: 12px;
-  padding: 4px 6px;
 }
 
 .standard-work-card-actions {

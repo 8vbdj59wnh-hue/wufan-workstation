@@ -368,10 +368,6 @@ function getTaskCategories() {
     .sort((left, right) => (left.sortOrder ?? 9999) - (right.sortOrder ?? 9999) || left.name.localeCompare(right.name, "zh-Hans-CN"));
 }
 
-function getStandardWorkValueChainColumns() {
-  return getTaskCategories().map((category) => ({ id: category.id, title: category.name }));
-}
-
 function getActiveTaskTemplates() {
   return state.taskTemplates.filter((template) => template.status === TaskTemplateStatus.Active);
 }
@@ -380,30 +376,8 @@ function getTaskTemplate(templateId) {
   return state.taskTemplates.find((template) => template.id === templateId) ?? null;
 }
 
-function getActiveProcessTemplates() {
-  return state.processTemplates.filter((template) => template.status === ProcessTemplateStatus.Active);
-}
-
-function getSelectableProcessTemplates(selectedTemplateId = "") {
-  return state.processTemplates.filter(
-    (template) => template.status === ProcessTemplateStatus.Active || template.id === selectedTemplateId,
-  );
-}
-
 function getProcessTemplateName(templateId) {
   return state.processTemplates.find((template) => template.id === templateId)?.name ?? "未绑定关键行动标准流程";
-}
-
-function getStandardWorkStepCount(template) {
-  const processTemplateId = template.defaultProcessTemplateId ?? "";
-  if (processTemplateId === "") return 0;
-  return state.processTemplateNodes.filter((node) => node.templateId === processTemplateId && node.status !== ProcessTemplateNodeStatus.Deleted).length;
-}
-
-function getStandardWorkProcessNodes(processTemplateId) {
-  return sortProcessNodes(
-    state.processTemplateNodes.filter((node) => node.templateId === processTemplateId && node.status !== ProcessTemplateNodeStatus.Deleted),
-  );
 }
 
 function getStandardWorkValueChain(template) {
@@ -434,33 +408,6 @@ function withValueModuleCustomFields(customFields, valueModuleId) {
     valueModuleId: normalizedValueModuleId,
     valueModuleName: getValueModuleName(normalizedValueModuleId),
   };
-}
-
-function getTaskTemplateValueChainCategoryId(template) {
-  if (template === null || template === undefined) return "";
-  if (getTaskCategories().some((category) => category.id === template.categoryId)) return template.categoryId;
-  return getTaskCategories().find((category) => category.name === getStandardWorkValueChain(template))?.id ?? "";
-}
-
-function renderStandardWorkValueChainSelect(template) {
-  if (!canCurrentUser("settings.editStandardWorks")) return "";
-  const currentCategoryId = getTaskTemplateValueChainCategoryId(template);
-  return `
-    <label class="standard-work-category-select">
-      <span>价值链</span>
-      <select data-action="change-standard-work-value-chain" data-template-id="${escapeHtml(template.id)}">
-        ${getStandardWorkValueChainColumns()
-          .map(
-            (column) => `
-              <option value="${escapeHtml(column.id)}" ${column.id === currentCategoryId ? "selected" : ""}>
-                ${escapeHtml(column.title)}
-              </option>
-            `,
-          )
-          .join("")}
-      </select>
-    </label>
-  `;
 }
 
 function getTaskTemplateForTask(task) {
@@ -1268,22 +1215,6 @@ function renderOptions(items, selectedId, emptyLabel) {
           </option>
         `,
       )
-      .join("")}
-  `;
-}
-
-function renderProcessTemplateOptions(selectedId) {
-  return `
-    <option value="">请选择关键行动标准流程</option>
-    ${getSelectableProcessTemplates(selectedId)
-      .map((template) => {
-        const statusLabel = template.status === ProcessTemplateStatus.Active ? "" : "（已停用）";
-        return `
-          <option value="${template.id}" ${template.id === selectedId ? "selected" : ""}>
-            ${escapeHtml(template.name)}${statusLabel}
-          </option>
-        `;
-      })
       .join("")}
   `;
 }
