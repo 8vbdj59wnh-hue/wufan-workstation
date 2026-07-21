@@ -4081,50 +4081,6 @@ function renderDetailField(label, value) {
   `;
 }
 
-function renderWorkInfoValue(field, value) {
-  if (Array.isArray(value)) return escapeHtml(value.join("、") || "-");
-  if (value === null || value === undefined || value === "") return "-";
-  if (field.type === "image") {
-    return `<img class="inline-detail-image" src="${escapeHtml(resolveAssetUrl(value))}" alt="${escapeHtml(field.label)}" onerror="this.replaceWith('-')" />`;
-  }
-  if (field.type === "file" || field.type === "link" || field.type === "url") {
-    return `<a href="${escapeHtml(resolveAssetUrl(value))}" target="_blank" rel="noreferrer">${escapeHtml(value)}</a>`;
-  }
-  return escapeHtml(getCustomFieldValue({ [field.key]: value }, field));
-}
-
-function getExtraCustomFieldLabel(key) {
-  if (key === "platform") return "上架平台（旧字段）";
-  if (key === "storeName") return "上架店铺";
-  return key;
-}
-
-function renderTaskWorkInfo(task, taskTemplate) {
-  const customFields = getTaskCustomFields(task);
-  const fields = getSortedFormFields(taskTemplate);
-  const visibleKeys = new Set(fields.map((field) => field.key));
-  const configuredRows = fields
-    .map((field) => renderDetailField(field.label, renderWorkInfoValue(field, customFields[field.key])))
-    .join("");
-  const extraRows = Object.entries(customFields)
-    .filter(
-      ([key, value]) =>
-        !visibleKeys.has(key) &&
-        key !== "storeName" &&
-        key !== standardWorkAttachmentsKey &&
-        key !== returnRecordsKey &&
-        key !== latestReturnReasonKey &&
-        value !== null &&
-        value !== undefined &&
-        value !== "",
-    )
-    .map(([key, value]) => renderDetailField(getExtraCustomFieldLabel(key), escapeHtml(Array.isArray(value) ? value.join("、") : value)))
-    .join("");
-
-  if (configuredRows === "" && extraRows === "") return `<p>暂无关键行动公共信息</p>`;
-  return `<div class="detail-grid">${configuredRows}${extraRows}</div>`;
-}
-
 function getTaskActionContext(task) {
   const instance = getTaskProcessInstance(task);
   const taskTemplate = instance === null ? getTaskTemplateForTask(task) : getTaskTemplate(instance.taskTemplateId ?? instance.standardWorkId ?? "");
@@ -4144,8 +4100,43 @@ function getTaskActionContext(task) {
   };
 }
 
-function renderActionHero(task, context) {
-  const { instance, taskTemplate, objectName, title } = context;
+function isFilledSummaryValue(value) {
+  if (Array.isArray(value)) return value.length > 0;
+  return value !== null && value !== undefined && String(value).trim() !== "";
+}
+
+function renderActionSummaryValue(field, value) {
+  if (!isFilledSummaryValue(value)) return "";
+  if (field.type === "image") return "已上传图片";
+  if (field.type === "file") return "已上传附件";
+  if (field.type === "link" || field.type === "url") return "已填写链接";
+  const text = Array.isArray(value) ? value.join("、") : getCustomFieldValue({ [field.key]: value }, field);
+  const normalizedText = String(text ?? "").trim();
+  return escapeHtml(normalizedText.length > 60 ? `${normalizedText.slice(0, 60)}...` : normalizedText);
+}
+
+function getActionSummaryFields(taskTemplate, customFields) {
+  return getSortedFormFields(taskTemplate)
+    .map((field) => ({
+      field,
+      value: customFields[field.key],
+      displayValue: renderActionSummaryValue(field, customFields[field.key]),
+    }))
+    .filter((item) => item.displayValue !== "")
+    .slice(0, 4);
+}
+
+function getActionProgressSummary(progressItems) {
+  if (progressItems.length === 0) return "暂无进度";
+  const doneCount = progressItems.filter((item) => item.status === TaskStatus.Done).length;
+  const currentIndex = progressItems.findIndex((item) => item.isCurrent);
+  const currentItem = currentIndex >= 0 ? progressItems[currentIndex] : progressItems.find((item) => item.status !== TaskStatus.Done && item.status !== TaskStatus.Canceled);
+  const currentText = currentItem === undefined ? "已完成" : `${currentItem.stepLabel} ${currentItem.name}`;
+  return `${currentText}，已完成 ${doneCount}/${progressItems.length}`;
+}
+
+function renderActionSummary(task, context) {
+  const { instance, taskTemplate, objectName, title, customFields } = context;
   if (instance === null) {
     return `
       <div class="task-action-hero is-unlinked">
@@ -4159,66 +4150,40 @@ function renderActionHero(task, context) {
   }
 
   const ownerNames = getProcessCurrentOwners(instance);
+  const progressItems = getActionProgressItems(task, context);
+  const summaryFields = getActionSummaryFields(taskTemplate, customFields);
 
   return `
-    <div class="task-action-hero">
-      <div>
-        <span class="eyebrow">当前关键行动</span>
-        <h2>${escapeHtml(title)}</h2>
-        <p>${escapeHtml(taskTemplate?.name ?? "未关联关键行动")}${objectName === "" ? "" : `｜${escapeHtml(objectName)}`}</p>
-      </div>
-      <div class="task-action-summary">
-        ${renderDetailField("整体状态", processInstanceStatusNames[instance.status] ?? instance.status)}
-        ${renderDetailField("关联目标", findName(goals, instance.goalId, "未设置"))}
-        ${renderDetailField("行动负责人", escapeHtml(ownerNames))}
-        ${renderDetailField("本次截止时间", formatBusinessDateTime(instance.dueDate))}
-      </div>
-    </div>
-  `;
-}
-
-function renderActionPublicInfo(task, context) {
-  const { instance, taskTemplate, customFields } = context;
-  if (instance === null) {
-    return `
-      <div class="detail-block">
-        <h3>关键行动信息</h3>
-        <p class="form-note">未关联关键行动。</p>
-      </div>
-    `;
-  }
-
-  const coverImageUrl = getTaskCoverImage(task);
-  const startedAt = instance.startedAt ?? instance.launchedAt ?? instance.createdAt ?? "";
-
-  return `
-    <div class="detail-block">
-      <h3>关键行动信息</h3>
-      <div class="task-work-overview">
-        <div class="task-image-detail">
-          ${
-            coverImageUrl === ""
-              ? `<div class="task-image-empty">暂无产品图片</div>`
-              : `<img class="task-cover-thumb" src="${escapeHtml(resolveAssetUrl(coverImageUrl))}" alt="相关产品图片" onerror="this.replaceWith(Object.assign(document.createElement('div'), { className: 'task-image-empty', textContent: '图片无法预览' }))" />`
-          }
+    <div class="detail-block task-action-summary-block">
+      <div class="section-heading with-actions">
+        <div>
+          <h3>所属关键行动</h3>
+          <p class="form-note">这里只展示摘要；完整公共信息、附件和全部标准步骤请进入关键行动主详情查看。</p>
         </div>
-        <div class="task-work-main">
-          <div class="detail-grid">
-            ${renderDetailField("关键行动名称", escapeHtml(taskTemplate?.name ?? "未关联关键行动"))}
-            ${renderDetailField("关联目标", findName(goals, instance.goalId, "未设置"))}
-            ${renderDetailField("本次发起说明", escapeHtml(instance.description || "未填写"))}
-            ${renderDetailField("本次开始时间", escapeHtml(startedAt || "未记录"))}
-            ${renderDetailField("本次截止时间", formatBusinessDateTime(instance.dueDate))}
-            ${renderDetailField("发起人", findName(people, instance.initiatorId, "未设置"))}
-          </div>
-          ${renderWorkFormViewer({
-            formFields: getSortedFormFields(taskTemplate),
-            customFields,
-          })}
+        <button class="secondary-button" type="button" data-action="view-launched-process-detail" data-task-id="${escapeHtml(task.id)}">查看关键行动详情</button>
+      </div>
+      <div class="task-action-hero">
+        <div>
+          <span class="eyebrow">当前关键行动</span>
+          <h2>${escapeHtml(title)}</h2>
+          <p>${escapeHtml(taskTemplate?.name ?? "未关联关键行动")}${objectName === "" ? "" : `｜${escapeHtml(objectName)}`}</p>
+        </div>
+        <div class="task-action-summary">
+          ${renderDetailField("整体状态", processInstanceStatusNames[instance.status] ?? instance.status)}
+          ${renderDetailField("对齐目标", findName(goals, instance.goalId, "未设置"))}
+          ${renderDetailField("负责人", escapeHtml(ownerNames))}
+          ${renderDetailField("执行进度", escapeHtml(getActionProgressSummary(progressItems)))}
+          ${renderDetailField("本次截止时间", formatBusinessDateTime(instance.dueDate))}
         </div>
       </div>
+      ${
+        summaryFields.length === 0
+          ? `<p class="form-note">暂无已填写的关键行动公共字段。</p>`
+          : `<div class="detail-grid">
+              ${summaryFields.map(({ field, displayValue }) => renderDetailField(escapeHtml(field.label), displayValue)).join("")}
+            </div>`
+      }
     </div>
-    ${renderStandardWorkAttachmentsBlock(customFields)}
   `;
 }
 
@@ -4244,51 +4209,6 @@ function getActionProgressItems(task, context) {
     isCurrent: node.id === task.processNodeId,
     stepLabel: formatProcessStepLabel(index + 1),
   }));
-}
-
-function getActionProgressMarker(item) {
-  if (item.status === TaskStatus.Done) return "✓";
-  if (item.isCurrent) return "▶";
-  if (isTaskOverdue(item) || hasTaskOverdueRecord(item)) return "!";
-  return "○";
-}
-
-function getActionProgressClass(item) {
-  if (item.isCurrent) return " is-current";
-  if (item.status === TaskStatus.Done) return " is-done";
-  if (item.status === TaskStatus.Canceled) return " is-canceled";
-  if (isTaskOverdue(item) || hasTaskOverdueRecord(item)) return " is-alert";
-  return "";
-}
-
-function renderActionProgress(task, context) {
-  if (context.instance === null) return "";
-  const progressItems = getActionProgressItems(task, context);
-
-  return `
-    <div class="detail-block">
-      <h3>行动进度</h3>
-      ${
-        progressItems.length === 0
-          ? `<p>暂无行动进度。</p>`
-          : `<ol class="action-progress-list">
-              ${progressItems
-                .map(
-                  (item) => `
-                    <li class="action-progress-item${getActionProgressClass(item)}">
-                      <span class="action-progress-marker">${getActionProgressMarker(item)}</span>
-                      <strong>${escapeHtml(item.stepLabel)}</strong>
-                      <span title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span>
-                      <em>${escapeHtml(taskStatusNames[item.status] ?? item.status ?? "未开始")}</em>
-                    </li>
-                  `,
-                )
-                .join("")}
-            </ol>`
-      }
-      <p class="form-note">行动进度优先读取本次已发起关键行动下实际生成的任务；历史数据缺失时才回退当前关键行动标准流程。</p>
-    </div>
-  `;
 }
 
 function renderCurrentTaskSection(task) {
@@ -4813,9 +4733,7 @@ function renderTaskDetail() {
       <div class="task-primary-actions">
         <div class="row-actions">${renderStatusActions(selectedTask) || "<span class=\"muted-action\">暂无可用操作</span>"}</div>
       </div>
-      ${renderActionHero(selectedTask, actionContext)}
-      ${renderActionPublicInfo(selectedTask, actionContext)}
-      ${renderActionProgress(selectedTask, actionContext)}
+      ${renderActionSummary(selectedTask, actionContext)}
       ${renderCurrentTaskSection(selectedTask)}
       ${renderPreviousTaskFilesBlock(selectedTask)}
       ${renderTaskSubmitResultDetail(selectedTask)}
@@ -4844,6 +4762,22 @@ function renderTaskDetail() {
         }</p>
       </div>
     </section>
+  `;
+}
+
+function renderLaunchedProcessDetailModal() {
+  if (modalState === null || modalState.kind !== "launchedProcessDetail") return "";
+
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <div class="modal-panel wide-modal task-detail-modal" role="dialog" aria-modal="true" aria-label="关键行动详情">
+        <div class="modal-header">
+          <h2>关键行动详情</h2>
+          <button class="icon-button" type="button" data-action="close-task-modal" aria-label="关闭">×</button>
+        </div>
+        ${renderLaunchedProcessDetail(modalState.instanceId)}
+      </div>
+    </div>
   `;
 }
 
@@ -6554,6 +6488,16 @@ async function handleTaskAction(action, taskId, rerender, actionButton = null) {
     return;
   }
 
+  if (action === "view-launched-process-detail") {
+    if (task.processInstanceId === null || task.processInstanceId === undefined || task.processInstanceId === "") {
+      window.alert("该任务未关联关键行动。");
+      return;
+    }
+    modalState = { kind: "launchedProcessDetail", instanceId: task.processInstanceId };
+    rerender();
+    return;
+  }
+
   if (action === "edit-task") {
     if (!canEditTask(task)) return;
     modalState = { kind: "task", mode: "edit", taskId, templateId: task.templateId ?? "", error: "" };
@@ -7442,6 +7386,15 @@ export function bindTasksPageEvents(rerender) {
     });
   }
   if (returnTaskForm !== null) returnTaskForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
+  if (modalState?.kind === "launchedProcessDetail") {
+    bindLaunchedProcessDetailEvents(tasksPage, rerender, {
+      onTaskSelect: (taskId) => {
+        selectedTaskId = taskId;
+        modalState = { kind: "taskDetail", taskId, error: "" };
+        rerender();
+      },
+    });
+  }
 }
 
 export function renderTasksPage() {
@@ -7487,6 +7440,7 @@ export function renderTasksPage() {
               ${renderTaskTable()}
               ${renderTaskDetail()}
               ${renderTaskDetailModal()}
+              ${renderLaunchedProcessDetailModal()}
               ${renderTaskModal()}
               ${renderResultModal()}
               ${renderReturnTaskModal()}
