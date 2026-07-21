@@ -473,6 +473,20 @@ export async function completeExecutionGroup(groupId, payload) {
   return postExecutionGroupAction(`/api/execution-groups/${groupId}/complete`, payload);
 }
 
+export async function batchUpdateTaskStatus(taskIds, status) {
+  const response = await authFetch(`${apiBaseUrl}/api/tasks/batch-status`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ taskIds, status }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success !== true) {
+    throw new Error(data.message ?? data.error ?? "批量任务状态保存失败，请检查本地数据库服务。");
+  }
+  if (data.data !== undefined) applyDataSnapshot(data.data);
+  return data.result ?? null;
+}
+
 export async function updateCurrentUserAvatar(avatarUrl) {
   const response = await authFetch(`${apiBaseUrl}/api/me/avatar`, {
     method: "PUT",

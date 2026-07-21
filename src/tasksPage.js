@@ -1,5 +1,6 @@
 import {
   advanceProcessAfterTaskDone,
+  batchUpdateTaskStatus as batchUpdateTaskStatusResource,
   cancelProcessInstance,
   cancelExecutionGroup as cancelExecutionGroupResource,
   completeExecutionGroup as completeExecutionGroupResource,
@@ -5113,15 +5114,6 @@ function getTaskStatusChangeError(task, status) {
   return "";
 }
 
-function buildTaskStatusUpdate(task, status, now) {
-  return markTaskOverdueRecordIfNeeded({
-    ...task,
-    status,
-    updatedAt: now,
-    completedAt: status === TaskStatus.Done ? now : null,
-  }, now);
-}
-
 async function bulkUpdateTaskStatus(status, rerender) {
   if (status === TaskStatus.Done && !canCurrentUser("tasks.batchComplete")) return;
   if (status === TaskStatus.Canceled && !canCurrentUser("tasks.batchCancel")) return;
@@ -5129,37 +5121,8 @@ async function bulkUpdateTaskStatus(status, rerender) {
   if (selectedTasks.length === 0) return;
   if (status === TaskStatus.Canceled && !window.confirm("确定要取消选中的任务吗？")) return;
 
-  const now = getNow();
-  const skipped = [];
-  const updatedTasks = [];
-  for (const selectedTask of selectedTasks) {
-    let task = selectedTask;
-    if (task.source === TaskSource.Process && task.status === TaskStatus.Waiting && status !== TaskStatus.Canceled) {
-      try {
-        await ensureTaskReadyForExecution(task.id);
-        task = getTask(task.id) ?? task;
-      } catch (error) {
-        console.error("标准任务激活失败", error);
-        skipped.push(task.name);
-        continue;
-      }
-    }
-    const error = getTaskStatusChangeError(task, status);
-    if (error !== "") {
-      skipped.push(task.name);
-      continue;
-    }
-    if ([TaskStatus.Done, TaskStatus.PendingAcceptance].includes(status) && !hasValidSubmittedResult(task)) {
-      skipped.push(task.name);
-      continue;
-    }
-    updatedTasks.push(buildTaskStatusUpdate(task, status, now));
-  }
-
   try {
-    for (const updatedTask of updatedTasks) {
-      await updatePersistentResource("tasks", updatedTask.id, updatedTask);
-    }
+    await batchUpdateTaskStatusResource(selectedTasks.map((task) => task.id), status);
   } catch (error) {
     console.error("批量修改任务状态失败", error);
     window.alert(error.message || "任务状态保存失败，请检查本地数据库服务。");
@@ -5167,30 +5130,17 @@ async function bulkUpdateTaskStatus(status, rerender) {
     return;
   }
 
-  const updatedTaskMap = new Map(updatedTasks.map((task) => [task.id, task]));
-  state.tasks = state.tasks.map((task) => updatedTaskMap.get(task.id) ?? task);
   const previousTaskMap = new Map(selectedTasks.map((task) => [task.id, task]));
-  for (const updatedTask of updatedTasks) {
-    await triggerOverdueRectificationIfNeeded(previousTaskMap.get(updatedTask.id), updatedTask);
-  }
   if (status === TaskStatus.Done) {
-    try {
-      for (const task of updatedTasks) {
-        await advanceProcessAfterTaskDone(task.id);
-      }
-    } catch (error) {
-      console.error("关键行动推进保存失败", error);
-      window.alert(error.message || "关键行动推进保存失败，请检查本地数据库服务。");
-      rerender();
-      return;
-    }
+    await Promise.all(
+      selectedTasks
+        .map((task) => state.tasks.find((item) => item.id === task.id))
+        .filter(Boolean)
+        .map((updatedTask) => triggerOverdueRectificationIfNeeded(previousTaskMap.get(updatedTask.id), updatedTask)),
+    );
   }
 
   selectedTaskIds = new Set();
-  if (skipped.length > 0) {
-    const reason = status === TaskStatus.Done ? "部分任务因前置步骤未完成或提交结果不完整，未能完成。" : `已修改 ${updatedTasks.length} 条任务，跳过 ${skipped.length} 条不可修改任务。`;
-    window.alert(reason);
-  }
   rerender();
 }
 

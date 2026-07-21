@@ -6,6 +6,7 @@ import multer from "multer";
 import {
   closeDatabase,
   createResource,
+  batchUpdateTaskStatus,
   cancelExecutionGroup,
   cancelProcessInstance,
   completeExecutionGroup,
@@ -539,6 +540,22 @@ app.post("/api/execution-groups/:id/complete", requirePermission("tasks.batchCom
   } catch (error) {
     console.error("执行组完成失败", error);
     response.status(400).json({ success: false, message: error.message || "执行组完成失败，请检查本地数据库服务。" });
+  }
+});
+
+app.post("/api/tasks/batch-status", (request, response) => {
+  const status = String(request.body?.status ?? "").trim();
+  const permission = status === "canceled" ? "tasks.batchCancel" : "tasks.batchComplete";
+  if (!hasPermission(request.user, permission)) {
+    response.status(403).json({ success: false, message: "你没有权限进行该操作" });
+    return;
+  }
+  try {
+    const result = batchUpdateTaskStatus(request.body ?? {});
+    response.json({ success: true, result, data: filterDataByScope(readAllData(), request.user) });
+  } catch (error) {
+    console.error("批量任务状态保存失败", error);
+    response.status(400).json({ success: false, message: error.message || "批量任务状态保存失败，请检查本地数据库服务。" });
   }
 });
 

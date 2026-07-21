@@ -1537,6 +1537,102 @@ function updateExecutionGroupTaskLinks(taskIds, executionGroupId) {
   for (const taskId of taskIds) updateTask.run({ id: taskId, executionGroupId, updatedAt: now });
 }
 
+const batchTaskStatuses = new Set(["done", "canceled"]);
+
+function getSortedBatchTasks(tasks) {
+  return [...tasks].sort((left, right) => {
+    const leftInstance = left.processInstanceId ?? "";
+    const rightInstance = right.processInstanceId ?? "";
+    if (leftInstance !== rightInstance) return leftInstance.localeCompare(rightInstance);
+    const leftNode = left.processNodeId ? readExistingItem("processTemplateNodes", left.processNodeId) : null;
+    const rightNode = right.processNodeId ? readExistingItem("processTemplateNodes", right.processNodeId) : null;
+    const stepDifference = getProcessNodeStepOrder(leftNode ?? left) - getProcessNodeStepOrder(rightNode ?? right);
+    if (stepDifference !== 0) return stepDifference;
+    return String(left.createdAt ?? "").localeCompare(String(right.createdAt ?? ""));
+  });
+}
+
+function ensureBatchTaskCanBeDone(task, completedTaskIds) {
+  if (task.status === "done") return;
+  if (task.status === "canceled") throw new Error(`${task.name}：已取消，不能批量完成。`);
+  if (task.status === "pending_acceptance") return;
+  if (task.status === "waiting") {
+    const orderedTasks = getOrderedProcessInstanceTasks(task.processInstanceId);
+    const taskIndex = orderedTasks.findIndex((item) => item.id === task.id);
+    if (taskIndex === -1) throw new Error(`${task.name}：未找到对应的流程顺序，不能批量完成。`);
+    const previousTasksDone = orderedTasks.slice(0, taskIndex).every((item) => item.status === "done" || completedTaskIds.has(item.id));
+    if (!previousTasksDone) throw new Error(`${task.name}：前置步骤未完成，当前步骤暂不能处理。`);
+  }
+  const submitError = validateExecutionGroupTaskSubmission(task);
+  if (submitError !== "") throw new Error(`${task.name}：${submitError}。`);
+}
+
+export function batchUpdateTaskStatus(payload = {}) {
+  const database = getDatabase();
+  const updateBatch = database.transaction(() => {
+    const status = String(payload.status ?? "").trim();
+    if (!batchTaskStatuses.has(status)) throw new Error("批量任务状态不合法。");
+
+    const taskIds = [...new Set((Array.isArray(payload.taskIds) ? payload.taskIds : []).map((id) => String(id ?? "").trim()).filter(Boolean))];
+    if (taskIds.length === 0) throw new Error("请选择需要批量处理的任务。");
+
+    const tasksToUpdate = taskIds.map((taskId) => readExistingItem("tasks", taskId));
+    const missingTaskIds = taskIds.filter((_taskId, index) => tasksToUpdate[index] === null);
+    if (missingTaskIds.length > 0) throw new Error(`未找到任务：${missingTaskIds.join("、")}`);
+
+    const now = payload.updatedAt || new Date().toISOString();
+    const sortedTasks = getSortedBatchTasks(tasksToUpdate);
+    const completedTaskIds = new Set(readResource("tasks").filter((task) => task.status === "done").map((task) => task.id));
+    const affectedProcessInstanceIds = new Set();
+    const changedTaskIds = [];
+
+    for (const selectedTask of sortedTasks) {
+      let task = readExistingItem("tasks", selectedTask.id);
+      if (task === null) throw new Error(`未找到任务：${selectedTask.id}`);
+      if (status === "done") {
+        ensureBatchTaskCanBeDone(task, completedTaskIds);
+        if (task.status === "done") {
+          if (task.processInstanceId) affectedProcessInstanceIds.add(task.processInstanceId);
+          continue;
+        }
+        if (task.status === "waiting") {
+          const orderedTasks = getOrderedProcessInstanceTasks(task.processInstanceId);
+          const taskIndex = orderedTasks.findIndex((item) => item.id === task.id);
+          const previousTask = orderedTasks[taskIndex - 1];
+          task = activateWaitingProcessTaskInTransaction(task, previousTask?.completedAt ?? now);
+        }
+      } else if (task.status === "canceled") {
+        continue;
+      }
+
+      const updatedTask = markTaskOverdueOnce({
+        ...task,
+        status,
+        completedAt: status === "done" ? now : null,
+        updatedAt: now,
+      });
+      insertItem("tasks", updatedTask);
+      changedTaskIds.push(updatedTask.id);
+      if (updatedTask.processInstanceId) affectedProcessInstanceIds.add(updatedTask.processInstanceId);
+      if (updatedTask.status === "done") completedTaskIds.add(updatedTask.id);
+    }
+
+    if (status === "done") {
+      for (const processInstanceId of affectedProcessInstanceIds) {
+        refreshProcessTaskReadinessInTransaction(processInstanceId, now);
+      }
+    }
+
+    return {
+      status,
+      taskIds,
+      changedTaskIds,
+      updatedAt: now,
+    };
+  });
+  return updateBatch();
+}
+
 export function createExecutionGroup(payload = {}) {
   const database = getDatabase();
   const createGroup = database.transaction(() => {
