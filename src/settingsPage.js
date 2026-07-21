@@ -3277,29 +3277,158 @@ export function bindSettingsPageEvents(rerender) {
   }
 }
 
+function getSettingsSubmodules() {
+  return [
+    {
+      id: "organization",
+      title: "组织架构",
+      group: "组织与权限",
+      icon: "组",
+      description: "维护部门层级、岗位和组织关系。",
+      canView: () => canCurrentUser("settings.viewOrg"),
+      render: renderOrganizationSection,
+    },
+    {
+      id: "people",
+      title: "人员管理",
+      group: "组织与权限",
+      icon: "人",
+      description: "维护员工账号、部门岗位和登录权限。",
+      canView: () => canCurrentUser("settings.viewPeople"),
+      render: renderPeopleSection,
+    },
+    {
+      id: "permissions",
+      title: "权限管理",
+      group: "组织与权限",
+      icon: "权",
+      description: "配置人员可访问的模块和数据范围。",
+      canView: () => canCurrentUser("settings.managePermissions"),
+      render: renderPermissionSection,
+    },
+    {
+      id: "stores",
+      title: "店铺管理",
+      group: "业务配置",
+      icon: "店",
+      description: "维护系统内可使用的店铺资料。",
+      canView: () => canCurrentUser("settings.viewStores"),
+      render: renderStoreSection,
+    },
+    {
+      id: "categories",
+      title: "分类设置",
+      group: "业务配置",
+      icon: "类",
+      description: "查看系统价值链分类配置。",
+      canView: () => true,
+      render: renderCategorySection,
+    },
+    {
+      id: "publishing-accounts",
+      title: "发布账号管理",
+      group: "业务配置",
+      icon: "发",
+      description: "维护内容排期可选择的发布账号。",
+      canView: () => canCurrentUser("settings.editStandardWorkForms"),
+      render: renderPublishingAccountSection,
+    },
+    {
+      id: "form-design",
+      title: "表单设计",
+      group: "业务配置",
+      icon: "表",
+      description: "为关键行动配置标准填写表单。",
+      canView: () => canCurrentUser("settings.viewStandardWorks") || canCurrentUser("settings.editStandardWorkForms"),
+      render: renderFormDesignSection,
+    },
+    {
+      id: "template-tags",
+      title: "模板标签管理",
+      group: "业务配置",
+      icon: "签",
+      description: "维护模板中心可选择的标签分类和标签。",
+      canView: () => canCurrentUser("settings.editStandardWorkForms"),
+      render: renderTemplateTagManagementSection,
+    },
+    {
+      id: "issues-requirements",
+      title: "需求与问题中心",
+      group: "系统反馈",
+      icon: "需",
+      description: "收集系统问题和优化需求，并跟进处理状态。",
+      canView: () => canCurrentUser("settings.editStandardWorkForms"),
+      render: renderIssuesRequirementsSection,
+    },
+  ];
+}
+
+function getCurrentSettingsSubmodule(submodules) {
+  const hash = window.location.hash.replace(/^#/, "");
+  const normalizedHash = hash.startsWith("settings/") ? hash.slice("settings/".length) : hash;
+  return submodules.find((item) => item.id === normalizedHash) ?? null;
+}
+
+function renderSettingsHome(submodules) {
+  const groups = ["组织与权限", "业务配置", "系统反馈"];
+  return `
+    <section class="settings-home">
+      <div class="settings-home-heading">
+        <h2>设置</h2>
+        <p>选择需要维护的设置项。具体表单和列表已拆分到独立页面，避免在首页堆叠。</p>
+      </div>
+      ${groups
+        .map((group) => {
+          const groupItems = submodules.filter((item) => item.group === group);
+          if (groupItems.length === 0) return "";
+          return `
+            <div class="settings-home-group">
+              <h3>${escapeHtml(group)}</h3>
+              <div class="settings-home-grid">
+                ${groupItems
+                  .map(
+                    (item) => `
+                      <a class="settings-home-card" href="#settings/${escapeHtml(item.id)}">
+                        <span class="settings-home-card-icon" aria-hidden="true">${escapeHtml(item.icon ?? item.title.slice(0, 1))}</span>
+                        <span class="settings-home-card-copy">
+                          <strong>${escapeHtml(item.title)}</strong>
+                          <span>${escapeHtml(item.description)}</span>
+                        </span>
+                        <em>进入</em>
+                      </a>
+                    `,
+                  )
+                  .join("")}
+              </div>
+            </div>
+          `;
+        })
+        .join("")}
+    </section>
+  `;
+}
+
+function renderSettingsSubpage(submodule) {
+  return `
+    <div class="settings-subpage-toolbar">
+      <div class="settings-breadcrumb" aria-label="设置路径">
+        <a href="#settings">设置</a>
+        <span>/</span>
+        <strong>${escapeHtml(submodule.title)}</strong>
+      </div>
+      <a class="secondary-button" href="#settings">← 返回设置</a>
+    </div>
+    ${submodule.render()}
+  `;
+}
+
 export function renderSettingsPage() {
+  const accessibleSubmodules = getSettingsSubmodules().filter((item) => item.canView());
+  const currentSubmodule = getCurrentSettingsSubmodule(accessibleSubmodules);
+
   return `
     <div class="settings-page">
-      <div class="settings-tabs" aria-label="设置分区">
-        ${canCurrentUser("settings.viewOrg") ? `<a href="#organization">组织架构</a>` : ""}
-        ${canCurrentUser("settings.viewPeople") ? `<a href="#people">人员管理</a>` : ""}
-        ${canCurrentUser("settings.managePermissions") ? `<a href="#permissions">权限管理</a>` : ""}
-        ${canCurrentUser("settings.viewStores") ? `<a href="#stores">店铺管理</a>` : ""}
-        ${canCurrentUser("settings.editStandardWorkForms") ? `<a href="#publishing-accounts">发布账号管理</a>` : ""}
-        ${canCurrentUser("settings.viewStandardWorks") || canCurrentUser("settings.editStandardWorkForms") ? `<a href="#form-design">表单设计</a>` : ""}
-        ${canCurrentUser("settings.editStandardWorkForms") ? `<a href="#template-tags">模板标签管理</a>` : ""}
-        ${canCurrentUser("settings.editStandardWorkForms") ? `<a href="#issues-requirements">需求与问题中心</a>` : ""}
-        <a href="#categories">分类设置</a>
-      </div>
-      ${canCurrentUser("settings.viewOrg") ? renderOrganizationSection() : ""}
-      ${canCurrentUser("settings.viewPeople") ? renderPeopleSection() : ""}
-      ${canCurrentUser("settings.managePermissions") ? renderPermissionSection() : ""}
-      ${canCurrentUser("settings.viewStores") ? renderStoreSection() : ""}
-      ${canCurrentUser("settings.editStandardWorkForms") ? renderPublishingAccountSection() : ""}
-      ${canCurrentUser("settings.viewStandardWorks") || canCurrentUser("settings.editStandardWorkForms") ? renderFormDesignSection() : ""}
-      ${canCurrentUser("settings.editStandardWorkForms") ? renderTemplateTagManagementSection() : ""}
-      ${canCurrentUser("settings.editStandardWorkForms") ? renderIssuesRequirementsSection() : ""}
-      ${renderCategorySection()}
+      ${currentSubmodule === null ? renderSettingsHome(accessibleSubmodules) : renderSettingsSubpage(currentSubmodule)}
       ${renderModal()}
     </div>
   `;

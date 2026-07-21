@@ -67,9 +67,17 @@ const moduleHashMap = {
   methodologies: "processes",
   methods: "processes",
   organization: "settings",
+  "settings/organization": "settings",
   people: "settings",
+  "settings/people": "settings",
+  permissions: "settings",
+  "settings/permissions": "settings",
   stores: "settings",
+  "settings/stores": "settings",
   categories: "settings",
+  "settings/categories": "settings",
+  "publishing-accounts": "settings",
+  "settings/publishing-accounts": "settings",
   "form-design": "settings",
   "settings/form-design": "settings",
   "template-tags": "settings",
@@ -85,6 +93,7 @@ function getRouteHash() {
 function scrollToCurrentHashSection() {
   const hash = getRouteHash();
   if (hash === "") return;
+  if (moduleHashMap[hash] === "settings" && hash !== "settings") return;
   const sectionId = hash.includes("/") ? hash.split("/").at(-1) : hash;
   window.requestAnimationFrame(() => {
     document.getElementById(sectionId)?.scrollIntoView({ block: "start" });
