@@ -578,21 +578,44 @@ function mergeExistingItem(resourceKey, id, patch) {
   return merged;
 }
 
-function encodeItem(item, config) {
+const legacyPriorityDefaults = { importance: "normal", urgency: "normal" };
+const legacyPriorityTables = new Set(["task_templates", "tasks", "work_plans"]);
+const tableColumnCache = new Map();
+
+function getTableColumnNames(table) {
+  if (!tableColumnCache.has(table)) {
+    const columns = getDatabase()
+      .prepare(`PRAGMA table_info(${table})`)
+      .all()
+      .map((item) => item.name);
+    tableColumnCache.set(table, new Set(columns));
+  }
+  return tableColumnCache.get(table);
+}
+
+function getWritableColumns(config) {
+  const actualColumns = getTableColumnNames(config.table);
+  const columns = config.columns.filter((column) => actualColumns.has(column));
+  if (legacyPriorityTables.has(config.table)) {
+    for (const column of Object.keys(legacyPriorityDefaults)) {
+      if (actualColumns.has(column) && !columns.includes(column)) columns.push(column);
+    }
+  }
+  return columns;
+}
+
+function encodeItem(item, config, columns = config.columns) {
   const jsonFields = new Set(config.jsonFields ?? []);
   const booleanFields = new Set(config.booleanFields ?? []);
   const encoded = {};
 
-  for (const column of config.columns) {
+  for (const column of columns) {
     let value = item[column] ?? null;
-    if ((config.table === "tasks" || config.table === "work_plans") && column === "importance" && (value === null || value === "")) {
-      value = defaultTaskImportance;
-    }
-    if ((config.table === "tasks" || config.table === "work_plans") && column === "urgency" && (value === null || value === "")) {
-      value = defaultTaskUrgency;
-    }
     if (config.table === "work_plans" && column === "workType" && (value === null || value === "")) {
       value = "normal";
+    }
+    if (legacyPriorityTables.has(config.table) && Object.prototype.hasOwnProperty.call(legacyPriorityDefaults, column) && (value === null || value === "")) {
+      value = legacyPriorityDefaults[column];
     }
     if (jsonFields.has(column)) value = JSON.stringify(value ?? (column.endsWith("s") ? [] : {}));
     if (booleanFields.has(column)) value = value ? 1 : 0;
@@ -666,8 +689,8 @@ function validateTemplateItem(item) {
 function insertItem(resourceKey, item) {
   const config = resourceConfigs[resourceKey];
   if (resourceKey === "templates") validateTemplateItem(item);
-  const encoded = encodeItem(item, config);
-  const columns = config.columns;
+  const columns = getWritableColumns(config);
+  const encoded = encodeItem(item, config, columns);
   const placeholders = columns.map((column) => `@${column}`).join(", ");
   const sql = `INSERT OR REPLACE INTO ${config.table} (${columns.join(", ")}) VALUES (${placeholders})`;
   getDatabase().prepare(sql).run(encoded);
