@@ -43,6 +43,7 @@ import {
 
 const defaultDepartmentId = "dept-marketing";
 const defaultOwnerId = "person-005";
+const contentNoteTaskTemplateId = "task-template-publish-content-note";
 const categories = state.categories;
 const goals = state.goals;
 const requiredImportHeaders = [];
@@ -65,6 +66,8 @@ const importHeaderAliases = {
   发布日期: ["发布日期", "发布日期（日期+时间）"],
   受众人群: ["受众人群", "对应人群"],
 };
+const contentNoteStatusOptions = ["待提交", "待制作", "待审核", "待发布", "已发布", "已超时", "已取消"];
+const legacyScheduleWriteDisabledMessage = "历史排期维护已停用，请通过“发起发布内容笔记”创建新排期。";
 
 let filters = {
   dateFrom: "",
@@ -457,6 +460,15 @@ function renderStatusOptions(selectedStatus, emptyLabel) {
   `;
 }
 
+function renderContentNoteStatusOptions(selectedStatus, emptyLabel) {
+  return `
+    <option value="">${emptyLabel}</option>
+    ${contentNoteStatusOptions
+      .map((status) => `<option value="${status}" ${status === selectedStatus ? "selected" : ""}>${status}</option>`)
+      .join("")}
+  `;
+}
+
 function normalizeImportDate(value) {
   const trimmedValue = String(value ?? "").trim();
   if (trimmedValue === "") return "";
@@ -546,10 +558,10 @@ function matchesFilters(schedule) {
   if (filters.dateTo !== "" && publishDate > filters.dateTo) return false;
   if (filters.account !== "" && schedule.account !== filters.account) return false;
   if (filters.contentType !== "" && normalizeContentType(schedule.contentType) !== filters.contentType) return false;
-  if (filters.contentPurpose !== "" && normalizeContentPurpose(schedule.contentPurpose) !== filters.contentPurpose) return false;
-  if (filters.targetAudience !== "" && normalizeContentAudience(schedule.targetAudience) !== filters.targetAudience) return false;
+  if (filters.contentPurpose !== "" && normalizeContentPurpose(schedule.contentPurpose ?? schedule.purpose) !== filters.contentPurpose) return false;
+  if (filters.targetAudience !== "" && normalizeContentAudience(schedule.targetAudience ?? schedule.audience) !== filters.targetAudience) return false;
   if (filters.status === "" && normalizeContentScheduleStatus(schedule.status) === ContentScheduleStatus.Canceled) return false;
-  if (filters.status !== "" && normalizeContentScheduleStatus(schedule.status) !== filters.status) return false;
+  if (filters.status !== "" && schedule.status !== filters.status && normalizeContentScheduleStatus(schedule.status) !== filters.status) return false;
   if (filters.goalId !== "" && schedule.goalId !== filters.goalId) return false;
   if (filters.productKeyword !== "" && !product.includes(filters.productKeyword)) return false;
   if (filters.titleKeyword !== "" && !title.includes(filters.titleKeyword)) return false;
@@ -571,7 +583,7 @@ function renderFilters() {
       <label><span>内容类型</span><select name="contentType">${renderStringOptions(contentScheduleTypeOptions, filters.contentType, "全部类型")}</select></label>
       <label><span>内容目的</span><select name="contentPurpose">${renderStringOptions(contentSchedulePurposeOptions, filters.contentPurpose, "全部目的")}</select></label>
       <label><span>受众人群</span><select name="targetAudience">${renderStringOptions(contentScheduleAudienceOptions, filters.targetAudience, "全部人群")}</select></label>
-      <label><span>状态</span><select name="status">${renderStatusOptions(filters.status, "全部状态")}</select></label>
+      <label><span>状态</span><select name="status">${renderContentNoteStatusOptions(filters.status, "全部状态")}</select></label>
       <label><span>关联目标</span><select name="goalId">${renderEntityOptions(getActiveGoals(), filters.goalId, "全部目标")}</select></label>
       <label><span>产品关键词</span><input name="productKeyword" value="${escapeAttribute(filters.productKeyword)}" placeholder="搜索产品" /></label>
       <label><span>标题关键词</span><input name="titleKeyword" value="${escapeAttribute(filters.titleKeyword)}" placeholder="搜索标题" /></label>
@@ -583,10 +595,127 @@ function renderActionButton(label, action, scheduleId, variant = "") {
   return `<button class="text-button ${variant}" type="button" data-content-action="${action}" data-schedule-id="${scheduleId}">${label}</button>`;
 }
 
-function renderImageCell(schedule) {
-  return schedule.productImage
-    ? `<img class="content-thumb" src="${escapeAttribute(resolveAssetUrl(schedule.productImage))}" alt="1:1 产品主图" />`
+function renderContentActionButton(label, action, itemId, variant = "") {
+  return `<button class="text-button ${variant}" type="button" data-content-action="${action}" data-content-id="${escapeAttribute(itemId)}">${label}</button>`;
+}
+
+function renderImageCell(item) {
+  return item.productImage
+    ? `<img class="content-thumb" src="${escapeAttribute(resolveAssetUrl(item.productImage))}" alt="1:1 产品主图" />`
     : `<span class="empty-thumb">无图</span>`;
+}
+
+function getContentNoteTemplate() {
+  return (
+    state.taskTemplates.find((template) => template.id === contentNoteTaskTemplateId) ??
+    state.taskTemplates.find((template) => template.name === "发布内容笔记") ??
+    state.taskTemplates.find((template) => template.name === "小红书笔记发布") ??
+    null
+  );
+}
+
+function isContentNoteInstance(instance) {
+  const template = getContentNoteTemplate();
+  if (instance.taskTemplateId === contentNoteTaskTemplateId) return true;
+  if (template !== null && instance.taskTemplateId === template.id) return true;
+  return state.taskTemplates.find((item) => item.id === instance.taskTemplateId)?.name === "发布内容笔记";
+}
+
+function getWorkPlanByProcessInstance(instanceId) {
+  return state.workPlans.find((workPlan) => workPlan.processInstanceId === instanceId) ?? null;
+}
+
+function getInstanceTasks(instanceId) {
+  return state.tasks
+    .filter((task) => task.processInstanceId === instanceId && task.status !== TaskStatus.Canceled)
+    .sort((left, right) => {
+      const leftNode = state.processTemplateNodes.find((node) => node.id === left.processNodeId);
+      const rightNode = state.processTemplateNodes.find((node) => node.id === right.processNodeId);
+      const leftOrder = leftNode?.stepOrder ?? leftNode?.nodeOrder ?? 999;
+      const rightOrder = rightNode?.stepOrder ?? rightNode?.nodeOrder ?? 999;
+      return leftOrder - rightOrder;
+    });
+}
+
+function getCurrentContentTask(tasks) {
+  return (
+    tasks.find((task) => task.status === TaskStatus.Doing || task.status === TaskStatus.Todo || task.status === TaskStatus.PendingAcceptance) ??
+    tasks.find((task) => task.status === TaskStatus.Waiting) ??
+    null
+  );
+}
+
+function getAliasedField(fields, keys, fallback = "") {
+  for (const key of keys) {
+    const value = fields?.[key];
+    if (value !== undefined && value !== null && value !== "") return value;
+  }
+  return fallback;
+}
+
+function normalizeContentNoteFields(instance, workPlan) {
+  const fields = { ...(workPlan?.customFields ?? {}), ...(instance.customFields ?? {}) };
+  return {
+    publishDate: getAliasedField(fields, ["publishDate"], instance.dueDate ?? workPlan?.dueDate ?? ""),
+    account: getAliasedField(fields, ["account"]),
+    contentType: normalizeContentType(getAliasedField(fields, ["contentType"])),
+    contentPurpose: normalizeContentPurpose(getAliasedField(fields, ["purpose", "contentPurpose"])),
+    targetAudience: normalizeContentAudience(getAliasedField(fields, ["audience", "targetAudience"])),
+    product: getAliasedField(fields, ["productName", "product"]),
+    productImage: getAliasedField(fields, ["coverImageUrl", "productImage"], instance.coverImageUrl ?? workPlan?.coverImageUrl ?? ""),
+    title: getAliasedField(fields, ["title"], instance.displayTitle ?? instance.name ?? ""),
+    copywriting: getAliasedField(fields, ["contentText", "copywriting"]),
+    scene: getAliasedField(fields, ["scene"]),
+    hashtags: getAliasedField(fields, ["hashtags"]),
+  };
+}
+
+function isTaskOverdueForContent(task) {
+  if (task === null || task.dueDate === "" || task.dueDate === null || task.dueDate === undefined) return false;
+  if ([TaskStatus.Done, TaskStatus.Canceled].includes(task.status)) return false;
+  return new Date(task.dueDate).getTime() < Date.now();
+}
+
+function getContentNoteStatus(instance, tasks) {
+  if (instance.status === ProcessInstanceStatus.Stopped || instance.status === "canceled") return "已取消";
+  if (instance.status === ProcessInstanceStatus.Done) return "已发布";
+  const currentTask = getCurrentContentTask(tasks);
+  if (isTaskOverdueForContent(currentTask)) return "已超时";
+  const taskName = currentTask?.name ?? "";
+  if (currentTask?.status === TaskStatus.PendingAcceptance || taskName.includes("审核")) return "待审核";
+  if (taskName.includes("发布")) return "待发布";
+  if (taskName.includes("制作") || taskName.includes("素材") || taskName.includes("文案")) return "待制作";
+  return "待提交";
+}
+
+function buildContentNoteItem(instance) {
+  const workPlan = getWorkPlanByProcessInstance(instance.id);
+  const tasks = getInstanceTasks(instance.id);
+  const fields = normalizeContentNoteFields(instance, workPlan);
+  return {
+    id: instance.id,
+    instance,
+    workPlan,
+    tasks,
+    currentTask: getCurrentContentTask(tasks),
+    goalId: instance.goalId ?? workPlan?.goalId ?? "",
+    ...fields,
+    status: getContentNoteStatus(instance, tasks),
+  };
+}
+
+function getContentNoteItems() {
+  const oldLinkedInstanceIds = new Set(
+    state.contentSchedules
+      .map((schedule) => schedule.processInstanceId)
+      .filter((instanceId) => instanceId !== null && instanceId !== undefined && instanceId !== ""),
+  );
+  return state.processInstances
+    .filter(isContentNoteInstance)
+    .filter((instance) => !oldLinkedInstanceIds.has(instance.id))
+    .map(buildContentNoteItem)
+    .filter(matchesFilters)
+    .sort((left, right) => (left.publishDate ?? "").localeCompare(right.publishDate ?? ""));
 }
 
 function getProcessProgressText(processInstanceId) {
@@ -635,103 +764,126 @@ function renderScheduleFlowStatus(schedule) {
 }
 
 function renderScheduleTable() {
-  const schedules = getFilteredSchedules();
-  const visibleScheduleIds = schedules.map((schedule) => schedule.id);
-  const visibleSelectedCount = visibleScheduleIds.filter((scheduleId) => selectedScheduleIds.has(scheduleId)).length;
-  const selectedCount = selectedScheduleIds.size;
-  const isAllVisibleSelected = visibleScheduleIds.length > 0 && visibleSelectedCount === visibleScheduleIds.length;
-  const isPartiallyVisibleSelected = visibleSelectedCount > 0 && visibleSelectedCount < visibleScheduleIds.length;
+  const schedules = getContentNoteItems();
 
   return `
     <section class="settings-section">
       <div class="section-heading with-actions">
         <div>
           <h2>内容排期表</h2>
-          <p class="form-note">导入支持“发布日期”填写日期（YYYY-MM-DD）或日期+时间（YYYY-MM-DD HH:mm），保存时统一为日期+整点小时。</p>
+          <p class="form-note">这里展示已发起的“发布内容笔记”关键行动；新内容请从统一入口发起，不再维护独立排期数据。</p>
         </div>
         <div class="section-actions">
-          ${canCurrentUser("contentSchedules.import") ? `<button class="secondary-button" type="button" data-content-action="download-template">下载导入模板</button>` : ""}
-          ${canCurrentUser("contentSchedules.import") ? `
-            <label class="secondary-button file-button">
-              导入排期
-              <input type="file" data-content-file="import" accept=".xls,.xml,.csv,.tsv,.txt" />
-            </label>
-          ` : ""}
           ${canCurrentUser("contentSchedules.export") ? `<button class="secondary-button" type="button" data-content-action="export-schedules">导出 Excel</button>` : ""}
-          ${canCurrentUser("contentSchedules.create") ? `<button class="primary-button" type="button" data-content-action="add-schedule">新增排期</button>` : ""}
+          ${canCurrentUser("workPlans.launch") ? `<button class="primary-button" type="button" data-content-action="launch-content-note">发起发布内容笔记</button>` : ""}
         </div>
-      </div>
-      <div class="bulk-task-bar">
-        <strong>已选择 ${selectedCount} 条内容</strong>
-        ${canCurrentUser("contentSchedules.addToFuture") ? `<button class="secondary-button" type="button" data-content-action="bulk-create-work-plan" data-status="${WorkPlanStatus.Future}" ${selectedCount === 0 ? "disabled" : ""}>加入未来工作</button>` : ""}
-        ${canCurrentUser("contentSchedules.addToThisWeek") ? `<button class="secondary-button" type="button" data-content-action="bulk-create-work-plan" data-status="${WorkPlanStatus.ThisWeek}" ${selectedCount === 0 ? "disabled" : ""}>加入本周关键行动</button>` : ""}
-        ${canCurrentUser("contentSchedules.batchCancel") ? `<button class="secondary-button danger-button" type="button" data-content-action="bulk-cancel-schedules" ${selectedCount === 0 ? "disabled" : ""}>批量取消</button>` : ""}
       </div>
       <div class="table-wrap">
         <table class="data-table content-schedule-table">
           <thead>
             <tr>
-              <th class="task-select-column">
-                <label class="task-select-all">
-                  <input
-                    type="checkbox"
-                    data-content-schedule-select-all
-                    data-indeterminate="${isPartiallyVisibleSelected ? "true" : "false"}"
-                    ${isAllVisibleSelected ? "checked" : ""}
-                    ${visibleScheduleIds.length === 0 ? "disabled" : ""}
-                  />
-                  <span>序号</span>
-                </label>
-              </th>
+              <th>序号</th>
               <th>产品图</th>
               <th>发布日期</th>
               <th>发布账号</th>
               <th>内容类型</th>
               <th>目的</th>
               <th>受众人群</th>
+              <th>对应产品</th>
               <th>标题</th>
-              <th>内容文案</th>
-              <th>关键行动状态</th>
+              <th>当前状态</th>
+              <th>关联目标</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody>
             ${
               schedules.length === 0
-                ? `<tr><td colspan="11">暂无匹配排期</td></tr>`
+                ? `<tr><td colspan="12">暂无已发起发布内容笔记</td></tr>`
                 : schedules
                     .map(
                       (schedule, index) => `
                         <tr class="${schedule.id === selectedScheduleId ? "is-selected" : ""}" data-schedule-row-id="${schedule.id}">
-                          <td class="task-select-column">
-                            <label class="task-row-select">
-                              <input
-                                type="checkbox"
-                                data-content-schedule-row-select
-                                data-schedule-id="${schedule.id}"
-                                ${selectedScheduleIds.has(schedule.id) ? "checked" : ""}
-                              />
-                              <span>${index + 1}</span>
-                            </label>
-                          </td>
+                          <td>${index + 1}</td>
                           <td class="content-image-column">${renderImageCell(schedule)}</td>
                           <td>${formatBusinessDateTime(schedule.publishDate, "-")}</td>
                           <td>${escapeHtml(schedule.account)}</td>
                           <td>${escapeHtml(normalizeContentType(schedule.contentType))}</td>
                           <td>${escapeHtml(normalizeContentPurpose(schedule.contentPurpose))}</td>
                           <td>${escapeHtml(normalizeContentAudience(schedule.targetAudience))}</td>
+                          <td>${escapeHtml(schedule.product || "未填写")}</td>
                           <td class="content-title-cell"><span>${escapeHtml(schedule.title)}</span></td>
-                          <td class="content-copy-cell"><span>${escapeHtml(schedule.copywriting || "未填写")}</span></td>
-                          <td>${renderScheduleFlowStatus(schedule)}</td>
+                          <td><span class="status-pill ${schedule.status === "已超时" || schedule.status === "已取消" ? "is-inactive" : ""}">${escapeHtml(schedule.status)}</span></td>
+                          <td>${escapeHtml(findName(goals, schedule.goalId, "未关联"))}</td>
                           <td>
                             <span class="row-actions">
-                              ${renderActionButton("查看", "view-schedule", schedule.id)}
-                              ${schedule.status !== ContentScheduleStatus.Canceled && canCurrentUser("contentSchedules.edit") ? renderActionButton("编辑", "edit-schedule", schedule.id) : ""}
-                              ${schedule.status !== ContentScheduleStatus.Canceled && canCurrentUser("contentSchedules.addToFuture") ? renderActionButton("加入未来工作", "generate-task", schedule.id) : ""}
-                              ${schedule.status !== ContentScheduleStatus.Canceled && canCurrentUser("contentSchedules.addToThisWeek") ? renderActionButton("加入本周关键行动", "start-content-process", schedule.id) : ""}
-                              ${schedule.status !== ContentScheduleStatus.Canceled && canCurrentUser("contentSchedules.batchCancel") ? renderActionButton("删除", "cancel-schedule", schedule.id, "danger-button") : ""}
+                              ${renderContentActionButton("查看", "view-content-note", schedule.id)}
                             </span>
                           </td>
+                        </tr>
+                      `,
+                    )
+                    .join("")
+            }
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+function getLegacySchedules() {
+  const linkedInstanceIds = new Set(state.processInstances.filter(isContentNoteInstance).map((item) => item.id));
+  return state.contentSchedules
+    .filter((schedule) => !schedule.processInstanceId || !linkedInstanceIds.has(schedule.processInstanceId))
+    .filter(matchesFilters)
+    .sort((left, right) => (left.publishDate ?? "").localeCompare(right.publishDate ?? ""));
+}
+
+function renderLegacyScheduleTable() {
+  const schedules = getLegacySchedules();
+  return `
+    <section class="settings-section content-legacy-section">
+      <div class="section-heading">
+        <div>
+          <h2>历史内容排期</h2>
+          <p class="form-note">以下为旧内容排期数据，只读保留；新数据不再写入 content_schedules。</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table content-schedule-table">
+          <thead>
+            <tr>
+              <th>序号</th>
+              <th>产品图</th>
+              <th>发布日期</th>
+              <th>发布账号</th>
+              <th>内容类型</th>
+              <th>目的</th>
+              <th>受众人群</th>
+              <th>对应产品</th>
+              <th>标题</th>
+              <th>历史状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${
+              schedules.length === 0
+                ? `<tr><td colspan="10">暂无历史内容排期</td></tr>`
+                : schedules
+                    .map(
+                      (schedule, index) => `
+                        <tr data-schedule-row-id="${escapeAttribute(schedule.id)}">
+                          <td>${index + 1}</td>
+                          <td class="content-image-column">${renderImageCell(schedule)}</td>
+                          <td>${formatBusinessDateTime(schedule.publishDate, "-")}</td>
+                          <td>${escapeHtml(schedule.account)}</td>
+                          <td>${escapeHtml(normalizeContentType(schedule.contentType))}</td>
+                          <td>${escapeHtml(normalizeContentPurpose(schedule.contentPurpose))}</td>
+                          <td>${escapeHtml(normalizeContentAudience(schedule.targetAudience))}</td>
+                          <td>${escapeHtml(schedule.product || "未填写")}</td>
+                          <td class="content-title-cell"><span>${escapeHtml(schedule.title)}</span></td>
+                          <td><span class="status-pill is-inactive">${escapeHtml(getStatusName(schedule.status))}</span></td>
                         </tr>
                       `,
                     )
@@ -748,14 +900,24 @@ function renderDetailField(label, value) {
   return `<div class="detail-field"><span>${label}</span><strong>${value}</strong></div>`;
 }
 
+function formatChineseStep(index) {
+  const digits = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九"];
+  const value = index + 1;
+  if (value <= 10) return `步骤${value === 10 ? "十" : digits[value]}`;
+  if (value < 20) return `步骤十${digits[value % 10]}`;
+  const tens = Math.floor(value / 10);
+  const ones = value % 10;
+  return `步骤${digits[tens]}十${ones === 0 ? "" : digits[ones]}`;
+}
+
 function renderScheduleDetail() {
-  const schedule = getSchedule(selectedScheduleId) ?? getFilteredSchedules()[0] ?? null;
+  const schedule = getContentNoteItems().find((item) => item.id === selectedScheduleId) ?? getContentNoteItems()[0] ?? null;
 
   if (schedule === null) {
     return `
       <section class="settings-section task-detail">
-        <div class="section-heading"><h2>排期详情</h2></div>
-        <div class="empty-detail">暂无排期</div>
+        <div class="section-heading"><h2>发布内容笔记详情</h2></div>
+        <div class="empty-detail">暂无已发起发布内容笔记</div>
       </section>
     `;
   }
@@ -763,11 +925,9 @@ function renderScheduleDetail() {
   return `
     <section class="settings-section task-detail">
       <div class="section-heading with-actions">
-        <h2>排期详情</h2>
+        <h2>发布内容笔记详情</h2>
         <div class="section-actions">
-          ${schedule.status !== ContentScheduleStatus.Canceled && canCurrentUser("contentSchedules.edit") ? renderActionButton("编辑", "edit-schedule", schedule.id) : ""}
-          ${schedule.status !== ContentScheduleStatus.Canceled && canCurrentUser("contentSchedules.addToFuture") ? renderActionButton("加入未来工作", "generate-task", schedule.id) : ""}
-          ${schedule.status !== ContentScheduleStatus.Canceled && canCurrentUser("contentSchedules.addToThisWeek") ? renderActionButton("加入本周关键行动", "start-content-process", schedule.id) : ""}
+          ${renderContentActionButton("查看已发起关键行动", "view-content-note", schedule.id)}
         </div>
       </div>
       <div class="content-detail-layout">
@@ -786,20 +946,34 @@ function renderScheduleDetail() {
           ${renderDetailField("内容目的", escapeHtml(normalizeContentPurpose(schedule.contentPurpose)))}
           ${renderDetailField("受众人群", escapeHtml(normalizeContentAudience(schedule.targetAudience)))}
           ${renderDetailField("对应产品", escapeHtml(schedule.product || "未填写"))}
-          ${renderDetailField("状态", getStatusName(schedule.status))}
+          ${renderDetailField("当前状态", escapeHtml(schedule.status))}
           ${renderDetailField("关联目标", findName(goals, schedule.goalId, "未关联"))}
-          ${renderDetailField("生成任务", schedule.taskId === null ? "未生成" : findName(state.tasks, schedule.taskId, "已生成"))}
+          ${renderDetailField("当前任务", escapeHtml(schedule.currentTask?.name ?? "暂无当前任务"))}
         </div>
       </div>
       <div class="detail-block">
-        <h3>内容信息</h3>
+        <h3>公共内容信息</h3>
         <p>文案：${escapeHtml(schedule.copywriting || "未填写")}</p>
         <p>参考场景：${escapeHtml(schedule.scene || "未填写")}</p>
         <p>话题：${escapeHtml(schedule.hashtags || "未填写")}</p>
       </div>
       <div class="detail-block">
-        <h3>关联模板</h3>
-        ${renderLinkedTemplateSummary(schedule.templateId ?? "", "detail")}
+        <h3>行动进度</h3>
+        <div class="content-progress-list">
+          ${schedule.tasks.length === 0
+            ? `<p class="empty-detail">暂无任务</p>`
+            : schedule.tasks
+                .map(
+                  (task, index) => `
+                    <div class="content-progress-item ${task.id === schedule.currentTask?.id ? "is-current" : ""}">
+                      <span>${formatChineseStep(index)}</span>
+                      <strong>${escapeHtml(task.name)}</strong>
+                      <em>${escapeHtml(taskStatusNames[task.status] ?? task.status)}</em>
+                    </div>
+                  `,
+                )
+                .join("")}
+        </div>
       </div>
     </section>
   `;
@@ -1209,6 +1383,9 @@ function setModalError(error) {
 }
 
 async function saveSchedule(form, rerender) {
+  setModalError(legacyScheduleWriteDisabledMessage);
+  rerender();
+  return;
   const editingSchedule = modalState.mode === "edit" ? getSchedule(modalState.scheduleId) : null;
   const draft = buildScheduleDraft(form);
   const error = validateScheduleDraft(draft);
@@ -1273,6 +1450,8 @@ async function ensureTemplateOptionsLoaded(rerender) {
 }
 
 async function cancelSchedule(scheduleId, rerender) {
+  window.alert(legacyScheduleWriteDisabledMessage);
+  return;
   if (!window.confirm("确定要取消该内容排期吗？取消后历史记录仍会保留。")) return;
   const schedule = getSchedule(scheduleId);
   if (schedule === null) return;
@@ -1290,6 +1469,8 @@ async function cancelSchedule(scheduleId, rerender) {
 }
 
 async function bulkUpdateScheduleStatus(status, rerender) {
+  window.alert(legacyScheduleWriteDisabledMessage);
+  return;
   if (selectedScheduleIds.size === 0) return;
   if (status === ContentScheduleStatus.Canceled && !window.confirm("确定要取消选中的内容排期吗？")) return;
 
@@ -1404,6 +1585,8 @@ function buildWorkPlanFromSchedule(schedule, status, fallbackGoalId, now) {
 }
 
 async function createWorkPlanFromSchedule(scheduleId, status, rerender) {
+  window.alert(legacyScheduleWriteDisabledMessage);
+  return;
   const schedule = getSchedule(scheduleId);
   if (schedule === null) return;
   const now = getNow();
@@ -1426,6 +1609,8 @@ async function createWorkPlanFromSchedule(scheduleId, status, rerender) {
 }
 
 async function bulkCreateWorkPlansFromSchedules(status, rerender) {
+  window.alert(legacyScheduleWriteDisabledMessage);
+  return;
   const schedules = [...selectedScheduleIds].map(getSchedule).filter(Boolean);
   if (schedules.length === 0) return;
   const fallbackGoalId = getBulkFallbackGoalId(schedules);
@@ -1485,6 +1670,8 @@ async function bulkCreateWorkPlansFromSchedules(status, rerender) {
 }
 
 async function bulkCancelSchedules(rerender) {
+  window.alert(legacyScheduleWriteDisabledMessage);
+  return;
   if (selectedScheduleIds.size === 0) return;
   if (!window.confirm("确定要取消选中的内容排期吗？")) return;
   const now = getNow();
@@ -1566,13 +1753,13 @@ function getExportRows(schedules) {
     文案: schedule.copywriting,
     参考场景: schedule.scene,
     "#话题": schedule.hashtags,
-    状态: getStatusName(schedule.status),
+    状态: contentNoteStatusOptions.includes(schedule.status) ? schedule.status : getStatusName(schedule.status),
     关联目标: findName(goals, schedule.goalId, ""),
   }));
 }
 
 function exportSchedules() {
-  const schedules = getFilteredSchedules();
+  const schedules = getContentNoteItems();
   if (schedules.length === 0) {
     window.alert("暂无可导出的内容排期。");
     return;
@@ -1701,6 +1888,9 @@ function buildImportPreviewRows(records) {
 }
 
 async function handleImportFile(file, rerender) {
+  modalState = { kind: "import", fileName: file.name, rows: [], error: legacyScheduleWriteDisabledMessage };
+  rerender();
+  return;
   try {
     const text = await file.text();
     const rows = text.trimStart().startsWith("<?xml") || text.includes("<Workbook") ? parseXmlWorkbook(text) : parseDelimitedRows(text);
@@ -1726,6 +1916,9 @@ async function handleImportFile(file, rerender) {
 }
 
 async function confirmImport(rerender) {
+  modalState = { ...modalState, error: legacyScheduleWriteDisabledMessage };
+  rerender();
+  return;
   const validRows = modalState.rows.filter((row) => row.errors.length === 0);
   const failedCount = modalState.rows.length - validRows.length;
   if (validRows.length === 0) {
@@ -1832,12 +2025,12 @@ export function bindContentScheduleEvents(rerender) {
   if (filterForm !== null) {
     filterForm.addEventListener("input", () => {
       updateFilters(filterForm);
-      selectedScheduleId = getFilteredSchedules()[0]?.id ?? null;
+      selectedScheduleId = getContentNoteItems()[0]?.id ?? null;
       rerender();
     });
     filterForm.addEventListener("change", () => {
       updateFilters(filterForm);
-      selectedScheduleId = getFilteredSchedules()[0]?.id ?? null;
+      selectedScheduleId = getContentNoteItems()[0]?.id ?? null;
       rerender();
     });
   }
@@ -1944,6 +2137,31 @@ export function bindContentScheduleEvents(rerender) {
       if (action === "export-schedules") {
         if (!canCurrentUser("contentSchedules.export")) return;
         exportSchedules();
+        return;
+      }
+      if (action === "launch-content-note") {
+        const template = getContentNoteTemplate();
+        if (template === null) {
+          window.alert("未找到“发布内容笔记”关键行动，请先到行动标准中配置。");
+          return;
+        }
+        window.sessionStorage.setItem(
+          "goalTaskPrefill",
+          JSON.stringify({
+            taskTemplateId: template.id,
+            categoryId: template.categoryId ?? "",
+            launchImmediately: true,
+            title: "发起发布内容笔记",
+          }),
+        );
+        window.location.hash = "goals";
+        return;
+      }
+      if (action === "view-content-note") {
+        const instanceId = actionButton.dataset.contentId ?? "";
+        if (instanceId === "") return;
+        window.sessionStorage.setItem("selectedProcessInstanceId", instanceId);
+        window.location.hash = "process-progress";
         return;
       }
       if (action === "download-template") {
@@ -2084,6 +2302,8 @@ export function renderContentSchedulePage() {
     <div class="content-schedule-page">
       ${renderFilters()}
       ${renderScheduleTable()}
+      ${renderScheduleDetail()}
+      ${renderLegacyScheduleTable()}
       ${renderScheduleViewModal()}
       ${renderScheduleModal()}
       ${renderImportModal()}

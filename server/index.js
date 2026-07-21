@@ -316,6 +316,15 @@ function getResourceWritePermission(resource, method, body = {}) {
   return null;
 }
 
+function rejectLegacyContentScheduleWrite(resource, response) {
+  if (resource !== "content-schedules") return false;
+  response.status(410).json({
+    success: false,
+    message: "历史内容排期已转为只读，请通过“发起发布内容笔记”创建新排期。",
+  });
+  return true;
+}
+
 app.post("/api/auth/login", (request, response) => {
   try {
     const username = String(request.body?.username ?? "").trim();
@@ -572,6 +581,7 @@ app.get("/api/:resource", (request, response) => {
 
 app.post("/api/:resource", (request, response) => {
   try {
+    if (rejectLegacyContentScheduleWrite(request.params.resource, response)) return;
     const permission = getResourceWritePermission(request.params.resource, "POST", request.body ?? {});
     const allowed = Array.isArray(permission)
       ? permission.some((item) => hasPermission(request.user, item))
@@ -588,6 +598,7 @@ app.post("/api/:resource", (request, response) => {
 
 app.put("/api/:resource/:id", (request, response) => {
   try {
+    if (rejectLegacyContentScheduleWrite(request.params.resource, response)) return;
     const permission = getResourceWritePermission(request.params.resource, "PUT", request.body ?? {});
     const allowed = Array.isArray(permission)
       ? permission.some((item) => hasPermission(request.user, item))
