@@ -1,4 +1,4 @@
-import { getNow, getProcessNodeStepOrder, resolveAssetUrl, state, updatePersistentResource, uploadStandardWorkAttachment } from "./appState.js?v=20260705-state-singleton1";
+import { formatProcessStepLabel, getNow, getProcessNodeStepOrder, resolveAssetUrl, state, updatePersistentResource, uploadStandardWorkAttachment } from "./appState.js?v=20260705-state-singleton1";
 import {
   GoalStatus,
   ProcessInstanceStatus,
@@ -318,15 +318,16 @@ function renderCustomFields(instance, editable) {
   `;
 }
 
-function renderStepTask(task, editable) {
+function renderStepTask(task, editable, stepIndex) {
   const node = getNode(task.processNodeId);
   const canEdit = editable && canEditTask(task);
+  const stepLabel = formatProcessStepLabel(stepIndex + 1);
 
   if (!canEdit) {
     return `
       <tr>
         <td>${escapeHtml(task.name)}</td>
-        <td>${getProcessNodeStepOrder(node ?? {})}</td>
+        <td>${stepLabel}</td>
         <td>${findName(people, task.ownerId, "未设置")}</td>
         <td>${findName(departments, task.departmentId, "未设置")}</td>
         <td><span class="status-pill">${taskStatusNames[task.status]}</span></td>
@@ -345,7 +346,7 @@ function renderStepTask(task, editable) {
   return `
     <tr>
       <td>${escapeHtml(task.name)}</td>
-      <td>${getProcessNodeStepOrder(node ?? {})}</td>
+      <td>${stepLabel}</td>
       <td><select name="task__${task.id}__ownerId">${renderOptions(people, task.ownerId, "请选择负责人")}</select></td>
       <td><select name="task__${task.id}__departmentId">${renderOptions(departments, task.departmentId, "请选择部门")}</select></td>
       <td><span class="status-pill">${taskStatusNames[task.status]}</span></td>
@@ -447,7 +448,7 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
                   <th>步骤名称</th><th>步骤</th><th>负责人</th><th>负责部门</th><th>状态</th><th>截止时间</th><th>是否逾期</th><th>四象限</th><th>步骤完成标准</th><th>步骤审核标准</th><th>输出结果 / 任务安排</th><th>完成时间</th><th>操作</th>
                 </tr>
               </thead>
-              <tbody>${tasks.map((task) => renderStepTask(task, editable)).join("")}</tbody>
+              <tbody>${tasks.map((task, index) => renderStepTask(task, editable, index)).join("")}</tbody>
             </table>
           </div>
         </div>

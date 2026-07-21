@@ -2,6 +2,7 @@ import {
   createPersistentResource,
   createId,
   deletePersistentResource,
+  formatProcessStepLabel,
   getCurrentUser,
   getNow,
   getProcessNodeStepOrder,
@@ -77,8 +78,6 @@ const goals = state.goals;
 const people = state.people;
 const positions = state.positions;
 
-const stepNumberNames = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
-
 function shouldShowStartedProcess(instance) {
   if (isDoneStatus(instance.status)) return startedProcessFilters.showDone;
   if (isHiddenByDefaultStatus(instance.status)) return startedProcessFilters.showCanceled;
@@ -131,10 +130,6 @@ function shouldShowTemplate(template) {
 
 function getVisibleProcessTemplates() {
   return state.processTemplates.filter(shouldShowTemplate);
-}
-
-function getStepLabel(stepOrder) {
-  return stepOrder <= 10 ? `步骤${stepNumberNames[stepOrder]}` : `步骤${stepOrder}`;
 }
 
 function syncSelectedTemplateFromHash() {
@@ -304,13 +299,11 @@ function renderTemplateNodes(templateId) {
     <div class="process-node-list">
       ${nodes
         .map(
-          (node, index) => {
-            const stepOrder = getProcessNodeStepOrder(node);
-            return `
+          (node, index) => `
             <article class="process-node">
               <div class="process-node-header">
                 <div class="process-node-title">
-                  <strong>${getStepLabel(stepOrder)}</strong>
+                  <strong>${formatProcessStepLabel(index + 1)}</strong>
                   <h4>${node.name}</h4>
                 </div>
                 <span class="row-actions">
@@ -344,8 +337,7 @@ function renderTemplateNodes(templateId) {
                 <p><strong>完成标准：</strong>${node.completionStandard}</p>
               </div>
             </article>
-          `;
-          },
+            `,
         )
         .join("")}
     </div>
@@ -667,7 +659,6 @@ function renderWorkflowNodesModal() {
             <div class="process-node-list">
               ${nodes
                 .map((node, index) => {
-                  const stepOrder = getProcessNodeStepOrder(node);
                   const ownerName = findName(people, node.ownerId ?? node.defaultOwnerId, "未设置");
                   const executorName = findName(people, node.executorId, ownerName === "未设置" ? "未设置" : ownerName);
                   const durationMinutes = node.durationMinutes ?? (Number(node.durationDays ?? 1) * 1440);
@@ -675,7 +666,7 @@ function renderWorkflowNodesModal() {
                     <article class="process-node">
                       <div class="process-node-header">
                         <div class="process-node-title">
-                          <strong>${getStepLabel(stepOrder || index + 1)}</strong>
+                          <strong>${formatProcessStepLabel(index + 1)}</strong>
                           <h4>${escapeHtml(node.name || "未命名任务")}</h4>
                         </div>
                       </div>
@@ -882,7 +873,8 @@ async function saveNode(form, rerender) {
       }
     }
   }
-  normalizeProcessStepOrders(selectedTemplateId);
+  const orderSaved = await persistContiguousNodeOrder(selectedTemplateId);
+  if (!orderSaved) return;
   modalState = null;
   rerender();
 }
@@ -924,10 +916,11 @@ async function persistContiguousNodeOrder(templateId, orderedNodes = getTemplate
   } catch (error) {
     console.error("标准步骤排序保存失败", error);
     window.alert(error.message || "标准步骤排序保存失败，请检查本地数据库服务。");
-    return;
+    return false;
   }
   state.processTemplateNodes = updatedNodes;
   normalizeProcessStepOrders(templateId);
+  return true;
 }
 
 function submitStart(form, rerender) {
@@ -1077,7 +1070,8 @@ async function deleteNode(nodeId, rerender) {
   state.processTemplateNodes = state.processTemplateNodes.map((item) =>
     item.id === node.id ? { ...item, status: ProcessTemplateNodeStatus.Deleted, updatedAt: getNow() } : item,
   );
-  await persistContiguousNodeOrder(node.templateId);
+  const orderSaved = await persistContiguousNodeOrder(node.templateId);
+  if (!orderSaved) return;
   rerender();
 }
 

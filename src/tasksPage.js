@@ -5,6 +5,7 @@ import {
   createOrReuseProcessTemplateForStandardWork,
   createId,
   ensureTaskReadyForExecution,
+  formatProcessStepLabel,
   getCurrentWeek,
   getProcessNodeStepOrder,
   getCurrentUser,
@@ -33,6 +34,7 @@ import {
   ProcessInstanceStatus,
   ProcessAccepterRule,
   ProcessOwnerRule,
+  ProcessTemplateNodeStatus,
   ProcessTemplateStatus,
   SubmitType,
   TaskImportance,
@@ -398,11 +400,13 @@ function getProcessTemplateName(templateId) {
 function getStandardWorkStepCount(template) {
   const processTemplateId = template.defaultProcessTemplateId ?? "";
   if (processTemplateId === "") return 0;
-  return state.processTemplateNodes.filter((node) => node.templateId === processTemplateId).length;
+  return state.processTemplateNodes.filter((node) => node.templateId === processTemplateId && node.status !== ProcessTemplateNodeStatus.Deleted).length;
 }
 
 function getStandardWorkProcessNodes(processTemplateId) {
-  return sortProcessNodes(state.processTemplateNodes.filter((node) => node.templateId === processTemplateId));
+  return sortProcessNodes(
+    state.processTemplateNodes.filter((node) => node.templateId === processTemplateId && node.status !== ProcessTemplateNodeStatus.Deleted),
+  );
 }
 
 function getStandardWorkValueChain(template) {
@@ -3288,7 +3292,6 @@ function renderStandardWorkProcessModal() {
             <div class="process-node-list">
               ${nodes
                 .map((node, index) => {
-                  const stepOrder = getProcessNodeStepOrder(node) || index + 1;
                   const ownerName = findName(people, node.ownerId ?? node.defaultOwnerId, "未设置");
                   const executorName = findName(people, node.executorId, ownerName === "未设置" ? "未设置" : ownerName);
                   const durationMinutes = node.durationMinutes ?? (Number(node.durationDays ?? 1) * 1440);
@@ -3296,7 +3299,7 @@ function renderStandardWorkProcessModal() {
                     <article class="process-node">
                       <div class="process-node-header">
                         <div class="process-node-title">
-                          <strong>${escapeHtml(`步骤${stepOrder}`)}</strong>
+                          <strong>${formatProcessStepLabel(index + 1)}</strong>
                           <h4>${escapeHtml(node.name || "未命名任务")}</h4>
                         </div>
                       </div>
@@ -3528,12 +3531,12 @@ function renderProcessStepProgress(instance) {
         </thead>
         <tbody>
           ${tasks
-            .map((task) => {
+            .map((task, index) => {
               const node = getProcessNode(task);
               return `
                 <tr>
                   <td>${escapeHtml(task.name)}</td>
-                  <td>${getProcessNodeStepOrder(node ?? {})}</td>
+                  <td>${formatProcessStepLabel(index + 1)}</td>
                   <td>${findName(people, task.ownerId, "未设置")}</td>
                   <td><span class="status-pill">${taskStatusNames[task.status]}</span></td>
                   <td>${formatBusinessMinuteDateTime(task.dueDate)}</td>
@@ -4221,7 +4224,7 @@ function renderReturnTaskModal() {
               ${returnableTasks
                 .map((targetTask, index) => {
                   const selected = modalState.returnTargetTaskId === targetTask.id ? "selected" : "";
-                  return `<option value="${targetTask.id}" ${selected}>步骤${index + 1}：${escapeHtml(targetTask.name)}</option>`;
+                  return `<option value="${targetTask.id}" ${selected}>${formatProcessStepLabel(index + 1)}：${escapeHtml(targetTask.name)}</option>`;
                 })
                 .join("")}
             </select>

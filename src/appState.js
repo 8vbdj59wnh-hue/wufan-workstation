@@ -1627,8 +1627,28 @@ export function sortProcessNodes(nodes) {
   return [...nodes].sort((left, right) => getProcessNodeStepOrder(left) - getProcessNodeStepOrder(right));
 }
 
+export function formatProcessStepLabel(stepOrder) {
+  const number = Number(stepOrder);
+  if (!Number.isInteger(number) || number <= 0) return "步骤";
+  return `步骤${formatChineseNumber(number)}`;
+}
+
+function formatChineseNumber(number) {
+  const digits = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九"];
+  if (number <= 9) return digits[number];
+  if (number <= 99) {
+    const tens = Math.floor(number / 10);
+    const ones = number % 10;
+    const tensText = tens === 1 ? "十" : `${digits[tens]}十`;
+    return ones === 0 ? tensText : `${tensText}${digits[ones]}`;
+  }
+  return String(number);
+}
+
 export function normalizeProcessStepOrders(templateId) {
-  const sortedNodes = sortProcessNodes(state.processTemplateNodes.filter((node) => node.templateId === templateId));
+  const sortedNodes = sortProcessNodes(
+    state.processTemplateNodes.filter((node) => node.templateId === templateId && node.status !== ProcessTemplateNodeStatus.Deleted),
+  );
   const orderById = new Map(sortedNodes.map((node, index) => [node.id, index + 1]));
   state.processTemplateNodes = state.processTemplateNodes.map((node) => {
     const stepOrder = orderById.get(node.id);
