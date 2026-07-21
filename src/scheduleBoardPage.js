@@ -1056,6 +1056,10 @@ export function bindScheduleBoardPageEvents(rerender) {
         selectTask(taskId);
         window.location.hash = "task-list";
       },
+      onSaved: () => {
+        selectedProcessInstanceId = null;
+        rerender();
+      },
     });
   }
 }

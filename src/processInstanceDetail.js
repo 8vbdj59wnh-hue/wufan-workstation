@@ -651,6 +651,10 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
     }
     state.tasks = state.tasks.map((task) => updatedTaskMap.get(task.id) ?? task);
 
+    if (typeof options.onSaved === "function") {
+      options.onSaved(updatedInstance);
+      return;
+    }
     rerender();
   });
 }

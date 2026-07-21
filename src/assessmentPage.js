@@ -1865,7 +1865,12 @@ export function bindAssessmentPageEvents(rerender) {
 
   const rectificationDetail = document.querySelector("[data-launched-process-detail]");
   if (rectificationDetail !== null) {
-    bindLaunchedProcessDetailEvents(document, rerender);
+    bindLaunchedProcessDetailEvents(document, rerender, {
+      onSaved: () => {
+        modalState = null;
+        rerender();
+      },
+    });
   }
 }
 
