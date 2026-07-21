@@ -46,7 +46,8 @@ import {
 import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
 import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260705-state-singleton1";
 import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260705-state-singleton1";
-import { bindStandardWorkLibraryEvents, renderStandardWorkLibraryPage, selectTask } from "./tasksPage.js?v=20260705-state-singleton1";
+import { bindStandardWorkLibraryEvents, openTaskTemplateLaunchModal, renderStandardWorkLibraryPage } from "./actionStandardsPage.js?v=20260722-action-standards-page1";
+import { selectTask } from "./tasksPage.js?v=20260721-priority-removal1";
 
 const today = "2026-06-24";
 let selectedTemplateId = state.processTemplates[0]?.id ?? null;
@@ -1113,6 +1114,10 @@ export function bindProcessesPageEvents(rerender) {
     if (actionButton !== null) {
       const action = actionButton.dataset.action;
       if (action === "view-standard-work-process") return;
+      if (action === "launch-task-template") {
+        openTaskTemplateLaunchModal(actionButton.dataset.templateId ?? "", rerender);
+        return;
+      }
       if (action === "add-task-template" || action === "edit-task-template" || action === "deactivate-task-template" || action === "remove-selected-standard-work-attachment" || action === "add-task-template-field" || action === "remove-task-template-field" || action === "move-task-template-field-up" || action === "move-task-template-field-down") return;
       if (action === "close-process-modal") modalState = null;
       if (action === "add-template" && canCurrentUser("processes.editTemplates")) modalState = { kind: "template", error: "" };
