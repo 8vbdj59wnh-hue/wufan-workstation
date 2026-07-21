@@ -9,6 +9,7 @@ import {
   companies,
   contentSchedules,
   departments,
+  executionGroups,
   goals,
   people,
   publishingAccounts,
@@ -238,12 +239,35 @@ const resourceConfigs = {
       "submittedAt",
       "submittedBy",
       "cancelReason",
+      "executionGroupId",
       "createdAt",
       "updatedAt",
       "completedAt",
     ],
     booleanFields: ["needAcceptance"],
     jsonFields: ["resultAttachments", "customFields", "submitFields", "submitFormData", "submitFiles", "submitLinks"],
+  },
+  executionGroups: {
+    table: "execution_groups",
+    columns: [
+      "id",
+      "name",
+      "taskIds",
+      "taskTemplateId",
+      "standardWorkId",
+      "processInstanceIds",
+      "ownerId",
+      "executorId",
+      "status",
+      "standardTotalMinutes",
+      "startedAt",
+      "endedAt",
+      "actualTotalMinutes",
+      "savedMinutes",
+      "createdAt",
+      "updatedAt",
+    ],
+    jsonFields: ["taskIds", "processInstanceIds"],
   },
   processTemplates: {
     table: "process_templates",
@@ -471,6 +495,7 @@ const routeResourceMap = {
   goals: "goals",
   "task-templates": "taskTemplates",
   tasks: "tasks",
+  "execution-groups": "executionGroups",
   "process-templates": "processTemplates",
   "process-template-nodes": "processTemplateNodes",
   "process-instances": "processInstances",
@@ -501,6 +526,7 @@ const seedData = {
   templateTagCategories,
   templateTags,
   tasks,
+  executionGroups,
   processTemplates,
   processTemplateNodes: processTemplateNodes.map((node) => ({
     reviewStandard: "按步骤完成标准和输出要求进行审核。",
@@ -1124,6 +1150,7 @@ function runLightweightMigrations() {
   ensureColumn("tasks", "submittedBy", "TEXT");
   ensureColumn("tasks", "cancelReason", "TEXT");
   ensureColumn("tasks", "templateId", "TEXT");
+  ensureColumn("tasks", "executionGroupId", "TEXT");
   ensureColumn("process_instances", "dueDate", "TEXT");
   ensureColumn("process_instances", "canceledAt", "TEXT");
   ensureColumn("process_instances", "cancelReason", "TEXT");
@@ -1280,6 +1307,8 @@ export function readResource(resourceKey) {
           ? " ORDER BY updatedAt DESC, createdAt DESC, id DESC"
         : resourceKey === "issuesRequirements"
           ? " ORDER BY createdAt DESC, id DESC"
+        : resourceKey === "executionGroups"
+          ? " ORDER BY createdAt DESC, id DESC"
         : "";
   return getDatabase()
     .prepare(`SELECT ${columns} FROM ${config.table}${orderBy}`)
@@ -1289,6 +1318,158 @@ export function readResource(resourceKey) {
 
 export function readAllData() {
   return Object.fromEntries(Object.keys(resourceConfigs).map((resourceKey) => [resourceKey, readResource(resourceKey)]));
+}
+
+function getTaskStandardWorkId(task) {
+  if (task === null || task === undefined) return "";
+  const instance =
+    task.processInstanceId === undefined || task.processInstanceId === null || task.processInstanceId === ""
+      ? null
+      : readExistingItem("processInstances", task.processInstanceId);
+  return instance?.taskTemplateId ?? instance?.standardWorkId ?? task.taskTemplateId ?? task.standardWorkId ?? "";
+}
+
+function getTaskDurationMinutes(task) {
+  if (task?.processNodeId === undefined || task.processNodeId === null || task.processNodeId === "") return 0;
+  const node = readExistingItem("processTemplateNodes", task.processNodeId);
+  const durationMinutes = Number(node?.durationMinutes);
+  if (Number.isFinite(durationMinutes) && durationMinutes > 0) return Math.round(durationMinutes);
+  const durationDays = Number(node?.durationDays);
+  if (Number.isFinite(durationDays) && durationDays > 0) return Math.round(durationDays * 1440);
+  return 0;
+}
+
+function validateExecutionGroupTasks(taskIds) {
+  if (!Array.isArray(taskIds) || taskIds.length < 2) throw new Error("请至少选择 2 个任务创建执行组。");
+  const uniqueTaskIds = [...new Set(taskIds.map((id) => String(id ?? "").trim()).filter(Boolean))];
+  if (uniqueTaskIds.length < 2) throw new Error("请至少选择 2 个不同任务创建执行组。");
+
+  const tasksToGroup = uniqueTaskIds.map((taskId) => readExistingItem("tasks", taskId));
+  const missingTaskIds = uniqueTaskIds.filter((_taskId, index) => tasksToGroup[index] === null);
+  if (missingTaskIds.length > 0) throw new Error(`未找到任务：${missingTaskIds.join("、")}`);
+
+  const invalidStatusTasks = tasksToGroup.filter((task) => ["done", "canceled"].includes(task.status));
+  if (invalidStatusTasks.length > 0) throw new Error(`已完成或已取消的任务不能加入执行组：${invalidStatusTasks.map((task) => task.name).join("、")}`);
+
+  const groupedTasks = tasksToGroup.filter((task) => String(task.executionGroupId ?? "").trim() !== "");
+  if (groupedTasks.length > 0) throw new Error(`任务已加入执行组，不能重复加入：${groupedTasks.map((task) => task.name).join("、")}`);
+
+  const standardWorkIds = new Set(tasksToGroup.map(getTaskStandardWorkId).filter(Boolean));
+  if (standardWorkIds.size !== 1) throw new Error("只有同一关键行动的任务才能创建执行组。");
+
+  const ownerIds = new Set(tasksToGroup.map((task) => task.ownerId).filter(Boolean));
+  if (ownerIds.size !== 1) throw new Error("只有同一负责人的任务才能创建执行组。");
+
+  const executorIds = new Set(tasksToGroup.map((task) => task.executorId).filter(Boolean));
+  if (executorIds.size !== 1) throw new Error("只有同一执行人的任务才能创建执行组。");
+
+  const missingDurationTasks = tasksToGroup.filter((task) => getTaskDurationMinutes(task) <= 0);
+  if (missingDurationTasks.length > 0) throw new Error(`以下任务缺少有效规定时长：${missingDurationTasks.map((task) => task.name).join("、")}`);
+
+  return tasksToGroup;
+}
+
+function updateExecutionGroupTaskLinks(taskIds, executionGroupId) {
+  const database = getDatabase();
+  const now = new Date().toISOString();
+  const updateTask = database.prepare("UPDATE tasks SET executionGroupId = @executionGroupId, updatedAt = @updatedAt WHERE id = @id");
+  for (const taskId of taskIds) updateTask.run({ id: taskId, executionGroupId, updatedAt: now });
+}
+
+export function createExecutionGroup(payload = {}) {
+  const database = getDatabase();
+  const createGroup = database.transaction(() => {
+    const tasksToGroup = validateExecutionGroupTasks(payload.taskIds);
+    const taskIds = tasksToGroup.map((task) => task.id);
+    const standardWorkId = getTaskStandardWorkId(tasksToGroup[0]);
+    const standardWork = readExistingItem("taskTemplates", standardWorkId);
+    const executorId = tasksToGroup[0].executorId;
+    const ownerId = tasksToGroup[0].ownerId;
+    const now = new Date().toISOString();
+    const standardTotalMinutes = tasksToGroup.reduce((total, task) => total + getTaskDurationMinutes(task), 0);
+    const processInstanceIds = [...new Set(tasksToGroup.map((task) => task.processInstanceId).filter(Boolean))];
+    const group = {
+      id: payload.id || `execution-group-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: String(payload.name ?? "").trim() || `执行组：${standardWork?.name ?? "关键行动"} - ${now.slice(0, 10)}`,
+      taskIds,
+      taskTemplateId: standardWorkId,
+      standardWorkId,
+      processInstanceIds,
+      ownerId,
+      executorId,
+      status: "created",
+      standardTotalMinutes,
+      startedAt: null,
+      endedAt: null,
+      actualTotalMinutes: null,
+      savedMinutes: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    insertItem("executionGroups", group);
+    updateExecutionGroupTaskLinks(taskIds, group.id);
+    return group;
+  });
+  return createGroup();
+}
+
+export function startExecutionGroup(groupId) {
+  const database = getDatabase();
+  const startGroup = database.transaction(() => {
+    const group = readExistingItem("executionGroups", groupId);
+    if (group === null) throw new Error("未找到执行组。");
+    if (group.status !== "created") throw new Error("只有已创建的执行组可以开始执行。");
+    const now = new Date().toISOString();
+    const updatedGroup = { ...group, status: "doing", startedAt: now, updatedAt: now };
+    insertItem("executionGroups", updatedGroup);
+    return updatedGroup;
+  });
+  return startGroup();
+}
+
+export function cancelExecutionGroup(groupId) {
+  const database = getDatabase();
+  const cancelGroup = database.transaction(() => {
+    const group = readExistingItem("executionGroups", groupId);
+    if (group === null) throw new Error("未找到执行组。");
+    if (group.status === "done") throw new Error("已完成的执行组不能取消。");
+    if (group.status === "canceled") return group;
+    const now = new Date().toISOString();
+    const updatedGroup = { ...group, status: "canceled", updatedAt: now };
+    insertItem("executionGroups", updatedGroup);
+    updateExecutionGroupTaskLinks(group.taskIds ?? [], null);
+    return updatedGroup;
+  });
+  return cancelGroup();
+}
+
+export function completeExecutionGroup(groupId, payload = {}) {
+  const database = getDatabase();
+  const completeGroup = database.transaction(() => {
+    const group = readExistingItem("executionGroups", groupId);
+    if (group === null) throw new Error("未找到执行组。");
+    if (group.status !== "doing") throw new Error("只有执行中的执行组可以完成。");
+    const taskIds = Array.isArray(group.taskIds) ? group.taskIds : [];
+    const tasksInGroup = taskIds.map((taskId) => readExistingItem("tasks", taskId));
+    const invalidTasks = tasksInGroup.filter((task) => task === null || !["done", "pending_acceptance"].includes(task.status));
+    if (invalidTasks.length > 0) throw new Error("成员任务尚未全部进入完成或待验收状态，不能完成执行组。");
+    const endedAt = payload.endedAt || new Date().toISOString();
+    const actualTotalMinutes = Number.isFinite(Number(payload.actualTotalMinutes))
+      ? Math.round(Number(payload.actualTotalMinutes))
+      : Math.max(0, Math.round((new Date(endedAt).getTime() - new Date(group.startedAt).getTime()) / 60000));
+    const standardTotalMinutes = Number(group.standardTotalMinutes) || 0;
+    const updatedGroup = {
+      ...group,
+      status: "done",
+      endedAt,
+      actualTotalMinutes,
+      savedMinutes: standardTotalMinutes - actualTotalMinutes,
+      updatedAt: endedAt,
+    };
+    insertItem("executionGroups", updatedGroup);
+    return updatedGroup;
+  });
+  return completeGroup();
 }
 
 export function moveTaskTemplateToValueChain(templateId, categoryName = "", categoryId = "", valueChainId = "") {

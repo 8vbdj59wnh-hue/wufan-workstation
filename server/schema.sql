@@ -191,9 +191,29 @@ CREATE TABLE IF NOT EXISTS tasks (
   submittedAt TEXT,
   submittedBy TEXT,
   cancelReason TEXT,
+  executionGroupId TEXT,
   createdAt TEXT,
   updatedAt TEXT,
   completedAt TEXT
+);
+
+CREATE TABLE IF NOT EXISTS execution_groups (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  taskIds TEXT,
+  taskTemplateId TEXT,
+  standardWorkId TEXT,
+  processInstanceIds TEXT,
+  ownerId TEXT,
+  executorId TEXT,
+  status TEXT NOT NULL,
+  standardTotalMinutes INTEGER,
+  startedAt TEXT,
+  endedAt TEXT,
+  actualTotalMinutes INTEGER,
+  savedMinutes INTEGER,
+  createdAt TEXT,
+  updatedAt TEXT
 );
 
 CREATE TABLE IF NOT EXISTS process_templates (

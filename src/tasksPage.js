@@ -1,6 +1,9 @@
 import {
   advanceProcessAfterTaskDone,
   cancelProcessInstance,
+  cancelExecutionGroup as cancelExecutionGroupResource,
+  completeExecutionGroup as completeExecutionGroupResource,
+  createExecutionGroup as createExecutionGroupResource,
   createPersistentResource,
   createOrReuseProcessTemplateForStandardWork,
   createId,
@@ -21,6 +24,7 @@ import {
   resolveAssetUrl,
   sortProcessNodes,
   startProcess,
+  startExecutionGroup as startExecutionGroupResource,
   state,
   updatePersistentResource,
   uploadGenericFile,
@@ -1544,6 +1548,99 @@ function getTaskProjectDueDateText(task) {
   return formatBusinessDateTime(instance.dueDate, "-");
 }
 
+function getTaskStandardWorkId(task) {
+  const instance = getTaskProcessInstance(task);
+  return instance?.taskTemplateId ?? instance?.standardWorkId ?? task.taskTemplateId ?? task.standardWorkId ?? "";
+}
+
+function getTaskStandardDurationMinutes(task) {
+  const node = getProcessNode(task);
+  const durationMinutes = Number(node?.durationMinutes);
+  if (Number.isFinite(durationMinutes) && durationMinutes > 0) return Math.round(durationMinutes);
+  const durationDays = Number(node?.durationDays);
+  if (Number.isFinite(durationDays) && durationDays > 0) return Math.round(durationDays * 1440);
+  return 0;
+}
+
+function parseExecutionGroupTime(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const normalized = String(value).includes("T") ? String(value) : `${String(value).slice(0, 10)}T00:00:00+08:00`;
+  const timestamp = new Date(normalized).getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function getExecutionGroupById(groupId) {
+  if (groupId === null || groupId === undefined || groupId === "") return null;
+  return state.executionGroups.find((group) => group.id === groupId) ?? null;
+}
+
+function getTaskExecutionGroup(task) {
+  return getExecutionGroupById(task.executionGroupId);
+}
+
+function getExecutionGroupTasks(group) {
+  const taskIds = Array.isArray(group?.taskIds) ? group.taskIds : [];
+  return taskIds.map(getTask).filter(Boolean);
+}
+
+function getExecutionGroupActualMinutes(group, endedAt = getNow()) {
+  const startTime = parseExecutionGroupTime(group?.startedAt);
+  const endTime = parseExecutionGroupTime(endedAt);
+  if (startTime === null || endTime === null || endTime < startTime) return 0;
+  return Math.max(0, Math.round((endTime - startTime) / 60000));
+}
+
+function validateExecutionGroupTasks(tasks) {
+  if (tasks.length < 2) return "请至少勾选 2 个任务创建执行组。";
+  const invalidStatusTasks = tasks.filter((task) => isDoneStatus(task.status) || isCanceledStatus(task.status));
+  if (invalidStatusTasks.length > 0) return `已完成或已取消的任务不能加入执行组：${invalidStatusTasks.map((task) => task.name).join("、")}`;
+
+  const standardWorkIds = new Set(tasks.map(getTaskStandardWorkId).filter(Boolean));
+  if (standardWorkIds.size !== 1) return "只有同一关键行动下的任务才能创建执行组。";
+
+  const ownerIds = new Set(tasks.map((task) => task.ownerId).filter(Boolean));
+  if (ownerIds.size !== 1) return "只有同一负责人的任务才能创建执行组。";
+
+  const executorIds = new Set(tasks.map(getTaskExecutorId).filter(Boolean));
+  if (executorIds.size !== 1) return "只有同一执行人的任务才能创建执行组。";
+
+  const groupedTasks = tasks.filter((task) => String(task.executionGroupId ?? "").trim() !== "");
+  if (groupedTasks.length > 0) return `任务已加入执行组，不能重复加入：${groupedTasks.map((task) => task.name).join("、")}`;
+
+  const missingDurationTasks = tasks.filter((task) => getTaskStandardDurationMinutes(task) <= 0);
+  if (missingDurationTasks.length > 0) return `以下任务缺少有效规定时长：${missingDurationTasks.map((task) => task.name).join("、")}`;
+
+  return "";
+}
+
+function sortExecutionGroupTasks(tasks) {
+  return [...tasks].sort((left, right) => {
+    const leftInstance = left.processInstanceId ?? "";
+    const rightInstance = right.processInstanceId ?? "";
+    if (leftInstance !== rightInstance) return leftInstance.localeCompare(rightInstance);
+    const stepDifference = getProcessNodeStepOrder(getProcessNode(left) ?? left) - getProcessNodeStepOrder(getProcessNode(right) ?? right);
+    if (stepDifference !== 0) return stepDifference;
+    return String(left.createdAt ?? "").localeCompare(String(right.createdAt ?? ""));
+  });
+}
+
+function buildExecutionGroupName(tasks) {
+  const firstTask = tasks[0];
+  const standardWorkName = getTaskBelonging(firstTask).standardWorkName;
+  const executorName = findName(people, getTaskExecutorId(firstTask), "未设置执行人");
+  return `执行组：${standardWorkName} - ${executorName} - ${getTodayDateInShanghai()}`;
+}
+
+function renderExecutionGroupBadge(task) {
+  const group = getTaskExecutionGroup(task);
+  if (group === null) return "";
+  return `
+    <button class="text-button task-execution-group-badge" type="button" data-action="view-execution-group" data-execution-group-id="${escapeHtml(group.id)}">
+      ${escapeHtml(group.name)}
+    </button>
+  `;
+}
+
 function renderTaskRow(task, index, options = {}) {
   const rowClass = [
     task.id === selectedTaskId ? "is-selected" : "",
@@ -1564,7 +1661,10 @@ function renderTaskRow(task, index, options = {}) {
       </td>
       <td class="task-cover-column">${renderCoverImage(task)}</td>
       <td class="task-belonging-column">${renderTaskBelonging(task)}</td>
-      <td class="task-name-column">${prefix}<span class="task-line-clamp task-name-text">${escapeHtml(task.name)}</span></td>
+      <td class="task-name-column">
+        ${prefix}<span class="task-line-clamp task-name-text">${escapeHtml(task.name)}</span>
+        ${renderExecutionGroupBadge(task)}
+      </td>
       <td class="task-executor-column">${findName(people, task.ownerId, "未设置")}</td>
       <td class="task-date-column">${formatBusinessMinuteDateTime(task.dueDate)}</td>
       <td class="task-date-column">${getTaskProjectDueDateText(task)}</td>
@@ -1610,7 +1710,10 @@ function renderProcessTaskGroupRow(row, index) {
           <small>${row.expanded ? `已展开 ${row.tasks.length} 个节点` : `当前任务：${escapeHtml(task.name)}`}</small>
         </div>
       </td>
-      <td class="task-name-column"><span class="task-line-clamp task-name-text">${escapeHtml(task.name)}</span></td>
+      <td class="task-name-column">
+        <span class="task-line-clamp task-name-text">${escapeHtml(task.name)}</span>
+        ${renderExecutionGroupBadge(task)}
+      </td>
       <td class="task-executor-column">${findName(people, task.ownerId, "未设置")}</td>
       <td class="task-date-column">${formatBusinessMinuteDateTime(task.dueDate)}</td>
       <td class="task-date-column">${getTaskProjectDueDateText(task)}</td>
@@ -3539,6 +3642,7 @@ function renderTaskTable() {
       <div class="bulk-task-bar">
         <strong>已选择 ${selectedCount} 条任务</strong>
         <span class="row-actions">
+          <button class="text-button" type="button" data-action="create-execution-group" ${selectedCount < 2 ? "disabled" : ""}>创建执行组</button>
           <button class="text-button" type="button" data-action="bulk-complete" ${selectedCount === 0 ? "disabled" : ""}>批量完成</button>
           <button class="text-button danger-button" type="button" data-action="bulk-cancel" ${selectedCount === 0 ? "disabled" : ""}>批量取消</button>
         </span>
@@ -4592,6 +4696,114 @@ function renderTaskTemplatePicker() {
             </div>`
       }
     </div>
+  `;
+}
+
+function renderExecutionGroupTaskList(tasks) {
+  return `
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr><th>任务</th><th>负责人</th><th>执行人</th><th>状态</th><th>规定时长</th></tr>
+        </thead>
+        <tbody>
+          ${tasks.map((task) => `
+            <tr>
+              <td>${escapeHtml(task.name)}</td>
+              <td>${findName(people, task.ownerId, "未设置")}</td>
+              <td>${findName(people, getTaskExecutorId(task), "未设置")}</td>
+              <td>${taskStatusNames[task.status] ?? task.status}</td>
+              <td>${getTaskStandardDurationMinutes(task)} 分钟</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderExecutionGroupCreateModal() {
+  if (modalState?.kind !== "executionGroupCreate") return "";
+  const tasks = modalState.taskIds.map(getTask).filter(Boolean);
+  const standardTotalMinutes = tasks.reduce((total, task) => total + getTaskStandardDurationMinutes(task), 0);
+  const firstTask = tasks[0] ?? null;
+  const belonging = firstTask === null ? null : getTaskBelonging(firstTask);
+  return `
+    <div class="modal-backdrop"><div class="modal-panel wide-modal">
+      <div class="modal-header">
+        <div>
+          <h2>创建执行组</h2>
+          <p class="form-note">执行组代表一次真实共同执行过程，成员任务仍然独立存在。</p>
+        </div>
+        <button class="icon-button" type="button" data-action="close-task-modal" aria-label="关闭">×</button>
+      </div>
+      ${modalState.error ? `<div class="form-error">${escapeHtml(modalState.error)}</div>` : ""}
+      <label>
+        <span>执行组名称</span>
+        <input name="executionGroupName" value="${escapeHtml(modalState.name ?? buildExecutionGroupName(tasks))}" autocomplete="off" />
+      </label>
+      <div class="detail-grid">
+        ${renderDetailField("关键行动", escapeHtml(belonging?.standardWorkName ?? "-"))}
+        ${renderDetailField("负责人", escapeHtml(findName(people, firstTask?.ownerId, "-")))}
+        ${renderDetailField("执行人", escapeHtml(findName(people, firstTask === null ? "" : getTaskExecutorId(firstTask), "-")))}
+        ${renderDetailField("成员任务数量", `${tasks.length}`)}
+        ${renderDetailField("标准总时长", `${standardTotalMinutes} 分钟`)}
+      </div>
+      ${renderExecutionGroupTaskList(tasks)}
+      <div class="modal-actions">
+        <button class="secondary-button" type="button" data-action="close-task-modal">取消</button>
+        <button class="primary-button" type="button" data-action="confirm-create-execution-group">确认创建</button>
+      </div>
+    </div></div>
+  `;
+}
+
+function getExecutionGroupStatusText(status) {
+  return {
+    created: "已创建",
+    doing: "执行中",
+    done: "已完成",
+    canceled: "已取消",
+  }[status] ?? status ?? "-";
+}
+
+function renderExecutionGroupDetailModal() {
+  if (modalState?.kind !== "executionGroupDetail") return "";
+  const group = getExecutionGroupById(modalState.groupId);
+  if (group === null) return "";
+  const tasks = getExecutionGroupTasks(group);
+  const actualMinutes = group.actualTotalMinutes ?? (group.status === "doing" ? getExecutionGroupActualMinutes(group) : null);
+  const savedMinutes = actualMinutes === null ? group.savedMinutes : (Number(group.standardTotalMinutes) || 0) - actualMinutes;
+  return `
+    <div class="modal-backdrop"><div class="modal-panel wide-modal">
+      <div class="modal-header">
+        <div>
+          <h2>${escapeHtml(group.name)}</h2>
+          <p class="form-note">状态：${escapeHtml(getExecutionGroupStatusText(group.status))}</p>
+        </div>
+        <button class="icon-button" type="button" data-action="close-task-modal" aria-label="关闭">×</button>
+      </div>
+      ${modalState.error ? `<div class="form-error">${escapeHtml(modalState.error)}</div>` : ""}
+      <div class="detail-grid">
+        ${renderDetailField("关键行动", escapeHtml(getTaskTemplate(group.taskTemplateId ?? group.standardWorkId)?.name ?? "-"))}
+        ${renderDetailField("负责人", escapeHtml(findName(people, group.ownerId, "-")))}
+        ${renderDetailField("执行人", escapeHtml(findName(people, group.executorId, "-")))}
+        ${renderDetailField("标准总时长", `${group.standardTotalMinutes ?? 0} 分钟`)}
+        ${renderDetailField("开始时间", escapeHtml(formatBusinessMinuteDateTime(group.startedAt, "未开始")))}
+        ${renderDetailField("结束时间", escapeHtml(formatBusinessMinuteDateTime(group.endedAt, "未完成")))}
+        ${renderDetailField("实际总时长", actualMinutes === null ? "未记录" : `${actualMinutes} 分钟`)}
+        ${renderDetailField("节约时间", savedMinutes === null || savedMinutes === undefined ? "未记录" : `${savedMinutes} 分钟`)}
+      </div>
+      <h3>包含任务</h3>
+      ${renderExecutionGroupTaskList(tasks)}
+      <div class="modal-actions">
+        <button class="secondary-button" type="button" data-action="close-task-modal">关闭</button>
+        ${group.status === "created" ? `<button class="secondary-button" type="button" data-action="cancel-execution-group" data-execution-group-id="${escapeHtml(group.id)}">取消执行组</button>` : ""}
+        ${group.status === "created" ? `<button class="primary-button" type="button" data-action="start-execution-group" data-execution-group-id="${escapeHtml(group.id)}">开始执行</button>` : ""}
+        ${group.status === "doing" ? `<button class="secondary-button" type="button" data-action="cancel-execution-group" data-execution-group-id="${escapeHtml(group.id)}">取消执行组</button>` : ""}
+        ${group.status === "doing" ? `<button class="primary-button" type="button" data-action="complete-execution-group" data-execution-group-id="${escapeHtml(group.id)}">完成执行组</button>` : ""}
+      </div>
+    </div></div>
   `;
 }
 
@@ -6092,6 +6304,177 @@ async function bulkUpdateTaskStatus(status, rerender) {
   rerender();
 }
 
+function openExecutionGroupCreateModal(rerender) {
+  if (!canCurrentUser("tasks.batchComplete")) return;
+  const selectedTasks = sortExecutionGroupTasks([...selectedTaskIds].map(getTask).filter(Boolean));
+  const validationError = validateExecutionGroupTasks(selectedTasks);
+  if (validationError !== "") {
+    window.alert(validationError);
+    return;
+  }
+
+  modalState = {
+    kind: "executionGroupCreate",
+    taskIds: selectedTasks.map((task) => task.id),
+    name: buildExecutionGroupName(selectedTasks),
+    error: "",
+  };
+  rerender();
+}
+
+async function confirmCreateExecutionGroup(rerender) {
+  if (modalState?.kind !== "executionGroupCreate") return;
+  const input = document.querySelector("[name='executionGroupName']");
+  const name = String(input?.value ?? modalState.name ?? "").trim();
+  try {
+    await createExecutionGroupResource({ name, taskIds: modalState.taskIds });
+  } catch (error) {
+    modalState = { ...modalState, name, error: error.message || "执行组创建失败，请检查本地数据库服务。" };
+    rerender();
+    return;
+  }
+
+  const firstTask = getTask(modalState.taskIds[0]);
+  const groupId = firstTask?.executionGroupId ?? "";
+  selectedTaskIds = new Set();
+  modalState = groupId === "" ? null : { kind: "executionGroupDetail", groupId, error: "" };
+  rerender();
+}
+
+async function startExecutionGroup(groupId, rerender) {
+  try {
+    await startExecutionGroupResource(groupId);
+    modalState = { kind: "executionGroupDetail", groupId, error: "" };
+  } catch (error) {
+    modalState = { kind: "executionGroupDetail", groupId, error: error.message || "执行组开始失败，请检查本地数据库服务。" };
+  }
+  rerender();
+}
+
+async function cancelExecutionGroup(groupId, rerender) {
+  if (!window.confirm("确定取消该执行组吗？成员任务会解除关联，任务状态保持不变。")) return;
+  try {
+    await cancelExecutionGroupResource(groupId);
+    modalState = null;
+  } catch (error) {
+    modalState = { kind: "executionGroupDetail", groupId, error: error.message || "执行组取消失败，请检查本地数据库服务。" };
+  }
+  rerender();
+}
+
+function getExecutionGroupCompletionErrors(group) {
+  if (group === null) return ["未找到执行组。"];
+  if (group.status !== "doing") return ["执行组尚未开始，不能完成。"];
+  const tasks = getExecutionGroupTasks(group);
+  const errors = [];
+  tasks.forEach((task) => {
+    if (isCanceledStatus(task.status)) errors.push(`${task.name}：已取消，不能完成执行组。`);
+    if (isDoneStatus(task.status) || task.status === TaskStatus.PendingAcceptance) return;
+    const status = task.needAcceptance ? TaskStatus.PendingAcceptance : TaskStatus.Done;
+    const statusError = getTaskStatusChangeError(task, status);
+    if (statusError !== "") errors.push(`${task.name}：${statusError}`);
+    const requirement = getTaskSubmitRequirement(task);
+    const hasForm = includesSubmitPart(requirement.submitType, "form");
+    const hasFile = includesSubmitPart(requirement.submitType, "file");
+    const hasLink = includesSubmitPart(requirement.submitType, "link");
+    if (hasForm) {
+      for (const field of getSubmitFields(task)) {
+        if (field.required !== true) continue;
+        const value = requirement.submitFormData[field.key];
+        const isEmpty = Array.isArray(value) ? value.length === 0 : String(value ?? "").trim() === "";
+        if (isEmpty) errors.push(`${task.name}：请先填写${field.label}。`);
+      }
+    }
+    if (hasFile && getVisibleSubmitFiles(requirement.submitFiles).length === 0) errors.push(`${task.name}：请先上传提交文件。`);
+    if (hasLink && requirement.submitLinks.length === 0) errors.push(`${task.name}：请先填写提交链接。`);
+    const submitError = validateSubmittedResult(task);
+    if (submitError !== "") errors.push(`${task.name}：${submitError}`);
+  });
+  return errors;
+}
+
+async function completeExecutionGroup(groupId, rerender) {
+  const group = getExecutionGroupById(groupId);
+  const errors = getExecutionGroupCompletionErrors(group);
+  if (errors.length > 0) {
+    modalState = { kind: "executionGroupDetail", groupId, error: errors.join("；") };
+    rerender();
+    return;
+  }
+  const tasks = sortExecutionGroupTasks(getExecutionGroupTasks(group));
+  const endedAt = getNow();
+  const actualTotalMinutes = getExecutionGroupActualMinutes(group, endedAt);
+  const affectedProcessInstanceIds = new Set(tasks.map((task) => task.processInstanceId).filter(Boolean));
+  const affectedTaskIds = new Set(tasks.map((task) => task.id));
+  state.tasks
+    .filter((task) => affectedProcessInstanceIds.has(task.processInstanceId))
+    .forEach((task) => affectedTaskIds.add(task.id));
+  const previousTasks = state.tasks.filter((task) => affectedTaskIds.has(task.id)).map((task) => ({ ...task }));
+  const previousProcessInstances = state.processInstances
+    .filter((instance) => affectedProcessInstanceIds.has(instance.id))
+    .map((instance) => ({ ...instance }));
+  const previousWorkPlans = state.workPlans
+    .filter((workPlan) => affectedProcessInstanceIds.has(workPlan.processInstanceId))
+    .map((workPlan) => ({ ...workPlan }));
+
+  if (!window.confirm(`确定完成该执行组吗？\n实际总时长：${actualTotalMinutes} 分钟\n系统将逐条完成成员任务。`)) return;
+
+  try {
+    for (const selectedTask of tasks) {
+      let task = getTask(selectedTask.id) ?? selectedTask;
+      if (isDoneStatus(task.status) || task.status === TaskStatus.PendingAcceptance) continue;
+      if (task.source === TaskSource.Process && task.status === TaskStatus.Waiting) {
+        await ensureTaskReadyForExecution(task.id);
+        task = getTask(task.id) ?? task;
+      }
+      const nextStatus = task.needAcceptance ? TaskStatus.PendingAcceptance : TaskStatus.Done;
+      const requirement = getTaskSubmitRequirement(task);
+      const shouldMarkSubmitted = requirement.submitType !== SubmitType.None;
+      const updatedTask = buildTaskStatusUpdate({
+        ...task,
+        submittedAt: shouldMarkSubmitted ? task.submittedAt ?? endedAt : task.submittedAt,
+        submittedBy: shouldMarkSubmitted ? task.submittedBy ?? task.ownerId : task.submittedBy,
+      }, nextStatus, endedAt);
+      const savedTask = await updatePersistentResource("tasks", updatedTask.id, updatedTask);
+      state.tasks = state.tasks.map((item) => (item.id === savedTask.id ? savedTask : item));
+      await triggerOverdueRectificationIfNeeded(task, savedTask);
+      if (nextStatus === TaskStatus.Done) await advanceProcessAfterTaskDone(savedTask.id);
+    }
+    await completeExecutionGroupResource(groupId, { endedAt, actualTotalMinutes });
+  } catch (error) {
+    console.error("执行组完成失败", error);
+    for (const previousTask of previousTasks) {
+      try {
+        await updatePersistentResource("tasks", previousTask.id, previousTask);
+      } catch (rollbackError) {
+        console.error("执行组任务回滚失败", rollbackError);
+      }
+    }
+    for (const previousInstance of previousProcessInstances) {
+      try {
+        await updatePersistentResource("process-instances", previousInstance.id, previousInstance);
+      } catch (rollbackError) {
+        console.error("执行组关键行动回滚失败", rollbackError);
+      }
+    }
+    for (const previousWorkPlan of previousWorkPlans) {
+      try {
+        await updatePersistentResource("work-plans", previousWorkPlan.id, previousWorkPlan);
+      } catch (rollbackError) {
+        console.error("执行组未来工作回滚失败", rollbackError);
+      }
+    }
+    state.tasks = state.tasks.map((task) => previousTasks.find((item) => item.id === task.id) ?? task);
+    state.processInstances = state.processInstances.map((instance) => previousProcessInstances.find((item) => item.id === instance.id) ?? instance);
+    state.workPlans = state.workPlans.map((workPlan) => previousWorkPlans.find((item) => item.id === workPlan.id) ?? workPlan);
+    modalState = { kind: "executionGroupDetail", groupId, error: error.message || "执行组完成失败，请检查本地数据库服务。" };
+    rerender();
+    return;
+  }
+  modalState = { kind: "executionGroupDetail", groupId, error: "" };
+  rerender();
+}
+
 async function cancelTask(taskId, rerender) {
   const task = getTask(taskId);
 
@@ -7058,6 +7441,31 @@ export function bindTasksPageEvents(rerender) {
         bulkUpdateTaskStatus(actionButton.dataset.status, rerender);
         return;
       }
+      if (action === "create-execution-group") {
+        openExecutionGroupCreateModal(rerender);
+        return;
+      }
+      if (action === "confirm-create-execution-group") {
+        await confirmCreateExecutionGroup(rerender);
+        return;
+      }
+      if (action === "view-execution-group") {
+        modalState = { kind: "executionGroupDetail", groupId: actionButton.dataset.executionGroupId, error: "" };
+        rerender();
+        return;
+      }
+      if (action === "start-execution-group") {
+        await startExecutionGroup(actionButton.dataset.executionGroupId, rerender);
+        return;
+      }
+      if (action === "cancel-execution-group") {
+        await cancelExecutionGroup(actionButton.dataset.executionGroupId, rerender);
+        return;
+      }
+      if (action === "complete-execution-group") {
+        await completeExecutionGroup(actionButton.dataset.executionGroupId, rerender);
+        return;
+      }
       if (action === "bulk-complete") {
         bulkUpdateTaskStatus(TaskStatus.Done, rerender);
         return;
@@ -7195,6 +7603,8 @@ export function renderTasksPage() {
               ${renderResultModal()}
               ${renderReturnTaskModal()}
               ${renderWorkFormModal()}
+              ${renderExecutionGroupCreateModal()}
+              ${renderExecutionGroupDetailModal()}
             `
       }
     </div>

@@ -3,6 +3,7 @@ import {
   companies as initialCompanies,
   contentSchedules as initialContentSchedules,
   departments as initialDepartments,
+  executionGroups as initialExecutionGroups,
   goals as initialGoals,
   people as initialPeople,
   publishingAccounts as initialPublishingAccounts,
@@ -72,6 +73,7 @@ export const state = {
   publishingAccounts: initialPublishingAccounts.map((account) => ({ ...account })),
   goals: initialGoals.map((goal) => ({ ...goal })),
   tasks: initialTasks.map((task) => ({ ...task })),
+  executionGroups: initialExecutionGroups.map((group) => ({ ...group })),
   taskTemplates: initialTaskTemplates.map((template) => ({ ...template })),
   contentSchedules: initialContentSchedules.map((schedule) => ({ ...schedule })),
   processTemplates: initialProcessTemplates.map((template) => ({ ...template })),
@@ -144,6 +146,7 @@ export function getDataSnapshot() {
     goals: state.goals,
     taskTemplates: state.taskTemplates,
     tasks: state.tasks,
+    executionGroups: state.executionGroups,
     processTemplates: state.processTemplates,
     processTemplateNodes: state.processTemplateNodes,
     processInstances: state.processInstances,
@@ -173,6 +176,7 @@ export function applyDataSnapshot(data) {
   replaceArray(state.goals, data.goals);
   replaceArray(state.taskTemplates, data.taskTemplates);
   replaceArray(state.tasks, data.tasks);
+  replaceArray(state.executionGroups, data.executionGroups ?? initialExecutionGroups);
   replaceArray(state.processTemplates, data.processTemplates);
   replaceArray(
     state.processTemplateNodes,
@@ -416,6 +420,36 @@ export async function updatePersistentResource(resource, id, item) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.message ?? data.error ?? "保存失败，请检查本地数据库服务。");
   return data;
+}
+
+async function postExecutionGroupAction(path, payload = {}) {
+  const response = await authFetch(`${apiBaseUrl}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success !== true) {
+    throw new Error(data.message ?? data.error ?? "执行组保存失败，请检查本地数据库服务。");
+  }
+  if (data.data !== undefined) applyDataSnapshot(data.data);
+  return data.data;
+}
+
+export async function createExecutionGroup(payload) {
+  return postExecutionGroupAction("/api/execution-groups/create", payload);
+}
+
+export async function startExecutionGroup(groupId) {
+  return postExecutionGroupAction(`/api/execution-groups/${groupId}/start`);
+}
+
+export async function cancelExecutionGroup(groupId) {
+  return postExecutionGroupAction(`/api/execution-groups/${groupId}/cancel`);
+}
+
+export async function completeExecutionGroup(groupId, payload) {
+  return postExecutionGroupAction(`/api/execution-groups/${groupId}/complete`, payload);
 }
 
 export async function updateCurrentUserAvatar(avatarUrl) {

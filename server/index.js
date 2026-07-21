@@ -6,7 +6,10 @@ import multer from "multer";
 import {
   closeDatabase,
   createResource,
+  cancelExecutionGroup,
   cancelProcessInstance,
+  completeExecutionGroup,
+  createExecutionGroup,
   databasePath,
   deleteProcessTemplate,
   deleteProcessTemplateNode,
@@ -21,6 +24,7 @@ import {
   replaceAllData,
   touchLastLoginAt,
   updateCurrentUserAvatar,
+  startExecutionGroup,
   updateProcessTemplateNodeStatus,
   updateResource,
   uploadsDir,
@@ -249,6 +253,10 @@ function filterDataByScope(data, user) {
   if (dataScope === "all") return { ...data, stores, publishingAccounts };
 
   const scopedTasks = filterByScope(data.tasks ?? [], user);
+  const scopedTaskIds = new Set(scopedTasks.map((task) => task.id));
+  const scopedExecutionGroups = (data.executionGroups ?? []).filter((group) =>
+    (Array.isArray(group.taskIds) ? group.taskIds : []).some((taskId) => scopedTaskIds.has(taskId)),
+  );
   const scopedWorkPlans = filterByScope(data.workPlans ?? [], user);
   const scopedProcessInstances = filterByScope(data.processInstances ?? [], user);
   const scopedGoals = filterByScope(data.goals ?? [], user);
@@ -267,6 +275,7 @@ function filterDataByScope(data, user) {
     publishingAccounts,
     goals: scopedGoals,
     tasks: scopedTasks,
+    executionGroups: scopedExecutionGroups,
     processInstances: scopedProcessInstances,
     contentSchedules: scopedContentSchedules,
     workPlans: scopedWorkPlans,
@@ -284,6 +293,7 @@ function getResourceWritePermission(resource, method, body = {}) {
     if (body.status !== undefined) return "tasks.changeStatus";
     return "tasks.changeStatus";
   }
+  if (resource === "execution-groups") return "tasks.batchComplete";
   if (resource === "task-templates") {
     if (body.formFields !== undefined) return "settings.editStandardWorkForms";
     return "settings.editStandardWorks";
@@ -480,6 +490,46 @@ app.post("/api/work-plans/:id/launch", requirePermission("workPlans.launch"), (r
   } catch (error) {
     console.error("发起关键行动失败", error);
     response.status(400).json({ success: false, message: error.message || "发起关键行动失败，请检查本地数据库服务。" });
+  }
+});
+
+app.post("/api/execution-groups/create", requirePermission("tasks.batchComplete"), (request, response) => {
+  try {
+    createExecutionGroup(request.body ?? {});
+    response.json({ success: true, data: filterDataByScope(readAllData(), request.user) });
+  } catch (error) {
+    console.error("执行组创建失败", error);
+    response.status(400).json({ success: false, message: error.message || "执行组创建失败，请检查本地数据库服务。" });
+  }
+});
+
+app.post("/api/execution-groups/:id/start", requirePermission("tasks.batchComplete"), (request, response) => {
+  try {
+    startExecutionGroup(request.params.id);
+    response.json({ success: true, data: filterDataByScope(readAllData(), request.user) });
+  } catch (error) {
+    console.error("执行组开始失败", error);
+    response.status(400).json({ success: false, message: error.message || "执行组开始失败，请检查本地数据库服务。" });
+  }
+});
+
+app.post("/api/execution-groups/:id/cancel", requirePermission("tasks.batchComplete"), (request, response) => {
+  try {
+    cancelExecutionGroup(request.params.id);
+    response.json({ success: true, data: filterDataByScope(readAllData(), request.user) });
+  } catch (error) {
+    console.error("执行组取消失败", error);
+    response.status(400).json({ success: false, message: error.message || "执行组取消失败，请检查本地数据库服务。" });
+  }
+});
+
+app.post("/api/execution-groups/:id/complete", requirePermission("tasks.batchComplete"), (request, response) => {
+  try {
+    completeExecutionGroup(request.params.id, request.body ?? {});
+    response.json({ success: true, data: filterDataByScope(readAllData(), request.user) });
+  } catch (error) {
+    console.error("执行组完成失败", error);
+    response.status(400).json({ success: false, message: error.message || "执行组完成失败，请检查本地数据库服务。" });
   }
 });
 
