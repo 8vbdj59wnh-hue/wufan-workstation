@@ -6,10 +6,10 @@ import {
   getCurrentUser,
   getNow,
   getProcessNodeStepOrder,
+  launchWorkPlanDraftAsProcess,
   normalizeSubmitRequirement,
   normalizeProcessStepOrders,
   sortProcessNodes,
-  startProcess,
   state,
   stopProcess,
   updateProcessTemplateNodeStatus,
@@ -26,6 +26,7 @@ import {
   ProcessTemplateStatus,
   SubmitType,
   TaskStatus,
+  WorkPlanStatus,
   WorkType,
   getValueModuleName,
   inferValueModuleIdFromText,
@@ -923,24 +924,44 @@ async function persistContiguousNodeOrder(templateId, orderedNodes = getTemplate
   return true;
 }
 
-function submitStart(form, rerender) {
+async function submitStart(form, rerender) {
   const template = state.processTemplates.find((item) => item.id === getFormValue(form, "templateId")) ?? state.processTemplates.find((item) => item.status === ProcessTemplateStatus.Active) ?? null;
   if (template === null) return setModalError("暂无可发起的关键行动标准。", rerender);
-  const templateId = template.id;
+  const standardWork = getStandardWorkForTemplate(template.id);
+  if (standardWork === null) return setModalError("该关键行动标准流程未关联行动标准，不能直接发起关键行动。", rerender);
   const name = getFormValue(form, "name") || template.name;
   const goalId = getFormValue(form, "goalId") || getActiveGoals()[0]?.id || "";
   const initiatorId = getCurrentUserId();
   if (initiatorId === "") return setModalError("无法确认当前发起人，请重新登录后再试。", rerender);
-  const result = startProcess({
-    templateId,
-    name,
+  const now = getNow();
+  const workPlan = {
+    id: createId("work-plan"),
     goalId,
-    initiatorId,
-    description: getFormValue(form, "description"),
-    launchAssignments: { owner: {}, accepter: {} },
-  });
-  if (result.error) return setModalError(result.error, rerender);
-  selectedInstanceId = result.instance.id;
+    departmentId: standardWork.departmentId ?? null,
+    taskTemplateId: standardWork.id,
+    title: name,
+    customFields: {},
+    coverImageUrl: null,
+    status: WorkPlanStatus.ThisWeek,
+    plannedWeek: null,
+    dueDate: null,
+    description: getFormValue(form, "description") || template.description || "",
+    processInstanceId: null,
+    createdAt: now,
+    updatedAt: now,
+    launchedAt: null,
+    canceledAt: null,
+  };
+  try {
+    const result = await launchWorkPlanDraftAsProcess(workPlan, {
+      initiatorId,
+      launchAssignments: { owner: {}, accepter: {} },
+    });
+    selectedInstanceId = result.instance.id;
+  } catch (error) {
+    console.error("发起关键行动标准流程失败", error);
+    return setModalError(error.message || "发起关键行动失败，请检查本地数据库服务。", rerender);
+  }
   modalState = null;
   rerender();
 }
