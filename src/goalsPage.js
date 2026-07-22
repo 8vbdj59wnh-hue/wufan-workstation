@@ -4,10 +4,8 @@ import {
   getProcessNodeStepOrder,
   getLatestStandardWorkFormFields,
   launchWorkPlanAsProcess,
-  resolveAssetUrl,
   state,
   updatePersistentResource,
-  uploadImageFile,
   uploadStandardWorkAttachment,
 } from "./appState.js?v=20260705-state-singleton1";
 import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
@@ -47,9 +45,15 @@ import { selectTask } from "./tasksPage.js?v=20260705-state-singleton1";
 import {
   collectBusinessDateTime,
   formatBusinessDateTime,
-  isBusinessDueDateField,
   renderBusinessHourOptions,
 } from "./businessTime.js?v=20260705-state-singleton1";
+import {
+  collectPublicFormFields,
+  handlePublicFormImageUpload,
+  renderPublicFormEditor,
+  updatePublicFormImagePreview,
+  validatePublicFormFields,
+} from "./workFormEditor.js?v=20260722-public-form-editor1";
 
 const departments = state.departments;
 const categories = state.categories;
@@ -302,38 +306,6 @@ function getCustomFieldValue(customFields, field) {
   return value ?? "";
 }
 
-function getStoreOptionLabel(store) {
-  return store.platform ? `${store.name}（${store.platform}）` : store.name;
-}
-
-function getDynamicFieldOptions(field) {
-  if ((field.options ?? []).length > 0) return field.options.map((option) => ({ value: option, label: option }));
-  if (field.key === "departmentId") {
-    return departments.filter((department) => department.status === "active").map((department) => ({ value: department.id, label: department.name }));
-  }
-  if (field.key === "interviewerId") {
-    return people.filter((person) => person.status === "active").map((person) => ({ value: person.id, label: person.name }));
-  }
-  if (field.key === "storeId") {
-    return stores.filter((store) => store.status === "active").map((store) => ({ value: store.id, label: getStoreOptionLabel(store) }));
-  }
-  return [];
-}
-
-function isValidUrl(value) {
-  if (value === "") return true;
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
-function isValidImagePath(value) {
-  return value === "" || value.startsWith("/uploads/images/") || isValidUrl(value);
-}
-
 function buildDisplayTitle(template, customFields) {
   const values = getSortedFormFields(template)
     .filter((field) => field.showInList && field.key !== "coverImageUrl")
@@ -360,76 +332,9 @@ function buildLaunchAssignments(templateId, taskTemplate, initiatorId) {
   return launchAssignments;
 }
 
-function renderCustomFieldInput(field) {
-  const requiredMark = "";
-
-  if (field.type === "textarea") {
-    return `<label><span>${field.label}${requiredMark}</span><textarea name="custom__${field.key}" rows="3" placeholder="${escapeHtml(field.placeholder ?? "")}"></textarea></label>`;
-  }
-
-  if (field.type === "select") {
-    const options = getDynamicFieldOptions(field);
-    return `
-      <label>
-        <span>${field.label}${requiredMark}</span>
-        <select name="custom__${field.key}">
-          <option value="">${field.key === "storeId" && options.length === 0 ? "暂无可选店铺，请确认账号有店铺选择权限，或先到设置 → 店铺管理中新增店铺。" : "请选择"}</option>
-          ${options.map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join("")}
-        </select>
-      </label>
-    `;
-  }
-
-  if (field.type === "multi_select") {
-    const options = getDynamicFieldOptions(field);
-    return `
-      <label>
-        <span>${field.label}${requiredMark}</span>
-        <select name="custom__${field.key}" multiple size="${Math.min(options.length, 5)}">
-          ${options.map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join("")}
-        </select>
-      </label>
-    `;
-  }
-
-  if (field.type === "image") {
-    return `
-      <label class="image-url-field">
-        <span>${field.label}${requiredMark}</span>
-        <input name="custom__${field.key}" type="hidden" />
-        <input name="upload__${field.key}" type="file" accept="image/jpeg,image/png,image/webp" data-image-upload-key="${escapeHtml(field.key)}" />
-        <span class="form-note">上传1:1产品图，支持 JPG、PNG、WebP，单张不超过 5MB。</span>
-        <span class="image-preview-box">暂无图片</span>
-      </label>
-    `;
-  }
-
-  if (isBusinessDueDateField(field)) {
-    return `
-      <label>
-        <span>${field.label}${requiredMark}</span>
-        <input name="custom__${field.key}Date" type="date" />
-        <select name="custom__${field.key}Hour">${renderBusinessHourOptions("", "请选择小时")}</select>
-      </label>
-    `;
-  }
-
-  const inputType = field.type === "date" ? "date" : field.type === "number" ? "number" : field.type === "url" ? "url" : "text";
-  return `<label><span>${field.label}${requiredMark}</span><input name="custom__${field.key}" type="${inputType}" placeholder="${escapeHtml(field.placeholder ?? "")}" /></label>`;
-}
-
 function renderCustomFieldsForm(template) {
   const fields = getSortedFormFields(template);
-  if (fields.length === 0) return "";
-
-  return `
-    <div class="template-custom-fields">
-      <h3>本次关键行动信息</h3>
-      <div class="form-grid">
-        ${fields.map((field) => renderCustomFieldInput(field)).join("")}
-      </div>
-    </div>
-  `;
+  return renderPublicFormEditor({ fields, customFields: {}, title: "本次关键行动信息" });
 }
 
 function getFileExt(filename = "") {
@@ -462,39 +367,11 @@ function renderStandardWorkAttachmentsField() {
 }
 
 function collectCustomFields(form, template) {
-  const formData = new FormData(form);
-  return getSortedFormFields(template).reduce((result, field) => {
-    if (isBusinessDueDateField(field)) {
-      const dateTime = collectBusinessDateTime(form, `custom__${field.key}`, field.label);
-      result[field.key] = dateTime.error === "" ? dateTime.value ?? "" : `__INVALID_BUSINESS_TIME__:${dateTime.error}`;
-    } else if (field.type === "multi_select") {
-      result[field.key] = formData.getAll(`custom__${field.key}`).map((item) => item.toString());
-    } else {
-      result[field.key] = getFormValue(form, `custom__${field.key}`);
-    }
-    if (field.key === "storeId") {
-      const store = stores.find((item) => item.id === result.storeId);
-      result.storeName = store?.name ?? "";
-    }
-    return result;
-  }, {});
+  return collectPublicFormFields(form, getSortedFormFields(template));
 }
 
 function validateCustomFields(customFields, template) {
-  for (const field of getSortedFormFields(template)) {
-    const value = customFields[field.key];
-    const isEmpty = Array.isArray(value) ? value.length === 0 : value === "";
-    if (isEmpty) continue;
-    if (typeof value === "string" && value.startsWith("__INVALID_BUSINESS_TIME__:")) return value.replace("__INVALID_BUSINESS_TIME__:", "");
-    if (field.type === "number" && Number.isNaN(Number(value))) return `${field.label}必须是数字。`;
-    if (isBusinessDueDateField(field) && !String(value).includes("T")) return `${field.label}必须选择日期和整点小时。`;
-    if (field.type === "date" && !isBusinessDueDateField(field) && Number.isNaN(Date.parse(`${value}T00:00:00+08:00`))) return `${field.label}必须是合法日期。`;
-    if (field.type === "url" && !isValidUrl(value)) return `${field.label}必须是有效链接。`;
-    if (field.type === "image" && !isValidImagePath(value)) return `${field.label}必须是上传后的图片路径。`;
-    if (field.type === "select" && !getDynamicFieldOptions(field).some((option) => option.value === value)) return `${field.label}必须选择有效选项。`;
-    if (field.type === "multi_select" && value.some((item) => !getDynamicFieldOptions(field).some((option) => option.value === item))) return `${field.label}包含无效选项。`;
-  }
-  return "";
+  return validatePublicFormFields(customFields, getSortedFormFields(template));
 }
 
 function getSelectedGoal() {
@@ -2026,33 +1903,11 @@ function removeSelectedStandardWorkAttachment(button) {
   renderSelectedStandardWorkAttachments(input);
 }
 
-function updateImagePreview(input) {
-  const preview = input.closest(".image-url-field")?.querySelector(".image-preview-box");
-  if (preview === undefined || preview === null) return;
-  const value = input.value.trim();
-  preview.innerHTML = value === ""
-    ? "暂无图片"
-    : `<img src="${escapeHtml(resolveAssetUrl(value))}" alt="图片预览" onerror="this.replaceWith('图片无法预览')" />`;
-}
-
 async function handleImageUpload(input) {
-  const file = input.files?.[0];
-  if (file === undefined) return;
-
-  const field = input.closest(".image-url-field");
-  const hiddenInput = field?.querySelector(`input[name="custom__${input.dataset.imageUploadKey}"]`);
-  const preview = field?.querySelector(".image-preview-box");
-  if (preview !== null && preview !== undefined) preview.textContent = "上传中...";
-
   try {
-    const result = await uploadImageFile(file);
-    if (hiddenInput !== null && hiddenInput !== undefined) {
-      hiddenInput.value = result.url;
-      updateImagePreview(hiddenInput);
-    }
+    await handlePublicFormImageUpload(input);
     setModalError("");
   } catch (error) {
-    if (preview !== null && preview !== undefined) preview.textContent = "图片上传失败";
     setModalError(error.message ?? "图片上传失败。");
   }
 }
@@ -2094,7 +1949,7 @@ export function bindGoalsPageEvents(rerender) {
   if (goalTaskForm !== null) {
     goalTaskForm.addEventListener("submit", (event) => handleGoalSubmit(event, rerender));
     goalTaskForm.addEventListener("input", (event) => {
-      if (event.target.name?.startsWith("custom__")) updateImagePreview(event.target);
+      if (event.target.name?.startsWith("custom__")) updatePublicFormImagePreview(event.target);
     });
     goalTaskForm.addEventListener("change", (event) => {
       if (event.target.matches("[data-goal-work-value-module-select]")) {

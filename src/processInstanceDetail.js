@@ -9,6 +9,13 @@ import {
 import { getProcessProgress as selectProcessProgress } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
 import { renderWorkFormViewer } from "./workFormViewer.js?v=20260705-state-singleton1";
 import {
+  collectPublicFormFields,
+  handlePublicFormImageUpload,
+  renderPublicFormEditor,
+  updatePublicFormImagePreview,
+  validatePublicFormFields,
+} from "./workFormEditor.js?v=20260722-public-form-editor1";
+import {
   collectBusinessDateTime,
   collectBusinessMinuteDateTime,
   formatBusinessDateTime,
@@ -155,10 +162,6 @@ function getFormValue(form, name) {
   return new FormData(form).get(name)?.toString().trim() ?? "";
 }
 
-function getCustomFieldEntries(instance) {
-  return Object.entries(instance.customFields ?? {}).filter(([key]) => key !== standardWorkAttachmentsKey);
-}
-
 function getStandardWorkAttachments(instance) {
   const attachments = instance.customFields?.[standardWorkAttachmentsKey];
   return Array.isArray(attachments) ? attachments : [];
@@ -288,9 +291,7 @@ function renderEditableStandardWorkAttachments(instance, editable) {
 }
 
 function renderCustomFields(instance, editable) {
-  const entries = getCustomFieldEntries(instance);
   const formFields = getInstanceFormFields(instance);
-  const configuredKeys = new Set(formFields.map((field) => field.key));
 
   if (!editable) {
     return renderWorkFormViewer({
@@ -299,33 +300,11 @@ function renderCustomFields(instance, editable) {
     });
   }
 
-  const configuredInputs = formFields
-    .map((field) => {
-      const value = instance.customFields?.[field.key];
-      const textValue = Array.isArray(value) ? value.join("、") : value ?? "";
-      return `
-        <label>
-          <span>${escapeHtml(field.label)}</span>
-          <input name="custom__${escapeHtml(field.key)}" value="${escapeHtml(textValue)}" />
-        </label>
-      `;
-    })
-    .join("");
-  const extraInputs = entries
-    .filter(([key]) => !configuredKeys.has(key))
-    .map(([key, value]) => {
-      const textValue = Array.isArray(value) ? value.join("、") : value;
-      return `
-        <label>
-          <span>${escapeHtml(key)}</span>
-          <input name="custom__${escapeHtml(key)}" value="${escapeHtml(textValue)}" />
-        </label>
-      `;
-    })
-    .join("");
-
-  if (configuredInputs === "" && extraInputs === "") return `<p>暂无关键行动公共信息</p>`;
-  return `<div class="form-grid">${configuredInputs}${extraInputs}</div>`;
+  return renderPublicFormEditor({
+    fields: formFields,
+    customFields: instance.customFields ?? {},
+    title: "",
+  }) || `<p>暂无关键行动公共信息</p>`;
 }
 
 function renderStepTask(task, editable, stepIndex) {
@@ -566,9 +545,28 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
     options.onTaskSelect?.(taskButton.dataset.launchedProcessTaskId);
   });
 
-  detail.addEventListener("change", (event) => {
+  detail.addEventListener("input", (event) => {
+    if (event.target.name?.startsWith("custom__")) updatePublicFormImagePreview(event.target);
+  });
+
+  detail.addEventListener("change", async (event) => {
     if (event.target.matches("[data-standard-work-attachments]")) {
       renderSelectedStandardWorkAttachments(event.target);
+      return;
+    }
+    if (event.target.matches("[data-image-upload-key]")) {
+      try {
+        await handlePublicFormImageUpload(event.target);
+        showFormError(form, "");
+      } catch (error) {
+        showFormError(form, error.message || "图片上传失败。");
+      }
+      return;
+    }
+    if (event.target.matches("[data-task-due-date-control]")) {
+      const taskId = event.target.dataset.taskDueDateControl;
+      const changedInput = form?.elements[`task__${taskId}__dueDateChanged`];
+      if (changedInput !== undefined) changedInput.value = "true";
     }
   });
 
@@ -595,12 +593,10 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
     if (invalidTaskDueDate !== undefined) return showFormError(form, invalidTaskDueDate.error);
     const now = getNow();
     const oldGoalId = instance.goalId;
-    const customFields = { ...(instance.customFields ?? {}) };
-    const customKeys = new Set([...Object.keys(customFields), ...getInstanceFormFields(instance).map((field) => field.key)]);
-    customKeys.forEach((key) => {
-      const input = form.elements[`custom__${key}`];
-      if (input !== undefined) customFields[key] = input.value.trim();
-    });
+    const formFields = getInstanceFormFields(instance);
+    const customFields = { ...(instance.customFields ?? {}), ...collectPublicFormFields(form, formFields) };
+    const customError = validatePublicFormFields(customFields, formFields);
+    if (customError !== "") return showFormError(form, customError);
     try {
       const existingAttachments = collectExistingStandardWorkAttachments(form);
       const uploadedAttachments = await uploadSelectedStandardWorkAttachments(form, instanceId);
