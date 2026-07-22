@@ -206,6 +206,21 @@ function requirePermission(permissionPath) {
   };
 }
 
+function isAdminUser(user) {
+  return user?.role === "admin" || user?.role === "system_admin" || user?.authRole === "admin";
+}
+
+function getUserPersonId(user) {
+  return user?.personId ?? user?.id ?? "";
+}
+
+function canEditProcessInstance(user, instance) {
+  if (instance === undefined || instance === null) return false;
+  if (isAdminUser(user)) return true;
+  const userPersonId = getUserPersonId(user);
+  return userPersonId !== "" && instance.initiatorId === userPersonId;
+}
+
 function belongsToUser(item, user) {
   return [item.ownerId, item.assigneeId, item.executorId, item.creatorId, item.personId, item.initiatorId, item.submittedBy, item.submitterId]
     .filter(Boolean)
@@ -616,6 +631,19 @@ app.post("/api/:resource", (request, response) => {
 app.put("/api/:resource/:id", (request, response) => {
   try {
     if (rejectLegacyContentScheduleWrite(request.params.resource, response)) return;
+    if (request.params.resource === "process-instances") {
+      const instance = readAllData().processInstances.find((item) => item.id === request.params.id);
+      if (instance === undefined) {
+        response.status(404).json({ success: false, message: "未找到该已发起关键行动" });
+        return;
+      }
+      if (!canEditProcessInstance(request.user, instance)) {
+        response.status(403).json({ success: false, message: "只有管理员或关键行动发起人可以编辑该关键行动" });
+        return;
+      }
+      response.json(updateResource(request.params.resource, request.params.id, request.body));
+      return;
+    }
     const permission = getResourceWritePermission(request.params.resource, "PUT", request.body ?? {});
     const allowed = Array.isArray(permission)
       ? permission.some((item) => hasPermission(request.user, item))
