@@ -5,6 +5,7 @@ import { formatBusinessDateTime } from "./businessTime.js?v=20260705-state-singl
 import {
   ProcessInstanceStatus,
   TaskStatus,
+  WorkType,
   getValueModuleName,
   inferValueModuleIdFromText,
   isValueModuleId,
@@ -464,6 +465,17 @@ function launchedRowMatchesFilters(row) {
   if (filters.overdue === "yes" && !isProcessRowOverdue(row)) return false;
   if (filters.overdue === "no" && isProcessRowOverdue(row)) return false;
   return true;
+}
+
+function isImprovementActionRow(row) {
+  if (row.workPlan.workType === WorkType.Rectification) return true;
+  const customFields = row.processInstance?.customFields ?? {};
+  return Boolean(
+    customFields.rectificationSource ||
+      customFields.sourceTaskId ||
+      customFields.sourceProcessInstanceId ||
+      customFields.sourceStandardWorkId,
+  );
 }
 
 function renderOptions(options, selectedValue, placeholder) {
@@ -1081,7 +1093,7 @@ function renderProcessDetailModal() {
 export function renderScheduleBoardPage() {
   const days = buildBoardDays();
   const launchedRows = buildLaunchedRows().filter(launchedRowMatchesFilters);
-  const pendingRows = launchedRows.filter((row) => row.statusValue === keyActionPendingStatusFilter);
+  const pendingRows = launchedRows.filter((row) => row.statusValue === keyActionPendingStatusFilter && !isImprovementActionRow(row));
   const runningRows = launchedRows.filter((row) => row.statusValue === keyActionRunningStatusFilter);
   const launchedListRows = buildLaunchedListRows().filter(launchedRowMatchesFilters);
   const columnCount = filters.noDueDateOnly ? 1 : boardDayCount;
