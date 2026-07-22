@@ -1,4 +1,4 @@
-import { ProcessInstanceStatus, TaskStatus } from "./modelOptions.js";
+import { ProcessInstanceStatus, TaskSource, TaskStatus } from "./modelOptions.js";
 import { hasTaskOverdueRecord, isCanceledStatus, isDoneStatus, isTaskOverdue } from "./taskUtils.js?v=20260705-state-singleton1";
 
 const currentTaskStatusRank = {
@@ -40,6 +40,29 @@ function getCurrentStatusRank(task) {
 
 function getActiveProcessTasks(processInstanceId, appState) {
   return getTasksForProcess(processInstanceId, appState).filter((task) => !isDoneStatus(task.status) && !isCanceledStatus(task.status));
+}
+
+function hasTaskExecutionEvidence(task) {
+  if ([TaskStatus.Doing, TaskStatus.PendingAcceptance, TaskStatus.Done].includes(task.status)) return true;
+  if (task.completedAt || task.submittedAt) return true;
+  if (typeof task.resultText === "string" && task.resultText.trim() !== "") return true;
+  if (Array.isArray(task.resultAttachments) && task.resultAttachments.length > 0) return true;
+  if (Array.isArray(task.submitFiles) && task.submitFiles.length > 0) return true;
+  if (Array.isArray(task.submitLinks) && task.submitLinks.length > 0) return true;
+  return false;
+}
+
+export function isTaskExecutionStarted(task, appState) {
+  if (task === null || task === undefined) return false;
+  const processInstanceId = String(task.processInstanceId ?? "").trim();
+  const isProcessTask = task.source === TaskSource.Process || processInstanceId !== "";
+  if (!isProcessTask) return true;
+  if (processInstanceId === "") return true;
+
+  const instance = getProcessInstance(processInstanceId, appState);
+  if (instance === null) return true;
+
+  return getTasksForProcess(processInstanceId, appState).some(hasTaskExecutionEvidence);
 }
 
 export function getCurrentProcessTask(processInstanceId, appState) {
