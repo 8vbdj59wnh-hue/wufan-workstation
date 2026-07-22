@@ -2611,7 +2611,8 @@ async function confirmClearanceImport(rerender) {
     for (const row of validRows) {
       const customFields = getClearanceImportCustomFields(row.data);
       const goal = getClearanceGoalByName(row.data.关联目标);
-      const initiator = getClearanceInitiatorByName(row.data.发起人);
+      const currentUser = getCurrentUser();
+      const currentUserId = currentUser?.personId ?? currentUser?.id ?? "";
       const displayTitle = buildDisplayTitle(template, customFields);
       const workPlan = {
         id: createId("work-plan"),
@@ -2633,8 +2634,8 @@ async function confirmClearanceImport(rerender) {
       };
       const result = await launchWorkPlanDraftAsProcess(workPlan, {
         dueDate: workPlan.dueDate,
-        initiatorId: initiator?.id ?? "",
-        launchAssignments: buildLaunchAssignments(template.defaultProcessTemplateId, template, initiator?.id ?? ""),
+        initiatorId: currentUserId,
+        launchAssignments: buildLaunchAssignments(template.defaultProcessTemplateId, template, currentUserId),
       });
       importedInstances.push(result.instance);
     }
@@ -4487,7 +4488,7 @@ function renderTaskModal() {
                   </label>
                   <label>
                     <span>发起人</span>
-                    <select name="initiatorId">${renderOptions(people, "", "请选择发起人")}</select>
+                    <select name="initiatorId">${renderOptions(people, getCurrentUser()?.personId ?? getCurrentUser()?.id ?? "", "请选择发起人")}</select>
                   </label>
                 </div>
                 ${renderTemplateLockedInfo(selectedTemplate)}
@@ -4636,7 +4637,7 @@ function buildTaskDraft(form, task) {
       valueModuleId,
       valueModuleName: getValueModuleName(valueModuleId),
       goalId: getFormValue(form, "goalId") || getActiveGoals()[0]?.id || "",
-      initiatorId: getFormValue(form, "initiatorId") || people[0]?.id || "",
+      initiatorId: getCurrentUser()?.personId ?? getCurrentUser()?.id ?? "",
       startDate: getFormValue(form, "startDate") || null,
       dueDate: dueDateResult.value,
       dueDateError: dueDateResult.error,

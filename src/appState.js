@@ -254,6 +254,14 @@ export function getCurrentUser() {
   return currentUser;
 }
 
+function getCurrentUserId() {
+  return currentUser?.personId ?? currentUser?.id ?? null;
+}
+
+function normalizeOptionalId(id) {
+  return typeof id === "string" && id.trim() !== "" ? id.trim() : null;
+}
+
 export async function validateCurrentSession() {
   const token = getAuthToken();
   if (token === "") return null;
@@ -1918,11 +1926,8 @@ export async function launchWorkPlanAsProcess(workPlanId, { dueDate = null, init
   const previousWorkPlans = [...state.workPlans];
   const now = getNow();
   const title = workPlan.title || taskTemplate.name || "未命名工作";
-  const rectificationSourceExecutorId =
-    workPlan.workType === WorkType.Rectification
-      ? workPlan.customFields?.sourceExecutorId ?? workPlan.customFields?.sourceOwnerId ?? null
-      : null;
-  const resolvedInitiatorId = initiatorId ?? rectificationSourceExecutorId ?? taskTemplate.ownerId;
+  const resolvedInitiatorId = normalizeOptionalId(initiatorId) ?? getCurrentUserId();
+  if (resolvedInitiatorId === null) throw new Error("无法确认当前发起人，请重新登录后再试。");
   const result = startProcess({
     templateId: taskTemplate.defaultProcessTemplateId,
     taskTemplateId: taskTemplate.id,

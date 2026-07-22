@@ -888,7 +888,7 @@ function renderActionStandardLaunchModal() {
             <label><span>关联目标</span><select name="goalId">${renderOptions(getActiveGoals(), "", "请选择目标")}</select></label>
             <label><span>选择价值链模块</span><select name="categoryId" data-action-standard-category-select>${renderOptions(getTaskCategories(), selectedCategoryId, "请选择价值链模块")}</select></label>
             <label><span>选择关键行动</span><select name="taskTemplateId" data-action-standard-template-select ${selectedCategoryId === "" ? "disabled" : ""}>${renderOptions(availableTemplates, effectiveTemplateId, selectedCategoryId === "" ? "请先选择价值链模块" : "请选择关键行动")}</select></label>
-            <label><span>发起人</span><select name="initiatorId">${renderOptions(people, getCurrentUser()?.id ?? "", "请选择发起人")}</select></label>
+            <label><span>发起人</span><select name="initiatorId">${renderOptions(people, getCurrentUser()?.personId ?? getCurrentUser()?.id ?? "", "请选择发起人")}</select></label>
           </div>
           ${renderTemplateLockedInfo(selectedTemplate)}
           ${renderCustomFieldsForm(selectedTemplate)}
@@ -991,10 +991,12 @@ async function saveActionStandardLaunch(form, rerender) {
     canceledAt: null,
   };
   try {
+    const currentUser = getCurrentUser();
+    const currentUserId = currentUser?.personId ?? currentUser?.id ?? "";
     await launchWorkPlanDraftAsProcess(workPlan, {
       dueDate: workPlan.dueDate,
-      initiatorId: getFormValue(form, "initiatorId") || getCurrentUser()?.id || people[0]?.id || "",
-      launchAssignments: buildLaunchAssignments(template.defaultProcessTemplateId, template, getFormValue(form, "initiatorId")),
+      initiatorId: currentUserId,
+      launchAssignments: buildLaunchAssignments(template.defaultProcessTemplateId, template, currentUserId),
     });
   } catch (launchError) {
     console.error("发起关键行动保存失败", launchError);
