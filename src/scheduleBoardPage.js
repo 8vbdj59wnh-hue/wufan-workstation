@@ -1,23 +1,14 @@
-import { cancelProcessInstance, getCurrentUser, launchWorkPlanAsProcess, resolveAssetUrl, startProcessInstanceExecution, state, updatePersistentResource } from "./appState.js?v=20260705-state-singleton1";
+import { cancelProcessInstance, getCurrentUser, resolveAssetUrl, startProcessInstanceExecution, state, updatePersistentResource } from "./appState.js?v=20260705-state-singleton1";
 import { selectTask } from "./tasksPage.js?v=20260705-state-singleton1";
 import { bindLaunchedProcessDetailEvents, canEditLaunchedProcessInstance, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260722-due-date-boundary2";
-import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
-import {
-  formatBusinessDateTime,
-  getBusinessDatePart,
-  getBusinessHourPart,
-  renderBusinessHourOptions,
-} from "./businessTime.js?v=20260705-state-singleton1";
+import { formatBusinessDateTime } from "./businessTime.js?v=20260705-state-singleton1";
 import {
   ProcessInstanceStatus,
   TaskStatus,
-  WorkPlanStatus,
   getValueModuleName,
   inferValueModuleIdFromText,
   isValueModuleId,
-  processInstanceStatusNames,
   valueModuleList,
-  workPlanStatusNames,
 } from "./data/modelOptions.js?v=20260705-state-singleton1";
 import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260705-state-singleton1";
 import {
@@ -37,7 +28,6 @@ const timeSlotHours = 2;
 const keyActionPendingStatusFilter = "pending";
 const keyActionRunningStatusFilter = "running";
 const keyActionDoneStatusFilter = "done";
-const futureWorkStatuses = new Set([WorkPlanStatus.Future, WorkPlanStatus.ThisWeek]);
 const hiddenProcessStatuses = new Set([
   ProcessInstanceStatus.Done,
   ProcessInstanceStatus.Canceled,
@@ -59,7 +49,6 @@ const filters = {
   initiatorId: "",
   status: "",
   overdue: "",
-  unlaunchedOnly: false,
   noDueDateOnly: false,
 };
 
@@ -70,8 +59,6 @@ let draggedSourceId = null;
 let draggedSourceType = null;
 let suppressProcessClickId = null;
 let expandedSlotKey = "";
-let editingWorkPlanId = null;
-let editingWorkPlanError = "";
 const savingWorkPlanIds = new Set();
 const previewSize = 172;
 const previewGap = 12;
@@ -190,14 +177,6 @@ function getTaskTemplate(workPlan) {
 function getProcessInstance(workPlan) {
   if (!workPlan.processInstanceId) return null;
   return state.processInstances.find((instance) => instance.id === workPlan.processInstanceId) ?? null;
-}
-
-function isWorkPlanLaunched(workPlan) {
-  return Boolean(workPlan.processInstanceId) || workPlan.status === WorkPlanStatus.Launched || getProcessInstance(workPlan) !== null;
-}
-
-function isFutureWorkPlan(workPlan) {
-  return futureWorkStatuses.has(workPlan.status) && !isWorkPlanLaunched(workPlan);
 }
 
 function getProcessTasks(instanceId) {
@@ -338,12 +317,6 @@ function getProcessPreviewImage(row) {
   return getReliableContentScheduleImage(workPlan, processInstance);
 }
 
-function getWorkPlanStatusLabel(workPlan, processInstance) {
-  if (processInstance?.status === ProcessInstanceStatus.Done) return "已完成";
-  if (processInstance !== null) return processInstanceStatusNames[processInstance.status] ?? processInstance.status ?? "未设置";
-  return workPlanStatusNames[workPlan.status] ?? workPlan.status ?? "未设置";
-}
-
 function getProcessInstanceFilterStatus(processInstance) {
   if (processInstance === null) return "";
   return selectProcessInstanceBusinessStatus(processInstance.id, state).status;
@@ -422,8 +395,8 @@ function buildRows() {
         ownerId: getOwnerId(workPlan),
         ownerName: findName(state.people, getOwnerId(workPlan), "未设置"),
         departmentName: findName(state.departments, workPlan.departmentId ?? template?.departmentId ?? "", "未设置部门"),
-        statusValue: processInstance === null ? workPlan.status : getProcessInstanceFilterStatus(processInstance),
-        statusLabel: processInstance === null ? getWorkPlanStatusLabel(workPlan, processInstance) : getProcessInstanceListStatusLabel(processInstance),
+        statusValue: processInstance === null ? "" : getProcessInstanceFilterStatus(processInstance),
+        statusLabel: processInstance === null ? "" : getProcessInstanceListStatusLabel(processInstance),
         thumbnail: getWorkThumbnail(workPlan),
         dueDate,
         dueDateKey: duePlacement.dateKey,
@@ -436,10 +409,6 @@ function buildRows() {
         currentExecutorName: currentExecutor.personId === "" ? "" : findName(state.people, currentExecutor.personId, "未设置"),
       };
     });
-}
-
-function buildFutureRows() {
-  return buildRows().filter((row) => isFutureWorkPlan(row.workPlan));
 }
 
 function buildLaunchedRows() {
@@ -487,19 +456,10 @@ function rowMatchesBaseFilters(row) {
   return true;
 }
 
-function futureRowMatchesFilters(row) {
-  if (!rowMatchesBaseFilters(row)) return false;
-  if (filters.initiatorId !== "") return false;
-  if (filters.status !== "") return false;
-  if (filters.noDueDateOnly) return false;
-  return true;
-}
-
 function launchedRowMatchesFilters(row) {
   if (!rowMatchesBaseFilters(row)) return false;
   if (filters.initiatorId !== "" && row.processInstance?.initiatorId !== filters.initiatorId) return false;
   if (filters.status !== "" && row.statusValue !== filters.status) return false;
-  if (filters.unlaunchedOnly) return false;
   if (filters.noDueDateOnly && !isNoDueDate(row)) return false;
   if (filters.overdue === "yes" && !isProcessRowOverdue(row)) return false;
   if (filters.overdue === "no" && isProcessRowOverdue(row)) return false;
@@ -563,10 +523,6 @@ function renderFilters() {
         <select name="overdue">${renderOptions([{ id: "yes", name: "已超时" }, { id: "no", name: "未超时" }], filters.overdue, "全部")}</select>
       </label>
       <label class="inline-checkbox">
-        <input type="checkbox" name="unlaunchedOnly" ${filters.unlaunchedOnly ? "checked" : ""} />
-        <span>只看待发起工作计划</span>
-      </label>
-      <label class="inline-checkbox">
         <input type="checkbox" name="noDueDateOnly" ${filters.noDueDateOnly ? "checked" : ""} />
         <span>只看无截止时间</span>
       </label>
@@ -613,14 +569,6 @@ function getValueModuleLegendLabel(valueModuleId, fallbackName) {
 
 function canDragProcess(row) {
   return row.processInstance !== null && row.processInstance.status === ProcessInstanceStatus.Running && !savingWorkPlanIds.has(row.workPlan.id);
-}
-
-function canDragFutureWork(row) {
-  return isFutureWorkPlan(row.workPlan) && !savingWorkPlanIds.has(row.workPlan.id);
-}
-
-function canEditFutureWork(row) {
-  return isFutureWorkPlan(row.workPlan) && hasPermission(getCurrentUser(), "workPlans.launch") && !savingWorkPlanIds.has(row.workPlan.id);
 }
 
 function isAdminUser(user) {
@@ -799,43 +747,11 @@ function renderNoDueDateColumn(rows) {
   `;
 }
 
-function renderWorkCell(row) {
-  const canDrag = canDragFutureWork(row);
-  const canEdit = canEditFutureWork(row);
-  return `
-    <article
-      class="schedule-work-cell ${canDrag ? "is-draggable" : ""} ${savingWorkPlanIds.has(row.workPlan.id) ? "is-saving" : ""}"
-      title="${escapeAttribute(`${row.title}｜${row.standardWorkName}｜负责人：${row.ownerName}`)}"
-      data-schedule-future-work-id="${escapeAttribute(row.workPlan.id)}"
-      data-schedule-drag-type="work-plan"
-      draggable="${canDrag ? "true" : "false"}"
-    >
-      <div class="schedule-work-thumb-wrap">${renderThumbnail(row)}</div>
-      <div class="schedule-work-meta">
-        <strong>${escapeHtml(row.title)}</strong>
-        <span>${escapeHtml(row.standardWorkName)}</span>
-        <small>目标：${escapeHtml(row.goalName)}</small>
-        <small>${escapeHtml(row.valueModuleName)}｜${escapeHtml(row.departmentName)}</small>
-        <small>负责人：${escapeHtml(row.ownerName)}｜${escapeHtml(row.statusLabel)}</small>
-        <small>截止时间：${formatBusinessDateTime(row.workPlan.dueDate, "未设置")}</small>
-        <div class="schedule-work-actions">
-          ${
-            canEdit
-              ? `<button class="text-button" type="button" data-action="edit-future-work-plan" data-work-plan-edit-id="${escapeAttribute(row.workPlan.id)}">编辑</button>`
-              : ""
-          }
-          <span class="schedule-work-action-hint">${canDrag ? "拖入日历发起" : "当前不可发起"}</span>
-        </div>
-      </div>
-    </article>
-  `;
-}
-
 function renderBoardRows(rows, days) {
   if (rows.length === 0) {
     return `
       <div class="schedule-board-empty">
-        <h2>暂无匹配执行中关键行动</h2>
+        <h2>暂无匹配关键行动</h2>
         <p>请调整筛选条件，或查看无截止时间工作。</p>
       </div>
     `;
@@ -870,31 +786,16 @@ function renderBoardHeader(days) {
   `;
 }
 
-function renderSummary(futureRows, launchedRows, days) {
+function renderSummary(launchedRows, days) {
   const dayKeys = new Set(days.map((day) => day.key));
   const noDueDateCount = launchedRows.filter(isNoDueDate).length;
   const outOfRangeCount = launchedRows.filter((row) => row.processInstance !== null && row.dueDateKey !== "" && !isDueDateInBoard(row, dayKeys)).length;
   return `
     <div class="schedule-board-summary">
-      <span>待发起工作计划 ${futureRows.length}</span>
-      <span>执行中关键行动 ${launchedRows.length}</span>
+      <span>关键行动 ${launchedRows.length}</span>
       <span>无截止时间 ${noDueDateCount}</span>
       <span>超出30天 ${outOfRangeCount}</span>
     </div>
-  `;
-}
-
-function renderFutureWorkList(rows) {
-  return `
-    <aside class="schedule-future-panel" aria-label="待发起工作计划">
-      <div class="schedule-future-panel-header">
-        <h3>待发起工作计划</h3>
-        <span>${rows.length}</span>
-      </div>
-      <div class="schedule-future-list">
-        ${rows.length === 0 ? `<p class="schedule-future-empty">暂无匹配待发起工作计划</p>` : rows.map(renderWorkCell).join("")}
-      </div>
-    </aside>
   `;
 }
 
@@ -1027,10 +928,6 @@ function renderLaunchedActionList(rows) {
   `;
 }
 
-function findRowByWorkPlanId(workPlanId) {
-  return buildRows().find((row) => row.workPlan.id === workPlanId) ?? null;
-}
-
 function findRowByProcessInstanceId(processInstanceId) {
   return buildRows().find((row) => row.processInstance?.id === processInstanceId) ?? null;
 }
@@ -1083,26 +980,6 @@ async function moveLaunchedProcessDueDate(processInstanceId, targetDate, targetH
   }
 }
 
-async function launchFutureWorkPlanToSlot(workPlanId, targetDate, targetHour, rerender) {
-  const row = findRowByWorkPlanId(workPlanId);
-  if (row === null || !canDragFutureWork(row)) return;
-  const dueDate = buildScheduledDueDate(targetDate, targetHour);
-
-  savingWorkPlanIds.add(workPlanId);
-  rerender();
-
-  try {
-    await launchWorkPlanAsProcess(workPlanId, { dueDate });
-  } catch (error) {
-    window.alert(error.message || "发起并排期失败，请检查本地数据库服务。");
-  } finally {
-    savingWorkPlanIds.delete(workPlanId);
-    draggedSourceId = null;
-    draggedSourceType = null;
-    rerender();
-  }
-}
-
 async function startLaunchedProcessExecution(processInstanceId, rerender) {
   const row = findRowByProcessInstanceId(processInstanceId);
   if (row === null || row.processInstance === null) return;
@@ -1142,73 +1019,21 @@ function renderProcessDetailModal() {
   `;
 }
 
-function renderWorkPlanEditModal() {
-  if (editingWorkPlanId === null) return "";
-  const row = findRowByWorkPlanId(editingWorkPlanId);
-  if (row === null || !isFutureWorkPlan(row.workPlan)) return "";
-  const workPlan = row.workPlan;
-
-  return `
-    <div class="modal-backdrop" role="presentation">
-      <div class="modal-panel" role="dialog" aria-modal="true" aria-label="编辑待发起工作计划">
-        <div class="modal-header">
-          <div>
-            <h2>编辑待发起工作计划</h2>
-            <p class="form-note">这里编辑的是执行前信息，不会影响关键行动详情。</p>
-          </div>
-          <button class="icon-button" type="button" data-action="close-work-plan-edit-modal" aria-label="关闭">×</button>
-        </div>
-        <form class="modal-form schedule-work-plan-edit-form">
-          <div class="form-error" ${editingWorkPlanError === "" ? "hidden" : ""}>${escapeHtml(editingWorkPlanError)}</div>
-          <div class="form-grid">
-            <label>
-              <span>本次关键行动标题</span>
-              <input name="title" value="${escapeAttribute(workPlan.title ?? "")}" placeholder="可留空，系统根据关键行动信息显示" autocomplete="off" />
-            </label>
-            <label>
-              <span>关联目标</span>
-              <select name="goalId">${renderOptions(state.goals, workPlan.goalId ?? "", "请选择目标")}</select>
-            </label>
-            <label>
-              <span>截止时间日期</span>
-              <input name="dueDateDate" type="date" value="${escapeAttribute(getBusinessDatePart(workPlan.dueDate))}" />
-            </label>
-            <label>
-              <span>截止时间小时</span>
-              <select name="dueDateHour">${renderBusinessHourOptions(getBusinessHourPart(workPlan.dueDate), "请选择小时")}</select>
-            </label>
-          </div>
-          <label>
-            <span>补充说明</span>
-            <textarea name="description" rows="3">${escapeHtml(workPlan.description ?? "")}</textarea>
-          </label>
-          <div class="modal-actions">
-            <button class="secondary-button" type="button" data-action="close-work-plan-edit-modal">取消</button>
-            <button class="primary-button" type="submit">保存</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  `;
-}
-
 export function renderScheduleBoardPage() {
   const days = buildBoardDays();
-  const futureRows = buildFutureRows().filter(futureRowMatchesFilters);
   const launchedRows = buildLaunchedRows().filter(launchedRowMatchesFilters);
   const launchedListRows = buildLaunchedListRows().filter(launchedRowMatchesFilters);
   const columnCount = filters.noDueDateOnly ? 1 : boardDayCount;
   return `
     <section class="schedule-board-page" style="--schedule-day-count: ${columnCount};">
       ${renderFilters()}
-      ${renderSummary(futureRows, launchedRows, days)}
+      ${renderSummary(launchedRows, days)}
       ${renderScheduleViewTabs()}
       ${
         activeScheduleView === "list"
           ? renderLaunchedActionList(launchedListRows)
           : `
             <div class="schedule-board-layout">
-              ${renderFutureWorkList(futureRows)}
               <div class="schedule-board-shell">
                 ${renderValueChainLegend()}
                 <div class="schedule-board-grid">
@@ -1219,76 +1044,9 @@ export function renderScheduleBoardPage() {
             </div>
           `
       }
-      ${renderWorkPlanEditModal()}
       ${renderProcessDetailModal()}
     </section>
   `;
-}
-
-function closeWorkPlanEditModal() {
-  editingWorkPlanId = null;
-  editingWorkPlanError = "";
-}
-
-function collectWorkPlanDueDate(form) {
-  const formData = new FormData(form);
-  const date = String(formData.get("dueDateDate") ?? "").trim();
-  const hour = String(formData.get("dueDateHour") ?? "").trim();
-  if (date === "" && hour === "") return { value: null, error: "" };
-  if (date === "") return { value: null, error: "请选择截止时间日期。" };
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { value: null, error: "截止时间日期格式不正确。" };
-  if (hour === "") return { value: date, error: "" };
-  if (!/^(?:[01]\d|2[0-3]):00$/.test(hour)) return { value: null, error: "截止时间只能选择整点小时。" };
-  return { value: `${date}T${hour}:00+08:00`, error: "" };
-}
-
-async function handleWorkPlanEditSubmit(event, rerender) {
-  event.preventDefault();
-  if (editingWorkPlanId === null) return;
-  const row = findRowByWorkPlanId(editingWorkPlanId);
-  if (row === null || !isFutureWorkPlan(row.workPlan)) {
-    closeWorkPlanEditModal();
-    rerender();
-    return;
-  }
-
-  const form = event.currentTarget;
-  const formData = new FormData(form);
-  const dueDateResult = collectWorkPlanDueDate(form);
-  if (dueDateResult.error !== "") {
-    editingWorkPlanError = dueDateResult.error;
-    rerender();
-    return;
-  }
-
-  const title = String(formData.get("title") ?? "").trim();
-  const goalId = String(formData.get("goalId") ?? "").trim();
-  const description = String(formData.get("description") ?? "").trim();
-  const now = new Date().toISOString();
-  const updates = {
-    title: title === "" ? null : title,
-    goalId,
-    dueDate: dueDateResult.value,
-    description,
-    updatedAt: now,
-  };
-  const previousWorkPlan = { ...row.workPlan };
-  const workPlanIndex = state.workPlans.findIndex((item) => item.id === row.workPlan.id);
-  if (workPlanIndex >= 0) state.workPlans[workPlanIndex] = { ...state.workPlans[workPlanIndex], ...updates };
-  savingWorkPlanIds.add(row.workPlan.id);
-
-  try {
-    const savedWorkPlan = await updatePersistentResource("work-plans", row.workPlan.id, updates);
-    const savedIndex = state.workPlans.findIndex((item) => item.id === row.workPlan.id);
-    if (savedIndex >= 0) state.workPlans[savedIndex] = { ...state.workPlans[savedIndex], ...savedWorkPlan };
-    closeWorkPlanEditModal();
-  } catch (error) {
-    if (workPlanIndex >= 0) state.workPlans[workPlanIndex] = previousWorkPlan;
-    editingWorkPlanError = error.message || "待发起工作计划保存失败，请检查本地数据库服务。";
-  } finally {
-    savingWorkPlanIds.delete(row.workPlan.id);
-    rerender();
-  }
 }
 
 export function bindScheduleBoardPageEvents(rerender) {
@@ -1297,7 +1055,7 @@ export function bindScheduleBoardPageEvents(rerender) {
   document.querySelector(".schedule-board-filters")?.addEventListener("input", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLSelectElement)) return;
-    if (target.name === "unlaunchedOnly" || target.name === "noDueDateOnly") {
+    if (target.name === "noDueDateOnly") {
       filters[target.name] = target.checked;
     } else if (Object.prototype.hasOwnProperty.call(filters, target.name)) {
       filters[target.name] = target.value;
@@ -1308,7 +1066,6 @@ export function bindScheduleBoardPageEvents(rerender) {
   document.querySelectorAll("[data-schedule-view]").forEach((button) => {
     button.addEventListener("click", () => {
       activeScheduleView = button.dataset.scheduleView === "list" ? "list" : "board";
-      if (activeScheduleView === "list" && filters.unlaunchedOnly) filters.unlaunchedOnly = false;
       rerender();
     });
   });
@@ -1405,45 +1162,6 @@ export function bindScheduleBoardPageEvents(rerender) {
     });
   });
 
-  document.querySelectorAll("[data-schedule-future-work-id]").forEach((card) => {
-    card.addEventListener("click", (event) => {
-      const actionButton = event.target.closest("[data-action]");
-      if (actionButton === null) return;
-      if (actionButton.dataset.action === "edit-future-work-plan") {
-        event.preventDefault();
-        event.stopPropagation();
-        editingWorkPlanId = actionButton.dataset.workPlanEditId ?? null;
-        editingWorkPlanError = "";
-        rerender();
-      }
-    });
-
-    card.addEventListener("dragstart", (event) => {
-      const workPlanId = card.dataset.scheduleFutureWorkId ?? "";
-      if (card.getAttribute("draggable") !== "true" || workPlanId === "") {
-        event.preventDefault();
-        return;
-      }
-      hideSchedulePreview();
-      draggedSourceId = workPlanId;
-      draggedSourceType = "work-plan";
-      card.classList.add("is-dragging");
-      event.dataTransfer?.setData("text/plain", workPlanId);
-      event.dataTransfer?.setData("application/x-schedule-drag-type", "work-plan");
-      if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
-    });
-
-    card.addEventListener("dragend", () => {
-      hideSchedulePreview();
-      card.classList.remove("is-dragging");
-      document.querySelectorAll(".schedule-time-slot.is-drop-target").forEach((cell) => cell.classList.remove("is-drop-target"));
-      window.setTimeout(() => {
-        draggedSourceId = null;
-        draggedSourceType = null;
-      }, 250);
-    });
-  });
-
   document.querySelectorAll("[data-schedule-date][data-schedule-hour]").forEach((cell) => {
     cell.addEventListener("dragover", (event) => {
       if (draggedSourceId === null) return;
@@ -1464,10 +1182,6 @@ export function bindScheduleBoardPageEvents(rerender) {
       const targetDate = cell.dataset.scheduleDate ?? "";
       const targetHour = Number(cell.dataset.scheduleHour);
       if (sourceId === null || sourceId === "" || targetDate === "" || !Number.isFinite(targetHour)) return;
-      if (sourceType === "work-plan") {
-        launchFutureWorkPlanToSlot(sourceId, targetDate, targetHour, rerender);
-        return;
-      }
       if (sourceType === "process-instance") {
         moveLaunchedProcessDueDate(sourceId, targetDate, targetHour, rerender);
       }
@@ -1487,15 +1201,6 @@ export function bindScheduleBoardPageEvents(rerender) {
     selectedProcessInstanceId = null;
     rerender();
   });
-
-  document.querySelectorAll('[data-action="close-work-plan-edit-modal"]').forEach((button) => {
-    button.addEventListener("click", () => {
-      closeWorkPlanEditModal();
-      rerender();
-    });
-  });
-
-  document.querySelector(".schedule-work-plan-edit-form")?.addEventListener("submit", (event) => handleWorkPlanEditSubmit(event, rerender));
 
   const modal = document.querySelector(".schedule-process-modal");
   if (modal !== null) {
