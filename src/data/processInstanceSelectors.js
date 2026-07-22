@@ -117,8 +117,6 @@ export function getProcessInstanceOwner(processInstanceId, appState) {
   if (instance.ownerId) return { userId: instance.ownerId, source: "processInstanceOwner" };
 
   const workPlan = getLinkedWorkPlan(instance, appState);
-  if (workPlan?.ownerId) return { userId: workPlan.ownerId, source: "workPlanOwner" };
-
   const actionStandard = getActionStandard(instance, workPlan, appState);
   if (actionStandard?.ownerId) return { userId: actionStandard.ownerId, source: "standardOwner" };
 
