@@ -570,7 +570,13 @@ function mergeExistingItem(resourceKey, id, patch) {
 }
 
 const legacyPriorityDefaults = { importance: "normal", urgency: "normal" };
-const legacyPriorityTables = new Set(["task_templates", "tasks", "work_plans"]);
+const legacyPriorityColumnDefaults = {
+  task_templates: legacyPriorityDefaults,
+  tasks: legacyPriorityDefaults,
+  work_plans: legacyPriorityDefaults,
+  process_template_nodes: { defaultImportance: "normal", defaultUrgency: "normal" },
+};
+const legacyPriorityTables = new Set(Object.keys(legacyPriorityColumnDefaults));
 const tableColumnCache = new Map();
 
 function getTableColumnNames(table) {
@@ -587,8 +593,9 @@ function getTableColumnNames(table) {
 function getWritableColumns(config) {
   const actualColumns = getTableColumnNames(config.table);
   const columns = config.columns.filter((column) => actualColumns.has(column));
+  const legacyDefaults = legacyPriorityColumnDefaults[config.table] ?? {};
   if (legacyPriorityTables.has(config.table)) {
-    for (const column of Object.keys(legacyPriorityDefaults)) {
+    for (const column of Object.keys(legacyDefaults)) {
       if (actualColumns.has(column) && !columns.includes(column)) columns.push(column);
     }
   }
@@ -605,8 +612,9 @@ function encodeItem(item, config, columns = config.columns) {
     if (config.table === "work_plans" && column === "workType" && (value === null || value === "")) {
       value = "normal";
     }
-    if (legacyPriorityTables.has(config.table) && Object.prototype.hasOwnProperty.call(legacyPriorityDefaults, column) && (value === null || value === "")) {
-      value = legacyPriorityDefaults[column];
+    const legacyDefaults = legacyPriorityColumnDefaults[config.table] ?? {};
+    if (legacyPriorityTables.has(config.table) && Object.prototype.hasOwnProperty.call(legacyDefaults, column) && (value === null || value === "")) {
+      value = legacyDefaults[column];
     }
     if (jsonFields.has(column)) value = JSON.stringify(value ?? (column.endsWith("s") ? [] : {}));
     if (booleanFields.has(column)) value = value ? 1 : 0;
