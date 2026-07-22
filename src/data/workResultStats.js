@@ -1,5 +1,6 @@
 import { ProcessInstanceStatus, TaskStatus, WorkPlanStatus, WorkType } from "./modelOptions.js";
 import { hasTaskOverdueRecord, isCanceledStatus, isDoneStatus, isTaskOverdue } from "./taskUtils.js";
+import { isTaskExecutionStarted } from "./processInstanceSelectors.js";
 
 export const UnassignedDepartmentId = "__unassigned_department__";
 
@@ -133,7 +134,7 @@ export function getPersonWorkPlans(dataState, personId) {
 }
 
 export function getPersonTasks(dataState, personId) {
-  return dataState.tasks.filter((task) => isTaskExecutedByPerson(task, personId));
+  return dataState.tasks.filter((task) => isTaskExecutionStarted(task, dataState) && isTaskExecutedByPerson(task, personId));
 }
 
 export function getDepartmentWorkPlans(dataState, departmentId) {
@@ -147,9 +148,9 @@ export function getDepartmentWorkPlans(dataState, departmentId) {
 export function getDepartmentTasks(dataState, departmentId) {
   if (departmentId === UnassignedDepartmentId) {
     const knownDepartmentIds = new Set(dataState.departments.map((department) => department.id));
-    return dataState.tasks.filter((task) => !task.departmentId || !knownDepartmentIds.has(task.departmentId));
+    return dataState.tasks.filter((task) => isTaskExecutionStarted(task, dataState) && (!task.departmentId || !knownDepartmentIds.has(task.departmentId)));
   }
-  return dataState.tasks.filter((task) => task.departmentId === departmentId);
+  return dataState.tasks.filter((task) => isTaskExecutionStarted(task, dataState) && task.departmentId === departmentId);
 }
 
 function getScopedWorkResultData(dataState, { personId, departmentId } = {}) {
@@ -167,7 +168,7 @@ function getScopedWorkResultData(dataState, { personId, departmentId } = {}) {
   }
   return {
     workPlans: dataState.workPlans.slice(),
-    tasks: dataState.tasks.slice(),
+    tasks: dataState.tasks.filter((task) => isTaskExecutionStarted(task, dataState)),
   };
 }
 

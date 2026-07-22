@@ -21,6 +21,7 @@ import { hasTaskOverdueRecord, isCanceledStatus, isDoneStatus, isTaskOverdue } f
 import {
   getCurrentExecutor as selectCurrentExecutor,
   getCurrentProcessTask as selectCurrentProcessTask,
+  isTaskExecutionStarted,
 } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
 import {
   getPeriodWorkResultSummary,
@@ -224,9 +225,14 @@ function isTaskAssessmentOverdue(task) {
   return isTaskOverdue(task, today) || hasTaskOverdueRecord(task);
 }
 
+function isTaskVisibleForStatistics(task) {
+  return isTaskExecutionStarted(task, state);
+}
+
 function getFilteredStatsTasks() {
   const range = getStatsRange();
   return state.tasks.filter((task) => {
+    if (!isTaskVisibleForStatistics(task)) return false;
     if (!isVisibleByAssessmentScope(task)) return false;
     if (!dateInRange(getTaskPeriodDate(task), range) && !dateInRange(task.dueDate, range)) return false;
     if (statsFilters.departmentId !== "" && task.departmentId !== statsFilters.departmentId) return false;
@@ -541,11 +547,12 @@ function getVisibleRectificationRows() {
 }
 
 function getTodayCompletedTasks() {
-  return state.tasks.filter((task) => isVisibleByAssessmentScope(task) && isDoneStatus(task.status) && isTodayValue(task.completedAt));
+  return state.tasks.filter((task) => isTaskVisibleForStatistics(task) && isVisibleByAssessmentScope(task) && isDoneStatus(task.status) && isTodayValue(task.completedAt));
 }
 
 function getTodayExceptionTasks() {
   return state.tasks.filter((task) => {
+    if (!isTaskVisibleForStatistics(task)) return false;
     if (!isVisibleByAssessmentScope(task) || isDoneStatus(task.status) || isCanceledStatus(task.status)) return false;
     const returnRecords = getTaskReturnRecords(task);
     const rejectRecords = getTaskReviewRejectRecords(task);
