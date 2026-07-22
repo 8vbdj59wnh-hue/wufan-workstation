@@ -1805,6 +1805,10 @@ export function startProcess({
   description,
   launchAssignments,
 }) {
+  const resolvedInitiatorId = normalizeOptionalId(initiatorId) ?? getCurrentUserId();
+  if (resolvedInitiatorId === null) {
+    return { error: "无法确认当前发起人，请重新登录后再试。" };
+  }
   const template = state.processTemplates.find((item) => item.id === templateId);
   if (template === undefined || template.status !== ProcessTemplateStatus.Active) {
     return { error: "只能发起启用状态的关键行动标准流程。" };
@@ -1818,7 +1822,7 @@ export function startProcess({
   }
 
   for (const node of nodes) {
-    const ownerId = resolveOwner(node, initiatorId, launchAssignments);
+    const ownerId = resolveOwner(node, resolvedInitiatorId, launchAssignments);
     if (ownerId === null) return { error: `标准步骤“${node.name}”无法解析负责人。` };
   }
 
@@ -1834,7 +1838,7 @@ export function startProcess({
     templateVersion: template.version,
     name,
     goalId,
-    initiatorId,
+    initiatorId: resolvedInitiatorId,
     description,
     status: ProcessInstanceStatus.Running,
     startedAt: now,
@@ -1858,8 +1862,8 @@ export function startProcess({
       processNodeId: node.id,
       categoryId: null,
       departmentId: node.departmentId ?? node.ownerDepartmentId ?? template.applicableDepartmentIds[0],
-      ownerId: resolveOwner(node, initiatorId, launchAssignments),
-      initiatorId,
+      ownerId: resolveOwner(node, resolvedInitiatorId, launchAssignments),
+      initiatorId: resolvedInitiatorId,
       description: node.description,
       completionStandard: node.completionStandard,
       reviewStandard: null,

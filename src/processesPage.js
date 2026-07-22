@@ -86,6 +86,11 @@ function findName(items, id, fallback) {
   return items.find((item) => item.id === id)?.name ?? fallback;
 }
 
+function getCurrentUserId() {
+  const currentUser = getCurrentUser();
+  return currentUser?.personId ?? currentUser?.id ?? "";
+}
+
 function getStandardWorkForTemplate(templateId) {
   return state.taskTemplates.find((template) => template.defaultProcessTemplateId === templateId) ?? null;
 }
@@ -705,7 +710,7 @@ function renderStartModal() {
         <label><span>已发起关键行动名称</span><input name="name" value="${template.name}" /></label>
         <div class="form-grid">
           <label><span>关联目标</span><select name="goalId">${renderOptions(getActiveGoals(), "", "请选择目标")}</select></label>
-          <label><span>发起人</span><select name="initiatorId">${renderOptions(people, "", "请选择发起人")}</select></label>
+          <label><span>发起人</span><select name="initiatorId" disabled>${renderOptions(people, getCurrentUserId(), "当前用户")}</select></label>
         </div>
         <label><span>本次关键行动说明</span><textarea name="description"></textarea></label>
         <div class="modal-actions"><button class="secondary-button" type="button" data-action="close-process-modal">取消</button><button class="primary-button" type="submit">发起</button></div>
@@ -924,7 +929,8 @@ function submitStart(form, rerender) {
   const templateId = template.id;
   const name = getFormValue(form, "name") || template.name;
   const goalId = getFormValue(form, "goalId") || getActiveGoals()[0]?.id || "";
-  const initiatorId = getFormValue(form, "initiatorId") || people[0]?.id || "";
+  const initiatorId = getCurrentUserId();
+  if (initiatorId === "") return setModalError("无法确认当前发起人，请重新登录后再试。", rerender);
   const result = startProcess({
     templateId,
     name,
