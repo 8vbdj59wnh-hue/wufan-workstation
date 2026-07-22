@@ -1,4 +1,4 @@
-import { getCurrentUser, launchWorkPlanAsProcess, resolveAssetUrl, state, updatePersistentResource } from "./appState.js?v=20260705-state-singleton1";
+import { cancelProcessInstance, getCurrentUser, launchWorkPlanAsProcess, resolveAssetUrl, state, updatePersistentResource } from "./appState.js?v=20260705-state-singleton1";
 import { selectTask } from "./tasksPage.js?v=20260705-state-singleton1";
 import { bindLaunchedProcessDetailEvents, canEditLaunchedProcessInstance, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260722-due-date-boundary2";
 import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
@@ -60,6 +60,7 @@ const filters = {
 
 let activeScheduleView = "board";
 let selectedProcessInstanceId = null;
+let selectedLaunchedProcessIds = new Set();
 let draggedSourceId = null;
 let draggedSourceType = null;
 let suppressProcessClickId = null;
@@ -895,6 +896,10 @@ function getActionOwnerName(row) {
   return findName(state.people, actionOwner.userId, "未设置");
 }
 
+function getActionInitiatorName(row) {
+  return findName(state.people, row.processInstance?.initiatorId ?? "", "未设置");
+}
+
 function getDueTimestamp(value) {
   const text = String(value ?? "").trim();
   if (text === "") return null;
@@ -930,8 +935,11 @@ function renderLaunchedActionList(rows) {
         <table class="data-table schedule-launched-list-table">
           <thead>
             <tr>
+              <th>序号</th>
+              <th>选择</th>
               <th>产品图</th>
               <th>关键行动名</th>
+              <th>发起人</th>
               <th>行动负责人</th>
               <th>当前步骤</th>
               <th>截止时间</th>
@@ -942,16 +950,20 @@ function renderLaunchedActionList(rows) {
           <tbody>
             ${
               sortedRows.length === 0
-                ? `<tr><td colspan="7">暂无匹配的已发起关键行动</td></tr>`
+                ? `<tr><td colspan="10">暂无匹配的已发起关键行动</td></tr>`
                 : sortedRows
-                    .map((row) => {
+                    .map((row, index) => {
                       const instanceId = row.processInstance?.id ?? "";
                       const processDueDate = getListProcessDueDate(row);
                       const canEdit = canEditLaunchedProcessInstance(row.processInstance, getCurrentUser());
+                      const checked = selectedLaunchedProcessIds.has(instanceId) ? "checked" : "";
                       return `
                         <tr data-schedule-process-row-id="${escapeAttribute(instanceId)}">
+                          <td>${index + 1}</td>
+                          <td><input type="checkbox" data-schedule-list-select="${escapeAttribute(instanceId)}" ${checked} aria-label="选择${escapeAttribute(getProcessCardTitle(row))}" /></td>
                           <td>${renderThumbnail(row)}</td>
                           <td><strong>${renderCellText(getProcessCardTitle(row))}</strong></td>
+                          <td>${renderCellText(getActionInitiatorName(row))}</td>
                           <td>${renderCellText(getActionOwnerName(row))}</td>
                           <td>${renderCellText(row.currentTaskName)}</td>
                           <td>${renderCellText(formatBusinessDateTime(processDueDate, ""))}</td>
@@ -960,6 +972,7 @@ function renderLaunchedActionList(rows) {
                             <span class="row-actions">
                               <button class="text-button" type="button" data-schedule-list-action="view" data-schedule-process-id="${escapeAttribute(instanceId)}">查看</button>
                               ${canEdit ? `<button class="text-button" type="button" data-schedule-list-action="edit" data-schedule-process-id="${escapeAttribute(instanceId)}">编辑</button>` : ""}
+                              ${canEdit ? `<button class="text-button danger-button" type="button" data-schedule-list-action="cancel" data-schedule-process-id="${escapeAttribute(instanceId)}">取消</button>` : ""}
                             </span>
                           </td>
                         </tr>
@@ -1239,11 +1252,32 @@ export function bindScheduleBoardPageEvents(rerender) {
   });
 
   document.querySelectorAll("[data-schedule-list-action]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       const processInstanceId = button.dataset.scheduleProcessId ?? "";
       if (processInstanceId === "") return;
+      if (button.dataset.scheduleListAction === "cancel") {
+        const reason = window.prompt("请输入取消原因：", "");
+        if (reason === null) return;
+        try {
+          await cancelProcessInstance(processInstanceId, reason);
+          selectedLaunchedProcessIds.delete(processInstanceId);
+        } catch (error) {
+          window.alert(error.message || "取消关键行动失败，请检查本地数据库服务。");
+        }
+        rerender();
+        return;
+      }
       selectedProcessInstanceId = processInstanceId;
       rerender();
+    });
+  });
+
+  document.querySelectorAll("[data-schedule-list-select]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      const processInstanceId = checkbox.dataset.scheduleListSelect ?? "";
+      if (processInstanceId === "") return;
+      if (checkbox.checked) selectedLaunchedProcessIds.add(processInstanceId);
+      else selectedLaunchedProcessIds.delete(processInstanceId);
     });
   });
 
