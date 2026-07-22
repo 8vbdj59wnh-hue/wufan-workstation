@@ -89,6 +89,42 @@ function getProcessInstance(processInstanceId, appState) {
   return (appState.processInstances ?? []).find((instance) => instance.id === processInstanceId) ?? null;
 }
 
+function getLinkedWorkPlan(instance, appState) {
+  if (instance === null) return null;
+  return (
+    (appState.workPlans ?? []).find((workPlan) => workPlan.processInstanceId === instance.id) ??
+    (appState.workPlans ?? []).find((workPlan) => workPlan.id === instance.workPlanId) ??
+    null
+  );
+}
+
+function getActionStandard(instance, workPlan, appState) {
+  const standardId =
+    instance?.taskTemplateId ??
+    instance?.standardWorkId ??
+    instance?.templateId ??
+    workPlan?.taskTemplateId ??
+    workPlan?.standardWorkId ??
+    "";
+  if (standardId === "") return null;
+  return (appState.taskTemplates ?? []).find((template) => template.id === standardId) ?? null;
+}
+
+export function getProcessInstanceOwner(processInstanceId, appState) {
+  const instance = getProcessInstance(processInstanceId, appState);
+  if (instance === null) return { userId: "", source: "none" };
+
+  if (instance.ownerId) return { userId: instance.ownerId, source: "processInstanceOwner" };
+
+  const workPlan = getLinkedWorkPlan(instance, appState);
+  if (workPlan?.ownerId) return { userId: workPlan.ownerId, source: "workPlanOwner" };
+
+  const actionStandard = getActionStandard(instance, workPlan, appState);
+  if (actionStandard?.ownerId) return { userId: actionStandard.ownerId, source: "standardOwner" };
+
+  return { userId: "", source: "none" };
+}
+
 function isTerminalProcessStatus(status) {
   return (
     status === ProcessInstanceStatus.Done ||

@@ -6,7 +6,7 @@ import {
   processInstanceStatusNames,
   taskStatusNames,
 } from "./data/modelOptions.js";
-import { getProcessProgress as selectProcessProgress } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
+import { getProcessInstanceOwner, getProcessProgress as selectProcessProgress } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
 import { renderWorkFormViewer } from "./workFormViewer.js?v=20260705-state-singleton1";
 import {
   collectPublicFormFields,
@@ -113,13 +113,6 @@ function getInstanceTasks(instanceId) {
 
 function getLinkedWorkPlan(instance) {
   return state.workPlans.find((workPlan) => workPlan.processInstanceId === instance.id) ?? null;
-}
-
-function getLaunchedActionOwnerName(instance) {
-  const ownerIds = [...new Set(getInstanceTasks(instance.id).map((task) => task.ownerId).filter(Boolean))];
-  if (ownerIds.length === 0) return "未设置";
-  const names = ownerIds.map((ownerId) => findName(people, ownerId, "")).filter(Boolean);
-  return names.slice(0, 3).join("、") || "未设置";
 }
 
 function getNode(nodeId) {
@@ -361,7 +354,8 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
   const template = getTemplate(instance);
   const taskTemplate = getTaskTemplate(instance);
   const tasks = getInstanceTasks(instance.id);
-  const actionOwnerName = getLaunchedActionOwnerName(instance);
+  const actionOwner = getProcessInstanceOwner(instance.id, state);
+  const actionOwnerName = findName(people, actionOwner.userId, "未设置");
 
   return `
     <section class="settings-section process-detail launched-process-detail" data-launched-process-detail="${instance.id}">

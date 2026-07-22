@@ -22,6 +22,7 @@ import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260705-state-singlet
 import {
   getCurrentExecutor as selectCurrentExecutor,
   getCurrentProcessTask as selectCurrentProcessTask,
+  getProcessInstanceOwner as selectProcessInstanceOwner,
   getProcessProgress as selectProcessProgress,
   isProcessInstanceOverdue as selectProcessInstanceOverdue,
 } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
@@ -889,7 +890,9 @@ function getListProcessDueDate(row) {
 }
 
 function getActionOwnerName(row) {
-  return findName(state.people, row.processInstance?.ownerId ?? row.ownerId, "未设置");
+  if (row.processInstance === null) return "未设置";
+  const actionOwner = selectProcessInstanceOwner(row.processInstance.id, state);
+  return findName(state.people, actionOwner.userId, "未设置");
 }
 
 function getDueTimestamp(value) {
