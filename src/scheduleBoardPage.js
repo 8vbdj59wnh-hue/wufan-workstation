@@ -44,6 +44,8 @@ const hiddenProcessStatuses = new Set([
   "cancelled",
   "terminated",
 ]);
+const completedProcessStatuses = new Set([ProcessInstanceStatus.Done, "done", "completed"]);
+const canceledProcessStatuses = new Set([ProcessInstanceStatus.Canceled, "canceled", "cancelled"]);
 
 const filters = {
   keyword: "",
@@ -441,6 +443,15 @@ function buildFutureRows() {
 
 function buildLaunchedRows() {
   return buildRows().filter((row) => row.processInstance !== null && !hiddenProcessStatuses.has(row.processInstance.status));
+}
+
+function buildLaunchedListRows() {
+  return buildRows().filter(
+    (row) =>
+      row.processInstance !== null &&
+      !completedProcessStatuses.has(row.processInstance.status) &&
+      !canceledProcessStatuses.has(row.processInstance.status),
+  );
 }
 
 function isDueDateInBoard(row, dayKeys) {
@@ -1135,6 +1146,7 @@ export function renderScheduleBoardPage() {
   const days = buildBoardDays();
   const futureRows = buildFutureRows().filter(futureRowMatchesFilters);
   const launchedRows = buildLaunchedRows().filter(launchedRowMatchesFilters);
+  const launchedListRows = buildLaunchedListRows().filter(launchedRowMatchesFilters);
   const columnCount = filters.noDueDateOnly ? 1 : boardDayCount;
   return `
     <section class="schedule-board-page" style="--schedule-day-count: ${columnCount};">
@@ -1143,7 +1155,7 @@ export function renderScheduleBoardPage() {
       ${renderScheduleViewTabs()}
       ${
         activeScheduleView === "list"
-          ? renderLaunchedActionList(launchedRows)
+          ? renderLaunchedActionList(launchedListRows)
           : `
             <div class="schedule-board-layout">
               ${renderFutureWorkList(futureRows)}
