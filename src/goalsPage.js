@@ -901,7 +901,7 @@ function renderGoalProcessTable(goal) {
       <table class="data-table compact-goal-process-table">
         <thead>
           <tr>
-            <th>本次工作标题</th>
+            <th>本次关键行动标题</th>
             <th>关键行动</th>
             <th>关键行动标准流程</th>
             <th>当前步骤</th>
@@ -1315,7 +1315,7 @@ function renderGoalTaskModal() {
               </select>
             </label>
             <label>
-              <span>本次工作标题</span>
+              <span>本次关键行动标题</span>
               <input name="title" placeholder="可留空，系统会根据填写信息生成" autocomplete="off" />
             </label>
             <label>

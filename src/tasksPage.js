@@ -3244,7 +3244,7 @@ function renderProcessProgressFilters() {
     <form class="process-progress-filters task-filters" aria-label="关键行动进度筛选">
       <label>
         <span>关键词</span>
-        <input name="keyword" value="${escapeHtml(processProgressFilters.keyword)}" placeholder="搜索本次工作、关键行动标准流程、目标" />
+        <input name="keyword" value="${escapeHtml(processProgressFilters.keyword)}" placeholder="搜索本次关键行动、关键行动标准流程、目标" />
       </label>
       <label>
         <span>关联目标</span>
@@ -3310,7 +3310,7 @@ function renderProcessProgressTable() {
           <thead>
             <tr>
               <th class="task-cover-column">产品图</th>
-              <th>本次工作标题</th>
+              <th>本次关键行动标题</th>
               <th>关键行动</th>
               <th>关联目标</th>
               <th>关键行动标准流程</th>
