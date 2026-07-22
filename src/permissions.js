@@ -12,7 +12,6 @@ export const permissionGroups = [
       { key: "goals", label: "可访问目标模块" },
       { key: "execution", label: "可访问任务模块" },
       { key: "processes", label: "可访问关键行动模块" },
-      { key: "priority", label: "可访问优先级模块" },
       { key: "assessment", label: "可访问工作结果模块" },
       { key: "methods", label: "可访问关键行动方法论" },
       { key: "settings", label: "可访问设置模块" },
@@ -34,15 +33,8 @@ export const permissionGroups = [
   },
   {
     key: "workPlans",
-    title: "工作 / 优先级权限",
+    title: "关键行动发起权限",
     permissions: [
-      { key: "viewFuture", label: "查看未来关键行动" },
-      { key: "createFuture", label: "新增未来关键行动" },
-      { key: "editFuture", label: "编辑未来关键行动" },
-      { key: "cancelFuture", label: "取消未来关键行动" },
-      { key: "joinThisWeek", label: "加入本周关键行动" },
-      { key: "viewThisWeek", label: "查看本周关键行动" },
-      { key: "returnToFuture", label: "退回未来关键行动" },
       { key: "launch", label: "发起关键行动" },
       { key: "batchOperate", label: "批量操作关键行动" },
     ],
@@ -146,9 +138,9 @@ function createPermissionSkeleton(value = false, dataScope = "department") {
 const superAdminPermissions = createPermissionSkeleton(true, "all");
 
 const bossPermissions = createPermissionSkeleton(false, "all");
-Object.assign(bossPermissions.modules, { goals: true, execution: true, processes: true, priority: true, assessment: true, methods: true, settings: true });
+Object.assign(bossPermissions.modules, { goals: true, execution: true, processes: true, assessment: true, methods: true, settings: true });
 Object.assign(bossPermissions.goals, { view: true, create: true, edit: true, viewDetail: true, addWork: true, viewRelatedData: true });
-Object.assign(bossPermissions.workPlans, { viewFuture: true, joinThisWeek: true, viewThisWeek: true, launch: true });
+Object.assign(bossPermissions.workPlans, { launch: true });
 Object.assign(bossPermissions.tasks, { view: true, viewDetail: true, viewForm: true, viewProcessProgress: true });
 Object.assign(bossPermissions.processes, { viewInstances: true, viewForm: true });
 Object.assign(bossPermissions.contentSchedules, {
@@ -166,9 +158,9 @@ Object.assign(bossPermissions.methods, { view: true });
 Object.assign(bossPermissions.settings, { viewOrg: true, viewPeople: true, viewStandardWorks: true, viewStores: true });
 
 const departmentLeaderPermissions = createPermissionSkeleton(false, "department");
-Object.assign(departmentLeaderPermissions.modules, { goals: true, execution: true, processes: true, priority: true, assessment: true, methods: true });
+Object.assign(departmentLeaderPermissions.modules, { goals: true, execution: true, processes: true, assessment: true, methods: true });
 Object.assign(departmentLeaderPermissions.goals, { view: true, viewDetail: true, addWork: true });
-Object.assign(departmentLeaderPermissions.workPlans, { viewFuture: true, createFuture: true, joinThisWeek: true, viewThisWeek: true, launch: true });
+Object.assign(departmentLeaderPermissions.workPlans, { launch: true });
 Object.assign(departmentLeaderPermissions.tasks, { view: true, viewDetail: true, viewForm: true, submitResult: true, changeStatus: true, viewProcessProgress: true });
 Object.assign(departmentLeaderPermissions.processes, { viewInstances: true, viewForm: true });
 Object.assign(departmentLeaderPermissions.assessment, { view: true, viewDepartment: true, fillWeeklyReport: true, editWeeklyReport: true, viewProblems: true });
@@ -300,7 +292,6 @@ export function canAccessModule(userOrPermissions, moduleId) {
     tasks: "execution",
     scheduleBoard: "execution",
     processes: "processes",
-    time: "priority",
     assessment: "assessment",
     methods: "methods",
     settings: "settings",

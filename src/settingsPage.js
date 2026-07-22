@@ -157,7 +157,6 @@ const issueRequirementStatuses = [
 
 const issueRequirementModules = [
   { value: "目标", label: "目标" },
-  { value: "优先级", label: "优先级" },
   { value: "任务", label: "任务" },
   { value: "关键行动", label: "关键行动" },
   { value: "内容排期", label: "内容排期" },

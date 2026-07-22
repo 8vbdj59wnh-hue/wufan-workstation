@@ -25,9 +25,7 @@ import {
   ProcessTemplateNodeStatus,
   ProcessTemplateStatus,
   SubmitType,
-  TaskImportance,
   TaskStatus,
-  TaskUrgency,
   WorkType,
   getValueModuleName,
   inferValueModuleIdFromText,
@@ -38,16 +36,14 @@ import {
   processTemplateNodeStatusNames,
   processTemplateStatusNames,
   submitTypeNames,
-  taskImportanceNames,
   taskStatusNames,
-  taskUrgencyNames,
   valueModuleList,
 } from "./data/modelOptions.js?v=20260705-state-singleton1";
-import { getTaskQuadrant, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
+import { isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
 import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260705-state-singleton1";
 import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260705-state-singleton1";
 import { bindStandardWorkLibraryEvents, openTaskTemplateLaunchModal, renderStandardWorkLibraryPage } from "./actionStandardsPage.js?v=20260722-action-standards-page1";
-import { selectTask } from "./tasksPage.js?v=20260721-priority-removal1";
+import { selectTask } from "./tasksPage.js?v=20260722-tasks-page1";
 
 const today = "2026-06-24";
 let selectedTemplateId = state.processTemplates[0]?.id ?? null;
@@ -805,8 +801,6 @@ async function saveNode(form, rerender) {
     description: getFormValue(form, "description"),
     completionStandard: getFormValue(form, "completionStandard"),
     reviewStandard: null,
-    defaultImportance: existingNode?.defaultImportance ?? TaskImportance.Important,
-    defaultUrgency: existingNode?.defaultUrgency ?? TaskUrgency.NotUrgent,
     needAcceptance: false,
     accepterRule: ProcessAccepterRule.None,
     defaultAccepterId: null,

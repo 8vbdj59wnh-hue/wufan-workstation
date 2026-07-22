@@ -29,8 +29,6 @@ import {
   Status,
   TaskStatus,
   TaskTemplateStatus,
-  TaskImportance,
-  TaskUrgency,
   WorkPlanStatus,
   contentScheduleAudienceOptions,
   contentSchedulePurposeOptions,
@@ -1557,8 +1555,6 @@ function buildWorkPlanFromSchedule(schedule, status, fallbackGoalId, now) {
       title: displayTitle,
       customFields,
       coverImageUrl: customFields.coverImageUrl || null,
-      importance: TaskImportance.Important,
-      urgency: TaskUrgency.NotUrgent,
       status,
       plannedWeek: status === WorkPlanStatus.ThisWeek ? getCurrentWeek() : null,
       dueDate: schedule.publishDate || null,
@@ -1594,7 +1590,7 @@ async function createWorkPlanFromSchedule(scheduleId, status, rerender) {
   }
   state.workPlans = [result.workPlan, ...state.workPlans];
   state.contentSchedules = state.contentSchedules.map((item) => (item.id === result.scheduleId ? updatedSchedule : item));
-  window.alert(status === WorkPlanStatus.ThisWeek ? "已加入本周关键行动，请到优先级模块发起关键行动。" : "已加入未来工作，请到优先级模块安排。");
+  window.alert(status === WorkPlanStatus.ThisWeek ? "已转为待发起工作计划，请到关键行动入口发起。" : "已转为待发起工作计划。");
   rerender();
 }
 
@@ -1650,7 +1646,7 @@ async function bulkCreateWorkPlansFromSchedules(status, rerender) {
   }
 
   selectedScheduleIds = new Set();
-  const targetText = status === WorkPlanStatus.ThisWeek ? "本周工作" : "未来工作";
+  const targetText = "待发起工作计划";
   const messages = [`已加入 ${createdWorkPlans.length} 条${targetText}。`];
   if (duplicatedCount > 0) messages.push("部分内容已加入关键行动计划，已跳过重复创建。");
   if (manualSelectCount > 0) messages.push("电商视觉需要手动选择关键行动，已跳过。");

@@ -20,10 +20,7 @@ import {
   ProcessAccepterRule,
   ProcessOwnerRule,
   ProcessTemplateStatus,
-  TaskImportance,
-  TaskStatus,
   TaskTemplateStatus,
-  TaskUrgency,
   WorkPlanStatus,
   goalLevelNames,
   goalPeriodTypeNames,
@@ -37,7 +34,7 @@ import {
   isValueModuleId,
   ValueModule,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
+import { getPrimaryImageUrl, isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
 import {
   getCurrentExecutor as selectCurrentExecutor,
   getCurrentProcessTask as selectCurrentProcessTask,
@@ -822,7 +819,6 @@ function renderGoalTaskTable(goal) {
             <th>任务名称</th>
             <th>负责人</th>
             <th>负责部门</th>
-            <th>四象限</th>
             <th>截止时间</th>
             <th>状态</th>
             <th>是否逾期</th>
@@ -831,7 +827,7 @@ function renderGoalTaskTable(goal) {
         <tbody>
           ${
             goalTasks.length === 0
-              ? `<tr><td colspan="7">暂无关联任务</td></tr>`
+              ? `<tr><td colspan="6">暂无关联任务</td></tr>`
               : goalTasks
                   .map(
                     (task) => `
@@ -839,7 +835,6 @@ function renderGoalTaskTable(goal) {
                         <td>${escapeHtml(task.name)}</td>
                         <td>${findName(people, task.ownerId, "未设置")}</td>
                         <td>${findName(departments, task.departmentId, "未设置")}</td>
-                        <td>${getTaskQuadrant(task.importance, task.urgency)}</td>
                         <td>${formatBusinessDateTime(task.dueDate)}</td>
                         <td><span class="status-pill">${taskStatusNames[task.status]}</span></td>
                         <td>${renderTaskOverdue(task)}</td>
@@ -926,7 +921,7 @@ function renderGoalDetail() {
         <h2>目标详情：${escapeHtml(goal.name)}</h2>
         <div class="section-actions">
           ${canCurrentUser("goals.edit") ? `<button class="secondary-button" type="button" data-action="edit-goal" data-goal-id="${goal.id}">编辑目标</button>` : ""}
-          ${canCurrentUser("goals.addWork") && !isInactiveGoal(goal) ? `<button class="primary-button" type="button" data-action="add-goal-task" data-goal-id="${goal.id}">添加未来工作</button>` : ""}
+          ${canCurrentUser("goals.addWork") && !isInactiveGoal(goal) ? `<button class="primary-button" type="button" data-action="add-goal-task" data-goal-id="${goal.id}">发起关键行动</button>` : ""}
           ${canCurrentUser("goals.delete") && !isInactiveGoal(goal) ? `<button class="secondary-button danger-button" type="button" data-action="deactivate-goal" data-goal-id="${goal.id}">停用目标</button>` : ""}
           ${canCurrentUser("goals.delete") && isInactiveGoal(goal) ? `<button class="secondary-button" type="button" data-action="activate-goal" data-goal-id="${goal.id}">重新启用</button>` : ""}
         </div>
@@ -1254,9 +1249,9 @@ function renderGoalTaskModal() {
 
   return `
     <div class="modal-backdrop" role="presentation">
-      <div class="modal-panel wide-modal" role="dialog" aria-modal="true" aria-label="${escapeHtml(modalState.title ?? "添加未来工作")}">
+      <div class="modal-panel wide-modal" role="dialog" aria-modal="true" aria-label="${escapeHtml(modalState.title ?? "发起关键行动")}">
         <div class="modal-header">
-          <h2>${escapeHtml(modalState.title ?? "添加未来工作")}</h2>
+          <h2>${escapeHtml(modalState.title ?? "发起关键行动")}</h2>
           <div class="modal-header-actions">
             <button class="secondary-button" type="button" data-action="close-goal-modal">取消</button>
             <button class="primary-button" type="button" data-action="submit-modal-form">保存</button>
@@ -1365,8 +1360,6 @@ function buildGoalTaskDraft(form, goalId) {
     template,
     customFields,
     title: getFormValue(form, "title") || null,
-    importance: TaskImportance.Important,
-    urgency: TaskUrgency.NotUrgent,
     dueDate: dueDateResult.value,
     dueDateError: dueDateResult.error,
     description: getFormValue(form, "description") || null,
@@ -1376,7 +1369,7 @@ function buildGoalTaskDraft(form, goalId) {
 function validateGoalTaskDraft(draft) {
   if (getGoal(draft.goalId) === null) return "当前目标必须存在。";
   if (draft.taskTemplateId === "" || draft.template === null) return "必须选择启用的关键行动。";
-  if (draft.template.status !== TaskTemplateStatus.Active) return "停用的关键行动不能用于添加未来工作。";
+  if (draft.template.status !== TaskTemplateStatus.Active) return "停用的关键行动不能用于发起。";
   if (!draft.template.defaultProcessTemplateId) return "该关键行动尚未绑定关键行动标准流程，请先到关键行动库中配置。";
   const customError = validateCustomFields(draft.customFields, draft.template);
   if (customError !== "") return customError;
@@ -1655,8 +1648,6 @@ async function saveGoalTask(form, rerender) {
     title: draft.title || displayTitle,
     customFields,
     coverImageUrl,
-    importance: draft.importance,
-    urgency: draft.urgency,
     status: WorkPlanStatus.Future,
     plannedWeek: null,
     dueDate: draft.dueDate,
@@ -1671,8 +1662,8 @@ async function saveGoalTask(form, rerender) {
   try {
     await createPersistentResource("work-plans", workPlan);
   } catch (error) {
-    console.error("未来工作保存失败", error);
-    return setModalError(error.message || "未来工作保存失败，请检查本地数据库服务。", rerender);
+    console.error("关键行动保存失败", error);
+    return setModalError(error.message || "关键行动保存失败，请检查本地数据库服务。", rerender);
   }
 
   selectedGoalId = draft.goalId;
@@ -1792,7 +1783,7 @@ function handleGoalClick(event, rerender) {
     const goal = getGoal(goalId);
     if (goal === null || isInactiveGoal(goal)) return;
     selectedGoalId = goalId;
-    modalState = { kind: "goalTask", goalId, categoryId: "", taskTemplateId: "", title: button.dataset.modalTitle ?? "添加未来工作", error: "" };
+    modalState = { kind: "goalTask", goalId, categoryId: "", taskTemplateId: "", title: button.dataset.modalTitle ?? "发起关键行动", error: "" };
     rerender();
     return;
   }

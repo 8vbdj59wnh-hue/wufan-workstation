@@ -1,7 +1,7 @@
 import { ProcessInstanceStatus, TaskStatus } from "./modelOptions.js";
 import { hasTaskOverdueRecord, isCanceledStatus, isDoneStatus, isTaskOverdue } from "./taskUtils.js?v=20260705-state-singleton1";
 
-const currentTaskStatusPriority = {
+const currentTaskStatusRank = {
   [TaskStatus.Doing]: 1,
   [TaskStatus.Todo]: 2,
   [TaskStatus.PendingAcceptance]: 3,
@@ -34,8 +34,8 @@ export function sortProcessInstanceTasks(tasks, appState) {
   });
 }
 
-function getCurrentStatusPriority(task) {
-  return currentTaskStatusPriority[task.status] ?? 99;
+function getCurrentStatusRank(task) {
+  return currentTaskStatusRank[task.status] ?? 99;
 }
 
 function getActiveProcessTasks(processInstanceId, appState) {
@@ -47,7 +47,7 @@ export function getCurrentProcessTask(processInstanceId, appState) {
   if (activeTasks.length === 0) return null;
 
   return [...activeTasks].sort((left, right) => {
-    const statusDifference = getCurrentStatusPriority(left) - getCurrentStatusPriority(right);
+    const statusDifference = getCurrentStatusRank(left) - getCurrentStatusRank(right);
     if (statusDifference !== 0) return statusDifference;
     const orderDifference = getProcessNodeOrder(left, appState) - getProcessNodeOrder(right, appState);
     if (orderDifference !== 0) return orderDifference;

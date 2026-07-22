@@ -95,16 +95,6 @@ export const TaskSource = Object.freeze({
   Process: "process",
 });
 
-export const TaskImportance = Object.freeze({
-  Important: "important",
-  NotImportant: "not_important",
-});
-
-export const TaskUrgency = Object.freeze({
-  Urgent: "urgent",
-  NotUrgent: "not_urgent",
-});
-
 export const TaskStatus = Object.freeze({
   Waiting: "waiting",
   Todo: "todo",
@@ -277,16 +267,6 @@ export const taskSourceNames = Object.freeze({
   [TaskSource.Process]: "标准步骤生成",
 });
 
-export const taskImportanceNames = Object.freeze({
-  [TaskImportance.Important]: "重要",
-  [TaskImportance.NotImportant]: "不重要",
-});
-
-export const taskUrgencyNames = Object.freeze({
-  [TaskUrgency.Urgent]: "紧急",
-  [TaskUrgency.NotUrgent]: "不紧急",
-});
-
 export const taskStatusNames = Object.freeze({
   [TaskStatus.Waiting]: "待处理",
   [TaskStatus.Todo]: "待处理",
@@ -356,8 +336,8 @@ export const contentScheduleStatusNames = Object.freeze({
 });
 
 export const workPlanStatusNames = Object.freeze({
-  [WorkPlanStatus.Future]: "未来工作",
-  [WorkPlanStatus.ThisWeek]: "本周工作",
+  [WorkPlanStatus.Future]: "待发起",
+  [WorkPlanStatus.ThisWeek]: "待发起",
   [WorkPlanStatus.Launched]: "已发起",
   [WorkPlanStatus.Done]: "已完成",
   [WorkPlanStatus.Canceled]: "已取消",

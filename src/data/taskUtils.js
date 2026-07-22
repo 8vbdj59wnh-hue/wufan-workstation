@@ -1,27 +1,4 @@
-import { TaskImportance, TaskStatus, TaskUrgency } from "./modelOptions.js";
-
-export const quadrantNames = Object.freeze({
-  first: "重要且紧急",
-  second: "重要不紧急",
-  third: "不重要但紧急",
-  fourth: "不重要不紧急",
-});
-
-export function getTaskQuadrant(importance, urgency) {
-  if (importance === TaskImportance.Important && urgency === TaskUrgency.Urgent) {
-    return quadrantNames.first;
-  }
-
-  if (importance === TaskImportance.Important && urgency === TaskUrgency.NotUrgent) {
-    return quadrantNames.second;
-  }
-
-  if (importance === TaskImportance.NotImportant && urgency === TaskUrgency.Urgent) {
-    return quadrantNames.third;
-  }
-
-  return quadrantNames.fourth;
-}
+import { TaskStatus } from "./modelOptions.js";
 
 export function isTaskOverdue(task, currentDate) {
   if (task.dueDate === null) return false;

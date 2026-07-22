@@ -581,14 +581,14 @@ function getHighestRiskDepartment(events) {
 
 function getTodayWorkResultSummaryText(events) {
   const summary = getTodayManagementSummary();
-  const priorityIssues = getPriorityIssues().length;
+  const focusIssues = getFocusIssues().length;
   const riskDepartment = getHighestRiskDepartment(events);
-  if (summary.todayExceptions === 0 && priorityIssues === 0) {
+  if (summary.todayExceptions === 0 && focusIssues === 0) {
     if (summary.todayDoneRectifications > 0) return `今日整体运行平稳，暂无重点异常，${summary.todayDoneRectifications} 个改善完成验证。`;
     return "今日整体运行平稳，暂无重点异常。";
   }
   const parts = [`今日新增异常 ${summary.todayExceptions} 条`];
-  if (priorityIssues > 0) parts.push(`${priorityIssues} 个重点问题需要管理层关注`);
+  if (focusIssues > 0) parts.push(`${focusIssues} 个重点问题需要管理层关注`);
   if (summary.todayDoneRectifications > 0) parts.push(`${summary.todayDoneRectifications} 个改善完成验证`);
   if (riskDepartment !== "") parts.push(`当前${riskDepartment}风险最高`);
   return `${parts.join("，")}。`;
@@ -683,7 +683,7 @@ function renderTodayWorkResultStream() {
           <span>今日工作摘要</span>
           <strong>${escapeHtml(summaryText)}</strong>
         </div>
-        <p class="form-note">先看今天真正发生的重要事件，按需要介入的程度排序。</p>
+        <p class="form-note">先看今天真正发生的关键事件，按需要介入的程度排序。</p>
       </div>
       <div class="work-result-event-list">
         ${events.length === 0 ? `<div class="empty-detail">今天暂无需要管理层介入的异常或已形成闭环的改善。</div>` : visibleEvents.map((event) => `
@@ -748,7 +748,7 @@ function renderDashboardMetrics() {
   return `<div class="assessment-dashboard-metrics">${metrics.map(([label, value, previousValue, formatter]) => renderDashboardMetricCard(label, value, previousValue, formatter)).join("")}</div>`;
 }
 
-function getPriorityIssues() {
+function getFocusIssues() {
   const taskIssues = getTodayExceptionTasks().map((task) => {
     const returnCount = getTaskReturnRecords(task).length;
     const rejectCount = getTaskReviewRejectRecords(task).length;
@@ -788,8 +788,8 @@ function getPriorityIssues() {
     .slice(0, 8);
 }
 
-function renderPriorityIssues() {
-  const issues = getPriorityIssues();
+function renderFocusIssues() {
+  const issues = getFocusIssues();
   return `
     <section class="settings-section">
       <div class="section-heading">
@@ -1096,7 +1096,7 @@ function renderStatsPage() {
   return `
     ${renderTodayWorkResultStream()}
     ${renderTodayOverview()}
-    ${renderPriorityIssues()}
+    ${renderFocusIssues()}
     ${renderImprovementProgress()}
     ${renderDepartmentOverview()}
     ${renderAuxiliaryMetrics()}

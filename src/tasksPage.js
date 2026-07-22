@@ -42,26 +42,21 @@ import {
   ProcessTemplateNodeStatus,
   ProcessTemplateStatus,
   SubmitType,
-  TaskImportance,
   TaskSource,
   TaskStatus,
   TaskTemplateStatus,
-  TaskUrgency,
   WorkPlanStatus,
   RectificationWorkTemplate,
   processInstanceStatusNames,
-  taskImportanceNames,
   taskSourceNames,
   taskStatusNames,
-  taskTemplateStatusNames,
-  taskUrgencyNames,
   submitTypeNames,
   getValueModuleName,
   inferValueModuleIdFromText,
   isValueModuleId,
   ValueModule,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, getTaskQuadrant, hasTaskOverdueRecord, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue, quadrantNames } from "./data/taskUtils.js?v=20260705-state-singleton1";
+import { getPrimaryImageUrl, hasTaskOverdueRecord, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
 import {
   getCurrentExecutor as selectCurrentExecutor,
   getCurrentProcessTask as selectCurrentProcessTask,
@@ -116,7 +111,6 @@ let filters = {
   executorId: "",
   goalId: "",
   categoryId: "",
-  quadrant: "",
   overdue: "",
   showDone: false,
   showCanceled: false,
@@ -1235,12 +1229,6 @@ function renderValueOptions(values, selectedValue, names, emptyLabel) {
   `;
 }
 
-function getQuadrantKey(task) {
-  const quadrantName = getTaskQuadrant(task.importance, task.urgency);
-
-  return Object.entries(quadrantNames).find(([, name]) => name === quadrantName)?.[0] ?? "";
-}
-
 function getTaskDisplayStatusValue(status) {
   if (isDoneStatus(status)) return TaskStatus.Done;
   if (isCanceledStatus(status)) return TaskStatus.Canceled;
@@ -1279,7 +1267,6 @@ function matchesFilters(task) {
   if (filters.executorId !== "" && getTaskExecutorId(task) !== filters.executorId) return false;
   if (filters.goalId !== "" && task.goalId !== filters.goalId) return false;
   if (filters.categoryId !== "" && task.categoryId !== filters.categoryId) return false;
-  if (filters.quadrant !== "" && getQuadrantKey(task) !== filters.quadrant) return false;
   if (filters.overdue === "yes" && !overdue) return false;
   if (filters.overdue === "no" && overdue) return false;
 
@@ -3027,7 +3014,7 @@ function canRestoreTask(task) {
 }
 
 function renderFilters() {
-  filters = { ...filters, source: "", goalId: "", categoryId: "", quadrant: "" };
+  filters = { ...filters, source: "", goalId: "", categoryId: "" };
   if (taskListView === "overdue" && filters.overdue !== "") filters = { ...filters, overdue: "" };
   const isFullView = taskListView === "all";
   const peopleFilters = `
@@ -3161,7 +3148,7 @@ function canCancelProcessInstance(instance) {
 }
 
 function canRelaunchProcessInstance(instance) {
-  return instance !== null && isCanceledStatus(instance.status) && canCurrentUser("workPlans.editFuture");
+  return instance !== null && isCanceledStatus(instance.status) && canCurrentUser("workPlans.launch");
 }
 
 function renderTemplateActionButton(label, action, templateId, variant = "") {
@@ -4143,7 +4130,6 @@ function renderTaskDetail() {
           ${renderDetailField("所属关键行动标准流程", escapeHtml(getTaskProcessTemplateName(selectedTask)))}
           ${renderDetailField("所属标准步骤", escapeHtml(getTaskProcessStepName(selectedTask)))}
           ${renderDetailField("关联目标", findName(goals, selectedTask.goalId, "未设置"))}
-          ${renderDetailField("四象限", getTaskQuadrant(selectedTask.importance, selectedTask.urgency))}
         </div>
         <p>${
           selectedTask.source === TaskSource.Process
@@ -4444,20 +4430,6 @@ function renderTaskModal() {
               <span>计划周</span>
               <input name="plannedWeek" value="${effectiveTask?.plannedWeek ?? ""}" placeholder="例如 2026-W27" autocomplete="off" />
             </label>
-            ${
-              isEdit
-                ? `
-                  <label>
-                    <span>重要性</span>
-                    <select name="importance">${renderValueOptions(TaskImportance, effectiveTask?.importance ?? "", taskImportanceNames, "请选择重要性")}</select>
-                  </label>
-                  <label>
-                    <span>紧急性</span>
-                    <select name="urgency">${renderValueOptions(TaskUrgency, effectiveTask?.urgency ?? "", taskUrgencyNames, "请选择紧急性")}</select>
-                  </label>
-                `
-                : ""
-            }
           </div>
           <label>
             <span>${isEdit ? "补充说明 / 任务说明" : "补充说明"}</span>
@@ -4526,7 +4498,6 @@ function updateFilters(form) {
     executorId: formData.get("executorId")?.toString() ?? "",
     goalId: formData.get("goalId")?.toString() ?? "",
     categoryId: formData.get("categoryId")?.toString() ?? "",
-    quadrant: formData.get("quadrant")?.toString() ?? "",
     overdue: formData.get("overdue")?.toString() ?? "",
     showDone: formData.has("showDone"),
     showCanceled: formData.has("showCanceled"),
@@ -4600,8 +4571,6 @@ function buildTaskDraft(form, task) {
     templateId: getFormValue(form, "templateId") || modalState?.templateId || task.templateId || "",
     ownerId: getFormValue(form, "ownerId") || task.ownerId,
     description: getFormValue(form, "description"),
-    importance: getFormValue(form, "importance") || task.importance,
-    urgency: getFormValue(form, "urgency") || task.urgency,
     startDate: getFormValue(form, "startDate") || null,
     dueDate: dueDateResult.value,
     dueDateError: dueDateResult.error,
@@ -4739,8 +4708,6 @@ async function saveTask(form, rerender) {
       templateId: draft.templateId ?? task.templateId ?? "",
       ownerId: draft.ownerId,
       description: draft.description,
-      importance: draft.importance,
-      urgency: draft.urgency,
       startDate: draft.startDate,
       dueDate: draft.dueDate,
       plannedWeek: draft.plannedWeek,
@@ -5321,8 +5288,6 @@ async function relaunchProcessAsWorkPlan(instanceId, rerender) {
     title: `${getProcessDisplayTitle(instance)}（重新发起）`,
     customFields: { ...(instance.customFields ?? {}) },
     coverImageUrl: getPrimaryImageUrl(instance) || null,
-    importance: TaskImportance.Important,
-    urgency: TaskUrgency.NotUrgent,
     status: WorkPlanStatus.ThisWeek,
     plannedWeek: getCurrentWeek(),
     dueDate: null,

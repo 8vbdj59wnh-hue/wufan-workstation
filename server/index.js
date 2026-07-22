@@ -287,7 +287,7 @@ function filterDataByScope(data, user) {
 
 function getResourceWritePermission(resource, method, body = {}) {
   if (resource === "goals") return method === "POST" ? "goals.create" : "goals.edit";
-  if (resource === "work-plans") return body.launchedAt ? "workPlans.launch" : "workPlans.editFuture";
+  if (resource === "work-plans") return "workPlans.launch";
   if (resource === "tasks") {
     if (method === "POST" && body.source === "process") return "workPlans.launch";
     if (body.submitFormData !== undefined || body.submitFiles !== undefined || body.submitLinks !== undefined) return "tasks.submitResult";

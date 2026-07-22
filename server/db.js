@@ -55,9 +55,6 @@ const standardWorkValueChainModules = [
   { id: "channel_sales", name: "渠道销售" },
   { id: "customer_maintenance", name: "客户维护" },
 ];
-const defaultTaskImportance = "important";
-const defaultTaskUrgency = "not_urgent";
-
 const resourceConfigs = {
   companies: {
     table: "companies",
@@ -185,8 +182,6 @@ const resourceConfigs = {
       "ownerId",
       "description",
       "completionStandard",
-      "importance",
-      "urgency",
       "needAcceptance",
       "accepterId",
       "status",
@@ -217,8 +212,6 @@ const resourceConfigs = {
       "completionStandard",
       "reviewStandard",
       "outputRequirement",
-      "importance",
-      "urgency",
       "startDate",
       "dueDate",
       "plannedWeek",
@@ -399,7 +392,7 @@ const resourceConfigs = {
       "title",
       "message",
       "status",
-      "priority",
+      "severity",
       "dueDate",
       "readAt",
       "createdAt",
@@ -464,8 +457,6 @@ const resourceConfigs = {
       "title",
       "customFields",
       "coverImageUrl",
-      "importance",
-      "urgency",
       "workType",
       "status",
       "plannedWeek",
@@ -1214,7 +1205,7 @@ function runLightweightMigrations() {
       title TEXT NOT NULL,
       message TEXT,
       status TEXT NOT NULL,
-      priority TEXT,
+      severity TEXT,
       dueDate TEXT,
       readAt TEXT,
       createdAt TEXT,
@@ -1312,6 +1303,7 @@ function runLightweightMigrations() {
   ensureColumn("tasks", "cancelReason", "TEXT");
   ensureColumn("tasks", "templateId", "TEXT");
   ensureColumn("tasks", "executionGroupId", "TEXT");
+  ensureColumn("notifications", "severity", "TEXT");
   ensureColumn("process_instances", "dueDate", "TEXT");
   ensureColumn("process_instances", "canceledAt", "TEXT");
   ensureColumn("process_instances", "cancelReason", "TEXT");

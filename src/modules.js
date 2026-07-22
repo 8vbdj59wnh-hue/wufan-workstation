@@ -24,10 +24,6 @@ export const modules = [
     name: "模板中心",
   },
   {
-    id: "time",
-    name: "优先级",
-  },
-  {
     id: "settings",
     name: "设置",
   },

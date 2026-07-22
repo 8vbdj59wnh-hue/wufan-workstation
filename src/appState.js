@@ -36,11 +36,9 @@ import {
   ProcessTemplateStatus,
   Status,
   SubmitType,
-  TaskImportance,
   TaskSource,
   TaskStatus,
   TaskTemplateStatus,
-  TaskUrgency,
   RectificationWorkTemplate,
   WorkType,
   WorkPlanStatus,
@@ -558,7 +556,7 @@ function getTaskReminderTitle(type) {
   return "你有待处理任务";
 }
 
-function getTaskReminderPriority(type) {
+function getTaskReminderSeverity(type) {
   if (type === "overdue") return "high";
   if (type === "due_soon" || type === "pending_acceptance") return "medium";
   return "normal";
@@ -579,7 +577,7 @@ function buildTaskNotification(userId, task, type) {
     title: getTaskReminderTitle(type),
     message: task.dueDate ? `${task.name}｜截止时间 ${formatBusinessDateTime(task.dueDate)}` : task.name,
     status: "unread",
-    priority: getTaskReminderPriority(type),
+    severity: getTaskReminderSeverity(type),
     dueDate: task.dueDate ?? null,
     readAt: null,
     createdAt: now,
@@ -599,10 +597,10 @@ export function getCurrentUserNotifications() {
     .sort((left, right) => {
       const statusOrder = left.status === "unread" && right.status !== "unread" ? -1 : left.status !== "unread" && right.status === "unread" ? 1 : 0;
       if (statusOrder !== 0) return statusOrder;
-      const priorityOrder = { high: 0, medium: 1, normal: 2 };
-      const leftPriority = priorityOrder[left.priority] ?? 3;
-      const rightPriority = priorityOrder[right.priority] ?? 3;
-      if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+      const severityOrder = { high: 0, medium: 1, normal: 2 };
+      const leftSeverity = severityOrder[left.severity] ?? 3;
+      const rightSeverity = severityOrder[right.severity] ?? 3;
+      if (leftSeverity !== rightSeverity) return leftSeverity - rightSeverity;
       return String(right.createdAt ?? "").localeCompare(String(left.createdAt ?? ""));
     });
 }
@@ -1332,8 +1330,6 @@ function syncNewProductLaunchProcessNodes(templateId, departmentsByKey, now) {
       durationMinutes: 1440,
       description: definition.description,
       completionStandard: definition.completionStandard,
-      defaultImportance: TaskImportance.Important,
-      defaultUrgency: index === 0 ? TaskUrgency.Urgent : TaskUrgency.NotUrgent,
       needAcceptance: false,
       accepterRule: ProcessAccepterRule.None,
       defaultAccepterId: null,
@@ -1496,8 +1492,6 @@ function syncRectificationProcessNodes(templateId, ownerId, departmentId, now) {
       durationMinutes: definition.durationMinutes,
       description: definition.description,
       completionStandard: definition.completionStandard,
-      defaultImportance: TaskImportance.Important,
-      defaultUrgency: index === 0 ? TaskUrgency.Urgent : TaskUrgency.NotUrgent,
       needAcceptance: false,
       accepterRule: ProcessAccepterRule.None,
       defaultAccepterId: null,
@@ -1628,8 +1622,6 @@ export function ensureDefaultStandardWorkLibrary() {
       ownerId: existing?.ownerId ?? ownerId,
       description: existing?.description ?? definition.description,
       completionStandard: existing?.completionStandard ?? definition.completionStandard,
-      importance: existing?.importance ?? TaskImportance.Important,
-      urgency: existing?.urgency ?? TaskUrgency.NotUrgent,
       needAcceptance: existing?.needAcceptance ?? false,
       accepterId: existing?.accepterId ?? null,
       defaultProcessTemplateId:
@@ -1861,8 +1853,6 @@ export function startProcess({
       completionStandard: node.completionStandard,
       reviewStandard: null,
       outputRequirement: null,
-      importance: node.defaultImportance ?? "important",
-      urgency: node.defaultUrgency ?? "not_urgent",
       startDate: activeNow ? taskStartAt : null,
       dueDate: activeNow ? addMinutesToBusinessDateTime(taskStartAt, getProcessNodeDurationMinutes(node)) : null,
       plannedWeek: activeNow ? getCurrentWeek(new Date(`${taskStartDate}T00:00:00+08:00`)) : null,
@@ -2092,8 +2082,6 @@ export async function launchRectificationWorkForSource({ sourceTaskId = null, so
       problemSummary: problemSummary || `${sourceLabel}异常需要发起改善：${rectificationObject}`,
     },
     coverImageUrl: sourceTask?.coverImageUrl ?? sourceProcessInstance?.coverImageUrl ?? null,
-    importance: TaskImportance.Important,
-    urgency: TaskUrgency.Urgent,
     workType: WorkType.Rectification,
     status: WorkPlanStatus.ThisWeek,
     plannedWeek: "",

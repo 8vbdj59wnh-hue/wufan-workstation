@@ -35,14 +35,6 @@
  */
 
 /**
- * @typedef {typeof import("./modelOptions.js").TaskImportance[keyof typeof import("./modelOptions.js").TaskImportance]} TaskImportanceValue
- */
-
-/**
- * @typedef {typeof import("./modelOptions.js").TaskUrgency[keyof typeof import("./modelOptions.js").TaskUrgency]} TaskUrgencyValue
- */
-
-/**
  * @typedef {typeof import("./modelOptions.js").TaskStatus[keyof typeof import("./modelOptions.js").TaskStatus]} TaskStatusValue
  */
 
@@ -186,8 +178,6 @@
  * @property {string} completionStandard
  * @property {string | null} reviewStandard
  * @property {string | null} outputRequirement
- * @property {TaskImportanceValue} importance
- * @property {TaskUrgencyValue} urgency
  * @property {string | null} startDate
  * @property {string | null} dueDate
  * @property {string | null} plannedWeek
@@ -256,8 +246,6 @@
  * @property {string} ownerId
  * @property {string} description
  * @property {string} completionStandard
- * @property {TaskImportanceValue} importance
- * @property {TaskUrgencyValue} urgency
  * @property {boolean} needAcceptance
  * @property {string | null} accepterId
  * @property {TaskTemplateStatusValue} status
@@ -326,8 +314,6 @@
  * @property {string} description
  * @property {string} completionStandard
  * @property {string | null} reviewStandard
- * @property {TaskImportanceValue} defaultImportance
- * @property {TaskUrgencyValue} defaultUrgency
  * @property {boolean} needAcceptance
  * @property {ProcessAccepterRuleValue} accepterRule
  * @property {string | null} defaultAccepterId
@@ -372,8 +358,6 @@
  * @property {string | null} title
  * @property {Record<string, unknown>} customFields
  * @property {string | null} coverImageUrl
- * @property {TaskImportanceValue} importance
- * @property {TaskUrgencyValue} urgency
  * @property {"normal" | "rectification"} workType
  * @property {WorkPlanStatusValue} status
  * @property {string | null} plannedWeek

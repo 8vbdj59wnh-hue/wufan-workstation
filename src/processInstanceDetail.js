@@ -2,15 +2,11 @@ import { formatProcessStepLabel, getLatestStandardWorkFormFields, getNow, getPro
 import {
   GoalStatus,
   ProcessInstanceStatus,
-  TaskImportance,
   TaskStatus,
-  TaskUrgency,
   processInstanceStatusNames,
-  taskImportanceNames,
   taskStatusNames,
-  taskUrgencyNames,
 } from "./data/modelOptions.js";
-import { getTaskQuadrant, isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
+import { isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
 import { getProcessProgress as selectProcessProgress } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
 import { renderWorkFormViewer } from "./workFormViewer.js?v=20260705-state-singleton1";
 import {
@@ -340,7 +336,6 @@ function renderStepTask(task, editable, stepIndex) {
         <td><span class="status-pill">${taskStatusNames[task.status]}</span></td>
         <td>${formatBusinessMinuteDateTime(task.dueDate)}</td>
         <td>${isTaskOverdue(task, today) ? "已逾期" : "未逾期"}</td>
-        <td>${getTaskQuadrant(task.importance, task.urgency)}</td>
         <td class="wide-text">${escapeHtml(task.completionStandard ?? node?.completionStandard ?? "-")}</td>
         <td class="wide-text">${escapeHtml(task.reviewStandard ?? node?.reviewStandard ?? "-")}</td>
         <td class="wide-text">${escapeHtml(task.resultText ?? "暂无")}</td>
@@ -362,10 +357,6 @@ function renderStepTask(task, editable, stepIndex) {
         <select name="task__${task.id}__dueDateTime">${renderBusinessMinuteOptions(getBusinessMinutePart(task.dueDate), "时间")}</select>
       </td>
       <td>${isTaskOverdue(task, today) ? "已逾期" : "未逾期"}</td>
-      <td>
-        <select name="task__${task.id}__importance">${renderValueOptions(TaskImportance, task.importance, taskImportanceNames, "重要性")}</select>
-        <select name="task__${task.id}__urgency">${renderValueOptions(TaskUrgency, task.urgency, taskUrgencyNames, "紧急性")}</select>
-      </td>
       <td class="wide-text">${escapeHtml(task.completionStandard ?? node?.completionStandard ?? "-")}</td>
       <td class="wide-text">${escapeHtml(task.reviewStandard ?? node?.reviewStandard ?? "-")}</td>
       <td>
@@ -452,7 +443,7 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
             <table class="data-table process-instance-task-table">
               <thead>
                 <tr>
-                  <th>步骤名称</th><th>步骤</th><th>负责人</th><th>负责部门</th><th>状态</th><th>截止时间</th><th>是否逾期</th><th>四象限</th><th>步骤完成标准</th><th>步骤审核标准</th><th>输出结果 / 任务安排</th><th>完成时间</th><th>操作</th>
+                  <th>步骤名称</th><th>步骤</th><th>负责人</th><th>负责部门</th><th>状态</th><th>截止时间</th><th>是否逾期</th><th>步骤完成标准</th><th>步骤审核标准</th><th>输出结果 / 任务安排</th><th>完成时间</th><th>操作</th>
                 </tr>
               </thead>
               <tbody>${tasks.map((task, index) => renderStepTask(task, editable, index)).join("")}</tbody>
@@ -629,8 +620,6 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
         departmentId: getFormValue(form, `task__${task.id}__departmentId`) || task.departmentId,
         dueDate: taskDueDateResults.get(task.id)?.value ?? null,
         plannedWeek,
-        importance: getFormValue(form, `task__${task.id}__importance`) || task.importance,
-        urgency: getFormValue(form, `task__${task.id}__urgency`) || task.urgency,
         accepterId: getFormValue(form, `task__${task.id}__accepterId`) || null,
         description: getFormValue(form, `task__${task.id}__description`) || task.description,
         updatedAt: now,
