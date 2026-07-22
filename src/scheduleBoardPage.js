@@ -1,9 +1,10 @@
-import { launchWorkPlanAsProcess, resolveAssetUrl, state, updatePersistentResource } from "./appState.js?v=20260705-state-singleton1";
+import { getCurrentUser, launchWorkPlanAsProcess, resolveAssetUrl, state, updatePersistentResource } from "./appState.js?v=20260705-state-singleton1";
 import { selectTask } from "./tasksPage.js?v=20260705-state-singleton1";
 import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260705-state-singleton1";
+import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
+import { formatBusinessDateTime } from "./businessTime.js?v=20260705-state-singleton1";
 import {
   ProcessInstanceStatus,
-  TaskStatus,
   WorkPlanStatus,
   getValueModuleName,
   inferValueModuleIdFromText,
@@ -42,12 +43,15 @@ const filters = {
   keyword: "",
   valueModuleId: "",
   standardWorkId: "",
+  departmentId: "",
   ownerId: "",
   status: "",
+  overdue: "",
   unlaunchedOnly: false,
   noDueDateOnly: false,
 };
 
+let activeScheduleView = "board";
 let selectedProcessInstanceId = null;
 let draggedSourceId = null;
 let draggedSourceType = null;
@@ -327,8 +331,14 @@ function getWorkPlanDisplayStatus(workPlan, processInstance) {
 
 function getWorkPlanStatusLabel(workPlan, processInstance) {
   if (processInstance?.status === ProcessInstanceStatus.Done) return "已完成";
-  if (processInstance !== null) return "已发起";
+  if (processInstance !== null) return processInstanceStatusNames[processInstance.status] ?? processInstance.status ?? "未设置";
   return workPlanStatusNames[workPlan.status] ?? workPlan.status ?? "未设置";
+}
+
+function getProcessInstanceListStatusLabel(processInstance, progress) {
+  if (processInstance === null) return "";
+  if (processInstance.status === ProcessInstanceStatus.Running && progress?.completed === 0 && progress.current?.status !== "doing") return "待执行";
+  return processInstanceStatusNames[processInstance.status] ?? processInstance.status ?? "未设置";
 }
 
 function getLatestTaskDueDate(tasks) {
@@ -391,6 +401,7 @@ function buildRows() {
         tasks,
         template,
         title: getWorkTitle(workPlan),
+        objectName: getWorkObjectName(workPlan),
         standardWorkName: template?.name ?? "未关联关键行动",
         goalName: findName(state.goals, workPlan.goalId, "未对齐目标"),
         valueModuleId: getValueModuleId(workPlan),
@@ -399,7 +410,7 @@ function buildRows() {
         ownerName: findName(state.people, getOwnerId(workPlan), "未设置"),
         departmentName: findName(state.departments, workPlan.departmentId ?? template?.departmentId ?? "", "未设置部门"),
         statusValue: getWorkPlanDisplayStatus(workPlan, processInstance),
-        statusLabel: getWorkPlanStatusLabel(workPlan, processInstance),
+        statusLabel: processInstance === null ? getWorkPlanStatusLabel(workPlan, processInstance) : getProcessInstanceListStatusLabel(processInstance, progress),
         thumbnail: getWorkThumbnail(workPlan),
         dueDate,
         dueDateKey: duePlacement.dateKey,
@@ -449,6 +460,7 @@ function rowMatchesBaseFilters(row) {
   if (keyword !== "" && !getSearchText(row).includes(keyword)) return false;
   if (filters.valueModuleId !== "" && row.valueModuleId !== filters.valueModuleId) return false;
   if (filters.standardWorkId !== "" && row.workPlan.taskTemplateId !== filters.standardWorkId) return false;
+  if (filters.departmentId !== "" && row.workPlan.departmentId !== filters.departmentId && row.template?.departmentId !== filters.departmentId) return false;
   if (filters.ownerId !== "" && row.ownerId !== filters.ownerId && !row.tasks.some((task) => task.ownerId === filters.ownerId)) return false;
   return true;
 }
@@ -466,6 +478,8 @@ function launchedRowMatchesFilters(row) {
   if (filters.status !== "" && row.statusValue !== filters.status) return false;
   if (filters.unlaunchedOnly) return false;
   if (filters.noDueDateOnly && !isNoDueDate(row)) return false;
+  if (filters.overdue === "yes" && !isProcessRowOverdue(row)) return false;
+  if (filters.overdue === "no" && isProcessRowOverdue(row)) return false;
   return true;
 }
 
@@ -480,8 +494,8 @@ function renderOptions(options, selectedValue, placeholder) {
 
 function renderStatusOptions() {
   const options = [
-    { id: WorkPlanStatus.Future, name: "未来工作" },
-    { id: WorkPlanStatus.ThisWeek, name: "本周工作" },
+    { id: WorkPlanStatus.Future, name: "待发起" },
+    { id: WorkPlanStatus.ThisWeek, name: "待发起" },
     { id: launchedStatusFilter, name: "已发起" },
     { id: completedStatusFilter, name: "已完成" },
   ];
@@ -490,6 +504,7 @@ function renderStatusOptions() {
 
 function renderFilters() {
   const activePeople = state.people.filter((person) => person.status !== "inactive");
+  const activeDepartments = state.departments.filter((department) => department.status !== "inactive");
   const standardWorks = state.taskTemplates.filter((template) => template.status !== "inactive");
   return `
     <section class="schedule-board-filters" aria-label="关键行动筛选">
@@ -510,8 +525,16 @@ function renderFilters() {
         <select name="ownerId">${renderOptions(activePeople, filters.ownerId, "全部负责人")}</select>
       </label>
       <label>
+        <span>责任部门</span>
+        <select name="departmentId">${renderOptions(activeDepartments, filters.departmentId, "全部部门")}</select>
+      </label>
+      <label>
         <span>状态</span>
         <select name="status">${renderStatusOptions()}</select>
+      </label>
+      <label>
+        <span>是否超时</span>
+        <select name="overdue">${renderOptions([{ id: "yes", name: "已超时" }, { id: "no", name: "未超时" }], filters.overdue, "全部")}</select>
       </label>
       <label class="inline-checkbox">
         <input type="checkbox" name="unlaunchedOnly" ${filters.unlaunchedOnly ? "checked" : ""} />
@@ -819,6 +842,91 @@ function renderValueChainLegend() {
   `;
 }
 
+function renderScheduleViewTabs() {
+  return `
+    <div class="settings-tabs schedule-view-tabs" aria-label="关键行动视图">
+      <button class="${activeScheduleView === "board" ? "is-active" : ""}" type="button" data-schedule-view="board">原有视图</button>
+      <button class="${activeScheduleView === "list" ? "is-active" : ""}" type="button" data-schedule-view="list">列表</button>
+    </div>
+  `;
+}
+
+function renderCellText(value) {
+  const text = String(value ?? "").trim();
+  return text === "" ? "—" : escapeHtml(text);
+}
+
+function canEditProcessInstances() {
+  return hasPermission(getCurrentUser(), "processes.editInstances");
+}
+
+function renderLaunchedActionList(rows) {
+  const canEdit = canEditProcessInstances();
+  const sortedRows = [...rows].sort((left, right) =>
+    String(right.startDate ?? "").localeCompare(String(left.startDate ?? "")) ||
+    String(right.processInstance?.createdAt ?? "").localeCompare(String(left.processInstance?.createdAt ?? "")),
+  );
+
+  return `
+    <section class="schedule-launched-list-section">
+      <div class="table-wrap">
+        <table class="data-table schedule-launched-list-table">
+          <thead>
+            <tr>
+              <th>关键行动名称</th>
+              <th>业务对象 / 产品</th>
+              <th>关联目标</th>
+              <th>责任部门</th>
+              <th>行动负责人</th>
+              <th>当前步骤</th>
+              <th>当前执行人</th>
+              <th>开始时间</th>
+              <th>截止时间</th>
+              <th>状态</th>
+              <th>是否超时</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${
+              sortedRows.length === 0
+                ? `<tr><td colspan="12">暂无匹配的已发起关键行动</td></tr>`
+                : sortedRows
+                    .map((row) => {
+                      const instanceId = row.processInstance?.id ?? "";
+                      const isOverdue = isProcessRowOverdue(row);
+                      return `
+                        <tr data-schedule-process-row-id="${escapeAttribute(instanceId)}">
+                          <td><strong>${renderCellText(getProcessCardTitle(row))}</strong><br /><span class="muted-text">${renderCellText(row.standardWorkName)}</span></td>
+                          <td>${renderCellText(row.objectName)}</td>
+                          <td>${renderCellText(row.goalName)}</td>
+                          <td>${renderCellText(row.departmentName)}</td>
+                          <td>${renderCellText(row.ownerSummary || row.ownerName)}</td>
+                          <td>${renderCellText(row.currentTaskName)}</td>
+                          <td>${renderCellText(row.currentExecutorName)}</td>
+                          <td>${renderCellText(formatBusinessDateTime(row.startDate, ""))}</td>
+                          <td>${renderCellText(formatBusinessDateTime(row.dueDate, ""))}</td>
+                          <td><span class="status-pill ${getProcessStatusClass(row)}">${renderCellText(row.statusLabel)}</span></td>
+                          <td><span class="status-pill ${isOverdue ? "is-overdue" : ""}">${isOverdue ? "已超时" : "未超时"}</span></td>
+                          <td>
+                            <span class="row-actions">
+                              <button class="text-button" type="button" data-schedule-list-action="view" data-schedule-process-id="${escapeAttribute(instanceId)}">查看</button>
+                              ${canEdit ? `<button class="text-button" type="button" data-schedule-list-action="edit" data-schedule-process-id="${escapeAttribute(instanceId)}">编辑</button>` : ""}
+                            </span>
+                          </td>
+                        </tr>
+                      `;
+                    })
+                    .join("")
+            }
+          </tbody>
+        </table>
+      </div>
+      <p class="form-note">列表只展示已发起关键行动；查看和编辑均复用现有已发起关键行动详情能力。</p>
+    </section>
+  `;
+}
+
 function findRowByWorkPlanId(workPlanId) {
   return buildRows().find((row) => row.workPlan.id === workPlanId) ?? null;
 }
@@ -921,16 +1029,23 @@ export function renderScheduleBoardPage() {
     <section class="schedule-board-page" style="--schedule-day-count: ${columnCount};">
       ${renderFilters()}
       ${renderSummary(futureRows, launchedRows, days)}
-      <div class="schedule-board-layout">
-        ${renderFutureWorkList(futureRows)}
-        <div class="schedule-board-shell">
-          ${renderValueChainLegend()}
-          <div class="schedule-board-grid">
-            ${renderBoardHeader(days)}
-            ${renderBoardRows(launchedRows, days)}
-          </div>
-        </div>
-      </div>
+      ${renderScheduleViewTabs()}
+      ${
+        activeScheduleView === "list"
+          ? renderLaunchedActionList(launchedRows)
+          : `
+            <div class="schedule-board-layout">
+              ${renderFutureWorkList(futureRows)}
+              <div class="schedule-board-shell">
+                ${renderValueChainLegend()}
+                <div class="schedule-board-grid">
+                  ${renderBoardHeader(days)}
+                  ${renderBoardRows(launchedRows, days)}
+                </div>
+              </div>
+            </div>
+          `
+      }
       ${renderProcessDetailModal()}
     </section>
   `;
@@ -948,6 +1063,23 @@ export function bindScheduleBoardPageEvents(rerender) {
       filters[target.name] = target.value;
     }
     rerender();
+  });
+
+  document.querySelectorAll("[data-schedule-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      activeScheduleView = button.dataset.scheduleView === "list" ? "list" : "board";
+      if (activeScheduleView === "list" && filters.unlaunchedOnly) filters.unlaunchedOnly = false;
+      rerender();
+    });
+  });
+
+  document.querySelectorAll("[data-schedule-list-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const processInstanceId = button.dataset.scheduleProcessId ?? "";
+      if (processInstanceId === "") return;
+      selectedProcessInstanceId = processInstanceId;
+      rerender();
+    });
   });
 
   document.querySelectorAll("[data-schedule-process-id]").forEach((button) => {
