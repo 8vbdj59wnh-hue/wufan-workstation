@@ -877,6 +877,37 @@ function renderCellText(value) {
   return text === "" ? "—" : escapeHtml(text);
 }
 
+function getListProcessDueDate(row) {
+  return row.processInstance?.dueDate ?? "";
+}
+
+function getActionOwnerName(row) {
+  return findName(state.people, row.processInstance?.ownerId ?? row.ownerId, "未设置");
+}
+
+function getDueTimestamp(value) {
+  const text = String(value ?? "").trim();
+  if (text === "") return null;
+  const date = new Date(text.length === 10 ? `${text}T23:59:59+08:00` : text);
+  const timestamp = date.getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function formatDurationByHours(milliseconds) {
+  const totalHours = Math.max(1, Math.ceil(Math.abs(milliseconds) / (60 * 60 * 1000)));
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  if (days > 0) return `${days}天${hours}小时`;
+  return `${hours}小时`;
+}
+
+function formatRemainingDueTime(value) {
+  const dueTimestamp = getDueTimestamp(value);
+  if (dueTimestamp === null) return "—";
+  const diff = dueTimestamp - Date.now();
+  return diff >= 0 ? `剩余 ${formatDurationByHours(diff)}` : `已超时 ${formatDurationByHours(diff)}`;
+}
+
 function canEditProcessInstances() {
   return hasPermission(getCurrentUser(), "processes.editInstances");
 }
@@ -894,41 +925,31 @@ function renderLaunchedActionList(rows) {
         <table class="data-table schedule-launched-list-table">
           <thead>
             <tr>
-              <th>关键行动名称</th>
-              <th>业务对象 / 产品</th>
-              <th>关联目标</th>
-              <th>责任部门</th>
+              <th>产品图</th>
+              <th>关键行动名</th>
               <th>行动负责人</th>
               <th>当前步骤</th>
-              <th>当前执行人</th>
-              <th>开始时间</th>
               <th>截止时间</th>
-              <th>状态</th>
-              <th>是否超时</th>
+              <th>剩余时间</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody>
             ${
               sortedRows.length === 0
-                ? `<tr><td colspan="12">暂无匹配的已发起关键行动</td></tr>`
+                ? `<tr><td colspan="7">暂无匹配的已发起关键行动</td></tr>`
                 : sortedRows
                     .map((row) => {
                       const instanceId = row.processInstance?.id ?? "";
-                      const isOverdue = isProcessRowOverdue(row);
+                      const processDueDate = getListProcessDueDate(row);
                       return `
                         <tr data-schedule-process-row-id="${escapeAttribute(instanceId)}">
-                          <td><strong>${renderCellText(getProcessCardTitle(row))}</strong><br /><span class="muted-text">${renderCellText(row.standardWorkName)}</span></td>
-                          <td>${renderCellText(row.objectName)}</td>
-                          <td>${renderCellText(row.goalName)}</td>
-                          <td>${renderCellText(row.departmentName)}</td>
-                          <td>${renderCellText(row.ownerSummary || row.ownerName)}</td>
+                          <td>${renderThumbnail(row)}</td>
+                          <td><strong>${renderCellText(getProcessCardTitle(row))}</strong></td>
+                          <td>${renderCellText(getActionOwnerName(row))}</td>
                           <td>${renderCellText(row.currentTaskName)}</td>
-                          <td>${renderCellText(row.currentExecutorName)}</td>
-                          <td>${renderCellText(formatBusinessDateTime(row.startDate, ""))}</td>
-                          <td>${renderCellText(formatBusinessDateTime(row.dueDate, ""))}</td>
-                          <td><span class="status-pill ${getProcessStatusClass(row)}">${renderCellText(row.statusLabel)}</span></td>
-                          <td><span class="status-pill ${isOverdue ? "is-overdue" : ""}">${isOverdue ? "已超时" : "未超时"}</span></td>
+                          <td>${renderCellText(formatBusinessDateTime(processDueDate, ""))}</td>
+                          <td>${renderCellText(formatRemainingDueTime(processDueDate))}</td>
                           <td>
                             <span class="row-actions">
                               <button class="text-button" type="button" data-schedule-list-action="view" data-schedule-process-id="${escapeAttribute(instanceId)}">查看</button>
