@@ -1,6 +1,6 @@
 import { getCurrentUser, launchWorkPlanAsProcess, resolveAssetUrl, state, updatePersistentResource } from "./appState.js?v=20260705-state-singleton1";
 import { selectTask } from "./tasksPage.js?v=20260705-state-singleton1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260722-due-date-boundary2";
+import { bindLaunchedProcessDetailEvents, canEditLaunchedProcessInstance, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260722-due-date-boundary2";
 import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
 import {
   formatBusinessDateTime,
@@ -908,12 +908,7 @@ function formatRemainingDueTime(value) {
   return diff >= 0 ? `剩余 ${formatDurationByHours(diff)}` : `已超时 ${formatDurationByHours(diff)}`;
 }
 
-function canEditProcessInstances() {
-  return hasPermission(getCurrentUser(), "processes.editInstances");
-}
-
 function renderLaunchedActionList(rows) {
-  const canEdit = canEditProcessInstances();
   const sortedRows = [...rows].sort((left, right) =>
     String(right.startDate ?? "").localeCompare(String(left.startDate ?? "")) ||
     String(right.processInstance?.createdAt ?? "").localeCompare(String(left.processInstance?.createdAt ?? "")),
@@ -942,6 +937,7 @@ function renderLaunchedActionList(rows) {
                     .map((row) => {
                       const instanceId = row.processInstance?.id ?? "";
                       const processDueDate = getListProcessDueDate(row);
+                      const canEdit = canEditLaunchedProcessInstance(row.processInstance, getCurrentUser());
                       return `
                         <tr data-schedule-process-row-id="${escapeAttribute(instanceId)}">
                           <td>${renderThumbnail(row)}</td>

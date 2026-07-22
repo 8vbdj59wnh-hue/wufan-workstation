@@ -1,4 +1,4 @@
-import { formatProcessStepLabel, getLatestStandardWorkFormFields, getNow, getProcessNodeStepOrder, resolveAssetUrl, state, updatePersistentResource, uploadStandardWorkAttachment } from "./appState.js?v=20260705-state-singleton1";
+import { formatProcessStepLabel, getCurrentUser, getLatestStandardWorkFormFields, getNow, getProcessNodeStepOrder, resolveAssetUrl, state, updatePersistentResource, uploadStandardWorkAttachment } from "./appState.js?v=20260705-state-singleton1";
 import {
   GoalStatus,
   ProcessInstanceStatus,
@@ -131,8 +131,22 @@ function getProgress(instanceId) {
   return `${progress.completed}/${progress.total}`;
 }
 
+function isAdminUser(user) {
+  const role = user?.role ?? "";
+  const authRole = user?.authRole ?? "";
+  return role === "admin" || role === "system_admin" || authRole === "admin";
+}
+
+export function canEditLaunchedProcessInstance(instance, user = getCurrentUser()) {
+  if (instance === null || instance === undefined) return false;
+  if (instance.status !== ProcessInstanceStatus.Running) return false;
+  if (isAdminUser(user)) return true;
+  const userPersonId = user?.personId ?? user?.id ?? "";
+  return userPersonId !== "" && instance.initiatorId === userPersonId;
+}
+
 function canEditInstance(instance) {
-  return instance.status === ProcessInstanceStatus.Running;
+  return canEditLaunchedProcessInstance(instance);
 }
 
 function canEditTask(task) {
