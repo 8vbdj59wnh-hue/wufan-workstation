@@ -1569,7 +1569,7 @@ function getStandardFlowFallbackOwnerId(template, department) {
 }
 
 function buildImportedProcessNode(row, processTemplateId, now, stepOrder = row.stepOrder) {
-  const ownerId = row.executor?.id ?? getStandardFlowFallbackOwnerId(row.template, row.department);
+  const ownerId = getStandardFlowFallbackOwnerId(row.template, row.department);
   const submitDefaults = normalizeSubmitRequirement({ name: row.record.步骤名称 });
   return {
     id: createId("process-node"),
