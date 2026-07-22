@@ -4762,6 +4762,24 @@ button.content-template-thumb {
   display: block;
 }
 
+.schedule-work-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.schedule-work-actions .text-button {
+  min-height: 24px;
+  padding: 0;
+}
+
+.schedule-work-action-hint {
+  color: #6b7280;
+  font-size: 12px;
+}
+
 .schedule-board-cell {
   display: grid;
   gap: 0;

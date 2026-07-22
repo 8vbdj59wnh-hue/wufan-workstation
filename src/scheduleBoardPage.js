@@ -2,7 +2,12 @@ import { getCurrentUser, launchWorkPlanAsProcess, resolveAssetUrl, state, update
 import { selectTask } from "./tasksPage.js?v=20260705-state-singleton1";
 import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260705-state-singleton1";
 import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
-import { formatBusinessDateTime } from "./businessTime.js?v=20260705-state-singleton1";
+import {
+  formatBusinessDateTime,
+  getBusinessDatePart,
+  getBusinessHourPart,
+  renderBusinessHourOptions,
+} from "./businessTime.js?v=20260705-state-singleton1";
 import {
   ProcessInstanceStatus,
   WorkPlanStatus,
@@ -57,6 +62,8 @@ let draggedSourceId = null;
 let draggedSourceType = null;
 let suppressProcessClickId = null;
 let expandedSlotKey = "";
+let editingWorkPlanId = null;
+let editingWorkPlanError = "";
 const savingWorkPlanIds = new Set();
 const previewSize = 172;
 const previewGap = 12;
@@ -593,6 +600,10 @@ function canDragFutureWork(row) {
   return isFutureWorkPlan(row.workPlan) && !savingWorkPlanIds.has(row.workPlan.id);
 }
 
+function canEditFutureWork(row) {
+  return isFutureWorkPlan(row.workPlan) && hasPermission(getCurrentUser(), "workPlans.launch") && !savingWorkPlanIds.has(row.workPlan.id);
+}
+
 function getProcessCardTitle(row) {
   return row.processInstance?.displayTitle ?? row.processInstance?.name ?? row.title;
 }
@@ -742,6 +753,7 @@ function renderNoDueDateColumn(rows) {
 
 function renderWorkCell(row) {
   const canDrag = canDragFutureWork(row);
+  const canEdit = canEditFutureWork(row);
   return `
     <article
       class="schedule-work-cell ${canDrag ? "is-draggable" : ""} ${savingWorkPlanIds.has(row.workPlan.id) ? "is-saving" : ""}"
@@ -757,6 +769,15 @@ function renderWorkCell(row) {
         <small>目标：${escapeHtml(row.goalName)}</small>
         <small>${escapeHtml(row.valueModuleName)}｜${escapeHtml(row.departmentName)}</small>
         <small>负责人：${escapeHtml(row.ownerName)}｜${escapeHtml(row.statusLabel)}</small>
+        <small>截止时间：${formatBusinessDateTime(row.workPlan.dueDate, "未设置")}</small>
+        <div class="schedule-work-actions">
+          ${
+            canEdit
+              ? `<button class="text-button" type="button" data-action="edit-future-work-plan" data-work-plan-edit-id="${escapeAttribute(row.workPlan.id)}">编辑</button>`
+              : ""
+          }
+          <span class="schedule-work-action-hint">${canDrag ? "拖入日历发起" : "当前不可发起"}</span>
+        </div>
       </div>
     </article>
   `;
@@ -1020,6 +1041,56 @@ function renderProcessDetailModal() {
   `;
 }
 
+function renderWorkPlanEditModal() {
+  if (editingWorkPlanId === null) return "";
+  const row = findRowByWorkPlanId(editingWorkPlanId);
+  if (row === null || !isFutureWorkPlan(row.workPlan)) return "";
+  const workPlan = row.workPlan;
+
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-label="编辑待发起工作计划">
+        <div class="modal-header">
+          <div>
+            <h2>编辑待发起工作计划</h2>
+            <p class="form-note">这里编辑的是待发起 WorkPlan，不会影响已发起关键行动。</p>
+          </div>
+          <button class="icon-button" type="button" data-action="close-work-plan-edit-modal" aria-label="关闭">×</button>
+        </div>
+        <form class="modal-form schedule-work-plan-edit-form">
+          <div class="form-error" ${editingWorkPlanError === "" ? "hidden" : ""}>${escapeHtml(editingWorkPlanError)}</div>
+          <div class="form-grid">
+            <label>
+              <span>本次关键行动标题</span>
+              <input name="title" value="${escapeAttribute(workPlan.title ?? "")}" placeholder="可留空，系统根据关键行动信息显示" autocomplete="off" />
+            </label>
+            <label>
+              <span>关联目标</span>
+              <select name="goalId">${renderOptions(state.goals, workPlan.goalId ?? "", "请选择目标")}</select>
+            </label>
+            <label>
+              <span>截止时间日期</span>
+              <input name="dueDateDate" type="date" value="${escapeAttribute(getBusinessDatePart(workPlan.dueDate))}" />
+            </label>
+            <label>
+              <span>截止时间小时</span>
+              <select name="dueDateHour">${renderBusinessHourOptions(getBusinessHourPart(workPlan.dueDate), "请选择小时")}</select>
+            </label>
+          </div>
+          <label>
+            <span>补充说明</span>
+            <textarea name="description" rows="3">${escapeHtml(workPlan.description ?? "")}</textarea>
+          </label>
+          <div class="modal-actions">
+            <button class="secondary-button" type="button" data-action="close-work-plan-edit-modal">取消</button>
+            <button class="primary-button" type="submit">保存</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
 export function renderScheduleBoardPage() {
   const days = buildBoardDays();
   const futureRows = buildFutureRows().filter(futureRowMatchesFilters);
@@ -1046,9 +1117,76 @@ export function renderScheduleBoardPage() {
             </div>
           `
       }
+      ${renderWorkPlanEditModal()}
       ${renderProcessDetailModal()}
     </section>
   `;
+}
+
+function closeWorkPlanEditModal() {
+  editingWorkPlanId = null;
+  editingWorkPlanError = "";
+}
+
+function collectWorkPlanDueDate(form) {
+  const formData = new FormData(form);
+  const date = String(formData.get("dueDateDate") ?? "").trim();
+  const hour = String(formData.get("dueDateHour") ?? "").trim();
+  if (date === "" && hour === "") return { value: null, error: "" };
+  if (date === "") return { value: null, error: "请选择截止时间日期。" };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { value: null, error: "截止时间日期格式不正确。" };
+  if (hour === "") return { value: date, error: "" };
+  if (!/^(?:[01]\d|2[0-3]):00$/.test(hour)) return { value: null, error: "截止时间只能选择整点小时。" };
+  return { value: `${date}T${hour}:00+08:00`, error: "" };
+}
+
+async function handleWorkPlanEditSubmit(event, rerender) {
+  event.preventDefault();
+  if (editingWorkPlanId === null) return;
+  const row = findRowByWorkPlanId(editingWorkPlanId);
+  if (row === null || !isFutureWorkPlan(row.workPlan)) {
+    closeWorkPlanEditModal();
+    rerender();
+    return;
+  }
+
+  const form = event.currentTarget;
+  const formData = new FormData(form);
+  const dueDateResult = collectWorkPlanDueDate(form);
+  if (dueDateResult.error !== "") {
+    editingWorkPlanError = dueDateResult.error;
+    rerender();
+    return;
+  }
+
+  const title = String(formData.get("title") ?? "").trim();
+  const goalId = String(formData.get("goalId") ?? "").trim();
+  const description = String(formData.get("description") ?? "").trim();
+  const now = new Date().toISOString();
+  const updates = {
+    title: title === "" ? null : title,
+    goalId,
+    dueDate: dueDateResult.value,
+    description,
+    updatedAt: now,
+  };
+  const previousWorkPlan = { ...row.workPlan };
+  const workPlanIndex = state.workPlans.findIndex((item) => item.id === row.workPlan.id);
+  if (workPlanIndex >= 0) state.workPlans[workPlanIndex] = { ...state.workPlans[workPlanIndex], ...updates };
+  savingWorkPlanIds.add(row.workPlan.id);
+
+  try {
+    const savedWorkPlan = await updatePersistentResource("work-plans", row.workPlan.id, updates);
+    const savedIndex = state.workPlans.findIndex((item) => item.id === row.workPlan.id);
+    if (savedIndex >= 0) state.workPlans[savedIndex] = { ...state.workPlans[savedIndex], ...savedWorkPlan };
+    closeWorkPlanEditModal();
+  } catch (error) {
+    if (workPlanIndex >= 0) state.workPlans[workPlanIndex] = previousWorkPlan;
+    editingWorkPlanError = error.message || "待发起工作计划保存失败，请检查本地数据库服务。";
+  } finally {
+    savingWorkPlanIds.delete(row.workPlan.id);
+    rerender();
+  }
 }
 
 export function bindScheduleBoardPageEvents(rerender) {
@@ -1127,6 +1265,18 @@ export function bindScheduleBoardPageEvents(rerender) {
   });
 
   document.querySelectorAll("[data-schedule-future-work-id]").forEach((card) => {
+    card.addEventListener("click", (event) => {
+      const actionButton = event.target.closest("[data-action]");
+      if (actionButton === null) return;
+      if (actionButton.dataset.action === "edit-future-work-plan") {
+        event.preventDefault();
+        event.stopPropagation();
+        editingWorkPlanId = actionButton.dataset.workPlanEditId ?? null;
+        editingWorkPlanError = "";
+        rerender();
+      }
+    });
+
     card.addEventListener("dragstart", (event) => {
       const workPlanId = card.dataset.scheduleFutureWorkId ?? "";
       if (card.getAttribute("draggable") !== "true" || workPlanId === "") {
@@ -1196,6 +1346,15 @@ export function bindScheduleBoardPageEvents(rerender) {
     selectedProcessInstanceId = null;
     rerender();
   });
+
+  document.querySelectorAll('[data-action="close-work-plan-edit-modal"]').forEach((button) => {
+    button.addEventListener("click", () => {
+      closeWorkPlanEditModal();
+      rerender();
+    });
+  });
+
+  document.querySelector(".schedule-work-plan-edit-form")?.addEventListener("submit", (event) => handleWorkPlanEditSubmit(event, rerender));
 
   const modal = document.querySelector(".schedule-process-modal");
   if (modal !== null) {
