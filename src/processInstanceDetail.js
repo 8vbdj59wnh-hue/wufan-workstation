@@ -343,8 +343,7 @@ function renderStepTask(task, editable, stepIndex) {
 
 function collectTaskDueDateForLaunchedProcess(form, task) {
   const fieldName = `task__${task.id}__dueDate`;
-  const result = collectBusinessMinuteDateTime(form, fieldName);
-  if (result.error !== "请选择截止时间时间。") return result;
+  if (getFormValue(form, `${fieldName}Changed`) !== "true") return { value: task.dueDate ?? null, error: "" };
 
   const data = new FormData(form);
   const date = data.get(`${fieldName}Date`)?.toString().trim() ?? "";
@@ -352,11 +351,9 @@ function collectTaskDueDateForLaunchedProcess(form, task) {
   const originalDate = getBusinessDatePart(task.dueDate);
   const originalTime = getBusinessMinutePart(task.dueDate);
 
-  if (time === "" && originalTime === "" && date !== "" && date === originalDate) {
-    return { value: task.dueDate ?? date, error: "" };
-  }
+  if (date === originalDate && time === originalTime) return { value: task.dueDate ?? null, error: "" };
 
-  return result;
+  return collectBusinessMinuteDateTime(form, fieldName);
 }
 
 export function renderLaunchedProcessDetail(instanceId, options = {}) {
