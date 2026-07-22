@@ -23,6 +23,7 @@ import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260705-state-singlet
 import {
   getCurrentExecutor as selectCurrentExecutor,
   getCurrentProcessTask as selectCurrentProcessTask,
+  getProcessInstanceBusinessStatus as selectProcessInstanceBusinessStatus,
   getProcessInstanceOwner as selectProcessInstanceOwner,
   getProcessProgress as selectProcessProgress,
   isProcessInstanceOverdue as selectProcessInstanceOverdue,
@@ -343,23 +344,14 @@ function getWorkPlanStatusLabel(workPlan, processInstance) {
   return workPlanStatusNames[workPlan.status] ?? workPlan.status ?? "未设置";
 }
 
-function getProcessInstanceFilterStatus(processInstance, progress) {
+function getProcessInstanceFilterStatus(processInstance) {
   if (processInstance === null) return "";
-  if (processInstance.status === ProcessInstanceStatus.Done || processInstance.status === "completed") return keyActionDoneStatusFilter;
-  if (processInstance.status === ProcessInstanceStatus.Running && progress?.completed === 0 && progress.current?.status !== "doing") {
-    return keyActionPendingStatusFilter;
-  }
-  if (processInstance.status === ProcessInstanceStatus.Running) return keyActionRunningStatusFilter;
-  return processInstance.status ?? "";
+  return selectProcessInstanceBusinessStatus(processInstance.id, state).status;
 }
 
-function getProcessInstanceListStatusLabel(processInstance, progress) {
+function getProcessInstanceListStatusLabel(processInstance) {
   if (processInstance === null) return "";
-  const statusValue = getProcessInstanceFilterStatus(processInstance, progress);
-  if (statusValue === keyActionPendingStatusFilter) return "待执行";
-  if (statusValue === keyActionRunningStatusFilter) return "执行中";
-  if (statusValue === keyActionDoneStatusFilter) return "已完成";
-  return processInstanceStatusNames[processInstance.status] ?? processInstance.status ?? "未设置";
+  return selectProcessInstanceBusinessStatus(processInstance.id, state).label;
 }
 
 function getLatestTaskDueDate(tasks) {
@@ -430,8 +422,8 @@ function buildRows() {
         ownerId: getOwnerId(workPlan),
         ownerName: findName(state.people, getOwnerId(workPlan), "未设置"),
         departmentName: findName(state.departments, workPlan.departmentId ?? template?.departmentId ?? "", "未设置部门"),
-        statusValue: processInstance === null ? workPlan.status : getProcessInstanceFilterStatus(processInstance, progress),
-        statusLabel: processInstance === null ? getWorkPlanStatusLabel(workPlan, processInstance) : getProcessInstanceListStatusLabel(processInstance, progress),
+        statusValue: processInstance === null ? workPlan.status : getProcessInstanceFilterStatus(processInstance),
+        statusLabel: processInstance === null ? getWorkPlanStatusLabel(workPlan, processInstance) : getProcessInstanceListStatusLabel(processInstance),
         thumbnail: getWorkThumbnail(workPlan),
         dueDate,
         dueDateKey: duePlacement.dateKey,

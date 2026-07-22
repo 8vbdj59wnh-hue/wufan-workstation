@@ -65,6 +65,22 @@ export function isTaskExecutionStarted(task, appState) {
   return getTasksForProcess(processInstanceId, appState).some(hasTaskExecutionEvidence);
 }
 
+export function getProcessInstanceBusinessStatus(processInstanceId, appState) {
+  const instance = getProcessInstance(processInstanceId, appState);
+  const tasks = getTasksForProcess(processInstanceId, appState);
+  const isDone =
+    instance?.status === ProcessInstanceStatus.Done ||
+    instance?.status === "completed" ||
+    (tasks.length > 0 && tasks.every((task) => isDoneStatus(task.status)));
+
+  if (isDone) return { status: "done", label: "已完成" };
+
+  const executionStarted = tasks.some((task) => isTaskExecutionStarted(task, appState));
+  if (!executionStarted) return { status: "pending", label: "待执行" };
+
+  return { status: "running", label: "执行中" };
+}
+
 export function getCurrentProcessTask(processInstanceId, appState) {
   const activeTasks = getActiveProcessTasks(processInstanceId, appState);
   if (activeTasks.length === 0) return null;
