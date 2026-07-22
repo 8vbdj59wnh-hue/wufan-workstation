@@ -3,6 +3,7 @@ import {
   getCurrentUser,
   getProcessNodeStepOrder,
   getLatestStandardWorkFormFields,
+  launchWorkPlanAsProcess,
   resolveAssetUrl,
   state,
   updatePersistentResource,
@@ -1293,7 +1294,7 @@ function renderGoalTaskModal() {
           <h2>${escapeHtml(modalState.title ?? "发起关键行动")}</h2>
           <div class="modal-header-actions">
             <button class="secondary-button" type="button" data-action="close-goal-modal">取消</button>
-            <button class="primary-button" type="button" data-action="submit-modal-form">保存</button>
+            <button class="primary-button" type="button" data-action="submit-modal-form">${modalState.launchImmediately ? "发起" : "保存"}</button>
             <button class="icon-button" type="button" data-action="close-goal-modal" aria-label="关闭">×</button>
           </div>
         </div>
@@ -1335,7 +1336,7 @@ function renderGoalTaskModal() {
           </label>
           <div class="modal-actions">
             <button class="secondary-button" type="button" data-action="close-goal-modal">取消</button>
-            <button class="primary-button" type="submit">保存</button>
+            <button class="primary-button" type="submit">${modalState.launchImmediately ? "发起" : "保存"}</button>
           </div>
         </form>
       </div>
@@ -1707,6 +1708,14 @@ async function saveGoalTask(form, rerender) {
 
   selectedGoalId = draft.goalId;
   state.workPlans = [workPlan, ...state.workPlans];
+  if (modalState.launchImmediately) {
+    try {
+      await launchWorkPlanAsProcess(workPlan.id, { dueDate: workPlan.dueDate });
+    } catch (error) {
+      console.error("关键行动发起失败", error);
+      return setModalError(error.message || "关键行动发起失败，请检查本地数据库服务。", rerender);
+    }
+  }
   modalState = null;
   rerender();
 }
@@ -2112,7 +2121,34 @@ export function bindGoalsPageEvents(rerender) {
   });
 }
 
+function consumeGoalTaskPrefill() {
+  if (modalState !== null || typeof window === "undefined") return;
+  const rawPrefill = window.sessionStorage.getItem("goalTaskPrefill");
+  if (rawPrefill === null) return;
+  window.sessionStorage.removeItem("goalTaskPrefill");
+  let prefill = null;
+  try {
+    prefill = JSON.parse(rawPrefill);
+  } catch {
+    return;
+  }
+  const template = getTaskTemplate(prefill?.taskTemplateId ?? "");
+  const goal = getGoal(prefill?.goalId ?? selectedGoalId) ?? getActiveGoals()[0] ?? null;
+  if (template === null || goal === null || isInactiveGoal(goal)) return;
+  selectedGoalId = goal.id;
+  modalState = {
+    kind: "goalTask",
+    goalId: goal.id,
+    categoryId: prefill.categoryId ?? template.categoryId ?? "",
+    taskTemplateId: template.id,
+    title: prefill.title ?? "发起关键行动",
+    launchImmediately: prefill.launchImmediately === true,
+    error: "",
+  };
+}
+
 export function renderGoalsPage() {
+  consumeGoalTaskPrefill();
   ensureSelectedGoalVisible();
   const content =
     activeGoalTab === "list"
