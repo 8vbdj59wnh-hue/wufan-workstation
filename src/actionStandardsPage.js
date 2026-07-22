@@ -250,6 +250,8 @@ function renderStandardWorkCard(template, selectedProcessTemplateId = "") {
   const isSelected = template.defaultProcessTemplateId !== undefined && template.defaultProcessTemplateId === selectedProcessTemplateId;
   const draggable = canCurrentUser("settings.editStandardWorks") ? ` draggable="true"` : "";
   const departmentName = findName(departments, template.departmentId, "未设置");
+  const processStepCount = template.defaultProcessTemplateId ? getStandardWorkProcessNodes(template.defaultProcessTemplateId).length : 0;
+  const processStepLabel = processStepCount > 0 ? `${processStepCount}步` : "未配置";
   return `
     <article class="standard-work-card ${isSelected ? "is-selected" : ""}"${draggable} data-standard-work-template-id="${escapeAttribute(template.id)}" data-process-template-id="${escapeAttribute(template.defaultProcessTemplateId ?? "")}">
       <div class="standard-work-card-title">
@@ -263,6 +265,10 @@ function renderStandardWorkCard(template, selectedProcessTemplateId = "") {
       <div class="standard-work-card-meta">
         <span>责任部门</span>
         <strong>${escapeHtml(departmentName)}</strong>
+      </div>
+      <div class="standard-work-card-meta">
+        <span>流程</span>
+        <strong>${escapeHtml(processStepLabel)}</strong>
       </div>
       <div class="standard-work-card-actions">
         ${renderTemplateActionButton("查看", "view-task-template", template.id)}
