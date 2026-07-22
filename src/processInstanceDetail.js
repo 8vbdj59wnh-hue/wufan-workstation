@@ -370,6 +370,24 @@ function renderStepTask(task, editable, stepIndex) {
   `;
 }
 
+function collectTaskDueDateForLaunchedProcess(form, task) {
+  const fieldName = `task__${task.id}__dueDate`;
+  const result = collectBusinessMinuteDateTime(form, fieldName);
+  if (result.error !== "请选择截止时间时间。") return result;
+
+  const data = new FormData(form);
+  const date = data.get(`${fieldName}Date`)?.toString().trim() ?? "";
+  const time = data.get(`${fieldName}Time`)?.toString().trim() ?? "";
+  const originalDate = getBusinessDatePart(task.dueDate);
+  const originalTime = getBusinessMinutePart(task.dueDate);
+
+  if (time === "" && originalTime === "" && date !== "" && date === originalDate) {
+    return { value: task.dueDate ?? date, error: "" };
+  }
+
+  return result;
+}
+
 export function renderLaunchedProcessDetail(instanceId, options = {}) {
   const instance = getInstance(instanceId);
   if (instance === null) {
@@ -576,7 +594,7 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
     const instanceDueDateResult = collectBusinessDateTime(form, "instanceDueDate");
     if (instanceDueDateResult.error !== "") return showFormError(form, instanceDueDateResult.error);
     const taskDueDateResults = new Map(
-      editableTasks.map((task) => [task.id, collectBusinessMinuteDateTime(form, `task__${task.id}__dueDate`)]),
+      editableTasks.map((task) => [task.id, collectTaskDueDateForLaunchedProcess(form, task)]),
     );
     const invalidTaskDueDate = [...taskDueDateResults.values()].find((result) => result.error !== "");
     if (invalidTaskDueDate !== undefined) return showFormError(form, invalidTaskDueDate.error);
