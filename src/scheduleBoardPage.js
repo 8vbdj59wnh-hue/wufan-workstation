@@ -638,6 +638,47 @@ function renderProcessBlock(row) {
   `;
 }
 
+function renderPendingProcessCard(row) {
+  if (row.processInstance === null) return "";
+  const canStart = canStartProcessExecution(row);
+  const title = getProcessCardTitle(row);
+  const previewImage = getProcessPreviewImage(row);
+  const imageUrl = previewImage === "" ? "" : resolveAssetUrl(previewImage);
+  const initiatorName = findName(state.people, row.processInstance.initiatorId ?? "", "未设置");
+  return `
+    <article
+      class="schedule-pending-card ${savingWorkPlanIds.has(row.workPlan.id) ? "is-saving" : ""}"
+      role="button"
+      tabindex="0"
+      data-schedule-process-id="${escapeAttribute(row.processInstance.id)}"
+      data-schedule-work-plan-id="${escapeAttribute(row.workPlan.id)}"
+      data-schedule-preview-title="${escapeAttribute(title)}"
+      data-schedule-preview-image="${escapeAttribute(imageUrl)}"
+      data-schedule-preview-progress="${escapeAttribute(getProcessCurrentProgressText(row.tasks))}"
+      draggable="false"
+      title="${escapeAttribute(title)}"
+      aria-label="${escapeAttribute(title)}"
+    >
+      <div class="schedule-pending-card-media">
+        ${
+          imageUrl === ""
+            ? `<div class="schedule-pending-card-placeholder">无图</div>`
+            : `<img src="${escapeAttribute(imageUrl)}" alt="${escapeAttribute(title)}" onerror="this.replaceWith(Object.assign(document.createElement('div'), { className: 'schedule-pending-card-placeholder', textContent: '无图' }))" />`
+        }
+      </div>
+      <div class="schedule-pending-card-body">
+        <strong>${escapeHtml(title)}</strong>
+        <span>发起人：${escapeHtml(initiatorName)}</span>
+        ${
+          canStart
+            ? `<button class="schedule-process-start-button" type="button" data-schedule-start-process-id="${escapeAttribute(row.processInstance.id)}">开始执行</button>`
+            : ""
+        }
+      </div>
+    </article>
+  `;
+}
+
 function getPreviewElement() {
   let preview = document.querySelector(".schedule-hover-preview");
   if (preview !== null) return preview;
@@ -778,7 +819,7 @@ function renderPendingProcessList(rows) {
         <span>${sortedRows.length} 个</span>
       </div>
       <div class="schedule-pending-list">
-        ${sortedRows.length === 0 ? `<p class="schedule-pending-empty">暂无待执行关键行动</p>` : sortedRows.map(renderProcessBlock).join("")}
+        ${sortedRows.length === 0 ? `<p class="schedule-pending-empty">暂无待执行关键行动</p>` : sortedRows.map(renderPendingProcessCard).join("")}
       </div>
     </aside>
   `;

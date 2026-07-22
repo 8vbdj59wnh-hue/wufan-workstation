@@ -4604,6 +4604,70 @@ button.content-template-thumb {
   font-size: 13px;
 }
 
+.schedule-pending-card {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border-bottom: 1px solid #e5e7eb;
+  cursor: pointer;
+}
+
+.schedule-pending-card:last-child {
+  border-bottom: 0;
+}
+
+.schedule-pending-card:hover {
+  background: #f9fafb;
+}
+
+.schedule-pending-card-media {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #f3f4f6;
+}
+
+.schedule-pending-card-media img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.schedule-pending-card-placeholder {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.schedule-pending-card-body {
+  display: grid;
+  gap: 6px;
+}
+
+.schedule-pending-card-body strong {
+  overflow: hidden;
+  color: #111827;
+  font-size: 13px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-pending-card-body span {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.schedule-pending-card-body .schedule-process-start-button {
+  justify-self: start;
+}
+
 .schedule-board-shell {
   overflow: auto;
 }
