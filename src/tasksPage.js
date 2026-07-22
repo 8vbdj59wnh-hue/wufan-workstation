@@ -61,6 +61,7 @@ import {
   getCurrentExecutor as selectCurrentExecutor,
   getCurrentProcessTask as selectCurrentProcessTask,
   getProcessProgress as selectProcessProgress,
+  isTaskExecutionStarted,
   isProcessInstanceOverdue as selectProcessInstanceOverdue,
   sortProcessInstanceTasks,
 } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
@@ -1303,8 +1304,16 @@ function matchesTaskListView(task) {
   return true;
 }
 
+function isTaskVisibleInExecutionStage(task) {
+  return isTaskExecutionStarted(task, state);
+}
+
 function getFilteredTasks() {
-  return state.tasks.filter((task) => !isClearanceTask(task)).filter(matchesTaskListView).filter(matchesFilters);
+  return state.tasks
+    .filter((task) => !isClearanceTask(task))
+    .filter(isTaskVisibleInExecutionStage)
+    .filter(matchesTaskListView)
+    .filter(matchesFilters);
 }
 
 function renderOverdue(task) {
@@ -4156,7 +4165,11 @@ function renderExecutionGroupDetailModal() {
 }
 
 function renderTaskDetail() {
-  const selectedTask = getTask(selectedTaskId) ?? getFilteredTasks()[0] ?? null;
+  const selectedTaskCandidate = getTask(selectedTaskId);
+  const selectedTask =
+    selectedTaskCandidate !== null && isTaskVisibleInExecutionStage(selectedTaskCandidate)
+      ? selectedTaskCandidate
+      : getFilteredTasks()[0] ?? null;
 
   if (selectedTask === null) {
     return `
