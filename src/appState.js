@@ -1761,7 +1761,6 @@ export function getCurrentWeek(date = new Date("2026-06-24T00:00:00+08:00")) {
 }
 
 function resolveOwner(node, initiatorId, launchAssignments) {
-  if (node.executorId) return node.executorId;
   if (node.ownerId) return node.ownerId;
   if (node.ownerRule === ProcessOwnerRule.FixedPerson) return node.defaultOwnerId;
   if (node.ownerRule === ProcessOwnerRule.Initiator) return initiatorId;
@@ -1780,6 +1779,10 @@ function resolveOwner(node, initiatorId, launchAssignments) {
     );
   }
   return null;
+}
+
+function resolveExecutor(node, ownerId) {
+  return node.executorId ?? ownerId;
 }
 
 function resolveAccepter(node, initiatorId, launchAssignments) {
@@ -1853,6 +1856,7 @@ export function startProcess({
   const generatedTasks = nodes.map((node, index) => {
     const activeNow = index === 0;
     const submitRequirement = normalizeSubmitRequirement(node);
+    const ownerId = resolveOwner(node, resolvedInitiatorId, launchAssignments);
     return {
       id: createId("task"),
       name: node.name,
@@ -1862,7 +1866,8 @@ export function startProcess({
       processNodeId: node.id,
       categoryId: null,
       departmentId: node.departmentId ?? node.ownerDepartmentId ?? template.applicableDepartmentIds[0],
-      ownerId: resolveOwner(node, resolvedInitiatorId, launchAssignments),
+      ownerId,
+      executorId: resolveExecutor(node, ownerId),
       initiatorId: resolvedInitiatorId,
       description: node.description,
       completionStandard: node.completionStandard,

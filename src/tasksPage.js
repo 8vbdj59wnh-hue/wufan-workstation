@@ -1535,7 +1535,7 @@ function renderTaskRow(task, index, options = {}) {
         ${prefix}<span class="task-line-clamp task-name-text">${escapeHtml(task.name)}</span>
         ${renderExecutionGroupBadge(task)}
       </td>
-      <td class="task-executor-column">${findName(people, task.ownerId, "未设置")}</td>
+      <td class="task-executor-column">${findName(people, getTaskExecutorId(task), "未设置")}</td>
       <td class="task-date-column">${formatBusinessMinuteDateTime(task.dueDate)}</td>
       <td class="task-date-column">${getTaskProjectDueDateText(task)}</td>
       <td class="task-status-column">${renderTaskStatusSelect(task)}</td>
@@ -1584,7 +1584,7 @@ function renderProcessTaskGroupRow(row, index) {
         <span class="task-line-clamp task-name-text">${escapeHtml(task.name)}</span>
         ${renderExecutionGroupBadge(task)}
       </td>
-      <td class="task-executor-column">${findName(people, task.ownerId, "未设置")}</td>
+      <td class="task-executor-column">${findName(people, getTaskExecutorId(task), "未设置")}</td>
       <td class="task-date-column">${formatBusinessMinuteDateTime(task.dueDate)}</td>
       <td class="task-date-column">${getTaskProjectDueDateText(task)}</td>
       <td class="task-status-column">${renderTaskStatusSelect(task)}</td>
@@ -4451,7 +4451,7 @@ function renderTaskModal() {
           ${
             isEdit
               ? `
-                ${isProcessTask ? "<p class=\"form-note\">标准步骤生成的任务，其步骤完成标准来自关键行动标准流程；本次执行人可以按实际人员调整。</p>" : "<p class=\"form-note\">任务来自关键行动库，任务名称、负责部门和标准完成要求已锁定；本次执行人可以调整。</p>"}
+                ${isProcessTask ? "<p class=\"form-note\">标准步骤生成的任务，其步骤完成标准来自关键行动标准流程；本次负责人和执行人可以按实际人员调整。</p>" : "<p class=\"form-note\">任务来自关键行动库，任务名称、负责部门和标准完成要求已锁定；本次负责人和执行人可以调整。</p>"}
                 <div class="detail-grid">
                   ${renderDetailField("任务名称", escapeHtml(task?.name ?? ""))}
                   ${renderDetailField("关联目标", findName(goals, task?.goalId ?? null, "未设置"))}
@@ -4463,8 +4463,12 @@ function renderTaskModal() {
                 ${renderTaskTemplateLinkField(selectedVisualTemplateId)}
                 <div class="form-grid">
                   <label>
+                    <span>负责人</span>
+                    <select name="ownerId">${renderOptions(people, effectiveTask?.ownerId ?? "", "请选择负责人")}</select>
+                  </label>
+                  <label>
                     <span>执行人</span>
-                    <select name="ownerId">${renderOptions(people, effectiveTask?.ownerId ?? "", "请选择执行人")}</select>
+                    <select name="executorId">${renderOptions(people, getTaskExecutorId(effectiveTask), "请选择执行人")}</select>
                   </label>
                 </div>
               `
@@ -4650,6 +4654,7 @@ function buildTaskDraft(form, task) {
     customFields: task.customFields && typeof task.customFields === "object" ? task.customFields : {},
     templateId: getFormValue(form, "templateId") || modalState?.templateId || task.templateId || "",
     ownerId: getFormValue(form, "ownerId") || task.ownerId,
+    executorId: getFormValue(form, "executorId") || task.executorId || "",
     description: getFormValue(form, "description"),
     startDate: getFormValue(form, "startDate") || null,
     dueDate: dueDateResult.value,
@@ -4787,6 +4792,7 @@ async function saveTask(form, rerender) {
       coverImageUrl: task.coverImageUrl ?? null,
       templateId: draft.templateId ?? task.templateId ?? "",
       ownerId: draft.ownerId,
+      executorId: draft.executorId,
       description: draft.description,
       startDate: draft.startDate,
       dueDate: draft.dueDate,
