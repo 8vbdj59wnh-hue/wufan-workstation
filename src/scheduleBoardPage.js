@@ -32,8 +32,9 @@ const boardDayCount = 30;
 const workdayStartHour = 8;
 const workdayEndHour = 24;
 const timeSlotHours = 2;
-const launchedStatusFilter = "launched";
-const completedStatusFilter = "completed";
+const keyActionPendingStatusFilter = "pending";
+const keyActionRunningStatusFilter = "running";
+const keyActionDoneStatusFilter = "done";
 const futureWorkStatuses = new Set([WorkPlanStatus.Future, WorkPlanStatus.ThisWeek]);
 const hiddenProcessStatuses = new Set([
   ProcessInstanceStatus.Done,
@@ -335,21 +336,28 @@ function getProcessPreviewImage(row) {
   return getReliableContentScheduleImage(workPlan, processInstance);
 }
 
-function getWorkPlanDisplayStatus(workPlan, processInstance) {
-  if (processInstance?.status === ProcessInstanceStatus.Done) return completedStatusFilter;
-  if (processInstance !== null) return launchedStatusFilter;
-  return workPlan.status;
-}
-
 function getWorkPlanStatusLabel(workPlan, processInstance) {
   if (processInstance?.status === ProcessInstanceStatus.Done) return "已完成";
   if (processInstance !== null) return processInstanceStatusNames[processInstance.status] ?? processInstance.status ?? "未设置";
   return workPlanStatusNames[workPlan.status] ?? workPlan.status ?? "未设置";
 }
 
+function getProcessInstanceFilterStatus(processInstance, progress) {
+  if (processInstance === null) return "";
+  if (processInstance.status === ProcessInstanceStatus.Done || processInstance.status === "completed") return keyActionDoneStatusFilter;
+  if (processInstance.status === ProcessInstanceStatus.Running && progress?.completed === 0 && progress.current?.status !== "doing") {
+    return keyActionPendingStatusFilter;
+  }
+  if (processInstance.status === ProcessInstanceStatus.Running) return keyActionRunningStatusFilter;
+  return processInstance.status ?? "";
+}
+
 function getProcessInstanceListStatusLabel(processInstance, progress) {
   if (processInstance === null) return "";
-  if (processInstance.status === ProcessInstanceStatus.Running && progress?.completed === 0 && progress.current?.status !== "doing") return "待执行";
+  const statusValue = getProcessInstanceFilterStatus(processInstance, progress);
+  if (statusValue === keyActionPendingStatusFilter) return "待执行";
+  if (statusValue === keyActionRunningStatusFilter) return "执行中";
+  if (statusValue === keyActionDoneStatusFilter) return "已完成";
   return processInstanceStatusNames[processInstance.status] ?? processInstance.status ?? "未设置";
 }
 
@@ -421,7 +429,7 @@ function buildRows() {
         ownerId: getOwnerId(workPlan),
         ownerName: findName(state.people, getOwnerId(workPlan), "未设置"),
         departmentName: findName(state.departments, workPlan.departmentId ?? template?.departmentId ?? "", "未设置部门"),
-        statusValue: getWorkPlanDisplayStatus(workPlan, processInstance),
+        statusValue: processInstance === null ? workPlan.status : getProcessInstanceFilterStatus(processInstance, progress),
         statusLabel: processInstance === null ? getWorkPlanStatusLabel(workPlan, processInstance) : getProcessInstanceListStatusLabel(processInstance, progress),
         thumbnail: getWorkThumbnail(workPlan),
         dueDate,
@@ -489,8 +497,7 @@ function rowMatchesBaseFilters(row) {
 function futureRowMatchesFilters(row) {
   if (!rowMatchesBaseFilters(row)) return false;
   if (filters.initiatorId !== "") return false;
-  if (filters.status !== "" && row.workPlan.status !== filters.status) return false;
-  if (filters.status !== "" && !futureWorkStatuses.has(filters.status)) return false;
+  if (filters.status !== "") return false;
   if (filters.noDueDateOnly) return false;
   return true;
 }
@@ -517,10 +524,9 @@ function renderOptions(options, selectedValue, placeholder) {
 
 function renderStatusOptions() {
   const options = [
-    { id: WorkPlanStatus.Future, name: "待执行" },
-    { id: WorkPlanStatus.ThisWeek, name: "待执行" },
-    { id: launchedStatusFilter, name: "已发起" },
-    { id: completedStatusFilter, name: "已完成" },
+    { id: keyActionPendingStatusFilter, name: "待执行" },
+    { id: keyActionRunningStatusFilter, name: "执行中" },
+    { id: keyActionDoneStatusFilter, name: "已完成" },
   ];
   return renderOptions(options, filters.status, "全部状态");
 }
@@ -961,7 +967,7 @@ function renderLaunchedActionList(rows) {
           <tbody>
             ${
               sortedRows.length === 0
-                ? `<tr><td colspan="10">暂无匹配的已发起关键行动</td></tr>`
+                ? `<tr><td colspan="10">暂无匹配的关键行动</td></tr>`
                 : sortedRows
                     .map((row, index) => {
                       const instanceId = row.processInstance?.id ?? "";
@@ -994,7 +1000,7 @@ function renderLaunchedActionList(rows) {
           </tbody>
         </table>
       </div>
-      <p class="form-note">列表只展示已发起关键行动；查看和编辑均复用现有已发起关键行动详情能力。</p>
+      <p class="form-note">列表只展示关键行动；查看和编辑均复用现有关键行动详情能力。</p>
     </section>
   `;
 }
@@ -1079,13 +1085,13 @@ function renderProcessDetailModal() {
   if (selectedProcessInstanceId === null) return "";
   return `
     <div class="modal-backdrop" role="presentation">
-      <div class="modal-panel wide-modal schedule-process-modal" role="dialog" aria-modal="true" aria-label="已发起关键行动详情">
+      <div class="modal-panel wide-modal schedule-process-modal" role="dialog" aria-modal="true" aria-label="关键行动详情">
         <div class="modal-header">
-          <h2>已发起关键行动详情</h2>
+          <h2>关键行动详情</h2>
           <button class="icon-button" type="button" data-action="close-schedule-process-modal" aria-label="关闭">×</button>
         </div>
         ${renderLaunchedProcessDetail(selectedProcessInstanceId, {
-          emptyHtml: `<section class="placeholder"><h2>未找到已发起关键行动</h2></section>`,
+          emptyHtml: `<section class="placeholder"><h2>未找到关键行动</h2></section>`,
         })}
       </div>
     </div>
@@ -1104,7 +1110,7 @@ function renderWorkPlanEditModal() {
         <div class="modal-header">
           <div>
             <h2>编辑待执行关键行动</h2>
-            <p class="form-note">这里编辑的是执行前信息，不会影响已发起后的关键行动详情。</p>
+            <p class="form-note">这里编辑的是执行前信息，不会影响关键行动详情。</p>
           </div>
           <button class="icon-button" type="button" data-action="close-work-plan-edit-modal" aria-label="关闭">×</button>
         </div>
