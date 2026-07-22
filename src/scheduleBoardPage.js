@@ -766,6 +766,24 @@ function renderBoardRows(rows, days) {
   `;
 }
 
+function renderPendingProcessList(rows) {
+  const sortedRows = [...rows].sort((left, right) =>
+    String(left.dueDate ?? "").localeCompare(String(right.dueDate ?? "")) ||
+    String(right.processInstance?.createdAt ?? "").localeCompare(String(left.processInstance?.createdAt ?? "")),
+  );
+  return `
+    <aside class="schedule-pending-panel" aria-label="待执行关键行动">
+      <div class="schedule-pending-panel-header">
+        <h3>待执行关键行动</h3>
+        <span>${sortedRows.length} 个</span>
+      </div>
+      <div class="schedule-pending-list">
+        ${sortedRows.length === 0 ? `<p class="schedule-pending-empty">暂无待执行关键行动</p>` : sortedRows.map(renderProcessBlock).join("")}
+      </div>
+    </aside>
+  `;
+}
+
 function renderBoardHeader(days) {
   const dayHeaders = filters.noDueDateOnly
     ? `<div class="schedule-day-header is-unscheduled">无截止时间</div>`
@@ -1022,6 +1040,8 @@ function renderProcessDetailModal() {
 export function renderScheduleBoardPage() {
   const days = buildBoardDays();
   const launchedRows = buildLaunchedRows().filter(launchedRowMatchesFilters);
+  const pendingRows = launchedRows.filter((row) => row.statusValue === keyActionPendingStatusFilter);
+  const runningRows = launchedRows.filter((row) => row.statusValue === keyActionRunningStatusFilter);
   const launchedListRows = buildLaunchedListRows().filter(launchedRowMatchesFilters);
   const columnCount = filters.noDueDateOnly ? 1 : boardDayCount;
   return `
@@ -1034,11 +1054,12 @@ export function renderScheduleBoardPage() {
           ? renderLaunchedActionList(launchedListRows)
           : `
             <div class="schedule-board-layout">
+              ${renderPendingProcessList(pendingRows)}
               <div class="schedule-board-shell">
                 ${renderValueChainLegend()}
                 <div class="schedule-board-grid">
                   ${renderBoardHeader(days)}
-                  ${renderBoardRows(launchedRows, days)}
+                  ${renderBoardRows(runningRows, days)}
                 </div>
               </div>
             </div>

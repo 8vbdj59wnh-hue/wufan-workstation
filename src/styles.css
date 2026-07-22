@@ -4547,17 +4547,20 @@ button.content-template-thumb {
 }
 
 .schedule-future-panel,
+.schedule-pending-panel,
 .schedule-board-shell {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #ffffff;
 }
 
-.schedule-future-panel {
+.schedule-future-panel,
+.schedule-pending-panel {
   overflow: hidden;
 }
 
-.schedule-future-panel-header {
+.schedule-future-panel-header,
+.schedule-pending-panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -4567,17 +4570,20 @@ button.content-template-thumb {
   background: #f9fafb;
 }
 
-.schedule-future-panel-header h3 {
+.schedule-future-panel-header h3,
+.schedule-pending-panel-header h3 {
   margin: 0;
   font-size: 14px;
 }
 
-.schedule-future-panel-header span {
+.schedule-future-panel-header span,
+.schedule-pending-panel-header span {
   color: #6b7280;
   font-size: 12px;
 }
 
-.schedule-future-list {
+.schedule-future-list,
+.schedule-pending-list {
   display: grid;
   max-height: 70vh;
   overflow: auto;
@@ -4590,7 +4596,8 @@ button.content-template-thumb {
   border-right: 0;
 }
 
-.schedule-future-empty {
+.schedule-future-empty,
+.schedule-pending-empty {
   margin: 0;
   padding: 24px 14px;
   color: #6b7280;
