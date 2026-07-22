@@ -146,6 +146,7 @@ let expandedClearanceGroups = new Set();
 let modalState = null;
 let activeTaskTab = "task-list";
 let taskListView = "today";
+let taskDisplayView = "list";
 let visualTemplatesLoaded = state.templates.length > 0;
 let visualTemplatesLoading = false;
 
@@ -3122,20 +3123,26 @@ function renderFilters() {
 
 function renderTaskListViewSwitch() {
   return `
-    <div class="task-list-view-switch" aria-label="任务视图">
-      ${taskListViewOptions
-        .map(
-          (option) => `
-            <button
-              class="${taskListView === option.value ? "is-active" : ""}"
-              type="button"
-              data-task-list-view="${option.value}"
-            >
-              ${option.label}
-            </button>
-          `,
-        )
-        .join("")}
+    <div class="task-list-toolbar">
+      <div class="task-list-view-switch" aria-label="任务范围">
+        ${taskListViewOptions
+          .map(
+            (option) => `
+              <button
+                class="${taskListView === option.value ? "is-active" : ""}"
+                type="button"
+                data-task-list-view="${option.value}"
+              >
+                ${option.label}
+              </button>
+            `,
+          )
+          .join("")}
+      </div>
+      <div class="task-display-view-switch" aria-label="任务展示方式">
+        <button class="${taskDisplayView === "list" ? "is-active" : ""}" type="button" data-task-display-view="list">列表</button>
+        <button class="${taskDisplayView === "card" ? "is-active" : ""}" type="button" data-task-display-view="card">卡片</button>
+      </div>
     </div>
   `;
 }
@@ -3235,6 +3242,85 @@ function renderTaskTable() {
           </tbody>
         </table>
       </div>
+    </section>
+  `;
+}
+
+function getTaskRemainingText(task) {
+  if (isDoneStatus(task.status)) return { label: "已完成", overdue: false };
+  if (isCanceledStatus(task.status)) return { label: "已取消", overdue: false };
+
+  const dueTime = parseTaskComparableTime(task.dueDate, "end");
+  if (dueTime === null) return { label: "未设置截止时间", overdue: false };
+
+  const nowTime = parseTaskComparableTime(getNow());
+  if (nowTime === null) return { label: "未设置截止时间", overdue: false };
+
+  const overdue = nowTime > dueTime || hasTaskOverdueRecord(task);
+  const diffMinutes = Math.max(1, Math.ceil(Math.abs(nowTime - dueTime) / 60000));
+  const hours = Math.floor(diffMinutes / 60);
+  const minutes = diffMinutes % 60;
+  const durationText = `${hours}小时${minutes}分钟`;
+  return { label: overdue ? `已超时 ${durationText}` : `剩余 ${durationText}`, overdue };
+}
+
+function renderTaskCard(task, options = {}) {
+  const selected = task.id === selectedTaskId ? "is-selected" : "";
+  const remaining = getTaskRemainingText(task);
+  const numberText = options.numberText ?? "";
+  const groupToggle =
+    options.processGroupId === undefined
+      ? ""
+      : `<button class="icon-button task-group-toggle" type="button" data-action="toggle-task-group" data-process-instance-id="${escapeHtml(options.processGroupId)}" aria-label="${options.expanded ? "折叠标准任务" : "展开标准任务"}">${options.expanded ? "▾" : "▸"}</button>`;
+
+  return `
+    <article class="task-card ${selected}" data-row-task-id="${escapeHtml(task.id)}">
+      <div class="task-card-cover">${renderCoverImage(task)}</div>
+      <div class="task-card-body">
+        <div class="task-card-title-row">
+          ${groupToggle}
+          <span class="task-card-index">${escapeHtml(numberText)}</span>
+          <h3>${escapeHtml(task.name)}</h3>
+        </div>
+        <div class="task-card-meta">
+          <span>${escapeHtml(findName(people, getTaskExecutorId(task), "未设置执行人"))}</span>
+          <span>${escapeHtml(formatBusinessMinuteDateTime(task.dueDate, "未设置截止"))}</span>
+        </div>
+        <div class="task-card-status-row">
+          ${renderTaskStatusSelect(task)}
+          <span class="task-card-remaining ${remaining.overdue ? "is-overdue" : ""}">${escapeHtml(remaining.label)}</span>
+        </div>
+        ${renderExecutionGroupBadge(task)}
+      </div>
+    </article>
+  `;
+}
+
+function renderTaskCardGrid() {
+  const tableRows = getTaskTableRows();
+  const cards = tableRows.flatMap((row, index) => {
+    if (row.type === "task") return [renderTaskCard(row.task, { numberText: String(index + 1) })];
+    if (!row.expanded) {
+      return [
+        renderTaskCard(row.currentTask, {
+          numberText: String(index + 1),
+          processGroupId: row.processInstanceId,
+          expanded: false,
+        }),
+      ];
+    }
+    return row.tasks.map((task, childIndex) =>
+      renderTaskCard(task, {
+        numberText: `${index + 1}.${childIndex + 1}`,
+        processGroupId: childIndex === 0 ? row.processInstanceId : undefined,
+        expanded: true,
+      }),
+    );
+  });
+
+  return `
+    <section class="settings-section task-card-section">
+      ${cards.length === 0 ? `<div class="empty-detail">暂无匹配的任务</div>` : `<div class="task-card-grid">${cards.join("")}</div>`}
     </section>
   `;
 }
@@ -5694,6 +5780,13 @@ export function bindTasksPageEvents(rerender) {
     });
   });
 
+  document.querySelectorAll("[data-task-display-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      taskDisplayView = button.dataset.taskDisplayView === "card" ? "card" : "list";
+      rerender();
+    });
+  });
+
   if (activeTaskTab === "content-schedule") {
     bindContentScheduleEvents(rerender);
     return;
@@ -6137,7 +6230,7 @@ export function renderTasksPage() {
             : `
               ${renderTaskListViewSwitch()}
               ${renderFilters()}
-              ${renderTaskTable()}
+              ${taskDisplayView === "card" ? renderTaskCardGrid() : renderTaskTable()}
               ${renderTaskDetail()}
               ${renderTaskDetailModal()}
               ${renderLaunchedProcessDetailModal()}
