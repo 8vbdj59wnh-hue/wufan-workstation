@@ -54,6 +54,7 @@ import {
   updatePublicFormImagePreview,
   validatePublicFormFields,
 } from "./workFormEditor.js?v=20260722-public-form-editor1";
+import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
 
 const departments = state.departments;
 const categories = state.categories;
@@ -263,29 +264,8 @@ function isContentNoteTemplate(template) {
   return template?.id === "task-template-publish-content-note" || template?.taskTemplateId === "task-template-publish-content-note" || template?.name === "发布内容笔记";
 }
 
-function getFormFieldKey(field, fallback) {
-  const rawKey = field.key ?? field.fieldId ?? field.id ?? fallback;
-  return String(rawKey).replace(/^发布内容笔记-/, "");
-}
-
-function normalizeGoalFormField(field, index) {
-  const key = getFormFieldKey(field, `field-${index + 1}`);
-  return {
-    ...field,
-    id: field.id ?? field.fieldId ?? key,
-    key,
-    label: field.label ?? "未命名字段",
-    type: field.type ?? "text",
-    required: field.required === true,
-    placeholder: field.placeholder ?? "",
-    options: Array.isArray(field.options) ? field.options : [],
-    showInList: field.showInList !== false,
-    sortOrder: Number.isFinite(Number(field.sortOrder ?? field.order)) ? Number(field.sortOrder ?? field.order) : index + 1,
-  };
-}
-
 function getSortedFormFields(template) {
-  const fields = getLatestStandardWorkFormFields(template?.id, template?.formFields ?? []).map(normalizeGoalFormField);
+  const fields = normalizePublicFormFields(getLatestStandardWorkFormFields(template?.id, template?.formFields ?? []));
   if (isContentNoteTemplate(template)) {
     fields.forEach((field) => {
       if (field.key === "publishDate") field.type = "datetime_hour";

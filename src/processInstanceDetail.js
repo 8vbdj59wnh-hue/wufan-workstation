@@ -15,6 +15,7 @@ import {
   updatePublicFormImagePreview,
   validatePublicFormFields,
 } from "./workFormEditor.js?v=20260722-public-form-editor1";
+import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
 import {
   collectBusinessDateTime,
   collectBusinessMinuteDateTime,
@@ -90,29 +91,9 @@ function getTaskTemplate(instance) {
   return state.taskTemplates.find((template) => template.id === (instance.taskTemplateId ?? instance.standardWorkId)) ?? null;
 }
 
-function normalizeExecutionFormField(field, index) {
-  const typeMap = {
-    multi: "multi_select",
-    checkbox: "multi_select",
-    attachment: "file",
-  };
-  const type = typeMap[field.type] ?? field.type ?? "text";
-  return {
-    ...field,
-    id: field.id ?? field.fieldId ?? field.key ?? `field-${index + 1}`,
-    key: field.key ?? field.fieldId ?? field.id ?? `field-${index + 1}`,
-    label: field.label ?? "未命名字段",
-    type,
-    required: field.required === true,
-    placeholder: field.placeholder ?? "",
-    options: Array.isArray(field.options) ? field.options : [],
-    sortOrder: Number.isFinite(Number(field.sortOrder ?? field.order)) ? Number(field.sortOrder ?? field.order) : index + 1,
-  };
-}
-
 function getStandardWorkFormFields(standardWorkId, fallbackFields = []) {
   const sourceFields = getLatestStandardWorkFormFields(standardWorkId, fallbackFields);
-  return sourceFields.map(normalizeExecutionFormField).sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0));
+  return normalizePublicFormFields(sourceFields);
 }
 
 function getInstanceFormFields(instance) {

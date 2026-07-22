@@ -1,4 +1,5 @@
 import { resolveAssetUrl, state } from "./appState.js?v=20260705-state-singleton1";
+import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
 
 const hiddenSystemFieldKeys = new Set(["standardWorkAttachments"]);
 
@@ -8,10 +9,6 @@ function escapeHtml(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
-}
-
-function normalizeFields(formFields = []) {
-  return [...formFields].sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0));
 }
 
 function isEmptyValue(value) {
@@ -65,7 +62,7 @@ function getExtraLabel(key) {
 }
 
 export function renderWorkFormViewer({ formFields = [], customFields = {} }) {
-  const fields = normalizeFields(formFields);
+  const fields = normalizePublicFormFields(formFields);
   const knownKeys = new Set(fields.map((field) => field.key));
   const rows = [
     ...fields.map((field) => ({

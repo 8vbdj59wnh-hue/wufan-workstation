@@ -43,6 +43,7 @@ import {
   renderBusinessHourOptions,
   renderBusinessMinuteOptions,
 } from "./businessTime.js?v=20260705-state-singleton1";
+import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
 
 const categories = state.categories;
 const departments = state.departments;
@@ -655,22 +656,6 @@ async function saveTaskTemplate(form, rerender) {
   rerender();
 }
 
-function normalizeExecutionFormField(field, index) {
-  const typeMap = { multi: "multi_select", checkbox: "multi_select", attachment: "file" };
-  const type = typeMap[field.type] ?? field.type ?? "text";
-  return {
-    ...field,
-    id: field.id ?? field.fieldId ?? field.key ?? `field-${index + 1}`,
-    key: field.key ?? field.fieldId ?? field.id ?? `field-${index + 1}`,
-    label: field.label ?? "未命名字段",
-    type,
-    required: field.required === true,
-    placeholder: field.placeholder ?? "",
-    options: Array.isArray(field.options) ? field.options : [],
-    sortOrder: Number.isFinite(Number(field.sortOrder ?? field.order)) ? Number(field.sortOrder ?? field.order) : index + 1,
-  };
-}
-
 function getSortedFormFields(template) {
   const sourceFields = [...getLatestStandardWorkFormFields(template?.id, template?.formFields ?? [])];
   if (template?.id === "task-template-publish-content-note" || template?.name === "发布内容笔记") {
@@ -682,7 +667,7 @@ function getSortedFormFields(template) {
       if (!sourceFields.some((item) => item.key === field.key)) sourceFields.push(field);
     });
   }
-  return sourceFields.map(normalizeExecutionFormField).sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0));
+  return normalizePublicFormFields(sourceFields);
 }
 
 function getCustomFieldValue(customFields, field) {

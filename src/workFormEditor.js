@@ -6,6 +6,7 @@ import {
   isBusinessDueDateField,
   renderBusinessHourOptions,
 } from "./businessTime.js?v=20260705-state-singleton1";
+import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -124,13 +125,14 @@ export function renderPublicFormFieldInput(field, customFields = {}) {
 }
 
 export function renderPublicFormEditor({ fields = [], customFields = {}, title = "本次关键行动信息" }) {
-  if (fields.length === 0) return "";
+  const normalizedFields = normalizePublicFormFields(fields);
+  if (normalizedFields.length === 0) return "";
 
   return `
     <div class="template-custom-fields">
       ${title === "" ? "" : `<h3>${escapeHtml(title)}</h3>`}
       <div class="form-grid">
-        ${fields.map((field) => renderPublicFormFieldInput(field, customFields)).join("")}
+        ${normalizedFields.map((field) => renderPublicFormFieldInput(field, customFields)).join("")}
       </div>
     </div>
   `;
@@ -138,7 +140,7 @@ export function renderPublicFormEditor({ fields = [], customFields = {}, title =
 
 export function collectPublicFormFields(form, fields = []) {
   const formData = new FormData(form);
-  return fields.reduce((result, field) => {
+  return normalizePublicFormFields(fields).reduce((result, field) => {
     if (isBusinessDueDateField(field)) {
       const dateTime = collectBusinessDateTime(form, `custom__${field.key}`, field.label);
       result[field.key] = dateTime.error === "" ? dateTime.value ?? "" : `__INVALID_BUSINESS_TIME__:${dateTime.error}`;
@@ -156,7 +158,7 @@ export function collectPublicFormFields(form, fields = []) {
 }
 
 export function validatePublicFormFields(customFields, fields = []) {
-  for (const field of fields) {
+  for (const field of normalizePublicFormFields(fields)) {
     const value = customFields[field.key];
     const isEmpty = Array.isArray(value) ? value.length === 0 : value === "";
     if (isEmpty) continue;
