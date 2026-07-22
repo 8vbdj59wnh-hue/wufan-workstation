@@ -4490,10 +4490,6 @@ function renderTaskModal() {
                       ${renderOptions(availableTemplates, modalState.taskTemplateId ?? "", templateHint)}
                     </select>
                   </label>
-                  <label>
-                    <span>发起人</span>
-                    <select name="initiatorId">${renderOptions(people, getCurrentUser()?.personId ?? getCurrentUser()?.id ?? "", "请选择发起人")}</select>
-                  </label>
                 </div>
                 ${renderTemplateLockedInfo(selectedTemplate)}
                 ${renderCustomFieldsForm(selectedTemplate)}
@@ -4770,10 +4766,12 @@ async function saveTask(form, rerender) {
     };
 
     try {
+      const currentUserId = getCurrentUser()?.personId ?? getCurrentUser()?.id ?? "";
+      if (currentUserId === "") return setModalError("无法确认当前发起人，请重新登录后再试。", rerender);
       const result = await launchWorkPlanDraftAsProcess(workPlan, {
         dueDate: workPlan.dueDate,
-        initiatorId: draft.initiatorId,
-        launchAssignments: buildLaunchAssignments(draft.template.defaultProcessTemplateId, draft.template, draft.initiatorId),
+        initiatorId: currentUserId,
+        launchAssignments: buildLaunchAssignments(draft.template.defaultProcessTemplateId, draft.template, currentUserId),
       });
       selectedProcessInstanceId = result.instance.id;
       selectedTaskId = state.tasks.find((item) => item.processInstanceId === result.instance.id)?.id ?? selectedTaskId;
