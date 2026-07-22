@@ -25,6 +25,7 @@ import {
   replaceAllData,
   touchLastLoginAt,
   updateCurrentUserAvatar,
+  startProcessInstanceExecution,
   startExecutionGroup,
   updateProcessTemplateNodeStatus,
   updateResource,
@@ -505,6 +506,20 @@ app.post("/api/process-instances/:id/cancel", requirePermission("processes.editI
   } catch (error) {
     console.error("取消关键行动失败", error);
     response.status(400).json({ success: false, message: error.message || "取消关键行动失败，请检查本地数据库服务。" });
+  }
+});
+
+app.post("/api/process-instances/:id/start", (request, response) => {
+  try {
+    startProcessInstanceExecution(request.params.id, {
+      userId: getUserPersonId(request.user),
+      isAdmin: isAdminUser(request.user),
+    });
+    response.json({ success: true, data: filterDataByScope(readAllData(), request.user) });
+  } catch (error) {
+    console.error("开始执行关键行动失败", error);
+    const message = error.message || "开始执行关键行动失败，请检查本地数据库服务。";
+    response.status(message.includes("没有权限") ? 403 : 400).json({ success: false, message });
   }
 });
 

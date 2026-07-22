@@ -4853,6 +4853,8 @@ button.content-template-thumb {
 .schedule-process-block {
   display: flex;
   align-items: center;
+  gap: 6px;
+  justify-content: space-between;
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
@@ -4882,7 +4884,7 @@ button.content-template-thumb {
 
 .schedule-process-block strong {
   display: block;
-  width: 100%;
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4890,6 +4892,22 @@ button.content-template-thumb {
   font-size: 12px;
   font-weight: 700;
   color: #111827;
+}
+
+.schedule-process-start-button {
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 255, 255, 0.74);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.86);
+  color: #111827;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1.2;
+  padding: 2px 5px;
+}
+
+.schedule-process-start-button:hover {
+  background: #ffffff;
 }
 
 .schedule-slot-more {

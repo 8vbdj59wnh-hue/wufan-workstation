@@ -397,6 +397,19 @@ export async function cancelProcessInstance(instanceId, cancelReason = "") {
   return data;
 }
 
+export async function startProcessInstanceExecution(instanceId) {
+  const response = await authFetch(`${apiBaseUrl}/api/process-instances/${instanceId}/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success !== true) {
+    throw new Error(data.message ?? data.error ?? "开始执行关键行动失败，请检查本地数据库服务。");
+  }
+  if (data.data !== undefined) applyDataSnapshot(data.data);
+  return data.data;
+}
+
 export async function moveTaskTemplateToValueChain(templateId, category) {
   const categoryName = typeof category === "string" ? category : category?.name ?? "";
   const categoryId = typeof category === "string" ? undefined : category?.id;

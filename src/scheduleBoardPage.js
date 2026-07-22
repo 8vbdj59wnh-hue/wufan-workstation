@@ -1,4 +1,4 @@
-import { cancelProcessInstance, getCurrentUser, launchWorkPlanAsProcess, resolveAssetUrl, state, updatePersistentResource } from "./appState.js?v=20260705-state-singleton1";
+import { cancelProcessInstance, getCurrentUser, launchWorkPlanAsProcess, resolveAssetUrl, startProcessInstanceExecution, state, updatePersistentResource } from "./appState.js?v=20260705-state-singleton1";
 import { selectTask } from "./tasksPage.js?v=20260705-state-singleton1";
 import { bindLaunchedProcessDetailEvents, canEditLaunchedProcessInstance, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260722-due-date-boundary2";
 import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
@@ -10,6 +10,7 @@ import {
 } from "./businessTime.js?v=20260705-state-singleton1";
 import {
   ProcessInstanceStatus,
+  TaskStatus,
   WorkPlanStatus,
   getValueModuleName,
   inferValueModuleIdFromText,
@@ -630,6 +631,28 @@ function canEditFutureWork(row) {
   return isFutureWorkPlan(row.workPlan) && hasPermission(getCurrentUser(), "workPlans.launch") && !savingWorkPlanIds.has(row.workPlan.id);
 }
 
+function isAdminUser(user) {
+  const role = user?.role ?? "";
+  const authRole = user?.authRole ?? "";
+  return role === "admin" || role === "system_admin" || authRole === "admin";
+}
+
+function getCurrentUserPersonId() {
+  const user = getCurrentUser();
+  return user?.personId ?? user?.id ?? "";
+}
+
+function canStartProcessExecution(row) {
+  if (row.processInstance === null) return false;
+  if (savingWorkPlanIds.has(row.workPlan.id)) return false;
+  if (row.statusValue !== keyActionPendingStatusFilter) return false;
+  if (row.currentTask?.status !== TaskStatus.Todo) return false;
+  const user = getCurrentUser();
+  if (isAdminUser(user)) return true;
+  const userId = getCurrentUserPersonId();
+  return userId !== "" && [row.currentTask.ownerId, row.currentTask.executorId].includes(userId);
+}
+
 function getProcessCardTitle(row) {
   return row.processInstance?.displayTitle ?? row.processInstance?.name ?? row.title;
 }
@@ -645,14 +668,16 @@ function getProcessCurrentProgressText(tasks) {
 function renderProcessBlock(row) {
   if (row.processInstance === null) return "";
   const canDrag = canDragProcess(row);
+  const canStart = canStartProcessExecution(row);
   const title = getProcessCardTitle(row);
   const previewImage = getProcessPreviewImage(row);
   const valueModuleClass = getValueModuleCardClass(row.valueModuleId);
   const progressText = getProcessCurrentProgressText(row.tasks);
   return `
-    <button
+    <article
       class="schedule-process-block ${getProcessStatusClass(row)} ${valueModuleClass} ${savingWorkPlanIds.has(row.workPlan.id) ? "is-saving" : ""}"
-      type="button"
+      role="button"
+      tabindex="0"
       data-schedule-process-id="${escapeAttribute(row.processInstance.id)}"
       data-schedule-work-plan-id="${escapeAttribute(row.workPlan.id)}"
       data-schedule-drag-type="process-instance"
@@ -664,7 +689,12 @@ function renderProcessBlock(row) {
       aria-label="${escapeAttribute(title)}"
     >
       <strong>${escapeHtml(title)}</strong>
-    </button>
+      ${
+        canStart
+          ? `<button class="schedule-process-start-button" type="button" data-schedule-start-process-id="${escapeAttribute(row.processInstance.id)}">开始执行</button>`
+          : ""
+      }
+    </article>
   `;
 }
 
@@ -1081,6 +1111,28 @@ async function launchFutureWorkPlanToSlot(workPlanId, targetDate, targetHour, re
   }
 }
 
+async function startLaunchedProcessExecution(processInstanceId, rerender) {
+  const row = findRowByProcessInstanceId(processInstanceId);
+  if (row === null || row.processInstance === null) return;
+  if (!canStartProcessExecution(row)) return;
+
+  savingWorkPlanIds.add(row.workPlan.id);
+  rerender();
+
+  try {
+    await startProcessInstanceExecution(processInstanceId);
+  } catch (error) {
+    window.alert(error.message || "开始执行关键行动失败，请检查本地数据库服务。");
+  } finally {
+    savingWorkPlanIds.delete(row.workPlan.id);
+    suppressProcessClickId = processInstanceId;
+    rerender();
+    window.setTimeout(() => {
+      if (suppressProcessClickId === processInstanceId) suppressProcessClickId = null;
+    }, 250);
+  }
+}
+
 function renderProcessDetailModal() {
   if (selectedProcessInstanceId === null) return "";
   return `
@@ -1299,6 +1351,16 @@ export function bindScheduleBoardPageEvents(rerender) {
     });
   });
 
+  document.querySelectorAll("[data-schedule-start-process-id]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const processInstanceId = button.dataset.scheduleStartProcessId ?? "";
+      if (processInstanceId === "") return;
+      await startLaunchedProcessExecution(processInstanceId, rerender);
+    });
+  });
+
   document.querySelectorAll("[data-schedule-process-id]").forEach((button) => {
     const showPreview = () => {
       showSchedulePreview(button);
@@ -1337,6 +1399,14 @@ export function bindScheduleBoardPageEvents(rerender) {
     });
 
     button.addEventListener("click", () => {
+      if (suppressProcessClickId === button.dataset.scheduleProcessId) return;
+      selectedProcessInstanceId = button.dataset.scheduleProcessId ?? null;
+      rerender();
+    });
+
+    button.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
       if (suppressProcessClickId === button.dataset.scheduleProcessId) return;
       selectedProcessInstanceId = button.dataset.scheduleProcessId ?? null;
       rerender();

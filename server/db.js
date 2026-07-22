@@ -810,6 +810,23 @@ function getOrderedProcessInstanceTasks(processInstanceId) {
     });
 }
 
+const currentProcessTaskStatusRank = {
+  doing: 1,
+  todo: 2,
+  pending_acceptance: 3,
+  waiting: 4,
+};
+
+function getCurrentProcessTaskInTransaction(processInstanceId) {
+  return getOrderedProcessInstanceTasks(processInstanceId)
+    .filter((task) => !["done", "completed", "canceled", "cancelled"].includes(task.status))
+    .sort((left, right) => {
+      const statusDifference = (currentProcessTaskStatusRank[left.status] ?? 99) - (currentProcessTaskStatusRank[right.status] ?? 99);
+      if (statusDifference !== 0) return statusDifference;
+      return 0;
+    })[0] ?? null;
+}
+
 function includesSubmitPart(submitType, part) {
   if (submitType === "none") return false;
   return String(submitType ?? "").split("_").includes(part);
@@ -1999,6 +2016,42 @@ export function cancelProcessInstance(instanceId, cancelReason = "") {
       .run({ id: instanceId, now });
   });
   cancel();
+}
+
+export function startProcessInstanceExecution(instanceId, { userId = "", isAdmin = false } = {}) {
+  const database = getDatabase();
+  const start = database.transaction(() => {
+    const instance = readExistingItem("processInstances", instanceId);
+    if (instance === null) throw new Error("未找到该关键行动。");
+    if (["done", "completed"].includes(instance.status)) throw new Error("已完成关键行动不能开始执行。");
+    if (["canceled", "cancelled", "stopped", "terminated"].includes(instance.status)) throw new Error("已取消或已终止关键行动不能开始执行。");
+
+    const currentTask = getCurrentProcessTaskInTransaction(instance.id);
+    if (currentTask === null) throw new Error("该关键行动没有可开始执行的当前任务。");
+    if (currentTask.status !== "todo") throw new Error("只有待处理任务可以开始执行。");
+
+    const normalizedUserId = String(userId ?? "").trim();
+    const canStart =
+      isAdmin === true ||
+      (normalizedUserId !== "" && [currentTask.ownerId, currentTask.executorId].includes(normalizedUserId));
+    if (!canStart) throw new Error("你没有权限开始执行该关键行动。");
+
+    const now = new Date().toISOString();
+    insertItem("tasks", {
+      ...currentTask,
+      status: "doing",
+      startDate: now,
+      updatedAt: now,
+    });
+    insertItem("processInstances", {
+      ...instance,
+      startedAt: instance.startedAt || now,
+      updatedAt: now,
+    });
+
+    return { processInstanceId: instance.id, taskId: currentTask.id, startedAt: now };
+  });
+  return start();
 }
 
 export function launchWorkPlanWithProcess(workPlanId, { processInstance, tasks: generatedTasks = [], workPlan: launchedWorkPlan }) {
