@@ -1035,13 +1035,16 @@ const standardWorkFormDefinitions = {
   ],
   发布内容笔记: [
     ["coverImageUrl", "产品图", "image", false, "上传1:1产品图", [], true],
-    ["publishDate", "发布日期", "date", true, "", [], true],
+    ["publishDate", "发布日期", "datetime_hour", true, "", [], true],
     ["account", "发布账号", "select", true, "请选择发布账号", ["阿柚", "小茉", "小满", "其他"], true],
     ["contentType", "内容类型", "select", true, "请选择内容类型", ["图文笔记", "视频笔记"], true],
     ["purpose", "目的", "select", true, "请选择目的", ["种草引流", "场景教育", "审美表达", "信任建立", "品牌心智", "转化收割"], true],
     ["audience", "受众人群", "select", true, "请选择受众人群", ["路人", "兴趣人群", "新客", "老客", "流失顾客"], true],
+    ["productName", "对应产品", "text", false, "请输入对应产品", [], true],
     ["title", "标题", "text", true, "请输入笔记标题", [], true],
     ["contentText", "内容文案", "textarea", true, "请输入内容文案", [], false],
+    ["scene", "参考场景", "text", false, "请输入参考场景", [], true],
+    ["hashtags", "话题", "text", false, "例如 #花瓶 #家居软装", [], true],
   ],
   发布买家秀: [
     ["coverImageUrl", "产品图", "image", false, "上传1:1产品图", [], true],

@@ -248,8 +248,47 @@ function getProcessTemplateName(templateId) {
   return state.processTemplates.find((template) => template.id === templateId)?.name ?? "未绑定关键行动标准流程";
 }
 
+const contentNoteRequiredFields = [
+  { id: "content-note-product-name", label: "对应产品", key: "productName", type: "text", required: false, placeholder: "请输入对应产品", options: [], showInList: true, sortOrder: 7 },
+  { id: "content-note-scene", label: "参考场景", key: "scene", type: "text", required: false, placeholder: "请输入参考场景", options: [], showInList: true, sortOrder: 10 },
+  { id: "content-note-hashtags", label: "话题", key: "hashtags", type: "text", required: false, placeholder: "例如 #花瓶 #家居软装", options: [], showInList: true, sortOrder: 11 },
+];
+
+function isContentNoteTemplate(template) {
+  return template?.id === "task-template-publish-content-note" || template?.taskTemplateId === "task-template-publish-content-note" || template?.name === "发布内容笔记";
+}
+
+function getFormFieldKey(field, fallback) {
+  const rawKey = field.key ?? field.fieldId ?? field.id ?? fallback;
+  return String(rawKey).replace(/^发布内容笔记-/, "");
+}
+
+function normalizeGoalFormField(field, index) {
+  const key = getFormFieldKey(field, `field-${index + 1}`);
+  return {
+    ...field,
+    id: field.id ?? field.fieldId ?? key,
+    key,
+    label: field.label ?? "未命名字段",
+    type: field.type ?? "text",
+    required: field.required === true,
+    placeholder: field.placeholder ?? "",
+    options: Array.isArray(field.options) ? field.options : [],
+    showInList: field.showInList !== false,
+    sortOrder: Number.isFinite(Number(field.sortOrder ?? field.order)) ? Number(field.sortOrder ?? field.order) : index + 1,
+  };
+}
+
 function getSortedFormFields(template) {
-  const fields = [...getLatestStandardWorkFormFields(template?.id, template?.formFields ?? [])];
+  const fields = getLatestStandardWorkFormFields(template?.id, template?.formFields ?? []).map(normalizeGoalFormField);
+  if (isContentNoteTemplate(template)) {
+    fields.forEach((field) => {
+      if (field.key === "publishDate") field.type = "datetime_hour";
+    });
+    contentNoteRequiredFields.forEach((field) => {
+      if (!fields.some((item) => item.key === field.key)) fields.push(field);
+    });
+  }
   return fields.sort((left, right) => left.sortOrder - right.sortOrder);
 }
 

@@ -424,9 +424,26 @@ function getTaskCoverImage(task) {
   return getPrimaryImageUrl(task, instance);
 }
 
+function getExecutionFormFieldKey(field, fallback) {
+  const rawKey = field.key ?? field.fieldId ?? field.id ?? fallback;
+  return String(rawKey).replace(/^发布内容笔记-/, "");
+}
+
 function getSortedFormFields(template) {
-  const sourceFields = getLatestStandardWorkFormFields(template?.id, template?.formFields ?? []);
-  return sourceFields.map(normalizeExecutionFormField).sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0));
+  const sourceFields = getLatestStandardWorkFormFields(template?.id, template?.formFields ?? []).map(normalizeExecutionFormField);
+  if (template?.id === "task-template-publish-content-note" || template?.taskTemplateId === "task-template-publish-content-note" || template?.name === "发布内容笔记") {
+    sourceFields.forEach((field) => {
+      if (field.key === "publishDate") field.type = "datetime_hour";
+    });
+    [
+      { id: "content-note-product-name", label: "对应产品", key: "productName", type: "text", required: false, placeholder: "请输入对应产品", options: [], showInList: true, sortOrder: 7 },
+      { id: "content-note-scene", label: "参考场景", key: "scene", type: "text", required: false, placeholder: "请输入参考场景", options: [], showInList: true, sortOrder: 10 },
+      { id: "content-note-hashtags", label: "话题", key: "hashtags", type: "text", required: false, placeholder: "例如 #花瓶 #家居软装", options: [], showInList: true, sortOrder: 11 },
+    ].forEach((field) => {
+      if (!sourceFields.some((item) => item.key === field.key)) sourceFields.push(field);
+    });
+  }
+  return sourceFields.sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0));
 }
 
 function normalizeExecutionFormField(field, index) {
@@ -439,7 +456,7 @@ function normalizeExecutionFormField(field, index) {
   return {
     ...field,
     id: field.id ?? field.fieldId ?? field.key ?? `field-${index + 1}`,
-    key: field.key ?? field.fieldId ?? field.id ?? `field-${index + 1}`,
+    key: getExecutionFormFieldKey(field, `field-${index + 1}`),
     label: field.label ?? "未命名字段",
     type,
     required: field.required === true,
