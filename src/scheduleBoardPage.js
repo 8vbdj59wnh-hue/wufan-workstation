@@ -501,8 +501,8 @@ function renderOptions(options, selectedValue, placeholder) {
 
 function renderStatusOptions() {
   const options = [
-    { id: WorkPlanStatus.Future, name: "待发起" },
-    { id: WorkPlanStatus.ThisWeek, name: "待发起" },
+    { id: WorkPlanStatus.Future, name: "待执行" },
+    { id: WorkPlanStatus.ThisWeek, name: "待执行" },
     { id: launchedStatusFilter, name: "已发起" },
     { id: completedStatusFilter, name: "已完成" },
   ];
@@ -545,7 +545,7 @@ function renderFilters() {
       </label>
       <label class="inline-checkbox">
         <input type="checkbox" name="unlaunchedOnly" ${filters.unlaunchedOnly ? "checked" : ""} />
-        <span>只看未发起</span>
+        <span>只看待执行</span>
       </label>
       <label class="inline-checkbox">
         <input type="checkbox" name="noDueDateOnly" ${filters.noDueDateOnly ? "checked" : ""} />
@@ -787,7 +787,7 @@ function renderBoardRows(rows, days) {
   if (rows.length === 0) {
     return `
       <div class="schedule-board-empty">
-        <h2>暂无匹配已发起关键行动</h2>
+        <h2>暂无匹配执行中关键行动</h2>
         <p>请调整筛选条件，或查看无截止时间工作。</p>
       </div>
     `;
@@ -828,8 +828,8 @@ function renderSummary(futureRows, launchedRows, days) {
   const outOfRangeCount = launchedRows.filter((row) => row.processInstance !== null && row.dueDateKey !== "" && !isDueDateInBoard(row, dayKeys)).length;
   return `
     <div class="schedule-board-summary">
-      <span>待发起工作计划 ${futureRows.length}</span>
-      <span>已发起 ${launchedRows.length}</span>
+      <span>待执行关键行动 ${futureRows.length}</span>
+      <span>执行中关键行动 ${launchedRows.length}</span>
       <span>无截止时间 ${noDueDateCount}</span>
       <span>超出30天 ${outOfRangeCount}</span>
     </div>
@@ -838,13 +838,13 @@ function renderSummary(futureRows, launchedRows, days) {
 
 function renderFutureWorkList(rows) {
   return `
-    <aside class="schedule-future-panel" aria-label="待发起工作计划">
+    <aside class="schedule-future-panel" aria-label="待执行关键行动">
       <div class="schedule-future-panel-header">
-        <h3>待发起工作计划</h3>
+        <h3>待执行关键行动</h3>
         <span>${rows.length}</span>
       </div>
       <div class="schedule-future-list">
-        ${rows.length === 0 ? `<p class="schedule-future-empty">暂无匹配待发起工作计划</p>` : rows.map(renderWorkCell).join("")}
+        ${rows.length === 0 ? `<p class="schedule-future-empty">暂无匹配待执行关键行动</p>` : rows.map(renderWorkCell).join("")}
       </div>
     </aside>
   `;
@@ -1070,11 +1070,11 @@ function renderWorkPlanEditModal() {
 
   return `
     <div class="modal-backdrop" role="presentation">
-      <div class="modal-panel" role="dialog" aria-modal="true" aria-label="编辑待发起工作计划">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-label="编辑待执行关键行动">
         <div class="modal-header">
           <div>
-            <h2>编辑待发起工作计划</h2>
-            <p class="form-note">这里编辑的是待发起 WorkPlan，不会影响已发起关键行动。</p>
+            <h2>编辑待执行关键行动</h2>
+            <p class="form-note">这里编辑的是执行前信息，不会影响已发起后的关键行动详情。</p>
           </div>
           <button class="icon-button" type="button" data-action="close-work-plan-edit-modal" aria-label="关闭">×</button>
         </div>
@@ -1203,7 +1203,7 @@ async function handleWorkPlanEditSubmit(event, rerender) {
     closeWorkPlanEditModal();
   } catch (error) {
     if (workPlanIndex >= 0) state.workPlans[workPlanIndex] = previousWorkPlan;
-    editingWorkPlanError = error.message || "待发起工作计划保存失败，请检查本地数据库服务。";
+    editingWorkPlanError = error.message || "待执行关键行动保存失败，请检查本地数据库服务。";
   } finally {
     savingWorkPlanIds.delete(row.workPlan.id);
     rerender();
