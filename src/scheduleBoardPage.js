@@ -50,6 +50,7 @@ const filters = {
   standardWorkId: "",
   departmentId: "",
   ownerId: "",
+  initiatorId: "",
   status: "",
   overdue: "",
   unlaunchedOnly: false,
@@ -474,6 +475,7 @@ function rowMatchesBaseFilters(row) {
 
 function futureRowMatchesFilters(row) {
   if (!rowMatchesBaseFilters(row)) return false;
+  if (filters.initiatorId !== "") return false;
   if (filters.status !== "" && row.workPlan.status !== filters.status) return false;
   if (filters.status !== "" && !futureWorkStatuses.has(filters.status)) return false;
   if (filters.noDueDateOnly) return false;
@@ -482,6 +484,7 @@ function futureRowMatchesFilters(row) {
 
 function launchedRowMatchesFilters(row) {
   if (!rowMatchesBaseFilters(row)) return false;
+  if (filters.initiatorId !== "" && row.processInstance?.initiatorId !== filters.initiatorId) return false;
   if (filters.status !== "" && row.statusValue !== filters.status) return false;
   if (filters.unlaunchedOnly) return false;
   if (filters.noDueDateOnly && !isNoDueDate(row)) return false;
@@ -530,6 +533,10 @@ function renderFilters() {
       <label>
         <span>负责人</span>
         <select name="ownerId">${renderOptions(activePeople, filters.ownerId, "全部负责人")}</select>
+      </label>
+      <label>
+        <span>发起人</span>
+        <select name="initiatorId">${renderOptions(activePeople, filters.initiatorId, "全部发起人")}</select>
       </label>
       <label>
         <span>责任部门</span>
