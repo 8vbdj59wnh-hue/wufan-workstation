@@ -26,6 +26,7 @@ import {
   workPlans as initialWorkPlans,
 } from "./data/mockData.js?v=20260705-state-singleton1";
 import { formatBusinessDateTime } from "./businessTime.js?v=20260705-state-singleton1";
+import { isTaskExecutionStarted } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
 import {
   CategoryType,
   PersonRole,
@@ -555,7 +556,7 @@ function getReminderTask(taskId) {
 }
 
 function isTaskReminderActive(task) {
-  return [TaskStatus.Todo, TaskStatus.Doing, TaskStatus.PendingAcceptance].includes(task?.status);
+  return [TaskStatus.Todo, TaskStatus.Doing, TaskStatus.PendingAcceptance].includes(task?.status) && isTaskExecutionStarted(task, state);
 }
 
 function getTaskReminderType(task) {
