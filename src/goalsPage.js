@@ -1688,7 +1688,15 @@ function handleGoalClick(event, rerender) {
     const goal = getGoal(goalId);
     if (goal === null || isInactiveGoal(goal)) return;
     selectedGoalId = goalId;
-    modalState = { kind: "goalTask", goalId, categoryId: "", taskTemplateId: "", title: button.dataset.modalTitle ?? "发起关键行动", error: "" };
+    modalState = {
+      kind: "goalTask",
+      goalId,
+      categoryId: "",
+      taskTemplateId: "",
+      title: button.dataset.modalTitle ?? "发起关键行动",
+      launchImmediately: true,
+      error: "",
+    };
     rerender();
     return;
   }
