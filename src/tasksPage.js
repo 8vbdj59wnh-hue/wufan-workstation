@@ -141,8 +141,6 @@ let clearanceFilters = {
 let selectedTaskId = state.tasks[0]?.id ?? null;
 let selectedProcessInstanceId = state.processInstances[0]?.id ?? null;
 let selectedTaskIds = new Set();
-let expandedProcessTaskGroups = new Set();
-let expandAllTaskGroups = false;
 let taskDueDateSort = "";
 let expandedClearanceGroups = new Set();
 let modalState = null;
@@ -1515,75 +1513,17 @@ function renderExecutionGroupBadge(task) {
   `;
 }
 
-function renderTaskRow(task, index, options = {}) {
-  const rowClass = [
-    task.id === selectedTaskId ? "is-selected" : "",
-    options.child ? "task-group-child-row" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-  const numberText = options.numberText ?? String(index + 1);
-  const prefix = options.child ? `<span class="task-node-indent">${escapeHtml(options.childLabel ?? "")}</span>` : "";
-
+function renderTaskRow(task, index) {
   return `
-    <tr class="${rowClass}" data-row-task-id="${task.id}">
+    <tr class="${task.id === selectedTaskId ? "is-selected" : ""}" data-row-task-id="${task.id}">
       <td class="task-select-column">
         <label class="task-row-select">
           <input type="checkbox" data-task-row-select data-task-id="${task.id}" ${selectedTaskIds.has(task.id) ? "checked" : ""} />
-          <span>${numberText}</span>
+          <span>${index + 1}</span>
         </label>
       </td>
       <td class="task-cover-column">${renderCoverImage(task)}</td>
       <td class="task-belonging-column">${renderTaskBelonging(task)}</td>
-      <td class="task-name-column">
-        ${prefix}<span class="task-line-clamp task-name-text">${escapeHtml(task.name)}</span>
-        ${renderExecutionGroupBadge(task)}
-      </td>
-      <td class="task-executor-column">${findName(people, getTaskExecutorId(task), "未设置")}</td>
-      <td class="task-date-column">${formatBusinessMinuteDateTime(task.dueDate)}</td>
-      <td class="task-date-column">${getTaskProjectDueDateText(task)}</td>
-      <td class="task-status-column">${renderTaskStatusSelect(task)}</td>
-      <td class="task-overdue-column">${renderOverdue(task)}</td>
-      <td class="task-department-column">${findName(departments, task.departmentId, "未设置")}</td>
-      <td class="task-owner-column">${findName(people, task.ownerId, "未设置")}</td>
-      <td class="task-actions-column">
-        <span class="row-actions">
-          ${renderActionButton("查看任务详情", "view-task", task.id)}
-          ${canReturnTask(task) ? renderActionButton("退回重做", "return-task", task.id) : ""}
-          ${canEditTask(task) ? renderActionButton("编辑", "edit-task", task.id) : ""}
-          ${canCancelTask(task) ? renderActionButton("取消", "cancel-task", task.id, "danger-button") : ""}
-          ${canRestoreTask(task) ? renderActionButton("恢复为待处理", "restore-task", task.id) : ""}
-        </span>
-      </td>
-    </tr>
-  `;
-}
-
-function renderProcessTaskGroupRow(row, index) {
-  const task = row.currentTask;
-  const title = getProcessGroupTitle(row.instance, row.tasks);
-  const expandedIcon = row.expanded ? "▾" : "▸";
-  const selected = task.id === selectedTaskId ? "is-selected" : "";
-
-  return `
-    <tr class="task-process-group-row ${selected}" data-row-task-id="${task.id}" data-process-task-group-id="${row.processInstanceId}">
-      <td class="task-select-column">
-        <div class="task-group-control">
-          <button class="icon-button task-group-toggle" type="button" data-action="toggle-task-group" data-process-instance-id="${row.processInstanceId}" aria-label="${row.expanded ? "折叠标准任务" : "展开标准任务"}">${expandedIcon}</button>
-          <label class="task-row-select">
-            <input type="checkbox" data-task-row-select data-task-id="${task.id}" ${selectedTaskIds.has(task.id) ? "checked" : ""} />
-            <span>${index + 1}</span>
-          </label>
-        </div>
-      </td>
-      <td class="task-cover-column">${renderCoverImage(task)}</td>
-      <td class="task-belonging-column">
-        <div class="task-belonging">
-          <strong>${escapeHtml(title)}</strong>
-          <span>${escapeHtml(getTaskBelonging(task).standardWorkName)}</span>
-          <small>${row.expanded ? `已展开 ${row.tasks.length} 个节点` : `当前任务：${escapeHtml(task.name)}`}</small>
-        </div>
-      </td>
       <td class="task-name-column">
         <span class="task-line-clamp task-name-text">${escapeHtml(task.name)}</span>
         ${renderExecutionGroupBadge(task)}
@@ -1605,19 +1545,6 @@ function renderProcessTaskGroupRow(row, index) {
         </span>
       </td>
     </tr>
-    ${
-      row.expanded
-        ? row.tasks
-            .map((childTask, childIndex) =>
-              renderTaskRow(childTask, childIndex, {
-                child: true,
-                childLabel: `${childIndex + 1}.`,
-                numberText: `${index + 1}.${childIndex + 1}`,
-              }),
-            )
-            .join("")
-        : ""
-    }
   `;
 }
 
@@ -1693,54 +1620,8 @@ function getCurrentTaskOfProcess(processTasks) {
   return selectCurrentProcessTask(processInstanceId, state);
 }
 
-function getProcessGroupTitle(instance, processTasks) {
-  if (instance?.name) return instance.name;
-  if (instance !== null && instance !== undefined) return getStandardWorkName(instance);
-  const template = getTaskTemplateForTask(processTasks[0] ?? {});
-  return template?.name ?? "未命名标准";
-}
-
 function getTaskTableRows() {
-  const filteredTasks = getFilteredTasks();
-  if (taskDueDateSort === "asc") {
-    return sortTaskTableRows(filteredTasks.map((task, index) => ({ type: "task", task, order: index })));
-  }
-
-  const processGroups = new Map();
-  const rows = [];
-
-  filteredTasks.forEach((task, index) => {
-    if (task.processInstanceId === null || task.processInstanceId === undefined || task.processInstanceId === "") {
-      rows.push({ type: "task", task, order: index });
-      return;
-    }
-
-    const group = processGroups.get(task.processInstanceId) ?? {
-      type: "process-group",
-      processInstanceId: task.processInstanceId,
-      tasks: [],
-      order: index,
-    };
-    group.tasks.push(task);
-    group.order = Math.min(group.order, index);
-    processGroups.set(task.processInstanceId, group);
-  });
-
-  processGroups.forEach((group) => {
-    const sortedTasks = sortProcessInstanceTasks(group.tasks, state);
-    const currentTask = getCurrentTaskOfProcess(sortedTasks) ?? sortedTasks[sortedTasks.length - 1] ?? sortedTasks[0] ?? null;
-    if (currentTask === null) return;
-
-    rows.push({
-      ...group,
-      tasks: sortedTasks,
-      instance: state.processInstances.find((item) => item.id === group.processInstanceId) ?? null,
-      currentTask,
-      expanded: expandAllTaskGroups || expandedProcessTaskGroups.has(group.processInstanceId),
-    });
-  });
-
-  return sortTaskTableRows(rows);
+  return sortTaskTableRows(getFilteredTasks().map((task, index) => ({ task, order: index })));
 }
 
 function getRowDueDate(row) {
@@ -2876,11 +2757,7 @@ function renderClearanceImportModal() {
 }
 
 function getVisibleTaskIdsFromRows(rows) {
-  return rows.flatMap((row) => {
-    if (row.type === "task") return [row.task.id];
-    if (row.expanded) return row.tasks.map((task) => task.id);
-    return [row.currentTask.id];
-  });
+  return rows.map((row) => row.task.id);
 }
 
 function getProcessProgress(processInstanceId) {
@@ -3057,10 +2934,6 @@ function renderFilters() {
         <input name="showCanceled" type="checkbox" ${filters.showCanceled ? "checked" : ""} />
         <span>显示已取消</span>
       </label>
-      <label class="checkbox-field task-filter-checkbox">
-        <input name="expandAllGroups" type="checkbox" ${expandAllTaskGroups ? "checked" : ""} />
-        <span>全部展开</span>
-      </label>
     </div>
   `;
 
@@ -3217,9 +3090,7 @@ function renderTaskTable() {
             ${
               tableRows.length === 0
                 ? `<tr><td colspan="12">暂无匹配的任务</td></tr>`
-                : tableRows
-                    .map((row, index) => (row.type === "task" ? renderTaskRow(row.task, index) : renderProcessTaskGroupRow(row, index)))
-                    .join("")
+                : tableRows.map((row, index) => renderTaskRow(row.task, index)).join("")
             }
           </tbody>
         </table>
@@ -3246,27 +3117,23 @@ function getTaskRemainingText(task) {
   return { label: overdue ? `已超时 ${durationText}` : `剩余 ${durationText}`, overdue };
 }
 
-function renderTaskCard(task, options = {}) {
+function renderTaskCard(task, index) {
   const selected = task.id === selectedTaskId ? "is-selected" : "";
   const remaining = getTaskRemainingText(task);
-  const numberText = options.numberText ?? "";
-  const groupToggle =
-    options.processGroupId === undefined
-      ? ""
-      : `<button class="icon-button task-group-toggle" type="button" data-action="toggle-task-group" data-process-instance-id="${escapeHtml(options.processGroupId)}" aria-label="${options.expanded ? "折叠标准任务" : "展开标准任务"}">${options.expanded ? "▾" : "▸"}</button>`;
+  const belonging = getTaskBelonging(task);
+  const actionName = belonging.title || belonging.standardWorkName || "未关联关键行动";
 
   return `
     <article class="task-card ${selected}" data-task-card data-row-task-id="${escapeHtml(task.id)}">
       <div class="task-card-cover">${renderCoverImage(task)}</div>
       <div class="task-card-body">
         <div class="task-card-title-row">
-          ${groupToggle}
-          <span class="task-card-index">${escapeHtml(numberText)}</span>
+          <span class="task-card-index">${index + 1}</span>
           <h3>${escapeHtml(task.name)}</h3>
         </div>
         <div class="task-card-meta">
-          <span>${escapeHtml(findName(people, getTaskExecutorId(task), "未设置执行人"))}</span>
-          <span>${escapeHtml(formatBusinessMinuteDateTime(task.dueDate, "未设置截止"))}</span>
+          <span>所属关键行动：${escapeHtml(actionName)}</span>
+          <span>执行人：${escapeHtml(findName(people, getTaskExecutorId(task), "未设置执行人"))}</span>
         </div>
         <div class="task-card-status-row">
           ${renderTaskStatusSelect(task)}
@@ -3279,26 +3146,7 @@ function renderTaskCard(task, options = {}) {
 }
 
 function renderTaskCardGrid() {
-  const tableRows = getTaskTableRows();
-  const cards = tableRows.flatMap((row, index) => {
-    if (row.type === "task") return [renderTaskCard(row.task, { numberText: String(index + 1) })];
-    if (!row.expanded) {
-      return [
-        renderTaskCard(row.currentTask, {
-          numberText: String(index + 1),
-          processGroupId: row.processInstanceId,
-          expanded: false,
-        }),
-      ];
-    }
-    return row.tasks.map((task, childIndex) =>
-      renderTaskCard(task, {
-        numberText: `${index + 1}.${childIndex + 1}`,
-        processGroupId: childIndex === 0 ? row.processInstanceId : undefined,
-        expanded: true,
-      }),
-    );
-  });
+  const cards = getTaskTableRows().map((row, index) => renderTaskCard(row.task, index));
 
   return `
     <section class="settings-section task-card-section">
@@ -4512,7 +4360,6 @@ function updateFilters(form) {
     showDone: formData.has("showDone"),
     showCanceled: formData.has("showCanceled"),
   };
-  expandAllTaskGroups = formData.has("expandAllGroups");
 }
 
 function updateProcessProgressFilters(form) {
@@ -5686,7 +5533,7 @@ export function bindTasksPageEvents(rerender) {
     button.addEventListener("click", () => {
       taskListView = button.dataset.taskListView;
       const firstRow = getTaskTableRows()[0];
-      selectedTaskId = firstRow?.type === "process-group" ? firstRow.currentTask.id : firstRow?.task.id ?? null;
+      selectedTaskId = firstRow?.task.id ?? null;
       rerender();
     });
   });
@@ -5901,13 +5748,13 @@ export function bindTasksPageEvents(rerender) {
   filterForm.addEventListener("input", () => {
     updateFilters(filterForm);
     const firstRow = getTaskTableRows()[0];
-    selectedTaskId = firstRow?.type === "process-group" ? firstRow.currentTask.id : firstRow?.task.id ?? null;
+    selectedTaskId = firstRow?.task.id ?? null;
     rerender();
   });
   filterForm.addEventListener("change", () => {
     updateFilters(filterForm);
     const firstRow = getTaskTableRows()[0];
-    selectedTaskId = firstRow?.type === "process-group" ? firstRow.currentTask.id : firstRow?.task.id ?? null;
+    selectedTaskId = firstRow?.task.id ?? null;
     rerender();
   });
   tasksPage.addEventListener("change", (event) => {
@@ -6025,27 +5872,6 @@ export function bindTasksPageEvents(rerender) {
         rerender();
         return;
       }
-      if (action === "toggle-task-group") {
-        const processInstanceId = actionButton.dataset.processInstanceId;
-        if (expandAllTaskGroups) {
-          expandedProcessTaskGroups = new Set(
-            getTaskTableRows()
-              .filter((row) => row.type === "process-group")
-              .map((row) => row.processInstanceId),
-          );
-          expandAllTaskGroups = false;
-        } else {
-          expandedProcessTaskGroups = new Set(expandedProcessTaskGroups);
-        }
-        if (expandedProcessTaskGroups.has(processInstanceId)) {
-          expandedProcessTaskGroups.delete(processInstanceId);
-        } else {
-          expandedProcessTaskGroups.add(processInstanceId);
-        }
-        rerender();
-        return;
-      }
-
       handleTaskAction(action, actionButton.dataset.taskId, rerender, actionButton);
       return;
     }

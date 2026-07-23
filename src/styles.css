@@ -2315,39 +2315,12 @@ button.content-template-thumb {
   color: #b91c1c;
 }
 
-.task-process-group-row {
-  background: #f8fafc;
-}
-
-.task-group-child-row {
-  background: #ffffff;
-}
-
-.task-group-child-row td {
-  border-top-color: #eef2f7;
-}
-
-.task-group-control {
-  align-items: center;
-  display: inline-flex;
-  gap: 6px;
-  justify-content: center;
-}
-
 .task-group-toggle {
   width: 26px;
   height: 26px;
   min-width: 26px;
   padding: 0;
   line-height: 1;
-}
-
-.task-node-indent {
-  color: #64748b;
-  display: inline-block;
-  font-weight: 700;
-  margin-right: 6px;
-  min-width: 22px;
 }
 
 .task-cover-thumb,
