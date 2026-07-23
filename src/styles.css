@@ -4920,6 +4920,15 @@ button.content-template-thumb {
   border-radius: 12px;
   background: #ffffff;
   box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.schedule-action-overview-card:hover,
+.schedule-action-overview-card:focus-visible {
+  border-color: #bfdbfe;
+  box-shadow: 0 4px 12px rgb(15 23 42 / 7%);
+  outline: none;
 }
 
 .schedule-action-overview-media {

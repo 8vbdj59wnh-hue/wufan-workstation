@@ -956,6 +956,7 @@ function renderScheduleViewTabs() {
     <div class="settings-tabs schedule-view-tabs" aria-label="关键行动视图">
       <button class="${activeScheduleView === "board" ? "is-active" : ""}" type="button" data-schedule-view="board">原有视图</button>
       <button class="${activeScheduleView === "list" ? "is-active" : ""}" type="button" data-schedule-view="list">列表</button>
+      <button class="${activeScheduleView === "card" ? "is-active" : ""}" type="button" data-schedule-view="card">卡片</button>
     </div>
   `;
 }
@@ -1008,7 +1009,13 @@ function renderActionOverviewCard(row) {
   const businessStatus = selectProcessInstanceBusinessStatus(row.processInstance.id, state);
   const progress = selectProcessProgress(row.processInstance.id, state);
   return `
-    <article class="schedule-action-overview-card">
+    <article
+      class="schedule-action-overview-card"
+      role="button"
+      tabindex="0"
+      data-schedule-action-card-id="${escapeAttribute(row.processInstance.id)}"
+      aria-label="查看关键行动详情：${escapeAttribute(title)}"
+    >
       <div class="schedule-action-overview-media">
         ${
           imageUrl === ""
@@ -1280,8 +1287,10 @@ export function renderScheduleBoardPage() {
       ${renderScheduleViewTabs()}
       ${
         activeScheduleView === "list"
-          ? `${renderLaunchedActionList(launchedListRows)}${renderActionOverviewCards(actionOverviewRows)}`
-          : `
+          ? renderLaunchedActionList(launchedListRows)
+          : activeScheduleView === "card"
+            ? renderActionOverviewCards(actionOverviewRows)
+            : `
             <div class="schedule-board-layout">
               ${renderPendingProcessList(pendingRows)}
               <div class="schedule-board-shell">
@@ -1320,7 +1329,8 @@ export function bindScheduleBoardPageEvents(rerender) {
 
   document.querySelectorAll("[data-schedule-view]").forEach((button) => {
     button.addEventListener("click", () => {
-      activeScheduleView = button.dataset.scheduleView === "list" ? "list" : "board";
+      const nextView = button.dataset.scheduleView;
+      activeScheduleView = ["board", "list", "card"].includes(nextView) ? nextView : "board";
       pendingInnerScrollRestore = null;
       rerender();
     });
@@ -1353,6 +1363,21 @@ export function bindScheduleBoardPageEvents(rerender) {
       if (processInstanceId === "") return;
       if (checkbox.checked) selectedLaunchedProcessIds.add(processInstanceId);
       else selectedLaunchedProcessIds.delete(processInstanceId);
+    });
+  });
+
+  document.querySelectorAll("[data-schedule-action-card-id]").forEach((card) => {
+    const openActionDetail = () => {
+      const processInstanceId = card.dataset.scheduleActionCardId ?? "";
+      if (processInstanceId === "") return;
+      selectedProcessInstanceId = processInstanceId;
+      rerenderScheduleBoard();
+    };
+    card.addEventListener("click", openActionDetail);
+    card.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      openActionDetail();
     });
   });
 
