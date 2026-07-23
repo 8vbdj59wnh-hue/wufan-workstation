@@ -148,7 +148,7 @@ let expandedClearanceGroups = new Set();
 let modalState = null;
 let activeTaskTab = "task-list";
 let taskListView = "today";
-let taskDisplayView = "list";
+let taskDisplayView = "card";
 let visualTemplatesLoaded = state.templates.length > 0;
 let visualTemplatesLoading = false;
 
