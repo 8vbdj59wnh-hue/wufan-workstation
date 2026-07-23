@@ -466,6 +466,19 @@ function buildLaunchedListRows() {
   );
 }
 
+function buildActionOverviewRows() {
+  return buildRows().filter((row) => {
+    const status = row.processInstance?.status;
+    return (
+      row.processInstance !== null &&
+      !canceledProcessStatuses.has(status) &&
+      status !== ProcessInstanceStatus.Stopped &&
+      status !== ProcessInstanceStatus.Terminated &&
+      status !== "terminated"
+    );
+  });
+}
+
 function isDueDateInBoard(row, dayKeys) {
   return row.processInstance !== null && row.dueDateKey !== "" && dayKeys.has(row.dueDateKey);
 }
@@ -961,6 +974,86 @@ function getActionOwnerName(row) {
   return findName(state.people, actionOwner.userId, "未设置");
 }
 
+function renderActionOverviewOwner(row) {
+  if (row.processInstance === null) return "";
+  const actionOwner = selectProcessInstanceOwner(row.processInstance.id, state);
+  const owner = state.people.find((person) => person.id === actionOwner.userId) ?? null;
+  const ownerName = owner?.name || "未设置";
+  const avatarUrl = owner?.avatarUrl ? resolveAssetUrl(owner.avatarUrl) : "";
+  const avatarInitial = Array.from(ownerName.trim())[0] || "未";
+  return `
+    <div class="schedule-action-overview-owner" title="${escapeAttribute(ownerName)}">
+      ${
+        avatarUrl === ""
+          ? `<span class="schedule-action-overview-avatar schedule-action-overview-avatar-placeholder" aria-hidden="true">${escapeHtml(avatarInitial)}</span>`
+          : `<img class="schedule-action-overview-avatar" src="${escapeAttribute(avatarUrl)}" alt="${escapeAttribute(ownerName)}头像" />`
+      }
+      <span>${escapeHtml(ownerName)}</span>
+    </div>
+  `;
+}
+
+function getActionOverviewStatusClass(status) {
+  if (status === keyActionPendingStatusFilter) return "is-pending";
+  if (status === keyActionDoneStatusFilter) return "is-done";
+  return "is-running";
+}
+
+function renderActionOverviewCard(row) {
+  if (row.processInstance === null) return "";
+  const title = getProcessCardTitle(row);
+  const previewImage = getProcessPreviewImage(row);
+  const imageUrl = previewImage === "" ? "" : resolveAssetUrl(previewImage);
+  const businessStatus = selectProcessInstanceBusinessStatus(row.processInstance.id, state);
+  const progress = selectProcessProgress(row.processInstance.id, state);
+  return `
+    <article class="schedule-action-overview-card">
+      <div class="schedule-action-overview-media">
+        ${
+          imageUrl === ""
+            ? `<div class="schedule-action-overview-placeholder">无图</div>`
+            : `<img src="${escapeAttribute(imageUrl)}" alt="${escapeAttribute(title)}" onerror="this.replaceWith(Object.assign(document.createElement('div'), { className: 'schedule-action-overview-placeholder', textContent: '无图' }))" />`
+        }
+      </div>
+      <div class="schedule-action-overview-body">
+        <h3 title="${escapeAttribute(title)}">${escapeHtml(title)}</h3>
+        <div class="schedule-action-overview-meta">
+          <span class="schedule-action-overview-status ${getActionOverviewStatusClass(businessStatus.status)}">${escapeHtml(businessStatus.label)}</span>
+          ${renderActionOverviewOwner(row)}
+        </div>
+        <div class="schedule-action-overview-progress">
+          <div>
+            <span>进度</span>
+            <strong>${progress.completed}/${progress.total}</strong>
+          </div>
+          <span class="schedule-action-overview-progress-track" aria-label="完成进度 ${progress.percentage}%">
+            <span style="width: ${progress.percentage}%"></span>
+          </span>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function renderActionOverviewCards(rows) {
+  const sortedRows = [...rows].sort((left, right) =>
+    String(right.processInstance?.createdAt ?? "").localeCompare(String(left.processInstance?.createdAt ?? "")),
+  );
+  return `
+    <section class="schedule-action-overview-section">
+      <div class="section-heading">
+        <h2>行动卡片</h2>
+        <span>${sortedRows.length} 个关键行动</span>
+      </div>
+      ${
+        sortedRows.length === 0
+          ? `<div class="empty-detail">暂无匹配的关键行动</div>`
+          : `<div class="schedule-action-overview-grid">${sortedRows.map(renderActionOverviewCard).join("")}</div>`
+      }
+    </section>
+  `;
+}
+
 function getActionInitiatorName(row) {
   return findName(state.people, row.processInstance?.initiatorId ?? "", "未设置");
 }
@@ -1177,6 +1270,7 @@ export function renderScheduleBoardPage() {
     (row) => row.statusValue === keyActionRunningStatusFilter && !isNoDueDate(row),
   );
   const launchedListRows = buildLaunchedListRows().filter(launchedRowMatchesFilters);
+  const actionOverviewRows = buildActionOverviewRows().filter(launchedRowMatchesFilters);
   const columnCount = filters.noDueDateOnly ? 1 : boardDayCount;
   return `
     <section class="schedule-board-page" style="--schedule-day-count: ${columnCount};">
@@ -1185,7 +1279,7 @@ export function renderScheduleBoardPage() {
       ${renderScheduleViewTabs()}
       ${
         activeScheduleView === "list"
-          ? renderLaunchedActionList(launchedListRows)
+          ? `${renderLaunchedActionList(launchedListRows)}${renderActionOverviewCards(actionOverviewRows)}`
           : `
             <div class="schedule-board-layout">
               ${renderPendingProcessList(pendingRows)}
