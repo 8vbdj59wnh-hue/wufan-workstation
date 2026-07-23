@@ -3117,7 +3117,7 @@ function getTaskRemainingText(task) {
   return { label: overdue ? `已超时 ${durationText}` : `剩余 ${durationText}`, overdue };
 }
 
-function renderTaskCard(task, index) {
+function renderTaskCard(task) {
   const selected = task.id === selectedTaskId ? "is-selected" : "";
   const remaining = getTaskRemainingText(task);
   const belonging = getTaskBelonging(task);
@@ -3128,25 +3128,21 @@ function renderTaskCard(task, index) {
       <div class="task-card-cover">${renderCoverImage(task)}</div>
       <div class="task-card-body">
         <div class="task-card-title-row">
-          <span class="task-card-index">${index + 1}</span>
           <h3>${escapeHtml(task.name)}</h3>
         </div>
-        <div class="task-card-meta">
-          <span>所属关键行动：${escapeHtml(actionName)}</span>
-          <span>执行人：${escapeHtml(findName(people, getTaskExecutorId(task), "未设置执行人"))}</span>
-        </div>
+        <p class="task-card-action-title">${escapeHtml(actionName)}</p>
+        <p class="task-card-executor">执行人：${escapeHtml(findName(people, getTaskExecutorId(task), "未设置执行人"))}</p>
         <div class="task-card-status-row">
           ${renderTaskStatusSelect(task)}
           <span class="task-card-remaining ${remaining.overdue ? "is-overdue" : ""}">${escapeHtml(remaining.label)}</span>
         </div>
-        ${renderExecutionGroupBadge(task)}
       </div>
     </article>
   `;
 }
 
 function renderTaskCardGrid() {
-  const cards = getTaskTableRows().map((row, index) => renderTaskCard(row.task, index));
+  const cards = getTaskTableRows().map((row) => renderTaskCard(row.task));
 
   return `
     <section class="settings-section task-card-section">

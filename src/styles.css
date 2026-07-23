@@ -2235,7 +2235,6 @@ button.content-template-thumb {
 
 .task-card {
   display: grid;
-  grid-template-columns: 100px minmax(0, 1fr);
   gap: 12px;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
@@ -2252,13 +2251,23 @@ button.content-template-thumb {
 }
 
 .task-card-cover {
-  width: 100px;
-  height: 100px;
+  aspect-ratio: 4 / 3;
+  min-width: 0;
+  overflow: hidden;
+  width: 100%;
+}
+
+.task-card-cover .task-cover-thumb,
+.task-card-cover .task-cover-placeholder {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
 }
 
 .task-card-body {
   display: grid;
   gap: 9px;
+  grid-template-rows: auto auto auto 1fr;
   min-width: 0;
 }
 
@@ -2273,30 +2282,34 @@ button.content-template-thumb {
   color: #111827;
   font-size: 15px;
   line-height: 1.35;
-  margin: 2px 0 0;
+  margin: 0;
   min-width: 0;
 }
 
-.task-card-index {
-  color: #64748b;
-  flex: 0 0 auto;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 26px;
+.task-card-action-title,
+.task-card-executor {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
-.task-card-meta {
+.task-card-action-title {
   color: #64748b;
-  display: grid;
-  gap: 4px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.task-card-executor {
+  color: #64748b;
   font-size: 12px;
 }
 
 .task-card-status-row {
   align-items: center;
   display: flex;
-  flex-wrap: wrap;
   gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
 }
 
 .task-card-remaining {
@@ -2307,6 +2320,7 @@ button.content-template-thumb {
   font-size: 12px;
   font-weight: 700;
   padding: 4px 8px;
+  white-space: nowrap;
 }
 
 .task-card-remaining.is-overdue {
