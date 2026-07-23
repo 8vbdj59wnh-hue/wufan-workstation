@@ -581,11 +581,7 @@ function getValueModuleLegendLabel(valueModuleId, fallbackName) {
 }
 
 function canDragProcess(row) {
-  return (
-    row.processInstance !== null &&
-    row.statusValue === keyActionPendingStatusFilter &&
-    !savingWorkPlanIds.has(row.workPlan.id)
-  );
+  return canStartProcessExecution(row);
 }
 
 function isAdminUser(user) {
@@ -607,7 +603,8 @@ function canStartProcessExecution(row) {
   const user = getCurrentUser();
   if (isAdminUser(user)) return true;
   const userId = getCurrentUserPersonId();
-  return userId !== "" && [row.currentTask.ownerId, row.currentTask.executorId].includes(userId);
+  const processOwnerId = selectProcessInstanceOwner(row.processInstance.id, state).userId;
+  return userId !== "" && [row.processInstance.initiatorId, processOwnerId].includes(userId);
 }
 
 function getProcessCardTitle(row) {

@@ -2031,9 +2031,12 @@ export function startProcessInstanceExecution(instanceId, { userId = "", isAdmin
     if (currentTask.status !== "todo") throw new Error("只有待处理任务可以开始执行。");
 
     const normalizedUserId = String(userId ?? "").trim();
+    const actionStandardId = instance.taskTemplateId ?? instance.standardWorkId ?? "";
+    const actionStandard = actionStandardId === "" ? null : readExistingItem("taskTemplates", actionStandardId);
+    const processOwnerId = String(instance.ownerId ?? actionStandard?.ownerId ?? "").trim();
     const canStart =
       isAdmin === true ||
-      (normalizedUserId !== "" && [currentTask.ownerId, currentTask.executorId].includes(normalizedUserId));
+      (normalizedUserId !== "" && [instance.initiatorId, processOwnerId].includes(normalizedUserId));
     if (!canStart) throw new Error("你没有权限开始执行该关键行动。");
 
     const now = new Date().toISOString();
