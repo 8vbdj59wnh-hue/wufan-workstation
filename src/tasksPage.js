@@ -64,7 +64,7 @@ import {
   isProcessInstanceOverdue as selectProcessInstanceOverdue,
   sortProcessInstanceTasks,
 } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
-import { getTaskBusinessStatus } from "./data/taskSelectors.js?v=20260723-task-business-status1";
+import { getTaskBusinessStatus } from "./data/taskSelectors.js?v=20260723-task-business-status2";
 import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260705-state-singleton1";
 import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260705-state-singleton1";
 import { renderWorkFormViewer } from "./workFormViewer.js?v=20260705-state-singleton1";
@@ -167,6 +167,7 @@ function getActiveGoals() {
 }
 
 const taskStatusSelectOptions = [
+  TaskStatus.Waiting,
   TaskStatus.Todo,
   TaskStatus.Doing,
   TaskStatus.PendingAcceptance,
@@ -175,6 +176,7 @@ const taskStatusSelectOptions = [
 ].map((status) => ({
   value: status,
   label: getTaskBusinessStatus({ status }).label,
+  editable: status !== TaskStatus.Waiting,
 }));
 
 const taskListViewOptions = [
@@ -1227,7 +1229,7 @@ function renderValueOptions(values, selectedValue, names, emptyLabel) {
 
 function matchesTaskStatusFilter(task, selectedStatus) {
   if (selectedStatus === "") return true;
-  return getTaskBusinessStatus(task).status === getTaskBusinessStatus({ status: selectedStatus }).status;
+  return getTaskBusinessStatus(task).status === selectedStatus;
 }
 
 function matchesFilters(task) {
@@ -1382,7 +1384,7 @@ function getTaskStatusClass(status) {
 
 function renderTaskStatusSelect(task) {
   const disabled = !canCurrentUser("tasks.changeStatus");
-  const value = task.status === TaskStatus.Waiting ? TaskStatus.Todo : task.status;
+  const value = task.status;
   const title =
     disabled
       ? "没有修改任务状态的权限。"
@@ -1402,7 +1404,7 @@ function renderTaskStatusSelect(task) {
       ${taskStatusSelectOptions
         .map(
           (option) => `
-            <option value="${option.value}" ${option.value === value ? "selected" : ""}>
+            <option value="${option.value}" ${option.value === value ? "selected" : ""} ${option.editable ? "" : "disabled"}>
               ${option.value === TaskStatus.Done && option.value === value && hasTaskOverdueRecord(task) ? "已完成（超时）" : option.label}
             </option>
           `,

@@ -2,34 +2,28 @@ import { TaskStatus } from "./modelOptions.js";
 
 const taskBusinessStatusDefinitions = Object.freeze({
   [TaskStatus.Waiting]: Object.freeze({
-    status: "pending",
-    label: "待处理",
-    actionable: false,
+    status: TaskStatus.Waiting,
+    label: "排队中",
   }),
   [TaskStatus.Todo]: Object.freeze({
-    status: "pending",
-    label: "待处理",
-    actionable: true,
+    status: TaskStatus.Todo,
+    label: "待执行",
   }),
   [TaskStatus.Doing]: Object.freeze({
-    status: "running",
-    label: "进行中",
-    actionable: true,
+    status: TaskStatus.Doing,
+    label: "执行中",
   }),
   [TaskStatus.PendingAcceptance]: Object.freeze({
-    status: "review",
+    status: TaskStatus.PendingAcceptance,
     label: "待审核",
-    actionable: true,
   }),
   [TaskStatus.Done]: Object.freeze({
-    status: "done",
+    status: TaskStatus.Done,
     label: "已完成",
-    actionable: false,
   }),
   [TaskStatus.Canceled]: Object.freeze({
-    status: "cancelled",
+    status: TaskStatus.Canceled,
     label: "已取消",
-    actionable: false,
   }),
 });
 
