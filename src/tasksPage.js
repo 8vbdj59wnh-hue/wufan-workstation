@@ -3256,7 +3256,7 @@ function renderTaskCard(task, options = {}) {
       : `<button class="icon-button task-group-toggle" type="button" data-action="toggle-task-group" data-process-instance-id="${escapeHtml(options.processGroupId)}" aria-label="${options.expanded ? "折叠标准任务" : "展开标准任务"}">${options.expanded ? "▾" : "▸"}</button>`;
 
   return `
-    <article class="task-card ${selected}" data-row-task-id="${escapeHtml(task.id)}">
+    <article class="task-card ${selected}" data-task-card data-row-task-id="${escapeHtml(task.id)}">
       <div class="task-card-cover">${renderCoverImage(task)}</div>
       <div class="task-card-body">
         <div class="task-card-title-row">
@@ -6027,11 +6027,15 @@ export function bindTasksPageEvents(rerender) {
   });
   tasksPage.addEventListener("click", async (event) => {
     if (event.target.closest("[data-task-row-select], [data-task-select-all]") !== null) return;
-    if (event.target.closest("[data-task-status-select]") !== null) return;
+    if (event.target.closest("[data-task-status-select]") !== null) {
+      event.stopPropagation();
+      return;
+    }
 
     const actionButton = event.target.closest("[data-action]");
 
       if (actionButton !== null) {
+        event.stopPropagation();
         const action = actionButton.dataset.action;
 
       if (await handleTaskTemplateLinkAction(action, actionButton, rerender)) return;
@@ -6135,6 +6139,11 @@ export function bindTasksPageEvents(rerender) {
     const row = event.target.closest("[data-row-task-id]");
 
     if (row === null) return;
+
+    if (row.matches("[data-task-card]")) {
+      await handleTaskAction("view-task", row.dataset.rowTaskId, rerender);
+      return;
+    }
 
     selectedTaskId = row.dataset.rowTaskId;
     rerender();
