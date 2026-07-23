@@ -5753,11 +5753,27 @@ export function bindTasksPageEvents(rerender) {
     checkbox.indeterminate = checkbox.dataset.indeterminate === "true";
   });
 
-  filterForm.addEventListener("input", () => {
+  filterForm.addEventListener("input", (event) => {
+    const keywordInput = event.target.closest('input[name="keyword"]');
+    const keywordFocus =
+      keywordInput === null
+        ? null
+        : {
+            value: keywordInput.value,
+            selectionStart: keywordInput.selectionStart,
+            selectionEnd: keywordInput.selectionEnd,
+          };
     updateFilters(filterForm);
     const firstRow = getTaskTableRows()[0];
     selectedTaskId = firstRow?.task.id ?? null;
     rerender();
+    if (keywordFocus !== null) {
+      const nextKeywordInput = document.querySelector('.task-list-filters input[name="keyword"]');
+      if (nextKeywordInput === null) return;
+      nextKeywordInput.value = keywordFocus.value;
+      nextKeywordInput.focus({ preventScroll: true });
+      nextKeywordInput.setSelectionRange(keywordFocus.selectionStart, keywordFocus.selectionEnd);
+    }
   });
   filterForm.addEventListener("change", () => {
     updateFilters(filterForm);
