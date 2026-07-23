@@ -3103,18 +3103,37 @@ function renderTaskCardWorkflowAction(task) {
   const businessStatus = getTaskBusinessStatus(task);
   if (businessStatus.technicalStatus === TaskStatus.Todo) {
     return canCurrentUser("tasks.changeStatus")
-      ? `<div class="task-card-workflow-action">${renderActionButton("开始执行", "start-task", task.id, "primary-button")}</div>`
+      ? renderActionButton("开始执行", "start-task", task.id, "primary-button")
       : "";
   }
   if (businessStatus.technicalStatus === TaskStatus.Doing) {
     if (!canCurrentUser("tasks.submitResult")) return "";
     const action = task.needAcceptance ? "submit-acceptance" : "submit-done";
-    return `<div class="task-card-workflow-action">${renderActionButton("提交结果", action, task.id, "primary-button")}</div>`;
+    return renderActionButton("提交结果", action, task.id, "primary-button");
   }
   if (businessStatus.technicalStatus === TaskStatus.PendingAcceptance) {
-    return `<div class="task-card-workflow-action"><button class="secondary-button" type="button" disabled>待审核</button></div>`;
+    return `<button class="secondary-button" type="button" disabled>待审核</button>`;
   }
   return "";
+}
+
+function renderTaskCardExecutor(task) {
+  const executorId = getTaskExecutorId(task);
+  const executor = people.find((person) => person.id === executorId) ?? null;
+  const executorName = executor?.name || "未设置执行人";
+  const avatarUrl = executor?.avatarUrl ? resolveAssetUrl(executor.avatarUrl) : "";
+  const avatarInitial = Array.from(executorName.trim())[0] || "未";
+
+  return `
+    <div class="task-card-executor" title="${escapeAttribute(executorName)}">
+      ${
+        avatarUrl
+          ? `<img class="task-card-executor-avatar" src="${escapeAttribute(avatarUrl)}" alt="${escapeAttribute(executorName)}头像" />`
+          : `<span class="task-card-executor-avatar task-card-executor-placeholder" aria-hidden="true">${escapeHtml(avatarInitial)}</span>`
+      }
+      <span class="task-card-executor-name">${escapeHtml(executorName)}</span>
+    </div>
+  `;
 }
 
 function renderTaskCard(task) {
@@ -3122,6 +3141,7 @@ function renderTaskCard(task) {
   const remaining = getTaskRemainingText(task);
   const belonging = getTaskBelonging(task);
   const actionName = belonging.title || belonging.standardWorkName || "未关联关键行动";
+  const workflowAction = renderTaskCardWorkflowAction(task);
 
   return `
     <article class="task-card ${selected}" data-task-card data-row-task-id="${escapeHtml(task.id)}">
@@ -3131,12 +3151,14 @@ function renderTaskCard(task) {
           <h3>${escapeHtml(task.name)}</h3>
         </div>
         <p class="task-card-action-title">${escapeHtml(actionName)}</p>
-        <p class="task-card-executor">执行人：${escapeHtml(findName(people, getTaskExecutorId(task), "未设置执行人"))}</p>
         <div class="task-card-status-row">
           ${renderTaskStatus(task)}
           <span class="task-card-remaining ${remaining.overdue ? "is-overdue" : ""}">${escapeHtml(remaining.label)}</span>
         </div>
-        ${renderTaskCardWorkflowAction(task)}
+        <div class="task-card-action-row">
+          ${renderTaskCardExecutor(task)}
+          ${workflowAction ? `<div class="task-card-workflow-action">${workflowAction}</div>` : ""}
+        </div>
       </div>
     </article>
   `;

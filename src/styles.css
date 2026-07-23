@@ -2319,18 +2319,45 @@ button.content-template-thumb {
 .task-card-executor {
   margin: 0;
   min-width: 0;
-  overflow-wrap: anywhere;
 }
 
 .task-card-action-title {
   color: #64748b;
   font-size: 13px;
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .task-card-executor {
-  color: #64748b;
+  align-items: center;
+  color: #334155;
+  display: inline-flex;
+  font-size: 14px;
+  gap: 8px;
+}
+
+.task-card-executor-avatar {
+  border-radius: 50%;
+  flex: 0 0 26px;
+  height: 26px;
+  object-fit: cover;
+  width: 26px;
+}
+
+.task-card-executor-placeholder {
+  align-items: center;
+  background: #e2e8f0;
+  color: #475569;
+  display: inline-flex;
   font-size: 12px;
+  font-weight: 600;
+  justify-content: center;
+}
+
+.task-card-executor-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .task-card-status-row {
@@ -2341,8 +2368,17 @@ button.content-template-thumb {
   min-width: 0;
 }
 
+.task-card-action-row {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
 .task-card-workflow-action {
   display: flex;
+  flex: 0 0 auto;
   justify-content: flex-end;
 }
 
@@ -5774,8 +5810,7 @@ button.content-template-thumb {
   line-height: 1.4;
 }
 
-.tasks-page .task-card-action-title,
-.tasks-page .task-card-executor {
+.tasks-page .task-card-action-title {
   color: #64748b;
   font-size: 14px;
   line-height: 1.5;
@@ -5878,9 +5913,14 @@ button.content-template-thumb {
   color: #2563eb;
 }
 
-.tasks-page .task-card-workflow-action {
+.tasks-page .task-card-action-row {
   border-top: 1px solid #f1f5f9;
   padding-top: 10px;
+}
+
+.tasks-page .task-card-workflow-action {
+  border-top: 0;
+  padding-top: 0;
 }
 
 .tasks-page .task-card-workflow-action button {
