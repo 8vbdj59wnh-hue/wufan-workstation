@@ -2163,6 +2163,53 @@ export function updateResource(routeResource, id, item) {
   return nextItem;
 }
 
+export function batchLinkProcessInstanceTemplates(payload = {}) {
+  const processInstanceIds = [...new Set((payload.processInstanceIds ?? []).map((id) => String(id ?? "").trim()).filter(Boolean))];
+  const templateIds = [...new Set((payload.templateIds ?? []).map((id) => String(id ?? "").trim()).filter(Boolean))];
+  if (processInstanceIds.length === 0) throw new Error("请选择需要关联模板的关键行动。");
+  if (templateIds.length === 0) throw new Error("请选择需要关联的模板。");
+
+  const batchLink = getDatabase().transaction(() => {
+    const instances = processInstanceIds.map((id) => {
+      const instance = readExistingItem("processInstances", id);
+      if (instance === null) throw new Error("存在未找到的关键行动，批量关联已取消。");
+      return instance;
+    });
+    templateIds.forEach((id) => {
+      if (readExistingItem("templates", id) === null) throw new Error("存在未找到的模板，批量关联已取消。");
+    });
+
+    const updatedAt = new Date().toISOString();
+    const updatedInstances = instances.map((instance) => {
+      const customFields =
+        instance.customFields !== null && typeof instance.customFields === "object" && !Array.isArray(instance.customFields)
+          ? instance.customFields
+          : {};
+      const existingTemplateIds = Array.isArray(customFields.linkedTemplateIds)
+        ? customFields.linkedTemplateIds.map((id) => String(id ?? "").trim()).filter(Boolean)
+        : [];
+      const updatedInstance = {
+        ...instance,
+        customFields: {
+          ...customFields,
+          linkedTemplateIds: [...new Set([...existingTemplateIds, ...templateIds])],
+        },
+        updatedAt,
+      };
+      insertItem("processInstances", updatedInstance);
+      return updatedInstance;
+    });
+
+    return {
+      processInstanceIds,
+      templateIds,
+      updatedCount: updatedInstances.length,
+    };
+  });
+
+  return batchLink();
+}
+
 const taskWorkflowTransitions = {
   start: { from: new Set(["todo"]), to: new Set(["doing"]) },
   activate: { from: new Set(["waiting"]), to: new Set(["todo"]) },

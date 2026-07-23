@@ -1,13 +1,23 @@
 import {
+  batchLinkActionTemplates,
   cancelProcessInstance,
   getCurrentUser,
+  loadTemplates,
   resolveAssetUrl,
   startProcessInstanceExecution,
   state,
   updatePersistentResource,
 } from "./appState.js?v=20260705-state-singleton1";
 import { selectTask } from "./tasksPage.js?v=20260724-action-template-link1";
-import { bindLaunchedProcessDetailEvents, canEditLaunchedProcessInstance, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260724-action-template-link1";
+import {
+  bindActionLinkedTemplatePreviewEvents,
+  bindLaunchedProcessDetailEvents,
+  canEditLaunchedProcessInstance,
+  filterActionTemplateOptions,
+  renderActionTemplatePicker,
+  renderLaunchedProcessDetail,
+  updateActionTemplatePickerSelection,
+} from "./processInstanceDetail.js?v=20260724-batch-action-template1";
 import { formatBusinessDateTime } from "./businessTime.js?v=20260705-state-singleton1";
 import { rerenderPreservingInputFocus } from "./inputFocus.js?v=20260723-input-focus1";
 import {
@@ -64,6 +74,10 @@ const filters = {
 let activeScheduleView = "board";
 let selectedProcessInstanceId = null;
 let selectedLaunchedProcessIds = new Set();
+let batchActionTemplatePickerOpen = false;
+let selectedBatchActionTemplateIds = new Set();
+let batchActionTemplateError = "";
+let batchActionTemplateSaving = false;
 let draggedSourceId = null;
 let draggedSourceType = null;
 let suppressProcessClickId = null;
@@ -1089,14 +1103,41 @@ function formatRemainingDueTime(value) {
   return diff >= 0 ? `剩余 ${formatDurationByHours(diff)}` : `已超时 ${formatDurationByHours(diff)}`;
 }
 
+function getSelectedEditableProcessInstances(rows = buildLaunchedListRows()) {
+  const currentUser = getCurrentUser();
+  const rowMap = new Map(rows.map((row) => [row.processInstance?.id, row]));
+  return [...selectedLaunchedProcessIds]
+    .map((processInstanceId) => rowMap.get(processInstanceId)?.processInstance ?? null)
+    .filter((instance) => instance !== null && canEditLaunchedProcessInstance(instance, currentUser));
+}
+
+function renderLaunchedActionBatchBar(selectedCount) {
+  if (selectedCount === 0) return "";
+  return `
+    <div class="schedule-action-batch-bar" data-schedule-action-batch-bar>
+      <strong>已选择 ${selectedCount} 个关键行动</strong>
+      <div class="row-actions">
+        <button class="primary-button" type="button" data-schedule-batch-action="link-templates">批量关联模板</button>
+        <button class="secondary-button" type="button" data-schedule-batch-action="clear">清除选择</button>
+      </div>
+    </div>
+  `;
+}
+
 function renderLaunchedActionList(rows) {
   const sortedRows = [...rows].sort((left, right) =>
     String(right.startDate ?? "").localeCompare(String(left.startDate ?? "")) ||
     String(right.processInstance?.createdAt ?? "").localeCompare(String(left.processInstance?.createdAt ?? "")),
   );
+  const visibleInstanceIds = new Set(sortedRows.map((row) => row.processInstance?.id).filter(Boolean));
+  selectedLaunchedProcessIds = new Set(
+    [...selectedLaunchedProcessIds].filter((instanceId) => visibleInstanceIds.has(instanceId)),
+  );
+  const selectedCount = getSelectedEditableProcessInstances(sortedRows).length;
 
   return `
     <section class="schedule-launched-list-section">
+      ${renderLaunchedActionBatchBar(selectedCount)}
       <div class="table-wrap">
         <table class="data-table schedule-launched-list-table">
           <thead>
@@ -1122,11 +1163,11 @@ function renderLaunchedActionList(rows) {
                       const instanceId = row.processInstance?.id ?? "";
                       const processDueDate = getListProcessDueDate(row);
                       const canEdit = canEditLaunchedProcessInstance(row.processInstance, getCurrentUser());
-                      const checked = selectedLaunchedProcessIds.has(instanceId) ? "checked" : "";
+                      const checked = canEdit && selectedLaunchedProcessIds.has(instanceId) ? "checked" : "";
                       return `
                         <tr data-schedule-process-row-id="${escapeAttribute(instanceId)}">
                           <td>${index + 1}</td>
-                          <td><input type="checkbox" data-schedule-list-select="${escapeAttribute(instanceId)}" ${checked} aria-label="选择${escapeAttribute(getProcessCardTitle(row))}" /></td>
+                          <td><input type="checkbox" data-schedule-list-select="${escapeAttribute(instanceId)}" ${checked} ${canEdit ? "" : "disabled"} aria-label="选择${escapeAttribute(getProcessCardTitle(row))}" title="${canEdit ? "选择关键行动" : "无编辑权限"}" /></td>
                           <td>${renderThumbnail(row)}</td>
                           <td><strong>${renderCellText(getProcessCardTitle(row))}</strong></td>
                           <td>${renderCellText(getActionInitiatorName(row))}</td>
@@ -1270,6 +1311,19 @@ function renderProcessDetailModal() {
   `;
 }
 
+function renderBatchActionTemplatePicker() {
+  if (!batchActionTemplatePickerOpen) return "";
+  const actionCount = getSelectedEditableProcessInstances().length;
+  return renderActionTemplatePicker([...selectedBatchActionTemplateIds], {
+    title: "批量关联模板",
+    confirmLabel: `关联到 ${actionCount} 个关键行动`,
+    confirmAction: "confirm-batch-action-template-picker",
+    closeAction: "close-batch-action-template-picker",
+    error: batchActionTemplateError,
+    saving: batchActionTemplateSaving,
+  });
+}
+
 export function renderScheduleBoardPage() {
   const days = buildBoardDays();
   const launchedRows = buildLaunchedRows().filter(launchedRowMatchesFilters);
@@ -1304,6 +1358,7 @@ export function renderScheduleBoardPage() {
           `
       }
       ${renderProcessDetailModal()}
+      ${renderBatchActionTemplatePicker()}
     </section>
   `;
 }
@@ -1363,6 +1418,28 @@ export function bindScheduleBoardPageEvents(rerender) {
       if (processInstanceId === "") return;
       if (checkbox.checked) selectedLaunchedProcessIds.add(processInstanceId);
       else selectedLaunchedProcessIds.delete(processInstanceId);
+      rerenderScheduleBoard();
+    });
+  });
+
+  document.querySelectorAll("[data-schedule-batch-action]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (button.dataset.scheduleBatchAction === "clear") {
+        selectedLaunchedProcessIds.clear();
+        rerenderScheduleBoard();
+        return;
+      }
+      const selectedInstances = getSelectedEditableProcessInstances();
+      if (selectedInstances.length === 0) return;
+      try {
+        await loadTemplates();
+        selectedBatchActionTemplateIds = new Set();
+        batchActionTemplateError = "";
+        batchActionTemplatePickerOpen = true;
+      } catch (error) {
+        window.alert(error.message || "模板列表读取失败，请检查本地数据库服务。");
+      }
+      rerenderScheduleBoard();
     });
   });
 
@@ -1500,6 +1577,67 @@ export function bindScheduleBoardPageEvents(rerender) {
         selectedProcessInstanceId = null;
         rerenderScheduleBoard();
       },
+    });
+  }
+
+  const batchTemplatePicker = document.querySelector("[data-action-template-picker]");
+  if (batchActionTemplatePickerOpen && batchTemplatePicker !== null) {
+    bindActionLinkedTemplatePreviewEvents(batchTemplatePicker);
+    batchTemplatePicker.querySelector("[data-action-template-search]")?.focus({ preventScroll: true });
+    batchTemplatePicker.addEventListener("input", (event) => {
+      if (event.target.matches("[data-action-template-search]")) filterActionTemplateOptions(batchTemplatePicker);
+    });
+    batchTemplatePicker.addEventListener("click", async (event) => {
+      const actionButton = event.target.closest("[data-action]");
+      if (actionButton === null) return;
+      if (actionButton.dataset.action === "close-batch-action-template-picker") {
+        batchActionTemplatePickerOpen = false;
+        selectedBatchActionTemplateIds.clear();
+        batchActionTemplateError = "";
+        rerenderScheduleBoard();
+        return;
+      }
+      if (actionButton.dataset.action === "filter-action-template") {
+        actionButton.classList.toggle("is-active");
+        filterActionTemplateOptions(batchTemplatePicker);
+        return;
+      }
+      if (actionButton.dataset.action === "toggle-action-template") {
+        const templateId = actionButton.dataset.templateId ?? "";
+        if (selectedBatchActionTemplateIds.has(templateId)) selectedBatchActionTemplateIds.delete(templateId);
+        else if (templateId !== "") selectedBatchActionTemplateIds.add(templateId);
+        updateActionTemplatePickerSelection(batchTemplatePicker, [...selectedBatchActionTemplateIds]);
+        return;
+      }
+      if (actionButton.dataset.action !== "confirm-batch-action-template-picker" || batchActionTemplateSaving) return;
+      const selectedInstances = getSelectedEditableProcessInstances();
+      if (selectedInstances.length !== selectedLaunchedProcessIds.size) {
+        batchActionTemplateError = "所选关键行动中存在无编辑权限或已不可编辑的记录，请重新选择。";
+        rerenderScheduleBoard();
+        return;
+      }
+      if (selectedBatchActionTemplateIds.size === 0) {
+        batchActionTemplateError = "请至少选择一个模板。";
+        rerenderScheduleBoard();
+        return;
+      }
+      batchActionTemplateSaving = true;
+      batchActionTemplateError = "";
+      rerenderScheduleBoard();
+      try {
+        await batchLinkActionTemplates(
+          selectedInstances.map((instance) => instance.id),
+          [...selectedBatchActionTemplateIds],
+        );
+        batchActionTemplatePickerOpen = false;
+        selectedBatchActionTemplateIds.clear();
+        selectedLaunchedProcessIds.clear();
+      } catch (error) {
+        batchActionTemplateError = error.message || "批量关联模板失败，请检查本地数据库服务。";
+      } finally {
+        batchActionTemplateSaving = false;
+        rerenderScheduleBoard();
+      }
     });
   }
 }

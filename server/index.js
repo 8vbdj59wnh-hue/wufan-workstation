@@ -6,6 +6,7 @@ import multer from "multer";
 import {
   closeDatabase,
   createResource,
+  batchLinkProcessInstanceTemplates,
   batchUpdateTaskStatus,
   cancelExecutionGroup,
   cancelProcessInstance,
@@ -523,6 +524,34 @@ app.post("/api/process-instances/:id/start", (request, response) => {
     console.error("开始执行关键行动失败", error);
     const message = error.message || "开始执行关键行动失败，请检查本地数据库服务。";
     response.status(message.includes("没有权限") ? 403 : 400).json({ success: false, message });
+  }
+});
+
+app.post("/api/process-instances/batch-link-templates", (request, response) => {
+  try {
+    const processInstanceIds = [...new Set((request.body?.processInstanceIds ?? []).map((id) => String(id ?? "").trim()).filter(Boolean))];
+    if (processInstanceIds.length === 0) {
+      response.status(400).json({ success: false, message: "请选择需要关联模板的关键行动。" });
+      return;
+    }
+    const instanceMap = new Map(readAllData().processInstances.map((instance) => [instance.id, instance]));
+    const instances = processInstanceIds.map((id) => instanceMap.get(id));
+    if (instances.some((instance) => instance === undefined)) {
+      response.status(404).json({ success: false, message: "存在未找到的关键行动。" });
+      return;
+    }
+    if (instances.some((instance) => !canEditProcessInstance(request.user, instance))) {
+      response.status(403).json({ success: false, message: "只有管理员或关键行动发起人可以关联模板。" });
+      return;
+    }
+    const result = batchLinkProcessInstanceTemplates({
+      processInstanceIds,
+      templateIds: request.body?.templateIds,
+    });
+    response.json({ success: true, result, data: filterDataByScope(readAllData(), request.user) });
+  } catch (error) {
+    console.error("批量关联关键行动模板失败", error);
+    response.status(400).json({ success: false, message: error.message || "批量关联模板失败，请检查本地数据库服务。" });
   }
 });
 

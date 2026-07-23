@@ -2161,6 +2161,26 @@ button.content-template-thumb {
   padding: 10px 12px;
 }
 
+.schedule-action-batch-bar {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  padding: 10px 12px;
+  color: #1e3a8a;
+}
+
+.schedule-action-batch-bar .row-actions {
+  flex-wrap: wrap;
+}
+
+.action-template-picker-error {
+  margin: 0 18px 14px;
+}
+
 .task-name-column {
   width: 170px;
 }

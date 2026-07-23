@@ -413,6 +413,20 @@ export async function startProcessInstanceExecution(instanceId, { dueDate } = {}
   return data.data;
 }
 
+export async function batchLinkActionTemplates(processInstanceIds, templateIds) {
+  const response = await authFetch(`${apiBaseUrl}/api/process-instances/batch-link-templates`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ processInstanceIds, templateIds }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success !== true) {
+    throw new Error(data.message ?? data.error ?? "批量关联模板失败，请检查本地数据库服务。");
+  }
+  if (data.data !== undefined) applyDataSnapshot(data.data);
+  return data.result ?? null;
+}
+
 export async function moveTaskTemplateToValueChain(templateId, category) {
   const categoryName = typeof category === "string" ? category : category?.name ?? "";
   const categoryId = typeof category === "string" ? undefined : category?.id;

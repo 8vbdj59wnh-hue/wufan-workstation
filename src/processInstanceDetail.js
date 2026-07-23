@@ -159,7 +159,7 @@ function getStandardWorkAttachments(instance) {
   return Array.isArray(attachments) ? attachments : [];
 }
 
-function getLinkedActionTemplateIds(source) {
+export function getLinkedActionTemplateIds(source) {
   const customFields = source?.customFields ?? source ?? {};
   const templateIds = customFields?.[linkedActionTemplateIdsKey];
   if (!Array.isArray(templateIds)) return [];
@@ -254,7 +254,17 @@ export function renderActionLinkedTemplates(instance, { editable = false, compac
   `;
 }
 
-function renderActionTemplatePicker(selectedTemplateIds) {
+export function renderActionTemplatePicker(
+  selectedTemplateIds,
+  {
+    title = "关联模板",
+    confirmLabel = "完成",
+    confirmAction = "close-action-template-picker",
+    closeAction = "close-action-template-picker",
+    error = "",
+    saving = false,
+  } = {},
+) {
   const categories = getTemplateTagCategories();
   const selectedIds = new Set(selectedTemplateIds);
   const groupedTags = Object.fromEntries(categories.map((category) => [category.id, []]));
@@ -267,10 +277,10 @@ function renderActionTemplatePicker(selectedTemplateIds) {
 
   return `
     <div class="modal-backdrop content-template-picker-backdrop action-template-picker-backdrop" role="presentation" data-action-template-picker>
-      <div class="modal-panel extra-wide-modal action-template-picker" role="dialog" aria-modal="true" aria-label="关联模板">
+      <div class="modal-panel extra-wide-modal action-template-picker" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">
         <div class="modal-header">
-          <h2>关联模板</h2>
-          <button class="icon-button" type="button" data-action="close-action-template-picker" aria-label="关闭">×</button>
+          <h2>${escapeHtml(title)}</h2>
+          <button class="icon-button" type="button" data-action="${escapeHtml(closeAction)}" aria-label="关闭">×</button>
         </div>
         <div class="content-template-picker">
           <div class="content-template-picker-toolbar">
@@ -330,8 +340,9 @@ function renderActionTemplatePicker(selectedTemplateIds) {
             </div>
           </div>
         </div>
+        ${error === "" ? "" : `<div class="form-error action-template-picker-error">${escapeHtml(error)}</div>`}
         <div class="modal-footer">
-          <button class="primary-button" type="button" data-action="close-action-template-picker">完成</button>
+          <button class="primary-button" type="button" data-action="${escapeHtml(confirmAction)}" ${saving ? "disabled" : ""}>${escapeHtml(saving ? "保存中…" : confirmLabel)}</button>
         </div>
       </div>
     </div>
@@ -740,7 +751,7 @@ function setSelectedActionTemplateIds(form, templateIds) {
   });
 }
 
-function filterActionTemplateOptions(picker) {
+export function filterActionTemplateOptions(picker) {
   const query = picker.querySelector("[data-action-template-search]")?.value.trim().toLowerCase() ?? "";
   const selectedTags = new Map();
   picker.querySelectorAll("[data-action='filter-action-template'].is-active").forEach((button) => {
@@ -767,6 +778,19 @@ function filterActionTemplateOptions(picker) {
   });
   const empty = picker.querySelector("[data-action-template-empty]");
   if (empty !== null) empty.hidden = visibleCount > 0;
+}
+
+export function updateActionTemplatePickerSelection(picker, templateIds) {
+  const selectedIds = new Set(getLinkedActionTemplateIds({ [linkedActionTemplateIdsKey]: templateIds }));
+  picker.querySelectorAll("[data-action-template-option]").forEach((option) => {
+    const selected = selectedIds.has(option.dataset.templateId ?? "");
+    option.classList.toggle("is-selected", selected);
+    const button = option.querySelector("[data-action='toggle-action-template']");
+    if (button === null) return;
+    button.textContent = selected ? "已选择" : "选择";
+    button.classList.toggle("primary-button", !selected);
+    button.classList.toggle("secondary-button", selected);
+  });
 }
 
 function getActionTemplateHoverPreview() {
