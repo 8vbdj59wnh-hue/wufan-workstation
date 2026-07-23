@@ -2080,12 +2080,20 @@ export function launchWorkPlanWithProcess(workPlanId, { processInstance, tasks: 
   if (generatedTasks.some((task) => task.processInstanceId !== processInstance.id)) throw new Error("任务与已发起关键行动不匹配。");
 
   const now = new Date().toISOString();
-  const syncedDueDate = processInstance.dueDate ?? launchedWorkPlan?.dueDate ?? baseWorkPlan.dueDate ?? null;
   const nextProcessInstance = {
     ...processInstance,
-    dueDate: syncedDueDate,
+    startedAt: null,
+    dueDate: null,
     updatedAt: now,
   };
+  const nextTasks = generatedTasks.map((task, index) => ({
+    ...task,
+    status: index === 0 ? "todo" : "waiting",
+    startDate: null,
+    dueDate: null,
+    plannedWeek: null,
+    updatedAt: now,
+  }));
   const nextWorkPlan = {
     ...baseWorkPlan,
     ...(launchedWorkPlan ?? {}),
@@ -2093,7 +2101,7 @@ export function launchWorkPlanWithProcess(workPlanId, { processInstance, tasks: 
     workType: launchedWorkPlan?.workType ?? baseWorkPlan.workType ?? "normal",
     status: "launched",
     processInstanceId: processInstance.id,
-    dueDate: syncedDueDate,
+    dueDate: null,
     launchedAt: launchedWorkPlan?.launchedAt ?? now,
     updatedAt: now,
   };
@@ -2127,12 +2135,12 @@ export function launchWorkPlanWithProcess(workPlanId, { processInstance, tasks: 
 
   const launch = database.transaction(() => {
     insertItem("processInstances", nextProcessInstance);
-    for (const task of generatedTasks) insertItem("tasks", task);
+    for (const task of nextTasks) insertItem("tasks", task);
     insertItem("workPlans", nextWorkPlan);
   });
   launch();
 
-  return { instance: nextProcessInstance, workPlan: nextWorkPlan, tasks: generatedTasks };
+  return { instance: nextProcessInstance, workPlan: nextWorkPlan, tasks: nextTasks };
 }
 
 export function createResource(routeResource, item) {

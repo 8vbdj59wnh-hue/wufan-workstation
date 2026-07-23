@@ -837,11 +837,6 @@ export function addMinutesToBusinessDateTime(value, minutes) {
 
 const standardWorkAttachmentsKey = "standardWorkAttachments";
 
-function getProcessExpectedFinishAt(nodes, startAt) {
-  const totalMinutes = nodes.reduce((sum, node) => sum + getProcessNodeDurationMinutes(node), 0);
-  return addMinutesToBusinessDateTime(startAt, totalMinutes);
-}
-
 function normalizeTaskSubmitRequirements() {
   state.tasks = state.tasks.map((task) => {
     const node = state.processTemplateNodes.find((item) => item.id === task.processNodeId);
@@ -1846,9 +1841,6 @@ export function startProcess({
   }
 
   const now = getNow();
-  const taskStartAt = getBusinessMinuteNow();
-  const taskStartDate = taskStartAt.slice(0, 10);
-  const expectedFinishAt = getProcessExpectedFinishAt(nodes, taskStartAt);
   const primaryCoverImageUrl = coverImageUrl || getPrimaryImageUrl({ customFields });
   const instance = {
     id: createId("process-instance"),
@@ -1860,7 +1852,8 @@ export function startProcess({
     initiatorId: resolvedInitiatorId,
     description,
     status: ProcessInstanceStatus.Running,
-    startedAt: now,
+    startedAt: null,
+    dueDate: null,
     completedAt: null,
     stoppedAt: null,
     createdAt: now,
@@ -1889,9 +1882,9 @@ export function startProcess({
       completionStandard: node.completionStandard,
       reviewStandard: null,
       outputRequirement: null,
-      startDate: activeNow ? taskStartAt : null,
-      dueDate: activeNow ? addMinutesToBusinessDateTime(taskStartAt, getProcessNodeDurationMinutes(node)) : null,
-      plannedWeek: activeNow ? getCurrentWeek(new Date(`${taskStartDate}T00:00:00+08:00`)) : null,
+      startDate: null,
+      dueDate: null,
+      plannedWeek: null,
       needAcceptance: false,
       accepterId: null,
       status: activeNow ? TaskStatus.Todo : TaskStatus.Waiting,
@@ -1917,7 +1910,7 @@ export function startProcess({
 
   state.processInstances = [instance, ...state.processInstances];
   state.tasks = [...generatedTasks, ...state.tasks];
-  return { instance, expectedFinishAt };
+  return { instance };
 }
 
 function enrichStandardWorkAttachments(customFields, { standardWorkId, workPlanId, processInstanceId, taskIds }) {
@@ -1935,7 +1928,7 @@ function enrichStandardWorkAttachments(customFields, { standardWorkId, workPlanI
   };
 }
 
-export async function launchWorkPlanAsProcess(workPlanId, { dueDate = null, initiatorId = null, launchAssignments = null } = {}) {
+export async function launchWorkPlanAsProcess(workPlanId, { initiatorId = null, launchAssignments = null } = {}) {
   const workPlan = state.workPlans.find((item) => item.id === workPlanId);
   if (workPlan === undefined) throw new Error("未找到该待发起工作计划。");
   if (workPlan.processInstanceId || workPlan.status === WorkPlanStatus.Launched) {
@@ -1970,13 +1963,9 @@ export async function launchWorkPlanAsProcess(workPlanId, { dueDate = null, init
 
   const launchedInstance = {
     ...result.instance,
-    dueDate: dueDate ?? workPlan.dueDate ?? result.instance.dueDate ?? null,
+    dueDate: null,
     updatedAt: now,
   };
-  const syncedDueDate = launchedInstance.dueDate ?? null;
-  if (syncedDueDate !== null && result.expectedFinishAt !== undefined && new Date(result.expectedFinishAt).getTime() > new Date(syncedDueDate).getTime()) {
-    window.alert("预计完成时间超过项目截止时间，请关注排期。");
-  }
   const generatedTasks = state.tasks.filter((task) => task.processInstanceId === result.instance.id);
   const taskIds = generatedTasks.map((task) => task.id);
   launchedInstance.customFields = enrichStandardWorkAttachments(launchedInstance.customFields ?? {}, {
@@ -1990,7 +1979,7 @@ export async function launchWorkPlanAsProcess(workPlanId, { dueDate = null, init
     workType: workPlan.workType || WorkType.Normal,
     status: WorkPlanStatus.Launched,
     processInstanceId: launchedInstance.id,
-    dueDate: syncedDueDate,
+    dueDate: null,
     customFields: launchedInstance.customFields,
     launchedAt: now,
     updatedAt: now,
