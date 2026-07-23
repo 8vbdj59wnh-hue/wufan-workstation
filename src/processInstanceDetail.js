@@ -3,13 +3,13 @@ import {
   GoalStatus,
   ProcessInstanceStatus,
   TaskStatus,
-  taskStatusNames,
 } from "./data/modelOptions.js";
 import {
   getProcessInstanceBusinessStatus as selectProcessInstanceBusinessStatus,
   getProcessInstanceOwner,
   getProcessProgress as selectProcessProgress,
 } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
+import { getTaskBusinessStatus } from "./data/taskSelectors.js?v=20260723-task-business-status2";
 import { renderWorkFormViewer } from "./workFormViewer.js?v=20260705-state-singleton1";
 import {
   collectPublicFormFields,
@@ -310,7 +310,7 @@ function renderStepTask(task, editable, stepIndex) {
     return `
       <tr>
         <td><strong>${stepLabel}</strong><br />${escapeHtml(task.name)}</td>
-        <td><span class="status-pill">${taskStatusNames[task.status]}</span></td>
+        <td><span class="status-pill">${escapeHtml(getTaskBusinessStatus(task).label)}</span></td>
         <td>${findName(people, displayedOwnerId, "未设置")}</td>
         <td>${findName(people, displayedExecutorId, "未设置")}</td>
         <td>${formatBusinessMinuteDateTime(task.dueDate)}</td>
@@ -322,7 +322,7 @@ function renderStepTask(task, editable, stepIndex) {
   return `
     <tr>
       <td><strong>${stepLabel}</strong><br />${escapeHtml(task.name)}</td>
-      <td><span class="status-pill">${taskStatusNames[task.status]}</span></td>
+      <td><span class="status-pill">${escapeHtml(getTaskBusinessStatus(task).label)}</span></td>
       <td><select name="task__${task.id}__ownerId">${renderOptions(people, task.ownerId, "请选择负责人")}</select></td>
       <td><select name="task__${task.id}__executorId">${renderOptions(people, task.executorId, "请选择执行人")}</select></td>
       <td>
