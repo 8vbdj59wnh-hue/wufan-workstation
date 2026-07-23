@@ -3098,6 +3098,24 @@ function getTaskRemainingText(task) {
   return { label: overdue ? `已超时 ${durationText}` : `剩余 ${durationText}`, overdue };
 }
 
+function renderTaskCardWorkflowAction(task) {
+  const businessStatus = getTaskBusinessStatus(task);
+  if (businessStatus.technicalStatus === TaskStatus.Todo) {
+    return canCurrentUser("tasks.changeStatus")
+      ? `<div class="task-card-workflow-action">${renderActionButton("开始执行", "start-task", task.id, "primary-button")}</div>`
+      : "";
+  }
+  if (businessStatus.technicalStatus === TaskStatus.Doing) {
+    if (!canCurrentUser("tasks.submitResult")) return "";
+    const action = task.needAcceptance ? "submit-acceptance" : "submit-done";
+    return `<div class="task-card-workflow-action">${renderActionButton("提交结果", action, task.id, "primary-button")}</div>`;
+  }
+  if (businessStatus.technicalStatus === TaskStatus.PendingAcceptance) {
+    return `<div class="task-card-workflow-action"><button class="secondary-button" type="button" disabled>待审核</button></div>`;
+  }
+  return "";
+}
+
 function renderTaskCard(task) {
   const selected = task.id === selectedTaskId ? "is-selected" : "";
   const remaining = getTaskRemainingText(task);
@@ -3117,6 +3135,7 @@ function renderTaskCard(task) {
           ${renderTaskStatus(task)}
           <span class="task-card-remaining ${remaining.overdue ? "is-overdue" : ""}">${escapeHtml(remaining.label)}</span>
         </div>
+        ${renderTaskCardWorkflowAction(task)}
       </div>
     </article>
   `;

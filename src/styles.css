@@ -2341,6 +2341,15 @@ button.content-template-thumb {
   min-width: 0;
 }
 
+.task-card-workflow-action {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.task-card-workflow-action button {
+  min-width: 96px;
+}
+
 .task-card-remaining {
   border: 1px solid #d1fae5;
   border-radius: 999px;
