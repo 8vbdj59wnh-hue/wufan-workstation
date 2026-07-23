@@ -26,7 +26,6 @@ import {
   goalStatusNames,
   goalTypeNames,
   metricDirectionNames,
-  processInstanceStatusNames,
   taskStatusNames,
   getValueModuleName,
   inferValueModuleIdFromText,
@@ -37,6 +36,7 @@ import { getPrimaryImageUrl, isTaskOverdue } from "./data/taskUtils.js?v=2026070
 import {
   getCurrentExecutor as selectCurrentExecutor,
   getCurrentProcessTask as selectCurrentProcessTask,
+  getProcessInstanceBusinessStatus as selectProcessInstanceBusinessStatus,
   getProcessProgress as selectProcessProgress,
   isProcessInstanceOverdue as selectProcessInstanceOverdue,
 } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
@@ -783,7 +783,7 @@ function renderGoalProcessTable(goal) {
                   <td>${getProcessProgress(instance)}</td>
                   <td>${escapeHtml(getProcessCurrentOwners(instance))}</td>
                   <td>${findName(people, instance.initiatorId, "未设置")}</td>
-                  <td><span class="status-pill">${processInstanceStatusNames[instance.status]}</span></td>
+                  <td><span class="status-pill">${selectProcessInstanceBusinessStatus(instance.id, state).label}</span></td>
                   <td>${isProcessInstanceOverdue(instance) ? `<span class="status-pill is-danger">已逾期</span>` : `<span class="status-pill">正常</span>`}</td>
                   <td>${instance.startedAt}</td>
                   <td><button class="text-button" type="button" data-action="view-goal-process" data-instance-id="${instance.id}">查看 / 编辑</button></td>

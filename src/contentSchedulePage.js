@@ -34,12 +34,12 @@ import {
   contentSchedulePurposeOptions,
   contentScheduleStatusNames,
   contentScheduleTypeOptions,
-  processInstanceStatusNames,
   taskStatusNames,
   workPlanStatusNames,
 } from "./data/modelOptions.js";
 import {
   getCurrentProcessTask as selectCurrentProcessTask,
+  getProcessInstanceBusinessStatus as selectProcessInstanceBusinessStatus,
   getProcessProgress as selectProcessProgress,
   isProcessInstanceOverdue as selectProcessInstanceOverdue,
 } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
@@ -725,14 +725,7 @@ function renderScheduleFlowStatus(schedule) {
     const instance = state.processInstances.find((item) => item.id === schedule.processInstanceId);
     if (instance === undefined) return `<span class="status-pill is-inactive">关键行动已失效</span>`;
 
-    const statusText =
-      instance.status === ProcessInstanceStatus.Running
-        ? "关键行动进行中"
-        : instance.status === ProcessInstanceStatus.Done
-          ? "关键行动已完成"
-          : instance.status === ProcessInstanceStatus.Stopped
-            ? "关键行动已终止"
-            : `关键行动${processInstanceStatusNames[instance.status] ?? "未知"}`;
+    const statusText = `关键行动${selectProcessInstanceBusinessStatus(instance.id, state).label}`;
     const progressText = getProcessProgressText(instance.id);
 
     return `

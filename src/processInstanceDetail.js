@@ -3,10 +3,13 @@ import {
   GoalStatus,
   ProcessInstanceStatus,
   TaskStatus,
-  processInstanceStatusNames,
   taskStatusNames,
 } from "./data/modelOptions.js";
-import { getProcessInstanceOwner, getProcessProgress as selectProcessProgress } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
+import {
+  getProcessInstanceBusinessStatus as selectProcessInstanceBusinessStatus,
+  getProcessInstanceOwner,
+  getProcessProgress as selectProcessProgress,
+} from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
 import { renderWorkFormViewer } from "./workFormViewer.js?v=20260705-state-singleton1";
 import {
   collectPublicFormFields,
@@ -390,7 +393,7 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
             ${renderDetailField("关键行动标准流程", `${escapeHtml(template?.name ?? "未设置")} v${instance.templateVersion}`)}
             ${renderDetailField("行动负责人", actionOwnerName)}
             ${renderDetailField("发起人", findName(people, instance.initiatorId, "未设置"))}
-            ${renderDetailField("状态", processInstanceStatusNames[instance.status])}
+            ${renderDetailField("状态", selectProcessInstanceBusinessStatus(instance.id, state).label)}
             ${renderDetailField("步骤进度", getProgress(instance.id))}
             ${renderDetailField("发起时间", instance.startedAt)}
             ${

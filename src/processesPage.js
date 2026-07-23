@@ -32,7 +32,6 @@ import {
   inferValueModuleIdFromText,
   isValueModuleId,
   processAccepterRuleNames,
-  processInstanceStatusNames,
   processOwnerRuleNames,
   processTemplateNodeStatusNames,
   processTemplateStatusNames,
@@ -41,6 +40,7 @@ import {
   valueModuleList,
 } from "./data/modelOptions.js?v=20260705-state-singleton1";
 import { isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
+import { getProcessInstanceBusinessStatus as selectProcessInstanceBusinessStatus } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
 import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260705-state-singleton1";
 import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260705-state-singleton1";
 import { bindStandardWorkLibraryEvents, openTaskTemplateLaunchModal, renderStandardWorkLibraryPage } from "./actionStandardsPage.js?v=20260722-action-standards-page1";
@@ -535,7 +535,7 @@ function renderStartedProcesses() {
                     <td>${findName(people, instance.initiatorId, "未设置")}</td>
                     <td>${getCurrentStep(instance)}</td>
                     <td>${doneCount} / ${instanceTasks.length}</td>
-                    <td><span class="status-pill">${processInstanceStatusNames[instance.status]}</span></td>
+                    <td><span class="status-pill">${selectProcessInstanceBusinessStatus(instance.id, state).label}</span></td>
                     <td>${instance.startedAt}</td>
                     <td>${instance.completedAt ?? "-"}</td>
                     <td>

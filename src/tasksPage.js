@@ -47,7 +47,6 @@ import {
   TaskTemplateStatus,
   WorkPlanStatus,
   RectificationWorkTemplate,
-  processInstanceStatusNames,
   taskSourceNames,
   taskStatusNames,
   submitTypeNames,
@@ -60,6 +59,7 @@ import { getPrimaryImageUrl, hasTaskOverdueRecord, isCanceledStatus, isDoneStatu
 import {
   getCurrentExecutor as selectCurrentExecutor,
   getCurrentProcessTask as selectCurrentProcessTask,
+  getProcessInstanceBusinessStatus as selectProcessInstanceBusinessStatus,
   getProcessProgress as selectProcessProgress,
   isTaskExecutionStarted,
   isProcessInstanceOverdue as selectProcessInstanceOverdue,
@@ -2728,11 +2728,12 @@ function renderClearanceCard(group, index) {
   const info = getClearanceDisplayInfo(group.instance, group.tasks);
   const currentTask = group.currentTask;
   const status = getClearanceStatus(group.instance, group.tasks);
+  const businessStatus = group.instance === null ? null : selectProcessInstanceBusinessStatus(group.instance.id, state);
   const expandedIcon = group.expanded ? "▾" : "▸";
   const currentTaskName = currentTask === null ? getProcessCurrentStepText(group.instance ?? {}) : currentTask.name;
   const currentOwner = currentTask === null ? "未设置" : findName(people, currentTask.ownerId, "未设置");
   const currentDueDate = formatBusinessMinuteDateTime(currentTask?.dueDate ?? info.dueDate, "未填写");
-  const currentStatus = currentTask === null ? processInstanceStatusNames[status] ?? status : taskStatusNames[currentTask.status] ?? currentTask.status;
+  const currentStatus = currentTask === null ? businessStatus?.label ?? status : taskStatusNames[currentTask.status] ?? currentTask.status;
 
   return `
     <article class="clearance-card" data-clearance-group-id="${escapeHtml(group.id)}">
@@ -2745,7 +2746,7 @@ function renderClearanceCard(group, index) {
         <div class="clearance-card-info">
           <div class="clearance-card-title">
             <h3>${renderClearanceValue(info.productName || info.title)}</h3>
-            <span class="status-pill ${getTaskStatusClass(status)}">${processInstanceStatusNames[status] ?? taskStatusNames[status] ?? status}</span>
+            <span class="status-pill ${getTaskStatusClass(businessStatus?.status ?? status)}">${businessStatus?.label ?? taskStatusNames[status] ?? status}</span>
           </div>
           <div class="clearance-meta-grid">
             <span><b>SKU / 规格</b>${renderClearanceValue(info.sku)}</span>
@@ -2990,7 +2991,7 @@ function matchesProcessProgressFilters(instance) {
   if (keyword !== "" && !`${title} ${templateName} ${goalName}`.includes(keyword)) return false;
   if (processProgressFilters.goalId !== "" && instance.goalId !== processProgressFilters.goalId) return false;
   if (processProgressFilters.templateId !== "" && instance.templateId !== processProgressFilters.templateId) return false;
-  if (processProgressFilters.status !== "" && instance.status !== processProgressFilters.status) return false;
+  if (processProgressFilters.status !== "" && selectProcessInstanceBusinessStatus(instance.id, state).status !== processProgressFilters.status) return false;
   if (processProgressFilters.status === "" && isDoneStatus(instance.status) && !processProgressFilters.showDone) return false;
   if (processProgressFilters.status === "" && isHiddenByDefaultStatus(instance.status) && !isDoneStatus(instance.status) && !processProgressFilters.showCanceled) return false;
   if (processProgressFilters.ownerId !== "" && !currentOwnerIds.includes(processProgressFilters.ownerId)) return false;
@@ -3328,7 +3329,12 @@ function renderProcessProgressFilters() {
       </label>
       <label>
         <span>状态</span>
-        <select name="status">${renderValueOptions(ProcessInstanceStatus, processProgressFilters.status, processInstanceStatusNames, "全部状态")}</select>
+        <select name="status">
+          <option value="">全部状态</option>
+          <option value="pending" ${processProgressFilters.status === "pending" ? "selected" : ""}>待执行</option>
+          <option value="running" ${processProgressFilters.status === "running" ? "selected" : ""}>执行中</option>
+          <option value="done" ${processProgressFilters.status === "done" ? "selected" : ""}>已完成</option>
+        </select>
       </label>
       <label>
         <span>当前负责人</span>
@@ -3415,7 +3421,7 @@ function renderProcessProgressTable() {
                           <td>${progress.text}</td>
                           <td>${escapeHtml(getProcessCurrentOwners(instance))}</td>
                           <td>${getProcessCurrentDueDate(instance)}</td>
-                          <td><span class="status-pill">${processInstanceStatusNames[instance.status]}</span></td>
+                          <td><span class="status-pill">${selectProcessInstanceBusinessStatus(instance.id, state).label}</span></td>
                           <td>${renderProcessOverdue(instance)}</td>
                           <td>${findName(people, instance.initiatorId, "未设置")}</td>
                           <td>${instance.startedAt}</td>
@@ -3635,7 +3641,7 @@ function renderActionSummary(task, context) {
           <p>${escapeHtml(taskTemplate?.name ?? "未关联关键行动")}${objectName === "" ? "" : `｜${escapeHtml(objectName)}`}</p>
         </div>
         <div class="task-action-summary">
-          ${renderDetailField("整体状态", processInstanceStatusNames[instance.status] ?? instance.status)}
+          ${renderDetailField("整体状态", selectProcessInstanceBusinessStatus(instance.id, state).label)}
           ${renderDetailField("对齐目标", findName(goals, instance.goalId, "未设置"))}
           ${renderDetailField("负责人", escapeHtml(ownerNames))}
           ${renderDetailField("执行进度", escapeHtml(getActionProgressSummary(progressItems)))}
