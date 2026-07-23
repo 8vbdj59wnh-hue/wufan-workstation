@@ -2274,6 +2274,8 @@ button.content-template-thumb {
   justify-self: center;
   min-width: 0;
   overflow: hidden;
+  transform: none;
+  transition: none;
   width: 200px;
 }
 
@@ -2281,7 +2283,15 @@ button.content-template-thumb {
 .task-card-cover .task-cover-placeholder {
   height: 100%;
   object-fit: cover;
+  transform: none;
+  transition: none;
   width: 100%;
+}
+
+.task-card:hover .task-card-cover,
+.task-card:hover .task-card-cover .task-cover-thumb,
+.task-card:hover .task-card-cover .task-cover-placeholder {
+  transform: none;
 }
 
 .task-card-body {
