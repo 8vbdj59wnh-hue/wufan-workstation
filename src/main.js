@@ -100,6 +100,7 @@ function getModuleIdFromHash() {
 }
 
 let activeModuleId = getModuleIdFromHash();
+let lastRenderedRouteHash = null;
 let loginError = "";
 let notificationPanelOpen = false;
 
@@ -382,8 +383,28 @@ function updatePersistenceBanner() {
   }
 }
 
-function render() {
-  activeModuleId = getModuleIdFromHash();
+function restorePageScroll(scrollTop) {
+  window.requestAnimationFrame(() => {
+    const page = document.querySelector(".page");
+    if (page === null) return;
+    const maximumScrollTop = Math.max(0, page.scrollHeight - page.clientHeight);
+    page.scrollTop = Math.min(scrollTop, maximumScrollTop);
+  });
+}
+
+function render({ navigation = false } = {}) {
+  const previousPage = document.querySelector(".page");
+  const previousScrollTop = previousPage?.scrollTop ?? 0;
+  const previousModuleId = activeModuleId;
+  const routeHash = getRouteHash();
+  const isInitialRender = lastRenderedRouteHash === null;
+  const routeChanged = !isInitialRender && lastRenderedRouteHash !== routeHash;
+  const nextModuleId = getModuleIdFromHash();
+  const shouldFollowHash = navigation || isInitialRender || routeChanged;
+  const shouldRestoreScroll = previousPage !== null && !shouldFollowHash && previousModuleId === nextModuleId;
+
+  activeModuleId = nextModuleId;
+  lastRenderedRouteHash = routeHash;
   const firstAccessibleModule = getFirstAccessibleModule(getCurrentUser(), modules);
 
   if (firstAccessibleModule === null) {
@@ -493,7 +514,11 @@ function render() {
   }
 
   attachThumbnailHoverPreview();
-  scrollToCurrentHashSection();
+  if (shouldFollowHash) {
+    scrollToCurrentHashSection();
+  } else if (shouldRestoreScroll) {
+    restorePageScroll(previousScrollTop);
+  }
 }
 
 function renderStartupError(error) {
@@ -520,7 +545,7 @@ window.addEventListener("error", (event) => {
 window.addEventListener("unhandledrejection", (event) => {
   if (app.innerHTML.trim() === "") renderStartupError(event.reason);
 });
-window.addEventListener("hashchange", render);
+window.addEventListener("hashchange", () => render({ navigation: true }));
 window.addEventListener("pagehide", flushPersistentSave);
 window.addEventListener("beforeunload", flushPersistentSave);
 window.addEventListener("persistence-status-change", updatePersistenceBanner);
