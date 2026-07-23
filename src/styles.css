@@ -4313,6 +4313,7 @@ button.content-template-thumb {
 }
 
 .template-material-thumb {
+  position: relative;
   display: grid;
   place-items: center;
   width: 100%;
@@ -4335,6 +4336,37 @@ button.content-template-thumb {
 
 .template-material-thumb:disabled {
   cursor: default;
+}
+
+.template-material-video-marker,
+.template-video-preview-icon {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+}
+
+.template-material-video-marker {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgb(255 255 255 / 80%);
+  border-radius: 50%;
+  background: rgb(15 23 42 / 78%);
+  color: #ffffff;
+  font-size: 13px;
+  padding-left: 2px;
+}
+
+.template-video-preview-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: #e2e8f0;
+  color: #334155;
+  font-size: 24px;
+  padding-left: 4px;
 }
 
 .template-material-body {

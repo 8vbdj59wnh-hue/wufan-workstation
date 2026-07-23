@@ -90,11 +90,12 @@ const allowedFileTypes = new Set([
   "text/plain",
   "video/mp4",
   "video/quicktime",
+  "video/x-m4v",
   "video/webm",
   "application/illustrator",
   "application/postscript",
 ]);
-const allowedFileExts = new Set([".jpg", ".jpeg", ".png", ".webp", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".txt", ".mp4", ".mov", ".webm", ".psd", ".psb", ".ai", ".fig"]);
+const allowedFileExts = new Set([".jpg", ".jpeg", ".png", ".webp", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".txt", ".mp4", ".mov", ".m4v", ".webm", ".psd", ".psb", ".ai", ".fig"]);
 const fileStorage = multer.diskStorage({
   destination: (_request, _file, callback) => {
     callback(null, fileUploadsDir);

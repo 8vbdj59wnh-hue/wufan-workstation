@@ -15,6 +15,25 @@ const materialTypeNames = {
   pdf: "PDF",
   zip: "压缩包",
 };
+const templateVideoExts = new Set(["mp4", "mov", "m4v", "webm"]);
+const templateSourceFileAccept = [
+  ".psd",
+  ".psb",
+  ".ai",
+  ".fig",
+  ".pdf",
+  ".zip",
+  ".mp4",
+  ".mov",
+  ".m4v",
+  ".webm",
+  "application/pdf",
+  "application/zip",
+  "video/mp4",
+  "video/quicktime",
+  "video/x-m4v",
+  "video/webm",
+].join(",");
 
 let filters = {
   keyword: "",
@@ -62,7 +81,7 @@ function getFileExt(fileName) {
 function detectFileType(file) {
   const ext = getFileExt(file.name);
   if (file.type.startsWith("image/") || ["jpg", "jpeg", "png", "webp"].includes(ext)) return "image";
-  if (file.type.startsWith("video/") || ["mp4", "mov"].includes(ext)) return "video";
+  if (file.type.startsWith("video/") || templateVideoExts.has(ext)) return "video";
   if (["psd", "psb", "ai", "fig"].includes(ext)) return "design";
   if (ext === "pdf") return "pdf";
   if (ext === "zip") return "zip";
@@ -71,6 +90,7 @@ function detectFileType(file) {
 
 function detectSourceFileType(file) {
   const ext = getFileExt(file.name);
+  if (file.type.startsWith("video/") || templateVideoExts.has(ext)) return "video";
   if (["psd", "psb", "ai", "fig"].includes(ext)) return "design";
   if (ext === "pdf") return "pdf";
   if (ext === "zip") return "zip";
@@ -349,10 +369,13 @@ function renderUploadFileState(file, emptyText) {
 
 function renderMaterialThumb(material) {
   const previewImage = getPreviewImage(material);
+  const videoMarker = material.fileType === "video"
+    ? `<span class="template-material-video-marker" aria-label="视频">▶</span>`
+    : "";
   if (previewImage.fileUrl !== "") {
-    return `<img src="${escapeHtml(resolveAssetUrl(previewImage.fileUrl))}" alt="${escapeHtml(getMaterialName(material))}" />`;
+    return `<img src="${escapeHtml(resolveAssetUrl(previewImage.fileUrl))}" alt="${escapeHtml(getMaterialName(material))}" />${videoMarker}`;
   }
-  return "";
+  return videoMarker;
 }
 
 function renderMaterialTags(material) {
@@ -365,6 +388,7 @@ function renderMaterialCard(material) {
   const sourceFile = getSourceFile(material);
   const previewImage = getPreviewImage(material);
   const templateName = getMaterialName(material);
+  const canPreview = previewImage.fileUrl !== "" || material.fileType === "video";
   const previewDownloadAction = previewImage.fileUrl === ""
     ? `<button class="text-button" type="button" disabled>图片</button>`
     : `<a class="text-button" href="${escapeHtml(resolveAssetUrl(previewImage.fileUrl))}" download="${escapeHtml(previewImage.fileName)}">图片</a>`;
@@ -377,7 +401,7 @@ function renderMaterialCard(material) {
         <div class="template-material-tags">
           ${renderMaterialTags(material)}
         </div>
-        <button class="template-material-thumb" type="button" data-action="preview-material" data-material-id="${escapeHtml(material.id)}" ${previewImage.fileUrl === "" ? "disabled" : ""} aria-label="预览 ${escapeHtml(templateName)}">
+        <button class="template-material-thumb" type="button" data-action="preview-material" data-material-id="${escapeHtml(material.id)}" ${canPreview ? "" : "disabled"} aria-label="预览 ${escapeHtml(templateName)}">
           ${renderMaterialThumb(material)}
         </button>
         <div class="template-material-title-row">
@@ -398,6 +422,7 @@ function renderPreviewModal() {
   const material = getMaterials().find((item) => item.id === previewMaterialId);
   if (material === undefined) return "";
   const previewImage = getPreviewImage(material);
+  const sourceFile = getSourceFile(material);
   const previewDownloadAction = previewImage.fileUrl === ""
     ? `<button class="secondary-button" type="button" disabled>下载预览图</button>`
     : `<a class="secondary-button" href="${escapeHtml(resolveAssetUrl(previewImage.fileUrl))}" download="${escapeHtml(previewImage.fileName)}">下载预览图</a>`;
@@ -414,7 +439,9 @@ function renderPreviewModal() {
         </div>
         <div class="template-preview-body">
           ${previewImage.fileUrl === ""
-            ? `<div class="template-design-preview"><strong>${escapeHtml(previewImage.fileName)}</strong><span class="form-note">暂无预览图</span></div>`
+            ? material.fileType === "video"
+              ? `<div class="template-design-preview"><span class="template-video-preview-icon" aria-hidden="true">▶</span><strong>${escapeHtml(sourceFile.fileName)}</strong><span class="form-note">视频文件</span></div>`
+              : `<div class="template-design-preview"><strong>${escapeHtml(previewImage.fileName)}</strong><span class="form-note">暂无预览图</span></div>`
             : `<img src="${escapeHtml(resolveAssetUrl(previewImage.fileUrl))}" alt="${escapeHtml(getMaterialName(material))}" />`
           }
         </div>
@@ -453,7 +480,7 @@ function renderEditTagsModal() {
             <label class="template-file-picker">
               <span>替换源文件</span>
               ${renderUploadFileState(null, sourceFile.fileName)}
-              <input data-template-edit-source-upload type="file" accept=".psd,.psb,.ai,.fig,.pdf,.zip,application/pdf,application/zip" />
+              <input data-template-edit-source-upload type="file" accept="${templateSourceFileAccept}" />
             </label>
           </div>
           ${renderTagSelector({
@@ -490,7 +517,7 @@ export function renderTemplateCenterPage() {
           <label class="template-file-picker">
             <span>源文件</span>
             ${renderUploadFileState(uploadDraft.sourceFile, "")}
-            <input data-template-source-upload type="file" accept=".psd,.psb,.ai,.fig,.pdf,.zip,application/pdf,application/zip" />
+            <input data-template-source-upload type="file" accept="${templateSourceFileAccept}" />
           </label>
           <button class="primary-button template-upload-submit" type="button" data-action="create-template-from-upload" ${canCreateTemplate ? "" : "disabled"}>上传模板</button>
         </div>
