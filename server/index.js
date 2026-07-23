@@ -29,6 +29,7 @@ import {
   startExecutionGroup,
   updateProcessTemplateNodeStatus,
   updateResource,
+  updateTaskFromWorkflow,
   uploadsDir,
 } from "./db.js";
 import { createToken, verifyPassword, verifyToken } from "./security.js";
@@ -590,6 +591,22 @@ app.post("/api/tasks/batch-status", (request, response) => {
   }
 });
 
+app.post("/api/tasks/:id/workflow", (request, response) => {
+  const action = String(request.body?.action ?? "").trim();
+  const permission = action === "submit" ? "tasks.submitResult" : "tasks.changeStatus";
+  if (!hasPermission(request.user, permission)) {
+    response.status(403).json({ success: false, message: "你没有权限进行该任务流程操作" });
+    return;
+  }
+  try {
+    const task = updateTaskFromWorkflow(request.params.id, action, request.body?.item ?? {});
+    response.json({ success: true, task });
+  } catch (error) {
+    console.error("任务流程操作失败", error);
+    response.status(400).json({ success: false, message: error.message || "任务流程操作失败，请检查本地数据库服务。" });
+  }
+});
+
 app.put("/api/task-templates/:id/value-chain", requirePermission("settings.editStandardWorks"), (request, response) => {
   try {
     moveTaskTemplateToValueChain(
@@ -647,6 +664,17 @@ app.post("/api/:resource", (request, response) => {
 app.put("/api/:resource/:id", (request, response) => {
   try {
     if (rejectLegacyContentScheduleWrite(request.params.resource, response)) return;
+    if (request.params.resource === "tasks" && request.body?.status !== undefined) {
+      const task = readAllData().tasks.find((item) => item.id === request.params.id);
+      if (task === undefined) {
+        response.status(404).json({ success: false, message: "未找到任务" });
+        return;
+      }
+      if (request.body.status !== task.status) {
+        response.status(400).json({ success: false, message: "任务状态不能直接编辑，请使用对应流程操作" });
+        return;
+      }
+    }
     if (request.params.resource === "process-instances") {
       const instance = readAllData().processInstances.find((item) => item.id === request.params.id);
       if (instance === undefined) {

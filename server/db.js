@@ -2163,6 +2163,42 @@ export function updateResource(routeResource, id, item) {
   return nextItem;
 }
 
+const taskWorkflowTransitions = {
+  start: { from: new Set(["todo"]), to: new Set(["doing"]) },
+  activate: { from: new Set(["waiting"]), to: new Set(["todo"]) },
+  submit: { from: new Set(["doing"]), to: new Set(["pending_acceptance", "done"]) },
+  approve: { from: new Set(["pending_acceptance"]), to: new Set(["done"]) },
+  reject: { from: new Set(["pending_acceptance"]), to: new Set(["doing"]) },
+  cancel: { from: new Set(["waiting", "todo", "doing", "pending_acceptance"]), to: new Set(["canceled"]) },
+  restore: { from: new Set(["canceled"]), to: new Set(["todo"]) },
+  return: { from: new Set(["todo", "doing", "pending_acceptance", "done"]), to: new Set(["waiting", "todo"]) },
+};
+
+export function updateTaskFromWorkflow(taskId, action, patch = {}) {
+  const existing = readExistingItem("tasks", taskId);
+  if (existing === null) throw new Error("未找到任务。");
+  const transition = taskWorkflowTransitions[action];
+  if (transition === undefined) throw new Error("未知的任务流程动作。");
+  if (action === "activate") {
+    const instance = readExistingItem("processInstances", existing.processInstanceId);
+    if (instance === null || instance.status !== "running") throw new Error("所属关键行动尚未进入执行中。");
+    const orderedTasks = getOrderedProcessInstanceTasks(existing.processInstanceId);
+    const taskIndex = orderedTasks.findIndex((task) => task.id === existing.id);
+    if (taskIndex < 0 || !orderedTasks.slice(0, taskIndex).every((task) => task.status === "done")) {
+      throw new Error("前置步骤尚未完成，当前任务不能激活。");
+    }
+  }
+  const nextStatus = String(patch.status ?? "").trim();
+  if (!transition.from.has(existing.status) || !transition.to.has(nextStatus)) {
+    throw new Error(`任务状态不能通过“${action}”从 ${existing.status} 变更为 ${nextStatus}。`);
+  }
+  const mergedItem = mergeExistingItem("tasks", taskId, patch);
+  const preservedItem = mergePreservedCustomFields("tasks", taskId, mergedItem);
+  const nextItem = markTaskOverdueOnce(preservedItem);
+  insertItem("tasks", nextItem);
+  return nextItem;
+}
+
 export function readRouteResource(routeResource) {
   const resourceKey = routeResourceMap[routeResource];
   if (resourceKey === undefined) throw new Error(`Unknown resource: ${routeResource}`);

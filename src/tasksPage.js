@@ -27,6 +27,7 @@ import {
   startExecutionGroup as startExecutionGroupResource,
   state,
   updatePersistentResource,
+  updateTaskWorkflow,
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
@@ -166,7 +167,7 @@ function getActiveGoals() {
   return goals.filter((goal) => goal.status !== GoalStatus.Inactive);
 }
 
-const taskStatusSelectOptions = [
+const taskStatusFilterOptions = [
   TaskStatus.Waiting,
   TaskStatus.Todo,
   TaskStatus.Doing,
@@ -176,7 +177,6 @@ const taskStatusSelectOptions = [
 ].map((status) => ({
   value: status,
   label: getTaskBusinessStatus({ status }).label,
-  editable: status !== TaskStatus.Waiting,
 }));
 
 const taskListViewOptions = [
@@ -1382,36 +1382,10 @@ function getTaskStatusClass(status) {
   return "is-todo";
 }
 
-function renderTaskStatusSelect(task) {
-  const disabled = !canCurrentUser("tasks.changeStatus");
-  const value = task.status;
-  const title =
-    disabled
-      ? "没有修改任务状态的权限。"
-      :
-    task.source === TaskSource.Process && task.status === TaskStatus.Waiting
-      ? "前置步骤未完成，当前步骤暂不能处理。"
-      : "";
-
-  return `
-    <select
-      class="task-status-select ${getTaskStatusClass(task.status)}"
-      data-task-status-select
-      data-task-id="${task.id}"
-      title="${escapeHtml(title)}"
-      ${disabled ? "disabled" : ""}
-    >
-      ${taskStatusSelectOptions
-        .map(
-          (option) => `
-            <option value="${option.value}" ${option.value === value ? "selected" : ""} ${option.editable ? "" : "disabled"}>
-              ${option.value === TaskStatus.Done && option.value === value && hasTaskOverdueRecord(task) ? "已完成（超时）" : option.label}
-            </option>
-          `,
-        )
-        .join("")}
-    </select>
-  `;
+function renderTaskStatus(task) {
+  const businessStatus = getTaskBusinessStatus(task);
+  const label = isDoneStatus(task.status) && hasTaskOverdueRecord(task) ? "已完成（超时）" : businessStatus.label;
+  return `<span class="status-pill ${getTaskStatusClass(task.status)}">${escapeHtml(label)}</span>`;
 }
 
 function getTaskProjectDueDateText(task) {
@@ -1533,7 +1507,7 @@ function renderTaskRow(task, index) {
       <td class="task-executor-column">${findName(people, getTaskExecutorId(task), "未设置")}</td>
       <td class="task-date-column">${formatBusinessMinuteDateTime(task.dueDate)}</td>
       <td class="task-date-column">${getTaskProjectDueDateText(task)}</td>
-      <td class="task-status-column">${renderTaskStatusSelect(task)}</td>
+      <td class="task-status-column">${renderTaskStatus(task)}</td>
       <td class="task-overdue-column">${renderOverdue(task)}</td>
       <td class="task-department-column">${findName(departments, task.departmentId, "未设置")}</td>
       <td class="task-owner-column">${findName(people, task.ownerId, "未设置")}</td>
@@ -2584,7 +2558,7 @@ function renderClearanceTaskRows(group) {
                 <td>${findName(departments, task.departmentId, "未设置")}</td>
                 <td>${findName(people, task.ownerId, "未设置")}</td>
                 <td>${formatBusinessMinuteDateTime(task.dueDate)}</td>
-                <td>${renderTaskStatusSelect(task)}</td>
+                <td>${renderTaskStatus(task)}</td>
                 <td>${renderOverdue(task)}</td>
                 <td>
                   <span class="row-actions">
@@ -2952,7 +2926,7 @@ function renderFilters() {
         <span>任务状态</span>
         <select name="status">
           <option value="">全部状态</option>
-          ${taskStatusSelectOptions
+          ${taskStatusFilterOptions
             .map(
               (option) => `
                 <option value="${option.value}" ${filters.status === option.value ? "selected" : ""}>
@@ -3140,7 +3114,7 @@ function renderTaskCard(task) {
         <p class="task-card-action-title">${escapeHtml(actionName)}</p>
         <p class="task-card-executor">执行人：${escapeHtml(findName(people, getTaskExecutorId(task), "未设置执行人"))}</p>
         <div class="task-card-status-row">
-          ${renderTaskStatusSelect(task)}
+          ${renderTaskStatus(task)}
           <span class="task-card-remaining ${remaining.overdue ? "is-overdue" : ""}">${escapeHtml(remaining.label)}</span>
         </div>
       </div>
@@ -4563,11 +4537,7 @@ async function saveTask(form, rerender) {
     activeTaskTab = "process-progress";
   } else {
     const now = getNow();
-    const updatedTask = {
-      ...task,
-      customFields: task.customFields && typeof task.customFields === "object" ? task.customFields : {},
-      displayTitle: task.displayTitle ?? null,
-      coverImageUrl: task.coverImageUrl ?? null,
+    const taskPatch = {
       templateId: draft.templateId ?? task.templateId ?? "",
       ownerId: draft.ownerId,
       executorId: draft.executorId,
@@ -4578,12 +4548,12 @@ async function saveTask(form, rerender) {
       updatedAt: now,
     };
     try {
-      await updatePersistentResource("tasks", updatedTask.id, updatedTask);
+      const updatedTask = await updatePersistentResource("tasks", task.id, taskPatch);
+      state.tasks = state.tasks.map((item) => (item.id === updatedTask.id ? updatedTask : item));
     } catch (error) {
       console.error("任务保存失败", error);
       return setModalError(error.message || "任务保存失败，请检查本地数据库服务。", rerender);
     }
-    state.tasks = state.tasks.map((item) => (item.id === updatedTask.id ? updatedTask : item));
   }
 
   modalState = null;
@@ -4818,7 +4788,11 @@ async function saveResult(form, rerender) {
     updatedAt: now,
   }, completedAt ?? now);
   try {
-    await updatePersistentResource("tasks", updatedTask.id, updatedTask);
+    if (nextStatus === task.status) {
+      await updatePersistentResource("tasks", updatedTask.id, updatedTask);
+    } else {
+      await updateTaskWorkflow(updatedTask.id, "submit", updatedTask);
+    }
   } catch (error) {
     console.error("任务结果保存失败", error);
     return setModalError(error.message || "任务结果保存失败，请检查本地数据库服务。", rerender);
@@ -4915,7 +4889,9 @@ async function updateTaskStatus(taskId, status, rerender) {
   }, now);
 
   try {
-    await updatePersistentResource("tasks", taskId, updatedTask);
+    const action = status === TaskStatus.Doing ? "start" : status === TaskStatus.Done ? "approve" : "";
+    if (action === "") throw new Error("当前任务状态只能通过对应流程动作修改。");
+    await updateTaskWorkflow(taskId, action, updatedTask);
   } catch (error) {
     console.error("任务状态保存失败", error);
     window.alert(error.message || "任务状态保存失败，请检查本地数据库服务。");
@@ -5103,7 +5079,7 @@ async function cancelTask(taskId, rerender) {
   const now = getNow();
   const updatedTask = { ...task, status: TaskStatus.Canceled, updatedAt: now };
   try {
-    await updatePersistentResource("tasks", taskId, updatedTask);
+    await updateTaskWorkflow(taskId, "cancel", updatedTask);
   } catch (error) {
     console.error("取消任务失败", error);
     window.alert(error.message || "任务状态保存失败，请检查本地数据库服务。");
@@ -5129,7 +5105,7 @@ async function restoreCanceledTask(taskId, rerender) {
   const now = getNow();
   const restoredTask = { ...task, status: TaskStatus.Todo, startDate: task.startDate ?? today, updatedAt: now, cancelReason: null };
   try {
-    await updatePersistentResource("tasks", taskId, restoredTask);
+    await updateTaskWorkflow(taskId, "restore", restoredTask);
   } catch (error) {
     console.error("恢复任务失败", error);
     window.alert(error.message || "任务状态保存失败，请检查本地数据库服务。");
@@ -5236,7 +5212,7 @@ async function returnTaskToSelectedStep(form, rerender) {
 
   try {
     for (const returnedTask of returnedTasks) {
-      await updatePersistentResource("tasks", returnedTask.id, returnedTask);
+      await updateTaskWorkflow(returnedTask.id, "return", returnedTask);
     }
   } catch (error) {
     console.error("退回重做失败", error);
@@ -5347,7 +5323,7 @@ async function handleTaskAction(action, taskId, rerender, actionButton = null) {
       },
     };
     try {
-      await updatePersistentResource("tasks", taskId, updatedTask);
+      await updateTaskWorkflow(taskId, "reject", updatedTask);
     } catch (error) {
       console.error("退回任务保存失败", error);
       window.alert(error.message || "任务状态保存失败，请检查本地数据库服务。");
@@ -5574,14 +5550,7 @@ export function bindTasksPageEvents(rerender) {
       });
     }
 
-    tasksPage.addEventListener("change", (event) => {
-      const statusSelect = event.target.closest("[data-task-status-select]");
-      if (statusSelect === null) return;
-      updateTaskStatus(statusSelect.dataset.taskId, statusSelect.value, rerender);
-    });
-
     tasksPage.addEventListener("click", async (event) => {
-      if (event.target.closest("[data-task-status-select]") !== null) return;
       const actionButton = event.target.closest("[data-action]");
 
       if (actionButton !== null) {
@@ -5808,18 +5777,9 @@ export function bindTasksPageEvents(rerender) {
       return;
     }
 
-    const statusSelect = event.target.closest("[data-task-status-select]");
-
-    if (statusSelect === null) return;
-
-    updateTaskStatus(statusSelect.dataset.taskId, statusSelect.value, rerender);
   });
   tasksPage.addEventListener("click", async (event) => {
     if (event.target.closest("[data-task-row-select], [data-task-select-all]") !== null) return;
-    if (event.target.closest("[data-task-status-select]") !== null) {
-      event.stopPropagation();
-      return;
-    }
 
     const actionButton = event.target.closest("[data-action]");
 

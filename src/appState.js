@@ -465,6 +465,19 @@ export async function updatePersistentResource(resource, id, item) {
   return data;
 }
 
+export async function updateTaskWorkflow(taskId, action, item) {
+  const response = await authFetch(`${apiBaseUrl}/api/tasks/${taskId}/workflow`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, item }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success !== true) {
+    throw new Error(data.message ?? data.error ?? "任务流程操作失败，请检查本地数据库服务。");
+  }
+  return data.task;
+}
+
 async function postExecutionGroupAction(path, payload = {}) {
   const response = await authFetch(`${apiBaseUrl}${path}`, {
     method: "POST",
@@ -2189,7 +2202,7 @@ async function activateWaitingProcessTask(task, startAt = getBusinessMinuteNow()
     plannedWeek: task.plannedWeek ?? getCurrentWeek(new Date(`${startDate}T00:00:00+08:00`)),
     updatedAt: now,
   };
-  await updatePersistentResource("tasks", updatedTask.id, updatedTask);
+  await updateTaskWorkflow(updatedTask.id, "activate", updatedTask);
   state.tasks = state.tasks.map((item) => (item.id === updatedTask.id ? updatedTask : item));
   return updatedTask;
 }
