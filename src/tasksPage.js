@@ -48,7 +48,6 @@ import {
   WorkPlanStatus,
   RectificationWorkTemplate,
   taskSourceNames,
-  taskStatusNames,
   submitTypeNames,
   getValueModuleName,
   inferValueModuleIdFromText,
@@ -65,6 +64,7 @@ import {
   isProcessInstanceOverdue as selectProcessInstanceOverdue,
   sortProcessInstanceTasks,
 } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
+import { getTaskBusinessStatus } from "./data/taskSelectors.js?v=20260723-task-business-status1";
 import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260705-state-singleton1";
 import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260705-state-singleton1";
 import { renderWorkFormViewer } from "./workFormViewer.js?v=20260705-state-singleton1";
@@ -169,12 +169,15 @@ function getActiveGoals() {
 }
 
 const taskStatusSelectOptions = [
-  { value: TaskStatus.Todo, label: "待处理" },
-  { value: TaskStatus.Doing, label: "进行中" },
-  { value: TaskStatus.PendingAcceptance, label: "待审核" },
-  { value: TaskStatus.Done, label: "已完成" },
-  { value: TaskStatus.Canceled, label: "已取消" },
-];
+  TaskStatus.Todo,
+  TaskStatus.Doing,
+  TaskStatus.PendingAcceptance,
+  TaskStatus.Done,
+  TaskStatus.Canceled,
+].map((status) => ({
+  value: status,
+  label: getTaskBusinessStatus({ status }).label,
+}));
 
 const taskListViewOptions = [
   { value: "today", label: "今天" },
@@ -1224,17 +1227,9 @@ function renderValueOptions(values, selectedValue, names, emptyLabel) {
   `;
 }
 
-function getTaskDisplayStatusValue(status) {
-  if (isDoneStatus(status)) return TaskStatus.Done;
-  if (isCanceledStatus(status)) return TaskStatus.Canceled;
-  return status === TaskStatus.Waiting ? TaskStatus.Todo : status;
-}
-
 function matchesTaskStatusFilter(task, selectedStatus) {
   if (selectedStatus === "") return true;
-  if (selectedStatus === TaskStatus.Done) return isDoneStatus(task.status);
-  if (selectedStatus === TaskStatus.Canceled) return isCanceledStatus(task.status);
-  return getTaskDisplayStatusValue(task.status) === selectedStatus;
+  return getTaskBusinessStatus(task).status === getTaskBusinessStatus({ status: selectedStatus }).status;
 }
 
 function matchesFilters(task) {
@@ -1389,7 +1384,7 @@ function getTaskStatusClass(status) {
 
 function renderTaskStatusSelect(task) {
   const disabled = !canCurrentUser("tasks.changeStatus");
-  const value = getTaskDisplayStatusValue(task.status);
+  const value = task.status === TaskStatus.Waiting ? TaskStatus.Todo : task.status;
   const title =
     disabled
       ? "没有修改任务状态的权限。"
@@ -2733,7 +2728,7 @@ function renderClearanceCard(group, index) {
   const currentTaskName = currentTask === null ? getProcessCurrentStepText(group.instance ?? {}) : currentTask.name;
   const currentOwner = currentTask === null ? "未设置" : findName(people, currentTask.ownerId, "未设置");
   const currentDueDate = formatBusinessMinuteDateTime(currentTask?.dueDate ?? info.dueDate, "未填写");
-  const currentStatus = currentTask === null ? businessStatus?.label ?? status : taskStatusNames[currentTask.status] ?? currentTask.status;
+  const currentStatus = currentTask === null ? businessStatus?.label ?? status : getTaskBusinessStatus(currentTask).label;
 
   return `
     <article class="clearance-card" data-clearance-group-id="${escapeHtml(group.id)}">
@@ -2746,7 +2741,7 @@ function renderClearanceCard(group, index) {
         <div class="clearance-card-info">
           <div class="clearance-card-title">
             <h3>${renderClearanceValue(info.productName || info.title)}</h3>
-            <span class="status-pill ${getTaskStatusClass(businessStatus?.status ?? status)}">${businessStatus?.label ?? taskStatusNames[status] ?? status}</span>
+            <span class="status-pill ${getTaskStatusClass(businessStatus?.status ?? status)}">${businessStatus?.label ?? currentStatus}</span>
           </div>
           <div class="clearance-meta-grid">
             <span><b>SKU / 规格</b>${renderClearanceValue(info.sku)}</span>
@@ -3507,7 +3502,7 @@ function renderProcessStepProgress(instance) {
                   <td>${escapeHtml(task.name)}</td>
                   <td>${formatProcessStepLabel(index + 1)}</td>
                   <td>${findName(people, task.ownerId, "未设置")}</td>
-                  <td><span class="status-pill">${taskStatusNames[task.status]}</span></td>
+                  <td><span class="status-pill">${getTaskBusinessStatus(task).label}</span></td>
                   <td>${formatBusinessMinuteDateTime(task.dueDate)}</td>
                   <td>${renderOverdue(task)}</td>
                   <td class="wide-text">${escapeHtml(task.completionStandard ?? node?.completionStandard ?? "-")}</td>
@@ -3698,7 +3693,7 @@ function renderCurrentTaskSection(task) {
         ${renderDetailField("执行人", findName(people, task.executorId ?? task.ownerId, "未设置"))}
         ${renderDetailField("规定时限", durationMinutes > 0 ? `${durationMinutes} 分钟` : "未设置")}
         ${renderDetailField("截止时间", formatBusinessMinuteDateTime(task.dueDate))}
-        ${renderDetailField("状态", taskStatusNames[task.status] ?? task.status)}
+        ${renderDetailField("状态", getTaskBusinessStatus(task).label)}
         ${renderDetailField("负责部门", findName(departments, task.departmentId, "未设置"))}
       </div>
       <p>节点说明：${escapeHtml(task.description || "未填写")}</p>
@@ -3891,7 +3886,7 @@ function renderPreviousTaskSubmissionBlock(task) {
       <h3>前步任务提交结果</h3>
       <div class="detail-grid">
         ${renderDetailField("前步任务", escapeHtml(previousTask.name))}
-        ${renderDetailField("任务状态", escapeHtml(taskStatusNames[previousTask.status] ?? previousTask.status ?? "未记录"))}
+        ${renderDetailField("任务状态", escapeHtml(getTaskBusinessStatus(previousTask).label))}
         ${renderDetailField("提交时间", escapeHtml(previousTask.submittedAt ?? "未提交"))}
         ${renderDetailField("提交人", escapeHtml(findName(people, previousTask.submittedBy, "未记录")))}
       </div>
@@ -4075,7 +4070,7 @@ function renderExecutionGroupTaskList(tasks) {
               <td>${escapeHtml(task.name)}</td>
               <td>${findName(people, task.ownerId, "未设置")}</td>
               <td>${findName(people, getTaskExecutorId(task), "未设置")}</td>
-              <td>${taskStatusNames[task.status] ?? task.status}</td>
+              <td>${getTaskBusinessStatus(task).label}</td>
               <td>${getTaskStandardDurationMinutes(task)} 分钟</td>
             </tr>
           `).join("")}
