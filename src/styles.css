@@ -620,6 +620,23 @@ textarea {
   gap: 8px;
 }
 
+.task-toolbar-actions,
+.task-sort-control {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.task-sort-control span {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.task-sort-control select {
+  min-height: 34px;
+  min-width: 120px;
+}
+
 .task-list-view-switch button,
 .task-display-view-switch button {
   min-height: 34px;

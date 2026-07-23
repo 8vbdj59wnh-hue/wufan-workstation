@@ -141,11 +141,11 @@ let clearanceFilters = {
 let selectedTaskId = state.tasks[0]?.id ?? null;
 let selectedProcessInstanceId = state.processInstances[0]?.id ?? null;
 let selectedTaskIds = new Set();
-let taskDueDateSort = "";
+let taskSort = "remaining";
 let expandedClearanceGroups = new Set();
 let modalState = null;
 let activeTaskTab = "task-list";
-let taskListView = "today";
+let taskListView = "mine";
 let taskDisplayView = "card";
 let visualTemplatesLoaded = state.templates.length > 0;
 let visualTemplatesLoading = false;
@@ -179,7 +179,7 @@ const taskStatusSelectOptions = [
 
 const taskListViewOptions = [
   { value: "today", label: "今天" },
-  { value: "mine", label: "我的" },
+  { value: "mine", label: "我的任务" },
   { value: "overdue", label: "逾期" },
   { value: "all", label: "全部" },
 ];
@@ -1630,8 +1630,11 @@ function getRowDueDate(row) {
 
 function sortTaskTableRows(rows) {
   const orderedRows = [...rows];
-  if (taskDueDateSort !== "asc") {
-    return orderedRows.sort((left, right) => left.order - right.order);
+  if (taskSort === "name") {
+    return orderedRows.sort((left, right) => {
+      const nameCompare = String(left.task?.name ?? "").localeCompare(String(right.task?.name ?? ""), "zh-Hans-CN");
+      return nameCompare !== 0 ? nameCompare : left.order - right.order;
+    });
   }
 
   return orderedRows.sort((left, right) => {
@@ -2994,9 +2997,18 @@ function renderTaskListViewSwitch() {
           )
           .join("")}
       </div>
-      <div class="task-display-view-switch" aria-label="任务展示方式">
-        <button class="${taskDisplayView === "list" ? "is-active" : ""}" type="button" data-task-display-view="list">列表</button>
-        <button class="${taskDisplayView === "card" ? "is-active" : ""}" type="button" data-task-display-view="card">卡片</button>
+      <div class="task-toolbar-actions">
+        <label class="task-sort-control">
+          <span>排序</span>
+          <select data-task-sort aria-label="任务排序">
+            <option value="remaining" ${taskSort === "remaining" ? "selected" : ""}>剩余时间</option>
+            <option value="name" ${taskSort === "name" ? "selected" : ""}>任务名</option>
+          </select>
+        </label>
+        <div class="task-display-view-switch" aria-label="任务展示方式">
+          <button class="${taskDisplayView === "list" ? "is-active" : ""}" type="button" data-task-display-view="list">列表</button>
+          <button class="${taskDisplayView === "card" ? "is-active" : ""}" type="button" data-task-display-view="card">卡片</button>
+        </div>
       </div>
     </div>
   `;
@@ -3045,8 +3057,6 @@ function renderTaskTable() {
   const allVisibleSelected = visibleTaskIds.length > 0 && selectedVisibleCount === visibleTaskIds.length;
   const hasPartialSelection = selectedVisibleCount > 0 && !allVisibleSelected;
   const selectedCount = selectedTaskIds.size;
-  const dueDateSortLabel = taskDueDateSort === "asc" ? "取消" : "↑";
-  const dueDateSortTitle = taskDueDateSort === "asc" ? "取消任务截止时间排序，恢复默认顺序" : "按任务截止时间从早到晚排序";
 
   return `
     <section class="settings-section">
@@ -3072,12 +3082,7 @@ function renderTaskTable() {
               <th class="task-belonging-column">归属事项</th>
               <th class="task-name-column">任务名</th>
               <th class="task-executor-column">执行人</th>
-              <th class="task-date-column">
-                <span class="sortable-table-header">
-                  <span>任务截止时间</span>
-                  <button class="table-sort-button ${taskDueDateSort === "" ? "" : "is-active"}" type="button" data-action="toggle-due-date-sort" title="${dueDateSortTitle}" aria-label="${dueDateSortTitle}">${dueDateSortLabel}</button>
-                </span>
-              </th>
+              <th class="task-date-column">任务截止时间</th>
               <th class="task-date-column">项目截止时间</th>
               <th class="task-status-column">状态</th>
               <th class="task-overdue-column">是否逾期</th>
@@ -5541,6 +5546,13 @@ export function bindTasksPageEvents(rerender) {
     });
   });
 
+  document.querySelector("[data-task-sort]")?.addEventListener("change", (event) => {
+    taskSort = event.target.value === "name" ? "name" : "remaining";
+    const firstRow = getTaskTableRows()[0];
+    selectedTaskId = firstRow?.task.id ?? null;
+    rerender();
+  });
+
   if (activeTaskTab === "content-schedule") {
     bindContentScheduleEvents(rerender);
     return;
@@ -5861,11 +5873,6 @@ export function bindTasksPageEvents(rerender) {
       }
       if (action === "bulk-cancel") {
         bulkUpdateTaskStatus(TaskStatus.Canceled, rerender);
-        return;
-      }
-      if (action === "toggle-due-date-sort") {
-        taskDueDateSort = taskDueDateSort === "asc" ? "" : "asc";
-        rerender();
         return;
       }
       handleTaskAction(action, actionButton.dataset.taskId, rerender, actionButton);
