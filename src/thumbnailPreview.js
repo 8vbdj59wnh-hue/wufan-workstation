@@ -23,6 +23,7 @@ function getThumbnailImage(target) {
   if (!(target instanceof Element)) return null;
   const image = target instanceof HTMLImageElement ? target : target.closest("img");
   if (!(image instanceof HTMLImageElement)) return null;
+  if (image.closest("[data-task-card]") !== null) return null;
   return image.matches(thumbnailPreviewSelector) ? image : null;
 }
 
