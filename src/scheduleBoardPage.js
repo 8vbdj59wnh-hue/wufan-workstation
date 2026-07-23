@@ -67,6 +67,7 @@ let draggedSourceId = null;
 let draggedSourceType = null;
 let suppressProcessClickId = null;
 let expandedSlotKey = "";
+let pendingInnerScrollRestore = null;
 const savingWorkPlanIds = new Set();
 const previewSize = 172;
 const previewGap = 12;
@@ -74,6 +75,39 @@ const slotBaseHeight = 50;
 const slotLabelHeight = 23;
 const slotCardHeight = 29;
 const slotCardGap = 3;
+
+function captureScheduleInnerScroll() {
+  const pendingList = document.querySelector(".schedule-pending-list");
+  const boardShell = document.querySelector(".schedule-board-shell");
+  const processModal = document.querySelector(".schedule-process-modal");
+  return {
+    view: activeScheduleView,
+    pendingListTop: pendingList?.scrollTop ?? 0,
+    boardShellLeft: boardShell?.scrollLeft ?? 0,
+    boardShellTop: boardShell?.scrollTop ?? 0,
+    processModalTop: processModal?.scrollTop ?? 0,
+  };
+}
+
+function rerenderPreservingInnerScroll(rerender) {
+  const snapshot = pendingInnerScrollRestore ?? captureScheduleInnerScroll();
+  pendingInnerScrollRestore = snapshot;
+  rerender();
+  window.requestAnimationFrame(() => {
+    if (snapshot.view === activeScheduleView) {
+      const pendingList = document.querySelector(".schedule-pending-list");
+      const boardShell = document.querySelector(".schedule-board-shell");
+      const processModal = document.querySelector(".schedule-process-modal");
+      if (pendingList !== null) pendingList.scrollTop = snapshot.pendingListTop;
+      if (boardShell !== null) {
+        boardShell.scrollLeft = snapshot.boardShellLeft;
+        boardShell.scrollTop = snapshot.boardShellTop;
+      }
+      if (processModal !== null) processModal.scrollTop = snapshot.processModalTop;
+    }
+    if (pendingInnerScrollRestore === snapshot) pendingInnerScrollRestore = null;
+  });
+}
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -1172,6 +1206,7 @@ export function renderScheduleBoardPage() {
 
 export function bindScheduleBoardPageEvents(rerender) {
   hideSchedulePreview();
+  const rerenderScheduleBoard = () => rerenderPreservingInnerScroll(rerender);
 
   document.querySelector(".schedule-board-filters")?.addEventListener("input", (event) => {
     const target = event.target;
@@ -1181,12 +1216,13 @@ export function bindScheduleBoardPageEvents(rerender) {
     } else if (Object.prototype.hasOwnProperty.call(filters, target.name)) {
       filters[target.name] = target.value;
     }
-    rerender();
+    rerenderScheduleBoard();
   });
 
   document.querySelectorAll("[data-schedule-view]").forEach((button) => {
     button.addEventListener("click", () => {
       activeScheduleView = button.dataset.scheduleView === "list" ? "list" : "board";
+      pendingInnerScrollRestore = null;
       rerender();
     });
   });
@@ -1204,11 +1240,11 @@ export function bindScheduleBoardPageEvents(rerender) {
         } catch (error) {
           window.alert(error.message || "取消关键行动失败，请检查本地数据库服务。");
         }
-        rerender();
+        rerenderScheduleBoard();
         return;
       }
       selectedProcessInstanceId = processInstanceId;
-      rerender();
+      rerenderScheduleBoard();
     });
   });
 
@@ -1227,7 +1263,7 @@ export function bindScheduleBoardPageEvents(rerender) {
       event.stopPropagation();
       const processInstanceId = button.dataset.scheduleStartProcessId ?? "";
       if (processInstanceId === "") return;
-      await startLaunchedProcessExecution(processInstanceId, rerender);
+      await startLaunchedProcessExecution(processInstanceId, rerenderScheduleBoard);
     });
   });
 
@@ -1271,7 +1307,7 @@ export function bindScheduleBoardPageEvents(rerender) {
     button.addEventListener("click", () => {
       if (suppressProcessClickId === button.dataset.scheduleProcessId) return;
       selectedProcessInstanceId = button.dataset.scheduleProcessId ?? null;
-      rerender();
+      rerenderScheduleBoard();
     });
 
     button.addEventListener("keydown", (event) => {
@@ -1279,7 +1315,7 @@ export function bindScheduleBoardPageEvents(rerender) {
       event.preventDefault();
       if (suppressProcessClickId === button.dataset.scheduleProcessId) return;
       selectedProcessInstanceId = button.dataset.scheduleProcessId ?? null;
-      rerender();
+      rerenderScheduleBoard();
     });
   });
 
@@ -1306,9 +1342,9 @@ export function bindScheduleBoardPageEvents(rerender) {
       if (sourceType === "process-instance") {
         const row = findRowByProcessInstanceId(sourceId);
         if (row?.statusValue === keyActionPendingStatusFilter) {
-          scheduleAndStartProcessExecution(sourceId, targetDate, targetHour, rerender);
+          scheduleAndStartProcessExecution(sourceId, targetDate, targetHour, rerenderScheduleBoard);
         } else if (row?.statusValue === keyActionRunningStatusFilter) {
-          moveLaunchedProcessDueDate(sourceId, targetDate, targetHour, rerender);
+          moveLaunchedProcessDueDate(sourceId, targetDate, targetHour, rerenderScheduleBoard);
         }
       }
     });
@@ -1319,18 +1355,18 @@ export function bindScheduleBoardPageEvents(rerender) {
       event.stopPropagation();
       const slotKey = button.dataset.scheduleSlotMore ?? "";
       expandedSlotKey = expandedSlotKey === slotKey ? "" : slotKey;
-      rerender();
+      rerenderScheduleBoard();
     });
   });
 
   document.querySelector('[data-action="close-schedule-process-modal"]')?.addEventListener("click", () => {
     selectedProcessInstanceId = null;
-    rerender();
+    rerenderScheduleBoard();
   });
 
   const modal = document.querySelector(".schedule-process-modal");
   if (modal !== null) {
-    bindLaunchedProcessDetailEvents(modal, rerender, {
+    bindLaunchedProcessDetailEvents(modal, rerenderScheduleBoard, {
       onTaskSelect: (taskId) => {
         selectedProcessInstanceId = null;
         selectTask(taskId);
@@ -1338,7 +1374,7 @@ export function bindScheduleBoardPageEvents(rerender) {
       },
       onSaved: () => {
         selectedProcessInstanceId = null;
-        rerender();
+        rerenderScheduleBoard();
       },
     });
   }
