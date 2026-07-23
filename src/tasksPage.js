@@ -1375,6 +1375,7 @@ async function triggerOverdueRectificationIfNeeded(previousTask, nextTask) {
 }
 
 function getTaskStatusClass(status) {
+  if (status === TaskStatus.Waiting) return "is-waiting";
   if (status === TaskStatus.Doing) return "is-doing";
   if (status === TaskStatus.PendingAcceptance) return "is-review";
   if (isDoneStatus(status)) return "is-done";
