@@ -2230,7 +2230,8 @@ button.content-template-thumb {
 .task-card-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, 252px);
+  justify-content: start;
 }
 
 .task-card {
@@ -2252,11 +2253,11 @@ button.content-template-thumb {
 
 .task-card-cover {
   aspect-ratio: 1;
-  height: 150px;
+  height: 200px;
   justify-self: center;
   min-width: 0;
   overflow: hidden;
-  width: 150px;
+  width: 200px;
 }
 
 .task-card-cover .task-cover-thumb,
@@ -5549,7 +5550,7 @@ button.content-template-thumb {
   }
 
   .task-card-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 252px);
   }
 
   .settings-subpage-toolbar {
