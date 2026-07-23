@@ -1078,11 +1078,9 @@ function renderProcessDetailModal() {
 export function renderScheduleBoardPage() {
   const days = buildBoardDays();
   const launchedRows = buildLaunchedRows().filter(launchedRowMatchesFilters);
-  const pendingRows = launchedRows.filter((row) => row.statusValue === keyActionPendingStatusFilter && isNoDueDate(row) && !isImprovementActionRow(row));
+  const pendingRows = launchedRows.filter((row) => row.statusValue === keyActionPendingStatusFilter && !isImprovementActionRow(row));
   const scheduledRows = launchedRows.filter(
-    (row) =>
-      [keyActionPendingStatusFilter, keyActionRunningStatusFilter].includes(row.statusValue) &&
-      !isNoDueDate(row),
+    (row) => row.statusValue === keyActionRunningStatusFilter && !isNoDueDate(row),
   );
   const launchedListRows = buildLaunchedListRows().filter(launchedRowMatchesFilters);
   const columnCount = filters.noDueDateOnly ? 1 : boardDayCount;
