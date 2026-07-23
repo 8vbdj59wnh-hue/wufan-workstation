@@ -580,7 +580,11 @@ function getValueModuleLegendLabel(valueModuleId, fallbackName) {
 }
 
 function canDragProcess(row) {
-  return row.processInstance !== null && row.processInstance.status === ProcessInstanceStatus.Running && !savingWorkPlanIds.has(row.workPlan.id);
+  return (
+    row.processInstance !== null &&
+    [keyActionPendingStatusFilter, keyActionRunningStatusFilter].includes(row.statusValue) &&
+    !savingWorkPlanIds.has(row.workPlan.id)
+  );
 }
 
 function isAdminUser(user) {
@@ -652,6 +656,7 @@ function renderProcessBlock(row) {
 
 function renderPendingProcessCard(row) {
   if (row.processInstance === null) return "";
+  const canDrag = canDragProcess(row);
   const canStart = canStartProcessExecution(row);
   const title = getProcessCardTitle(row);
   const previewImage = getProcessPreviewImage(row);
@@ -667,7 +672,8 @@ function renderPendingProcessCard(row) {
       data-schedule-preview-title="${escapeAttribute(title)}"
       data-schedule-preview-image="${escapeAttribute(imageUrl)}"
       data-schedule-preview-progress="${escapeAttribute(getProcessCurrentProgressText(row.tasks))}"
-      draggable="false"
+      data-schedule-drag-type="process-instance"
+      draggable="${canDrag ? "true" : "false"}"
       title="${escapeAttribute(title)}"
       aria-label="${escapeAttribute(title)}"
     >
