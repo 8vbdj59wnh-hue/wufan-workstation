@@ -9,6 +9,7 @@ import {
 import { selectTask } from "./tasksPage.js?v=20260705-state-singleton1";
 import { bindLaunchedProcessDetailEvents, canEditLaunchedProcessInstance, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260722-due-date-boundary2";
 import { formatBusinessDateTime } from "./businessTime.js?v=20260705-state-singleton1";
+import { rerenderPreservingInputFocus } from "./inputFocus.js?v=20260723-input-focus1";
 import {
   ProcessInstanceStatus,
   TaskStatus,
@@ -1309,6 +1310,10 @@ export function bindScheduleBoardPageEvents(rerender) {
       filters[target.name] = target.checked;
     } else if (Object.prototype.hasOwnProperty.call(filters, target.name)) {
       filters[target.name] = target.value;
+    }
+    if (target.matches('input[name="keyword"]')) {
+      rerenderPreservingInputFocus(rerenderScheduleBoard, target, '.schedule-board-filters input[name="keyword"]');
+      return;
     }
     rerenderScheduleBoard();
   });

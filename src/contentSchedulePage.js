@@ -18,6 +18,7 @@ import {
   renderBusinessHourOptions,
 } from "./businessTime.js?v=20260705-state-singleton1";
 import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
+import { rerenderPreservingInputFocus } from "./inputFocus.js?v=20260723-input-focus1";
 import {
   CategoryType,
   ContentScheduleStatus,
@@ -2002,9 +2003,14 @@ export function bindContentScheduleEvents(rerender) {
   });
 
   if (filterForm !== null) {
-    filterForm.addEventListener("input", () => {
+    filterForm.addEventListener("input", (event) => {
       updateFilters(filterForm);
       selectedScheduleId = getContentNoteItems()[0]?.id ?? null;
+      const keywordInput = event.target.closest('input[name="productKeyword"], input[name="titleKeyword"]');
+      if (keywordInput !== null) {
+        rerenderPreservingInputFocus(rerender, keywordInput, `.content-schedule-filters input[name="${keywordInput.name}"]`);
+        return;
+      }
       rerender();
     });
     filterForm.addEventListener("change", () => {
@@ -2202,7 +2208,7 @@ export function bindContentScheduleEvents(rerender) {
         draft: readCurrentScheduleModalDraft(),
         templateQuery: searchInput.value,
       };
-      rerender();
+      rerenderPreservingInputFocus(rerender, searchInput, "[data-template-picker-search]");
     }
   });
 

@@ -8,6 +8,7 @@ import {
   uploadGenericFile,
   uploadImageFile,
 } from "./appState.js?v=20260705-state-singleton1";
+import { rerenderPreservingInputFocus } from "./inputFocus.js?v=20260723-input-focus1";
 import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
 import { getValueModuleName, inferValueModuleIdFromText, isValueModuleId } from "./data/modelOptions.js?v=20260705-state-singleton1";
 
@@ -535,8 +536,10 @@ function mutateStepEditors(action, index, rerender) {
 
 export function bindMethodologiesPageEvents(rerender) {
   document.querySelector(".methodology-search")?.addEventListener("input", (event) => {
-    keyword = event.target.form.keyword.value;
-    rerender();
+    const keywordInput = event.target.closest('input[name="keyword"]');
+    if (keywordInput === null) return;
+    keyword = keywordInput.value;
+    rerenderPreservingInputFocus(rerender, keywordInput, '.methodology-search input[name="keyword"]');
   });
   document.querySelector(".methodology-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();

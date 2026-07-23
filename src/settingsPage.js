@@ -8,6 +8,7 @@ import {
   permissionGroups,
   permissionTemplates,
 } from "./permissions.js?v=20260705-state-singleton1";
+import { rerenderPreservingInputFocus } from "./inputFocus.js?v=20260723-input-focus1";
 import {
   CategoryType,
   PersonRole,
@@ -3231,6 +3232,10 @@ export function bindSettingsPageEvents(rerender) {
       selectedPermissionPersonId = null;
       permissionDraft = null;
       permissionSaveMessage = "";
+      if (input.name === "permissionKeyword") {
+        rerenderPreservingInputFocus(rerender, input, '[name="permissionKeyword"]');
+        return;
+      }
       rerender();
     });
   });
@@ -3242,6 +3247,10 @@ export function bindSettingsPageEvents(rerender) {
         platform: settingsPage.querySelector("[name='storePlatform']")?.value ?? "",
         status: settingsPage.querySelector("[name='storeStatus']")?.value ?? "",
       };
+      if (input.name === "storeKeyword") {
+        rerenderPreservingInputFocus(rerender, input, '[name="storeKeyword"]');
+        return;
+      }
       rerender();
     });
     input.addEventListener("change", () => {
@@ -3262,6 +3271,10 @@ export function bindSettingsPageEvents(rerender) {
         module: settingsPage.querySelector("[name='issueModule']")?.value ?? "",
         status: settingsPage.querySelector("[name='issueStatus']")?.value ?? "",
       };
+      if (input.name === "issueKeyword") {
+        rerenderPreservingInputFocus(rerender, input, '[name="issueKeyword"]');
+        return;
+      }
       rerender();
     };
     input.addEventListener("input", updateIssueFilters);

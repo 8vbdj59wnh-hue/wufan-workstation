@@ -33,6 +33,7 @@ import {
   uploadStandardWorkAttachment,
 } from "./appState.js?v=20260705-state-singleton1";
 import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260705-state-singleton1";
+import { rerenderPreservingInputFocus } from "./inputFocus.js?v=20260723-input-focus1";
 import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
 import {
   CategoryType,
@@ -4725,7 +4726,7 @@ function handleTaskTemplatePickerSearchInput(searchInput, rerender) {
     draft: readCurrentTaskModalDraft(),
     templateQuery: searchInput.value,
   };
-  rerender();
+  rerenderPreservingInputFocus(rerender, searchInput, "[data-task-template-picker-search]");
   return true;
 }
 
@@ -5580,9 +5581,14 @@ export function bindTasksPageEvents(rerender) {
 
   if (activeTaskTab === "clearance") {
     if (clearanceFilterForm !== null) {
-      clearanceFilterForm.addEventListener("input", () => {
+      clearanceFilterForm.addEventListener("input", (event) => {
         updateClearanceFilters(clearanceFilterForm);
         selectedTaskId = getClearanceGroups()[0]?.currentTask?.id ?? selectedTaskId;
+        const keywordInput = event.target.closest('input[name="keyword"]');
+        if (keywordInput !== null) {
+          rerenderPreservingInputFocus(rerender, keywordInput, '.clearance-filters input[name="keyword"]');
+          return;
+        }
         rerender();
       });
       clearanceFilterForm.addEventListener("change", () => {
@@ -5679,9 +5685,14 @@ export function bindTasksPageEvents(rerender) {
 
   if (activeTaskTab === "process-progress") {
     if (processProgressFilterForm !== null) {
-      processProgressFilterForm.addEventListener("input", () => {
+      processProgressFilterForm.addEventListener("input", (event) => {
         updateProcessProgressFilters(processProgressFilterForm);
         selectedProcessInstanceId = getFilteredProcessInstances()[0]?.id ?? null;
+        const keywordInput = event.target.closest('input[name="keyword"]');
+        if (keywordInput !== null) {
+          rerenderPreservingInputFocus(rerender, keywordInput, '.process-progress-filters input[name="keyword"]');
+          return;
+        }
         rerender();
       });
       processProgressFilterForm.addEventListener("change", () => {
@@ -5768,25 +5779,14 @@ export function bindTasksPageEvents(rerender) {
 
   filterForm.addEventListener("input", (event) => {
     const keywordInput = event.target.closest('input[name="keyword"]');
-    const keywordFocus =
-      keywordInput === null
-        ? null
-        : {
-            value: keywordInput.value,
-            selectionStart: keywordInput.selectionStart,
-            selectionEnd: keywordInput.selectionEnd,
-          };
     updateFilters(filterForm);
     const firstRow = getTaskTableRows()[0];
     selectedTaskId = firstRow?.task.id ?? null;
-    rerender();
-    if (keywordFocus !== null) {
-      const nextKeywordInput = document.querySelector('.task-list-filters input[name="keyword"]');
-      if (nextKeywordInput === null) return;
-      nextKeywordInput.value = keywordFocus.value;
-      nextKeywordInput.focus({ preventScroll: true });
-      nextKeywordInput.setSelectionRange(keywordFocus.selectionStart, keywordFocus.selectionEnd);
+    if (keywordInput !== null) {
+      rerenderPreservingInputFocus(rerender, keywordInput, '.task-list-filters input[name="keyword"]');
+      return;
     }
+    rerender();
   });
   filterForm.addEventListener("change", () => {
     updateFilters(filterForm);
