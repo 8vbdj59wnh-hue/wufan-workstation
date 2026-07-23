@@ -785,8 +785,10 @@ export function normalizeSubmitRequirement(item) {
 }
 
 function normalizeProcessTemplateNode(node) {
-  const durationDays = Number(node.durationDays ?? 1);
-  const durationMinutes = Number(node.durationMinutes ?? durationDays * 1440);
+  const durationDays = Number(node.durationDays);
+  const durationMinutes = Number(node.durationMinutes);
+  const hasValidDurationDays = Number.isFinite(durationDays) && durationDays > 0;
+  const hasValidDurationMinutes = Number.isFinite(durationMinutes) && durationMinutes > 0;
   const base = {
     reviewStandard: "按步骤完成标准和输出要求进行审核。",
     stepOrder: node.stepOrder ?? node.stageOrder ?? node.nodeOrder ?? 1,
@@ -794,8 +796,8 @@ function normalizeProcessTemplateNode(node) {
     ownerId: node.ownerId ?? node.defaultOwnerId ?? null,
     executorId: node.executorId ?? null,
     ...node,
-    durationDays: Number.isFinite(durationDays) && durationDays > 0 ? durationDays : 1,
-    durationMinutes: Number.isFinite(durationMinutes) && durationMinutes > 0 ? Math.round(durationMinutes) : 1440,
+    durationDays: hasValidDurationDays ? durationDays : 1,
+    durationMinutes: hasValidDurationMinutes ? Math.round(durationMinutes) : hasValidDurationDays ? Math.round(durationDays * 1440) : 120,
   };
   return {
     ...base,
@@ -808,7 +810,7 @@ export function getProcessNodeDurationMinutes(node) {
   if (Number.isFinite(durationMinutes) && durationMinutes > 0) return Math.round(durationMinutes);
   const durationDays = Number(node?.durationDays);
   if (Number.isFinite(durationDays) && durationDays > 0) return Math.round(durationDays * 1440);
-  return 1440;
+  return 120;
 }
 
 function formatBusinessMinuteIsoFromDate(date) {

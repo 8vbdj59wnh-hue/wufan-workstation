@@ -616,7 +616,7 @@ function renderNodeModal() {
           <label><span>负责部门</span><select name="departmentId">${renderOptions(departments, node?.departmentId ?? node?.ownerDepartmentId ?? "", "请选择部门")}</select></label>
           <label><span>负责人</span><select name="ownerId">${renderOptions(people, node?.ownerId ?? node?.defaultOwnerId ?? "", "请选择负责人")}</select></label>
           <label><span>执行人</span><select name="executorId">${renderOptions(people, node?.executorId ?? "", "同负责人")}</select></label>
-          <label><span>任务时长（分钟）</span><input name="durationMinutes" type="number" min="1" step="1" value="${node?.durationMinutes ?? (Number(node?.durationDays ?? 1) * 1440)}" /></label>
+          <label><span>任务时长（分钟）</span><input name="durationMinutes" type="number" min="1" step="1" value="${node === null ? 120 : node.durationMinutes ?? (Number(node.durationDays ?? 1) * 1440)}" /></label>
           <label><span>状态</span><select name="status">${renderValueOptions(ProcessTemplateNodeStatus, node?.status ?? ProcessTemplateNodeStatus.Active, processTemplateNodeStatusNames, "请选择状态")}</select></label>
         </div>
         <label><span>步骤说明</span><textarea name="description">${node?.description ?? ""}</textarea></label>

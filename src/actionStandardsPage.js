@@ -1432,7 +1432,7 @@ function getPersonByName(name) {
 
 function normalizeStandardFlowDuration(value) {
   const text = String(value ?? "").trim();
-  if (text === "") return 1440;
+  if (text === "") return 120;
   const number = Number(text.replace(/分钟|分/g, ""));
   return Number.isFinite(number) && number > 0 ? Math.round(number) : null;
 }
@@ -1471,7 +1471,7 @@ function buildStandardFlowImportPreviewRows(records) {
         template,
         department,
         executor,
-        durationMinutes: durationMinutes ?? 1440,
+        durationMinutes: durationMinutes ?? 120,
         stepOrder: Number.isInteger(stepOrder) && stepOrder > 0 ? stepOrder : 1,
         errors,
       };
@@ -1548,7 +1548,7 @@ function renderStandardFlowImportModal() {
                     <td>${escapeHtml(row.record.步骤名称)}</td>
                     <td>${escapeHtml(row.record.执行部门)}</td>
                     <td>${escapeHtml(row.record.执行人 || "-")}</td>
-                    <td>${escapeHtml(row.record.时限 || "1440")}</td>
+                    <td>${escapeHtml(row.record.时限 || "120")}</td>
                     <td>${row.errors.length === 0 ? "可导入" : escapeHtml(row.errors.join("；"))}</td>
                   </tr>
                 `).join("")
