@@ -4541,7 +4541,7 @@ button.content-template-thumb {
 
 .schedule-board-layout {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: 252px minmax(0, 1fr);
   gap: 12px;
   align-items: start;
 }
@@ -4589,6 +4589,13 @@ button.content-template-thumb {
   overflow: auto;
 }
 
+.schedule-pending-list {
+  grid-template-columns: repeat(2, 112px);
+  gap: 8px;
+  align-content: start;
+  padding: 8px;
+}
+
 .schedule-future-list .schedule-work-cell {
   position: relative;
   left: auto;
@@ -4607,13 +4614,11 @@ button.content-template-thumb {
 .schedule-pending-card {
   display: grid;
   gap: 10px;
-  padding: 10px;
-  border-bottom: 1px solid #e5e7eb;
+  width: 112px;
+  padding: 6px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
   cursor: pointer;
-}
-
-.schedule-pending-card:last-child {
-  border-bottom: 0;
 }
 
 .schedule-pending-card:hover {
@@ -4621,8 +4626,9 @@ button.content-template-thumb {
 }
 
 .schedule-pending-card-media {
-  width: 100%;
-  aspect-ratio: 4 / 3;
+  width: 100px;
+  height: 100px;
+  aspect-ratio: 1;
   overflow: hidden;
   border: 1px solid #e5e7eb;
   border-radius: 6px;
