@@ -40,8 +40,8 @@ import {
   getProcessProgress as selectProcessProgress,
   isProcessInstanceOverdue as selectProcessInstanceOverdue,
 } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260705-state-singleton1";
-import { selectTask } from "./tasksPage.js?v=20260705-state-singleton1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260724-action-template-link1";
+import { selectTask } from "./tasksPage.js?v=20260724-action-template-link1";
 import {
   collectBusinessDateTime,
   formatBusinessDateTime,

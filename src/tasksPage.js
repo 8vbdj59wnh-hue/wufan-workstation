@@ -67,7 +67,7 @@ import {
   sortProcessInstanceTasks,
 } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
 import { getTaskBusinessStatus } from "./data/taskSelectors.js?v=20260723-task-business-status2";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260705-state-singleton1";
+import { bindActionLinkedTemplatePreviewEvents, bindLaunchedProcessDetailEvents, renderActionLinkedTemplates, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260724-action-template-link1";
 import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260705-state-singleton1";
 import { renderWorkFormViewer } from "./workFormViewer.js?v=20260705-state-singleton1";
 import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
@@ -3454,6 +3454,10 @@ function renderActionSummary(task, context) {
         formFields: getSortedFormFields(taskTemplate),
         customFields,
       })}
+      <div class="task-action-template-reference">
+        <h4>关联模板</h4>
+        ${renderActionLinkedTemplates(instance, { compact: true })}
+      </div>
     </div>
   `;
 }
@@ -5538,6 +5542,7 @@ export function bindTasksPageEvents(rerender) {
   const clearanceImportInput = document.querySelector("[data-clearance-file='import']");
 
   if (tasksPage === null) return;
+  bindActionLinkedTemplatePreviewEvents(tasksPage);
 
   document.querySelectorAll("[data-task-tab]").forEach((tab) => {
     tab.addEventListener("click", () => {

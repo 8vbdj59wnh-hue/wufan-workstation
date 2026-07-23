@@ -6,8 +6,8 @@ import {
   state,
   updatePersistentResource,
 } from "./appState.js?v=20260705-state-singleton1";
-import { selectTask } from "./tasksPage.js?v=20260705-state-singleton1";
-import { bindLaunchedProcessDetailEvents, canEditLaunchedProcessInstance, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260722-due-date-boundary2";
+import { selectTask } from "./tasksPage.js?v=20260724-action-template-link1";
+import { bindLaunchedProcessDetailEvents, canEditLaunchedProcessInstance, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260724-action-template-link1";
 import { formatBusinessDateTime } from "./businessTime.js?v=20260705-state-singleton1";
 import { rerenderPreservingInputFocus } from "./inputFocus.js?v=20260723-input-focus1";
 import {

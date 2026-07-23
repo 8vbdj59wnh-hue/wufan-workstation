@@ -1,4 +1,4 @@
-import { formatProcessStepLabel, getCurrentUser, getLatestStandardWorkFormFields, getNow, getProcessNodeStepOrder, resolveAssetUrl, state, updatePersistentResource, uploadStandardWorkAttachment } from "./appState.js?v=20260705-state-singleton1";
+import { formatProcessStepLabel, getCurrentUser, getLatestStandardWorkFormFields, getNow, getProcessNodeStepOrder, loadTemplates, resolveAssetUrl, state, updatePersistentResource, uploadStandardWorkAttachment } from "./appState.js?v=20260705-state-singleton1";
 import {
   GoalStatus,
   ProcessInstanceStatus,
@@ -34,6 +34,7 @@ import {
 const goals = state.goals;
 const people = state.people;
 const standardWorkAttachmentsKey = "standardWorkAttachments";
+const linkedActionTemplateIdsKey = "linkedTemplateIds";
 const returnRecordsKey = "returnRecords";
 const spreadsheetAttachmentExts = new Set([".xlsx", ".xls", ".csv"]);
 const maxStandardWorkAttachmentSize = 20 * 1024 * 1024;
@@ -156,6 +157,185 @@ function getFormValue(form, name) {
 function getStandardWorkAttachments(instance) {
   const attachments = instance.customFields?.[standardWorkAttachmentsKey];
   return Array.isArray(attachments) ? attachments : [];
+}
+
+function getLinkedActionTemplateIds(source) {
+  const customFields = source?.customFields ?? source ?? {};
+  const templateIds = customFields?.[linkedActionTemplateIdsKey];
+  if (!Array.isArray(templateIds)) return [];
+  return [...new Set(templateIds.map((templateId) => String(templateId ?? "").trim()).filter(Boolean))];
+}
+
+function getTemplateTagCategories() {
+  return (state.templateTagCategories ?? [])
+    .filter((category) => category.status !== "inactive")
+    .slice()
+    .sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0))
+    .map((category) => ({ id: category.id, label: category.name ?? category.label ?? category.id }));
+}
+
+function normalizeTemplateTags(tags) {
+  const categories = getTemplateTagCategories();
+  const normalized = Object.fromEntries(categories.map((category) => [category.id, []]));
+  if (Array.isArray(tags)) {
+    const fallbackCategoryId = categories.find((category) => category.id === "usage")?.id ?? categories[0]?.id;
+    if (fallbackCategoryId !== undefined) normalized[fallbackCategoryId] = tags.map((tag) => String(tag ?? "").trim()).filter(Boolean);
+    return normalized;
+  }
+  if (tags === null || typeof tags !== "object") return normalized;
+  categories.forEach((category) => {
+    normalized[category.id] = Array.isArray(tags[category.id])
+      ? [...new Set(tags[category.id].map((tag) => String(tag ?? "").trim()).filter(Boolean))]
+      : [];
+  });
+  return normalized;
+}
+
+function getTemplateFlatTags(template) {
+  const tags = normalizeTemplateTags(template?.tags);
+  return getTemplateTagCategories().flatMap((category) => tags[category.id] ?? []);
+}
+
+function getLinkedTemplateName(template) {
+  const nameFromTags = getTemplateFlatTags(template).join(" ");
+  return nameFromTags || template?.name || "未命名模板";
+}
+
+function getLinkedTemplatePreviewUrl(template) {
+  const previewUrl = template?.previewImage?.fileUrl ?? template?.previewImage?.url ?? "";
+  if (previewUrl !== "") return resolveAssetUrl(previewUrl);
+  if (template?.fileType === "image") return resolveAssetUrl(template.fileUrl ?? "");
+  return "";
+}
+
+function renderLinkedTemplateTags(template) {
+  const tags = getTemplateFlatTags(template);
+  if (tags.length === 0) return "";
+  return `<div class="action-template-tags">${tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div>`;
+}
+
+export function renderActionLinkedTemplates(instance, { editable = false, compact = false } = {}) {
+  const templateIds = getLinkedActionTemplateIds(instance);
+  const templates = templateIds
+    .map((templateId) => state.templates.find((template) => template.id === templateId) ?? null)
+    .filter(Boolean);
+
+  if (templates.length === 0) {
+    return `<div class="action-linked-template-empty">暂无关联模板</div>`;
+  }
+
+  return `
+    <div class="action-linked-template-grid ${compact ? "is-compact" : ""}" data-action-linked-template-list>
+      ${templates
+        .map((template) => {
+          const previewUrl = getLinkedTemplatePreviewUrl(template);
+          return `
+            <article class="action-linked-template-card">
+              <div
+                class="action-linked-template-thumb"
+                ${previewUrl === "" ? "" : `data-action-template-preview-url="${escapeHtml(previewUrl)}" data-action-template-preview-title="${escapeHtml(getLinkedTemplateName(template))}"`}
+              >
+                ${previewUrl === "" ? `<span>无预览</span>` : `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(getLinkedTemplateName(template))}" />`}
+              </div>
+              <div class="action-linked-template-meta">
+                <strong>${escapeHtml(getLinkedTemplateName(template))}</strong>
+                ${renderLinkedTemplateTags(template)}
+              </div>
+              ${
+                editable
+                  ? `<button class="text-button danger-button" type="button" data-action="remove-action-template" data-template-id="${escapeHtml(template.id)}">移除</button>`
+                  : ""
+              }
+            </article>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderActionTemplatePicker(selectedTemplateIds) {
+  const categories = getTemplateTagCategories();
+  const selectedIds = new Set(selectedTemplateIds);
+  const groupedTags = Object.fromEntries(categories.map((category) => [category.id, []]));
+  state.templates.forEach((template) => {
+    const tags = normalizeTemplateTags(template.tags);
+    categories.forEach((category) => {
+      groupedTags[category.id] = [...new Set([...(groupedTags[category.id] ?? []), ...(tags[category.id] ?? [])])];
+    });
+  });
+
+  return `
+    <div class="modal-backdrop content-template-picker-backdrop action-template-picker-backdrop" role="presentation" data-action-template-picker>
+      <div class="modal-panel extra-wide-modal action-template-picker" role="dialog" aria-modal="true" aria-label="关联模板">
+        <div class="modal-header">
+          <h2>关联模板</h2>
+          <button class="icon-button" type="button" data-action="close-action-template-picker" aria-label="关闭">×</button>
+        </div>
+        <div class="content-template-picker">
+          <div class="content-template-picker-toolbar">
+            <input data-action-template-search placeholder="搜索模板名称或标签" autocomplete="off" />
+          </div>
+          <div class="content-template-picker-layout">
+            <aside class="content-template-picker-filters">
+              ${categories
+                .map(
+                  (category) => `
+                    <div class="content-template-filter-group">
+                      <h3>${escapeHtml(category.label)}</h3>
+                      <div class="template-tag-cloud">
+                        ${(groupedTags[category.id] ?? [])
+                          .map(
+                            (tag) =>
+                              `<button type="button" data-action="filter-action-template" data-template-category="${escapeHtml(category.id)}" data-template-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</button>`,
+                          )
+                          .join("")}
+                      </div>
+                    </div>
+                  `,
+                )
+                .join("")}
+            </aside>
+            <div class="content-template-picker-main">
+              <div class="content-template-picker-grid" data-action-template-options>
+                ${state.templates
+                  .map((template) => {
+                    const previewUrl = getLinkedTemplatePreviewUrl(template);
+                    const name = getLinkedTemplateName(template);
+                    const tags = normalizeTemplateTags(template.tags);
+                    const selected = selectedIds.has(template.id);
+                    return `
+                      <article
+                        class="content-template-option ${selected ? "is-selected" : ""}"
+                        data-action-template-option
+                        data-template-id="${escapeHtml(template.id)}"
+                        data-template-search="${escapeHtml(`${name} ${getTemplateFlatTags(template).join(" ")}`.toLowerCase())}"
+                        data-template-tags="${escapeHtml(encodeURIComponent(JSON.stringify(tags)))}"
+                      >
+                        <div
+                          class="content-template-option-thumb"
+                          ${previewUrl === "" ? "" : `data-action-template-preview-url="${escapeHtml(previewUrl)}" data-action-template-preview-title="${escapeHtml(name)}"`}
+                        >
+                          ${previewUrl === "" ? `<span>无预览</span>` : `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(name)}" />`}
+                        </div>
+                        <h3>${escapeHtml(name)}</h3>
+                        ${renderLinkedTemplateTags(template)}
+                        <button class="${selected ? "secondary-button" : "primary-button"}" type="button" data-action="toggle-action-template" data-template-id="${escapeHtml(template.id)}">${selected ? "已选择" : "选择"}</button>
+                      </article>
+                    `;
+                  })
+                  .join("")}
+              </div>
+              <div class="empty-detail" data-action-template-empty ${state.templates.length === 0 ? "" : "hidden"}>暂无匹配模板</div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="primary-button" type="button" data-action="close-action-template-picker">完成</button>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 function validateStandardWorkAttachmentFiles(files) {
@@ -418,6 +598,17 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
           ${renderCustomFields(instance, editable)}
           <p class="form-note">该信息在发起关键行动时填写，同一关键行动下所有任务共享。</p>
         </div>
+        <div class="detail-block action-linked-template-section">
+          <div class="section-heading with-actions compact-heading">
+            <h3>关联模板</h3>
+            ${editable ? `<button class="secondary-button" type="button" data-action="open-action-template-picker">关联模板</button>` : ""}
+          </div>
+          <input type="hidden" name="${linkedActionTemplateIdsKey}" value="${escapeHtml(JSON.stringify(getLinkedActionTemplateIds(instance)))}" />
+          <div data-action-linked-template-list-host>
+            ${renderActionLinkedTemplates(instance, { editable })}
+          </div>
+          ${editable ? `<div data-action-template-picker-host></div>` : ""}
+        </div>
         ${renderEditableStandardWorkAttachments(instance, editable)}
         ${renderReturnRecords(instance.id)}
         <div class="detail-block">
@@ -517,11 +708,116 @@ function removeSelectedStandardWorkAttachment(button) {
   renderSelectedStandardWorkAttachments(input);
 }
 
+function getSelectedActionTemplateIds(form) {
+  const value = form.elements[linkedActionTemplateIdsKey]?.value ?? "[]";
+  try {
+    return getLinkedActionTemplateIds({ [linkedActionTemplateIdsKey]: JSON.parse(value) });
+  } catch {
+    return [];
+  }
+}
+
+function setSelectedActionTemplateIds(form, templateIds) {
+  const normalizedIds = getLinkedActionTemplateIds({ [linkedActionTemplateIdsKey]: templateIds });
+  const input = form.elements[linkedActionTemplateIdsKey];
+  if (input !== undefined) input.value = JSON.stringify(normalizedIds);
+  const instance = getInstance(form.closest("[data-launched-process-detail]")?.dataset.launchedProcessDetail ?? "");
+  const listHost = form.querySelector("[data-action-linked-template-list-host]");
+  if (listHost !== null) {
+    listHost.innerHTML = renderActionLinkedTemplates(
+      { ...(instance ?? {}), customFields: { ...(instance?.customFields ?? {}), [linkedActionTemplateIdsKey]: normalizedIds } },
+      { editable: true },
+    );
+  }
+  form.querySelectorAll("[data-action-template-option]").forEach((option) => {
+    const selected = normalizedIds.includes(option.dataset.templateId ?? "");
+    option.classList.toggle("is-selected", selected);
+    const button = option.querySelector("[data-action='toggle-action-template']");
+    if (button === null) return;
+    button.textContent = selected ? "已选择" : "选择";
+    button.classList.toggle("primary-button", !selected);
+    button.classList.toggle("secondary-button", selected);
+  });
+}
+
+function filterActionTemplateOptions(picker) {
+  const query = picker.querySelector("[data-action-template-search]")?.value.trim().toLowerCase() ?? "";
+  const selectedTags = new Map();
+  picker.querySelectorAll("[data-action='filter-action-template'].is-active").forEach((button) => {
+    const categoryId = button.dataset.templateCategory ?? "";
+    const categoryTags = selectedTags.get(categoryId) ?? [];
+    categoryTags.push(button.dataset.templateTag ?? "");
+    selectedTags.set(categoryId, categoryTags);
+  });
+
+  let visibleCount = 0;
+  picker.querySelectorAll("[data-action-template-option]").forEach((option) => {
+    let tags = {};
+    try {
+      tags = JSON.parse(decodeURIComponent(option.dataset.templateTags ?? ""));
+    } catch {
+      tags = {};
+    }
+    const matchesQuery = query === "" || (option.dataset.templateSearch ?? "").includes(query);
+    const matchesTags = [...selectedTags.entries()].every(([categoryId, requiredTags]) =>
+      requiredTags.every((tag) => (tags[categoryId] ?? []).includes(tag)),
+    );
+    option.hidden = !matchesQuery || !matchesTags;
+    if (!option.hidden) visibleCount += 1;
+  });
+  const empty = picker.querySelector("[data-action-template-empty]");
+  if (empty !== null) empty.hidden = visibleCount > 0;
+}
+
+function getActionTemplateHoverPreview() {
+  let preview = document.querySelector(".thumbnail-hover-preview.action-template-hover-preview");
+  if (preview !== null) return preview;
+  preview = document.createElement("div");
+  preview.className = "thumbnail-hover-preview action-template-hover-preview is-hidden";
+  preview.setAttribute("aria-hidden", "true");
+  document.body.appendChild(preview);
+  return preview;
+}
+
+function showActionTemplateHoverPreview(anchor) {
+  const imageUrl = anchor.dataset.actionTemplatePreviewUrl ?? "";
+  if (imageUrl === "") return;
+  const preview = getActionTemplateHoverPreview();
+  preview.innerHTML = `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(anchor.dataset.actionTemplatePreviewTitle ?? "模板预览")}" />`;
+  preview.classList.remove("is-hidden");
+  const rect = anchor.getBoundingClientRect();
+  const previewSize = 360;
+  const gap = 12;
+  const left = rect.right + previewSize + gap <= window.innerWidth ? rect.right + gap : Math.max(gap, rect.left - previewSize - gap);
+  const top = Math.min(Math.max(gap, rect.top), Math.max(gap, window.innerHeight - previewSize - gap));
+  preview.style.left = `${Math.round(left)}px`;
+  preview.style.top = `${Math.round(top)}px`;
+}
+
+function hideActionTemplateHoverPreview() {
+  document.querySelector(".thumbnail-hover-preview.action-template-hover-preview")?.classList.add("is-hidden");
+}
+
+export function bindActionLinkedTemplatePreviewEvents(root) {
+  root.addEventListener("pointerover", (event) => {
+    const previewAnchor = event.target.closest("[data-action-template-preview-url]");
+    if (previewAnchor === null || previewAnchor.contains(event.relatedTarget)) return;
+    showActionTemplateHoverPreview(previewAnchor);
+  });
+
+  root.addEventListener("pointerout", (event) => {
+    const previewAnchor = event.target.closest("[data-action-template-preview-url]");
+    if (previewAnchor === null || previewAnchor.contains(event.relatedTarget)) return;
+    hideActionTemplateHoverPreview();
+  });
+}
+
 export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
   const detail = root.querySelector("[data-launched-process-detail]");
   if (detail === null) return;
+  bindActionLinkedTemplatePreviewEvents(detail);
 
-  detail.addEventListener("click", (event) => {
+  detail.addEventListener("click", async (event) => {
     const actionButton = event.target.closest("[data-action]");
     if (actionButton?.dataset.action === "remove-existing-standard-work-attachment") {
       actionButton.closest("[data-existing-attachment-item]")?.remove();
@@ -529,6 +825,46 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
     }
     if (actionButton?.dataset.action === "remove-selected-standard-work-attachment") {
       removeSelectedStandardWorkAttachment(actionButton);
+      return;
+    }
+    if (actionButton?.dataset.action === "open-action-template-picker") {
+      try {
+        await loadTemplates();
+        const pickerHost = form?.querySelector("[data-action-template-picker-host]");
+        if (pickerHost !== null && pickerHost !== undefined) {
+          pickerHost.innerHTML = renderActionTemplatePicker(getSelectedActionTemplateIds(form));
+          pickerHost.querySelector("[data-action-template-search]")?.focus({ preventScroll: true });
+        }
+      } catch (error) {
+        showFormError(form, error.message || "模板列表读取失败。");
+      }
+      return;
+    }
+    if (actionButton?.dataset.action === "close-action-template-picker") {
+      hideActionTemplateHoverPreview();
+      actionButton.closest("[data-action-template-picker]")?.remove();
+      return;
+    }
+    if (actionButton?.dataset.action === "toggle-action-template") {
+      const templateId = actionButton.dataset.templateId ?? "";
+      const selectedIds = getSelectedActionTemplateIds(form);
+      setSelectedActionTemplateIds(
+        form,
+        selectedIds.includes(templateId) ? selectedIds.filter((selectedId) => selectedId !== templateId) : [...selectedIds, templateId],
+      );
+      return;
+    }
+    if (actionButton?.dataset.action === "remove-action-template") {
+      const templateId = actionButton.dataset.templateId ?? "";
+      setSelectedActionTemplateIds(
+        form,
+        getSelectedActionTemplateIds(form).filter((selectedId) => selectedId !== templateId),
+      );
+      return;
+    }
+    if (actionButton?.dataset.action === "filter-action-template") {
+      actionButton.classList.toggle("is-active");
+      filterActionTemplateOptions(actionButton.closest("[data-action-template-picker]"));
       return;
     }
 
@@ -539,6 +875,9 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
 
   detail.addEventListener("input", (event) => {
     if (event.target.name?.startsWith("custom__")) updatePublicFormImagePreview(event.target);
+    if (event.target.matches("[data-action-template-search]")) {
+      filterActionTemplateOptions(event.target.closest("[data-action-template-picker]"));
+    }
   });
 
   detail.addEventListener("change", async (event) => {
@@ -587,6 +926,7 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
     const oldGoalId = instance.goalId;
     const formFields = getInstanceFormFields(instance);
     const customFields = { ...(instance.customFields ?? {}), ...collectPublicFormFields(form, formFields) };
+    customFields[linkedActionTemplateIdsKey] = getSelectedActionTemplateIds(form);
     const customError = validatePublicFormFields(customFields, formFields);
     if (customError !== "") return showFormError(form, customError);
     try {
