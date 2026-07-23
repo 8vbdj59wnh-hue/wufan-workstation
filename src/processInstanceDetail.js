@@ -302,14 +302,17 @@ function renderStepTask(task, editable, stepIndex) {
   const canEdit = editable && canEditTask(task);
   const stepLabel = formatProcessStepLabel(stepIndex + 1);
   const taskDueDateFieldName = `task__${task.id}__dueDate`;
+  const processNode = getNode(task.processNodeId);
+  const displayedOwnerId = processNode === null ? task.ownerId : processNode.ownerId;
+  const displayedExecutorId = processNode === null ? task.executorId : processNode.executorId;
 
   if (!canEdit) {
     return `
       <tr>
         <td><strong>${stepLabel}</strong><br />${escapeHtml(task.name)}</td>
         <td><span class="status-pill">${taskStatusNames[task.status]}</span></td>
-        <td>${findName(people, task.ownerId, "未设置")}</td>
-        <td>${findName(people, task.executorId, "未设置")}</td>
+        <td>${findName(people, displayedOwnerId, "未设置")}</td>
+        <td>${findName(people, displayedExecutorId, "未设置")}</td>
         <td>${formatBusinessMinuteDateTime(task.dueDate)}</td>
         <td><button class="text-button" type="button" data-launched-process-task-id="${task.id}">查看任务</button></td>
       </tr>
