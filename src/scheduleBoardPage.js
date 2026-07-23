@@ -1,4 +1,4 @@
-import { cancelProcessInstance, getCurrentUser, resolveAssetUrl, startProcessInstanceExecution, state, updatePersistentResource } from "./appState.js?v=20260705-state-singleton1";
+import { cancelProcessInstance, getCurrentUser, resolveAssetUrl, startProcessInstanceExecution, state } from "./appState.js?v=20260705-state-singleton1";
 import { selectTask } from "./tasksPage.js?v=20260705-state-singleton1";
 import { bindLaunchedProcessDetailEvents, canEditLaunchedProcessInstance, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260722-due-date-boundary2";
 import { formatBusinessDateTime } from "./businessTime.js?v=20260705-state-singleton1";
@@ -583,7 +583,7 @@ function getValueModuleLegendLabel(valueModuleId, fallbackName) {
 function canDragProcess(row) {
   return (
     row.processInstance !== null &&
-    [keyActionPendingStatusFilter, keyActionRunningStatusFilter].includes(row.statusValue) &&
+    row.statusValue === keyActionPendingStatusFilter &&
     !savingWorkPlanIds.has(row.workPlan.id)
   );
 }
@@ -1011,42 +1011,19 @@ function findRowByProcessInstanceId(processInstanceId) {
   return buildRows().find((row) => row.processInstance?.id === processInstanceId) ?? null;
 }
 
-async function moveLaunchedProcessDueDate(processInstanceId, targetDate, targetHour, rerender) {
+async function scheduleAndStartProcessExecution(processInstanceId, targetDate, targetHour, rerender) {
   const row = findRowByProcessInstanceId(processInstanceId);
   if (row === null || row.processInstance === null) return;
   if (!canDragProcess(row)) return;
   const nextDueDate = buildScheduledDueDate(targetDate, targetHour);
-  if (row.dueDate === nextDueDate && row.workPlan.dueDate === nextDueDate) return;
-
-  const instanceIndex = state.processInstances.findIndex((instance) => instance.id === row.processInstance.id);
-  const workPlanIndex = state.workPlans.findIndex((workPlan) => workPlan.id === row.workPlan.id);
-  if (instanceIndex < 0) return;
-
-  const previousInstanceDueDate = state.processInstances[instanceIndex].dueDate ?? null;
-  const previousWorkPlanDueDate = workPlanIndex >= 0 ? state.workPlans[workPlanIndex].dueDate ?? null : null;
 
   savingWorkPlanIds.add(row.workPlan.id);
-  state.processInstances[instanceIndex] = { ...state.processInstances[instanceIndex], dueDate: nextDueDate };
-  if (workPlanIndex >= 0) state.workPlans[workPlanIndex] = { ...state.workPlans[workPlanIndex], dueDate: nextDueDate };
   rerender();
 
   try {
-    const savedInstance = await updatePersistentResource("process-instances", row.processInstance.id, { dueDate: nextDueDate });
-    const savedWorkPlan = await updatePersistentResource("work-plans", row.workPlan.id, { dueDate: nextDueDate });
-    const savedIndex = state.processInstances.findIndex((instance) => instance.id === row.processInstance.id);
-    if (savedIndex >= 0) state.processInstances[savedIndex] = { ...state.processInstances[savedIndex], ...savedInstance };
-    const savedWorkPlanIndex = state.workPlans.findIndex((workPlan) => workPlan.id === row.workPlan.id);
-    if (savedWorkPlanIndex >= 0) state.workPlans[savedWorkPlanIndex] = { ...state.workPlans[savedWorkPlanIndex], ...savedWorkPlan };
+    await startProcessInstanceExecution(processInstanceId, { dueDate: nextDueDate });
   } catch (error) {
-    await Promise.allSettled([
-      updatePersistentResource("process-instances", row.processInstance.id, { dueDate: previousInstanceDueDate }),
-      updatePersistentResource("work-plans", row.workPlan.id, { dueDate: previousWorkPlanDueDate }),
-    ]);
-    const rollbackIndex = state.processInstances.findIndex((instance) => instance.id === row.processInstance.id);
-    if (rollbackIndex >= 0) state.processInstances[rollbackIndex] = { ...state.processInstances[rollbackIndex], dueDate: previousInstanceDueDate };
-    const rollbackWorkPlanIndex = state.workPlans.findIndex((workPlan) => workPlan.id === row.workPlan.id);
-    if (rollbackWorkPlanIndex >= 0) state.workPlans[rollbackWorkPlanIndex] = { ...state.workPlans[rollbackWorkPlanIndex], dueDate: previousWorkPlanDueDate };
-    window.alert(error.message || "截止时间保存失败，请检查本地数据库服务。");
+    window.alert(error.message || "排期并开始执行失败，请检查本地数据库服务。");
   } finally {
     savingWorkPlanIds.delete(row.workPlan.id);
     draggedSourceId = null;
@@ -1269,7 +1246,7 @@ export function bindScheduleBoardPageEvents(rerender) {
       const targetHour = Number(cell.dataset.scheduleHour);
       if (sourceId === null || sourceId === "" || targetDate === "" || !Number.isFinite(targetHour)) return;
       if (sourceType === "process-instance") {
-        moveLaunchedProcessDueDate(sourceId, targetDate, targetHour, rerender);
+        scheduleAndStartProcessExecution(sourceId, targetDate, targetHour, rerender);
       }
     });
   });

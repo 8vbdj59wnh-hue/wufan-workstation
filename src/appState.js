@@ -398,10 +398,12 @@ export async function cancelProcessInstance(instanceId, cancelReason = "") {
   return data;
 }
 
-export async function startProcessInstanceExecution(instanceId) {
+export async function startProcessInstanceExecution(instanceId, { dueDate } = {}) {
+  const body = dueDate === undefined ? undefined : JSON.stringify({ dueDate });
   const response = await authFetch(`${apiBaseUrl}/api/process-instances/${instanceId}/start`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    ...(body === undefined ? {} : { body }),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.success !== true) {

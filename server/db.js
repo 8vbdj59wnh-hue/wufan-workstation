@@ -2018,7 +2018,7 @@ export function cancelProcessInstance(instanceId, cancelReason = "") {
   cancel();
 }
 
-export function startProcessInstanceExecution(instanceId, { userId = "", isAdmin = false } = {}) {
+export function startProcessInstanceExecution(instanceId, { userId = "", isAdmin = false, dueDate } = {}) {
   const database = getDatabase();
   const start = database.transaction(() => {
     const instance = readExistingItem("processInstances", instanceId);
@@ -2037,6 +2037,8 @@ export function startProcessInstanceExecution(instanceId, { userId = "", isAdmin
     if (!canStart) throw new Error("你没有权限开始执行该关键行动。");
 
     const now = new Date().toISOString();
+    const hasDueDate = dueDate !== undefined;
+    const normalizedDueDate = hasDueDate ? String(dueDate ?? "").trim() || null : undefined;
     insertItem("tasks", {
       ...currentTask,
       status: "doing",
@@ -2045,11 +2047,22 @@ export function startProcessInstanceExecution(instanceId, { userId = "", isAdmin
     });
     insertItem("processInstances", {
       ...instance,
+      ...(hasDueDate ? { dueDate: normalizedDueDate } : {}),
       startedAt: instance.startedAt || now,
       updatedAt: now,
     });
+    if (hasDueDate) {
+      database
+        .prepare(
+          `UPDATE work_plans
+           SET dueDate = @dueDate,
+               updatedAt = @now
+           WHERE processInstanceId = @instanceId`,
+        )
+        .run({ dueDate: normalizedDueDate, now, instanceId: instance.id });
+    }
 
-    return { processInstanceId: instance.id, taskId: currentTask.id, startedAt: now };
+    return { processInstanceId: instance.id, taskId: currentTask.id, startedAt: now, dueDate: hasDueDate ? normalizedDueDate : instance.dueDate ?? null };
   });
   return start();
 }

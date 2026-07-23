@@ -514,6 +514,7 @@ app.post("/api/process-instances/:id/start", (request, response) => {
     startProcessInstanceExecution(request.params.id, {
       userId: getUserPersonId(request.user),
       isAdmin: isAdminUser(request.user),
+      dueDate: request.body?.dueDate,
     });
     response.json({ success: true, data: filterDataByScope(readAllData(), request.user) });
   } catch (error) {
