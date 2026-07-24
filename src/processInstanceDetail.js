@@ -157,7 +157,9 @@ function canChangeTaskExecutor(instance, task, user = getCurrentUser()) {
   if (isAdminUser(user)) return true;
   const userPersonId = user?.personId ?? user?.id ?? "";
   const processOwnerId = getProcessInstanceOwner(instance.id, state).userId;
-  return userPersonId !== "" && (userPersonId === processOwnerId || userPersonId === task.ownerId);
+  const processNode = getNode(task.processNodeId);
+  const stepOwnerId = processNode === null ? task.ownerId : processNode.ownerId;
+  return userPersonId !== "" && (userPersonId === processOwnerId || userPersonId === stepOwnerId);
 }
 
 function getFormValue(form, name) {
