@@ -9,7 +9,11 @@ import {
   updatePersistentResource,
   uploadStandardWorkAttachment,
 } from "./appState.js?v=20260705-state-singleton1";
-import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
+import {
+  canLaunchActionTemplate,
+  canLaunchAnyActionTemplate,
+  hasPermission,
+} from "./permissions.js?v=20260724-action-launch-permissions1";
 import {
   CategoryType,
   GoalLevel,
@@ -161,7 +165,25 @@ function isSelectableGoalWorkTemplate(template) {
 }
 
 function getActiveTaskTemplates() {
-  return state.taskTemplates.filter((template) => template.status === TaskTemplateStatus.Active && isSelectableGoalWorkTemplate(template));
+  const currentUser = getCurrentUser();
+  return state.taskTemplates.filter(
+    (template) =>
+      template.status === TaskTemplateStatus.Active &&
+      isSelectableGoalWorkTemplate(template) &&
+      canLaunchActionTemplate(currentUser, template.id),
+  );
+}
+
+function canCurrentUserLaunchGoalAction() {
+  return (
+    canCurrentUser("goals.addWork") &&
+    canLaunchAnyActionTemplate(
+      getCurrentUser(),
+      state.taskTemplates.filter(
+        (template) => template.status === TaskTemplateStatus.Active && isSelectableGoalWorkTemplate(template),
+      ),
+    )
+  );
 }
 
 function sortCategoriesBySortOrder(left, right) {
@@ -561,7 +583,7 @@ function renderGoalMapCard(goal) {
         <span class="goal-map-line">${formatProgress(goal)}</span>
       </button>
       ${
-        canCurrentUser("goals.addWork")
+        canCurrentUserLaunchGoalAction()
           ? `
             <div class="goal-map-card-actions">
               <button
@@ -820,7 +842,7 @@ function renderGoalDetail() {
         <h2>目标详情：${escapeHtml(goal.name)}</h2>
         <div class="section-actions">
           ${canCurrentUser("goals.edit") ? `<button class="secondary-button" type="button" data-action="edit-goal" data-goal-id="${goal.id}">编辑目标</button>` : ""}
-          ${canCurrentUser("goals.addWork") && !isInactiveGoal(goal) ? `<button class="primary-button" type="button" data-action="add-goal-task" data-goal-id="${goal.id}">发起关键行动</button>` : ""}
+          ${canCurrentUserLaunchGoalAction() && !isInactiveGoal(goal) ? `<button class="primary-button" type="button" data-action="add-goal-task" data-goal-id="${goal.id}">发起关键行动</button>` : ""}
           ${canCurrentUser("goals.delete") && !isInactiveGoal(goal) ? `<button class="secondary-button danger-button" type="button" data-action="deactivate-goal" data-goal-id="${goal.id}">停用目标</button>` : ""}
           ${canCurrentUser("goals.delete") && isInactiveGoal(goal) ? `<button class="secondary-button" type="button" data-action="activate-goal" data-goal-id="${goal.id}">重新启用</button>` : ""}
         </div>
@@ -1269,6 +1291,7 @@ function validateGoalTaskDraft(draft) {
   if (getGoal(draft.goalId) === null) return "当前目标必须存在。";
   if (draft.taskTemplateId === "" || draft.template === null) return "必须选择启用的关键行动。";
   if (draft.template.status !== TaskTemplateStatus.Active) return "停用的关键行动不能用于发起。";
+  if (!canLaunchActionTemplate(getCurrentUser(), draft.template.id)) return "你没有权限发起该关键行动。";
   if (!draft.template.defaultProcessTemplateId) return "该关键行动尚未绑定关键行动标准流程，请先到关键行动库中配置。";
   const customError = validateCustomFields(draft.customFields, draft.template);
   if (customError !== "") return customError;
@@ -1691,7 +1714,7 @@ function handleGoalClick(event, rerender) {
   }
 
   if (action === "add-goal-task") {
-    if (!canCurrentUser("goals.addWork")) return;
+    if (!canCurrentUserLaunchGoalAction()) return;
     const goal = getGoal(goalId);
     if (goal === null || isInactiveGoal(goal)) return;
     selectedGoalId = goalId;

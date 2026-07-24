@@ -17,7 +17,7 @@ import {
   uploadImageFile,
   uploadStandardWorkAttachment,
 } from "./appState.js?v=20260705-state-singleton1";
-import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
+import { canLaunchActionTemplate, hasPermission } from "./permissions.js?v=20260724-action-launch-permissions1";
 import {
   CategoryType,
   ProcessAccepterRule,
@@ -151,7 +151,10 @@ function getTaskTemplate(templateId) {
 }
 
 function getActiveTaskTemplates() {
-  return state.taskTemplates.filter((template) => template.status === TaskTemplateStatus.Active);
+  const currentUser = getCurrentUser();
+  return state.taskTemplates.filter(
+    (template) => template.status === TaskTemplateStatus.Active && canLaunchActionTemplate(currentUser, template.id),
+  );
 }
 
 function getActiveTaskTemplatesByCategory(categoryId) {
@@ -282,7 +285,7 @@ function renderStandardWorkCard(template, selectedProcessTemplateId = "") {
       <div class="standard-work-card-actions">
         ${renderTemplateActionButton("查看", "view-task-template", template.id)}
         ${renderTemplateActionButton("编辑", "edit-task-template", template.id)}
-        ${renderTemplateActionButton("发起", "launch-task-template", template.id)}
+        ${canLaunchActionTemplate(getCurrentUser(), template.id) ? renderTemplateActionButton("发起", "launch-task-template", template.id) : ""}
       </div>
     </article>
   `;
@@ -948,6 +951,7 @@ async function saveActionStandardLaunch(form, rerender) {
   const template = getTaskTemplate(getFormValue(form, "taskTemplateId"));
   if (template === null) return setModalError("必须选择启用的关键行动。", rerender);
   if (template.status !== TaskTemplateStatus.Active) return setModalError("停用的关键行动不能用于发起关键行动。", rerender);
+  if (!canLaunchActionTemplate(getCurrentUser(), template.id)) return setModalError("你没有权限发起该关键行动。", rerender);
   if (!template.defaultProcessTemplateId) return setModalError("该关键行动尚未绑定关键行动标准流程，请先配置。", rerender);
   const processTemplate = getProcessTemplateById(template.defaultProcessTemplateId);
   if (processTemplate === null || processTemplate.status !== ProcessTemplateStatus.Active) return setModalError("该关键行动绑定的关键行动标准流程未启用。", rerender);
@@ -1067,7 +1071,7 @@ async function handleLaunchSubmit(event, rerender) {
 
 export function openTaskTemplateLaunchModal(templateId, rerender) {
   const template = getTaskTemplate(templateId);
-  if (template === null) return false;
+  if (template === null || !canLaunchActionTemplate(getCurrentUser(), template.id)) return false;
   modalState = {
     kind: "launchActionStandard",
     categoryId: getTaskTemplateValueChainCategoryId(template),

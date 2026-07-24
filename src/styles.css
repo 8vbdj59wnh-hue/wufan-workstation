@@ -4524,6 +4524,40 @@ button.content-template-thumb {
   gap: 16px;
 }
 
+.action-launch-permission {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 14px;
+}
+
+.action-launch-permission h4 {
+  margin: 0;
+}
+
+.action-launch-template-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f9fafb;
+  padding: 10px;
+}
+
+.action-launch-template-grid .checkbox-line span {
+  display: grid;
+  gap: 2px;
+}
+
+.action-launch-template-grid small {
+  color: #6b7280;
+  font-size: 12px;
+}
+
 .permission-sidebar,
 .permission-editor {
   min-width: 0;

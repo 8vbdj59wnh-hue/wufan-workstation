@@ -17,7 +17,7 @@ import {
   getBusinessHourPart,
   renderBusinessHourOptions,
 } from "./businessTime.js?v=20260705-state-singleton1";
-import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
+import { canLaunchActionTemplate, hasPermission } from "./permissions.js?v=20260724-action-launch-permissions1";
 import { rerenderPreservingInputFocus } from "./inputFocus.js?v=20260723-input-focus1";
 import {
   CategoryType,
@@ -618,6 +618,11 @@ function getContentNoteTemplate() {
   );
 }
 
+function canLaunchContentNote() {
+  const template = getContentNoteTemplate();
+  return template !== null && canLaunchActionTemplate(getCurrentUser(), template.id);
+}
+
 function isContentNoteInstance(instance) {
   const template = getContentNoteTemplate();
   if (instance.taskTemplateId === contentNoteTaskTemplateId) return true;
@@ -757,7 +762,7 @@ function renderScheduleTable() {
         </div>
         <div class="section-actions">
           ${canCurrentUser("contentSchedules.export") ? `<button class="secondary-button" type="button" data-content-action="export-schedules">导出 Excel</button>` : ""}
-          ${canCurrentUser("workPlans.launch") ? `<button class="primary-button" type="button" data-content-action="launch-content-note">发起发布内容笔记</button>` : ""}
+          ${canLaunchContentNote() ? `<button class="primary-button" type="button" data-content-action="launch-content-note">发起发布内容笔记</button>` : ""}
         </div>
       </div>
       <div class="table-wrap">
@@ -2130,6 +2135,7 @@ export function bindContentScheduleEvents(rerender) {
           window.alert("未找到“发布内容笔记”关键行动，请先到行动标准中配置。");
           return;
         }
+        if (!canLaunchActionTemplate(getCurrentUser(), template.id)) return;
         window.sessionStorage.setItem(
           "goalTaskPrefill",
           JSON.stringify({

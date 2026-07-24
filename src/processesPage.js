@@ -15,7 +15,7 @@ import {
   updateProcessTemplateNodeStatus,
   updatePersistentResource,
 } from "./appState.js?v=20260705-state-singleton1";
-import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
+import { canLaunchActionTemplate, hasPermission } from "./permissions.js?v=20260724-action-launch-permissions1";
 import {
   CategoryType,
   GoalStatus,
@@ -94,6 +94,19 @@ function getCurrentUserId() {
 
 function getStandardWorkForTemplate(templateId) {
   return state.taskTemplates.find((template) => template.defaultProcessTemplateId === templateId) ?? null;
+}
+
+function canCurrentUserLaunchProcessTemplate(templateId) {
+  const standardWork = getStandardWorkForTemplate(templateId);
+  return standardWork !== null && canLaunchActionTemplate(getCurrentUser(), standardWork.id);
+}
+
+function getLaunchableProcessTemplates() {
+  return state.processTemplates.filter(
+    (template) =>
+      template.status === ProcessTemplateStatus.Active &&
+      canCurrentUserLaunchProcessTemplate(template.id),
+  );
 }
 
 function getLaunchedInstancesForTemplate(templateId) {
@@ -694,7 +707,12 @@ function renderWorkflowNodesModal() {
 
 function renderStartModal() {
   if (modalState?.kind !== "start") return "";
-  const template = state.processTemplates.find((item) => item.id === modalState.templateId);
+  const launchableTemplates = getLaunchableProcessTemplates();
+  const template =
+    launchableTemplates.find((item) => item.id === modalState.templateId) ??
+    launchableTemplates[0] ??
+    null;
+  if (template === null) return "";
   return `
     <div class="modal-backdrop"><div class="modal-panel wide-modal">
       <div class="modal-header">
@@ -707,7 +725,7 @@ function renderStartModal() {
       </div>
       <form class="modal-form process-start-form">
         <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${modalState.error}</div>
-        <label><span>关键行动标准流程</span><select name="templateId">${renderOptions(state.processTemplates.filter((item) => item.status === ProcessTemplateStatus.Active), template.id, "请选择关键行动标准流程")}</select></label>
+        <label><span>关键行动标准流程</span><select name="templateId">${renderOptions(launchableTemplates, template.id, "请选择关键行动标准流程")}</select></label>
         <label><span>已发起关键行动名称</span><input name="name" value="${template.name}" /></label>
         <div class="form-grid">
           <label><span>关联目标</span><select name="goalId">${renderOptions(getActiveGoals(), "", "请选择目标")}</select></label>
@@ -925,7 +943,11 @@ async function persistContiguousNodeOrder(templateId, orderedNodes = getTemplate
 }
 
 async function submitStart(form, rerender) {
-  const template = state.processTemplates.find((item) => item.id === getFormValue(form, "templateId")) ?? state.processTemplates.find((item) => item.status === ProcessTemplateStatus.Active) ?? null;
+  const launchableTemplates = getLaunchableProcessTemplates();
+  const template =
+    launchableTemplates.find((item) => item.id === getFormValue(form, "templateId")) ??
+    launchableTemplates[0] ??
+    null;
   if (template === null) return setModalError("暂无可发起的关键行动标准。", rerender);
   const standardWork = getStandardWorkForTemplate(template.id);
   if (standardWork === null) return setModalError("该关键行动标准流程未关联行动标准，不能直接发起关键行动。", rerender);
@@ -1144,7 +1166,9 @@ export function bindProcessesPageEvents(rerender) {
       if (action === "add-template" && canCurrentUser("processes.editTemplates")) modalState = { kind: "template", error: "" };
       if (action === "select-template") modalState = { kind: "workflowNodes", templateId: actionButton.dataset.templateId };
       if (action === "edit-template" && canCurrentUser("processes.editTemplates")) modalState = { kind: "template", id: actionButton.dataset.templateId, error: "" };
-      if (action === "start-process" && canCurrentUser("workPlans.launch")) modalState = { kind: "start", templateId: actionButton.dataset.templateId, error: "" };
+      if (action === "start-process" && canCurrentUserLaunchProcessTemplate(actionButton.dataset.templateId ?? "")) {
+        modalState = { kind: "start", templateId: actionButton.dataset.templateId, error: "" };
+      }
       if (action === "view-process-instance") selectedInstanceId = actionButton.dataset.instanceId;
       if (action === "delete-template" && canCurrentUser("processes.editTemplates")) {
         await deleteTemplate(actionButton.dataset.templateId, rerender);

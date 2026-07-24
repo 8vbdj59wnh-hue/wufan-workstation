@@ -1,5 +1,6 @@
 import { createPersistentResource, defaultCompanySlogan, getCurrentUser, getLatestStandardWorkForm, resolveAssetUrl, state, updatePersistentResource, uploadGenericFile, validateCurrentSession } from "./appState.js?v=20260705-state-singleton1";
 import {
+  actionLaunchScopeOptions,
   applyPermissionTemplate,
   dataScopeOptions,
   hasPermission,
@@ -7,7 +8,7 @@ import {
   permissionCount,
   permissionGroups,
   permissionTemplates,
-} from "./permissions.js?v=20260705-state-singleton1";
+} from "./permissions.js?v=20260724-action-launch-permissions1";
 import { rerenderPreservingInputFocus } from "./inputFocus.js?v=20260723-input-focus1";
 import {
   CategoryType,
@@ -1225,7 +1226,66 @@ function renderPermissionGroup(group, permissions) {
           `)
           .join("")}
       </div>
+      ${group.key === "workPlans" ? renderActionLaunchTemplatePermissions(permissions) : ""}
     </details>
+  `;
+}
+
+function renderActionLaunchTemplatePermissions(permissions) {
+  const selectedIds = new Set(permissions.workPlans?.launchTemplateIds ?? []);
+  const templates = state.taskTemplates
+    .filter((template) => template.status !== Status.Inactive || selectedIds.has(template.id))
+    .slice()
+    .sort((left, right) => {
+      const categoryCompare = findName(categories, left.categoryId, "").localeCompare(findName(categories, right.categoryId, ""), "zh-Hans-CN");
+      return categoryCompare || String(left.name ?? "").localeCompare(String(right.name ?? ""), "zh-Hans-CN");
+    });
+  return `
+    <div class="action-launch-permission">
+      <h4>可发起行动范围</h4>
+      <p class="form-note">先判断是否拥有“发起关键行动”权限，再按以下范围过滤行动标准。管理员始终可以发起全部。</p>
+      <div class="permission-radio-list">
+        ${actionLaunchScopeOptions
+          .map(
+            (option) => `
+              <label class="checkbox-line">
+                <input
+                  type="radio"
+                  name="workPlans.launchTemplateScope"
+                  value="${option.value}"
+                  ${permissions.workPlans?.launchTemplateScope === option.value ? "checked" : ""}
+                />
+                <span>${option.label}</span>
+              </label>
+            `,
+          )
+          .join("")}
+      </div>
+      <div class="action-launch-template-grid">
+        ${
+          templates.length === 0
+            ? `<div class="empty-detail">暂无可配置的行动标准。</div>`
+            : templates
+                .map(
+                  (template) => `
+                    <label class="checkbox-line">
+                      <input
+                        type="checkbox"
+                        name="workPlans.launchTemplateIds"
+                        value="${escapeHtml(template.id)}"
+                        ${selectedIds.has(template.id) ? "checked" : ""}
+                      />
+                      <span>
+                        <strong>${escapeHtml(template.name)}</strong>
+                        <small>${escapeHtml(findName(categories, template.categoryId, "未分类"))}</small>
+                      </span>
+                    </label>
+                  `,
+                )
+                .join("")
+        }
+      </div>
+    </div>
   `;
 }
 
@@ -2826,12 +2886,16 @@ async function handleFormSubmit(event, rerender) {
 
 function collectPermissionDraft(form, currentPermissions) {
   const permissions = normalizePermissions(currentPermissions);
+  const formData = new FormData(form);
   permissions.dataScope = getFormValue(form, "dataScope") || "department";
   for (const group of permissionGroups) {
     for (const item of group.permissions) {
-      permissions[group.key][item.key] = new FormData(form).has(`${group.key}.${item.key}`);
+      permissions[group.key][item.key] = formData.has(`${group.key}.${item.key}`);
     }
   }
+  permissions.workPlans.launchTemplateScope =
+    formData.get("workPlans.launchTemplateScope") === "selected" ? "selected" : "all";
+  permissions.workPlans.launchTemplateIds = [...new Set(formData.getAll("workPlans.launchTemplateIds").map(String).filter(Boolean))];
   return permissions;
 }
 

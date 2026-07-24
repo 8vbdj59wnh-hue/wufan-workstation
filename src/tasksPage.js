@@ -34,7 +34,11 @@ import {
 } from "./appState.js?v=20260705-state-singleton1";
 import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260705-state-singleton1";
 import { rerenderPreservingInputFocus } from "./inputFocus.js?v=20260723-input-focus1";
-import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
+import {
+  canLaunchActionTemplate,
+  canLaunchAnyActionTemplate,
+  hasPermission,
+} from "./permissions.js?v=20260724-action-launch-permissions1";
 import {
   CategoryType,
   GoalStatus,
@@ -380,7 +384,10 @@ function getTaskCategories() {
 }
 
 function getActiveTaskTemplates() {
-  return state.taskTemplates.filter((template) => template.status === TaskTemplateStatus.Active);
+  const currentUser = getCurrentUser();
+  return state.taskTemplates.filter(
+    (template) => template.status === TaskTemplateStatus.Active && canLaunchActionTemplate(currentUser, template.id),
+  );
 }
 
 function getTaskTemplate(templateId) {
@@ -2382,6 +2389,14 @@ function getClearanceTemplate() {
   return getActiveTaskTemplates().find((template) => template.name === clearanceWorkName) ?? null;
 }
 
+function canCurrentUserLaunchClearance() {
+  const template =
+    state.taskTemplates.find(
+      (item) => item.status === TaskTemplateStatus.Active && item.name === clearanceWorkName,
+    ) ?? null;
+  return template !== null && canLaunchActionTemplate(getCurrentUser(), template.id);
+}
+
 function buildClearanceImportPreviewRows(records) {
   const template = getClearanceTemplate();
   return records.map((record, index) => {
@@ -2670,9 +2685,9 @@ function renderClearancePage() {
           <p class="form-note">集中查看库存清仓关键行动产生的标准步骤和任务；批量导入可在“产品图”列填写图片地址，或在对应行插入图片。</p>
         </div>
         <div class="toolbar-actions">
-          ${canCurrentUser("workPlans.launch") ? `<button class="secondary-button" type="button" data-action="download-clearance-template">下载导入模板</button>` : ""}
+          ${canCurrentUserLaunchClearance() ? `<button class="secondary-button" type="button" data-action="download-clearance-template">下载导入模板</button>` : ""}
           ${
-            canCurrentUser("workPlans.launch")
+            canCurrentUserLaunchClearance()
               ? `
                 <label class="secondary-button file-button">
                   批量导入
@@ -4476,6 +4491,7 @@ function validateTaskDraft(draft, isAdd) {
     if (!isValueModuleId(draft.valueModuleId)) return "必须选择价值链模块。";
     if (draft.taskTemplateId === "" || draft.template === null) return "必须选择启用的关键行动。";
     if (draft.template.status !== TaskTemplateStatus.Active) return "停用的关键行动不能用于发起关键行动。";
+    if (!canLaunchActionTemplate(getCurrentUser(), draft.template.id)) return "你没有权限发起该关键行动。";
     if (!draft.template.defaultProcessTemplateId) return "该关键行动尚未绑定关键行动标准流程，请先到关键行动库中配置。";
     const processTemplate = getProcessTemplateById(draft.template.defaultProcessTemplateId);
     if (processTemplate === null || processTemplate.status !== ProcessTemplateStatus.Active) return "该关键行动绑定的关键行动标准流程未启用。";
@@ -5637,12 +5653,12 @@ export function bindTasksPageEvents(rerender) {
           return;
         }
         if (action === "download-clearance-template") {
-          if (!canCurrentUser("workPlans.launch")) return;
+          if (!canCurrentUserLaunchClearance()) return;
           downloadClearanceImportTemplate();
           return;
         }
         if (action === "confirm-clearance-import") {
-          if (!canCurrentUser("workPlans.launch")) return;
+          if (!canCurrentUserLaunchClearance()) return;
           confirmClearanceImport(rerender);
           return;
         }
@@ -5857,6 +5873,12 @@ export function bindTasksPageEvents(rerender) {
       if (await handleTaskTemplateLinkAction(action, actionButton, rerender)) return;
 
       if (action === "add-task") {
+        if (
+          !canLaunchAnyActionTemplate(
+            getCurrentUser(),
+            state.taskTemplates.filter((template) => template.status === TaskTemplateStatus.Active),
+          )
+        ) return;
         modalState = { kind: "task", mode: "add", categoryId: "", taskTemplateId: "", error: "" };
         rerender();
         return;

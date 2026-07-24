@@ -34,7 +34,7 @@ import {
   uploadsDir,
 } from "./db.js";
 import { createToken, verifyPassword, verifyToken } from "./security.js";
-import { getDataScope, hasPermission } from "../src/permissions.js";
+import { canLaunchActionTemplate, getDataScope, hasPermission } from "../src/permissions.js";
 import { getProcessInstanceOwner } from "../src/data/processInstanceSelectors.js";
 
 const app = express();
@@ -209,6 +209,28 @@ function requirePermission(permissionPath) {
     }
     next();
   };
+}
+
+function getRequestedActionTemplateIds(body = {}) {
+  return [
+    body?.processInstance?.taskTemplateId ?? body?.processInstance?.standardWorkId,
+    body?.workPlan?.taskTemplateId,
+    body?.taskTemplateId ?? body?.standardWorkId,
+  ]
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean);
+}
+
+function rejectUnauthorizedActionTemplateLaunch(user, body, response, trustedTemplateId = "") {
+  const trustedId = String(trustedTemplateId ?? "").trim();
+  const requestedIds = [...new Set(getRequestedActionTemplateIds(body))];
+  const templateIds = trustedId === "" ? requestedIds : [...new Set([trustedId, ...requestedIds])];
+  if (
+    templateIds.length === 1 &&
+    canLaunchActionTemplate(user, templateIds[0])
+  ) return false;
+  response.status(403).json({ success: false, message: "你没有权限发起该关键行动" });
+  return true;
 }
 
 function isAdminUser(user) {
@@ -608,6 +630,15 @@ app.put("/api/process-instances/:id/tasks/:taskId/executor", (request, response)
 
 app.post("/api/work-plans/:id/launch", requirePermission("workPlans.launch"), (request, response) => {
   try {
+    const existingWorkPlan = readAllData().workPlans.find((item) => item.id === request.params.id);
+    if (
+      rejectUnauthorizedActionTemplateLaunch(
+        request.user,
+        request.body ?? {},
+        response,
+        existingWorkPlan?.taskTemplateId ?? "",
+      )
+    ) return;
     launchWorkPlanWithProcess(request.params.id, request.body ?? {});
     response.json({ success: true, data: filterDataByScope(readAllData(), request.user) });
   } catch (error) {
@@ -736,6 +767,10 @@ app.post("/api/:resource", (request, response) => {
       response.status(403).json({ success: false, message: "你没有权限进行该操作" });
       return;
     }
+    if (
+      new Set(["work-plans", "process-instances"]).has(request.params.resource) &&
+      rejectUnauthorizedActionTemplateLaunch(request.user, request.body ?? {}, response)
+    ) return;
     response.status(201).json(createResource(request.params.resource, request.body));
   } catch (error) {
     response.status(404).json({ error: error.message });

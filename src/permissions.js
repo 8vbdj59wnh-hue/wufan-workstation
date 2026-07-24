@@ -4,6 +4,11 @@ export const dataScopeOptions = [
   { value: "all", label: "看全部数据" },
 ];
 
+export const actionLaunchScopeOptions = [
+  { value: "all", label: "可发起全部关键行动" },
+  { value: "selected", label: "只可发起指定关键行动" },
+];
+
 export const permissionGroups = [
   {
     key: "modules",
@@ -132,6 +137,8 @@ function createPermissionSkeleton(value = false, dataScope = "department") {
   for (const group of permissionGroups) {
     permissions[group.key] = Object.fromEntries(group.permissions.map((item) => [item.key, value]));
   }
+  permissions.workPlans.launchTemplateScope = value ? "all" : "selected";
+  permissions.workPlans.launchTemplateIds = [];
   return permissions;
 }
 
@@ -141,6 +148,7 @@ const bossPermissions = createPermissionSkeleton(false, "all");
 Object.assign(bossPermissions.modules, { goals: true, execution: true, processes: true, assessment: true, methods: true, settings: true });
 Object.assign(bossPermissions.goals, { view: true, create: true, edit: true, viewDetail: true, addWork: true, viewRelatedData: true });
 Object.assign(bossPermissions.workPlans, { launch: true });
+bossPermissions.workPlans.launchTemplateScope = "all";
 Object.assign(bossPermissions.tasks, { view: true, viewDetail: true, viewForm: true, viewProcessProgress: true });
 Object.assign(bossPermissions.processes, { viewInstances: true, viewForm: true });
 Object.assign(bossPermissions.contentSchedules, {
@@ -161,6 +169,7 @@ const departmentLeaderPermissions = createPermissionSkeleton(false, "department"
 Object.assign(departmentLeaderPermissions.modules, { goals: true, execution: true, processes: true, assessment: true, methods: true });
 Object.assign(departmentLeaderPermissions.goals, { view: true, viewDetail: true, addWork: true });
 Object.assign(departmentLeaderPermissions.workPlans, { launch: true });
+departmentLeaderPermissions.workPlans.launchTemplateScope = "all";
 Object.assign(departmentLeaderPermissions.tasks, { view: true, viewDetail: true, viewForm: true, submitResult: true, changeStatus: true, viewProcessProgress: true });
 Object.assign(departmentLeaderPermissions.processes, { viewInstances: true, viewForm: true });
 Object.assign(departmentLeaderPermissions.assessment, { view: true, viewDepartment: true, fillWeeklyReport: true, editWeeklyReport: true, viewProblems: true });
@@ -228,6 +237,19 @@ function applyContentSchedulePermissionCompatibility(normalized, source, role) {
   }
 }
 
+function normalizeActionLaunchPermissions(normalized, source) {
+  const sourceWorkPlans = source?.workPlans;
+  const hasExplicitScope = ["all", "selected"].includes(sourceWorkPlans?.launchTemplateScope);
+  normalized.workPlans.launchTemplateScope = hasExplicitScope
+    ? sourceWorkPlans.launchTemplateScope
+    : normalized.workPlans.launch
+      ? "all"
+      : "selected";
+  normalized.workPlans.launchTemplateIds = Array.isArray(sourceWorkPlans?.launchTemplateIds)
+    ? [...new Set(sourceWorkPlans.launchTemplateIds.map((item) => String(item ?? "").trim()).filter(Boolean))]
+    : [];
+}
+
 export function normalizePermissions(rawPermissions, role = "user") {
   let source = rawPermissions;
   if (typeof rawPermissions === "string" && rawPermissions.trim() !== "") {
@@ -251,6 +273,7 @@ export function normalizePermissions(rawPermissions, role = "user") {
     applyLegacyPermissionCompatibility(normalized, source);
     applyContentSchedulePermissionCompatibility(normalized, source, role);
   }
+  normalizeActionLaunchPermissions(normalized, source);
 
   return normalized;
 }
@@ -264,6 +287,26 @@ export function hasPermission(userOrPermissions, permissionPath) {
   const normalized = normalizePermissions(permissions, userOrPermissions?.role ?? userOrPermissions?.authRole ?? "user");
   const [group, key] = permissionPath.split(".");
   return normalized[group]?.[key] === true;
+}
+
+function isAdminUser(userOrPermissions) {
+  const role = userOrPermissions?.role ?? userOrPermissions?.authRole ?? "";
+  return ["admin", "system_admin"].includes(role);
+}
+
+export function canLaunchActionTemplate(userOrPermissions, templateId) {
+  if (isAdminUser(userOrPermissions)) return true;
+  if (!hasPermission(userOrPermissions, "workPlans.launch")) return false;
+  const permissions = normalizePermissions(
+    userOrPermissions?.permissions ?? userOrPermissions,
+    userOrPermissions?.role ?? userOrPermissions?.authRole ?? "user",
+  );
+  if (permissions.workPlans.launchTemplateScope === "all") return true;
+  return permissions.workPlans.launchTemplateIds.includes(String(templateId ?? ""));
+}
+
+export function canLaunchAnyActionTemplate(userOrPermissions, templates = []) {
+  return templates.some((template) => canLaunchActionTemplate(userOrPermissions, template?.id));
 }
 
 function canAccessTemplateCenter(userOrPermissions) {
