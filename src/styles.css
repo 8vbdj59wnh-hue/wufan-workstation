@@ -4814,6 +4814,9 @@ button.content-template-thumb {
 }
 
 .schedule-scope-toggle {
+  width: fit-content;
+  min-width: 104px;
+  max-width: min(180px, 100%);
   min-height: 38px;
   border: 1px solid #bfdbfe;
   border-radius: 8px;
@@ -4842,6 +4845,16 @@ button.content-template-thumb {
 .schedule-board-filters input,
 .schedule-board-filters select {
   width: 100%;
+}
+
+.schedule-board-filters select {
+  field-sizing: content;
+  width: fit-content;
+  min-width: 112px;
+  max-width: min(240px, 100%);
+  justify-self: start;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .schedule-board-filters .inline-checkbox {
@@ -6247,6 +6260,17 @@ button.content-template-thumb {
   color: #0f172a;
   font-size: 14px;
   outline: none;
+}
+
+.tasks-page .task-list-filters select,
+.tasks-page .task-sort-control select {
+  field-sizing: content;
+  width: fit-content;
+  min-width: 104px;
+  max-width: min(240px, 100%);
+  justify-self: start;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .tasks-page .task-filters input:hover,
