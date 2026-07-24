@@ -4247,6 +4247,8 @@ button.content-template-thumb {
   width: min(520px, 100%);
   max-height: calc(100vh - 40px);
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   border-radius: 8px;
   background: #ffffff;
   box-shadow: 0 18px 45px rgb(15 23 42 / 18%);
@@ -4257,7 +4259,11 @@ button.content-template-thumb {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  position: sticky;
+  top: 0;
+  z-index: 6;
   border-bottom: 1px solid #e5e7eb;
+  background: #ffffff;
   padding: 16px 18px;
 }
 
@@ -4485,9 +4491,29 @@ button.content-template-thumb {
   padding: 14px 18px;
 }
 
+.modal-panel .modal-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  background: #ffffff;
+  box-shadow: 0 -8px 18px rgb(15 23 42 / 4%);
+}
+
+.modal-panel > .modal-actions,
+.modal-panel > form:not(.modal-form) > .modal-actions {
+  width: 100%;
+  margin: 4px 0 0;
+}
+
+.modal-panel > .modal-form > .modal-actions {
+  width: calc(100% - 18px);
+}
+
 .top-form-actions {
+  position: static;
   border-top: 0;
   border-bottom: 1px solid #e5e7eb;
+  box-shadow: none;
   margin: -18px -18px 4px;
   padding: 14px 18px;
 }
@@ -6802,7 +6828,12 @@ button.content-template-thumb {
 .action-template-picker .modal-footer {
   display: flex;
   justify-content: flex-end;
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
   border-top: 1px solid #e2e8f0;
+  background: #ffffff;
+  box-shadow: 0 -8px 18px rgb(15 23 42 / 4%);
   padding: 14px 18px;
 }
 
