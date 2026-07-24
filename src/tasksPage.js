@@ -2897,7 +2897,6 @@ function canRestoreTask(task) {
 function renderFilters() {
   filters = { ...filters, source: "", goalId: "", categoryId: "" };
   if (taskListView === "overdue" && filters.overdue !== "") filters = { ...filters, overdue: "" };
-  const isFullView = taskListView === "all";
   const peopleFilters = `
     <label>
       <span>负责部门</span>
@@ -2942,7 +2941,7 @@ function renderFilters() {
   `;
 
   return `
-    <form class="task-filters task-list-filters ${isFullView ? "" : "is-compact"}" aria-label="任务筛选">
+    <form class="task-filters task-list-filters" aria-label="任务筛选">
       <label class="task-keyword-filter">
         <span>关键词</span>
         <input name="keyword" value="${escapeHtml(filters.keyword)}" placeholder="搜索任务名称" />
@@ -2963,19 +2962,8 @@ function renderFilters() {
         </select>
       </label>
       ${taskListView === "overdue" ? "" : overdueFilter}
-      ${
-        isFullView
-          ? `${peopleFilters}${filterOptions}`
-          : `
-            <details class="task-more-filters">
-              <summary>更多筛选</summary>
-              <div class="task-more-filter-grid">
-                ${peopleFilters}
-                ${filterOptions}
-              </div>
-            </details>
-          `
-      }
+      ${peopleFilters}
+      ${filterOptions}
     </form>
   `;
 }

@@ -593,10 +593,6 @@ textarea {
   padding: 14px;
 }
 
-.task-list-filters.is-compact {
-  align-items: end;
-}
-
 .task-list-filters > label {
   flex: 0 0 auto;
   width: fit-content;
@@ -609,13 +605,10 @@ textarea {
 
 .task-list-filters .task-filter-options {
   align-items: center;
-  border-top: 1px solid #eef2f7;
   display: flex;
   flex-wrap: wrap;
-  flex: 1 0 100%;
+  flex: 0 0 auto;
   gap: 8px 18px;
-  grid-column: 1 / -1;
-  padding-top: 10px;
 }
 
 .task-list-toolbar {
@@ -673,26 +666,6 @@ textarea {
   background: #eff6ff;
   color: #1d4ed8;
   font-weight: 700;
-}
-
-.task-more-filters {
-  flex: 1 0 100%;
-  grid-column: 1 / -1;
-}
-
-.task-more-filters summary {
-  color: #2563eb;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 700;
-  list-style-position: inside;
-}
-
-.task-more-filter-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(140px, 1fr));
-  gap: 10px;
-  margin-top: 10px;
 }
 
 .content-schedule-filters {
