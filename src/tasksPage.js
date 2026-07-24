@@ -67,6 +67,14 @@ import {
   sortProcessInstanceTasks,
 } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
 import { getTaskBusinessStatus } from "./data/taskSelectors.js?v=20260723-task-business-status2";
+import {
+  collectProductImageField,
+  handleProductImagesUpload,
+  isProductImageField,
+  removeProductImage,
+  renderProductImageEditor,
+  validateProductImages,
+} from "./actionImages.js";
 import { bindActionLinkedTemplatePreviewEvents, bindLaunchedProcessDetailEvents, renderActionLinkedTemplates, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260724-action-template-link1";
 import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260705-state-singleton1";
 import { renderWorkFormViewer } from "./workFormViewer.js?v=20260705-state-singleton1";
@@ -1111,6 +1119,7 @@ function renderCustomFieldInput(field, customFields = {}) {
   }
 
   if (field.type === "image") {
+    if (isProductImageField(field)) return renderProductImageEditor(field, customFields);
     const imageUrl = typeof value === "string" ? value : "";
     return `
       <label class="image-url-field">
@@ -1164,6 +1173,8 @@ function collectCustomFields(form, template) {
     if (isBusinessDueDateField(field)) {
       const dateTime = collectBusinessDateTime(form, `custom__${field.key}`, field.label);
       result[field.key] = dateTime.error === "" ? dateTime.value ?? "" : `__INVALID_BUSINESS_TIME__:${dateTime.error}`;
+    } else if (isProductImageField(field)) {
+      collectProductImageField(formData, result, field);
     } else if (field.type === "multi_select") {
       result[field.key] = formData.getAll(`custom__${field.key}`).map((item) => item.toString());
     } else {
@@ -1178,6 +1189,8 @@ function collectCustomFields(form, template) {
 }
 
 function validateCustomFields(customFields, template) {
+  const productImagesError = validateProductImages(customFields);
+  if (productImagesError !== "") return productImagesError;
   for (const field of getSortedFormFields(template)) {
     const value = customFields[field.key];
     const isEmpty = Array.isArray(value) ? value.length === 0 : value === "";
@@ -5510,6 +5523,15 @@ function updateImagePreview(input) {
 }
 
 async function handleImageUpload(input) {
+  if (input.matches("[data-product-images-upload]")) {
+    try {
+      await handleProductImagesUpload(input);
+      setModalError("");
+    } catch (error) {
+      setModalError(error.message ?? "图片上传失败。");
+    }
+    return;
+  }
   const file = input.files?.[0];
   if (file === undefined) return;
 
@@ -5850,6 +5872,11 @@ export function bindTasksPageEvents(rerender) {
 
       if (action === "remove-selected-standard-work-attachment") {
         removeSelectedStandardWorkAttachment(actionButton);
+        return;
+      }
+
+      if (action === "remove-product-image") {
+        removeProductImage(actionButton);
         return;
       }
 

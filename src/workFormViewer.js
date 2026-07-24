@@ -1,7 +1,9 @@
 import { resolveAssetUrl, state } from "./appState.js?v=20260705-state-singleton1";
 import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
+import { getActionImageUrls } from "./data/taskUtils.js?v=20260705-state-singleton1";
+import { renderActionImageGrid } from "./actionImages.js";
 
-const hiddenSystemFieldKeys = new Set(["standardWorkAttachments"]);
+const hiddenSystemFieldKeys = new Set(["standardWorkAttachments", "productImages"]);
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -18,6 +20,14 @@ function isEmptyValue(value) {
 
 function renderValue(field, value, customFields = {}) {
   if (isEmptyValue(value)) return `<span class="muted-action">未填写</span>`;
+  if (field?.type === "image") {
+    const imageUrls = Array.isArray(value) ? value : getActionImageUrls({ customFields: { ...customFields, productImages: [value] } });
+    return renderActionImageGrid(imageUrls, {
+      className: "work-form-image-grid",
+      alt: field.label ?? "产品图片",
+      placeholder: "暂无图片",
+    });
+  }
   if (Array.isArray(value)) return escapeHtml(value.join("、"));
 
   const textValue = String(value);
@@ -34,14 +44,6 @@ function renderValue(field, value, customFields = {}) {
   if (field?.type === "department") {
     const department = state.departments.find((item) => item.id === textValue);
     return escapeHtml(department?.name ?? textValue);
-  }
-
-  if (field?.type === "image") {
-    return `
-      <a href="${escapeHtml(resolveAssetUrl(textValue))}" target="_blank" rel="noreferrer">
-        <img class="work-form-image" src="${escapeHtml(resolveAssetUrl(textValue))}" alt="${escapeHtml(field.label ?? "图片")}" onerror="this.replaceWith('图片无法预览')" />
-      </a>
-    `;
   }
 
   if (field?.type === "file" || field?.type === "link" || field?.type === "url") {
@@ -64,12 +66,17 @@ function getExtraLabel(key) {
 export function renderWorkFormViewer({ formFields = [], customFields = {} }) {
   const fields = normalizePublicFormFields(formFields);
   const knownKeys = new Set(fields.map((field) => field.key));
+  const productImageUrls = getActionImageUrls({ customFields });
+  const hasImageField = fields.some((field) => field.type === "image");
+  const displayFields = hasImageField || productImageUrls.length === 0
+    ? fields
+    : [{ key: "productImages", label: "产品图片", type: "image" }, ...fields];
   const rows = [
-    ...fields.map((field) => ({
+    ...displayFields.map((field) => ({
       key: field.key,
       label: field.label,
       field,
-      value: customFields[field.key],
+      value: field.type === "image" && productImageUrls.length > 0 ? productImageUrls : customFields[field.key],
     })),
     ...Object.entries(customFields)
       .filter(([key]) => !knownKeys.has(key) && !hiddenSystemFieldKeys.has(key))

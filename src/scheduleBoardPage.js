@@ -29,7 +29,8 @@ import {
   isValueModuleId,
   valueModuleList,
 } from "./data/modelOptions.js?v=20260705-state-singleton1";
-import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260705-state-singleton1";
+import { getActionImageUrls, getPrimaryImageUrl } from "./data/taskUtils.js?v=20260705-state-singleton1";
+import { renderActionImageGrid } from "./actionImages.js";
 import {
   getCurrentExecutor as selectCurrentExecutor,
   getCurrentProcessTask as selectCurrentProcessTask,
@@ -375,6 +376,13 @@ function getProcessPreviewImage(row) {
   return getReliableContentScheduleImage(workPlan, processInstance);
 }
 
+function getProcessImageUrls(row) {
+  const imageUrls = getActionImageUrls(row.processInstance, row.workPlan);
+  if (imageUrls.length > 0) return imageUrls;
+  const fallbackImage = getProcessPreviewImage(row) || row.thumbnail || "";
+  return fallbackImage === "" ? [] : [fallbackImage];
+}
+
 function getProcessInstanceFilterStatus(processInstance) {
   if (processInstance === null) return "";
   return selectProcessInstanceBusinessStatus(processInstance.id, state).status;
@@ -636,15 +644,11 @@ function renderFilters() {
 }
 
 function renderThumbnail(row) {
-  if (row.thumbnail === "") return `<div class="schedule-board-thumb-placeholder">无图</div>`;
-  return `
-    <img
-      class="schedule-board-thumb"
-      src="${escapeAttribute(resolveAssetUrl(row.thumbnail))}"
-      alt="${escapeAttribute(row.title)}"
-      onerror="this.replaceWith(Object.assign(document.createElement('div'), { className: 'schedule-board-thumb-placeholder', textContent: '无图' }))"
-    />
-  `;
+  return renderActionImageGrid(getProcessImageUrls(row), {
+    className: "schedule-board-image-grid",
+    alt: row.title,
+    placeholder: "无图",
+  });
 }
 
 function getProcessStatusClass(row) {
@@ -759,8 +763,8 @@ function renderPendingProcessCard(row) {
   const canDrag = canDragProcess(row);
   const canStart = canStartProcessExecution(row);
   const title = getProcessCardTitle(row);
-  const previewImage = getProcessPreviewImage(row);
-  const imageUrl = previewImage === "" ? "" : resolveAssetUrl(previewImage);
+  const imageUrls = getProcessImageUrls(row);
+  const imageUrl = imageUrls[0] === undefined ? "" : resolveAssetUrl(imageUrls[0]);
   const initiatorName = findName(state.people, row.processInstance.initiatorId ?? "", "未设置");
   return `
     <article
@@ -778,11 +782,11 @@ function renderPendingProcessCard(row) {
       aria-label="${escapeAttribute(title)}"
     >
       <div class="schedule-pending-card-media">
-        ${
-          imageUrl === ""
-            ? `<div class="schedule-pending-card-placeholder">无图</div>`
-            : `<img src="${escapeAttribute(imageUrl)}" alt="${escapeAttribute(title)}" onerror="this.replaceWith(Object.assign(document.createElement('div'), { className: 'schedule-pending-card-placeholder', textContent: '无图' }))" />`
-        }
+        ${renderActionImageGrid(imageUrls, {
+          className: "schedule-pending-image-grid",
+          alt: title,
+          placeholder: "无图",
+        })}
       </div>
       <div class="schedule-pending-card-body">
         <strong>${escapeHtml(title)}</strong>
@@ -1042,8 +1046,7 @@ function getActionOverviewStatusClass(status) {
 function renderActionOverviewCard(row) {
   if (row.processInstance === null) return "";
   const title = getProcessCardTitle(row);
-  const previewImage = getProcessPreviewImage(row);
-  const imageUrl = previewImage === "" ? "" : resolveAssetUrl(previewImage);
+  const imageUrls = getProcessImageUrls(row);
   const businessStatus = selectProcessInstanceBusinessStatus(row.processInstance.id, state);
   const progress = selectProcessProgress(row.processInstance.id, state);
   return `
@@ -1055,11 +1058,11 @@ function renderActionOverviewCard(row) {
       aria-label="查看关键行动详情：${escapeAttribute(title)}"
     >
       <div class="schedule-action-overview-media">
-        ${
-          imageUrl === ""
-            ? `<div class="schedule-action-overview-placeholder">无图</div>`
-            : `<img src="${escapeAttribute(imageUrl)}" alt="${escapeAttribute(title)}" onerror="this.replaceWith(Object.assign(document.createElement('div'), { className: 'schedule-action-overview-placeholder', textContent: '无图' }))" />`
-        }
+        ${renderActionImageGrid(imageUrls, {
+          className: "schedule-action-overview-image-grid",
+          alt: title,
+          placeholder: "无图",
+        })}
       </div>
       <div class="schedule-action-overview-body">
         <h3 title="${escapeAttribute(title)}">${escapeHtml(title)}</h3>

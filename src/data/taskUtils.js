@@ -35,19 +35,46 @@ export function isHiddenByDefaultStatus(status) {
 }
 
 function normalizeImageUrl(value) {
-  if (typeof value === "string" && value.trim() !== "") return value.trim();
+  if (typeof value === "string" && value.trim() !== "") {
+    const imageUrl = value.trim();
+    if (
+      imageUrl.startsWith("/uploads/images/")
+      || imageUrl.startsWith("uploads/images/")
+      || imageUrl.startsWith("https://")
+      || imageUrl.startsWith("http://")
+      || imageUrl.startsWith("data:image/")
+    ) {
+      return imageUrl;
+    }
+    return "";
+  }
   if (value && typeof value === "object") {
-    if (typeof value.url === "string" && value.url.trim() !== "") return value.url.trim();
-    if (typeof value.src === "string" && value.src.trim() !== "") return value.src.trim();
-    if (typeof value.path === "string" && value.path.trim() !== "") return value.path.trim();
+    return normalizeImageUrl(value.url ?? value.src ?? value.path);
   }
   return "";
+}
+
+function normalizeImageList(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map(normalizeImageUrl).filter(Boolean);
+}
+
+function getImagesFromCustomFields(customFields) {
+  if (customFields === null || typeof customFields !== "object") return [];
+
+  const productImages = normalizeImageList(customFields.productImages);
+  if (productImages.length > 0) return productImages;
+
+  const legacyImage = normalizeImageUrl(
+    customFields.productImage ?? customFields.coverImageUrl ?? customFields.imageUrl,
+  );
+  return legacyImage === "" ? [] : [legacyImage];
 }
 
 function getImageFromCustomFields(customFields) {
   if (customFields === null || typeof customFields !== "object") return "";
 
-  const directImage = normalizeImageUrl(customFields.coverImageUrl ?? customFields.productImage ?? customFields.imageUrl);
+  const directImage = getImagesFromCustomFields(customFields)[0] ?? "";
   if (directImage !== "") return directImage;
 
   for (const value of Object.values(customFields)) {
@@ -64,7 +91,27 @@ function getImageFromCustomFields(customFields) {
   return "";
 }
 
+export function getActionImageUrls(...items) {
+  for (const item of items) {
+    if (item === null || item === undefined) continue;
+
+    const customFieldImages = getImagesFromCustomFields(item.customFields);
+    if (customFieldImages.length > 0) return [...new Set(customFieldImages)].slice(0, 9);
+
+    const directImages = normalizeImageList(item.productImages);
+    if (directImages.length > 0) return [...new Set(directImages)].slice(0, 9);
+
+    const legacyImage = normalizeImageUrl(item.productImage ?? item.coverImageUrl ?? item.imageUrl);
+    if (legacyImage !== "") return [legacyImage];
+  }
+
+  return [];
+}
+
 export function getPrimaryImageUrl(...items) {
+  const actionImages = getActionImageUrls(...items);
+  if (actionImages.length > 0) return actionImages[0];
+
   for (const item of items) {
     if (item === null || item === undefined) continue;
 

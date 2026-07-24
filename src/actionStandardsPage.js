@@ -34,6 +34,14 @@ import {
 } from "./data/modelOptions.js";
 import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260705-state-singleton1";
 import {
+  collectProductImageField,
+  handleProductImagesUpload,
+  isProductImageField,
+  removeProductImage,
+  renderProductImageEditor,
+  validateProductImages,
+} from "./actionImages.js";
+import {
   collectBusinessDateTime,
   collectBusinessMinuteDateTime,
   getBusinessDatePart,
@@ -741,6 +749,7 @@ function renderCustomFieldInput(field, customFields = {}) {
     `;
   }
   if (field.type === "image") {
+    if (isProductImageField(field)) return renderProductImageEditor(field, customFields);
     const imageUrl = typeof value === "string" ? value : "";
     return `
       <label class="image-url-field">
@@ -782,6 +791,8 @@ function collectCustomFields(form, template) {
     if (isBusinessDueDateField(field)) {
       const dateTime = collectBusinessDateTime(form, `custom__${field.key}`, field.label);
       result[field.key] = dateTime.error === "" ? dateTime.value ?? "" : `__INVALID_BUSINESS_TIME__:${dateTime.error}`;
+    } else if (isProductImageField(field)) {
+      collectProductImageField(formData, result, field);
     } else if (field.type === "multi_select") {
       result[field.key] = formData.getAll(`custom__${field.key}`).map((item) => item.toString());
     } else {
@@ -796,6 +807,8 @@ function collectCustomFields(form, template) {
 }
 
 function validateCustomFields(customFields, template) {
+  const productImagesError = validateProductImages(customFields);
+  if (productImagesError !== "") return productImagesError;
   for (const field of getSortedFormFields(template)) {
     const value = customFields[field.key];
     const isEmpty = Array.isArray(value) ? value.length === 0 : value === "";
@@ -1174,6 +1187,14 @@ function removeSelectedStandardWorkAttachment(button) {
 }
 
 async function handleImageUpload(input) {
+  if (input.matches("[data-product-images-upload]")) {
+    try {
+      await handleProductImagesUpload(input);
+    } catch (error) {
+      window.alert(error.message || "图片上传失败。");
+    }
+    return;
+  }
   const key = input.dataset.imageUploadKey;
   const file = input.files?.[0];
   if (key === undefined || file === undefined) return;
@@ -1745,6 +1766,10 @@ export function bindStandardWorkLibraryEvents(rerender, container = document) {
     }
     if (action === "remove-selected-standard-work-attachment") {
       removeSelectedStandardWorkAttachment(actionButton);
+      return;
+    }
+    if (action === "remove-product-image") {
+      removeProductImage(actionButton);
       return;
     }
     if (action === "download-standard-flow-template") {

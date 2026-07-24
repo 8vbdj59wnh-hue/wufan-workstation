@@ -7,6 +7,14 @@ import {
   renderBusinessHourOptions,
 } from "./businessTime.js?v=20260705-state-singleton1";
 import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
+import {
+  collectProductImageField,
+  handleProductImagesUpload,
+  isProductImageField,
+  removeProductImage,
+  renderProductImageEditor,
+  validateProductImages,
+} from "./actionImages.js";
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -91,6 +99,7 @@ export function renderPublicFormFieldInput(field, customFields = {}) {
   }
 
   if (field.type === "image") {
+    if (isProductImageField(field)) return renderProductImageEditor(field, customFields);
     const imageUrl = typeof value === "string" ? value : "";
     return `
       <label class="image-url-field">
@@ -144,6 +153,8 @@ export function collectPublicFormFields(form, fields = []) {
     if (isBusinessDueDateField(field)) {
       const dateTime = collectBusinessDateTime(form, `custom__${field.key}`, field.label);
       result[field.key] = dateTime.error === "" ? dateTime.value ?? "" : `__INVALID_BUSINESS_TIME__:${dateTime.error}`;
+    } else if (isProductImageField(field)) {
+      collectProductImageField(formData, result, field);
     } else if (field.type === "multi_select") {
       result[field.key] = formData.getAll(`custom__${field.key}`).map((item) => item.toString());
     } else {
@@ -158,6 +169,8 @@ export function collectPublicFormFields(form, fields = []) {
 }
 
 export function validatePublicFormFields(customFields, fields = []) {
+  const productImagesError = validateProductImages(customFields);
+  if (productImagesError !== "") return productImagesError;
   for (const field of normalizePublicFormFields(fields)) {
     const value = customFields[field.key];
     const isEmpty = Array.isArray(value) ? value.length === 0 : value === "";
@@ -184,6 +197,7 @@ export function updatePublicFormImagePreview(input) {
 }
 
 export async function handlePublicFormImageUpload(input) {
+  if (input.matches("[data-product-images-upload]")) return handleProductImagesUpload(input);
   const file = input.files?.[0];
   if (file === undefined) return null;
 
@@ -203,4 +217,8 @@ export async function handlePublicFormImageUpload(input) {
     if (preview !== null && preview !== undefined) preview.textContent = "图片上传失败";
     throw error;
   }
+}
+
+export function removePublicFormImage(button) {
+  removeProductImage(button);
 }

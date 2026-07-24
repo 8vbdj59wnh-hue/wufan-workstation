@@ -3233,6 +3233,123 @@ button.content-template-thumb {
   align-content: start;
 }
 
+.product-image-field {
+  display: grid;
+  gap: 8px;
+}
+
+.product-image-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 96px);
+  gap: 4px;
+}
+
+.product-image-editor-item {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.product-image-editor-item img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: none;
+  transition: none;
+}
+
+.product-image-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  min-height: 0;
+  border: 1px solid rgb(255 255 255 / 80%);
+  background: rgb(15 23 42 / 72%);
+  color: #fff;
+}
+
+.product-image-editor-empty {
+  display: grid;
+  width: 96px;
+  height: 96px;
+  place-items: center;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.action-image-grid {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  gap: 4px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #f1f5f9;
+}
+
+.action-image-grid.is-single {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+
+.action-image-grid.is-four {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.action-image-grid.is-nine {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+}
+
+.action-image-grid img,
+.action-image-grid-broken {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 4px;
+  object-fit: cover;
+  transform: none;
+  transition: none;
+}
+
+.action-image-grid-broken,
+.action-image-grid-empty {
+  display: grid;
+  place-items: center;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.work-form-image-grid {
+  width: min(300px, 100%);
+  aspect-ratio: 1;
+}
+
+.schedule-board-image-grid {
+  width: 56px;
+  height: 56px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+
+.schedule-pending-image-grid,
+.schedule-action-overview-image-grid {
+  border-radius: inherit;
+}
+
 .image-preview-box {
   display: flex;
   align-items: center;

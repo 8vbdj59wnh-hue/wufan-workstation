@@ -14,6 +14,7 @@ import { renderWorkFormViewer } from "./workFormViewer.js?v=20260705-state-singl
 import {
   collectPublicFormFields,
   handlePublicFormImageUpload,
+  removePublicFormImage,
   renderPublicFormEditor,
   updatePublicFormImagePreview,
   validatePublicFormFields,
@@ -949,6 +950,10 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
 
   detail.addEventListener("click", async (event) => {
     const actionButton = event.target.closest("[data-action]");
+    if (actionButton?.dataset.action === "remove-product-image") {
+      removePublicFormImage(actionButton);
+      return;
+    }
     if (actionButton?.dataset.action === "remove-existing-standard-work-attachment") {
       actionButton.closest("[data-existing-attachment-item]")?.remove();
       return;

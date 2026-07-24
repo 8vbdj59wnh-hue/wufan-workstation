@@ -50,6 +50,7 @@ import {
 import {
   collectPublicFormFields,
   handlePublicFormImageUpload,
+  removePublicFormImage,
   renderPublicFormEditor,
   updatePublicFormImagePreview,
   validatePublicFormFields,
@@ -1669,6 +1670,11 @@ function handleGoalClick(event, rerender) {
 
   const action = button.dataset.action;
   const goalId = button.dataset.goalId;
+
+  if (action === "remove-product-image") {
+    removePublicFormImage(button);
+    return;
+  }
 
   if (action === "add-goal") {
     if (!canCurrentUser("goals.create")) return;
