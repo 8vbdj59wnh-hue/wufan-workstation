@@ -35,6 +35,7 @@ import {
 } from "./db.js";
 import { createToken, verifyPassword, verifyToken } from "./security.js";
 import { getDataScope, hasPermission } from "../src/permissions.js";
+import { getProcessInstanceOwner } from "../src/data/processInstanceSelectors.js";
 
 const app = express();
 const host = process.env.HOST ?? "0.0.0.0";
@@ -552,6 +553,51 @@ app.post("/api/process-instances/batch-link-templates", (request, response) => {
   } catch (error) {
     console.error("批量关联关键行动模板失败", error);
     response.status(400).json({ success: false, message: error.message || "批量关联模板失败，请检查本地数据库服务。" });
+  }
+});
+
+app.put("/api/process-instances/:id/tasks/:taskId/executor", (request, response) => {
+  try {
+    const data = readAllData();
+    const instance = data.processInstances.find((item) => item.id === request.params.id);
+    if (instance === undefined) {
+      response.status(404).json({ success: false, message: "未找到该关键行动。" });
+      return;
+    }
+    const task = data.tasks.find(
+      (item) => item.id === request.params.taskId && item.processInstanceId === instance.id,
+    );
+    if (task === undefined) {
+      response.status(404).json({ success: false, message: "未找到该关键行动下的任务。" });
+      return;
+    }
+    const userPersonId = getUserPersonId(request.user);
+    const processOwnerId = getProcessInstanceOwner(instance.id, data).userId;
+    if (!isAdminUser(request.user) && (userPersonId === "" || userPersonId !== processOwnerId)) {
+      response.status(403).json({ success: false, message: "只有管理员或关键行动负责人可以调整任务执行人。" });
+      return;
+    }
+    if (!new Set(["waiting", "todo", "doing"]).has(task.status)) {
+      response.status(400).json({ success: false, message: "当前任务状态不允许调整执行人。" });
+      return;
+    }
+    const executorId = String(request.body?.executorId ?? "").trim();
+    const executor = data.people.find((person) => person.id === executorId && person.status !== "inactive");
+    if (executor === undefined) {
+      response.status(400).json({ success: false, message: "请选择有效的执行人。" });
+      return;
+    }
+    const updatedTask = updateResource("tasks", task.id, {
+      executorId,
+      updatedAt: new Date().toISOString(),
+    });
+    response.json({
+      success: true,
+      task: updatedTask,
+    });
+  } catch (error) {
+    console.error("调整关键行动任务执行人失败", error);
+    response.status(400).json({ success: false, message: error.message || "任务执行人保存失败，请检查本地数据库服务。" });
   }
 });
 

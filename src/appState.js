@@ -427,6 +427,23 @@ export async function batchLinkActionTemplates(processInstanceIds, templateIds) 
   return data.result ?? null;
 }
 
+export async function updateProcessTaskExecutor(processInstanceId, taskId, executorId) {
+  const response = await authFetch(`${apiBaseUrl}/api/process-instances/${processInstanceId}/tasks/${taskId}/executor`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ executorId }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success !== true) {
+    throw new Error(data.message ?? data.error ?? "任务执行人保存失败，请检查本地数据库服务。");
+  }
+  if (data.task !== undefined) {
+    const taskIndex = state.tasks.findIndex((task) => task.id === data.task.id);
+    if (taskIndex >= 0) state.tasks.splice(taskIndex, 1, cloneItem(data.task));
+  }
+  return data.task ?? null;
+}
+
 export async function moveTaskTemplateToValueChain(templateId, category) {
   const categoryName = typeof category === "string" ? category : category?.name ?? "";
   const categoryId = typeof category === "string" ? undefined : category?.id;

@@ -1,4 +1,4 @@
-import { formatProcessStepLabel, getCurrentUser, getLatestStandardWorkFormFields, getNow, getProcessNodeStepOrder, loadTemplates, resolveAssetUrl, state, updatePersistentResource, uploadStandardWorkAttachment } from "./appState.js?v=20260705-state-singleton1";
+import { formatProcessStepLabel, getCurrentUser, getLatestStandardWorkFormFields, getNow, getProcessNodeStepOrder, loadTemplates, resolveAssetUrl, state, updatePersistentResource, updateProcessTaskExecutor, uploadStandardWorkAttachment } from "./appState.js?v=20260705-state-singleton1";
 import {
   GoalStatus,
   ProcessInstanceStatus,
@@ -38,6 +38,8 @@ const linkedActionTemplateIdsKey = "linkedTemplateIds";
 const returnRecordsKey = "returnRecords";
 const spreadsheetAttachmentExts = new Set([".xlsx", ".xls", ".csv"]);
 const maxStandardWorkAttachmentSize = 20 * 1024 * 1024;
+const executorEditableTaskStatuses = new Set([TaskStatus.Waiting, TaskStatus.Todo, TaskStatus.Doing]);
+let taskExecutorPickerState = null;
 
 function getSelectableGoals(selectedGoalId = "") {
   return goals.filter((goal) => goal.status !== GoalStatus.Inactive || goal.id === selectedGoalId);
@@ -148,6 +150,14 @@ function canEditInstance(instance) {
 
 function canEditTask(task) {
   return task.status !== TaskStatus.Done && task.status !== TaskStatus.Canceled;
+}
+
+function canChangeTaskExecutor(instance, task, user = getCurrentUser()) {
+  if (!executorEditableTaskStatuses.has(task.status)) return false;
+  if (isAdminUser(user)) return true;
+  const userPersonId = user?.personId ?? user?.id ?? "";
+  const processOwnerId = getProcessInstanceOwner(instance.id, state).userId;
+  return userPersonId !== "" && userPersonId === processOwnerId;
 }
 
 function getFormValue(form, name) {
@@ -489,13 +499,44 @@ function renderCustomFields(instance, editable) {
   }) || `<p>暂无关键行动公共信息</p>`;
 }
 
-function renderStepTask(task, editable, stepIndex) {
+function renderPersonIdentity(personId, fallback = "未设置") {
+  const person = people.find((item) => item.id === personId) ?? null;
+  const personName = person?.name ?? fallback;
+  const avatarUrl = person?.avatarUrl ? resolveAssetUrl(person.avatarUrl) : "";
+  const avatarInitial = Array.from(personName.trim())[0] || "未";
+  return `
+    <span class="process-task-person" title="${escapeHtml(personName)}">
+      ${
+        avatarUrl === ""
+          ? `<span class="process-task-person-avatar process-task-person-avatar-placeholder" aria-hidden="true">${escapeHtml(avatarInitial)}</span>`
+          : `<img class="process-task-person-avatar" src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(personName)}头像" />`
+      }
+      <span>${escapeHtml(personName)}</span>
+    </span>
+  `;
+}
+
+function renderTaskExecutorCell(instance, task, displayedExecutorId) {
+  const canChangeExecutor = canChangeTaskExecutor(instance, task);
+  return `
+    <div class="process-task-executor-cell">
+      ${renderPersonIdentity(displayedExecutorId)}
+      ${
+        canChangeExecutor
+          ? `<button class="text-button" type="button" data-action="open-task-executor-picker" data-task-id="${escapeHtml(task.id)}">调整</button>`
+          : ""
+      }
+    </div>
+  `;
+}
+
+function renderStepTask(instance, task, editable, stepIndex) {
   const canEdit = editable && canEditTask(task);
   const stepLabel = formatProcessStepLabel(stepIndex + 1);
   const taskDueDateFieldName = `task__${task.id}__dueDate`;
   const processNode = getNode(task.processNodeId);
   const displayedOwnerId = processNode === null ? task.ownerId : processNode.ownerId;
-  const displayedExecutorId = processNode === null ? task.executorId : processNode.executorId;
+  const displayedExecutorId = task.executorId || processNode?.executorId || "";
 
   if (!canEdit) {
     return `
@@ -503,7 +544,7 @@ function renderStepTask(task, editable, stepIndex) {
         <td><strong>${stepLabel}</strong><br />${escapeHtml(task.name)}</td>
         <td><span class="status-pill">${escapeHtml(getTaskBusinessStatus(task).label)}</span></td>
         <td>${findName(people, displayedOwnerId, "未设置")}</td>
-        <td>${findName(people, displayedExecutorId, "未设置")}</td>
+        <td>${renderTaskExecutorCell(instance, task, displayedExecutorId)}</td>
         <td>${formatBusinessMinuteDateTime(task.dueDate)}</td>
         <td><button class="text-button" type="button" data-launched-process-task-id="${task.id}">查看任务</button></td>
       </tr>
@@ -515,7 +556,7 @@ function renderStepTask(task, editable, stepIndex) {
       <td><strong>${stepLabel}</strong><br />${escapeHtml(task.name)}</td>
       <td><span class="status-pill">${escapeHtml(getTaskBusinessStatus(task).label)}</span></td>
       <td><select name="task__${task.id}__ownerId">${renderOptions(people, task.ownerId, "请选择负责人")}</select></td>
-      <td><select name="task__${task.id}__executorId">${renderOptions(people, task.executorId, "请选择执行人")}</select></td>
+      <td>${renderTaskExecutorCell(instance, task, displayedExecutorId)}</td>
       <td>
         <input name="${taskDueDateFieldName}Date" type="date" value="${escapeHtml(getBusinessDatePart(task.dueDate))}" data-task-due-date-control="${task.id}" />
         <select name="${taskDueDateFieldName}Time" data-task-due-date-control="${task.id}">${renderBusinessMinuteOptions(getBusinessMinutePart(task.dueDate), "时间")}</select>
@@ -524,6 +565,68 @@ function renderStepTask(task, editable, stepIndex) {
       <td><button class="text-button" type="button" data-launched-process-task-id="${task.id}">查看任务</button></td>
     </tr>
   `;
+}
+
+function renderTaskExecutorPicker(instance) {
+  if (taskExecutorPickerState?.instanceId !== instance.id) return "";
+  const task = getInstanceTasks(instance.id).find((item) => item.id === taskExecutorPickerState.taskId) ?? null;
+  if (task === null || !canChangeTaskExecutor(instance, task)) return "";
+  const departments = state.departments.filter((department) => department.status !== "inactive");
+  const activePeople = people.filter((person) => person.status !== "inactive");
+  return `
+    <div class="modal-backdrop task-executor-picker-backdrop" role="presentation" data-task-executor-picker>
+      <div class="modal-panel task-executor-picker" role="dialog" aria-modal="true" aria-label="调整执行人">
+        <div class="modal-header">
+          <div>
+            <h2>调整执行人</h2>
+            <p>${escapeHtml(task.name)}</p>
+          </div>
+          <button class="icon-button" type="button" data-action="close-task-executor-picker" aria-label="关闭">×</button>
+        </div>
+        <div class="task-executor-picker-filters">
+          <input type="search" placeholder="搜索人员" autocomplete="off" data-task-executor-search />
+          <select data-task-executor-department>
+            ${renderOptions(departments, "", "全部部门")}
+          </select>
+        </div>
+        <div class="form-error" ${taskExecutorPickerState.error === "" ? "hidden" : ""}>${escapeHtml(taskExecutorPickerState.error)}</div>
+        <div class="task-executor-picker-grid" data-task-executor-options>
+          ${activePeople
+            .map(
+              (person) => `
+                <button
+                  class="task-executor-option ${person.id === task.executorId ? "is-current" : ""}"
+                  type="button"
+                  data-action="select-task-executor"
+                  data-person-id="${escapeHtml(person.id)}"
+                  data-person-search="${escapeHtml(`${person.name ?? ""} ${findName(state.departments, person.departmentId, "")}`.toLowerCase())}"
+                  data-department-id="${escapeHtml(person.departmentId ?? "")}"
+                >
+                  ${renderPersonIdentity(person.id)}
+                  <small>${escapeHtml(findName(state.departments, person.departmentId, "未设置部门"))}</small>
+                </button>
+              `,
+            )
+            .join("")}
+        </div>
+        <div class="empty-detail" data-task-executor-empty hidden>暂无匹配人员</div>
+      </div>
+    </div>
+  `;
+}
+
+function filterTaskExecutorOptions(picker) {
+  const keyword = picker.querySelector("[data-task-executor-search]")?.value.trim().toLowerCase() ?? "";
+  const departmentId = picker.querySelector("[data-task-executor-department]")?.value ?? "";
+  let visibleCount = 0;
+  picker.querySelectorAll(".task-executor-option").forEach((option) => {
+    const matchesKeyword = keyword === "" || (option.dataset.personSearch ?? "").includes(keyword);
+    const matchesDepartment = departmentId === "" || option.dataset.departmentId === departmentId;
+    option.hidden = !matchesKeyword || !matchesDepartment;
+    if (!option.hidden) visibleCount += 1;
+  });
+  const empty = picker.querySelector("[data-task-executor-empty]");
+  if (empty !== null) empty.hidden = visibleCount > 0;
 }
 
 function collectTaskDueDateForLaunchedProcess(form, task) {
@@ -631,11 +734,12 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
                   <th>步骤名称</th><th>当前状态</th><th>负责人</th><th>执行人</th><th>截止时间</th><th>操作</th>
                 </tr>
               </thead>
-              <tbody>${tasks.map((task, index) => renderStepTask(task, editable, index)).join("")}</tbody>
+              <tbody>${tasks.map((task, index) => renderStepTask(instance, task, editable, index)).join("")}</tbody>
             </table>
           </div>
         </div>
       </form>
+      ${renderTaskExecutorPicker(instance)}
     </section>
   `;
 }
@@ -851,6 +955,37 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
       removeSelectedStandardWorkAttachment(actionButton);
       return;
     }
+    if (actionButton?.dataset.action === "open-task-executor-picker") {
+      const taskId = actionButton.dataset.taskId ?? "";
+      const instance = getInstance(detail.dataset.launchedProcessDetail);
+      const task = getInstanceTasks(instance?.id ?? "").find((item) => item.id === taskId) ?? null;
+      if (instance !== null && task !== null && canChangeTaskExecutor(instance, task)) {
+        taskExecutorPickerState = { instanceId: instance.id, taskId, error: "" };
+        rerender();
+      }
+      return;
+    }
+    if (actionButton?.dataset.action === "close-task-executor-picker") {
+      taskExecutorPickerState = null;
+      rerender();
+      return;
+    }
+    if (actionButton?.dataset.action === "select-task-executor") {
+      const pickerState = taskExecutorPickerState;
+      if (pickerState === null) return;
+      try {
+        await updateProcessTaskExecutor(
+          pickerState.instanceId,
+          pickerState.taskId,
+          actionButton.dataset.personId ?? "",
+        );
+        taskExecutorPickerState = null;
+      } catch (error) {
+        taskExecutorPickerState = { ...pickerState, error: error.message || "任务执行人保存失败。" };
+      }
+      rerender();
+      return;
+    }
     if (actionButton?.dataset.action === "open-action-template-picker") {
       try {
         await loadTemplates();
@@ -902,6 +1037,9 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
     if (event.target.matches("[data-action-template-search]")) {
       filterActionTemplateOptions(event.target.closest("[data-action-template-picker]"));
     }
+    if (event.target.matches("[data-task-executor-search]")) {
+      filterTaskExecutorOptions(event.target.closest("[data-task-executor-picker]"));
+    }
   });
 
   detail.addEventListener("change", async (event) => {
@@ -922,6 +1060,9 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
       const taskId = event.target.dataset.taskDueDateControl;
       const changedInput = form?.elements[`task__${taskId}__dueDateChanged`];
       if (changedInput !== undefined) changedInput.value = "true";
+    }
+    if (event.target.matches("[data-task-executor-department]")) {
+      filterTaskExecutorOptions(event.target.closest("[data-task-executor-picker]"));
     }
   });
 
@@ -972,7 +1113,7 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
         ...task,
         goalId: oldGoalId === goalId ? task.goalId : goalId,
         ownerId: getFormValue(form, `task__${task.id}__ownerId`) || task.ownerId,
-        executorId: getFormValue(form, `task__${task.id}__executorId`) || task.executorId,
+        executorId: task.executorId,
         dueDate: taskDueDateResults.get(task.id)?.value ?? null,
         updatedAt: now,
       };
