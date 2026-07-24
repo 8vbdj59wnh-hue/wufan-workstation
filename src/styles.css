@@ -2307,6 +2307,10 @@ button.content-template-thumb {
   width: 100%;
 }
 
+.task-card-image-grid {
+  border-radius: inherit;
+}
+
 .task-card:hover .task-card-cover,
 .task-card:hover .task-card-cover .task-cover-thumb,
 .task-card:hover .task-card-cover .task-cover-placeholder {

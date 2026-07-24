@@ -56,7 +56,7 @@ import {
   isValueModuleId,
   ValueModule,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, hasTaskOverdueRecord, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
+import { getActionImageUrls, getPrimaryImageUrl, hasTaskOverdueRecord, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
 import {
   getCurrentExecutor as selectCurrentExecutor,
   getCurrentProcessTask as selectCurrentProcessTask,
@@ -72,6 +72,7 @@ import {
   handleProductImagesUpload,
   isProductImageField,
   removeProductImage,
+  renderActionImageGrid,
   renderProductImageEditor,
   validateProductImages,
 } from "./actionImages.js";
@@ -741,6 +742,15 @@ function renderCoverImage(task) {
       onerror="this.replaceWith(Object.assign(document.createElement('span'), { className: 'task-cover-placeholder', textContent: '无图' }))"
     />
   `;
+}
+
+function renderTaskCardImages(task) {
+  const processInstance = getTaskProcessInstance(task);
+  return renderActionImageGrid(getActionImageUrls(processInstance, task), {
+    className: "task-card-image-grid",
+    alt: `${task.name}产品图片`,
+    placeholder: "无图",
+  });
 }
 
 function renderProcessCoverImage(instance) {
@@ -3159,7 +3169,7 @@ function renderTaskCard(task) {
 
   return `
     <article class="task-card ${selected}" data-task-card data-row-task-id="${escapeHtml(task.id)}">
-      <div class="task-card-cover">${renderCoverImage(task)}</div>
+      <div class="task-card-cover">${renderTaskCardImages(task)}</div>
       <div class="task-card-body">
         <div class="task-card-title-row">
           <h3>${escapeHtml(task.name)}</h3>
