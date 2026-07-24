@@ -573,8 +573,11 @@ app.put("/api/process-instances/:id/tasks/:taskId/executor", (request, response)
     }
     const userPersonId = getUserPersonId(request.user);
     const processOwnerId = getProcessInstanceOwner(instance.id, data).userId;
-    if (!isAdminUser(request.user) && (userPersonId === "" || userPersonId !== processOwnerId)) {
-      response.status(403).json({ success: false, message: "只有管理员或关键行动负责人可以调整任务执行人。" });
+    const canChangeExecutor =
+      isAdminUser(request.user) ||
+      (userPersonId !== "" && (userPersonId === processOwnerId || userPersonId === task.ownerId));
+    if (!canChangeExecutor) {
+      response.status(403).json({ success: false, message: "只有管理员、关键行动负责人或当前任务负责人可以调整任务执行人。" });
       return;
     }
     if (!new Set(["waiting", "todo", "doing"]).has(task.status)) {
