@@ -1209,9 +1209,20 @@ function renderPermissionPeopleList() {
 }
 
 function renderPermissionGroup(group, permissions) {
+  const allSelected = group.permissions.every((item) => permissions[group.key]?.[item.key] === true);
   return `
-    <details class="permission-card" open>
-      <summary>${group.title}</summary>
+    <details class="permission-card" data-permission-group="${group.key}" open>
+      <summary>
+        <span>${group.title}</span>
+        <button
+          class="text-button permission-group-toggle"
+          type="button"
+          data-permission-group-toggle="${group.key}"
+          aria-pressed="${allSelected}"
+        >
+          ${allSelected ? "取消全选" : "全选"}
+        </button>
+      </summary>
       <div class="permission-check-grid">
         ${group.permissions
           .map((item) => `
@@ -1229,6 +1240,29 @@ function renderPermissionGroup(group, permissions) {
       ${group.key === "workPlans" ? renderActionLaunchTemplatePermissions(permissions) : ""}
     </details>
   `;
+}
+
+function getPermissionGroupInputs(permissionCard) {
+  return Array.from(
+    permissionCard?.querySelectorAll(".permission-check-grid input[type='checkbox']") ?? [],
+  );
+}
+
+function syncPermissionGroupToggle(permissionCard) {
+  const toggle = permissionCard?.querySelector("[data-permission-group-toggle]");
+  const inputs = getPermissionGroupInputs(permissionCard);
+  if (toggle === null || inputs.length === 0) return;
+  const allSelected = inputs.every((input) => input.checked);
+  toggle.textContent = allSelected ? "取消全选" : "全选";
+  toggle.setAttribute("aria-pressed", String(allSelected));
+}
+
+function togglePermissionGroup(permissionCard) {
+  const inputs = getPermissionGroupInputs(permissionCard);
+  if (inputs.length === 0) return;
+  const shouldSelectAll = !inputs.every((input) => input.checked);
+  for (const input of inputs) input.checked = shouldSelectAll;
+  syncPermissionGroupToggle(permissionCard);
 }
 
 function renderActionLaunchTemplatePermissions(permissions) {
@@ -3115,6 +3149,14 @@ export function bindSettingsPageEvents(rerender) {
       return;
     }
 
+    const permissionGroupToggle = event.target.closest("[data-permission-group-toggle]");
+    if (permissionGroupToggle !== null) {
+      event.preventDefault();
+      event.stopPropagation();
+      togglePermissionGroup(permissionGroupToggle.closest("[data-permission-group]"));
+      return;
+    }
+
     const permissionPerson = event.target.closest("[data-permission-person-id]");
     if (permissionPerson !== null) {
       selectedPermissionPersonId = permissionPerson.dataset.permissionPersonId;
@@ -3406,6 +3448,10 @@ export function bindSettingsPageEvents(rerender) {
   });
 
   if (permissionForm !== null) {
+    permissionForm.addEventListener("change", (event) => {
+      if (event.target.closest(".permission-check-grid input[type='checkbox']") === null) return;
+      syncPermissionGroupToggle(event.target.closest("[data-permission-group]"));
+    });
     permissionForm.addEventListener("submit", (event) => {
       event.preventDefault();
       savePermissions(event.currentTarget, rerender);

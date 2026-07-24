@@ -4617,8 +4617,18 @@ button.content-template-thumb {
 }
 
 .permission-card summary {
+  align-items: center;
   cursor: pointer;
+  display: flex;
+  gap: 12px;
   font-weight: 700;
+  justify-content: space-between;
+}
+
+.permission-group-toggle {
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .permission-check-grid {
