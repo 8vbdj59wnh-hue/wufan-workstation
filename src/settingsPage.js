@@ -3354,7 +3354,7 @@ function getSettingsSubmodules() {
     {
       id: "organization",
       title: "组织架构",
-      group: "组织与权限",
+      group: "公司设置",
       icon: "组",
       description: "维护部门层级、岗位和组织关系。",
       canView: () => canCurrentUser("settings.viewOrg"),
@@ -3363,7 +3363,7 @@ function getSettingsSubmodules() {
     {
       id: "people",
       title: "人员管理",
-      group: "组织与权限",
+      group: "组织人员",
       icon: "人",
       description: "维护员工账号、部门岗位和登录权限。",
       canView: () => canCurrentUser("settings.viewPeople"),
@@ -3372,7 +3372,7 @@ function getSettingsSubmodules() {
     {
       id: "permissions",
       title: "权限管理",
-      group: "组织与权限",
+      group: "权限管理",
       icon: "权",
       description: "配置人员可访问的模块和数据范围。",
       canView: () => canCurrentUser("settings.managePermissions"),
@@ -3381,7 +3381,7 @@ function getSettingsSubmodules() {
     {
       id: "stores",
       title: "店铺管理",
-      group: "业务配置",
+      group: "数据管理",
       icon: "店",
       description: "维护系统内可使用的店铺资料。",
       canView: () => canCurrentUser("settings.viewStores"),
@@ -3390,7 +3390,7 @@ function getSettingsSubmodules() {
     {
       id: "categories",
       title: "分类设置",
-      group: "业务配置",
+      group: "数据管理",
       icon: "类",
       description: "查看系统价值链分类配置。",
       canView: () => true,
@@ -3399,7 +3399,7 @@ function getSettingsSubmodules() {
     {
       id: "publishing-accounts",
       title: "发布账号管理",
-      group: "业务配置",
+      group: "数据管理",
       icon: "发",
       description: "维护内容排期可选择的发布账号。",
       canView: () => canCurrentUser("settings.editStandardWorkForms"),
@@ -3417,7 +3417,7 @@ function getSettingsSubmodules() {
     {
       id: "template-tags",
       title: "模板标签管理",
-      group: "业务配置",
+      group: "模板中心",
       icon: "签",
       description: "维护模板中心可选择的标签分类和标签。",
       canView: () => canCurrentUser("settings.editStandardWorkForms"),
@@ -3426,7 +3426,7 @@ function getSettingsSubmodules() {
     {
       id: "issues-requirements",
       title: "需求与问题中心",
-      group: "系统反馈",
+      group: "系统设置",
       icon: "需",
       description: "收集系统问题和优化需求，并跟进处理状态。",
       canView: () => canCurrentUser("settings.editStandardWorkForms"),
@@ -3441,32 +3441,42 @@ function getCurrentSettingsSubmodule(submodules) {
   return submodules.find((item) => item.id === normalizedHash) ?? null;
 }
 
-function renderSettingsHome(submodules) {
-  const groups = ["组织与权限", "业务配置", "系统反馈"];
+const settingsNavigationGroups = [
+  "公司设置",
+  "组织人员",
+  "权限管理",
+  "业务配置",
+  "模板中心",
+  "系统设置",
+  "数据管理",
+];
+
+function renderSettingsNavigation(submodules, currentSubmodule) {
   return `
-    <section class="settings-home">
-      <div class="settings-home-heading">
-        <h2>设置</h2>
-        <p>选择需要维护的设置项。具体表单和列表已拆分到独立页面，避免在首页堆叠。</p>
+    <aside class="settings-center-sidebar">
+      <div class="settings-center-brand">
+        <strong>设置中心</strong>
+        <span>企业配置</span>
       </div>
-      ${groups
+      <nav class="settings-center-nav" aria-label="设置导航">
+      ${settingsNavigationGroups
         .map((group) => {
           const groupItems = submodules.filter((item) => item.group === group);
           if (groupItems.length === 0) return "";
           return `
-            <div class="settings-home-group">
+            <div class="settings-center-nav-group">
               <h3>${escapeHtml(group)}</h3>
-              <div class="settings-home-grid">
+              <div class="settings-center-nav-items">
                 ${groupItems
                   .map(
                     (item) => `
-                      <a class="settings-home-card" href="#settings/${escapeHtml(item.id)}">
-                        <span class="settings-home-card-icon" aria-hidden="true">${escapeHtml(item.icon ?? item.title.slice(0, 1))}</span>
-                        <span class="settings-home-card-copy">
-                          <strong>${escapeHtml(item.title)}</strong>
-                          <span>${escapeHtml(item.description)}</span>
-                        </span>
-                        <em>进入</em>
+                      <a
+                        class="settings-center-nav-link ${currentSubmodule?.id === item.id ? "is-active" : ""}"
+                        href="#settings/${escapeHtml(item.id)}"
+                        ${currentSubmodule?.id === item.id ? `aria-current="page"` : ""}
+                      >
+                        <span class="settings-center-nav-icon" aria-hidden="true">${escapeHtml(item.icon ?? item.title.slice(0, 1))}</span>
+                        <span>${escapeHtml(item.title)}</span>
                       </a>
                     `,
                   )
@@ -3476,31 +3486,36 @@ function renderSettingsHome(submodules) {
           `;
         })
         .join("")}
-    </section>
+      </nav>
+    </aside>
   `;
 }
 
 function renderSettingsSubpage(submodule) {
   return `
-    <div class="settings-subpage-toolbar">
-      <div class="settings-breadcrumb" aria-label="设置路径">
-        <a href="#settings">设置</a>
-        <span>/</span>
-        <strong>${escapeHtml(submodule.title)}</strong>
+    <main class="settings-center-main">
+      <header class="settings-center-content-header">
+        <span>${escapeHtml(submodule.group)}</span>
+        <h1>${escapeHtml(submodule.title)}</h1>
+        <p>${escapeHtml(submodule.description)}</p>
+      </header>
+      <div class="settings-center-config">
+        ${submodule.render()}
       </div>
-      <a class="secondary-button" href="#settings">← 返回设置</a>
-    </div>
-    ${submodule.render()}
+    </main>
   `;
 }
 
 export function renderSettingsPage() {
   const accessibleSubmodules = getSettingsSubmodules().filter((item) => item.canView());
-  const currentSubmodule = getCurrentSettingsSubmodule(accessibleSubmodules);
+  const currentSubmodule = getCurrentSettingsSubmodule(accessibleSubmodules) ?? accessibleSubmodules[0] ?? null;
 
   return `
     <div class="settings-page">
-      ${currentSubmodule === null ? renderSettingsHome(accessibleSubmodules) : renderSettingsSubpage(currentSubmodule)}
+      <div class="settings-center-layout">
+        ${renderSettingsNavigation(accessibleSubmodules, currentSubmodule)}
+        ${currentSubmodule === null ? "" : renderSettingsSubpage(currentSubmodule)}
+      </div>
       ${renderModal()}
     </div>
   `;
