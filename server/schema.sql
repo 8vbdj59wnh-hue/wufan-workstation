@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS companies (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
+  companySlogan TEXT,
   status TEXT NOT NULL,
   createdAt TEXT,
   updatedAt TEXT

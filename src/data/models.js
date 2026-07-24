@@ -73,6 +73,7 @@
  * @typedef {object} Company
  * @property {string} id
  * @property {string} name
+ * @property {string | null} companySlogan
  * @property {StatusValue} status
  * @property {string} createdAt
  * @property {string} updatedAt

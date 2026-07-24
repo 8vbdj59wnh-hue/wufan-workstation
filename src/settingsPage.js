@@ -1,4 +1,4 @@
-import { createPersistentResource, getCurrentUser, getLatestStandardWorkForm, resolveAssetUrl, state, updatePersistentResource, uploadGenericFile, validateCurrentSession } from "./appState.js?v=20260705-state-singleton1";
+import { createPersistentResource, defaultCompanySlogan, getCurrentUser, getLatestStandardWorkForm, resolveAssetUrl, state, updatePersistentResource, uploadGenericFile, validateCurrentSession } from "./appState.js?v=20260705-state-singleton1";
 import {
   applyPermissionTemplate,
   dataScopeOptions,
@@ -44,6 +44,11 @@ let activeFormDesignStandardWorkId = "";
 let activeFormDesignFieldId = "";
 let draggedFormFieldId = null;
 let draggedFormComponentType = null;
+let companySloganSaveMessage = "";
+
+function replaceCompanies(nextCompanies) {
+  state.companies.splice(0, state.companies.length, ...nextCompanies);
+}
 
 function replaceDepartments(nextDepartments) {
   state.departments.splice(0, state.departments.length, ...nextDepartments);
@@ -96,6 +101,7 @@ function replaceTemplateTags(nextTags) {
 }
 
 const settingsResourceByEntity = {
+  company: "companies",
   department: "departments",
   position: "positions",
   person: "persons",
@@ -584,6 +590,8 @@ function renderOrganizationList() {
 
 function renderOrganizationSection() {
   const content = activeOrganizationTab === "list" ? renderOrganizationList() : renderOrganizationChart();
+  const company = companies[0];
+  const companySlogan = String(company?.companySlogan ?? "");
 
   return `
     <section class="settings-section" id="organization">
@@ -597,6 +605,28 @@ function renderOrganizationSection() {
         ` : ""}
       </div>
       <div class="organization-inner">
+        <form class="company-culture-settings" data-company-slogan-form>
+          <div class="company-culture-settings-copy">
+            <strong>公司口号</strong>
+            <span>显示在目标模块顶部，用于统一传达企业文化。</span>
+          </div>
+          <label>
+            <span class="sr-only">公司口号</span>
+            <textarea
+              name="companySlogan"
+              rows="2"
+              maxlength="160"
+              placeholder="${escapeHtml(defaultCompanySlogan)}"
+              ${canCurrentUser("settings.editOrg") ? "" : "readonly"}
+            >${escapeHtml(companySlogan)}</textarea>
+          </label>
+          ${
+            canCurrentUser("settings.editOrg")
+              ? `<button class="primary-button" type="submit">保存口号</button>`
+              : ""
+          }
+          ${companySloganSaveMessage ? `<span class="company-culture-save-message">${escapeHtml(companySloganSaveMessage)}</span>` : ""}
+        </form>
         ${renderOrganizationTabs()}
         ${content}
       </div>
@@ -2026,6 +2056,28 @@ async function saveDepartment(form, rerender) {
   }
 }
 
+async function saveCompanySlogan(form, rerender) {
+  const company = companies[0];
+  if (company === undefined || !canCurrentUser("settings.editOrg")) return;
+
+  const companySlogan = getFormValue(form, "companySlogan").trim();
+  const item = {
+    ...company,
+    companySlogan,
+    updatedAt: getNow(),
+  };
+
+  try {
+    const savedCompany = await persistSettingsEntity("company", item);
+    replaceCompanies(upsertItem(companies, savedCompany));
+    companySloganSaveMessage = "公司口号已保存";
+    rerender();
+  } catch (error) {
+    companySloganSaveMessage = error.message || "公司口号保存失败，请检查本地数据库服务。";
+    rerender();
+  }
+}
+
 async function savePosition(form, rerender) {
   const name = getFormValue(form, "name");
   const departmentId = getFormValue(form, "departmentId");
@@ -2984,6 +3036,7 @@ function reorderFormDesignerField(draggedId, targetId) {
 export function bindSettingsPageEvents(rerender) {
   const settingsPage = document.querySelector(".settings-page");
   const form = document.querySelector(".modal-form");
+  const companySloganForm = document.querySelector("[data-company-slogan-form]");
   const permissionForm = document.querySelector(".permission-editor-form");
   const formDesignerForm = document.querySelector(".form-designer-editor");
 
@@ -3203,6 +3256,13 @@ export function bindSettingsPageEvents(rerender) {
 
   if (form !== null) {
     form.addEventListener("submit", (event) => handleFormSubmit(event, rerender));
+  }
+
+  if (companySloganForm !== null) {
+    companySloganForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      saveCompanySlogan(event.currentTarget, rerender);
+    });
   }
 
   if (formDesignerForm !== null) {

@@ -24,6 +24,7 @@ export const companies = [
   {
     id: "company-001",
     name: "星河科技有限公司",
+    companySlogan: "",
     status: Status.Active,
     createdAt: timestamp,
     updatedAt: timestamp,

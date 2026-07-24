@@ -90,7 +90,14 @@ export const state = {
   standardWorkForms: initialStandardWorkForms.map((form) => ({ ...form })),
 };
 
+export const defaultCompanySlogan = "做对的事，把事做对。\n尊重时间，尊重经营。";
+
 normalizeTaskSubmitRequirements();
+
+export function getCompanySlogan() {
+  const slogan = String(state.companies[0]?.companySlogan ?? "").trim();
+  return slogan || defaultCompanySlogan;
+}
 
 function getAuthToken() {
   return window.localStorage.getItem(authTokenKey) ?? "";

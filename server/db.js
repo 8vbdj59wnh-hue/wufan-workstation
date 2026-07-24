@@ -58,7 +58,7 @@ const standardWorkValueChainModules = [
 const resourceConfigs = {
   companies: {
     table: "companies",
-    columns: ["id", "name", "status", "createdAt", "updatedAt"],
+    columns: ["id", "name", "companySlogan", "status", "createdAt", "updatedAt"],
   },
   departments: {
     table: "departments",
@@ -1329,6 +1329,7 @@ function runLightweightMigrations() {
   ensureColumn("tasks", "templateId", "TEXT");
   ensureColumn("tasks", "executionGroupId", "TEXT");
   ensureColumn("notifications", "severity", "TEXT");
+  ensureColumn("companies", "companySlogan", "TEXT");
   ensureColumn("process_instances", "dueDate", "TEXT");
   ensureColumn("process_instances", "canceledAt", "TEXT");
   ensureColumn("process_instances", "cancelReason", "TEXT");
