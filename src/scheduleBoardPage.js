@@ -597,7 +597,7 @@ function renderFilters() {
           title="点击切换为${isMyActions ? "全部行动" : "我的行动"}"
         >${isMyActions ? "我的行动" : "全部行动"}</button>
       </div>
-      <label>
+      <label class="schedule-keyword-filter">
         <span>关键词</span>
         <input name="keyword" value="${escapeAttribute(filters.keyword)}" autocomplete="off" />
       </label>

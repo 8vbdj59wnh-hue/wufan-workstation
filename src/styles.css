@@ -585,14 +585,26 @@ textarea {
 }
 
 .task-list-filters {
-  grid-template-columns: minmax(220px, 1.5fr) repeat(4, minmax(120px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: flex-start;
   gap: 10px;
   padding: 14px;
 }
 
 .task-list-filters.is-compact {
   align-items: end;
-  grid-template-columns: minmax(240px, 1.5fr) minmax(140px, 1fr) minmax(140px, 1fr);
+}
+
+.task-list-filters > label {
+  flex: 0 0 auto;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.task-list-filters .task-keyword-filter {
+  width: min(320px, 100%);
 }
 
 .task-list-filters .task-filter-options {
@@ -600,6 +612,7 @@ textarea {
   border-top: 1px solid #eef2f7;
   display: flex;
   flex-wrap: wrap;
+  flex: 1 0 100%;
   gap: 8px 18px;
   grid-column: 1 / -1;
   padding-top: 10px;
@@ -663,6 +676,7 @@ textarea {
 }
 
 .task-more-filters {
+  flex: 1 0 100%;
   grid-column: 1 / -1;
 }
 
@@ -4789,8 +4803,9 @@ button.content-template-thumb {
 }
 
 .schedule-board-filters {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(140px, 1fr)) auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
   gap: 12px;
   align-items: end;
   padding: 14px;
@@ -4801,6 +4816,9 @@ button.content-template-thumb {
 
 .schedule-board-filters label {
   display: grid;
+  flex: 0 0 auto;
+  width: fit-content;
+  max-width: 100%;
   gap: 6px;
   font-size: 12px;
   color: #6b7280;
@@ -4808,9 +4826,16 @@ button.content-template-thumb {
 
 .schedule-scope-filter {
   display: grid;
+  flex: 0 0 auto;
+  width: fit-content;
+  max-width: 100%;
   gap: 6px;
   font-size: 12px;
   color: #6b7280;
+}
+
+.schedule-board-filters .schedule-keyword-filter {
+  width: min(200px, 100%);
 }
 
 .schedule-scope-toggle {

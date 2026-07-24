@@ -2943,7 +2943,7 @@ function renderFilters() {
 
   return `
     <form class="task-filters task-list-filters ${isFullView ? "" : "is-compact"}" aria-label="任务筛选">
-      <label>
+      <label class="task-keyword-filter">
         <span>关键词</span>
         <input name="keyword" value="${escapeHtml(filters.keyword)}" placeholder="搜索任务名称" />
       </label>
