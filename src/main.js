@@ -103,6 +103,8 @@ let activeModuleId = getModuleIdFromHash();
 let lastRenderedRouteHash = null;
 let loginError = "";
 let notificationPanelOpen = false;
+let sidebarMode = "fixed";
+let sidebarDrawerOpen = false;
 
 function getActiveModule() {
   return modules.find((module) => module.id === activeModuleId) ?? modules[0];
@@ -241,11 +243,33 @@ function renderSidebarStatus() {
   `;
 }
 
-function renderSidebar() {
+function renderSidebarMenuIcon() {
   return `
-    <aside class="sidebar">
-      <div class="brand">
-        <span class="brand-name"><span>屋范</span><span>极简工作站</span></span>
+    <span class="sidebar-menu-icon" aria-hidden="true">
+      <span></span>
+      <span></span>
+      <span></span>
+    </span>
+  `;
+}
+
+function renderSidebar() {
+  const modeButtonLabel = sidebarMode === "fixed" ? "切换为抽屉侧栏" : "恢复固定侧栏";
+  return `
+    <aside class="sidebar" aria-label="主导航侧栏">
+      <div class="sidebar-topbar">
+        <div class="brand">
+          <span class="brand-name"><span>屋范</span><span>极简工作站</span></span>
+        </div>
+        <button
+          class="icon-button sidebar-mode-toggle"
+          type="button"
+          data-action="toggle-sidebar-mode"
+          aria-label="${modeButtonLabel}"
+          title="${modeButtonLabel}"
+        >
+          ${renderSidebarMenuIcon()}
+        </button>
       </div>
       <nav class="nav" aria-label="主导航">
         ${getAccessibleModules()
@@ -311,7 +335,24 @@ function renderPage() {
   return `
     <main class="page">
       <header class="page-header">
-        <h1>${activeModule.name}</h1>
+        <div class="page-header-title">
+          ${
+            sidebarMode === "drawer"
+              ? `
+                <button
+                  class="icon-button sidebar-drawer-trigger"
+                  type="button"
+                  data-action="open-sidebar-drawer"
+                  aria-label="打开主导航"
+                  title="打开主导航"
+                >
+                  ${renderSidebarMenuIcon()}
+                </button>
+              `
+              : ""
+          }
+          <h1>${activeModule.name}</h1>
+        </div>
         <div class="user-menu">
           ${renderNotificationButton()}
           ${renderUserProfile(currentUser)}
@@ -448,15 +489,37 @@ function render({ navigation = false } = {}) {
   }
 
   app.innerHTML = `
-    <div class="app-shell">
+    <div class="app-shell has-sidebar is-sidebar-${sidebarMode} ${sidebarDrawerOpen ? "is-sidebar-open" : ""}">
       ${renderSidebar()}
+      ${
+        sidebarMode === "drawer"
+          ? `<button class="sidebar-backdrop" type="button" data-action="close-sidebar-drawer" aria-label="关闭主导航"></button>`
+          : ""
+      }
       ${renderPage()}
     </div>
   `;
 
+  document.querySelector('[data-action="toggle-sidebar-mode"]')?.addEventListener("click", () => {
+    sidebarMode = sidebarMode === "fixed" ? "drawer" : "fixed";
+    sidebarDrawerOpen = false;
+    render();
+  });
+
+  document.querySelector('[data-action="open-sidebar-drawer"]')?.addEventListener("click", () => {
+    sidebarDrawerOpen = true;
+    render();
+  });
+
+  document.querySelector('[data-action="close-sidebar-drawer"]')?.addEventListener("click", () => {
+    sidebarDrawerOpen = false;
+    render();
+  });
+
   document.querySelectorAll(".nav-item").forEach((item) => {
     item.addEventListener("click", () => {
       const nextModuleId = item.dataset.moduleId;
+      sidebarDrawerOpen = false;
       if (getRouteHash() === nextModuleId) {
         activeModuleId = nextModuleId;
         render();
