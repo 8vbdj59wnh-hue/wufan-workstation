@@ -78,6 +78,7 @@ textarea {
 
 .nav {
   display: flex;
+  flex: 1 0 auto;
   flex-direction: column;
   gap: 6px;
 }
@@ -103,6 +104,42 @@ textarea {
   background: #eaf1ff;
   color: #1d4ed8;
   font-weight: 700;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  border-top: 1px solid #e5e7eb;
+  padding: 12px 6px 2px;
+}
+
+.sidebar-system-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: #6b7280;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.sidebar-system-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  margin-top: 4px;
+  border-radius: 999px;
+  background: #f59e0b;
+}
+
+.sidebar-system-status.is-success .sidebar-system-dot {
+  background: #22c55e;
+}
+
+.sidebar-system-status.is-error {
+  color: #b91c1c;
+}
+
+.sidebar-system-status.is-error .sidebar-system-dot {
+  background: #ef4444;
 }
 
 .page {

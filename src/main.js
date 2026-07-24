@@ -223,6 +223,24 @@ function bindUserAvatarUpload() {
   });
 }
 
+function getSidebarStatusText(status) {
+  return status.kind === "success" ? "系统运行正常" : status.message;
+}
+
+function renderSidebarStatus() {
+  const status = getPersistenceStatus();
+  if (status.message === "") return "";
+
+  return `
+    <footer class="sidebar-footer">
+      <div class="sidebar-system-status is-${status.kind}" role="status">
+        <span class="sidebar-system-dot" aria-hidden="true"></span>
+        <span>${escapeHtml(getSidebarStatusText(status))}</span>
+      </div>
+    </footer>
+  `;
+}
+
 function renderSidebar() {
   return `
     <aside class="sidebar">
@@ -244,13 +262,13 @@ function renderSidebar() {
           )
           .join("")}
       </nav>
+      ${renderSidebarStatus()}
     </aside>
   `;
 }
 
 function renderPage() {
   const activeModule = getActiveModule();
-  const persistenceStatus = getPersistenceStatus();
   const currentUser = getCurrentUser();
   const canAccessActiveModule = canAccessModule(currentUser, activeModule.id);
   let content = `
@@ -300,11 +318,6 @@ function renderPage() {
           <button class="text-button" type="button" data-action="logout">退出登录</button>
         </div>
       </header>
-      ${
-        persistenceStatus.message
-          ? `<div class="db-status is-${persistenceStatus.kind}">${persistenceStatus.message}</div>`
-          : ""
-      }
       ${
         currentUser?.mustChangePassword
           ? `<div class="db-status is-error">请尽快修改默认管理员密码。</div>`
@@ -364,22 +377,24 @@ function renderLoginPage() {
 
 function updatePersistenceBanner() {
   const status = getPersistenceStatus();
-  const existingBanner = document.querySelector(".db-status");
+  const existingFooter = document.querySelector(".sidebar-footer");
+  const existingStatus = document.querySelector(".sidebar-system-status");
 
   if (status.message === "") {
-    existingBanner?.remove();
+    existingFooter?.remove();
     return;
   }
 
-  if (existingBanner !== null) {
-    existingBanner.className = `db-status is-${status.kind}`;
-    existingBanner.textContent = status.message;
+  if (existingStatus !== null) {
+    existingStatus.className = `sidebar-system-status is-${status.kind}`;
+    const text = existingStatus.querySelector("span:last-child");
+    if (text !== null) text.textContent = getSidebarStatusText(status);
     return;
   }
 
-  const pageHeader = document.querySelector(".page-header");
-  if (pageHeader !== null) {
-    pageHeader.insertAdjacentHTML("afterend", `<div class="db-status is-${status.kind}">${status.message}</div>`);
+  const sidebar = document.querySelector(".sidebar");
+  if (sidebar !== null) {
+    sidebar.insertAdjacentHTML("beforeend", renderSidebarStatus());
   }
 }
 
