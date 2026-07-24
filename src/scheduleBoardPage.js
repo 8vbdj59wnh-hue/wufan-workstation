@@ -580,29 +580,23 @@ function renderStatusOptions() {
   return renderOptions(options, filters.status, "全部状态");
 }
 
-function renderActionScopeOptions() {
-  const options = [
-    { id: "mine", name: "我的关键行动" },
-    { id: "all", name: "全部关键行动" },
-  ];
-  return options
-    .map(
-      (option) =>
-        `<option value="${option.id}" ${option.id === filters.scope ? "selected" : ""}>${option.name}</option>`,
-    )
-    .join("");
-}
-
 function renderFilters() {
   const activePeople = state.people.filter((person) => person.status !== "inactive");
   const activeDepartments = state.departments.filter((department) => department.status !== "inactive");
   const standardWorks = state.taskTemplates.filter((template) => template.status !== "inactive");
+  const isMyActions = filters.scope === "mine";
   return `
     <section class="schedule-board-filters" aria-label="关键行动筛选">
-      <label>
+      <div class="schedule-scope-filter">
         <span>查看范围</span>
-        <select name="scope">${renderActionScopeOptions()}</select>
-      </label>
+        <button
+          class="schedule-scope-toggle ${isMyActions ? "is-mine" : "is-all"}"
+          type="button"
+          data-schedule-scope-toggle
+          aria-pressed="${isMyActions}"
+          title="点击切换为${isMyActions ? "全部行动" : "我的行动"}"
+        >${isMyActions ? "我的行动" : "全部行动"}</button>
+      </div>
       <label>
         <span>关键词</span>
         <input name="keyword" value="${escapeAttribute(filters.keyword)}" autocomplete="off" />
@@ -1406,6 +1400,11 @@ export function bindScheduleBoardPageEvents(rerender) {
       rerenderPreservingInputFocus(rerenderScheduleBoard, target, '.schedule-board-filters input[name="keyword"]');
       return;
     }
+    rerenderScheduleBoard();
+  });
+
+  document.querySelector("[data-schedule-scope-toggle]")?.addEventListener("click", () => {
+    filters.scope = filters.scope === "mine" ? "all" : "mine";
     rerenderScheduleBoard();
   });
 
