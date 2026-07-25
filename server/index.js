@@ -284,6 +284,7 @@ function canUsePublishingAccountOptions(user) {
 }
 
 function canReadResource(resource, user) {
+  if (resource === "permission-templates") return hasPermission(user, "settings.managePermissions");
   if (resource === "stores") return canUseStoreOptions(user);
   if (resource === "publishing-accounts") return canUsePublishingAccountOptions(user);
   return true;
@@ -293,7 +294,8 @@ function filterDataByScope(data, user) {
   const dataScope = getDataScope(user);
   const stores = canUseStoreOptions(user) ? (data.stores ?? []) : [];
   const publishingAccounts = canUsePublishingAccountOptions(user) ? (data.publishingAccounts ?? []) : [];
-  if (dataScope === "all") return { ...data, stores, publishingAccounts };
+  const permissionTemplates = hasPermission(user, "settings.managePermissions") ? (data.permissionTemplates ?? []) : [];
+  if (dataScope === "all") return { ...data, stores, publishingAccounts, permissionTemplates };
 
   const scopedTasks = filterByScope(data.tasks ?? [], user);
   const scopedTaskIds = new Set(scopedTasks.map((task) => task.id));
@@ -316,6 +318,7 @@ function filterDataByScope(data, user) {
     people: scopedPeople,
     stores,
     publishingAccounts,
+    permissionTemplates,
     goals: scopedGoals,
     tasks: scopedTasks,
     executionGroups: scopedExecutionGroups,
@@ -345,7 +348,13 @@ function getResourceWritePermission(resource, method, body = {}) {
   if (resource === "process-template-nodes") return ["processes.editSteps", "processes.sortSteps"];
   if (resource === "process-instances") return method === "POST" ? "workPlans.launch" : "processes.editInstances";
   if (resource === "methodologies") return method === "POST" ? "methods.create" : "methods.edit";
-  if (resource === "persons" || resource === "people") return "settings.editPeople";
+  if (resource === "persons" || resource === "people") {
+    const writesPermissions = ["permissions", "permissionTemplateId", "permissionOverrides"].some((key) =>
+      Object.prototype.hasOwnProperty.call(body, key),
+    );
+    return writesPermissions ? "settings.managePermissions" : "settings.editPeople";
+  }
+  if (resource === "permission-templates") return "settings.managePermissions";
   if (resource === "departments" || resource === "positions") return "settings.editOrg";
   if (resource === "categories") return "settings.editCategories";
   if (resource === "stores") return "settings.editStores";

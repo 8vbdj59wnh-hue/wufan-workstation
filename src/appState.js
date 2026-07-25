@@ -67,6 +67,7 @@ export const state = {
   departments: initialDepartments.map((department) => normalizeDepartment(department)),
   positions: initialPositions.map((position) => ({ ...position })),
   people: initialPeople.map((person) => ({ ...person })),
+  permissionTemplates: [],
   categories: initialCategories.map((category) => ({ ...category })),
   stores: initialStores.map((store) => ({ ...store })),
   publishingAccounts: initialPublishingAccounts.map((account) => ({ ...account })),
@@ -167,6 +168,7 @@ export function getDataSnapshot() {
     departments: state.departments,
     positions: state.positions,
     people: state.people,
+    permissionTemplates: state.permissionTemplates,
     categories: state.categories,
     stores: state.stores,
     publishingAccounts: state.publishingAccounts,
@@ -197,6 +199,7 @@ export function applyDataSnapshot(data) {
   replaceArray(state.departments, (data.departments ?? []).map((department) => normalizeDepartment(department)));
   replaceArray(state.positions, data.positions);
   replaceArray(state.people, data.people ?? data.persons);
+  replaceArray(state.permissionTemplates, data.permissionTemplates ?? []);
   replaceArray(state.categories, data.categories);
   replaceArray(state.stores, data.stores);
   replaceArray(state.publishingAccounts, data.publishingAccounts ?? initialPublishingAccounts);

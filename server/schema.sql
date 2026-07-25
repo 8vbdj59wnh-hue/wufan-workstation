@@ -38,6 +38,18 @@ CREATE TABLE IF NOT EXISTS persons (
   directManagerId TEXT,
   role TEXT NOT NULL,
   avatarUrl TEXT,
+  permissionTemplateId TEXT,
+  permissionOverrides TEXT,
+  status TEXT NOT NULL,
+  createdAt TEXT,
+  updatedAt TEXT
+);
+
+CREATE TABLE IF NOT EXISTS permission_templates (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  permissions TEXT NOT NULL,
   status TEXT NOT NULL,
   createdAt TEXT,
   updatedAt TEXT

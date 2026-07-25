@@ -1,14 +1,15 @@
-import { createPersistentResource, defaultCompanySlogan, getCurrentUser, getLatestStandardWorkForm, resolveAssetUrl, state, updatePersistentResource, uploadGenericFile, validateCurrentSession } from "./appState.js?v=20260705-state-singleton1";
+import { createPersistentResource, defaultCompanySlogan, getCurrentUser, getLatestStandardWorkForm, loadPersistentData, resolveAssetUrl, state, updatePersistentResource, uploadGenericFile, validateCurrentSession } from "./appState.js?v=20260705-state-singleton1";
 import {
   actionLaunchScopeOptions,
-  applyPermissionTemplate,
+  createEmptyPermissions,
+  createPermissionOverrides,
   dataScopeOptions,
   hasPermission,
+  mergePermissionSources,
   normalizePermissions,
   permissionCount,
   permissionGroups,
-  permissionTemplates,
-} from "./permissions.js?v=20260724-action-launch-permissions1";
+} from "./permissions.js?v=20260725-custom-permission-templates1";
 import { rerenderPreservingInputFocus } from "./inputFocus.js?v=20260723-input-focus1";
 import {
   CategoryType,
@@ -23,6 +24,7 @@ const companies = state.companies;
 let departments = state.departments;
 let positions = state.positions;
 let people = state.people;
+let customPermissionTemplates = state.permissionTemplates;
 let categories = state.categories;
 let stores = state.stores;
 let publishingAccounts = state.publishingAccounts;
@@ -38,6 +40,10 @@ let issueFilters = { keyword: "", type: "", status: "", module: "" };
 let selectedPermissionPersonId = null;
 let permissionDraft = null;
 let permissionSaveMessage = "";
+let permissionManagementMode = "people";
+let selectedCustomPermissionTemplateId = null;
+let permissionTemplateDraft = null;
+let permissionTemplateSaveMessage = "";
 let draggedDepartmentId = null;
 let dragOverDepartmentId = null;
 let draggedPersonId = null;
@@ -64,6 +70,11 @@ function replacePositions(nextPositions) {
 function replacePeople(nextPeople) {
   state.people.splice(0, state.people.length, ...nextPeople);
   people = state.people;
+}
+
+function replaceCustomPermissionTemplates(nextTemplates) {
+  state.permissionTemplates.splice(0, state.permissionTemplates.length, ...nextTemplates);
+  customPermissionTemplates = state.permissionTemplates;
 }
 
 function replaceCategories(nextCategories) {
@@ -106,6 +117,7 @@ const settingsResourceByEntity = {
   department: "departments",
   position: "positions",
   person: "persons",
+  permissionTemplate: "permission-templates",
   category: "categories",
   store: "stores",
   publishingAccount: "publishing-accounts",
@@ -276,6 +288,17 @@ function getPersonPermissions(person) {
   return normalizePermissions(person?.permissions, person?.authRole ?? "user");
 }
 
+function getCustomPermissionTemplate(templateId) {
+  return customPermissionTemplates.find((template) => template.id === templateId) ?? null;
+}
+
+function getActiveCustomPermissionTemplates() {
+  return customPermissionTemplates
+    .filter((template) => template.status !== Status.Inactive)
+    .slice()
+    .sort((left, right) => String(left.name ?? "").localeCompare(String(right.name ?? ""), "zh-Hans-CN"));
+}
+
 function hasManageablePermissionAdmin(peopleList = people) {
   return peopleList.some((person) =>
     person.canLogin === true &&
@@ -286,7 +309,10 @@ function hasManageablePermissionAdmin(peopleList = people) {
 
 function getPermissionStatus(person) {
   if (!person.canLogin) return "不可登录";
-  return getPersonPermissions(person).settings.managePermissions ? "权限管理员" : "已配置";
+  if (["admin", "system_admin"].includes(person.authRole)) return "系统管理员";
+  const template = getCustomPermissionTemplate(person.permissionTemplateId);
+  if (template !== null) return template.name;
+  return getPersonPermissions(person).settings.managePermissions ? "权限管理员" : "个人权限";
 }
 
 function renderCategoryTypeOptions(selectedType) {
@@ -1177,10 +1203,16 @@ function getActivePermissionDraft(person) {
   if (permissionDraft === null || permissionDraft.personId !== person.id) {
     permissionDraft = {
       personId: person.id,
+      permissionTemplateId: person.permissionTemplateId ?? "",
       permissions: getPersonPermissions(person),
     };
   }
   return permissionDraft.permissions;
+}
+
+function getActivePersonPermissionTemplateId(person) {
+  getActivePermissionDraft(person);
+  return permissionDraft?.permissionTemplateId ?? "";
 }
 
 function renderPermissionPeopleList() {
@@ -1323,6 +1355,45 @@ function renderActionLaunchTemplatePermissions(permissions) {
   `;
 }
 
+function renderPermissionConfiguration(permissions) {
+  return `
+    <section class="permission-card data-scope-card">
+      <h4>数据范围</h4>
+      <div class="permission-radio-list">
+        ${dataScopeOptions
+          .map((option) => `
+            <label class="checkbox-line">
+              <input type="radio" name="dataScope" value="${option.value}" ${permissions.dataScope === option.value ? "checked" : ""} />
+              <span>${option.label}</span>
+            </label>
+          `)
+          .join("")}
+      </div>
+    </section>
+    ${permissionGroups.map((group) => renderPermissionGroup(group, permissions)).join("")}
+  `;
+}
+
+function renderPersonPermissionTemplateOptions(selectedTemplateId) {
+  const selectedTemplate = getCustomPermissionTemplate(selectedTemplateId);
+  const templates = getActiveCustomPermissionTemplates();
+  if (selectedTemplate !== null && !templates.some((template) => template.id === selectedTemplate.id)) {
+    templates.push(selectedTemplate);
+  }
+  return `
+    <option value="" ${selectedTemplateId === "" ? "selected" : ""}>不绑定模板（仅个人权限）</option>
+    ${templates
+      .map(
+        (template) => `
+          <option value="${escapeHtml(template.id)}" ${template.id === selectedTemplateId ? "selected" : ""}>
+            ${escapeHtml(template.name)}${template.status === Status.Inactive ? "（已停用）" : ""}
+          </option>
+        `,
+      )
+      .join("")}
+  `;
+}
+
 function renderPermissionEditor() {
   const person = getSelectedPermissionPerson();
   if (!canCurrentUser("settings.managePermissions")) {
@@ -1331,6 +1402,8 @@ function renderPermissionEditor() {
   if (person === null) return `<div class="empty-detail">请选择一个人员。</div>`;
 
   const permissions = getActivePermissionDraft(person);
+  const selectedTemplateId = getActivePersonPermissionTemplateId(person);
+  const isSystemAdmin = ["admin", "system_admin"].includes(person.authRole);
   return `
     <form class="permission-editor-form">
       <div class="permission-editor-heading">
@@ -1338,32 +1411,127 @@ function renderPermissionEditor() {
           <h3>${escapeHtml(person.name)}</h3>
           <p>${escapeHtml(person.username || "未设置登录账号")} · ${person.canLogin ? "允许登录" : "不允许登录"}</p>
         </div>
-        <div class="section-actions">
-          ${Object.entries(permissionTemplates)
-            .map(([key, template]) => `<button class="secondary-button" type="button" data-permission-template="${key}">${template.label}</button>`)
-            .join("")}
-        </div>
       </div>
-      <section class="permission-card data-scope-card">
-        <h4>数据范围</h4>
-        <div class="permission-radio-list">
-          ${dataScopeOptions
-            .map((option) => `
-              <label class="checkbox-line">
-                <input type="radio" name="dataScope" value="${option.value}" ${permissions.dataScope === option.value ? "checked" : ""} />
-                <span>${option.label}</span>
-              </label>
-            `)
-            .join("")}
+      <section class="permission-card permission-template-binding">
+        <div>
+          <h4>绑定权限模板</h4>
+          <p class="form-note">${isSystemAdmin ? "系统管理员始终拥有全部权限，不受模板限制。" : "模板提供基础权限；下方勾选项与模板不同的部分会作为个人特殊权限保存。"}</p>
         </div>
+        <label>
+          <span>权限模板</span>
+          <select name="permissionTemplateId" ${isSystemAdmin ? "disabled" : ""}>
+            ${renderPersonPermissionTemplateOptions(isSystemAdmin ? "" : selectedTemplateId)}
+          </select>
+        </label>
       </section>
-      ${permissionGroups.map((group) => renderPermissionGroup(group, permissions)).join("")}
+      ${renderPermissionConfiguration(permissions)}
       <div class="permission-footer">
         <span>${permissionCount} 个权限项</span>
         <span class="form-error" ${permissionSaveMessage === "" ? "hidden" : ""}>${permissionSaveMessage}</span>
-        <button class="primary-button" type="submit">保存权限</button>
+        <button class="primary-button" type="submit" ${isSystemAdmin ? "disabled" : ""}>保存人员权限</button>
       </div>
     </form>
+  `;
+}
+
+function ensureSelectedCustomPermissionTemplate() {
+  if (permissionTemplateDraft?.mode === "add") {
+    selectedCustomPermissionTemplateId = permissionTemplateDraft.id;
+    return;
+  }
+  if (
+    selectedCustomPermissionTemplateId !== null &&
+    customPermissionTemplates.some((template) => template.id === selectedCustomPermissionTemplateId)
+  ) return;
+  selectedCustomPermissionTemplateId = getActiveCustomPermissionTemplates()[0]?.id ?? null;
+  permissionTemplateDraft = null;
+}
+
+function getActiveCustomPermissionTemplateDraft() {
+  ensureSelectedCustomPermissionTemplate();
+  if (permissionTemplateDraft?.mode === "add") return permissionTemplateDraft;
+  if (permissionTemplateDraft !== null && permissionTemplateDraft.id === selectedCustomPermissionTemplateId) {
+    return permissionTemplateDraft;
+  }
+  const template = getCustomPermissionTemplate(selectedCustomPermissionTemplateId);
+  if (template === null) return null;
+  permissionTemplateDraft = {
+    ...template,
+    mode: "edit",
+    permissions: normalizePermissions(template.permissions),
+  };
+  return permissionTemplateDraft;
+}
+
+function renderCustomPermissionTemplateList() {
+  const templates = customPermissionTemplates
+    .slice()
+    .sort((left, right) => String(left.name ?? "").localeCompare(String(right.name ?? ""), "zh-Hans-CN"));
+  return `
+    <div class="permission-template-list-header">
+      <strong>企业权限模板</strong>
+      <button class="secondary-button compact-button" type="button" data-add-permission-template>新增模板</button>
+    </div>
+    <div class="permission-person-list">
+      ${
+        templates.length === 0
+          ? `<div class="empty-detail">暂无权限模板。</div>`
+          : templates
+              .map(
+                (template) => `
+                  <button
+                    class="permission-person-item ${template.id === selectedCustomPermissionTemplateId ? "is-active" : ""}"
+                    type="button"
+                    data-custom-permission-template-id="${escapeHtml(template.id)}"
+                  >
+                    <strong>${escapeHtml(template.name)}</strong>
+                    <span>${escapeHtml(template.description || "未填写说明")}</span>
+                    <span>${template.status === Status.Inactive ? "已停用" : "启用中"}</span>
+                  </button>
+                `,
+              )
+              .join("")
+      }
+    </div>
+  `;
+}
+
+function renderCustomPermissionTemplateEditor() {
+  const draft = getActiveCustomPermissionTemplateDraft();
+  if (draft === null) return `<div class="empty-detail">新建一个企业权限模板后即可配置。</div>`;
+  return `
+    <form class="permission-template-editor-form">
+      <div class="permission-editor-heading">
+        <div>
+          <h3>${draft.mode === "add" ? "新增权限模板" : escapeHtml(draft.name)}</h3>
+          <p>配置模板基础权限及允许发起的关键行动。</p>
+        </div>
+      </div>
+      <section class="permission-card permission-template-basics">
+        <label><span>模板名称</span><input name="permissionTemplateName" value="${escapeHtml(draft.name ?? "")}" placeholder="例如：产品经理" required /></label>
+        <label><span>模板说明</span><textarea name="permissionTemplateDescription" placeholder="说明适用岗位和职责范围">${escapeHtml(draft.description ?? "")}</textarea></label>
+        <label><span>状态</span><select name="permissionTemplateStatus">${renderSimpleValueOptions(
+          [Status.Active, Status.Inactive].map((value) => ({ value, label: statusNames[value] ?? value })),
+          draft.status ?? Status.Active,
+        )}</select></label>
+      </section>
+      ${renderPermissionConfiguration(draft.permissions)}
+      <div class="permission-footer">
+        <span>${permissionCount} 个权限项</span>
+        <span class="form-error" ${permissionTemplateSaveMessage === "" ? "hidden" : ""}>${permissionTemplateSaveMessage}</span>
+        <button class="primary-button" type="submit">保存权限模板</button>
+      </div>
+    </form>
+  `;
+}
+
+function renderPermissionTemplateManagement() {
+  ensureSelectedCustomPermissionTemplate();
+  return `
+    <div class="permission-layout">
+      <aside class="permission-sidebar">${renderCustomPermissionTemplateList()}</aside>
+      <div class="permission-editor">${renderCustomPermissionTemplateEditor()}</div>
+    </div>
   `;
 }
 
@@ -1371,26 +1539,39 @@ function renderPermissionSection() {
   return `
     <section class="settings-section" id="permissions">
       <div class="section-heading with-actions">
-        <h2>权限管理</h2>
-      </div>
-      <div class="permission-layout">
-        <aside class="permission-sidebar">
-          <div class="permission-filters">
-            <input name="permissionKeyword" value="${escapeHtml(permissionFilters.keyword)}" placeholder="搜索姓名或账号" />
-            <select name="permissionDepartmentId">
-              ${renderOptions(departments, permissionFilters.departmentId, "全部部门")}
-            </select>
-            <label class="checkbox-line">
-              <input name="permissionLoginOnly" type="checkbox" ${permissionFilters.loginOnly ? "checked" : ""} />
-              <span>只看可登录账号</span>
-            </label>
-          </div>
-          ${renderPermissionPeopleList()}
-        </aside>
-        <div class="permission-editor">
-          ${renderPermissionEditor()}
+        <div>
+          <h2>权限管理</h2>
+          <p class="form-note">使用企业自定义模板建立岗位权限基线，再为个别员工配置特殊权限。</p>
+        </div>
+        <div class="task-display-view-switch" aria-label="权限管理方式">
+          <button class="${permissionManagementMode === "people" ? "is-active" : ""}" type="button" data-permission-management-mode="people">人员授权</button>
+          <button class="${permissionManagementMode === "templates" ? "is-active" : ""}" type="button" data-permission-management-mode="templates">权限模板</button>
         </div>
       </div>
+      ${
+        permissionManagementMode === "templates"
+          ? renderPermissionTemplateManagement()
+          : `
+            <div class="permission-layout">
+              <aside class="permission-sidebar">
+                <div class="permission-filters">
+                  <input name="permissionKeyword" value="${escapeHtml(permissionFilters.keyword)}" placeholder="搜索姓名或账号" />
+                  <select name="permissionDepartmentId">
+                    ${renderOptions(departments, permissionFilters.departmentId, "全部部门")}
+                  </select>
+                  <label class="checkbox-line">
+                    <input name="permissionLoginOnly" type="checkbox" ${permissionFilters.loginOnly ? "checked" : ""} />
+                    <span>只看可登录账号</span>
+                  </label>
+                </div>
+                ${renderPermissionPeopleList()}
+              </aside>
+              <div class="permission-editor">
+                ${renderPermissionEditor()}
+              </div>
+            </div>
+          `
+      }
     </section>
   `;
 }
@@ -2237,7 +2418,7 @@ async function savePerson(form, rerender) {
   if (canLogin && editingPerson?.canLogin !== true && password === "") return setModalError("启用登录时必须设置新密码。", rerender);
 
   const now = getNow();
-  const item =
+  const itemWithPermissions =
     modalState.mode === "add"
       ? {
           id: createId("person"),
@@ -2252,6 +2433,9 @@ async function savePerson(form, rerender) {
           authRole,
           lastLoginAt: null,
           mustChangePassword: false,
+          permissions: createEmptyPermissions("self"),
+          permissionTemplateId: null,
+          permissionOverrides: {},
           status: Status.Active,
           createdAt: now,
           updatedAt: now,
@@ -2273,6 +2457,12 @@ async function savePerson(form, rerender) {
           mustChangePassword: password === "" ? editingPerson?.mustChangePassword ?? false : false,
           updatedAt: now,
         };
+  const {
+    permissions: _permissions,
+    permissionTemplateId: _permissionTemplateId,
+    permissionOverrides: _permissionOverrides,
+    ...item
+  } = itemWithPermissions;
 
   const safeDraft = stripSensitivePersonFields(item);
   const nextPeople = upsertItem(people, safeDraft);
@@ -2943,7 +3133,22 @@ async function savePermissions(form, rerender) {
   }
 
   const nextPermissions = collectPermissionDraft(form, getActivePermissionDraft(person));
-  const nextPerson = { ...person, permissions: nextPermissions, updatedAt: getNow() };
+  const permissionTemplateId = getFormValue(form, "permissionTemplateId");
+  const template = getCustomPermissionTemplate(permissionTemplateId);
+  if (permissionTemplateId !== "" && (template === null || template.status === Status.Inactive)) {
+    permissionSaveMessage = "请选择有效的权限模板。";
+    rerender();
+    return;
+  }
+  const permissionOverrides =
+    template === null ? {} : createPermissionOverrides(template.permissions, nextPermissions, person.authRole ?? "user");
+  const nextPerson = {
+    ...person,
+    permissions: nextPermissions,
+    permissionTemplateId: template?.id ?? null,
+    permissionOverrides,
+    updatedAt: getNow(),
+  };
   const nextPeople = people.map((item) => (item.id === person.id ? nextPerson : item));
 
   if (!hasManageablePermissionAdmin(nextPeople)) {
@@ -2955,11 +3160,58 @@ async function savePermissions(form, rerender) {
   try {
     const savedPerson = await persistSettingsEntity("person", nextPerson);
     replacePeople(upsertItem(people, stripSensitivePersonFields(savedPerson)));
-    permissionDraft = { personId: person.id, permissions: nextPermissions };
+    await loadPersistentData();
+    permissionDraft = {
+      personId: person.id,
+      permissionTemplateId: template?.id ?? "",
+      permissions: nextPermissions,
+    };
     permissionSaveMessage = "权限已保存";
     if (person.id === getCurrentUser()?.id) await validateCurrentSession();
   } catch (error) {
     permissionSaveMessage = error.message || "权限保存失败，请检查本地数据库服务。";
+  }
+  rerender();
+}
+
+async function saveCustomPermissionTemplate(form, rerender) {
+  if (!canCurrentUser("settings.managePermissions")) return;
+  const draft = getActiveCustomPermissionTemplateDraft();
+  if (draft === null) return;
+  const name = getFormValue(form, "permissionTemplateName");
+  if (name === "") {
+    permissionTemplateSaveMessage = "权限模板名称不能为空。";
+    rerender();
+    return;
+  }
+  const duplicated = customPermissionTemplates.some(
+    (template) => template.id !== draft.id && String(template.name ?? "").trim() === name,
+  );
+  if (duplicated) {
+    permissionTemplateSaveMessage = "权限模板名称不能重复。";
+    rerender();
+    return;
+  }
+  const now = getNow();
+  const item = {
+    id: draft.id,
+    name,
+    description: getFormValue(form, "permissionTemplateDescription"),
+    permissions: collectPermissionDraft(form, draft.permissions),
+    status: getFormValue(form, "permissionTemplateStatus") || Status.Active,
+    createdAt: draft.createdAt ?? now,
+    updatedAt: now,
+  };
+  try {
+    const savedTemplate = await persistSettingsEntity("permissionTemplate", item, draft.mode);
+    replaceCustomPermissionTemplates(upsertItem(customPermissionTemplates, savedTemplate));
+    selectedCustomPermissionTemplateId = savedTemplate.id;
+    permissionTemplateDraft = { ...savedTemplate, mode: "edit" };
+    permissionTemplateSaveMessage = "权限模板已保存";
+    await loadPersistentData();
+    if (getCurrentUser() !== null) await validateCurrentSession();
+  } catch (error) {
+    permissionTemplateSaveMessage = error.message || "权限模板保存失败，请检查本地数据库服务。";
   }
   rerender();
 }
@@ -3136,6 +3388,7 @@ export function bindSettingsPageEvents(rerender) {
   const form = document.querySelector(".modal-form");
   const companySloganForm = document.querySelector("[data-company-slogan-form]");
   const permissionForm = document.querySelector(".permission-editor-form");
+  const permissionTemplateForm = document.querySelector(".permission-template-editor-form");
   const formDesignerForm = document.querySelector(".form-designer-editor");
 
   if (settingsPage === null) return;
@@ -3145,6 +3398,43 @@ export function bindSettingsPageEvents(rerender) {
 
     if (organizationTab !== null) {
       activeOrganizationTab = organizationTab.dataset.organizationTab;
+      rerender();
+      return;
+    }
+
+    const permissionManagementButton = event.target.closest("[data-permission-management-mode]");
+    if (permissionManagementButton !== null) {
+      permissionManagementMode = permissionManagementButton.dataset.permissionManagementMode === "templates" ? "templates" : "people";
+      permissionSaveMessage = "";
+      permissionTemplateSaveMessage = "";
+      rerender();
+      return;
+    }
+
+    const addPermissionTemplateButton = event.target.closest("[data-add-permission-template]");
+    if (addPermissionTemplateButton !== null) {
+      const id = createId("permission-template");
+      selectedCustomPermissionTemplateId = id;
+      permissionTemplateDraft = {
+        id,
+        name: "",
+        description: "",
+        permissions: createEmptyPermissions("self"),
+        status: Status.Active,
+        createdAt: getNow(),
+        updatedAt: getNow(),
+        mode: "add",
+      };
+      permissionTemplateSaveMessage = "";
+      rerender();
+      return;
+    }
+
+    const customPermissionTemplateButton = event.target.closest("[data-custom-permission-template-id]");
+    if (customPermissionTemplateButton !== null) {
+      selectedCustomPermissionTemplateId = customPermissionTemplateButton.dataset.customPermissionTemplateId;
+      permissionTemplateDraft = null;
+      permissionTemplateSaveMessage = "";
       rerender();
       return;
     }
@@ -3163,20 +3453,6 @@ export function bindSettingsPageEvents(rerender) {
       permissionDraft = null;
       permissionSaveMessage = "";
       rerender();
-      return;
-    }
-
-    const permissionTemplate = event.target.closest("[data-permission-template]");
-    if (permissionTemplate !== null) {
-      const person = getSelectedPermissionPerson();
-      if (person !== null) {
-        permissionDraft = {
-          personId: person.id,
-          permissions: applyPermissionTemplate(permissionTemplate.dataset.permissionTemplate),
-        };
-        permissionSaveMessage = "";
-        rerender();
-      }
       return;
     }
 
@@ -3455,6 +3731,33 @@ export function bindSettingsPageEvents(rerender) {
     permissionForm.addEventListener("submit", (event) => {
       event.preventDefault();
       savePermissions(event.currentTarget, rerender);
+    });
+    permissionForm.querySelector("[name='permissionTemplateId']")?.addEventListener("change", (event) => {
+      const person = getSelectedPermissionPerson();
+      if (person === null) return;
+      const templateId = event.target.value;
+      const template = getCustomPermissionTemplate(templateId);
+      permissionDraft = {
+        personId: person.id,
+        permissionTemplateId: template?.id ?? "",
+        permissions:
+          template === null
+            ? getPersonPermissions(person)
+            : mergePermissionSources(template.permissions, {}, person.authRole ?? "user"),
+      };
+      permissionSaveMessage = "";
+      rerender();
+    });
+  }
+
+  if (permissionTemplateForm !== null) {
+    permissionTemplateForm.addEventListener("change", (event) => {
+      if (event.target.closest(".permission-check-grid input[type='checkbox']") === null) return;
+      syncPermissionGroupToggle(event.target.closest("[data-permission-group]"));
+    });
+    permissionTemplateForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      saveCustomPermissionTemplate(event.currentTarget, rerender);
     });
   }
 }

@@ -112,6 +112,19 @@
  * @property {string} positionId
  * @property {string | null} directManagerId
  * @property {PersonRoleValue} role
+ * @property {string | null} permissionTemplateId
+ * @property {object} permissionOverrides
+ * @property {StatusValue} status
+ * @property {string} createdAt
+ * @property {string} updatedAt
+ */
+
+/**
+ * @typedef {object} PermissionTemplate
+ * @property {string} id
+ * @property {string} name
+ * @property {string} description
+ * @property {object} permissions
  * @property {StatusValue} status
  * @property {string} createdAt
  * @property {string} updatedAt

@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { hashPassword } from "./security.js";
-import { normalizePermissions, serializePermissions } from "../src/permissions.js";
+import { createEmptyPermissions, mergePermissionSources, normalizePermissions, serializePermissions } from "../src/permissions.js";
 import {
   categories,
   companies,
@@ -85,11 +85,18 @@ const resourceConfigs = {
       "lastLoginAt",
       "mustChangePassword",
       "permissions",
+      "permissionTemplateId",
+      "permissionOverrides",
       "status",
       "createdAt",
       "updatedAt",
     ],
     booleanFields: ["canLogin", "mustChangePassword"],
+    jsonFields: ["permissions", "permissionOverrides"],
+  },
+  permissionTemplates: {
+    table: "permission_templates",
+    columns: ["id", "name", "description", "permissions", "status", "createdAt", "updatedAt"],
     jsonFields: ["permissions"],
   },
   categories: {
@@ -478,6 +485,7 @@ const routeResourceMap = {
   positions: "positions",
   persons: "people",
   people: "people",
+  "permission-templates": "permissionTemplates",
   categories: "categories",
   stores: "stores",
   "publishing-accounts": "publishingAccounts",
@@ -638,6 +646,7 @@ function decodeRow(row, config) {
     submitFiles: [],
     submitLinks: [],
     permissions: null,
+    permissionOverrides: {},
     relatedGoalIds: [],
     steps: [],
     previewImage: {},
@@ -1348,24 +1357,71 @@ function runLightweightMigrations() {
   ensureColumn("persons", "lastLoginAt", "TEXT");
   ensureColumn("persons", "mustChangePassword", "INTEGER DEFAULT 0");
   ensureColumn("persons", "permissions", "TEXT");
+  ensureColumn("persons", "permissionTemplateId", "TEXT");
+  ensureColumn("persons", "permissionOverrides", "TEXT");
   ensureColumn("persons", "avatarUrl", "TEXT");
+  getDatabase().exec(`
+    CREATE TABLE IF NOT EXISTS permission_templates (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      permissions TEXT NOT NULL,
+      status TEXT NOT NULL,
+      createdAt TEXT,
+      updatedAt TEXT
+    )
+  `);
   ensureStandardWorkValueChainCategories();
+}
+
+function getPermissionTemplateById(templateId) {
+  if (templateId === null || templateId === undefined || templateId === "") return null;
+  const config = resourceConfigs.permissionTemplates;
+  const row = getDatabase()
+    .prepare("SELECT * FROM permission_templates WHERE id = @id LIMIT 1")
+    .get({ id: templateId });
+  return row === undefined ? null : decodeRow(row, config);
+}
+
+function resolvePersonPermissionView(person) {
+  const role = person.authRole ?? "user";
+  if (["admin", "system_admin"].includes(role)) {
+    return {
+      ...person,
+      permissions: normalizePermissions(null, "admin"),
+      permissionOverrides: {},
+    };
+  }
+  const template = getPermissionTemplateById(person.permissionTemplateId);
+  if (template === null || template.status === "inactive") {
+    return {
+      ...person,
+      permissionOverrides: person.permissionOverrides ?? {},
+      permissions: normalizePermissions(person.permissions, role),
+    };
+  }
+  return {
+    ...person,
+    permissionOverrides: person.permissionOverrides ?? {},
+    permissions: mergePermissionSources(template.permissions, person.permissionOverrides, role),
+  };
 }
 
 function publicUser(row) {
   if (row === undefined) return null;
-  const role = row.authRole ?? "user";
+  const person = resolvePersonPermissionView(decodeRow(row, resourceConfigs.people));
+  const role = person.authRole ?? "user";
   return {
-    id: row.id,
-    name: row.name,
-    departmentId: row.departmentId,
-    username: row.username,
-    avatarUrl: row.avatarUrl ?? "",
+    id: person.id,
+    name: person.name,
+    departmentId: person.departmentId,
+    username: person.username,
+    avatarUrl: person.avatarUrl ?? "",
     role,
-    canLogin: Boolean(row.canLogin),
-    mustChangePassword: Boolean(row.mustChangePassword),
-    lastLoginAt: row.lastLoginAt ?? null,
-    permissions: normalizePermissions(row.permissions, role),
+    canLogin: Boolean(person.canLogin),
+    mustChangePassword: Boolean(person.mustChangePassword),
+    lastLoginAt: person.lastLoginAt ?? null,
+    permissions: person.permissions,
   };
 }
 
@@ -1489,10 +1545,11 @@ export function readResource(resourceKey) {
         : resourceKey === "executionGroups"
           ? " ORDER BY createdAt DESC, id DESC"
         : "";
-  return getDatabase()
+  const items = getDatabase()
     .prepare(`SELECT ${columns} FROM ${config.table}${orderBy}`)
     .all()
     .map((row) => decodeRow(row, config));
+  return resourceKey === "people" ? items.map(resolvePersonPermissionView) : items;
 }
 
 export function readAllData() {
@@ -2150,18 +2207,57 @@ export function launchWorkPlanWithProcess(workPlanId, { processInstance, tasks: 
 export function createResource(routeResource, item) {
   const resourceKey = routeResourceMap[routeResource];
   if (resourceKey === undefined) throw new Error(`Unknown resource: ${routeResource}`);
-  insertItem(resourceKey, item);
-  return item;
+  if (resourceKey === "permissionTemplates") {
+    const name = String(item.name ?? "").trim();
+    if (name === "") throw new Error("权限模板名称不能为空。");
+    const duplicated = getDatabase()
+      .prepare("SELECT id FROM permission_templates WHERE name = @name LIMIT 1")
+      .get({ name });
+    if (duplicated !== undefined) throw new Error("权限模板名称不能重复。");
+    const nextItem = { ...item, name };
+    insertItem(resourceKey, nextItem);
+    return nextItem;
+  }
+  const nextItem =
+    resourceKey === "people"
+      ? {
+          ...item,
+          permissions: item.permissions ?? createEmptyPermissions("self"),
+          permissionTemplateId: item.permissionTemplateId ?? null,
+          permissionOverrides: item.permissionOverrides ?? {},
+        }
+      : item;
+  validatePersonPermissionTemplate(nextItem, resourceKey);
+  insertItem(resourceKey, nextItem);
+  return nextItem;
 }
 
 export function updateResource(routeResource, id, item) {
   const resourceKey = routeResourceMap[routeResource];
   if (resourceKey === undefined) throw new Error(`Unknown resource: ${routeResource}`);
   const mergedItem = mergeExistingItem(resourceKey, id, item);
+  if (resourceKey === "permissionTemplates") {
+    const name = String(mergedItem.name ?? "").trim();
+    if (name === "") throw new Error("权限模板名称不能为空。");
+    const duplicated = getDatabase()
+      .prepare("SELECT id FROM permission_templates WHERE name = @name AND id <> @id LIMIT 1")
+      .get({ name, id });
+    if (duplicated !== undefined) throw new Error("权限模板名称不能重复。");
+    mergedItem.name = name;
+  }
+  validatePersonPermissionTemplate(mergedItem, resourceKey);
   const preservedItem = mergePreservedCustomFields(resourceKey, id, mergedItem);
   const nextItem = resourceKey === "tasks" ? markTaskOverdueOnce(preservedItem) : preservedItem;
   insertItem(resourceKey, nextItem);
   return nextItem;
+}
+
+function validatePersonPermissionTemplate(person, resourceKey) {
+  if (resourceKey !== "people" || !person.permissionTemplateId) return;
+  const template = getPermissionTemplateById(person.permissionTemplateId);
+  if (template === null || template.status === "inactive") {
+    throw new Error("绑定的权限模板不存在或已停用。");
+  }
 }
 
 export function batchLinkProcessInstanceTemplates(payload = {}) {

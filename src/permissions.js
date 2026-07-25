@@ -144,52 +144,18 @@ function createPermissionSkeleton(value = false, dataScope = "department") {
 
 const superAdminPermissions = createPermissionSkeleton(true, "all");
 
-const bossPermissions = createPermissionSkeleton(false, "all");
-Object.assign(bossPermissions.modules, { goals: true, execution: true, processes: true, assessment: true, methods: true, settings: true });
-Object.assign(bossPermissions.goals, { view: true, create: true, edit: true, viewDetail: true, addWork: true, viewRelatedData: true });
-Object.assign(bossPermissions.workPlans, { launch: true });
-bossPermissions.workPlans.launchTemplateScope = "all";
-Object.assign(bossPermissions.tasks, { view: true, viewDetail: true, viewForm: true, viewProcessProgress: true });
-Object.assign(bossPermissions.processes, { viewInstances: true, viewForm: true });
-Object.assign(bossPermissions.contentSchedules, {
-  view: true,
-  create: true,
-  edit: true,
-  import: true,
-  export: true,
-  addToFuture: true,
-  addToThisWeek: true,
-  batchCancel: true,
-});
-Object.assign(bossPermissions.assessment, { view: true, viewAll: true, viewProblems: true, updateProblems: true });
-Object.assign(bossPermissions.methods, { view: true });
-Object.assign(bossPermissions.settings, { viewOrg: true, viewPeople: true, viewStandardWorks: true, viewStores: true });
-
-const departmentLeaderPermissions = createPermissionSkeleton(false, "department");
-Object.assign(departmentLeaderPermissions.modules, { goals: true, execution: true, processes: true, assessment: true, methods: true });
-Object.assign(departmentLeaderPermissions.goals, { view: true, viewDetail: true, addWork: true });
-Object.assign(departmentLeaderPermissions.workPlans, { launch: true });
-departmentLeaderPermissions.workPlans.launchTemplateScope = "all";
-Object.assign(departmentLeaderPermissions.tasks, { view: true, viewDetail: true, viewForm: true, submitResult: true, changeStatus: true, viewProcessProgress: true });
-Object.assign(departmentLeaderPermissions.processes, { viewInstances: true, viewForm: true });
-Object.assign(departmentLeaderPermissions.assessment, { view: true, viewDepartment: true, fillWeeklyReport: true, editWeeklyReport: true, viewProblems: true });
-Object.assign(departmentLeaderPermissions.methods, { view: true });
-
 const employeePermissions = createPermissionSkeleton(false, "self");
 Object.assign(employeePermissions.modules, { execution: true, methods: true });
 Object.assign(employeePermissions.tasks, { view: true, viewDetail: true, viewForm: true, submitResult: true, changeStatus: true });
 Object.assign(employeePermissions.assessment, { viewSelf: true });
 Object.assign(employeePermissions.methods, { view: true });
 
-export const permissionTemplates = {
-  superAdmin: { label: "套用超级管理员权限", permissions: superAdminPermissions },
-  boss: { label: "套用老板权限", permissions: bossPermissions },
-  departmentLeader: { label: "套用部门负责人权限", permissions: departmentLeaderPermissions },
-  employee: { label: "套用普通员工权限", permissions: employeePermissions },
-};
-
 function clonePermissions(permissions) {
   return JSON.parse(JSON.stringify(permissions));
+}
+
+export function createEmptyPermissions(dataScope = "self") {
+  return createPermissionSkeleton(false, dataScope);
 }
 
 function getDefaultPermissions(role = "user") {
@@ -278,6 +244,56 @@ export function normalizePermissions(rawPermissions, role = "user") {
   return normalized;
 }
 
+function applyPermissionOverrides(basePermissions, overrides) {
+  const merged = clonePermissions(basePermissions);
+  if (overrides === null || typeof overrides !== "object") return merged;
+  if (["self", "department", "all"].includes(overrides.dataScope)) merged.dataScope = overrides.dataScope;
+  for (const group of permissionGroups) {
+    for (const item of group.permissions) {
+      if (typeof overrides[group.key]?.[item.key] === "boolean") {
+        merged[group.key][item.key] = overrides[group.key][item.key];
+      }
+    }
+  }
+  const overrideWorkPlans = overrides.workPlans;
+  if (["all", "selected"].includes(overrideWorkPlans?.launchTemplateScope)) {
+    merged.workPlans.launchTemplateScope = overrideWorkPlans.launchTemplateScope;
+  }
+  if (Array.isArray(overrideWorkPlans?.launchTemplateIds)) {
+    merged.workPlans.launchTemplateIds = [...new Set(overrideWorkPlans.launchTemplateIds.map(String).filter(Boolean))];
+  }
+  return merged;
+}
+
+export function mergePermissionSources(templatePermissions, personalOverrides, role = "user") {
+  const basePermissions = normalizePermissions(templatePermissions, role);
+  return applyPermissionOverrides(basePermissions, personalOverrides);
+}
+
+export function createPermissionOverrides(templatePermissions, effectivePermissions, role = "user") {
+  const base = normalizePermissions(templatePermissions, role);
+  const effective = normalizePermissions(effectivePermissions, role);
+  const overrides = {};
+  if (base.dataScope !== effective.dataScope) overrides.dataScope = effective.dataScope;
+  for (const group of permissionGroups) {
+    for (const item of group.permissions) {
+      if (base[group.key][item.key] === effective[group.key][item.key]) continue;
+      overrides[group.key] ??= {};
+      overrides[group.key][item.key] = effective[group.key][item.key];
+    }
+  }
+  const baseScope = base.workPlans.launchTemplateScope;
+  const effectiveScope = effective.workPlans.launchTemplateScope;
+  const baseIds = [...base.workPlans.launchTemplateIds].sort();
+  const effectiveIds = [...effective.workPlans.launchTemplateIds].sort();
+  if (baseScope !== effectiveScope || JSON.stringify(baseIds) !== JSON.stringify(effectiveIds)) {
+    overrides.workPlans ??= {};
+    overrides.workPlans.launchTemplateScope = effectiveScope;
+    overrides.workPlans.launchTemplateIds = effectiveIds;
+  }
+  return overrides;
+}
+
 export function serializePermissions(permissions) {
   return JSON.stringify(normalizePermissions(permissions));
 }
@@ -350,8 +366,4 @@ export function getDataScope(userOrPermissions) {
 
 export function getFirstAccessibleModule(userOrPermissions, modules = []) {
   return modules.find((module) => canAccessModule(userOrPermissions, module.id)) ?? null;
-}
-
-export function applyPermissionTemplate(templateKey) {
-  return clonePermissions(permissionTemplates[templateKey]?.permissions ?? employeePermissions);
 }

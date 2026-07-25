@@ -4602,6 +4602,43 @@ button.content-template-thumb {
   gap: 12px;
 }
 
+.permission-template-editor-form {
+  display: grid;
+  gap: 12px;
+}
+
+.permission-template-list-header {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.permission-template-binding,
+.permission-template-basics {
+  display: grid;
+  gap: 12px;
+}
+
+.permission-template-binding {
+  align-items: end;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 320px);
+}
+
+.permission-template-binding h4,
+.permission-template-binding p {
+  margin: 0;
+}
+
+.permission-template-basics {
+  grid-template-columns: minmax(180px, 1fr) minmax(240px, 2fr) minmax(140px, 180px);
+}
+
+.permission-template-basics textarea {
+  min-height: 72px;
+}
+
 .permission-editor-heading {
   align-items: flex-start;
   display: flex;
@@ -6459,6 +6496,8 @@ button.content-template-thumb {
 
   .permission-layout,
   .permission-check-grid,
+  .permission-template-binding,
+  .permission-template-basics,
   .form-designer-layout,
   .form-designer-workspace,
   .template-center-layout,
