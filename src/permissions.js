@@ -20,6 +20,7 @@ export const permissionGroups = [
       { key: "assessment", label: "可访问工作结果模块" },
       { key: "methods", label: "可访问关键行动方法论" },
       { key: "settings", label: "可访问设置模块" },
+      { key: "products", label: "可访问产品中心" },
     ],
   },
   {
@@ -42,6 +43,16 @@ export const permissionGroups = [
     permissions: [
       { key: "launch", label: "发起关键行动" },
       { key: "batchOperate", label: "批量操作关键行动" },
+    ],
+  },
+  {
+    key: "products",
+    title: "产品中心权限",
+    permissions: [
+      { key: "view", label: "查看产品" },
+      { key: "create", label: "新增产品" },
+      { key: "edit", label: "编辑产品" },
+      { key: "archive", label: "归档产品" },
     ],
   },
   {
@@ -354,8 +365,12 @@ export function canAccessModule(userOrPermissions, moduleId) {
     assessment: "assessment",
     methods: "methods",
     settings: "settings",
+    products: "products",
   };
   const permissionKey = modulePermissionMap[moduleId] ?? moduleId;
+  if (moduleId === "products") {
+    return hasPermission(userOrPermissions, "modules.products") && hasPermission(userOrPermissions, "products.view");
+  }
   return hasPermission(userOrPermissions, `modules.${permissionKey}`);
 }
 

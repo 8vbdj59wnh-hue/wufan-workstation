@@ -23,6 +23,7 @@ import {
   moveTaskTemplateToValueChain,
   readAllData,
   readRouteResource,
+  replaceActionProducts,
   replaceAllData,
   touchLastLoginAt,
   updateCurrentUserAvatar,
@@ -284,6 +285,7 @@ function canUsePublishingAccountOptions(user) {
 }
 
 function canReadResource(resource, user) {
+  if (resource === "products" || resource === "action-products") return hasPermission(user, "products.view");
   if (resource === "permission-templates") return hasPermission(user, "settings.managePermissions");
   if (resource === "stores") return canUseStoreOptions(user);
   if (resource === "publishing-accounts") return canUsePublishingAccountOptions(user);
@@ -295,7 +297,12 @@ function filterDataByScope(data, user) {
   const stores = canUseStoreOptions(user) ? (data.stores ?? []) : [];
   const publishingAccounts = canUsePublishingAccountOptions(user) ? (data.publishingAccounts ?? []) : [];
   const permissionTemplates = hasPermission(user, "settings.managePermissions") ? (data.permissionTemplates ?? []) : [];
-  if (dataScope === "all") return { ...data, stores, publishingAccounts, permissionTemplates };
+  const products = hasPermission(user, "products.view") ? (data.products ?? []) : [];
+  const visibleProductIds = new Set(products.map((product) => product.id));
+  if (dataScope === "all") {
+    const actionProducts = (data.actionProducts ?? []).filter((item) => visibleProductIds.has(item.productId));
+    return { ...data, stores, publishingAccounts, permissionTemplates, products, actionProducts };
+  }
 
   const scopedTasks = filterByScope(data.tasks ?? [], user);
   const scopedTaskIds = new Set(scopedTasks.map((task) => task.id));
@@ -304,6 +311,10 @@ function filterDataByScope(data, user) {
   );
   const scopedWorkPlans = filterByScope(data.workPlans ?? [], user);
   const scopedProcessInstances = filterByScope(data.processInstances ?? [], user);
+  const scopedProcessInstanceIds = new Set(scopedProcessInstances.map((instance) => instance.id));
+  const scopedActionProducts = (data.actionProducts ?? []).filter(
+    (item) => scopedProcessInstanceIds.has(item.actionId) && visibleProductIds.has(item.productId),
+  );
   const scopedGoals = filterByScope(data.goals ?? [], user);
   const scopedContentSchedules = filterByScope(data.contentSchedules ?? [], user);
   const scopedWeeklyReports = filterByScope(data.weeklyReports ?? [], user);
@@ -323,6 +334,8 @@ function filterDataByScope(data, user) {
     tasks: scopedTasks,
     executionGroups: scopedExecutionGroups,
     processInstances: scopedProcessInstances,
+    products,
+    actionProducts: scopedActionProducts,
     contentSchedules: scopedContentSchedules,
     workPlans: scopedWorkPlans,
     weeklyReports: scopedWeeklyReports,
@@ -331,6 +344,11 @@ function filterDataByScope(data, user) {
 }
 
 function getResourceWritePermission(resource, method, body = {}) {
+  if (resource === "products") {
+    if (method === "POST") return "products.create";
+    return body.status === "已归档" ? "products.archive" : "products.edit";
+  }
+  if (resource === "action-products") return "products.__managedRelation";
   if (resource === "goals") return method === "POST" ? "goals.create" : "goals.edit";
   if (resource === "work-plans") return "workPlans.launch";
   if (resource === "tasks") {
@@ -559,6 +577,25 @@ app.post("/api/process-instances/:id/start", (request, response) => {
   }
 });
 
+app.put("/api/process-instances/:id/products", requirePermission("products.view"), (request, response) => {
+  try {
+    const instance = readAllData().processInstances.find((item) => item.id === request.params.id);
+    if (instance === undefined) {
+      response.status(404).json({ success: false, message: "未找到该关键行动。" });
+      return;
+    }
+    if (!canEditProcessInstance(request.user, instance)) {
+      response.status(403).json({ success: false, message: "只有管理员或关键行动发起人可以编辑关联产品。" });
+      return;
+    }
+    replaceActionProducts(instance.id, request.body?.productIds ?? []);
+    response.json({ success: true, data: filterDataByScope(readAllData(), request.user) });
+  } catch (error) {
+    console.error("关键行动关联产品保存失败", error);
+    response.status(400).json({ success: false, message: error.message || "关联产品保存失败。" });
+  }
+});
+
 app.post("/api/process-instances/batch-link-templates", (request, response) => {
   try {
     const processInstanceIds = [...new Set((request.body?.processInstanceIds ?? []).map((id) => String(id ?? "").trim()).filter(Boolean))];
@@ -639,6 +676,10 @@ app.put("/api/process-instances/:id/tasks/:taskId/executor", (request, response)
 
 app.post("/api/work-plans/:id/launch", requirePermission("workPlans.launch"), (request, response) => {
   try {
+    if ((request.body?.productIds ?? []).length > 0 && !hasPermission(request.user, "products.view")) {
+      response.status(403).json({ success: false, message: "你没有权限关联产品。" });
+      return;
+    }
     const existingWorkPlan = readAllData().workPlans.find((item) => item.id === request.params.id);
     if (
       rejectUnauthorizedActionTemplateLaunch(

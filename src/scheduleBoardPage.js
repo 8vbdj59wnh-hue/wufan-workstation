@@ -31,6 +31,7 @@ import {
 } from "./data/modelOptions.js?v=20260705-state-singleton1";
 import { getActionImageUrls, getPrimaryImageUrl } from "./data/taskUtils.js?v=20260705-state-singleton1";
 import { renderActionImageGrid } from "./actionImages.js";
+import { getActionProductImageUrls, getActionProducts, renderLinkedActionProducts } from "./actionProductRelations.js?v=20260725-product-center1";
 import {
   getCurrentExecutor as selectCurrentExecutor,
   getCurrentProcessTask as selectCurrentProcessTask,
@@ -377,6 +378,8 @@ function getProcessPreviewImage(row) {
 }
 
 function getProcessImageUrls(row) {
+  const productImageUrls = row.processInstance ? getActionProductImageUrls(row.processInstance.id) : [];
+  if (productImageUrls.length > 0) return productImageUrls;
   const imageUrls = getActionImageUrls(row.processInstance, row.workPlan);
   if (imageUrls.length > 0) return imageUrls;
   const fallbackImage = getProcessPreviewImage(row) || row.thumbnail || "";
@@ -638,11 +641,10 @@ function renderFilters() {
 }
 
 function renderThumbnail(row) {
-  return renderActionImageGrid(getProcessImageUrls(row), {
-    className: "schedule-board-image-grid",
-    alt: row.title,
-    placeholder: "无图",
-  });
+  const products = row.processInstance ? getActionProducts(row.processInstance.id) : [];
+  return `<div class="schedule-action-product-cell">${renderActionImageGrid(getProcessImageUrls(row), {
+    className: "schedule-board-image-grid", alt: row.title, placeholder: "无图",
+  })}${products.length ? `<div class="schedule-action-product-names">${products.map((product) => `<a href="#products/${encodeURIComponent(product.id)}">${escapeHtml(product.skuCode || product.name)}</a>`).join("")}</div>` : ""}</div>`;
 }
 
 function getProcessStatusClass(row) {
@@ -784,6 +786,7 @@ function renderPendingProcessCard(row) {
       </div>
       <div class="schedule-pending-card-body">
         <strong>${escapeHtml(title)}</strong>
+        ${row.processInstance && getActionProducts(row.processInstance.id).length ? renderLinkedActionProducts(row.processInstance.id, { compact: true }) : ""}
         <span>发起人：${escapeHtml(initiatorName)}</span>
         ${
           canStart
@@ -1060,6 +1063,7 @@ function renderActionOverviewCard(row) {
       </div>
       <div class="schedule-action-overview-body">
         <h3 title="${escapeAttribute(title)}">${escapeHtml(title)}</h3>
+        ${getActionProducts(row.processInstance.id).length ? renderLinkedActionProducts(row.processInstance.id, { compact: true }) : ""}
         <div class="schedule-action-overview-meta">
           <span class="schedule-action-overview-status ${getActionOverviewStatusClass(businessStatus.status)}">${escapeHtml(businessStatus.label)}</span>
           ${renderActionOverviewOwner(row)}
@@ -1387,6 +1391,9 @@ export function renderScheduleBoardPage() {
 export function bindScheduleBoardPageEvents(rerender) {
   hideSchedulePreview();
   const rerenderScheduleBoard = () => rerenderPreservingInnerScroll(rerender);
+  document.querySelectorAll(".linked-action-product, .schedule-action-product-names a").forEach((link) => {
+    link.addEventListener("click", (event) => event.stopPropagation());
+  });
 
   document.querySelector(".schedule-board-filters")?.addEventListener("input", (event) => {
     const target = event.target;

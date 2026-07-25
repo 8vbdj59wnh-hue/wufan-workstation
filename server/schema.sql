@@ -417,3 +417,33 @@ CREATE TABLE IF NOT EXISTS work_plans (
   launchedAt TEXT,
   canceledAt TEXT
 );
+
+CREATE TABLE IF NOT EXISTS products (
+  id TEXT PRIMARY KEY,
+  skuCode TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  mainImage TEXT,
+  galleryImages TEXT,
+  brand TEXT,
+  category TEXT,
+  series TEXT,
+  material TEXT,
+  color TEXT,
+  specification TEXT,
+  status TEXT NOT NULL,
+  ownerId TEXT,
+  remark TEXT,
+  createdAt TEXT,
+  updatedAt TEXT
+);
+
+CREATE TABLE IF NOT EXISTS action_products (
+  id TEXT PRIMARY KEY,
+  actionId TEXT NOT NULL,
+  productId TEXT NOT NULL,
+  createdAt TEXT,
+  UNIQUE(actionId, productId)
+);
+
+CREATE INDEX IF NOT EXISTS idx_action_products_action ON action_products(actionId);
+CREATE INDEX IF NOT EXISTS idx_action_products_product ON action_products(productId);

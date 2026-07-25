@@ -477,6 +477,18 @@ const resourceConfigs = {
     ],
     jsonFields: ["customFields"],
   },
+  products: {
+    table: "products",
+    columns: [
+      "id", "skuCode", "name", "mainImage", "galleryImages", "brand", "category", "series", "material",
+      "color", "specification", "status", "ownerId", "remark", "createdAt", "updatedAt",
+    ],
+    jsonFields: ["galleryImages"],
+  },
+  actionProducts: {
+    table: "action_products",
+    columns: ["id", "actionId", "productId", "createdAt"],
+  },
 };
 
 const routeResourceMap = {
@@ -507,6 +519,8 @@ const routeResourceMap = {
   "issues-requirements": "issuesRequirements",
   "content-schedules": "contentSchedules",
   "work-plans": "workPlans",
+  products: "products",
+  "action-products": "actionProducts",
 };
 
 const seedData = {
@@ -538,6 +552,8 @@ const seedData = {
   standardWorkForms,
   contentSchedules,
   workPlans,
+  products: [],
+  actionProducts: [],
 };
 
 let db;
@@ -653,6 +669,7 @@ function decodeRow(row, config) {
     sourceFile: {},
     tags: {},
     replyRecords: [],
+    galleryImages: [],
   };
 
   for (const field of jsonFields) {
@@ -1157,6 +1174,35 @@ function readTaskTemplateCategoryId(templateId) {
 }
 
 function runLightweightMigrations() {
+  getDatabase().exec(`
+    CREATE TABLE IF NOT EXISTS products (
+      id TEXT PRIMARY KEY,
+      skuCode TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      mainImage TEXT,
+      galleryImages TEXT,
+      brand TEXT,
+      category TEXT,
+      series TEXT,
+      material TEXT,
+      color TEXT,
+      specification TEXT,
+      status TEXT NOT NULL,
+      ownerId TEXT,
+      remark TEXT,
+      createdAt TEXT,
+      updatedAt TEXT
+    );
+    CREATE TABLE IF NOT EXISTS action_products (
+      id TEXT PRIMARY KEY,
+      actionId TEXT NOT NULL,
+      productId TEXT NOT NULL,
+      createdAt TEXT,
+      UNIQUE(actionId, productId)
+    );
+    CREATE INDEX IF NOT EXISTS idx_action_products_action ON action_products(actionId);
+    CREATE INDEX IF NOT EXISTS idx_action_products_product ON action_products(productId)
+  `);
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS stores (
       id TEXT PRIMARY KEY,
@@ -2128,7 +2174,10 @@ export function startProcessInstanceExecution(instanceId, { userId = "", isAdmin
   return start();
 }
 
-export function launchWorkPlanWithProcess(workPlanId, { processInstance, tasks: generatedTasks = [], workPlan: launchedWorkPlan }) {
+export function launchWorkPlanWithProcess(
+  workPlanId,
+  { processInstance, tasks: generatedTasks = [], workPlan: launchedWorkPlan, productIds = [] },
+) {
   const database = getDatabase();
   const existingWorkPlan = readExistingItem("workPlans", workPlanId);
   const incomingWorkPlan = launchedWorkPlan?.id === workPlanId ? launchedWorkPlan : null;
@@ -2198,6 +2247,7 @@ export function launchWorkPlanWithProcess(workPlanId, { processInstance, tasks: 
     insertItem("processInstances", nextProcessInstance);
     for (const task of nextTasks) insertItem("tasks", task);
     insertItem("workPlans", nextWorkPlan);
+    replaceActionProductsInTransaction(nextProcessInstance.id, productIds, now);
   });
   launch();
 
@@ -2215,6 +2265,11 @@ export function createResource(routeResource, item) {
       .get({ name });
     if (duplicated !== undefined) throw new Error("权限模板名称不能重复。");
     const nextItem = { ...item, name };
+    insertItem(resourceKey, nextItem);
+    return nextItem;
+  }
+  if (resourceKey === "products") {
+    const nextItem = normalizeAndValidateProduct(item);
     insertItem(resourceKey, nextItem);
     return nextItem;
   }
@@ -2245,11 +2300,67 @@ export function updateResource(routeResource, id, item) {
     if (duplicated !== undefined) throw new Error("权限模板名称不能重复。");
     mergedItem.name = name;
   }
+  if (resourceKey === "products") Object.assign(mergedItem, normalizeAndValidateProduct(mergedItem, id));
   validatePersonPermissionTemplate(mergedItem, resourceKey);
   const preservedItem = mergePreservedCustomFields(resourceKey, id, mergedItem);
   const nextItem = resourceKey === "tasks" ? markTaskOverdueOnce(preservedItem) : preservedItem;
   insertItem(resourceKey, nextItem);
   return nextItem;
+}
+
+const productStatuses = new Set(["开发中", "待上架", "在售", "停售", "清仓", "已归档"]);
+
+function normalizeAndValidateProduct(item, existingId = "") {
+  const skuCode = String(item?.skuCode ?? "").trim();
+  const name = String(item?.name ?? "").trim();
+  const status = String(item?.status ?? "开发中").trim();
+  if (skuCode === "") throw new Error("SKU编码不能为空。");
+  if (name === "") throw new Error("产品名称不能为空。");
+  if (!productStatuses.has(status)) throw new Error("产品状态无效。");
+  const duplicated = getDatabase()
+    .prepare("SELECT id FROM products WHERE lower(skuCode) = lower(@skuCode) AND id <> @existingId LIMIT 1")
+    .get({ skuCode, existingId });
+  if (duplicated !== undefined) throw new Error("SKU编码不能重复。");
+  return {
+    ...item,
+    skuCode,
+    name,
+    status,
+    mainImage: String(item?.mainImage ?? "").trim() || null,
+    galleryImages: Array.isArray(item?.galleryImages) ? item.galleryImages.filter(Boolean) : [],
+  };
+}
+
+function normalizeProductIds(productIds = []) {
+  return [...new Set((Array.isArray(productIds) ? productIds : []).map((id) => String(id ?? "").trim()).filter(Boolean))];
+}
+
+function replaceActionProductsInTransaction(actionId, productIds, createdAt = new Date().toISOString()) {
+  const ids = normalizeProductIds(productIds);
+  const existingIds = new Set(
+    getDatabase().prepare("SELECT productId FROM action_products WHERE actionId = @actionId").all({ actionId }).map((item) => item.productId),
+  );
+  ids.forEach((productId) => {
+    const product = readExistingItem("products", productId);
+    if (product === null) throw new Error("存在未找到的关联产品。");
+    if (product.status === "已归档" && !existingIds.has(productId)) throw new Error("已归档产品不能新增关联。");
+  });
+  getDatabase().prepare("DELETE FROM action_products WHERE actionId = @actionId").run({ actionId });
+  ids.forEach((productId, index) => {
+    insertItem("actionProducts", {
+      id: `action-product-${actionId}-${index}-${Date.now()}`,
+      actionId,
+      productId,
+      createdAt,
+    });
+  });
+  return ids;
+}
+
+export function replaceActionProducts(actionId, productIds = []) {
+  if (readExistingItem("processInstances", actionId) === null) throw new Error("未找到该关键行动。");
+  const replace = getDatabase().transaction(() => replaceActionProductsInTransaction(actionId, productIds));
+  return replace();
 }
 
 function validatePersonPermissionTemplate(person, resourceKey) {

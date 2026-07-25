@@ -1,4 +1,4 @@
-import { formatProcessStepLabel, getCurrentUser, getLatestStandardWorkFormFields, getNow, getProcessNodeStepOrder, loadTemplates, resolveAssetUrl, state, updatePersistentResource, updateProcessTaskExecutor, uploadStandardWorkAttachment } from "./appState.js?v=20260705-state-singleton1";
+import { formatProcessStepLabel, getCurrentUser, getLatestStandardWorkFormFields, getNow, getProcessNodeStepOrder, loadTemplates, resolveAssetUrl, state, updateActionProducts, updatePersistentResource, updateProcessTaskExecutor, uploadStandardWorkAttachment } from "./appState.js?v=20260705-state-singleton1";
 import {
   GoalStatus,
   ProcessInstanceStatus,
@@ -20,6 +20,8 @@ import {
   validatePublicFormFields,
 } from "./workFormEditor.js?v=20260722-public-form-editor1";
 import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
+import { bindActionProductSelectors, collectActionProductIds, getActionProductIds, renderActionProductSelector, renderLinkedActionProducts } from "./actionProductRelations.js?v=20260725-product-center1";
+import { hasPermission } from "./permissions.js?v=20260725-product-center1";
 import {
   collectBusinessDateTime,
   collectBusinessMinuteDateTime,
@@ -147,6 +149,10 @@ export function canEditLaunchedProcessInstance(instance, user = getCurrentUser()
 
 function canEditInstance(instance) {
   return canEditLaunchedProcessInstance(instance);
+}
+
+function canManageActionProducts(instance) {
+  return canEditInstance(instance) && hasPermission(getCurrentUser(), "products.view");
 }
 
 function canEditTask(task) {
@@ -715,6 +721,10 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
           ${renderCustomFields(instance, editable)}
           <p class="form-note">该信息在发起关键行动时填写，同一关键行动下所有任务共享。</p>
         </div>
+        <div class="detail-block">
+          <h3>关联产品</h3>
+          ${canManageActionProducts(instance) ? renderActionProductSelector(getActionProductIds(instance.id), { label: "选择产品" }) : renderLinkedActionProducts(instance.id)}
+        </div>
         <div class="detail-block action-linked-template-section">
           <div class="section-heading with-actions compact-heading">
             <h3>关联模板</h3>
@@ -1075,6 +1085,7 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
 
   const form = detail.querySelector(".launched-process-form");
   if (form === null) return;
+  bindActionProductSelectors(form);
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -1086,6 +1097,8 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
     const name = getFormValue(form, "name");
     const goalId = getFormValue(form, "goalId");
     const description = getFormValue(form, "description");
+    const productSelector = form.querySelector("[data-action-product-selector]");
+    const productIds = productSelector === null ? null : collectActionProductIds(form);
     const editableTasks = getInstanceTasks(instanceId).filter(canEditTask);
     const instanceDueDateResult = collectBusinessDateTime(form, "instanceDueDate");
     if (instanceDueDateResult.error !== "") return showFormError(form, instanceDueDateResult.error);
@@ -1128,6 +1141,7 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
 
     try {
       await updatePersistentResource("process-instances", updatedInstance.id, updatedInstance);
+      if (productIds !== null) await updateActionProducts(updatedInstance.id, productIds);
       if (linkedWorkPlan !== null) {
         await updatePersistentResource("work-plans", linkedWorkPlan.id, { dueDate: updatedInstance.dueDate ?? null });
       }

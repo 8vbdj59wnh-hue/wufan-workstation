@@ -7,6 +7,7 @@ import { bindScheduleBoardPageEvents, renderScheduleBoardPage } from "./schedule
 import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260717-work-results-dashboard1";
 import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260705-state-singleton1";
 import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js?v=20260705-state-singleton1";
+import { bindProductCenterPageEvents, renderProductCenterPage } from "./productCenterPage.js?v=20260725-product-center1";
 import { attachThumbnailHoverPreview } from "./thumbnailPreview.js?v=20260723-task-card-static1";
 import {
   flushPersistentSave,
@@ -39,6 +40,7 @@ const moduleHashMap = {
   processes: "processes",
   assessment: "assessment",
   templateCenter: "templateCenter",
+  products: "products",
   "template-center": "templateCenter",
   methods: "processes",
   settings: "settings",
@@ -94,6 +96,7 @@ function scrollToCurrentHashSection() {
 
 function getModuleIdFromHash() {
   const hash = getRouteHash();
+  if (hash.startsWith("products/")) return "products";
   if (hash.startsWith("process-template-")) return "processes";
   if (hash.startsWith("methodology-")) return "processes";
   return moduleHashMap[hash] ?? modules[0].id;
@@ -326,6 +329,10 @@ function renderPage() {
 
   if (activeModule.id === "templateCenter") {
     content = renderTemplateCenterPage();
+  }
+
+  if (activeModule.id === "products") {
+    content = renderProductCenterPage();
   }
 
   if (activeModule.id === "settings") {
@@ -585,6 +592,10 @@ function render({ navigation = false } = {}) {
 
   if (activeModuleId === "templateCenter") {
     bindTemplateCenterPageEvents(render);
+  }
+
+  if (activeModuleId === "products") {
+    bindProductCenterPageEvents(render);
   }
 
   if (document.querySelector(".methodologies-page") !== null) {

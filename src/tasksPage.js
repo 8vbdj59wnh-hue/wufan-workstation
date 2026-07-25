@@ -84,6 +84,7 @@ import { bindActionLinkedTemplatePreviewEvents, bindLaunchedProcessDetailEvents,
 import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260705-state-singleton1";
 import { renderWorkFormViewer } from "./workFormViewer.js?v=20260705-state-singleton1";
 import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
+import { bindActionProductSelectors, collectActionProductIds, renderActionProductSelector } from "./actionProductRelations.js?v=20260725-product-center1";
 import {
   collectBusinessDateTime,
   collectBusinessMinuteDateTime,
@@ -4321,6 +4322,7 @@ function renderTaskModal() {
                 </div>
                 ${renderTemplateLockedInfo(selectedTemplate)}
                 ${renderCustomFieldsForm(selectedTemplate)}
+                ${renderActionProductSelector()}
                 ${renderStandardWorkAttachmentsField()}
               `
           }
@@ -4542,6 +4544,7 @@ async function saveTask(form, rerender) {
   if (error !== "") return setModalError(error, rerender);
 
   if (isAdd) {
+    const productIds = collectActionProductIds(form);
     let uploadedAttachments = [];
     try {
       uploadedAttachments = await uploadSelectedStandardWorkAttachments(form);
@@ -4600,6 +4603,7 @@ async function saveTask(form, rerender) {
         dueDate: workPlan.dueDate,
         initiatorId: currentUserId,
         launchAssignments: buildLaunchAssignments(draft.template.defaultProcessTemplateId, draft.template, currentUserId),
+        productIds,
       });
       selectedProcessInstanceId = result.instance.id;
       selectedTaskId = state.tasks.find((item) => item.processInstanceId === result.instance.id)?.id ?? selectedTaskId;
@@ -5695,6 +5699,7 @@ export function bindTasksPageEvents(rerender) {
 
     if (taskForm !== null) taskForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
     if (taskForm !== null) {
+      bindActionProductSelectors(taskForm);
       taskForm.addEventListener("input", (event) => {
         if (event.target.name?.startsWith("custom__")) updateImagePreview(event.target);
       });

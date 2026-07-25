@@ -61,6 +61,7 @@ import {
   validatePublicFormFields,
 } from "./workFormEditor.js?v=20260722-public-form-editor1";
 import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
+import { bindActionProductSelectors, collectActionProductIds, renderActionProductSelector } from "./actionProductRelations.js?v=20260725-product-center1";
 
 const departments = state.departments;
 const categories = state.categories;
@@ -1210,6 +1211,7 @@ function renderGoalTaskModal() {
           </div>
           ${renderTaskTemplateLockedInfo(selectedTemplate)}
           ${renderCustomFieldsForm(selectedTemplate)}
+          ${renderActionProductSelector()}
           ${renderStandardWorkAttachmentsField()}
           <label>
             <span>补充说明</span>
@@ -1528,6 +1530,7 @@ async function uploadSelectedStandardWorkAttachments(form) {
 
 async function saveGoalTask(form, rerender) {
   const draft = buildGoalTaskDraft(form, modalState.goalId);
+  const productIds = collectActionProductIds(form);
   const error = validateGoalTaskDraft(draft);
 
   if (error !== "") return setModalError(error, rerender);
@@ -1592,7 +1595,7 @@ async function saveGoalTask(form, rerender) {
   state.workPlans = [workPlan, ...state.workPlans];
   if (modalState.launchImmediately) {
     try {
-      await launchWorkPlanAsProcess(workPlan.id, { dueDate: workPlan.dueDate });
+      await launchWorkPlanAsProcess(workPlan.id, { dueDate: workPlan.dueDate, productIds });
     } catch (error) {
       console.error("关键行动发起失败", error);
       return setModalError(error.message || "关键行动发起失败，请检查本地数据库服务。", rerender);
@@ -1965,6 +1968,7 @@ export function bindGoalsPageEvents(rerender) {
   }
 
   if (goalTaskForm !== null) {
+    bindActionProductSelectors(goalTaskForm);
     goalTaskForm.addEventListener("submit", (event) => handleGoalSubmit(event, rerender));
     goalTaskForm.addEventListener("input", (event) => {
       if (event.target.name?.startsWith("custom__")) updatePublicFormImagePreview(event.target);

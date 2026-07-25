@@ -89,6 +89,8 @@ export const state = {
   templateTags: initialTemplateTags.map((tag) => ({ ...tag })),
   issuesRequirements: initialIssuesRequirements.map((item) => ({ ...item })),
   standardWorkForms: initialStandardWorkForms.map((form) => ({ ...form })),
+  products: [],
+  actionProducts: [],
 };
 
 export const defaultCompanySlogan = "做对的事，把事做对。\n尊重时间，尊重经营。";
@@ -190,6 +192,8 @@ export function getDataSnapshot() {
     templateTags: state.templateTags,
     issuesRequirements: state.issuesRequirements,
     standardWorkForms: state.standardWorkForms,
+    products: state.products,
+    actionProducts: state.actionProducts,
   };
 }
 
@@ -226,6 +230,8 @@ export function applyDataSnapshot(data) {
   replaceArray(state.templateTags, data.templateTags ?? initialTemplateTags);
   replaceArray(state.issuesRequirements, data.issuesRequirements ?? initialIssuesRequirements);
   replaceArray(state.standardWorkForms, data.standardWorkForms ?? initialStandardWorkForms);
+  replaceArray(state.products, data.products ?? []);
+  replaceArray(state.actionProducts, data.actionProducts ?? []);
   isApplyingRemoteData = false;
   ensureTaskTemplatesHaveProcessTemplates();
   ensureDefaultStandardWorkLibrary();
@@ -1984,7 +1990,10 @@ function enrichStandardWorkAttachments(customFields, { standardWorkId, workPlanI
   };
 }
 
-export async function launchWorkPlanAsProcess(workPlanId, { initiatorId = null, launchAssignments = null } = {}) {
+export async function launchWorkPlanAsProcess(
+  workPlanId,
+  { initiatorId = null, launchAssignments = null, productIds = [] } = {},
+) {
   const workPlan = state.workPlans.find((item) => item.id === workPlanId);
   if (workPlan === undefined) throw new Error("未找到该待发起工作计划。");
   if (workPlan.processInstanceId || workPlan.status === WorkPlanStatus.Launched) {
@@ -2051,6 +2060,7 @@ export async function launchWorkPlanAsProcess(workPlanId, { initiatorId = null, 
         processInstance: launchedInstance,
         tasks: generatedTasks,
         workPlan: launchedWorkPlan,
+        productIds,
       }),
     });
     const data = await response.json().catch(() => ({}));
@@ -2065,6 +2075,18 @@ export async function launchWorkPlanAsProcess(workPlanId, { initiatorId = null, 
     state.workPlans = previousWorkPlans;
     throw error;
   }
+}
+
+export async function updateActionProducts(processInstanceId, productIds = []) {
+  const response = await authFetch(`${apiBaseUrl}/api/process-instances/${processInstanceId}/products`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ productIds }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success !== true) throw new Error(data.message ?? data.error ?? "关联产品保存失败。");
+  if (data.data !== undefined) applyDataSnapshot(data.data);
+  return data;
 }
 
 export async function launchWorkPlanDraftAsProcess(workPlan, options = {}) {

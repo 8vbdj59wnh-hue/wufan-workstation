@@ -43,6 +43,7 @@ import { isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/tas
 import { getProcessInstanceBusinessStatus as selectProcessInstanceBusinessStatus } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
 import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260724-action-template-link1";
 import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260705-state-singleton1";
+import { bindActionProductSelectors, collectActionProductIds, renderActionProductSelector } from "./actionProductRelations.js?v=20260725-product-center1";
 import { bindStandardWorkLibraryEvents, openTaskTemplateLaunchModal, renderStandardWorkLibraryPage } from "./actionStandardsPage.js?v=20260722-action-standards-page1";
 import { selectTask } from "./tasksPage.js?v=20260724-action-template-link1";
 
@@ -732,6 +733,7 @@ function renderStartModal() {
           <label><span>发起人</span><select name="initiatorId" disabled>${renderOptions(people, getCurrentUserId(), "当前用户")}</select></label>
         </div>
         <label><span>本次关键行动说明</span><textarea name="description"></textarea></label>
+        ${renderActionProductSelector()}
         <div class="modal-actions"><button class="secondary-button" type="button" data-action="close-process-modal">取消</button><button class="primary-button" type="submit">发起</button></div>
       </form>
     </div></div>
@@ -943,6 +945,7 @@ async function persistContiguousNodeOrder(templateId, orderedNodes = getTemplate
 }
 
 async function submitStart(form, rerender) {
+  const productIds = collectActionProductIds(form);
   const launchableTemplates = getLaunchableProcessTemplates();
   const template =
     launchableTemplates.find((item) => item.id === getFormValue(form, "templateId")) ??
@@ -978,6 +981,7 @@ async function submitStart(form, rerender) {
     const result = await launchWorkPlanDraftAsProcess(workPlan, {
       initiatorId,
       launchAssignments: { owner: {}, accepter: {} },
+      productIds,
     });
     selectedInstanceId = result.instance.id;
   } catch (error) {
@@ -1124,6 +1128,7 @@ export function bindProcessesPageEvents(rerender) {
   const templateForm = document.querySelector(".process-template-form");
   const nodeForm = document.querySelector(".process-node-form");
   const startForm = document.querySelector(".process-start-form");
+  if (startForm !== null) bindActionProductSelectors(startForm);
   const startedProcessFilterForm = document.querySelector(".started-process-filters");
   if (page === null) return;
   if (document.querySelector(".standard-work-library-host") !== null) {

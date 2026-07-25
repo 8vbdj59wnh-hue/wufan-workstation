@@ -52,6 +52,7 @@ import {
   renderBusinessMinuteOptions,
 } from "./businessTime.js?v=20260705-state-singleton1";
 import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
+import { bindActionProductSelectors, collectActionProductIds, renderActionProductSelector } from "./actionProductRelations.js?v=20260725-product-center1";
 
 const categories = state.categories;
 const departments = state.departments;
@@ -908,6 +909,7 @@ function renderActionStandardLaunchModal() {
           </div>
           ${renderTemplateLockedInfo(selectedTemplate)}
           ${renderCustomFieldsForm(selectedTemplate)}
+          ${renderActionProductSelector()}
           ${renderStandardWorkAttachmentsField()}
           <div class="form-grid">
             <label><span>计划开始日期</span><input name="startDate" type="date" value="" /></label>
@@ -947,6 +949,7 @@ async function uploadSelectedStandardWorkAttachments(form) {
 }
 
 async function saveActionStandardLaunch(form, rerender) {
+  const productIds = collectActionProductIds(form);
   const dueDateResult = collectBusinessMinuteDateTime(form, "dueDate");
   const template = getTaskTemplate(getFormValue(form, "taskTemplateId"));
   if (template === null) return setModalError("必须选择启用的关键行动。", rerender);
@@ -1014,6 +1017,7 @@ async function saveActionStandardLaunch(form, rerender) {
       dueDate: workPlan.dueDate,
       initiatorId: currentUserId,
       launchAssignments: buildLaunchAssignments(template.defaultProcessTemplateId, template, currentUserId),
+      productIds,
     });
   } catch (launchError) {
     console.error("发起关键行动保存失败", launchError);
@@ -1696,6 +1700,7 @@ export function bindStandardWorkLibraryEvents(rerender, container = document) {
   const host = container.querySelector?.(".standard-work-library-host") ?? container;
   const taskTemplateForm = document.querySelector(".task-template-form");
   const launchForm = document.querySelector(".action-standard-launch-form");
+  if (launchForm !== null) bindActionProductSelectors(launchForm);
 
   host.addEventListener("dragstart", (event) => {
     const card = event.target.closest(".standard-work-card[draggable='true']");

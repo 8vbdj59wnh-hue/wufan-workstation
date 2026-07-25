@@ -24,6 +24,10 @@ export const modules = [
     name: "模板中心",
   },
   {
+    id: "products",
+    name: "产品中心",
+  },
+  {
     id: "settings",
     name: "设置",
   },
