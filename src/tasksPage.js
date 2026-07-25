@@ -1264,10 +1264,32 @@ function matchesTaskStatusFilter(task, selectedStatus) {
   return getTaskBusinessStatus(task).status === selectedStatus;
 }
 
-function matchesFilters(task) {
+function getTaskIdentifierSearchTarget() {
+  const keyword = filters.keyword.trim().toLowerCase();
+  if (keyword === "") return null;
+
+  const matchedTask = state.tasks.find(
+    (task) => String(task.businessCode ?? "").toLowerCase() === keyword,
+  );
+  if (matchedTask !== undefined) return { type: "task", id: matchedTask.id };
+
+  const matchedProcessInstance = state.processInstances.find(
+    (instance) => String(instance.businessCode ?? "").toLowerCase() === keyword,
+  );
+  return matchedProcessInstance === undefined
+    ? null
+    : { type: "processInstance", id: matchedProcessInstance.id };
+}
+
+function taskMatchesIdentifierSearch(task, target) {
+  if (target.type === "task") return task.id === target.id;
+  return task.processInstanceId === target.id;
+}
+
+function matchesFilters(task, identifierTarget = null) {
   const overdue = isTaskOverdue(task, today) || hasTaskOverdueRecord(task);
-  const shouldShowDone = filters.showDone || filters.status === TaskStatus.Done;
-  const shouldShowCanceled = filters.showCanceled || filters.status === TaskStatus.Canceled;
+  const shouldShowDone = identifierTarget !== null || filters.showDone || filters.status === TaskStatus.Done;
+  const shouldShowCanceled = identifierTarget !== null || filters.showCanceled || filters.status === TaskStatus.Canceled;
   const belonging = getTaskBelonging(task);
   const searchableText = [
     task.businessCode,
@@ -1283,7 +1305,12 @@ function matchesFilters(task) {
   if (!matchesTaskStatusFilter(task, filters.status)) return false;
   if (!shouldShowDone && isDoneStatus(task.status)) return false;
   if (!shouldShowCanceled && isCanceledStatus(task.status)) return false;
-  if (filters.keyword !== "" && !searchableText.includes(filters.keyword.toLowerCase())) return false;
+  if (identifierTarget !== null && !taskMatchesIdentifierSearch(task, identifierTarget)) return false;
+  if (
+    identifierTarget === null &&
+    filters.keyword !== "" &&
+    !searchableText.includes(filters.keyword.toLowerCase())
+  ) return false;
   if (filters.source !== "" && task.source !== filters.source) return false;
   if (filters.departmentId !== "" && task.departmentId !== filters.departmentId) return false;
   if (filters.ownerId !== "" && task.ownerId !== filters.ownerId) return false;
@@ -1337,11 +1364,12 @@ function isTaskVisibleInExecutionStage(task) {
 }
 
 function getFilteredTasks() {
+  const identifierTarget = getTaskIdentifierSearchTarget();
   return state.tasks
     .filter((task) => !isClearanceTask(task))
     .filter(isTaskVisibleInExecutionStage)
-    .filter(matchesTaskListView)
-    .filter(matchesFilters);
+    .filter((task) => identifierTarget !== null || matchesTaskListView(task))
+    .filter((task) => matchesFilters(task, identifierTarget));
 }
 
 function renderOverdue(task) {
@@ -2961,7 +2989,7 @@ function renderFilters() {
     <form class="task-filters task-list-filters" aria-label="任务筛选">
       <label class="task-keyword-filter">
         <span>关键词</span>
-        <input name="keyword" value="${escapeHtml(filters.keyword)}" placeholder="搜索任务名称或编号" />
+        <input name="keyword" value="${escapeHtml(filters.keyword)}" placeholder="搜索任务名称、编号、关键行动编号" />
       </label>
       <label>
         <span>任务状态</span>

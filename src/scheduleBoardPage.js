@@ -529,9 +529,25 @@ function getSearchText(row) {
   ].filter(Boolean).join(" ").toLowerCase();
 }
 
-function rowMatchesBaseFilters(row) {
+function getActionIdentifierSearchTarget() {
   const keyword = filters.keyword.trim().toLowerCase();
-  if (keyword !== "" && !getSearchText(row).includes(keyword)) return false;
+  if (keyword === "") return null;
+
+  const matchedProcessInstance = state.processInstances.find(
+    (instance) => String(instance.businessCode ?? "").toLowerCase() === keyword,
+  );
+  if (matchedProcessInstance !== undefined) return matchedProcessInstance.id;
+
+  const matchedTask = state.tasks.find(
+    (task) => String(task.businessCode ?? "").toLowerCase() === keyword,
+  );
+  return matchedTask?.processInstanceId ?? null;
+}
+
+function rowMatchesBaseFilters(row, identifierTarget = null) {
+  const keyword = filters.keyword.trim().toLowerCase();
+  if (identifierTarget !== null && row.processInstance?.id !== identifierTarget) return false;
+  if (identifierTarget === null && keyword !== "" && !getSearchText(row).includes(keyword)) return false;
   if (filters.valueModuleId !== "" && row.valueModuleId !== filters.valueModuleId) return false;
   if (filters.standardWorkId !== "" && row.workPlan.taskTemplateId !== filters.standardWorkId) return false;
   if (filters.departmentId !== "" && row.workPlan.departmentId !== filters.departmentId && row.template?.departmentId !== filters.departmentId) return false;
@@ -540,8 +556,10 @@ function rowMatchesBaseFilters(row) {
 }
 
 function launchedRowMatchesFilters(row) {
-  if (!rowMatchesBaseFilters(row)) return false;
+  const identifierTarget = getActionIdentifierSearchTarget();
+  if (!rowMatchesBaseFilters(row, identifierTarget)) return false;
   if (
+    identifierTarget === null &&
     filters.scope === "mine" &&
     selectProcessInstanceOwner(row.processInstance?.id, state).userId !== getCurrentUserPersonId()
   ) {
@@ -603,7 +621,7 @@ function renderFilters() {
       </div>
       <label class="schedule-keyword-filter">
         <span>关键词</span>
-        <input name="keyword" value="${escapeAttribute(filters.keyword)}" autocomplete="off" />
+        <input name="keyword" value="${escapeAttribute(filters.keyword)}" placeholder="搜索行动名称、编号、任务编号" autocomplete="off" />
       </label>
       <label>
         <span>价值链</span>
