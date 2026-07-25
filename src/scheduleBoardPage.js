@@ -1063,7 +1063,6 @@ function renderActionOverviewCard(row) {
       </div>
       <div class="schedule-action-overview-body">
         <h3 title="${escapeAttribute(title)}">${escapeHtml(title)}</h3>
-        ${getActionProducts(row.processInstance.id).length ? renderLinkedActionProducts(row.processInstance.id, { compact: true }) : ""}
         <div class="schedule-action-overview-meta">
           <span class="schedule-action-overview-status ${getActionOverviewStatusClass(businessStatus.status)}">${escapeHtml(businessStatus.label)}</span>
           ${renderActionOverviewOwner(row)}
