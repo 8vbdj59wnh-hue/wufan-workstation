@@ -12,6 +12,8 @@ import {
   cancelProcessInstance,
   completeExecutionGroup,
   createExecutionGroup,
+  createProductImportBatch,
+  commitProductImportBatch,
   databasePath,
   deleteProcessTemplate,
   deleteProcessTemplateNode,
@@ -22,11 +24,13 @@ import {
   launchWorkPlanWithProcess,
   moveTaskTemplateToValueChain,
   readAllData,
+  readProductImportBatch,
   readRouteResource,
   replaceActionProducts,
   replaceAllData,
   touchLastLoginAt,
   updateCurrentUserAvatar,
+  updateProductImportBatch,
   startProcessInstanceExecution,
   startExecutionGroup,
   updateProcessTemplateNodeStatus,
@@ -34,6 +38,12 @@ import {
   updateTaskFromWorkflow,
   uploadsDir,
 } from "./db.js";
+import {
+  parseProductWorkbook,
+  productImportFieldDefinitions,
+  readProductImportStaging,
+  validateProductImport,
+} from "./productImport.js";
 import { createToken, verifyPassword, verifyToken } from "./security.js";
 import { canLaunchActionTemplate, getDataScope, hasPermission } from "../src/permissions.js";
 import { getProcessInstanceOwner } from "../src/data/processInstanceSelectors.js";
@@ -44,11 +54,13 @@ const port = Number(process.env.PORT ?? 3001);
 const imageUploadsDir = path.join(uploadsDir, "images");
 const fileUploadsDir = path.join(uploadsDir, "files");
 const standardWorkAttachmentsDir = path.join(uploadsDir, "standard-work-attachments");
+const productImportUploadsDir = path.join(uploadsDir, "product-import-uploads");
 
 initializeDatabase();
 fs.mkdirSync(imageUploadsDir, { recursive: true });
 fs.mkdirSync(fileUploadsDir, { recursive: true });
 fs.mkdirSync(standardWorkAttachmentsDir, { recursive: true });
+fs.mkdirSync(productImportUploadsDir, { recursive: true });
 
 function normalizeUploadedFileName(name = "") {
   const decoded = Buffer.from(name, "latin1").toString("utf8");
@@ -139,6 +151,26 @@ const uploadSpreadsheet = multer({
     const ext = path.extname(file.originalname).toLowerCase();
     if (!allowedSpreadsheetExts.has(ext)) {
       callback(new Error("只支持 .xlsx、.xls、.csv 表格附件。"));
+      return;
+    }
+    callback(null, true);
+  },
+});
+
+const productImportStorage = multer.diskStorage({
+  destination: (_request, _file, callback) => callback(null, productImportUploadsDir),
+  filename: (_request, file, callback) => {
+    const extension = path.extname(file.originalname).toLowerCase();
+    callback(null, `${Date.now()}-${Math.random().toString(36).slice(2, 10)}${extension}`);
+  },
+});
+const uploadProductImport = multer({
+  storage: productImportStorage,
+  limits: { fileSize: 300 * 1024 * 1024 },
+  fileFilter: (_request, file, callback) => {
+    const extension = path.extname(file.originalname).toLowerCase();
+    if (!new Set([".xls", ".xlsx"]).has(extension)) {
+      callback(new Error("ERP 产品导入仅支持 .xls、.xlsx 文件。"));
       return;
     }
     callback(null, true);
@@ -285,7 +317,7 @@ function canUsePublishingAccountOptions(user) {
 }
 
 function canReadResource(resource, user) {
-  if (resource === "products" || resource === "action-products") return hasPermission(user, "products.view");
+  if (resource === "products" || resource === "action-products" || resource === "product-import-batches") return hasPermission(user, "products.view");
   if (resource === "permission-templates") return hasPermission(user, "settings.managePermissions");
   if (resource === "stores") return canUseStoreOptions(user);
   if (resource === "publishing-accounts") return canUsePublishingAccountOptions(user);
@@ -298,10 +330,11 @@ function filterDataByScope(data, user) {
   const publishingAccounts = canUsePublishingAccountOptions(user) ? (data.publishingAccounts ?? []) : [];
   const permissionTemplates = hasPermission(user, "settings.managePermissions") ? (data.permissionTemplates ?? []) : [];
   const products = hasPermission(user, "products.view") ? (data.products ?? []) : [];
+  const productImportBatches = hasPermission(user, "products.view") ? (data.productImportBatches ?? []) : [];
   const visibleProductIds = new Set(products.map((product) => product.id));
   if (dataScope === "all") {
     const actionProducts = (data.actionProducts ?? []).filter((item) => visibleProductIds.has(item.productId));
-    return { ...data, stores, publishingAccounts, permissionTemplates, products, actionProducts };
+    return { ...data, stores, publishingAccounts, permissionTemplates, products, actionProducts, productImportBatches };
   }
 
   const scopedTasks = filterByScope(data.tasks ?? [], user);
@@ -335,6 +368,7 @@ function filterDataByScope(data, user) {
     executionGroups: scopedExecutionGroups,
     processInstances: scopedProcessInstances,
     products,
+    productImportBatches,
     actionProducts: scopedActionProducts,
     contentSchedules: scopedContentSchedules,
     workPlans: scopedWorkPlans,
@@ -550,6 +584,147 @@ app.post("/api/uploads/standard-work-attachment", (request, response) => {
       uploadedAt: new Date().toISOString(),
     });
   });
+});
+
+app.post("/api/products/import/parse", requirePermission("products.create"), (request, response) => {
+  uploadProductImport.single("file")(request, response, async (error) => {
+    if (error !== undefined) {
+      const message = error.code === "LIMIT_FILE_SIZE" ? "ERP Excel 大小不能超过 300MB。" : error.message || "Excel 上传失败。";
+      response.status(error.code === "LIMIT_FILE_SIZE" ? 413 : 400).json({ success: false, message });
+      return;
+    }
+    if (request.file === undefined) {
+      response.status(400).json({ success: false, message: "请选择 ERP Excel 文件。" });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const batchId = `product-import-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const fileName = normalizeUploadedFileName(request.file.originalname);
+    const sourceSystem = String(request.body?.sourceSystem ?? "ERP").trim() || "ERP";
+    let batch = createProductImportBatch({
+      id: batchId,
+      fileName,
+      sourceSystem,
+      sheetName: "",
+      status: "parsing",
+      headers: [],
+      mappingConfig: {},
+      summary: {},
+      createdBy: getUserPersonId(request.user),
+      validatedAt: null,
+      committedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    try {
+      const parsed = await parseProductWorkbook(request.file.path, batchId, fileName);
+      const existingProducts = readAllData().products ?? [];
+      const validation = validateProductImport(parsed.staging, parsed.mapping, existingProducts, batchId, sourceSystem);
+      batch = updateProductImportBatch(batchId, {
+        ...batch,
+        sheetName: parsed.staging.sheetName,
+        status: "parsed",
+        headers: parsed.staging.headers,
+        mappingConfig: parsed.mapping,
+        summary: validation.summary,
+        updatedAt: new Date().toISOString(),
+      });
+      response.json({
+        success: true,
+        batch,
+        fieldDefinitions: productImportFieldDefinitions,
+        preview: validation.rows.slice(0, 20),
+      });
+    } catch (parseError) {
+      updateProductImportBatch(batchId, {
+        ...batch,
+        status: "failed",
+        summary: { message: parseError.message || "Excel 解析失败。" },
+        updatedAt: new Date().toISOString(),
+      });
+      console.error("ERP 产品 Excel 解析失败", parseError);
+      response.status(400).json({ success: false, message: parseError.message || "Excel 解析失败。" });
+    } finally {
+      fs.rmSync(request.file.path, { force: true });
+    }
+  });
+});
+
+app.post("/api/products/import/:id/validate", requirePermission("products.create"), (request, response) => {
+  try {
+    const batch = readProductImportBatch(request.params.id);
+    if (batch === null) {
+      response.status(404).json({ success: false, message: "导入记录不存在。" });
+      return;
+    }
+    if (batch.status === "committed") {
+      response.status(409).json({ success: false, message: "该批次已经完成导入。" });
+      return;
+    }
+    const staging = readProductImportStaging(batch.id);
+    const mapping = Object.fromEntries(staging.headers.map((header) => [header, String(request.body?.mapping?.[header] ?? "rawSourceData")]));
+    const allowedTargets = new Set(["rawSourceData", ...productImportFieldDefinitions.map((definition) => definition.key)]);
+    if (Object.values(mapping).some((target) => !allowedTargets.has(target))) {
+      response.status(400).json({ success: false, message: "字段映射中包含未知系统字段。" });
+      return;
+    }
+    const validation = validateProductImport(staging, mapping, readAllData().products ?? [], batch.id, batch.sourceSystem);
+    const now = new Date().toISOString();
+    const nextBatch = updateProductImportBatch(batch.id, {
+      ...batch,
+      status: validation.valid ? "validated" : "parsed",
+      mappingConfig: mapping,
+      summary: validation.summary,
+      validatedAt: validation.valid ? now : null,
+      updatedAt: now,
+    });
+    response.json({ success: true, valid: validation.valid, batch: nextBatch, preview: validation.rows.slice(0, 100) });
+  } catch (validationError) {
+    console.error("ERP 产品导入校验失败", validationError);
+    response.status(400).json({ success: false, message: validationError.message || "导入校验失败。" });
+  }
+});
+
+app.post("/api/products/import/:id/commit", requirePermission("products.create"), (request, response) => {
+  try {
+    const batch = readProductImportBatch(request.params.id);
+    if (batch === null) {
+      response.status(404).json({ success: false, message: "导入记录不存在。" });
+      return;
+    }
+    if (batch.status === "committed") {
+      response.json({ success: true, idempotent: true, batch, data: filterDataByScope(readAllData(), request.user) });
+      return;
+    }
+    const staging = readProductImportStaging(batch.id);
+    const validation = validateProductImport(staging, batch.mappingConfig ?? {}, readAllData().products ?? [], batch.id, batch.sourceSystem);
+    if (!validation.valid) {
+      response.status(409).json({ success: false, message: "导入数据已变化或校验未通过，请重新校验。", summary: validation.summary });
+      return;
+    }
+    if (validation.summary.update > 0 && !hasPermission(request.user, "products.edit")) {
+      response.status(403).json({ success: false, message: "本批次包含 SKU 更新，你没有编辑产品权限。" });
+      return;
+    }
+    const committedAt = new Date().toISOString();
+    const result = commitProductImportBatch(
+      batch.id,
+      validation.rows.map((row) => row.product),
+      { ...validation.summary, committedBy: getUserPersonId(request.user), committedAt },
+      committedAt,
+    );
+    response.json({
+      success: true,
+      idempotent: result.idempotent,
+      batch: result.batch,
+      products: result.products,
+      data: filterDataByScope(readAllData(), request.user),
+    });
+  } catch (commitError) {
+    console.error("ERP 产品确认导入失败", commitError);
+    response.status(400).json({ success: false, message: commitError.message || "确认导入失败。" });
+  }
 });
 
 app.post("/api/process-instances/:id/cancel", requirePermission("processes.editInstances"), (request, response) => {

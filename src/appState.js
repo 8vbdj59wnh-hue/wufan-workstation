@@ -91,6 +91,7 @@ export const state = {
   standardWorkForms: initialStandardWorkForms.map((form) => ({ ...form })),
   products: [],
   actionProducts: [],
+  productImportBatches: [],
 };
 
 export const defaultCompanySlogan = "做对的事，把事做对。\n尊重时间，尊重经营。";
@@ -194,6 +195,7 @@ export function getDataSnapshot() {
     standardWorkForms: state.standardWorkForms,
     products: state.products,
     actionProducts: state.actionProducts,
+    productImportBatches: state.productImportBatches,
   };
 }
 
@@ -232,6 +234,7 @@ export function applyDataSnapshot(data) {
   replaceArray(state.standardWorkForms, data.standardWorkForms ?? initialStandardWorkForms);
   replaceArray(state.products, data.products ?? []);
   replaceArray(state.actionProducts, data.actionProducts ?? []);
+  replaceArray(state.productImportBatches, data.productImportBatches ?? []);
   isApplyingRemoteData = false;
   ensureTaskTemplatesHaveProcessTemplates();
   ensureDefaultStandardWorkLibrary();
@@ -607,6 +610,36 @@ export function createId(prefix) {
 
 export function getNow() {
   return new Date().toISOString();
+}
+
+async function readApiJson(response, fallbackMessage) {
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.message || body.error || fallbackMessage);
+  return body;
+}
+
+export async function parseProductImport(file, sourceSystem = "ERP") {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("sourceSystem", sourceSystem);
+  const response = await authFetch(`${apiBaseUrl}/api/products/import/parse`, { method: "POST", body: formData });
+  return readApiJson(response, "ERP Excel 解析失败。");
+}
+
+export async function validateProductImportBatch(batchId, mapping) {
+  const response = await authFetch(`${apiBaseUrl}/api/products/import/${encodeURIComponent(batchId)}/validate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mapping }),
+  });
+  return readApiJson(response, "ERP 产品导入校验失败。");
+}
+
+export async function commitProductImport(batchId) {
+  const response = await authFetch(`${apiBaseUrl}/api/products/import/${encodeURIComponent(batchId)}/commit`, { method: "POST" });
+  const body = await readApiJson(response, "ERP 产品确认导入失败。");
+  if (body.data) applyDataSnapshot(body.data);
+  return body;
 }
 
 function getTodayDate() {

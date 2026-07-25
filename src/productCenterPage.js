@@ -1,12 +1,15 @@
 import {
   createId,
   createPersistentResource,
+  commitProductImport,
   getCurrentUser,
   getNow,
+  parseProductImport,
   resolveAssetUrl,
   state,
   updatePersistentResource,
   uploadImageFile,
+  validateProductImportBatch,
 } from "./appState.js?v=20260705-state-singleton1";
 import { getProcessInstanceBusinessStatus, getProcessInstanceOwner } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
 import { hasPermission } from "./permissions.js?v=20260725-product-center1";
@@ -14,6 +17,7 @@ import { hasPermission } from "./permissions.js?v=20260725-product-center1";
 const productStatuses = ["开发中", "待上架", "在售", "停售", "清仓", "已归档"];
 let filters = { query: "", brand: "", category: "", status: "" };
 let modalState = null;
+let importState = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -73,7 +77,9 @@ function renderProductList() {
     <section class="product-center-page">
       <div class="section-heading with-actions">
         <div><h1>产品中心</h1><p>以 SKU 为单位维护唯一产品主数据</p></div>
-        ${canCreate ? `<button class="primary-button" type="button" data-action="new-product">新增产品</button>` : ""}
+        <div class="heading-actions">
+          ${canCreate ? `<button class="secondary-button" type="button" data-action="open-product-import">导入ERP Excel</button><button class="primary-button" type="button" data-action="new-product">新增产品</button>` : ""}
+        </div>
       </div>
       <form class="filter-bar product-filter-bar" data-product-filter-form>
         <input type="search" name="query" value="${escapeHtml(filters.query)}" placeholder="搜索产品名称或SKU" />
@@ -98,9 +104,23 @@ function renderProductList() {
           </tbody>
         </table>
       </div>
+      ${renderProductImportRecords()}
       ${renderProductModal()}
+      ${renderProductImportModal()}
     </section>
   `;
+}
+
+function renderProductImportRecords() {
+  const batches = [...state.productImportBatches].sort((left, right) => String(right.createdAt ?? "").localeCompare(String(left.createdAt ?? "")));
+  if (batches.length === 0) return "";
+  const statusLabels = { parsing: "解析中", parsed: "待校验", validated: "待确认", committed: "已导入", failed: "失败" };
+  return `<section class="product-import-records">
+    <div class="subsection-heading"><div><h2>导入记录</h2><p>保留每次 ERP 文件的映射、校验和提交结果</p></div></div>
+    <div class="table-wrap"><table class="data-table"><thead><tr><th>文件</th><th>来源</th><th>工作表</th><th>状态</th><th>总行数</th><th>新增</th><th>更新</th><th>导入时间</th></tr></thead>
+      <tbody>${batches.map((batch) => `<tr><td>${escapeHtml(batch.fileName)}</td><td>${escapeHtml(batch.sourceSystem || "ERP")}</td><td>${escapeHtml(batch.sheetName || "-")}</td><td><span class="status-badge">${escapeHtml(statusLabels[batch.status] || batch.status)}</span></td><td>${batch.summary?.total ?? "-"}</td><td>${batch.summary?.create ?? "-"}</td><td>${batch.summary?.update ?? "-"}</td><td>${formatDateTime(batch.committedAt || batch.createdAt)}</td></tr>`).join("")}</tbody>
+    </table></div>
+  </section>`;
 }
 
 function renderProductDetail(product) {
@@ -145,6 +165,92 @@ function renderProductModal() {
       <label class="span-2"><span>其他产品图片</span><input name="galleryImageFiles" type="file" accept="image/jpeg,image/png,image/webp" multiple /><input name="existingGalleryImages" type="hidden" value="${escapeHtml(JSON.stringify(item.galleryImages || []))}" /></label>
       <label class="span-2"><span>备注</span><textarea name="remark" rows="3">${escapeHtml(item.remark || "")}</textarea></label>
     </div></form><footer class="modal-footer"><button class="secondary-button" type="button" data-action="close-product-modal">取消</button><button class="primary-button" type="submit" form="product-form">保存</button></footer></section></div>`;
+}
+
+function getImportStepNumber() {
+  if (importState?.step === "mapping") return 2;
+  if (importState?.step === "preview") return 4;
+  if (importState?.step === "complete") return 5;
+  return 1;
+}
+
+function renderImportSteps() {
+  const current = getImportStepNumber();
+  return `<ol class="product-import-steps">${["上传Excel", "字段匹配", "数据预览", "校验", "确认导入"].map((label, index) => {
+    const step = index + 1;
+    return `<li class="${step === current ? "is-current" : step < current ? "is-complete" : ""}"><span>${step}</span>${label}</li>`;
+  }).join("")}</ol>`;
+}
+
+function renderImportUpload() {
+  return `<form id="product-import-upload-form" class="product-import-upload-form">
+    <label><span>数据来源</span><input name="sourceSystem" value="ERP" maxlength="40" /></label>
+    <label class="product-import-file-field"><span>ERP Excel *</span><input name="file" type="file" accept=".xls,.xlsx" required /><small>支持通用 .xls、.xlsx；上传后先匹配字段，不会直接写入产品数据。</small></label>
+    <div class="form-error" ${importState?.error ? "" : "hidden"}>${escapeHtml(importState?.error || "")}</div>
+  </form>`;
+}
+
+function renderMappingOptions(selected) {
+  return `<option value="rawSourceData" ${selected === "rawSourceData" ? "selected" : ""}>仅保留在原始数据</option>${importState.fieldDefinitions.map((definition) =>
+    `<option value="${escapeHtml(definition.key)}" ${selected === definition.key ? "selected" : ""}>${escapeHtml(definition.label)}</option>`,
+  ).join("")}`;
+}
+
+function getImportSample(header) {
+  return importState.preview.map((row) => row.product?.rawSourceData?.[header]).filter((value) => String(value ?? "").trim() !== "").slice(0, 2).join("；");
+}
+
+function renderImportMapping() {
+  const batch = importState.batch;
+  return `<div class="product-import-mapping">
+    <div class="import-summary-line"><strong>${escapeHtml(batch.fileName)}</strong><span>工作表：${escapeHtml(batch.sheetName)}</span><span>${batch.summary?.total ?? 0} 行</span><span>提取图片 ${batch.summary?.imageCount ?? 0} 张</span></div>
+    ${(batch.summary?.warnings ?? []).map((warning) => `<div class="form-warning">${escapeHtml(warning)}</div>`).join("")}
+    <div class="form-error" ${importState.error ? "" : "hidden"}>${escapeHtml(importState.error || "")}</div>
+    <form id="product-import-mapping-form"><div class="table-wrap import-mapping-table-wrap"><table class="data-table"><thead><tr><th>ERP字段</th><th>样例数据</th><th>系统字段</th></tr></thead>
+      <tbody>${batch.headers.map((header, index) => `<tr><td><strong>${escapeHtml(header)}</strong></td><td class="import-sample-cell">${escapeHtml(getImportSample(header) || "-")}</td><td><select name="mapping-${index}" data-import-header="${escapeHtml(header)}">${renderMappingOptions(batch.mappingConfig?.[header] || "rawSourceData")}</select></td></tr>`).join("")}</tbody>
+    </table></div></form>
+    <p class="form-note">未映射字段不会丢失，将按 ERP 原始字段名完整保存在 <code>rawSourceData</code>。</p>
+  </div>`;
+}
+
+function renderImportPreview() {
+  const { batch, preview, valid } = importState;
+  const summary = batch.summary ?? {};
+  return `<div class="product-import-preview">
+    <div class="import-summary-grid">
+      <div><span>总数据</span><strong>${summary.total ?? 0}</strong></div><div><span>新增</span><strong>${summary.create ?? 0}</strong></div>
+      <div><span>更新</span><strong>${summary.update ?? 0}</strong></div><div><span>错误行</span><strong>${summary.invalid ?? 0}</strong></div>
+    </div>
+    ${(summary.mappingErrors ?? []).length ? `<div class="form-error">${summary.mappingErrors.map(escapeHtml).join("<br />")}</div>` : ""}
+    ${(summary.warnings ?? []).map((warning) => `<div class="form-warning">${escapeHtml(warning)}</div>`).join("")}
+    <div class="table-wrap import-preview-table-wrap"><table class="data-table"><thead><tr><th>行号</th><th>图片</th><th>SKU编码</th><th>产品名称</th><th>判断</th><th>校验结果</th></tr></thead>
+      <tbody>${preview.map((row) => `<tr class="${row.errors.length ? "import-row-error" : ""}"><td>${row.rowNumber}</td><td>${row.product.mainImage ? `<img class="product-import-preview-image" src="${escapeHtml(resolveAssetUrl(row.product.mainImage))}" alt="" />` : `<span class="product-import-preview-image product-image-placeholder">无图</span>`}</td><td>${escapeHtml(row.product.skuCode || "-")}</td><td>${escapeHtml(row.product.name || "-")}</td><td><span class="status-badge">${row.action === "update" ? "更新" : "新增"}</span></td><td>${row.errors.length ? escapeHtml(row.errors.join("；")) : "通过"}</td></tr>`).join("")}</tbody>
+    </table></div>
+    <p class="form-note">${valid ? "全部数据校验通过，可以确认导入。" : "存在校验错误，请返回字段匹配后重新生成预览。"}</p>
+  </div>`;
+}
+
+function renderImportComplete() {
+  const summary = importState.batch.summary ?? {};
+  return `<div class="product-import-complete"><strong>ERP 产品数据导入完成</strong><p>共处理 ${summary.total ?? 0} 个 SKU，新增 ${summary.create ?? 0}，更新 ${summary.update ?? 0}；导入记录已保存。</p></div>`;
+}
+
+function renderProductImportModal() {
+  if (importState === null) return "";
+  let body = renderImportUpload();
+  if (importState.step === "mapping") body = renderImportMapping();
+  if (importState.step === "preview") body = renderImportPreview();
+  if (importState.step === "complete") body = renderImportComplete();
+  let footer = `<button class="secondary-button" type="button" data-action="close-product-import">取消</button><button class="primary-button" type="submit" form="product-import-upload-form" ${importState.loading ? "disabled" : ""}>${importState.loading ? "正在解析…" : "上传并解析"}</button>`;
+  if (importState.step === "mapping") footer = `<button class="secondary-button" type="button" data-action="close-product-import">取消</button><button class="primary-button" type="button" data-action="validate-product-import" ${importState.loading ? "disabled" : ""}>${importState.loading ? "正在校验…" : "生成预览并校验"}</button>`;
+  if (importState.step === "preview") footer = `<button class="secondary-button" type="button" data-action="back-product-import-mapping">返回字段匹配</button><button class="primary-button" type="button" data-action="commit-product-import" ${!importState.valid || importState.loading ? "disabled" : ""}>${importState.loading ? "正在导入…" : "确认导入"}</button>`;
+  if (importState.step === "complete") footer = `<button class="primary-button" type="button" data-action="close-product-import">完成</button>`;
+  return `<div class="modal-backdrop"><section class="modal-panel product-import-modal"><header class="modal-header"><div><h2>ERP 产品数据导入</h2><p>字段可配置，未知字段完整保留</p></div><button class="icon-button" type="button" data-action="close-product-import" aria-label="关闭">×</button></header>
+    ${renderImportSteps()}<div class="modal-body">${body}</div><footer class="modal-footer">${footer}</footer></section></div>`;
+}
+
+function collectImportMapping() {
+  return Object.fromEntries(Array.from(document.querySelectorAll("[data-import-header]")).map((select) => [select.dataset.importHeader, select.value]));
 }
 
 export function renderProductCenterPage() {
@@ -201,8 +307,34 @@ export function bindProductCenterPageEvents(rerender) {
     if (button === null) return;
     const action = button.dataset.action;
     if (action === "new-product") { modalState = { kind: "create", error: "" }; rerender(); }
+    if (action === "open-product-import") { importState = { step: "upload", loading: false, error: "" }; rerender(); }
     if (action === "edit-product") { modalState = { kind: "edit", id: button.dataset.productId, error: "" }; rerender(); }
     if (action === "close-product-modal") { modalState = null; rerender(); }
+    if (action === "close-product-import") { importState = null; rerender(); }
+    if (action === "back-product-import-mapping") { importState = { ...importState, step: "mapping", error: "" }; rerender(); }
+    if (action === "validate-product-import") {
+      const mapping = collectImportMapping();
+      importState = { ...importState, loading: true, error: "" };
+      rerender();
+      try {
+        const result = await validateProductImportBatch(importState.batch.id, mapping);
+        importState = { ...importState, step: "preview", loading: false, valid: result.valid, batch: result.batch, preview: result.preview };
+      } catch (error) {
+        importState = { ...importState, loading: false, error: error.message || "导入校验失败。" };
+      }
+      rerender();
+    }
+    if (action === "commit-product-import") {
+      importState = { ...importState, loading: true, error: "" };
+      rerender();
+      try {
+        const result = await commitProductImport(importState.batch.id);
+        importState = { ...importState, step: "complete", loading: false, batch: result.batch, valid: true };
+      } catch (error) {
+        importState = { ...importState, loading: false, error: error.message || "确认导入失败。" };
+      }
+      rerender();
+    }
     if (action === "view-product") window.location.hash = `products/${encodeURIComponent(button.dataset.productId)}`;
     if (action === "back-products") window.location.hash = "products";
     if (action === "archive-product") {
@@ -219,4 +351,27 @@ export function bindProductCenterPageEvents(rerender) {
     }
   });
   document.querySelector("#product-form")?.addEventListener("submit", (event) => { event.preventDefault(); saveProduct(event.currentTarget, rerender); });
+  document.querySelector("#product-import-upload-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const file = form.elements.file.files[0];
+    if (!file) return;
+    const sourceSystem = form.elements.sourceSystem.value.trim() || "ERP";
+    importState = { ...importState, loading: true, error: "" };
+    rerender();
+    try {
+      const result = await parseProductImport(file, sourceSystem);
+      importState = {
+        step: "mapping",
+        loading: false,
+        error: "",
+        batch: result.batch,
+        preview: result.preview,
+        fieldDefinitions: result.fieldDefinitions,
+      };
+    } catch (error) {
+      importState = { step: "upload", loading: false, error: error.message || "ERP Excel 解析失败。" };
+    }
+    rerender();
+  });
 }

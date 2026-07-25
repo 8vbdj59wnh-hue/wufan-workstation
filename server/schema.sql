@@ -433,6 +433,32 @@ CREATE TABLE IF NOT EXISTS products (
   status TEXT NOT NULL,
   ownerId TEXT,
   remark TEXT,
+  skuName TEXT,
+  weightKg REAL,
+  lengthCm REAL,
+  widthCm REAL,
+  heightCm REAL,
+  volumeCm3 REAL,
+  productType TEXT,
+  style TEXT,
+  warehouseInfo TEXT,
+  tags TEXT,
+  priceInfo TEXT,
+  shelfLifeDays INTEGER,
+  pointsInfo TEXT,
+  unitInfo TEXT,
+  placement TEXT,
+  grade TEXT,
+  sourceCreatedAt TEXT,
+  sourceUpdatedAt TEXT,
+  supplierInfo TEXT,
+  preSaleInfo TEXT,
+  erpStatusRaw TEXT,
+  erpAttributes TEXT,
+  identifiers TEXT,
+  rawSourceData TEXT,
+  sourceSystem TEXT,
+  lastImportedAt TEXT,
   createdAt TEXT,
   updatedAt TEXT
 );
@@ -447,3 +473,19 @@ CREATE TABLE IF NOT EXISTS action_products (
 
 CREATE INDEX IF NOT EXISTS idx_action_products_action ON action_products(actionId);
 CREATE INDEX IF NOT EXISTS idx_action_products_product ON action_products(productId);
+
+CREATE TABLE IF NOT EXISTS product_import_batches (
+  id TEXT PRIMARY KEY,
+  fileName TEXT NOT NULL,
+  sourceSystem TEXT,
+  sheetName TEXT,
+  status TEXT NOT NULL,
+  headers TEXT,
+  mappingConfig TEXT,
+  summary TEXT,
+  createdBy TEXT,
+  validatedAt TEXT,
+  committedAt TEXT,
+  createdAt TEXT,
+  updatedAt TEXT
+);

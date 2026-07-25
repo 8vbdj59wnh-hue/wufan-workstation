@@ -481,13 +481,28 @@ const resourceConfigs = {
     table: "products",
     columns: [
       "id", "skuCode", "name", "mainImage", "galleryImages", "brand", "category", "series", "material",
-      "color", "specification", "status", "ownerId", "remark", "createdAt", "updatedAt",
+      "color", "specification", "status", "ownerId", "remark", "skuName", "weightKg", "lengthCm", "widthCm",
+      "heightCm", "volumeCm3", "productType", "style", "warehouseInfo", "tags", "priceInfo",
+      "shelfLifeDays", "pointsInfo", "unitInfo", "placement", "grade", "sourceCreatedAt", "sourceUpdatedAt",
+      "supplierInfo", "preSaleInfo", "erpStatusRaw", "erpAttributes", "identifiers", "rawSourceData",
+      "sourceSystem", "lastImportedAt", "createdAt", "updatedAt",
     ],
-    jsonFields: ["galleryImages"],
+    jsonFields: [
+      "galleryImages", "warehouseInfo", "tags", "priceInfo", "pointsInfo", "unitInfo", "supplierInfo",
+      "preSaleInfo", "erpAttributes", "identifiers", "rawSourceData",
+    ],
   },
   actionProducts: {
     table: "action_products",
     columns: ["id", "actionId", "productId", "createdAt"],
+  },
+  productImportBatches: {
+    table: "product_import_batches",
+    columns: [
+      "id", "fileName", "sourceSystem", "sheetName", "status", "headers", "mappingConfig", "summary",
+      "createdBy", "validatedAt", "committedAt", "createdAt", "updatedAt",
+    ],
+    jsonFields: ["headers", "mappingConfig", "summary"],
   },
 };
 
@@ -521,6 +536,7 @@ const routeResourceMap = {
   "work-plans": "workPlans",
   products: "products",
   "action-products": "actionProducts",
+  "product-import-batches": "productImportBatches",
 };
 
 const seedData = {
@@ -554,6 +570,7 @@ const seedData = {
   workPlans,
   products: [],
   actionProducts: [],
+  productImportBatches: [],
 };
 
 let db;
@@ -1201,7 +1218,22 @@ function runLightweightMigrations() {
       UNIQUE(actionId, productId)
     );
     CREATE INDEX IF NOT EXISTS idx_action_products_action ON action_products(actionId);
-    CREATE INDEX IF NOT EXISTS idx_action_products_product ON action_products(productId)
+    CREATE INDEX IF NOT EXISTS idx_action_products_product ON action_products(productId);
+    CREATE TABLE IF NOT EXISTS product_import_batches (
+      id TEXT PRIMARY KEY,
+      fileName TEXT NOT NULL,
+      sourceSystem TEXT,
+      sheetName TEXT,
+      status TEXT NOT NULL,
+      headers TEXT,
+      mappingConfig TEXT,
+      summary TEXT,
+      createdBy TEXT,
+      validatedAt TEXT,
+      committedAt TEXT,
+      createdAt TEXT,
+      updatedAt TEXT
+    )
   `);
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS stores (
@@ -1392,6 +1424,32 @@ function runLightweightMigrations() {
   ensureColumn("content_schedules", "templateId", "TEXT");
   ensureColumn("work_plans", "departmentId", "TEXT");
   ensureColumn("work_plans", "workType", "TEXT DEFAULT 'normal'");
+  ensureColumn("products", "skuName", "TEXT");
+  ensureColumn("products", "weightKg", "REAL");
+  ensureColumn("products", "lengthCm", "REAL");
+  ensureColumn("products", "widthCm", "REAL");
+  ensureColumn("products", "heightCm", "REAL");
+  ensureColumn("products", "volumeCm3", "REAL");
+  ensureColumn("products", "productType", "TEXT");
+  ensureColumn("products", "style", "TEXT");
+  ensureColumn("products", "warehouseInfo", "TEXT");
+  ensureColumn("products", "tags", "TEXT");
+  ensureColumn("products", "priceInfo", "TEXT");
+  ensureColumn("products", "shelfLifeDays", "INTEGER");
+  ensureColumn("products", "pointsInfo", "TEXT");
+  ensureColumn("products", "unitInfo", "TEXT");
+  ensureColumn("products", "placement", "TEXT");
+  ensureColumn("products", "grade", "TEXT");
+  ensureColumn("products", "sourceCreatedAt", "TEXT");
+  ensureColumn("products", "sourceUpdatedAt", "TEXT");
+  ensureColumn("products", "supplierInfo", "TEXT");
+  ensureColumn("products", "preSaleInfo", "TEXT");
+  ensureColumn("products", "erpStatusRaw", "TEXT");
+  ensureColumn("products", "erpAttributes", "TEXT");
+  ensureColumn("products", "identifiers", "TEXT");
+  ensureColumn("products", "rawSourceData", "TEXT");
+  ensureColumn("products", "sourceSystem", "TEXT");
+  ensureColumn("products", "lastImportedAt", "TEXT");
   ensureColumn("issues_requirements", "latestReply", "TEXT");
   ensureColumn("issues_requirements", "latestReplyAt", "TEXT");
   ensureColumn("issues_requirements", "latestReplyBy", "TEXT");
@@ -2329,6 +2387,74 @@ function normalizeAndValidateProduct(item, existingId = "") {
     mainImage: String(item?.mainImage ?? "").trim() || null,
     galleryImages: Array.isArray(item?.galleryImages) ? item.galleryImages.filter(Boolean) : [],
   };
+}
+
+export function createProductImportBatch(item) {
+  insertItem("productImportBatches", item);
+  return item;
+}
+
+export function readProductImportBatch(id) {
+  return readExistingItem("productImportBatches", id);
+}
+
+export function updateProductImportBatch(id, item) {
+  const nextItem = mergeExistingItem("productImportBatches", id, item);
+  insertItem("productImportBatches", nextItem);
+  return nextItem;
+}
+
+export function findProductsBySkuCodes(skuCodes = []) {
+  const values = [...new Set(skuCodes.map((value) => String(value ?? "").trim().toLowerCase()).filter(Boolean))];
+  if (values.length === 0) return [];
+  const placeholders = values.map(() => "?").join(", ");
+  return getDatabase()
+    .prepare(`SELECT * FROM products WHERE lower(skuCode) IN (${placeholders})`)
+    .all(...values)
+    .map((row) => decodeRow(row, resourceConfigs.products));
+}
+
+export function commitProductImportBatch(batchId, importedProducts, summary, committedAt = new Date().toISOString()) {
+  const commit = getDatabase().transaction(() => {
+    const batch = readExistingItem("productImportBatches", batchId);
+    if (batch === null) throw new Error("导入记录不存在。");
+    if (batch.status === "committed") {
+      return { batch, products: findProductsBySkuCodes(importedProducts.map((item) => item.skuCode)), idempotent: true };
+    }
+    if (batch.status !== "validated") throw new Error("请先完成导入校验。");
+
+    const nextProducts = importedProducts.map((item) => {
+      const existingRow = getDatabase()
+        .prepare("SELECT * FROM products WHERE lower(skuCode) = lower(@skuCode) LIMIT 1")
+        .get({ skuCode: item.skuCode });
+      const existing = existingRow === undefined ? null : decodeRow(existingRow, resourceConfigs.products);
+      const nextItem = normalizeAndValidateProduct({
+        ...(existing ?? {}),
+        ...item,
+        id: existing?.id ?? item.id,
+        mainImage: item.mainImage || existing?.mainImage || null,
+        galleryImages: item.galleryImages?.length ? item.galleryImages : existing?.galleryImages ?? [],
+        ownerId: existing?.ownerId ?? item.ownerId ?? null,
+        remark: item.remark ?? existing?.remark ?? "",
+        createdAt: existing?.createdAt ?? item.createdAt ?? committedAt,
+        updatedAt: committedAt,
+        lastImportedAt: committedAt,
+      }, existing?.id ?? "");
+      insertItem("products", nextItem);
+      return nextItem;
+    });
+
+    const nextBatch = {
+      ...batch,
+      status: "committed",
+      summary,
+      committedAt,
+      updatedAt: committedAt,
+    };
+    insertItem("productImportBatches", nextBatch);
+    return { batch: nextBatch, products: nextProducts, idempotent: false };
+  });
+  return commit();
 }
 
 function normalizeProductIds(productIds = []) {
