@@ -84,7 +84,14 @@ import { bindActionLinkedTemplatePreviewEvents, bindLaunchedProcessDetailEvents,
 import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260705-state-singleton1";
 import { renderWorkFormViewer } from "./workFormViewer.js?v=20260705-state-singleton1";
 import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
-import { bindActionProductSelectors, collectActionProductIds, renderActionProductSelector } from "./actionProductRelations.js?v=20260725-product-center1";
+import {
+  bindActionProductSelectors,
+  collectActionProductIds,
+  getActionProductImageUrls,
+  getActionProducts,
+  renderActionProductSelector,
+  renderLinkedActionProducts,
+} from "./actionProductRelations.js?v=20260725-product-center1";
 import {
   collectBusinessDateTime,
   collectBusinessMinuteDateTime,
@@ -754,7 +761,13 @@ function renderCoverImage(task) {
 
 function renderTaskCardImages(task) {
   const processInstance = getTaskProcessInstance(task);
-  return renderActionImageGrid(getActionImageUrls(processInstance, task), {
+  const linkedProductImages =
+    processInstance === null ? [] : getActionProductImageUrls(processInstance.id);
+  const images =
+    linkedProductImages.length > 0
+      ? linkedProductImages
+      : getActionImageUrls(processInstance, task);
+  return renderActionImageGrid(images, {
     className: "task-card-image-grid",
     alt: `${task.name}产品图片`,
     placeholder: "无图",
@@ -3497,6 +3510,8 @@ function renderActionSummary(task, context) {
     `;
   }
 
+  const linkedProducts = getActionProducts(instance.id);
+
   return `
     <div class="detail-block">
       <div class="section-heading with-actions">
@@ -3510,6 +3525,16 @@ function renderActionSummary(task, context) {
         formFields: getSortedFormFields(taskTemplate),
         customFields,
       })}
+      ${
+        linkedProducts.length === 0
+          ? ""
+          : `
+            <div class="task-action-product-reference">
+              <h4>关联产品</h4>
+              ${renderLinkedActionProducts(instance.id)}
+            </div>
+          `
+      }
       <div class="task-action-template-reference">
         <h4>关联模板</h4>
         ${renderActionLinkedTemplates(instance, { compact: true })}

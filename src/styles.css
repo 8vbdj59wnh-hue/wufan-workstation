@@ -7680,12 +7680,14 @@ button.content-template-thumb {
   padding: 14px 18px;
 }
 
+.task-action-product-reference,
 .task-action-template-reference {
   display: grid;
   gap: 10px;
   margin-top: 16px;
 }
 
+.task-action-product-reference h4,
 .task-action-template-reference h4 {
   margin: 0;
 }
