@@ -16,6 +16,7 @@ import { hasPermission } from "./permissions.js?v=20260725-product-center1";
 
 const productStatuses = ["开发中", "待上架", "在售", "停售", "清仓", "已归档"];
 let filters = { query: "", brand: "", category: "", status: "" };
+let productViewMode = "list";
 let modalState = null;
 let importState = null;
 
@@ -70,6 +71,56 @@ function renderFilterOptions(values, selected, emptyLabel) {
   return `<option value="">${emptyLabel}</option>${values.map((value) => `<option value="${escapeHtml(value)}" ${value === selected ? "selected" : ""}>${escapeHtml(value)}</option>`).join("")}`;
 }
 
+function renderProductActions(product) {
+  return `<div class="table-actions">
+    <button class="text-button" type="button" data-action="view-product" data-product-id="${product.id}">查看</button>
+    ${hasPermission(getCurrentUser(), "products.edit") ? `<button class="text-button" type="button" data-action="edit-product" data-product-id="${product.id}">编辑</button>` : ""}
+    ${product.status !== "已归档" && hasPermission(getCurrentUser(), "products.archive") ? `<button class="text-button danger-text" type="button" data-action="archive-product" data-product-id="${product.id}">归档</button>` : ""}
+  </div>`;
+}
+
+function renderProductTable(products) {
+  return `<div class="table-wrap">
+    <table class="data-table product-table">
+      <thead><tr><th>产品主图</th><th>SKU编码</th><th>产品名称</th><th>品牌</th><th>产品分类</th><th>产品状态</th><th>产品负责人</th><th>关联关键行动</th><th>更新时间</th><th>操作</th></tr></thead>
+      <tbody>
+        ${products.length === 0 ? `<tr><td colspan="10" class="empty-cell">暂无匹配产品</td></tr>` : products.map((product) => {
+          const relatedCount = getRelatedActions(product.id).length;
+          return `<tr>
+            <td>${renderImage(product)}</td><td><strong>${escapeHtml(product.skuCode)}</strong></td><td>${escapeHtml(product.name)}</td>
+            <td>${escapeHtml(product.brand || "-")}</td><td>${escapeHtml(product.category || "-")}</td><td><span class="status-badge">${escapeHtml(product.status)}</span></td>
+            <td>${escapeHtml(findName(state.people, product.ownerId))}</td><td>${relatedCount}</td><td>${formatDateTime(product.updatedAt)}</td>
+            <td>${renderProductActions(product)}</td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+function renderProductCards(products) {
+  if (products.length === 0) return `<div class="product-card-empty">暂无匹配产品</div>`;
+  return `<div class="product-card-grid">
+    ${products.map((product) => `
+      <article class="product-archive-card" data-action="view-product" data-product-id="${escapeHtml(product.id)}" role="button" tabindex="0" aria-label="查看产品：${escapeHtml(product.name)}">
+        <div class="product-archive-card-media">${renderImage(product, "product-card-image")}</div>
+        <div class="product-archive-card-body">
+          <div class="product-archive-card-heading">
+            <h3 title="${escapeHtml(product.name)}">${escapeHtml(product.name)}</h3>
+            <span class="status-badge">${escapeHtml(product.status)}</span>
+          </div>
+          <strong class="product-card-sku">${escapeHtml(product.skuCode)}</strong>
+          <div class="product-archive-card-meta">
+            <span>${escapeHtml(product.brand || "未设置品牌")}</span>
+            <span>关联关键行动 ${getRelatedActions(product.id).length}</span>
+          </div>
+          ${renderProductActions(product)}
+        </div>
+      </article>
+    `).join("")}
+  </div>`;
+}
+
 function renderProductList() {
   const products = getFilteredProducts();
   const canCreate = hasPermission(getCurrentUser(), "products.create");
@@ -88,22 +139,14 @@ function renderProductList() {
         <select name="status">${renderFilterOptions(productStatuses, filters.status, "全部状态")}</select>
         <button class="secondary-button" type="submit">筛选</button>
       </form>
-      <div class="table-wrap">
-        <table class="data-table product-table">
-          <thead><tr><th>产品主图</th><th>SKU编码</th><th>产品名称</th><th>品牌</th><th>产品分类</th><th>产品状态</th><th>产品负责人</th><th>关联关键行动</th><th>更新时间</th><th>操作</th></tr></thead>
-          <tbody>
-            ${products.length === 0 ? `<tr><td colspan="10" class="empty-cell">暂无匹配产品</td></tr>` : products.map((product) => {
-              const relatedCount = getRelatedActions(product.id).length;
-              return `<tr>
-                <td>${renderImage(product)}</td><td><strong>${escapeHtml(product.skuCode)}</strong></td><td>${escapeHtml(product.name)}</td>
-                <td>${escapeHtml(product.brand || "-")}</td><td>${escapeHtml(product.category || "-")}</td><td><span class="status-badge">${escapeHtml(product.status)}</span></td>
-                <td>${escapeHtml(findName(state.people, product.ownerId))}</td><td>${relatedCount}</td><td>${formatDateTime(product.updatedAt)}</td>
-                <td><div class="table-actions"><button class="text-button" type="button" data-action="view-product" data-product-id="${product.id}">查看</button>${hasPermission(getCurrentUser(), "products.edit") ? `<button class="text-button" type="button" data-action="edit-product" data-product-id="${product.id}">编辑</button>` : ""}${product.status !== "已归档" && hasPermission(getCurrentUser(), "products.archive") ? `<button class="text-button danger-text" type="button" data-action="archive-product" data-product-id="${product.id}">归档</button>` : ""}</div></td>
-              </tr>`;
-            }).join("")}
-          </tbody>
-        </table>
+      <div class="product-list-toolbar">
+        <span>共 ${products.length} 个 SKU</span>
+        <div class="product-view-switch" aria-label="产品展示方式">
+          <button type="button" data-action="set-product-view" data-view-mode="list" class="${productViewMode === "list" ? "is-active" : ""}">列表</button>
+          <button type="button" data-action="set-product-view" data-view-mode="card" class="${productViewMode === "card" ? "is-active" : ""}">卡片</button>
+        </div>
       </div>
+      ${productViewMode === "card" ? renderProductCards(products) : renderProductTable(products)}
       ${renderProductImportRecords()}
       ${renderProductModal()}
       ${renderProductImportModal()}
@@ -123,8 +166,101 @@ function renderProductImportRecords() {
   </section>`;
 }
 
+function getProductExecutionArchive(productId) {
+  const actions = getRelatedActions(productId);
+  const actionIds = new Set(actions.map((instance) => instance.id));
+  const tasks = state.tasks.filter((task) => actionIds.has(task.processInstanceId));
+  const departmentIds = new Set();
+
+  actions.forEach((instance) => {
+    const standard = state.taskTemplates.find((item) => item.id === instance.taskTemplateId);
+    if (standard?.departmentId) departmentIds.add(standard.departmentId);
+  });
+  tasks.forEach((task) => {
+    if (task.departmentId) departmentIds.add(task.departmentId);
+    const node = state.processTemplateNodes.find((item) => item.id === task.processNodeId);
+    const departmentId = node?.departmentId ?? node?.ownerDepartmentId;
+    if (departmentId) departmentIds.add(departmentId);
+  });
+
+  const activities = [
+    ...actions.map((instance) => ({
+      id: `action-${instance.id}`,
+      type: "关键行动",
+      title: instance.displayTitle || instance.name || "未命名关键行动",
+      detail: getProcessInstanceBusinessStatus(instance.id, state).label,
+      occurredAt: instance.updatedAt || instance.completedAt || instance.startedAt || instance.createdAt,
+    })),
+    ...tasks.map((task) => ({
+      id: `task-${task.id}`,
+      type: "任务",
+      title: task.name || "未命名任务",
+      detail: task.submittedAt ? "已提交结果" : task.completedAt ? "已完成" : "任务已更新",
+      occurredAt: task.updatedAt || task.submittedAt || task.completedAt || task.startDate || task.createdAt,
+    })),
+  ].filter((item) => item.occurredAt).sort((left, right) => String(right.occurredAt).localeCompare(String(left.occurredAt))).slice(0, 6);
+
+  return {
+    actions,
+    tasks,
+    departments: [...departmentIds].map((id) => findName(state.departments, id)).filter((name) => name !== "未设置"),
+    activities,
+  };
+}
+
+function renderProductSourceDetails(product) {
+  const dimensions = [product.lengthCm, product.widthCm, product.heightCm].some((value) => value !== null && value !== undefined)
+    ? `${product.lengthCm ?? "-"} × ${product.widthCm ?? "-"} × ${product.heightCm ?? "-"} cm`
+    : "";
+  const fields = [
+    ["规格名称", product.skuName],
+    ["品类", product.productType],
+    ["风格", product.style],
+    ["重量", product.weightKg === null || product.weightKg === undefined ? "" : `${product.weightKg} kg`],
+    ["长宽高", dimensions],
+    ["体积", product.volumeCm3 === null || product.volumeCm3 === undefined ? "" : `${product.volumeCm3} cm³`],
+    ["摆放位置", product.placement],
+    ["级别", product.grade],
+    ["主条码", product.identifiers?.barcode],
+    ["主供应商", product.supplierInfo?.primarySupplier],
+    ["数据来源", product.sourceSystem],
+    ["ERP更新时间", product.sourceUpdatedAt],
+  ].filter(([, value]) => String(value ?? "").trim() !== "");
+  if (fields.length === 0) return "";
+  return `<div class="product-source-details">
+    <h3>ERP 与规格资料</h3>
+    <div class="detail-grid">${fields.map(([label, value]) => `<div class="detail-field"><span>${label}</span><strong>${escapeHtml(value)}</strong></div>`).join("")}</div>
+  </div>`;
+}
+
+function renderProductExecutionSummary(archive) {
+  return `<section class="product-detail-band">
+    <h2>执行情况</h2>
+    <div class="product-execution-summary">
+      <div class="product-execution-metrics">
+        <div><span>关联任务</span><strong>${archive.tasks.length}</strong></div>
+        <div><span>涉及部门</span><strong>${archive.departments.length}</strong></div>
+        <div><span>最近活动</span><strong>${archive.activities.length ? formatDateTime(archive.activities[0].occurredAt) : "暂无"}</strong></div>
+      </div>
+      <div class="product-execution-departments">
+        <h3>涉及部门</h3>
+        ${archive.departments.length ? `<div>${archive.departments.map((name) => `<span>${escapeHtml(name)}</span>`).join("")}</div>` : `<p class="form-note">暂无部门记录</p>`}
+      </div>
+      <div class="product-activity-list">
+        <h3>最近活动</h3>
+        ${archive.activities.length ? archive.activities.map((activity) => `<div class="product-activity-item">
+          <span>${escapeHtml(activity.type)}</span>
+          <strong>${escapeHtml(activity.title)}</strong>
+          <small>${escapeHtml(activity.detail)} · ${formatDateTime(activity.occurredAt)}</small>
+        </div>`).join("") : `<p class="form-note">暂无执行活动</p>`}
+      </div>
+    </div>
+  </section>`;
+}
+
 function renderProductDetail(product) {
-  const actions = getRelatedActions(product.id);
+  const archive = getProductExecutionArchive(product.id);
+  const actions = archive.actions;
   const statuses = actions.map((instance) => getProcessInstanceBusinessStatus(instance.id, state).status);
   return `
     <section class="product-center-page product-detail-page">
@@ -138,7 +274,8 @@ function renderProductDetail(product) {
         <div class="detail-grid">
           ${[["SKU编码", product.skuCode], ["产品名称", product.name], ["品牌", product.brand], ["产品分类", product.category], ["产品系列", product.series], ["材质", product.material], ["颜色", product.color], ["规格尺寸", product.specification], ["产品状态", product.status], ["产品负责人", findName(state.people, product.ownerId)], ["备注", product.remark]].map(([label, value]) => `<div class="detail-field"><span>${label}</span><strong>${escapeHtml(value || "-")}</strong></div>`).join("")}
         </div>
-      </div>${Array.isArray(product.galleryImages) && product.galleryImages.length ? `<div class="product-gallery">${product.galleryImages.map((url) => `<img src="${escapeHtml(resolveAssetUrl(url))}" alt="产品图片" />`).join("")}</div>` : ""}</section>
+      </div>${Array.isArray(product.galleryImages) && product.galleryImages.length ? `<div class="product-gallery">${product.galleryImages.map((url) => `<img src="${escapeHtml(resolveAssetUrl(url))}" alt="产品图片" />`).join("")}</div>` : ""}
+      ${renderProductSourceDetails(product)}</section>
       <section class="product-detail-band"><h2>关联关键行动</h2><div class="table-wrap"><table class="data-table"><thead><tr><th>关键行动名称</th><th>行动状态</th><th>负责部门</th><th>负责人</th><th>发起时间</th><th>截止时间</th></tr></thead><tbody>
         ${actions.length === 0 ? `<tr><td colspan="6" class="empty-cell">暂无关联关键行动</td></tr>` : actions.map((instance) => {
           const standard = state.taskTemplates.find((item) => item.id === instance.taskTemplateId);
@@ -146,6 +283,7 @@ function renderProductDetail(product) {
           return `<tr><td>${escapeHtml(instance.displayTitle || instance.name)}</td><td>${getProcessInstanceBusinessStatus(instance.id, state).label}</td><td>${escapeHtml(findName(state.departments, standard?.departmentId))}</td><td>${escapeHtml(findName(state.people, owner.userId))}</td><td>${formatDateTime(instance.createdAt)}</td><td>${formatDateTime(instance.dueDate)}</td></tr>`;
         }).join("")}
       </tbody></table></div></section>
+      ${renderProductExecutionSummary(archive)}
       ${renderProductModal()}
     </section>
   `;
@@ -302,10 +440,18 @@ export function bindProductCenterPageEvents(rerender) {
     filters = { query: form.elements.query.value, brand: form.elements.brand.value, category: form.elements.category.value, status: form.elements.status.value };
     rerender();
   });
-  document.querySelector(".product-center-page")?.addEventListener("click", async (event) => {
+  const page = document.querySelector(".product-center-page");
+  page?.addEventListener("keydown", (event) => {
+    const card = event.target.closest(".product-archive-card");
+    if (card === null || event.target !== card || !["Enter", " "].includes(event.key)) return;
+    event.preventDefault();
+    window.location.hash = `products/${encodeURIComponent(card.dataset.productId)}`;
+  });
+  page?.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-action]");
     if (button === null) return;
     const action = button.dataset.action;
+    if (action === "set-product-view") { productViewMode = button.dataset.viewMode === "card" ? "card" : "list"; rerender(); }
     if (action === "new-product") { modalState = { kind: "create", error: "" }; rerender(); }
     if (action === "open-product-import") { importState = { step: "upload", loading: false, error: "" }; rerender(); }
     if (action === "edit-product") { modalState = { kind: "edit", id: button.dataset.productId, error: "" }; rerender(); }

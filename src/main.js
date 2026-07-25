@@ -7,7 +7,7 @@ import { bindScheduleBoardPageEvents, renderScheduleBoardPage } from "./schedule
 import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260717-work-results-dashboard1";
 import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260705-state-singleton1";
 import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js?v=20260705-state-singleton1";
-import { bindProductCenterPageEvents, renderProductCenterPage } from "./productCenterPage.js?v=20260725-erp-product-import1";
+import { bindProductCenterPageEvents, renderProductCenterPage } from "./productCenterPage.js?v=20260725-product-archive1";
 import { attachThumbnailHoverPreview } from "./thumbnailPreview.js?v=20260723-task-card-static1";
 import {
   flushPersistentSave,
