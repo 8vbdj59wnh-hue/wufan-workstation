@@ -8,6 +8,7 @@ import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage
 import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260705-state-singleton1";
 import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js?v=20260705-state-singleton1";
 import { bindProductCenterPageEvents, renderProductCenterPage } from "./productCenterPage.js?v=20260725-product-archive1";
+import { bindProductPreviewEvents, closeProductPreview, openProductPreview, renderProductPreviewModal } from "./productPreview.js?v=20260725-product-preview1";
 import { attachThumbnailHoverPreview } from "./thumbnailPreview.js?v=20260723-task-card-static1";
 import {
   flushPersistentSave,
@@ -30,6 +31,24 @@ import {
 import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260705-state-singleton1";
 
 const app = document.querySelector("#app");
+
+app.addEventListener("click", (event) => {
+  const actionTarget = event.target.closest("[data-action]");
+  if (actionTarget !== null && actionTarget.dataset.action !== "view-product") return;
+
+  const trigger = event.target.closest('[data-action="view-product"], a[href^="#products/"]');
+  if (trigger === null) return;
+  const href = trigger.getAttribute("href") ?? "";
+  const productId = trigger.dataset.productId ?? decodeURIComponent(href.replace(/^#products\//, ""));
+  if (productId === "") return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  openProductPreview(productId);
+  document.querySelector("[data-product-preview-backdrop]")?.remove();
+  app.insertAdjacentHTML("beforeend", renderProductPreviewModal());
+  bindProductPreviewEvents();
+}, true);
 
 app.addEventListener("click", (event) => {
   const button = event.target.closest("[data-password-visibility-toggle]");
@@ -395,6 +414,7 @@ function renderPage() {
 }
 
 function renderLoginPage() {
+  closeProductPreview();
   app.innerHTML = `
     <main class="login-page">
       <form class="login-panel">

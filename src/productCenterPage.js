@@ -445,7 +445,7 @@ export function bindProductCenterPageEvents(rerender) {
     const card = event.target.closest(".product-archive-card");
     if (card === null || event.target !== card || !["Enter", " "].includes(event.key)) return;
     event.preventDefault();
-    window.location.hash = `products/${encodeURIComponent(card.dataset.productId)}`;
+    card.click();
   });
   page?.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-action]");
