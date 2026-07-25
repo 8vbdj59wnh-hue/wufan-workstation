@@ -462,6 +462,71 @@ textarea {
   padding: 0 10px;
 }
 
+.password-input-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.password-input-wrap > input {
+  padding-right: 42px;
+}
+
+.password-visibility-toggle {
+  position: absolute;
+  top: 50%;
+  right: 9px;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 0;
+  transform: translateY(-50%);
+}
+
+.password-visibility-toggle:hover,
+.password-visibility-toggle:focus-visible {
+  background: #f1f5f9;
+  color: #2563eb;
+  outline: none;
+}
+
+.password-eye-icon {
+  position: relative;
+  display: block;
+  width: 15px;
+  height: 10px;
+  border: 1.5px solid currentColor;
+  border-radius: 75% 15%;
+  transform: rotate(45deg);
+}
+
+.password-eye-icon::after {
+  position: absolute;
+  top: 2px;
+  left: 4.5px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  content: "";
+}
+
+.password-visibility-toggle[aria-pressed="true"] .password-eye-icon::before {
+  position: absolute;
+  top: 3px;
+  left: -3px;
+  width: 19px;
+  height: 1.5px;
+  background: currentColor;
+  box-shadow: 0 0 0 2px #fff;
+  content: "";
+}
+
 .login-motto {
   margin: -4px 0 0;
   color: #6b7280;

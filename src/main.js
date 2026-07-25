@@ -31,6 +31,24 @@ import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20
 
 const app = document.querySelector("#app");
 
+app.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-password-visibility-toggle]");
+  if (button === null) return;
+  const wrapper = button.closest(".password-input-wrap");
+  const input = wrapper?.querySelector("input");
+  if (input === null || input === undefined) return;
+
+  const selectionStart = input.selectionStart;
+  const selectionEnd = input.selectionEnd;
+  const shouldShow = input.type === "password";
+  input.type = shouldShow ? "text" : "password";
+  button.setAttribute("aria-pressed", String(shouldShow));
+  button.setAttribute("aria-label", shouldShow ? "隐藏密码" : "显示密码");
+  button.title = shouldShow ? "隐藏密码" : "显示密码";
+  input.focus({ preventScroll: true });
+  if (selectionStart !== null && selectionEnd !== null) input.setSelectionRange(selectionStart, selectionEnd);
+});
+
 const moduleHashMap = {
   goals: "goals",
   tasks: "tasks",
@@ -390,7 +408,12 @@ function renderLoginPage() {
         </label>
         <label>
           <span>密码</span>
-          <input name="password" type="password" autocomplete="current-password" />
+          <div class="password-input-wrap">
+            <input name="password" type="password" autocomplete="current-password" />
+            <button class="password-visibility-toggle" type="button" data-password-visibility-toggle aria-label="显示密码" aria-pressed="false" title="显示密码">
+              <span class="password-eye-icon" aria-hidden="true"></span>
+            </button>
+          </div>
         </label>
         <div class="form-error" ${loginError === "" ? "hidden" : ""}>${loginError}</div>
         <button class="primary-button" type="submit">登录</button>

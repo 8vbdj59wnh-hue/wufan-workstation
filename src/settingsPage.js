@@ -1704,7 +1704,12 @@ function renderPersonForm() {
             </label>
             <label>
               <span>设置新密码</span>
-              <input name="password" type="password" autocomplete="new-password" placeholder="${modalState.mode === "edit" ? "留空则不修改密码" : ""}" />
+              <div class="password-input-wrap">
+                <input name="password" type="password" autocomplete="new-password" placeholder="${modalState.mode === "edit" ? "留空则不修改密码" : ""}" />
+                <button class="password-visibility-toggle" type="button" data-password-visibility-toggle aria-label="显示密码" aria-pressed="false" title="显示密码">
+                  <span class="password-eye-icon" aria-hidden="true"></span>
+                </button>
+              </div>
             </label>
             <label>
               <span>登录角色</span>
