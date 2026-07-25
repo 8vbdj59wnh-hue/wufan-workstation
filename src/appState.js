@@ -501,6 +501,9 @@ export async function createPersistentResource(resource, item) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.message ?? data.error ?? "保存失败，请检查本地数据库服务。");
+  if (item !== null && typeof item === "object" && data !== null && typeof data === "object") {
+    Object.assign(item, data);
+  }
   return data;
 }
 

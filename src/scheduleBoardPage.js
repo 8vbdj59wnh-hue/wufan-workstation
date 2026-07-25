@@ -525,6 +525,7 @@ function getSearchText(row) {
     row.statusLabel,
     row.processInstance?.displayTitle,
     row.processInstance?.name,
+    row.processInstance?.businessCode,
   ].filter(Boolean).join(" ").toLowerCase();
 }
 

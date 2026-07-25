@@ -1270,6 +1270,7 @@ function matchesFilters(task) {
   const shouldShowCanceled = filters.showCanceled || filters.status === TaskStatus.Canceled;
   const belonging = getTaskBelonging(task);
   const searchableText = [
+    task.businessCode,
     task.name,
     belonging.objectName,
     belonging.standardWorkName,
@@ -1277,12 +1278,12 @@ function matchesFilters(task) {
     findName(goals, task.goalId, ""),
     findName(departments, task.departmentId, ""),
     findName(people, task.ownerId, ""),
-  ].join(" ");
+  ].join(" ").toLowerCase();
 
   if (!matchesTaskStatusFilter(task, filters.status)) return false;
   if (!shouldShowDone && isDoneStatus(task.status)) return false;
   if (!shouldShowCanceled && isCanceledStatus(task.status)) return false;
-  if (filters.keyword !== "" && !searchableText.includes(filters.keyword)) return false;
+  if (filters.keyword !== "" && !searchableText.includes(filters.keyword.toLowerCase())) return false;
   if (filters.source !== "" && task.source !== filters.source) return false;
   if (filters.departmentId !== "" && task.departmentId !== filters.departmentId) return false;
   if (filters.ownerId !== "" && task.ownerId !== filters.ownerId) return false;
@@ -2960,7 +2961,7 @@ function renderFilters() {
     <form class="task-filters task-list-filters" aria-label="任务筛选">
       <label class="task-keyword-filter">
         <span>关键词</span>
-        <input name="keyword" value="${escapeHtml(filters.keyword)}" placeholder="搜索任务名称" />
+        <input name="keyword" value="${escapeHtml(filters.keyword)}" placeholder="搜索任务名称或编号" />
       </label>
       <label>
         <span>任务状态</span>
@@ -3497,6 +3498,7 @@ function renderCurrentTaskSection(task) {
     <div class="detail-block current-task-block">
       <h3>本次任务</h3>
       <div class="detail-grid">
+        ${renderDetailField("任务编号", escapeHtml(task.businessCode ?? "未编号"))}
         ${renderDetailField("任务名称", escapeHtml(task.name))}
         ${renderDetailField("执行人", findName(people, task.executorId ?? task.ownerId, "未设置"))}
         ${renderDetailField("剩余时间", escapeHtml(remaining.label))}

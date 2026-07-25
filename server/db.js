@@ -159,6 +159,7 @@ const resourceConfigs = {
     table: "goals",
     columns: [
       "id",
+      "businessCode",
       "name",
       "level",
       "type",
@@ -203,6 +204,7 @@ const resourceConfigs = {
     table: "tasks",
     columns: [
       "id",
+      "businessCode",
       "name",
       "goalId",
       "taskTemplateId",
@@ -273,6 +275,7 @@ const resourceConfigs = {
     table: "process_templates",
     columns: [
       "id",
+      "businessCode",
       "name",
       "categoryId",
       "purpose",
@@ -332,6 +335,7 @@ const resourceConfigs = {
     table: "process_instances",
     columns: [
       "id",
+      "businessCode",
       "templateId",
       "taskTemplateId",
       "templateVersion",
@@ -728,9 +732,59 @@ function validateTemplateItem(item) {
   if (!hasTemplateTags(item.tags)) throw new Error("模板标签不能为空。");
 }
 
+const businessIdentifierConfigs = {
+  goals: { table: "goals", prefix: "GOAL" },
+  processInstances: { table: "process_instances", prefix: "KA" },
+  tasks: { table: "tasks", prefix: "TASK" },
+  processTemplates: { table: "process_templates", prefix: "TPL" },
+};
+
+function getBusinessIdentifierMonth(value) {
+  const rawValue = String(value ?? "").trim();
+  const date = new Date(rawValue);
+  if (!Number.isNaN(date.getTime())) {
+    const businessDate = new Date(date.getTime() + 8 * 60 * 60 * 1000);
+    return `${businessDate.getUTCFullYear()}${String(businessDate.getUTCMonth() + 1).padStart(2, "0")}`;
+  }
+
+  const matchedMonth = rawValue.match(/^(\d{4})-(\d{2})/);
+  if (matchedMonth !== null) return `${matchedMonth[1]}${matchedMonth[2]}`;
+
+  const businessNow = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  return `${businessNow.getUTCFullYear()}${String(businessNow.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function getNextBusinessIdentifier(config, month) {
+  const prefix = `${config.prefix}-${month}-`;
+  const rows = getDatabase()
+    .prepare(`SELECT businessCode FROM ${config.table} WHERE businessCode LIKE @pattern`)
+    .all({ pattern: `${prefix}%` });
+  const highestSerial = rows.reduce((highest, row) => {
+    const rawSerial = String(row.businessCode ?? "").slice(prefix.length);
+    return /^\d+$/.test(rawSerial) ? Math.max(highest, Number(rawSerial)) : highest;
+  }, 0);
+  return `${prefix}${String(highestSerial + 1).padStart(4, "0")}`;
+}
+
+function applyBusinessIdentifier(resourceKey, item) {
+  const config = businessIdentifierConfigs[resourceKey];
+  if (config === undefined) return;
+
+  const existing = getDatabase()
+    .prepare(`SELECT businessCode FROM ${config.table} WHERE id = @id LIMIT 1`)
+    .get({ id: item.id });
+  if (String(existing?.businessCode ?? "").trim() !== "") {
+    item.businessCode = existing.businessCode;
+    return;
+  }
+
+  item.businessCode = getNextBusinessIdentifier(config, getBusinessIdentifierMonth(item.createdAt));
+}
+
 function insertItem(resourceKey, item) {
   const config = resourceConfigs[resourceKey];
   if (resourceKey === "templates") validateTemplateItem(item);
+  applyBusinessIdentifier(resourceKey, item);
   const columns = getWritableColumns(config);
   const encoded = encodeItem(item, config, columns);
   const placeholders = columns.map((column) => `@${column}`).join(", ");
@@ -1060,6 +1114,57 @@ function ensureColumn(table, column, definition) {
     .some((item) => item.name === column);
 
   if (!hasColumn) getDatabase().exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
+function backfillBusinessIdentifiers() {
+  const database = getDatabase();
+  const backfill = database.transaction(() => {
+    for (const config of Object.values(businessIdentifierConfigs)) {
+      const rows = database
+        .prepare(
+          `SELECT id, businessCode, createdAt
+           FROM ${config.table}
+           ORDER BY COALESCE(createdAt, '') ASC, id ASC`,
+        )
+        .all();
+      const usedSerialsByMonth = new Map();
+
+      for (const row of rows) {
+        const existingCode = String(row.businessCode ?? "").trim();
+        const existingMatch = existingCode.match(
+          new RegExp(`^${config.prefix}-(\\d{6})-(\\d+)$`),
+        );
+        if (existingMatch !== null) {
+          const month = existingMatch[1];
+          const serial = Number(existingMatch[2]);
+          if (!usedSerialsByMonth.has(month)) usedSerialsByMonth.set(month, new Set());
+          usedSerialsByMonth.get(month).add(serial);
+        }
+      }
+
+      for (const row of rows) {
+        if (String(row.businessCode ?? "").trim() !== "") continue;
+        const month = getBusinessIdentifierMonth(row.createdAt);
+        if (!usedSerialsByMonth.has(month)) usedSerialsByMonth.set(month, new Set());
+        const usedSerials = usedSerialsByMonth.get(month);
+        let serial = 1;
+        while (usedSerials.has(serial)) serial += 1;
+        const businessCode = `${config.prefix}-${month}-${String(serial).padStart(4, "0")}`;
+        database
+          .prepare(`UPDATE ${config.table} SET businessCode = @businessCode WHERE id = @id`)
+          .run({ id: row.id, businessCode });
+        usedSerials.add(serial);
+      }
+    }
+  });
+  backfill();
+
+  database.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_goals_business_code ON goals(businessCode);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_process_instances_business_code ON process_instances(businessCode);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_business_code ON tasks(businessCode);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_process_templates_business_code ON process_templates(businessCode);
+  `);
 }
 
 function ensureStandardWorkValueChainCategories() {
@@ -1393,6 +1498,10 @@ function runLightweightMigrations() {
     )
   `);
   ensureColumn("departments", "parentDepartmentId", "TEXT");
+  ensureColumn("goals", "businessCode", "TEXT");
+  ensureColumn("process_instances", "businessCode", "TEXT");
+  ensureColumn("tasks", "businessCode", "TEXT");
+  ensureColumn("process_templates", "businessCode", "TEXT");
   ensureColumn("task_templates", "defaultProcessTemplateId", "TEXT");
   ensureColumn("process_template_nodes", "stepOrder", "INTEGER");
   ensureColumn("process_template_nodes", "departmentId", "TEXT");
@@ -1464,6 +1573,7 @@ function runLightweightMigrations() {
   ensureColumn("persons", "permissionTemplateId", "TEXT");
   ensureColumn("persons", "permissionOverrides", "TEXT");
   ensureColumn("persons", "avatarUrl", "TEXT");
+  backfillBusinessIdentifiers();
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS permission_templates (
       id TEXT PRIMARY KEY,

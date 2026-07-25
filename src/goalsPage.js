@@ -75,6 +75,7 @@ let dragOverGoalId = null;
 let activeGoalTab = "alignment";
 let isSavingGoal = false;
 let showInactiveGoals = false;
+let goalKeyword = "";
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
 const standardWorkAttachmentsKey = "standardWorkAttachments";
@@ -672,6 +673,10 @@ function renderFilters() {
   return `
     <section class="goal-filters" aria-label="目标筛选">
       <label>
+        <span>关键词</span>
+        <input data-goal-keyword value="${escapeHtml(goalKeyword)}" placeholder="搜索目标名称或编号" autocomplete="off" />
+      </label>
+      <label>
         <span>目标层级</span>
         <select>
           <option>全部层级</option>
@@ -851,6 +856,7 @@ function renderGoalDetail() {
       <div class="detail-block">
         <h3>目标基本信息</h3>
         <div class="detail-grid">
+          ${renderDetailField("目标编号", escapeHtml(goal.businessCode ?? "未编号"))}
           ${renderDetailField("目标名称", escapeHtml(goal.name))}
           ${renderDetailField("目标层级", goalLevelNames[goal.level])}
           ${renderDetailField("目标类型", goalTypeNames[goal.type])}
@@ -896,7 +902,11 @@ function renderGoalDetail() {
 }
 
 function renderGoalTable() {
-  const visibleGoals = getVisibleGoals();
+  const normalizedKeyword = goalKeyword.trim().toLowerCase();
+  const visibleGoals = getVisibleGoals().filter((goal) => {
+    if (normalizedKeyword === "") return true;
+    return `${goal.name ?? ""} ${goal.businessCode ?? ""}`.toLowerCase().includes(normalizedKeyword);
+  });
   return `
     <section class="settings-section">
       <div class="section-heading">
@@ -1949,6 +1959,20 @@ export function bindGoalsPageEvents(rerender) {
       ensureSelectedGoalVisible();
       rerender();
     }
+  });
+  goalsPage.addEventListener("input", (event) => {
+    const input = event.target.closest("[data-goal-keyword]");
+    if (input === null) return;
+    goalKeyword = input.value;
+    const selectionStart = input.selectionStart;
+    const selectionEnd = input.selectionEnd;
+    rerender();
+    window.requestAnimationFrame(() => {
+      const nextInput = document.querySelector("[data-goal-keyword]");
+      if (nextInput === null) return;
+      nextInput.focus({ preventScroll: true });
+      nextInput.setSelectionRange(selectionStart, selectionEnd);
+    });
   });
   goalsPage.addEventListener("dragstart", handleGoalDragStart);
   goalsPage.addEventListener("dragenter", handleGoalDragEnter);

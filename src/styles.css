@@ -932,10 +932,34 @@ textarea {
 }
 
 .goal-filters select,
+.goal-filters input,
 .task-filters select,
 .task-filters input,
 .content-schedule-filters select,
 .content-schedule-filters input {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #111827;
+  padding: 0 10px;
+}
+
+.standard-work-search {
+  display: grid;
+  gap: 7px;
+  width: min(360px, 100%);
+  margin-bottom: 12px;
+}
+
+.standard-work-search span {
+  color: #4b5563;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.standard-work-search input {
   width: 100%;
   min-height: 36px;
   border: 1px solid #d1d5db;

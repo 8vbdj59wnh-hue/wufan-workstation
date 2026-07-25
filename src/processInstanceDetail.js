@@ -695,6 +695,7 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
             </label>
           </div>
           <div class="detail-grid">
+            ${renderDetailField("关键行动编号", escapeHtml(instance.businessCode ?? "未编号"))}
             ${renderDetailField("关键行动", escapeHtml(taskTemplate?.name ?? "未关联关键行动"))}
             ${renderDetailField("关键行动标准流程", `${escapeHtml(template?.name ?? "未设置")} v${instance.templateVersion}`)}
             ${renderDetailField("行动负责人", actionOwnerName)}

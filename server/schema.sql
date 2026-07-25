@@ -128,6 +128,7 @@ CREATE TABLE IF NOT EXISTS weekly_report_problems (
 
 CREATE TABLE IF NOT EXISTS goals (
   id TEXT PRIMARY KEY,
+  businessCode TEXT UNIQUE,
   name TEXT NOT NULL,
   level TEXT NOT NULL,
   type TEXT NOT NULL,
@@ -166,6 +167,7 @@ CREATE TABLE IF NOT EXISTS task_templates (
 
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
+  businessCode TEXT UNIQUE,
   name TEXT NOT NULL,
   goalId TEXT NOT NULL,
   taskTemplateId TEXT,
@@ -227,6 +229,7 @@ CREATE TABLE IF NOT EXISTS execution_groups (
 
 CREATE TABLE IF NOT EXISTS process_templates (
   id TEXT PRIMARY KEY,
+  businessCode TEXT UNIQUE,
   name TEXT NOT NULL,
   categoryId TEXT,
   purpose TEXT,
@@ -279,6 +282,7 @@ CREATE TABLE IF NOT EXISTS process_template_nodes (
 
 CREATE TABLE IF NOT EXISTS process_instances (
   id TEXT PRIMARY KEY,
+  businessCode TEXT UNIQUE,
   templateId TEXT NOT NULL,
   taskTemplateId TEXT,
   templateVersion INTEGER NOT NULL,

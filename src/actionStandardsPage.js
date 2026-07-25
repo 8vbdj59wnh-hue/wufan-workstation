@@ -82,6 +82,7 @@ let modalState = null;
 let standardWorkMoveStatus = null;
 let draggedStandardWorkTemplateId = "";
 let didDragStandardWorkCard = false;
+let standardWorkKeyword = "";
 
 function canCurrentUser(permissionPath) {
   return hasPermission(getCurrentUser(), permissionPath);
@@ -293,7 +294,17 @@ function renderStandardWorkCard(template, selectedProcessTemplateId = "") {
 }
 
 function renderTaskTemplateTable(selectedProcessTemplateId = "") {
-  const visibleTemplates = state.taskTemplates.filter((template) => !hiddenLegacyStandardWorkNames.includes(template.name));
+  const normalizedKeyword = standardWorkKeyword.trim().toLowerCase();
+  const visibleTemplates = state.taskTemplates.filter((template) => {
+    if (hiddenLegacyStandardWorkNames.includes(template.name)) return false;
+    if (normalizedKeyword === "") return true;
+    const processTemplate = state.processTemplates.find(
+      (item) => item.id === template.defaultProcessTemplateId,
+    );
+    return `${template.name ?? ""} ${processTemplate?.name ?? ""} ${processTemplate?.businessCode ?? ""}`
+      .toLowerCase()
+      .includes(normalizedKeyword);
+  });
   const canConfigureStandards = canCurrentUser("settings.editStandardWorks");
 
   return `
@@ -309,6 +320,10 @@ function renderTaskTemplateTable(selectedProcessTemplateId = "") {
           ${canConfigureStandards ? `<button class="secondary-button" type="button" data-action="download-standard-flow-template">导出待配置模板</button>` : ""}
         </div>
       </div>
+      <label class="standard-work-search">
+        <span>搜索</span>
+        <input data-standard-work-keyword value="${escapeAttribute(standardWorkKeyword)}" placeholder="搜索关键行动或模板编号" autocomplete="off" />
+      </label>
       ${renderStandardWorkMoveStatus()}
       ${renderStandardWorkBoardView(visibleTemplates, selectedProcessTemplateId)}
       <p class="form-note">可拖动关键行动卡片到其他价值链分类中，调整后会保存到关键行动库。</p>
@@ -1701,6 +1716,20 @@ export function bindStandardWorkLibraryEvents(rerender, container = document) {
   const taskTemplateForm = document.querySelector(".task-template-form");
   const launchForm = document.querySelector(".action-standard-launch-form");
   if (launchForm !== null) bindActionProductSelectors(launchForm);
+  host.addEventListener("input", (event) => {
+    const input = event.target.closest("[data-standard-work-keyword]");
+    if (input === null) return;
+    standardWorkKeyword = input.value;
+    const selectionStart = input.selectionStart;
+    const selectionEnd = input.selectionEnd;
+    rerender();
+    window.requestAnimationFrame(() => {
+      const nextInput = document.querySelector("[data-standard-work-keyword]");
+      if (nextInput === null) return;
+      nextInput.focus({ preventScroll: true });
+      nextInput.setSelectionRange(selectionStart, selectionEnd);
+    });
+  });
 
   host.addEventListener("dragstart", (event) => {
     const card = event.target.closest(".standard-work-card[draggable='true']");
