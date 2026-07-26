@@ -337,6 +337,13 @@ STAGE="service-restart"
 [[ "$REQUIRES_SERVER_RESTART" != "true" ]] || pm2 restart wufan-server
 
 STAGE="service-stabilization"
+if [[ "$REQUIRES_CLIENT_RESTART" == "true" ]]; then
+  for attempt in {1..10}; do
+    curl --fail --silent http://127.0.0.1:5173/ >/dev/null && break
+    [[ "$attempt" -lt 10 ]]
+    sleep 2
+  done
+fi
 for attempt in {1..10}; do
   curl --fail --silent http://127.0.0.1:3001/api/health >/dev/null && break
   [[ "$attempt" -lt 10 ]]
