@@ -6450,6 +6450,65 @@ button.content-template-thumb {
   opacity: 1;
 }
 
+.schedule-launched-list-table .schedule-action-code-column {
+  width: 124px;
+  max-width: 124px;
+  padding-right: 8px;
+  padding-left: 8px;
+}
+
+.schedule-list-action-code {
+  display: inline-flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+}
+
+.schedule-list-action-code > strong,
+.schedule-list-action-code > button {
+  min-width: 0;
+  overflow: hidden;
+  color: #334155;
+  font: inherit;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-list-action-code > button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.schedule-list-action-code > button:hover,
+.schedule-list-action-code > button:focus-visible {
+  color: #2563eb;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.schedule-list-action-code > button:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.35);
+  outline-offset: 2px;
+}
+
+.schedule-list-action-code > em {
+  flex: 0 0 auto;
+  color: #16a34a;
+  font-size: 11px;
+  font-style: normal;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.schedule-list-action-code > em.is-visible {
+  opacity: 1;
+}
+
 .schedule-action-overview-meta {
   align-items: center;
   display: flex;

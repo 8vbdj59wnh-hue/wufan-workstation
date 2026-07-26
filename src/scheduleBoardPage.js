@@ -156,7 +156,9 @@ async function copyActionCode(copyTarget) {
       textarea.remove();
       if (!copied) throw new Error("copy command failed");
     }
-    const feedback = copyTarget.closest(".schedule-action-overview-code")?.querySelector("[data-schedule-action-code-feedback]");
+    const feedback = copyTarget
+      .closest(".schedule-action-overview-code, .schedule-list-action-code")
+      ?.querySelector("[data-schedule-action-code-feedback]");
     if (feedback === null || feedback === undefined) return;
     feedback.textContent = "已复制";
     feedback.classList.add("is-visible");
@@ -1230,6 +1232,7 @@ function renderLaunchedActionList(rows) {
               <th>序号</th>
               <th>选择</th>
               <th>产品图</th>
+              <th class="schedule-action-code-column">行动编码</th>
               <th>关键行动名</th>
               <th>发起人</th>
               <th>行动负责人</th>
@@ -1242,10 +1245,11 @@ function renderLaunchedActionList(rows) {
           <tbody>
             ${
               sortedRows.length === 0
-                ? `<tr><td colspan="10">暂无匹配的关键行动</td></tr>`
+                ? `<tr><td colspan="11">暂无匹配的关键行动</td></tr>`
                 : sortedRows
                     .map((row, index) => {
                       const instanceId = row.processInstance?.id ?? "";
+                      const actionCode = String(row.processInstance?.businessCode ?? "").trim();
                       const processDueDate = getListProcessDueDate(row);
                       const canEdit = canEditLaunchedProcessInstance(row.processInstance, getCurrentUser());
                       const checked = canEdit && selectedLaunchedProcessIds.has(instanceId) ? "checked" : "";
@@ -1254,6 +1258,16 @@ function renderLaunchedActionList(rows) {
                           <td>${index + 1}</td>
                           <td><input type="checkbox" data-schedule-list-select="${escapeAttribute(instanceId)}" ${checked} ${canEdit ? "" : "disabled"} aria-label="选择${escapeAttribute(getProcessCardTitle(row))}" title="${canEdit ? "选择关键行动" : "无编辑权限"}" /></td>
                           <td>${renderThumbnail(row)}</td>
+                          <td class="schedule-action-code-column">
+                            <span class="schedule-list-action-code">
+                              ${
+                                actionCode === ""
+                                  ? `<strong>—</strong>`
+                                  : `<button type="button" data-schedule-copy-action-code="${escapeAttribute(actionCode)}" title="点击复制完整行动编码">${escapeHtml(actionCode)}</button>`
+                              }
+                              <em data-schedule-action-code-feedback aria-live="polite"></em>
+                            </span>
+                          </td>
                           <td><strong>${renderCellText(getProcessCardTitle(row))}</strong></td>
                           <td>${renderCellText(getActionInitiatorName(row))}</td>
                           <td>${renderCellText(getActionOwnerName(row))}</td>
