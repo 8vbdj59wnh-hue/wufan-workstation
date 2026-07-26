@@ -3954,6 +3954,47 @@ button.content-template-thumb {
   min-width: 960px;
 }
 
+.process-table th,
+.process-table td {
+  padding-right: 8px;
+  padding-left: 8px;
+}
+
+.process-table th:nth-child(1),
+.process-table td:nth-child(1) {
+  width: 18%;
+}
+
+.process-table th:nth-child(2),
+.process-table td:nth-child(2),
+.process-table th:nth-child(3),
+.process-table td:nth-child(3) {
+  width: 14%;
+}
+
+.process-table th:nth-child(5),
+.process-table td:nth-child(5) {
+  width: 12%;
+}
+
+.process-table th:nth-child(8),
+.process-table td:nth-child(8),
+.process-table th:nth-child(9),
+.process-table td:nth-child(9) {
+  width: 10%;
+}
+
+.process-table th:nth-child(4),
+.process-table td:nth-child(4),
+.process-table th:nth-child(6),
+.process-table td:nth-child(6),
+.process-table th:nth-child(7),
+.process-table td:nth-child(7),
+.process-table th:nth-child(10),
+.process-table td:nth-child(10) {
+  width: 1%;
+}
+
 .task-detail {
   overflow: hidden;
 }
