@@ -1113,7 +1113,10 @@ function ensureColumn(table, column, definition) {
     .all()
     .some((item) => item.name === column);
 
-  if (!hasColumn) getDatabase().exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  if (!hasColumn) {
+    getDatabase().exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    console.log(`[db:migrate] added ${table}.${column}`);
+  }
 }
 
 function backfillBusinessIdentifiers() {
@@ -1501,6 +1504,7 @@ function runLightweightMigrations() {
   ensureColumn("goals", "businessCode", "TEXT");
   ensureColumn("process_instances", "businessCode", "TEXT");
   ensureColumn("tasks", "businessCode", "TEXT");
+  ensureColumn("tasks", "executorId", "TEXT");
   ensureColumn("process_templates", "businessCode", "TEXT");
   ensureColumn("task_templates", "defaultProcessTemplateId", "TEXT");
   ensureColumn("process_template_nodes", "stepOrder", "INTEGER");

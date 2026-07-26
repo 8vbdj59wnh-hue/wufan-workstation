@@ -177,6 +177,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   categoryId TEXT,
   departmentId TEXT NOT NULL,
   ownerId TEXT NOT NULL,
+  executorId TEXT,
   initiatorId TEXT NOT NULL,
   description TEXT,
   completionStandard TEXT,
