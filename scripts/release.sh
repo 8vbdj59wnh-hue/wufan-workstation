@@ -12,6 +12,7 @@ DRY_RUN=false
 PREPARE_ONLY=false
 EXECUTE_ONLY=false
 RELEASE_DIR=""
+BUNDLE_PATH=""
 
 fail() {
   echo "RELEASE_FAIL: $*" >&2
@@ -27,6 +28,7 @@ while [[ $# -gt 0 ]]; do
     --prepare-only) PREPARE_ONLY=true; shift ;;
     --execute-only) EXECUTE_ONLY=true; shift ;;
     --release-dir) RELEASE_DIR="${2:-}"; shift 2 ;;
+    --bundle) BUNDLE_PATH="${2:-}"; shift 2 ;;
     *) fail "unknown argument: $1" ;;
   esac
 done
@@ -48,10 +50,13 @@ else
 fi
 
 if [[ "$DRY_RUN" == true && "$EXECUTE_ONLY" != true ]]; then
-  "$SCRIPT_DIR/release-prepare.sh" \
-    --commit "$COMMIT_SHA" \
-    --change-type "$CHANGE_TYPE" \
+  PREPARE_DRY_RUN_ARGS=(
+    --commit "$COMMIT_SHA"
+    --change-type "$CHANGE_TYPE"
     --dry-run
+  )
+  [[ -n "$BUNDLE_PATH" ]] && PREPARE_DRY_RUN_ARGS+=(--bundle "$BUNDLE_PATH")
+  "$SCRIPT_DIR/release-prepare.sh" "${PREPARE_DRY_RUN_ARGS[@]}"
   CURRENT_COMMIT="$(git -C "$PROJECT_DIR" rev-parse HEAD)"
   echo "===== RELEASE EXECUTION PLAN ====="
   PROJECT_DIR="$PROJECT_DIR" NODE_COMMAND="$NODE_COMMAND" "$SCRIPT_DIR/release-classify.sh" \
@@ -70,9 +75,9 @@ if [[ "$EXECUTE_ONLY" == true ]]; then
   [[ -n "$RELEASE_DIR" ]] || fail "--execute-only requires --release-dir"
 else
   PREPARE_OUTPUT="$(
-    "$SCRIPT_DIR/release-prepare.sh" \
-      --commit "$COMMIT_SHA" \
-      --change-type "$CHANGE_TYPE"
+    PREPARE_ARGS=(--commit "$COMMIT_SHA" --change-type "$CHANGE_TYPE")
+    [[ -n "$BUNDLE_PATH" ]] && PREPARE_ARGS+=(--bundle "$BUNDLE_PATH")
+    "$SCRIPT_DIR/release-prepare.sh" "${PREPARE_ARGS[@]}"
   )"
   printf '%s\n' "$PREPARE_OUTPUT"
   RELEASE_DIR="$(printf '%s\n' "$PREPARE_OUTPUT" | awk -F= '/^RELEASE_DIR=/ { sub(/^[^=]*=/, ""); print; exit }')"
@@ -98,13 +103,16 @@ EXECUTE_ARGS=(
   --release-dir "$RELEASE_DIR"
   --confirm DEPLOY
 )
+[[ -n "$BUNDLE_PATH" ]] && EXECUTE_ARGS+=(--bundle "$BUNDLE_PATH")
 [[ "$DRY_RUN" == true ]] && EXECUTE_ARGS+=(--dry-run)
 "$SCRIPT_DIR/release-execute.sh" "${EXECUTE_ARGS[@]}"
 
 if [[ "$DRY_RUN" == true ]]; then
   "$SCRIPT_DIR/release-tag.sh" --release-dir "$RELEASE_DIR" --dry-run
 else
-  "$SCRIPT_DIR/release-tag.sh" --release-dir "$RELEASE_DIR" --confirm TAG
+  TAG_ARGS=(--release-dir "$RELEASE_DIR" --confirm TAG)
+  [[ -n "$BUNDLE_PATH" ]] && TAG_ARGS+=(--offline)
+  "$SCRIPT_DIR/release-tag.sh" "${TAG_ARGS[@]}"
 fi
 
 echo "RELEASE_DIR=$RELEASE_DIR"

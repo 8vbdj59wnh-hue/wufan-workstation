@@ -9,6 +9,7 @@ CHANGE_TYPE=""
 RELEASE_DIR=""
 STATUS="prepared"
 DRY_RUN="false"
+BUNDLE_PATH=""
 
 fail() {
   echo "MANIFEST_FAIL: $*" >&2
@@ -47,6 +48,11 @@ while [[ $# -gt 0 ]]; do
     --dry-run)
       DRY_RUN="true"
       shift
+      ;;
+    --bundle)
+      [[ $# -ge 2 ]] || fail "--bundle requires a value"
+      BUNDLE_PATH="$2"
+      shift 2
       ;;
     *)
       fail "unknown argument: $1"
@@ -125,6 +131,19 @@ else
   PM2_VERSION="${RELEASE_TEST_PM2_VERSION:-test}"
 fi
 DISK_FREE_BEFORE="$(df -Pk "$PROJECT_DIR" | awk 'NR == 2 { printf "%.0f\n", $4 * 1024 }')"
+SOURCE_MODE="online"
+BUNDLE_SHA256=""
+BUNDLE_VERIFIED="false"
+BUNDLE_TARGET_COMMIT=""
+if [[ -n "$BUNDLE_PATH" ]]; then
+  [[ "$BUNDLE_PATH" == /* && -s "$BUNDLE_PATH" ]] || fail "--bundle must be an absolute, non-empty file"
+  git -C "$PROJECT_DIR" bundle verify "$BUNDLE_PATH" >/dev/null 2>&1 \
+    || fail "git bundle verification failed"
+  SOURCE_MODE="offline-bundle"
+  BUNDLE_SHA256="$(shasum -a 256 "$BUNDLE_PATH" | awk '{print $1}')"
+  BUNDLE_VERIFIED="true"
+  BUNDLE_TARGET_COMMIT="$COMMIT_SHA"
+fi
 
 export RELEASE_ID="$(basename "$RELEASE_DIR")"
 export CREATED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -138,6 +157,7 @@ export NODE_VERSION NPM_VERSION PM2_VERSION DATABASE_PATH DATABASE_SIZE DATABASE
 export DATABASE_BACKUP_PATH DATABASE_BACKUP_SHA256 DATABASE_INTEGRITY DISK_FREE_BEFORE
 export REQUIRES_NPM_CI REQUIRES_CLIENT_RESTART REQUIRES_SERVER_RESTART
 export REQUIRES_MIGRATION_PREVIEW REQUIRES_UPLOADS_BACKUP DRY_RUN RELEASE_DIR
+export SOURCE_MODE BUNDLE_SHA256 BUNDLE_VERIFIED BUNDLE_TARGET_COMMIT
 
 "$NODE_COMMAND" <<'NODE'
 const fs = require("fs");
@@ -197,6 +217,10 @@ const manifest = {
   noOp: bool("NO_OP"),
   dryRun: bool("DRY_RUN"),
   manualBrowserVerificationRequired: true,
+  sourceMode: process.env.SOURCE_MODE,
+  bundleSha256: process.env.BUNDLE_SHA256,
+  bundleVerified: bool("BUNDLE_VERIFIED"),
+  bundleTargetCommit: process.env.BUNDLE_TARGET_COMMIT,
 };
 fs.writeFileSync(
   path.join(process.env.RELEASE_DIR, "release-manifest.json"),

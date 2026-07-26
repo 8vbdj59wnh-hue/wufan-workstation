@@ -14,6 +14,7 @@ DRY_RUN=false
 STAGE="argument-validation"
 MANIFEST=""
 NODE_COMMAND="$NODE22_BIN/node"
+BUNDLE_PATH=""
 
 fail() {
   echo "RELEASE_EXECUTE_FAIL: $*" >&2
@@ -27,6 +28,7 @@ while [[ $# -gt 0 ]]; do
     --release-dir) RELEASE_DIR="${2:-}"; shift 2 ;;
     --confirm) CONFIRM="${2:-}"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
+    --bundle) BUNDLE_PATH="${2:-}"; shift 2 ;;
     *) fail "unknown argument: $1" ;;
   esac
 done
@@ -58,6 +60,13 @@ manifest_value() {
 [[ "$(manifest_value status)" == "prepared" ]] || fail "manifest status must be prepared"
 [[ "$(manifest_value targetCommit)" == "$COMMIT_SHA" ]] || fail "manifest targetCommit mismatch"
 [[ "$(manifest_value changeType)" == "$CHANGE_TYPE" ]] || fail "manifest changeType mismatch"
+if [[ -n "$BUNDLE_PATH" ]]; then
+  [[ "$BUNDLE_PATH" == /* && -s "$BUNDLE_PATH" ]] || fail "--bundle must be an absolute, non-empty file"
+  [[ "$(manifest_value sourceMode)" == "offline-bundle" ]] || fail "manifest sourceMode mismatch"
+  [[ "$(manifest_value bundleTargetCommit)" == "$COMMIT_SHA" ]] || fail "manifest bundleTargetCommit mismatch"
+  [[ "$(shasum -a 256 "$BUNDLE_PATH" | awk '{print $1}')" == "$(manifest_value bundleSha256)" ]] \
+    || fail "bundle SHA mismatch"
+fi
 
 BACKUP_PATH="$(manifest_value databaseBackupPath)"
 BACKUP_SHA="$(manifest_value databaseBackupSha256)"
@@ -154,8 +163,9 @@ on_error() {
 trap on_error ERR
 
 STAGE="preflight"
-"$SCRIPT_DIR/release-preflight.sh" --commit "$COMMIT_SHA" --change-type "$CHANGE_TYPE" \
-  > "$RELEASE_DIR/checks/preflight-execute.txt"
+PREFLIGHT_ARGS=(--commit "$COMMIT_SHA" --change-type "$CHANGE_TYPE")
+[[ -n "$BUNDLE_PATH" ]] && PREFLIGHT_ARGS+=(--bundle "$BUNDLE_PATH")
+"$SCRIPT_DIR/release-preflight.sh" "${PREFLIGHT_ARGS[@]}" > "$RELEASE_DIR/checks/preflight-execute.txt"
 
 STAGE="health-before"
 "$SCRIPT_DIR/release-health-check.sh" --commit "$COMMIT_SHA" --release-dir "$RELEASE_DIR" --phase before
@@ -164,8 +174,10 @@ update_manifest deploying "$STAGE"
 
 STAGE="git-update"
 cd "$PROJECT_DIR"
-git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
-[[ "$(git rev-parse origin/main)" == "$COMMIT_SHA" ]]
+if [[ -z "$BUNDLE_PATH" ]]; then
+  git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+  [[ "$(git rev-parse origin/main)" == "$COMMIT_SHA" ]]
+fi
 git merge-base --is-ancestor HEAD "$COMMIT_SHA"
 if [[ "$NO_OP" == "false" ]]; then
   git merge --ff-only "$COMMIT_SHA"

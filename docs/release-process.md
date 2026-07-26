@@ -41,6 +41,20 @@ scripts/release.sh \
 没有 `--confirm DEPLOY` 时，统一入口自动退化为 dry-run。Dry-run可以fetch远程引用，
 但不会merge、npm ci、重启服务、修改manifest正式状态或创建标签。
 
+Server-01无法访问GitHub时，可由Dev-01提供经过校验的Git bundle：
+
+```bash
+scripts/release.sh \
+  --commit <SHA> \
+  --change-type <类型> \
+  --bundle /absolute/path/to/release.bundle \
+  --dry-run
+```
+
+离线模式验证bundle、目标commit和纯fast-forward关系，不执行任何GitHub网络请求。
+Server-01只创建本地生产标签；维护者随后在Dev-01使用release记录中的相同标签名称和
+说明创建并推送标签。
+
 当目标等于当前Server HEAD时，dry-run会识别为no-op；只有真实发布目标才强制等于
 远程main HEAD。
 
