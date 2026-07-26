@@ -4,6 +4,7 @@ set -euo pipefail
 EXPECTED_PROJECT_DIR="/Users/meiyounaichatouyuna/Projects/goal-execution-system"
 RELEASE_ROOT="/Users/meiyounaichatouyuna/WufanWorkstationReleases"
 NODE22_BIN="/opt/homebrew/opt/node@22/bin"
+export PATH="$NODE22_BIN:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 PACKAGE_REF="refs/wufan-package/offline-target"
 MINIMUM_SAFETY_BYTES=$((10 * 1024 * 1024 * 1024))
 NPM_TEMP_BYTES=$((2 * 1024 * 1024 * 1024))
@@ -139,7 +140,12 @@ DISK_FREE_BYTES="$(df -Pk "$PROJECT_DIR" | awk 'NR==2 {printf "%.0f\n", $4 * 102
 REQUIRED_FREE_BYTES=$((DATABASE_SIZE + NPM_TEMP_BYTES + MINIMUM_SAFETY_BYTES))
 [[ "$DISK_FREE_BYTES" -gt "$REQUIRED_FREE_BYTES" ]] || fail "insufficient disk space"
 
-export PATH="$NODE22_BIN:/opt/homebrew/bin:/usr/bin:/bin"
+LSOF_BIN="$(command -v lsof || true)"
+if [[ -z "$LSOF_BIN" && -x /usr/sbin/lsof ]]; then
+  LSOF_BIN="/usr/sbin/lsof"
+fi
+[[ -n "$LSOF_BIN" && -x "$LSOF_BIN" ]] || fail "lsof is unavailable for port checks"
+
 PM2_JSON="$(pm2 jlist)"
 PROJECT_DIR="$PROJECT_DIR" PM2_JSON="$PM2_JSON" "$NODE_COMMAND" <<'NODE' >/dev/null
 const apps = JSON.parse(process.env.PM2_JSON);
@@ -150,7 +156,8 @@ for (const name of ["wufan-client", "wufan-server"]) {
 }
 NODE
 for port in 5173 3001; do
-  lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null || fail "port $port is not listening"
+  "$LSOF_BIN" -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null \
+    || fail "port $port is not listening"
 done
 curl --fail --silent --show-error http://127.0.0.1:3001/api/health \
   | "$NODE_COMMAND" -e \
