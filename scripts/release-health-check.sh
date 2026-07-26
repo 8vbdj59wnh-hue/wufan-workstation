@@ -168,68 +168,50 @@ for resource in index.html src/main.js src/modules.js src/styles.css; do
   printf '%s|%s\n' "$resource" "$http_sha" >> "$RESOURCE_RESULTS"
 done
 
-HEALTH_USERNAME="${WUFAN_HEALTH_USERNAME:-}"
-HEALTH_PASSWORD="${WUFAN_HEALTH_PASSWORD:-}"
-HEALTH_TOKEN="${WUFAN_HEALTH_TOKEN:-}"
-AUTH_RESULT="$RELEASE_DIR/checks/auth-$PHASE.json"
-HEALTH_USERNAME="$HEALTH_USERNAME" HEALTH_PASSWORD="$HEALTH_PASSWORD" HEALTH_TOKEN="$HEALTH_TOKEN" \
-  AUTH_RESULT="$AUTH_RESULT" "$NODE_COMMAND" <<'NODE' || fail "administrator login or /api/data check failed"
-const fs = require("fs");
-(async () => {
-  const base = "http://127.0.0.1:3001";
-  let token = process.env.HEALTH_TOKEN;
-  let loginUser = null;
-  if (!token) {
-    if (!process.env.HEALTH_USERNAME || !process.env.HEALTH_PASSWORD) {
-      throw new Error("WUFAN_HEALTH_TOKEN or WUFAN_HEALTH_USERNAME/WUFAN_HEALTH_PASSWORD is required");
-    }
-    const loginResponse = await fetch(`${base}/api/auth/login`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        username: process.env.HEALTH_USERNAME,
-        password: process.env.HEALTH_PASSWORD,
-      }),
-    });
-    if (!loginResponse.ok) throw new Error(`login returned ${loginResponse.status}`);
-    const login = await loginResponse.json();
-    if (!login.token) throw new Error("login response did not include a token");
-    token = login.token;
-    loginUser = { id: login.user?.id, name: login.user?.name, role: login.user?.role };
-  }
-  const dataResponse = await fetch(`${base}/api/data`, {
-    headers: { authorization: `Bearer ${token}` },
-  });
-  if (!dataResponse.ok) throw new Error(`/api/data returned ${dataResponse.status}`);
-  const data = await dataResponse.json();
-  const counts = {};
-  for (const [key, value] of Object.entries(data)) {
-    if (Array.isArray(value)) counts[key] = value.length;
-  }
-  fs.writeFileSync(process.env.AUTH_RESULT, `${JSON.stringify({
-    loginOk: true,
-    dataReadOk: true,
-    user: loginUser,
-    counts,
-  }, null, 2)}\n`);
-})().catch((error) => {
-  console.error(error.message);
-  process.exit(1);
-});
-NODE
-
 DATABASE_INTEGRITY="$(sqlite3 "file:$DATABASE_PATH?mode=ro" 'PRAGMA integrity_check;')"
 [[ "$DATABASE_INTEGRITY" == "ok" ]] || fail "database integrity check failed"
 
+CLIENT_ERROR_LOG="$HOME/.pm2/logs/wufan-client-error.log"
+SERVER_ERROR_LOG="$HOME/.pm2/logs/wufan-server-error.log"
+CLIENT_ERROR_LOG_SIZE="$(stat -f '%z' "$CLIENT_ERROR_LOG" 2>/dev/null || echo 0)"
+SERVER_ERROR_LOG_SIZE="$(stat -f '%z' "$SERVER_ERROR_LOG" 2>/dev/null || echo 0)"
+NEW_FATAL_ERRORS=false
+if [[ "$PHASE" == "after" && -f "$RELEASE_DIR/checks/health-before.json" ]]; then
+  BEFORE_CLIENT_SIZE="$("$NODE_COMMAND" -e \
+    'const r=require(process.argv[1]);process.stdout.write(String(r.errorLogOffsets?.client??0))' \
+    "$RELEASE_DIR/checks/health-before.json")"
+  BEFORE_SERVER_SIZE="$("$NODE_COMMAND" -e \
+    'const r=require(process.argv[1]);process.stdout.write(String(r.errorLogOffsets?.server??0))' \
+    "$RELEASE_DIR/checks/health-before.json")"
+  NEW_ERRORS="$RELEASE_DIR/checks/new-errors-after.log"
+  : > "$NEW_ERRORS"
+  for entry in \
+    "$CLIENT_ERROR_LOG|$BEFORE_CLIENT_SIZE" \
+    "$SERVER_ERROR_LOG|$BEFORE_SERVER_SIZE"
+  do
+    error_log="${entry%%|*}"
+    previous_size="${entry##*|}"
+    current_size="$(stat -f '%z' "$error_log" 2>/dev/null || echo 0)"
+    start_byte=$((previous_size + 1))
+    [[ "$current_size" -ge "$previous_size" ]] || start_byte=1
+    [[ -f "$error_log" ]] && tail -c +"$start_byte" "$error_log" >> "$NEW_ERRORS"
+  done
+  if grep -Eiq 'fatal|uncaught exception|unhandled rejection|EADDRINUSE|SQLITE_(CORRUPT|NOTADB)' "$NEW_ERRORS"; then
+    NEW_FATAL_ERRORS=true
+  fi
+  [[ "$NEW_FATAL_ERRORS" == false ]] || fail "new fatal errors detected in PM2 error logs"
+fi
+
 {
   echo "===== wufan-client recent errors ====="
-  tail -n 80 "$HOME/.pm2/logs/wufan-client-error.log" 2>/dev/null || true
+  tail -n 80 "$CLIENT_ERROR_LOG" 2>/dev/null || true
   echo "===== wufan-server recent errors ====="
-  tail -n 80 "$HOME/.pm2/logs/wufan-server-error.log" 2>/dev/null || true
+  tail -n 80 "$SERVER_ERROR_LOG" 2>/dev/null || true
 } >> "$LOG_PATH"
 
 export RESULT_PATH PHASE COMMIT_SHA CURRENT_COMMIT HEALTH_JSON FRONT_STATUS
-export DATABASE_PATH DATABASE_INTEGRITY PM2_SAFE_PATH AUTH_RESULT RESOURCE_RESULTS
+export DATABASE_PATH DATABASE_INTEGRITY PM2_SAFE_PATH RESOURCE_RESULTS
+export CLIENT_ERROR_LOG_SIZE SERVER_ERROR_LOG_SIZE NEW_FATAL_ERRORS
 "$NODE_COMMAND" <<'NODE'
 const fs = require("fs");
 const parse = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
@@ -249,10 +231,15 @@ const result = {
   health: JSON.parse(process.env.HEALTH_JSON),
   frontendStatus: Number(process.env.FRONT_STATUS),
   resources,
-  authentication: parse(process.env.AUTH_RESULT),
   databasePath: process.env.DATABASE_PATH,
   databaseIntegrity: process.env.DATABASE_INTEGRITY,
+  errorLogOffsets: {
+    client: Number(process.env.CLIENT_ERROR_LOG_SIZE),
+    server: Number(process.env.SERVER_ERROR_LOG_SIZE),
+  },
+  newFatalErrorsDetected: process.env.NEW_FATAL_ERRORS === "true",
   businessWritesPerformed: false,
+  manualBrowserVerificationRequired: true,
 };
 fs.writeFileSync(process.env.RESULT_PATH, `${JSON.stringify(result, null, 2)}\n`);
 NODE

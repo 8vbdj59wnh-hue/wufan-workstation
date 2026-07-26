@@ -44,8 +44,6 @@ jobs:
       COMMIT_SHA: ${{ inputs.commit_sha }}
       CHANGE_TYPE: ${{ inputs.change_type }}
       CONFIRM_PRODUCTION: ${{ inputs.confirm_production }}
-      WUFAN_HEALTH_USERNAME: ${{ secrets.WUFAN_HEALTH_USERNAME }}
-      WUFAN_HEALTH_PASSWORD: ${{ secrets.WUFAN_HEALTH_PASSWORD }}
 
     defaults:
       run:

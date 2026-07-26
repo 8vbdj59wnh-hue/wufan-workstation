@@ -9,12 +9,8 @@
 - 正式目标必须是远程 `main` 当前的40位完整 commit SHA。
 - GitHub `production` Environment 应配置 Required reviewers；未配置审批前不应触发正式部署。
 
-生产健康检查需要在 `production` Environment 中配置：
-
-- `WUFAN_HEALTH_USERNAME`
-- `WUFAN_HEALTH_PASSWORD`
-
-不得把管理员密码写入 workflow、脚本或 release manifest。
+自动健康检查不登录系统、不获取token、不读取认证接口，也不写业务测试数据。发布完成后
+必须由维护者在浏览器中手动登录并验收主要业务页面。
 
 ## 标准顺序
 
@@ -95,11 +91,11 @@ schema或迁移代码发生变化时，`release-migration-preview.sh`：
 - PM2服务、工作目录、PID与端口；
 - `/api/health`；
 - 首页与核心前端资源，并与当前工作区SHA对照；
-- 管理员登录和只读 `/api/data`；
 - SQLite完整性和实际路径；
-- 最近PM2错误日志。
+- 最近PM2错误日志，以及发布期间新增的致命错误。
 
-健康检查不新增、修改或删除业务记录。
+健康检查不新增、修改或删除业务记录；manifest会记录
+`manualBrowserVerificationRequired: true`。
 
 重启由实际变更文件决定：
 

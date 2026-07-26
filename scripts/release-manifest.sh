@@ -196,6 +196,7 @@ const manifest = {
   requiresUploadsBackup: bool("REQUIRES_UPLOADS_BACKUP"),
   noOp: bool("NO_OP"),
   dryRun: bool("DRY_RUN"),
+  manualBrowserVerificationRequired: true,
 };
 fs.writeFileSync(
   path.join(process.env.RELEASE_DIR, "release-manifest.json"),
