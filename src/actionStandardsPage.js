@@ -176,42 +176,6 @@ function getProcessTemplateName(templateId) {
   return state.processTemplates.find((template) => template.id === templateId)?.name ?? "未绑定关键行动标准流程";
 }
 
-function getActionCode(template) {
-  return getProcessTemplateById(template.defaultProcessTemplateId ?? "")?.businessCode?.trim() ?? "";
-}
-
-async function copyActionCode(copyTarget) {
-  const actionCode = copyTarget.dataset.copyActionCode ?? "";
-  if (actionCode === "") return;
-  try {
-    if (navigator.clipboard?.writeText !== undefined) {
-      await navigator.clipboard.writeText(actionCode);
-    } else {
-      const textarea = document.createElement("textarea");
-      textarea.value = actionCode;
-      textarea.style.position = "fixed";
-      textarea.style.opacity = "0";
-      document.body.append(textarea);
-      textarea.select();
-      const copied = document.execCommand("copy");
-      textarea.remove();
-      if (!copied) throw new Error("copy command failed");
-    }
-    const feedback = copyTarget.closest(".standard-work-card-meta")?.querySelector("[data-action-code-feedback]");
-    if (feedback === null || feedback === undefined) return;
-    feedback.textContent = "已复制";
-    feedback.classList.add("is-visible");
-    window.clearTimeout(Number(feedback.dataset.hideTimer ?? 0));
-    feedback.dataset.hideTimer = String(window.setTimeout(() => {
-      feedback.classList.remove("is-visible");
-      feedback.textContent = "";
-      delete feedback.dataset.hideTimer;
-    }, 1600));
-  } catch (error) {
-    console.error("行动编码复制失败", error);
-  }
-}
-
 function inferValueModuleIdForTemplate(template) {
   if (template === null || template === undefined) return ValueModule.InfrastructureMaintenance;
   const category = categories.find((item) => item.id === template.categoryId && item.type === CategoryType.Task);
@@ -300,7 +264,6 @@ function renderStandardWorkCard(template, selectedProcessTemplateId = "") {
   const isSelected = template.defaultProcessTemplateId !== undefined && template.defaultProcessTemplateId === selectedProcessTemplateId;
   const draggable = canCurrentUser("settings.editStandardWorks") ? ` draggable="true"` : "";
   const departmentName = findName(departments, template.departmentId, "未设置");
-  const actionCode = getActionCode(template);
   const processStepCount = template.defaultProcessTemplateId ? getStandardWorkProcessNodes(template.defaultProcessTemplateId).length : 0;
   const processStepLabel = processStepCount > 0 ? `${processStepCount}步` : "未配置";
   return `
@@ -316,15 +279,6 @@ function renderStandardWorkCard(template, selectedProcessTemplateId = "") {
       <div class="standard-work-card-meta">
         <span>责任部门</span>
         <strong>${escapeHtml(departmentName)}</strong>
-      </div>
-      <div class="standard-work-card-meta action-code-meta">
-        <span>行动编码</span>
-        ${
-          actionCode === ""
-            ? `<strong class="action-code-copy is-empty">—</strong>`
-            : `<button class="action-code-copy" type="button" data-copy-action-code="${escapeAttribute(actionCode)}" title="点击复制完整行动编码">${escapeHtml(actionCode)}</button>`
-        }
-        <em class="action-code-copy-feedback" data-action-code-feedback aria-live="polite"></em>
       </div>
       <div class="standard-work-card-meta">
         <span>流程</span>
@@ -1828,13 +1782,6 @@ export function bindStandardWorkLibraryEvents(rerender, container = document) {
     if (didDragStandardWorkCard) {
       event.preventDefault();
       didDragStandardWorkCard = false;
-      return;
-    }
-    const actionCodeTarget = event.target.closest("[data-copy-action-code]");
-    if (actionCodeTarget !== null) {
-      event.preventDefault();
-      event.stopPropagation();
-      void copyActionCode(actionCodeTarget);
       return;
     }
     const actionButton = event.target.closest("[data-action]");

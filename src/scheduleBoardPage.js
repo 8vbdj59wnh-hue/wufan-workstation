@@ -139,6 +139,38 @@ function escapeAttribute(value) {
   return escapeHtml(value).replaceAll("'", "&#39;");
 }
 
+async function copyActionCode(copyTarget) {
+  const actionCode = copyTarget.dataset.scheduleCopyActionCode ?? "";
+  if (actionCode === "") return;
+  try {
+    if (navigator.clipboard?.writeText !== undefined) {
+      await navigator.clipboard.writeText(actionCode);
+    } else {
+      const textarea = document.createElement("textarea");
+      textarea.value = actionCode;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.append(textarea);
+      textarea.select();
+      const copied = document.execCommand("copy");
+      textarea.remove();
+      if (!copied) throw new Error("copy command failed");
+    }
+    const feedback = copyTarget.closest(".schedule-action-overview-code")?.querySelector("[data-schedule-action-code-feedback]");
+    if (feedback === null || feedback === undefined) return;
+    feedback.textContent = "已复制";
+    feedback.classList.add("is-visible");
+    window.clearTimeout(Number(feedback.dataset.hideTimer ?? 0));
+    feedback.dataset.hideTimer = String(window.setTimeout(() => {
+      feedback.classList.remove("is-visible");
+      feedback.textContent = "";
+      delete feedback.dataset.hideTimer;
+    }, 1600));
+  } catch (error) {
+    console.error("行动编码复制失败", error);
+  }
+}
+
 function formatDate(date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -1062,6 +1094,7 @@ function getActionOverviewStatusClass(status) {
 function renderActionOverviewCard(row) {
   if (row.processInstance === null) return "";
   const title = getProcessCardTitle(row);
+  const actionCode = String(row.processInstance.businessCode ?? "").trim();
   const imageUrls = getProcessImageUrls(row);
   const businessStatus = selectProcessInstanceBusinessStatus(row.processInstance.id, state);
   const progress = selectProcessProgress(row.processInstance.id, state);
@@ -1082,6 +1115,15 @@ function renderActionOverviewCard(row) {
       </div>
       <div class="schedule-action-overview-body">
         <h3 title="${escapeAttribute(title)}">${escapeHtml(title)}</h3>
+        <div class="schedule-action-overview-code">
+          <span>行动编码</span>
+          ${
+            actionCode === ""
+              ? `<strong>—</strong>`
+              : `<button type="button" data-schedule-copy-action-code="${escapeAttribute(actionCode)}" title="点击复制完整行动编码">${escapeHtml(actionCode)}</button>`
+          }
+          <em data-schedule-action-code-feedback aria-live="polite"></em>
+        </div>
         <div class="schedule-action-overview-meta">
           <span class="schedule-action-overview-status ${getActionOverviewStatusClass(businessStatus.status)}">${escapeHtml(businessStatus.label)}</span>
           ${renderActionOverviewOwner(row)}
@@ -1503,9 +1545,18 @@ export function bindScheduleBoardPageEvents(rerender) {
     };
     card.addEventListener("click", openActionDetail);
     card.addEventListener("keydown", (event) => {
+      if (event.target.closest("[data-schedule-copy-action-code]") !== null) return;
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
       openActionDetail();
+    });
+  });
+
+  document.querySelectorAll("[data-schedule-copy-action-code]").forEach((copyTarget) => {
+    copyTarget.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void copyActionCode(copyTarget);
     });
   });
 
