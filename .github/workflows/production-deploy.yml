@@ -32,7 +32,7 @@ concurrency:
 
 jobs:
   production-preflight:
-    name: Production preflight (deployment blocked)
+    name: Production dry-run (deployment blocked)
     runs-on:
       - self-hosted
     timeout-minutes: 10
@@ -48,6 +48,9 @@ jobs:
         shell: bash
 
     steps:
+      - name: Checkout workflow source
+        uses: actions/checkout@v4
+
       - name: Validate manual production confirmation
         run: |
           set -euo pipefail
@@ -60,96 +63,15 @@ jobs:
             exit 1
           fi
 
-      - name: Validate production repository and remote target
+      - name: Run release preparation dry-run
         run: |
-          set -euo pipefail
-          expected_project_dir="/Users/meiyounaichatouyuna/Projects/goal-execution-system"
-          if [[ "$PROJECT_DIR" != "$expected_project_dir" ]]; then
-            echo "Unexpected production project path: $PROJECT_DIR" >&2
-            exit 1
-          fi
-          cd "$PROJECT_DIR"
-          if [[ "$PWD" != "$expected_project_dir" ]]; then
-            echo "Resolved production project path is incorrect: $PWD" >&2
-            exit 1
-          fi
-          if [[ "$(git branch --show-current)" != "main" ]]; then
-            echo "Server-01 must be on main." >&2
-            exit 1
-          fi
-          if ! git diff --quiet; then
-            echo "Server-01 has unstaged changes." >&2
-            exit 1
-          fi
-          if ! git diff --cached --quiet; then
-            echo "Server-01 has staged changes." >&2
-            exit 1
-          fi
-          if [[ -n "$(git status --porcelain=v1 --untracked-files=all)" ]]; then
-            echo "Server-01 worktree is not clean." >&2
-            exit 1
-          fi
-
-          remote_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
-          if [[ -z "$remote_main" || "$remote_main" != "$COMMIT_SHA" ]]; then
-            echo "commit_sha must equal the current remote main HEAD." >&2
-            echo "Requested: $COMMIT_SHA" >&2
-            echo "Remote:    ${remote_main:-missing}" >&2
-            exit 1
-          fi
-
-          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
-          if [[ "$(git rev-parse origin/main)" != "$COMMIT_SHA" ]]; then
-            echo "Fetched origin/main does not resolve to commit_sha." >&2
-            exit 1
-          fi
-          git cat-file -e "$COMMIT_SHA^{commit}"
-          if ! git merge-base --is-ancestor HEAD "$COMMIT_SHA"; then
-            echo "Server-01 HEAD is not an ancestor of commit_sha; non-fast-forward deployment refused." >&2
-            exit 1
-          fi
-
-          echo "Production preflight passed."
-          echo "Current HEAD: $(git rev-parse HEAD)"
-          echo "Target HEAD:  $COMMIT_SHA"
-          echo "Change type:  $CHANGE_TYPE"
+          "$GITHUB_WORKSPACE/scripts/release-prepare.sh" \
+            --commit "$COMMIT_SHA" \
+            --change-type "$CHANGE_TYPE" \
+            --dry-run
 
       - name: Block deployment until release backup workflow is ready
         run: |
           echo "release backup workflow not ready" >&2
           echo "No source update, dependency installation, PM2 restart, or database change was performed." >&2
           exit 1
-
-      # The following minimum deployment actions intentionally remain unreachable
-      # until a verified SQLite online-backup and release-manifest stage replaces
-      # the protection gate above.
-      - name: Fast-forward production source
-        if: ${{ success() }}
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: git merge --ff-only "$COMMIT_SHA"
-
-      - name: Install dependencies with Node 22 when required
-        if: ${{ success() && (inputs.change_type == 'deps' || inputs.change_type == 'runtime') }}
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          export PATH="$NODE22_BIN:/opt/homebrew/bin:/usr/bin:/bin"
-          npm ci --no-audit --no-fund
-
-      - name: Check production source with Node 22
-        if: ${{ success() }}
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          export PATH="$NODE22_BIN:/opt/homebrew/bin:/usr/bin:/bin"
-          npm run check
-
-      - name: Restart only Wufan Workstation services
-        if: ${{ success() }}
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          export PATH="$NODE22_BIN:/opt/homebrew/bin:/usr/bin:/bin"
-          pm2 restart wufan-client
-          pm2 restart wufan-server
-
-      - name: Verify production health
-        if: ${{ success() }}
-        run: curl --fail --silent --show-error http://127.0.0.1:3001/api/health

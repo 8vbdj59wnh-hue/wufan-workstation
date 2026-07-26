@@ -5,6 +5,7 @@ REMOTE_PATH="/Users/meiyounaichatouyuna/Projects/goal-execution-system"
 MODE="dry-run"
 REMOTE_HOST=""
 REMOTE_USER=""
+LEGACY_CONFIRMED="false"
 
 usage() {
   cat <<'USAGE'
@@ -16,6 +17,7 @@ Options:
                             Default: /Users/meiyounaichatouyuna/Projects/goal-execution-system
   --execute                 Actually rsync code and restart pm2. Default is dry-run only.
   --dry-run                 Preview rsync changes without modifying the company Mac.
+  --legacy-confirm          Explicitly acknowledge use of this deprecated script.
   -h, --help                Show this help.
 
 Safety:
@@ -80,6 +82,10 @@ while [[ $# -gt 0 ]]; do
       MODE="dry-run"
       shift
       ;;
+    --legacy-confirm)
+      LEGACY_CONFIRMED="true"
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -91,6 +97,12 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "$LEGACY_CONFIRMED" != "true" ]]; then
+  echo "Deprecated: use the release workflow" >&2
+  echo "Legacy execution requires an explicit --legacy-confirm argument." >&2
+  exit 1
+fi
 
 if [[ -z "$REMOTE_HOST" || -z "$REMOTE_USER" ]]; then
   echo "Missing required --host or --user." >&2

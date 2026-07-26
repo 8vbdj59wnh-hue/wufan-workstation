@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${1:-}" != "--legacy-confirm" ]]; then
+  echo "Deprecated: use the release workflow" >&2
+  echo "Legacy execution requires an explicit --legacy-confirm argument." >&2
+  exit 1
+fi
+shift
+
 PROJECT_DIR="/Users/meiyounaichatouyuna/Projects/goal-execution-system"
 
 cd "$PROJECT_DIR"
