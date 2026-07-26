@@ -98,10 +98,20 @@ git diff --cached --quiet || fail "index contains staged changes"
 CURRENT_COMMIT="$(git rev-parse HEAD)"
 REMOTE_MAIN="$(git ls-remote origin refs/heads/main | awk 'NR == 1 { print $1 }')"
 [[ -n "$REMOTE_MAIN" ]] || fail "cannot resolve remote main"
-[[ "$REMOTE_MAIN" == "$COMMIT_SHA" ]] || fail "target commit must equal remote main HEAD ($REMOTE_MAIN)"
-
 git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
-[[ "$(git rev-parse origin/main)" == "$COMMIT_SHA" ]] || fail "fetched origin/main does not equal target commit"
+
+NO_OP="false"
+if [[ "$REMOTE_MAIN" != "$COMMIT_SHA" ]]; then
+  if [[ "$DRY_RUN" == "true" && "$CURRENT_COMMIT" == "$COMMIT_SHA" ]] \
+    && git merge-base --is-ancestor "$COMMIT_SHA" origin/main; then
+    NO_OP="true"
+  else
+    fail "target commit must equal remote main HEAD ($REMOTE_MAIN)"
+  fi
+else
+  [[ "$(git rev-parse origin/main)" == "$COMMIT_SHA" ]] || fail "fetched origin/main does not equal target commit"
+fi
+
 git cat-file -e "$COMMIT_SHA^{commit}" || fail "target commit is not a commit object"
 git merge-base --is-ancestor "$CURRENT_COMMIT" "$COMMIT_SHA" || fail "current HEAD is not an ancestor of target commit"
 
@@ -163,37 +173,28 @@ COMMITS_AHEAD="$(git rev-list --count "$CURRENT_COMMIT..$COMMIT_SHA")"
 CHANGED_FILES_COUNT="$(git diff --name-only "$CURRENT_COMMIT" "$COMMIT_SHA" | wc -l | tr -d ' ')"
 CHANGED_FILES="$(git diff --name-only "$CURRENT_COMMIT" "$COMMIT_SHA")"
 
-REQUIRES_NPM_CI="false"
-REQUIRES_CLIENT_RESTART="false"
-REQUIRES_SERVER_RESTART="false"
-REQUIRES_MIGRATION_PREVIEW="false"
-REQUIRES_UPLOADS_BACKUP="false"
-case "$CHANGE_TYPE" in
-  frontend)
-    REQUIRES_CLIENT_RESTART="true"
-    ;;
-  backend)
-    REQUIRES_SERVER_RESTART="true"
-    ;;
-  deps)
-    REQUIRES_NPM_CI="true"
-    REQUIRES_CLIENT_RESTART="true"
-    REQUIRES_SERVER_RESTART="true"
-    ;;
-  schema)
-    REQUIRES_SERVER_RESTART="true"
-    REQUIRES_MIGRATION_PREVIEW="true"
-    ;;
-  uploads)
-    REQUIRES_SERVER_RESTART="true"
-    REQUIRES_UPLOADS_BACKUP="true"
-    ;;
-  runtime)
-    REQUIRES_NPM_CI="true"
-    REQUIRES_CLIENT_RESTART="true"
-    REQUIRES_SERVER_RESTART="true"
-    ;;
-esac
+CLASSIFICATION="$(
+  PROJECT_DIR="$PROJECT_DIR" NODE_COMMAND="$NODE22_BIN/node" \
+    "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/release-classify.sh" \
+      --current "$CURRENT_COMMIT" \
+      --target "$COMMIT_SHA" \
+      --change-type "$CHANGE_TYPE"
+)"
+classification_value() {
+  printf '%s\n' "$CLASSIFICATION" | awk -F= -v key="$1" '$1 == key { sub(/^[^=]*=/, ""); print; exit }'
+}
+REQUIRES_NPM_CI="$(classification_value REQUIRES_NPM_CI)"
+REQUIRES_CLIENT_RESTART="$(classification_value REQUIRES_CLIENT_RESTART)"
+REQUIRES_SERVER_RESTART="$(classification_value REQUIRES_SERVER_RESTART)"
+REQUIRES_MIGRATION_PREVIEW="$(classification_value REQUIRES_MIGRATION_PREVIEW)"
+REQUIRES_UPLOADS_BACKUP="$(classification_value REQUIRES_UPLOADS_BACKUP)"
+if [[ "$NO_OP" == "true" ]]; then
+  REQUIRES_NPM_CI="false"
+  REQUIRES_CLIENT_RESTART="false"
+  REQUIRES_SERVER_RESTART="false"
+  REQUIRES_MIGRATION_PREVIEW="false"
+  REQUIRES_UPLOADS_BACKUP="false"
+fi
 
 echo "PREFLIGHT_OK=true"
 echo "DRY_RUN=$DRY_RUN"
@@ -201,6 +202,7 @@ echo "PROJECT_DIR=$PROJECT_DIR"
 echo "CURRENT_COMMIT=$CURRENT_COMMIT"
 echo "TARGET_COMMIT=$COMMIT_SHA"
 echo "REMOTE_MAIN=$REMOTE_MAIN"
+echo "NO_OP=$NO_OP"
 echo "CHANGE_TYPE=$CHANGE_TYPE"
 echo "COMMITS_AHEAD=$COMMITS_AHEAD"
 echo "CHANGED_FILES_COUNT=$CHANGED_FILES_COUNT"

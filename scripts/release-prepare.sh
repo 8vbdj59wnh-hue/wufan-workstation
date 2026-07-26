@@ -246,6 +246,10 @@ NODE
     printf 'pm2=%s\n' "$(PATH="$NODE22_BIN:/opt/homebrew/bin:/usr/bin:/bin" command -v pm2)"
     printf 'sqlite3=%s\n' "$(command -v sqlite3)"
   } > "$RELEASE_DIR/config/runtime-paths.txt"
+  [[ -f "$PROJECT_DIR/.node-version" ]] \
+    && cp "$PROJECT_DIR/.node-version" "$RELEASE_DIR/config/node-version.txt"
+  [[ -f "$PROJECT_DIR/ecosystem.config.cjs" ]] \
+    && cp "$PROJECT_DIR/ecosystem.config.cjs" "$RELEASE_DIR/config/ecosystem.config.cjs"
 fi
 
 MANIFEST_ARGS=(

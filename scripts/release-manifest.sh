@@ -81,38 +81,29 @@ COMMITS_AHEAD="$(git -C "$PROJECT_DIR" rev-list --count "$CURRENT_COMMIT..$COMMI
 CHANGED_FILES_PATH="$RELEASE_DIR/git/changed-files.txt"
 [[ -f "$CHANGED_FILES_PATH" ]] || git -C "$PROJECT_DIR" diff --name-only "$CURRENT_COMMIT" "$COMMIT_SHA" > "$CHANGED_FILES_PATH"
 
-PACKAGE_JSON_CHANGED="false"
-PACKAGE_LOCK_CHANGED="false"
-SCHEMA_CHANGED="false"
-MIGRATION_CODE_CHANGED="false"
-UPLOADS_RELATED_CHANGED="false"
-grep -Fxq "package.json" "$CHANGED_FILES_PATH" && PACKAGE_JSON_CHANGED="true"
-grep -Fxq "package-lock.json" "$CHANGED_FILES_PATH" && PACKAGE_LOCK_CHANGED="true"
-grep -Fxq "server/schema.sql" "$CHANGED_FILES_PATH" && SCHEMA_CHANGED="true"
-grep -Fxq "server/db.js" "$CHANGED_FILES_PATH" && MIGRATION_CODE_CHANGED="true"
-grep -Eiq '(^|/)(uploads?|upload)(/|[-_.]|$)|server/index\.js' "$CHANGED_FILES_PATH" && UPLOADS_RELATED_CHANGED="true"
-
-REQUIRES_NPM_CI="false"
-REQUIRES_CLIENT_RESTART="false"
-REQUIRES_SERVER_RESTART="false"
-REQUIRES_MIGRATION_PREVIEW="false"
-REQUIRES_UPLOADS_BACKUP="false"
-
-if [[ "$CHANGE_TYPE" == "deps" || "$CHANGE_TYPE" == "runtime" || "$PACKAGE_JSON_CHANGED" == "true" || "$PACKAGE_LOCK_CHANGED" == "true" ]]; then
-  REQUIRES_NPM_CI="true"
-fi
-if [[ "$CHANGE_TYPE" == "frontend" || "$CHANGE_TYPE" == "deps" || "$CHANGE_TYPE" == "runtime" ]]; then
-  REQUIRES_CLIENT_RESTART="true"
-fi
-if [[ "$CHANGE_TYPE" == "backend" || "$CHANGE_TYPE" == "deps" || "$CHANGE_TYPE" == "schema" || "$CHANGE_TYPE" == "uploads" || "$CHANGE_TYPE" == "runtime" ]]; then
-  REQUIRES_SERVER_RESTART="true"
-fi
-if [[ "$CHANGE_TYPE" == "schema" || "$SCHEMA_CHANGED" == "true" || "$MIGRATION_CODE_CHANGED" == "true" ]]; then
-  REQUIRES_MIGRATION_PREVIEW="true"
-fi
-if [[ "$CHANGE_TYPE" == "uploads" || "$UPLOADS_RELATED_CHANGED" == "true" ]]; then
-  REQUIRES_UPLOADS_BACKUP="true"
-fi
+CLASSIFICATION="$(
+  PROJECT_DIR="$PROJECT_DIR" NODE_COMMAND="$NODE_COMMAND" \
+    "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/release-classify.sh" \
+      --current "$CURRENT_COMMIT" \
+      --target "$COMMIT_SHA" \
+      --change-type "$CHANGE_TYPE"
+)"
+classification_value() {
+  printf '%s\n' "$CLASSIFICATION" | awk -F= -v key="$1" '$1 == key { sub(/^[^=]*=/, ""); print; exit }'
+}
+PACKAGE_JSON_CHANGED="$(classification_value PACKAGE_JSON_CHANGED)"
+PACKAGE_LOCK_CHANGED="$(classification_value PACKAGE_LOCK_CHANGED)"
+FRONTEND_CHANGED="$(classification_value FRONTEND_CHANGED)"
+BACKEND_CHANGED="$(classification_value BACKEND_CHANGED)"
+SCHEMA_CHANGED="$(classification_value SCHEMA_CHANGED)"
+MIGRATION_CODE_CHANGED="$(classification_value MIGRATION_CODE_CHANGED)"
+UPLOADS_RELATED_CHANGED="$(classification_value UPLOADS_RELATED_CHANGED)"
+REQUIRES_NPM_CI="$(classification_value REQUIRES_NPM_CI)"
+REQUIRES_CLIENT_RESTART="$(classification_value REQUIRES_CLIENT_RESTART)"
+REQUIRES_SERVER_RESTART="$(classification_value REQUIRES_SERVER_RESTART)"
+REQUIRES_MIGRATION_PREVIEW="$(classification_value REQUIRES_MIGRATION_PREVIEW)"
+REQUIRES_UPLOADS_BACKUP="$(classification_value REQUIRES_UPLOADS_BACKUP)"
+NO_OP="$(classification_value NO_OP)"
 
 DATABASE_SIZE="$(stat -f '%z' "$DATABASE_PATH")"
 DATABASE_SHA256="$(shasum -a 256 "$DATABASE_PATH" | awk '{print $1}')"
@@ -141,7 +132,8 @@ export MANIFEST_STATUS="$STATUS"
 export OPERATOR="$(id -un)"
 export RELEASE_HOSTNAME="$(hostname)"
 export PROJECT_DIR CURRENT_COMMIT COMMIT_SHA CHANGE_TYPE CURRENT_MESSAGE TARGET_MESSAGE COMMITS_AHEAD
-export PACKAGE_JSON_CHANGED PACKAGE_LOCK_CHANGED SCHEMA_CHANGED MIGRATION_CODE_CHANGED UPLOADS_RELATED_CHANGED
+export PACKAGE_JSON_CHANGED PACKAGE_LOCK_CHANGED FRONTEND_CHANGED BACKEND_CHANGED
+export SCHEMA_CHANGED MIGRATION_CODE_CHANGED UPLOADS_RELATED_CHANGED NO_OP
 export NODE_VERSION NPM_VERSION PM2_VERSION DATABASE_PATH DATABASE_SIZE DATABASE_SHA256
 export DATABASE_BACKUP_PATH DATABASE_BACKUP_SHA256 DATABASE_INTEGRITY DISK_FREE_BEFORE
 export REQUIRES_NPM_CI REQUIRES_CLIENT_RESTART REQUIRES_SERVER_RESTART
@@ -180,6 +172,8 @@ const manifest = {
   changedFiles,
   packageJsonChanged: bool("PACKAGE_JSON_CHANGED"),
   packageLockChanged: bool("PACKAGE_LOCK_CHANGED"),
+  frontendChanged: bool("FRONTEND_CHANGED"),
+  backendChanged: bool("BACKEND_CHANGED"),
   schemaChanged: bool("SCHEMA_CHANGED"),
   migrationCodeChanged: bool("MIGRATION_CODE_CHANGED"),
   uploadsRelatedChanged: bool("UPLOADS_RELATED_CHANGED"),
@@ -200,6 +194,7 @@ const manifest = {
   requiresServerRestart: bool("REQUIRES_SERVER_RESTART"),
   requiresMigrationPreview: bool("REQUIRES_MIGRATION_PREVIEW"),
   requiresUploadsBackup: bool("REQUIRES_UPLOADS_BACKUP"),
+  noOp: bool("NO_OP"),
   dryRun: bool("DRY_RUN"),
 };
 fs.writeFileSync(

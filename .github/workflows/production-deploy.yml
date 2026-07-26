@@ -32,16 +32,20 @@ concurrency:
 
 jobs:
   production-preflight:
-    name: Production dry-run (deployment blocked)
+    name: Controlled production release
     runs-on:
       - self-hosted
-    timeout-minutes: 10
+    environment:
+      name: production
+    timeout-minutes: 30
     env:
       PROJECT_DIR: /Users/meiyounaichatouyuna/Projects/goal-execution-system
       NODE22_BIN: /opt/homebrew/opt/node@22/bin
       COMMIT_SHA: ${{ inputs.commit_sha }}
       CHANGE_TYPE: ${{ inputs.change_type }}
       CONFIRM_PRODUCTION: ${{ inputs.confirm_production }}
+      WUFAN_HEALTH_USERNAME: ${{ secrets.WUFAN_HEALTH_USERNAME }}
+      WUFAN_HEALTH_PASSWORD: ${{ secrets.WUFAN_HEALTH_PASSWORD }}
 
     defaults:
       run:
@@ -50,6 +54,13 @@ jobs:
     steps:
       - name: Checkout workflow source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
 
       - name: Validate manual production confirmation
         run: |
@@ -63,15 +74,9 @@ jobs:
             exit 1
           fi
 
-      - name: Run release preparation dry-run
+      - name: Run controlled release workflow
         run: |
-          "$GITHUB_WORKSPACE/scripts/release-prepare.sh" \
+          "$GITHUB_WORKSPACE/scripts/release.sh" \
             --commit "$COMMIT_SHA" \
             --change-type "$CHANGE_TYPE" \
-            --dry-run
-
-      - name: Block deployment until release backup workflow is ready
-        run: |
-          echo "release backup workflow not ready" >&2
-          echo "No source update, dependency installation, PM2 restart, or database change was performed." >&2
-          exit 1
+            --confirm "$CONFIRM_PRODUCTION"

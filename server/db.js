@@ -33,9 +33,13 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
-export const dataDir = path.join(projectRoot, "data");
+const configuredDatabasePath = String(process.env.WUFAN_DB_PATH ?? "").trim();
+export const databasePath =
+  configuredDatabasePath === ""
+    ? path.join(projectRoot, "data", "workstation.db")
+    : path.resolve(configuredDatabasePath);
+export const dataDir = path.dirname(databasePath);
 export const uploadsDir = path.join(projectRoot, "uploads");
-export const databasePath = path.join(dataDir, "workstation.db");
 const schemaPath = path.join(__dirname, "schema.sql");
 const standardWorkValueChainCategories = [
   "基础设施维护",

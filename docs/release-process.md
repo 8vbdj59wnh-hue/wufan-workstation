@@ -1,49 +1,64 @@
-# 极简工作站发布前准备
+# 极简工作站标准发布流程
 
-当前只启用了发布前检查、SQLite 在线备份和发布记录准备。真正的生产部署仍被
-GitHub Actions 中的 `release backup workflow not ready` 保护门阻止。
+## 基线与职责
 
-## 基本原则
+- Dev-01 是唯一开发环境，只在 `main` 上形成候选发布提交。
+- push 和 pull request 只执行 CI，不部署 Server-01。
+- GitHub `Production Deploy` 只能通过 `workflow_dispatch` 人工触发。
+- Server-01 不直接开发，不提交生产工作区修改。
+- 正式目标必须是远程 `main` 当前的40位完整 commit SHA。
+- GitHub `production` Environment 应配置 Required reviewers；未配置审批前不应触发正式部署。
 
-- Dev-01、GitHub 和 Server-01 均以 `main` 为正式分支。
-- 正式发布必须显式指定远程 `main` 当前的40位完整 commit SHA。
-- 发布前必须完成 dry-run。
-- 发布前数据库备份必须使用 SQLite `.backup`，禁止直接复制正在运行的数据库。
-- 禁止直接运行旧 `deploy.sh` 或 `deploy-to-company.sh`。
-- 禁止使用 `npm install`、`pm2 restart all`、force、reset 或 rebase 发布。
-- 本阶段不会更新生产源码、安装依赖、重启服务、执行标签或自动恢复数据库。
+生产健康检查需要在 `production` Environment 中配置：
+
+- `WUFAN_HEALTH_USERNAME`
+- `WUFAN_HEALTH_PASSWORD`
+
+不得把管理员密码写入 workflow、脚本或 release manifest。
+
+## 标准顺序
+
+1. Dev-01 开发并通过本地检查。
+2. push main，等待 CI 成功。
+3. 执行发布 dry-run。
+4. 创建 release 目录和SQLite在线备份。
+5. 生成 Git、PM2、配置和 manifest 证据。
+6. schema或迁移代码变化时，在数据库备份副本上运行 migration preview。
+7. 执行发布前健康检查。
+8. 通过 `git merge --ff-only` 更新生产源码。
+9. 仅在依赖变化时用 Node 22 执行 `npm ci`。
+10. 运行 `npm run check`。
+11. 仅重启受影响的 `wufan-client`、`wufan-server`。
+12. 执行发布后健康检查和数据库完整性检查。
+13. 健康通过后执行 `pm2 save`，manifest标记为deployed。
+14. 创建并推送 annotated production 标签。
 
 ## Dry-run
 
-在 Server-01 项目目录执行：
-
 ```bash
-scripts/release-prepare.sh \
+scripts/release.sh \
   --commit <40位完整SHA> \
   --change-type <frontend|backend|deps|schema|uploads|runtime> \
   --dry-run
 ```
 
-Dry-run 会读取 Git、数据库、端口、PM2、健康接口和磁盘状态，可以 fetch
-`origin/main` 用于判断，但不会修改工作区、创建正式 release 目录、生成数据库
-备份、安装依赖或重启服务。临时 dry-run 目录会在退出时清理。
+没有 `--confirm DEPLOY` 时，统一入口自动退化为 dry-run。Dry-run可以fetch远程引用，
+但不会merge、npm ci、重启服务、修改manifest正式状态或创建标签。
 
-## 正式发布准备
+当目标等于当前Server HEAD时，dry-run会识别为no-op；只有真实发布目标才强制等于
+远程main HEAD。
 
-在备份机制验收后，可运行不带 `--dry-run` 的准备命令。它只准备发布证据和数据库
-备份，仍不会部署：
+## Prepare与release目录
 
 ```bash
-scripts/release-prepare.sh \
-  --commit <40位完整SHA> \
-  --change-type <frontend|backend|deps|schema|runtime>
+scripts/release.sh \
+  --commit <SHA> \
+  --change-type <类型> \
+  --confirm DEPLOY \
+  --prepare-only
 ```
 
-`uploads` 类型会明确停止，等待专项 uploads 备份方案，不会自动创建大型全量压缩包。
-
-## Release目录
-
-正式记录写入仓库之外：
+正式记录写入：
 
 ```text
 /Users/meiyounaichatouyuna/WufanWorkstationReleases/
@@ -57,30 +72,80 @@ scripts/release-prepare.sh \
     logs/
 ```
 
-目录不覆盖已有发布记录，不写入项目、data 或 uploads。
+SQLite备份只使用 `.backup`。禁止直接复制正在运行的 `workstation.db`。
 
-## SQLite在线备份
+## Migration preview
 
-`release-backup.sh` 使用 `sqlite3 .backup` 生成事务一致备份，并验证：
+schema或迁移代码发生变化时，`release-migration-preview.sh`：
 
-- 文件存在且非空
-- `PRAGMA integrity_check = ok`
-- 文件大小
-- SHA-256
-- 数据表数量
+- 从release数据库备份再创建隔离预演副本；
+- 从目标commit解压对应源码；
+- 通过显式 `WUFAN_DB_PATH` 打开预演数据库；
+- 使用Node 22执行初始化两次；
+- 验证迁移前后完整性、表数量、schema差异、基础读取和幂等性；
+- 永远不打开或覆盖正式数据库。
 
-manifest 不包含密码、Token、SSH密钥、完整环境变量或数据库业务内容。
+## Execute与健康检查
 
-## 尚未启用
+`release-execute.sh`只接受状态为prepared且数据库备份完整的release目录。迁移预演
+需要但未通过时，执行会被阻止。
 
-以下能力尚未启用：
+健康检查包括：
 
-- 更新 Server-01 源码
-- 生产依赖安装
-- 数据库迁移预演与执行
-- PM2 定向重启
-- 发布后业务健康验收
-- Git生产标签
-- 自动或人工数据库回滚
+- PM2服务、工作目录、PID与端口；
+- `/api/health`；
+- 首页与核心前端资源，并与当前工作区SHA对照；
+- 管理员登录和只读 `/api/data`；
+- SQLite完整性和实际路径；
+- 最近PM2错误日志。
 
-在上述能力完成前，不得移除 Production Deploy workflow 的保护门。
+健康检查不新增、修改或删除业务记录。
+
+重启由实际变更文件决定：
+
+- 纯前端：只重启client；
+- 纯后端：只重启server；
+- package或lockfile：Node 22执行npm ci，重启两个服务；
+- schema：必须预演，只重启server；同时有前端文件时再重启client；
+- ops/docs/Actions：不重启业务服务；
+- uploads：统一流程直接停止，必须专项处理。
+
+严禁 `pm2 restart all` 和 `npm install`。
+
+## 标签
+
+发布健康通过且manifest为deployed后，`release-tag.sh`创建：
+
+```text
+production-YYYY-MM-DD-HHMM
+```
+
+标签是annotated tag，包含目标commit、releaseId、变更类型、数据库备份SHA、迁移预演
+和健康检查结果。禁止覆盖标签或force push。
+
+## 失败与回滚计划
+
+执行失败后立即停止并将manifest标记为failed。系统不会自动：
+
+- `git reset`
+- 恢复数据库
+- 删除release目录
+- 删除数据库备份
+
+`release-rollback-plan.sh`只生成 `rollback-plan.json` 和 `rollback-plan.md`。
+数据库迁移后或员工可能已经写入数据时，禁止直接覆盖旧数据库，应优先使用前向修复
+提交和经过预演的前向迁移。
+
+## 明确禁止
+
+- push main自动部署
+- Server-01直接开发
+- uploads普通发布
+- `git reset`、rebase、force
+- `npm install`
+- `pm2 restart all`
+- 直接复制运行中的SQLite数据库
+- 自动数据库回滚
+- 跳过backup、manifest、health check或必要的migration preview
+
+旧 `deploy.sh` 和 `deploy-to-company.sh` 已弃用，不得作为正式发布入口。
