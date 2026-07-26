@@ -81,6 +81,19 @@ log() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" | tee -a "$LOG_PATH"
 }
 
+is_process_or_descendant_of() {
+  local process_pid="$1"
+  local expected_ancestor_pid="$2"
+  local parent_pid=""
+  while [[ "$process_pid" =~ ^[0-9]+$ && "$process_pid" -gt 1 ]]; do
+    [[ "$process_pid" == "$expected_ancestor_pid" ]] && return 0
+    parent_pid="$(ps -o ppid= -p "$process_pid" | tr -d ' ')"
+    [[ -n "$parent_pid" && "$parent_pid" != "$process_pid" ]] || break
+    process_pid="$parent_pid"
+  done
+  return 1
+}
+
 [[ -d "$PROJECT_DIR/.git" ]] || fail "project repository missing"
 CURRENT_COMMIT="$(git -C "$PROJECT_DIR" rev-parse HEAD)"
 if [[ "$PHASE" == "after" ]]; then
@@ -123,8 +136,8 @@ for port in 5173 3001; do
   expected_pid="$("$NODE_COMMAND" -e \
     'const apps=require(process.argv[1]);const app=apps.find(x=>x.name===process.argv[2]);process.stdout.write(String(app?.pid??""))' \
     "$PM2_SAFE_PATH" "$expected_service")"
-  [[ "$listener_pid" == "$expected_pid" ]] \
-    || fail "port $port is not owned by PM2 service $expected_service (listener=$listener_pid pm2=$expected_pid)"
+  is_process_or_descendant_of "$listener_pid" "$expected_pid" \
+    || fail "port $port is not owned by PM2 service $expected_service or its process tree (listener=$listener_pid pm2=$expected_pid)"
   listener_cwd="$(lsof -a -p "$listener_pid" -d cwd -Fn | awk '/^n/ { sub(/^n/, ""); print; exit }')"
   [[ "$listener_cwd" == "$PROJECT_DIR" ]] || fail "port $port listener cwd mismatch: $listener_cwd"
 done
