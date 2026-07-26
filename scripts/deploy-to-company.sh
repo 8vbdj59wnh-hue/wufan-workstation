@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "Deprecated: use scripts/release-package.sh on Dev-01 and scripts/release-from-package.sh on Server-01." >&2
+exit 1
+
 REMOTE_PATH="/Users/meiyounaichatouyuna/Projects/goal-execution-system"
 MODE="dry-run"
 REMOTE_HOST=""

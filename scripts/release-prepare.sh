@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "Deprecated: release preparation is now built into scripts/release-from-package.sh." >&2
+exit 1
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXPECTED_PROJECT_DIR="/Users/meiyounaichatouyuna/Projects/goal-execution-system"
 RELEASE_ROOT="/Users/meiyounaichatouyuna/WufanWorkstationReleases"
@@ -11,7 +14,6 @@ CHANGE_TYPE=""
 DRY_RUN="false"
 RELEASE_DIR=""
 RELEASE_DIR_CREATED="false"
-BUNDLE_PATH=""
 
 usage() {
   cat <<'USAGE'
@@ -53,11 +55,6 @@ while [[ $# -gt 0 ]]; do
       DRY_RUN="true"
       shift
       ;;
-    --bundle)
-      [[ $# -ge 2 ]] || fail "--bundle requires a value"
-      BUNDLE_PATH="$2"
-      shift 2
-      ;;
     -h|--help)
       usage
       exit 0
@@ -73,7 +70,6 @@ is_valid_change_type "$CHANGE_TYPE" || fail "invalid --change-type: $CHANGE_TYPE
 
 PREFLIGHT_ARGS=(--commit "$COMMIT_SHA" --change-type "$CHANGE_TYPE")
 [[ "$DRY_RUN" == "true" ]] && PREFLIGHT_ARGS+=(--dry-run)
-[[ -n "$BUNDLE_PATH" ]] && PREFLIGHT_ARGS+=(--bundle "$BUNDLE_PATH")
 PREFLIGHT_OUTPUT="$("$SCRIPT_DIR/release-preflight.sh" "${PREFLIGHT_ARGS[@]}")"
 echo "$PREFLIGHT_OUTPUT"
 
@@ -124,7 +120,6 @@ mark_failed() {
         --status failed
       )
       [[ "$DRY_RUN" == "true" ]] && MANIFEST_ARGS+=(--dry-run)
-      [[ -n "$BUNDLE_PATH" ]] && MANIFEST_ARGS+=(--bundle "$BUNDLE_PATH")
       "$SCRIPT_DIR/release-manifest.sh" "${MANIFEST_ARGS[@]}" >/dev/null 2>&1 || true
     fi
   fi
@@ -267,7 +262,6 @@ MANIFEST_ARGS=(
   --status prepared
 )
 [[ "$DRY_RUN" == "true" ]] && MANIFEST_ARGS+=(--dry-run)
-[[ -n "$BUNDLE_PATH" ]] && MANIFEST_ARGS+=(--bundle "$BUNDLE_PATH")
 "$SCRIPT_DIR/release-manifest.sh" "${MANIFEST_ARGS[@]}"
 
 "$NODE_COMMAND" -e "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'))" \

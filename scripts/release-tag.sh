@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "Deprecated: production tags are created by scripts/release-from-package.sh." >&2
+exit 1
+
 EXPECTED_PROJECT_DIR="/Users/meiyounaichatouyuna/Projects/goal-execution-system"
 RELEASE_ROOT="/Users/meiyounaichatouyuna/WufanWorkstationReleases"
 NODE22_BIN="/opt/homebrew/opt/node@22/bin"
@@ -8,7 +11,6 @@ NODE22_BIN="/opt/homebrew/opt/node@22/bin"
 RELEASE_DIR=""
 CONFIRM=""
 DRY_RUN=false
-OFFLINE=false
 
 fail() {
   echo "RELEASE_TAG_FAIL: $*" >&2
@@ -20,7 +22,6 @@ while [[ $# -gt 0 ]]; do
     --release-dir) RELEASE_DIR="${2:-}"; shift 2 ;;
     --confirm) CONFIRM="${2:-}"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
-    --offline) OFFLINE=true; shift ;;
     *) fail "unknown argument: $1" ;;
   esac
 done
@@ -54,7 +55,7 @@ TAG_NAME="production-$(date '+%Y-%m-%d-%H%M')"
 if git -C "$PROJECT_DIR" rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
   fail "local tag already exists: $TAG_NAME"
 fi
-if [[ "$OFFLINE" == false && -n "$(git -C "$PROJECT_DIR" ls-remote --tags origin "refs/tags/$TAG_NAME")" ]]; then
+if [[ -n "$(git -C "$PROJECT_DIR" ls-remote --tags origin "refs/tags/$TAG_NAME")" ]]; then
   fail "remote tag already exists: $TAG_NAME"
 fi
 
@@ -73,9 +74,6 @@ changeType: $CHANGE_TYPE
 databaseBackupSha256: $BACKUP_SHA
 migrationPreview: $PREVIEW_RESULT
 healthCheck: passed"
-mkdir -p "$RELEASE_DIR/checks"
-printf '%s\n' "$TAG_NAME" > "$RELEASE_DIR/checks/production-tag-name.txt"
-printf '%s\n' "$TAG_MESSAGE" > "$RELEASE_DIR/checks/production-tag-message.txt"
 
 echo "TAG_NAME=$TAG_NAME"
 echo "TAG_TARGET=$TARGET"
@@ -86,8 +84,5 @@ if [[ "$DRY_RUN" == true ]]; then
 fi
 
 git -C "$PROJECT_DIR" tag -a "$TAG_NAME" "$TARGET" -m "$TAG_MESSAGE"
-if [[ "$OFFLINE" == false ]]; then
-  git -C "$PROJECT_DIR" push origin "refs/tags/$TAG_NAME"
-fi
+git -C "$PROJECT_DIR" push origin "refs/tags/$TAG_NAME"
 echo "TAG_CREATED=true"
-echo "TAG_PUSHED=$([[ "$OFFLINE" == false ]] && echo true || echo false)"

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "Deprecated: preflight is now built into scripts/release-from-package.sh." >&2
+exit 1
+
 EXPECTED_PROJECT_DIR="/Users/meiyounaichatouyuna/Projects/goal-execution-system"
 EXPECTED_USER="meiyounaichatouyuna"
 EXPECTED_HOSTNAME="MacBook-Air-2.local"
@@ -14,8 +17,6 @@ NPM_TEMP_BYTES=$((2 * 1024 * 1024 * 1024))
 COMMIT_SHA=""
 CHANGE_TYPE=""
 DRY_RUN="false"
-BUNDLE_PATH=""
-OFFLINE_REF="refs/release/offline-target"
 
 usage() {
   cat <<'USAGE'
@@ -55,11 +56,6 @@ while [[ $# -gt 0 ]]; do
     --dry-run)
       DRY_RUN="true"
       shift
-      ;;
-    --bundle)
-      [[ $# -ge 2 ]] || fail "--bundle requires a value"
-      BUNDLE_PATH="$2"
-      shift 2
       ;;
     -h|--help)
       usage
@@ -103,46 +99,20 @@ git diff --cached --quiet || fail "index contains staged changes"
 [[ -z "$(git status --porcelain=v1 --untracked-files=all)" ]] || fail "worktree contains untracked or modified files"
 
 CURRENT_COMMIT="$(git rev-parse HEAD)"
+REMOTE_MAIN="$(git ls-remote origin refs/heads/main | awk 'NR == 1 { print $1 }')"
+[[ -n "$REMOTE_MAIN" ]] || fail "cannot resolve remote main"
+git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+
 NO_OP="false"
-SOURCE_MODE="online"
-BUNDLE_SHA256=""
-BUNDLE_VERIFIED="false"
-BUNDLE_TARGET_COMMIT=""
-REMOTE_MAIN=""
-
-cleanup_offline_ref() {
-  if [[ "$SOURCE_MODE" == "offline-bundle" ]]; then
-    git update-ref -d "$OFFLINE_REF" >/dev/null 2>&1 || true
-  fi
-}
-trap cleanup_offline_ref EXIT
-
-if [[ -n "$BUNDLE_PATH" ]]; then
-  SOURCE_MODE="offline-bundle"
-  [[ "$BUNDLE_PATH" == /* && -s "$BUNDLE_PATH" ]] || fail "--bundle must be an absolute, non-empty file"
-  git bundle verify "$BUNDLE_PATH" >/dev/null 2>&1 || fail "git bundle verification failed"
-  BUNDLE_SHA256="$(shasum -a 256 "$BUNDLE_PATH" | awk '{print $1}')"
-  git update-ref -d "$OFFLINE_REF" >/dev/null 2>&1 || true
-  git fetch --no-tags "$BUNDLE_PATH" "$COMMIT_SHA:$OFFLINE_REF" >/dev/null 2>&1 \
-    || fail "bundle does not contain target commit $COMMIT_SHA"
-  BUNDLE_TARGET_COMMIT="$(git rev-parse "$OFFLINE_REF^{commit}")"
-  [[ "$BUNDLE_TARGET_COMMIT" == "$COMMIT_SHA" ]] || fail "bundle target commit mismatch"
-  BUNDLE_VERIFIED="true"
-  [[ "$CURRENT_COMMIT" != "$COMMIT_SHA" ]] || NO_OP="true"
-else
-  REMOTE_MAIN="$(git ls-remote origin refs/heads/main | awk 'NR == 1 { print $1 }')"
-  [[ -n "$REMOTE_MAIN" ]] || fail "cannot resolve remote main"
-  git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
-  if [[ "$REMOTE_MAIN" != "$COMMIT_SHA" ]]; then
-    if [[ "$DRY_RUN" == "true" && "$CURRENT_COMMIT" == "$COMMIT_SHA" ]] \
-      && git merge-base --is-ancestor "$COMMIT_SHA" origin/main; then
-      NO_OP="true"
-    else
-      fail "target commit must equal remote main HEAD ($REMOTE_MAIN)"
-    fi
+if [[ "$REMOTE_MAIN" != "$COMMIT_SHA" ]]; then
+  if [[ "$DRY_RUN" == "true" && "$CURRENT_COMMIT" == "$COMMIT_SHA" ]] \
+    && git merge-base --is-ancestor "$COMMIT_SHA" origin/main; then
+    NO_OP="true"
   else
-    [[ "$(git rev-parse origin/main)" == "$COMMIT_SHA" ]] || fail "fetched origin/main does not equal target commit"
+    fail "target commit must equal remote main HEAD ($REMOTE_MAIN)"
   fi
+else
+  [[ "$(git rev-parse origin/main)" == "$COMMIT_SHA" ]] || fail "fetched origin/main does not equal target commit"
 fi
 
 git cat-file -e "$COMMIT_SHA^{commit}" || fail "target commit is not a commit object"
@@ -235,10 +205,6 @@ echo "PROJECT_DIR=$PROJECT_DIR"
 echo "CURRENT_COMMIT=$CURRENT_COMMIT"
 echo "TARGET_COMMIT=$COMMIT_SHA"
 echo "REMOTE_MAIN=$REMOTE_MAIN"
-echo "SOURCE_MODE=$SOURCE_MODE"
-echo "BUNDLE_SHA256=$BUNDLE_SHA256"
-echo "BUNDLE_VERIFIED=$BUNDLE_VERIFIED"
-echo "BUNDLE_TARGET_COMMIT=$BUNDLE_TARGET_COMMIT"
 echo "NO_OP=$NO_OP"
 echo "CHANGE_TYPE=$CHANGE_TYPE"
 echo "COMMITS_AHEAD=$COMMITS_AHEAD"

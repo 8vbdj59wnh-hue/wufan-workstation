@@ -1,161 +1,136 @@
-# 极简工作站标准发布流程
+# 极简工作站本地发布流程
 
-## 基线与职责
+## 正式架构
 
-- Dev-01 是唯一开发环境，只在 `main` 上形成候选发布提交。
-- push 和 pull request 只执行 CI，不部署 Server-01。
-- GitHub `Production Deploy` 只能通过 `workflow_dispatch` 人工触发。
-- Server-01 不直接开发，不提交生产工作区修改。
-- 正式目标必须是远程 `main` 当前的40位完整 commit SHA。
-- GitHub `production` Environment 应配置 Required reviewers；未配置审批前不应触发正式部署。
+- Dev-01 是唯一开发环境，使用本地 Git `main` 管理开发历史。
+- Server-01 是唯一生产环境，不直接开发，不访问任何 Git remote。
+- GitHub 不属于开发检查、发布或生产工作流。
+- Dev-01 生成离线发布包，校验后传输到 Server-01。
+- Server-01 从发布包执行备份、迁移预演、健康检查和纯快进更新。
+- 发布完成后必须由维护者在浏览器中手动登录并验收业务页面。
 
-自动健康检查不登录系统、不获取token、不读取认证接口，也不写业务测试数据。发布完成后
-必须由维护者在浏览器中手动登录并验收主要业务页面。
+保留Git remote配置不影响本流程；正式脚本不会读取或使用remote。
 
-## 标准顺序
+## Dev-01发布前基线
 
-1. Dev-01 开发并通过本地检查。
-2. push main，等待 CI 成功。
-3. 执行发布 dry-run。
-4. 创建 release 目录和SQLite在线备份。
-5. 生成 Git、PM2、配置和 manifest 证据。
-6. schema或迁移代码变化时，在数据库备份副本上运行 migration preview。
-7. 执行发布前健康检查。
-8. 通过 `git merge --ff-only` 更新生产源码。
-9. 仅在依赖变化时用 Node 22 执行 `npm ci`。
-10. 运行 `npm run check`。
-11. 仅重启受影响的 `wufan-client`、`wufan-server`。
-12. 执行发布后健康检查和数据库完整性检查。
-13. 健康通过后执行 `pm2 save`，manifest标记为deployed。
-14. 创建并推送 annotated production 标签。
+发布前必须满足：
 
-## Dry-run
+- 当前分支为 `main`；
+- 工作区、暂存区和未跟踪文件均干净；
+- 所有开发修改已经形成本地Git commit；
+- 目标40位commit存在于Dev-01本地仓库；
+- `uploads`变更不使用普通发布流程。
+
+生成发布包：
 
 ```bash
-scripts/release.sh \
-  --commit <40位完整SHA> \
-  --change-type <frontend|backend|deps|schema|uploads|runtime> \
-  --dry-run
+scripts/release-package.sh \
+  --commit <40位SHA> \
+  --change-type <frontend|backend|deps|schema|runtime> \
+  --output-dir <绝对路径>
 ```
 
-没有 `--confirm DEPLOY` 时，统一入口自动退化为 dry-run。Dry-run可以fetch远程引用，
-但不会merge、npm ci、重启服务、修改manifest正式状态或创建标签。
+## 发布包
 
-Server-01无法访问GitHub时，可由Dev-01提供经过校验的Git bundle：
-
-```bash
-scripts/release.sh \
-  --commit <SHA> \
-  --change-type <类型> \
-  --bundle /absolute/path/to/release.bundle \
-  --dry-run
-```
-
-离线模式验证bundle、目标commit和纯fast-forward关系，不执行任何GitHub网络请求。
-Server-01只创建本地生产标签；维护者随后在Dev-01使用release记录中的相同标签名称和
-说明创建并推送标签。
-
-当目标等于当前Server HEAD时，dry-run会识别为no-op；只有真实发布目标才强制等于
-远程main HEAD。
-
-## Prepare与release目录
-
-```bash
-scripts/release.sh \
-  --commit <SHA> \
-  --change-type <类型> \
-  --confirm DEPLOY \
-  --prepare-only
-```
-
-正式记录写入：
+目录名称：
 
 ```text
-/Users/meiyounaichatouyuna/WufanWorkstationReleases/
-  release-YYYYMMDD-HHMMSS-<目标commit前8位>/
-    release-manifest.json
-    database/
-    git/
-    pm2/
-    config/
-    checks/
-    logs/
+wufan-release-YYYYMMDD-HHMMSS-<shortsha>/
 ```
 
-SQLite备份只使用 `.backup`。禁止直接复制正在运行的 `workstation.db`。
+内容至少包括：
 
-## Migration preview
+```text
+source.tar.gz
+source.bundle
+release-metadata.json
+SHA256SUMS
+scripts/
+```
 
-schema或迁移代码发生变化时，`release-migration-preview.sh`：
+- `source.tar.gz`直接由目标Git commit生成，不含 `.git`、`node_modules`、`data`、
+  `uploads`、日志、缓存或临时文件。
+- `source.bundle`提供目标commit及其完整本地Git历史，用于Server-01验证commit和
+  执行纯fast-forward。
+- `SHA256SUMS`覆盖包内所有文件，可独立使用 `shasum -a 256 -c` 验证。
+- metadata和发布包不得包含密码、Token或环境变量。
 
-- 从release数据库备份再创建隔离预演副本；
-- 从目标commit解压对应源码；
-- 通过显式 `WUFAN_DB_PATH` 打开预演数据库；
-- 使用Node 22执行初始化两次；
-- 验证迁移前后完整性、表数量、schema差异、基础读取和幂等性；
-- 永远不打开或覆盖正式数据库。
+## Server-01发布
 
-## Execute与健康检查
+先执行dry-run：
 
-`release-execute.sh`只接受状态为prepared且数据库备份完整的release目录。迁移预演
-需要但未通过时，执行会被阻止。
+```bash
+scripts/release-from-package.sh \
+  --package-dir <发布包绝对路径> \
+  --dry-run
+```
 
-健康检查包括：
+dry-run不会创建正式数据库备份、更新源码、安装依赖、重启服务或创建标签。
 
-- PM2服务、工作目录、PID与端口；
-- `/api/health`；
-- 首页与核心前端资源，并与当前工作区SHA对照；
-- SQLite完整性和实际路径；
-- 最近PM2错误日志，以及发布期间新增的致命错误。
+正式执行：
 
-健康检查不新增、修改或删除业务记录；manifest会记录
-`manualBrowserVerificationRequired: true`。
+```bash
+scripts/release-from-package.sh \
+  --package-dir <发布包绝对路径> \
+  --confirm DEPLOY
+```
 
-重启由实际变更文件决定：
+标准顺序：
 
-- 纯前端：只重启client；
-- 纯后端：只重启server；
-- package或lockfile：Node 22执行npm ci，重启两个服务；
-- schema：必须预演，只重启server；同时有前端文件时再重启client；
-- ops/docs/Actions：不重启业务服务；
-- uploads：统一流程直接停止，必须专项处理。
+1. 校验发布包结构、SHA256SUMS、metadata、源码归档和Git bundle。
+2. 确认Server-01路径、main、干净工作区、数据库、PM2、端口和磁盘。
+3. 确认目标commit是当前生产commit的后代或相同。
+4. 创建release目录和SQLite在线备份。
+5. 保存Git、PM2、配置及发布包证据。
+6. 必要时只在数据库备份副本上执行迁移预演和幂等检查。
+7. 执行发布前基础健康检查。
+8. 解压并校验源码归档。
+9. 使用 `git merge --ff-only`更新到明确目标commit。
+10. 仅在依赖变化时使用Node 22执行 `npm ci`。
+11. 执行 `npm run check`并定向重启受影响服务。
+12. 执行发布后健康检查和SQLite完整性检查。
+13. manifest标记为deployed，执行 `pm2 save`。
+14. Server-01创建本地annotated production标签。
+15. 维护者执行浏览器人工验收。
 
-严禁 `pm2 restart all` 和 `npm install`。
+## 生产标签
 
-## 标签
-
-发布健康通过且manifest为deployed后，`release-tag.sh`创建：
+标签名称：
 
 ```text
 production-YYYY-MM-DD-HHMM
 ```
 
-标签是annotated tag，包含目标commit、releaseId、变更类型、数据库备份SHA、迁移预演
-和健康检查结果。禁止覆盖标签或force push。
+标签只保存在Server-01和Dev-01本地Git仓库，不要求推送到任何网络平台。Server发布
+成功后，Dev-01根据release记录中的标签名称和说明，在同一commit创建同名annotated
+tag。
 
-## 失败与回滚计划
+## Backup-01
 
-执行失败后立即停止并将manifest标记为failed。系统不会自动：
+由于不存在网络源码副本，必须定期备份：
 
-- `git reset`
-- 恢复数据库
-- 删除release目录
-- 删除数据库备份
+- Dev-01完整项目Git仓库，包括 `.git`、所有本地分支和标签；
+- Server-01完整生产Git仓库，包括 `.git`和production标签；
+- Server-01生产SQLite在线备份；
+- Server-01生产uploads备份；
+- 必要的release记录和manifest。
 
-`release-rollback-plan.sh`只生成 `rollback-plan.json` 和 `rollback-plan.md`。
-数据库迁移后或员工可能已经写入数据时，禁止直接覆盖旧数据库，应优先使用前向修复
-提交和经过预演的前向迁移。
+不得把正在写入的SQLite数据库直接复制；必须使用SQLite在线备份。不得把真实开发或
+生产数据库外发到非Backup-01位置。
 
-## 明确禁止
+## 禁止事项
 
-- push main自动部署
-- Server-01直接开发
-- uploads普通发布
-- `git reset`、rebase、force
-- `npm install`
-- `pm2 restart all`
-- 直接复制运行中的SQLite数据库
-- 自动数据库回滚
-- 跳过backup、manifest、health check或必要的migration preview
+- Server-01直接开发；
+- Server-01访问Git remote；
+- `git pull`、fetch、reset、rebase或force；
+- `npm install`；
+- `pm2 restart all`；
+- 自动恢复数据库；
+- 普通发布流程修改uploads；
+- 自动登录业务系统或写入业务测试数据；
+- 直接复制正在运行的SQLite数据库。
 
-旧 `deploy.sh` 和 `deploy-to-company.sh` 已弃用，不得作为正式发布入口。
+旧发布脚本仅保留历史参考，默认退出。正式入口只有：
+
+- Dev-01：`scripts/release-package.sh`
+- Server-01：`scripts/release-from-package.sh`

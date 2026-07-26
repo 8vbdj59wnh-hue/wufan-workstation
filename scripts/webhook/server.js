@@ -1,6 +1,12 @@
 import express from 'express';
 import { exec } from 'child_process';
 
+console.error(
+  'Deprecated: GitHub webhooks are not part of the release workflow. ' +
+  'Use scripts/release-package.sh and scripts/release-from-package.sh.',
+);
+process.exit(1);
+
 const app = express();
 const port = Number(process.env.WEBHOOK_PORT || 9000);
 const deployScript = '/Users/meiyounaichatouyuna/Projects/goal-execution-system/scripts/deploy.sh';
