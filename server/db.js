@@ -380,7 +380,7 @@ const resourceConfigs = {
   },
   templates: {
     table: "templates",
-    columns: ["id", "name", "previewImage", "sourceFile", "tags", "fileType", "createdAt", "updatedAt"],
+    columns: ["id", "businessCode", "name", "previewImage", "sourceFile", "tags", "fileType", "createdAt", "updatedAt"],
     jsonFields: ["previewImage", "sourceFile", "tags"],
   },
   templateTagCategories: {
@@ -741,6 +741,7 @@ const businessIdentifierConfigs = {
   processInstances: { table: "process_instances", prefix: "KA" },
   tasks: { table: "tasks", prefix: "TASK" },
   processTemplates: { table: "process_templates", prefix: "TPL" },
+  templates: { table: "templates", prefix: "MB" },
 };
 
 function getBusinessIdentifierMonth(value) {
@@ -1171,6 +1172,7 @@ function backfillBusinessIdentifiers() {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_process_instances_business_code ON process_instances(businessCode);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_business_code ON tasks(businessCode);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_process_templates_business_code ON process_templates(businessCode);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_templates_business_code ON templates(businessCode);
   `);
 }
 
@@ -1389,6 +1391,7 @@ function runLightweightMigrations() {
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS templates (
       id TEXT PRIMARY KEY,
+      businessCode TEXT UNIQUE,
       name TEXT NOT NULL,
       previewImage TEXT NOT NULL,
       sourceFile TEXT NOT NULL,
@@ -1510,6 +1513,7 @@ function runLightweightMigrations() {
   ensureColumn("tasks", "businessCode", "TEXT");
   ensureColumn("tasks", "executorId", "TEXT");
   ensureColumn("process_templates", "businessCode", "TEXT");
+  ensureColumn("templates", "businessCode", "TEXT");
   ensureColumn("task_templates", "defaultProcessTemplateId", "TEXT");
   ensureColumn("process_template_nodes", "stepOrder", "INTEGER");
   ensureColumn("process_template_nodes", "departmentId", "TEXT");
@@ -2357,7 +2361,11 @@ export function launchWorkPlanWithProcess(
   const database = getDatabase();
   const existingWorkPlan = readExistingItem("workPlans", workPlanId);
   const incomingWorkPlan = launchedWorkPlan?.id === workPlanId ? launchedWorkPlan : null;
-  const baseWorkPlan = existingWorkPlan ?? incomingWorkPlan;
+  const baseWorkPlan =
+    existingWorkPlan ??
+    (incomingWorkPlan === null
+      ? null
+      : { ...incomingWorkPlan, status: "future", processInstanceId: null, launchedAt: null });
   if (baseWorkPlan === null) throw new Error("未找到该待发起工作计划。");
   if (baseWorkPlan.processInstanceId || baseWorkPlan.status === "launched") throw new Error("该工作已经发起，不能重复发起。");
   if (!["future", "this_week"].includes(baseWorkPlan.status)) throw new Error("只有待发起工作计划可以发起。");
@@ -2369,7 +2377,7 @@ export function launchWorkPlanWithProcess(
   const nextProcessInstance = {
     ...processInstance,
     startedAt: null,
-    dueDate: null,
+    dueDate: launchedWorkPlan?.dueDate ?? baseWorkPlan.dueDate ?? processInstance.dueDate ?? null,
     updatedAt: now,
   };
   const nextTasks = generatedTasks.map((task, index) => ({
@@ -2387,7 +2395,7 @@ export function launchWorkPlanWithProcess(
     workType: launchedWorkPlan?.workType ?? baseWorkPlan.workType ?? "normal",
     status: "launched",
     processInstanceId: processInstance.id,
-    dueDate: null,
+    dueDate: launchedWorkPlan?.dueDate ?? baseWorkPlan.dueDate ?? processInstance.dueDate ?? null,
     launchedAt: launchedWorkPlan?.launchedAt ?? now,
     updatedAt: now,
   };
@@ -2430,6 +2438,144 @@ export function launchWorkPlanWithProcess(
   return { instance: nextProcessInstance, workPlan: nextWorkPlan, tasks: nextTasks };
 }
 
+function normalizeBatchDedupePart(value) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function buildBatchLaunchDedupeKey(dedupe = {}) {
+  const parts = [
+    dedupe.taskTemplateId,
+    dedupe.goalId,
+    dedupe.productId,
+    dedupe.templateId,
+    dedupe.publishDate,
+    dedupe.account,
+    dedupe.contentTitle,
+  ].map(normalizeBatchDedupePart);
+  parts.push(parts.slice(2).every((value) => value === "") ? normalizeBatchDedupePart(dedupe.actionName) : "");
+  return parts.join("|");
+}
+
+function hasExistingBatchLaunchDuplicate(dedupe = {}) {
+  const taskTemplateId = String(dedupe.taskTemplateId ?? "").trim();
+  const goalId = String(dedupe.goalId ?? "").trim();
+  if (taskTemplateId === "" || goalId === "") return false;
+
+  const database = getDatabase();
+  const candidates = database
+    .prepare(
+      `SELECT wp.title, wp.customFields, wp.processInstanceId
+       FROM work_plans wp
+       WHERE wp.taskTemplateId = @taskTemplateId
+         AND wp.goalId = @goalId
+         AND COALESCE(wp.status, '') <> 'canceled'`,
+    )
+    .all({ taskTemplateId, goalId });
+  const expectedKey = buildBatchLaunchDedupeKey(dedupe);
+  return candidates.some((candidate) => {
+    let fields = {};
+    try {
+      fields = JSON.parse(candidate.customFields || "{}");
+    } catch {
+      return false;
+    }
+    const productId =
+      database.prepare("SELECT productId FROM action_products WHERE actionId = @actionId ORDER BY createdAt, id LIMIT 1")
+        .get({ actionId: candidate.processInstanceId })?.productId ?? "";
+    const templateId = Array.isArray(fields.linkedTemplateIds) ? fields.linkedTemplateIds[0] ?? "" : "";
+    return buildBatchLaunchDedupeKey({
+      taskTemplateId,
+      goalId,
+      productId,
+      templateId,
+      publishDate: fields[dedupe.publishDateFieldId] ?? fields.publishDate ?? "",
+      account: fields[dedupe.accountFieldId] ?? fields.account ?? "",
+      contentTitle: fields[dedupe.contentTitleFieldId] ?? fields.title ?? "",
+      actionName: candidate.title ?? "",
+    }) === expectedKey;
+  });
+}
+
+export function batchLaunchWorkPlans(rows = [], { userId = "" } = {}) {
+  if (!Array.isArray(rows) || rows.length === 0) throw new Error("没有可批量发起的有效数据。");
+  if (rows.length > 200) throw new Error("单次最多批量发起 200 条关键行动。");
+
+  const results = [];
+  for (const row of rows) {
+    const rowNumber = Number(row?.rowNumber) || null;
+    try {
+      const workPlan = row?.workPlan ?? {};
+      const processInstance = row?.processInstance ?? {};
+      const taskTemplate = readExistingItem("taskTemplates", workPlan.taskTemplateId);
+      if (taskTemplate === null || taskTemplate.id !== "task-template-publish-content-note" || taskTemplate.status !== "active") {
+        throw new Error("批量发起只能使用启用的“发布内容笔记”行动标准。");
+      }
+      if (
+        !taskTemplate.defaultProcessTemplateId ||
+        processInstance.templateId !== taskTemplate.defaultProcessTemplateId
+      ) {
+        throw new Error("发布内容笔记默认流程无效或与行动标准不一致。");
+      }
+      if (!readExistingItem("goals", workPlan.goalId)) throw new Error("对齐目标不存在。");
+      const productIds = Array.isArray(row.productIds) ? [...new Set(row.productIds.filter(Boolean))] : [];
+      if (productIds.length > 1) throw new Error("每行最多关联一个产品。");
+      const linkedTemplateIds = Array.isArray(workPlan.customFields?.linkedTemplateIds)
+        ? [...new Set(workPlan.customFields.linkedTemplateIds.filter(Boolean))]
+        : [];
+      if (linkedTemplateIds.length > 1) throw new Error("每行最多关联一个模板。");
+      if (linkedTemplateIds.length === 1) {
+        const linkedTemplate = readExistingItem("templates", linkedTemplateIds[0]);
+        if (linkedTemplate === null) throw new Error("关联模板不存在。");
+        const platformTags = Array.isArray(linkedTemplate.tags?.platform) ? linkedTemplate.tags.platform : [];
+        const usageTags = Array.isArray(linkedTemplate.tags?.usage) ? linkedTemplate.tags.usage : [];
+        if (!platformTags.includes("小红书") || !usageTags.includes("笔记")) {
+          throw new Error("关联模板不是可用于发布内容笔记的小红书笔记模板。");
+        }
+      }
+      if (normalizeBatchDedupePart(row.dedupe?.productId) !== normalizeBatchDedupePart(productIds[0] ?? "")) {
+        throw new Error("产品关联与重复判断数据不一致。");
+      }
+      if (normalizeBatchDedupePart(row.dedupe?.templateId) !== normalizeBatchDedupePart(linkedTemplateIds[0] ?? "")) {
+        throw new Error("模板关联与重复判断数据不一致。");
+      }
+      if (hasExistingBatchLaunchDuplicate(row.dedupe) && row.forceDuplicate !== true) {
+        results.push({ rowNumber, status: "skipped_duplicate", message: "数据库中已存在相同发布内容笔记。" });
+        continue;
+      }
+      const now = new Date().toISOString();
+      const auditFields = {
+        ...(workPlan.customFields ?? {}),
+        batchLaunchAudit: {
+          importedAt: now,
+          importedBy: String(userId ?? ""),
+          rowNumber,
+          forcedDuplicate: row.forceDuplicate === true,
+        },
+      };
+      const launched = launchWorkPlanWithProcess(workPlan.id, {
+        processInstance: { ...processInstance, customFields: auditFields },
+        tasks: row.tasks,
+        workPlan: { ...workPlan, customFields: auditFields },
+        productIds,
+      });
+      const savedInstance = readExistingItem("processInstances", launched.instance.id);
+      results.push({
+        rowNumber,
+        status: "success",
+        workPlanId: launched.workPlan.id,
+        processInstanceId: launched.instance.id,
+        businessCode: savedInstance?.businessCode ?? null,
+        taskCount: launched.tasks.length,
+        productLinked: productIds.length === 1,
+        templateLinked: linkedTemplateIds.length === 1,
+      });
+    } catch (error) {
+      results.push({ rowNumber, status: "failed", message: error.message || "批量发起失败。" });
+    }
+  }
+  return results;
+}
+
 export function createResource(routeResource, item) {
   const resourceKey = routeResourceMap[routeResource];
   if (resourceKey === undefined) throw new Error(`Unknown resource: ${routeResource}`);
@@ -2448,6 +2594,14 @@ export function createResource(routeResource, item) {
     const nextItem = normalizeAndValidateProduct(item);
     insertItem(resourceKey, nextItem);
     return nextItem;
+  }
+  if (resourceKey === "templates") {
+    const createTemplate = getDatabase().transaction(() => {
+      const nextItem = { ...item, businessCode: null };
+      insertItem(resourceKey, nextItem);
+      return readExistingItem(resourceKey, nextItem.id);
+    });
+    return createTemplate();
   }
   const nextItem =
     resourceKey === "people"

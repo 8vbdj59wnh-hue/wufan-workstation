@@ -5,6 +5,7 @@ import {
   getProcessNodeStepOrder,
   getLatestStandardWorkFormFields,
   launchWorkPlanAsProcess,
+  resolveAssetUrl,
   state,
   updatePersistentResource,
   uploadStandardWorkAttachment,
@@ -12,6 +13,7 @@ import {
 import {
   canLaunchActionTemplate,
   canLaunchAnyActionTemplate,
+  canAccessTemplateCenter,
   hasPermission,
 } from "./permissions.js?v=20260724-action-launch-permissions1";
 import {
@@ -45,7 +47,7 @@ import {
   getProcessProgress as selectProcessProgress,
   isProcessInstanceOverdue as selectProcessInstanceOverdue,
 } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260724-action-template-link1";
+import { bindActionLinkedTemplatePreviewEvents, bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260724-action-template-link1";
 import { selectTask } from "./tasksPage.js?v=20260724-action-template-link1";
 import {
   collectBusinessDateTime,
@@ -81,6 +83,8 @@ const plannedWeekPattern = /^\d{4}-W\d{2}$/;
 const standardWorkAttachmentsKey = "standardWorkAttachments";
 const spreadsheetAttachmentExts = new Set([".xlsx", ".xls", ".csv"]);
 const maxStandardWorkAttachmentSize = 20 * 1024 * 1024;
+const publishContentNoteTemplateId = "task-template-publish-content-note";
+const linkedActionTemplateIdsKey = "linkedTemplateIds";
 let selectedGoalId =
   goals.find((goal) => goal.level === GoalLevel.Company && goal.type === GoalType.Ultimate)?.id ??
   goals[0]?.id ??
@@ -101,6 +105,53 @@ function escapeHtml(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function getPublishContentNoteTemplates() {
+  return state.templates.filter((template) => {
+    const tags = template?.tags;
+    if (tags === null || tags === undefined || typeof tags !== "object" || Array.isArray(tags)) return false;
+    return Array.isArray(tags.platform) && tags.platform.includes("小红书")
+      && Array.isArray(tags.usage) && tags.usage.includes("笔记");
+  });
+}
+
+function getGoalTemplatePreviewUrl(template) {
+  const rawUrl = template?.previewImage?.fileUrl ?? template?.previewImage?.url ?? "";
+  return rawUrl === "" ? "" : resolveAssetUrl(rawUrl);
+}
+
+function renderContentNoteTemplateSelector(selectedTemplate) {
+  if (!canAccessTemplateCenter(getCurrentUser())) {
+    return `<div class="form-error">你没有模板中心查看权限，无法选择发布内容笔记模板。</div>`;
+  }
+  const templates = getPublishContentNoteTemplates();
+  return `
+    <fieldset class="goal-content-note-template-selector">
+      <legend>关联模板</legend>
+      <p class="form-note">仅显示平台含“小红书”且用途含“笔记”的模板；本次关键行动只能关联一个模板。</p>
+      ${
+        templates.length === 0
+          ? `<div class="empty-detail">模板中心暂无可用的发布笔记模板</div>`
+          : `<div class="goal-content-note-template-grid">
+              ${templates.map((template) => {
+                const previewUrl = getGoalTemplatePreviewUrl(template);
+                return `
+                  <label class="goal-content-note-template-option">
+                    <input type="radio" name="linkedTemplateId" value="${escapeHtml(template.id)}" ${selectedTemplate === template.id ? "checked" : ""} />
+                    <span class="goal-content-note-template-thumb" ${previewUrl === "" ? "" : `data-action-template-preview-url="${escapeHtml(previewUrl)}" data-action-template-preview-title="${escapeHtml(template.name)}"`}>${previewUrl === "" ? "无预览" : `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(template.name)}" />`}</span>
+                    <span>
+                      <strong>${escapeHtml(template.name)}</strong>
+                      <small>${escapeHtml(template.businessCode || "—")} · ${escapeHtml(template.fileType || "文件")}</small>
+                    </span>
+                  </label>
+                `;
+              }).join("")}
+            </div>`
+      }
+      <button class="text-button" type="button" data-action="clear-goal-linked-template">清除模板选择</button>
+    </fieldset>
+  `;
 }
 
 function findName(items, id, fallback) {
@@ -1172,6 +1223,7 @@ function renderGoalTaskModal() {
   const selectedCategoryId = modalState.categoryId ?? "";
   const availableTemplates = getActiveTaskTemplatesByCategory(selectedCategoryId);
   const selectedTemplate = availableTemplates.find((template) => template.id === modalState.taskTemplateId) ?? null;
+  const isPublishContentNote = selectedTemplate?.id === publishContentNoteTemplateId;
   const templateHint =
     selectedCategoryId === ""
       ? "请先选择价值链模块"
@@ -1208,7 +1260,7 @@ function renderGoalTaskModal() {
             </label>
             <label>
               <span>本次关键行动标题</span>
-              <input name="title" placeholder="可留空，系统会根据填写信息生成" autocomplete="off" />
+              <input name="title" placeholder="可留空，系统会根据填写信息生成" autocomplete="off" data-goal-action-title data-auto-title="true" />
             </label>
             <label>
               <span>截止时间日期</span>
@@ -1222,6 +1274,7 @@ function renderGoalTaskModal() {
           ${renderTaskTemplateLockedInfo(selectedTemplate)}
           ${renderCustomFieldsForm(selectedTemplate)}
           ${renderActionProductSelector()}
+          ${isPublishContentNote ? renderContentNoteTemplateSelector(modalState.linkedTemplateId ?? "") : ""}
           ${renderStandardWorkAttachmentsField()}
           <label>
             <span>补充说明</span>
@@ -1281,7 +1334,14 @@ function buildGoalTaskDraft(form, goalId) {
   }
   const departmentId = template?.departmentId || "";
   const valueModuleId = inferValueModuleIdForTemplate(template);
-  const customFields = withValueModuleCustomFields(template === null ? {} : collectCustomFields(form, template), valueModuleId);
+  const linkedTemplateId = getFormValue(form, "linkedTemplateId");
+  const collectedCustomFields = template === null ? {} : collectCustomFields(form, template);
+  const customFields = withValueModuleCustomFields(
+    template?.id === publishContentNoteTemplateId && linkedTemplateId !== ""
+      ? { ...collectedCustomFields, [linkedActionTemplateIdsKey]: [linkedTemplateId] }
+      : collectedCustomFields,
+    valueModuleId,
+  );
 
   const dueDateResult = collectBusinessDateTime(form, "dueDate");
   return {
@@ -1292,6 +1352,7 @@ function buildGoalTaskDraft(form, goalId) {
     taskTemplateId,
     template,
     customFields,
+    linkedTemplateId,
     title: getFormValue(form, "title") || null,
     dueDate: dueDateResult.value,
     dueDateError: dueDateResult.error,
@@ -1305,6 +1366,11 @@ function validateGoalTaskDraft(draft) {
   if (draft.template.status !== TaskTemplateStatus.Active) return "停用的关键行动不能用于发起。";
   if (!canLaunchActionTemplate(getCurrentUser(), draft.template.id)) return "你没有权限发起该关键行动。";
   if (!draft.template.defaultProcessTemplateId) return "该关键行动尚未绑定关键行动标准流程，请先到关键行动库中配置。";
+  if (draft.template.id === publishContentNoteTemplateId) {
+    if (!canAccessTemplateCenter(getCurrentUser())) return "你没有模板中心查看权限，无法发起发布内容笔记。";
+    const linkedTemplate = getPublishContentNoteTemplates().find((template) => template.id === draft.linkedTemplateId);
+    if (linkedTemplate === undefined) return "必须选择一个有效的发布内容笔记模板。";
+  }
   const customError = validateCustomFields(draft.customFields, draft.template);
   if (customError !== "") return customError;
   if (draft.dueDateError !== "") return draft.dueDateError;
@@ -1544,6 +1610,9 @@ async function saveGoalTask(form, rerender) {
   const error = validateGoalTaskDraft(draft);
 
   if (error !== "") return setModalError(error, rerender);
+  if (draft.template.id === publishContentNoteTemplateId && productIds.length === 0) {
+    return setModalError("发布内容笔记必须关联至少一个产品。", rerender);
+  }
 
   let uploadedAttachments = [];
   try {
@@ -1993,9 +2062,22 @@ export function bindGoalsPageEvents(rerender) {
 
   if (goalTaskForm !== null) {
     bindActionProductSelectors(goalTaskForm);
+    bindActionLinkedTemplatePreviewEvents(goalTaskForm);
+    const updateSuggestedContentNoteTitle = () => {
+      const titleInput = goalTaskForm.querySelector("[data-goal-action-title]");
+      if (titleInput === null || titleInput.dataset.autoTitle === "false") return;
+      const productId = goalTaskForm.querySelector('[name="actionProductId"]:checked')?.value ?? "";
+      const templateId = goalTaskForm.querySelector('[name="linkedTemplateId"]:checked')?.value ?? "";
+      const product = state.products.find((item) => item.id === productId);
+      const template = state.templates.find((item) => item.id === templateId);
+      titleInput.value = product !== undefined && template !== undefined
+        ? `发布内容笔记｜${product.name}｜${template.name}`
+        : "";
+    };
     goalTaskForm.addEventListener("submit", (event) => handleGoalSubmit(event, rerender));
     goalTaskForm.addEventListener("input", (event) => {
       if (event.target.name?.startsWith("custom__")) updatePublicFormImagePreview(event.target);
+      if (event.target.matches("[data-goal-action-title]")) event.target.dataset.autoTitle = "false";
     });
     goalTaskForm.addEventListener("change", (event) => {
       if (event.target.matches("[data-goal-work-value-module-select]")) {
@@ -2011,6 +2093,21 @@ export function bindGoalsPageEvents(rerender) {
       }
       if (event.target.matches("[data-standard-work-attachments]")) {
         renderSelectedStandardWorkAttachments(event.target);
+      }
+      if (event.target.name === "actionProductId" || event.target.name === "linkedTemplateId") {
+        updateSuggestedContentNoteTitle();
+      }
+    });
+    goalTaskForm.addEventListener("click", (event) => {
+      if (event.target.closest("[data-action='clear-goal-linked-template']") !== null) {
+        goalTaskForm.querySelectorAll('[name="linkedTemplateId"]').forEach((input) => {
+          input.checked = false;
+        });
+        updateSuggestedContentNoteTitle();
+        return;
+      }
+      if (event.target.closest("[data-action='remove-action-product']") !== null) {
+        window.requestAnimationFrame(updateSuggestedContentNoteTitle);
       }
     });
   }

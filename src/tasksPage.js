@@ -32,7 +32,6 @@ import {
   uploadImageFile,
   uploadStandardWorkAttachment,
 } from "./appState.js?v=20260705-state-singleton1";
-import { bindContentScheduleEvents, renderContentSchedulePage } from "./contentSchedulePage.js?v=20260705-state-singleton1";
 import { rerenderPreservingInputFocus } from "./inputFocus.js?v=20260723-input-focus1";
 import {
   canLaunchActionTemplate,
@@ -213,9 +212,6 @@ const taskTabHashMap = {
   "task-list": "task-list",
   clearance: "clearance",
   "process-progress": "process-progress",
-  "content-schedule": "content-schedule",
-  contentSchedule: "content-schedule",
-  contentSchedules: "content-schedule",
 };
 
 const clearanceWorkName = "库存清仓";
@@ -5674,11 +5670,6 @@ export function bindTasksPageEvents(rerender) {
     rerender();
   });
 
-  if (activeTaskTab === "content-schedule") {
-    bindContentScheduleEvents(rerender);
-    return;
-  }
-
   if (activeTaskTab === "clearance") {
     if (clearanceFilterForm !== null) {
       clearanceFilterForm.addEventListener("input", (event) => {
@@ -6074,31 +6065,26 @@ export function bindTasksPageEvents(rerender) {
 export function renderTasksPage() {
   syncTaskTabFromHash();
   if (activeTaskTab === "task-library") activeTaskTab = "task-list";
-  if (activeTaskTab === "task-list" && !canCurrentUser("tasks.view")) activeTaskTab = canCurrentUser("contentSchedules.view") ? "content-schedule" : "task-list";
-  if (activeTaskTab === "clearance" && !canCurrentUser("tasks.view")) activeTaskTab = canCurrentUser("contentSchedules.view") ? "content-schedule" : "task-list";
+  if (activeTaskTab === "task-list" && !canCurrentUser("tasks.view")) activeTaskTab = "task-list";
+  if (activeTaskTab === "clearance" && !canCurrentUser("tasks.view")) activeTaskTab = "task-list";
   if (activeTaskTab === "process-progress" && !canCurrentUser("tasks.viewProcessProgress")) {
-    activeTaskTab = canCurrentUser("tasks.view") ? "task-list" : "content-schedule";
+    activeTaskTab = "task-list";
   }
-  if (activeTaskTab === "content-schedule" && !canCurrentUser("contentSchedules.view")) activeTaskTab = "task-list";
   const canViewActiveTab =
     (activeTaskTab === "task-list" && canCurrentUser("tasks.view")) ||
     (activeTaskTab === "clearance" && canCurrentUser("tasks.view")) ||
-    (activeTaskTab === "process-progress" && canCurrentUser("tasks.viewProcessProgress")) ||
-    (activeTaskTab === "content-schedule" && canCurrentUser("contentSchedules.view"));
+    (activeTaskTab === "process-progress" && canCurrentUser("tasks.viewProcessProgress"));
 
   return `
     <div class="tasks-page">
       <div class="settings-tabs task-subtabs" aria-label="任务页签">
         ${canCurrentUser("tasks.view") ? `<button class="${activeTaskTab === "task-list" ? "is-active" : ""}" type="button" data-task-tab="task-list">任务</button>` : ""}
         ${canCurrentUser("tasks.view") ? `<button class="${activeTaskTab === "clearance" ? "is-active" : ""}" type="button" data-task-tab="clearance">库存清仓</button>` : ""}
-        ${canCurrentUser("contentSchedules.view") ? `<button class="${activeTaskTab === "content-schedule" ? "is-active" : ""}" type="button" data-task-tab="content-schedule">内容排期</button>` : ""}
       </div>
       ${
         !canViewActiveTab
           ? `<section class="settings-section"><div class="empty-detail">你没有权限访问该页面。</div></section>`
-        : activeTaskTab === "content-schedule"
-          ? renderContentSchedulePage()
-          : activeTaskTab === "clearance"
+        : activeTaskTab === "clearance"
             ? renderClearancePage()
           : activeTaskTab === "process-progress"
             ? `

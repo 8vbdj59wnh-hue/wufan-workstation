@@ -2064,7 +2064,7 @@ export async function launchWorkPlanAsProcess(
 
   const launchedInstance = {
     ...result.instance,
-    dueDate: null,
+    dueDate: workPlan.dueDate ?? null,
     updatedAt: now,
   };
   const generatedTasks = state.tasks.filter((task) => task.processInstanceId === result.instance.id);
@@ -2080,7 +2080,7 @@ export async function launchWorkPlanAsProcess(
     workType: workPlan.workType || WorkType.Normal,
     status: WorkPlanStatus.Launched,
     processInstanceId: launchedInstance.id,
-    dueDate: null,
+    dueDate: workPlan.dueDate ?? null,
     customFields: launchedInstance.customFields,
     launchedAt: now,
     updatedAt: now,
@@ -2140,6 +2140,100 @@ export async function launchWorkPlanDraftAsProcess(workPlan, options = {}) {
     state.workPlans = previousWorkPlans;
     throw error;
   }
+}
+
+export function prepareWorkPlanLaunchPayload(
+  workPlan,
+  { initiatorId = null, launchAssignments = null, productIds = [], rowNumber = null, dedupe = null, forceDuplicate = false } = {},
+) {
+  const taskTemplate = state.taskTemplates.find((template) => template.id === workPlan.taskTemplateId);
+  if (taskTemplate === undefined) throw new Error("该关键行动计划未关联关键行动。");
+  if (!taskTemplate.defaultProcessTemplateId) throw new Error("该关键行动尚未绑定关键行动标准流程。");
+
+  const previousProcessInstances = [...state.processInstances];
+  const previousTasks = [...state.tasks];
+  const now = getNow();
+  const title = workPlan.title || taskTemplate.name || "未命名工作";
+  const resolvedInitiatorId = normalizeOptionalId(initiatorId) ?? getCurrentUserId();
+  if (resolvedInitiatorId === null) throw new Error("无法确认当前发起人，请重新登录后再试。");
+
+  try {
+    const result = startProcess({
+      templateId: taskTemplate.defaultProcessTemplateId,
+      taskTemplateId: taskTemplate.id,
+      customFields: workPlan.customFields ?? {},
+      displayTitle: title,
+      coverImageUrl: getPrimaryImageUrl(workPlan) || null,
+      name: title,
+      goalId: workPlan.goalId,
+      initiatorId: resolvedInitiatorId,
+      description: workPlan.description || `由待发起工作计划发起：${title}`,
+      launchAssignments: launchAssignments ?? { owner: {}, accepter: {} },
+    });
+    if (result.error !== undefined) throw new Error(result.error);
+    const generatedTasks = state.tasks.filter((task) => task.processInstanceId === result.instance.id);
+    const taskIds = generatedTasks.map((task) => task.id);
+    const customFields = enrichStandardWorkAttachments(workPlan.customFields ?? {}, {
+      standardWorkId: taskTemplate.id,
+      workPlanId: workPlan.id,
+      processInstanceId: result.instance.id,
+      taskIds,
+    });
+    const launchedInstance = {
+      ...result.instance,
+      dueDate: workPlan.dueDate ?? null,
+      customFields,
+      updatedAt: now,
+    };
+    const launchedWorkPlan = {
+      ...workPlan,
+      workType: workPlan.workType || WorkType.Normal,
+      status: WorkPlanStatus.Launched,
+      processInstanceId: launchedInstance.id,
+      dueDate: workPlan.dueDate ?? null,
+      customFields,
+      launchedAt: now,
+      updatedAt: now,
+    };
+    return {
+      rowNumber,
+      processInstance: launchedInstance,
+      tasks: generatedTasks,
+      workPlan: launchedWorkPlan,
+      productIds,
+      dedupe,
+      forceDuplicate,
+    };
+  } finally {
+    state.processInstances = previousProcessInstances;
+    state.tasks = previousTasks;
+  }
+}
+
+export async function batchLaunchWorkPlanDrafts(rows = []) {
+  const response = await authFetch(`${apiBaseUrl}/api/work-plans/batch-launch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rows }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || body.success !== true) {
+    throw new Error(body.message ?? body.error ?? "批量发起关键行动失败。");
+  }
+  if (body.data !== undefined) applyDataSnapshot(body.data);
+  return body;
+}
+
+export async function parseContentNoteImport(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await authFetch(`${apiBaseUrl}/api/content-note-import/parse`, {
+    method: "POST",
+    body: formData,
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || body.success !== true) throw new Error(body.message ?? "Excel 文件解析失败。");
+  return body;
 }
 
 function getRectificationTaskExecutorId(task) {

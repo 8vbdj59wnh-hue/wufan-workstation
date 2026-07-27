@@ -1,10 +1,14 @@
 import {
+  batchLaunchWorkPlanDrafts,
   createId,
   createPersistentResource,
   getCurrentUser,
   getCurrentWeek,
+  getLatestStandardWorkFormFields,
   getNow,
   loadTemplates,
+  parseContentNoteImport,
+  prepareWorkPlanLaunchPayload,
   resolveAssetUrl,
   state,
   updatePersistentResource,
@@ -44,32 +48,29 @@ import {
   getProcessProgress as selectProcessProgress,
   isProcessInstanceOverdue as selectProcessInstanceOverdue,
 } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
+import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
+import {
+  bindLaunchedProcessDetailEvents,
+  canEditLaunchedProcessInstance,
+  renderLaunchedProcessDetail,
+} from "./processInstanceDetail.js?v=20260724-batch-action-template1";
 
 const defaultDepartmentId = "dept-marketing";
 const defaultOwnerId = "person-005";
 const contentNoteTaskTemplateId = "task-template-publish-content-note";
 const categories = state.categories;
 const goals = state.goals;
-const requiredImportHeaders = [];
-const exportHeaders = [
+const contentNoteExportHeaders = [
+  "行动编码",
   "发布日期",
   "发布账号",
-  "内容类型",
+  "笔记形式",
   "内容目的",
-  "受众人群",
   "对应产品",
-  "标题",
-  "文案",
-  "参考场景",
-  "#话题",
-  "状态",
-  "关联目标",
+  "关键行动名称",
+  "当前状态",
+  "对齐目标",
 ];
-const importTemplateHeaders = exportHeaders.map((header) => (header === "发布日期" ? "发布日期（日期+时间）" : header));
-const importHeaderAliases = {
-  发布日期: ["发布日期", "发布日期（日期+时间）"],
-  受众人群: ["受众人群", "对应人群"],
-};
 const contentNoteStatusOptions = ["待提交", "待制作", "待审核", "待发布", "已发布", "已超时", "已取消"];
 const legacyScheduleWriteDisabledMessage = "历史排期维护已停用，请通过“发起发布内容笔记”创建新排期。";
 
@@ -580,13 +581,12 @@ function getFilteredSchedules() {
 
 function renderFilters() {
   return `
-    <form class="content-schedule-filters" aria-label="内容排期筛选">
+    <form class="content-schedule-filters" aria-label="发布内容笔记筛选">
       <label><span>开始日期</span><input name="dateFrom" type="date" value="${filters.dateFrom}" /></label>
       <label><span>结束日期</span><input name="dateTo" type="date" value="${filters.dateTo}" /></label>
       <label><span>发布账号</span><select name="account">${renderStringOptions(getActivePublishingAccountNames(filters.account), filters.account, "全部账号")}</select></label>
-      <label><span>内容类型</span><select name="contentType">${renderStringOptions(contentScheduleTypeOptions, filters.contentType, "全部类型")}</select></label>
+      <label><span>笔记形式</span><select name="contentType">${renderStringOptions(contentScheduleTypeOptions, filters.contentType, "全部形式")}</select></label>
       <label><span>内容目的</span><select name="contentPurpose">${renderStringOptions(contentSchedulePurposeOptions, filters.contentPurpose, "全部目的")}</select></label>
-      <label><span>受众人群</span><select name="targetAudience">${renderStringOptions(contentScheduleAudienceOptions, filters.targetAudience, "全部人群")}</select></label>
       <label><span>状态</span><select name="status">${renderContentNoteStatusOptions(filters.status, "全部状态")}</select></label>
       <label><span>关联目标</span><select name="goalId">${renderEntityOptions(getActiveGoals(), filters.goalId, "全部目标")}</select></label>
       <label><span>产品关键词</span><input name="productKeyword" value="${escapeAttribute(filters.productKeyword)}" placeholder="搜索产品" /></label>
@@ -616,6 +616,97 @@ function getContentNoteTemplate() {
     state.taskTemplates.find((template) => template.name === "小红书笔记发布") ??
     null
   );
+}
+
+const contentNoteExtraFormFields = [
+  { id: "content-note-product-name", key: "productName", label: "对应产品", type: "text", required: false, options: [], showInList: true, sortOrder: 7 },
+  { id: "content-note-scene", key: "scene", label: "参考场景", type: "text", required: false, options: [], showInList: true, sortOrder: 10 },
+  { id: "content-note-hashtags", key: "hashtags", label: "话题", type: "text", required: false, options: [], showInList: true, sortOrder: 11 },
+];
+
+function getContentNoteFormFields() {
+  const template = getContentNoteTemplate();
+  if (template === null) return [];
+  const fields = normalizePublicFormFields(getLatestStandardWorkFormFields(template.id, template.formFields ?? []));
+  fields.forEach((field) => {
+    if (field.key === "publishDate") field.type = "datetime_hour";
+  });
+  contentNoteExtraFormFields.forEach((field) => {
+    if (!fields.some((item) => item.key === field.key)) fields.push({ ...field });
+  });
+  return fields.sort((left, right) => left.sortOrder - right.sortOrder);
+}
+
+function getContentNoteBatchFormFields() {
+  const template = getContentNoteTemplate();
+  if (template === null) return [];
+  return normalizePublicFormFields(getLatestStandardWorkFormFields(template.id, template.formFields ?? []))
+    .slice()
+    .sort((left, right) => left.sortOrder - right.sortOrder);
+}
+
+function findContentFormField(keys = [], labels = []) {
+  return getContentNoteFormFields().find(
+    (field) => keys.includes(field.key) || labels.includes(String(field.label ?? "").trim()),
+  ) ?? null;
+}
+
+function getContentTitleField() {
+  return findContentFormField(["title", "contentTitle"], ["标题", "内容标题"]);
+}
+
+function getContentFieldHeader(field) {
+  if (field.key === "publishDate") return null;
+  if (field.key === "coverImageUrl" || field.type === "image" || field.type === "file") return null;
+  if (field.label === "标题") return "内容标题";
+  if (field.label === "文案") return "内容文案";
+  if (field.label === "目的") return "内容目的";
+  return field.label;
+}
+
+function getBatchTemplateColumns() {
+  const columns = ["对齐目标", "关键行动名称", "产品编码", "模板编码", "完成日期", "完成时间"];
+  getContentNoteBatchFormFields().forEach((field) => {
+    if (field.key === "publishDate") {
+      columns.push("发布日期", "发布时间");
+      return;
+    }
+    const header = getContentFieldHeader(field);
+    if (header && !columns.includes(header)) columns.push(header);
+  });
+  ["参考场景", "话题", "备注"].forEach((header) => {
+    if (!columns.includes(header)) columns.push(header);
+  });
+  return columns;
+}
+
+function getFieldAllowedValues(field) {
+  if (!Array.isArray(field?.options)) return [];
+  return field.options.map((option) => String(option?.label ?? option?.name ?? option?.value ?? option)).filter(Boolean);
+}
+
+function getBatchTemplateInstruction(column) {
+  if (column === "对齐目标") return "可留空并在预览页统一选择；填写目标编码或唯一目标名称";
+  if (column === "产品编码") return "选填；填写产品中心唯一SKU编码；空值不建立产品关联";
+  if (column === "模板编码") return "选填；格式 MB-YYYYMM-NNNN；仅限小红书笔记模板；空值不建立模板关联";
+  if (column === "关键行动名称") return "选填；留空按产品和模板名称自动生成";
+  if (column === "完成日期") return "选填；格式 YYYY-MM-DD";
+  if (column === "完成时间") return "与完成日期同时填写；整点 HH:00";
+  if (column === "发布日期") return "选填；有值时格式 YYYY-MM-DD";
+  if (column === "发布时间") return "选填；与发布日期同时填写，整点 HH:00";
+  const field = getContentNoteBatchFormFields().find((item) => getContentFieldHeader(item) === column);
+  if (column === "参考场景" || column === "话题" || column === "备注") return "选填；普通字段允许留空";
+  const options = getFieldAllowedValues(field);
+  return `选填；普通字段允许留空${options.length ? `；有值时可选：${options.join(" / ")}` : ""}`;
+}
+
+function getFieldValueByHeader(record, field) {
+  const header = getContentFieldHeader(field);
+  return header ? String(record[header] ?? "").trim() : "";
+}
+
+function isSelectableImportProduct(product) {
+  return !["inactive", "archived", "已归档", "停用"].includes(String(product?.status ?? "").trim());
 }
 
 function canLaunchContentNote() {
@@ -656,6 +747,8 @@ function getAliasedField(fields, keys, fallback = "") {
 
 function normalizeContentNoteFields(instance, workPlan) {
   const fields = { ...(workPlan?.customFields ?? {}), ...(instance.customFields ?? {}) };
+  const titleField = getContentTitleField();
+  const copyField = findContentFormField(["contentText", "copywriting"], ["内容文案", "文案"]);
   return {
     publishDate: getAliasedField(fields, ["publishDate"], instance.dueDate ?? workPlan?.dueDate ?? ""),
     account: getAliasedField(fields, ["account"]),
@@ -664,8 +757,8 @@ function normalizeContentNoteFields(instance, workPlan) {
     targetAudience: normalizeContentAudience(getAliasedField(fields, ["audience", "targetAudience"])),
     product: getAliasedField(fields, ["productName", "product"]),
     productImage: getAliasedField(fields, ["coverImageUrl", "productImage"], instance.coverImageUrl ?? workPlan?.coverImageUrl ?? ""),
-    title: getAliasedField(fields, ["title"], instance.displayTitle ?? instance.name ?? ""),
-    copywriting: getAliasedField(fields, ["contentText", "copywriting"]),
+    title: getAliasedField(fields, [titleField?.key, "title"].filter(Boolean), instance.displayTitle ?? instance.name ?? ""),
+    copywriting: getAliasedField(fields, [copyField?.key, "contentText", "copywriting"].filter(Boolean)),
     scene: getAliasedField(fields, ["scene"]),
     hashtags: getAliasedField(fields, ["hashtags"]),
   };
@@ -687,6 +780,8 @@ function buildContentNoteItem(instance) {
   const workPlan = getWorkPlanByProcessInstance(instance.id);
   const tasks = getInstanceTasks(instance.id);
   const fields = normalizeContentNoteFields(instance, workPlan);
+  const productLinks = state.actionProducts.filter((link) => link.actionId === instance.id);
+  const relatedProducts = productLinks.map((link) => state.products.find((product) => product.id === link.productId)).filter(Boolean);
   return {
     id: instance.id,
     instance,
@@ -694,7 +789,9 @@ function buildContentNoteItem(instance) {
     tasks,
     currentTask: selectCurrentProcessTask(instance.id, state),
     goalId: instance.goalId ?? workPlan?.goalId ?? "",
+    actionName: workPlan?.title ?? instance.displayTitle ?? instance.name ?? "",
     ...fields,
+    product: relatedProducts.map((product) => product.name).join("、") || fields.product,
     status: getContentNoteStatus(instance, tasks),
   };
 }
@@ -757,27 +854,32 @@ function renderScheduleTable() {
     <section class="settings-section">
       <div class="section-heading with-actions">
         <div>
-          <h2>内容排期表</h2>
-          <p class="form-note">这里展示已发起的“发布内容笔记”关键行动；新内容请从统一入口发起，不再维护独立排期数据。</p>
+          <h2>发布内容笔记</h2>
+          <p class="form-note">用于单条或批量发起真正的“发布内容笔记”关键行动。附件和产品图片请在单条发起时上传，首版批量导入不接收文件。</p>
         </div>
         <div class="section-actions">
-          ${canCurrentUser("contentSchedules.export") ? `<button class="secondary-button" type="button" data-content-action="export-schedules">导出 Excel</button>` : ""}
           ${canLaunchContentNote() ? `<button class="primary-button" type="button" data-content-action="launch-content-note">发起发布内容笔记</button>` : ""}
+          ${canLaunchContentNote() ? `
+            <label class="secondary-button content-import-button">批量导入<input type="file" accept=".xlsx,.xls,.csv,.tsv" data-content-file="import" hidden /></label>
+            <button class="text-button" type="button" data-content-action="download-template">下载导入模板</button>
+          ` : ""}
+          ${canCurrentUser("contentSchedules.export") ? `<button class="text-button" type="button" data-content-action="export-schedules">导出当前列表</button>` : ""}
         </div>
       </div>
       <div class="table-wrap">
         <table class="data-table content-schedule-table">
           <thead>
             <tr>
-              <th>序号</th>
-              <th>产品图</th>
               <th>发布日期</th>
               <th>发布账号</th>
-              <th>内容类型</th>
+              <th>笔记形式</th>
               <th>目的</th>
-              <th>受众人群</th>
               <th>对应产品</th>
-              <th>标题</th>
+              <th>行动编码</th>
+              <th>关键行动名称</th>
+              <th>内容标题</th>
+              <th>负责人</th>
+              <th>当前步骤</th>
               <th>当前状态</th>
               <th>关联目标</th>
               <th>操作</th>
@@ -786,25 +888,32 @@ function renderScheduleTable() {
           <tbody>
             ${
               schedules.length === 0
-                ? `<tr><td colspan="12">暂无已发起发布内容笔记</td></tr>`
+                ? `<tr><td colspan="13">暂无已发起的“发布内容笔记”关键行动，可使用单条发起或批量导入。</td></tr>`
                 : schedules
                     .map(
                       (schedule, index) => `
                         <tr class="${schedule.id === selectedScheduleId ? "is-selected" : ""}" data-schedule-row-id="${schedule.id}">
-                          <td>${index + 1}</td>
-                          <td class="content-image-column">${renderImageCell(schedule)}</td>
                           <td>${formatBusinessDateTime(schedule.publishDate, "-")}</td>
                           <td>${escapeHtml(schedule.account)}</td>
                           <td>${escapeHtml(normalizeContentType(schedule.contentType))}</td>
                           <td>${escapeHtml(normalizeContentPurpose(schedule.contentPurpose))}</td>
-                          <td>${escapeHtml(normalizeContentAudience(schedule.targetAudience))}</td>
                           <td>${escapeHtml(schedule.product || "未填写")}</td>
+                          <td>
+                            <span class="content-action-code">
+                              <button class="copyable-code" type="button" data-copy-content-code="${escapeAttribute(schedule.instance.businessCode ?? "")}" ${schedule.instance.businessCode ? "" : "disabled"}>${escapeHtml(schedule.instance.businessCode || "—")}</button>
+                              <em data-content-code-feedback aria-live="polite"></em>
+                            </span>
+                          </td>
+                          <td class="content-title-cell"><span>${escapeHtml(schedule.actionName)}</span></td>
                           <td class="content-title-cell"><span>${escapeHtml(schedule.title)}</span></td>
+                          <td>${escapeHtml(findName(state.people, schedule.currentTask?.executorId ?? schedule.currentTask?.ownerId, "未设置"))}</td>
+                          <td>${escapeHtml(schedule.currentTask?.name ?? "已完成")}</td>
                           <td><span class="status-pill ${schedule.status === "已超时" || schedule.status === "已取消" ? "is-inactive" : ""}">${escapeHtml(schedule.status)}</span></td>
                           <td>${escapeHtml(findName(goals, schedule.goalId, "未关联"))}</td>
                           <td>
                             <span class="row-actions">
                               ${renderContentActionButton("查看", "view-content-note", schedule.id)}
+                              ${canEditLaunchedProcessInstance(schedule.instance, getCurrentUser()) ? renderContentActionButton("编辑", "edit-content-note", schedule.id) : ""}
                             </span>
                           </td>
                         </tr>
@@ -816,6 +925,23 @@ function renderScheduleTable() {
         </table>
       </div>
     </section>
+  `;
+}
+
+function renderContentNoteEditModal() {
+  if (modalState?.kind !== "editContentNote") return "";
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <div class="modal-panel extra-wide-modal content-note-edit-modal" role="dialog" aria-modal="true" aria-label="编辑发布内容笔记关键行动">
+        <div class="modal-header">
+          <h2>编辑发布内容笔记关键行动</h2>
+          <button class="icon-button" type="button" data-content-action="close-content-modal" aria-label="关闭">×</button>
+        </div>
+        ${renderLaunchedProcessDetail(modalState.instanceId, {
+          emptyHtml: `<section class="placeholder"><h2>未找到关键行动</h2></section>`,
+        })}
+      </div>
+    </div>
   `;
 }
 
@@ -1272,45 +1398,176 @@ function renderScheduleModal() {
 
 function renderImportModal() {
   if (modalState === null || modalState.kind !== "import") return "";
+  const results = modalState.result ?? [];
+  const successCount = results.filter((item) => item.status === "success").length;
+  const failedCount = results.filter((item) => item.status === "failed").length;
+  const skippedCount = results.filter((item) => item.status === "skipped" || item.status === "skipped_duplicate").length;
+  const resultDuplicateCount = results.filter((item) => item.status === "skipped_duplicate").length;
+  const resultByRow = new Map(results.map((item) => [item.rowNumber, item]));
+  const previewAvailableCount = modalState.rows.filter((row) => row.errors.length === 0 && row.duplicateType !== "database").length;
+  const previewErrorCount = modalState.rows.filter((row) => row.errors.length > 0 && row.duplicateType !== "file").length;
+  const previewDuplicateCount = modalState.rows.filter((row) => row.duplicateType !== "").length;
+  const previewSelectedCount = modalState.rows.filter((row) => row.selected || row.forceDuplicate).length;
 
   return `
     <div class="modal-backdrop" role="presentation">
-      <div class="modal-panel wide-modal" role="dialog" aria-modal="true" aria-label="导入排期预览">
+      <div class="modal-panel extra-wide-modal" role="dialog" aria-modal="true" aria-label="发布内容笔记批量导入预览">
         <div class="modal-header">
-          <h2>导入排期预览</h2>
+          <h2>发布内容笔记批量导入预览</h2>
           <button class="icon-button" type="button" data-content-action="close-content-modal" aria-label="关闭">×</button>
         </div>
         <div class="modal-form">
           <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${modalState.error}</div>
-          <p class="form-note">${escapeHtml(modalState.fileName)}，共 ${modalState.rows.length} 行，可导入 ${modalState.rows.filter((row) => row.errors.length === 0).length} 行。</p>
+          <p class="form-note">${escapeHtml(modalState.fileName)}，共 ${modalState.rows.length} 行。附件和产品图片不会通过本次 Excel 导入创建。</p>
+          <label class="content-note-batch-goal">
+            <span>本批次对齐目标</span>
+            <select data-content-note-batch-goal>
+              <option value="">请选择；仅用于行内目标为空的数据</option>
+              ${getActiveGoals().map((goal) => `<option value="${escapeAttribute(goal.id)}" ${modalState.batchGoalId === goal.id ? "selected" : ""}>${escapeHtml(goal.businessCode ? `${goal.businessCode}｜${goal.name}` : goal.name)}</option>`).join("")}
+            </select>
+          </label>
+          <div class="import-preview-summary">
+            <span>总行数：${modalState.rows.length}</span>
+            <span>可发起：${previewAvailableCount}</span>
+            <span>错误：${previewErrorCount}</span>
+            <span>重复：${previewDuplicateCount}</span>
+            <strong>已选择：${previewSelectedCount}</strong>
+          </div>
+          ${results.length ? `<div class="import-result-summary"><strong>批量结果</strong><span>成功：${successCount} 条</span><span>失败：${failedCount} 条</span><span>跳过：${skippedCount} 条</span><span>重复：${resultDuplicateCount} 条</span></div>` : ""}
           <div class="table-wrap">
             <table class="data-table compact-import-table">
-              <thead><tr><th>行号</th><th>发布日期</th><th>标题</th><th>状态</th><th>校验</th></tr></thead>
+              <thead><tr><th>选择</th><th>行号</th><th>对齐目标</th><th>产品编码</th><th>产品名称</th><th>模板编码</th><th>模板名称</th><th>关键行动名称</th><th>发布日期</th><th>发布账号</th><th>内容标题</th><th>校验状态</th><th>错误说明</th></tr></thead>
               <tbody>
                 ${modalState.rows
-                  .map(
-                    (row) => `
+                  .map((row) => {
+                    const result = resultByRow.get(row.rowNumber);
+                    const resultText =
+                      result?.status === "success"
+                        ? `已创建 ${result.businessCode ?? result.processInstanceId}，任务 ${result.taskCount} 条`
+                        : result?.status === "skipped_duplicate"
+                          ? `已跳过：${result.message}`
+                          : result?.status === "failed"
+                            ? `失败：${result.message}`
+                            : "";
+                    return `
                       <tr>
+                        <td>
+                          <input type="checkbox" data-import-row-select="${row.rowNumber}" ${row.selected ? "checked" : ""} ${row.errors.length ? "disabled" : ""} />
+                        </td>
                         <td>${row.rowNumber}</td>
-                        <td>${escapeHtml(formatBusinessDateTime(row.data.发布日期, ""))}</td>
-                        <td>${escapeHtml(row.data.标题)}</td>
-                        <td>${escapeHtml(row.data.状态)}</td>
-                        <td>${row.errors.length === 0 ? "可导入" : escapeHtml(row.errors.join("；"))}</td>
+                        <td>${escapeHtml(row.goal?.name ?? row.data.对齐目标 ?? "—")}</td>
+                        <td>${escapeHtml(row.data.产品编码 || "—")}</td>
+                        <td>${escapeHtml(row.product?.name ?? "—")}</td>
+                        <td>${escapeHtml(row.data.模板编码 || "—")}</td>
+                        <td>${escapeHtml(row.linkedTemplate?.name ?? "—")}</td>
+                        <td>${escapeHtml(row.actionName)}</td>
+                        <td>${escapeHtml([row.data.发布日期, row.data.发布时间].filter(Boolean).join(" "))}</td>
+                        <td>${escapeHtml(getBatchFieldValue(row.customFields, findBatchField(["account"], ["发布账号"])) || "—")}</td>
+                        <td>${escapeHtml(getBatchFieldValue(row.customFields, findBatchField(["title", "contentTitle"], ["标题", "内容标题"])) || "—")}</td>
+                        <td>${result?.status === "success" ? "已创建" : result?.status === "failed" ? "失败" : row.duplicateType === "database" ? "可能重复" : row.duplicateType === "file" ? "文件内重复" : row.errors.length ? "错误" : "可发起"}</td>
+                        <td>${resultText ? escapeHtml(resultText) : row.errors.length ? `<span class="form-error-inline">${escapeHtml(row.errors.join("；"))}</span>` : row.warnings.length ? `<span class="warning-text">${escapeHtml(row.warnings.join("；"))}</span>` : "—"}</td>
                       </tr>
-                    `,
-                  )
+                    `;
+                  })
                   .join("")}
               </tbody>
             </table>
           </div>
           <div class="modal-actions">
             <button class="secondary-button" type="button" data-content-action="close-content-modal">取消</button>
-            <button class="primary-button" type="button" data-content-action="confirm-import">确认导入有效行</button>
+            ${results.length ? `
+              ${(failedCount + skippedCount) > 0 ? `<button class="secondary-button" type="button" data-content-action="download-import-results">下载失败明细</button>` : ""}
+              <button class="primary-button" type="button" data-content-action="close-content-modal">完成</button>
+            ` : `<button class="primary-button" type="button" data-content-action="confirm-import" ${previewSelectedCount === 0 ? "disabled" : ""}>批量发起</button>`}
           </div>
         </div>
       </div>
     </div>
   `;
+}
+
+export function renderContentNoteBatchTools() {
+  if (!canLaunchContentNote()) return "";
+  return `
+    <div class="section-actions content-note-batch-tools">
+      <button class="primary-button" type="button" data-content-note-batch-action="launch">发起发布内容笔记</button>
+      <label class="secondary-button content-import-button">批量导入<input type="file" accept=".xlsx,.xls,.csv,.tsv" data-content-note-batch-file hidden /></label>
+      <button class="text-button" type="button" data-content-note-batch-action="download-template">下载导入模板</button>
+    </div>
+  `;
+}
+
+export function renderContentNoteBatchModal() {
+  return renderImportModal();
+}
+
+export function bindContentNoteBatchEvents(root, rerender) {
+  if (root === null) return;
+  root.querySelector("[data-content-note-batch-file]")?.addEventListener("change", (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file !== undefined) void handleImportFile(file, rerender);
+  });
+  root.querySelectorAll("[data-content-note-batch-action]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const action = button.dataset.contentNoteBatchAction;
+      if (action === "launch") {
+        const template = getContentNoteTemplate();
+        if (template === null || !canLaunchContentNote()) return;
+        window.sessionStorage.setItem("goalTaskPrefill", JSON.stringify({
+          taskTemplateId: template.id,
+          categoryId: template.categoryId ?? "",
+          launchImmediately: true,
+          title: "发起发布内容笔记",
+        }));
+        window.location.hash = "goals";
+      } else if (action === "download-template") {
+        downloadTemplate();
+      }
+    });
+  });
+  root.querySelectorAll("[data-content-action]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const action = button.dataset.contentAction;
+      if (action === "close-content-modal") {
+        modalState = null;
+        rerender();
+      } else if (action === "confirm-import") {
+        await confirmImport(rerender);
+      } else if (action === "download-import-results") {
+        downloadImportFailureDetails();
+      }
+    });
+  });
+  root.querySelectorAll("[data-import-row-select]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      const rowNumber = Number(checkbox.dataset.importRowSelect);
+      modalState = {
+        ...modalState,
+        rows: modalState.rows.map((row) =>
+          row.rowNumber === rowNumber
+            ? {
+                ...row,
+                selected: checkbox.checked,
+                forceDuplicate: row.duplicateType === "database" ? checkbox.checked : false,
+              }
+            : row,
+        ),
+      };
+      rerender();
+    });
+  });
+  root.querySelector("[data-content-note-batch-goal]")?.addEventListener("change", (event) => {
+    const batchGoalId = event.target.value;
+    modalState = {
+      ...modalState,
+      batchGoalId,
+      rows: buildImportPreviewRows(modalState.records ?? [], batchGoalId),
+      result: null,
+      error: "",
+    };
+    rerender();
+  });
 }
 
 function updateFilters(form) {
@@ -1686,7 +1943,7 @@ async function startContentProcess(scheduleId, rerender) {
   await createWorkPlanFromSchedule(scheduleId, WorkPlanStatus.ThisWeek, rerender);
 }
 
-function createXmlWorkbook(rows, headers = exportHeaders) {
+function createXmlWorkbook(rows, headers = contentNoteExportHeaders) {
   const xmlRows = rows
     .map(
       (row) => `
@@ -1705,7 +1962,7 @@ function createXmlWorkbook(rows, headers = exportHeaders) {
  xmlns:o="urn:schemas-microsoft-com:office:office"
  xmlns:x="urn:schemas-microsoft-com:office:excel"
  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
-  <Worksheet ss:Name="内容排期">
+  <Worksheet ss:Name="发布内容笔记">
     <Table>
       <Row>${headers.map((header) => `<Cell><Data ss:Type="String">${header}</Data></Cell>`).join("")}</Row>
       ${xmlRows}
@@ -1728,159 +1985,289 @@ function downloadFile(content, fileName, type) {
 
 function getExportRows(schedules) {
   return schedules.map((schedule) => ({
+    行动编码: schedule.instance?.businessCode ?? "",
     发布日期: formatBusinessDateTime(schedule.publishDate, ""),
     发布账号: schedule.account,
-    内容类型: normalizeContentType(schedule.contentType),
+    笔记形式: normalizeContentType(schedule.contentType),
     内容目的: normalizeContentPurpose(schedule.contentPurpose),
-    受众人群: normalizeContentAudience(schedule.targetAudience),
     对应产品: schedule.product,
-    标题: schedule.title,
-    文案: schedule.copywriting,
-    参考场景: schedule.scene,
-    "#话题": schedule.hashtags,
-    状态: contentNoteStatusOptions.includes(schedule.status) ? schedule.status : getStatusName(schedule.status),
-    关联目标: findName(goals, schedule.goalId, ""),
+    关键行动名称: schedule.actionName,
+    当前状态: contentNoteStatusOptions.includes(schedule.status) ? schedule.status : getStatusName(schedule.status),
+    对齐目标: findName(goals, schedule.goalId, ""),
   }));
 }
 
 function exportSchedules() {
   const schedules = getContentNoteItems();
   if (schedules.length === 0) {
-    window.alert("暂无可导出的内容排期。");
+    window.alert("暂无可导出的发布内容笔记。");
     return;
   }
-  downloadFile(createXmlWorkbook(getExportRows(schedules)), "半然内容排期导出.xls", "application/vnd.ms-excel;charset=utf-8");
+  downloadFile(createXmlWorkbook(getExportRows(schedules)), "发布内容笔记导出.xls", "application/vnd.ms-excel;charset=utf-8");
 }
 
 function downloadTemplate() {
-  const rows = [
-    {
-      "发布日期（日期+时间）": "2026-07-20 10:00",
-      发布账号: "阿柚",
-      内容类型: "图文笔记",
-      内容目的: "种草引流",
-      受众人群: "兴趣人群",
-      对应产品: "赛里木湖蓝花瓶",
-      标题: "这个蓝色花瓶太适合夏天了",
-      文案: "放在窗边真的很有夏天的感觉，清透、安静、不抢空间。",
-      参考场景: "窗台",
-      "#话题": "#花瓶 #家居软装 #氛围感家居",
-      状态: "待提交",
-      关联目标: "提高内容互动转化效率",
-    },
-  ];
-  downloadFile(createXmlWorkbook(rows, importTemplateHeaders), "半然内容排期导入模板.xls", "application/vnd.ms-excel;charset=utf-8");
-}
-
-function parseDelimitedRows(text) {
-  const delimiter = text.includes("\t") ? "\t" : ",";
-  const rows = [];
-  let row = [];
-  let cell = "";
-  let inQuotes = false;
-
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index];
-    const next = text[index + 1];
-    if (char === '"' && inQuotes && next === '"') {
-      cell += '"';
-      index += 1;
-    } else if (char === '"') {
-      inQuotes = !inQuotes;
-    } else if (char === delimiter && !inQuotes) {
-      row.push(cell.trim());
-      cell = "";
-    } else if ((char === "\n" || char === "\r") && !inQuotes) {
-      if (char === "\r" && next === "\n") index += 1;
-      row.push(cell.trim());
-      if (row.some((value) => value !== "")) rows.push(row);
-      row = [];
-      cell = "";
-    } else {
-      cell += char;
-    }
-  }
-
-  row.push(cell.trim());
-  if (row.some((value) => value !== "")) rows.push(row);
-  return rows;
-}
-
-function parseXmlWorkbook(text) {
-  const document = new DOMParser().parseFromString(text, "text/xml");
-  if (document.querySelector("parsererror") !== null) return [];
-  return [...document.querySelectorAll("Row")].map((row) =>
-    [...row.querySelectorAll("Cell")].map((cell) => cell.textContent?.trim() ?? ""),
+  const headers = getBatchTemplateColumns();
+  const instruction = Object.fromEntries(headers.map((header) => [header, `说明：${getBatchTemplateInstruction(header)}`]));
+  downloadFile(
+    createXmlWorkbook([instruction], headers),
+    "发布内容笔记批量发起模板.xls",
+    "application/vnd.ms-excel;charset=utf-8",
   );
 }
 
 function rowsToRecords(rows) {
   const headers = rows[0] ?? [];
-  const findHeaderIndex = (header) => {
-    const aliases = importHeaderAliases[header] ?? [header];
-    return aliases.map((alias) => headers.indexOf(alias)).find((index) => index >= 0) ?? -1;
-  };
-  return rows.slice(1).map((row) =>
-    exportHeaders.reduce((record, header) => {
-      const index = findHeaderIndex(header);
-      record[header] = index >= 0 ? row[index] ?? "" : "";
-      return record;
-    }, {}),
+  return rows
+    .slice(1)
+    .map((row) => Object.fromEntries(headers.map((header, index) => [header, String(row[index] ?? "").trim()])))
+    .filter((record) => !Object.values(record).every((value) => value === ""))
+    .filter((record) => !String(record.对齐目标 ?? "").startsWith("说明："));
+}
+
+function normalizeImportHour(value) {
+  const match = String(value ?? "").trim().match(/^([01]?\d|2[0-3])(?::00)?$/);
+  return match ? `${String(Number(match[1])).padStart(2, "0")}:00` : null;
+}
+
+function combineImportDateHour(dateValue, hourValue, label, errors, required = false) {
+  const date = String(dateValue ?? "").trim();
+  const hour = String(hourValue ?? "").trim();
+  if (date === "" && hour === "" && !required) return null;
+  const normalizedDate = normalizeImportDate(date);
+  const normalizedHour = normalizeImportHour(hour);
+  if (normalizedDate === null) errors.push(`${label}日期格式应为 YYYY-MM-DD`);
+  if (normalizedHour === null) errors.push(`${label}时间必须是整点 HH:00`);
+  return normalizedDate && normalizedHour ? `${getBusinessDatePart(normalizedDate)}T${normalizedHour}:00+08:00` : null;
+}
+
+function resolveUniqueEntity(items, rawValue, codeKeys = [], { allowEmpty = false } = {}) {
+  const value = String(rawValue ?? "").trim();
+  if (value === "") return { item: null, error: allowEmpty ? "" : "不能为空" };
+  const matches = items.filter((item) =>
+    [item.id, item.name, ...codeKeys.map((key) => item[key])].some(
+      (candidate) => String(candidate ?? "").trim().toLowerCase() === value.toLowerCase(),
+    ),
   );
+  if (matches.length === 0) return { item: null, error: "不存在" };
+  if (matches.length > 1) return { item: null, error: "名称匹配到多条，请改用编码" };
+  return { item: matches[0], error: "" };
 }
 
-function hasImportHeader(headers, header) {
-  return (importHeaderAliases[header] ?? [header]).some((alias) => headers.includes(alias));
+function isPublishContentNoteTemplate(template) {
+  return Array.isArray(template?.tags?.platform)
+    && template.tags.platform.includes("小红书")
+    && Array.isArray(template?.tags?.usage)
+    && template.tags.usage.includes("笔记");
 }
 
-function buildImportPreviewRows(records) {
+function findBatchField(keys = [], labels = []) {
+  return getContentNoteBatchFormFields().find(
+    (field) => keys.includes(field.key) || labels.includes(String(field.label ?? "").trim()),
+  ) ?? null;
+}
+
+function getBatchFieldValue(customFields, field) {
+  return field === null ? "" : String(customFields?.[field.key] ?? "").trim();
+}
+
+function validateOptionalBatchField(value, field, errors) {
+  const normalized = String(value ?? "").trim();
+  if (normalized === "") return;
+  const options = getFieldAllowedValues(field);
+  if (options.length > 0 && !options.includes(normalized)) {
+    errors.push(`${field.label}选项无效`);
+    return;
+  }
+  if (field.type === "date" && normalizeImportDate(normalized) === null) {
+    errors.push(`${field.label}日期格式应为 YYYY-MM-DD`);
+  } else if (field.type === "time" && normalizeImportHour(normalized) === null) {
+    errors.push(`${field.label}时间格式应为整点 HH:00`);
+  } else if (field.type === "number" && !Number.isFinite(Number(normalized))) {
+    errors.push(`${field.label}必须是数字`);
+  }
+}
+
+function buildContentNoteDedupeKey(dedupe = {}) {
+  const parts = [
+    dedupe.taskTemplateId,
+    dedupe.goalId,
+    dedupe.productId,
+    dedupe.templateId,
+    dedupe.publishDate,
+    dedupe.account,
+    dedupe.contentTitle,
+  ].map((value) => String(value ?? "").trim().toLowerCase());
+  if (parts.slice(2).every((value) => value === "")) {
+    parts.push(String(dedupe.actionName ?? "").trim().toLowerCase());
+  } else {
+    parts.push("");
+  }
+  return parts.join("|");
+}
+
+function getExistingContentNoteDedupeKeys() {
+  const publishDateField = findBatchField(["publishDate"], ["发布日期"]);
+  const accountField = findBatchField(["account"], ["发布账号"]);
+  const titleField = findBatchField(["title", "contentTitle"], ["标题", "内容标题"]);
+  return new Set(state.processInstances.filter(isContentNoteInstance).map((instance) => {
+    const workPlan = getWorkPlanByProcessInstance(instance.id);
+    const productId = state.actionProducts.find((link) => link.actionId === instance.id)?.productId ?? "";
+    const templateId = Array.isArray(instance.customFields?.linkedTemplateIds)
+      ? instance.customFields.linkedTemplateIds[0] ?? ""
+      : "";
+    return buildContentNoteDedupeKey({
+      taskTemplateId: contentNoteTaskTemplateId,
+      goalId: instance.goalId,
+      productId,
+      templateId,
+      publishDate: getBatchFieldValue(instance.customFields, publishDateField),
+      account: getBatchFieldValue(instance.customFields, accountField),
+      contentTitle: getBatchFieldValue(instance.customFields, titleField),
+      actionName: workPlan?.title ?? instance.name ?? "",
+    });
+  }));
+}
+
+function buildAutomaticContentNoteName(product, linkedTemplate) {
+  return ["发布内容笔记", product?.name, linkedTemplate?.name].filter(Boolean).join("｜");
+}
+
+function buildImportPreviewRows(records, batchGoalId = "") {
+  const template = getContentNoteTemplate();
+  const formFields = getContentNoteBatchFormFields();
+  const existingKeys = getExistingContentNoteDedupeKeys();
+  const seenKeys = new Set();
   return records.map((record, index) => {
-    const data = { ...record };
-    const rowNumber = index + 2;
+    const rowNumber = index + 3;
     const errors = [];
-    const normalizedDate = normalizeImportDate(data.发布日期);
-    const contentType = normalizeContentType(data.内容类型);
-    const contentPurpose = normalizeContentPurpose(data.内容目的);
-    const targetAudience = normalizeContentAudience(data.受众人群);
-    const statusValue = getStatusValueByName(data.状态);
-
-    if (data.发布日期 !== "" && normalizedDate === null) errors.push(`第 ${rowNumber} 行：【发布日期】必须是合法日期`);
-    if (normalizedDate !== null) data.发布日期 = normalizedDate;
-    if (data.内容类型 !== "" && !contentScheduleTypeOptions.includes(contentType)) {
-      errors.push(`第 ${rowNumber} 行：【内容类型】不在固定选项中`);
-    } else {
-      data.内容类型 = contentType;
+    const warnings = [];
+    const rowGoalValue = String(record.对齐目标 ?? "").trim();
+    const batchGoal = getActiveGoals().find((goal) => goal.id === batchGoalId) ?? null;
+    const goalResult = rowGoalValue === ""
+      ? { item: batchGoal, error: batchGoal === null ? "不能为空" : "" }
+      : resolveUniqueEntity(getActiveGoals(), rowGoalValue, ["businessCode"]);
+    const productCode = String(record.产品编码 ?? "").trim();
+    const productMatches = productCode === ""
+      ? []
+      : state.products.filter(
+          (product) => isSelectableImportProduct(product)
+            && String(product.skuCode ?? "").trim().toLowerCase() === productCode.toLowerCase(),
+        );
+    const productResult = {
+      item: productMatches.length === 1 ? productMatches[0] : null,
+      error: productCode === "" ? "" : productMatches.length === 0 ? "不存在" : productMatches.length > 1 ? "匹配到多条" : "",
+    };
+    const templateCode = String(record.模板编码 ?? "").trim();
+    const templateMatches = templateCode === ""
+      ? []
+      : state.templates.filter(
+          (item) => String(item.businessCode ?? "").trim().toLowerCase() === templateCode.toLowerCase(),
+        );
+    const linkedTemplate = templateMatches.length === 1 ? templateMatches[0] : null;
+    let templateError = "";
+    if (templateCode !== "" && !/^MB-\d{6}-\d{4}$/.test(templateCode)) templateError = "格式无效";
+    else if (templateCode !== "" && templateMatches.length === 0) templateError = "不存在";
+    else if (templateMatches.length > 1) templateError = "匹配到多条";
+    else if (linkedTemplate !== null && !isPublishContentNoteTemplate(linkedTemplate)) templateError = "不是小红书笔记模板";
+    if (goalResult.error) errors.push(`目标${goalResult.error}`);
+    if (productResult.error) errors.push(`产品编码${productResult.error}`);
+    if (templateError) errors.push(`模板编码${templateError}`);
+    const dueDate = combineImportDateHour(record.完成日期, record.完成时间, "完成期限", errors, false);
+    const customFields = {};
+    formFields.forEach((field) => {
+      if (field.key === "publishDate" || field.label === "发布日期") {
+        customFields[field.key] = combineImportDateHour(record.发布日期, record.发布时间, "发布", errors, false) ?? "";
+        return;
+      }
+      if (field.key === "coverImageUrl" || field.type === "image" || field.type === "file") {
+        customFields[field.key] = "";
+        return;
+      }
+      customFields[field.key] = getFieldValueByHeader(record, field);
+      validateOptionalBatchField(customFields[field.key], field, errors);
+    });
+    if (!formFields.some((field) => field.label === "参考场景")) customFields.scene = String(record.参考场景 ?? "").trim();
+    if (!formFields.some((field) => field.label === "话题")) customFields.hashtags = String(record.话题 ?? "").trim();
+    if (!formFields.some((field) => field.label === "备注")) customFields.remark = String(record.备注 ?? "").trim();
+    if (linkedTemplate !== null && templateError === "") customFields.linkedTemplateIds = [linkedTemplate.id];
+    const processTemplate = state.processTemplates.find((item) => item.id === template?.defaultProcessTemplateId);
+    const nodes = state.processTemplateNodes.filter(
+      (node) => node.templateId === template?.defaultProcessTemplateId && node.status !== ProcessTemplateStatus.Inactive,
+    );
+    if (!template || template.id !== contentNoteTaskTemplateId || template.status !== TaskTemplateStatus.Active) errors.push("发布内容笔记行动标准无效");
+    if (!processTemplate || processTemplate.status !== ProcessTemplateStatus.Active) errors.push("默认流程无效");
+    if (nodes.length === 0) errors.push("默认流程没有启用步骤");
+    const unresolvedNode = nodes.find((node) => {
+      if (node.ownerRule === ProcessOwnerRule.LaunchAssign) return !template?.ownerId;
+      return !node.ownerId && !template?.ownerId;
+    });
+    if (unresolvedNode) errors.push(`流程步骤“${unresolvedNode.name}”负责人配置不完整`);
+    const titleField = findBatchField(["title", "contentTitle"], ["标题", "内容标题"]);
+    const accountField = findBatchField(["account"], ["发布账号"]);
+    const publishDateField = findBatchField(["publishDate"], ["发布日期"]);
+    const actionName =
+      String(record.关键行动名称 ?? "").trim()
+      || buildAutomaticContentNoteName(productResult.item, linkedTemplate);
+    const dedupe = {
+      taskTemplateId: contentNoteTaskTemplateId,
+      goalId: goalResult.item?.id ?? "",
+      productId: productResult.item?.id ?? "",
+      templateId: linkedTemplate?.id ?? "",
+      publishDate: getBatchFieldValue(customFields, publishDateField),
+      account: getBatchFieldValue(customFields, accountField),
+      contentTitle: getBatchFieldValue(customFields, titleField),
+      actionName,
+      publishDateFieldId: publishDateField?.key ?? "publishDate",
+      accountFieldId: accountField?.key ?? "account",
+      contentTitleFieldId: titleField?.key ?? "title",
+    };
+    const dedupeKey = buildContentNoteDedupeKey(dedupe);
+    let duplicateType = "";
+    if (errors.length === 0) {
+      if (seenKeys.has(dedupeKey)) {
+        errors.push("导入文件内存在重复行");
+        duplicateType = "file";
+      } else if (existingKeys.has(dedupeKey)) {
+        warnings.push("数据库中可能已存在相同内容，默认不发起");
+        duplicateType = "database";
+      }
+      seenKeys.add(dedupeKey);
     }
-    if (data.内容目的 !== "" && !contentSchedulePurposeOptions.includes(contentPurpose)) {
-      errors.push(`第 ${rowNumber} 行：【内容目的】不在固定选项中`);
-    } else {
-      data.内容目的 = contentPurpose;
-    }
-    if (data.受众人群 !== "" && !contentScheduleAudienceOptions.includes(targetAudience)) {
-      errors.push(`第 ${rowNumber} 行：【受众人群】不在固定选项中`);
-    } else {
-      data.受众人群 = targetAudience;
-    }
-    if (data.状态 !== "" && statusValue === "") errors.push(`第 ${rowNumber} 行：【状态】不在固定选项中`);
-    if (statusValue !== "") data.状态 = contentScheduleStatusNames[statusValue];
-    if (data.关联目标 !== "" && !goals.some((goal) => goal.name === data.关联目标)) {
-      errors.push(`第 ${rowNumber} 行：【关联目标】不存在`);
-    }
-    if (data.关联目标 === "") data.关联目标 = "提高内容互动转化效率";
-
-    return { rowNumber, data, errors };
+    return {
+      rowNumber,
+      data: record,
+      errors,
+      warnings,
+      selected: errors.length === 0 && duplicateType !== "database",
+      forceDuplicate: false,
+      duplicateType,
+      goal: goalResult.item,
+      product: productResult.item,
+      linkedTemplate: templateError === "" ? linkedTemplate : null,
+      actionName,
+      dueDate,
+      customFields,
+      dedupe,
+    };
   });
 }
 
+export function buildContentNoteImportPreview(records, batchGoalId = "") {
+  return buildImportPreviewRows(records, batchGoalId);
+}
+
+export function getContentNoteImportTemplateColumns() {
+  return getBatchTemplateColumns();
+}
+
 async function handleImportFile(file, rerender) {
-  modalState = { kind: "import", fileName: file.name, rows: [], error: legacyScheduleWriteDisabledMessage };
-  rerender();
-  return;
   try {
-    const text = await file.text();
-    const rows = text.trimStart().startsWith("<?xml") || text.includes("<Workbook") ? parseXmlWorkbook(text) : parseDelimitedRows(text);
+    const parsed = await parseContentNoteImport(file);
+    const rows = parsed.rows;
     const headers = rows[0] ?? [];
-    const missingHeaders = requiredImportHeaders.filter((header) => !hasImportHeader(headers, header));
+    const requiredHeaders = getBatchTemplateColumns();
+    const missingHeaders = [...new Set(requiredHeaders)].filter((header) => !headers.includes(header));
     if (missingHeaders.length > 0) {
       modalState = { kind: "import", fileName: file.name, rows: [], error: `缺少必要表头：${missingHeaders.join("、")}` };
       rerender();
@@ -1890,70 +2277,91 @@ async function handleImportFile(file, rerender) {
     modalState = {
       kind: "import",
       fileName: file.name,
-      rows: buildImportPreviewRows(rowsToRecords(rows)),
+      records: rowsToRecords(rows),
+      batchGoalId: "",
+      rows: buildImportPreviewRows(rowsToRecords(rows), ""),
       error: "",
+      result: null,
     };
     rerender();
   } catch {
-    modalState = { kind: "import", fileName: file.name, rows: [], error: "文件解析失败，请使用系统导出的 xls 模板，或 CSV/TSV 文件。" };
+    modalState = { kind: "import", fileName: file.name, rows: [], error: "文件解析失败，请使用系统模板，或 .xlsx/.xls/.csv/.tsv 文件。" };
     rerender();
   }
 }
 
 async function confirmImport(rerender) {
-  modalState = { ...modalState, error: legacyScheduleWriteDisabledMessage };
-  rerender();
-  return;
-  const validRows = modalState.rows.filter((row) => row.errors.length === 0);
-  const failedCount = modalState.rows.length - validRows.length;
+  const validRows = modalState.rows.filter((row) => row.errors.length === 0 && (row.selected || row.forceDuplicate));
   if (validRows.length === 0) {
-    modalState = { ...modalState, error: "没有可导入的有效行。" };
+    modalState = { ...modalState, error: "没有已选择且校验通过的可发起行。" };
     rerender();
     return;
   }
-
+  const template = getContentNoteTemplate();
   const now = getNow();
-  const importedSchedules = validRows.map((row) => {
-    const goalId = getActiveGoals().find((goal) => goal.name === row.data.关联目标)?.id ?? getActiveGoals()[0]?.id ?? "goal-marketing-2026-07";
-    return {
-      id: createId("content-schedule"),
-      publishDate: row.data.发布日期,
-      account: row.data.发布账号,
-      contentType: row.data.内容类型,
-      contentPurpose: row.data.内容目的,
-      targetAudience: row.data.受众人群,
-      product: row.data.对应产品,
-      productImage: "",
-      title: row.data.标题,
-      copywriting: row.data.文案,
-      scene: row.data.参考场景,
-      hashtags: row.data["#话题"],
-      status: getStatusValueByName(row.data.状态),
-      goalId,
-      taskId: null,
-      processInstanceId: null,
-      workPlanId: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-  });
-
   try {
-    for (const schedule of importedSchedules) {
-      await createPersistentResource("content-schedules", schedule);
-    }
-  } catch (error) {
-    console.error("内容排期导入失败", error);
-    modalState = { ...modalState, error: error.message || "内容排期导入失败，请检查本地数据库服务。" };
+    const payloadRows = validRows.map((row) => {
+      const workPlan = {
+        id: createId("work-plan"),
+        goalId: row.goal.id,
+        departmentId: template.departmentId || "",
+        taskTemplateId: template.id,
+        title: row.actionName,
+        customFields: {
+          ...row.customFields,
+          valueModuleId: row.customFields.valueModuleId || "brand_marketing",
+          valueModuleName: row.customFields.valueModuleName || "品牌营销",
+        },
+        coverImageUrl: null,
+        status: WorkPlanStatus.Future,
+        plannedWeek: null,
+        dueDate: row.dueDate,
+        description: "通过“发布内容笔记”批量导入发起。",
+        processInstanceId: null,
+        createdAt: now,
+        updatedAt: now,
+        launchedAt: null,
+        canceledAt: null,
+      };
+      return prepareWorkPlanLaunchPayload(workPlan, {
+        productIds: row.product === null ? [] : [row.product.id],
+        rowNumber: row.rowNumber,
+        dedupe: row.dedupe,
+        forceDuplicate: row.forceDuplicate,
+      });
+    });
+    const response = await batchLaunchWorkPlanDrafts(payloadRows);
+    const nonSubmittedResults = modalState.rows
+      .filter((row) => !validRows.includes(row))
+      .map((row) => ({
+        rowNumber: row.rowNumber,
+        status: row.errors.length > 0 ? "failed" : row.duplicateType === "database" ? "skipped_duplicate" : "skipped",
+        message: row.errors.join("；") || row.warnings.join("；") || "用户未选择该行。",
+      }));
+    modalState = { ...modalState, result: [...response.results, ...nonSubmittedResults], error: "" };
     rerender();
-    return;
+  } catch (error) {
+    console.error("发布内容笔记批量发起失败", error);
+    modalState = { ...modalState, error: error.message || "批量发起失败，请检查本地数据库服务。" };
+    rerender();
   }
+}
 
-  state.contentSchedules = [...importedSchedules, ...state.contentSchedules];
-  selectedScheduleId = importedSchedules[0]?.id ?? selectedScheduleId;
-  modalState = null;
-  window.alert(`导入完成：成功 ${importedSchedules.length} 行，跳过 ${failedCount} 行。`);
-  rerender();
+function downloadImportFailureDetails() {
+  if (modalState?.kind !== "import" || !Array.isArray(modalState.result)) return;
+  const rows = modalState.result
+    .filter((item) => item.status !== "success")
+    .map((item) => ({
+      行号: item.rowNumber,
+      结果: item.status === "skipped_duplicate" ? "跳过重复" : "失败",
+      原因: item.message ?? "",
+    }));
+  if (rows.length === 0) return;
+  downloadFile(
+    createXmlWorkbook(rows, ["行号", "结果", "原因"]),
+    "发布内容笔记批量发起失败明细.xls",
+    "application/vnd.ms-excel;charset=utf-8",
+  );
 }
 
 async function handleScheduleAction(action, scheduleId, rerender) {
@@ -2026,6 +2434,18 @@ export function bindContentScheduleEvents(rerender) {
   }
 
   page.addEventListener("click", async (event) => {
+    const copyCodeButton = event.target.closest("[data-copy-content-code]");
+    if (copyCodeButton !== null) {
+      const code = copyCodeButton.dataset.copyContentCode ?? "";
+      if (!code) return;
+      await navigator.clipboard.writeText(code);
+      const feedback = copyCodeButton.closest(".content-action-code")?.querySelector("[data-content-code-feedback]");
+      if (feedback) feedback.textContent = "已复制";
+      window.setTimeout(() => {
+        if (feedback) feedback.textContent = "";
+      }, 1200);
+      return;
+    }
     const actionButton = event.target.closest("[data-content-action]");
     if (actionButton !== null) {
       const action = actionButton.dataset.contentAction;
@@ -2155,14 +2575,26 @@ export function bindContentScheduleEvents(rerender) {
         window.location.hash = "process-progress";
         return;
       }
+      if (action === "edit-content-note") {
+        const instanceId = actionButton.dataset.contentId ?? "";
+        const instance = state.processInstances.find((item) => item.id === instanceId) ?? null;
+        if (instance === null || !canEditLaunchedProcessInstance(instance, getCurrentUser())) return;
+        modalState = { kind: "editContentNote", instanceId };
+        rerender();
+        return;
+      }
       if (action === "download-template") {
-        if (!canCurrentUser("contentSchedules.import")) return;
+        if (!canLaunchContentNote()) return;
         downloadTemplate();
         return;
       }
       if (action === "confirm-import") {
-        if (!canCurrentUser("contentSchedules.import")) return;
+        if (!canLaunchContentNote()) return;
         await confirmImport(rerender);
+        return;
+      }
+      if (action === "download-import-results") {
+        downloadImportFailureDetails();
         return;
       }
       if (action === "bulk-create-work-plan") {
@@ -2219,6 +2651,24 @@ export function bindContentScheduleEvents(rerender) {
   });
 
   page.addEventListener("change", (event) => {
+    const importRowSelect = event.target.closest("[data-import-row-select]");
+    if (importRowSelect !== null && modalState?.kind === "import") {
+      const rowNumber = Number(importRowSelect.dataset.importRowSelect);
+      modalState = {
+        ...modalState,
+        rows: modalState.rows.map((row) =>
+          row.rowNumber === rowNumber
+            ? {
+                ...row,
+                selected: importRowSelect.checked,
+                forceDuplicate: row.duplicateType === "database" ? importRowSelect.checked : row.forceDuplicate,
+              }
+            : row,
+        ),
+      };
+      rerender();
+      return;
+    }
     const searchInput = event.target.closest("[data-template-picker-search]");
     if (searchInput !== null && modalState?.kind === "schedule") {
       modalState = {
@@ -2286,6 +2736,21 @@ export function bindContentScheduleEvents(rerender) {
       }
     });
   }
+
+  const editModal = document.querySelector(".content-note-edit-modal");
+  if (editModal !== null && modalState?.kind === "editContentNote") {
+    bindLaunchedProcessDetailEvents(editModal, rerender, {
+      onTaskSelect: (taskId) => {
+        window.sessionStorage.setItem("selectedTaskId", taskId);
+        modalState = null;
+        window.location.hash = "task-list";
+      },
+      onSaved: () => {
+        modalState = null;
+        rerender();
+      },
+    });
+  }
 }
 
 export function renderContentSchedulePage() {
@@ -2298,6 +2763,7 @@ export function renderContentSchedulePage() {
       ${renderScheduleViewModal()}
       ${renderScheduleModal()}
       ${renderImportModal()}
+      ${renderContentNoteEditModal()}
     </div>
   `;
 }

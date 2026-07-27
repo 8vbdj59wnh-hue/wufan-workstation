@@ -74,6 +74,7 @@ const moduleHashMap = {
   scheduleBoard: "scheduleBoard",
   "schedule-board": "scheduleBoard",
   "task-schedule-board": "scheduleBoard",
+  "schedule-board/content-note": "scheduleBoard",
   processes: "processes",
   assessment: "assessment",
   templateCenter: "templateCenter",
@@ -85,9 +86,9 @@ const moduleHashMap = {
   clearance: "tasks",
   "process-progress": "tasks",
   "task-library": "processes",
-  "content-schedule": "tasks",
-  contentSchedule: "tasks",
-  contentSchedules: "tasks",
+  "content-schedule": "scheduleBoard",
+  contentSchedule: "scheduleBoard",
+  contentSchedules: "scheduleBoard",
   "process-templates": "processes",
   "started-processes": "processes",
   "assessment-stats": "assessment",
@@ -116,6 +117,10 @@ const moduleHashMap = {
   "issues-requirements": "settings",
   "settings/issues-requirements": "settings",
 };
+
+if (["content-schedule", "contentSchedule", "contentSchedules"].includes(window.location.hash.replace(/^#/, ""))) {
+  window.history.replaceState(null, "", "#schedule-board/content-note");
+}
 
 function getRouteHash() {
   return window.location.hash.replace(/^#/, "");

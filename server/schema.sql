@@ -318,6 +318,18 @@ CREATE TABLE IF NOT EXISTS methodologies (
   updatedAt TEXT
 );
 
+CREATE TABLE IF NOT EXISTS templates (
+  id TEXT PRIMARY KEY,
+  businessCode TEXT UNIQUE,
+  name TEXT NOT NULL,
+  previewImage TEXT NOT NULL,
+  sourceFile TEXT NOT NULL,
+  tags TEXT NOT NULL,
+  fileType TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT
+);
+
 CREATE TABLE IF NOT EXISTS template_tag_categories (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,

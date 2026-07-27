@@ -978,7 +978,7 @@ function renderPublishingAccountSection() {
       <div class="section-heading with-actions">
         <div>
           <h2>发布账号管理</h2>
-          <p class="form-note">维护内容排期可选择的发布账号；停用后不再提供新排期选择，历史排期仍保留原账号。</p>
+          <p class="form-note">维护“发布内容笔记”可选择的发布账号；停用后不再提供新发起选择，历史数据仍保留原账号。</p>
         </div>
         ${canEdit ? `<button class="primary-button" type="button" data-action="add" data-entity="publishingAccount">新增发布账号</button>` : ""}
       </div>
@@ -3819,7 +3819,7 @@ function getSettingsSubmodules() {
       title: "发布账号管理",
       group: "数据管理",
       icon: "发",
-      description: "维护内容排期可选择的发布账号。",
+      description: "维护“发布内容笔记”可选择的发布账号。",
       canView: () => canCurrentUser("settings.editStandardWorkForms"),
       render: renderPublishingAccountSection,
     },

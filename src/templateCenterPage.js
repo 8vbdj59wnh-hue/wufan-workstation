@@ -302,7 +302,7 @@ function getFilteredMaterials() {
     const materialTags = getMaterialTags(material);
     const flatTags = getFlatTags(materialTags);
     const sourceFile = getSourceFile(material);
-    const searchableText = `${getMaterialName(material)} ${sourceFile.fileName} ${flatTags.join(" ")}`.toLowerCase();
+    const searchableText = `${material.businessCode ?? ""} ${getMaterialName(material)} ${sourceFile.fileName} ${flatTags.join(" ")}`.toLowerCase();
 
     if (keyword !== "" && !searchableText.includes(keyword)) return false;
 
@@ -407,6 +407,15 @@ function renderMaterialCard(material) {
         <div class="template-material-title-row">
           <h3 title="${escapeHtml(templateName)}">${escapeHtml(templateName)}</h3>
         </div>
+        <div class="template-material-code">
+          <span>模板编码</span>
+          ${
+            material.businessCode
+              ? `<button type="button" data-action="copy-template-business-code" data-template-business-code="${escapeHtml(material.businessCode)}" title="点击复制完整模板编码">${escapeHtml(material.businessCode)}</button>`
+              : `<strong>—</strong>`
+          }
+          <em aria-live="polite"></em>
+        </div>
         <div class="template-material-actions">
           <button class="secondary-button" type="button" data-action="edit-material-tags" data-material-id="${escapeHtml(material.id)}">编辑</button>
           ${previewDownloadAction}
@@ -433,7 +442,7 @@ function renderPreviewModal() {
         <div class="modal-header">
           <div>
             <h2>${escapeHtml(getMaterialName(material))}</h2>
-            <p class="form-note">${escapeHtml(getMaterialFileTypeLabel(material))} · ${escapeHtml(getMaterialUploadTime(material))}</p>
+            <p class="form-note">模板编码：${escapeHtml(material.businessCode || "—")} · ${escapeHtml(getMaterialFileTypeLabel(material))} · ${escapeHtml(getMaterialUploadTime(material))}</p>
           </div>
           <button class="icon-button" type="button" data-action="close-template-preview" aria-label="关闭">×</button>
         </div>
@@ -535,6 +544,7 @@ export function renderTemplateCenterPage() {
         <div class="template-material-list">
           <div class="section-heading">
             <h2>模板列表</h2>
+            <input class="template-material-search" type="search" value="${escapeHtml(filters.keyword)}" placeholder="搜索模板名称、编码、文件或标签" data-template-keyword autocomplete="off" />
           </div>
           ${
             visibleMaterials.length === 0
@@ -552,6 +562,19 @@ export function renderTemplateCenterPage() {
 export function bindTemplateCenterPageEvents(rerender) {
   const page = document.querySelector(".template-center-page");
   if (page === null) return;
+
+  page.querySelector("[data-template-keyword]")?.addEventListener("input", (event) => {
+    filters.keyword = event.target.value;
+    const selectionStart = event.target.selectionStart;
+    const selectionEnd = event.target.selectionEnd;
+    rerender();
+    window.requestAnimationFrame(() => {
+      const input = document.querySelector("[data-template-keyword]");
+      if (input === null) return;
+      input.focus({ preventScroll: true });
+      input.setSelectionRange(selectionStart, selectionEnd);
+    });
+  });
 
   const getSelectedTagsByScope = (scope) => {
     if (scope === "upload") return uploadTags;
@@ -821,6 +844,25 @@ export function bindTemplateCenterPageEvents(rerender) {
     button.addEventListener("click", () => {
       previewMaterialId = button.dataset.materialId ?? null;
       rerender();
+    });
+  });
+
+  page.querySelectorAll("[data-action='copy-template-business-code']").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const businessCode = button.dataset.templateBusinessCode ?? "";
+      if (businessCode === "") return;
+      try {
+        await navigator.clipboard.writeText(businessCode);
+        const feedback = button.parentElement?.querySelector("em");
+        if (feedback !== null && feedback !== undefined) {
+          feedback.textContent = "已复制";
+          feedback.classList.add("is-visible");
+          window.setTimeout(() => feedback.classList.remove("is-visible"), 1200);
+        }
+      } catch {
+        templateError = "复制失败，请手工选择模板编码。";
+        rerender();
+      }
     });
   });
 

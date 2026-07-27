@@ -40,6 +40,11 @@ import {
   getProcessProgress as selectProcessProgress,
   isProcessInstanceOverdue as selectProcessInstanceOverdue,
 } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
+import {
+  bindContentNoteBatchEvents,
+  renderContentNoteBatchModal,
+  renderContentNoteBatchTools,
+} from "./contentSchedulePage.js?v=20260728-content-note-batch1";
 
 const dayMs = 24 * 60 * 60 * 1000;
 const boardDayCount = 30;
@@ -60,6 +65,7 @@ const hiddenProcessStatuses = new Set([
 ]);
 const completedProcessStatuses = new Set([ProcessInstanceStatus.Done, "done", "completed"]);
 const canceledProcessStatuses = new Set([ProcessInstanceStatus.Canceled, "canceled", "cancelled"]);
+const publishContentNoteTemplateId = "task-template-publish-content-note";
 
 const filters = {
   scope: "mine",
@@ -75,6 +81,10 @@ const filters = {
 };
 
 let activeScheduleView = "board";
+let activeActionSubmodule =
+  typeof window !== "undefined" && ["content-schedule", "contentSchedule", "contentSchedules", "schedule-board/content-note"].includes(window.location.hash.replace(/^#/, ""))
+    ? "publish-content-note"
+    : "all";
 let selectedProcessInstanceId = null;
 let selectedLaunchedProcessIds = new Set();
 let batchActionTemplatePickerOpen = false;
@@ -1053,6 +1063,15 @@ function renderScheduleViewTabs() {
   `;
 }
 
+function renderActionSubmoduleTabs() {
+  return `
+    <div class="settings-tabs schedule-action-subtabs" aria-label="关键行动子模块">
+      <button class="${activeActionSubmodule === "all" ? "is-active" : ""}" type="button" data-action-submodule="all">全部关键行动</button>
+      <button class="${activeActionSubmodule === "publish-content-note" ? "is-active" : ""}" type="button" data-action-submodule="publish-content-note">发布内容笔记</button>
+    </div>
+  `;
+}
+
 function renderCellText(value) {
   const text = String(value ?? "").trim();
   return text === "" ? "—" : escapeHtml(text);
@@ -1424,6 +1443,14 @@ function renderBatchActionTemplatePicker() {
 }
 
 export function renderScheduleBoardPage() {
+  if (typeof window !== "undefined") {
+    const routeHash = window.location.hash.replace(/^#/, "");
+    if (["content-schedule", "contentSchedule", "contentSchedules", "schedule-board/content-note"].includes(routeHash)) {
+      activeActionSubmodule = "publish-content-note";
+    } else if (["scheduleBoard", "schedule-board", "task-schedule-board"].includes(routeHash)) {
+      activeActionSubmodule = "all";
+    }
+  }
   const days = buildBoardDays();
   const launchedRows = buildLaunchedRows().filter(launchedRowMatchesFilters);
   const pendingRows = launchedRows.filter((row) => row.statusValue === keyActionPendingStatusFilter && !isImprovementActionRow(row));
@@ -1432,14 +1459,18 @@ export function renderScheduleBoardPage() {
   );
   const launchedListRows = buildLaunchedListRows().filter(launchedRowMatchesFilters);
   const actionOverviewRows = buildActionOverviewRows().filter(launchedRowMatchesFilters);
+  const contentNoteRows = actionOverviewRows.filter((row) => row.workPlan.taskTemplateId === publishContentNoteTemplateId);
   const columnCount = filters.noDueDateOnly ? 1 : boardDayCount;
   return `
     <section class="schedule-board-page" style="--schedule-day-count: ${columnCount};">
+      ${renderActionSubmoduleTabs()}
       ${renderFilters()}
       ${renderSummary(launchedRows, days)}
-      ${renderScheduleViewTabs()}
+      ${activeActionSubmodule === "all" ? renderScheduleViewTabs() : ""}
       ${
-        activeScheduleView === "list"
+        activeActionSubmodule === "publish-content-note"
+          ? `${renderContentNoteBatchTools()}${renderActionOverviewCards(contentNoteRows)}${renderContentNoteBatchModal()}`
+          : activeScheduleView === "list"
           ? renderLaunchedActionList(launchedListRows)
           : activeScheduleView === "card"
             ? renderActionOverviewCards(actionOverviewRows)
@@ -1465,6 +1496,7 @@ export function renderScheduleBoardPage() {
 export function bindScheduleBoardPageEvents(rerender) {
   hideSchedulePreview();
   const rerenderScheduleBoard = () => rerenderPreservingInnerScroll(rerender);
+  bindContentNoteBatchEvents(document.querySelector(".schedule-board-page"), rerenderScheduleBoard);
   document.querySelectorAll(".linked-action-product, .schedule-action-product-names a").forEach((link) => {
     link.addEventListener("click", (event) => event.stopPropagation());
   });
@@ -1484,6 +1516,14 @@ export function bindScheduleBoardPageEvents(rerender) {
     rerenderScheduleBoard();
   });
 
+  document.querySelectorAll("[data-action-submodule]").forEach((button) => {
+    button.addEventListener("click", () => {
+      activeActionSubmodule = button.dataset.actionSubmodule === "publish-content-note" ? "publish-content-note" : "all";
+      window.history.replaceState(null, "", activeActionSubmodule === "publish-content-note" ? "#schedule-board/content-note" : "#schedule-board");
+      rerenderScheduleBoard();
+    });
+  });
+
   document.querySelector("[data-schedule-scope-toggle]")?.addEventListener("click", () => {
     filters.scope = filters.scope === "mine" ? "all" : "mine";
     rerenderScheduleBoard();
@@ -1499,7 +1539,9 @@ export function bindScheduleBoardPageEvents(rerender) {
   });
 
   document.querySelectorAll("[data-schedule-list-action]").forEach((button) => {
-    button.addEventListener("click", async () => {
+    button.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
       const processInstanceId = button.dataset.scheduleProcessId ?? "";
       if (processInstanceId === "") return;
       if (button.dataset.scheduleListAction === "cancel") {
@@ -1511,6 +1553,18 @@ export function bindScheduleBoardPageEvents(rerender) {
         } catch (error) {
           window.alert(error.message || "取消关键行动失败，请检查本地数据库服务。");
         }
+        rerenderScheduleBoard();
+        return;
+      }
+      if (button.dataset.scheduleListAction === "tasks") {
+        const row = findRowByProcessInstanceId(processInstanceId);
+        const task = row?.currentTask ?? row?.tasks?.[0] ?? null;
+        if (task !== null) selectTask(task.id);
+        window.location.hash = "task-list";
+        return;
+      }
+      if (button.dataset.scheduleListAction === "process") {
+        selectedProcessInstanceId = processInstanceId;
         rerenderScheduleBoard();
         return;
       }

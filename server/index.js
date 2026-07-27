@@ -3,6 +3,7 @@ import cors from "cors";
 import fs from "node:fs";
 import path from "node:path";
 import multer from "multer";
+import * as XLSX from "xlsx";
 import {
   closeDatabase,
   createResource,
@@ -21,6 +22,7 @@ import {
   findLoginUserById,
   getPublicUser,
   initializeDatabase,
+  batchLaunchWorkPlans,
   launchWorkPlanWithProcess,
   moveTaskTemplateToValueChain,
   readAllData,
@@ -55,6 +57,18 @@ const imageUploadsDir = path.join(uploadsDir, "images");
 const fileUploadsDir = path.join(uploadsDir, "files");
 const standardWorkAttachmentsDir = path.join(uploadsDir, "standard-work-attachments");
 const productImportUploadsDir = path.join(uploadsDir, "product-import-uploads");
+const uploadContentNoteWorkbook = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_request, file, callback) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (![".xlsx", ".xls", ".csv", ".tsv"].includes(ext)) {
+      callback(new Error("只支持 .xlsx、.xls、.csv 或 .tsv 文件。"));
+      return;
+    }
+    callback(null, true);
+  },
+});
 
 initializeDatabase();
 fs.mkdirSync(imageUploadsDir, { recursive: true });
@@ -871,6 +885,58 @@ app.post("/api/work-plans/:id/launch", requirePermission("workPlans.launch"), (r
     response.status(400).json({ success: false, message: error.message || "发起关键行动失败，请检查本地数据库服务。" });
   }
 });
+
+app.post("/api/work-plans/batch-launch", requirePermission("workPlans.launch"), (request, response) => {
+  try {
+    const rows = Array.isArray(request.body?.rows) ? request.body.rows : [];
+    if (!hasPermission(request.user, "products.view") && rows.some((row) => (row?.productIds ?? []).length > 0)) {
+      response.status(403).json({ success: false, message: "你没有权限关联产品。" });
+      return;
+    }
+    if (
+      rows.some((row) =>
+        rejectUnauthorizedActionTemplateLaunch(
+          request.user,
+          row?.workPlan ?? {},
+          response,
+          row?.workPlan?.taskTemplateId ?? "",
+        ),
+      )
+    ) return;
+    const results = batchLaunchWorkPlans(rows, { userId: request.user.id });
+    response.json({ success: true, results, data: filterDataByScope(readAllData(), request.user) });
+  } catch (error) {
+    console.error("批量发起发布内容笔记失败", error);
+    response.status(400).json({ success: false, message: error.message || "批量发起失败，请检查本地数据库服务。" });
+  }
+});
+
+app.post(
+  "/api/content-note-import/parse",
+  requirePermission("workPlans.launch"),
+  uploadContentNoteWorkbook.single("file"),
+  (request, response) => {
+    try {
+      if (!request.file?.buffer?.length) {
+        response.status(400).json({ success: false, message: "请选择要导入的 Excel 或表格文件。" });
+        return;
+      }
+      const workbook = XLSX.read(request.file.buffer, { type: "buffer", cellDates: false });
+      const sheetName = workbook.SheetNames[0];
+      if (!sheetName) throw new Error("工作簿中没有可读取的工作表。");
+      const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
+        header: 1,
+        defval: "",
+        raw: false,
+        blankrows: false,
+      });
+      response.json({ success: true, sheetName, rows });
+    } catch (error) {
+      console.error("发布内容笔记导入文件解析失败", error);
+      response.status(400).json({ success: false, message: error.message || "Excel 文件解析失败。" });
+    }
+  },
+);
 
 app.post("/api/execution-groups/create", requirePermission("tasks.batchComplete"), (request, response) => {
   try {

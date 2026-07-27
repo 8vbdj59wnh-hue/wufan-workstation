@@ -174,7 +174,10 @@ export function validatePublicFormFields(customFields, fields = []) {
   for (const field of normalizePublicFormFields(fields)) {
     const value = customFields[field.key];
     const isEmpty = Array.isArray(value) ? value.length === 0 : value === "";
-    if (isEmpty) continue;
+    if (isEmpty) {
+      if (field.required) return `${field.label}不能为空。`;
+      continue;
+    }
     if (typeof value === "string" && value.startsWith("__INVALID_BUSINESS_TIME__:")) return value.replace("__INVALID_BUSINESS_TIME__:", "");
     if (field.type === "number" && Number.isNaN(Number(value))) return `${field.label}必须是数字。`;
     if (isBusinessDueDateField(field) && !String(value).includes("T")) return `${field.label}必须选择日期和整点小时。`;

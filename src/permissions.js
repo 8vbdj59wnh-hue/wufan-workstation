@@ -84,13 +84,13 @@ export const permissionGroups = [
   },
   {
     key: "contentSchedules",
-    title: "内容排期权限",
+    title: "发布内容笔记权限",
     permissions: [
-      { key: "view", label: "查看内容排期" },
-      { key: "create", label: "新增内容排期" },
-      { key: "edit", label: "编辑内容排期" },
-      { key: "import", label: "导入内容排期" },
-      { key: "export", label: "导出内容排期" },
+      { key: "view", label: "查看发布内容笔记" },
+      { key: "create", label: "单条发起发布内容笔记" },
+      { key: "edit", label: "编辑历史内容排期" },
+      { key: "import", label: "批量发起发布内容笔记" },
+      { key: "export", label: "导出发布内容笔记" },
       { key: "addToFuture", label: "历史排期转待发起工作计划" },
       { key: "addToThisWeek", label: "历史排期直接发起关键行动" },
       { key: "batchCancel", label: "批量取消内容" },
@@ -336,7 +336,7 @@ export function canLaunchAnyActionTemplate(userOrPermissions, templates = []) {
   return templates.some((template) => canLaunchActionTemplate(userOrPermissions, template?.id));
 }
 
-function canAccessTemplateCenter(userOrPermissions) {
+export function canAccessTemplateCenter(userOrPermissions) {
   if (userOrPermissions === null || userOrPermissions === undefined) return false;
   const role = userOrPermissions.role ?? userOrPermissions.authRole ?? "user";
   if (["admin", "system_admin", "company_manager"].includes(role)) return true;
