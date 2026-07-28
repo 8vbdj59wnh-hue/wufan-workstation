@@ -214,6 +214,12 @@ function applyContentSchedulePermissionCompatibility(normalized, source, role) {
   }
 }
 
+function normalizeProductCenterAccess(normalized) {
+  const canViewProducts = normalized.modules.products === true || normalized.products.view === true;
+  normalized.modules.products = canViewProducts;
+  normalized.products.view = canViewProducts;
+}
+
 function normalizeActionLaunchPermissions(normalized, source) {
   const sourceWorkPlans = source?.workPlans;
   const hasExplicitScope = ["all", "selected"].includes(sourceWorkPlans?.launchTemplateScope);
@@ -250,6 +256,7 @@ export function normalizePermissions(rawPermissions, role = "user") {
     applyLegacyPermissionCompatibility(normalized, source);
     applyContentSchedulePermissionCompatibility(normalized, source, role);
   }
+  normalizeProductCenterAccess(normalized);
   normalizeActionLaunchPermissions(normalized, source);
 
   return normalized;
@@ -369,7 +376,7 @@ export function canAccessModule(userOrPermissions, moduleId) {
   };
   const permissionKey = modulePermissionMap[moduleId] ?? moduleId;
   if (moduleId === "products") {
-    return hasPermission(userOrPermissions, "modules.products") && hasPermission(userOrPermissions, "products.view");
+    return hasPermission(userOrPermissions, "products.view");
   }
   return hasPermission(userOrPermissions, `modules.${permissionKey}`);
 }
