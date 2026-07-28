@@ -362,7 +362,9 @@ export function parseErpV2Import({ filePath, originalFilename, importType, creat
   const fileBuffer = fs.readFileSync(filePath);
   const fileHash = crypto.createHash("sha256").update(fileBuffer).digest("hex");
   const existing = decodeBatch(getDatabase().prepare(`
-    SELECT * FROM erp_import_batches WHERE importType=? AND fileHash=? AND status='committed' ORDER BY createdAt DESC LIMIT 1
+    SELECT * FROM erp_import_batches
+    WHERE importType=? AND fileHash=? AND status IN ('committed','completed')
+    ORDER BY createdAt DESC LIMIT 1
   `).get(importType, fileHash));
   const parsed = parseWorkbook(filePath);
   const required = importType === "inventory" ? inventoryRequiredHeaders : platformRequiredHeaders;
@@ -410,11 +412,42 @@ export function validateErpV2Import(batchId, { shopMappings = {}, previewFilters
     ? buildPlatformPreview(validation.rows, { ...previewFilters, page, pageSize })
     : { links: [], pagination: null };
   return {
+    ...validation,
     batch: nextBatch,
     valid: nextBatch.status === "validated",
-    ...validation,
     rows: undefined,
     preview: batch.importType === "inventory" ? validation.rows.slice(0, 500) : [],
+    previewLinks: platformPreview.links,
+    pagination: platformPreview.pagination,
+  };
+}
+
+export function previewErpV2Import(batchId, { previewFilters = {}, page = 1, pageSize = 30 } = {}) {
+  const batch = decodeBatch(readBatch(batchId));
+  if (!batch) throw new Error("导入批次不存在。");
+  if (batch.importType !== "platform_goods") throw new Error("该批次不是平台货品导入。");
+  if (!["validated", "importing", "completed", "committed"].includes(batch.status)) {
+    throw new Error("当前批次尚未完成后台校验，请返回店铺确认并重新校验。");
+  }
+  const staging = readStaging(batchId);
+  const savedShopMappings = Object.fromEntries((batch.summaryJson?.shopMappings ?? []).map((mapping) => [
+    mapping.rawName,
+    mapping.mappingStatus === "ignored"
+      ? { action: "ignore" }
+      : mapping.shopId
+        ? { shopId: mapping.shopId }
+        : { platform: mapping.platform, shopName: mapping.shopName, displayName: mapping.displayName },
+  ]));
+  const validation = platformValidation(staging, savedShopMappings);
+  if (validation.shopMappings.some((item) => !["confirmed", "ignored"].includes(item.mappingStatus))) {
+    throw new Error("店铺映射尚未全部确认或忽略，请返回店铺确认。");
+  }
+  const platformPreview = buildPlatformPreview(validation.rows, { ...previewFilters, page, pageSize });
+  return {
+    batch,
+    valid: true,
+    summary: validation.summary,
+    shopMappings: validation.shopMappings,
     previewLinks: platformPreview.links,
     pagination: platformPreview.pagination,
   };
@@ -424,10 +457,20 @@ export function readErpV2Import(batchId) {
   const batch = decodeBatch(readBatch(batchId));
   if (!batch) throw new Error("导入批次不存在。");
   const staging = readStaging(batchId);
-  const validation = batch.importType === "inventory" ? inventoryValidation(staging) : platformValidation(staging, {});
+  const savedShopMappings = Object.fromEntries((batch.summaryJson?.shopMappings ?? []).map((mapping) => [
+    mapping.rawName,
+    mapping.mappingStatus === "ignored"
+      ? { action: "ignore" }
+      : mapping.shopId
+        ? { shopId: mapping.shopId }
+        : { platform: mapping.platform, shopName: mapping.shopName, displayName: mapping.displayName },
+  ]));
+  const validation = batch.importType === "inventory"
+    ? inventoryValidation(staging)
+    : platformValidation(staging, savedShopMappings);
   return {
     batch,
-    valid: false,
+    valid: ["validated", "importing", "completed", "committed"].includes(batch.status),
     summary: validation.summary,
     shopMappings: validation.shopMappings ?? [],
     preview: batch.importType === "inventory" ? validation.rows.slice(0, 200) : [],
@@ -559,7 +602,10 @@ function commitPlatform(batch, staging, shopMappings) {
   const validation = platformValidation(staging, shopMappings);
   if (validation.shopMappings.some((item) => !["confirmed", "ignored"].includes(item.mappingStatus))) throw new Error("仍有店铺映射未确认。");
   const now = new Date().toISOString();
-  const stats = { created: 0, updated: 0, unchanged: 0, matched: 0, unmatched: 0, ambiguous: 0, combination: 0, errors: 0, shops: 0, links: 0 };
+  const stats = {
+    created: 0, updated: 0, unchanged: 0, matched: 0, matchedAuto: 0, matchedManual: 0,
+    unmatched: 0, ambiguous: 0, combination: 0, errors: 0, shops: 0, links: 0, skus: 0,
+  };
   const mappingByRaw = new Map(validation.shopMappings.map((item) => [item.rawName, item]));
   const grouped = new Map();
   for (const row of validation.rows.filter((item) => item.errors.length === 0)) {
@@ -631,7 +677,12 @@ function commitPlatform(batch, staging, shopMappings) {
           numberValue(source["最后同步库存"]), value(source["最后同步时间"]) || null, value(source["停止同步原因"]) || null,
           matchStatus, matchMethod, row.matchReason, batch.id, sku?.createdAt ?? now, now,
         );
-        if (matchStatus.startsWith("matched")) stats.matched += 1;
+        stats.skus += 1;
+        if (matchStatus.startsWith("matched")) {
+          stats.matched += 1;
+          if (matchStatus === "matched_manual") stats.matchedManual += 1;
+          else stats.matchedAuto += 1;
+        }
         else stats[matchStatus] = (stats[matchStatus] ?? 0) + 1;
       }
       stats.links += 1;
@@ -643,20 +694,57 @@ function commitPlatform(batch, staging, shopMappings) {
 }
 
 export function commitErpV2Import(batchId, { shopMappings = {} } = {}) {
-  const batch = decodeBatch(readBatch(batchId));
+  let batch = decodeBatch(readBatch(batchId));
   if (!batch) throw new Error("导入批次不存在。");
-  if (batch.status === "committed") return { batch, idempotent: true, summary: batch.summaryJson };
-  if (batch.status !== "validated") throw new Error("请先完成导入预览与校验。");
+  if (["committed", "completed"].includes(batch.status)) return { batch, idempotent: true, summary: batch.summaryJson };
+  if (batch.status === "importing") throw new Error("该批次正在导入，请勿重复提交。");
+  if (!["validated", "failed"].includes(batch.status)) throw new Error("请先完成导入预览与校验。");
   const staging = readStaging(batchId);
-  const stats = batch.importType === "inventory" ? commitInventory(batch, staging) : commitPlatform(batch, staging, shopMappings);
-  const completedAt = new Date().toISOString();
-  const nextBatch = saveBatch({
-    ...batch, status: "committed", totalRows: batch.totalRows,
-    createdCount: stats.created ?? 0, updatedCount: stats.updated ?? 0, unchangedCount: stats.unchanged ?? 0,
-    matchedCount: stats.matched ?? 0, unmatchedCount: (stats.unmatched ?? 0) + (stats.ambiguous ?? 0) + (stats.combination ?? 0),
-    errorCount: stats.errors ?? 0, summaryJson: stats, completedAt,
+  const savedShopMappings = Object.fromEntries((batch.summaryJson?.shopMappings ?? []).map((mapping) => [
+    mapping.rawName,
+    mapping.mappingStatus === "ignored"
+      ? { action: "ignore" }
+      : mapping.shopId
+        ? { shopId: mapping.shopId }
+        : { platform: mapping.platform, shopName: mapping.shopName, displayName: mapping.displayName },
+  ]));
+  const effectiveShopMappings = Object.keys(shopMappings).length > 0 ? shopMappings : savedShopMappings;
+  const importStartedAt = new Date().toISOString();
+  batch = saveBatch({
+    ...batch,
+    status: "importing",
+    completedAt: null,
+    summaryJson: { ...batch.summaryJson, shopMappings: batch.summaryJson?.shopMappings ?? [], importStartedAt, failure: null },
   });
-  return { batch: nextBatch, idempotent: false, summary: stats };
+  try {
+    const database = getDatabase();
+    const stats = batch.importType === "inventory"
+      ? commitInventory(batch, staging)
+      : database.transaction(() => commitPlatform(batch, staging, effectiveShopMappings))();
+    const completedAt = new Date().toISOString();
+    const nextBatch = saveBatch({
+      ...batch, status: "completed", totalRows: batch.totalRows,
+      createdCount: stats.created ?? 0, updatedCount: stats.updated ?? 0, unchangedCount: stats.unchanged ?? 0,
+      matchedCount: stats.matched ?? 0, unmatchedCount: (stats.unmatched ?? 0) + (stats.ambiguous ?? 0) + (stats.combination ?? 0),
+      errorCount: stats.errors ?? 0,
+      summaryJson: { ...stats, shopMappings: batch.summaryJson?.shopMappings ?? [], importStartedAt },
+      completedAt,
+    });
+    return { batch: nextBatch, idempotent: false, summary: stats };
+  } catch (error) {
+    saveBatch({
+      ...batch,
+      status: "failed",
+      errorCount: Math.max(1, Number(batch.errorCount) || 0),
+      summaryJson: {
+        ...batch.summaryJson,
+        importStartedAt,
+        failure: { message: error.message || "平台货品导入失败。", failedAt: new Date().toISOString() },
+      },
+      completedAt: null,
+    });
+    throw error;
+  }
 }
 
 export function updatePlatformSkuManualBinding(salesLinkSkuId, productId, createdBy) {

@@ -712,6 +712,15 @@ export async function loadProductV2Import(batchId) {
   return readApiJson(response, "ERP 导入批次读取失败。");
 }
 
+export async function loadProductV2Preview(batchId, options = {}) {
+  const response = await authFetch(`${apiBaseUrl}/api/products/erp-v2/${encodeURIComponent(batchId)}/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(options),
+  });
+  return readApiJson(response, "ERP 平台货品预览读取失败。");
+}
+
 export async function commitProductV2Import(batchId, options = {}) {
   const response = await authFetch(`${apiBaseUrl}/api/products/erp-v2/${encodeURIComponent(batchId)}/commit`, {
     method: "POST",
@@ -719,7 +728,12 @@ export async function commitProductV2Import(batchId, options = {}) {
     body: JSON.stringify(options),
   });
   const body = await readApiJson(response, "ERP 数据确认导入失败。");
-  if (body.data) applyDataSnapshot(body.data);
+  if (body.batch) {
+    replaceArray(state.erpImportBatches, [
+      body.batch,
+      ...state.erpImportBatches.filter((batch) => batch.id !== body.batch.id),
+    ]);
+  }
   return body;
 }
 

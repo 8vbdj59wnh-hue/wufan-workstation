@@ -54,6 +54,7 @@ import {
   commitErpV2Import,
   markPlatformSku,
   parseErpV2Import,
+  previewErpV2Import,
   readErpV2Import,
   removePlatformSkuManualBinding,
   updatePlatformSkuManualBinding,
@@ -830,6 +831,15 @@ app.get("/api/products/erp-v2/:id", requirePermission("products.create"), (reque
     response.json({ success: true, ...readErpV2Import(request.params.id) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "ERP导入批次读取失败。" });
+  }
+});
+
+app.post("/api/products/erp-v2/:id/preview", requirePermission("products.create"), (request, response) => {
+  try {
+    response.json({ success: true, ...previewErpV2Import(request.params.id, request.body ?? {}) });
+  } catch (error) {
+    console.error("产品中心 V2 ERP预览读取失败", error);
+    response.status(400).json({ success: false, message: error.message || "ERP导入预览读取失败。" });
   }
 });
 

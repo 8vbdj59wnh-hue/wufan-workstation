@@ -8,6 +8,7 @@ import {
   getNow,
   loadProductSalesLinks,
   loadProductV2Import,
+  loadProductV2Preview,
   loadUnmatchedPlatformSkus,
   parseProductImport,
   parseProductV2Import,
@@ -303,12 +304,15 @@ function renderProductImportRecords() {
     ...state.productImportBatches,
   ].sort((left, right) => String(right.createdAt ?? "").localeCompare(String(left.createdAt ?? "")));
   if (batches.length === 0) return "";
-  const statusLabels = { parsing: "解析中", parsed: "待校验", validated: "待确认", committed: "已导入", failed: "失败" };
+  const statusLabels = {
+    parsing: "解析中", parsed: "待校验", validated: "待确认", importing: "导入中",
+    completed: "已导入", committed: "已导入", failed: "失败",
+  };
   return `<section class="product-import-records">
     <div class="subsection-heading"><div><h2>导入记录</h2><p>库存明细与平台货品分批记录，可追溯每次校验和提交结果</p></div></div>
     <div class="table-wrap"><table class="data-table"><thead><tr><th>文件</th><th>来源</th><th>工作表</th><th>状态</th><th>总行数</th><th>新增</th><th>更新</th><th>导入时间</th><th>操作</th></tr></thead>
       <tbody>${batches.map((batch) => `<tr><td>${escapeHtml(batch.fileName)}</td><td>${escapeHtml(batch.sourceSystem || "ERP")}</td><td>${escapeHtml(batch.sheetName || "-")}</td><td><span class="status-badge">${escapeHtml(statusLabels[batch.status] || batch.status)}</span></td><td>${batch.summary?.total ?? "-"}</td><td>${batch.summary?.create ?? batch.summary?.created ?? "-"}</td><td>${batch.summary?.update ?? batch.summary?.updated ?? "-"}</td><td>${formatDateTime(batch.committedAt || batch.createdAt)}</td>
-        <td>${batch.importType && batch.status !== "committed" ? `<button class="text-button" type="button" data-action="resume-product-v2-import" data-batch-id="${escapeHtml(batch.id)}">继续处理</button>` : "—"}</td></tr>`).join("")}</tbody>
+        <td>${batch.importType && ["parsed", "validated", "failed"].includes(batch.status) ? `<button class="text-button" type="button" data-action="resume-product-v2-import" data-batch-id="${escapeHtml(batch.id)}">继续处理</button>` : "—"}</td></tr>`).join("")}</tbody>
     </table></div>
   </section>`;
 }
@@ -795,6 +799,8 @@ function renderPlatformV2Preview() {
     .filter((page) => page >= 1 && page <= totalPages)
     .sort((left, right) => left - right);
   return `<div class="product-import-preview platform-goods-preview">
+    ${importState.loading ? `<div class="form-note">正在导入平台货品，请勿关闭页面或重复点击。完整文件通常需要约半分钟。</div>` : ""}
+    <div class="form-error" ${importState.error ? "" : "hidden"}>${escapeHtml(importState.error || "")}</div>
     <div class="platform-preview-summary">
       ${[
         ["店铺", summary.shops], ["商品链接", summary.links], ["平台SKU", summary.total],
@@ -851,8 +857,21 @@ function renderPlatformPreviewRows(rows) {
 
 function renderProductV2Complete() {
   const summary = importState.result?.summary ?? {};
-  return `<div class="product-import-complete"><strong>ERP 数据导入完成</strong>
-    <p>新增 ${summary.created ?? 0}，更新 ${summary.updated ?? 0}，匹配 ${summary.matched ?? 0}，未匹配 ${summary.unmatched ?? 0}。</p>
+  if (importState.importType === "inventory") {
+    return `<div class="product-import-complete"><strong>ERP 库存明细导入完成</strong>
+      <p>新增 ${summary.created ?? 0}，更新 ${summary.updated ?? 0}，匹配 ${summary.matched ?? 0}，未匹配 ${summary.unmatched ?? 0}。</p>
+    </div>`;
+  }
+  return `<div class="product-import-complete"><strong>ERP 平台货品导入完成</strong>
+    <p>批次：${escapeHtml(importState.result?.batch?.id || importState.batch?.id || "—")}</p>
+    <div class="import-summary-grid">
+      ${[
+        ["店铺", summary.shops], ["新增链接", summary.created], ["更新链接", summary.updated],
+        ["未变化链接", summary.unchanged], ["平台SKU", summary.skus], ["自动匹配", summary.matchedAuto],
+        ["人工匹配", summary.matchedManual], ["未匹配", summary.unmatched], ["歧义", summary.ambiguous],
+        ["组合装", summary.combination], ["错误", summary.errors],
+      ].map(([label, count]) => `<div><span>${label}</span><strong>${count ?? 0}</strong></div>`).join("")}
+    </div>
   </div>`;
 }
 
@@ -864,7 +883,10 @@ function renderProductV2ImportModal() {
   if (importState.step === "complete") body = renderProductV2Complete();
   let footer = `<button class="secondary-button" type="button" data-action="close-product-import">取消</button><button class="primary-button" type="submit" form="product-v2-import-upload-form" ${importState.loading ? "disabled" : ""}>${importState.loading ? "正在解析…" : "上传并解析"}</button>`;
   if (importState.step === "shops") footer = `<button class="secondary-button" type="button" data-action="close-product-import">取消</button><button class="primary-button" type="button" data-action="confirm-shop-mappings" ${importState.loading ? "disabled" : ""}>确认店铺并生成预览</button>`;
-  if (importState.step === "preview") footer = `<button class="secondary-button" type="button" data-action="close-product-import">取消</button><button class="primary-button" type="button" data-action="commit-product-v2-import" ${!importState.valid || importState.loading ? "disabled" : ""}>确认导入</button>`;
+  if (importState.step === "preview") {
+    const backendValidated = importState.batch?.status === "validated";
+    footer = `<button class="secondary-button" type="button" data-action="${backendValidated ? "close-product-import" : "return-product-v2-shop-mapping"}" ${importState.loading ? "disabled" : ""}>${backendValidated ? "取消" : "返回店铺确认"}</button><button class="primary-button" type="button" data-action="commit-product-v2-import" ${!backendValidated || importState.loading ? "disabled" : ""}>${importState.loading ? `正在导入${importState.importType === "platform_goods" ? "平台货品" : "库存明细"}…` : backendValidated ? "确认导入" : "尚未完成后台校验"}</button>`;
+  }
   if (importState.step === "complete") footer = `<button class="primary-button" type="button" data-action="close-product-import">完成</button>`;
   return `<div class="modal-backdrop"><section class="modal-panel product-import-modal"><header class="modal-header"><div><h2>导入 ERP 数据</h2><p>库存明细与平台货品分别校验、分别提交</p></div><button class="icon-button" type="button" data-action="close-product-import">×</button></header>
     <div class="modal-body">${body}</div><footer class="modal-footer">${footer}</footer></section></div>`;
@@ -962,7 +984,6 @@ async function refreshPlatformPreview(rerender, { page = 1, filters = importStat
   const totalPages = Math.max(1, previousPagination?.totalPages ?? 1);
   const targetPage = Math.min(totalPages, Math.max(1, Number(page) || 1));
   const batchId = importState.batch.id;
-  const shopMappings = importState.submittedShopMappings ?? {};
   const requestId = ++platformPreviewRequestId;
   importState = {
     ...importState,
@@ -973,8 +994,7 @@ async function refreshPlatformPreview(rerender, { page = 1, filters = importStat
   };
   rerender();
   try {
-    const result = await validateProductV2Import(batchId, {
-      shopMappings,
+    const result = await loadProductV2Preview(batchId, {
       previewFilters: filters,
       page: targetPage,
       pageSize: 30,
@@ -984,7 +1004,8 @@ async function refreshPlatformPreview(rerender, { page = 1, filters = importStat
       ...importState,
       step: "preview",
       loading: false,
-      valid: result.valid,
+      batch: result.batch,
+      valid: result.batch?.status === "validated",
       summary: result.summary,
       previewLinks: result.previewLinks ?? [],
       pagination: result.pagination,
@@ -1081,14 +1102,25 @@ export function bindProductCenterPageEvents(rerender) {
       rerender();
       try {
         const result = await loadProductV2Import(button.dataset.batchId);
+        const restoredMappings = Object.fromEntries((result.shopMappings ?? []).map((mapping) => [
+          mapping.rawName,
+          mapping.mappingStatus === "ignored"
+            ? { action: "ignore" }
+            : mapping.shopId
+              ? { shopId: mapping.shopId }
+              : { platform: mapping.platform, shopName: mapping.shopName, displayName: mapping.displayName },
+        ]));
+        const isValidatedPlatform = result.batch.importType === "platform_goods" && result.batch.status === "validated";
         importState = {
           version: "v2",
-          step: result.batch.importType === "platform_goods" ? "shops" : "preview",
+          step: result.batch.importType === "platform_goods" && !isValidatedPlatform ? "shops" : "preview",
           loading: false,
           error: "",
           importType: result.batch.importType,
+          submittedShopMappings: restoredMappings,
           ...result,
         };
+        if (isValidatedPlatform) await refreshPlatformPreview(rerender);
       } catch (error) {
         importState = { version: "v2", step: "upload", loading: false, error: error.message || "导入批次读取失败。" };
       }
@@ -1097,6 +1129,10 @@ export function bindProductCenterPageEvents(rerender) {
     if (action === "edit-product") { modalState = { kind: "edit", id: button.dataset.productId, error: "" }; rerender(); }
     if (action === "close-product-modal") { modalState = null; rerender(); }
     if (action === "close-product-import") { importState = null; rerender(); }
+    if (action === "return-product-v2-shop-mapping") {
+      importState = { ...importState, step: "shops", valid: false, error: "请确认或忽略全部店铺后重新生成导入预览。" };
+      rerender();
+    }
     if (action === "back-product-import-mapping") { importState = { ...importState, step: "mapping", error: "" }; rerender(); }
     if (action === "validate-product-import") {
       const mapping = collectImportMapping();
@@ -1141,7 +1177,8 @@ export function bindProductCenterPageEvents(rerender) {
           ...importState,
           step: result.valid ? "preview" : "shops",
           loading: false,
-          valid: result.valid,
+          batch: result.batch,
+          valid: result.batch?.status === "validated",
           summary: result.summary,
           preview: result.preview,
           previewLinks: result.previewLinks ?? [],
@@ -1155,16 +1192,38 @@ export function bindProductCenterPageEvents(rerender) {
       rerender();
     }
     if (action === "commit-product-v2-import") {
-      importState = { ...importState, loading: true, error: "" };
+      if (importState.loading) return;
+      const batchId = importState.batch?.id;
+      const submittedShopMappings = importState.submittedShopMappings ?? {};
+      if (!batchId) {
+        importState = { ...importState, error: "导入批次状态已丢失，请返回导入记录后重新进入预览。" };
+        rerender();
+        return;
+      }
+      if (importState.batch?.status !== "validated") {
+        importState = {
+          ...importState,
+          error: "当前批次尚未完成后台校验，请返回店铺确认并点击“确认店铺并生成预览”。",
+        };
+        rerender();
+        return;
+      }
+      importState = { ...importState, loading: true, error: "", result: null };
       rerender();
       try {
-        const result = await commitProductV2Import(importState.batch.id, { shopMappings: importState.submittedShopMappings ?? {} });
-        unmatchedSkuState = { loading: false, loaded: false, rows: [], total: 0, query: "", error: "" };
+        const result = await commitProductV2Import(batchId, { shopMappings: submittedShopMappings });
         importState = { ...importState, step: "complete", loading: false, result };
+        unmatchedSkuState = { loading: false, loaded: false, rows: [], total: 0, query: "", error: "" };
+        rerender();
+        await refreshUnmatchedPlatformSkus(rerender);
       } catch (error) {
-        importState = { ...importState, loading: false, error: error.message || "ERP 数据确认导入失败。" };
+        importState = {
+          ...importState,
+          loading: false,
+          error: `批次 ${batchId} 导入失败：${error.message || "ERP 数据确认导入失败。"}`,
+        };
+        rerender();
       }
-      rerender();
     }
     if (action === "platform-preview-page") {
       await refreshPlatformPreview(rerender, { page: Number(button.dataset.page) || 1 });
