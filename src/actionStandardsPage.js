@@ -101,6 +101,24 @@ function escapeAttribute(value) {
   return escapeHtml(value);
 }
 
+async function copyTextToClipboard(value) {
+  try {
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch {
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.append(textarea);
+    textarea.select();
+    const copied = document.execCommand("copy");
+    textarea.remove();
+    return copied;
+  }
+}
+
 function getFormValue(form, name) {
   return new FormData(form).get(name)?.toString().trim() ?? "";
 }
@@ -121,6 +139,18 @@ function renderOptions(items, selectedId, emptyLabel) {
           </option>
         `,
       )
+      .join("")}
+  `;
+}
+
+function renderTaskTemplateOptions(items, selectedId, emptyLabel) {
+  return `
+    <option value="">${emptyLabel}</option>
+    ${items
+      .map((item) => {
+        const label = item.businessCode ? `${item.businessCode}｜${item.name}` : item.name;
+        return `<option value="${escapeAttribute(item.id)}" ${item.id === selectedId ? "selected" : ""}>${escapeHtml(label)}</option>`;
+      })
       .join("")}
   `;
 }
@@ -269,7 +299,10 @@ function renderStandardWorkCard(template, selectedProcessTemplateId = "") {
   return `
     <article class="standard-work-card ${isSelected ? "is-selected" : ""}"${draggable} data-standard-work-template-id="${escapeAttribute(template.id)}" data-process-template-id="${escapeAttribute(template.defaultProcessTemplateId ?? "")}">
       <div class="standard-work-card-title">
-        <h4>${escapeHtml(template.name)}</h4>
+        <div>
+          <h4>${escapeHtml(template.name)}</h4>
+          <button class="copyable-code standard-work-business-code" type="button" data-copy-action-standard-code="${escapeAttribute(template.businessCode ?? "")}" ${template.businessCode ? "" : "disabled"} title="${template.businessCode ? "点击复制行动标准编码" : "行动标准编码缺失"}">行动标准编码：${escapeHtml(template.businessCode || "—")}</button>
+        </div>
         <span class="status-pill ${template.status === TaskTemplateStatus.Inactive ? "is-inactive" : ""}">${taskTemplateStatusNames[template.status]}</span>
       </div>
       <div class="standard-work-card-meta">
@@ -301,7 +334,7 @@ function renderTaskTemplateTable(selectedProcessTemplateId = "") {
     const processTemplate = state.processTemplates.find(
       (item) => item.id === template.defaultProcessTemplateId,
     );
-    return `${template.name ?? ""} ${processTemplate?.name ?? ""} ${processTemplate?.businessCode ?? ""}`
+    return `${template.name ?? ""} ${template.businessCode ?? ""} ${processTemplate?.name ?? ""} ${processTemplate?.businessCode ?? ""}`
       .toLowerCase()
       .includes(normalizedKeyword);
   });
@@ -322,7 +355,7 @@ function renderTaskTemplateTable(selectedProcessTemplateId = "") {
       </div>
       <label class="standard-work-search">
         <span>搜索</span>
-        <input data-standard-work-keyword value="${escapeAttribute(standardWorkKeyword)}" placeholder="搜索关键行动或模板编号" autocomplete="off" />
+        <input data-standard-work-keyword value="${escapeAttribute(standardWorkKeyword)}" placeholder="搜索关键行动、行动标准编码或流程编码" autocomplete="off" />
       </label>
       ${renderStandardWorkMoveStatus()}
       ${renderStandardWorkBoardView(visibleTemplates, selectedProcessTemplateId)}
@@ -551,6 +584,7 @@ function renderTaskTemplateModal() {
         </div>
         <form class="modal-form task-template-form">
           <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${escapeHtml(modalState.error)}</div>
+          ${isEdit ? `<p class="form-note">行动标准编码：${escapeHtml(template?.businessCode ?? "—")}（创建后不可修改）</p>` : ""}
           <label><span>关键行动名称</span><input name="name" value="${escapeAttribute(template?.name ?? "")}" autocomplete="off" /></label>
           <div class="form-grid">
             <label><span>价值链模块</span><select name="categoryId">${renderOptions(getTaskCategories(), getTaskTemplateValueChainCategoryId(template), "请选择价值链模块")}</select></label>
@@ -884,6 +918,7 @@ function renderTemplateLockedInfo(template) {
   if (template === null) return `<p class="form-note">请选择关键行动后查看自动带出的锁定信息。</p>`;
   return `
     <div class="locked-template-info">
+      ${renderDetailField("行动标准编码", escapeHtml(template.businessCode ?? "—"))}
       ${renderDetailField("关键行动名称", escapeHtml(template.name))}
       ${renderDetailField("价值链模块", escapeHtml(getStandardWorkValueChain(template)))}
       ${renderDetailField("对应关键行动标准流程", escapeHtml(getProcessTemplateName(template.defaultProcessTemplateId)))}
@@ -919,7 +954,7 @@ function renderActionStandardLaunchModal() {
           <div class="form-grid">
             <label><span>关联目标</span><select name="goalId">${renderOptions(getActiveGoals(), "", "请选择目标")}</select></label>
             <label><span>选择价值链模块</span><select name="categoryId" data-action-standard-category-select>${renderOptions(getTaskCategories(), selectedCategoryId, "请选择价值链模块")}</select></label>
-            <label><span>选择关键行动</span><select name="taskTemplateId" data-action-standard-template-select ${selectedCategoryId === "" ? "disabled" : ""}>${renderOptions(availableTemplates, effectiveTemplateId, selectedCategoryId === "" ? "请先选择价值链模块" : "请选择关键行动")}</select></label>
+            <label><span>选择关键行动</span><select name="taskTemplateId" data-action-standard-template-select ${selectedCategoryId === "" ? "disabled" : ""}>${renderTaskTemplateOptions(availableTemplates, effectiveTemplateId, selectedCategoryId === "" ? "请先选择价值链模块" : "请选择关键行动")}</select></label>
             <label><span>发起人</span><select name="initiatorId">${renderOptions(people, getCurrentUser()?.personId ?? getCurrentUser()?.id ?? "", "请选择发起人")}</select></label>
           </div>
           ${renderTemplateLockedInfo(selectedTemplate)}
@@ -1782,6 +1817,22 @@ export function bindStandardWorkLibraryEvents(rerender, container = document) {
     if (didDragStandardWorkCard) {
       event.preventDefault();
       didDragStandardWorkCard = false;
+      return;
+    }
+    const codeButton = event.target.closest("[data-copy-action-standard-code]");
+    if (codeButton !== null) {
+      event.preventDefault();
+      event.stopPropagation();
+      const code = codeButton.dataset.copyActionStandardCode ?? "";
+      if (code === "") return;
+      copyTextToClipboard(code).then((copied) => {
+        if (!copied) return;
+        const originalText = codeButton.textContent;
+        codeButton.textContent = "已复制";
+        window.setTimeout(() => {
+          if (codeButton.isConnected) codeButton.textContent = originalText;
+        }, 1200);
+      });
       return;
     }
     const actionButton = event.target.closest("[data-action]");

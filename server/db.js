@@ -187,6 +187,7 @@ const resourceConfigs = {
     table: "task_templates",
     columns: [
       "id",
+      "businessCode",
       "name",
       "categoryId",
       "defaultProcessTemplateId",
@@ -811,6 +812,7 @@ function validateTemplateItem(item) {
 
 const businessIdentifierConfigs = {
   goals: { table: "goals", prefix: "GOAL" },
+  taskTemplates: { table: "task_templates", prefix: "AS" },
   processInstances: { table: "process_instances", prefix: "KA" },
   tasks: { table: "tasks", prefix: "TASK" },
   processTemplates: { table: "process_templates", prefix: "TPL" },
@@ -1242,6 +1244,7 @@ function backfillBusinessIdentifiers() {
 
   database.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_goals_business_code ON goals(businessCode);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_task_templates_business_code ON task_templates(businessCode);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_process_instances_business_code ON process_instances(businessCode);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_business_code ON tasks(businessCode);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_process_templates_business_code ON process_templates(businessCode);
@@ -1582,6 +1585,7 @@ function runLightweightMigrations() {
   `);
   ensureColumn("departments", "parentDepartmentId", "TEXT");
   ensureColumn("goals", "businessCode", "TEXT");
+  ensureColumn("task_templates", "businessCode", "TEXT");
   ensureColumn("process_instances", "businessCode", "TEXT");
   ensureColumn("tasks", "businessCode", "TEXT");
   ensureColumn("tasks", "executorId", "TEXT");
@@ -2709,6 +2713,14 @@ export function createResource(routeResource, item) {
     });
     return createTemplate();
   }
+  if (resourceKey === "taskTemplates") {
+    const createTaskTemplate = getDatabase().transaction(() => {
+      const nextItem = { ...item, businessCode: null };
+      insertItem(resourceKey, nextItem);
+      return readExistingItem(resourceKey, nextItem.id);
+    });
+    return createTaskTemplate();
+  }
   const nextItem =
     resourceKey === "people"
       ? {
@@ -2727,6 +2739,11 @@ export function updateResource(routeResource, id, item) {
   const resourceKey = routeResourceMap[routeResource];
   if (resourceKey === undefined) throw new Error(`Unknown resource: ${routeResource}`);
   const mergedItem = mergeExistingItem(resourceKey, id, item);
+  if (resourceKey === "taskTemplates") {
+    const existing = readExistingItem(resourceKey, id);
+    if (existing === null) throw new Error("行动标准不存在。");
+    mergedItem.businessCode = existing.businessCode;
+  }
   if (resourceKey === "permissionTemplates") {
     const name = String(mergedItem.name ?? "").trim();
     if (name === "") throw new Error("权限模板名称不能为空。");

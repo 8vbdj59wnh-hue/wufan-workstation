@@ -253,6 +253,7 @@
 /**
  * @typedef {object} TaskTemplate
  * @property {string} id
+ * @property {string | null} businessCode
  * @property {string} name
  * @property {string | null} categoryId
  * @property {string} defaultProcessTemplateId

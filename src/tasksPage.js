@@ -1253,6 +1253,18 @@ function renderOptions(items, selectedId, emptyLabel) {
   `;
 }
 
+function renderTaskTemplateOptions(items, selectedId, emptyLabel) {
+  return `
+    <option value="">${emptyLabel}</option>
+    ${items
+      .map((item) => {
+        const label = item.businessCode ? `${item.businessCode}｜${item.name}` : item.name;
+        return `<option value="${item.id}" ${item.id === selectedId ? "selected" : ""}>${escapeHtml(label)}</option>`;
+      })
+      .join("")}
+  `;
+}
+
 function renderValueOptions(values, selectedValue, names, emptyLabel) {
   return `
     <option value="">${emptyLabel}</option>
@@ -4328,6 +4340,7 @@ function renderTemplateLockedInfo(template) {
 
   return `
     <div class="locked-template-info">
+      ${renderDetailField("行动标准编码", escapeHtml(template.businessCode ?? "—"))}
       ${renderDetailField("关键行动名称", escapeHtml(template.name))}
       ${renderDetailField("价值链模块", getStandardWorkValueChain(template))}
       ${renderDetailField("对应关键行动标准流程", getProcessTemplateName(template.defaultProcessTemplateId))}
@@ -4415,7 +4428,7 @@ function renderTaskModal() {
                   <label>
                     <span>选择关键行动</span>
                     <select name="taskTemplateId" data-task-template-select ${selectedCategoryId === "" ? "disabled" : ""}>
-                      ${renderOptions(availableTemplates, modalState.taskTemplateId ?? "", templateHint)}
+                      ${renderTaskTemplateOptions(availableTemplates, modalState.taskTemplateId ?? "", templateHint)}
                     </select>
                   </label>
                 </div>

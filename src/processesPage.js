@@ -447,8 +447,10 @@ function renderTemplateDetail() {
         <div class="key-action-detail-section">
           <h3>基本信息</h3>
           <div class="process-template-meta">
-            <span><em>模板编号</em>${escapeHtml(template.businessCode ?? "未编号")}</span>
-            <span><em>名称</em>${standardWork?.name ?? template.name}</span>
+            <span><em>行动标准编码</em>${escapeHtml(standardWork?.businessCode ?? "—")}</span>
+            <span><em>行动标准名称</em>${standardWork?.name ?? template.name}</span>
+            <span><em>默认流程名称</em>${escapeHtml(template.name)}</span>
+            <span><em>流程模板编码</em>${escapeHtml(template.businessCode ?? "未编号")}</span>
             <span><em>所属价值链</em>${getProcessTemplateValueModuleName(template)}</span>
             <span><em>责任部门</em>${standardWorkDepartment}</span>
             <span><em>负责人</em>${findName(people, template.ownerId, "未设置")}</span>

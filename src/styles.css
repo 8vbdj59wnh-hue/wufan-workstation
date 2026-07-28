@@ -2399,6 +2399,16 @@ button.content-template-thumb {
   line-height: 1.3;
 }
 
+.standard-work-business-code {
+  display: block;
+  max-width: 190px;
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.25;
+  text-align: left;
+}
+
 .standard-work-card-meta {
   display: flex;
   align-items: center;

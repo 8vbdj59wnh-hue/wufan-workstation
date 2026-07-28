@@ -150,6 +150,7 @@ CREATE TABLE IF NOT EXISTS goals (
 
 CREATE TABLE IF NOT EXISTS task_templates (
   id TEXT PRIMARY KEY,
+  businessCode TEXT UNIQUE,
   name TEXT NOT NULL,
   categoryId TEXT,
   defaultProcessTemplateId TEXT,
