@@ -512,6 +512,63 @@ const resourceConfigs = {
     ],
     jsonFields: ["headers", "mappingConfig", "summary"],
   },
+  erpGoods: {
+    table: "erp_goods",
+    columns: [
+      "id", "goodsCode", "goodsName", "shortName", "brand", "category", "productType",
+      "primarySupplier", "supplierGoodsCode", "sourceCreatedAt", "lastImportedAt", "createdAt", "updatedAt",
+    ],
+  },
+  productErpMappings: {
+    table: "product_erp_mappings",
+    columns: [
+      "id", "productId", "erpGoodsId", "merchantSkuCode", "matchMethod", "sourceBatchId",
+      "latestStateJson", "createdAt", "updatedAt",
+    ],
+    jsonFields: ["latestStateJson"],
+  },
+  salesShops: {
+    table: "sales_shops",
+    columns: [
+      "id", "platform", "shopName", "normalizedShopName", "displayName", "rawShopName",
+      "status", "notes", "createdAt", "updatedAt",
+    ],
+  },
+  salesShopAliases: {
+    table: "sales_shop_aliases",
+    columns: ["id", "shopId", "rawName", "createdAt"],
+  },
+  salesLinks: {
+    table: "sales_links",
+    columns: [
+      "id", "shopId", "platformGoodsId", "platformGoodsCode", "title", "canonicalUrl", "rawUrl",
+      "status", "activityStatus", "category", "identityStrength", "lastModifiedAt", "lastSeenBatchId",
+      "lastImportedAt", "createdAt", "updatedAt",
+    ],
+  },
+  salesLinkSkus: {
+    table: "sales_link_skus",
+    columns: [
+      "id", "salesLinkId", "productId", "platformSkuId", "platformSkuCode", "normalizedPlatformSkuCode",
+      "specificationName", "normalizedSpecificationName", "price", "platformStock", "occupiedStock",
+      "systemGoodsType", "syncEnabled", "lastSyncedStock", "lastSyncedAt", "stopSyncReason",
+      "matchStatus", "matchMethod", "matchReason", "lastSeenBatchId", "createdAt", "updatedAt",
+    ],
+    booleanFields: ["syncEnabled"],
+  },
+  erpImportBatches: {
+    table: "erp_import_batches",
+    columns: [
+      "id", "importType", "originalFilename", "fileHash", "status", "totalRows", "createdCount",
+      "updatedCount", "unchangedCount", "matchedCount", "unmatchedCount", "errorCount", "summaryJson",
+      "createdBy", "createdAt", "completedAt",
+    ],
+    jsonFields: ["summaryJson"],
+  },
+  platformSkuManualBindings: {
+    table: "platform_sku_manual_bindings",
+    columns: ["id", "salesLinkSkuId", "productId", "createdBy", "createdAt", "updatedAt"],
+  },
 };
 
 const routeResourceMap = {
@@ -545,6 +602,14 @@ const routeResourceMap = {
   products: "products",
   "action-products": "actionProducts",
   "product-import-batches": "productImportBatches",
+  "erp-goods": "erpGoods",
+  "product-erp-mappings": "productErpMappings",
+  "sales-shops": "salesShops",
+  "sales-shop-aliases": "salesShopAliases",
+  "sales-links": "salesLinks",
+  "sales-link-skus": "salesLinkSkus",
+  "erp-import-batches": "erpImportBatches",
+  "platform-sku-manual-bindings": "platformSkuManualBindings",
 };
 
 const seedData = {
@@ -579,6 +644,14 @@ const seedData = {
   products: [],
   actionProducts: [],
   productImportBatches: [],
+  erpGoods: [],
+  productErpMappings: [],
+  salesShops: [],
+  salesShopAliases: [],
+  salesLinks: [],
+  salesLinkSkus: [],
+  erpImportBatches: [],
+  platformSkuManualBindings: [],
 };
 
 let db;

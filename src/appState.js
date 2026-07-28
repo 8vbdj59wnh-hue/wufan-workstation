@@ -92,6 +92,14 @@ export const state = {
   products: [],
   actionProducts: [],
   productImportBatches: [],
+  erpGoods: [],
+  productErpMappings: [],
+  salesShops: [],
+  salesShopAliases: [],
+  salesLinks: [],
+  salesLinkSkus: [],
+  erpImportBatches: [],
+  platformSkuManualBindings: [],
 };
 
 export const defaultCompanySlogan = "做对的事，把事做对。\n尊重时间，尊重经营。";
@@ -196,6 +204,14 @@ export function getDataSnapshot() {
     products: state.products,
     actionProducts: state.actionProducts,
     productImportBatches: state.productImportBatches,
+    erpGoods: state.erpGoods,
+    productErpMappings: state.productErpMappings,
+    salesShops: state.salesShops,
+    salesShopAliases: state.salesShopAliases,
+    salesLinks: state.salesLinks,
+    salesLinkSkus: state.salesLinkSkus,
+    erpImportBatches: state.erpImportBatches,
+    platformSkuManualBindings: state.platformSkuManualBindings,
   };
 }
 
@@ -235,6 +251,14 @@ export function applyDataSnapshot(data) {
   replaceArray(state.products, data.products ?? []);
   replaceArray(state.actionProducts, data.actionProducts ?? []);
   replaceArray(state.productImportBatches, data.productImportBatches ?? []);
+  replaceArray(state.erpGoods, data.erpGoods ?? []);
+  replaceArray(state.productErpMappings, data.productErpMappings ?? []);
+  replaceArray(state.salesShops, data.salesShops ?? []);
+  replaceArray(state.salesShopAliases, data.salesShopAliases ?? []);
+  replaceArray(state.salesLinks, data.salesLinks ?? []);
+  replaceArray(state.salesLinkSkus, data.salesLinkSkus ?? []);
+  replaceArray(state.erpImportBatches, data.erpImportBatches ?? []);
+  replaceArray(state.platformSkuManualBindings, data.platformSkuManualBindings ?? []);
   isApplyingRemoteData = false;
   ensureTaskTemplatesHaveProcessTemplates();
   ensureDefaultStandardWorkLibrary();
@@ -643,6 +667,79 @@ export async function commitProductImport(batchId) {
   const body = await readApiJson(response, "ERP 产品确认导入失败。");
   if (body.data) applyDataSnapshot(body.data);
   return body;
+}
+
+export async function parseProductV2Import(file, importType) {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("importType", importType);
+  const response = await authFetch(`${apiBaseUrl}/api/products/erp-v2/parse`, { method: "POST", body: formData });
+  return readApiJson(response, "ERP 数据解析失败。");
+}
+
+export async function validateProductV2Import(batchId, options = {}) {
+  const response = await authFetch(`${apiBaseUrl}/api/products/erp-v2/${encodeURIComponent(batchId)}/validate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(options),
+  });
+  return readApiJson(response, "ERP 数据校验失败。");
+}
+
+export async function loadProductV2Import(batchId) {
+  const response = await authFetch(`${apiBaseUrl}/api/products/erp-v2/${encodeURIComponent(batchId)}`);
+  return readApiJson(response, "ERP 导入批次读取失败。");
+}
+
+export async function commitProductV2Import(batchId, options = {}) {
+  const response = await authFetch(`${apiBaseUrl}/api/products/erp-v2/${encodeURIComponent(batchId)}/commit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(options),
+  });
+  const body = await readApiJson(response, "ERP 数据确认导入失败。");
+  if (body.data) applyDataSnapshot(body.data);
+  return body;
+}
+
+export async function bindPlatformSku(salesLinkSkuId, productId) {
+  const response = await authFetch(`${apiBaseUrl}/api/products/platform-skus/${encodeURIComponent(salesLinkSkuId)}/bind`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ productId }),
+  });
+  const body = await readApiJson(response, "平台 SKU 绑定失败。");
+  if (body.data) applyDataSnapshot(body.data);
+  return body;
+}
+
+export async function unbindPlatformSku(salesLinkSkuId) {
+  const response = await authFetch(`${apiBaseUrl}/api/products/platform-skus/${encodeURIComponent(salesLinkSkuId)}/bind`, { method: "DELETE" });
+  const body = await readApiJson(response, "平台 SKU 解绑失败。");
+  if (body.data) applyDataSnapshot(body.data);
+  return body;
+}
+
+export async function markPlatformSku(salesLinkSkuId, status) {
+  const response = await authFetch(`${apiBaseUrl}/api/products/platform-skus/${encodeURIComponent(salesLinkSkuId)}/mark`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+  const body = await readApiJson(response, "平台 SKU 状态保存失败。");
+  if (body.data) applyDataSnapshot(body.data);
+  return body;
+}
+
+export async function loadProductSalesLinks(productId) {
+  const response = await authFetch(`${apiBaseUrl}/api/products/${encodeURIComponent(productId)}/sales-links`);
+  return readApiJson(response, "产品销售链接读取失败。");
+}
+
+export async function loadUnmatchedPlatformSkus({ query = "", limit = 100, offset = 0 } = {}) {
+  const search = new URLSearchParams({ query, limit: String(limit), offset: String(offset) });
+  const response = await authFetch(`${apiBaseUrl}/api/products/platform-skus/unmatched?${search}`);
+  return readApiJson(response, "未匹配平台SKU读取失败。");
 }
 
 function getTodayDate() {

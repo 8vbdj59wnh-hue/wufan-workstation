@@ -506,3 +506,145 @@ CREATE TABLE IF NOT EXISTS product_import_batches (
   createdAt TEXT,
   updatedAt TEXT
 );
+
+CREATE TABLE IF NOT EXISTS erp_goods (
+  id TEXT PRIMARY KEY,
+  goodsCode TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  goodsName TEXT,
+  shortName TEXT,
+  brand TEXT,
+  category TEXT,
+  productType TEXT,
+  primarySupplier TEXT,
+  supplierGoodsCode TEXT,
+  sourceCreatedAt TEXT,
+  lastImportedAt TEXT,
+  createdAt TEXT,
+  updatedAt TEXT
+);
+
+CREATE TABLE IF NOT EXISTS erp_import_batches (
+  id TEXT PRIMARY KEY,
+  importType TEXT NOT NULL,
+  originalFilename TEXT NOT NULL,
+  fileHash TEXT NOT NULL,
+  status TEXT NOT NULL,
+  totalRows INTEGER NOT NULL DEFAULT 0,
+  createdCount INTEGER NOT NULL DEFAULT 0,
+  updatedCount INTEGER NOT NULL DEFAULT 0,
+  unchangedCount INTEGER NOT NULL DEFAULT 0,
+  matchedCount INTEGER NOT NULL DEFAULT 0,
+  unmatchedCount INTEGER NOT NULL DEFAULT 0,
+  errorCount INTEGER NOT NULL DEFAULT 0,
+  summaryJson TEXT,
+  createdBy TEXT,
+  createdAt TEXT,
+  completedAt TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_erp_import_batches_hash ON erp_import_batches(importType, fileHash);
+
+CREATE TABLE IF NOT EXISTS product_erp_mappings (
+  id TEXT PRIMARY KEY,
+  productId TEXT NOT NULL UNIQUE,
+  erpGoodsId TEXT NOT NULL,
+  merchantSkuCode TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  matchMethod TEXT NOT NULL,
+  sourceBatchId TEXT,
+  latestStateJson TEXT,
+  createdAt TEXT,
+  updatedAt TEXT,
+  FOREIGN KEY(productId) REFERENCES products(id),
+  FOREIGN KEY(erpGoodsId) REFERENCES erp_goods(id)
+);
+
+CREATE TABLE IF NOT EXISTS sales_shops (
+  id TEXT PRIMARY KEY,
+  platform TEXT NOT NULL,
+  shopName TEXT NOT NULL,
+  normalizedShopName TEXT NOT NULL,
+  displayName TEXT NOT NULL,
+  rawShopName TEXT,
+  status TEXT NOT NULL,
+  notes TEXT,
+  createdAt TEXT,
+  updatedAt TEXT,
+  UNIQUE(platform, normalizedShopName)
+);
+
+CREATE TABLE IF NOT EXISTS sales_shop_aliases (
+  id TEXT PRIMARY KEY,
+  shopId TEXT NOT NULL,
+  rawName TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  createdAt TEXT,
+  FOREIGN KEY(shopId) REFERENCES sales_shops(id)
+);
+
+CREATE TABLE IF NOT EXISTS sales_links (
+  id TEXT PRIMARY KEY,
+  shopId TEXT NOT NULL,
+  platformGoodsId TEXT,
+  platformGoodsCode TEXT,
+  title TEXT,
+  canonicalUrl TEXT,
+  rawUrl TEXT,
+  status TEXT,
+  activityStatus TEXT,
+  category TEXT,
+  identityStrength TEXT NOT NULL,
+  lastModifiedAt TEXT,
+  lastSeenBatchId TEXT,
+  lastImportedAt TEXT,
+  createdAt TEXT,
+  updatedAt TEXT,
+  FOREIGN KEY(shopId) REFERENCES sales_shops(id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_links_goods_identity
+  ON sales_links(shopId, platformGoodsId) WHERE platformGoodsId IS NOT NULL AND platformGoodsId <> '';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_links_url_identity
+  ON sales_links(shopId, canonicalUrl) WHERE (platformGoodsId IS NULL OR platformGoodsId = '') AND canonicalUrl IS NOT NULL AND canonicalUrl <> '';
+
+CREATE TABLE IF NOT EXISTS sales_link_skus (
+  id TEXT PRIMARY KEY,
+  salesLinkId TEXT NOT NULL,
+  productId TEXT,
+  platformSkuId TEXT,
+  platformSkuCode TEXT,
+  normalizedPlatformSkuCode TEXT,
+  specificationName TEXT,
+  normalizedSpecificationName TEXT,
+  price REAL,
+  platformStock REAL,
+  occupiedStock REAL,
+  systemGoodsType TEXT,
+  syncEnabled INTEGER NOT NULL DEFAULT 0,
+  lastSyncedStock REAL,
+  lastSyncedAt TEXT,
+  stopSyncReason TEXT,
+  matchStatus TEXT NOT NULL,
+  matchMethod TEXT,
+  matchReason TEXT,
+  lastSeenBatchId TEXT,
+  createdAt TEXT,
+  updatedAt TEXT,
+  FOREIGN KEY(salesLinkId) REFERENCES sales_links(id),
+  FOREIGN KEY(productId) REFERENCES products(id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_link_skus_platform_id
+  ON sales_link_skus(salesLinkId, platformSkuId) WHERE platformSkuId IS NOT NULL AND platformSkuId <> '';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_link_skus_fallback
+  ON sales_link_skus(salesLinkId, normalizedPlatformSkuCode, normalizedSpecificationName)
+  WHERE platformSkuId IS NULL OR platformSkuId = '';
+
+CREATE TABLE IF NOT EXISTS platform_sku_manual_bindings (
+  id TEXT PRIMARY KEY,
+  salesLinkSkuId TEXT NOT NULL UNIQUE,
+  productId TEXT NOT NULL,
+  createdBy TEXT,
+  createdAt TEXT,
+  updatedAt TEXT,
+  FOREIGN KEY(salesLinkSkuId) REFERENCES sales_link_skus(id),
+  FOREIGN KEY(productId) REFERENCES products(id)
+);

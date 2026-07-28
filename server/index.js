@@ -20,6 +20,7 @@ import {
   deleteProcessTemplateNode,
   findLoginUser,
   findLoginUserById,
+  getDatabase,
   getPublicUser,
   initializeDatabase,
   batchLaunchWorkPlans,
@@ -46,6 +47,15 @@ import {
   readProductImportStaging,
   validateProductImport,
 } from "./productImport.js";
+import {
+  commitErpV2Import,
+  markPlatformSku,
+  parseErpV2Import,
+  readErpV2Import,
+  removePlatformSkuManualBinding,
+  updatePlatformSkuManualBinding,
+  validateErpV2Import,
+} from "./productV2Import.js";
 import { createToken, verifyPassword, verifyToken } from "./security.js";
 import { canLaunchActionTemplate, getDataScope, hasPermission } from "../src/permissions.js";
 import { getProcessInstanceOwner } from "../src/data/processInstanceSelectors.js";
@@ -331,7 +341,20 @@ function canUsePublishingAccountOptions(user) {
 }
 
 function canReadResource(resource, user) {
-  if (resource === "products" || resource === "action-products" || resource === "product-import-batches") return hasPermission(user, "products.view");
+  const productResources = new Set([
+    "products",
+    "action-products",
+    "product-import-batches",
+    "erp-goods",
+    "product-erp-mappings",
+    "sales-shops",
+    "sales-shop-aliases",
+    "sales-links",
+    "sales-link-skus",
+    "erp-import-batches",
+    "platform-sku-manual-bindings",
+  ]);
+  if (productResources.has(resource)) return hasPermission(user, "products.view");
   if (resource === "permission-templates") return hasPermission(user, "settings.managePermissions");
   if (resource === "stores") return canUseStoreOptions(user);
   if (resource === "publishing-accounts") return canUsePublishingAccountOptions(user);
@@ -345,10 +368,31 @@ function filterDataByScope(data, user) {
   const permissionTemplates = hasPermission(user, "settings.managePermissions") ? (data.permissionTemplates ?? []) : [];
   const products = hasPermission(user, "products.view") ? (data.products ?? []) : [];
   const productImportBatches = hasPermission(user, "products.view") ? (data.productImportBatches ?? []) : [];
+  const productV2Data = hasPermission(user, "products.view")
+    ? {
+        erpGoods: data.erpGoods ?? [],
+        productErpMappings: data.productErpMappings ?? [],
+        salesShops: data.salesShops ?? [],
+        salesShopAliases: data.salesShopAliases ?? [],
+        salesLinks: [],
+        salesLinkSkus: [],
+        erpImportBatches: data.erpImportBatches ?? [],
+        platformSkuManualBindings: data.platformSkuManualBindings ?? [],
+      }
+    : {
+        erpGoods: [],
+        productErpMappings: [],
+        salesShops: [],
+        salesShopAliases: [],
+        salesLinks: [],
+        salesLinkSkus: [],
+        erpImportBatches: [],
+        platformSkuManualBindings: [],
+      };
   const visibleProductIds = new Set(products.map((product) => product.id));
   if (dataScope === "all") {
     const actionProducts = (data.actionProducts ?? []).filter((item) => visibleProductIds.has(item.productId));
-    return { ...data, stores, publishingAccounts, permissionTemplates, products, actionProducts, productImportBatches };
+    return { ...data, stores, publishingAccounts, permissionTemplates, products, actionProducts, productImportBatches, ...productV2Data };
   }
 
   const scopedTasks = filterByScope(data.tasks ?? [], user);
@@ -383,6 +427,7 @@ function filterDataByScope(data, user) {
     processInstances: scopedProcessInstances,
     products,
     productImportBatches,
+    ...productV2Data,
     actionProducts: scopedActionProducts,
     contentSchedules: scopedContentSchedules,
     workPlans: scopedWorkPlans,
@@ -738,6 +783,154 @@ app.post("/api/products/import/:id/commit", requirePermission("products.create")
   } catch (commitError) {
     console.error("ERP 产品确认导入失败", commitError);
     response.status(400).json({ success: false, message: commitError.message || "确认导入失败。" });
+  }
+});
+
+app.post("/api/products/erp-v2/parse", requirePermission("products.create"), (request, response) => {
+  uploadProductImport.single("file")(request, response, (error) => {
+    if (error !== undefined) {
+      response.status(error.code === "LIMIT_FILE_SIZE" ? 413 : 400).json({
+        success: false,
+        message: error.code === "LIMIT_FILE_SIZE" ? "ERP Excel 大小不能超过 300MB。" : error.message || "Excel 上传失败。",
+      });
+      return;
+    }
+    if (request.file === undefined) {
+      response.status(400).json({ success: false, message: "请选择 ERP Excel 文件。" });
+      return;
+    }
+    try {
+      const result = parseErpV2Import({
+        filePath: request.file.path,
+        originalFilename: normalizeUploadedFileName(request.file.originalname),
+        importType: String(request.body?.importType ?? ""),
+        createdBy: getUserPersonId(request.user),
+      });
+      response.json({ success: true, ...result });
+    } catch (parseError) {
+      console.error("产品中心 V2 ERP解析失败", parseError);
+      response.status(400).json({ success: false, message: parseError.message || "ERP文件解析失败。" });
+    } finally {
+      fs.rmSync(request.file.path, { force: true });
+    }
+  });
+});
+
+app.post("/api/products/erp-v2/:id/validate", requirePermission("products.create"), (request, response) => {
+  try {
+    response.json({ success: true, ...validateErpV2Import(request.params.id, request.body ?? {}) });
+  } catch (error) {
+    console.error("产品中心 V2 ERP校验失败", error);
+    response.status(400).json({ success: false, message: error.message || "ERP导入校验失败。" });
+  }
+});
+
+app.get("/api/products/erp-v2/:id", requirePermission("products.create"), (request, response) => {
+  try {
+    response.json({ success: true, ...readErpV2Import(request.params.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "ERP导入批次读取失败。" });
+  }
+});
+
+app.post("/api/products/erp-v2/:id/commit", requirePermission("products.create"), (request, response) => {
+  try {
+    const result = commitErpV2Import(request.params.id, request.body ?? {});
+    response.json({ success: true, ...result });
+  } catch (error) {
+    console.error("产品中心 V2 ERP提交失败", error);
+    response.status(400).json({ success: false, message: error.message || "ERP导入提交失败。" });
+  }
+});
+
+app.get("/api/products/platform-skus/unmatched", requirePermission("products.view"), (request, response) => {
+  try {
+    const database = getDatabase();
+    const query = String(request.query.query ?? "").trim();
+    const limit = Math.min(200, Math.max(20, Number(request.query.limit) || 100));
+    const offset = Math.max(0, Number(request.query.offset) || 0);
+    const search = `%${query}%`;
+    const where = `
+      x.productId IS NULL
+      AND x.matchStatus NOT IN ('ignored','combination')
+      AND (? = '' OR x.platformSkuCode LIKE ? OR x.platformSkuId LIKE ? OR x.specificationName LIKE ?
+        OR l.title LIKE ? OR l.platformGoodsCode LIKE ? OR l.platformGoodsId LIKE ?)
+    `;
+    const params = [query, search, search, search, search, search, search];
+    const total = database.prepare(`
+      SELECT COUNT(*) AS total
+      FROM sales_link_skus x
+      JOIN sales_links l ON l.id=x.salesLinkId
+      WHERE ${where}
+    `).get(...params).total;
+    const rows = database.prepare(`
+      SELECT
+        x.*, l.shopId, l.platformGoodsId, l.platformGoodsCode, l.title, l.rawUrl, l.canonicalUrl,
+        s.platform, s.shopName, s.displayName,
+        g.id AS possibleErpGoodsId, g.goodsCode AS possibleErpGoodsCode, g.goodsName AS possibleErpGoodsName
+      FROM sales_link_skus x
+      JOIN sales_links l ON l.id=x.salesLinkId
+      JOIN sales_shops s ON s.id=l.shopId
+      LEFT JOIN erp_goods g ON lower(g.goodsCode)=lower(l.platformGoodsCode)
+      WHERE ${where}
+      ORDER BY s.platform, s.displayName, l.title, x.platformSkuCode
+      LIMIT ? OFFSET ?
+    `).all(...params, limit, offset);
+    response.json({ success: true, rows, pagination: { total, limit, offset } });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "未匹配平台SKU读取失败。" });
+  }
+});
+
+app.get("/api/products/:id/sales-links", requirePermission("products.view"), (request, response) => {
+  try {
+    const database = getDatabase();
+    const product = database.prepare("SELECT id FROM products WHERE id=?").get(request.params.id);
+    if (!product) {
+      response.status(404).json({ success: false, message: "产品不存在。" });
+      return;
+    }
+    const rows = database.prepare(`
+      SELECT
+        x.*, l.shopId, l.platformGoodsId, l.platformGoodsCode, l.title, l.rawUrl, l.canonicalUrl,
+        l.status AS linkStatus, l.activityStatus, l.category, l.identityStrength,
+        s.platform, s.shopName, s.displayName
+      FROM sales_link_skus x
+      JOIN sales_links l ON l.id=x.salesLinkId
+      JOIN sales_shops s ON s.id=l.shopId
+      WHERE x.productId=?
+      ORDER BY s.platform, s.displayName, l.title, x.platformSkuCode
+    `).all(request.params.id);
+    response.json({ success: true, productId: request.params.id, rows });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "产品销售链接读取失败。" });
+  }
+});
+
+app.post("/api/products/platform-skus/:id/bind", requirePermission("products.edit"), (request, response) => {
+  try {
+    updatePlatformSkuManualBinding(request.params.id, String(request.body?.productId ?? ""), getUserPersonId(request.user));
+    response.json({ success: true });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "人工绑定失败。" });
+  }
+});
+
+app.delete("/api/products/platform-skus/:id/bind", requirePermission("products.edit"), (request, response) => {
+  try {
+    removePlatformSkuManualBinding(request.params.id);
+    response.json({ success: true });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "取消绑定失败。" });
+  }
+});
+
+app.post("/api/products/platform-skus/:id/mark", requirePermission("products.edit"), (request, response) => {
+  try {
+    markPlatformSku(request.params.id, String(request.body?.status ?? ""));
+    response.json({ success: true });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "标记失败。" });
   }
 });
 
