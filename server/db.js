@@ -2515,11 +2515,17 @@ function normalizeBatchDedupePart(value) {
   return String(value ?? "").trim().toLowerCase();
 }
 
+function normalizeBatchProductKey(productIds = []) {
+  return [...new Set((Array.isArray(productIds) ? productIds : []).map(normalizeBatchDedupePart).filter(Boolean))]
+    .sort()
+    .join("|");
+}
+
 function buildBatchLaunchDedupeKey(dedupe = {}) {
   const parts = [
     dedupe.taskTemplateId,
     dedupe.goalId,
-    dedupe.productId,
+    dedupe.productKey ?? normalizeBatchProductKey(dedupe.productIds ?? (dedupe.productId ? [dedupe.productId] : [])),
     dedupe.templateId,
     dedupe.publishDate,
     dedupe.account,
@@ -2552,14 +2558,15 @@ function hasExistingBatchLaunchDuplicate(dedupe = {}) {
     } catch {
       return false;
     }
-    const productId =
-      database.prepare("SELECT productId FROM action_products WHERE actionId = @actionId ORDER BY createdAt, id LIMIT 1")
-        .get({ actionId: candidate.processInstanceId })?.productId ?? "";
+    const productIds = database
+      .prepare("SELECT productId FROM action_products WHERE actionId = @actionId ORDER BY productId")
+      .all({ actionId: candidate.processInstanceId })
+      .map((item) => item.productId);
     const templateId = Array.isArray(fields.linkedTemplateIds) ? fields.linkedTemplateIds[0] ?? "" : "";
     return buildBatchLaunchDedupeKey({
       taskTemplateId,
       goalId,
-      productId,
+      productIds,
       templateId,
       publishDate: fields[dedupe.publishDateFieldId] ?? fields.publishDate ?? "",
       account: fields[dedupe.accountFieldId] ?? fields.account ?? "",
@@ -2591,7 +2598,6 @@ export function batchLaunchWorkPlans(rows = [], { userId = "" } = {}) {
       }
       if (!readExistingItem("goals", workPlan.goalId)) throw new Error("对齐目标不存在。");
       const productIds = Array.isArray(row.productIds) ? [...new Set(row.productIds.filter(Boolean))] : [];
-      if (productIds.length > 1) throw new Error("每行最多关联一个产品。");
       const linkedTemplateIds = Array.isArray(workPlan.customFields?.linkedTemplateIds)
         ? [...new Set(workPlan.customFields.linkedTemplateIds.filter(Boolean))]
         : [];
@@ -2605,7 +2611,8 @@ export function batchLaunchWorkPlans(rows = [], { userId = "" } = {}) {
           throw new Error("关联模板不是可用于发布内容笔记的小红书笔记模板。");
         }
       }
-      if (normalizeBatchDedupePart(row.dedupe?.productId) !== normalizeBatchDedupePart(productIds[0] ?? "")) {
+      const dedupeProductIds = row.dedupe?.productIds ?? (row.dedupe?.productId ? [row.dedupe.productId] : []);
+      if (normalizeBatchProductKey(dedupeProductIds) !== normalizeBatchProductKey(productIds)) {
         throw new Error("产品关联与重复判断数据不一致。");
       }
       if (normalizeBatchDedupePart(row.dedupe?.templateId) !== normalizeBatchDedupePart(linkedTemplateIds[0] ?? "")) {
@@ -2639,7 +2646,8 @@ export function batchLaunchWorkPlans(rows = [], { userId = "" } = {}) {
         processInstanceId: launched.instance.id,
         businessCode: savedInstance?.businessCode ?? null,
         taskCount: launched.tasks.length,
-        productLinked: productIds.length === 1,
+        productLinked: productIds.length > 0,
+        productCount: productIds.length,
         templateLinked: linkedTemplateIds.length === 1,
       });
     } catch (error) {

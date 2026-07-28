@@ -8198,3 +8198,18 @@ button.content-template-thumb {
     grid-template-columns: 1fr;
   }
 }
+.content-note-import-products {
+  display: grid;
+  gap: 4px;
+  min-width: 180px;
+}
+
+.content-note-import-products span,
+.content-note-import-products small {
+  display: block;
+}
+
+.content-note-import-products summary {
+  color: var(--accent, #5f6f52);
+  cursor: pointer;
+}

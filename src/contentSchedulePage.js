@@ -687,7 +687,7 @@ function getFieldAllowedValues(field) {
 
 function getBatchTemplateInstruction(column) {
   if (column === "对齐目标") return "可留空并在预览页统一选择；填写目标编码或唯一目标名称";
-  if (column === "产品编码") return "选填；填写产品中心唯一SKU编码；空值不建立产品关联";
+  if (column === "产品编码") return "选填；可填写多个产品编码，使用逗号、分号或换行分隔；空值不建立产品关联";
   if (column === "模板编码") return "选填；格式 MB-YYYYMM-NNNN；仅限小红书笔记模板；空值不建立模板关联";
   if (column === "关键行动名称") return "选填；留空按产品和模板名称自动生成";
   if (column === "完成日期") return "选填；格式 YYYY-MM-DD";
@@ -1456,8 +1456,18 @@ function renderImportModal() {
                         </td>
                         <td>${row.rowNumber}</td>
                         <td>${escapeHtml(row.goal?.name ?? row.data.对齐目标 ?? "—")}</td>
-                        <td>${escapeHtml(row.data.产品编码 || "—")}</td>
-                        <td>${escapeHtml(row.product?.name ?? "—")}</td>
+                        <td>${escapeHtml(row.productCodes.join("、") || "—")}</td>
+                        <td>
+                          ${
+                            row.products.length === 0
+                              ? "—"
+                              : `<div class="content-note-import-products">
+                                  ${row.products.slice(0, 3).map((product) => `<span>${escapeHtml(product.name)}（${escapeHtml(product.skuCode)}）</span>`).join("")}
+                                  ${row.products.length > 3 ? `<details><summary>另有${row.products.length - 3}个</summary>${row.products.slice(3).map((product) => `<span>${escapeHtml(product.name)}（${escapeHtml(product.skuCode)}）</span>`).join("")}</details>` : ""}
+                                  <small>共 ${row.products.length} 个产品</small>
+                                </div>`
+                          }
+                        </td>
                         <td>${escapeHtml(row.data.模板编码 || "—")}</td>
                         <td>${escapeHtml(row.linkedTemplate?.name ?? "—")}</td>
                         <td>${escapeHtml(row.actionName)}</td>
@@ -2088,11 +2098,31 @@ function validateOptionalBatchField(value, field, errors) {
   }
 }
 
+function parseImportProductCodes(value) {
+  const seen = new Set();
+  return String(value ?? "")
+    .split(/[,，;；\r\n]+/)
+    .map((item) => item.trim())
+    .filter((item) => {
+      if (item === "") return false;
+      const key = item.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function buildProductSetKey(productIds = []) {
+  return [...new Set(productIds.map((item) => String(item ?? "").trim()).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right))
+    .join("|");
+}
+
 function buildContentNoteDedupeKey(dedupe = {}) {
   const parts = [
     dedupe.taskTemplateId,
     dedupe.goalId,
-    dedupe.productId,
+    dedupe.productKey ?? buildProductSetKey(dedupe.productIds ?? (dedupe.productId ? [dedupe.productId] : [])),
     dedupe.templateId,
     dedupe.publishDate,
     dedupe.account,
@@ -2112,14 +2142,14 @@ function getExistingContentNoteDedupeKeys() {
   const titleField = findBatchField(["title", "contentTitle"], ["标题", "内容标题"]);
   return new Set(state.processInstances.filter(isContentNoteInstance).map((instance) => {
     const workPlan = getWorkPlanByProcessInstance(instance.id);
-    const productId = state.actionProducts.find((link) => link.actionId === instance.id)?.productId ?? "";
+    const productIds = state.actionProducts.filter((link) => link.actionId === instance.id).map((link) => link.productId);
     const templateId = Array.isArray(instance.customFields?.linkedTemplateIds)
       ? instance.customFields.linkedTemplateIds[0] ?? ""
       : "";
     return buildContentNoteDedupeKey({
       taskTemplateId: contentNoteTaskTemplateId,
       goalId: instance.goalId,
-      productId,
+      productIds,
       templateId,
       publishDate: getBatchFieldValue(instance.customFields, publishDateField),
       account: getBatchFieldValue(instance.customFields, accountField),
@@ -2129,8 +2159,11 @@ function getExistingContentNoteDedupeKeys() {
   }));
 }
 
-function buildAutomaticContentNoteName(product, linkedTemplate) {
-  return ["发布内容笔记", product?.name, linkedTemplate?.name].filter(Boolean).join("｜");
+function buildAutomaticContentNoteName(products, linkedTemplate) {
+  const productLabel = products.length > 1
+    ? `${products[0].name}等${products.length}个产品`
+    : products[0]?.name;
+  return ["发布内容笔记", productLabel, linkedTemplate?.name].filter(Boolean).join("｜");
 }
 
 function buildImportPreviewRows(records, batchGoalId = "") {
@@ -2147,17 +2180,19 @@ function buildImportPreviewRows(records, batchGoalId = "") {
     const goalResult = rowGoalValue === ""
       ? { item: batchGoal, error: batchGoal === null ? "不能为空" : "" }
       : resolveUniqueEntity(getActiveGoals(), rowGoalValue, ["businessCode"]);
-    const productCode = String(record.产品编码 ?? "").trim();
-    const productMatches = productCode === ""
-      ? []
-      : state.products.filter(
-          (product) => isSelectableImportProduct(product)
-            && String(product.skuCode ?? "").trim().toLowerCase() === productCode.toLowerCase(),
-        );
-    const productResult = {
-      item: productMatches.length === 1 ? productMatches[0] : null,
-      error: productCode === "" ? "" : productMatches.length === 0 ? "不存在" : productMatches.length > 1 ? "匹配到多条" : "",
-    };
+    const productCodes = parseImportProductCodes(record.产品编码);
+    const products = [];
+    const missingProductCodes = [];
+    const ambiguousProductCodes = [];
+    productCodes.forEach((productCode) => {
+      const matches = state.products.filter(
+        (product) => isSelectableImportProduct(product)
+          && String(product.skuCode ?? "").trim().toLowerCase() === productCode.toLowerCase(),
+      );
+      if (matches.length === 0) missingProductCodes.push(productCode);
+      else if (matches.length > 1) ambiguousProductCodes.push(productCode);
+      else products.push(matches[0]);
+    });
     const templateCode = String(record.模板编码 ?? "").trim();
     const templateMatches = templateCode === ""
       ? []
@@ -2171,7 +2206,8 @@ function buildImportPreviewRows(records, batchGoalId = "") {
     else if (templateMatches.length > 1) templateError = "匹配到多条";
     else if (linkedTemplate !== null && !isPublishContentNoteTemplate(linkedTemplate)) templateError = "不是小红书笔记模板";
     if (goalResult.error) errors.push(`目标${goalResult.error}`);
-    if (productResult.error) errors.push(`产品编码${productResult.error}`);
+    if (missingProductCodes.length > 0) errors.push(`产品编码不存在：${missingProductCodes.join("、")}`);
+    if (ambiguousProductCodes.length > 0) errors.push(`产品编码匹配不唯一：${ambiguousProductCodes.join("、")}`);
     if (templateError) errors.push(`模板编码${templateError}`);
     const dueDate = combineImportDateHour(record.完成日期, record.完成时间, "完成期限", errors, false);
     const customFields = {};
@@ -2208,11 +2244,12 @@ function buildImportPreviewRows(records, batchGoalId = "") {
     const publishDateField = findBatchField(["publishDate"], ["发布日期"]);
     const actionName =
       String(record.关键行动名称 ?? "").trim()
-      || buildAutomaticContentNoteName(productResult.item, linkedTemplate);
+      || buildAutomaticContentNoteName(products, linkedTemplate);
     const dedupe = {
       taskTemplateId: contentNoteTaskTemplateId,
       goalId: goalResult.item?.id ?? "",
-      productId: productResult.item?.id ?? "",
+      productIds: products.map((product) => product.id),
+      productKey: buildProductSetKey(products.map((product) => product.id)),
       templateId: linkedTemplate?.id ?? "",
       publishDate: getBatchFieldValue(customFields, publishDateField),
       account: getBatchFieldValue(customFields, accountField),
@@ -2243,7 +2280,9 @@ function buildImportPreviewRows(records, batchGoalId = "") {
       forceDuplicate: false,
       duplicateType,
       goal: goalResult.item,
-      product: productResult.item,
+      productCodes,
+      products,
+      invalidProductCodes: [...missingProductCodes, ...ambiguousProductCodes],
       linkedTemplate: templateError === "" ? linkedTemplate : null,
       actionName,
       dueDate,
@@ -2324,7 +2363,7 @@ async function confirmImport(rerender) {
         canceledAt: null,
       };
       return prepareWorkPlanLaunchPayload(workPlan, {
-        productIds: row.product === null ? [] : [row.product.id],
+        productIds: row.products.map((product) => product.id),
         rowNumber: row.rowNumber,
         dedupe: row.dedupe,
         forceDuplicate: row.forceDuplicate,
