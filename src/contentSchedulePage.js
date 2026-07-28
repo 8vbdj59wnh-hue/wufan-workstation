@@ -2236,10 +2236,12 @@ function buildImportPreviewRows(records, batchGoalId = "") {
     if (!processTemplate || processTemplate.status !== ProcessTemplateStatus.Active) errors.push("默认流程无效");
     if (nodes.length === 0) errors.push("默认流程没有启用步骤");
     const unresolvedNode = nodes.find((node) => {
+      const isReview = (node.stepType ?? "execution") === "review";
+      if (isReview) return !node.reviewerId;
       if (node.ownerRule === ProcessOwnerRule.LaunchAssign) return !template?.ownerId;
       return !node.ownerId && !template?.ownerId;
     });
-    if (unresolvedNode) errors.push(`流程步骤“${unresolvedNode.name}”负责人配置不完整`);
+    if (unresolvedNode) errors.push(`流程步骤“${unresolvedNode.name}”负责人或审核人配置不完整`);
     const titleField = findBatchField(["title", "contentTitle"], ["标题", "内容标题"]);
     const accountField = findBatchField(["account"], ["发布账号"]);
     const publishDateField = findBatchField(["publishDate"], ["发布日期"]);

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { hashPassword } from "./security.js";
@@ -9,7 +10,6 @@ import {
   companies,
   contentSchedules,
   departments,
-  executionGroups,
   goals,
   people,
   publishingAccounts,
@@ -210,6 +210,7 @@ const resourceConfigs = {
     columns: [
       "id",
       "businessCode",
+      "taskType",
       "name",
       "goalId",
       "taskTemplateId",
@@ -227,6 +228,7 @@ const resourceConfigs = {
       "reviewStandard",
       "outputRequirement",
       "startDate",
+      "readyAt",
       "dueDate",
       "plannedWeek",
       "needAcceptance",
@@ -246,35 +248,20 @@ const resourceConfigs = {
       "submittedAt",
       "submittedBy",
       "cancelReason",
-      "executionGroupId",
+      "reviewTargetTaskId",
+      "reviewTargetSnapshot",
+      "returnToNodeId",
+      "reviewStatus",
+      "reviewComment",
+      "reviewedAt",
+      "reviewerId",
+      "requireRejectionReason",
       "createdAt",
       "updatedAt",
       "completedAt",
     ],
-    booleanFields: ["needAcceptance"],
-    jsonFields: ["resultAttachments", "customFields", "submitFields", "submitFormData", "submitFiles", "submitLinks"],
-  },
-  executionGroups: {
-    table: "execution_groups",
-    columns: [
-      "id",
-      "name",
-      "taskIds",
-      "taskTemplateId",
-      "standardWorkId",
-      "processInstanceIds",
-      "ownerId",
-      "executorId",
-      "status",
-      "standardTotalMinutes",
-      "startedAt",
-      "endedAt",
-      "actualTotalMinutes",
-      "savedMinutes",
-      "createdAt",
-      "updatedAt",
-    ],
-    jsonFields: ["taskIds", "processInstanceIds"],
+    booleanFields: ["needAcceptance", "requireRejectionReason"],
+    jsonFields: ["resultAttachments", "customFields", "submitFields", "submitFormData", "submitFiles", "submitLinks", "reviewTargetSnapshot"],
   },
   processTemplates: {
     table: "process_templates",
@@ -301,6 +288,7 @@ const resourceConfigs = {
     columns: [
       "id",
       "templateId",
+      "stepType",
       "stepOrder",
       "departmentId",
       "ownerId",
@@ -329,11 +317,18 @@ const resourceConfigs = {
       "submitFields",
       "requireFile",
       "requireLink",
+      "reviewerId",
+      "reviewTargetType",
+      "returnToNodeId",
+      "requireRejectionReason",
+      "waveEnabled",
+      "waveSize",
+      "waveTemplatePriority",
       "status",
       "createdAt",
       "updatedAt",
     ],
-    booleanFields: ["needAcceptance", "requireFile", "requireLink"],
+    booleanFields: ["needAcceptance", "requireFile", "requireLink", "requireRejectionReason", "waveEnabled", "waveTemplatePriority"],
     jsonFields: ["submitFields"],
   },
   processInstances: {
@@ -587,7 +582,6 @@ const routeResourceMap = {
   goals: "goals",
   "task-templates": "taskTemplates",
   tasks: "tasks",
-  "execution-groups": "executionGroups",
   "process-templates": "processTemplates",
   "process-template-nodes": "processTemplateNodes",
   "process-instances": "processInstances",
@@ -629,7 +623,6 @@ const seedData = {
   templateTagCategories,
   templateTags,
   tasks,
-  executionGroups,
   processTemplates,
   processTemplateNodes: processTemplateNodes.map((node) => ({
     reviewStandard: "按步骤完成标准和输出要求进行审核。",
@@ -735,6 +728,12 @@ function encodeItem(item, config, columns = config.columns) {
     if (config.table === "work_plans" && column === "workType" && (value === null || value === "")) {
       value = "normal";
     }
+    if (config.table === "process_template_nodes" && column === "stepType" && (value === null || value === "")) {
+      value = "execution";
+    }
+    if (config.table === "tasks" && column === "taskType" && (value === null || value === "")) {
+      value = "execution";
+    }
     const legacyDefaults = legacyPriorityColumnDefaults[config.table] ?? {};
     if (legacyPriorityTables.has(config.table) && Object.prototype.hasOwnProperty.call(legacyDefaults, column) && (value === null || value === "")) {
       value = legacyDefaults[column];
@@ -786,6 +785,13 @@ function decodeRow(row, config) {
   if (config.table === "work_plans" && (decoded.workType === null || decoded.workType === "" || decoded.workType === undefined)) {
     decoded.workType = "normal";
   }
+  if (config.table === "process_template_nodes" && !decoded.stepType) decoded.stepType = "execution";
+  if (config.table === "process_template_nodes") {
+    if (decoded.waveEnabled === null || decoded.waveEnabled === undefined) decoded.waveEnabled = false;
+    if (!Number.isInteger(Number(decoded.waveSize))) decoded.waveSize = 10;
+    if (decoded.waveTemplatePriority === null || decoded.waveTemplatePriority === undefined) decoded.waveTemplatePriority = true;
+  }
+  if (config.table === "tasks" && !decoded.taskType) decoded.taskType = "execution";
 
   return decoded;
 }
@@ -1020,7 +1026,7 @@ function getTaskSubmitRequirement(task) {
   };
 }
 
-function validateExecutionGroupTaskSubmission(task) {
+function validateTaskSubmission(task) {
   const requirement = getTaskSubmitRequirement(task);
   if (requirement.submitType === "none") return "";
   if (includesSubmitPart(requirement.submitType, "form")) {
@@ -1043,6 +1049,7 @@ function activateWaitingProcessTaskInTransaction(task, startAt) {
   const updatedTask = {
     ...task,
     status: "todo",
+    readyAt: now,
     startDate: startAt,
     dueDate: addMinutesToBusinessDateTime(startAt, getTaskDurationMinutes(task)),
     plannedWeek: task.plannedWeek ?? getCurrentWeek(new Date(`${startDate}T00:00:00+08:00`)),
@@ -1058,10 +1065,32 @@ function refreshProcessTaskReadinessInTransaction(processInstanceId, referenceAt
   if (instance === null || instance.status !== "running") return null;
 
   const orderedTasks = getOrderedProcessInstanceTasks(instance.id);
-  const nextTask = orderedTasks.find((task) => task.status !== "done");
+  let nextTask = orderedTasks.find((task) => task.status !== "done");
+  if (nextTask?.status === "pending_acceptance") {
+    const targetIndex = orderedTasks.findIndex((task) => task.id === nextTask.id);
+    const reviewTask = orderedTasks[targetIndex + 1];
+    if (
+      reviewTask?.taskType === "review" &&
+      reviewTask.reviewTargetTaskId === nextTask.id &&
+      reviewTask.status !== "done"
+    ) {
+      nextTask = reviewTask;
+    }
+  }
   if (nextTask !== undefined) {
     const nextIndex = orderedTasks.findIndex((task) => task.id === nextTask.id);
-    const previousTasksDone = nextIndex > 0 && orderedTasks.slice(0, nextIndex).every((task) => task.status === "done");
+    const previousTasksDone =
+      nextIndex > 0 &&
+      orderedTasks.slice(0, nextIndex).every((task) => {
+        if (
+          nextTask.taskType === "review" &&
+          task.id === nextTask.reviewTargetTaskId &&
+          task.status === "pending_acceptance"
+        ) {
+          return true;
+        }
+        return task.status === "done";
+      });
     if (nextTask.status === "waiting" && previousTasksDone) {
       const previousTask = orderedTasks[nextIndex - 1];
       return activateWaitingProcessTaskInTransaction(nextTask, previousTask?.completedAt ?? referenceAt);
@@ -1079,24 +1108,6 @@ function refreshProcessTaskReadinessInTransaction(processInstanceId, referenceAt
     }
   }
   return null;
-}
-
-function ensureExecutionGroupTaskCanComplete(task, completedTaskIds, groupTaskIds = new Set()) {
-  if (task === null) throw new Error("执行组成员任务不存在。");
-  if (task.status === "canceled") throw new Error(`${task.name}：已取消，不能完成执行组。`);
-  if (task.status === "done" || task.status === "pending_acceptance") return task;
-  if (task.status === "waiting") {
-    const orderedTasks = getOrderedProcessInstanceTasks(task.processInstanceId);
-    const taskIndex = orderedTasks.findIndex((item) => item.id === task.id);
-    if (taskIndex === -1) throw new Error(`${task.name}：未找到对应的流程顺序，不能完成执行组。`);
-    const previousTasksDone = orderedTasks
-      .slice(0, taskIndex)
-      .every((item) => item.status === "done" || completedTaskIds.has(item.id) || groupTaskIds.has(item.id));
-    if (!previousTasksDone) throw new Error(`${task.name}：前置步骤未完成，当前步骤暂不能处理。`);
-  }
-  const submitError = validateExecutionGroupTaskSubmission(task);
-  if (submitError !== "") throw new Error(`${task.name}：${submitError}。`);
-  return task;
 }
 
 function getMethodologyTitle(nodeName) {
@@ -1382,6 +1393,48 @@ function readTaskTemplateCategoryId(templateId) {
 
 function runLightweightMigrations() {
   getDatabase().exec(`
+    CREATE TABLE IF NOT EXISTS task_waves (
+      id TEXT PRIMARY KEY,
+      businessCode TEXT NOT NULL UNIQUE,
+      taskTemplateId TEXT NOT NULL,
+      processTemplateId TEXT NOT NULL,
+      processNodeId TEXT NOT NULL,
+      executorId TEXT NOT NULL,
+      templateGroupKey TEXT NOT NULL,
+      waveType TEXT NOT NULL,
+      taskCount INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'waiting',
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      startedAt TEXT,
+      completedAt TEXT,
+      canceledAt TEXT,
+      cancelReason TEXT
+    );
+    CREATE TABLE IF NOT EXISTS task_wave_items (
+      id TEXT PRIMARY KEY,
+      waveId TEXT NOT NULL,
+      taskId TEXT NOT NULL,
+      processInstanceId TEXT NOT NULL,
+      linkedTemplateIds TEXT NOT NULL DEFAULT '[]',
+      primaryTemplateId TEXT,
+      sortOrder INTEGER NOT NULL,
+      joinedAt TEXT NOT NULL,
+      removedAt TEXT,
+      removeReason TEXT,
+      isActive INTEGER NOT NULL DEFAULT 1,
+      resultDraft TEXT NOT NULL DEFAULT '{}',
+      updatedAt TEXT,
+      submittedAt TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_waves_process_node ON task_waves(processNodeId);
+    CREATE INDEX IF NOT EXISTS idx_task_waves_executor ON task_waves(executorId);
+    CREATE INDEX IF NOT EXISTS idx_task_waves_status ON task_waves(status);
+    CREATE INDEX IF NOT EXISTS idx_task_wave_items_wave ON task_wave_items(waveId);
+    CREATE INDEX IF NOT EXISTS idx_task_wave_items_task ON task_wave_items(taskId);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_task_wave_items_active_task ON task_wave_items(taskId) WHERE isActive = 1;
+  `);
+  getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS products (
       id TEXT PRIMARY KEY,
       skuCode TEXT NOT NULL UNIQUE,
@@ -1589,10 +1642,21 @@ function runLightweightMigrations() {
   ensureColumn("process_instances", "businessCode", "TEXT");
   ensureColumn("tasks", "businessCode", "TEXT");
   ensureColumn("tasks", "executorId", "TEXT");
+  ensureColumn("tasks", "readyAt", "TEXT");
+  ensureColumn("tasks", "taskType", "TEXT NOT NULL DEFAULT 'execution'");
+  ensureColumn("tasks", "reviewTargetTaskId", "TEXT");
+  ensureColumn("tasks", "reviewTargetSnapshot", "TEXT");
+  ensureColumn("tasks", "returnToNodeId", "TEXT");
+  ensureColumn("tasks", "reviewStatus", "TEXT");
+  ensureColumn("tasks", "reviewComment", "TEXT");
+  ensureColumn("tasks", "reviewedAt", "TEXT");
+  ensureColumn("tasks", "reviewerId", "TEXT");
+  ensureColumn("tasks", "requireRejectionReason", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn("process_templates", "businessCode", "TEXT");
   ensureColumn("templates", "businessCode", "TEXT");
   ensureColumn("task_templates", "defaultProcessTemplateId", "TEXT");
   ensureColumn("process_template_nodes", "stepOrder", "INTEGER");
+  ensureColumn("process_template_nodes", "stepType", "TEXT NOT NULL DEFAULT 'execution'");
   ensureColumn("process_template_nodes", "departmentId", "TEXT");
   ensureColumn("process_template_nodes", "ownerId", "TEXT");
   ensureColumn("process_template_nodes", "executorId", "TEXT");
@@ -1602,6 +1666,16 @@ function runLightweightMigrations() {
   ensureColumn("process_template_nodes", "submitFields", "TEXT");
   ensureColumn("process_template_nodes", "requireFile", "INTEGER DEFAULT 0");
   ensureColumn("process_template_nodes", "requireLink", "INTEGER DEFAULT 0");
+  ensureColumn("process_template_nodes", "reviewerId", "TEXT");
+  ensureColumn("process_template_nodes", "reviewTargetType", "TEXT");
+  ensureColumn("process_template_nodes", "returnToNodeId", "TEXT");
+  ensureColumn("process_template_nodes", "requireRejectionReason", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn("process_template_nodes", "waveEnabled", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn("process_template_nodes", "waveSize", "INTEGER NOT NULL DEFAULT 10");
+  ensureColumn("process_template_nodes", "waveTemplatePriority", "INTEGER NOT NULL DEFAULT 1");
+  ensureColumn("task_wave_items", "resultDraft", "TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn("task_wave_items", "updatedAt", "TEXT");
+  ensureColumn("task_wave_items", "submittedAt", "TEXT");
   ensureColumn("tasks", "submitType", "TEXT");
   ensureColumn("tasks", "submitDescription", "TEXT");
   ensureColumn("tasks", "submitFields", "TEXT");
@@ -1824,6 +1898,7 @@ export function initializeDatabase({ reset = false } = {}) {
   ensureDefaultTemplateTags();
   ensureDefaultPublishingAccounts();
   ensureDefaultAdmin();
+  generateEligibleTaskWaves();
 }
 
 export function readResource(resourceKey) {
@@ -1845,8 +1920,6 @@ export function readResource(resourceKey) {
           ? " ORDER BY updatedAt DESC, createdAt DESC, id DESC"
         : resourceKey === "issuesRequirements"
           ? " ORDER BY createdAt DESC, id DESC"
-        : resourceKey === "executionGroups"
-          ? " ORDER BY createdAt DESC, id DESC"
         : "";
   const items = getDatabase()
     .prepare(`SELECT ${columns} FROM ${config.table}${orderBy}`)
@@ -1859,15 +1932,6 @@ export function readAllData() {
   return Object.fromEntries(Object.keys(resourceConfigs).map((resourceKey) => [resourceKey, readResource(resourceKey)]));
 }
 
-function getTaskStandardWorkId(task) {
-  if (task === null || task === undefined) return "";
-  const instance =
-    task.processInstanceId === undefined || task.processInstanceId === null || task.processInstanceId === ""
-      ? null
-      : readExistingItem("processInstances", task.processInstanceId);
-  return instance?.taskTemplateId ?? instance?.standardWorkId ?? task.taskTemplateId ?? task.standardWorkId ?? "";
-}
-
 function getTaskDurationMinutes(task) {
   if (task?.processNodeId === undefined || task.processNodeId === null || task.processNodeId === "") return 0;
   const node = readExistingItem("processTemplateNodes", task.processNodeId);
@@ -1878,41 +1942,486 @@ function getTaskDurationMinutes(task) {
   return 0;
 }
 
-function validateExecutionGroupTasks(taskIds) {
-  if (!Array.isArray(taskIds) || taskIds.length < 2) throw new Error("请至少选择 2 个任务创建执行组。");
-  const uniqueTaskIds = [...new Set(taskIds.map((id) => String(id ?? "").trim()).filter(Boolean))];
-  if (uniqueTaskIds.length < 2) throw new Error("请至少选择 2 个不同任务创建执行组。");
-
-  const tasksToGroup = uniqueTaskIds.map((taskId) => readExistingItem("tasks", taskId));
-  const missingTaskIds = uniqueTaskIds.filter((_taskId, index) => tasksToGroup[index] === null);
-  if (missingTaskIds.length > 0) throw new Error(`未找到任务：${missingTaskIds.join("、")}`);
-
-  const invalidStatusTasks = tasksToGroup.filter((task) => ["done", "canceled"].includes(task.status));
-  if (invalidStatusTasks.length > 0) throw new Error(`已完成或已取消的任务不能加入执行组：${invalidStatusTasks.map((task) => task.name).join("、")}`);
-
-  const groupedTasks = tasksToGroup.filter((task) => String(task.executionGroupId ?? "").trim() !== "");
-  if (groupedTasks.length > 0) throw new Error(`任务已加入执行组，不能重复加入：${groupedTasks.map((task) => task.name).join("、")}`);
-
-  const standardWorkIds = new Set(tasksToGroup.map(getTaskStandardWorkId).filter(Boolean));
-  if (standardWorkIds.size !== 1) throw new Error("只有同一关键行动的任务才能创建执行组。");
-
-  const ownerIds = new Set(tasksToGroup.map((task) => task.ownerId).filter(Boolean));
-  if (ownerIds.size !== 1) throw new Error("只有同一负责人的任务才能创建执行组。");
-
-  const executorIds = new Set(tasksToGroup.map((task) => task.executorId).filter(Boolean));
-  if (executorIds.size !== 1) throw new Error("只有同一执行人的任务才能创建执行组。");
-
-  const missingDurationTasks = tasksToGroup.filter((task) => getTaskDurationMinutes(task) <= 0);
-  if (missingDurationTasks.length > 0) throw new Error(`以下任务缺少有效规定时长：${missingDurationTasks.map((task) => task.name).join("、")}`);
-
-  return tasksToGroup;
+function normalizeLinkedTemplateIds(value) {
+  let candidate = value;
+  if (typeof candidate === "string") {
+    try {
+      candidate = JSON.parse(candidate);
+    } catch {
+      candidate = [];
+    }
+  }
+  if (!Array.isArray(candidate)) return [];
+  return [...new Set(candidate.map((item) => String(item ?? "").trim()).filter(Boolean))];
 }
 
-function updateExecutionGroupTaskLinks(taskIds, executionGroupId) {
+function getTaskWaveSortTime(task) {
+  return String(task.readyAt ?? task.startDate ?? task.createdAt ?? task.updatedAt ?? "");
+}
+
+function compareTaskWaveCandidates(left, right) {
+  return (
+    getTaskWaveSortTime(left).localeCompare(getTaskWaveSortTime(right)) ||
+    String(left.createdAt ?? "").localeCompare(String(right.createdAt ?? "")) ||
+    String(left.id).localeCompare(String(right.id))
+  );
+}
+
+function getNextTaskWaveBusinessCode(database, now) {
+  const businessDay = new Date(now.getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10).replaceAll("-", "");
+  const prefix = `WAVE-${businessDay}-`;
+  const highestSerial = database
+    .prepare("SELECT businessCode FROM task_waves WHERE businessCode LIKE @pattern")
+    .all({ pattern: `${prefix}%` })
+    .reduce((highest, row) => {
+      const serial = String(row.businessCode ?? "").slice(prefix.length);
+      return /^\d+$/.test(serial) ? Math.max(highest, Number(serial)) : highest;
+    }, 0);
+  return `${prefix}${String(highestSerial + 1).padStart(4, "0")}`;
+}
+
+function classifyTaskWaveBatch(tasks, templatePriorityEnabled) {
+  const primaryTemplateIds = [...new Set(tasks.map((task) => task.primaryTemplateId).filter(Boolean))];
+  const allWithoutTemplate = tasks.every((task) => task.primaryTemplateId === null);
+  if (allWithoutTemplate) return { waveType: "no_template", templateGroupKey: "none" };
+  if (templatePriorityEnabled && primaryTemplateIds.length === 1 && tasks.every((task) => task.primaryTemplateId === primaryTemplateIds[0])) {
+    return { waveType: "template_priority", templateGroupKey: primaryTemplateIds[0] };
+  }
+  return { waveType: "mixed", templateGroupKey: "mixed" };
+}
+
+function createTaskWaveInTransaction(database, queue, tasks, templatePriorityEnabled, createdAt) {
+  const { waveType, templateGroupKey } = classifyTaskWaveBatch(tasks, templatePriorityEnabled);
+  const waveId = `task-wave-${crypto.randomUUID()}`;
+  const businessCode = getNextTaskWaveBusinessCode(database, new Date(createdAt));
+  database
+    .prepare(
+      `INSERT INTO task_waves (
+         id, businessCode, taskTemplateId, processTemplateId, processNodeId, executorId,
+         templateGroupKey, waveType, taskCount, status, createdAt, updatedAt
+       ) VALUES (
+         @id, @businessCode, @taskTemplateId, @processTemplateId, @processNodeId, @executorId,
+         @templateGroupKey, @waveType, @taskCount, 'waiting', @createdAt, @createdAt
+       )`,
+    )
+    .run({
+      id: waveId,
+      businessCode,
+      taskTemplateId: queue.taskTemplateId,
+      processTemplateId: queue.processTemplateId,
+      processNodeId: queue.processNodeId,
+      executorId: queue.executorId,
+      templateGroupKey,
+      waveType,
+      taskCount: tasks.length,
+      createdAt,
+    });
+  const insertWaveItem = database.prepare(
+    `INSERT INTO task_wave_items (
+       id, waveId, taskId, processInstanceId, linkedTemplateIds, primaryTemplateId,
+       sortOrder, joinedAt, isActive
+     ) VALUES (
+       @id, @waveId, @taskId, @processInstanceId, @linkedTemplateIds, @primaryTemplateId,
+       @sortOrder, @joinedAt, 1
+     )`,
+  );
+  tasks.forEach((task, index) => {
+    insertWaveItem.run({
+      id: `task-wave-item-${crypto.randomUUID()}`,
+      waveId,
+      taskId: task.id,
+      processInstanceId: task.processInstanceId,
+      linkedTemplateIds: JSON.stringify(task.linkedTemplateIds),
+      primaryTemplateId: task.primaryTemplateId,
+      sortOrder: index + 1,
+      joinedAt: createdAt,
+    });
+  });
+  return { id: waveId, businessCode, waveType, templateGroupKey, taskCount: tasks.length };
+}
+
+export function generateEligibleTaskWaves() {
   const database = getDatabase();
-  const now = new Date().toISOString();
-  const updateTask = database.prepare("UPDATE tasks SET executionGroupId = @executionGroupId, updatedAt = @updatedAt WHERE id = @id");
-  for (const taskId of taskIds) updateTask.run({ id: taskId, executionGroupId, updatedAt: now });
+  const generate = database.transaction(() => {
+    const candidates = database
+      .prepare(
+        `SELECT
+           t.*,
+           pi.taskTemplateId AS waveTaskTemplateId,
+           pi.templateId AS waveProcessTemplateId,
+           pi.customFields AS processInstanceCustomFields,
+           ptn.waveSize AS configuredWaveSize,
+           ptn.waveTemplatePriority AS configuredTemplatePriority
+         FROM tasks t
+         JOIN process_instances pi ON pi.id = t.processInstanceId
+         JOIN process_template_nodes ptn ON ptn.id = t.processNodeId
+         JOIN task_templates tt ON tt.id = pi.taskTemplateId
+         JOIN process_templates pt ON pt.id = pi.templateId
+         LEFT JOIN task_wave_items twi ON twi.taskId = t.id AND twi.isActive = 1
+         WHERE t.status = 'todo'
+           AND COALESCE(t.processInstanceId, '') <> ''
+           AND COALESCE(t.processNodeId, '') <> ''
+           AND COALESCE(t.executorId, '') <> ''
+           AND COALESCE(t.taskType, 'execution') <> 'review'
+           AND COALESCE(ptn.stepType, 'execution') = 'execution'
+           AND ptn.waveEnabled = 1
+           AND COALESCE(ptn.status, 'active') <> 'deleted'
+           AND COALESCE(pi.status, '') NOT IN ('done', 'completed', 'canceled', 'cancelled', 'stopped', 'terminated')
+           AND COALESCE(tt.status, 'active') <> 'deleted'
+           AND COALESCE(pt.status, 'active') <> 'deleted'
+           AND twi.taskId IS NULL`,
+      )
+      .all()
+      .map((task) => {
+        let customFields = {};
+        try {
+          customFields = JSON.parse(task.processInstanceCustomFields || "{}");
+        } catch {
+          customFields = {};
+        }
+        const linkedTemplateIds = normalizeLinkedTemplateIds(customFields.linkedTemplateIds);
+        return { ...task, linkedTemplateIds, primaryTemplateId: linkedTemplateIds[0] ?? null };
+      })
+      .sort(compareTaskWaveCandidates);
+
+    const queues = new Map();
+    for (const task of candidates) {
+      const queueKey = [task.waveTaskTemplateId, task.waveProcessTemplateId, task.processNodeId, task.executorId].join("\u001f");
+      if (!queues.has(queueKey)) {
+        queues.set(queueKey, {
+          taskTemplateId: task.waveTaskTemplateId,
+          processTemplateId: task.waveProcessTemplateId,
+          processNodeId: task.processNodeId,
+          executorId: task.executorId,
+          waveSize: Number(task.configuredWaveSize),
+          templatePriority: Number(task.configuredTemplatePriority) !== 0,
+          tasks: [],
+        });
+      }
+      queues.get(queueKey).tasks.push(task);
+    }
+
+    const createdAt = new Date().toISOString();
+    const createdWaves = [];
+    for (const queue of queues.values()) {
+      if (!Number.isInteger(queue.waveSize) || queue.waveSize < 2 || queue.waveSize > 100) continue;
+      const remaining = new Set(queue.tasks.map((task) => task.id));
+      if (queue.templatePriority) {
+        const templateGroups = new Map();
+        for (const task of queue.tasks) {
+          const templateKey = task.primaryTemplateId ?? "none";
+          if (!templateGroups.has(templateKey)) templateGroups.set(templateKey, []);
+          templateGroups.get(templateKey).push(task);
+        }
+        for (const groupTasks of templateGroups.values()) {
+          for (let index = 0; index + queue.waveSize <= groupTasks.length; index += queue.waveSize) {
+            const waveTasks = groupTasks.slice(index, index + queue.waveSize);
+            createdWaves.push(createTaskWaveInTransaction(database, queue, waveTasks, true, createdAt));
+            waveTasks.forEach((task) => remaining.delete(task.id));
+          }
+        }
+      }
+      const remainingTasks = queue.tasks.filter((task) => remaining.has(task.id)).sort(compareTaskWaveCandidates);
+      for (let index = 0; index + queue.waveSize <= remainingTasks.length; index += queue.waveSize) {
+        const waveTasks = remainingTasks.slice(index, index + queue.waveSize);
+        createdWaves.push(createTaskWaveInTransaction(database, queue, waveTasks, queue.templatePriority, createdAt));
+      }
+    }
+    return { createdCount: createdWaves.length, createdWaves, candidateCount: candidates.length };
+  });
+  return generate.immediate();
+}
+
+export function readTaskWavesForTaskIds(taskIds = []) {
+  const visibleTaskIds = [...new Set(taskIds.map((id) => String(id ?? "").trim()).filter(Boolean))];
+  if (visibleTaskIds.length === 0) return [];
+  const placeholders = visibleTaskIds.map(() => "?").join(", ");
+  const waves = getDatabase()
+    .prepare(
+      `SELECT DISTINCT tw.*
+       FROM task_waves tw
+       JOIN task_wave_items twi ON twi.waveId = tw.id AND twi.isActive = 1
+       WHERE twi.taskId IN (${placeholders})
+       ORDER BY tw.createdAt DESC, tw.id DESC`,
+    )
+    .all(...visibleTaskIds);
+  const readTaskIds = getDatabase().prepare(
+    "SELECT taskId FROM task_wave_items WHERE waveId = @waveId AND isActive = 1 ORDER BY sortOrder, id",
+  );
+  return waves.map((wave) => ({ ...wave, taskIds: readTaskIds.all({ waveId: wave.id }).map((item) => item.taskId) }));
+}
+
+export function readTaskWaveDetailForTaskIds(waveId, taskIds = []) {
+  const visibleTaskIds = new Set(taskIds.map((id) => String(id ?? "").trim()).filter(Boolean));
+  if (visibleTaskIds.size === 0) return null;
+  const wave = getDatabase().prepare("SELECT * FROM task_waves WHERE id = @id LIMIT 1").get({ id: waveId });
+  if (wave === undefined) return null;
+  const items = getDatabase()
+    .prepare("SELECT * FROM task_wave_items WHERE waveId = @waveId AND isActive = 1 ORDER BY sortOrder, id")
+    .all({ waveId })
+    .filter((item) => visibleTaskIds.has(item.taskId))
+    .map((item) => {
+      let resultDraft = {};
+      try {
+        resultDraft = JSON.parse(item.resultDraft || "{}");
+      } catch {
+        resultDraft = {};
+      }
+      return { ...item, linkedTemplateIds: normalizeLinkedTemplateIds(item.linkedTemplateIds), resultDraft };
+    });
+  if (items.length === 0) return null;
+  return { ...wave, items };
+}
+
+const activeTaskWaveStatuses = new Set(["waiting", "doing", "pending_acceptance"]);
+
+function readActiveTaskWaveForTask(taskId) {
+  return getDatabase()
+    .prepare(
+      `SELECT tw.id, tw.businessCode, tw.status, tw.executorId
+       FROM task_wave_items twi
+       JOIN task_waves tw ON tw.id = twi.waveId
+       WHERE twi.taskId = @taskId
+         AND twi.isActive = 1
+         AND tw.status IN ('waiting', 'doing', 'pending_acceptance')
+       LIMIT 1`,
+    )
+    .get({ taskId }) ?? null;
+}
+
+function ensureTaskIsNotLockedByWave(taskId, operationName) {
+  const wave = readActiveTaskWaveForTask(taskId);
+  if (wave !== null) throw new Error(`任务已加入波次 ${wave.businessCode}，请在任务波次中${operationName}。`);
+}
+
+function readTaskWaveForOperation(database, waveId) {
+  const wave = database.prepare("SELECT * FROM task_waves WHERE id = @id LIMIT 1").get({ id: waveId });
+  if (wave === undefined) throw new Error("未找到任务波次。");
+  const items = database
+    .prepare("SELECT * FROM task_wave_items WHERE waveId = @waveId AND isActive = 1 ORDER BY sortOrder, id")
+    .all({ waveId })
+    .map((item) => {
+      let resultDraft = {};
+      try {
+        resultDraft = JSON.parse(item.resultDraft || "{}");
+      } catch {
+        resultDraft = {};
+      }
+      return { ...item, resultDraft };
+    });
+  if (items.length === 0) throw new Error("任务波次没有有效成员。");
+  const tasks = items.map((item) => {
+    const task = readExistingItem("tasks", item.taskId);
+    if (task === null) throw new Error(`波次成员任务不存在：${item.taskId}`);
+    return task;
+  });
+  return { wave, items, tasks };
+}
+
+function ensureTaskWaveOperationPermission(wave, options = {}, managementOnly = false) {
+  if (options.canManage === true) return;
+  if (managementOnly) throw new Error("你没有权限取消任务波次。");
+  if (String(options.userId ?? "") === "" || wave.executorId !== options.userId) {
+    throw new Error("只有波次执行人或任务管理人员可以执行该操作。");
+  }
+}
+
+function refreshTaskWaveStatusInTransaction(database, waveId, referenceAt = new Date().toISOString()) {
+  const wave = database.prepare("SELECT * FROM task_waves WHERE id = @id LIMIT 1").get({ id: waveId });
+  if (wave === undefined || wave.status === "canceled") return wave ?? null;
+  const statuses = database
+    .prepare(
+      `SELECT t.status
+       FROM task_wave_items twi
+       JOIN tasks t ON t.id = twi.taskId
+       WHERE twi.waveId = @waveId AND twi.isActive = 1`,
+    )
+    .all({ waveId })
+    .map((row) => row.status);
+  if (statuses.length === 0) return wave;
+  let status = wave.status;
+  if (statuses.every((item) => item === "done")) status = "done";
+  else if (statuses.some((item) => item === "doing")) status = "doing";
+  else if (statuses.some((item) => item === "pending_acceptance")) status = "pending_acceptance";
+  else if (statuses.every((item) => item === "todo")) status = "waiting";
+  const completedAt = status === "done" ? wave.completedAt ?? referenceAt : null;
+  database
+    .prepare("UPDATE task_waves SET status = @status, completedAt = @completedAt, updatedAt = @updatedAt WHERE id = @id")
+    .run({ id: waveId, status, completedAt, updatedAt: referenceAt });
+  return database.prepare("SELECT * FROM task_waves WHERE id = @id").get({ id: waveId });
+}
+
+export function refreshTaskWaveStatusForTask(taskId) {
+  const database = getDatabase();
+  const wave = readActiveTaskWaveForTask(taskId);
+  if (wave === null) return null;
+  return refreshTaskWaveStatusInTransaction(database, wave.id);
+}
+
+function normalizeTaskWaveDraft(value) {
+  const draft = value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    resultText: String(draft.resultText ?? ""),
+    submitFormData:
+      draft.submitFormData !== null && typeof draft.submitFormData === "object" && !Array.isArray(draft.submitFormData)
+        ? draft.submitFormData
+        : {},
+    submitFiles: Array.isArray(draft.submitFiles) ? draft.submitFiles : [],
+    submitLinks: Array.isArray(draft.submitLinks) ? draft.submitLinks.map((item) => String(item ?? "").trim()).filter(Boolean) : [],
+  };
+}
+
+export function startTaskWave(waveId, options = {}) {
+  const database = getDatabase();
+  return database.transaction(() => {
+    const { wave, items, tasks } = readTaskWaveForOperation(database, waveId);
+    ensureTaskWaveOperationPermission(wave, options);
+    if (wave.status !== "waiting") throw new Error("只有待执行波次可以开始。");
+    if (items.length !== Number(wave.taskCount)) throw new Error("波次成员数量已变化，不能开始。");
+    for (const task of tasks) {
+      if (task.status !== "todo") throw new Error(`${task.name} 当前不是待执行状态，波次不能开始。`);
+      if (task.executorId !== wave.executorId) throw new Error(`${task.name} 的执行人已变化，波次不能开始。`);
+    }
+    const now = new Date().toISOString();
+    for (const task of tasks) {
+      insertItem("tasks", { ...task, status: "doing", startDate: task.startDate ?? now, updatedAt: now });
+    }
+    database
+      .prepare("UPDATE task_waves SET status = 'doing', startedAt = @now, updatedAt = @now WHERE id = @id")
+      .run({ id: wave.id, now });
+    return database.prepare("SELECT * FROM task_waves WHERE id = @id").get({ id: wave.id });
+  }).immediate();
+}
+
+export function saveTaskWaveDraft(waveId, drafts = [], options = {}) {
+  const database = getDatabase();
+  return database.transaction(() => {
+    const { wave, items } = readTaskWaveForOperation(database, waveId);
+    ensureTaskWaveOperationPermission(wave, options);
+    if (!["doing", "pending_acceptance"].includes(wave.status)) throw new Error("当前波次不能保存工作结果草稿。");
+    const itemByTaskId = new Map(items.map((item) => [item.taskId, item]));
+    const now = new Date().toISOString();
+    for (const entry of Array.isArray(drafts) ? drafts : []) {
+      const taskId = String(entry?.taskId ?? "").trim();
+      if (!itemByTaskId.has(taskId)) throw new Error(`任务 ${taskId} 不属于当前波次。`);
+      database
+        .prepare("UPDATE task_wave_items SET resultDraft = @resultDraft, updatedAt = @updatedAt WHERE waveId = @waveId AND taskId = @taskId AND isActive = 1")
+        .run({ waveId, taskId, resultDraft: JSON.stringify(normalizeTaskWaveDraft(entry?.resultDraft)), updatedAt: now });
+    }
+    return { updatedAt: now, updatedCount: (Array.isArray(drafts) ? drafts : []).length };
+  }).immediate();
+}
+
+function taskWaitsForReviewStep(task) {
+  const orderedTasks = getOrderedProcessInstanceTasks(task.processInstanceId);
+  const index = orderedTasks.findIndex((item) => item.id === task.id);
+  const nextTask = orderedTasks[index + 1];
+  return nextTask?.taskType === "review" && nextTask.reviewTargetTaskId === task.id;
+}
+
+export function submitTaskWave(waveId, drafts = [], options = {}) {
+  const database = getDatabase();
+  return database.transaction(() => {
+    const { wave, items, tasks } = readTaskWaveForOperation(database, waveId);
+    ensureTaskWaveOperationPermission(wave, options);
+    if (wave.status !== "doing") throw new Error("只有执行中的波次可以提交。");
+    if (items.length !== Number(wave.taskCount)) throw new Error("波次成员数量已变化，不能提交。");
+    const incomingDrafts = new Map(
+      (Array.isArray(drafts) ? drafts : []).map((entry) => [String(entry?.taskId ?? "").trim(), normalizeTaskWaveDraft(entry?.resultDraft)]),
+    );
+    const now = new Date().toISOString();
+    const submissions = [];
+    for (let index = 0; index < tasks.length; index += 1) {
+      const task = tasks[index];
+      if (task.executorId !== wave.executorId) throw new Error(`${task.name} 的执行人已变化，波次不能提交。`);
+      if (["done", "pending_acceptance"].includes(task.status)) continue;
+      if (task.status !== "doing") throw new Error(`${task.name} 当前不是执行中状态，波次不能提交。`);
+      const draft = incomingDrafts.get(task.id) ?? normalizeTaskWaveDraft(items[index].resultDraft);
+      const candidate = {
+        ...task,
+        ...draft,
+        resultAttachments: draft.submitFiles,
+      };
+      const validationError = validateTaskSubmission(candidate);
+      if (validationError !== "") throw new Error(`${task.businessCode || task.name}：${validationError}。`);
+      submissions.push({ task, draft, candidate });
+    }
+    if (submissions.length === 0) throw new Error("当前波次没有需要重新提交的任务。");
+
+    const affectedProcessInstanceIds = new Set();
+    for (const { task, draft, candidate } of submissions) {
+      const nextStatus = task.needAcceptance || taskWaitsForReviewStep(task) ? "pending_acceptance" : "done";
+      const previousSubmission =
+        task.submittedAt
+          ? {
+              submittedAt: task.submittedAt,
+              submittedBy: task.submittedBy ?? null,
+              resultText: task.resultText ?? "",
+              resultAttachments: task.resultAttachments ?? [],
+              submitFormData: task.submitFormData ?? {},
+              submitFiles: task.submitFiles ?? [],
+              submitLinks: task.submitLinks ?? [],
+            }
+          : null;
+      const customFields = {
+        ...(task.customFields ?? {}),
+        ...(previousSubmission === null
+          ? {}
+          : {
+              submissionVersions: [
+                ...(Array.isArray(task.customFields?.submissionVersions) ? task.customFields.submissionVersions : []),
+                previousSubmission,
+              ],
+            }),
+      };
+      insertItem("tasks", {
+        ...candidate,
+        customFields,
+        submittedAt: now,
+        submittedBy: options.userId,
+        status: nextStatus,
+        completedAt: nextStatus === "done" ? now : null,
+        updatedAt: now,
+      });
+      database
+        .prepare(
+          `UPDATE task_wave_items
+           SET resultDraft = @resultDraft, updatedAt = @updatedAt, submittedAt = @submittedAt
+           WHERE waveId = @waveId AND taskId = @taskId AND isActive = 1`,
+        )
+        .run({ waveId, taskId: task.id, resultDraft: JSON.stringify(draft), updatedAt: now, submittedAt: now });
+      affectedProcessInstanceIds.add(task.processInstanceId);
+    }
+    for (const processInstanceId of affectedProcessInstanceIds) {
+      refreshProcessTaskReadinessInTransaction(processInstanceId, now);
+    }
+    const updatedWave = refreshTaskWaveStatusInTransaction(database, wave.id, now);
+    return { wave: updatedWave, submittedTaskIds: submissions.map((item) => item.task.id) };
+  }).immediate();
+}
+
+export function cancelTaskWave(waveId, cancelReason, options = {}) {
+  const database = getDatabase();
+  return database.transaction(() => {
+    const { wave, tasks } = readTaskWaveForOperation(database, waveId);
+    ensureTaskWaveOperationPermission(wave, options, true);
+    if (wave.status !== "waiting") throw new Error("只有待执行波次可以取消。");
+    const reason = String(cancelReason ?? "").trim();
+    if (reason === "") throw new Error("请填写取消原因。");
+    if (tasks.some((task) => task.status !== "todo")) throw new Error("波次成员状态已变化，不能取消。");
+    const now = new Date().toISOString();
+    database
+      .prepare("UPDATE task_waves SET status = 'canceled', canceledAt = @now, cancelReason = @reason, updatedAt = @now WHERE id = @id")
+      .run({ id: wave.id, now, reason });
+    database
+      .prepare(
+        `UPDATE task_wave_items
+         SET isActive = 0, removedAt = @now, removeReason = '波次取消', updatedAt = @now
+         WHERE waveId = @waveId AND isActive = 1`,
+      )
+      .run({ waveId, now });
+    return database.prepare("SELECT * FROM task_waves WHERE id = @id").get({ id: wave.id });
+  }).immediate();
 }
 
 const batchTaskStatuses = new Set(["done", "canceled"]);
@@ -1941,7 +2450,7 @@ function ensureBatchTaskCanBeDone(task, completedTaskIds) {
     const previousTasksDone = orderedTasks.slice(0, taskIndex).every((item) => item.status === "done" || completedTaskIds.has(item.id));
     if (!previousTasksDone) throw new Error(`${task.name}：前置步骤未完成，当前步骤暂不能处理。`);
   }
-  const submitError = validateExecutionGroupTaskSubmission(task);
+  const submitError = validateTaskSubmission(task);
   if (submitError !== "") throw new Error(`${task.name}：${submitError}。`);
 }
 
@@ -1967,6 +2476,7 @@ export function batchUpdateTaskStatus(payload = {}) {
     for (const selectedTask of sortedTasks) {
       let task = readExistingItem("tasks", selectedTask.id);
       if (task === null) throw new Error(`未找到任务：${selectedTask.id}`);
+      ensureTaskIsNotLockedByWave(task.id, status === "done" ? "完成任务" : "取消任务");
       if (status === "done") {
         ensureBatchTaskCanBeDone(task, completedTaskIds);
         if (task.status === "done") {
@@ -2008,172 +2518,9 @@ export function batchUpdateTaskStatus(payload = {}) {
       updatedAt: now,
     };
   });
-  return updateBatch();
-}
-
-export function createExecutionGroup(payload = {}) {
-  const database = getDatabase();
-  const createGroup = database.transaction(() => {
-    const tasksToGroup = validateExecutionGroupTasks(payload.taskIds);
-    const taskIds = tasksToGroup.map((task) => task.id);
-    const standardWorkId = getTaskStandardWorkId(tasksToGroup[0]);
-    const standardWork = readExistingItem("taskTemplates", standardWorkId);
-    const executorId = tasksToGroup[0].executorId;
-    const ownerId = tasksToGroup[0].ownerId;
-    const now = new Date().toISOString();
-    const standardTotalMinutes = tasksToGroup.reduce((total, task) => total + getTaskDurationMinutes(task), 0);
-    const processInstanceIds = [...new Set(tasksToGroup.map((task) => task.processInstanceId).filter(Boolean))];
-    const group = {
-      id: payload.id || `execution-group-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      name: String(payload.name ?? "").trim() || `执行组：${standardWork?.name ?? "关键行动"} - ${now.slice(0, 10)}`,
-      taskIds,
-      taskTemplateId: standardWorkId,
-      standardWorkId,
-      processInstanceIds,
-      ownerId,
-      executorId,
-      status: "created",
-      standardTotalMinutes,
-      startedAt: null,
-      endedAt: null,
-      actualTotalMinutes: null,
-      savedMinutes: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-    insertItem("executionGroups", group);
-    updateExecutionGroupTaskLinks(taskIds, group.id);
-    return group;
-  });
-  return createGroup();
-}
-
-export function startExecutionGroup(groupId) {
-  const database = getDatabase();
-  const startGroup = database.transaction(() => {
-    const group = readExistingItem("executionGroups", groupId);
-    if (group === null) throw new Error("未找到执行组。");
-    if (group.status !== "created") throw new Error("只有已创建的执行组可以开始执行。");
-    const now = new Date().toISOString();
-    const updatedGroup = { ...group, status: "doing", startedAt: now, updatedAt: now };
-    insertItem("executionGroups", updatedGroup);
-    return updatedGroup;
-  });
-  return startGroup();
-}
-
-export function cancelExecutionGroup(groupId) {
-  const database = getDatabase();
-  const cancelGroup = database.transaction(() => {
-    const group = readExistingItem("executionGroups", groupId);
-    if (group === null) throw new Error("未找到执行组。");
-    if (group.status === "done") throw new Error("已完成的执行组不能取消。");
-    if (group.status === "canceled") return group;
-    const now = new Date().toISOString();
-    const updatedGroup = { ...group, status: "canceled", updatedAt: now };
-    insertItem("executionGroups", updatedGroup);
-    updateExecutionGroupTaskLinks(group.taskIds ?? [], null);
-    return updatedGroup;
-  });
-  return cancelGroup();
-}
-
-export function completeExecutionGroup(groupId, payload = {}) {
-  const database = getDatabase();
-  const completeGroup = database.transaction(() => {
-    const group = readExistingItem("executionGroups", groupId);
-    if (group === null) throw new Error("未找到执行组。");
-    if (group.status === "done") return group;
-    if (group.status === "canceled") throw new Error("已取消的执行组不能完成。");
-    if (group.status !== "doing") throw new Error("只有执行中的执行组可以完成。");
-    if (group.startedAt === null || group.startedAt === undefined || group.startedAt === "") throw new Error("执行组尚未记录开始时间，不能完成。");
-
-    const taskIds = Array.isArray(group.taskIds) ? group.taskIds : [];
-    if (taskIds.length < 2) throw new Error("执行组成员任务不足，不能完成。");
-
-    const linkedTasks = readResource("tasks").filter((task) => task.executionGroupId === group.id);
-    const linkedTaskIds = new Set(linkedTasks.map((task) => task.id));
-    const groupTaskIds = new Set(taskIds);
-    const mismatchedTaskIds = [
-      ...taskIds.filter((taskId) => !linkedTaskIds.has(taskId)),
-      ...linkedTasks.map((task) => task.id).filter((taskId) => !groupTaskIds.has(taskId)),
-    ];
-    if (mismatchedTaskIds.length > 0) throw new Error(`执行组成员关联不一致：${[...new Set(mismatchedTaskIds)].join("、")}`);
-
-    const tasksInGroup = taskIds.map((taskId) => readExistingItem("tasks", taskId));
-    const missingTaskIds = taskIds.filter((_taskId, index) => tasksInGroup[index] === null);
-    if (missingTaskIds.length > 0) throw new Error(`未找到执行组成员任务：${missingTaskIds.join("、")}`);
-
-    const standardWorkIds = new Set(tasksInGroup.map(getTaskStandardWorkId).filter(Boolean));
-    if (standardWorkIds.size !== 1) throw new Error("执行组成员不再属于同一关键行动，不能完成。");
-    const ownerIds = new Set(tasksInGroup.map((task) => task.ownerId).filter(Boolean));
-    if (ownerIds.size !== 1 || ownerIds.values().next().value !== group.ownerId) throw new Error("执行组成员负责人不一致，不能完成。");
-    const executorIds = new Set(tasksInGroup.map((task) => task.executorId).filter(Boolean));
-    if (executorIds.size !== 1 || executorIds.values().next().value !== group.executorId) throw new Error("执行组成员执行人不一致，不能完成。");
-
-    const standardTotalMinutes = tasksInGroup.reduce((total, task) => total + getTaskDurationMinutes(task), 0);
-    if (standardTotalMinutes <= 0) throw new Error("执行组成员缺少有效规定时长，不能完成。");
-
-    const endedAt = payload.endedAt || new Date().toISOString();
-    const actualTotalMinutes = Math.max(0, Math.round((new Date(endedAt).getTime() - new Date(group.startedAt).getTime()) / 60000));
-    const completedTaskIds = new Set(tasksInGroup.filter((task) => task.status === "done").map((task) => task.id));
-    const sortedTasks = [...tasksInGroup].sort((left, right) => {
-      const leftInstance = left.processInstanceId ?? "";
-      const rightInstance = right.processInstanceId ?? "";
-      if (leftInstance !== rightInstance) return leftInstance.localeCompare(rightInstance);
-      const leftNode = left.processNodeId ? readExistingItem("processTemplateNodes", left.processNodeId) : null;
-      const rightNode = right.processNodeId ? readExistingItem("processTemplateNodes", right.processNodeId) : null;
-      const stepDifference = getProcessNodeStepOrder(leftNode ?? left) - getProcessNodeStepOrder(rightNode ?? right);
-      if (stepDifference !== 0) return stepDifference;
-      return String(left.createdAt ?? "").localeCompare(String(right.createdAt ?? ""));
-    });
-    const affectedProcessInstanceIds = new Set(sortedTasks.map((task) => task.processInstanceId).filter(Boolean));
-
-    for (const selectedTask of sortedTasks) {
-      let task = readExistingItem("tasks", selectedTask.id);
-      ensureExecutionGroupTaskCanComplete(task, completedTaskIds, groupTaskIds);
-      if (task.status === "done" || task.status === "pending_acceptance") continue;
-      if (task.status === "waiting") {
-        const orderedTasks = getOrderedProcessInstanceTasks(task.processInstanceId);
-        const taskIndex = orderedTasks.findIndex((item) => item.id === task.id);
-        const previousTask = orderedTasks[taskIndex - 1];
-        task = activateWaitingProcessTaskInTransaction(task, previousTask?.completedAt ?? endedAt);
-      }
-
-      const requirement = getTaskSubmitRequirement(task);
-      const shouldMarkSubmitted = requirement.submitType !== "none";
-      const nextStatus = task.needAcceptance ? "pending_acceptance" : "done";
-      const updatedTask = markTaskOverdueOnce({
-        ...task,
-        status: nextStatus,
-        submittedAt: shouldMarkSubmitted ? task.submittedAt ?? endedAt : task.submittedAt,
-        submittedBy: shouldMarkSubmitted ? task.submittedBy ?? task.ownerId : task.submittedBy,
-        completedAt: nextStatus === "done" ? endedAt : null,
-        updatedAt: endedAt,
-      });
-      insertItem("tasks", updatedTask);
-      if (updatedTask.status === "done") {
-        completedTaskIds.add(updatedTask.id);
-      }
-    }
-
-    for (const processInstanceId of affectedProcessInstanceIds) {
-      refreshProcessTaskReadinessInTransaction(processInstanceId, endedAt);
-    }
-
-    const updatedGroup = {
-      ...group,
-      status: "done",
-      endedAt,
-      standardTotalMinutes,
-      actualTotalMinutes,
-      savedMinutes: standardTotalMinutes - actualTotalMinutes,
-      updatedAt: endedAt,
-    };
-    insertItem("executionGroups", updatedGroup);
-    return updatedGroup;
-  });
-  return completeGroup();
+  const result = updateBatch();
+  generateEligibleTaskWaves();
+  return result;
 }
 
 export function moveTaskTemplateToValueChain(templateId, categoryName = "", categoryId = "", valueChainId = "") {
@@ -2471,18 +2818,28 @@ export function launchWorkPlanWithProcess(
       ? readExistingItem("processTemplateNodes", task.processNodeId)
       : null;
     const configuredExecutorId = String(processNode?.executorId ?? "").trim();
+    const fixedOwnerId =
+      String(processNode?.ownerId ?? "").trim() ||
+      (processNode?.ownerRule === "fixed_person" ? String(processNode?.defaultOwnerId ?? "").trim() : "");
     const executorId =
       configuredExecutorId === "initiator"
         ? trustedInitiatorId
-        : configuredExecutorId || task.executorId;
+        : configuredExecutorId || String(task.executorId ?? "").trim() || fixedOwnerId;
     if (executorId === "initiator") {
       throw new Error(`标准步骤“${task.name ?? ""}”的同发起人执行规则解析失败。`);
+    }
+    if ((task.taskType ?? "execution") === "execution") {
+      const executor = executorId === "" ? null : readExistingItem("people", executorId);
+      if (executor === null || executor.status === "inactive") {
+        throw new Error(`标准步骤“${task.name ?? ""}”未能解析有效执行人，请先完善步骤配置。`);
+      }
     }
     return {
       ...task,
       executorId,
       initiatorId: trustedInitiatorId,
       status: index === 0 ? "todo" : "waiting",
+      readyAt: index === 0 ? now : null,
       startDate: null,
       dueDate: null,
       plannedWeek: null,
@@ -2535,6 +2892,7 @@ export function launchWorkPlanWithProcess(
     replaceActionProductsInTransaction(nextProcessInstance.id, productIds, now);
   });
   launch();
+  generateEligibleTaskWaves();
 
   return { instance: nextProcessInstance, workPlan: nextWorkPlan, tasks: nextTasks };
 }
@@ -2689,6 +3047,10 @@ export function batchLaunchWorkPlans(rows = [], { userId = "" } = {}) {
 export function createResource(routeResource, item) {
   const resourceKey = routeResourceMap[routeResource];
   if (resourceKey === undefined) throw new Error(`Unknown resource: ${routeResource}`);
+  if (resourceKey === "processTemplateNodes") item = normalizeAndValidateProcessTemplateNodeWave(item);
+  if (resourceKey === "tasks" && item?.status === "todo" && !item?.readyAt) {
+    item = { ...item, readyAt: item.createdAt ?? new Date().toISOString() };
+  }
   if (resourceKey === "permissionTemplates") {
     const name = String(item.name ?? "").trim();
     if (name === "") throw new Error("权限模板名称不能为空。");
@@ -2732,6 +3094,7 @@ export function createResource(routeResource, item) {
       : item;
   validatePersonPermissionTemplate(nextItem, resourceKey);
   insertItem(resourceKey, nextItem);
+  if (resourceKey === "processTemplateNodes" || resourceKey === "tasks") generateEligibleTaskWaves();
   return nextItem;
 }
 
@@ -2739,6 +3102,15 @@ export function updateResource(routeResource, id, item) {
   const resourceKey = routeResourceMap[routeResource];
   if (resourceKey === undefined) throw new Error(`Unknown resource: ${routeResource}`);
   const mergedItem = mergeExistingItem(resourceKey, id, item);
+  if (resourceKey === "tasks") {
+    const existingTask = readExistingItem("tasks", id);
+    const protectedFields = ["executorId", "processNodeId", "processInstanceId", "status"];
+    const changesProtectedField = protectedFields.some(
+      (field) => Object.prototype.hasOwnProperty.call(item ?? {}, field) && item[field] !== existingTask?.[field],
+    );
+    if (changesProtectedField) ensureTaskIsNotLockedByWave(id, "处理该任务");
+  }
+  if (resourceKey === "processTemplateNodes") Object.assign(mergedItem, normalizeAndValidateProcessTemplateNodeWave(mergedItem));
   if (resourceKey === "taskTemplates") {
     const existing = readExistingItem(resourceKey, id);
     if (existing === null) throw new Error("行动标准不存在。");
@@ -2757,11 +3129,32 @@ export function updateResource(routeResource, id, item) {
   validatePersonPermissionTemplate(mergedItem, resourceKey);
   const preservedItem = mergePreservedCustomFields(resourceKey, id, mergedItem);
   const nextItem = resourceKey === "tasks" ? markTaskOverdueOnce(preservedItem) : preservedItem;
+  if (resourceKey === "tasks" && nextItem.status === "todo" && !nextItem.readyAt) {
+    nextItem.readyAt = nextItem.createdAt ?? new Date().toISOString();
+  }
   insertItem(resourceKey, nextItem);
+  if (resourceKey === "processTemplateNodes" || resourceKey === "tasks") generateEligibleTaskWaves();
   return nextItem;
 }
 
 const productStatuses = new Set(["开发中", "待上架", "在售", "停售", "清仓", "已归档"]);
+
+function normalizeAndValidateProcessTemplateNodeWave(item) {
+  const stepType = item?.stepType === "review" ? "review" : "execution";
+  const waveEnabled = stepType === "execution" && (item?.waveEnabled === true || item?.waveEnabled === 1 || item?.waveEnabled === "1");
+  const rawWaveSize = item?.waveSize === null || item?.waveSize === undefined || item?.waveSize === "" ? 10 : Number(item.waveSize);
+  const waveSizeIsValid = Number.isInteger(rawWaveSize) && rawWaveSize >= 2 && rawWaveSize <= 100;
+  if (waveEnabled && !waveSizeIsValid) {
+    throw new Error("一个波次任务数必须是 2—100 的整数。");
+  }
+  return {
+    ...item,
+    stepType,
+    waveEnabled,
+    waveSize: waveSizeIsValid ? rawWaveSize : 10,
+    waveTemplatePriority: item?.waveTemplatePriority === false || item?.waveTemplatePriority === 0 || item?.waveTemplatePriority === "0" ? false : true,
+  };
+}
 
 function normalizeAndValidateProduct(item, existingId = "") {
   const skuCode = String(item?.skuCode ?? "").trim();
@@ -2948,6 +3341,8 @@ const taskWorkflowTransitions = {
   cancel: { from: new Set(["waiting", "todo", "doing", "pending_acceptance"]), to: new Set(["canceled"]) },
   restore: { from: new Set(["canceled"]), to: new Set(["todo"]) },
   return: { from: new Set(["todo", "doing", "pending_acceptance", "done"]), to: new Set(["waiting", "todo"]) },
+  review_approve: { from: new Set(["todo", "doing"]), to: new Set(["done"]) },
+  review_reject: { from: new Set(["todo", "doing"]), to: new Set(["waiting"]) },
 };
 
 export function updateTaskFromWorkflow(taskId, action, patch = {}) {
@@ -2955,12 +3350,27 @@ export function updateTaskFromWorkflow(taskId, action, patch = {}) {
   if (existing === null) throw new Error("未找到任务。");
   const transition = taskWorkflowTransitions[action];
   if (transition === undefined) throw new Error("未知的任务流程动作。");
+  if (["start", "submit", "cancel", "restore"].includes(action)) {
+    ensureTaskIsNotLockedByWave(taskId, action === "start" ? "开始执行" : action === "submit" ? "提交结果" : "处理该任务");
+  }
   if (action === "activate") {
     const instance = readExistingItem("processInstances", existing.processInstanceId);
     if (instance === null || instance.status !== "running") throw new Error("所属关键行动尚未进入执行中。");
     const orderedTasks = getOrderedProcessInstanceTasks(existing.processInstanceId);
     const taskIndex = orderedTasks.findIndex((task) => task.id === existing.id);
-    if (taskIndex < 0 || !orderedTasks.slice(0, taskIndex).every((task) => task.status === "done")) {
+    const previousTasksReady =
+      taskIndex >= 0 &&
+      orderedTasks.slice(0, taskIndex).every((task) => {
+        if (
+          existing.taskType === "review" &&
+          task.id === existing.reviewTargetTaskId &&
+          task.status === "pending_acceptance"
+        ) {
+          return true;
+        }
+        return task.status === "done";
+      });
+    if (!previousTasksReady) {
       throw new Error("前置步骤尚未完成，当前任务不能激活。");
     }
   }
@@ -2971,7 +3381,10 @@ export function updateTaskFromWorkflow(taskId, action, patch = {}) {
   const mergedItem = mergeExistingItem("tasks", taskId, patch);
   const preservedItem = mergePreservedCustomFields("tasks", taskId, mergedItem);
   const nextItem = markTaskOverdueOnce(preservedItem);
+  if (nextItem.status === "todo" && !nextItem.readyAt) nextItem.readyAt = new Date().toISOString();
   insertItem("tasks", nextItem);
+  refreshTaskWaveStatusForTask(taskId);
+  generateEligibleTaskWaves();
   return nextItem;
 }
 

@@ -84,6 +84,7 @@ const moduleHashMap = {
   methods: "processes",
   settings: "settings",
   "task-list": "tasks",
+  "task-waves": "tasks",
   clearance: "tasks",
   "process-progress": "tasks",
   "task-library": "processes",

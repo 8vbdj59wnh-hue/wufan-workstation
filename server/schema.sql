@@ -169,6 +169,7 @@ CREATE TABLE IF NOT EXISTS task_templates (
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
   businessCode TEXT UNIQUE,
+  taskType TEXT NOT NULL DEFAULT 'execution',
   name TEXT NOT NULL,
   goalId TEXT NOT NULL,
   taskTemplateId TEXT,
@@ -185,6 +186,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   reviewStandard TEXT,
   outputRequirement TEXT,
   startDate TEXT,
+  readyAt TEXT,
   dueDate TEXT,
   plannedWeek TEXT,
   needAcceptance INTEGER NOT NULL DEFAULT 0,
@@ -205,6 +207,14 @@ CREATE TABLE IF NOT EXISTS tasks (
   submittedBy TEXT,
   cancelReason TEXT,
   executionGroupId TEXT,
+  reviewTargetTaskId TEXT,
+  reviewTargetSnapshot TEXT,
+  returnToNodeId TEXT,
+  reviewStatus TEXT,
+  reviewComment TEXT,
+  reviewedAt TEXT,
+  reviewerId TEXT,
+  requireRejectionReason INTEGER NOT NULL DEFAULT 0,
   createdAt TEXT,
   updatedAt TEXT,
   completedAt TEXT
@@ -229,6 +239,49 @@ CREATE TABLE IF NOT EXISTS execution_groups (
   updatedAt TEXT
 );
 
+CREATE TABLE IF NOT EXISTS task_waves (
+  id TEXT PRIMARY KEY,
+  businessCode TEXT NOT NULL UNIQUE,
+  taskTemplateId TEXT NOT NULL,
+  processTemplateId TEXT NOT NULL,
+  processNodeId TEXT NOT NULL,
+  executorId TEXT NOT NULL,
+  templateGroupKey TEXT NOT NULL,
+  waveType TEXT NOT NULL,
+  taskCount INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'waiting',
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  startedAt TEXT,
+  completedAt TEXT,
+  canceledAt TEXT,
+  cancelReason TEXT
+);
+
+CREATE TABLE IF NOT EXISTS task_wave_items (
+  id TEXT PRIMARY KEY,
+  waveId TEXT NOT NULL,
+  taskId TEXT NOT NULL,
+  processInstanceId TEXT NOT NULL,
+  linkedTemplateIds TEXT NOT NULL DEFAULT '[]',
+  primaryTemplateId TEXT,
+  sortOrder INTEGER NOT NULL,
+  joinedAt TEXT NOT NULL,
+  removedAt TEXT,
+  removeReason TEXT,
+  isActive INTEGER NOT NULL DEFAULT 1,
+  resultDraft TEXT NOT NULL DEFAULT '{}',
+  updatedAt TEXT,
+  submittedAt TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_waves_process_node ON task_waves(processNodeId);
+CREATE INDEX IF NOT EXISTS idx_task_waves_executor ON task_waves(executorId);
+CREATE INDEX IF NOT EXISTS idx_task_waves_status ON task_waves(status);
+CREATE INDEX IF NOT EXISTS idx_task_wave_items_wave ON task_wave_items(waveId);
+CREATE INDEX IF NOT EXISTS idx_task_wave_items_task ON task_wave_items(taskId);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_task_wave_items_active_task ON task_wave_items(taskId) WHERE isActive = 1;
+
 CREATE TABLE IF NOT EXISTS process_templates (
   id TEXT PRIMARY KEY,
   businessCode TEXT UNIQUE,
@@ -249,6 +302,7 @@ CREATE TABLE IF NOT EXISTS process_templates (
 CREATE TABLE IF NOT EXISTS process_template_nodes (
   id TEXT PRIMARY KEY,
   templateId TEXT NOT NULL,
+  stepType TEXT NOT NULL DEFAULT 'execution',
   stepOrder INTEGER,
   departmentId TEXT,
   ownerId TEXT,
@@ -277,6 +331,13 @@ CREATE TABLE IF NOT EXISTS process_template_nodes (
   submitFields TEXT,
   requireFile INTEGER NOT NULL DEFAULT 0,
   requireLink INTEGER NOT NULL DEFAULT 0,
+  reviewerId TEXT,
+  reviewTargetType TEXT,
+  returnToNodeId TEXT,
+  requireRejectionReason INTEGER NOT NULL DEFAULT 0,
+  waveEnabled INTEGER NOT NULL DEFAULT 0,
+  waveSize INTEGER NOT NULL DEFAULT 10,
+  waveTemplatePriority INTEGER NOT NULL DEFAULT 1,
   status TEXT NOT NULL,
   createdAt TEXT,
   updatedAt TEXT

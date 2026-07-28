@@ -9,10 +9,8 @@ import {
   createResource,
   batchLinkProcessInstanceTemplates,
   batchUpdateTaskStatus,
-  cancelExecutionGroup,
+  cancelTaskWave,
   cancelProcessInstance,
-  completeExecutionGroup,
-  createExecutionGroup,
   createProductImportBatch,
   commitProductImportBatch,
   databasePath,
@@ -20,6 +18,7 @@ import {
   deleteProcessTemplateNode,
   findLoginUser,
   findLoginUserById,
+  generateEligibleTaskWaves,
   getDatabase,
   getPublicUser,
   initializeDatabase,
@@ -29,13 +28,17 @@ import {
   readAllData,
   readProductImportBatch,
   readRouteResource,
+  readTaskWaveDetailForTaskIds,
+  readTaskWavesForTaskIds,
+  saveTaskWaveDraft,
+  startTaskWave,
+  submitTaskWave,
   replaceActionProducts,
   replaceAllData,
   touchLastLoginAt,
   updateCurrentUserAvatar,
   updateProductImportBatch,
   startProcessInstanceExecution,
-  startExecutionGroup,
   updateProcessTemplateNodeStatus,
   updateResource,
   updateTaskFromWorkflow,
@@ -399,10 +402,6 @@ function filterDataByScope(data, user) {
   }
 
   const scopedTasks = filterByScope(data.tasks ?? [], user);
-  const scopedTaskIds = new Set(scopedTasks.map((task) => task.id));
-  const scopedExecutionGroups = (data.executionGroups ?? []).filter((group) =>
-    (Array.isArray(group.taskIds) ? group.taskIds : []).some((taskId) => scopedTaskIds.has(taskId)),
-  );
   const scopedWorkPlans = filterByScope(data.workPlans ?? [], user);
   const scopedProcessInstances = filterByScope(data.processInstances ?? [], user);
   const scopedProcessInstanceIds = new Set(scopedProcessInstances.map((instance) => instance.id));
@@ -426,7 +425,6 @@ function filterDataByScope(data, user) {
     permissionTemplates,
     goals: scopedGoals,
     tasks: scopedTasks,
-    executionGroups: scopedExecutionGroups,
     processInstances: scopedProcessInstances,
     products,
     productImportBatches,
@@ -453,7 +451,6 @@ function getResourceWritePermission(resource, method, body = {}) {
     if (body.status !== undefined) return "tasks.changeStatus";
     return "tasks.changeStatus";
   }
-  if (resource === "execution-groups") return "tasks.batchComplete";
   if (resource === "task-templates") {
     if (body.formFields !== undefined) return "settings.editStandardWorkForms";
     return "settings.editStandardWorks";
@@ -1178,46 +1175,6 @@ app.post(
   },
 );
 
-app.post("/api/execution-groups/create", requirePermission("tasks.batchComplete"), (request, response) => {
-  try {
-    createExecutionGroup(request.body ?? {});
-    response.json({ success: true, data: filterDataByScope(readAllData(), request.user) });
-  } catch (error) {
-    console.error("执行组创建失败", error);
-    response.status(400).json({ success: false, message: error.message || "执行组创建失败，请检查本地数据库服务。" });
-  }
-});
-
-app.post("/api/execution-groups/:id/start", requirePermission("tasks.batchComplete"), (request, response) => {
-  try {
-    startExecutionGroup(request.params.id);
-    response.json({ success: true, data: filterDataByScope(readAllData(), request.user) });
-  } catch (error) {
-    console.error("执行组开始失败", error);
-    response.status(400).json({ success: false, message: error.message || "执行组开始失败，请检查本地数据库服务。" });
-  }
-});
-
-app.post("/api/execution-groups/:id/cancel", requirePermission("tasks.batchComplete"), (request, response) => {
-  try {
-    cancelExecutionGroup(request.params.id);
-    response.json({ success: true, data: filterDataByScope(readAllData(), request.user) });
-  } catch (error) {
-    console.error("执行组取消失败", error);
-    response.status(400).json({ success: false, message: error.message || "执行组取消失败，请检查本地数据库服务。" });
-  }
-});
-
-app.post("/api/execution-groups/:id/complete", requirePermission("tasks.batchComplete"), (request, response) => {
-  try {
-    completeExecutionGroup(request.params.id, request.body ?? {});
-    response.json({ success: true, data: filterDataByScope(readAllData(), request.user) });
-  } catch (error) {
-    console.error("执行组完成失败", error);
-    response.status(400).json({ success: false, message: error.message || "执行组完成失败，请检查本地数据库服务。" });
-  }
-});
-
 app.post("/api/tasks/batch-status", (request, response) => {
   const status = String(request.body?.status ?? "").trim();
   const permission = status === "canceled" ? "tasks.batchCancel" : "tasks.batchComplete";
@@ -1247,6 +1204,109 @@ app.post("/api/tasks/:id/workflow", (request, response) => {
   } catch (error) {
     console.error("任务流程操作失败", error);
     response.status(400).json({ success: false, message: error.message || "任务流程操作失败，请检查本地数据库服务。" });
+  }
+});
+
+function getVisibleTaskIds(user) {
+  return filterByScope(readAllData().tasks ?? [], user).map((task) => task.id);
+}
+
+app.get("/api/task-waves", (request, response) => {
+  if (!hasPermission(request.user, "tasks.view")) {
+    response.status(403).json({ success: false, message: "你没有权限查看任务波次。" });
+    return;
+  }
+  response.json(readTaskWavesForTaskIds(getVisibleTaskIds(request.user)));
+});
+
+app.get("/api/task-waves/:id", (request, response) => {
+  if (!hasPermission(request.user, "tasks.view")) {
+    response.status(403).json({ success: false, message: "你没有权限查看任务波次。" });
+    return;
+  }
+  const wave = readTaskWaveDetailForTaskIds(request.params.id, getVisibleTaskIds(request.user));
+  if (wave === null) {
+    response.status(404).json({ success: false, message: "未找到可查看的任务波次。" });
+    return;
+  }
+  response.json(wave);
+});
+
+function getTaskWaveOperationContext(request, managementOnly = false) {
+  const wave = readTaskWaveDetailForTaskIds(request.params.id, getVisibleTaskIds(request.user));
+  if (wave === null || wave.items.length !== Number(wave.taskCount)) {
+    throw new Error("未找到可操作的任务波次，或波次包含超出当前数据范围的任务。");
+  }
+  const userId = getUserPersonId(request.user);
+  const canManage =
+    isAdminUser(request.user) ||
+    hasPermission(request.user, "tasks.batchCancel") ||
+    (managementOnly === false && hasPermission(request.user, "tasks.changeStatus") && wave.executorId !== userId);
+  return { wave, options: { userId, canManage } };
+}
+
+app.post("/api/task-waves/:id/start", (request, response) => {
+  if (!hasPermission(request.user, "tasks.changeStatus")) {
+    response.status(403).json({ success: false, message: "你没有权限开始任务波次。" });
+    return;
+  }
+  try {
+    const { options } = getTaskWaveOperationContext(request);
+    response.json({ success: true, wave: startTaskWave(request.params.id, options) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "任务波次开始失败。" });
+  }
+});
+
+app.put("/api/task-waves/:id/draft", (request, response) => {
+  if (!hasPermission(request.user, "tasks.submitResult")) {
+    response.status(403).json({ success: false, message: "你没有权限保存任务波次结果。" });
+    return;
+  }
+  try {
+    const { options } = getTaskWaveOperationContext(request);
+    response.json({ success: true, result: saveTaskWaveDraft(request.params.id, request.body?.drafts ?? [], options) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "任务波次草稿保存失败。" });
+  }
+});
+
+app.post("/api/task-waves/:id/submit", (request, response) => {
+  if (!hasPermission(request.user, "tasks.submitResult")) {
+    response.status(403).json({ success: false, message: "你没有权限提交任务波次。" });
+    return;
+  }
+  try {
+    const { options } = getTaskWaveOperationContext(request);
+    response.json({ success: true, result: submitTaskWave(request.params.id, request.body?.drafts ?? [], options) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "任务波次提交失败。" });
+  }
+});
+
+app.post("/api/task-waves/:id/cancel", (request, response) => {
+  if (!isAdminUser(request.user) && !hasPermission(request.user, "tasks.batchCancel")) {
+    response.status(403).json({ success: false, message: "你没有权限取消任务波次。" });
+    return;
+  }
+  try {
+    const { options } = getTaskWaveOperationContext(request, true);
+    response.json({ success: true, wave: cancelTaskWave(request.params.id, request.body?.cancelReason ?? "", { ...options, canManage: true }) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "任务波次取消失败。" });
+  }
+});
+
+app.post("/api/task-waves/generate", (request, response) => {
+  if (!isAdminUser(request.user) && !hasPermission(request.user, "processes.editSteps")) {
+    response.status(403).json({ success: false, message: "你没有权限执行任务波次补扫。" });
+    return;
+  }
+  try {
+    response.json({ success: true, result: generateEligibleTaskWaves() });
+  } catch (error) {
+    console.error("任务波次补扫失败", error);
+    response.status(400).json({ success: false, message: error.message || "任务波次补扫失败。" });
   }
 });
 

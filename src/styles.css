@@ -3570,19 +3570,6 @@ button.content-template-thumb {
   padding: 0 8px;
 }
 
-.task-execution-group-badge {
-  display: inline-flex;
-  align-items: center;
-  max-width: 100%;
-  margin-top: 4px;
-  padding: 2px 6px;
-  border-radius: 999px;
-  background: #eef4ff;
-  color: #31558f;
-  font-size: 12px;
-  line-height: 1.4;
-}
-
 .status-pill.is-todo {
   background: #f3f4f6;
   border-color: #e5e7eb;
@@ -4358,6 +4345,55 @@ button.content-template-thumb {
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+
+.process-step-type,
+.task-type-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: #f1f5f9;
+  padding: 2px 7px;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.process-step-type.is-review,
+.task-type-badge {
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.process-step-type-picker {
+  display: flex;
+  gap: 18px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.process-step-type-picker legend {
+  padding: 0 4px;
+  color: #374151;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.process-step-type-picker label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.review-decision-form {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid #e5e7eb;
+  margin-top: 16px;
+  padding-top: 16px;
 }
 
 .process-node-header strong {
@@ -8585,4 +8621,102 @@ button.content-template-thumb {
 .content-note-import-products summary {
   color: var(--accent, #5f6f52);
   cursor: pointer;
+}
+.task-wave-status-tabs,
+.task-wave-card-meta,
+.task-wave-fixed-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.task-wave-status-tabs {
+  margin-bottom: 18px;
+}
+
+.task-wave-status-tabs button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  padding: 8px 4px;
+  color: var(--muted-text, #6b7280);
+  cursor: pointer;
+}
+
+.task-wave-status-tabs button.is-active {
+  border-bottom-color: currentColor;
+  color: var(--text-color, #111827);
+}
+
+.task-wave-list,
+.task-wave-members {
+  display: grid;
+  gap: 14px;
+}
+
+.task-wave-card,
+.task-wave-member {
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 14px;
+  background: var(--panel-background, #fff);
+  padding: 16px;
+}
+
+.task-wave-card {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(280px, 1.4fr) auto;
+  gap: 18px;
+  align-items: center;
+}
+
+.task-wave-card h3,
+.task-wave-member h3 {
+  margin: 5px 0;
+}
+
+.task-wave-card p {
+  margin: 0;
+  color: var(--muted-text, #6b7280);
+}
+
+.task-wave-member-heading {
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  gap: 14px;
+  align-items: center;
+}
+
+.task-wave-result-fields {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.task-wave-result-fields label,
+.task-wave-cancel-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.task-wave-fixed-actions {
+  position: sticky;
+  bottom: 0;
+  justify-content: flex-end;
+  margin-top: 18px;
+  padding: 12px;
+  border-top: 1px solid var(--border-color, #e5e7eb);
+  background: var(--panel-background, #fff);
+}
+
+.task-wave-link {
+  display: block;
+  margin-top: 4px;
+  padding: 0;
+}
+
+@media (max-width: 900px) {
+  .task-wave-card {
+    grid-template-columns: 1fr;
+  }
 }

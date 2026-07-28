@@ -3,7 +3,6 @@ import {
   companies as initialCompanies,
   contentSchedules as initialContentSchedules,
   departments as initialDepartments,
-  executionGroups as initialExecutionGroups,
   goals as initialGoals,
   people as initialPeople,
   publishingAccounts as initialPublishingAccounts,
@@ -74,7 +73,6 @@ export const state = {
   publishingAccounts: initialPublishingAccounts.map((account) => ({ ...account })),
   goals: initialGoals.map((goal) => ({ ...goal })),
   tasks: initialTasks.map((task) => ({ ...task })),
-  executionGroups: initialExecutionGroups.map((group) => ({ ...group })),
   taskTemplates: initialTaskTemplates.map((template) => ({ ...template })),
   contentSchedules: initialContentSchedules.map((schedule) => ({ ...schedule })),
   processTemplates: initialProcessTemplates.map((template) => ({ ...template })),
@@ -101,6 +99,8 @@ export const state = {
   salesLinkSkus: [],
   erpImportBatches: [],
   platformSkuManualBindings: [],
+  taskWaves: [],
+  taskWaveDetails: {},
 };
 
 export const defaultCompanySlogan = "做对的事，把事做对。\n尊重时间，尊重经营。";
@@ -187,7 +187,6 @@ export function getDataSnapshot() {
     goals: state.goals,
     taskTemplates: state.taskTemplates,
     tasks: state.tasks,
-    executionGroups: state.executionGroups,
     processTemplates: state.processTemplates,
     processTemplateNodes: state.processTemplateNodes,
     processInstances: state.processInstances,
@@ -229,7 +228,6 @@ export function applyDataSnapshot(data) {
   replaceArray(state.goals, data.goals);
   replaceArray(state.taskTemplates, data.taskTemplates);
   replaceArray(state.tasks, data.tasks);
-  replaceArray(state.executionGroups, data.executionGroups ?? initialExecutionGroups);
   replaceArray(state.processTemplates, data.processTemplates);
   replaceArray(
     state.processTemplateNodes,
@@ -270,6 +268,7 @@ export async function loadPersistentData() {
     const response = await authFetch(`${apiBaseUrl}/api/data`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     applyDataSnapshot(await response.json());
+    await loadTaskWaves();
     persistenceAvailable = true;
     loadedFromDatabase = true;
     persistenceStatus = {
@@ -285,6 +284,57 @@ export async function loadPersistentData() {
     };
     throw new Error(`数据库数据加载失败：${error.message ?? "无法连接本地数据库服务"}`);
   }
+}
+
+export async function loadTaskWaves() {
+  const response = await authFetch(`${apiBaseUrl}/api/task-waves`);
+  const data = await response.json().catch(() => []);
+  if (response.status === 403) {
+    replaceArray(state.taskWaves, []);
+    return state.taskWaves;
+  }
+  if (!response.ok) throw new Error(data.message ?? data.error ?? "任务波次读取失败。");
+  replaceArray(state.taskWaves, Array.isArray(data) ? data : []);
+  return state.taskWaves;
+}
+
+export async function loadTaskWaveDetail(waveId) {
+  const response = await authFetch(`${apiBaseUrl}/api/task-waves/${waveId}`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.message ?? data.error ?? "任务波次详情读取失败。");
+  state.taskWaveDetails = { ...state.taskWaveDetails, [waveId]: data };
+  return data;
+}
+
+async function runTaskWaveAction(waveId, action, body = {}, method = "POST") {
+  const response = await authFetch(`${apiBaseUrl}/api/task-waves/${waveId}/${action}`, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success !== true) throw new Error(data.message ?? data.error ?? "任务波次操作失败。");
+  await loadTaskWaves();
+  await loadTaskWaveDetail(waveId).catch(() => null);
+  const snapshotResponse = await authFetch(`${apiBaseUrl}/api/data`);
+  if (snapshotResponse.ok) applyDataSnapshot(await snapshotResponse.json());
+  return data;
+}
+
+export function startTaskWave(waveId) {
+  return runTaskWaveAction(waveId, "start");
+}
+
+export function saveTaskWaveDraft(waveId, drafts) {
+  return runTaskWaveAction(waveId, "draft", { drafts }, "PUT");
+}
+
+export function submitTaskWave(waveId, drafts) {
+  return runTaskWaveAction(waveId, "submit", { drafts });
+}
+
+export function cancelTaskWave(waveId, cancelReason) {
+  return runTaskWaveAction(waveId, "cancel", { cancelReason });
 }
 
 export function getPersistenceWarning() {
@@ -554,36 +604,6 @@ export async function updateTaskWorkflow(taskId, action, item) {
     throw new Error(data.message ?? data.error ?? "任务流程操作失败，请检查本地数据库服务。");
   }
   return data.task;
-}
-
-async function postExecutionGroupAction(path, payload = {}) {
-  const response = await authFetch(`${apiBaseUrl}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok || data.success !== true) {
-    throw new Error(data.message ?? data.error ?? "执行组保存失败，请检查本地数据库服务。");
-  }
-  if (data.data !== undefined) applyDataSnapshot(data.data);
-  return data.data;
-}
-
-export async function createExecutionGroup(payload) {
-  return postExecutionGroupAction("/api/execution-groups/create", payload);
-}
-
-export async function startExecutionGroup(groupId) {
-  return postExecutionGroupAction(`/api/execution-groups/${groupId}/start`);
-}
-
-export async function cancelExecutionGroup(groupId) {
-  return postExecutionGroupAction(`/api/execution-groups/${groupId}/cancel`);
-}
-
-export async function completeExecutionGroup(groupId, payload) {
-  return postExecutionGroupAction(`/api/execution-groups/${groupId}/complete`, payload);
 }
 
 export async function batchUpdateTaskStatus(taskIds, status) {
@@ -2039,7 +2059,19 @@ export function startProcess({
   }
 
   for (const node of nodes) {
-    const ownerId = resolveOwner(node, resolvedInitiatorId, launchAssignments);
+    const isReviewStep = (node.stepType ?? "execution") === "review";
+    const ownerId = isReviewStep ? normalizeOptionalId(node.reviewerId) : resolveOwner(node, resolvedInitiatorId, launchAssignments);
+    if (isReviewStep && node.id === nodes[0].id) return { error: "审核步骤不能作为流程第一步。" };
+    if (
+      isReviewStep &&
+      !nodes.some(
+        (candidate) =>
+          (candidate.stepType ?? "execution") === "execution" &&
+          getProcessNodeStepOrder(candidate) < getProcessNodeStepOrder(node),
+      )
+    ) {
+      return { error: `审核步骤“${node.name}”之前必须存在执行步骤。` };
+    }
     if (ownerId === null) return { error: `标准步骤“${node.name}”无法解析负责人。` };
   }
 
@@ -2065,12 +2097,20 @@ export function startProcess({
     displayTitle,
     coverImageUrl: primaryCoverImageUrl,
   };
-  const generatedTasks = nodes.map((node, index) => {
+  const generatedTasks = [];
+  nodes.forEach((node, index) => {
     const activeNow = index === 0;
-    const submitRequirement = normalizeSubmitRequirement(node);
-    const ownerId = resolveOwner(node, resolvedInitiatorId, launchAssignments);
-    return {
+    const taskType = (node.stepType ?? "execution") === "review" ? "review" : "execution";
+    const submitRequirement = taskType === "review"
+      ? { submitType: "none", submitDescription: "", submitFields: [] }
+      : normalizeSubmitRequirement(node);
+    const ownerId = taskType === "review"
+      ? normalizeOptionalId(node.reviewerId)
+      : resolveOwner(node, resolvedInitiatorId, launchAssignments);
+    const previousExecutionTask = [...generatedTasks].reverse().find((task) => task.taskType === "execution") ?? null;
+    generatedTasks.push({
       id: createId("task"),
+      taskType,
       name: node.name,
       goalId,
       source: TaskSource.Process,
@@ -2079,7 +2119,7 @@ export function startProcess({
       categoryId: null,
       departmentId: node.departmentId ?? node.ownerDepartmentId ?? template.applicableDepartmentIds[0],
       ownerId,
-      executorId: resolveExecutor(node, ownerId, resolvedInitiatorId),
+      executorId: taskType === "review" ? ownerId : resolveExecutor(node, ownerId, resolvedInitiatorId),
       initiatorId: resolvedInitiatorId,
       description: node.description,
       completionStandard: node.completionStandard,
@@ -2105,10 +2145,18 @@ export function startProcess({
       customFields: {},
       displayTitle: null,
       coverImageUrl: primaryCoverImageUrl,
+      reviewTargetTaskId: taskType === "review" ? previousExecutionTask?.id ?? null : null,
+      reviewTargetSnapshot: null,
+      returnToNodeId: taskType === "review" ? node.returnToNodeId ?? previousExecutionTask?.processNodeId ?? null : null,
+      reviewStatus: taskType === "review" ? "pending" : null,
+      reviewComment: null,
+      reviewedAt: null,
+      reviewerId: taskType === "review" ? ownerId : null,
+      requireRejectionReason: taskType === "review" ? Boolean(node.requireRejectionReason) : false,
       createdAt: now,
       updatedAt: now,
       completedAt: null,
-    };
+    });
   });
 
   state.processInstances = [instance, ...state.processInstances];
@@ -2485,16 +2533,47 @@ function isRectificationProcessInstance(instance) {
 
 function arePreviousProcessTasksDone(orderedTasks, taskIndex) {
   if (taskIndex < 0) return false;
-  return orderedTasks.slice(0, taskIndex).every((item) => item.status === TaskStatus.Done);
+  const currentTask = orderedTasks[taskIndex];
+  return orderedTasks.slice(0, taskIndex).every((item) => {
+    if (
+      currentTask?.taskType === "review" &&
+      item.id === currentTask.reviewTargetTaskId &&
+      item.status === TaskStatus.PendingAcceptance
+    ) {
+      return true;
+    }
+    return item.status === TaskStatus.Done;
+  });
 }
 
 async function activateWaitingProcessTask(task, startAt = getBusinessMinuteNow()) {
   const now = getNow();
   const startDate = String(startAt ?? "").slice(0, 10) || now.slice(0, 10);
   const node = state.processTemplateNodes.find((candidate) => candidate.id === task.processNodeId);
+  const reviewTarget =
+    task.taskType === "review"
+      ? state.tasks.find((candidate) => candidate.id === task.reviewTargetTaskId) ?? null
+      : null;
+  const reviewTargetSnapshot =
+    reviewTarget === null
+      ? task.reviewTargetSnapshot ?? null
+      : {
+          taskId: reviewTarget.id,
+          taskName: reviewTarget.name,
+          submittedAt: reviewTarget.submittedAt ?? null,
+          submittedBy: reviewTarget.submittedBy ?? null,
+          resultText: reviewTarget.resultText ?? "",
+          resultAttachments: reviewTarget.resultAttachments ?? [],
+          submitFormData: reviewTarget.submitFormData ?? {},
+          submitFiles: reviewTarget.submitFiles ?? [],
+          submitLinks: reviewTarget.submitLinks ?? [],
+        };
   const updatedTask = {
     ...task,
     status: TaskStatus.Todo,
+    ...(task.taskType === "review"
+      ? { reviewStatus: "pending", reviewComment: null, reviewedAt: null, reviewTargetSnapshot }
+      : {}),
     startDate: startAt,
     dueDate: addMinutesToBusinessDateTime(startAt, getProcessNodeDurationMinutes(node)),
     plannedWeek: task.plannedWeek ?? getCurrentWeek(new Date(`${startDate}T00:00:00+08:00`)),
@@ -2510,7 +2589,18 @@ export async function refreshProcessTaskReadiness(processInstanceId) {
   if (instance === undefined || instance.status !== ProcessInstanceStatus.Running) return null;
 
   const orderedTasks = getOrderedProcessInstanceTasks(instance.id);
-  const nextTask = orderedTasks.find((item) => item.status !== TaskStatus.Done);
+  let nextTask = orderedTasks.find((item) => item.status !== TaskStatus.Done);
+  if (nextTask?.status === TaskStatus.PendingAcceptance) {
+    const targetIndex = orderedTasks.findIndex((item) => item.id === nextTask.id);
+    const reviewTask = orderedTasks[targetIndex + 1];
+    if (
+      reviewTask?.taskType === "review" &&
+      reviewTask.reviewTargetTaskId === nextTask.id &&
+      reviewTask.status !== TaskStatus.Done
+    ) {
+      nextTask = reviewTask;
+    }
+  }
 
   if (nextTask !== undefined) {
     const nextIndex = orderedTasks.findIndex((item) => item.id === nextTask.id);

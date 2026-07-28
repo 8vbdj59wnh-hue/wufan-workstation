@@ -2,9 +2,6 @@ import {
   advanceProcessAfterTaskDone,
   batchUpdateTaskStatus as batchUpdateTaskStatusResource,
   cancelProcessInstance,
-  cancelExecutionGroup as cancelExecutionGroupResource,
-  completeExecutionGroup as completeExecutionGroupResource,
-  createExecutionGroup as createExecutionGroupResource,
   createPersistentResource,
   createId,
   ensureTaskReadyForExecution,
@@ -19,13 +16,19 @@ import {
   getRectificationSubmitFields,
   launchWorkPlanDraftAsProcess,
   launchRectificationWorkForSource,
+  loadTaskWaveDetail,
+  loadTaskWaves,
   loadTemplates,
   normalizeSubmitRequirement,
   recordRectificationTriggerFailure,
+  refreshProcessTaskReadiness,
   resolveAssetUrl,
+  saveTaskWaveDraft,
   sortProcessNodes,
-  startExecutionGroup as startExecutionGroupResource,
   state,
+  startTaskWave,
+  submitTaskWave,
+  cancelTaskWave,
   updatePersistentResource,
   updateTaskWorkflow,
   uploadGenericFile,
@@ -175,6 +178,10 @@ let taskListView = "mine";
 let taskDisplayView = "card";
 let visualTemplatesLoaded = state.templates.length > 0;
 let visualTemplatesLoading = false;
+let selectedTaskWaveId = null;
+let taskWaveStatus = "waiting";
+let taskWaveLoading = false;
+let taskWaveError = "";
 
 const templateTagCategories = [
   { id: "brand", label: "品牌" },
@@ -214,6 +221,7 @@ const taskListViewOptions = [
 const taskTabHashMap = {
   tasks: "task-list",
   "task-list": "task-list",
+  "task-waves": "task-waves",
   clearance: "clearance",
   "process-progress": "process-progress",
 };
@@ -276,25 +284,7 @@ function resolvePersonId(value) {
 }
 
 function getTaskExecutorId(task) {
-  const customFields = task.customFields && typeof task.customFields === "object" ? task.customFields : {};
-  const node = task.processNodeId === undefined || task.processNodeId === null ? null : state.processTemplateNodes.find((item) => item.id === task.processNodeId) ?? null;
-  const candidates = [
-    task.executorId,
-    task.assigneeId,
-    task.executor,
-    task.assignee,
-    customFields.executorId,
-    customFields.assigneeId,
-    customFields.executorName,
-    customFields.assigneeName,
-    node?.executorId,
-  ];
-
-  for (const candidate of candidates) {
-    const personId = resolvePersonId(candidate);
-    if (personId !== "") return personId;
-  }
-  return "";
+  return String(task?.executorId ?? "").trim();
 }
 
 function createEmptyTemplateTags() {
@@ -1520,7 +1510,13 @@ function getTaskStatusClass(status) {
 
 function renderTaskStatus(task) {
   const businessStatus = getTaskBusinessStatus(task);
-  const label = isDoneStatus(task.status) && hasTaskOverdueRecord(task) ? "已完成（超时）" : businessStatus.label;
+  const reviewStatusLabels = { pending: "待审核", approved: "已通过", rejected: "已驳回" };
+  const label =
+    task.taskType === "review"
+      ? reviewStatusLabels[task.reviewStatus] ?? (task.status === TaskStatus.Done ? "已通过" : "待审核")
+      : isDoneStatus(task.status) && hasTaskOverdueRecord(task)
+        ? "已完成（超时）"
+        : businessStatus.label;
   return `<span class="status-pill ${getTaskStatusClass(task.status)}">${escapeHtml(label)}</span>`;
 }
 
@@ -1532,105 +1528,19 @@ function getTaskProjectDueDateText(task) {
   return formatBusinessDateTime(instance.dueDate, "-");
 }
 
-function getTaskStandardWorkId(task) {
-  const instance = getTaskProcessInstance(task);
-  return instance?.taskTemplateId ?? instance?.standardWorkId ?? task.taskTemplateId ?? task.standardWorkId ?? "";
-}
-
-function getTaskStandardDurationMinutes(task) {
-  const node = getProcessNode(task);
-  const durationMinutes = Number(node?.durationMinutes);
-  if (Number.isFinite(durationMinutes) && durationMinutes > 0) return Math.round(durationMinutes);
-  const durationDays = Number(node?.durationDays);
-  if (Number.isFinite(durationDays) && durationDays > 0) return Math.round(durationDays * 1440);
-  return 0;
-}
-
-function parseExecutionGroupTime(value) {
-  if (value === null || value === undefined || value === "") return null;
-  const normalized = String(value).includes("T") ? String(value) : `${String(value).slice(0, 10)}T00:00:00+08:00`;
-  const timestamp = new Date(normalized).getTime();
-  return Number.isFinite(timestamp) ? timestamp : null;
-}
-
-function getExecutionGroupById(groupId) {
-  if (groupId === null || groupId === undefined || groupId === "") return null;
-  return state.executionGroups.find((group) => group.id === groupId) ?? null;
-}
-
-function getTaskExecutionGroup(task) {
-  return getExecutionGroupById(task.executionGroupId);
-}
-
-function getExecutionGroupTasks(group) {
-  const taskIds = Array.isArray(group?.taskIds) ? group.taskIds : [];
-  return taskIds.map(getTask).filter(Boolean);
-}
-
-function getExecutionGroupActualMinutes(group, endedAt = getNow()) {
-  const startTime = parseExecutionGroupTime(group?.startedAt);
-  const endTime = parseExecutionGroupTime(endedAt);
-  if (startTime === null || endTime === null || endTime < startTime) return 0;
-  return Math.max(0, Math.round((endTime - startTime) / 60000));
-}
-
-function validateExecutionGroupTasks(tasks) {
-  if (tasks.length < 2) return "请至少勾选 2 个任务创建执行组。";
-  const invalidStatusTasks = tasks.filter((task) => isDoneStatus(task.status) || isCanceledStatus(task.status));
-  if (invalidStatusTasks.length > 0) return `已完成或已取消的任务不能加入执行组：${invalidStatusTasks.map((task) => task.name).join("、")}`;
-
-  const standardWorkIds = new Set(tasks.map(getTaskStandardWorkId).filter(Boolean));
-  if (standardWorkIds.size !== 1) return "只有同一关键行动下的任务才能创建执行组。";
-
-  const ownerIds = new Set(tasks.map((task) => task.ownerId).filter(Boolean));
-  if (ownerIds.size !== 1) return "只有同一负责人的任务才能创建执行组。";
-
-  const executorIds = new Set(tasks.map(getTaskExecutorId).filter(Boolean));
-  if (executorIds.size !== 1) return "只有同一执行人的任务才能创建执行组。";
-
-  const groupedTasks = tasks.filter((task) => String(task.executionGroupId ?? "").trim() !== "");
-  if (groupedTasks.length > 0) return `任务已加入执行组，不能重复加入：${groupedTasks.map((task) => task.name).join("、")}`;
-
-  const missingDurationTasks = tasks.filter((task) => getTaskStandardDurationMinutes(task) <= 0);
-  if (missingDurationTasks.length > 0) return `以下任务缺少有效规定时长：${missingDurationTasks.map((task) => task.name).join("、")}`;
-
-  return "";
-}
-
-function sortExecutionGroupTasks(tasks) {
-  return [...tasks].sort((left, right) => {
-    const leftInstance = left.processInstanceId ?? "";
-    const rightInstance = right.processInstanceId ?? "";
-    if (leftInstance !== rightInstance) return leftInstance.localeCompare(rightInstance);
-    const stepDifference = getProcessNodeStepOrder(getProcessNode(left) ?? left) - getProcessNodeStepOrder(getProcessNode(right) ?? right);
-    if (stepDifference !== 0) return stepDifference;
-    return String(left.createdAt ?? "").localeCompare(String(right.createdAt ?? ""));
-  });
-}
-
-function buildExecutionGroupName(tasks) {
-  const firstTask = tasks[0];
-  const standardWorkName = getTaskBelonging(firstTask).standardWorkName;
-  const executorName = findName(people, getTaskExecutorId(firstTask), "未设置执行人");
-  return `执行组：${standardWorkName} - ${executorName} - ${getTodayDateInShanghai()}`;
-}
-
-function renderExecutionGroupBadge(task) {
-  const group = getTaskExecutionGroup(task);
-  if (group === null) return "";
-  return `
-    <button class="text-button task-execution-group-badge" type="button" data-action="view-execution-group" data-execution-group-id="${escapeHtml(group.id)}">
-      ${escapeHtml(group.name)}
-    </button>
-  `;
+function getActiveTaskWave(taskId) {
+  return state.taskWaves.find(
+    (wave) => ["waiting", "doing", "pending_acceptance"].includes(wave.status) && wave.taskIds?.includes(taskId),
+  ) ?? null;
 }
 
 function renderTaskRow(task, index) {
+  const activeWave = getActiveTaskWave(task.id);
   return `
     <tr class="${task.id === selectedTaskId ? "is-selected" : ""}" data-row-task-id="${task.id}">
       <td class="task-select-column">
         <label class="task-row-select">
-          <input type="checkbox" data-task-row-select data-task-id="${task.id}" ${selectedTaskIds.has(task.id) ? "checked" : ""} />
+          <input type="checkbox" data-task-row-select data-task-id="${task.id}" ${selectedTaskIds.has(task.id) ? "checked" : ""} ${activeWave ? "disabled" : ""} />
           <span>${index + 1}</span>
         </label>
       </td>
@@ -1638,9 +1548,10 @@ function renderTaskRow(task, index) {
       <td class="task-belonging-column">${renderTaskBelonging(task)}</td>
       <td class="task-name-column">
         <span class="task-line-clamp task-name-text">${escapeHtml(task.name)}</span>
-        ${renderExecutionGroupBadge(task)}
+        ${task.taskType === "review" ? `<span class="task-type-badge">审核</span>` : ""}
+        ${activeWave ? `<button class="text-button task-wave-link" type="button" data-action="view-task-wave" data-wave-id="${escapeHtml(activeWave.id)}">${escapeHtml(activeWave.businessCode)}</button>` : ""}
       </td>
-      <td class="task-executor-column">${findName(people, getTaskExecutorId(task), "未设置")}</td>
+      <td class="task-executor-column">${findName(people, getTaskExecutorId(task), "未指定")}</td>
       <td class="task-date-column">${formatBusinessMinuteDateTime(task.dueDate)}</td>
       <td class="task-date-column">${getTaskProjectDueDateText(task)}</td>
       <td class="task-status-column">${renderTaskStatus(task)}</td>
@@ -1650,10 +1561,11 @@ function renderTaskRow(task, index) {
       <td class="task-actions-column">
         <span class="row-actions">
           ${renderActionButton("查看任务详情", "view-task", task.id)}
-          ${canReturnTask(task) ? renderActionButton("退回重做", "return-task", task.id) : ""}
-          ${canEditTask(task) ? renderActionButton("编辑", "edit-task", task.id) : ""}
-          ${canCancelTask(task) ? renderActionButton("取消", "cancel-task", task.id, "danger-button") : ""}
-          ${canRestoreTask(task) ? renderActionButton("恢复为待处理", "restore-task", task.id) : ""}
+          ${activeWave ? `<button class="text-button" type="button" data-action="view-task-wave" data-wave-id="${escapeHtml(activeWave.id)}">查看波次</button>` : ""}
+          ${!activeWave && canReturnTask(task) ? renderActionButton("退回重做", "return-task", task.id) : ""}
+          ${!activeWave && canEditTask(task) ? renderActionButton("编辑", "edit-task", task.id) : ""}
+          ${!activeWave && canCancelTask(task) ? renderActionButton("取消", "cancel-task", task.id, "danger-button") : ""}
+          ${!activeWave && canRestoreTask(task) ? renderActionButton("恢复为待处理", "restore-task", task.id) : ""}
         </span>
       </td>
     </tr>
@@ -1691,7 +1603,24 @@ function canActivateWaitingProcessTask(task) {
   if (processTasks === null) return false;
   const currentIndex = processTasks.findIndex((item) => item.id === task.id);
   if (currentIndex < 0) return false;
-  return processTasks.slice(0, currentIndex).every((item) => isDoneStatus(item.status));
+  return processTasks.slice(0, currentIndex).every((item) => {
+    if (task.taskType === "review" && item.id === task.reviewTargetTaskId && item.status === TaskStatus.PendingAcceptance) {
+      return true;
+    }
+    return isDoneStatus(item.status);
+  });
+}
+
+function getNextProcessTask(task) {
+  const processTasks = getOrderedActiveProcessTasks(task);
+  if (processTasks === null) return null;
+  const currentIndex = processTasks.findIndex((item) => item.id === task.id);
+  return currentIndex < 0 ? null : processTasks[currentIndex + 1] ?? null;
+}
+
+function isExecutionAwaitingReview(task) {
+  const nextTask = getNextProcessTask(task);
+  return task.taskType !== "review" && nextTask?.taskType === "review" && nextTask.reviewTargetTaskId === task.id;
 }
 
 function getReturnableProcessTasks(task) {
@@ -2880,7 +2809,14 @@ function renderClearanceImportModal() {
 }
 
 function getVisibleTaskIdsFromRows(rows) {
-  return rows.map((row) => row.task.id);
+  return rows
+    .map((row) => row.task.id)
+    .filter(
+      (taskId) =>
+        !state.taskWaves.some(
+          (wave) => ["waiting", "doing", "pending_acceptance"].includes(wave.status) && wave.taskIds?.includes(taskId),
+        ),
+    );
 }
 
 function getProcessProgress(processInstanceId) {
@@ -3171,7 +3107,6 @@ function renderTaskTable() {
       <div class="bulk-task-bar">
         <strong>已选择 ${selectedCount} 条任务</strong>
         <span class="row-actions">
-          <button class="text-button" type="button" data-action="create-execution-group" ${selectedCount < 2 ? "disabled" : ""}>创建执行组</button>
           <button class="text-button" type="button" data-action="bulk-complete" ${selectedCount === 0 ? "disabled" : ""}>批量完成</button>
           <button class="text-button danger-button" type="button" data-action="bulk-cancel" ${selectedCount === 0 ? "disabled" : ""}>批量取消</button>
         </span>
@@ -3231,6 +3166,15 @@ function getTaskRemainingText(task) {
 }
 
 function renderTaskCardWorkflowAction(task) {
+  const activeWave = getActiveTaskWave(task.id);
+  if (activeWave !== null) {
+    return `<button class="text-button" type="button" data-action="view-task-wave" data-wave-id="${escapeHtml(activeWave.id)}">所属波次：${escapeHtml(activeWave.businessCode)}</button>`;
+  }
+  if (task.taskType === "review") {
+    return (task.reviewStatus ?? "pending") === "pending"
+      ? renderActionButton("审核", "view-task", task.id, "primary-button")
+      : "";
+  }
   const businessStatus = getTaskBusinessStatus(task);
   if (businessStatus.technicalStatus === TaskStatus.Todo) {
     return canCurrentUser("tasks.changeStatus")
@@ -3251,7 +3195,7 @@ function renderTaskCardWorkflowAction(task) {
 function renderTaskCardExecutor(task) {
   const executorId = getTaskExecutorId(task);
   const executor = people.find((person) => person.id === executorId) ?? null;
-  const executorName = executor?.name || "未设置执行人";
+  const executorName = executor?.name || "未指定";
   const avatarUrl = executor?.avatarUrl ? resolveAssetUrl(executor.avatarUrl) : "";
   const avatarInitial = Array.from(executorName.trim())[0] || "未";
 
@@ -3280,6 +3224,7 @@ function renderTaskCard(task) {
       <div class="task-card-body">
         <div class="task-card-title-row">
           <h3>${escapeHtml(task.name)}</h3>
+          ${task.taskType === "review" ? `<span class="task-type-badge">审核</span>` : ""}
         </div>
         <p class="task-card-action-title">${escapeHtml(actionName)}</p>
         <div class="task-card-status-row">
@@ -3614,7 +3559,7 @@ function renderCurrentTaskSection(task) {
       <div class="detail-grid">
         ${renderDetailField("任务编号", escapeHtml(task.businessCode ?? "未编号"))}
         ${renderDetailField("任务名称", escapeHtml(task.name))}
-        ${renderDetailField("执行人", findName(people, task.executorId ?? task.ownerId, "未设置"))}
+        ${renderDetailField("执行人", findName(people, getTaskExecutorId(task), "未指定"))}
         ${renderDetailField("剩余时间", escapeHtml(remaining.label))}
         ${renderDetailField("状态", getTaskBusinessStatus(task).label)}
       </div>
@@ -3660,6 +3605,10 @@ function renderReturnRecordsContent(task) {
 
 function renderStatusActions(task) {
   if (!canCurrentUser("tasks.changeStatus")) return "";
+  const activeWave = getActiveTaskWave(task.id);
+  if (activeWave !== null) {
+    return `<button class="text-button" type="button" data-action="view-task-wave" data-wave-id="${escapeHtml(activeWave.id)}">所属波次：${escapeHtml(activeWave.businessCode)}</button>`;
+  }
   const returnAction = canReturnTask(task) ? renderActionButton("退回重做", "return-task", task.id) : "";
   if (task.status === TaskStatus.Waiting) {
     if (canActivateWaitingProcessTask(task)) {
@@ -4016,111 +3965,71 @@ function renderTaskTemplatePicker() {
   `;
 }
 
-function renderExecutionGroupTaskList(tasks) {
-  return `
-    <div class="table-wrap">
-      <table class="data-table">
-        <thead>
-          <tr><th>任务</th><th>负责人</th><th>执行人</th><th>状态</th><th>规定时长</th></tr>
-        </thead>
-        <tbody>
-          ${tasks.map((task) => `
-            <tr>
-              <td>${escapeHtml(task.name)}</td>
-              <td>${findName(people, task.ownerId, "未设置")}</td>
-              <td>${findName(people, getTaskExecutorId(task), "未设置")}</td>
-              <td>${getTaskBusinessStatus(task).label}</td>
-              <td>${getTaskStandardDurationMinutes(task)} 分钟</td>
-            </tr>
-          `).join("")}
-        </tbody>
-      </table>
-    </div>
-  `;
+function getReviewTargetTask(task) {
+  return task?.reviewTargetTaskId ? getTask(task.reviewTargetTaskId) : null;
 }
 
-function renderExecutionGroupCreateModal() {
-  if (modalState?.kind !== "executionGroupCreate") return "";
-  const tasks = modalState.taskIds.map(getTask).filter(Boolean);
-  const standardTotalMinutes = tasks.reduce((total, task) => total + getTaskStandardDurationMinutes(task), 0);
-  const firstTask = tasks[0] ?? null;
-  const belonging = firstTask === null ? null : getTaskBelonging(firstTask);
+function renderReviewTaskDetail(task) {
+  const targetTask = getReviewTargetTask(task);
+  const instance = getTaskProcessInstance(task);
+  const canDecide =
+    canCurrentUser("tasks.changeStatus") &&
+    [TaskStatus.Todo, TaskStatus.Doing].includes(task.status) &&
+    (task.reviewStatus ?? "pending") === "pending";
+  const targetFiles = getTaskSubmittedFiles(targetTask);
+
   return `
-    <div class="modal-backdrop"><div class="modal-panel wide-modal">
-      <div class="modal-header">
+    <section class="settings-section task-detail review-task-detail">
+      <div class="section-heading with-actions task-action-heading">
         <div>
-          <h2>创建执行组</h2>
-          <p class="form-note">执行组代表一次真实共同执行过程，成员任务仍然独立存在。</p>
+          <h2>审核任务</h2>
+          <p class="form-note">${escapeHtml(task.name)}</p>
         </div>
-        <button class="icon-button" type="button" data-action="close-task-modal" aria-label="关闭">×</button>
+        ${renderTaskStatus(task)}
       </div>
-      ${modalState.error ? `<div class="form-error">${escapeHtml(modalState.error)}</div>` : ""}
-      <label>
-        <span>执行组名称</span>
-        <input name="executionGroupName" value="${escapeHtml(modalState.name ?? buildExecutionGroupName(tasks))}" autocomplete="off" />
-      </label>
       <div class="detail-grid">
-        ${renderDetailField("关键行动", escapeHtml(belonging?.standardWorkName ?? "-"))}
-        ${renderDetailField("负责人", escapeHtml(findName(people, firstTask?.ownerId, "-")))}
-        ${renderDetailField("执行人", escapeHtml(findName(people, firstTask === null ? "" : getTaskExecutorId(firstTask), "-")))}
-        ${renderDetailField("成员任务数量", `${tasks.length}`)}
-        ${renderDetailField("标准总时长", `${standardTotalMinutes} 分钟`)}
+        ${renderDetailField("审核事项", escapeHtml(task.name))}
+        ${renderDetailField("所属关键行动", escapeHtml(instance?.displayTitle ?? instance?.name ?? "未设置"))}
+        ${renderDetailField("提交人", escapeHtml(findName(people, targetTask?.submittedBy, "未记录")))}
+        ${renderDetailField("提交时间", escapeHtml(targetTask?.submittedAt ?? "未提交"))}
+        ${renderDetailField("上一步执行任务", escapeHtml(targetTask?.name ?? "未找到"))}
+        ${renderDetailField("审核截止时间", escapeHtml(formatBusinessMinuteDateTime(task.dueDate)))}
       </div>
-      ${renderExecutionGroupTaskList(tasks)}
-      <div class="modal-actions">
-        <button class="secondary-button" type="button" data-action="close-task-modal">取消</button>
-        <button class="primary-button" type="button" data-action="confirm-create-execution-group">确认创建</button>
-      </div>
-    </div></div>
-  `;
-}
-
-function getExecutionGroupStatusText(status) {
-  return {
-    created: "已创建",
-    doing: "执行中",
-    done: "已完成",
-    canceled: "已取消",
-  }[status] ?? status ?? "-";
-}
-
-function renderExecutionGroupDetailModal() {
-  if (modalState?.kind !== "executionGroupDetail") return "";
-  const group = getExecutionGroupById(modalState.groupId);
-  if (group === null) return "";
-  const tasks = getExecutionGroupTasks(group);
-  const actualMinutes = group.actualTotalMinutes ?? (group.status === "doing" ? getExecutionGroupActualMinutes(group) : null);
-  const savedMinutes = actualMinutes === null ? group.savedMinutes : (Number(group.standardTotalMinutes) || 0) - actualMinutes;
-  return `
-    <div class="modal-backdrop"><div class="modal-panel wide-modal">
-      <div class="modal-header">
-        <div>
-          <h2>${escapeHtml(group.name)}</h2>
-          <p class="form-note">状态：${escapeHtml(getExecutionGroupStatusText(group.status))}</p>
+      <div class="detail-block">
+        <h3>工作结果</h3>
+        <p>${escapeHtml(targetTask?.resultText ?? "暂无")}</p>
+        ${renderSubmittedFormDataRows(targetTask)}
+        <p>提交链接：${renderSubmittedLinks(targetTask)}</p>
+        <div class="submit-file-preview">
+          <p>工作附件：</p>
+          ${renderAttachmentPreviewList(targetFiles, "暂无附件")}
         </div>
-        <button class="icon-button" type="button" data-action="close-task-modal" aria-label="关闭">×</button>
       </div>
-      ${modalState.error ? `<div class="form-error">${escapeHtml(modalState.error)}</div>` : ""}
-      <div class="detail-grid">
-        ${renderDetailField("关键行动", escapeHtml(getTaskTemplate(group.taskTemplateId ?? group.standardWorkId)?.name ?? "-"))}
-        ${renderDetailField("负责人", escapeHtml(findName(people, group.ownerId, "-")))}
-        ${renderDetailField("执行人", escapeHtml(findName(people, group.executorId, "-")))}
-        ${renderDetailField("标准总时长", `${group.standardTotalMinutes ?? 0} 分钟`)}
-        ${renderDetailField("开始时间", escapeHtml(formatBusinessMinuteDateTime(group.startedAt, "未开始")))}
-        ${renderDetailField("结束时间", escapeHtml(formatBusinessMinuteDateTime(group.endedAt, "未完成")))}
-        ${renderDetailField("实际总时长", actualMinutes === null ? "未记录" : `${actualMinutes} 分钟`)}
-        ${renderDetailField("节约时间", savedMinutes === null || savedMinutes === undefined ? "未记录" : `${savedMinutes} 分钟`)}
-      </div>
-      <h3>包含任务</h3>
-      ${renderExecutionGroupTaskList(tasks)}
-      <div class="modal-actions">
-        <button class="secondary-button" type="button" data-action="close-task-modal">关闭</button>
-        ${group.status === "created" ? `<button class="secondary-button" type="button" data-action="cancel-execution-group" data-execution-group-id="${escapeHtml(group.id)}">取消执行组</button>` : ""}
-        ${group.status === "created" ? `<button class="primary-button" type="button" data-action="start-execution-group" data-execution-group-id="${escapeHtml(group.id)}">开始执行</button>` : ""}
-        ${group.status === "doing" ? `<button class="secondary-button" type="button" data-action="cancel-execution-group" data-execution-group-id="${escapeHtml(group.id)}">取消执行组</button>` : ""}
-        ${group.status === "doing" ? `<button class="primary-button" type="button" data-action="complete-execution-group" data-execution-group-id="${escapeHtml(group.id)}">完成执行组</button>` : ""}
-      </div>
-    </div></div>
+      ${
+        canDecide
+          ? `
+            <form class="review-decision-form" data-review-task-id="${escapeAttribute(task.id)}">
+              <div class="form-error" ${modalState?.error ? "" : "hidden"}>${escapeHtml(modalState?.error ?? "")}</div>
+              <label>
+                <span>审核意见${task.requireRejectionReason ? "（不通过时必填）" : "（可选）"}</span>
+                <textarea name="reviewComment" rows="4">${escapeHtml(task.reviewComment ?? "")}</textarea>
+              </label>
+              <div class="modal-actions">
+                <button class="secondary-button danger-button" type="submit" name="reviewDecision" value="reject">不通过</button>
+                <button class="primary-button" type="submit" name="reviewDecision" value="approve">通过</button>
+              </div>
+            </form>
+          `
+          : `
+            <div class="detail-block">
+              <h3>审核记录</h3>
+              <p>审核意见：${escapeHtml(task.reviewComment ?? "未填写")}</p>
+              <p>审核人：${escapeHtml(findName(people, task.reviewerId, "未记录"))}</p>
+              <p>审核时间：${escapeHtml(task.reviewedAt ?? "未审核")}</p>
+            </div>
+          `
+      }
+    </section>
   `;
 }
 
@@ -4141,6 +4050,7 @@ function renderTaskDetail() {
       </section>
     `;
   }
+  if (selectedTask.taskType === "review") return renderReviewTaskDetail(selectedTask);
 
   const actionContext = getTaskActionContext(selectedTask);
 
@@ -4414,7 +4324,7 @@ function renderTaskModal() {
                   </label>
                   <label>
                     <span>执行人</span>
-                    <select name="executorId">${renderOptions(people, getTaskExecutorId(effectiveTask), "请选择执行人")}</select>
+                    <select name="executorId">${renderOptions(people, getTaskExecutorId(effectiveTask), "未指定")}</select>
                   </label>
                 </div>
               `
@@ -4946,9 +4856,10 @@ async function saveResult(form, rerender) {
   if (submitError !== "") return setModalError(submitError, rerender);
 
   const now = getNow();
+  const waitsForReview = modalState.action === "submit-done" && isExecutionAwaitingReview(task);
   const nextStatus =
     modalState.action === "submit-done"
-      ? TaskStatus.Done
+      ? waitsForReview ? TaskStatus.PendingAcceptance : TaskStatus.Done
       : modalState.action === "submit-acceptance"
         ? TaskStatus.PendingAcceptance
         : task.status;
@@ -4960,6 +4871,21 @@ async function saveResult(form, rerender) {
         : null;
   const resultAttachments = submitFiles;
   const nextCustomFields = task.customFields && typeof task.customFields === "object" ? { ...task.customFields } : {};
+  if (task.submittedAt) {
+    const previousSubmission = {
+      submittedAt: task.submittedAt,
+      submittedBy: task.submittedBy ?? null,
+      resultText: task.resultText ?? "",
+      resultAttachments: task.resultAttachments ?? [],
+      submitFormData: task.submitFormData ?? {},
+      submitFiles: task.submitFiles ?? [],
+      submitLinks: task.submitLinks ?? [],
+    };
+    nextCustomFields.submissionVersions = [
+      ...(Array.isArray(nextCustomFields.submissionVersions) ? nextCustomFields.submissionVersions : []),
+      previousSubmission,
+    ];
+  }
   if (isRectificationStandardOptimizationTask(task)) {
     nextCustomFields.standardOptimizationApplied = submitFormData.needStandardUpdate === "需要" ? "是" : "否";
     nextCustomFields.standardOptimizationScope = submitFormData.standardUpdateScope ?? [];
@@ -5000,6 +4926,13 @@ async function saveResult(form, rerender) {
     } catch (error) {
       console.error("关键行动推进保存失败", error);
       return setModalError(error.message || "关键行动推进保存失败，请检查本地数据库服务。", rerender);
+    }
+  } else if (waitsForReview) {
+    try {
+      await refreshProcessTaskReadiness(task.processInstanceId);
+    } catch (error) {
+      console.error("审核步骤激活失败", error);
+      return setModalError(error.message || "审核步骤激活失败，请检查本地数据库服务。", rerender);
     }
   }
   modalState = null;
@@ -5143,119 +5076,6 @@ async function bulkUpdateTaskStatus(status, rerender) {
   }
 
   selectedTaskIds = new Set();
-  rerender();
-}
-
-function openExecutionGroupCreateModal(rerender) {
-  if (!canCurrentUser("tasks.batchComplete")) return;
-  const selectedTasks = sortExecutionGroupTasks([...selectedTaskIds].map(getTask).filter(Boolean));
-  const validationError = validateExecutionGroupTasks(selectedTasks);
-  if (validationError !== "") {
-    window.alert(validationError);
-    return;
-  }
-
-  modalState = {
-    kind: "executionGroupCreate",
-    taskIds: selectedTasks.map((task) => task.id),
-    name: buildExecutionGroupName(selectedTasks),
-    error: "",
-  };
-  rerender();
-}
-
-async function confirmCreateExecutionGroup(rerender) {
-  if (modalState?.kind !== "executionGroupCreate") return;
-  const input = document.querySelector("[name='executionGroupName']");
-  const name = String(input?.value ?? modalState.name ?? "").trim();
-  try {
-    await createExecutionGroupResource({ name, taskIds: modalState.taskIds });
-  } catch (error) {
-    modalState = { ...modalState, name, error: error.message || "执行组创建失败，请检查本地数据库服务。" };
-    rerender();
-    return;
-  }
-
-  const firstTask = getTask(modalState.taskIds[0]);
-  const groupId = firstTask?.executionGroupId ?? "";
-  selectedTaskIds = new Set();
-  modalState = groupId === "" ? null : { kind: "executionGroupDetail", groupId, error: "" };
-  rerender();
-}
-
-async function startExecutionGroup(groupId, rerender) {
-  try {
-    await startExecutionGroupResource(groupId);
-    modalState = { kind: "executionGroupDetail", groupId, error: "" };
-  } catch (error) {
-    modalState = { kind: "executionGroupDetail", groupId, error: error.message || "执行组开始失败，请检查本地数据库服务。" };
-  }
-  rerender();
-}
-
-async function cancelExecutionGroup(groupId, rerender) {
-  if (!window.confirm("确定取消该执行组吗？成员任务会解除关联，任务状态保持不变。")) return;
-  try {
-    await cancelExecutionGroupResource(groupId);
-    modalState = null;
-  } catch (error) {
-    modalState = { kind: "executionGroupDetail", groupId, error: error.message || "执行组取消失败，请检查本地数据库服务。" };
-  }
-  rerender();
-}
-
-function getExecutionGroupCompletionErrors(group) {
-  if (group === null) return ["未找到执行组。"];
-  if (group.status !== "doing") return ["执行组尚未开始，不能完成。"];
-  const tasks = getExecutionGroupTasks(group);
-  const errors = [];
-  tasks.forEach((task) => {
-    if (isCanceledStatus(task.status)) errors.push(`${task.name}：已取消，不能完成执行组。`);
-    if (isDoneStatus(task.status) || task.status === TaskStatus.PendingAcceptance) return;
-    const status = task.needAcceptance ? TaskStatus.PendingAcceptance : TaskStatus.Done;
-    const statusError = getTaskStatusChangeError(task, status);
-    if (statusError !== "") errors.push(`${task.name}：${statusError}`);
-    const requirement = getTaskSubmitRequirement(task);
-    const hasForm = includesSubmitPart(requirement.submitType, "form");
-    const hasFile = includesSubmitPart(requirement.submitType, "file");
-    const hasLink = includesSubmitPart(requirement.submitType, "link");
-    if (hasForm) {
-      for (const field of getSubmitFields(task)) {
-        if (field.required !== true) continue;
-        const value = requirement.submitFormData[field.key];
-        const isEmpty = Array.isArray(value) ? value.length === 0 : String(value ?? "").trim() === "";
-        if (isEmpty) errors.push(`${task.name}：请先填写${field.label}。`);
-      }
-    }
-    if (hasFile && getVisibleSubmitFiles(requirement.submitFiles).length === 0) errors.push(`${task.name}：请先上传提交文件。`);
-    if (hasLink && requirement.submitLinks.length === 0) errors.push(`${task.name}：请先填写提交链接。`);
-    const submitError = validateSubmittedResult(task);
-    if (submitError !== "") errors.push(`${task.name}：${submitError}`);
-  });
-  return errors;
-}
-
-async function completeExecutionGroup(groupId, rerender) {
-  const group = getExecutionGroupById(groupId);
-  const errors = getExecutionGroupCompletionErrors(group);
-  if (errors.length > 0) {
-    modalState = { kind: "executionGroupDetail", groupId, error: errors.join("；") };
-    rerender();
-    return;
-  }
-  const actualTotalMinutes = getExecutionGroupActualMinutes(group);
-
-  if (!window.confirm(`确定完成该执行组吗？\n实际总时长：${actualTotalMinutes} 分钟\n系统将逐条完成成员任务。`)) return;
-
-  try {
-    await completeExecutionGroupResource(groupId);
-  } catch (error) {
-    console.error("执行组完成失败", error);
-    modalState = { kind: "executionGroupDetail", groupId, error: error.message || "执行组完成失败，请检查本地数据库服务。" };
-    rerender();
-    return;
-  }
-  modalState = { kind: "executionGroupDetail", groupId, error: "" };
   rerender();
 }
 
@@ -5530,6 +5350,146 @@ async function handleTaskAction(action, taskId, rerender, actionButton = null) {
   }
 }
 
+async function handleReviewDecision(form, submitter, rerender) {
+  if (!canCurrentUser("tasks.changeStatus")) return;
+  const task = getTask(form.dataset.reviewTaskId);
+  if (task === null || task.taskType !== "review") return;
+  if (![TaskStatus.Todo, TaskStatus.Doing].includes(task.status) || (task.reviewStatus ?? "pending") !== "pending") {
+    return setModalError("该审核任务当前不能重复处理。", rerender);
+  }
+  const decision = submitter?.value === "reject" ? "reject" : "approve";
+  const reviewComment = getFormValue(form, "reviewComment");
+  if (decision === "reject" && task.requireRejectionReason && reviewComment === "") {
+    return setModalError("请填写不通过原因。", rerender);
+  }
+
+  const orderedTasks = getOrderedActiveProcessTasks(task) ?? [];
+  const reviewIndex = orderedTasks.findIndex((item) => item.id === task.id);
+  const targetTask = getReviewTargetTask(task);
+  const returnIndex = orderedTasks.findIndex((item) => item.processNodeId === task.returnToNodeId);
+  if (targetTask === null || reviewIndex < 0) return setModalError("未找到审核对象，无法完成审核。", rerender);
+  if (decision === "reject" && (returnIndex < 0 || returnIndex >= reviewIndex || orderedTasks[returnIndex]?.taskType === "review")) {
+    return setModalError("审核步骤的退回执行步骤无效，请先修正流程模板。", rerender);
+  }
+
+  const now = getNow();
+  const currentUser = getCurrentUser();
+  const reviewerId = currentUser?.personId ?? currentUser?.id ?? task.reviewerId ?? task.ownerId;
+  const reviewSnapshot = {
+    taskId: targetTask.id,
+    taskName: targetTask.name,
+    submittedAt: targetTask.submittedAt ?? null,
+    submittedBy: targetTask.submittedBy ?? null,
+    resultText: targetTask.resultText ?? "",
+    resultAttachments: targetTask.resultAttachments ?? [],
+    submitFormData: targetTask.submitFormData ?? {},
+    submitFiles: targetTask.submitFiles ?? [],
+    submitLinks: targetTask.submitLinks ?? [],
+  };
+  const decisionRecord = {
+    id: createId("review-decision"),
+    decision: decision === "approve" ? "approved" : "rejected",
+    comment: reviewComment,
+    reviewedAt: now,
+    reviewerId,
+    reviewerName: currentUser?.name ?? findName(people, reviewerId, "未记录人员"),
+    targetSnapshot: reviewSnapshot,
+  };
+
+  try {
+    if (decision === "approve") {
+      const completedTarget =
+        targetTask.status === TaskStatus.Done
+          ? targetTask
+          : { ...targetTask, status: TaskStatus.Done, completedAt: now, updatedAt: now };
+      if (targetTask.status !== TaskStatus.Done) {
+        await updateTaskWorkflow(targetTask.id, "approve", completedTarget);
+      }
+      const completedReview = {
+        ...task,
+        status: TaskStatus.Done,
+        reviewStatus: "approved",
+        reviewComment,
+        reviewedAt: now,
+        reviewerId,
+        reviewTargetSnapshot: reviewSnapshot,
+        completedAt: now,
+        updatedAt: now,
+        customFields: {
+          ...(task.customFields ?? {}),
+          reviewDecisionRecords: [
+            ...(Array.isArray(task.customFields?.reviewDecisionRecords) ? task.customFields.reviewDecisionRecords : []),
+            decisionRecord,
+          ],
+        },
+      };
+      await updateTaskWorkflow(task.id, "review_approve", completedReview);
+      state.tasks = state.tasks.map((item) => {
+        if (item.id === completedTarget.id) return completedTarget;
+        if (item.id === completedReview.id) return completedReview;
+        return item;
+      });
+      await advanceProcessAfterTaskDone(task.id);
+    } else {
+      const affectedTasks = orderedTasks.slice(returnIndex, reviewIndex);
+      const returnRecord = {
+        id: createId("return-record"),
+        returnedAt: now,
+        returnedBy: reviewerId,
+        returnedByName: currentUser?.name ?? findName(people, reviewerId, "未记录人员"),
+        reason: reviewComment || "审核不通过",
+        fromTaskId: task.id,
+        fromTaskName: task.name,
+        fromNodeId: task.processNodeId,
+        toTaskId: affectedTasks[0].id,
+        toTaskName: affectedTasks[0].name,
+        toNodeId: affectedTasks[0].processNodeId,
+        affectedTaskIds: affectedTasks.map((item) => item.id),
+        affectedTaskNames: affectedTasks.map((item) => item.name),
+      };
+      const returnedTasks = affectedTasks.map((affectedTask, index) => appendReturnRecord({
+        ...affectedTask,
+        status: index === 0 ? TaskStatus.Todo : TaskStatus.Waiting,
+        completedAt: null,
+        updatedAt: now,
+      }, returnRecord, index === 0 ? { [latestReturnReasonKey]: returnRecord.reason } : {}));
+      for (const returnedTask of returnedTasks) {
+        await updateTaskWorkflow(returnedTask.id, "return", returnedTask);
+      }
+      const rejectedReview = {
+        ...task,
+        status: TaskStatus.Waiting,
+        reviewStatus: "rejected",
+        reviewComment,
+        reviewedAt: now,
+        reviewerId,
+        reviewTargetSnapshot: reviewSnapshot,
+        completedAt: null,
+        updatedAt: now,
+        customFields: {
+          ...(task.customFields ?? {}),
+          reviewDecisionRecords: [
+            ...(Array.isArray(task.customFields?.reviewDecisionRecords) ? task.customFields.reviewDecisionRecords : []),
+            decisionRecord,
+          ],
+        },
+      };
+      await updateTaskWorkflow(task.id, "review_reject", rejectedReview);
+      const returnedMap = new Map(returnedTasks.map((item) => [item.id, item]));
+      state.tasks = state.tasks.map((item) => {
+        if (item.id === rejectedReview.id) return rejectedReview;
+        return returnedMap.get(item.id) ?? item;
+      });
+      selectedTaskId = returnedTasks[0].id;
+    }
+  } catch (error) {
+    console.error("审核任务保存失败", error);
+    return setModalError(error.message || "审核任务保存失败，请检查本地数据库服务。", rerender);
+  }
+  modalState = null;
+  rerender();
+}
+
 function openStandardOptimizationTarget(task, target) {
   const sourceStandardWork = getRectificationSourceStandardWork(task);
   if (sourceStandardWork === null) {
@@ -5696,6 +5656,7 @@ export function bindTasksPageEvents(rerender) {
   const taskForm = document.querySelector(".task-form");
   const resultForm = document.querySelector(".result-form");
   const returnTaskForm = document.querySelector(".return-task-form");
+  const reviewDecisionForm = document.querySelector(".review-decision-form");
   const clearanceImportInput = document.querySelector("[data-clearance-file='import']");
 
   if (tasksPage === null) return;
@@ -5728,6 +5689,58 @@ export function bindTasksPageEvents(rerender) {
       rerender();
     });
   });
+
+  if (activeTaskTab === "task-waves") {
+    tasksPage.addEventListener("click", async (event) => {
+      const statusButton = event.target.closest("[data-wave-status]");
+      if (statusButton !== null) {
+        taskWaveStatus = statusButton.dataset.waveStatus;
+        selectedTaskWaveId = null;
+        rerender();
+        return;
+      }
+      const button = event.target.closest("[data-action]");
+      if (button === null) return;
+      const action = button.dataset.action;
+      taskWaveError = "";
+      try {
+        if (action === "back-task-waves") {
+          selectedTaskWaveId = null;
+        } else if (action === "view-task-wave") {
+          selectedTaskWaveId = button.dataset.waveId;
+          await loadTaskWaveDetail(selectedTaskWaveId);
+        } else if (action === "start-task-wave") {
+          await startTaskWave(button.dataset.waveId);
+          selectedTaskWaveId = button.dataset.waveId;
+        } else if (action === "save-task-wave-draft") {
+          await saveTaskWaveDraft(button.dataset.waveId, await collectTaskWaveDrafts(tasksPage));
+        } else if (action === "submit-task-wave") {
+          await submitTaskWave(button.dataset.waveId, await collectTaskWaveDrafts(tasksPage));
+        } else if (action === "view-wave-member-task") {
+          selectedTaskId = button.dataset.taskId;
+          activeTaskTab = "task-list";
+          window.location.hash = "tasks";
+        }
+      } catch (error) {
+        taskWaveError = error.message || "任务波次操作失败。";
+      }
+      rerender();
+    });
+    tasksPage.querySelector(".task-wave-cancel-form")?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      taskWaveError = "";
+      try {
+        const cancelReason = String(new FormData(event.currentTarget).get("cancelReason") ?? "").trim();
+        await cancelTaskWave(selectedTaskWaveId, cancelReason);
+        selectedTaskWaveId = null;
+        taskWaveStatus = "canceled";
+      } catch (error) {
+        taskWaveError = error.message || "任务波次取消失败。";
+      }
+      rerender();
+    });
+    return;
+  }
 
   document.querySelector("[data-task-sort]")?.addEventListener("change", (event) => {
     taskSort = event.target.value === "name" ? "name" : "remaining";
@@ -6031,37 +6044,22 @@ export function bindTasksPageEvents(rerender) {
         bulkUpdateTaskStatus(actionButton.dataset.status, rerender);
         return;
       }
-      if (action === "create-execution-group") {
-        openExecutionGroupCreateModal(rerender);
-        return;
-      }
-      if (action === "confirm-create-execution-group") {
-        await confirmCreateExecutionGroup(rerender);
-        return;
-      }
-      if (action === "view-execution-group") {
-        modalState = { kind: "executionGroupDetail", groupId: actionButton.dataset.executionGroupId, error: "" };
-        rerender();
-        return;
-      }
-      if (action === "start-execution-group") {
-        await startExecutionGroup(actionButton.dataset.executionGroupId, rerender);
-        return;
-      }
-      if (action === "cancel-execution-group") {
-        await cancelExecutionGroup(actionButton.dataset.executionGroupId, rerender);
-        return;
-      }
-      if (action === "complete-execution-group") {
-        await completeExecutionGroup(actionButton.dataset.executionGroupId, rerender);
-        return;
-      }
       if (action === "bulk-complete") {
         bulkUpdateTaskStatus(TaskStatus.Done, rerender);
         return;
       }
       if (action === "bulk-cancel") {
         bulkUpdateTaskStatus(TaskStatus.Canceled, rerender);
+        return;
+      }
+      if (action === "view-task-wave") {
+        selectedTaskWaveId = actionButton.dataset.waveId;
+        activeTaskTab = "task-waves";
+        window.location.hash = "task-waves";
+        await loadTaskWaveDetail(selectedTaskWaveId).catch((error) => {
+          taskWaveError = error.message || "任务波次详情读取失败。";
+        });
+        rerender();
         return;
       }
       handleTaskAction(action, actionButton.dataset.taskId, rerender, actionButton);
@@ -6117,6 +6115,12 @@ export function bindTasksPageEvents(rerender) {
     });
   }
   if (returnTaskForm !== null) returnTaskForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
+  if (reviewDecisionForm !== null) {
+    reviewDecisionForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      await handleReviewDecision(event.currentTarget, event.submitter, rerender);
+    });
+  }
   if (modalState?.kind === "launchedProcessDetail") {
     bindLaunchedProcessDetailEvents(tasksPage, rerender, {
       onTaskSelect: (taskId) => {
@@ -6128,16 +6132,203 @@ export function bindTasksPageEvents(rerender) {
   }
 }
 
+const taskWaveStatusLabels = {
+  waiting: "待执行",
+  doing: "执行中",
+  pending_acceptance: "待审核",
+  done: "已完成",
+  canceled: "已取消",
+};
+
+function getTaskWaveMemberTasks(wave) {
+  return (wave?.items ?? [])
+    .map((item) => ({ item, task: state.tasks.find((task) => task.id === item.taskId) ?? null }))
+    .filter((entry) => entry.task !== null);
+}
+
+function getTaskWaveTypeLabel(wave) {
+  if (wave.waveType === "template_priority") return "同模板";
+  if (wave.waveType === "mixed") return "混合模板";
+  return "无模板";
+}
+
+function getTaskWaveTemplateNames(wave) {
+  const ids = [...new Set((wave?.items ?? []).flatMap((item) => item.linkedTemplateIds ?? []))];
+  return ids.map((id) => state.templates.find((item) => item.id === id)?.name ?? id).join("、") || "—";
+}
+
+function getTaskWaveDueDate(wave) {
+  return getTaskWaveMemberTasks(wave)
+    .map(({ task }) => task.dueDate)
+    .filter(Boolean)
+    .sort()[0] ?? "";
+}
+
+function getTaskWaveSummary(wave) {
+  const tasks = (wave.taskIds ?? []).map((id) => state.tasks.find((task) => task.id === id)).filter(Boolean);
+  const done = tasks.filter((task) => task.status === TaskStatus.Done).length;
+  const node = state.processTemplateNodes.find((item) => item.id === wave.processNodeId);
+  const standard = state.taskTemplates.find((item) => item.id === wave.taskTemplateId);
+  return { tasks, done, node, standard };
+}
+
+function renderTaskWaveList() {
+  const waves = state.taskWaves
+    .filter((wave) => wave.status === taskWaveStatus)
+    .sort((left, right) => {
+      const leftDue = getTaskWaveDueDate({ ...left, items: (left.taskIds ?? []).map((taskId) => ({ taskId })) }) || "9999";
+      const rightDue = getTaskWaveDueDate({ ...right, items: (right.taskIds ?? []).map((taskId) => ({ taskId })) }) || "9999";
+      return leftDue.localeCompare(rightDue) || String(left.createdAt).localeCompare(String(right.createdAt)) || left.businessCode.localeCompare(right.businessCode);
+    });
+  return `
+    <section class="settings-section task-wave-page">
+      <div class="task-wave-status-tabs">
+        ${Object.entries(taskWaveStatusLabels).map(([value, label]) => `
+          <button class="${taskWaveStatus === value ? "is-active" : ""}" type="button" data-wave-status="${value}">${label}</button>
+        `).join("")}
+      </div>
+      ${taskWaveLoading ? `<div class="empty-detail">正在读取任务波次…</div>` : ""}
+      ${taskWaveError ? `<div class="form-error">${escapeHtml(taskWaveError)}</div>` : ""}
+      <div class="task-wave-list">
+        ${waves.length === 0 ? `<div class="empty-detail">暂无${taskWaveStatusLabels[taskWaveStatus]}波次</div>` : waves.map((wave) => {
+          const { done, node, standard } = getTaskWaveSummary(wave);
+          const executor = findName(people, wave.executorId, "未设置");
+          const operation = wave.status === "waiting" ? "开始执行" : wave.status === "doing" ? "继续执行" : wave.status === "pending_acceptance" ? "查看提交" : wave.status === "done" ? "查看结果" : "查看";
+          return `
+            <article class="task-wave-card">
+              <div>
+                <strong>${escapeHtml(wave.businessCode)}</strong>
+                <h3>${escapeHtml(node?.name ?? "未命名步骤")}</h3>
+                <p>${escapeHtml(standard?.name ?? "未关联行动标准")} · ${escapeHtml(getTaskWaveTypeLabel(wave))}</p>
+              </div>
+              <div class="task-wave-card-meta">
+                <span>执行人：${escapeHtml(executor)}</span>
+                <span>任务：${done}/${wave.taskCount}</span>
+                <span>最早截止：${escapeHtml(formatBusinessMinuteDateTime(getTaskWaveDueDate({ ...wave, items: (wave.taskIds ?? []).map((taskId) => ({ taskId })) })))}</span>
+                <span class="status-pill">${escapeHtml(taskWaveStatusLabels[wave.status] ?? wave.status)}</span>
+              </div>
+              <div class="row-actions">
+                <button class="text-button" type="button" data-action="view-task-wave" data-wave-id="${escapeHtml(wave.id)}">查看</button>
+                ${["waiting", "doing"].includes(wave.status) ? `<button class="primary-button" type="button" data-action="${wave.status === "waiting" ? "start-task-wave" : "view-task-wave"}" data-wave-id="${escapeHtml(wave.id)}">${operation}</button>` : ""}
+              </div>
+            </article>
+          `;
+        }).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderTaskWaveMemberResult(entry, editable) {
+  const { item, task } = entry;
+  const draft = item.resultDraft ?? {};
+  const fields = includesSubmitPart(task.submitType, "form")
+    ? getSubmitFields(task).map((field) => `
+        <label><span>${escapeHtml(field.label)}${field.required ? " *" : ""}</span>${renderSubmitFieldInput(field, draft.submitFormData?.[field.key] ?? "")}</label>
+      `).join("")
+    : "";
+  return `
+    <article class="task-wave-member" data-wave-member-task-id="${escapeHtml(task.id)}">
+      <div class="task-wave-member-heading">
+        <div class="task-cover-column">${renderCoverImage(task)}</div>
+        <div>
+          <strong>${escapeHtml(task.businessCode || task.name)}</strong>
+          <h3>${escapeHtml(task.name)}</h3>
+          <span class="status-pill">${escapeHtml(getTaskBusinessStatus(task).label)}</span>
+        </div>
+        <button class="text-button" type="button" data-action="view-wave-member-task" data-task-id="${escapeHtml(task.id)}">查看原任务</button>
+      </div>
+      <p class="form-note">${escapeHtml(task.submitDescription || task.outputRequirement || task.completionStandard || "按原任务要求提交工作结果")}</p>
+      ${editable && task.status === TaskStatus.Doing ? `
+        <div class="task-wave-result-fields">
+          <label><span>结果说明</span><textarea name="waveResultText" rows="3">${escapeHtml(draft.resultText ?? "")}</textarea></label>
+          ${fields}
+          ${includesSubmitPart(task.submitType, "file") ? `<label><span>提交文件${task.requireFile ? " *" : ""}</span><input type="file" data-wave-submit-files multiple /><small>${(draft.submitFiles ?? []).map((file) => escapeHtml(file.originalName ?? file.filename ?? file.url ?? file)).join("、") || "暂无已保存文件"}</small></label>` : ""}
+          ${includesSubmitPart(task.submitType, "link") ? `<label><span>提交链接${task.requireLink ? " *" : ""}</span><textarea name="waveSubmitLinks" rows="2">${escapeHtml((draft.submitLinks ?? []).join("\n"))}</textarea></label>` : ""}
+        </div>
+      ` : `<div class="task-wave-result-readonly">${escapeHtml(task.resultText || draft.resultText || "暂无结果")}</div>`}
+    </article>
+  `;
+}
+
+function renderTaskWaveDetail() {
+  if (selectedTaskWaveId === null) return renderTaskWaveList();
+  const wave = state.taskWaveDetails[selectedTaskWaveId] ?? null;
+  if (wave === null) return `<section class="settings-section"><button class="text-button" type="button" data-action="back-task-waves">返回任务波次</button><div class="empty-detail">正在读取波次详情…</div></section>`;
+  const members = getTaskWaveMemberTasks(wave);
+  const editable = wave.status === "doing";
+  const node = state.processTemplateNodes.find((item) => item.id === wave.processNodeId);
+  const standard = state.taskTemplates.find((item) => item.id === wave.taskTemplateId);
+  const processTemplate = state.processTemplates.find((item) => item.id === wave.processTemplateId);
+  return `
+    <section class="settings-section task-wave-detail">
+      <button class="text-button" type="button" data-action="back-task-waves">← 返回任务波次</button>
+      <div class="section-heading"><div><h2>${escapeHtml(wave.businessCode)}</h2><p>${escapeHtml(taskWaveStatusLabels[wave.status] ?? wave.status)}</p></div></div>
+      <div class="detail-grid">
+        ${renderDetailField("行动标准", escapeHtml(standard?.name ?? "—"))}
+        ${renderDetailField("流程模板", escapeHtml(processTemplate?.name ?? "—"))}
+        ${renderDetailField("步骤节点", escapeHtml(node?.name ?? "—"))}
+        ${renderDetailField("执行人", escapeHtml(findName(people, wave.executorId, "—")))}
+        ${renderDetailField("波次类型", escapeHtml(getTaskWaveTypeLabel(wave)))}
+        ${renderDetailField("关联模板", escapeHtml(getTaskWaveTemplateNames(wave)))}
+        ${renderDetailField("任务数量", String(wave.taskCount))}
+        ${renderDetailField("最早截止", escapeHtml(formatBusinessMinuteDateTime(getTaskWaveDueDate(wave))))}
+      </div>
+      <div class="task-wave-members">${members.map((entry) => renderTaskWaveMemberResult(entry, editable)).join("")}</div>
+      ${taskWaveError ? `<div class="form-error">${escapeHtml(taskWaveError)}</div>` : ""}
+      ${editable ? `<div class="task-wave-fixed-actions"><button class="secondary-button" type="button" data-action="save-task-wave-draft" data-wave-id="${escapeHtml(wave.id)}">保存草稿</button><button class="primary-button" type="button" data-action="submit-task-wave" data-wave-id="${escapeHtml(wave.id)}">完成并提交</button></div>` : ""}
+      ${wave.status === "waiting" && canCurrentUser("tasks.batchCancel") ? `<form class="task-wave-cancel-form"><label><span>取消原因</span><textarea name="cancelReason" required></textarea></label><button class="danger-button" type="submit">取消波次</button></form>` : ""}
+    </section>
+  `;
+}
+
+async function collectTaskWaveDrafts(tasksPage) {
+  const drafts = [];
+  for (const member of tasksPage.querySelectorAll("[data-wave-member-task-id]")) {
+    const taskId = member.dataset.waveMemberTaskId;
+    const task = state.tasks.find((item) => item.id === taskId);
+    if (task?.status !== TaskStatus.Doing) continue;
+    const existing = state.taskWaveDetails[selectedTaskWaveId]?.items?.find((item) => item.taskId === taskId)?.resultDraft ?? {};
+    const submitFormData = { ...(existing.submitFormData ?? {}) };
+    for (const field of getSubmitFields(task)) {
+      const input = member.querySelector(`[name="submit__${CSS.escape(field.key)}"]`);
+      if (input === null) continue;
+      if (input.type === "checkbox") {
+        const checked = [...member.querySelectorAll(`[name="submit__${CSS.escape(field.key)}"]:checked`)].map((item) => item.value);
+        submitFormData[field.key] = checked;
+      } else {
+        submitFormData[field.key] = input.value;
+      }
+    }
+    const submitFiles = [...(existing.submitFiles ?? [])];
+    for (const file of member.querySelector("[data-wave-submit-files]")?.files ?? []) {
+      submitFiles.push(await uploadGenericFile(file));
+    }
+    drafts.push({
+      taskId,
+      resultDraft: {
+        resultText: member.querySelector('[name="waveResultText"]')?.value ?? "",
+        submitFormData,
+        submitFiles,
+        submitLinks: String(member.querySelector('[name="waveSubmitLinks"]')?.value ?? "").split(/\r?\n/).map((item) => item.trim()).filter(Boolean),
+      },
+    });
+  }
+  return drafts;
+}
+
 export function renderTasksPage() {
   syncTaskTabFromHash();
   if (activeTaskTab === "task-library") activeTaskTab = "task-list";
   if (activeTaskTab === "task-list" && !canCurrentUser("tasks.view")) activeTaskTab = "task-list";
+  if (activeTaskTab === "task-waves" && !canCurrentUser("tasks.view")) activeTaskTab = "task-list";
   if (activeTaskTab === "clearance" && !canCurrentUser("tasks.view")) activeTaskTab = "task-list";
   if (activeTaskTab === "process-progress" && !canCurrentUser("tasks.viewProcessProgress")) {
     activeTaskTab = "task-list";
   }
   const canViewActiveTab =
     (activeTaskTab === "task-list" && canCurrentUser("tasks.view")) ||
+    (activeTaskTab === "task-waves" && canCurrentUser("tasks.view")) ||
     (activeTaskTab === "clearance" && canCurrentUser("tasks.view")) ||
     (activeTaskTab === "process-progress" && canCurrentUser("tasks.viewProcessProgress"));
 
@@ -6145,6 +6336,7 @@ export function renderTasksPage() {
     <div class="tasks-page">
       <div class="settings-tabs task-subtabs" aria-label="任务页签">
         ${canCurrentUser("tasks.view") ? `<button class="${activeTaskTab === "task-list" ? "is-active" : ""}" type="button" data-task-tab="task-list">任务</button>` : ""}
+        ${canCurrentUser("tasks.view") ? `<button class="${activeTaskTab === "task-waves" ? "is-active" : ""}" type="button" data-task-tab="task-waves">任务波次</button>` : ""}
         ${canCurrentUser("tasks.view") ? `<button class="${activeTaskTab === "clearance" ? "is-active" : ""}" type="button" data-task-tab="clearance">库存清仓</button>` : ""}
       </div>
       ${
@@ -6152,6 +6344,8 @@ export function renderTasksPage() {
           ? `<section class="settings-section"><div class="empty-detail">你没有权限访问该页面。</div></section>`
         : activeTaskTab === "clearance"
             ? renderClearancePage()
+          : activeTaskTab === "task-waves"
+            ? renderTaskWaveDetail()
           : activeTaskTab === "process-progress"
             ? `
               ${renderProcessProgressFilters()}
@@ -6171,8 +6365,6 @@ export function renderTasksPage() {
               ${renderResultModal()}
               ${renderReturnTaskModal()}
               ${renderWorkFormModal()}
-              ${renderExecutionGroupCreateModal()}
-              ${renderExecutionGroupDetailModal()}
             `
       }
     </div>

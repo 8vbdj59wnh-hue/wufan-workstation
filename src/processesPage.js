@@ -342,6 +342,7 @@ function renderTemplateNodes(templateId) {
                 <div class="process-node-title">
                   <strong>${formatProcessStepLabel(index + 1)}</strong>
                   <h4>${node.name}</h4>
+                  <span class="process-step-type ${node.stepType === "review" ? "is-review" : ""}">${node.stepType === "review" ? "审核步骤" : "执行步骤"}</span>
                 </div>
                 <span class="row-actions">
                   <span class="status-pill ${node.status === ProcessTemplateNodeStatus.Inactive ? "is-inactive" : ""}">${processTemplateNodeStatusNames[node.status]}</span>
@@ -363,15 +364,26 @@ function renderTemplateNodes(templateId) {
                 </span>
               </div>
               <div class="process-node-meta">
-                <span><em>负责部门</em>${findName(departments, node.departmentId ?? node.ownerDepartmentId, "未设置")}</span>
-                <span><em>负责人</em>${findName(people, node.ownerId ?? node.defaultOwnerId, "未设置")}</span>
-                <span><em>执行人</em>${getExecutorDisplayName(node)}</span>
-                <span><em>任务时长</em>${node.durationMinutes ?? (Number(node.durationDays ?? 1) * 1440)} 分钟</span>
+                ${
+                  node.stepType === "review"
+                    ? `<span><em>审核人</em>${findName(people, node.reviewerId, "未设置")}</span>
+                       <span><em>审核时限</em>${node.durationMinutes ?? (Number(node.durationDays ?? 1) * 1440)} 分钟</span>
+                       <span><em>审核对象</em>上一个执行步骤的工作结果</span>`
+                    : `<span><em>负责部门</em>${findName(departments, node.departmentId ?? node.ownerDepartmentId, "未设置")}</span>
+                       <span><em>负责人</em>${findName(people, node.ownerId ?? node.defaultOwnerId, "未设置")}</span>
+                       <span><em>执行人</em>${getExecutorDisplayName(node)}</span>
+                       <span><em>任务时长</em>${node.durationMinutes ?? (Number(node.durationDays ?? 1) * 1440)} 分钟</span>`
+                }
                 <span><em>状态</em>${processTemplateNodeStatusNames[node.status]}</span>
               </div>
               <div class="process-node-copy">
-                <p><strong>步骤说明：</strong>${node.description}</p>
-                <p><strong>完成标准：</strong>${node.completionStandard}</p>
+                ${
+                  node.stepType === "review"
+                    ? `<p><strong>不通过退回：</strong>${escapeHtml(findName(state.processTemplateNodes, node.returnToNodeId, "最近的上一个执行步骤"))}</p>
+                       <p><strong>不通过原因：</strong>${node.requireRejectionReason ? "必须填写" : "可选"}</p>`
+                    : `<p><strong>步骤说明：</strong>${node.description}</p>
+                       <p><strong>完成标准：</strong>${node.completionStandard}</p>`
+                }
               </div>
             </article>
             `,
@@ -634,6 +646,15 @@ function renderTemplateModal() {
 function renderNodeModal() {
   if (modalState?.kind !== "node") return "";
   const node = modalState.id ? state.processTemplateNodes.find((item) => item.id === modalState.id) : null;
+  const stepType = modalState.stepType ?? node?.stepType ?? "execution";
+  const nodeOrder = node === null ? Number.MAX_SAFE_INTEGER : getProcessNodeStepOrder(node);
+  const returnTargets = getTemplateNodes(selectedTemplateId).filter(
+    (candidate) =>
+      candidate.id !== node?.id &&
+      (candidate.stepType ?? "execution") === "execution" &&
+      getProcessNodeStepOrder(candidate) < nodeOrder,
+  );
+  const defaultReturnNodeId = node?.returnToNodeId ?? returnTargets.at(-1)?.id ?? "";
   const submitRequirement = normalizeSubmitRequirement(node ?? { name: "" });
   const submitFieldsJson = JSON.stringify(submitRequirement.submitFields ?? [], null, 2);
   return `
@@ -648,6 +669,26 @@ function renderNodeModal() {
       </div>
       <form class="modal-form process-node-form">
         <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${modalState.error}</div>
+        <fieldset class="process-step-type-picker">
+          <legend>步骤类型</legend>
+          <label><input type="radio" name="stepType" value="execution" ${stepType === "execution" ? "checked" : ""} /> 执行步骤</label>
+          <label><input type="radio" name="stepType" value="review" ${stepType === "review" ? "checked" : ""} /> 审核步骤</label>
+        </fieldset>
+        ${
+          stepType === "review"
+            ? `
+        <div class="form-grid">
+          <label><span>审核步骤名称</span><input name="name" value="${escapeHtml(node?.name ?? "")}" /></label>
+          <label><span>审核人</span><select name="reviewerId">${renderOptions(people, node?.reviewerId ?? "", "请选择审核人")}</select></label>
+          <label><span>审核时限（分钟）</span><input name="durationMinutes" type="number" min="1" step="1" value="${node === null ? 120 : node.durationMinutes ?? (Number(node.durationDays ?? 1) * 1440)}" /></label>
+          <label><span>审核对象</span><input value="上一个执行步骤提交的工作结果" disabled /></label>
+          <label><span>不通过退回步骤</span><select name="returnToNodeId">${renderOptions(returnTargets, defaultReturnNodeId, "请选择之前的执行步骤")}</select></label>
+          <label><span>状态</span><select name="status">${renderValueOptions(ProcessTemplateNodeStatus, node?.status ?? ProcessTemplateNodeStatus.Active, processTemplateNodeStatusNames, "请选择状态")}</select></label>
+        </div>
+        <label class="checkbox-field"><input type="checkbox" name="requireRejectionReason" ${node?.requireRejectionReason ? "checked" : ""} /> <span>不通过时必须填写原因</span></label>
+        <p class="form-note">审核步骤只审核上一个执行步骤的工作结果；不通过时退回所选执行步骤。</p>
+            `
+            : `
         <div class="form-grid">
           <label><span>步骤名称</span><input name="name" value="${node?.name ?? ""}" /></label>
           <label><span>负责部门</span><select name="departmentId">${renderOptions(departments, node?.departmentId ?? node?.ownerDepartmentId ?? "", "请选择部门")}</select></label>
@@ -672,6 +713,25 @@ function renderNodeModal() {
           </label>
           <p class="form-note">字段格式：label、key、type、required、placeholder、options、sortOrder。type 支持 text、textarea、number、date、select、multi_select、url。</p>
         </div>
+        <div class="form-subsection process-wave-settings">
+          <h3>任务波次</h3>
+          <label class="checkbox-field">
+            <input type="checkbox" name="waveEnabled" ${node?.waveEnabled ? "checked" : ""} />
+            <span>启用任务波次</span>
+          </label>
+          <div data-wave-settings-detail ${node?.waveEnabled ? "" : "hidden"}>
+            <div class="form-grid">
+              <label><span>一个波次任务数</span><input name="waveSize" type="number" min="2" max="100" step="1" value="${Number.isInteger(Number(node?.waveSize)) ? Number(node.waveSize) : 10}" /></label>
+              <label class="checkbox-field">
+                <input type="checkbox" name="waveTemplatePriority" ${node?.waveTemplatePriority === false ? "" : "checked"} />
+                <span>同关联模板优先组波</span>
+              </label>
+            </div>
+            <p class="form-note">系统将在后续波次功能中，将同一行动标准、同一步骤节点、同一执行人的任务组成波次，并优先组合关联模板相同的任务。</p>
+          </div>
+        </div>
+            `
+        }
         <div class="modal-actions"><button class="secondary-button" type="button" data-action="close-process-modal">取消</button><button class="primary-button" type="submit">保存</button></div>
       </form>
     </div></div>
@@ -818,51 +878,72 @@ async function saveTemplate(form, rerender) {
 }
 
 async function saveNode(form, rerender) {
+  const stepType = getFormValue(form, "stepType") === "review" ? "review" : "execution";
   const durationMinutes = Number(getFormValue(form, "durationMinutes"));
   const durationDays = Math.max(1, Math.ceil((Number.isFinite(durationMinutes) ? durationMinutes : 1440) / 1440));
   let submitFields = [];
-  try {
-    submitFields = JSON.parse(getFormValue(form, "submitFieldsJson") || "[]");
-    if (!Array.isArray(submitFields)) throw new Error("invalid");
-  } catch {
-    return setModalError("表单字段配置必须是合法 JSON 数组。", rerender);
+  if (stepType === "execution") {
+    try {
+      submitFields = JSON.parse(getFormValue(form, "submitFieldsJson") || "[]");
+      if (!Array.isArray(submitFields)) throw new Error("invalid");
+    } catch {
+      return setModalError("表单字段配置必须是合法 JSON 数组。", rerender);
+    }
   }
   const existingNode = modalState.id ? state.processTemplateNodes.find((node) => node.id === modalState.id) : null;
+  const waveEnabled = stepType === "execution" && (form.elements.waveEnabled?.checked ?? false);
+  const waveSizeValue = stepType === "execution" ? getFormValue(form, "waveSize") : existingNode?.waveSize ?? 10;
+  const rawWaveSize = waveSizeValue === "" ? 10 : Number(waveSizeValue);
+  const waveSizeIsValid = Number.isInteger(rawWaveSize) && rawWaveSize >= 2 && rawWaveSize <= 100;
+  const waveSize = waveSizeIsValid ? rawWaveSize : 10;
+  const waveTemplatePriority =
+    stepType === "execution"
+      ? form.elements.waveTemplatePriority?.checked ?? true
+      : existingNode?.waveTemplatePriority ?? true;
   const nextStepOrder =
     existingNode === null
       ? Math.max(0, ...getTemplateNodes(selectedTemplateId).map((node) => getProcessNodeStepOrder(node))) + 1
       : getProcessNodeStepOrder(existingNode);
   const draft = {
+    stepType,
     name: getFormValue(form, "name"),
     stepOrder: nextStepOrder,
     stageName: "默认标准",
     stageOrder: nextStepOrder,
     nodeOrder: nextStepOrder,
-    departmentId: getFormValue(form, "departmentId"),
-    ownerId: getFormValue(form, "ownerId"),
-    executorId: getFormValue(form, "executorId") || null,
+    departmentId: stepType === "review" ? null : getFormValue(form, "departmentId"),
+    ownerId: stepType === "review" ? getFormValue(form, "reviewerId") : getFormValue(form, "ownerId"),
+    executorId: stepType === "review" ? getFormValue(form, "reviewerId") : getFormValue(form, "executorId") || null,
     ownerRule: ProcessOwnerRule.FixedPerson,
-    ownerDepartmentId: getFormValue(form, "departmentId"),
+    ownerDepartmentId: stepType === "review" ? null : getFormValue(form, "departmentId"),
     ownerPositionId: null,
-    defaultOwnerId: getFormValue(form, "ownerId"),
+    defaultOwnerId: stepType === "review" ? getFormValue(form, "reviewerId") : getFormValue(form, "ownerId"),
     durationDays,
     durationMinutes,
-    description: getFormValue(form, "description"),
-    completionStandard: getFormValue(form, "completionStandard"),
+    description: stepType === "review" ? "" : getFormValue(form, "description"),
+    completionStandard: stepType === "review" ? "" : getFormValue(form, "completionStandard"),
     reviewStandard: null,
     needAcceptance: false,
     accepterRule: ProcessAccepterRule.None,
     defaultAccepterId: null,
     outputRequirement: null,
-    submitType: getFormValue(form, "submitType") || SubmitType.None,
-    submitDescription: getFormValue(form, "submitDescription"),
+    submitType: stepType === "review" ? SubmitType.None : getFormValue(form, "submitType") || SubmitType.None,
+    submitDescription: stepType === "review" ? "" : getFormValue(form, "submitDescription"),
     submitFields,
-    requireFile: form.elements.requireFile?.checked ?? false,
-    requireLink: form.elements.requireLink?.checked ?? false,
+    requireFile: stepType === "execution" && (form.elements.requireFile?.checked ?? false),
+    requireLink: stepType === "execution" && (form.elements.requireLink?.checked ?? false),
+    reviewerId: stepType === "review" ? getFormValue(form, "reviewerId") : null,
+    reviewTargetType: stepType === "review" ? "previous_execution_result" : null,
+    returnToNodeId: stepType === "review" ? getFormValue(form, "returnToNodeId") : null,
+    requireRejectionReason: stepType === "review" && (form.elements.requireRejectionReason?.checked ?? false),
+    waveEnabled,
+    waveSize,
+    waveTemplatePriority,
     status: getFormValue(form, "status") || ProcessTemplateNodeStatus.Active,
   };
   const emptySubmitDefault = normalizeSubmitRequirement({ name: "" });
   const shouldInferSubmitForNewNode =
+    stepType === "execution" &&
     existingNode === null &&
     draft.submitType === emptySubmitDefault.submitType &&
     draft.submitDescription === emptySubmitDefault.submitDescription &&
@@ -873,6 +954,23 @@ async function saveNode(form, rerender) {
     Object.assign(draft, normalizeSubmitRequirement({ name: draft.name }));
   }
   if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) return setModalError("请填写大于 0 的任务时长（分钟）。");
+  if (waveEnabled && !waveSizeIsValid) return setModalError("一个波次任务数必须是 2—100 的整数。");
+  if (draft.name === "") return setModalError(stepType === "review" ? "请填写审核步骤名称。" : "请填写步骤名称。");
+  if (stepType === "review") {
+    if (nextStepOrder <= 1) return setModalError("审核步骤不能作为流程第一步。");
+    if (draft.reviewerId === "") return setModalError("请选择审核人。");
+    const validReturnTarget = getTemplateNodes(selectedTemplateId).some(
+      (node) =>
+        node.id === draft.returnToNodeId &&
+        node.id !== existingNode?.id &&
+        (node.stepType ?? "execution") === "execution" &&
+        getProcessNodeStepOrder(node) < nextStepOrder,
+    );
+    if (!validReturnTarget) return setModalError("审核步骤之前必须有执行步骤，并选择有效的不通过退回步骤。");
+  } else {
+    if (draft.departmentId === "") return setModalError("请选择负责部门。");
+    if (draft.ownerId === "") return setModalError("请选择负责人。");
+  }
   const now = getNow();
   if (modalState.id) {
     const existingNode = state.processTemplateNodes.find((node) => node.id === modalState.id);
@@ -1127,6 +1225,17 @@ async function deleteNode(nodeId, rerender) {
     window.alert("该标准节点已经生成过任务，为保留历史数据不能删除，请使用停用节点。");
     return;
   }
+  const referencedByReviewNode = state.processTemplateNodes.find(
+    (candidate) =>
+      candidate.templateId === node.templateId &&
+      candidate.status !== ProcessTemplateNodeStatus.Deleted &&
+      candidate.stepType === "review" &&
+      candidate.returnToNodeId === node.id,
+  );
+  if (referencedByReviewNode !== undefined) {
+    window.alert(`审核步骤“${referencedByReviewNode.name}”将该步骤设为不通过退回目标，请先重新选择退回步骤。`);
+    return;
+  }
 
   if (!window.confirm(`确定要删除标准节点「${node.name}」吗？删除后会同时删除该节点的方法论记录。`)) return;
 
@@ -1226,6 +1335,18 @@ export function bindProcessesPageEvents(rerender) {
   });
 
   page.addEventListener("change", (event) => {
+    const waveEnabledInput = event.target.closest('input[name="waveEnabled"]');
+    if (waveEnabledInput !== null) {
+      const detail = waveEnabledInput.closest(".process-wave-settings")?.querySelector("[data-wave-settings-detail]");
+      if (detail !== null && detail !== undefined) detail.hidden = !waveEnabledInput.checked;
+      return;
+    }
+    const stepTypeInput = event.target.closest('input[name="stepType"]');
+    if (stepTypeInput !== null && modalState?.kind === "node") {
+      modalState = { ...modalState, stepType: stepTypeInput.value, error: "" };
+      rerender();
+      return;
+    }
     const checkbox = event.target.closest("[data-show-inactive-processes]");
     if (checkbox === null) return;
     showInactiveTemplates = checkbox.checked;
