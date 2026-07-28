@@ -1072,7 +1072,10 @@ app.post("/api/work-plans/:id/launch", requirePermission("workPlans.launch"), (r
         existingWorkPlan?.taskTemplateId ?? "",
       )
     ) return;
-    launchWorkPlanWithProcess(request.params.id, request.body ?? {});
+    launchWorkPlanWithProcess(request.params.id, {
+      ...(request.body ?? {}),
+      initiatorId: getUserPersonId(request.user),
+    });
     response.json({ success: true, data: filterDataByScope(readAllData(), request.user) });
   } catch (error) {
     console.error("发起关键行动失败", error);
@@ -1097,7 +1100,7 @@ app.post("/api/work-plans/batch-launch", requirePermission("workPlans.launch"), 
         ),
       )
     ) return;
-    const results = batchLaunchWorkPlans(rows, { userId: request.user.id });
+    const results = batchLaunchWorkPlans(rows, { userId: getUserPersonId(request.user) });
     response.json({ success: true, results, data: filterDataByScope(readAllData(), request.user) });
   } catch (error) {
     console.error("批量发起发布内容笔记失败", error);

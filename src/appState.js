@@ -51,6 +51,7 @@ import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260705-state-singlet
 const apiPort = "3001";
 const apiBaseUrl = `${window.location.protocol}//${window.location.hostname}:${apiPort}`;
 const authTokenKey = "wufanAuthToken";
+const processExecutorInitiatorRule = "initiator";
 let persistenceAvailable = false;
 let loadedFromDatabase = false;
 let currentUser = null;
@@ -1987,7 +1988,8 @@ function resolveOwner(node, initiatorId, launchAssignments) {
   return null;
 }
 
-function resolveExecutor(node, ownerId) {
+function resolveExecutor(node, ownerId, initiatorId) {
+  if (node.executorId === processExecutorInitiatorRule) return initiatorId;
   return node.executorId ?? ownerId;
 }
 
@@ -2017,6 +2019,12 @@ export function startProcess({
   const resolvedInitiatorId = normalizeOptionalId(initiatorId) ?? getCurrentUserId();
   if (resolvedInitiatorId === null) {
     return { error: "无法确认当前发起人，请重新登录后再试。" };
+  }
+  const initiator = state.people.find(
+    (person) => person.id === resolvedInitiatorId && person.status !== "inactive",
+  );
+  if (initiator === undefined) {
+    return { error: "当前发起人账号不存在或不可分配，请重新登录后再试。" };
   }
   const template = state.processTemplates.find((item) => item.id === templateId);
   if (template === undefined || template.status !== ProcessTemplateStatus.Active) {
@@ -2071,7 +2079,7 @@ export function startProcess({
       categoryId: null,
       departmentId: node.departmentId ?? node.ownerDepartmentId ?? template.applicableDepartmentIds[0],
       ownerId,
-      executorId: resolveExecutor(node, ownerId),
+      executorId: resolveExecutor(node, ownerId, resolvedInitiatorId),
       initiatorId: resolvedInitiatorId,
       description: node.description,
       completionStandard: node.completionStandard,

@@ -76,6 +76,7 @@ const departments = state.departments;
 const goals = state.goals;
 const people = state.people;
 const positions = state.positions;
+const processExecutorInitiatorRule = "initiator";
 
 function shouldShowStartedProcess(instance) {
   if (isDoneStatus(instance.status)) return startedProcessFilters.showDone;
@@ -179,6 +180,25 @@ function renderOptions(items, selectedId, emptyLabel) {
       )
       .join("")}
   `;
+}
+
+function renderExecutorOptions(selectedId) {
+  return `
+    <option value="">同负责人</option>
+    <option value="${processExecutorInitiatorRule}" ${selectedId === processExecutorInitiatorRule ? "selected" : ""}>同发起人</option>
+    ${people
+      .map(
+        (person) => `
+          <option value="${person.id}" ${person.id === selectedId ? "selected" : ""}>${person.name}</option>
+        `,
+      )
+      .join("")}
+  `;
+}
+
+function getExecutorDisplayName(node, fallback = "同负责人") {
+  if (node?.executorId === processExecutorInitiatorRule) return "同发起人";
+  return findName(people, node?.executorId, fallback);
 }
 
 function renderValueOptions(values, selectedValue, names, emptyLabel) {
@@ -345,7 +365,7 @@ function renderTemplateNodes(templateId) {
               <div class="process-node-meta">
                 <span><em>负责部门</em>${findName(departments, node.departmentId ?? node.ownerDepartmentId, "未设置")}</span>
                 <span><em>负责人</em>${findName(people, node.ownerId ?? node.defaultOwnerId, "未设置")}</span>
-                <span><em>执行人</em>${findName(people, node.executorId, "同负责人")}</span>
+                <span><em>执行人</em>${getExecutorDisplayName(node)}</span>
                 <span><em>任务时长</em>${node.durationMinutes ?? (Number(node.durationDays ?? 1) * 1440)} 分钟</span>
                 <span><em>状态</em>${processTemplateNodeStatusNames[node.status]}</span>
               </div>
@@ -630,7 +650,7 @@ function renderNodeModal() {
           <label><span>步骤名称</span><input name="name" value="${node?.name ?? ""}" /></label>
           <label><span>负责部门</span><select name="departmentId">${renderOptions(departments, node?.departmentId ?? node?.ownerDepartmentId ?? "", "请选择部门")}</select></label>
           <label><span>负责人</span><select name="ownerId">${renderOptions(people, node?.ownerId ?? node?.defaultOwnerId ?? "", "请选择负责人")}</select></label>
-          <label><span>执行人</span><select name="executorId">${renderOptions(people, node?.executorId ?? "", "同负责人")}</select></label>
+          <label><span>执行人</span><select name="executorId">${renderExecutorOptions(node?.executorId ?? "")}</select></label>
           <label><span>任务时长（分钟）</span><input name="durationMinutes" type="number" min="1" step="1" value="${node === null ? 120 : node.durationMinutes ?? (Number(node.durationDays ?? 1) * 1440)}" /></label>
           <label><span>状态</span><select name="status">${renderValueOptions(ProcessTemplateNodeStatus, node?.status ?? ProcessTemplateNodeStatus.Active, processTemplateNodeStatusNames, "请选择状态")}</select></label>
         </div>
@@ -678,7 +698,7 @@ function renderWorkflowNodesModal() {
               ${nodes
                 .map((node, index) => {
                   const ownerName = findName(people, node.ownerId ?? node.defaultOwnerId, "未设置");
-                  const executorName = findName(people, node.executorId, ownerName === "未设置" ? "未设置" : ownerName);
+                  const executorName = getExecutorDisplayName(node, ownerName === "未设置" ? "未设置" : ownerName);
                   const durationMinutes = node.durationMinutes ?? (Number(node.durationDays ?? 1) * 1440);
                   return `
                     <article class="process-node">

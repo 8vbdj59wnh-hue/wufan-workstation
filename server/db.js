@@ -2429,9 +2429,17 @@ export function startProcessInstanceExecution(instanceId, { userId = "", isAdmin
 
 export function launchWorkPlanWithProcess(
   workPlanId,
-  { processInstance, tasks: generatedTasks = [], workPlan: launchedWorkPlan, productIds = [] },
+  { processInstance, tasks: generatedTasks = [], workPlan: launchedWorkPlan, productIds = [], initiatorId = "" },
 ) {
   const database = getDatabase();
+  const trustedInitiatorId = String(initiatorId ?? "").trim();
+  const trustedInitiator =
+    trustedInitiatorId === ""
+      ? null
+      : readExistingItem("people", trustedInitiatorId);
+  if (trustedInitiator === null || trustedInitiator.status === "inactive") {
+    throw new Error("无法确认有效的实际发起人，请重新登录后再试。");
+  }
   const existingWorkPlan = readExistingItem("workPlans", workPlanId);
   const incomingWorkPlan = launchedWorkPlan?.id === workPlanId ? launchedWorkPlan : null;
   const baseWorkPlan =
@@ -2449,18 +2457,34 @@ export function launchWorkPlanWithProcess(
   const now = new Date().toISOString();
   const nextProcessInstance = {
     ...processInstance,
+    initiatorId: trustedInitiatorId,
     startedAt: null,
     dueDate: launchedWorkPlan?.dueDate ?? baseWorkPlan.dueDate ?? processInstance.dueDate ?? null,
     updatedAt: now,
   };
-  const nextTasks = generatedTasks.map((task, index) => ({
-    ...task,
-    status: index === 0 ? "todo" : "waiting",
-    startDate: null,
-    dueDate: null,
-    plannedWeek: null,
-    updatedAt: now,
-  }));
+  const nextTasks = generatedTasks.map((task, index) => {
+    const processNode = task.processNodeId
+      ? readExistingItem("processTemplateNodes", task.processNodeId)
+      : null;
+    const configuredExecutorId = String(processNode?.executorId ?? "").trim();
+    const executorId =
+      configuredExecutorId === "initiator"
+        ? trustedInitiatorId
+        : configuredExecutorId || task.executorId;
+    if (executorId === "initiator") {
+      throw new Error(`标准步骤“${task.name ?? ""}”的同发起人执行规则解析失败。`);
+    }
+    return {
+      ...task,
+      executorId,
+      initiatorId: trustedInitiatorId,
+      status: index === 0 ? "todo" : "waiting",
+      startDate: null,
+      dueDate: null,
+      plannedWeek: null,
+      updatedAt: now,
+    };
+  });
   const nextWorkPlan = {
     ...baseWorkPlan,
     ...(launchedWorkPlan ?? {}),
@@ -2637,6 +2661,7 @@ export function batchLaunchWorkPlans(rows = [], { userId = "" } = {}) {
         tasks: row.tasks,
         workPlan: { ...workPlan, customFields: auditFields },
         productIds,
+        initiatorId: userId,
       });
       const savedInstance = readExistingItem("processInstances", launched.instance.id);
       results.push({
