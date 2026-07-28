@@ -23,6 +23,7 @@ import {
 } from "./businessTime.js?v=20260705-state-singleton1";
 import { canLaunchActionTemplate, hasPermission } from "./permissions.js?v=20260724-action-launch-permissions1";
 import { rerenderPreservingInputFocus } from "./inputFocus.js?v=20260723-input-focus1";
+import { normalizeProductSkuCode, splitProductSkuCodes } from "./data/productSku.js?v=20260728-product-sku1";
 import {
   CategoryType,
   ContentScheduleStatus,
@@ -89,6 +90,7 @@ let filters = {
 let selectedScheduleId = state.contentSchedules[0]?.id ?? null;
 let selectedScheduleIds = new Set();
 let modalState = null;
+let importProductMatchIndex = null;
 let contentTemplatesLoaded = false;
 let contentTemplatesLoading = false;
 
@@ -2099,17 +2101,7 @@ function validateOptionalBatchField(value, field, errors) {
 }
 
 function parseImportProductCodes(value) {
-  const seen = new Set();
-  return String(value ?? "")
-    .split(/[,，;；\r\n]+/)
-    .map((item) => item.trim())
-    .filter((item) => {
-      if (item === "") return false;
-      const key = item.toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+  return splitProductSkuCodes(value);
 }
 
 function buildProductSetKey(productIds = []) {
@@ -2184,14 +2176,20 @@ function buildImportPreviewRows(records, batchGoalId = "") {
     const products = [];
     const missingProductCodes = [];
     const ambiguousProductCodes = [];
+    const unavailableProductCodes = [];
     productCodes.forEach((productCode) => {
-      const matches = state.products.filter(
-        (product) => isSelectableImportProduct(product)
-          && String(product.skuCode ?? "").trim().toLowerCase() === productCode.toLowerCase(),
-      );
-      if (matches.length === 0) missingProductCodes.push(productCode);
-      else if (matches.length > 1) ambiguousProductCodes.push(productCode);
-      else products.push(matches[0]);
+      const normalizedCode = normalizeProductSkuCode(productCode);
+      const serverMatches = importProductMatchIndex?.get(normalizedCode);
+      const allMatches = serverMatches === undefined
+        ? state.products.filter(
+            (product) => normalizeProductSkuCode(product.skuCode) === normalizedCode,
+          )
+        : serverMatches
+            .map((match) => state.products.find((product) => product.id === match.id) ?? match);
+      if (allMatches.length === 0) missingProductCodes.push(productCode);
+      else if (allMatches.length > 1) ambiguousProductCodes.push(productCode);
+      else if (!isSelectableImportProduct(allMatches[0])) unavailableProductCodes.push(productCode);
+      else products.push(allMatches[0]);
     });
     const templateCode = String(record.模板编码 ?? "").trim();
     const templateMatches = templateCode === ""
@@ -2208,6 +2206,7 @@ function buildImportPreviewRows(records, batchGoalId = "") {
     if (goalResult.error) errors.push(`目标${goalResult.error}`);
     if (missingProductCodes.length > 0) errors.push(`产品编码不存在：${missingProductCodes.join("、")}`);
     if (ambiguousProductCodes.length > 0) errors.push(`产品编码匹配不唯一：${ambiguousProductCodes.join("、")}`);
+    if (unavailableProductCodes.length > 0) errors.push(`产品已停用或归档，不能关联：${unavailableProductCodes.join("、")}`);
     if (templateError) errors.push(`模板编码${templateError}`);
     const dueDate = combineImportDateHour(record.完成日期, record.完成时间, "完成期限", errors, false);
     const customFields = {};
@@ -2282,7 +2281,7 @@ function buildImportPreviewRows(records, batchGoalId = "") {
       goal: goalResult.item,
       productCodes,
       products,
-      invalidProductCodes: [...missingProductCodes, ...ambiguousProductCodes],
+      invalidProductCodes: [...missingProductCodes, ...ambiguousProductCodes, ...unavailableProductCodes],
       linkedTemplate: templateError === "" ? linkedTemplate : null,
       actionName,
       dueDate,
@@ -2303,6 +2302,9 @@ export function getContentNoteImportTemplateColumns() {
 async function handleImportFile(file, rerender) {
   try {
     const parsed = await parseContentNoteImport(file);
+    importProductMatchIndex = new Map(
+      (parsed.productMatches ?? []).map((entry) => [entry.normalizedCode, entry.matches ?? []]),
+    );
     const rows = parsed.rows;
     const headers = rows[0] ?? [];
     const requiredHeaders = getBatchTemplateColumns();
@@ -2323,8 +2325,9 @@ async function handleImportFile(file, rerender) {
       result: null,
     };
     rerender();
-  } catch {
-    modalState = { kind: "import", fileName: file.name, rows: [], error: "文件解析失败，请使用系统模板，或 .xlsx/.xls/.csv/.tsv 文件。" };
+  } catch (error) {
+    importProductMatchIndex = null;
+    modalState = { kind: "import", fileName: file.name, rows: [], error: error.message || "文件解析失败，请使用系统模板，或 .xlsx/.xls/.csv/.tsv 文件。" };
     rerender();
   }
 }

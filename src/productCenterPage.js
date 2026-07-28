@@ -22,10 +22,15 @@ import {
 } from "./appState.js?v=20260705-state-singleton1";
 import { getProcessInstanceBusinessStatus, getProcessInstanceOwner } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
 import { hasPermission } from "./permissions.js?v=20260725-product-center1";
+import { normalizeProductSkuCode } from "./data/productSku.js?v=20260728-product-sku1";
 
 const productStatuses = ["开发中", "待上架", "在售", "停售", "清仓", "已归档"];
-let filters = { query: "", brand: "", category: "", status: "" };
-let productViewMode = "list";
+let filters = { query: "", brand: "", category: "", status: "", erpStatus: "", platform: "", stockStatus: "" };
+let productViewMode = "card";
+let productPage = 1;
+const productPageSize = 48;
+let productDetailTab = "basic";
+let productDetailId = "";
 let modalState = null;
 let importState = null;
 let productSalesState = { productId: "", loading: false, loaded: false, rows: [], error: "" };
@@ -57,7 +62,7 @@ function formatDateTime(value) {
 
 function renderImage(product, className = "product-list-image") {
   return product.mainImage
-    ? `<img class="${className}" src="${escapeHtml(resolveAssetUrl(product.mainImage))}" alt="${escapeHtml(product.name)}" />`
+    ? `<img class="${className}" src="${escapeHtml(resolveAssetUrl(product.mainImage))}" alt="${escapeHtml(product.name)}" loading="lazy" />`
     : `<span class="${className} product-image-placeholder">无图</span>`;
 }
 
@@ -66,13 +71,92 @@ function getRelatedActions(productId) {
   return state.processInstances.filter((instance) => actionIds.has(instance.id));
 }
 
-function getFilteredProducts() {
+function buildProductUiIndex() {
+  const goodsById = new Map((state.erpGoods ?? []).map((item) => [item.id, item]));
+  const erpByProduct = new Map((state.productErpMappings ?? []).map((mapping) => [mapping.productId, {
+    mapping,
+    goods: goodsById.get(mapping.erpGoodsId) ?? null,
+    stock: mapping.latestStateJson && typeof mapping.latestStateJson === "object" ? mapping.latestStateJson : {},
+  }]));
+  const linksById = new Map((state.salesLinks ?? []).map((item) => [item.id, item]));
+  const shopsById = new Map((state.salesShops ?? []).map((item) => [item.id, item]));
+  const salesByProduct = new Map();
+  const validActionIds = new Set(state.processInstances.map((item) => item.id));
+  const actionIdsByProduct = new Map();
+  for (const relation of state.actionProducts ?? []) {
+    if (!validActionIds.has(relation.actionId)) continue;
+    const actionIds = actionIdsByProduct.get(relation.productId) ?? new Set();
+    actionIds.add(relation.actionId);
+    actionIdsByProduct.set(relation.productId, actionIds);
+  }
+  for (const sku of state.salesLinkSkus ?? []) {
+    if (!sku.productId) continue;
+    const summary = salesByProduct.get(sku.productId) ?? { platforms: new Set(), shopIds: new Set(), linkIds: new Set(), skuCount: 0 };
+    const link = linksById.get(sku.salesLinkId);
+    const shop = link ? shopsById.get(link.shopId) : null;
+    summary.skuCount += 1;
+    if (link) summary.linkIds.add(link.id);
+    if (shop) {
+      summary.shopIds.add(shop.id);
+      if (shop.platform) summary.platforms.add(shop.platform);
+    }
+    salesByProduct.set(sku.productId, summary);
+  }
+  return { erpByProduct, salesByProduct, actionIdsByProduct };
+}
+
+function getFilteredProducts(index) {
   const query = filters.query.trim().toLowerCase();
+  const normalizedSkuQuery = normalizeProductSkuCode(filters.query);
   return state.products.filter((product) => {
-    const matchesQuery = query === "" || `${product.name} ${product.skuCode}`.toLowerCase().includes(query);
+    const matchesQuery = query === ""
+      || String(product.name ?? "").toLowerCase().includes(query)
+      || normalizeProductSkuCode(product.skuCode).includes(normalizedSkuQuery);
+    const erp = getProductErpContext(product.id, index);
+    const platforms = getProductSalesSummary(product.id, index).platforms;
+    const stock = Number(erp.stock.currentStock ?? erp.stock.stock ?? 0);
+    const matchesStock = !filters.stockStatus
+      || (filters.stockStatus === "available" && stock > 10)
+      || (filters.stockStatus === "low" && stock > 0 && stock <= 10)
+      || (filters.stockStatus === "empty" && stock <= 0);
     return matchesQuery && (!filters.brand || product.brand === filters.brand) &&
-      (!filters.category || product.category === filters.category) && (!filters.status || product.status === filters.status);
+      (!filters.category || product.category === filters.category) && (!filters.status || product.status === filters.status) &&
+      (!filters.erpStatus || (filters.erpStatus === "linked" ? erp.mapping !== null : erp.mapping === null)) &&
+      (!filters.platform || platforms.has(filters.platform)) && matchesStock;
   });
+}
+
+function getProductErpContext(productId, index = null) {
+  if (index) return index.erpByProduct.get(productId) ?? { mapping: null, goods: null, stock: {} };
+  const mapping = state.productErpMappings.find((item) => item.productId === productId) ?? null;
+  const goods = mapping ? state.erpGoods.find((item) => item.id === mapping.erpGoodsId) ?? null : null;
+  const stock = mapping?.latestStateJson && typeof mapping.latestStateJson === "object"
+    ? mapping.latestStateJson
+    : {};
+  return { mapping, goods, stock };
+}
+
+function getProductSalesSummary(productId, index = null) {
+  if (index) {
+    const summary = index.salesByProduct.get(productId);
+    if (!summary) return { platforms: new Set(), shopCount: 0, linkCount: 0, skuCount: 0 };
+    return {
+      platforms: summary.platforms,
+      shopCount: summary.shopIds.size,
+      linkCount: summary.linkIds.size,
+      skuCount: summary.skuCount,
+    };
+  }
+  const skus = (state.salesLinkSkus ?? []).filter((item) => item.productId === productId);
+  const linkIds = new Set(skus.map((item) => item.salesLinkId));
+  const links = (state.salesLinks ?? []).filter((item) => linkIds.has(item.id));
+  const shopIds = new Set(links.map((item) => item.shopId));
+  const platforms = new Set((state.salesShops ?? []).filter((item) => shopIds.has(item.id)).map((item) => item.platform).filter(Boolean));
+  return { platforms, shopCount: shopIds.size, linkCount: linkIds.size, skuCount: skus.length };
+}
+
+function formatMetric(value) {
+  return value === null || value === undefined || value === "" ? "—" : escapeHtml(value);
 }
 
 function uniqueValues(key) {
@@ -110,10 +194,13 @@ function renderProductTable(products) {
   </div>`;
 }
 
-function renderProductCards(products) {
+function renderProductCards(products, index) {
   if (products.length === 0) return `<div class="product-card-empty">暂无匹配产品</div>`;
   return `<div class="product-card-grid">
-    ${products.map((product) => `
+    ${products.map((product) => {
+      const erp = getProductErpContext(product.id, index);
+      const sales = getProductSalesSummary(product.id, index);
+      return `
       <article class="product-archive-card" data-action="view-product" data-product-id="${escapeHtml(product.id)}" role="button" tabindex="0" aria-label="查看产品：${escapeHtml(product.name)}">
         <div class="product-archive-card-media">${renderImage(product, "product-card-image")}</div>
         <div class="product-archive-card-body">
@@ -121,20 +208,34 @@ function renderProductCards(products) {
             <h3 title="${escapeHtml(product.name)}">${escapeHtml(product.name)}</h3>
             <span class="status-badge">${escapeHtml(product.status)}</span>
           </div>
-          <strong class="product-card-sku">${escapeHtml(product.skuCode)}</strong>
-          <div class="product-archive-card-meta">
-            <span>${escapeHtml(product.brand || "未设置品牌")}</span>
-            <span>关联关键行动 ${getRelatedActions(product.id).length}</span>
+          <div class="product-card-identities">
+            <span>SKU <strong>${escapeHtml(product.skuCode || "—")}</strong></span>
+            <span>ERP <strong>${escapeHtml(erp.goods?.goodsCode || "—")}</strong></span>
           </div>
-          ${renderProductActions(product)}
+          <div class="product-card-metrics">
+            <div><strong>${index.actionIdsByProduct.get(product.id)?.size ?? 0}</strong><span>关联行动</span></div>
+            <div><strong>${formatMetric(erp.stock.sales30d)}</strong><span>近30天销量</span></div>
+            <div><strong>${sales.platforms.size || "—"}</strong><span>平台</span></div>
+            <div><strong>${sales.shopCount || "—"}</strong><span>店铺</span></div>
+            <div><strong>${sales.linkCount || "—"}</strong><span>链接</span></div>
+          </div>
+          <div class="product-card-more">
+            <button class="icon-button" type="button" data-action="toggle-product-menu" data-product-id="${escapeHtml(product.id)}" aria-label="产品操作">•••</button>
+            <div class="product-card-menu" data-product-menu="${escapeHtml(product.id)}" hidden>${renderProductActions(product)}</div>
+          </div>
         </div>
       </article>
-    `).join("")}
+    `;
+    }).join("")}
   </div>`;
 }
 
 function renderProductList() {
-  const products = getFilteredProducts();
+  const index = buildProductUiIndex();
+  const products = getFilteredProducts(index);
+  const totalPages = Math.max(1, Math.ceil(products.length / productPageSize));
+  productPage = Math.min(productPage, totalPages);
+  const visibleProducts = products.slice((productPage - 1) * productPageSize, productPage * productPageSize);
   const canCreate = hasPermission(getCurrentUser(), "products.create");
   return `
     <section class="product-center-page">
@@ -148,8 +249,17 @@ function renderProductList() {
         <input type="search" name="query" value="${escapeHtml(filters.query)}" placeholder="搜索产品名称或SKU" />
         <select name="brand">${renderFilterOptions(uniqueValues("brand"), filters.brand, "全部品牌")}</select>
         <select name="category">${renderFilterOptions(uniqueValues("category"), filters.category, "全部分类")}</select>
-        <select name="status">${renderFilterOptions(productStatuses, filters.status, "全部状态")}</select>
+        <details class="product-more-filters" ${filters.status || filters.erpStatus || filters.platform || filters.stockStatus ? "open" : ""}>
+          <summary>更多筛选</summary>
+          <div>
+            <select name="status">${renderFilterOptions(productStatuses, filters.status, "全部状态")}</select>
+            <select name="erpStatus"><option value="">全部ERP状态</option><option value="linked" ${filters.erpStatus === "linked" ? "selected" : ""}>已关联ERP</option><option value="unlinked" ${filters.erpStatus === "unlinked" ? "selected" : ""}>未关联ERP</option></select>
+            <select name="platform">${renderFilterOptions([...new Set((state.salesShops ?? []).map((item) => item.platform).filter(Boolean))].sort(), filters.platform, "全部销售平台")}</select>
+            <select name="stockStatus"><option value="">全部库存</option><option value="available" ${filters.stockStatus === "available" ? "selected" : ""}>有库存</option><option value="low" ${filters.stockStatus === "low" ? "selected" : ""}>低库存</option><option value="empty" ${filters.stockStatus === "empty" ? "selected" : ""}>无库存</option></select>
+          </div>
+        </details>
         <button class="secondary-button" type="submit">筛选</button>
+        <button class="text-button" type="button" data-action="clear-product-filters">清空</button>
       </form>
       <div class="product-list-toolbar">
         <span>共 ${products.length} 个 SKU</span>
@@ -158,13 +268,28 @@ function renderProductList() {
           <button type="button" data-action="set-product-view" data-view-mode="card" class="${productViewMode === "card" ? "is-active" : ""}">卡片</button>
         </div>
       </div>
-      ${productViewMode === "card" ? renderProductCards(products) : renderProductTable(products)}
+      ${productViewMode === "card" ? renderProductCards(visibleProducts, index) : renderProductTable(visibleProducts)}
+      ${renderProductPagination(products.length, totalPages)}
       ${renderProductImportRecords()}
       ${renderUnmatchedPlatformSkus()}
       ${renderProductModal()}
       ${renderProductV2ImportModal()}
     </section>
   `;
+}
+
+function renderProductPagination(total, totalPages) {
+  if (totalPages <= 1) return "";
+  const start = Math.max(1, Math.min(productPage - 2, totalPages - 4));
+  const pages = Array.from({ length: Math.min(5, totalPages) }, (_, index) => start + index);
+  return `<nav class="product-pagination" aria-label="产品分页">
+    <span>第 ${productPage}/${totalPages} 页 · 共 ${total} 个 SKU</span>
+    <div>
+      <button class="secondary-button" type="button" data-action="product-page" data-page="${productPage - 1}" ${productPage === 1 ? "disabled" : ""}>上一页</button>
+      ${pages.map((page) => `<button type="button" data-action="product-page" data-page="${page}" class="${page === productPage ? "is-active" : ""}">${page}</button>`).join("")}
+      <button class="secondary-button" type="button" data-action="product-page" data-page="${productPage + 1}" ${productPage === totalPages ? "disabled" : ""}>下一页</button>
+    </div>
+  </nav>`;
 }
 
 function renderProductImportRecords() {
@@ -322,7 +447,7 @@ function renderProductSalesGroups(rows) {
     <section class="product-sales-platform-group"><h3>${escapeHtml(platform)}</h3>
       ${[...shops.values()].map((shop) => `<div class="product-sales-shop-group">
         <div class="product-sales-shop-heading"><strong>${escapeHtml(shop.name)}</strong><span>${shop.links.size} 条商品链接</span></div>
-        ${[...shop.links.values()].map((link) => `<details class="product-sales-link-card" open>
+        ${[...shop.links.values()].map((link) => `<details class="product-sales-link-card">
           <summary><span>${escapeHtml(link.title || link.platformGoodsCode || link.platformGoodsId || "未命名商品")}</span><span>${link.skus.length} 个当前产品SKU</span></summary>
           <div class="product-sales-link-meta">
             <span>平台商品ID：${escapeHtml(link.platformGoodsId || "—")}</span>
@@ -366,35 +491,139 @@ function renderUnmatchedPlatformSkus() {
 }
 
 function renderProductDetail(product) {
+  if (productDetailId !== product.id) {
+    productDetailId = product.id;
+    productDetailTab = "basic";
+  }
   const archive = getProductExecutionArchive(product.id);
   const actions = archive.actions;
-  const statuses = actions.map((instance) => getProcessInstanceBusinessStatus(instance.id, state).status);
+  const erp = getProductErpContext(product.id);
   return `
     <section class="product-center-page product-detail-page">
-      <div class="section-heading with-actions">
-        <div><button class="text-button" type="button" data-action="back-products">← 返回产品列表</button><h1>${escapeHtml(product.name)}</h1><p>${escapeHtml(product.skuCode)}</p></div>
-        ${hasPermission(getCurrentUser(), "products.edit") ? `<button class="primary-button" type="button" data-action="edit-product" data-product-id="${product.id}">编辑产品</button>` : ""}
-      </div>
-      <div class="product-summary-stats"><div><span>累计关联</span><strong>${actions.length}</strong></div><div><span>执行中</span><strong>${statuses.filter((status) => status === "running").length}</strong></div><div><span>已完成</span><strong>${statuses.filter((status) => status === "done").length}</strong></div></div>
-      <section class="product-detail-band"><h2>基础信息</h2><div class="product-detail-grid">
+      <button class="text-button product-detail-back" type="button" data-action="back-products">← 返回产品列表</button>
+      <header class="product-detail-hero">
         <div class="product-detail-media">${renderImage(product, "product-detail-main-image")}</div>
-        <div class="detail-grid">
-          ${[["SKU编码", product.skuCode], ["产品名称", product.name], ["品牌", product.brand], ["产品分类", product.category], ["产品系列", product.series], ["材质", product.material], ["颜色", product.color], ["规格尺寸", product.specification], ["产品状态", product.status], ["产品负责人", findName(state.people, product.ownerId)], ["备注", product.remark]].map(([label, value]) => `<div class="detail-field"><span>${label}</span><strong>${escapeHtml(value || "-")}</strong></div>`).join("")}
+        <div class="product-detail-identity">
+          <div><span class="status-badge">${escapeHtml(product.status || "—")}</span><span>${escapeHtml(product.brand || "未设置品牌")}</span></div>
+          <h1>${escapeHtml(product.name)}</h1>
+          <p>SKU：${escapeHtml(product.skuCode || "—")}</p>
+          <p>ERP：${escapeHtml(erp.goods?.goodsCode || "—")}</p>
+          <p>${escapeHtml(product.category || "未设置分类")}</p>
         </div>
-      </div>${Array.isArray(product.galleryImages) && product.galleryImages.length ? `<div class="product-gallery">${product.galleryImages.map((url) => `<img src="${escapeHtml(resolveAssetUrl(url))}" alt="产品图片" />`).join("")}</div>` : ""}
-      ${renderProductSourceDetails(product)}</section>
-      ${renderProductSalesLinks(product.id)}
-      <section class="product-detail-band"><h2>关联关键行动</h2><div class="table-wrap"><table class="data-table"><thead><tr><th>关键行动名称</th><th>行动状态</th><th>负责部门</th><th>负责人</th><th>发起时间</th><th>截止时间</th></tr></thead><tbody>
-        ${actions.length === 0 ? `<tr><td colspan="6" class="empty-cell">暂无关联关键行动</td></tr>` : actions.map((instance) => {
-          const standard = state.taskTemplates.find((item) => item.id === instance.taskTemplateId);
-          const owner = getProcessInstanceOwner(instance.id, state);
-          return `<tr><td>${escapeHtml(instance.displayTitle || instance.name)}</td><td>${getProcessInstanceBusinessStatus(instance.id, state).label}</td><td>${escapeHtml(findName(state.departments, standard?.departmentId))}</td><td>${escapeHtml(findName(state.people, owner.userId))}</td><td>${formatDateTime(instance.createdAt)}</td><td>${formatDateTime(instance.dueDate)}</td></tr>`;
-        }).join("")}
-      </tbody></table></div></section>
-      ${renderProductExecutionSummary(archive)}
+        ${hasPermission(getCurrentUser(), "products.edit") ? `<button class="primary-button" type="button" data-action="edit-product" data-product-id="${product.id}">编辑产品</button>` : ""}
+      </header>
+      <nav class="product-detail-tabs" aria-label="产品详情">
+        ${[
+          ["basic", "基本信息"],
+          ["erp", "ERP与库存"],
+          ["sales", "销售链接"],
+          ["actions", "关键行动"],
+          ["templates", "关联模板"],
+        ].map(([id, label]) => `<button type="button" data-action="product-detail-tab" data-tab="${id}" class="${productDetailTab === id ? "is-active" : ""}">${label}</button>`).join("")}
+      </nav>
+      <div class="product-detail-tab-panel">${renderProductDetailTab(product, archive, erp)}</div>
       ${renderProductModal()}
     </section>
   `;
+}
+
+function renderInfoGroup(title, fields) {
+  return `<section class="product-info-group"><h2>${escapeHtml(title)}</h2><div class="product-info-grid">
+    ${fields.map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${formatMetric(value)}</strong></div>`).join("")}
+  </div></section>`;
+}
+
+function renderProductDetailTab(product, archive, erp) {
+  if (productDetailTab === "erp") return renderProductErpTab(erp);
+  if (productDetailTab === "sales") return renderProductSalesLinks(product.id);
+  if (productDetailTab === "actions") return renderProductActionsTab(archive.actions);
+  if (productDetailTab === "templates") return renderProductTemplatesTab(archive.actions);
+  const dimensions = [product.lengthCm, product.widthCm, product.heightCm].some((value) => value !== null && value !== undefined)
+    ? `${product.lengthCm ?? "—"} × ${product.widthCm ?? "—"} × ${product.heightCm ?? "—"} cm`
+    : "—";
+  return `<div class="product-basic-layout">
+    ${renderInfoGroup("产品身份", [
+      ["产品名称", product.name], ["SKU编码", product.skuCode], ["规格名称", product.skuName || product.specification],
+      ["品牌", product.brand], ["分类", product.category], ["品类", product.productType],
+    ])}
+    ${renderInfoGroup("产品属性", [
+      ["风格", product.style], ["材质", product.material], ["颜色", product.color], ["摆放位置", product.placement],
+      ["条码", product.identifiers?.barcode], ["单位", product.unitInfo?.unit || product.unitInfo?.name],
+    ])}
+    ${renderInfoGroup("包装与物流", [
+      ["重量", product.weightKg === null || product.weightKg === undefined ? "—" : `${product.weightKg} kg`],
+      ["长宽高", dimensions], ["体积", product.volumeCm3 === null || product.volumeCm3 === undefined ? "—" : `${product.volumeCm3} cm³`],
+      ["产品负责人", findName(state.people, product.ownerId)], ["备注", product.remark],
+    ])}
+    ${Array.isArray(product.galleryImages) && product.galleryImages.length ? `<section class="product-info-group"><h2>产品图片</h2><div class="product-gallery">${product.galleryImages.map((url) => `<img src="${escapeHtml(resolveAssetUrl(url))}" alt="产品图片" loading="lazy" />`).join("")}</div></section>` : ""}
+  </div>`;
+}
+
+function renderProductErpTab({ mapping, goods, stock }) {
+  if (mapping === null) return `<div class="product-detail-empty"><strong>尚未关联 ERP 规格</strong><p>可通过“导入ERP数据”建立关联。</p></div>`;
+  return `<div class="product-erp-layout">
+    ${renderInfoGroup("ERP货品信息", [
+      ["ERP货品编码", goods?.goodsCode], ["ERP货品名称", goods?.goodsName], ["货品简称", goods?.shortName],
+      ["主供应商", goods?.primarySupplier], ["供应商货号", goods?.supplierGoodsCode],
+      ["成本价", stock.costPrice], ["零售价", stock.retailPrice],
+    ])}
+    <section class="product-info-group product-inventory-primary"><h2>库存概览</h2><div class="product-inventory-highlights">
+      <div><span>当前库存</span><strong>${formatMetric(stock.currentStock ?? stock.stock)}</strong></div>
+      <div><span>可发库存</span><strong>${formatMetric(stock.shippableStock)}</strong></div>
+      <div><span>采购在途</span><strong>${formatMetric(stock.purchaseInTransit)}</strong></div>
+    </div></section>
+    ${renderInfoGroup("库存明细", [
+      ["可用库存", stock.availableStock], ["实际库存", stock.actualStock],
+      ["实际可发库存", stock.actualShippableStock], ["待发货量", stock.pendingShipment],
+    ])}
+    ${renderInfoGroup("销量概览", [
+      ["7天销量", stock.sales7d], ["30天销量", stock.sales30d], ["90天销量", stock.sales90d],
+      ["180天销量", stock.sales180d], ["总销量", stock.totalSales],
+    ])}
+  </div>`;
+}
+
+function renderProductActionsTab(actions) {
+  if (actions.length === 0) return `<div class="product-detail-empty">暂无关联关键行动</div>`;
+  return `<div class="product-related-actions">${actions.map((instance) => {
+    const standard = state.taskTemplates.find((item) => item.id === instance.taskTemplateId);
+    const owner = getProcessInstanceOwner(instance.id, state);
+    const progress = state.tasks.filter((task) => task.processInstanceId === instance.id);
+    const done = progress.filter((task) => ["done", "completed"].includes(task.status)).length;
+    return `<a class="product-related-action" href="#schedule-board">
+      <div><strong>${escapeHtml(instance.businessCode || "—")}</strong><span>${escapeHtml(getProcessInstanceBusinessStatus(instance.id, state).label)}</span></div>
+      <h3>${escapeHtml(instance.displayTitle || instance.name || "未命名关键行动")}</h3>
+      <p>${escapeHtml(standard?.name || "未设置行动标准")} · ${escapeHtml(findName(state.people, owner.userId))}</p>
+      <small>进度 ${done}/${progress.length}</small>
+    </a>`;
+  }).join("")}</div>`;
+}
+
+function renderProductTemplatesTab(actions) {
+  const relations = new Map();
+  for (const instance of actions) {
+    const workPlan = state.workPlans.find((item) => item.processInstanceId === instance.id);
+    const templateIds = instance.customFields?.linkedTemplateIds ?? workPlan?.customFields?.linkedTemplateIds ?? [];
+    for (const templateId of templateIds) {
+      const current = relations.get(templateId) ?? { count: 0, latestAt: "" };
+      current.count += 1;
+      current.latestAt = [current.latestAt, instance.updatedAt, instance.createdAt].filter(Boolean).sort().at(-1) ?? "";
+      relations.set(templateId, current);
+    }
+  }
+  const templates = [...relations.entries()].map(([id, relation]) => ({
+    template: state.templates.find((item) => item.id === id),
+    relation,
+  })).filter((item) => item.template);
+  if (templates.length === 0) return `<div class="product-detail-empty">暂无通过关键行动关联的模板</div>`;
+  return `<div class="product-related-templates">${templates.map(({ template, relation }) => {
+    const previewUrl = template.previewImage?.fileUrl ?? template.previewImage?.url ?? "";
+    return `<article class="product-related-template">
+      ${previewUrl ? `<img src="${escapeHtml(resolveAssetUrl(previewUrl))}" alt="${escapeHtml(template.name)}" loading="lazy" />` : `<span class="product-image-placeholder">无预览</span>`}
+      <div><h3>${escapeHtml(template.name)}</h3><p>${escapeHtml(template.businessCode || "—")} · ${escapeHtml(template.fileType || "—")}</p>
+      <small>关联行动 ${relation.count} · 最近 ${formatDateTime(relation.latestAt)}</small></div>
+    </article>`;
+  }).join("")}</div>`;
 }
 
 function renderProductModal() {
@@ -775,7 +1004,7 @@ async function refreshPlatformPreview(rerender, { page = 1, filters = importStat
 
 export function bindProductCenterPageEvents(rerender) {
   const routeProductId = getRouteProductId();
-  if (routeProductId && productSalesState.productId !== routeProductId && !productSalesState.loading) {
+  if (routeProductId && productDetailTab === "sales" && productSalesState.productId !== routeProductId && !productSalesState.loading) {
     void refreshProductSalesLinks(routeProductId, rerender);
   }
   if (!routeProductId && !unmatchedSkuState.loaded && !unmatchedSkuState.loading) {
@@ -801,7 +1030,16 @@ export function bindProductCenterPageEvents(rerender) {
   document.querySelector("[data-product-filter-form]")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const form = event.currentTarget;
-    filters = { query: form.elements.query.value, brand: form.elements.brand.value, category: form.elements.category.value, status: form.elements.status.value };
+    filters = {
+      query: form.elements.query.value,
+      brand: form.elements.brand.value,
+      category: form.elements.category.value,
+      status: form.elements.status.value,
+      erpStatus: form.elements.erpStatus.value,
+      platform: form.elements.platform.value,
+      stockStatus: form.elements.stockStatus.value,
+    };
+    productPage = 1;
     rerender();
   });
   const page = document.querySelector(".product-center-page");
@@ -816,6 +1054,25 @@ export function bindProductCenterPageEvents(rerender) {
     if (button === null) return;
     const action = button.dataset.action;
     if (action === "set-product-view") { productViewMode = button.dataset.viewMode === "card" ? "card" : "list"; rerender(); }
+    if (action === "product-page") {
+      productPage = Math.max(1, Number(button.dataset.page) || 1);
+      rerender();
+      document.querySelector(".product-list-toolbar")?.scrollIntoView({ block: "start" });
+    }
+    if (action === "clear-product-filters") {
+      filters = { query: "", brand: "", category: "", status: "", erpStatus: "", platform: "", stockStatus: "" };
+      productPage = 1;
+      rerender();
+    }
+    if (action === "toggle-product-menu") {
+      event.stopPropagation();
+      const menu = document.querySelector(`[data-product-menu="${CSS.escape(button.dataset.productId)}"]`);
+      if (menu) menu.hidden = !menu.hidden;
+    }
+    if (action === "product-detail-tab") {
+      productDetailTab = button.dataset.tab || "basic";
+      rerender();
+    }
     if (action === "new-product") { modalState = { kind: "create", error: "" }; rerender(); }
     if (action === "open-product-import") { importState = { step: "upload", loading: false, error: "" }; rerender(); }
     if (action === "open-product-v2-import") { importState = { version: "v2", step: "upload", loading: false, error: "" }; rerender(); }

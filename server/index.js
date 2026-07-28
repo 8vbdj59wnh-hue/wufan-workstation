@@ -59,6 +59,7 @@ import {
 import { createToken, verifyPassword, verifyToken } from "./security.js";
 import { canLaunchActionTemplate, getDataScope, hasPermission } from "../src/permissions.js";
 import { getProcessInstanceOwner } from "../src/data/processInstanceSelectors.js";
+import { normalizeProductSkuCode, splitProductSkuCodes } from "../src/data/productSku.js";
 
 const app = express();
 const host = process.env.HOST ?? "0.0.0.0";
@@ -1107,6 +1108,13 @@ app.post("/api/work-plans/batch-launch", requirePermission("workPlans.launch"), 
 app.post(
   "/api/content-note-import/parse",
   requirePermission("workPlans.launch"),
+  (request, response, next) => {
+    if (!hasPermission(request.user, "products.view")) {
+      response.status(403).json({ success: false, message: "你没有产品中心查看权限，无法匹配产品编码。" });
+      return;
+    }
+    next();
+  },
   uploadContentNoteWorkbook.single("file"),
   (request, response) => {
     try {
@@ -1123,7 +1131,41 @@ app.post(
         raw: false,
         blankrows: false,
       });
-      response.json({ success: true, sheetName, rows });
+      const productColumnIndex = (rows[0] ?? []).findIndex((value) => String(value ?? "").trim() === "产品编码");
+      const rawProductValues = productColumnIndex < 0
+        ? []
+        : rows.slice(2).map((row) => row[productColumnIndex]).filter((value) => String(value ?? "") !== "");
+      const productDiagnostics = rawProductValues.flatMap((rawValue) =>
+        splitProductSkuCodes(rawValue).map((code) => ({
+          rawValue: String(rawValue ?? ""),
+          code,
+          length: code.length,
+          utf8Hex: Buffer.from(code, "utf8").toString("hex"),
+          trimmedValue: String(code).trim(),
+          normalizedCode: normalizeProductSkuCode(code),
+        })),
+      );
+      const requestedCodes = [...new Set(productDiagnostics.map((item) => item.normalizedCode).filter(Boolean))];
+      const requestedCodeSet = new Set(requestedCodes);
+      const productIndex = new Map();
+      for (const product of getDatabase().prepare("SELECT * FROM products").all()) {
+        const normalizedCode = normalizeProductSkuCode(product.skuCode);
+        if (!requestedCodeSet.has(normalizedCode)) continue;
+        const matches = productIndex.get(normalizedCode) ?? [];
+        matches.push({
+          id: product.id,
+          skuCode: product.skuCode,
+          name: product.name,
+          status: product.status,
+          mainImage: product.mainImage,
+        });
+        productIndex.set(normalizedCode, matches);
+      }
+      const productMatches = requestedCodes.map((normalizedCode) => ({
+        normalizedCode,
+        matches: productIndex.get(normalizedCode) ?? [],
+      }));
+      response.json({ success: true, sheetName, rows, productMatches, productDiagnostics });
     } catch (error) {
       console.error("发布内容笔记导入文件解析失败", error);
       response.status(400).json({ success: false, message: error.message || "Excel 文件解析失败。" });

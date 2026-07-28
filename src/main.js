@@ -38,6 +38,7 @@ app.addEventListener("click", (event) => {
 
   const trigger = event.target.closest('[data-action="view-product"], a[href^="#products/"]');
   if (trigger === null) return;
+  if (trigger.matches(".product-archive-card") && trigger.closest(".product-center-page") !== null) return;
   const href = trigger.getAttribute("href") ?? "";
   const productId = trigger.dataset.productId ?? decodeURIComponent(href.replace(/^#products\//, ""));
   if (productId === "") return;
