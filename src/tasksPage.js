@@ -1273,8 +1273,47 @@ function matchesTaskStatusFilter(task, selectedStatus) {
   return getTaskBusinessStatus(task).status === selectedStatus;
 }
 
-function getTaskIdentifierSearchTarget() {
-  const keyword = filters.keyword.trim().toLowerCase();
+function getLinkedTemplateIds(item) {
+  const linkedTemplateIds = item?.customFields?.linkedTemplateIds;
+  return Array.isArray(linkedTemplateIds)
+    ? linkedTemplateIds.map((id) => String(id ?? "").trim()).filter(Boolean)
+    : [];
+}
+
+function buildTemplateBusinessCodeSearchIndex(keyword) {
+  const normalizedKeyword = String(keyword ?? "").trim().toLowerCase();
+  if (normalizedKeyword === "") return null;
+
+  const matchedTemplateIds = new Set(
+    state.templates
+      .filter((template) =>
+        String(template.businessCode ?? "").trim().toLowerCase().includes(normalizedKeyword),
+      )
+      .map((template) => template.id),
+  );
+  const isTemplateCodeQuery = normalizedKeyword.startsWith("mb-") || matchedTemplateIds.size > 0;
+  if (!isTemplateCodeQuery) return null;
+
+  const workPlanByProcessInstanceId = new Map(
+    state.workPlans
+      .filter((workPlan) => String(workPlan.processInstanceId ?? "").trim() !== "")
+      .map((workPlan) => [workPlan.processInstanceId, workPlan]),
+  );
+  const matchedProcessInstanceIds = new Set();
+  state.processInstances.forEach((instance) => {
+    const linkedTemplateIds = new Set([
+      ...getLinkedTemplateIds(instance),
+      ...getLinkedTemplateIds(workPlanByProcessInstanceId.get(instance.id)),
+    ]);
+    if ([...linkedTemplateIds].some((templateId) => matchedTemplateIds.has(templateId))) {
+      matchedProcessInstanceIds.add(instance.id);
+    }
+  });
+
+  return { matchedProcessInstanceIds };
+}
+
+function getTaskIdentifierSearchTarget(keyword) {
   if (keyword === "") return null;
 
   const matchedTask = state.tasks.find(
@@ -1295,10 +1334,10 @@ function taskMatchesIdentifierSearch(task, target) {
   return task.processInstanceId === target.id;
 }
 
-function matchesFilters(task, identifierTarget = null) {
+function matchesFilters(task, identifierTarget = null, isTemplateCodeSearch = false) {
   const overdue = isTaskOverdue(task, today) || hasTaskOverdueRecord(task);
-  const shouldShowDone = identifierTarget !== null || filters.showDone || filters.status === TaskStatus.Done;
-  const shouldShowCanceled = identifierTarget !== null || filters.showCanceled || filters.status === TaskStatus.Canceled;
+  const shouldShowDone = identifierTarget !== null || isTemplateCodeSearch || filters.showDone || filters.status === TaskStatus.Done;
+  const shouldShowCanceled = identifierTarget !== null || isTemplateCodeSearch || filters.showCanceled || filters.status === TaskStatus.Canceled;
   const belonging = getTaskBelonging(task);
   const searchableText = [
     task.businessCode,
@@ -1317,6 +1356,7 @@ function matchesFilters(task, identifierTarget = null) {
   if (identifierTarget !== null && !taskMatchesIdentifierSearch(task, identifierTarget)) return false;
   if (
     identifierTarget === null &&
+    !isTemplateCodeSearch &&
     filters.keyword !== "" &&
     !searchableText.includes(filters.keyword.toLowerCase())
   ) return false;
@@ -1373,12 +1413,20 @@ function isTaskVisibleInExecutionStage(task) {
 }
 
 function getFilteredTasks() {
-  const identifierTarget = getTaskIdentifierSearchTarget();
+  const keyword = filters.keyword.trim().toLowerCase();
+  const identifierTarget = getTaskIdentifierSearchTarget(keyword);
+  const templateCodeSearch = identifierTarget === null
+    ? buildTemplateBusinessCodeSearchIndex(keyword)
+    : null;
   return state.tasks
     .filter((task) => !isClearanceTask(task))
-    .filter(isTaskVisibleInExecutionStage)
-    .filter((task) => identifierTarget !== null || matchesTaskListView(task))
-    .filter((task) => matchesFilters(task, identifierTarget));
+    .filter((task) => templateCodeSearch !== null || isTaskVisibleInExecutionStage(task))
+    .filter((task) => identifierTarget !== null || templateCodeSearch !== null || matchesTaskListView(task))
+    .filter((task) => {
+      if (!matchesFilters(task, identifierTarget, templateCodeSearch !== null)) return false;
+      if (templateCodeSearch === null) return true;
+      return templateCodeSearch.matchedProcessInstanceIds.has(task.processInstanceId);
+    });
 }
 
 function renderOverdue(task) {
@@ -2998,7 +3046,7 @@ function renderFilters() {
     <form class="task-filters task-list-filters" aria-label="任务筛选">
       <label class="task-keyword-filter">
         <span>关键词</span>
-        <input name="keyword" value="${escapeHtml(filters.keyword)}" placeholder="搜索任务名称、编号、关键行动编号" />
+        <input name="keyword" value="${escapeHtml(filters.keyword)}" placeholder="搜索任务名称、任务编码、行动编码或模板编码" />
       </label>
       <label>
         <span>任务状态</span>
