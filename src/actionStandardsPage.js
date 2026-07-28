@@ -53,11 +53,16 @@ import {
 } from "./businessTime.js?v=20260705-state-singleton1";
 import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
 import { bindActionProductSelectors, collectActionProductIds, renderActionProductSelector } from "./actionProductRelations.js?v=20260725-product-center1";
+import {
+  getPublishingAccountFieldOptions,
+  isPublishingAccountField,
+} from "./publishingAccountOptions.js?v=20260728-publishing-account-options1";
 
 const categories = state.categories;
 const departments = state.departments;
 const goals = state.goals;
 const people = state.people;
+const publishingAccounts = state.publishingAccounts;
 const stores = state.stores;
 const standardWorkAttachmentsKey = "standardWorkAttachments";
 const spreadsheetAttachmentExts = new Set([".xlsx", ".xls", ".csv"]);
@@ -745,6 +750,7 @@ function getStoreOptionLabel(store) {
 }
 
 function getDynamicFieldOptions(field) {
+  if (isPublishingAccountField(field)) return getPublishingAccountFieldOptions(publishingAccounts);
   if ((field.options ?? []).length > 0) return field.options.map((option) => ({ value: option, label: option }));
   if (field.key === "departmentId" || field.type === "department") {
     return departments.filter((department) => department.status === "active").map((department) => ({ value: department.id, label: department.name }));

@@ -335,6 +335,8 @@ function canUseStoreOptions(user) {
 function canUsePublishingAccountOptions(user) {
   return (
     hasPermission(user, "settings.editStandardWorkForms") ||
+    hasPermission(user, "workPlans.launch") ||
+    hasPermission(user, "goals.addWork") ||
     hasPermission(user, "contentSchedules.view") ||
     hasPermission(user, "contentSchedules.create") ||
     hasPermission(user, "contentSchedules.edit")

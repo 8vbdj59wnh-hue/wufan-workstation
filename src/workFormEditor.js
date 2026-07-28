@@ -8,6 +8,10 @@ import {
 } from "./businessTime.js?v=20260705-state-singleton1";
 import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
 import {
+  getPublishingAccountFieldOptions,
+  isPublishingAccountField,
+} from "./publishingAccountOptions.js?v=20260728-publishing-account-options1";
+import {
   collectProductImageField,
   handleProductImagesUpload,
   isProductImageField,
@@ -33,6 +37,7 @@ function getStoreOptionLabel(store) {
 }
 
 function getDynamicFieldOptions(field) {
+  if (isPublishingAccountField(field)) return getPublishingAccountFieldOptions(state.publishingAccounts);
   if ((field.options ?? []).length > 0) return field.options.map((option) => ({ value: option, label: option }));
   if (field.key === "departmentId" || field.type === "department") {
     return state.departments.filter((department) => department.status === "active").map((department) => ({ value: department.id, label: department.name }));

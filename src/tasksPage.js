@@ -84,6 +84,10 @@ import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260705-st
 import { renderWorkFormViewer } from "./workFormViewer.js?v=20260705-state-singleton1";
 import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
 import {
+  getPublishingAccountFieldOptions,
+  isPublishingAccountField,
+} from "./publishingAccountOptions.js?v=20260728-publishing-account-options1";
+import {
   bindActionProductSelectors,
   collectActionProductIds,
   getActionProductImageUrls,
@@ -484,6 +488,7 @@ function getStoreOptionLabel(store) {
 }
 
 function getDynamicFieldOptions(field) {
+  if (isPublishingAccountField(field)) return getPublishingAccountFieldOptions(state.publishingAccounts);
   if ((field.options ?? []).length > 0) return field.options.map((option) => ({ value: option, label: option }));
   if (field.key === "departmentId") {
     return departments.filter((department) => department.status === "active").map((department) => ({ value: department.id, label: department.name }));

@@ -51,6 +51,10 @@ import {
 } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
 import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
 import {
+  getPublishingAccountNames,
+  isPublishingAccountField,
+} from "./publishingAccountOptions.js?v=20260728-publishing-account-options1";
+import {
   bindLaunchedProcessDetailEvents,
   canEditLaunchedProcessInstance,
   renderLaunchedProcessDetail,
@@ -444,10 +448,7 @@ function renderEntityOptions(items, selectedId, emptyLabel) {
 }
 
 function getActivePublishingAccountNames(selectedAccount = "") {
-  const names = state.publishingAccounts
-    .filter((account) => account.status === Status.Active)
-    .map((account) => account.name)
-    .filter((name) => String(name ?? "").trim() !== "");
+  const names = getPublishingAccountNames(state.publishingAccounts);
   if (selectedAccount !== "" && !names.includes(selectedAccount)) return [...names, selectedAccount];
   return names;
 }
@@ -683,6 +684,7 @@ function getBatchTemplateColumns() {
 }
 
 function getFieldAllowedValues(field) {
+  if (isPublishingAccountField(field)) return getActivePublishingAccountNames();
   if (!Array.isArray(field?.options)) return [];
   return field.options.map((option) => String(option?.label ?? option?.name ?? option?.value ?? option)).filter(Boolean);
 }
