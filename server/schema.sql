@@ -253,6 +253,10 @@ CREATE TABLE IF NOT EXISTS task_waves (
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
   startedAt TEXT,
+  unitDurationMinutes INTEGER,
+  waveDurationMinutes INTEGER,
+  deadlineAt TEXT,
+  submittedAt TEXT,
   completedAt TEXT,
   canceledAt TEXT,
   cancelReason TEXT

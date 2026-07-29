@@ -8807,6 +8807,24 @@ button.content-template-thumb {
   color: var(--muted-text, #6b7280);
 }
 
+.task-wave-time-summary {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 14px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 12px;
+  background: var(--soft-background, #f8fafc);
+}
+
+.task-wave-card-meta .is-overdue,
+.task-wave-time-summary .is-overdue,
+.task-wave-member-heading .is-overdue {
+  color: var(--danger-color, #b42318);
+}
+
 .task-wave-member-heading {
   display: grid;
   grid-template-columns: 72px 1fr auto;

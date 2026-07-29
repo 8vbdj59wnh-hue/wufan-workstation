@@ -1408,6 +1408,10 @@ function runLightweightMigrations() {
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL,
       startedAt TEXT,
+      unitDurationMinutes INTEGER,
+      waveDurationMinutes INTEGER,
+      deadlineAt TEXT,
+      submittedAt TEXT,
       completedAt TEXT,
       canceledAt TEXT,
       cancelReason TEXT
@@ -1798,6 +1802,10 @@ function runLightweightMigrations() {
       ON product_shop_daily_snapshots(productId,businessDate);
   `);
   ensureColumn("product_erp_daily_snapshots", "unitCost", "REAL");
+  ensureColumn("task_waves", "unitDurationMinutes", "INTEGER");
+  ensureColumn("task_waves", "waveDurationMinutes", "INTEGER");
+  ensureColumn("task_waves", "deadlineAt", "TEXT");
+  ensureColumn("task_waves", "submittedAt", "TEXT");
   ensureColumn("tasks", "submitType", "TEXT");
   ensureColumn("tasks", "submitDescription", "TEXT");
   ensureColumn("tasks", "submitFields", "TEXT");
@@ -2064,6 +2072,70 @@ function getTaskDurationMinutes(task) {
   return 0;
 }
 
+function getTaskDurationSnapshotMinutes(task) {
+  const dueTime = parseComparableTime(task?.dueDate);
+  for (const startValue of [task?.startDate, task?.readyAt]) {
+    const startTime = parseComparableTime(startValue);
+    if (startTime !== null && dueTime !== null && dueTime > startTime) {
+      return Math.max(1, Math.round((dueTime - startTime) / 60000));
+    }
+  }
+  const configuredMinutes = getTaskDurationMinutes(task);
+  return configuredMinutes > 0 ? configuredMinutes : null;
+}
+
+function resolveTaskWaveUnitDurationMinutes(wave, tasks) {
+  const savedMinutes = Number(wave?.unitDurationMinutes);
+  if (Number.isInteger(savedMinutes) && savedMinutes > 0) return savedMinutes;
+  for (const task of tasks) {
+    const taskMinutes = getTaskDurationSnapshotMinutes(task);
+    if (taskMinutes !== null) return taskMinutes;
+  }
+  return null;
+}
+
+function getTaskWaveTiming(wave, tasks, referenceAt = new Date().toISOString()) {
+  const activeTaskCount = tasks.length;
+  const unitDurationMinutes = resolveTaskWaveUnitDurationMinutes(wave, tasks);
+  const savedWaveDurationMinutes = Number(wave?.waveDurationMinutes);
+  const waveDurationMinutes =
+    Number.isInteger(savedWaveDurationMinutes) && savedWaveDurationMinutes > 0
+      ? savedWaveDurationMinutes
+      : unitDurationMinutes === null
+        ? null
+        : unitDurationMinutes * activeTaskCount;
+  const deadlineAt =
+    String(wave?.deadlineAt ?? "").trim() ||
+    (String(wave?.startedAt ?? "").trim() !== "" && waveDurationMinutes !== null
+      ? addMinutesToBusinessDateTime(wave.startedAt, waveDurationMinutes)
+      : null);
+  const inferredSubmittedAt = ["pending_acceptance", "done"].includes(wave?.status)
+    ? tasks
+        .map((task) => String(task?.submittedAt ?? "").trim())
+        .filter((value) => parseComparableTime(value) !== null)
+        .sort()
+        .at(-1) ?? null
+    : null;
+  const executionEndedAt = String(wave?.submittedAt ?? "").trim() || inferredSubmittedAt;
+  const comparisonAt =
+    executionEndedAt ??
+    (["doing", "pending_acceptance", "done"].includes(wave?.status) ? referenceAt : null);
+  const deadlineTime = parseComparableTime(deadlineAt);
+  const comparisonTime = parseComparableTime(comparisonAt);
+  const executionOverdue =
+    deadlineTime !== null && comparisonTime !== null ? comparisonTime > deadlineTime : false;
+  const executionOverdueMinutes =
+    executionOverdue ? Math.max(0, Math.ceil((comparisonTime - deadlineTime) / 60000)) : 0;
+  return {
+    unitDurationMinutes,
+    waveDurationMinutes,
+    deadlineAt,
+    submittedAt: executionEndedAt,
+    executionOverdue,
+    executionOverdueMinutes,
+  };
+}
+
 function normalizeLinkedTemplateIds(value) {
   let candidate = value;
   if (typeof candidate === "string") {
@@ -2116,14 +2188,15 @@ function createTaskWaveInTransaction(database, queue, tasks, templatePriorityEna
   const { waveType, templateGroupKey } = classifyTaskWaveBatch(tasks, templatePriorityEnabled);
   const waveId = `task-wave-${crypto.randomUUID()}`;
   const businessCode = getNextTaskWaveBusinessCode(database, new Date(createdAt));
+  const unitDurationMinutes = resolveTaskWaveUnitDurationMinutes(null, tasks);
   database
     .prepare(
       `INSERT INTO task_waves (
          id, businessCode, taskTemplateId, processTemplateId, processNodeId, executorId,
-         templateGroupKey, waveType, taskCount, status, createdAt, updatedAt
+         templateGroupKey, waveType, taskCount, status, unitDurationMinutes, createdAt, updatedAt
        ) VALUES (
          @id, @businessCode, @taskTemplateId, @processTemplateId, @processNodeId, @executorId,
-         @templateGroupKey, @waveType, @taskCount, 'waiting', @createdAt, @createdAt
+         @templateGroupKey, @waveType, @taskCount, 'waiting', @unitDurationMinutes, @createdAt, @createdAt
        )`,
     )
     .run({
@@ -2136,6 +2209,7 @@ function createTaskWaveInTransaction(database, queue, tasks, templatePriorityEna
       templateGroupKey,
       waveType,
       taskCount: tasks.length,
+      unitDurationMinutes,
       createdAt,
     });
   const insertWaveItem = database.prepare(
@@ -2270,7 +2344,11 @@ export function readTaskWavesForTaskIds(taskIds = []) {
   const readTaskIds = getDatabase().prepare(
     "SELECT taskId FROM task_wave_items WHERE waveId = @waveId AND isActive = 1 ORDER BY sortOrder, id",
   );
-  return waves.map((wave) => ({ ...wave, taskIds: readTaskIds.all({ waveId: wave.id }).map((item) => item.taskId) }));
+  return waves.map((wave) => {
+    const taskIds = readTaskIds.all({ waveId: wave.id }).map((item) => item.taskId);
+    const tasks = taskIds.map((taskId) => readExistingItem("tasks", taskId)).filter(Boolean);
+    return { ...wave, ...getTaskWaveTiming(wave, tasks), taskIds };
+  });
 }
 
 export function readTaskWaveDetailForTaskIds(waveId, taskIds = []) {
@@ -2278,10 +2356,9 @@ export function readTaskWaveDetailForTaskIds(waveId, taskIds = []) {
   if (visibleTaskIds.size === 0) return null;
   const wave = getDatabase().prepare("SELECT * FROM task_waves WHERE id = @id LIMIT 1").get({ id: waveId });
   if (wave === undefined) return null;
-  const items = getDatabase()
+  const allItems = getDatabase()
     .prepare("SELECT * FROM task_wave_items WHERE waveId = @waveId AND isActive = 1 ORDER BY sortOrder, id")
     .all({ waveId })
-    .filter((item) => visibleTaskIds.has(item.taskId))
     .map((item) => {
       let resultDraft = {};
       try {
@@ -2291,8 +2368,10 @@ export function readTaskWaveDetailForTaskIds(waveId, taskIds = []) {
       }
       return { ...item, linkedTemplateIds: normalizeLinkedTemplateIds(item.linkedTemplateIds), resultDraft };
     });
+  const items = allItems.filter((item) => visibleTaskIds.has(item.taskId));
   if (items.length === 0) return null;
-  return { ...wave, items };
+  const tasks = allItems.map((item) => readExistingItem("tasks", item.taskId)).filter(Boolean);
+  return { ...wave, ...getTaskWaveTiming(wave, tasks), items };
 }
 
 const activeTaskWaveStatuses = new Set(["waiting", "doing", "pending_acceptance"]);
@@ -2405,12 +2484,25 @@ export function startTaskWave(waveId, options = {}) {
       if (task.executorId !== wave.executorId) throw new Error(`${task.name} 的执行人已变化，波次不能开始。`);
     }
     const now = new Date().toISOString();
+    const unitDurationMinutes = resolveTaskWaveUnitDurationMinutes(wave, tasks);
+    if (unitDurationMinutes === null) throw new Error("该步骤未设置有效执行时限，无法开始波次");
+    const waveDurationMinutes = unitDurationMinutes * items.length;
+    const deadlineAt = new Date(new Date(now).getTime() + waveDurationMinutes * 60000).toISOString();
     for (const task of tasks) {
       insertItem("tasks", { ...task, status: "doing", startDate: task.startDate ?? now, updatedAt: now });
     }
     database
-      .prepare("UPDATE task_waves SET status = 'doing', startedAt = @now, updatedAt = @now WHERE id = @id")
-      .run({ id: wave.id, now });
+      .prepare(
+        `UPDATE task_waves
+         SET status = 'doing',
+             startedAt = @now,
+             unitDurationMinutes = @unitDurationMinutes,
+             waveDurationMinutes = @waveDurationMinutes,
+             deadlineAt = @deadlineAt,
+             updatedAt = @now
+         WHERE id = @id`,
+      )
+      .run({ id: wave.id, now, unitDurationMinutes, waveDurationMinutes, deadlineAt });
     return database.prepare("SELECT * FROM task_waves WHERE id = @id").get({ id: wave.id });
   }).immediate();
 }
@@ -2517,8 +2609,14 @@ export function submitTaskWave(waveId, drafts = [], options = {}) {
     for (const processInstanceId of affectedProcessInstanceIds) {
       refreshProcessTaskReadinessInTransaction(processInstanceId, now);
     }
+    database
+      .prepare("UPDATE task_waves SET submittedAt = @submittedAt, updatedAt = @submittedAt WHERE id = @id")
+      .run({ id: wave.id, submittedAt: now });
     const updatedWave = refreshTaskWaveStatusInTransaction(database, wave.id, now);
-    return { wave: updatedWave, submittedTaskIds: submissions.map((item) => item.task.id) };
+    return {
+      wave: { ...updatedWave, ...getTaskWaveTiming({ ...updatedWave, submittedAt: now }, tasks, now) },
+      submittedTaskIds: submissions.map((item) => item.task.id),
+    };
   }).immediate();
 }
 

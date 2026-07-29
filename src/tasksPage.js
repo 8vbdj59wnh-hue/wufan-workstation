@@ -182,6 +182,8 @@ let selectedTaskWaveId = null;
 let taskWaveStatus = "waiting";
 let taskWaveLoading = false;
 let taskWaveError = "";
+let taskWaveClockTimer = null;
+let taskWaveClockHashListenerBound = false;
 
 const templateTagCategories = [
   { id: "brand", label: "品牌" },
@@ -1342,7 +1344,7 @@ function taskMatchesIdentifierSearch(task, target) {
 }
 
 function matchesFilters(task, identifierTarget = null, isTemplateCodeSearch = false) {
-  const overdue = isTaskOverdue(task, today) || hasTaskOverdueRecord(task);
+  const overdue = isTaskExecutionOverdue(task);
   const shouldShowDone = identifierTarget !== null || isTemplateCodeSearch || filters.showDone || filters.status === TaskStatus.Done;
   const shouldShowCanceled = identifierTarget !== null || isTemplateCodeSearch || filters.showCanceled || filters.status === TaskStatus.Canceled;
   const belonging = getTaskBelonging(task);
@@ -1392,7 +1394,7 @@ function isTaskInProgressToday(task) {
 }
 
 function isTaskOverdueForView(task) {
-  return isTaskOverdue(task, today) || hasTaskOverdueRecord(task);
+  return isTaskExecutionOverdue(task);
 }
 
 function matchesTaskListView(task) {
@@ -1437,7 +1439,7 @@ function getFilteredTasks() {
 }
 
 function renderOverdue(task) {
-  return isTaskOverdue(task, today) || hasTaskOverdueRecord(task)
+  return isTaskExecutionOverdue(task)
     ? `<span class="status-pill is-danger">已逾期</span>`
     : `<span class="status-pill">未逾期</span>`;
 }
@@ -1514,7 +1516,7 @@ function renderTaskStatus(task) {
   const label =
     task.taskType === "review"
       ? reviewStatusLabels[task.reviewStatus] ?? (task.status === TaskStatus.Done ? "已通过" : "待审核")
-      : isDoneStatus(task.status) && hasTaskOverdueRecord(task)
+      : isDoneStatus(task.status) && isTaskExecutionOverdue(task)
         ? "已完成（超时）"
         : businessStatus.label;
   return `<span class="status-pill ${getTaskStatusClass(task.status)}">${escapeHtml(label)}</span>`;
@@ -1528,10 +1530,48 @@ function getTaskProjectDueDateText(task) {
   return formatBusinessDateTime(instance.dueDate, "-");
 }
 
+function getTaskActionDeadline(task) {
+  const instanceId = String(task?.processInstanceId ?? "").trim();
+  if (instanceId === "") return "";
+  const instance = state.processInstances.find((item) => item.id === instanceId) ?? null;
+  if (String(instance?.dueDate ?? "").trim() !== "") return instance.dueDate;
+  const workPlan = state.workPlans.find(
+    (item) => item.processInstanceId === instanceId || item.id === instance?.workPlanId,
+  ) ?? null;
+  return String(workPlan?.dueDate ?? "").trim();
+}
+
+function getTaskWaveForTask(taskId) {
+  return state.taskWaves.find((wave) => wave.taskIds?.includes(taskId)) ?? null;
+}
+
 function getActiveTaskWave(taskId) {
   return state.taskWaves.find(
     (wave) => ["waiting", "doing", "pending_acceptance"].includes(wave.status) && wave.taskIds?.includes(taskId),
   ) ?? null;
+}
+
+function getTaskWaveExecutionTiming(wave, referenceAt = getNow()) {
+  if (wave === null || wave === undefined || String(wave.startedAt ?? "").trim() === "") return null;
+  const deadlineTime = parseTaskComparableTime(wave.deadlineAt);
+  if (deadlineTime === null) return null;
+  const endedAt = String(wave.submittedAt ?? "").trim();
+  const referenceTime = parseTaskComparableTime(endedAt || referenceAt);
+  if (referenceTime === null) return null;
+  const overdue = referenceTime > deadlineTime;
+  return {
+    overdue,
+    diffMinutes: Math.max(0, Math.ceil(Math.abs(referenceTime - deadlineTime) / 60000)),
+    deadlineAt: wave.deadlineAt,
+    endedAt: endedAt || null,
+  };
+}
+
+function isTaskExecutionOverdue(task) {
+  const wave = getTaskWaveForTask(task.id);
+  const waveTiming = getTaskWaveExecutionTiming(wave);
+  if (waveTiming !== null) return waveTiming.overdue;
+  return isTaskOverdue(task, today) || hasTaskOverdueRecord(task);
 }
 
 function renderTaskRow(task, index) {
@@ -3148,6 +3188,25 @@ function renderTaskTable() {
 }
 
 function getTaskRemainingText(task) {
+  const wave = getTaskWaveForTask(task.id);
+  if (wave !== null) {
+    const waveTiming = getTaskWaveExecutionTiming(wave);
+    if (waveTiming !== null) {
+      if (String(wave.submittedAt ?? "").trim() !== "") {
+        return {
+          label: waveTiming.overdue ? `执行超时 ${formatTaskWaveDuration(waveTiming.diffMinutes)}` : "执行未超时",
+          overdue: waveTiming.overdue,
+        };
+      }
+      return {
+        label: waveTiming.overdue
+          ? `执行已超时 ${formatTaskWaveDuration(waveTiming.diffMinutes)}`
+          : `波次剩余 ${formatTaskWaveDuration(waveTiming.diffMinutes)}`,
+        overdue: waveTiming.overdue,
+      };
+    }
+    if (wave.status === "waiting") return { label: "波次待执行", overdue: false };
+  }
   if (isDoneStatus(task.status)) return { label: "已完成", overdue: false };
   if (isCanceledStatus(task.status)) return { label: "已取消", overdue: false };
 
@@ -5660,6 +5719,28 @@ export function bindTasksPageEvents(rerender) {
   const clearanceImportInput = document.querySelector("[data-clearance-file='import']");
 
   if (tasksPage === null) return;
+  if (taskWaveClockTimer !== null) {
+    window.clearInterval(taskWaveClockTimer);
+    taskWaveClockTimer = null;
+  }
+  if (!taskWaveClockHashListenerBound) {
+    window.addEventListener("hashchange", () => {
+      if (window.location.hash.replace(/^#/, "") === "task-waves") return;
+      if (taskWaveClockTimer !== null) window.clearInterval(taskWaveClockTimer);
+      taskWaveClockTimer = null;
+    });
+    taskWaveClockHashListenerBound = true;
+  }
+  if (activeTaskTab === "task-waves" && state.taskWaves.some((wave) => wave.status === "doing")) {
+    taskWaveClockTimer = window.setInterval(() => {
+      if (activeTaskTab !== "task-waves" || document.querySelector(".tasks-page") === null) {
+        window.clearInterval(taskWaveClockTimer);
+        taskWaveClockTimer = null;
+        return;
+      }
+      rerender();
+    }, 60000);
+  }
   bindActionLinkedTemplatePreviewEvents(tasksPage);
 
   document.querySelectorAll("[data-task-tab]").forEach((tab) => {
@@ -6157,11 +6238,67 @@ function getTaskWaveTemplateNames(wave) {
   return ids.map((id) => state.templates.find((item) => item.id === id)?.name ?? id).join("、") || "—";
 }
 
-function getTaskWaveDueDate(wave) {
+function getTaskWaveActionDeadline(wave) {
   return getTaskWaveMemberTasks(wave)
-    .map(({ task }) => task.dueDate)
+    .map(({ task }) => getTaskActionDeadline(task))
     .filter(Boolean)
     .sort()[0] ?? "";
+}
+
+function getTaskWaveFallbackUnitDurationMinutes(wave) {
+  const savedMinutes = Number(wave?.unitDurationMinutes);
+  if (Number.isInteger(savedMinutes) && savedMinutes > 0) return savedMinutes;
+  const node = state.processTemplateNodes.find((item) => item.id === wave?.processNodeId) ?? null;
+  const durationMinutes = Number(node?.durationMinutes);
+  if (Number.isFinite(durationMinutes) && durationMinutes > 0) return Math.round(durationMinutes);
+  const durationDays = Number(node?.durationDays);
+  if (Number.isFinite(durationDays) && durationDays > 0) return Math.round(durationDays * 1440);
+  return null;
+}
+
+function formatTaskWaveDuration(minutes) {
+  const totalMinutes = Math.max(0, Math.round(Number(minutes) || 0));
+  const hours = Math.floor(totalMinutes / 60);
+  const remainingMinutes = totalMinutes % 60;
+  if (hours === 0) return `${remainingMinutes}分钟`;
+  if (remainingMinutes === 0) return `${hours}小时`;
+  return `${hours}小时${remainingMinutes}分钟`;
+}
+
+function getTaskWaveTimePresentation(wave) {
+  const savedDuration = Number(wave?.waveDurationMinutes);
+  const unitDurationMinutes = getTaskWaveFallbackUnitDurationMinutes(wave);
+  const taskCount = Array.isArray(wave?.taskIds)
+    ? wave.taskIds.length
+    : Array.isArray(wave?.items)
+      ? wave.items.length
+      : Number(wave?.taskCount) || 0;
+  const waveDurationMinutes =
+    Number.isInteger(savedDuration) && savedDuration > 0
+      ? savedDuration
+      : unitDurationMinutes === null || taskCount <= 0
+        ? null
+        : unitDurationMinutes * taskCount;
+  if (wave?.status === "waiting") {
+    return {
+      label: waveDurationMinutes === null ? "时限未设置" : `波次时限：${waveDurationMinutes}分钟`,
+      overdue: false,
+    };
+  }
+  const timing = getTaskWaveExecutionTiming(wave);
+  if (timing === null) return { label: "时限未设置", overdue: false };
+  if (String(wave?.submittedAt ?? "").trim() !== "") {
+    return {
+      label: timing.overdue ? `执行超时${formatTaskWaveDuration(timing.diffMinutes)}` : "按时完成",
+      overdue: timing.overdue,
+    };
+  }
+  return {
+    label: timing.overdue
+      ? `波次已超时：${formatTaskWaveDuration(timing.diffMinutes)}`
+      : `波次剩余时间：${formatTaskWaveDuration(timing.diffMinutes)}`,
+    overdue: timing.overdue,
+  };
 }
 
 function getTaskWaveSummary(wave) {
@@ -6176,9 +6313,24 @@ function renderTaskWaveList() {
   const waves = state.taskWaves
     .filter((wave) => wave.status === taskWaveStatus)
     .sort((left, right) => {
-      const leftDue = getTaskWaveDueDate({ ...left, items: (left.taskIds ?? []).map((taskId) => ({ taskId })) }) || "9999";
-      const rightDue = getTaskWaveDueDate({ ...right, items: (right.taskIds ?? []).map((taskId) => ({ taskId })) }) || "9999";
-      return leftDue.localeCompare(rightDue) || String(left.createdAt).localeCompare(String(right.createdAt)) || left.businessCode.localeCompare(right.businessCode);
+      const leftView = { ...left, items: (left.taskIds ?? []).map((taskId) => ({ taskId })) };
+      const rightView = { ...right, items: (right.taskIds ?? []).map((taskId) => ({ taskId })) };
+      const leftActionDue = getTaskWaveActionDeadline(leftView);
+      const rightActionDue = getTaskWaveActionDeadline(rightView);
+      const now = parseTaskComparableTime(getNow());
+      const leftActionDueTime = parseTaskComparableTime(leftActionDue, "end");
+      const rightActionDueTime = parseTaskComparableTime(rightActionDue, "end");
+      const leftActionOverdue = leftActionDueTime !== null && now !== null && leftActionDueTime < now ? 0 : 1;
+      const rightActionOverdue = rightActionDueTime !== null && now !== null && rightActionDueTime < now ? 0 : 1;
+      const leftExecutionOverdue = getTaskWaveTimePresentation(left).overdue ? 0 : 1;
+      const rightExecutionOverdue = getTaskWaveTimePresentation(right).overdue ? 0 : 1;
+      return (
+        leftActionOverdue - rightActionOverdue ||
+        leftExecutionOverdue - rightExecutionOverdue ||
+        (leftActionDue || "9999").localeCompare(rightActionDue || "9999") ||
+        String(left.createdAt).localeCompare(String(right.createdAt)) ||
+        left.businessCode.localeCompare(right.businessCode)
+      );
     });
   return `
     <section class="settings-section task-wave-page">
@@ -6193,6 +6345,9 @@ function renderTaskWaveList() {
         ${waves.length === 0 ? `<div class="empty-detail">暂无${taskWaveStatusLabels[taskWaveStatus]}波次</div>` : waves.map((wave) => {
           const { done, node, standard } = getTaskWaveSummary(wave);
           const executor = findName(people, wave.executorId, "未设置");
+          const waveView = { ...wave, items: (wave.taskIds ?? []).map((taskId) => ({ taskId })) };
+          const timePresentation = getTaskWaveTimePresentation(wave);
+          const actionDeadline = getTaskWaveActionDeadline(waveView);
           const operation = wave.status === "waiting" ? "开始执行" : wave.status === "doing" ? "继续执行" : wave.status === "pending_acceptance" ? "查看提交" : wave.status === "done" ? "查看结果" : "查看";
           return `
             <article class="task-wave-card">
@@ -6204,7 +6359,8 @@ function renderTaskWaveList() {
               <div class="task-wave-card-meta">
                 <span>执行人：${escapeHtml(executor)}</span>
                 <span>任务：${done}/${wave.taskCount}</span>
-                <span>最早截止：${escapeHtml(formatBusinessMinuteDateTime(getTaskWaveDueDate({ ...wave, items: (wave.taskIds ?? []).map((taskId) => ({ taskId })) })))}</span>
+                <span class="${timePresentation.overdue ? "is-overdue" : ""}">${escapeHtml(timePresentation.label)}</span>
+                <span>最近行动截止：${escapeHtml(formatBusinessMinuteDateTime(actionDeadline, "未设置"))}</span>
                 <span class="status-pill">${escapeHtml(taskWaveStatusLabels[wave.status] ?? wave.status)}</span>
               </div>
               <div class="row-actions">
@@ -6222,6 +6378,13 @@ function renderTaskWaveList() {
 function renderTaskWaveMemberResult(entry, editable) {
   const { item, task } = entry;
   const draft = item.resultDraft ?? {};
+  const wave = state.taskWaveDetails[selectedTaskWaveId] ?? getTaskWaveForTask(task.id);
+  const executionTiming = getTaskWaveExecutionTiming(wave);
+  const executionText =
+    executionTiming === null
+      ? wave?.status === "waiting" ? "波次未开始" : "时限未设置"
+      : executionTiming.overdue ? "执行已超时" : "执行未超时";
+  const actionDeadline = getTaskActionDeadline(task);
   const fields = includesSubmitPart(task.submitType, "form")
     ? getSubmitFields(task).map((field) => `
         <label><span>${escapeHtml(field.label)}${field.required ? " *" : ""}</span>${renderSubmitFieldInput(field, draft.submitFormData?.[field.key] ?? "")}</label>
@@ -6235,6 +6398,8 @@ function renderTaskWaveMemberResult(entry, editable) {
           <strong>${escapeHtml(task.businessCode || task.name)}</strong>
           <h3>${escapeHtml(task.name)}</h3>
           <span class="status-pill">${escapeHtml(getTaskBusinessStatus(task).label)}</span>
+          <span>行动截止：${escapeHtml(formatBusinessMinuteDateTime(actionDeadline, "未设置"))}</span>
+          <span class="${executionTiming?.overdue ? "is-overdue" : ""}">${escapeHtml(executionText)}</span>
         </div>
         <button class="text-button" type="button" data-action="view-wave-member-task" data-task-id="${escapeHtml(task.id)}">查看原任务</button>
       </div>
@@ -6260,10 +6425,16 @@ function renderTaskWaveDetail() {
   const node = state.processTemplateNodes.find((item) => item.id === wave.processNodeId);
   const standard = state.taskTemplates.find((item) => item.id === wave.taskTemplateId);
   const processTemplate = state.processTemplates.find((item) => item.id === wave.processTemplateId);
+  const timePresentation = getTaskWaveTimePresentation(wave);
+  const actionDeadline = getTaskWaveActionDeadline(wave);
   return `
     <section class="settings-section task-wave-detail">
       <button class="text-button" type="button" data-action="back-task-waves">← 返回任务波次</button>
       <div class="section-heading"><div><h2>${escapeHtml(wave.businessCode)}</h2><p>${escapeHtml(taskWaveStatusLabels[wave.status] ?? wave.status)}</p></div></div>
+      <div class="task-wave-time-summary">
+        <strong class="${timePresentation.overdue ? "is-overdue" : ""}">${escapeHtml(timePresentation.label)}</strong>
+        <span>最近行动截止：${escapeHtml(formatBusinessMinuteDateTime(actionDeadline, "未设置"))}</span>
+      </div>
       <div class="detail-grid">
         ${renderDetailField("行动标准", escapeHtml(standard?.name ?? "—"))}
         ${renderDetailField("流程模板", escapeHtml(processTemplate?.name ?? "—"))}
@@ -6272,7 +6443,6 @@ function renderTaskWaveDetail() {
         ${renderDetailField("波次类型", escapeHtml(getTaskWaveTypeLabel(wave)))}
         ${renderDetailField("关联模板", escapeHtml(getTaskWaveTemplateNames(wave)))}
         ${renderDetailField("任务数量", String(wave.taskCount))}
-        ${renderDetailField("最早截止", escapeHtml(formatBusinessMinuteDateTime(getTaskWaveDueDate(wave))))}
       </div>
       <div class="task-wave-members">${members.map((entry) => renderTaskWaveMemberResult(entry, editable)).join("")}</div>
       ${taskWaveError ? `<div class="form-error">${escapeHtml(taskWaveError)}</div>` : ""}
