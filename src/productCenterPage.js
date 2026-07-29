@@ -3,14 +3,17 @@ import {
   createPersistentResource,
   commitProductImport,
   commitProductV2Import,
+  createErpSyncRun,
   bindPlatformSku,
   getCurrentUser,
   getNow,
   loadProductSalesLinks,
   loadProductSalesSummaries,
+  loadErpSyncRun,
   loadProductV2Import,
   loadProductV2Preview,
   loadUnmatchedPlatformSkus,
+  listErpSyncRuns,
   parseProductImport,
   parseProductV2Import,
   resolveAssetUrl,
@@ -35,6 +38,7 @@ let productDetailTab = "basic";
 let productDetailId = "";
 let modalState = null;
 let importState = null;
+let erpSyncState = { loading: false, runs: [], active: null, error: "" };
 let productSalesState = { productId: "", loading: false, loaded: false, rows: [], error: "" };
 let productSalesSummaryState = { loading: false, loaded: false, rows: [], error: "" };
 let unmatchedSkuState = { loading: false, loaded: false, rows: [], total: 0, query: "", error: "" };
@@ -284,7 +288,7 @@ function renderProductImportRecords() {
     ...state.erpImportBatches.map((batch) => ({
       ...batch,
       fileName: batch.originalFilename,
-      sourceSystem: batch.importType === "inventory" ? "库存明细" : "平台货品",
+      sourceSystem: `${batch.importType === "goods_info" ? "货品信息" : batch.importType === "inventory" ? "库存明细" : "平台货品"}${batch.syncRunId ? "" : " · 历史独立批次"}`,
       summary: batch.summaryJson,
     })),
     ...state.productImportBatches,
@@ -295,7 +299,7 @@ function renderProductImportRecords() {
     completed: "已导入", committed: "已导入", failed: "失败",
   };
   return `<section class="product-import-records">
-    <div class="subsection-heading"><div><h2>导入记录</h2><p>库存明细与平台货品分批记录，可追溯每次校验和提交结果</p></div></div>
+    <div class="subsection-heading"><div><h2>导入记录</h2><p>货品信息、库存明细与平台货品分批记录，可追溯每次校验和提交结果</p></div></div>
     <div class="table-wrap"><table class="data-table"><thead><tr><th>文件</th><th>来源</th><th>工作表</th><th>状态</th><th>总行数</th><th>新增</th><th>更新</th><th>导入时间</th><th>操作</th></tr></thead>
       <tbody>${batches.map((batch) => `<tr><td>${escapeHtml(batch.fileName)}</td><td>${escapeHtml(batch.sourceSystem || "ERP")}</td><td>${escapeHtml(batch.sheetName || "-")}</td><td><span class="status-badge">${escapeHtml(statusLabels[batch.status] || batch.status)}</span></td><td>${batch.summary?.total ?? "-"}</td><td>${batch.summary?.create ?? batch.summary?.created ?? "-"}</td><td>${batch.summary?.update ?? batch.summary?.updated ?? "-"}</td><td>${formatDateTime(batch.committedAt || batch.createdAt)}</td>
         <td>${batch.importType && ["parsed", "validated", "failed"].includes(batch.status) ? `<button class="text-button" type="button" data-action="resume-product-v2-import" data-batch-id="${escapeHtml(batch.id)}">继续处理</button>` : "—"}</td></tr>`).join("")}</tbody>
@@ -719,15 +723,82 @@ function collectImportMapping() {
 }
 
 function renderProductV2Upload() {
+  const fixedImportType = importState?.syncRun ? importState.importType : "";
+  const importTypeLabels = {
+    goods_info: "货品信息（ERP货品主档）",
+    inventory: "库存明细（库存与销量）",
+    platform_goods: "平台货品（店铺、链接与平台SKU）",
+  };
   return `<form id="product-v2-import-upload-form" class="product-import-upload-form">
-    <label><span>导入类型 *</span><select name="importType" required>
-      <option value="inventory">库存明细（ERP货品与规格）</option>
+    ${fixedImportType
+      ? `<label><span>导入类型</span><input name="importType" value="${escapeHtml(fixedImportType)}" type="hidden" /><strong>${escapeHtml(importTypeLabels[fixedImportType])}</strong></label>`
+      : `<label><span>导入类型 *</span><select name="importType" required>
+      <option value="goods_info">货品信息（ERP货品主档）</option>
+      <option value="inventory">库存明细（库存与销量）</option>
       <option value="platform_goods">平台货品（店铺、链接与平台SKU）</option>
-    </select></label>
+    </select></label>`}
     <label class="product-import-file-field"><span>Excel 文件 *</span><input name="file" type="file" accept=".xls,.xlsx" required />
-      <small>上传后先预览和校验，不会直接写入数据库。库存明细建议先于平台货品导入。</small></label>
+      <small>上传后先预览和校验，不会直接写入数据库。建议依次导入货品信息、库存明细、平台货品。</small></label>
     <div class="form-error" ${importState?.error ? "" : "hidden"}>${escapeHtml(importState?.error || "")}</div>
   </form>`;
+}
+
+function renderErpSyncDashboard() {
+  const run = erpSyncState.active;
+  const statusLabels = { draft: "草稿", syncing: "同步中", partial: "部分完成", completed: "已完成", failed: "失败" };
+  const batchStatusLabels = {
+    parsed: "待校验", validated: "待确认导入", importing: "导入中", completed: "已完成",
+    committed: "已完成", failed: "失败",
+  };
+  const types = [
+    ["goods_info", "货品信息", "ERP货品主档与产品映射"],
+    ["inventory", "库存明细", "库存与销量当前值"],
+    ["platform_goods", "平台货品", "店铺、商品链接与平台SKU"],
+  ];
+  if (erpSyncState.loading && !run) return `<div class="form-note">正在读取ERP每日同步状态…</div>`;
+  if (!run) {
+    const today = new Date().toLocaleDateString("sv-SE");
+    return `<div class="erp-sync-create">
+      <p class="form-note">一次每日同步统一组织货品信息、库存明细和平台货品。业务日期表示三张文件共同对应的经营事实日期。</p>
+      <form id="erp-sync-create-form" class="product-import-upload-form">
+        <label><span>业务日期 *</span><input name="businessDate" type="date" value="${escapeHtml(today)}" required /></label>
+        <button class="primary-button" type="submit" ${erpSyncState.loading ? "disabled" : ""}>${erpSyncState.loading ? "正在创建…" : "创建每日同步"}</button>
+      </form>
+      ${erpSyncState.runs.length ? `<div class="erp-sync-history"><h3>最近同步</h3>${erpSyncState.runs.slice(0, 8).map((item) =>
+        `<button class="erp-sync-history-item" type="button" data-action="open-erp-sync-run" data-sync-run-id="${escapeHtml(item.id)}">
+          <strong>${escapeHtml(item.syncCode)}</strong><span>${escapeHtml(item.businessDate)} · ${escapeHtml(statusLabels[item.status] || item.status)}</span>
+        </button>`).join("")}</div>` : ""}
+      <div class="form-error" ${erpSyncState.error ? "" : "hidden"}>${escapeHtml(erpSyncState.error)}</div>
+    </div>`;
+  }
+  return `<div class="erp-sync-dashboard">
+    <div class="erp-sync-overview">
+      <div><span>同步编码</span><strong>${escapeHtml(run.syncCode)}</strong></div>
+      <div><span>业务日期</span><strong>${escapeHtml(run.businessDate)}</strong></div>
+      <div><span>整体状态</span><strong>${escapeHtml(statusLabels[run.status] || run.status)}</strong></div>
+      <div><span>版本</span><strong>V${run.version}</strong></div>
+      <div><span>系统创建时间</span><strong>${formatDateTime(run.createdAt)}</strong></div>
+      <div><span>最近更新时间</span><strong>${formatDateTime(run.updatedAt)}</strong></div>
+    </div>
+    ${run.supersedesRunId ? `<p class="form-note">本次为同一业务日期的重新同步版本，历史同步仍保留。</p>` : ""}
+    <div class="erp-sync-file-grid">${types.map(([importType, label, description]) => {
+      const batch = run.batches?.[importType];
+      const completed = ["completed", "committed"].includes(batch?.status);
+      const action = batch
+        ? `<button class="secondary-button" type="button" data-action="resume-product-v2-import" data-batch-id="${escapeHtml(batch.id)}">${completed ? "查看结果" : batch.status === "failed" ? "查看失败并重试" : "继续处理"}</button>`
+        : `<button class="primary-button" type="button" data-action="upload-erp-sync-child" data-import-type="${importType}">上传文件</button>`;
+      return `<article class="erp-sync-file-card">
+        <div><h3>${label}</h3><p>${description}</p></div>
+        <dl><div><dt>状态</dt><dd>${escapeHtml(batchStatusLabels[batch?.status] || (batch ? batch.status : "待导入"))}</dd></div>
+          <div><dt>文件</dt><dd>${escapeHtml(batch?.originalFilename || "—")}</dd></div>
+          <div><dt>批次</dt><dd>${escapeHtml(batch?.id || "—")}</dd></div></dl>
+        ${action}
+      </article>`;
+    }).join("")}</div>
+    ${(run.errorSummary ?? []).length ? `<div class="form-error">${(run.errorSummary ?? []).map((item) =>
+      `${escapeHtml(item.importType)}：${escapeHtml(item.reason)}`).join("<br>")}</div>` : ""}
+    <div class="erp-sync-history-actions"><button class="secondary-button" type="button" data-action="choose-erp-sync-run">查看其他同步</button></div>
+  </div>`;
 }
 
 function renderShopMapping() {
@@ -751,11 +822,38 @@ function renderShopMapping() {
 
 function renderProductV2Preview() {
   const summary = importState.summary ?? {};
+  const isGoodsInfo = importState.importType === "goods_info";
   const isInventory = importState.importType === "inventory";
-  if (!isInventory) return renderPlatformV2Preview();
-  const columns = isInventory
-    ? `<th>行号</th><th>货品编号</th><th>商家编码</th><th>ERP名称</th><th>系统产品</th><th>匹配状态</th><th>新增货品</th><th>更新字段</th><th>错误说明</th>`
-    : `<th>行号</th><th>店铺</th><th>商品</th><th>平台SKU</th><th>系统产品</th><th>结果</th>`;
+  if (!isGoodsInfo && !isInventory) return renderPlatformV2Preview();
+  if (isGoodsInfo) {
+    const mappingLabels = { existing: "已关联产品", auto: "可自动关联产品", pending: "待人工关联产品", error: "错误行" };
+    const goodsLabels = { new: "新增ERP货品", update: "更新ERP货品", unchanged: "无变化" };
+    return `<div class="product-import-preview">
+      <div class="import-summary-grid">
+        ${[
+          ["文件行数", summary.total], ["有效货品", summary.validGoods], ["新增ERP货品", summary.created],
+          ["更新ERP货品", summary.updated], ["已有映射", summary.existingMappings],
+          ["自动建立映射", summary.autoMappings], ["待人工关联", summary.pendingMappings],
+          ["无变化", summary.unchanged], ["无效行", summary.invalid], ["错误", summary.error],
+        ].map(([label, count]) => `<div><span>${label}</span><strong>${count ?? 0}</strong></div>`).join("")}
+      </div>
+      ${importState.duplicate ? `<div class="form-warning">相同文件曾于 ${formatDateTime(importState.duplicate.completedAt)} 导入；再次确认将幂等更新，不会重复创建ERP货品、产品或映射。</div>` : ""}
+      <div class="table-wrap import-preview-table-wrap"><table class="data-table"><thead><tr>
+        <th>行号</th><th>ERP货品编码</th><th>货品名称</th><th>规格</th><th>分类</th>
+        <th>当前匹配产品</th><th>处理方式</th><th>校验状态</th><th>错误原因</th>
+      </tr></thead><tbody>
+        ${(importState.preview ?? []).map((row) => `<tr class="${row.errors?.length ? "import-row-error" : ""}">
+          <td>${row.rowNumber}</td><td>${escapeHtml(row.goodsCode || "—")}</td><td>${escapeHtml(row.goodsName || "—")}</td>
+          <td>${escapeHtml(row.specificationName || "—")}</td><td>${escapeHtml(row.category || "—")}</td>
+          <td>${escapeHtml(row.systemProduct ? `${row.systemProduct.skuCode} · ${row.systemProduct.name}` : "—")}</td>
+          <td>${escapeHtml(`${goodsLabels[row.goodsAction] || row.goodsAction}；${mappingLabels[row.mappingAction] || row.mappingAction}`)}</td>
+          <td>${row.errors?.length ? "失败" : "通过"}</td><td>${escapeHtml(row.errors?.join("；") || "—")}</td>
+        </tr>`).join("")}
+      </tbody></table></div>
+      <p class="form-note">待人工关联不阻止ERP货品主档导入，也不会自动创建products；预览最多展示前 ${importState.preview?.length ?? 0} 行。</p>
+    </div>`;
+  }
+  const columns = `<th>行号</th><th>货品编号</th><th>商家编码</th><th>ERP名称</th><th>系统产品</th><th>匹配状态</th><th>新增货品</th><th>更新字段</th><th>错误说明</th>`;
   return `<div class="product-import-preview">
     <div class="import-summary-grid">
       <div><span>有效行</span><strong>${summary.total ?? 0}</strong></div>
@@ -843,6 +941,11 @@ function renderPlatformPreviewRows(rows) {
 
 function renderProductV2Complete() {
   const summary = importState.result?.summary ?? {};
+  if (importState.importType === "goods_info") {
+    return `<div class="product-import-complete"><strong>ERP 货品信息导入完成</strong>
+      <p>新增ERP货品 ${summary.created ?? 0}，更新 ${summary.updated ?? 0}，无变化 ${summary.unchanged ?? 0}；已有映射 ${summary.existingMappings ?? 0}，自动建立映射 ${summary.autoMappings ?? 0}，待人工关联 ${summary.pendingMappings ?? 0}。</p>
+    </div>`;
+  }
   if (importState.importType === "inventory") {
     return `<div class="product-import-complete"><strong>ERP 库存明细导入完成</strong>
       <p>新增 ${summary.created ?? 0}，更新 ${summary.updated ?? 0}，匹配 ${summary.matched ?? 0}，未匹配 ${summary.unmatched ?? 0}。</p>
@@ -863,18 +966,24 @@ function renderProductV2Complete() {
 
 function renderProductV2ImportModal() {
   if (importState?.version !== "v2") return "";
-  let body = renderProductV2Upload();
+  let body = importState.step === "sync" ? renderErpSyncDashboard() : renderProductV2Upload();
   if (importState.step === "shops") body = renderShopMapping();
   if (importState.step === "preview") body = renderProductV2Preview();
   if (importState.step === "complete") body = renderProductV2Complete();
-  let footer = `<button class="secondary-button" type="button" data-action="close-product-import">取消</button><button class="primary-button" type="submit" form="product-v2-import-upload-form" ${importState.loading ? "disabled" : ""}>${importState.loading ? "正在解析…" : "上传并解析"}</button>`;
+  let footer = importState.step === "sync"
+    ? `<button class="secondary-button" type="button" data-action="close-product-import">关闭</button>`
+    : `<button class="secondary-button" type="button" data-action="${importState.syncRun ? "back-to-erp-sync" : "close-product-import"}">返回</button><button class="primary-button" type="submit" form="product-v2-import-upload-form" ${importState.loading ? "disabled" : ""}>${importState.loading ? "正在解析…" : "上传并解析"}</button>`;
   if (importState.step === "shops") footer = `<button class="secondary-button" type="button" data-action="close-product-import">取消</button><button class="primary-button" type="button" data-action="confirm-shop-mappings" ${importState.loading ? "disabled" : ""}>确认店铺并生成预览</button>`;
   if (importState.step === "preview") {
     const backendValidated = importState.batch?.status === "validated";
-    footer = `<button class="secondary-button" type="button" data-action="${backendValidated ? "close-product-import" : "return-product-v2-shop-mapping"}" ${importState.loading ? "disabled" : ""}>${backendValidated ? "取消" : "返回店铺确认"}</button><button class="primary-button" type="button" data-action="commit-product-v2-import" ${!backendValidated || importState.loading ? "disabled" : ""}>${importState.loading ? `正在导入${importState.importType === "platform_goods" ? "平台货品" : "库存明细"}…` : backendValidated ? "确认导入" : "尚未完成后台校验"}</button>`;
+    const importLabel = importState.importType === "goods_info" ? "货品信息" : importState.importType === "platform_goods" ? "平台货品" : "库存明细";
+    const secondaryAction = importState.importType === "platform_goods" && !backendValidated
+      ? "return-product-v2-shop-mapping"
+      : importState.syncRun ? "back-to-erp-sync" : "close-product-import";
+    footer = `<button class="secondary-button" type="button" data-action="${secondaryAction}" ${importState.loading ? "disabled" : ""}>${importState.importType === "platform_goods" && !backendValidated ? "返回店铺确认" : "返回每日同步"}</button><button class="primary-button" type="button" data-action="commit-product-v2-import" ${!backendValidated || importState.loading ? "disabled" : ""}>${importState.loading ? `正在导入${importLabel}…` : backendValidated ? "确认导入" : "尚未完成后台校验"}</button>`;
   }
-  if (importState.step === "complete") footer = `<button class="primary-button" type="button" data-action="close-product-import">完成</button>`;
-  return `<div class="modal-backdrop"><section class="modal-panel product-import-modal"><header class="modal-header"><div><h2>导入 ERP 数据</h2><p>库存明细与平台货品分别校验、分别提交</p></div><button class="icon-button" type="button" data-action="close-product-import">×</button></header>
+  if (importState.step === "complete") footer = `<button class="primary-button" type="button" data-action="${importState.syncRun ? "back-to-erp-sync" : "close-product-import"}">返回每日同步</button>`;
+  return `<div class="modal-backdrop"><section class="modal-panel product-import-modal"><header class="modal-header"><div><h2>ERP 每日同步</h2><p>一个业务日期统一组织货品信息、库存明细与平台货品</p></div><button class="icon-button" type="button" data-action="close-product-import">×</button></header>
     <div class="modal-body">${body}</div><footer class="modal-footer">${footer}</footer></section></div>`;
 }
 
@@ -889,6 +998,25 @@ function collectShopMappings() {
       shopName: document.querySelector(`[data-shop-name="${CSS.escape(rawName)}"]`)?.value.trim() ?? "",
     }];
   }));
+}
+
+async function refreshErpSyncState(syncRunId = erpSyncState.active?.id) {
+  erpSyncState = { ...erpSyncState, loading: true, error: "" };
+  try {
+    const [listResult, detailResult] = await Promise.all([
+      listErpSyncRuns(),
+      syncRunId ? loadErpSyncRun(syncRunId) : Promise.resolve(null),
+    ]);
+    erpSyncState = {
+      loading: false,
+      runs: listResult.runs ?? [],
+      active: detailResult?.syncRun ?? (syncRunId ? null : erpSyncState.active),
+      error: "",
+    };
+  } catch (error) {
+    erpSyncState = { ...erpSyncState, loading: false, error: error.message || "ERP每日同步读取失败。" };
+  }
+  return erpSyncState;
 }
 
 export function renderProductCenterPage() {
@@ -1103,8 +1231,42 @@ export function bindProductCenterPageEvents(rerender) {
       rerender();
     }
     if (action === "new-product") { modalState = { kind: "create", error: "" }; rerender(); }
-    if (action === "open-product-import") { importState = { step: "upload", loading: false, error: "" }; rerender(); }
-    if (action === "open-product-v2-import") { importState = { version: "v2", step: "upload", loading: false, error: "" }; rerender(); }
+    if (action === "open-product-import") {
+      importState = { version: "v2", step: "upload", importType: "goods_info", loading: false, error: "" };
+      rerender();
+    }
+    if (action === "open-product-v2-import") {
+      importState = { version: "v2", step: "sync", loading: false, error: "" };
+      erpSyncState = { ...erpSyncState, loading: true, active: null, error: "" };
+      rerender();
+      await refreshErpSyncState();
+      rerender();
+    }
+    if (action === "choose-erp-sync-run") {
+      erpSyncState = { ...erpSyncState, active: null, error: "" };
+      rerender();
+    }
+    if (action === "open-erp-sync-run") {
+      await refreshErpSyncState(button.dataset.syncRunId);
+      rerender();
+    }
+    if (action === "upload-erp-sync-child") {
+      importState = {
+        version: "v2",
+        step: "upload",
+        importType: button.dataset.importType,
+        syncRun: erpSyncState.active,
+        loading: false,
+        error: "",
+      };
+      rerender();
+    }
+    if (action === "back-to-erp-sync") {
+      const syncRunId = importState.syncRun?.id || importState.result?.syncRun?.id || importState.batch?.syncRunId;
+      await refreshErpSyncState(syncRunId);
+      importState = { version: "v2", step: "sync", loading: false, error: "" };
+      rerender();
+    }
     if (action === "resume-product-v2-import") {
       importState = { version: "v2", step: "upload", loading: true, error: "" };
       rerender();
@@ -1118,19 +1280,25 @@ export function bindProductCenterPageEvents(rerender) {
               ? { shopId: mapping.shopId }
               : { platform: mapping.platform, shopName: mapping.shopName, displayName: mapping.displayName },
         ]));
+        const isCompleted = ["completed", "committed"].includes(result.batch.status);
         const isValidatedPlatform = result.batch.importType === "platform_goods" && result.batch.status === "validated";
         importState = {
           version: "v2",
-          step: result.batch.importType === "platform_goods" && !isValidatedPlatform ? "shops" : "preview",
+          step: isCompleted ? "complete" : result.batch.importType === "platform_goods" && !isValidatedPlatform ? "shops" : "preview",
           loading: false,
           error: "",
           importType: result.batch.importType,
+          syncRun: erpSyncState.active || result.syncRun,
+          result: isCompleted ? { batch: result.batch, summary: result.batch.summaryJson, syncRun: result.syncRun } : null,
           submittedShopMappings: restoredMappings,
           ...result,
         };
         if (isValidatedPlatform) await refreshPlatformPreview(rerender);
       } catch (error) {
-        importState = { version: "v2", step: "upload", loading: false, error: error.message || "导入批次读取失败。" };
+        importState = {
+          version: "v2", step: "sync", loading: false,
+          error: error.message || "导入批次读取失败.",
+        };
       }
       rerender();
     }
@@ -1220,7 +1388,7 @@ export function bindProductCenterPageEvents(rerender) {
       rerender();
       try {
         const result = await commitProductV2Import(batchId, { shopMappings: submittedShopMappings });
-        importState = { ...importState, step: "complete", loading: false, result };
+        importState = { ...importState, step: "complete", loading: false, result, syncRun: result.syncRun || importState.syncRun };
         unmatchedSkuState = { loading: false, loaded: false, rows: [], total: 0, query: "", error: "" };
         rerender();
         await Promise.all([
@@ -1296,24 +1464,53 @@ export function bindProductCenterPageEvents(rerender) {
     }
     rerender();
   });
+  document.querySelector("#erp-sync-create-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const businessDate = event.currentTarget.elements.businessDate.value;
+    erpSyncState = { ...erpSyncState, loading: true, error: "" };
+    rerender();
+    try {
+      const result = await createErpSyncRun(businessDate);
+      await refreshErpSyncState(result.syncRun.id);
+    } catch (error) {
+      erpSyncState = {
+        ...erpSyncState,
+        loading: false,
+        active: error.syncRun ?? erpSyncState.active,
+        error: error.message || "ERP每日同步创建失败。",
+      };
+    }
+    rerender();
+  });
   document.querySelector("#product-v2-import-upload-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
     const file = form.elements.file.files[0];
     if (!file) return;
     const importType = form.elements.importType.value;
+    const syncRun = importState.syncRun;
+    if (!syncRun?.id) {
+      importState = { ...importState, loading: false, error: "请先创建或恢复ERP每日同步批次。" };
+      rerender();
+      return;
+    }
     importState = { ...importState, loading: true, error: "", importType };
     rerender();
     try {
-      const result = await parseProductV2Import(file, importType);
+      const result = await parseProductV2Import(file, importType, syncRun.id);
       if (importType === "platform_goods") {
-        importState = { version: "v2", step: "shops", loading: false, error: "", importType, ...result };
+        importState = { version: "v2", step: "shops", loading: false, error: "", importType, syncRun: result.syncRun || syncRun, ...result };
       } else {
         const validated = await validateProductV2Import(result.batch.id);
-        importState = { version: "v2", step: "preview", loading: false, error: "", importType, duplicate: result.duplicate, batch: validated.batch, valid: validated.valid, summary: validated.summary, preview: validated.preview };
+        importState = {
+          version: "v2", step: "preview", loading: false, error: "", importType,
+          syncRun: validated.syncRun || result.syncRun || syncRun,
+          duplicate: result.duplicate, batch: validated.batch, valid: validated.valid,
+          summary: validated.summary, preview: validated.preview,
+        };
       }
     } catch (error) {
-      importState = { version: "v2", step: "upload", loading: false, error: error.message || "ERP 数据解析失败。" };
+      importState = { version: "v2", step: "upload", importType, syncRun, loading: false, error: error.message || "ERP 数据解析失败。" };
     }
     rerender();
   });

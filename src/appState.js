@@ -690,12 +690,33 @@ export async function commitProductImport(batchId) {
   return body;
 }
 
-export async function parseProductV2Import(file, importType) {
+export async function parseProductV2Import(file, importType, syncRunId) {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("importType", importType);
+  formData.append("syncRunId", syncRunId);
   const response = await authFetch(`${apiBaseUrl}/api/products/erp-v2/parse`, { method: "POST", body: formData });
   return readApiJson(response, "ERP 数据解析失败。");
+}
+
+export async function listErpSyncRuns(businessDate = "") {
+  const query = businessDate ? `?businessDate=${encodeURIComponent(businessDate)}` : "";
+  const response = await authFetch(`${apiBaseUrl}/api/products/erp-sync-runs${query}`);
+  return readApiJson(response, "ERP每日同步列表读取失败。");
+}
+
+export async function loadErpSyncRun(syncRunId) {
+  const response = await authFetch(`${apiBaseUrl}/api/products/erp-sync-runs/${encodeURIComponent(syncRunId)}`);
+  return readApiJson(response, "ERP每日同步读取失败。");
+}
+
+export async function createErpSyncRun(businessDate) {
+  const response = await authFetch(`${apiBaseUrl}/api/products/erp-sync-runs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ businessDate }),
+  });
+  return readApiJson(response, "ERP每日同步创建失败。");
 }
 
 export async function validateProductV2Import(batchId, options = {}) {
@@ -728,6 +749,7 @@ export async function commitProductV2Import(batchId, options = {}) {
     body: JSON.stringify(options),
   });
   const body = await readApiJson(response, "ERP 数据确认导入失败。");
+  if (body.data) applyDataSnapshot(body.data);
   if (body.batch) {
     replaceArray(state.erpImportBatches, [
       body.batch,

@@ -518,7 +518,8 @@ const resourceConfigs = {
   productErpMappings: {
     table: "product_erp_mappings",
     columns: [
-      "id", "productId", "erpGoodsId", "merchantSkuCode", "matchMethod", "sourceBatchId",
+      "id", "productId", "erpGoodsId", "merchantSkuCode", "specificationName", "unit", "barcode", "erpStatus",
+      "matchMethod", "sourceBatchId",
       "latestStateJson", "createdAt", "updatedAt",
     ],
     jsonFields: ["latestStateJson"],
@@ -1676,6 +1677,44 @@ function runLightweightMigrations() {
   ensureColumn("task_wave_items", "resultDraft", "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn("task_wave_items", "updatedAt", "TEXT");
   ensureColumn("task_wave_items", "submittedAt", "TEXT");
+  ensureColumn("product_erp_mappings", "specificationName", "TEXT");
+  ensureColumn("product_erp_mappings", "unit", "TEXT");
+  ensureColumn("product_erp_mappings", "barcode", "TEXT");
+  ensureColumn("product_erp_mappings", "erpStatus", "TEXT");
+  ensureColumn("erp_import_batches", "syncRunId", "TEXT");
+  ensureColumn("erp_import_batches", "businessDate", "TEXT");
+  getDatabase().exec(`
+    CREATE TABLE IF NOT EXISTS erp_sync_runs (
+      id TEXT PRIMARY KEY,
+      syncCode TEXT NOT NULL UNIQUE,
+      businessDate TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      goodsInfoBatchId TEXT,
+      inventoryBatchId TEXT,
+      platformGoodsBatchId TEXT,
+      supersedesRunId TEXT,
+      goodsInfoExportedAt TEXT,
+      inventoryExportedAt TEXT,
+      platformGoodsExportedAt TEXT,
+      createdBy TEXT,
+      createdAt TEXT NOT NULL,
+      startedAt TEXT,
+      completedAt TEXT,
+      failedAt TEXT,
+      errorSummary TEXT,
+      updatedAt TEXT NOT NULL,
+      UNIQUE(businessDate, version)
+    );
+    CREATE INDEX IF NOT EXISTS idx_erp_import_batches_sync_run
+      ON erp_import_batches(syncRunId, importType, createdAt);
+    CREATE INDEX IF NOT EXISTS idx_erp_sync_runs_business_date
+      ON erp_sync_runs(businessDate, version);
+    CREATE INDEX IF NOT EXISTS idx_erp_sync_runs_status
+      ON erp_sync_runs(status, updatedAt);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_erp_sync_runs_one_active_date
+      ON erp_sync_runs(businessDate) WHERE status IN ('draft', 'syncing', 'partial');
+  `);
   ensureColumn("tasks", "submitType", "TEXT");
   ensureColumn("tasks", "submitDescription", "TEXT");
   ensureColumn("tasks", "submitFields", "TEXT");

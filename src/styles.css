@@ -6422,6 +6422,105 @@ button.content-template-thumb {
   width: min(1040px, calc(100vw - 32px));
 }
 
+.erp-sync-create,
+.erp-sync-dashboard,
+.erp-sync-history,
+.erp-sync-file-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.erp-sync-history-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.erp-sync-overview,
+.erp-sync-file-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.erp-sync-overview > div,
+.erp-sync-file-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.erp-sync-overview > div {
+  display: grid;
+  gap: 5px;
+  padding: 12px 14px;
+}
+
+.erp-sync-overview span,
+.erp-sync-file-card dt {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.erp-sync-file-card {
+  display: grid;
+  align-content: space-between;
+  gap: 16px;
+  padding: 16px;
+}
+
+.erp-sync-file-card h3,
+.erp-sync-file-card p {
+  margin: 0;
+}
+
+.erp-sync-file-card p {
+  margin-top: 5px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.erp-sync-file-card dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.erp-sync-file-card dl > div {
+  display: grid;
+  gap: 2px;
+}
+
+.erp-sync-file-card dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.erp-sync-history-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+@media (max-width: 760px) {
+  .erp-sync-overview,
+  .erp-sync-file-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .erp-sync-history-item {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 .product-import-modal .modal-body {
   min-height: 280px;
   overflow-y: auto;

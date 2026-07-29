@@ -588,6 +588,8 @@ CREATE TABLE IF NOT EXISTS erp_goods (
 CREATE TABLE IF NOT EXISTS erp_import_batches (
   id TEXT PRIMARY KEY,
   importType TEXT NOT NULL,
+  syncRunId TEXT,
+  businessDate TEXT,
   originalFilename TEXT NOT NULL,
   fileHash TEXT NOT NULL,
   status TEXT NOT NULL,
@@ -605,12 +607,43 @@ CREATE TABLE IF NOT EXISTS erp_import_batches (
 );
 
 CREATE INDEX IF NOT EXISTS idx_erp_import_batches_hash ON erp_import_batches(importType, fileHash);
+CREATE TABLE IF NOT EXISTS erp_sync_runs (
+  id TEXT PRIMARY KEY,
+  syncCode TEXT NOT NULL UNIQUE,
+  businessDate TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  goodsInfoBatchId TEXT,
+  inventoryBatchId TEXT,
+  platformGoodsBatchId TEXT,
+  supersedesRunId TEXT,
+  goodsInfoExportedAt TEXT,
+  inventoryExportedAt TEXT,
+  platformGoodsExportedAt TEXT,
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  startedAt TEXT,
+  completedAt TEXT,
+  failedAt TEXT,
+  errorSummary TEXT,
+  updatedAt TEXT NOT NULL,
+  UNIQUE(businessDate, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_erp_sync_runs_business_date ON erp_sync_runs(businessDate, version);
+CREATE INDEX IF NOT EXISTS idx_erp_sync_runs_status ON erp_sync_runs(status, updatedAt);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_erp_sync_runs_one_active_date
+  ON erp_sync_runs(businessDate) WHERE status IN ('draft', 'syncing', 'partial');
 
 CREATE TABLE IF NOT EXISTS product_erp_mappings (
   id TEXT PRIMARY KEY,
   productId TEXT NOT NULL UNIQUE,
   erpGoodsId TEXT NOT NULL,
   merchantSkuCode TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  specificationName TEXT,
+  unit TEXT,
+  barcode TEXT,
+  erpStatus TEXT,
   matchMethod TEXT NOT NULL,
   sourceBatchId TEXT,
   latestStateJson TEXT,

@@ -52,10 +52,14 @@ import {
 } from "./productImport.js";
 import {
   commitErpV2Import,
+  createErpSyncRun,
+  listErpSyncRuns,
   markPlatformSku,
   parseErpV2Import,
   previewErpV2Import,
   readErpV2Import,
+  readErpSyncRun,
+  recalculateErpSyncRun,
   removePlatformSkuManualBinding,
   updatePlatformSkuManualBinding,
   validateErpV2Import,
@@ -646,6 +650,14 @@ app.post("/api/uploads/standard-work-attachment", (request, response) => {
   });
 });
 
+app.use("/api/products/import", requirePermission("products.create"), (_request, response) => {
+  response.status(410).json({
+    success: false,
+    message: "旧货品信息导入入口已停用，请使用产品中心 ERP V2 的“导入货品信息”。",
+    redirectTo: "/api/products/erp-v2/parse",
+  });
+});
+
 app.post("/api/products/import/parse", requirePermission("products.create"), (request, response) => {
   uploadProductImport.single("file")(request, response, async (error) => {
     if (error !== undefined) {
@@ -805,6 +817,7 @@ app.post("/api/products/erp-v2/parse", requirePermission("products.create"), (re
         filePath: request.file.path,
         originalFilename: normalizeUploadedFileName(request.file.originalname),
         importType: String(request.body?.importType ?? ""),
+        syncRunId: String(request.body?.syncRunId ?? ""),
         createdBy: getUserPersonId(request.user),
       });
       response.json({ success: true, ...result });
@@ -815,6 +828,56 @@ app.post("/api/products/erp-v2/parse", requirePermission("products.create"), (re
       fs.rmSync(request.file.path, { force: true });
     }
   });
+});
+
+app.get("/api/products/erp-sync-runs", requirePermission("products.view"), (request, response) => {
+  try {
+    response.json({
+      success: true,
+      runs: listErpSyncRuns({
+        businessDate: String(request.query.businessDate ?? ""),
+        includeHistorical: String(request.query.includeHistorical ?? "true") !== "false",
+      }),
+    });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "ERP每日同步列表读取失败。" });
+  }
+});
+
+app.get("/api/products/erp-sync-runs/:id", requirePermission("products.view"), (request, response) => {
+  const syncRun = readErpSyncRun(request.params.id);
+  if (!syncRun) {
+    response.status(404).json({ success: false, message: "ERP每日同步批次不存在。" });
+    return;
+  }
+  response.json({ success: true, syncRun });
+});
+
+app.post("/api/products/erp-sync-runs", requirePermission("products.create"), (request, response) => {
+  try {
+    response.json({
+      success: true,
+      syncRun: createErpSyncRun({
+        businessDate: request.body?.businessDate,
+        createdBy: getUserPersonId(request.user),
+      }),
+    });
+  } catch (error) {
+    response.status(error.code === "ERP_SYNC_ACTIVE_EXISTS" ? 409 : 400).json({
+      success: false,
+      message: error.message || "ERP每日同步创建失败。",
+      syncRun: error.syncRun ? readErpSyncRun(error.syncRun.id) : undefined,
+    });
+  }
+});
+
+app.post("/api/products/erp-sync-runs/:id/recalculate-status", requirePermission("products.create"), (request, response) => {
+  try {
+    const syncRun = recalculateErpSyncRun(request.params.id);
+    response.json({ success: true, syncRun: readErpSyncRun(syncRun.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "ERP每日同步状态刷新失败。" });
+  }
 });
 
 app.post("/api/products/erp-v2/:id/validate", requirePermission("products.create"), (request, response) => {
@@ -846,7 +909,7 @@ app.post("/api/products/erp-v2/:id/preview", requirePermission("products.create"
 app.post("/api/products/erp-v2/:id/commit", requirePermission("products.create"), (request, response) => {
   try {
     const result = commitErpV2Import(request.params.id, request.body ?? {});
-    response.json({ success: true, ...result });
+    response.json({ success: true, ...result, data: filterDataByScope(readAllData(), request.user) });
   } catch (error) {
     console.error("产品中心 V2 ERP提交失败", error);
     response.status(400).json({ success: false, message: error.message || "ERP导入提交失败。" });

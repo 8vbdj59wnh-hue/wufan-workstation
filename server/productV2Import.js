@@ -5,6 +5,7 @@ import * as XLSX from "xlsx";
 import { getDatabase, uploadsDir } from "./db.js";
 
 const stagingRoot = path.join(uploadsDir, "product-v2-imports");
+const goodsInfoRequiredHeaders = ["货品编号", "商家编码", "货品名称"];
 const inventoryRequiredHeaders = ["货品编号", "商家编码"];
 const platformRequiredHeaders = ["店铺", "货品ID", "规格ID", "平台规格编码"];
 
@@ -14,6 +15,15 @@ function value(raw) {
 
 function lower(raw) {
   return value(raw).toLocaleLowerCase("zh-CN");
+}
+
+function equivalentBusinessCode(left, right) {
+  const normalizedLeft = lower(left);
+  const normalizedRight = lower(right);
+  if (normalizedLeft === normalizedRight) return true;
+  return /^\d+$/u.test(normalizedLeft)
+    && /^\d+$/u.test(normalizedRight)
+    && normalizedLeft.replace(/^0+(?=\d)/u, "") === normalizedRight.replace(/^0+(?=\d)/u, "");
 }
 
 function numberValue(raw) {
@@ -69,19 +79,214 @@ function decodeBatch(row) {
 function saveBatch(batch) {
   getDatabase().prepare(`
     INSERT INTO erp_import_batches (
-      id, importType, originalFilename, fileHash, status, totalRows, createdCount, updatedCount,
+      id, importType, syncRunId, businessDate, originalFilename, fileHash, status, totalRows, createdCount, updatedCount,
       unchangedCount, matchedCount, unmatchedCount, errorCount, summaryJson, createdBy, createdAt, completedAt
     ) VALUES (
-      @id, @importType, @originalFilename, @fileHash, @status, @totalRows, @createdCount, @updatedCount,
+      @id, @importType, @syncRunId, @businessDate, @originalFilename, @fileHash, @status, @totalRows, @createdCount, @updatedCount,
       @unchangedCount, @matchedCount, @unmatchedCount, @errorCount, @summaryJson, @createdBy, @createdAt, @completedAt
     )
     ON CONFLICT(id) DO UPDATE SET
+      syncRunId=excluded.syncRunId, businessDate=excluded.businessDate,
       status=excluded.status, totalRows=excluded.totalRows, createdCount=excluded.createdCount,
       updatedCount=excluded.updatedCount, unchangedCount=excluded.unchangedCount,
       matchedCount=excluded.matchedCount, unmatchedCount=excluded.unmatchedCount,
       errorCount=excluded.errorCount, summaryJson=excluded.summaryJson, completedAt=excluded.completedAt
-  `).run({ ...batch, summaryJson: JSON.stringify(batch.summaryJson ?? {}) });
+  `).run({
+    syncRunId: null,
+    businessDate: null,
+    ...batch,
+    summaryJson: JSON.stringify(batch.summaryJson ?? {}),
+  });
   return decodeBatch(readBatch(batch.id));
+}
+
+const syncRunBatchColumns = {
+  goods_info: "goodsInfoBatchId",
+  inventory: "inventoryBatchId",
+  platform_goods: "platformGoodsBatchId",
+};
+
+function normalizeBusinessDate(raw) {
+  const businessDate = value(raw);
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(businessDate)) throw new Error("业务日期格式必须为 YYYY-MM-DD。");
+  const parsed = new Date(`${businessDate}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== businessDate) {
+    throw new Error("业务日期无效。");
+  }
+  return businessDate;
+}
+
+function decodeSyncRun(row) {
+  if (!row) return null;
+  let errorSummary = [];
+  try { errorSummary = JSON.parse(row.errorSummary || "[]"); } catch {}
+  return { ...row, errorSummary };
+}
+
+function getSyncRunRow(syncRunId) {
+  return getDatabase().prepare("SELECT * FROM erp_sync_runs WHERE id=?").get(syncRunId) ?? null;
+}
+
+function getSyncRunBatches(run) {
+  return Object.fromEntries(Object.entries(syncRunBatchColumns).map(([importType, column]) => [
+    importType,
+    run?.[column] ? decodeBatch(readBatch(run[column])) : null,
+  ]));
+}
+
+function recalculateSyncRunInTransaction(syncRunId, referenceAt = new Date().toISOString()) {
+  const database = getDatabase();
+  const row = getSyncRunRow(syncRunId);
+  if (!row) throw new Error("ERP同步批次不存在。");
+  if (row.status === "completed") return decodeSyncRun(row);
+  const batches = getSyncRunBatches(row);
+  const current = Object.values(batches).filter(Boolean);
+  const success = (batch) => ["completed", "committed"].includes(batch?.status);
+  const allCompleted = Object.values(batches).every((batch) =>
+    success(batch)
+    && batch.syncRunId === row.id
+    && batch.businessDate === row.businessDate
+    && Number(batch.errorCount ?? 0) === 0,
+  );
+  const productsExist = database.prepare("SELECT COUNT(*) AS total FROM products").get().total > 0;
+  let status = "draft";
+  if (allCompleted && productsExist) status = "completed";
+  else if (current.some(success) || current.some((batch) => batch.status === "failed")) status = "partial";
+  else if (current.length > 0) status = "syncing";
+  const errors = current
+    .filter((batch) => batch.status === "failed" || Number(batch.errorCount ?? 0) > 0)
+    .map((batch) => ({
+      importType: batch.importType,
+      batchId: batch.id,
+      reason: batch.summaryJson?.failure?.message
+        || (Number(batch.errorCount ?? 0) > 0 ? `存在 ${batch.errorCount} 条阻断错误` : "子批次导入失败"),
+      failedAt: batch.summaryJson?.failure?.failedAt ?? batch.completedAt ?? referenceAt,
+    }));
+  database.prepare(`
+    UPDATE erp_sync_runs
+    SET status=@status,
+        startedAt=CASE WHEN @hasBatch=1 THEN COALESCE(startedAt,@referenceAt) ELSE startedAt END,
+        completedAt=CASE WHEN @status='completed' THEN @referenceAt ELSE NULL END,
+        failedAt=CASE WHEN @status='failed' THEN @referenceAt ELSE NULL END,
+        errorSummary=@errorSummary,
+        updatedAt=@referenceAt
+    WHERE id=@id
+  `).run({
+    id: row.id,
+    status,
+    hasBatch: current.length > 0 ? 1 : 0,
+    errorSummary: JSON.stringify(errors),
+    referenceAt,
+  });
+  return decodeSyncRun(getSyncRunRow(row.id));
+}
+
+export function createErpSyncRun({ businessDate: rawBusinessDate, createdBy = "" } = {}) {
+  const database = getDatabase();
+  const businessDate = normalizeBusinessDate(rawBusinessDate);
+  return database.transaction(() => {
+    const active = database.prepare(`
+      SELECT * FROM erp_sync_runs
+      WHERE businessDate=? AND status IN ('draft','syncing','partial')
+      ORDER BY version DESC LIMIT 1
+    `).get(businessDate);
+    if (active) {
+      const error = new Error(`该业务日期已有未完成同步：${active.syncCode}`);
+      error.code = "ERP_SYNC_ACTIVE_EXISTS";
+      error.syncRun = decodeSyncRun(active);
+      throw error;
+    }
+    const latest = database.prepare(`
+      SELECT * FROM erp_sync_runs WHERE businessDate=? ORDER BY version DESC LIMIT 1
+    `).get(businessDate);
+    const version = Number(latest?.version ?? 0) + 1;
+    const compactDate = businessDate.replaceAll("-", "");
+    const syncCode = `ERP-SYNC-${compactDate}-${String(version).padStart(4, "0")}`;
+    const now = new Date().toISOString();
+    const run = {
+      id: `erp-sync-${crypto.randomUUID()}`,
+      syncCode,
+      businessDate,
+      version,
+      status: "draft",
+      goodsInfoBatchId: null,
+      inventoryBatchId: null,
+      platformGoodsBatchId: null,
+      supersedesRunId: latest?.status === "completed" ? latest.id : null,
+      goodsInfoExportedAt: null,
+      inventoryExportedAt: null,
+      platformGoodsExportedAt: null,
+      createdBy: value(createdBy) || null,
+      createdAt: now,
+      startedAt: null,
+      completedAt: null,
+      failedAt: null,
+      errorSummary: "[]",
+      updatedAt: now,
+    };
+    database.prepare(`
+      INSERT INTO erp_sync_runs (
+        id,syncCode,businessDate,version,status,goodsInfoBatchId,inventoryBatchId,platformGoodsBatchId,
+        supersedesRunId,goodsInfoExportedAt,inventoryExportedAt,platformGoodsExportedAt,
+        createdBy,createdAt,startedAt,completedAt,failedAt,errorSummary,updatedAt
+      ) VALUES (
+        @id,@syncCode,@businessDate,@version,@status,@goodsInfoBatchId,@inventoryBatchId,@platformGoodsBatchId,
+        @supersedesRunId,@goodsInfoExportedAt,@inventoryExportedAt,@platformGoodsExportedAt,
+        @createdBy,@createdAt,@startedAt,@completedAt,@failedAt,@errorSummary,@updatedAt
+      )
+    `).run(run);
+    return decodeSyncRun(getSyncRunRow(run.id));
+  }).immediate();
+}
+
+export function attachErpImportBatchToSyncRun(syncRunId, batchId) {
+  const database = getDatabase();
+  return database.transaction(() => {
+    const run = decodeSyncRun(getSyncRunRow(syncRunId));
+    if (!run) throw new Error("ERP同步批次不存在。");
+    if (run.status === "completed") throw new Error("已完成同步不可修改，请创建同日重新同步版本。");
+    const batch = decodeBatch(readBatch(batchId));
+    if (!batch) throw new Error("ERP导入子批次不存在。");
+    const column = syncRunBatchColumns[batch.importType];
+    if (!column) throw new Error("ERP导入类型无效。");
+    if (batch.syncRunId && batch.syncRunId !== run.id) throw new Error("该子批次已属于其他ERP同步。");
+    const previousBatchId = run[column];
+    const previousBatch = previousBatchId ? decodeBatch(readBatch(previousBatchId)) : null;
+    if (previousBatch && ["completed", "committed"].includes(previousBatch.status)) {
+      throw new Error("该表已完成导入，重新导入请创建同日重新同步版本。");
+    }
+    database.prepare(`
+      UPDATE erp_import_batches SET syncRunId=?,businessDate=? WHERE id=?
+    `).run(run.id, run.businessDate, batch.id);
+    database.prepare(`UPDATE erp_sync_runs SET ${column}=?,updatedAt=? WHERE id=?`)
+      .run(batch.id, new Date().toISOString(), run.id);
+    return {
+      run: recalculateSyncRunInTransaction(run.id),
+      replacedBatchId: previousBatchId && previousBatchId !== batch.id ? previousBatchId : null,
+    };
+  }).immediate();
+}
+
+export function recalculateErpSyncRun(syncRunId) {
+  return getDatabase().transaction(() => recalculateSyncRunInTransaction(syncRunId)).immediate();
+}
+
+export function readErpSyncRun(syncRunId) {
+  const run = decodeSyncRun(getSyncRunRow(syncRunId));
+  if (!run) return null;
+  return { ...run, batches: getSyncRunBatches(run) };
+}
+
+export function listErpSyncRuns({ businessDate = "", includeHistorical = true } = {}) {
+  const params = [];
+  const where = value(businessDate) ? "WHERE businessDate=?" : "";
+  if (where) params.push(normalizeBusinessDate(businessDate));
+  const rows = getDatabase().prepare(`
+    SELECT * FROM erp_sync_runs ${where}
+    ORDER BY businessDate DESC,version DESC,createdAt DESC
+    ${includeHistorical ? "" : "LIMIT 20"}
+  `).all(...params);
+  return rows.map((row) => readErpSyncRun(row.id));
 }
 
 export function suggestShopPlatform(rawName) {
@@ -176,6 +381,137 @@ function inventoryValidation(staging) {
       filtered: staging.records.length - rows.length,
     },
   };
+}
+
+function goodsInfoFields(record, existing = {}) {
+  return {
+    goodsName: value(record["货品名称"]) || existing.goodsName || null,
+    shortName: value(record["简称"]) || value(record["货品简称"]) || existing.shortName || null,
+    brand: value(record["品牌"]) || existing.brand || null,
+    category: value(record["分类"]) || existing.category || null,
+    productType: value(record["品类"]) || existing.productType || null,
+    primarySupplier: value(record["主供应商"]) || existing.primarySupplier || null,
+    supplierGoodsCode: value(record["主供应商货号"]) || existing.supplierGoodsCode || null,
+    sourceCreatedAt: value(record["创建时间"]) || value(record["单品创建时间"]) || existing.sourceCreatedAt || null,
+  };
+}
+
+function goodsInfoValidation(staging) {
+  const database = getDatabase();
+  const canonicalGoodsFields = new Map();
+  for (const { record } of staging.records) {
+    const goodsKey = lower(record["货品编号"]);
+    if (!goodsKey || value(record["货品编号"]) === "总计:") continue;
+    const current = canonicalGoodsFields.get(goodsKey) ?? {};
+    const candidate = goodsInfoFields(record);
+    canonicalGoodsFields.set(goodsKey, Object.fromEntries(
+      Object.keys(candidate).map((key) => [key, current[key] ?? candidate[key] ?? null]),
+    ));
+  }
+  const productsBySku = new Map();
+  for (const product of database.prepare("SELECT id, skuCode, name FROM products").all()) {
+    const key = lower(product.skuCode);
+    const matches = productsBySku.get(key) ?? [];
+    matches.push(product);
+    productsBySku.set(key, matches);
+  }
+  const goodsByCode = new Map(database.prepare("SELECT * FROM erp_goods").all().map((item) => [lower(item.goodsCode), item]));
+  const mappingsBySku = new Map(database.prepare(`
+    SELECT m.*, g.goodsCode
+    FROM product_erp_mappings m
+    JOIN erp_goods g ON g.id=m.erpGoodsId
+  `).all().map((item) => [lower(item.merchantSkuCode), item]));
+  const seenSkuGoods = new Map();
+  const goodsActions = new Map();
+  const rows = [];
+  const summary = {
+    total: 0,
+    validGoods: 0,
+    created: 0,
+    updated: 0,
+    unchanged: 0,
+    existingMappings: 0,
+    autoMappings: 0,
+    pendingMappings: 0,
+    invalid: 0,
+    error: 0,
+  };
+  for (const item of staging.records) {
+    const record = item.record;
+    const goodsCode = value(record["货品编号"]);
+    const merchantSkuCode = value(record["商家编码"]);
+    const goodsName = value(record["货品名称"]);
+    if (!goodsCode && !merchantSkuCode && !goodsName) continue;
+    if (goodsCode === "总计:" || merchantSkuCode === "总计:") continue;
+    const errors = [];
+    if (!goodsCode) errors.push("ERP货品编码为空");
+    if (!merchantSkuCode) errors.push("商家编码为空");
+    if (!goodsName) errors.push("货品名称为空");
+    const skuKey = lower(merchantSkuCode);
+    const goodsKey = lower(goodsCode);
+    if (skuKey && seenSkuGoods.has(skuKey) && seenSkuGoods.get(skuKey) !== goodsKey) {
+      errors.push(`同一商家编码对应多个货品编号：${seenSkuGoods.get(skuKey)}、${goodsCode}`);
+    }
+    if (skuKey) seenSkuGoods.set(skuKey, goodsKey);
+    const existingMapping = mappingsBySku.get(skuKey) ?? null;
+    if (existingMapping && !equivalentBusinessCode(existingMapping.goodsCode, goodsCode)) {
+      errors.push(`现有映射指向货品 ${existingMapping.goodsCode}，与本行 ${goodsCode} 冲突`);
+    }
+    const productMatches = productsBySku.get(skuKey) ?? [];
+    if (!existingMapping && productMatches.length > 1) errors.push("商家编码匹配到多个系统产品");
+    const product = existingMapping
+      ? productMatches.find((candidate) => candidate.id === existingMapping.productId) ?? null
+      : productMatches.length === 1 ? productMatches[0] : null;
+    const existingGoods = goodsByCode.get(goodsKey)
+      ?? (existingMapping && equivalentBusinessCode(existingMapping.goodsCode, goodsCode)
+        ? database.prepare("SELECT * FROM erp_goods WHERE id=?").get(existingMapping.erpGoodsId)
+        : null);
+    const nextFields = Object.fromEntries(
+      Object.entries(canonicalGoodsFields.get(goodsKey) ?? goodsInfoFields(record))
+        .map(([key, nextValue]) => [key, nextValue ?? existingGoods?.[key] ?? null]),
+    );
+    let goodsAction = "new";
+    if (existingGoods) {
+      goodsAction = lower(existingGoods.goodsCode) !== goodsKey
+        || Object.entries(nextFields).some(([key, nextValue]) => (existingGoods[key] ?? null) !== nextValue)
+        ? "update"
+        : "unchanged";
+    }
+    if (goodsKey && !goodsActions.has(goodsKey)) goodsActions.set(goodsKey, goodsAction);
+    const mappingAction = errors.length
+      ? "error"
+      : existingMapping
+        ? "existing"
+        : product
+          ? "auto"
+          : "pending";
+    rows.push({
+      rowNumber: item.rowNumber,
+      goodsCode,
+      merchantSkuCode,
+      goodsName,
+      specificationName: value(record["规格名称"]),
+      category: value(record["分类"]),
+      systemProduct: product,
+      existingGoodsId: existingGoods?.id ?? null,
+      goodsFields: nextFields,
+      goodsAction,
+      mappingAction,
+      status: errors.length ? "error" : "valid",
+      errors,
+    });
+  }
+  summary.total = rows.length;
+  summary.validGoods = goodsActions.size;
+  summary.created = [...goodsActions.values()].filter((item) => item === "new").length;
+  summary.updated = [...goodsActions.values()].filter((item) => item === "update").length;
+  summary.unchanged = [...goodsActions.values()].filter((item) => item === "unchanged").length;
+  summary.existingMappings = rows.filter((row) => row.mappingAction === "existing").length;
+  summary.autoMappings = rows.filter((row) => row.mappingAction === "auto").length;
+  summary.pendingMappings = rows.filter((row) => row.mappingAction === "pending").length;
+  summary.invalid = rows.filter((row) => row.errors.length > 0).length;
+  summary.error = rows.reduce((total, row) => total + row.errors.length, 0);
+  return { valid: rows.length > 0 && summary.error === 0, rows, summary };
 }
 
 function normalizeShopMappings(staging, submitted = {}) {
@@ -357,8 +693,15 @@ function buildPlatformPreview(rows, { platform = "", shop = "", status = "", que
   };
 }
 
-export function parseErpV2Import({ filePath, originalFilename, importType, createdBy }) {
-  if (!["inventory", "platform_goods"].includes(importType)) throw new Error("导入类型无效。");
+export function parseErpV2Import({ filePath, originalFilename, importType, syncRunId, createdBy }) {
+  if (!["goods_info", "inventory", "platform_goods"].includes(importType)) throw new Error("导入类型无效。");
+  const syncRun = readErpSyncRun(syncRunId);
+  if (!syncRun) throw new Error("请先创建或恢复ERP每日同步批次。");
+  if (syncRun.status === "completed") throw new Error("该ERP每日同步已完成，请创建同日重新同步版本。");
+  const currentBatch = syncRun.batches?.[importType];
+  if (currentBatch && ["completed", "committed"].includes(currentBatch.status)) {
+    throw new Error("该表已完成导入，重新导入请创建同日重新同步版本。");
+  }
   const fileBuffer = fs.readFileSync(filePath);
   const fileHash = crypto.createHash("sha256").update(fileBuffer).digest("hex");
   const existing = decodeBatch(getDatabase().prepare(`
@@ -367,28 +710,39 @@ export function parseErpV2Import({ filePath, originalFilename, importType, creat
     ORDER BY createdAt DESC LIMIT 1
   `).get(importType, fileHash));
   const parsed = parseWorkbook(filePath);
-  const required = importType === "inventory" ? inventoryRequiredHeaders : platformRequiredHeaders;
+  const required = importType === "goods_info"
+    ? goodsInfoRequiredHeaders
+    : importType === "inventory"
+      ? inventoryRequiredHeaders
+      : platformRequiredHeaders;
   const missing = required.filter((header) => !parsed.headers.includes(header));
   if (missing.length) throw new Error(`文件缺少必要字段：${missing.join("、")}`);
   const now = new Date().toISOString();
   const batchId = `erp-v2-${importType}-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
   const staging = { ...parsed, importType, fileHash, originalFilename, parsedAt: now };
   writeStaging(batchId, staging);
-  const validation = importType === "inventory" ? inventoryValidation(staging) : platformValidation(staging, {});
+  const validation = importType === "goods_info"
+    ? goodsInfoValidation(staging)
+    : importType === "inventory"
+      ? inventoryValidation(staging)
+      : platformValidation(staging, {});
   const batch = saveBatch({
-    id: batchId, importType, originalFilename, fileHash, status: "parsed", totalRows: validation.summary.total,
+    id: batchId, importType, syncRunId: syncRun.id, businessDate: syncRun.businessDate,
+    originalFilename, fileHash, status: "parsed", totalRows: validation.summary.total,
     createdCount: 0, updatedCount: 0, unchangedCount: 0, matchedCount: validation.summary.matched ?? validation.summary.matchedAuto ?? 0,
     unmatchedCount: validation.summary.unmatched ?? 0, errorCount: validation.summary.error ?? 0,
     summaryJson: { ...validation.summary, duplicateCommittedBatchId: existing?.id ?? null },
     createdBy, createdAt: now, completedAt: null,
   });
+  const attachment = attachErpImportBatchToSyncRun(syncRun.id, batch.id);
   return {
     batch,
+    syncRun: readErpSyncRun(attachment.run.id),
     duplicate: existing,
     valid: validation.valid,
     summary: validation.summary,
     shopMappings: validation.shopMappings ?? [],
-    preview: importType === "inventory" ? validation.rows.slice(0, 200) : [],
+    preview: importType === "platform_goods" ? [] : validation.rows.slice(0, 200),
     previewLinks: [],
     pagination: null,
   };
@@ -398,10 +752,14 @@ export function validateErpV2Import(batchId, { shopMappings = {}, previewFilters
   const batch = decodeBatch(readBatch(batchId));
   if (!batch) throw new Error("导入批次不存在。");
   const staging = readStaging(batchId);
-  const validation = batch.importType === "inventory" ? inventoryValidation(staging) : platformValidation(staging, shopMappings);
+  const validation = batch.importType === "goods_info"
+    ? goodsInfoValidation(staging)
+    : batch.importType === "inventory"
+      ? inventoryValidation(staging)
+      : platformValidation(staging, shopMappings);
   const nextBatch = saveBatch({
     ...batch,
-    status: validation.valid && (batch.importType === "inventory" || validation.shopMappings.every((item) => ["confirmed", "ignored"].includes(item.mappingStatus)))
+    status: validation.valid && (batch.importType !== "platform_goods" || validation.shopMappings.every((item) => ["confirmed", "ignored"].includes(item.mappingStatus)))
       ? "validated" : "parsed",
     matchedCount: validation.summary.matched ?? validation.summary.matchedAuto ?? 0,
     unmatchedCount: validation.summary.unmatched ?? 0,
@@ -411,14 +769,16 @@ export function validateErpV2Import(batchId, { shopMappings = {}, previewFilters
   const platformPreview = batch.importType === "platform_goods"
     ? buildPlatformPreview(validation.rows, { ...previewFilters, page, pageSize })
     : { links: [], pagination: null };
+  const syncRun = nextBatch.syncRunId ? recalculateErpSyncRun(nextBatch.syncRunId) : null;
   return {
     ...validation,
     batch: nextBatch,
     valid: nextBatch.status === "validated",
     rows: undefined,
-    preview: batch.importType === "inventory" ? validation.rows.slice(0, 500) : [],
+    preview: batch.importType === "platform_goods" ? [] : validation.rows.slice(0, 500),
     previewLinks: platformPreview.links,
     pagination: platformPreview.pagination,
+    syncRun: syncRun ? readErpSyncRun(syncRun.id) : null,
   };
 }
 
@@ -465,15 +825,18 @@ export function readErpV2Import(batchId) {
         ? { shopId: mapping.shopId }
         : { platform: mapping.platform, shopName: mapping.shopName, displayName: mapping.displayName },
   ]));
-  const validation = batch.importType === "inventory"
-    ? inventoryValidation(staging)
-    : platformValidation(staging, savedShopMappings);
+  const validation = batch.importType === "goods_info"
+    ? goodsInfoValidation(staging)
+    : batch.importType === "inventory"
+      ? inventoryValidation(staging)
+      : platformValidation(staging, savedShopMappings);
   return {
     batch,
+    syncRun: batch.syncRunId ? readErpSyncRun(batch.syncRunId) : null,
     valid: ["validated", "importing", "completed", "committed"].includes(batch.status),
     summary: validation.summary,
     shopMappings: validation.shopMappings ?? [],
-    preview: batch.importType === "inventory" ? validation.rows.slice(0, 200) : [],
+    preview: batch.importType === "platform_goods" ? [] : validation.rows.slice(0, 200),
     previewLinks: [],
     pagination: null,
   };
@@ -490,10 +853,12 @@ function commitInventory(batch, staging) {
     for (const row of validation.rows) {
       const record = staging.records.find((item) => item.rowNumber === row.rowNumber)?.record ?? {};
       if (!row.goodsCode) continue;
-      let goods = goodsByCode.get(lower(row.goodsCode)) ?? database.prepare("SELECT * FROM erp_goods WHERE lower(goodsCode)=lower(?)").get(row.goodsCode);
+      const generatedGoodsId = id("erp-goods", lower(row.goodsCode));
+      let goods = goodsByCode.get(lower(row.goodsCode))
+        ?? database.prepare("SELECT * FROM erp_goods WHERE lower(goodsCode)=lower(?) OR id=?").get(row.goodsCode, generatedGoodsId);
       const nextGoods = {
-        id: goods?.id ?? id("erp-goods", lower(row.goodsCode)),
-        goodsCode: row.goodsCode,
+        id: goods?.id ?? generatedGoodsId,
+        goodsCode: goods?.goodsCode ?? row.goodsCode,
         goodsName: value(record["货品名称"]) || goods?.goodsName || null,
         shortName: value(record["货品简称"]) || goods?.shortName || null,
         brand: value(record["品牌"]) || goods?.brand || null,
@@ -576,6 +941,98 @@ function commitInventory(batch, staging) {
     }
   });
   transaction();
+  return stats;
+}
+
+function commitGoodsInfo(batch, staging) {
+  const database = getDatabase();
+  const validation = goodsInfoValidation(staging);
+  if (!validation.valid) throw new Error("货品信息存在编码缺失或冲突，请返回预览处理后重试。");
+  const now = new Date().toISOString();
+  const stats = {
+    created: 0,
+    updated: 0,
+    unchanged: 0,
+    matched: 0,
+    existingMappings: 0,
+    autoMappings: 0,
+    pendingMappings: 0,
+    errors: 0,
+  };
+  database.transaction(() => {
+    const countedGoods = new Set();
+    for (const row of validation.rows) {
+      const record = staging.records.find((item) => item.rowNumber === row.rowNumber)?.record ?? {};
+      const goodsKey = lower(row.goodsCode);
+      let goods = database.prepare("SELECT * FROM erp_goods WHERE lower(goodsCode)=lower(?)").get(row.goodsCode)
+        ?? (row.existingGoodsId ? database.prepare("SELECT * FROM erp_goods WHERE id=?").get(row.existingGoodsId) : null);
+      if (!countedGoods.has(goodsKey)) {
+        const nextGoods = {
+          id: goods?.id ?? id("erp-goods", goodsKey),
+          goodsCode: row.goodsCode,
+          ...row.goodsFields,
+          lastImportedAt: now,
+          createdAt: goods?.createdAt ?? now,
+          updatedAt: now,
+        };
+        if (goods) {
+          database.prepare(`
+            UPDATE erp_goods SET goodsCode=@goodsCode,goodsName=@goodsName,shortName=@shortName,brand=@brand,
+              category=@category,productType=@productType,primarySupplier=@primarySupplier,
+              supplierGoodsCode=@supplierGoodsCode,sourceCreatedAt=@sourceCreatedAt,lastImportedAt=@lastImportedAt,updatedAt=@updatedAt
+            WHERE id=@id
+          `).run(nextGoods);
+        } else {
+          database.prepare(`
+            INSERT INTO erp_goods VALUES (@id,@goodsCode,@goodsName,@shortName,@brand,@category,@productType,@primarySupplier,@supplierGoodsCode,@sourceCreatedAt,@lastImportedAt,@createdAt,@updatedAt)
+          `).run(nextGoods);
+        }
+        if (!goods) stats.created += 1;
+        else if (row.goodsAction === "update") stats.updated += 1;
+        else stats.unchanged += 1;
+        countedGoods.add(goodsKey);
+        goods = nextGoods;
+      } else {
+        goods = database.prepare("SELECT * FROM erp_goods WHERE lower(goodsCode)=lower(?)").get(row.goodsCode)
+          ?? (row.existingGoodsId ? database.prepare("SELECT * FROM erp_goods WHERE id=?").get(row.existingGoodsId) : null);
+      }
+      if (!row.systemProduct) {
+        stats.pendingMappings += 1;
+        continue;
+      }
+      const existingMapping = database.prepare("SELECT * FROM product_erp_mappings WHERE productId=?").get(row.systemProduct.id);
+      let latestState = {};
+      try { latestState = JSON.parse(existingMapping?.latestStateJson || "{}"); } catch {}
+      const mappingId = existingMapping?.id ?? id("product-erp-map", row.systemProduct.id);
+      database.prepare(`
+        INSERT INTO product_erp_mappings (
+          id,productId,erpGoodsId,merchantSkuCode,specificationName,unit,barcode,erpStatus,
+          matchMethod,sourceBatchId,latestStateJson,createdAt,updatedAt
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(productId) DO UPDATE SET
+          erpGoodsId=excluded.erpGoodsId,merchantSkuCode=excluded.merchantSkuCode,
+          specificationName=excluded.specificationName,unit=excluded.unit,barcode=excluded.barcode,erpStatus=excluded.erpStatus,
+          matchMethod=excluded.matchMethod,sourceBatchId=excluded.sourceBatchId,updatedAt=excluded.updatedAt
+      `).run(
+        mappingId,
+        row.systemProduct.id,
+        goods.id,
+        row.merchantSkuCode,
+        row.specificationName || null,
+        value(record["基本单位"]) || value(record["单位"]) || null,
+        value(record["主条码"]) || value(record["条码"]) || null,
+        value(record["单品状态"]) || null,
+        existingMapping ? existingMapping.matchMethod : "sku_code",
+        batch.id,
+        JSON.stringify(latestState),
+        existingMapping?.createdAt ?? now,
+        now,
+      );
+      stats.matched += 1;
+      if (existingMapping) stats.existingMappings += 1;
+      else stats.autoMappings += 1;
+    }
+  })();
   return stats;
 }
 
@@ -696,7 +1153,14 @@ function commitPlatform(batch, staging, shopMappings) {
 export function commitErpV2Import(batchId, { shopMappings = {} } = {}) {
   let batch = decodeBatch(readBatch(batchId));
   if (!batch) throw new Error("导入批次不存在。");
-  if (["committed", "completed"].includes(batch.status)) return { batch, idempotent: true, summary: batch.summaryJson };
+  if (["committed", "completed"].includes(batch.status)) {
+    return {
+      batch,
+      idempotent: true,
+      summary: batch.summaryJson,
+      syncRun: batch.syncRunId ? readErpSyncRun(batch.syncRunId) : null,
+    };
+  }
   if (batch.status === "importing") throw new Error("该批次正在导入，请勿重复提交。");
   if (!["validated", "failed"].includes(batch.status)) throw new Error("请先完成导入预览与校验。");
   const staging = readStaging(batchId);
@@ -716,11 +1180,14 @@ export function commitErpV2Import(batchId, { shopMappings = {} } = {}) {
     completedAt: null,
     summaryJson: { ...batch.summaryJson, shopMappings: batch.summaryJson?.shopMappings ?? [], importStartedAt, failure: null },
   });
+  if (batch.syncRunId) recalculateErpSyncRun(batch.syncRunId);
   try {
     const database = getDatabase();
-    const stats = batch.importType === "inventory"
-      ? commitInventory(batch, staging)
-      : database.transaction(() => commitPlatform(batch, staging, effectiveShopMappings))();
+    const stats = batch.importType === "goods_info"
+      ? commitGoodsInfo(batch, staging)
+      : batch.importType === "inventory"
+        ? commitInventory(batch, staging)
+        : database.transaction(() => commitPlatform(batch, staging, effectiveShopMappings))();
     const completedAt = new Date().toISOString();
     const nextBatch = saveBatch({
       ...batch, status: "completed", totalRows: batch.totalRows,
@@ -730,9 +1197,15 @@ export function commitErpV2Import(batchId, { shopMappings = {} } = {}) {
       summaryJson: { ...stats, shopMappings: batch.summaryJson?.shopMappings ?? [], importStartedAt },
       completedAt,
     });
-    return { batch: nextBatch, idempotent: false, summary: stats };
+    const syncRun = nextBatch.syncRunId ? recalculateErpSyncRun(nextBatch.syncRunId) : null;
+    return {
+      batch: nextBatch,
+      idempotent: false,
+      summary: stats,
+      syncRun: syncRun ? readErpSyncRun(syncRun.id) : null,
+    };
   } catch (error) {
-    saveBatch({
+    const failedBatch = saveBatch({
       ...batch,
       status: "failed",
       errorCount: Math.max(1, Number(batch.errorCount) || 0),
@@ -743,6 +1216,7 @@ export function commitErpV2Import(batchId, { shopMappings = {} } = {}) {
       },
       completedAt: null,
     });
+    if (failedBatch.syncRunId) recalculateErpSyncRun(failedBatch.syncRunId);
     throw error;
   }
 }
