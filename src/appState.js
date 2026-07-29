@@ -726,6 +726,17 @@ export async function generateErpSyncSnapshot(syncRunId) {
   return readApiJson(response, "ERP历史快照生成失败。");
 }
 
+export async function loadDataCenterView(view, params = {}) {
+  const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== "" && value !== undefined));
+  const response = await authFetch(`${apiBaseUrl}/api/data-center/${view}${query.size ? `?${query}` : ""}`);
+  return readApiJson(response, "数据中心读取失败。");
+}
+
+export async function loadDataCenterProductDetail(productId, source) {
+  const response = await authFetch(`${apiBaseUrl}/api/data-center/products/${encodeURIComponent(productId)}?source=${encodeURIComponent(source)}`);
+  return readApiJson(response, "产品分析详情读取失败。");
+}
+
 export async function validateProductV2Import(batchId, options = {}) {
   const response = await authFetch(`${apiBaseUrl}/api/products/erp-v2/${encodeURIComponent(batchId)}/validate`, {
     method: "POST",

@@ -21,6 +21,7 @@ export const permissionGroups = [
       { key: "methods", label: "可访问关键行动方法论" },
       { key: "settings", label: "可访问设置模块" },
       { key: "products", label: "可访问产品中心" },
+      { key: "dataCenter", label: "可访问数据中心" },
     ],
   },
   {
@@ -53,6 +54,13 @@ export const permissionGroups = [
       { key: "create", label: "新增产品" },
       { key: "edit", label: "编辑产品" },
       { key: "archive", label: "归档产品" },
+    ],
+  },
+  {
+    key: "dataCenter",
+    title: "数据中心权限",
+    permissions: [
+      { key: "view", label: "查看数据中心" },
     ],
   },
   {
@@ -373,10 +381,14 @@ export function canAccessModule(userOrPermissions, moduleId) {
     methods: "methods",
     settings: "settings",
     products: "products",
+    dataCenter: "dataCenter",
   };
   const permissionKey = modulePermissionMap[moduleId] ?? moduleId;
   if (moduleId === "products") {
     return hasPermission(userOrPermissions, "products.view");
+  }
+  if (moduleId === "dataCenter") {
+    return hasPermission(userOrPermissions, "dataCenter.view");
   }
   return hasPermission(userOrPermissions, `modules.${permissionKey}`);
 }

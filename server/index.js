@@ -70,6 +70,13 @@ import {
   listProductFactSnapshots,
   readErpFactSnapshot,
 } from "./erpFactSnapshots.js";
+import {
+  getCapitalOccupationProducts,
+  getDataCenterProductDetail,
+  getDataCenterSummary,
+  getSlowMovingProducts,
+  getTrendProducts,
+} from "./dataCenterService.js";
 import { createToken, verifyPassword, verifyToken } from "./security.js";
 import { canLaunchActionTemplate, getDataScope, hasPermission } from "../src/permissions.js";
 import { getProcessInstanceOwner } from "../src/data/processInstanceSelectors.js";
@@ -925,6 +932,51 @@ app.get("/api/products/:id/snapshots", requirePermission("products.view"), (requ
     response.json({ success: true, productId: request.params.id, snapshots: listProductFactSnapshots(request.params.id) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "产品历史快照读取失败。" });
+  }
+});
+
+app.get("/api/data-center/summary", requirePermission("dataCenter.view"), (_request, response) => {
+  try {
+    response.json({ success: true, summary: getDataCenterSummary() });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "数据中心概览读取失败。" });
+  }
+});
+
+app.get("/api/data-center/trends", requirePermission("dataCenter.view"), (request, response) => {
+  try {
+    response.json({ success: true, ...getTrendProducts(request.query) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "产品趋势读取失败。" });
+  }
+});
+
+app.get("/api/data-center/slow-moving", requirePermission("dataCenter.view"), (request, response) => {
+  try {
+    response.json({ success: true, ...getSlowMovingProducts(request.query) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "长期滞销分析读取失败。" });
+  }
+});
+
+app.get("/api/data-center/capital-occupation", requirePermission("dataCenter.view"), (request, response) => {
+  try {
+    response.json({ success: true, ...getCapitalOccupationProducts(request.query) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "资金占用分析读取失败。" });
+  }
+});
+
+app.get("/api/data-center/products/:productId", requirePermission("dataCenter.view"), (request, response) => {
+  try {
+    const detail = getDataCenterProductDetail(request.params.productId, String(request.query.source ?? "trends"));
+    if (!detail) {
+      response.status(404).json({ success: false, message: "该产品没有正式历史快照。" });
+      return;
+    }
+    response.json({ success: true, detail });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "产品分析详情读取失败。" });
   }
 });
 

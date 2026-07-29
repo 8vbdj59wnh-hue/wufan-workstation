@@ -8,6 +8,7 @@ import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage
 import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260705-state-singleton1";
 import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js?v=20260705-state-singleton1";
 import { bindProductCenterPageEvents, renderProductCenterPage } from "./productCenterPage.js?v=20260725-product-archive1";
+import { bindDataCenterPageEvents, renderDataCenterPage } from "./dataCenterPage.js?v=20260729-data-center-v5";
 import { bindProductPreviewEvents, closeProductPreview, openProductPreview, renderProductPreviewModal } from "./productPreview.js?v=20260725-product-preview1";
 import { attachThumbnailHoverPreview } from "./thumbnailPreview.js?v=20260723-task-card-static1";
 import {
@@ -80,6 +81,8 @@ const moduleHashMap = {
   assessment: "assessment",
   templateCenter: "templateCenter",
   products: "products",
+  dataCenter: "dataCenter",
+  "data-center": "dataCenter",
   "template-center": "templateCenter",
   methods: "processes",
   settings: "settings",
@@ -379,6 +382,10 @@ function renderPage() {
     content = renderProductCenterPage();
   }
 
+  if (canAccessActiveModule && activeModule.id === "dataCenter") {
+    content = renderDataCenterPage();
+  }
+
   if (activeModule.id === "settings") {
     content = renderSettingsPage();
   }
@@ -646,6 +653,10 @@ function render({ navigation = false } = {}) {
 
   if (activeModuleId === "products") {
     bindProductCenterPageEvents(render);
+  }
+
+  if (activeModuleId === "dataCenter") {
+    bindDataCenterPageEvents(render);
   }
 
   if (document.querySelector(".methodologies-page") !== null) {

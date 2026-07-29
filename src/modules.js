@@ -4,6 +4,14 @@ export const modules = [
     name: "目标",
   },
   {
+    id: "products",
+    name: "产品中心",
+  },
+  {
+    id: "dataCenter",
+    name: "数据中心",
+  },
+  {
     id: "scheduleBoard",
     name: "关键行动",
   },
@@ -22,10 +30,6 @@ export const modules = [
   {
     id: "templateCenter",
     name: "模板中心",
-  },
-  {
-    id: "products",
-    name: "产品中心",
   },
   {
     id: "settings",
