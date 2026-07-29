@@ -7,6 +7,7 @@ import {
   getCurrentUser,
   getNow,
   loadProductSalesLinks,
+  loadProductSalesSummaries,
   loadProductV2Import,
   loadProductV2Preview,
   loadUnmatchedPlatformSkus,
@@ -35,6 +36,7 @@ let productDetailId = "";
 let modalState = null;
 let importState = null;
 let productSalesState = { productId: "", loading: false, loaded: false, rows: [], error: "" };
+let productSalesSummaryState = { loading: false, loaded: false, rows: [], error: "" };
 let unmatchedSkuState = { loading: false, loaded: false, rows: [], total: 0, query: "", error: "" };
 let platformPreviewRequestId = 0;
 
@@ -79,9 +81,15 @@ function buildProductUiIndex() {
     goods: goodsById.get(mapping.erpGoodsId) ?? null,
     stock: mapping.latestStateJson && typeof mapping.latestStateJson === "object" ? mapping.latestStateJson : {},
   }]));
-  const linksById = new Map((state.salesLinks ?? []).map((item) => [item.id, item]));
-  const shopsById = new Map((state.salesShops ?? []).map((item) => [item.id, item]));
-  const salesByProduct = new Map();
+  const salesByProduct = new Map((productSalesSummaryState.rows ?? []).map((summary) => [
+    summary.productId,
+    {
+      platforms: new Set(summary.platforms ?? []),
+      platformCount: Number(summary.platformCount) || 0,
+      shopCount: Number(summary.shopCount) || 0,
+      linkCount: Number(summary.linkCount) || 0,
+    },
+  ]));
   const validActionIds = new Set(state.processInstances.map((item) => item.id));
   const actionIdsByProduct = new Map();
   for (const relation of state.actionProducts ?? []) {
@@ -89,19 +97,6 @@ function buildProductUiIndex() {
     const actionIds = actionIdsByProduct.get(relation.productId) ?? new Set();
     actionIds.add(relation.actionId);
     actionIdsByProduct.set(relation.productId, actionIds);
-  }
-  for (const sku of state.salesLinkSkus ?? []) {
-    if (!sku.productId) continue;
-    const summary = salesByProduct.get(sku.productId) ?? { platforms: new Set(), shopIds: new Set(), linkIds: new Set(), skuCount: 0 };
-    const link = linksById.get(sku.salesLinkId);
-    const shop = link ? shopsById.get(link.shopId) : null;
-    summary.skuCount += 1;
-    if (link) summary.linkIds.add(link.id);
-    if (shop) {
-      summary.shopIds.add(shop.id);
-      if (shop.platform) summary.platforms.add(shop.platform);
-    }
-    salesByProduct.set(sku.productId, summary);
   }
   return { erpByProduct, salesByProduct, actionIdsByProduct };
 }
@@ -138,22 +133,13 @@ function getProductErpContext(productId, index = null) {
 }
 
 function getProductSalesSummary(productId, index = null) {
-  if (index) {
-    const summary = index.salesByProduct.get(productId);
-    if (!summary) return { platforms: new Set(), shopCount: 0, linkCount: 0, skuCount: 0 };
-    return {
-      platforms: summary.platforms,
-      shopCount: summary.shopIds.size,
-      linkCount: summary.linkIds.size,
-      skuCount: summary.skuCount,
-    };
+  const summary = index?.salesByProduct.get(productId) ?? null;
+  if (!productSalesSummaryState.loaded) {
+    return { loaded: false, platforms: new Set(), platformCount: null, shopCount: null, linkCount: null };
   }
-  const skus = (state.salesLinkSkus ?? []).filter((item) => item.productId === productId);
-  const linkIds = new Set(skus.map((item) => item.salesLinkId));
-  const links = (state.salesLinks ?? []).filter((item) => linkIds.has(item.id));
-  const shopIds = new Set(links.map((item) => item.shopId));
-  const platforms = new Set((state.salesShops ?? []).filter((item) => shopIds.has(item.id)).map((item) => item.platform).filter(Boolean));
-  return { platforms, shopCount: shopIds.size, linkCount: linkIds.size, skuCount: skus.length };
+  return summary
+    ? { loaded: true, ...summary }
+    : { loaded: true, platforms: new Set(), platformCount: 0, shopCount: 0, linkCount: 0 };
 }
 
 function formatMetric(value) {
@@ -216,9 +202,9 @@ function renderProductCards(products, index) {
           <div class="product-card-metrics">
             <div><strong>${index.actionIdsByProduct.get(product.id)?.size ?? 0}</strong><span>关联行动</span></div>
             <div><strong>${formatMetric(erp.stock.sales30d)}</strong><span>近30天销量</span></div>
-            <div><strong>${sales.platforms.size || "—"}</strong><span>平台</span></div>
-            <div><strong>${sales.shopCount || "—"}</strong><span>店铺</span></div>
-            <div><strong>${sales.linkCount || "—"}</strong><span>链接</span></div>
+            <div><strong>${sales.loaded ? sales.platformCount : "—"}</strong><span>平台</span></div>
+            <div><strong>${sales.loaded ? sales.shopCount : "—"}</strong><span>店铺</span></div>
+            <div><strong>${sales.loaded ? sales.linkCount : "—"}</strong><span>链接</span></div>
           </div>
           <div class="product-card-more">
             <button class="icon-button" type="button" data-action="toggle-product-menu" data-product-id="${escapeHtml(product.id)}" aria-label="产品操作">•••</button>
@@ -959,6 +945,25 @@ async function refreshProductSalesLinks(productId, rerender) {
   rerender();
 }
 
+async function refreshProductSalesSummaries(rerender) {
+  if (productSalesSummaryState.loading) return;
+  productSalesSummaryState = { ...productSalesSummaryState, loading: true, error: "" };
+  rerender();
+  try {
+    const result = await loadProductSalesSummaries();
+    productSalesSummaryState = { loading: false, loaded: true, rows: result.rows ?? [], error: "" };
+  } catch (error) {
+    productSalesSummaryState = {
+      loading: false,
+      loaded: false,
+      rows: [],
+      error: error.message || "产品销售汇总读取失败。",
+    };
+    console.error(productSalesSummaryState.error);
+  }
+  rerender();
+}
+
 async function refreshUnmatchedPlatformSkus(rerender, query = unmatchedSkuState.query) {
   unmatchedSkuState = { ...unmatchedSkuState, query, loading: true, error: "" };
   rerender();
@@ -1030,6 +1035,9 @@ export function bindProductCenterPageEvents(rerender) {
   }
   if (!routeProductId && !unmatchedSkuState.loaded && !unmatchedSkuState.loading) {
     void refreshUnmatchedPlatformSkus(rerender);
+  }
+  if (!routeProductId && !productSalesSummaryState.loaded && !productSalesSummaryState.loading) {
+    void refreshProductSalesSummaries(rerender);
   }
   document.querySelector("[data-unmatched-search]")?.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -1215,7 +1223,10 @@ export function bindProductCenterPageEvents(rerender) {
         importState = { ...importState, step: "complete", loading: false, result };
         unmatchedSkuState = { loading: false, loaded: false, rows: [], total: 0, query: "", error: "" };
         rerender();
-        await refreshUnmatchedPlatformSkus(rerender);
+        await Promise.all([
+          refreshUnmatchedPlatformSkus(rerender),
+          refreshProductSalesSummaries(rerender),
+        ]);
       } catch (error) {
         importState = {
           ...importState,
@@ -1232,11 +1243,17 @@ export function bindProductCenterPageEvents(rerender) {
       const input = document.querySelector(`[data-platform-bind-product="${CSS.escape(button.dataset.skuId)}"]`);
       const product = state.products.find((item) => `${item.skuCode} · ${item.name}` === input?.value.trim());
       if (product) await bindPlatformSku(button.dataset.skuId, product.id);
-      await refreshUnmatchedPlatformSkus(rerender);
+      await Promise.all([
+        refreshUnmatchedPlatformSkus(rerender),
+        refreshProductSalesSummaries(rerender),
+      ]);
     }
     if (action === "unbind-platform-sku") {
       await unbindPlatformSku(button.dataset.skuId);
-      await refreshProductSalesLinks(getRouteProductId(), rerender);
+      await Promise.all([
+        refreshProductSalesLinks(getRouteProductId(), rerender),
+        refreshProductSalesSummaries(rerender),
+      ]);
     }
     if (action === "mark-platform-combination") { await markPlatformSku(button.dataset.skuId, "combination"); await refreshUnmatchedPlatformSkus(rerender); }
     if (action === "ignore-platform-sku") { await markPlatformSku(button.dataset.skuId, "ignored"); await refreshUnmatchedPlatformSkus(rerender); }

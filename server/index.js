@@ -892,6 +892,35 @@ app.get("/api/products/platform-skus/unmatched", requirePermission("products.vie
   }
 });
 
+app.get("/api/products/sales-summary", requirePermission("products.view"), (request, response) => {
+  try {
+    const database = getDatabase();
+    const rows = database.prepare(`
+      SELECT
+        x.productId,
+        COUNT(DISTINCT x.salesLinkId) AS linkCount,
+        COUNT(DISTINCT l.shopId) AS shopCount,
+        COUNT(DISTINCT s.platform) AS platformCount,
+        json_group_array(DISTINCT s.platform) AS platformsJson
+      FROM sales_link_skus x
+      JOIN sales_links l ON l.id=x.salesLinkId
+      JOIN sales_shops s ON s.id=l.shopId
+      WHERE x.productId IS NOT NULL
+        AND x.matchStatus IN ('matched_auto','matched_manual')
+      GROUP BY x.productId
+    `).all().map((row) => ({
+      productId: row.productId,
+      linkCount: Number(row.linkCount) || 0,
+      shopCount: Number(row.shopCount) || 0,
+      platformCount: Number(row.platformCount) || 0,
+      platforms: JSON.parse(row.platformsJson || "[]").filter(Boolean),
+    }));
+    response.json({ success: true, rows });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "产品销售汇总读取失败。" });
+  }
+});
+
 app.get("/api/products/:id/sales-links", requirePermission("products.view"), (request, response) => {
   try {
     const database = getDatabase();
@@ -909,6 +938,7 @@ app.get("/api/products/:id/sales-links", requirePermission("products.view"), (re
       JOIN sales_links l ON l.id=x.salesLinkId
       JOIN sales_shops s ON s.id=l.shopId
       WHERE x.productId=?
+        AND x.matchStatus IN ('matched_auto','matched_manual')
       ORDER BY s.platform, s.displayName, l.title, x.platformSkuCode
     `).all(request.params.id);
     response.json({ success: true, productId: request.params.id, rows });

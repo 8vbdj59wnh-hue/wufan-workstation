@@ -771,6 +771,11 @@ export async function loadProductSalesLinks(productId) {
   return readApiJson(response, "产品销售链接读取失败。");
 }
 
+export async function loadProductSalesSummaries() {
+  const response = await authFetch(`${apiBaseUrl}/api/products/sales-summary`);
+  return readApiJson(response, "产品销售汇总读取失败。");
+}
+
 export async function loadUnmatchedPlatformSkus({ query = "", limit = 100, offset = 0 } = {}) {
   const search = new URLSearchParams({ query, limit: String(limit), offset: String(offset) });
   const response = await authFetch(`${apiBaseUrl}/api/products/platform-skus/unmatched?${search}`);
