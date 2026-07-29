@@ -719,6 +719,13 @@ export async function createErpSyncRun(businessDate) {
   return readApiJson(response, "ERP每日同步创建失败。");
 }
 
+export async function generateErpSyncSnapshot(syncRunId) {
+  const response = await authFetch(`${apiBaseUrl}/api/products/erp-sync-runs/${encodeURIComponent(syncRunId)}/generate-snapshot`, {
+    method: "POST",
+  });
+  return readApiJson(response, "ERP历史快照生成失败。");
+}
+
 export async function validateProductV2Import(batchId, options = {}) {
   const response = await authFetch(`${apiBaseUrl}/api/products/erp-v2/${encodeURIComponent(batchId)}/validate`, {
     method: "POST",

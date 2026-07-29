@@ -1683,6 +1683,10 @@ function runLightweightMigrations() {
   ensureColumn("product_erp_mappings", "erpStatus", "TEXT");
   ensureColumn("erp_import_batches", "syncRunId", "TEXT");
   ensureColumn("erp_import_batches", "businessDate", "TEXT");
+  ensureColumn("erp_sync_runs", "snapshotId", "TEXT");
+  ensureColumn("erp_sync_runs", "snapshotStatus", "TEXT NOT NULL DEFAULT 'pending'");
+  ensureColumn("erp_sync_runs", "snapshotCompletedAt", "TEXT");
+  ensureColumn("erp_sync_runs", "snapshotError", "TEXT");
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS erp_sync_runs (
       id TEXT PRIMARY KEY,
@@ -1703,6 +1707,10 @@ function runLightweightMigrations() {
       completedAt TEXT,
       failedAt TEXT,
       errorSummary TEXT,
+      snapshotId TEXT,
+      snapshotStatus TEXT NOT NULL DEFAULT 'pending',
+      snapshotCompletedAt TEXT,
+      snapshotError TEXT,
       updatedAt TEXT NOT NULL,
       UNIQUE(businessDate, version)
     );
@@ -1714,7 +1722,82 @@ function runLightweightMigrations() {
       ON erp_sync_runs(status, updatedAt);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_erp_sync_runs_one_active_date
       ON erp_sync_runs(businessDate) WHERE status IN ('draft', 'syncing', 'partial');
+    CREATE TABLE IF NOT EXISTS erp_fact_snapshots (
+      id TEXT PRIMARY KEY,
+      syncRunId TEXT NOT NULL UNIQUE,
+      businessDate TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      isCurrent INTEGER NOT NULL DEFAULT 0,
+      supersedesSnapshotId TEXT,
+      productCount INTEGER NOT NULL DEFAULT 0,
+      inventoryRowCount INTEGER NOT NULL DEFAULT 0,
+      salesLinkCount INTEGER NOT NULL DEFAULT 0,
+      platformSkuCount INTEGER NOT NULL DEFAULT 0,
+      productShopRelationCount INTEGER NOT NULL DEFAULT 0,
+      contentHash TEXT,
+      createdAt TEXT NOT NULL,
+      completedAt TEXT,
+      errorSummary TEXT,
+      FOREIGN KEY(syncRunId) REFERENCES erp_sync_runs(id),
+      FOREIGN KEY(supersedesSnapshotId) REFERENCES erp_fact_snapshots(id),
+      UNIQUE(businessDate, version)
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_erp_fact_snapshots_current
+      ON erp_fact_snapshots(businessDate) WHERE isCurrent = 1 AND status = 'completed';
+    CREATE TABLE IF NOT EXISTS product_daily_snapshots (
+      snapshotId TEXT NOT NULL,businessDate TEXT NOT NULL,productId TEXT NOT NULL,skuCode TEXT,productName TEXT,
+      erpGoodsCount INTEGER NOT NULL DEFAULT 0,totalStock REAL,availableStock REAL,shippableStock REAL,
+      purchaseInTransit REAL,pendingShipment REAL,sales7d REAL,sales30d REAL,sales90d REAL,sales180d REAL,
+      totalSales REAL,platformCount INTEGER NOT NULL DEFAULT 0,shopCount INTEGER NOT NULL DEFAULT 0,
+      salesLinkCount INTEGER NOT NULL DEFAULT 0,platformSkuCount INTEGER NOT NULL DEFAULT 0,
+      productStatus TEXT,erpStatus TEXT,createdAt TEXT NOT NULL,
+      PRIMARY KEY(snapshotId,productId),
+      FOREIGN KEY(snapshotId) REFERENCES erp_fact_snapshots(id),
+      FOREIGN KEY(productId) REFERENCES products(id)
+    );
+    CREATE TABLE IF NOT EXISTS product_erp_daily_snapshots (
+      snapshotId TEXT NOT NULL,businessDate TEXT NOT NULL,productId TEXT NOT NULL,mappingId TEXT NOT NULL,
+      erpGoodsId TEXT NOT NULL,goodsCode TEXT,merchantCode TEXT,specificationName TEXT,barcode TEXT,unit TEXT,
+      erpStatus TEXT,unitCost REAL,stock REAL,shippableStock REAL,availableStock REAL,actualStock REAL,actualShippableStock REAL,
+      purchaseInTransit REAL,pendingShipment REAL,sales7d REAL,sales30d REAL,sales90d REAL,sales180d REAL,
+      totalSales REAL,sourceBatchId TEXT,createdAt TEXT NOT NULL,
+      PRIMARY KEY(snapshotId,mappingId),
+      FOREIGN KEY(snapshotId) REFERENCES erp_fact_snapshots(id),
+      FOREIGN KEY(productId) REFERENCES products(id)
+    );
+    CREATE TABLE IF NOT EXISTS sales_link_daily_snapshots (
+      snapshotId TEXT NOT NULL,businessDate TEXT NOT NULL,salesLinkId TEXT NOT NULL,shopId TEXT NOT NULL,
+      platform TEXT,platformGoodsId TEXT,canonicalUrl TEXT,goodsTitle TEXT,linkStatus TEXT,price REAL,
+      platformStock REAL,occupiedStock REAL,firstSeenAt TEXT,lastSeenBatchId TEXT,sourceBatchId TEXT,
+      createdAt TEXT NOT NULL,PRIMARY KEY(snapshotId,salesLinkId),
+      FOREIGN KEY(snapshotId) REFERENCES erp_fact_snapshots(id)
+    );
+    CREATE TABLE IF NOT EXISTS sales_link_sku_daily_snapshots (
+      snapshotId TEXT NOT NULL,businessDate TEXT NOT NULL,salesLinkSkuId TEXT NOT NULL,salesLinkId TEXT NOT NULL,
+      platformSkuId TEXT,merchantCode TEXT,skuName TEXT,matchStatus TEXT,productId TEXT,manualBindingId TEXT,
+      combinationFlag INTEGER NOT NULL DEFAULT 0,platformPrice REAL,platformStock REAL,occupiedStock REAL,
+      sourceBatchId TEXT,createdAt TEXT NOT NULL,PRIMARY KEY(snapshotId,salesLinkSkuId),
+      FOREIGN KEY(snapshotId) REFERENCES erp_fact_snapshots(id)
+    );
+    CREATE TABLE IF NOT EXISTS product_shop_daily_snapshots (
+      snapshotId TEXT NOT NULL,businessDate TEXT NOT NULL,productId TEXT NOT NULL,shopId TEXT NOT NULL,
+      platform TEXT,salesLinkCount INTEGER NOT NULL DEFAULT 0,platformSkuCount INTEGER NOT NULL DEFAULT 0,
+      createdAt TEXT NOT NULL,PRIMARY KEY(snapshotId,productId,shopId),
+      FOREIGN KEY(snapshotId) REFERENCES erp_fact_snapshots(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_product_daily_snapshots_product_date
+      ON product_daily_snapshots(productId,businessDate);
+    CREATE INDEX IF NOT EXISTS idx_product_erp_daily_snapshots_product_date
+      ON product_erp_daily_snapshots(productId,businessDate);
+    CREATE INDEX IF NOT EXISTS idx_sales_link_daily_snapshots_link_date
+      ON sales_link_daily_snapshots(salesLinkId,businessDate);
+    CREATE INDEX IF NOT EXISTS idx_sales_link_sku_daily_snapshots_product_date
+      ON sales_link_sku_daily_snapshots(productId,businessDate);
+    CREATE INDEX IF NOT EXISTS idx_product_shop_daily_snapshots_product_date
+      ON product_shop_daily_snapshots(productId,businessDate);
   `);
+  ensureColumn("product_erp_daily_snapshots", "unitCost", "REAL");
   ensureColumn("tasks", "submitType", "TEXT");
   ensureColumn("tasks", "submitDescription", "TEXT");
   ensureColumn("tasks", "submitFields", "TEXT");

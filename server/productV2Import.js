@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import * as XLSX from "xlsx";
 import { getDatabase, uploadsDir } from "./db.js";
+import { generateErpFactSnapshot, readErpFactSnapshot } from "./erpFactSnapshots.js";
 
 const stagingRoot = path.join(uploadsDir, "product-v2-imports");
 const goodsInfoRequiredHeaders = ["货品编号", "商家编码", "货品名称"];
@@ -268,13 +269,25 @@ export function attachErpImportBatchToSyncRun(syncRunId, batchId) {
 }
 
 export function recalculateErpSyncRun(syncRunId) {
-  return getDatabase().transaction(() => recalculateSyncRunInTransaction(syncRunId)).immediate();
+  const run = getDatabase().transaction(() => recalculateSyncRunInTransaction(syncRunId)).immediate();
+  if (run.status === "completed" && run.snapshotStatus !== "completed") {
+    try {
+      generateErpFactSnapshot(run.id);
+    } catch (error) {
+      console.error(`ERP同步 ${run.syncCode} 历史快照生成失败`, error);
+    }
+  }
+  return decodeSyncRun(getSyncRunRow(syncRunId));
 }
 
 export function readErpSyncRun(syncRunId) {
   const run = decodeSyncRun(getSyncRunRow(syncRunId));
   if (!run) return null;
-  return { ...run, batches: getSyncRunBatches(run) };
+  return {
+    ...run,
+    batches: getSyncRunBatches(run),
+    snapshot: run.snapshotId ? readErpFactSnapshot(run.snapshotId) : null,
+  };
 }
 
 export function listErpSyncRuns({ businessDate = "", includeHistorical = true } = {}) {

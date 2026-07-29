@@ -64,6 +64,12 @@ import {
   updatePlatformSkuManualBinding,
   validateErpV2Import,
 } from "./productV2Import.js";
+import {
+  generateErpFactSnapshot,
+  listErpFactSnapshots,
+  listProductFactSnapshots,
+  readErpFactSnapshot,
+} from "./erpFactSnapshots.js";
 import { createToken, verifyPassword, verifyToken } from "./security.js";
 import { canLaunchActionTemplate, getDataScope, hasPermission } from "../src/permissions.js";
 import { getProcessInstanceOwner } from "../src/data/processInstanceSelectors.js";
@@ -877,6 +883,48 @@ app.post("/api/products/erp-sync-runs/:id/recalculate-status", requirePermission
     response.json({ success: true, syncRun: readErpSyncRun(syncRun.id) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "ERP每日同步状态刷新失败。" });
+  }
+});
+
+app.post("/api/products/erp-sync-runs/:id/generate-snapshot", requirePermission("products.create"), (request, response) => {
+  try {
+    const result = generateErpFactSnapshot(request.params.id);
+    response.json({ success: true, ...result, syncRun: readErpSyncRun(request.params.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "ERP历史快照生成失败。" });
+  }
+});
+
+app.get("/api/products/erp-snapshots", requirePermission("products.view"), (request, response) => {
+  try {
+    response.json({
+      success: true,
+      snapshots: listErpFactSnapshots({
+        businessDate: String(request.query.businessDate ?? "").trim(),
+        currentOnly: String(request.query.currentOnly ?? "false") === "true",
+      }),
+    });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "ERP历史快照列表读取失败。" });
+  }
+});
+
+app.get("/api/products/erp-snapshots/:id", requirePermission("products.view"), (request, response) => {
+  const snapshot = readErpFactSnapshot(request.params.id, {
+    includeDetails: String(request.query.includeDetails ?? "false") === "true",
+  });
+  if (!snapshot) {
+    response.status(404).json({ success: false, message: "ERP历史快照不存在。" });
+    return;
+  }
+  response.json({ success: true, snapshot });
+});
+
+app.get("/api/products/:id/snapshots", requirePermission("products.view"), (request, response) => {
+  try {
+    response.json({ success: true, productId: request.params.id, snapshots: listProductFactSnapshots(request.params.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "产品历史快照读取失败。" });
   }
 });
 

@@ -6509,6 +6509,34 @@ button.content-template-thumb {
   justify-content: flex-end;
 }
 
+.erp-sync-snapshot-status {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid #dbe4ee;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.erp-sync-snapshot-status > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.erp-sync-snapshot-status > div:first-child span,
+.erp-sync-snapshot-summary {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.erp-sync-snapshot-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+
 @media (max-width: 760px) {
   .erp-sync-overview,
   .erp-sync-file-grid {

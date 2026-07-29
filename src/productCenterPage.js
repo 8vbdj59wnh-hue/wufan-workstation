@@ -4,6 +4,7 @@ import {
   commitProductImport,
   commitProductV2Import,
   createErpSyncRun,
+  generateErpSyncSnapshot,
   bindPlatformSku,
   getCurrentUser,
   getNow,
@@ -795,6 +796,24 @@ function renderErpSyncDashboard() {
         ${action}
       </article>`;
     }).join("")}</div>
+    ${run.status === "completed" ? `<section class="erp-sync-snapshot-status">
+      <div>
+        <span>历史快照</span>
+        <strong>${run.snapshotStatus === "completed" ? "已生成" : run.snapshotStatus === "failed" ? "生成失败" : "生成中"}</strong>
+      </div>
+      ${run.snapshotStatus === "completed"
+        ? `<div class="erp-sync-snapshot-summary">
+            <span>快照版本：V${run.version}</span>
+            <span>产品：${run.snapshot?.productCount ?? "—"}</span>
+            <span>ERP规格：${run.snapshot?.inventoryRowCount ?? "—"}</span>
+            <span>链接：${run.snapshot?.salesLinkCount ?? "—"}</span>
+            <span>平台SKU：${run.snapshot?.platformSkuCount ?? "—"}</span>
+          </div>`
+        : run.snapshotStatus === "failed"
+          ? `<p class="form-error">三张表已导入完成，但历史快照生成失败：${escapeHtml(run.snapshotError || "未知错误")}</p>
+            <button class="secondary-button" type="button" data-action="retry-erp-snapshot">重新生成快照</button>`
+          : `<p class="form-note">三张表已完成，系统正在生成历史事实快照。</p>`}
+    </section>` : ""}
     ${(run.errorSummary ?? []).length ? `<div class="form-error">${(run.errorSummary ?? []).map((item) =>
       `${escapeHtml(item.importType)}：${escapeHtml(item.reason)}`).join("<br>")}</div>` : ""}
     <div class="erp-sync-history-actions"><button class="secondary-button" type="button" data-action="choose-erp-sync-run">查看其他同步</button></div>
@@ -1265,6 +1284,17 @@ export function bindProductCenterPageEvents(rerender) {
       const syncRunId = importState.syncRun?.id || importState.result?.syncRun?.id || importState.batch?.syncRunId;
       await refreshErpSyncState(syncRunId);
       importState = { version: "v2", step: "sync", loading: false, error: "" };
+      rerender();
+    }
+    if (action === "retry-erp-snapshot") {
+      erpSyncState = { ...erpSyncState, loading: true, error: "" };
+      rerender();
+      try {
+        const result = await generateErpSyncSnapshot(erpSyncState.active.id);
+        erpSyncState = { ...erpSyncState, loading: false, active: result.syncRun, error: "" };
+      } catch (error) {
+        erpSyncState = { ...erpSyncState, loading: false, error: error.message || "ERP历史快照生成失败。" };
+      }
       rerender();
     }
     if (action === "resume-product-v2-import") {
