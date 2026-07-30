@@ -639,6 +639,35 @@ export async function updatePersistentResource(resource, id, item) {
   return data;
 }
 
+export async function previewProductSkuChange(productId, item) {
+  const response = await authFetch(`${apiBaseUrl}/api/products/${encodeURIComponent(productId)}/change-sku/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(item),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success !== true) {
+    throw new Error(data.message ?? data.error ?? "SKU修改影响检查失败。");
+  }
+  return data.impact;
+}
+
+export async function changeProductSku(productId, item) {
+  const response = await authFetch(`${apiBaseUrl}/api/products/${encodeURIComponent(productId)}/change-sku`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(item),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success !== true) {
+    throw new Error(data.message ?? data.error ?? "SKU修改失败。");
+  }
+  if (data.product) {
+    state.products = state.products.map((product) => product.id === data.product.id ? data.product : product);
+  }
+  return data;
+}
+
 export async function updateTaskWorkflow(taskId, action, item) {
   const response = await authFetch(`${apiBaseUrl}/api/tasks/${taskId}/workflow`, {
     method: "POST",

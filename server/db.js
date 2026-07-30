@@ -3696,6 +3696,16 @@ export function createResource(routeResource, item) {
 export function updateResource(routeResource, id, item) {
   const resourceKey = routeResourceMap[routeResource];
   if (resourceKey === undefined) throw new Error(`Unknown resource: ${routeResource}`);
+  if (resourceKey === "products") {
+    const existingProduct = readExistingItem(resourceKey, id);
+    if (existingProduct === null) throw new Error("产品不存在。");
+    if (
+      Object.prototype.hasOwnProperty.call(item ?? {}, "skuCode")
+      && String(item.skuCode ?? "").trim() !== String(existingProduct.skuCode ?? "").trim()
+    ) {
+      throw new Error("SKU编码属于ERP关联关键字段，请使用SKU修改流程。");
+    }
+  }
   const mergedItem = mergeExistingItem(resourceKey, id, item);
   if (resourceKey === "tasks") {
     const existingTask = readExistingItem("tasks", id);
@@ -3730,6 +3740,131 @@ export function updateResource(routeResource, id, item) {
   insertItem(resourceKey, nextItem);
   if (resourceKey === "processTemplateNodes" || resourceKey === "tasks") generateEligibleTaskWaves();
   return nextItem;
+}
+
+function normalizeSkuForComparison(value) {
+  return String(value ?? "").trim().toLocaleLowerCase("en-US");
+}
+
+function readProductSkuChangeImpact(productId, newSkuCode) {
+  const db = getDatabase();
+  const product = db.prepare("SELECT id, skuCode, name FROM products WHERE id = @productId LIMIT 1").get({ productId });
+  if (product === undefined) throw new Error("产品不存在。");
+  const normalizedNewSkuCode = normalizeSkuForComparison(newSkuCode);
+  if (normalizedNewSkuCode === "") throw new Error("新SKU编码不能为空。");
+
+  const productConflict = db
+    .prepare("SELECT id, skuCode, name FROM products WHERE lower(trim(skuCode)) = @normalized AND id <> @productId LIMIT 1")
+    .get({ normalized: normalizedNewSkuCode, productId });
+  const mappingConflict = db
+    .prepare(`
+      SELECT id, productId, merchantSkuCode
+      FROM product_erp_mappings
+      WHERE lower(trim(merchantSkuCode)) = @normalized AND productId <> @productId
+      LIMIT 1
+    `)
+    .get({ normalized: normalizedNewSkuCode, productId });
+  const platformConflict = db
+    .prepare(`
+      SELECT id, productId, platformSkuCode
+      FROM sales_link_skus
+      WHERE lower(trim(platformSkuCode)) = @normalized
+        AND productId IS NOT NULL
+        AND productId <> @productId
+      LIMIT 1
+    `)
+    .get({ normalized: normalizedNewSkuCode, productId });
+  const counts = db.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM product_erp_mappings WHERE productId = @productId) AS erpMappingCount,
+      (SELECT COUNT(*) FROM sales_link_skus WHERE productId = @productId) AS platformSkuCount,
+      (SELECT COUNT(*) FROM platform_sku_manual_bindings WHERE productId = @productId) AS manualBindingCount,
+      (SELECT COUNT(*) FROM product_daily_snapshots WHERE productId = @productId) AS historySnapshotCount,
+      (SELECT COUNT(DISTINCT businessDate) FROM product_daily_snapshots WHERE productId = @productId) AS historyBusinessDayCount,
+      (SELECT COUNT(*) FROM action_products WHERE productId = @productId) AS actionCount
+  `).get({ productId });
+
+  const conflicts = {
+    product: productConflict ?? null,
+    erpMapping: mappingConflict ?? null,
+    platformSku: platformConflict ?? null,
+  };
+  const hasConflict = Object.values(conflicts).some(Boolean);
+  const warnings = [];
+  if (counts.platformSkuCount > 0) warnings.push(`该产品关联${counts.platformSkuCount}个平台SKU，平台编码不会自动修改。`);
+  if (counts.historySnapshotCount > 0) warnings.push(`该产品有${counts.historySnapshotCount}条历史快照，历史SKU将保持不变。`);
+  if (counts.actionCount > 0) warnings.push(`该产品关联${counts.actionCount}条关键行动，关系继续按产品ID保留。`);
+  return {
+    productId,
+    productName: product.name,
+    oldSkuCode: product.skuCode,
+    newSkuCode: String(newSkuCode).trim(),
+    ...counts,
+    conflicts,
+    hasConflict,
+    warnings,
+  };
+}
+
+export function previewProductSkuChange(productId, newSkuCode) {
+  return readProductSkuChangeImpact(String(productId ?? "").trim(), newSkuCode);
+}
+
+export function changeProductSku(productId, input = {}) {
+  const db = getDatabase();
+  const change = db.transaction(() => {
+    const id = String(productId ?? "").trim();
+    const oldSkuCode = String(input.oldSkuCode ?? "").trim();
+    const newSkuCode = String(input.newSkuCode ?? "").trim();
+    const reason = String(input.reason ?? "").trim();
+    const changedBy = String(input.changedBy ?? "").trim();
+    const current = db.prepare("SELECT * FROM products WHERE id = @id LIMIT 1").get({ id });
+    if (current === undefined) throw new Error("产品不存在。");
+    if (String(current.skuCode ?? "").trim() !== oldSkuCode) {
+      throw new Error("产品SKU已发生变化，请刷新后重新确认。");
+    }
+    if (normalizeSkuForComparison(oldSkuCode) === normalizeSkuForComparison(newSkuCode)) {
+      throw new Error("新SKU编码必须与当前SKU不同。");
+    }
+    if (reason === "") throw new Error("请填写SKU修改原因。");
+    if (changedBy === "") throw new Error("无法确认操作人，禁止修改SKU。");
+
+    const impact = readProductSkuChangeImpact(id, newSkuCode);
+    if (impact.conflicts.product) throw new Error("新SKU编码已被其他产品使用。");
+    if (impact.conflicts.erpMapping) throw new Error("新SKU编码已被其他ERP映射使用。");
+    if (impact.conflicts.platformSku) throw new Error("新SKU编码与其他产品的平台SKU关系冲突。");
+
+    const changedAt = new Date().toISOString();
+    db.prepare("UPDATE products SET skuCode = @newSkuCode, updatedAt = @changedAt WHERE id = @id")
+      .run({ id, newSkuCode, changedAt });
+    db.prepare(`
+      UPDATE product_erp_mappings
+      SET merchantSkuCode = @newSkuCode, updatedAt = @changedAt
+      WHERE productId = @id
+    `).run({ id, newSkuCode, changedAt });
+    const audit = {
+      id: `sku-change-${crypto.randomUUID()}`,
+      productId: id,
+      oldSkuCode,
+      newSkuCode,
+      reason,
+      changedBy,
+      impactJson: JSON.stringify(impact),
+      changedAt,
+    };
+    db.prepare(`
+      INSERT INTO product_sku_changes
+        (id, productId, oldSkuCode, newSkuCode, reason, changedBy, impactJson, changedAt)
+      VALUES
+        (@id, @productId, @oldSkuCode, @newSkuCode, @reason, @changedBy, @impactJson, @changedAt)
+    `).run(audit);
+    return {
+      product: readExistingItem("products", id),
+      impact,
+      audit: { ...audit, impactJson: impact },
+    };
+  });
+  return change.immediate();
 }
 
 const productStatuses = new Set(["开发中", "待上架", "在售", "停售", "清仓", "已归档"]);

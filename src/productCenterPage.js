@@ -1,5 +1,6 @@
 import {
   createId,
+  changeProductSku,
   createPersistentResource,
   commitProductImport,
   commitProductV2Import,
@@ -17,6 +18,7 @@ import {
   listErpSyncRuns,
   parseProductImport,
   parseProductV2Import,
+  previewProductSkuChange,
   resolveAssetUrl,
   state,
   updatePersistentResource,
@@ -38,6 +40,7 @@ const productPageSize = 48;
 let productDetailTab = "basic";
 let productDetailId = "";
 let modalState = null;
+let skuChangeState = null;
 let importState = null;
 let erpSyncState = { loading: false, runs: [], active: null, error: "" };
 let productSalesState = { productId: "", loading: false, loaded: false, rows: [], error: "" };
@@ -265,6 +268,7 @@ function renderProductList() {
       ${renderProductImportRecords()}
       ${renderUnmatchedPlatformSkus()}
       ${renderProductModal()}
+      ${renderProductSkuChangeModal()}
       ${renderProductV2ImportModal()}
     </section>
   `;
@@ -518,6 +522,7 @@ function renderProductDetail(product) {
       </nav>
       <div class="product-detail-tab-panel">${renderProductDetailTab(product, archive, erp)}</div>
       ${renderProductModal()}
+      ${renderProductSkuChangeModal()}
     </section>
   `;
 }
@@ -627,7 +632,7 @@ function renderProductModal() {
   const item = product ?? { skuCode: "", name: "", mainImage: "", galleryImages: [], status: "开发中" };
   return `<div class="modal-backdrop"><section class="modal-panel product-modal"><header class="modal-header"><div><h2>${product ? "编辑产品" : "新增产品"}</h2><p>每个 SKU 仅维护一条产品记录</p></div><button class="icon-button" type="button" data-action="close-product-modal" aria-label="关闭">×</button></header>
     <form class="modal-body product-form" id="product-form"><div class="form-error" ${modalState.error ? "" : "hidden"}>${escapeHtml(modalState.error || "")}</div><div class="form-grid">
-      <label><span>SKU编码 *</span><input name="skuCode" required value="${escapeHtml(item.skuCode)}" /></label><label><span>产品名称 *</span><input name="name" required value="${escapeHtml(item.name)}" /></label>
+      <label><span>SKU编码 *</span><input name="skuCode" required value="${escapeHtml(item.skuCode)}" ${product ? "readonly" : ""} />${product ? `<small>ERP关联关键字段，普通编辑不可修改。${hasPermission(getCurrentUser(), "products.archive") ? ` <button class="text-button" type="button" data-action="open-sku-change" data-product-id="${product.id}">使用SKU修改流程</button>` : ""}</small>` : ""}</label><label><span>产品名称 *</span><input name="name" required value="${escapeHtml(item.name)}" /></label>
       ${[["brand", "品牌"], ["category", "产品分类"], ["series", "产品系列"], ["material", "材质"], ["color", "颜色"], ["specification", "规格尺寸"]].map(([name, label]) => `<label><span>${label}</span><input name="${name}" value="${escapeHtml(item[name] || "")}" /></label>`).join("")}
       <label><span>产品状态</span><select name="status">${productStatuses.filter((status) => status !== "已归档" || item.status === "已归档" || hasPermission(getCurrentUser(), "products.archive")).map((status) => `<option ${status === item.status ? "selected" : ""}>${status}</option>`).join("")}</select></label>
       <label><span>产品负责人</span><select name="ownerId"><option value="">未设置</option>${state.people.filter((person) => person.status !== "inactive").map((person) => `<option value="${person.id}" ${person.id === item.ownerId ? "selected" : ""}>${escapeHtml(person.name)}</option>`).join("")}</select></label>
@@ -635,6 +640,39 @@ function renderProductModal() {
       <label class="span-2"><span>其他产品图片</span><input name="galleryImageFiles" type="file" accept="image/jpeg,image/png,image/webp" multiple /><input name="existingGalleryImages" type="hidden" value="${escapeHtml(JSON.stringify(item.galleryImages || []))}" /></label>
       <label class="span-2"><span>备注</span><textarea name="remark" rows="3">${escapeHtml(item.remark || "")}</textarea></label>
     </div></form><footer class="modal-footer"><button class="secondary-button" type="button" data-action="close-product-modal">取消</button><button class="primary-button" type="submit" form="product-form">保存</button></footer></section></div>`;
+}
+
+function renderProductSkuChangeModal() {
+  if (skuChangeState === null) return "";
+  const impact = skuChangeState.impact;
+  const conflictMessages = impact
+    ? [
+        impact.conflicts?.product ? "新SKU已被其他产品使用" : "",
+        impact.conflicts?.erpMapping ? "新SKU已被其他ERP映射使用" : "",
+        impact.conflicts?.platformSku ? "新SKU与其他产品的平台SKU关系冲突" : "",
+      ].filter(Boolean)
+    : [];
+  return `<div class="modal-backdrop"><section class="modal-panel product-modal"><header class="modal-header"><div><h2>修改产品SKU</h2><p>该操作会同步更新ERP映射，但不会改写平台SKU和历史快照。</p></div><button class="icon-button" type="button" data-action="close-sku-change" aria-label="关闭">×</button></header>
+    <form class="modal-body product-form" id="product-sku-change-form">
+      <div class="form-error" ${skuChangeState.error ? "" : "hidden"}>${escapeHtml(skuChangeState.error || "")}</div>
+      <div class="form-grid">
+        <label><span>当前SKU</span><input name="oldSkuCode" readonly value="${escapeHtml(skuChangeState.oldSkuCode)}" /></label>
+        <label><span>新SKU *</span><input name="newSkuCode" required value="${escapeHtml(skuChangeState.newSkuCode || "")}" ${impact ? "readonly" : ""} /></label>
+        <label class="span-2"><span>修改原因 *</span><textarea name="reason" rows="3" required ${impact ? "readonly" : ""}>${escapeHtml(skuChangeState.reason || "")}</textarea></label>
+      </div>
+      ${impact ? `<section class="product-info-group"><h3>影响范围</h3><div class="product-info-grid">
+        <div><span>ERP规格映射</span><strong>${impact.erpMappingCount}</strong></div>
+        <div><span>平台SKU</span><strong>${impact.platformSkuCount}</strong></div>
+        <div><span>人工平台绑定</span><strong>${impact.manualBindingCount}</strong></div>
+        <div><span>历史快照</span><strong>${impact.historySnapshotCount}</strong></div>
+        <div><span>历史业务日</span><strong>${impact.historyBusinessDayCount}</strong></div>
+        <div><span>关联关键行动</span><strong>${impact.actionCount}</strong></div>
+      </div>${impact.warnings?.length ? `<p>${impact.warnings.map(escapeHtml).join("<br />")}</p>` : ""}${conflictMessages.length ? `<div class="form-error">${conflictMessages.map(escapeHtml).join("；")}</div>` : ""}</section>` : ""}
+    </form>
+    <footer class="modal-footer">
+      <button class="secondary-button" type="button" data-action="close-sku-change">取消</button>
+      ${impact ? `<button class="secondary-button" type="button" data-action="back-sku-change">返回修改</button><button class="primary-button" type="button" data-action="confirm-sku-change" ${impact.hasConflict || skuChangeState.loading ? "disabled" : ""}>确认修改SKU</button>` : `<button class="primary-button" type="submit" form="product-sku-change-form" ${skuChangeState.loading ? "disabled" : ""}>检查影响范围</button>`}
+    </footer></section></div>`;
 }
 
 function getImportStepNumber() {
@@ -1060,7 +1098,7 @@ async function saveProduct(form, rerender) {
     const item = {
       ...(existing ?? {}),
       id: existing?.id ?? createId("product"),
-      skuCode: form.elements.skuCode.value.trim(), name: form.elements.name.value.trim(), mainImage, galleryImages,
+      skuCode: existing?.skuCode ?? form.elements.skuCode.value.trim(), name: form.elements.name.value.trim(), mainImage, galleryImages,
       brand: form.elements.brand.value.trim(), category: form.elements.category.value.trim(), series: form.elements.series.value.trim(),
       material: form.elements.material.value.trim(), color: form.elements.color.value.trim(), specification: form.elements.specification.value.trim(),
       status: form.elements.status.value, ownerId: form.elements.ownerId.value || null, remark: form.elements.remark.value.trim(),
@@ -1334,6 +1372,31 @@ export function bindProductCenterPageEvents(rerender) {
     }
     if (action === "edit-product") { modalState = { kind: "edit", id: button.dataset.productId, error: "" }; rerender(); }
     if (action === "close-product-modal") { modalState = null; rerender(); }
+    if (action === "open-sku-change") {
+      const product = state.products.find((item) => item.id === button.dataset.productId);
+      if (product) {
+        modalState = null;
+        skuChangeState = { productId: product.id, oldSkuCode: product.skuCode, newSkuCode: "", reason: "", impact: null, loading: false, error: "" };
+        rerender();
+      }
+    }
+    if (action === "close-sku-change") { skuChangeState = null; rerender(); }
+    if (action === "back-sku-change") { skuChangeState = { ...skuChangeState, impact: null, error: "" }; rerender(); }
+    if (action === "confirm-sku-change" && skuChangeState && !skuChangeState.loading) {
+      skuChangeState = { ...skuChangeState, loading: true, error: "" };
+      rerender();
+      try {
+        await changeProductSku(skuChangeState.productId, {
+          oldSkuCode: skuChangeState.oldSkuCode,
+          newSkuCode: skuChangeState.newSkuCode,
+          reason: skuChangeState.reason,
+        });
+        skuChangeState = null;
+      } catch (error) {
+        skuChangeState = { ...skuChangeState, loading: false, error: error.message || "SKU修改失败。" };
+      }
+      rerender();
+    }
     if (action === "close-product-import") { importState = null; rerender(); }
     if (action === "return-product-v2-shop-mapping") {
       importState = { ...importState, step: "shops", valid: false, error: "请确认或忽略全部店铺后重新生成导入预览。" };
@@ -1471,6 +1534,25 @@ export function bindProductCenterPageEvents(rerender) {
     }
   });
   document.querySelector("#product-form")?.addEventListener("submit", (event) => { event.preventDefault(); saveProduct(event.currentTarget, rerender); });
+  document.querySelector("#product-sku-change-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!skuChangeState || skuChangeState.loading) return;
+    const form = event.currentTarget;
+    const newSkuCode = form.elements.newSkuCode.value.trim();
+    const reason = form.elements.reason.value.trim();
+    skuChangeState = { ...skuChangeState, newSkuCode, reason, loading: true, error: "" };
+    rerender();
+    try {
+      const impact = await previewProductSkuChange(skuChangeState.productId, {
+        oldSkuCode: skuChangeState.oldSkuCode,
+        newSkuCode,
+      });
+      skuChangeState = { ...skuChangeState, impact, loading: false };
+    } catch (error) {
+      skuChangeState = { ...skuChangeState, loading: false, error: error.message || "SKU修改影响检查失败。" };
+    }
+    rerender();
+  });
   document.querySelector("#product-import-upload-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget;

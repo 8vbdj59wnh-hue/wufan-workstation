@@ -837,6 +837,21 @@ CREATE TABLE IF NOT EXISTS product_erp_mappings (
   FOREIGN KEY(erpGoodsId) REFERENCES erp_goods(id)
 );
 
+CREATE TABLE IF NOT EXISTS product_sku_changes (
+  id TEXT PRIMARY KEY,
+  productId TEXT NOT NULL,
+  oldSkuCode TEXT NOT NULL,
+  newSkuCode TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  changedBy TEXT NOT NULL,
+  impactJson TEXT,
+  changedAt TEXT NOT NULL,
+  FOREIGN KEY(productId) REFERENCES products(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_sku_changes_product_time
+  ON product_sku_changes(productId, changedAt);
+
 CREATE TABLE IF NOT EXISTS sales_shops (
   id TEXT PRIMARY KEY,
   platform TEXT NOT NULL,

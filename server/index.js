@@ -11,6 +11,7 @@ import {
   batchUpdateTaskStatus,
   cancelTaskWave,
   cancelProcessInstance,
+  changeProductSku,
   createProductImportBatch,
   commitProductImportBatch,
   databasePath,
@@ -27,6 +28,7 @@ import {
   moveTaskTemplateToValueChain,
   readAllData,
   readProductImportBatch,
+  previewProductSkuChange,
   readRouteResource,
   readRouteResourceItem,
   readTaskWaveDetailForTaskIds,
@@ -2145,6 +2147,18 @@ app.put("/api/:resource/:id", (request, response) => {
       request.body ?? {},
       existing,
     );
+    if (
+      request.params.resource === "products"
+      && existing !== null
+      && Object.prototype.hasOwnProperty.call(request.body ?? {}, "skuCode")
+      && String(request.body.skuCode ?? "").trim() !== String(existing.skuCode ?? "").trim()
+    ) {
+      response.status(400).json({
+        success: false,
+        message: "SKU编码属于ERP关联关键字段，请使用SKU修改流程。",
+      });
+      return;
+    }
     if (!authorizeResourceAction(request.params.resource, "write", context)) {
       response.status(403).json({ success: false, message: "你没有权限进行该操作" });
       return;
@@ -2195,6 +2209,38 @@ app.put("/api/:resource/:id", (request, response) => {
     response.json(updateResource(request.params.resource, request.params.id, request.body));
   } catch (error) {
     response.status(404).json({ error: error.message });
+  }
+});
+
+app.post("/api/products/:id/change-sku/preview", requirePermission("products.archive"), (request, response) => {
+  try {
+    const impact = previewProductSkuChange(request.params.id, request.body?.newSkuCode);
+    if (
+      request.body?.oldSkuCode !== undefined
+      && String(request.body.oldSkuCode ?? "").trim() !== String(impact.oldSkuCode ?? "").trim()
+    ) {
+      response.status(409).json({ success: false, message: "产品SKU已发生变化，请刷新后重新确认。" });
+      return;
+    }
+    response.json({ success: true, impact });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "SKU修改影响检查失败。" });
+  }
+});
+
+app.post("/api/products/:id/change-sku", requirePermission("products.archive"), (request, response) => {
+  try {
+    const result = changeProductSku(request.params.id, {
+      oldSkuCode: request.body?.oldSkuCode,
+      newSkuCode: request.body?.newSkuCode,
+      reason: request.body?.reason,
+      changedBy: getUserPersonId(request.user),
+    });
+    response.json({ success: true, ...result });
+  } catch (error) {
+    const message = error.message || "SKU修改失败。";
+    const status = /已发生变化|已被|冲突/.test(message) ? 409 : 400;
+    response.status(status).json({ success: false, message });
   }
 });
 
