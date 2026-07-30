@@ -25,6 +25,40 @@ body {
   overflow: hidden;
 }
 
+.startup-loading {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  min-height: 100vh;
+  background: #f6f7f9;
+  color: #6b7280;
+}
+
+.startup-loading-title,
+.startup-loading-note {
+  margin: 0;
+}
+
+.startup-loading-title {
+  color: #111827;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.startup-loading-note {
+  font-size: 13px;
+}
+
+.startup-page-loading {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  min-height: 260px;
+  color: #6b7280;
+}
+
 button {
   font: inherit;
 }

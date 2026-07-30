@@ -567,7 +567,16 @@ app.put("/api/me/avatar", (request, response) => {
 
 app.get("/api/data", (request, response) => {
   try {
-    response.json(filterDataByScope(readAllData(), request.user));
+    const startedAt = performance.now();
+    const snapshot = readAllData({ exclude: ["salesLinks", "salesLinkSkus"] });
+    const readCompletedAt = performance.now();
+    const scopedSnapshot = filterDataByScope(snapshot, request.user);
+    const filterCompletedAt = performance.now();
+    response.set(
+      "Server-Timing",
+      `database;dur=${(readCompletedAt - startedAt).toFixed(1)}, scope;dur=${(filterCompletedAt - readCompletedAt).toFixed(1)}`,
+    );
+    response.json(scopedSnapshot);
   } catch (error) {
     response.status(500).json({ error: error.message || "读取本地数据库失败。" });
   }

@@ -54,6 +54,7 @@ const processExecutorInitiatorRule = "initiator";
 let persistenceAvailable = false;
 let loadedFromDatabase = false;
 let currentUser = null;
+let taskWavesLoaded = false;
 let persistenceStatus = {
   kind: "warning",
   message: "",
@@ -263,12 +264,29 @@ export function applyDataSnapshot(data) {
   ensureDefaultStandardWorkLibrary();
 }
 
-export async function loadPersistentData() {
+export async function loadPersistentData({ includeTaskWaves = null } = {}) {
   try {
-    const response = await authFetch(`${apiBaseUrl}/api/data`);
+    const route = window.location.hash.replace(/^#/, "").split("/")[0];
+    const shouldLoadTaskWaves =
+      includeTaskWaves ??
+      ["tasks", "task-list", "task-waves", "clearance", "process-progress"].includes(route);
+    const [response, waveResponse] = await Promise.all([
+      authFetch(`${apiBaseUrl}/api/data`),
+      shouldLoadTaskWaves ? authFetch(`${apiBaseUrl}/api/task-waves`) : Promise.resolve(null),
+    ]);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     applyDataSnapshot(await response.json());
-    await loadTaskWaves();
+    if (waveResponse !== null) {
+      const waveData = await waveResponse.json().catch(() => []);
+      if (waveResponse.status === 403) {
+        replaceArray(state.taskWaves, []);
+      } else if (!waveResponse.ok) {
+        throw new Error(waveData.message ?? waveData.error ?? "任务波次读取失败。");
+      } else {
+        replaceArray(state.taskWaves, Array.isArray(waveData) ? waveData : []);
+      }
+      taskWavesLoaded = true;
+    }
     persistenceAvailable = true;
     loadedFromDatabase = true;
     persistenceStatus = {
@@ -291,11 +309,18 @@ export async function loadTaskWaves() {
   const data = await response.json().catch(() => []);
   if (response.status === 403) {
     replaceArray(state.taskWaves, []);
+    taskWavesLoaded = true;
     return state.taskWaves;
   }
   if (!response.ok) throw new Error(data.message ?? data.error ?? "任务波次读取失败。");
   replaceArray(state.taskWaves, Array.isArray(data) ? data : []);
+  taskWavesLoaded = true;
   return state.taskWaves;
+}
+
+export async function ensureTaskWavesLoaded() {
+  if (taskWavesLoaded) return state.taskWaves;
+  return loadTaskWaves();
 }
 
 export async function loadTaskWaveDetail(waveId) {
@@ -416,6 +441,7 @@ export async function login(username, password) {
 export function logout() {
   setAuthToken("");
   currentUser = null;
+  taskWavesLoaded = false;
   loadedFromDatabase = false;
   persistenceAvailable = false;
   persistenceStatus = { kind: "warning", message: "" };

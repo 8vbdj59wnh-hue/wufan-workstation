@@ -7,7 +7,13 @@
     <link rel="stylesheet" href="./src/styles.css?v=20260725-product-preview1" />
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <main class="startup-loading" aria-live="polite" aria-busy="true">
+        <span class="brand-mark"></span>
+        <p class="startup-loading-title">正在加载工作站…</p>
+        <p class="startup-loading-note" data-startup-loading-note>正在连接服务器</p>
+      </main>
+    </div>
     <script type="module" src="./src/main.js?v=20260725-product-preview1"></script>
   </body>
 </html>

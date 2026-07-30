@@ -2086,8 +2086,14 @@ export function readResource(resourceKey) {
   return resourceKey === "people" ? items.map(resolvePersonPermissionView) : items;
 }
 
-export function readAllData() {
-  return Object.fromEntries(Object.keys(resourceConfigs).map((resourceKey) => [resourceKey, readResource(resourceKey)]));
+export function readAllData({ exclude = [] } = {}) {
+  const excludedResources = new Set(exclude);
+  return Object.fromEntries(
+    Object.keys(resourceConfigs).map((resourceKey) => [
+      resourceKey,
+      excludedResources.has(resourceKey) ? [] : readResource(resourceKey),
+    ]),
+  );
 }
 
 function getTaskDurationMinutes(task) {

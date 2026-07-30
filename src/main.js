@@ -13,6 +13,7 @@ import { bindProductPreviewEvents, closeProductPreview, openProductPreview, rend
 import { attachThumbnailHoverPreview } from "./thumbnailPreview.js?v=20260723-task-card-static1";
 import {
   flushPersistentSave,
+  ensureTaskWavesLoaded,
   getCurrentUser,
   getCurrentUserNotifications,
   getUnreadNotificationCount,
@@ -472,11 +473,14 @@ function renderLoginPage() {
     }
 
     loginError = "";
-    await loadPersistentData();
-    await syncTaskNotificationsForCurrentUser();
+    const loadingNoticeTimer = scheduleStartupLoadingNotice();
+    renderAuthenticatedStartup();
     const firstAccessibleModule = getFirstAccessibleModule(getCurrentUser(), modules);
+    await loadPersistentData({ includeTaskWaves: firstAccessibleModule?.id === "tasks" });
+    window.clearTimeout(loadingNoticeTimer);
     window.location.hash = firstAccessibleModule?.id ?? "goals";
     render();
+    void syncTaskNotificationsForCurrentUser().catch((error) => console.error("任务提醒同步失败", error));
   });
 }
 
@@ -689,13 +693,45 @@ function renderStartupError(error) {
   `;
 }
 
+function renderAuthenticatedStartup() {
+  const currentUser = getCurrentUser();
+  app.innerHTML = `
+    <div class="app-shell has-sidebar is-sidebar-${sidebarMode}">
+      ${renderSidebar()}
+      <main class="page">
+        <header class="page-header">
+          <div class="page-header-title"><h1>${getActiveModule().name}</h1></div>
+          <div class="user-menu">${renderUserProfile(currentUser)}</div>
+        </header>
+        <section class="startup-page-loading" aria-live="polite" aria-busy="true">
+          <span class="brand-mark"></span>
+          <p class="startup-loading-title">正在加载工作站…</p>
+          <p class="startup-loading-note" data-startup-loading-note>正在读取当前页面数据</p>
+        </section>
+      </main>
+    </div>
+  `;
+}
+
+function scheduleStartupLoadingNotice() {
+  return window.setTimeout(() => {
+    const note = document.querySelector("[data-startup-loading-note]");
+    if (note !== null) note.textContent = "系统加载时间较长，正在连接服务器…";
+  }, 3000);
+}
+
 window.addEventListener("error", (event) => {
   if (app.innerHTML.trim() === "") renderStartupError(event.error ?? event.message);
 });
 window.addEventListener("unhandledrejection", (event) => {
   if (app.innerHTML.trim() === "") renderStartupError(event.reason);
 });
-window.addEventListener("hashchange", () => render({ navigation: true }));
+window.addEventListener("hashchange", async () => {
+  if (getModuleIdFromHash() === "tasks") {
+    await ensureTaskWavesLoaded().catch((error) => console.error("任务波次按需加载失败", error));
+  }
+  render({ navigation: true });
+});
 window.addEventListener("pagehide", flushPersistentSave);
 window.addEventListener("beforeunload", flushPersistentSave);
 window.addEventListener("persistence-status-change", updatePersistenceBanner);
@@ -729,13 +765,17 @@ document.addEventListener("visibilitychange", () => {
 });
 
 try {
+  const loadingNoticeTimer = scheduleStartupLoadingNotice();
   const currentUser = await validateCurrentSession();
   if (currentUser === null) {
+    window.clearTimeout(loadingNoticeTimer);
     renderLoginPage();
   } else {
+    renderAuthenticatedStartup();
     await loadPersistentData();
-    await syncTaskNotificationsForCurrentUser();
+    window.clearTimeout(loadingNoticeTimer);
     render();
+    void syncTaskNotificationsForCurrentUser().catch((error) => console.error("任务提醒同步失败", error));
   }
 } catch (error) {
   renderStartupError(error);
