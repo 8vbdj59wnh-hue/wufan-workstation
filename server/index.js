@@ -28,6 +28,7 @@ import {
   readAllData,
   readProductImportBatch,
   readRouteResource,
+  readRouteResourceItem,
   readTaskWaveDetailForTaskIds,
   readTaskWaveRegenerationPreview,
   readTaskWavesForTaskIds,
@@ -86,7 +87,6 @@ import {
   getDataScope,
   hasPermission,
 } from "../src/permissions.js";
-import { getProcessInstanceOwner } from "../src/data/processInstanceSelectors.js";
 import { normalizeProductSkuCode, splitProductSkuCodes } from "../src/data/productSku.js";
 
 const app = express();
@@ -329,7 +329,18 @@ function canEditProcessInstance(user, instance) {
 }
 
 function belongsToUser(item, user) {
-  return [item.ownerId, item.assigneeId, item.executorId, item.creatorId, item.personId, item.initiatorId, item.submittedBy, item.submitterId]
+  return [
+    item.ownerId,
+    item.assigneeId,
+    item.executorId,
+    item.accepterId,
+    item.reviewerId,
+    item.creatorId,
+    item.personId,
+    item.initiatorId,
+    item.submittedBy,
+    item.submitterId,
+  ]
     .filter(Boolean)
     .includes(user.id);
 }
@@ -343,6 +354,239 @@ function filterByScope(items, user) {
   if (dataScope === "all") return items;
   if (dataScope === "department") return items.filter((item) => belongsToDepartment(item, user) || belongsToUser(item, user));
   return items.filter((item) => belongsToUser(item, user));
+}
+
+function readTaskAuthorizationResolver(taskIds = []) {
+  const ids = [...new Set(taskIds.map((id) => String(id ?? "").trim()).filter(Boolean))];
+  const emptyResolver = { get: () => null, tasks: [] };
+  if (ids.length === 0) return emptyResolver;
+
+  const database = getDatabase();
+  const taskPlaceholders = ids.map(() => "?").join(", ");
+  const tasks = database.prepare(`SELECT * FROM tasks WHERE id IN (${taskPlaceholders})`).all(...ids);
+  if (tasks.length === 0) return emptyResolver;
+
+  const processInstanceIds = [...new Set(tasks.map((task) => task.processInstanceId).filter(Boolean))];
+  const processNodeIds = [...new Set(tasks.map((task) => task.processNodeId).filter(Boolean))];
+  const instances =
+    processInstanceIds.length === 0
+      ? []
+      : database
+          .prepare(`SELECT * FROM process_instances WHERE id IN (${processInstanceIds.map(() => "?").join(", ")})`)
+          .all(...processInstanceIds);
+  const instanceMap = new Map(instances.map((instance) => [instance.id, instance]));
+  const nodes =
+    processNodeIds.length === 0
+      ? []
+      : database
+          .prepare(`SELECT * FROM process_template_nodes WHERE id IN (${processNodeIds.map(() => "?").join(", ")})`)
+          .all(...processNodeIds);
+  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+  const actionStandardIds = [
+    ...new Set(
+      tasks
+        .map((task) => task.taskTemplateId || instanceMap.get(task.processInstanceId)?.taskTemplateId)
+        .filter(Boolean),
+    ),
+  ];
+  const actionStandards =
+    actionStandardIds.length === 0
+      ? []
+      : database
+          .prepare(`SELECT id, ownerId FROM task_templates WHERE id IN (${actionStandardIds.map(() => "?").join(", ")})`)
+          .all(...actionStandardIds);
+  const actionStandardMap = new Map(actionStandards.map((standard) => [standard.id, standard]));
+  const relatedProcessTasks =
+    processInstanceIds.length === 0
+      ? []
+      : database
+          .prepare(
+            `SELECT id, processInstanceId, taskType, reviewTargetTaskId, executorId, accepterId, reviewerId, ownerId, status
+             FROM tasks
+             WHERE processInstanceId IN (${processInstanceIds.map(() => "?").join(", ")})`,
+          )
+          .all(...processInstanceIds);
+  const processTasksByProcessId = new Map();
+  const reviewTasksByProcessId = new Map();
+  const reviewTasksByTargetId = new Map();
+  for (const processTask of relatedProcessTasks) {
+    const processTasks = processTasksByProcessId.get(processTask.processInstanceId) ?? [];
+    processTasks.push(processTask);
+    processTasksByProcessId.set(processTask.processInstanceId, processTasks);
+    if (processTask.taskType !== "review") continue;
+    const reviewTask = processTask;
+    const processReviewTasks = reviewTasksByProcessId.get(reviewTask.processInstanceId) ?? [];
+    processReviewTasks.push(reviewTask);
+    reviewTasksByProcessId.set(reviewTask.processInstanceId, processReviewTasks);
+    if (reviewTask.reviewTargetTaskId) {
+      const targetTasks = reviewTasksByTargetId.get(reviewTask.reviewTargetTaskId) ?? [];
+      targetTasks.push(reviewTask);
+      reviewTasksByTargetId.set(reviewTask.reviewTargetTaskId, targetTasks);
+    }
+  }
+
+  const contextMap = new Map(
+    tasks.map((task) => {
+      const instance = instanceMap.get(task.processInstanceId) ?? null;
+      const node = nodeMap.get(task.processNodeId) ?? null;
+      const actionStandardId = task.taskTemplateId || instance?.taskTemplateId;
+      return [
+        task.id,
+        {
+          task,
+          instance,
+          node,
+          actionStandard: actionStandardMap.get(actionStandardId) ?? null,
+          processTasks: processTasksByProcessId.get(task.processInstanceId) ?? [],
+          processReviewTasks: reviewTasksByProcessId.get(task.processInstanceId) ?? [],
+          targetReviewTasks: reviewTasksByTargetId.get(task.id) ?? [],
+        },
+      ];
+    }),
+  );
+  return { get: (taskId) => contextMap.get(taskId) ?? null, tasks };
+}
+
+function getTaskActorId(user) {
+  return String(getUserPersonId(user) ?? "").trim();
+}
+
+function taskAssignmentMatches(task, userId) {
+  if (userId === "") return false;
+  return [task?.executorId, task?.accepterId, task?.reviewerId].filter(Boolean).includes(userId);
+}
+
+function isTaskManager(user, context) {
+  if (isAdminUser(user)) return true;
+  const userId = getTaskActorId(user);
+  if (userId === "") return false;
+  return [
+    context.task?.ownerId,
+    context.node?.ownerId,
+    context.actionStandard?.ownerId,
+  ]
+    .filter(Boolean)
+    .includes(userId);
+}
+
+function isTaskReviewer(user, context, allowProcessReview = false, includeHistoricalTarget = false) {
+  if (isAdminUser(user)) return true;
+  const userId = getTaskActorId(user);
+  if (userId === "") return false;
+  if (context.task?.taskType === "review" && taskAssignmentMatches(context.task, userId)) return true;
+  if (context.task?.accepterId === userId || context.task?.reviewerId === userId) return true;
+  if (
+    context.targetReviewTasks.some(
+      (task) =>
+        (includeHistoricalTarget || !["done", "canceled"].includes(task.status)) &&
+        taskAssignmentMatches(task, userId),
+    )
+  ) return true;
+  return (
+    allowProcessReview &&
+    context.processReviewTasks.some(
+      (task) =>
+        !["done", "canceled"].includes(task.status) &&
+        taskAssignmentMatches(task, userId),
+    )
+  );
+}
+
+function canViewTask(user, context) {
+  if (context === null) return false;
+  if (isAdminUser(user)) return true;
+  const userId = getTaskActorId(user);
+  if (
+    [
+      context.task?.executorId,
+      context.task?.accepterId,
+      context.task?.reviewerId,
+      context.task?.ownerId,
+      context.task?.initiatorId,
+    ]
+      .filter(Boolean)
+      .includes(userId)
+  ) return true;
+  if (isTaskManager(user, context) || isTaskReviewer(user, context, false, true)) return true;
+  const dataScope = getDataScope(user);
+  if (dataScope === "all") return true;
+  return (
+    dataScope === "department" &&
+    String(context.task?.departmentId ?? "") !== "" &&
+    context.task.departmentId === user.departmentId
+  );
+}
+
+function filterTasksByScope(tasks, user, data = {}) {
+  if (isAdminUser(user) || getDataScope(user) === "all") return tasks;
+  const baseVisibleTaskIds = new Set(filterByScope(tasks, user).map((task) => task.id));
+  const userId = getTaskActorId(user);
+  const instanceMap = new Map((data.processInstances ?? []).map((instance) => [instance.id, instance]));
+  const nodeMap = new Map((data.processTemplateNodes ?? []).map((node) => [node.id, node]));
+  const actionStandardMap = new Map((data.taskTemplates ?? []).map((standard) => [standard.id, standard]));
+  const reviewTargetTaskIds = new Set(
+    tasks
+      .filter(
+        (task) =>
+          task.taskType === "review" &&
+          task.reviewTargetTaskId &&
+          taskAssignmentMatches(task, userId),
+      )
+      .map((task) => task.reviewTargetTaskId),
+  );
+  return tasks.filter((task) => {
+    if (baseVisibleTaskIds.has(task.id) || reviewTargetTaskIds.has(task.id)) return true;
+    const instance = instanceMap.get(task.processInstanceId);
+    const actionStandardId = task.taskTemplateId || instance?.taskTemplateId;
+    return [
+      nodeMap.get(task.processNodeId)?.ownerId,
+      actionStandardMap.get(actionStandardId)?.ownerId,
+    ]
+      .filter(Boolean)
+      .includes(userId);
+  });
+}
+
+function canOperateTask(user, context, action) {
+  if (context === null) return false;
+  if (isAdminUser(user)) return true;
+  const userId = getTaskActorId(user);
+  const isExecutor = userId !== "" && context.task?.executorId === userId;
+  if (action === "start") return isExecutor && context.task.status === "todo";
+  if (action === "submit") return isExecutor && context.task.status === "doing";
+  if (["approve", "reject"].includes(action)) {
+    return context.task.status === "pending_acceptance" && isTaskReviewer(user, context);
+  }
+  if (["review_approve", "review_reject"].includes(action)) {
+    return (
+      context.task.taskType === "review" &&
+      ["todo", "doing"].includes(context.task.status) &&
+      isTaskReviewer(user, context)
+    );
+  }
+  if (action === "return") return isTaskManager(user, context) || isTaskReviewer(user, context, true);
+  if (action === "activate") {
+    return (
+      context.task.status === "waiting" &&
+      (isTaskManager(user, context) ||
+        context.processTasks.some((task) => task.executorId === userId))
+    );
+  }
+  if (action === "edit") {
+    return (
+      !["done", "canceled"].includes(context.task.status) &&
+      isTaskManager(user, context)
+    );
+  }
+  if (["cancel", "restore", "batch_cancel"].includes(action)) {
+    return isTaskManager(user, context);
+  }
+  if (action === "batch_done") return isExecutor || isTaskManager(user, context);
+  return false;
+}
+
+function rejectUnauthorizedTask(response, message = "你没有权限操作该任务") {
+  response.status(403).json({ success: false, message });
 }
 
 function canUseStoreOptions(user) {
@@ -581,7 +825,13 @@ function authorizeResourceAction(resource, action, context) {
 
 function applyResourceReadScope(resource, items, user) {
   const scope = resourcePermissions[resource]?.scope;
-  if (scope === "dataScope") return filterByScope(items, user);
+  if (scope === "dataScope") {
+    if (resource === "tasks") {
+      const data = readAllData();
+      return filterTasksByScope(items, user, data);
+    }
+    return filterByScope(items, user);
+  }
   if (scope === "people") {
     const dataScope = getDataScope(user);
     if (dataScope === "all") return items;
@@ -633,7 +883,7 @@ function filterDataByScope(data, user) {
     return { ...data, stores, publishingAccounts, permissionTemplates, products, actionProducts, productImportBatches, ...productV2Data };
   }
 
-  const scopedTasks = filterByScope(data.tasks ?? [], user);
+  const scopedTasks = filterTasksByScope(data.tasks ?? [], user, data);
   const scopedWorkPlans = filterByScope(data.workPlans ?? [], user);
   const scopedProcessInstances = filterByScope(data.processInstances ?? [], user);
   const scopedProcessInstanceIds = new Set(scopedProcessInstances.map((instance) => instance.id));
@@ -1391,7 +1641,20 @@ app.post("/api/process-instances/batch-link-templates", (request, response) => {
 });
 
 app.put("/api/process-instances/:id/tasks/:taskId/executor", (request, response) => {
+  if (!hasPermission(request.user, "tasks.changeStatus")) {
+    rejectUnauthorizedTask(response, "你没有权限调整任务执行人。");
+    return;
+  }
   try {
+    const authorization = readTaskAuthorizationResolver([request.params.taskId]).get(request.params.taskId);
+    if (authorization === null || authorization.task.processInstanceId !== request.params.id) {
+      response.status(404).json({ success: false, message: "未找到该关键行动下的任务。" });
+      return;
+    }
+    if (!canOperateTask(request.user, authorization, "edit")) {
+      rejectUnauthorizedTask(response, "只有管理员、任务负责人、关键行动负责人或标准步骤负责人可以调整任务执行人。");
+      return;
+    }
     const data = readAllData();
     const instance = data.processInstances.find((item) => item.id === request.params.id);
     if (instance === undefined) {
@@ -1403,17 +1666,6 @@ app.put("/api/process-instances/:id/tasks/:taskId/executor", (request, response)
     );
     if (task === undefined) {
       response.status(404).json({ success: false, message: "未找到该关键行动下的任务。" });
-      return;
-    }
-    const userPersonId = getUserPersonId(request.user);
-    const processOwnerId = getProcessInstanceOwner(instance.id, data).userId;
-    const processNode = data.processTemplateNodes.find((item) => item.id === task.processNodeId);
-    const stepOwnerId = processNode === undefined ? task.ownerId : processNode.ownerId;
-    const canChangeExecutor =
-      isAdminUser(request.user) ||
-      (userPersonId !== "" && (userPersonId === processOwnerId || userPersonId === stepOwnerId));
-    if (!canChangeExecutor) {
-      response.status(403).json({ success: false, message: "只有管理员、关键行动负责人或标准步骤负责人可以调整任务执行人。" });
       return;
     }
     if (!new Set(["waiting", "todo", "doing"]).has(task.status)) {
@@ -1567,12 +1819,48 @@ app.post("/api/tasks/batch-status", (request, response) => {
     return;
   }
   try {
+    const taskIds = [
+      ...new Set(
+        (Array.isArray(request.body?.taskIds) ? request.body.taskIds : [])
+          .map((id) => String(id ?? "").trim())
+          .filter(Boolean),
+      ),
+    ];
+    const resolver = readTaskAuthorizationResolver(taskIds);
+    const objectAction = status === "canceled" ? "batch_cancel" : "batch_done";
+    const unauthorizedTaskIds = taskIds.filter(
+      (taskId) => !canOperateTask(request.user, resolver.get(taskId), objectAction),
+    );
+    if (unauthorizedTaskIds.length > 0) {
+      rejectUnauthorizedTask(
+        response,
+        `批量操作已整体拒绝，无权操作任务：${unauthorizedTaskIds.join("、")}`,
+      );
+      return;
+    }
     const result = batchUpdateTaskStatus(request.body ?? {});
     response.json({ success: true, result, data: filterDataByScope(readAllData(), request.user) });
   } catch (error) {
     console.error("批量任务状态保存失败", error);
     response.status(400).json({ success: false, message: error.message || "批量任务状态保存失败，请检查本地数据库服务。" });
   }
+});
+
+app.get("/api/tasks/:id", (request, response) => {
+  if (!hasPermission(request.user, "tasks.viewDetail")) {
+    rejectUnauthorizedTask(response, "你没有权限查看任务详情。");
+    return;
+  }
+  const authorization = readTaskAuthorizationResolver([request.params.id]).get(request.params.id);
+  if (authorization === null) {
+    response.status(404).json({ success: false, message: "未找到任务。" });
+    return;
+  }
+  if (!canViewTask(request.user, authorization)) {
+    rejectUnauthorizedTask(response, "你没有权限查看该任务。");
+    return;
+  }
+  response.json(readRouteResourceItem("tasks", request.params.id));
 });
 
 app.post("/api/tasks/:id/workflow", (request, response) => {
@@ -1583,6 +1871,15 @@ app.post("/api/tasks/:id/workflow", (request, response) => {
     return;
   }
   try {
+    const authorization = readTaskAuthorizationResolver([request.params.id]).get(request.params.id);
+    if (authorization === null) {
+      response.status(404).json({ success: false, message: "未找到任务。" });
+      return;
+    }
+    if (!canOperateTask(request.user, authorization, action)) {
+      rejectUnauthorizedTask(response, "你没有权限对该任务执行此操作。");
+      return;
+    }
     const task = updateTaskFromWorkflow(request.params.id, action, request.body?.item ?? {});
     response.json({ success: true, task });
   } catch (error) {
@@ -1592,7 +1889,8 @@ app.post("/api/tasks/:id/workflow", (request, response) => {
 });
 
 function getVisibleTaskIds(user) {
-  return filterByScope(readAllData().tasks ?? [], user).map((task) => task.id);
+  const data = readAllData();
+  return filterTasksByScope(data.tasks ?? [], user, data).map((task) => task.id);
 }
 
 app.get("/api/task-waves", (request, response) => {
@@ -1600,7 +1898,13 @@ app.get("/api/task-waves", (request, response) => {
     response.status(403).json({ success: false, message: "你没有权限查看任务波次。" });
     return;
   }
-  response.json(readTaskWavesForTaskIds(getVisibleTaskIds(request.user)));
+  const visibleTaskIds = getVisibleTaskIds(request.user);
+  const visibleTaskIdSet = new Set(visibleTaskIds);
+  response.json(
+    readTaskWavesForTaskIds(visibleTaskIds).filter((wave) =>
+      wave.taskIds.every((taskId) => visibleTaskIdSet.has(taskId)),
+    ),
+  );
 });
 
 app.get("/api/task-waves-regeneration/preview", (request, response) => {
@@ -1633,24 +1937,38 @@ app.get("/api/task-waves/:id", (request, response) => {
     return;
   }
   const wave = readTaskWaveDetailForTaskIds(request.params.id, getVisibleTaskIds(request.user));
-  if (wave === null) {
+  if (wave === null || wave.items.length !== Number(wave.taskCount)) {
     response.status(404).json({ success: false, message: "未找到可查看的任务波次。" });
     return;
   }
   response.json(wave);
 });
 
-function getTaskWaveOperationContext(request, managementOnly = false) {
+function getTaskWaveOperationContext(request, action) {
   const wave = readTaskWaveDetailForTaskIds(request.params.id, getVisibleTaskIds(request.user));
   if (wave === null || wave.items.length !== Number(wave.taskCount)) {
-    throw new Error("未找到可操作的任务波次，或波次包含超出当前数据范围的任务。");
+    return {
+      allowed: false,
+      status: 403,
+      message: "未找到可操作的任务波次，或波次包含超出当前数据范围的任务。",
+    };
   }
   const userId = getUserPersonId(request.user);
-  const canManage =
-    isAdminUser(request.user) ||
-    hasPermission(request.user, "tasks.batchCancel") ||
-    (managementOnly === false && hasPermission(request.user, "tasks.changeStatus") && wave.executorId !== userId);
-  return { wave, options: { userId, canManage } };
+  if (isAdminUser(request.user)) {
+    return { allowed: true, wave, options: { userId, canManage: true } };
+  }
+  if (action === "cancel") {
+    const resolver = readTaskAuthorizationResolver(wave.items.map((item) => item.taskId));
+    const canManage =
+      hasPermission(request.user, "tasks.batchCancel") &&
+      wave.items.every((item) => canOperateTask(request.user, resolver.get(item.taskId), "batch_cancel"));
+    return canManage
+      ? { allowed: true, wave, options: { userId, canManage: true } }
+      : { allowed: false, status: 403, message: "你没有权限取消该任务波次。" };
+  }
+  return wave.executorId === userId
+    ? { allowed: true, wave, options: { userId, canManage: false } }
+    : { allowed: false, status: 403, message: "只有波次执行人可以执行该操作。" };
 }
 
 app.post("/api/task-waves/:id/start", (request, response) => {
@@ -1659,7 +1977,12 @@ app.post("/api/task-waves/:id/start", (request, response) => {
     return;
   }
   try {
-    const { options } = getTaskWaveOperationContext(request);
+    const context = getTaskWaveOperationContext(request, "start");
+    if (!context.allowed) {
+      response.status(context.status).json({ success: false, message: context.message });
+      return;
+    }
+    const { options } = context;
     response.json({ success: true, wave: startTaskWave(request.params.id, options) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "任务波次开始失败。" });
@@ -1672,7 +1995,12 @@ app.put("/api/task-waves/:id/draft", (request, response) => {
     return;
   }
   try {
-    const { options } = getTaskWaveOperationContext(request);
+    const context = getTaskWaveOperationContext(request, "draft");
+    if (!context.allowed) {
+      response.status(context.status).json({ success: false, message: context.message });
+      return;
+    }
+    const { options } = context;
     response.json({ success: true, result: saveTaskWaveDraft(request.params.id, request.body?.drafts ?? [], options) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "任务波次草稿保存失败。" });
@@ -1685,7 +2013,12 @@ app.post("/api/task-waves/:id/submit", (request, response) => {
     return;
   }
   try {
-    const { options } = getTaskWaveOperationContext(request);
+    const context = getTaskWaveOperationContext(request, "submit");
+    if (!context.allowed) {
+      response.status(context.status).json({ success: false, message: context.message });
+      return;
+    }
+    const { options } = context;
     response.json({ success: true, result: submitTaskWave(request.params.id, request.body?.drafts ?? [], options) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "任务波次提交失败。" });
@@ -1698,7 +2031,12 @@ app.post("/api/task-waves/:id/cancel", (request, response) => {
     return;
   }
   try {
-    const { options } = getTaskWaveOperationContext(request, true);
+    const context = getTaskWaveOperationContext(request, "cancel");
+    if (!context.allowed) {
+      response.status(context.status).json({ success: false, message: context.message });
+      return;
+    }
+    const { options } = context;
     response.json({ success: true, wave: cancelTaskWave(request.params.id, request.body?.cancelReason ?? "", { ...options, canManage: true }) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "任务波次取消失败。" });
@@ -1792,7 +2130,14 @@ app.put("/api/:resource/:id", (request, response) => {
       response.status(403).json({ success: false, message: "你没有权限进行该操作" });
       return;
     }
-    const existing = readExistingRouteResourceItem(request.params.resource, request.params.id);
+    const taskAuthorization =
+      request.params.resource === "tasks"
+        ? readTaskAuthorizationResolver([request.params.id]).get(request.params.id)
+        : null;
+    const existing =
+      request.params.resource === "tasks"
+        ? taskAuthorization?.task ?? null
+        : readExistingRouteResourceItem(request.params.resource, request.params.id);
     const context = getResourceAuthorizationContext(
       request.params.resource,
       "PUT",
@@ -1804,9 +2149,28 @@ app.put("/api/:resource/:id", (request, response) => {
       response.status(403).json({ success: false, message: "你没有权限进行该操作" });
       return;
     }
+    if (request.params.resource === "tasks") {
+      if (taskAuthorization === null) {
+        response.status(404).json({ success: false, message: "未找到任务" });
+        return;
+      }
+      const updatesSubmission = [
+        "resultText",
+        "resultAttachments",
+        "submitFormData",
+        "submitFiles",
+        "submitLinks",
+        "submittedAt",
+      ].some((key) => Object.prototype.hasOwnProperty.call(request.body ?? {}, key));
+      const objectAction = updatesSubmission ? "submit" : "edit";
+      if (!canOperateTask(request.user, taskAuthorization, objectAction)) {
+        rejectUnauthorizedTask(response, "你没有权限修改该任务。");
+        return;
+      }
+    }
     if (request.params.resource === "tasks" && request.body?.status !== undefined) {
-      const task = readAllData().tasks.find((item) => item.id === request.params.id);
-      if (task === undefined) {
+      const task = readRouteResourceItem("tasks", request.params.id);
+      if (task === null) {
         response.status(404).json({ success: false, message: "未找到任务" });
         return;
       }

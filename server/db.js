@@ -3992,6 +3992,12 @@ export function readRouteResource(routeResource) {
   return readResource(resourceKey);
 }
 
+export function readRouteResourceItem(routeResource, id) {
+  const resourceKey = routeResourceMap[routeResource];
+  if (resourceKey === undefined) throw new Error(`Unknown resource: ${routeResource}`);
+  return readExistingItem(resourceKey, id);
+}
+
 export function closeDatabase() {
   if (db !== undefined) {
     db.close();
