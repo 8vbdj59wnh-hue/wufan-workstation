@@ -31,7 +31,11 @@ import {
 } from "./data/modelOptions.js?v=20260705-state-singleton1";
 import { getActionImageUrls, getPrimaryImageUrl } from "./data/taskUtils.js?v=20260705-state-singleton1";
 import { renderActionImageGrid } from "./actionImages.js";
-import { getActionProductImageUrls, getActionProducts, renderLinkedActionProducts } from "./actionProductRelations.js?v=20260725-product-center1";
+import {
+  getActionProductImageUrls,
+  getActionProducts,
+  renderLinkedActionProducts,
+} from "./actionProductRelations.js?v=20260730-schedule-hover-product1";
 import {
   getCurrentExecutor as selectCurrentExecutor,
   getCurrentProcessTask as selectCurrentProcessTask,
@@ -788,7 +792,9 @@ function renderProcessBlock(row) {
   const canDrag = canDragProcess(row);
   const canStart = canStartProcessExecution(row);
   const title = getProcessCardTitle(row);
-  const previewImage = getProcessPreviewImage(row);
+  const linkedProducts = getActionProducts(row.processInstance.id);
+  const primaryProduct = linkedProducts[0] ?? null;
+  const previewImage = normalizeImageUrl(primaryProduct?.mainImage);
   const valueModuleClass = getValueModuleCardClass(row.valueModuleId);
   const progressText = getProcessCurrentProgressText(row.tasks);
   return `
@@ -801,6 +807,9 @@ function renderProcessBlock(row) {
       data-schedule-drag-type="process-instance"
       data-schedule-preview-title="${escapeAttribute(title)}"
       data-schedule-preview-image="${escapeAttribute(previewImage === "" ? "" : resolveAssetUrl(previewImage))}"
+      data-schedule-preview-product-name="${escapeAttribute(primaryProduct?.name ?? "")}"
+      data-schedule-preview-product-code="${escapeAttribute(primaryProduct?.skuCode ?? "")}"
+      data-schedule-preview-product-count="${linkedProducts.length}"
       data-schedule-preview-progress="${escapeAttribute(progressText)}"
       draggable="${canDrag ? "true" : "false"}"
       title="${escapeAttribute(title)}"
@@ -875,12 +884,14 @@ function positionSchedulePreview(preview, anchor) {
   const rect = anchor.getBoundingClientRect();
   const viewportWidth = window.innerWidth;
   const viewportHeight = window.innerHeight;
+  const previewWidth = preview.offsetWidth;
+  const previewHeight = preview.offsetHeight;
   let left = rect.right + previewGap;
   let top = rect.top;
 
-  if (left + previewSize > viewportWidth - previewGap) left = rect.left - previewSize - previewGap;
+  if (left + previewWidth > viewportWidth - previewGap) left = rect.left - previewWidth - previewGap;
   if (left < previewGap) left = previewGap;
-  if (top + previewSize > viewportHeight - previewGap) top = viewportHeight - previewSize - previewGap;
+  if (top + previewHeight > viewportHeight - previewGap) top = viewportHeight - previewHeight - previewGap;
   if (top < previewGap) top = previewGap;
 
   preview.style.left = `${Math.round(left)}px`;
@@ -893,6 +904,9 @@ function showSchedulePreview(button) {
   const imageUrl = button.dataset.schedulePreviewImage ?? "";
   const title = button.dataset.schedulePreviewTitle ?? "";
   const progressText = button.dataset.schedulePreviewProgress ?? "暂无进度";
+  const productName = button.dataset.schedulePreviewProductName ?? "";
+  const productCode = button.dataset.schedulePreviewProductCode ?? "";
+  const productCount = Number(button.dataset.schedulePreviewProductCount ?? 0);
   preview.classList.remove("is-hidden");
   preview.innerHTML = `
     <div class="schedule-hover-preview-media">
@@ -902,6 +916,15 @@ function showSchedulePreview(button) {
           : `<img src="${escapeAttribute(imageUrl)}" alt="${escapeAttribute(title)}" />`
       }
     </div>
+    ${
+      productCount > 0
+        ? `<div class="schedule-hover-preview-product">
+            <strong>${escapeHtml(productName || "未命名产品")}</strong>
+            <span>${escapeHtml(productCode || "未设置产品编码")}</span>
+            ${productCount > 1 ? `<small>共关联 ${productCount} 个产品</small>` : ""}
+          </div>`
+        : ""
+    }
     <div class="schedule-hover-preview-progress" title="${escapeAttribute(`当前进度：${progressText}`)}">当前进度：${escapeHtml(progressText)}</div>
   `;
   preview.querySelector("img")?.addEventListener("error", () => {

@@ -8,13 +8,49 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
+let indexedActionProducts = null;
+let indexedProducts = null;
+let indexedActionProductCount = -1;
+let indexedProductCount = -1;
+let productIdsByActionId = new Map();
+let productsById = new Map();
+
+function ensureProductRelationIndexes() {
+  if (indexedActionProducts !== state.actionProducts || indexedActionProductCount !== state.actionProducts.length) {
+    indexedActionProducts = state.actionProducts;
+    indexedActionProductCount = state.actionProducts.length;
+    productIdsByActionId = new Map();
+    [...state.actionProducts]
+      .sort(
+        (left, right) =>
+          String(left.createdAt ?? "").localeCompare(String(right.createdAt ?? "")) ||
+          String(left.id ?? "").localeCompare(String(right.id ?? "")),
+      )
+      .forEach((item) => {
+        const productIds = productIdsByActionId.get(item.actionId) ?? [];
+        productIds.push(item.productId);
+        productIdsByActionId.set(item.actionId, productIds);
+      });
+  }
+  if (indexedProducts !== state.products || indexedProductCount !== state.products.length) {
+    indexedProducts = state.products;
+    indexedProductCount = state.products.length;
+    productsById = new Map(state.products.map((product) => [product.id, product]));
+  }
+}
+
 export function getActionProductIds(actionId) {
-  return state.actionProducts.filter((item) => item.actionId === actionId).map((item) => item.productId);
+  ensureProductRelationIndexes();
+  return [...(productIdsByActionId.get(actionId) ?? [])];
 }
 
 export function getActionProducts(actionId) {
-  const ids = new Set(getActionProductIds(actionId));
-  return state.products.filter((product) => ids.has(product.id));
+  ensureProductRelationIndexes();
+  return getActionProductIds(actionId).map((productId) => productsById.get(productId)).filter(Boolean);
+}
+
+export function getPrimaryActionProduct(actionId) {
+  return getActionProducts(actionId)[0] ?? null;
 }
 
 export function getActionProductImageUrls(actionId) {
