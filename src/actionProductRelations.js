@@ -57,6 +57,22 @@ export function getActionProductImageUrls(actionId) {
   return getActionProducts(actionId).map((product) => product.mainImage).filter(Boolean);
 }
 
+export function getActionDisplayImages(actionId, fallbackImages = []) {
+  const products = getActionProducts(actionId);
+  if (products.length > 0) {
+    return {
+      images: products.slice(0, 9).map((product) => String(product.mainImage ?? "").trim()),
+      linkedProducts: products,
+      usesLinkedProducts: true,
+    };
+  }
+  return {
+    images: Array.isArray(fallbackImages) ? fallbackImages : [],
+    linkedProducts: [],
+    usesLinkedProducts: false,
+  };
+}
+
 function renderProductThumb(product) {
   return product.mainImage
     ? `<img src="${escapeHtml(resolveAssetUrl(product.mainImage))}" alt="${escapeHtml(product.name)}" />`

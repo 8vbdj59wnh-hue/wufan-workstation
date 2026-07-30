@@ -7740,7 +7740,7 @@ button.content-template-thumb {
   position: fixed;
   z-index: 10000;
   display: grid;
-  grid-template-rows: 172px auto auto;
+  grid-template-rows: 172px auto auto auto;
   gap: 8px;
   width: 172px;
   min-height: 200px;
@@ -7771,6 +7771,10 @@ button.content-template-thumb {
   background: #f9fafb;
 }
 
+.schedule-hover-preview .action-image-grid img {
+  object-fit: cover;
+}
+
 .schedule-hover-preview-empty {
   display: grid;
   place-items: center;
@@ -7790,6 +7794,18 @@ button.content-template-thumb {
   color: #4b5563;
   font-size: 12px;
   font-weight: 600;
+  line-height: 1.35;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-hover-preview-title {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  color: #1f2937;
+  font-size: 13px;
   line-height: 1.35;
   text-align: left;
   text-overflow: ellipsis;

@@ -143,8 +143,14 @@ export function removeProductImage(button) {
   );
 }
 
-export function renderActionImageGrid(images, { className = "", alt = "产品图片", placeholder = "无图" } = {}) {
-  const imageUrls = [...new Set((Array.isArray(images) ? images : []).filter(Boolean))].slice(0, maxProductImages);
+export function renderActionImageGrid(
+  images,
+  { className = "", alt = "产品图片", placeholder = "无图", preserveEmptySlots = false } = {},
+) {
+  const sourceImages = Array.isArray(images) ? images : [];
+  const imageUrls = preserveEmptySlots
+    ? sourceImages.map((url) => String(url ?? "").trim()).slice(0, maxProductImages)
+    : [...new Set(sourceImages.filter(Boolean))].slice(0, maxProductImages);
   if (imageUrls.length === 0) {
     return `<div class="action-image-grid action-image-grid-empty ${escapeHtml(className)}">${escapeHtml(placeholder)}</div>`;
   }
@@ -154,11 +160,15 @@ export function renderActionImageGrid(images, { className = "", alt = "产品图
       ${imageUrls
         .map(
           (url, index) => `
-            <img
-              src="${escapeHtml(resolveAssetUrl(url))}"
-              alt="${escapeHtml(alt)}${imageUrls.length === 1 ? "" : `${index + 1}`}"
-              onerror="this.replaceWith(Object.assign(document.createElement('span'), { className: 'action-image-grid-broken', textContent: '无图' }))"
-            />
+            ${
+              url === ""
+                ? `<span class="action-image-grid-broken">无图</span>`
+                : `<img
+                    src="${escapeHtml(resolveAssetUrl(url))}"
+                    alt="${escapeHtml(alt)}${imageUrls.length === 1 ? "" : `${index + 1}`}"
+                    onerror="this.replaceWith(Object.assign(document.createElement('span'), { className: 'action-image-grid-broken', textContent: '无图' }))"
+                  />`
+            }
           `,
         )
         .join("")}

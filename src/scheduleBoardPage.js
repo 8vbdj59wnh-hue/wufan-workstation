@@ -32,10 +32,10 @@ import {
 import { getActionImageUrls, getPrimaryImageUrl } from "./data/taskUtils.js?v=20260705-state-singleton1";
 import { renderActionImageGrid } from "./actionImages.js";
 import {
-  getActionProductImageUrls,
+  getActionDisplayImages,
   getActionProducts,
   renderLinkedActionProducts,
-} from "./actionProductRelations.js?v=20260730-schedule-hover-product1";
+} from "./actionProductRelations.js?v=20260730-schedule-hover-grid1";
 import {
   getCurrentExecutor as selectCurrentExecutor,
   getCurrentProcessTask as selectCurrentProcessTask,
@@ -426,12 +426,12 @@ function getProcessPreviewImage(row) {
 }
 
 function getProcessImageUrls(row) {
-  const productImageUrls = row.processInstance ? getActionProductImageUrls(row.processInstance.id) : [];
-  if (productImageUrls.length > 0) return productImageUrls;
   const imageUrls = getActionImageUrls(row.processInstance, row.workPlan);
-  if (imageUrls.length > 0) return imageUrls;
+  const displayImages = getActionDisplayImages(row.processInstance?.id ?? "", imageUrls);
+  if (displayImages.usesLinkedProducts || displayImages.images.length > 0) return displayImages;
   const fallbackImage = getProcessPreviewImage(row) || row.thumbnail || "";
-  return fallbackImage === "" ? [] : [fallbackImage];
+  const safeFallbackImages = getActionImageUrls({ productImage: fallbackImage });
+  return getActionDisplayImages(row.processInstance?.id ?? "", safeFallbackImages);
 }
 
 function getProcessInstanceFilterStatus(processInstance) {
@@ -709,8 +709,10 @@ function renderFilters() {
 
 function renderThumbnail(row) {
   const products = row.processInstance ? getActionProducts(row.processInstance.id) : [];
-  return `<div class="schedule-action-product-cell">${renderActionImageGrid(getProcessImageUrls(row), {
+  const displayImages = getProcessImageUrls(row);
+  return `<div class="schedule-action-product-cell">${renderActionImageGrid(displayImages.images, {
     className: "schedule-board-image-grid", alt: row.title, placeholder: "无图",
+    preserveEmptySlots: displayImages.usesLinkedProducts,
   })}${products.length ? `<div class="schedule-action-product-names">${products.map((product) => `<a href="#products/${encodeURIComponent(product.id)}">${escapeHtml(product.skuCode || product.name)}</a>`).join("")}</div>` : ""}</div>`;
 }
 
@@ -792,9 +794,9 @@ function renderProcessBlock(row) {
   const canDrag = canDragProcess(row);
   const canStart = canStartProcessExecution(row);
   const title = getProcessCardTitle(row);
-  const linkedProducts = getActionProducts(row.processInstance.id);
+  const displayImages = getProcessImageUrls(row);
+  const linkedProducts = displayImages.linkedProducts;
   const primaryProduct = linkedProducts[0] ?? null;
-  const previewImage = normalizeImageUrl(primaryProduct?.mainImage);
   const valueModuleClass = getValueModuleCardClass(row.valueModuleId);
   const progressText = getProcessCurrentProgressText(row.tasks);
   return `
@@ -806,7 +808,8 @@ function renderProcessBlock(row) {
       data-schedule-work-plan-id="${escapeAttribute(row.workPlan.id)}"
       data-schedule-drag-type="process-instance"
       data-schedule-preview-title="${escapeAttribute(title)}"
-      data-schedule-preview-image="${escapeAttribute(previewImage === "" ? "" : resolveAssetUrl(previewImage))}"
+      data-schedule-preview-images="${escapeAttribute(JSON.stringify(displayImages.images))}"
+      data-schedule-preview-uses-products="${displayImages.usesLinkedProducts ? "true" : "false"}"
       data-schedule-preview-product-name="${escapeAttribute(primaryProduct?.name ?? "")}"
       data-schedule-preview-product-code="${escapeAttribute(primaryProduct?.skuCode ?? "")}"
       data-schedule-preview-product-count="${linkedProducts.length}"
@@ -831,8 +834,7 @@ function renderPendingProcessCard(row) {
   const canDrag = canDragProcess(row);
   const canStart = canStartProcessExecution(row);
   const title = getProcessCardTitle(row);
-  const imageUrls = getProcessImageUrls(row);
-  const imageUrl = imageUrls[0] === undefined ? "" : resolveAssetUrl(imageUrls[0]);
+  const displayImages = getProcessImageUrls(row);
   const initiatorName = findName(state.people, row.processInstance.initiatorId ?? "", "未设置");
   return `
     <article
@@ -842,7 +844,8 @@ function renderPendingProcessCard(row) {
       data-schedule-process-id="${escapeAttribute(row.processInstance.id)}"
       data-schedule-work-plan-id="${escapeAttribute(row.workPlan.id)}"
       data-schedule-preview-title="${escapeAttribute(title)}"
-      data-schedule-preview-image="${escapeAttribute(imageUrl)}"
+      data-schedule-preview-images="${escapeAttribute(JSON.stringify(displayImages.images))}"
+      data-schedule-preview-uses-products="${displayImages.usesLinkedProducts ? "true" : "false"}"
       data-schedule-preview-progress="${escapeAttribute(getProcessCurrentProgressText(row.tasks))}"
       data-schedule-drag-type="process-instance"
       draggable="${canDrag ? "true" : "false"}"
@@ -850,10 +853,11 @@ function renderPendingProcessCard(row) {
       aria-label="${escapeAttribute(title)}"
     >
       <div class="schedule-pending-card-media">
-        ${renderActionImageGrid(imageUrls, {
+        ${renderActionImageGrid(displayImages.images, {
           className: "schedule-pending-image-grid",
           alt: title,
           placeholder: "无图",
+          preserveEmptySlots: displayImages.usesLinkedProducts,
         })}
       </div>
       <div class="schedule-pending-card-body">
@@ -901,7 +905,13 @@ function positionSchedulePreview(preview, anchor) {
 function showSchedulePreview(button) {
   if (draggedSourceId !== null) return;
   const preview = getPreviewElement();
-  const imageUrl = button.dataset.schedulePreviewImage ?? "";
+  let imageUrls = [];
+  try {
+    imageUrls = JSON.parse(button.dataset.schedulePreviewImages ?? "[]");
+  } catch {
+    imageUrls = [];
+  }
+  const usesLinkedProducts = button.dataset.schedulePreviewUsesProducts === "true";
   const title = button.dataset.schedulePreviewTitle ?? "";
   const progressText = button.dataset.schedulePreviewProgress ?? "暂无进度";
   const productName = button.dataset.schedulePreviewProductName ?? "";
@@ -910,12 +920,14 @@ function showSchedulePreview(button) {
   preview.classList.remove("is-hidden");
   preview.innerHTML = `
     <div class="schedule-hover-preview-media">
-      ${
-        imageUrl === ""
-          ? `<div class="schedule-hover-preview-empty">无预览图</div>`
-          : `<img src="${escapeAttribute(imageUrl)}" alt="${escapeAttribute(title)}" />`
-      }
+      ${renderActionImageGrid(imageUrls, {
+        className: "schedule-hover-preview-image-grid",
+        alt: title,
+        placeholder: "无预览图",
+        preserveEmptySlots: usesLinkedProducts,
+      })}
     </div>
+    <strong class="schedule-hover-preview-title">${escapeHtml(title)}</strong>
     ${
       productCount > 0
         ? `<div class="schedule-hover-preview-product">
@@ -927,10 +939,6 @@ function showSchedulePreview(button) {
     }
     <div class="schedule-hover-preview-progress" title="${escapeAttribute(`当前进度：${progressText}`)}">当前进度：${escapeHtml(progressText)}</div>
   `;
-  preview.querySelector("img")?.addEventListener("error", () => {
-    const media = preview.querySelector(".schedule-hover-preview-media");
-    if (media !== null) media.innerHTML = `<div class="schedule-hover-preview-empty">无预览图</div>`;
-  }, { once: true });
   positionSchedulePreview(preview, button);
 }
 
@@ -1139,7 +1147,7 @@ function renderActionOverviewCard(row) {
   if (row.processInstance === null) return "";
   const title = getProcessCardTitle(row);
   const actionCode = String(row.processInstance.businessCode ?? "").trim();
-  const imageUrls = getProcessImageUrls(row);
+  const displayImages = getProcessImageUrls(row);
   const businessStatus = selectProcessInstanceBusinessStatus(row.processInstance.id, state);
   const progress = selectProcessProgress(row.processInstance.id, state);
   return `
@@ -1151,10 +1159,11 @@ function renderActionOverviewCard(row) {
       aria-label="查看关键行动详情：${escapeAttribute(title)}"
     >
       <div class="schedule-action-overview-media">
-        ${renderActionImageGrid(imageUrls, {
+        ${renderActionImageGrid(displayImages.images, {
           className: "schedule-action-overview-image-grid",
           alt: title,
           placeholder: "无图",
+          preserveEmptySlots: displayImages.usesLinkedProducts,
         })}
       </div>
       <div class="schedule-action-overview-body">
