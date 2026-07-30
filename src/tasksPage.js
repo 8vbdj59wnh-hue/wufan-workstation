@@ -191,6 +191,7 @@ let taskWaveRegenerating = false;
 let taskWaveRegenerationResult = null;
 let taskWaveClockTimer = null;
 let taskWaveClockHashListenerBound = false;
+let taskWaveScrollPositions = new Map();
 
 const templateTagCategories = [
   { id: "brand", label: "品牌" },
@@ -266,6 +267,11 @@ function syncTaskTabFromHash() {
 
 export function selectTask(taskId) {
   selectedTaskId = taskId;
+}
+
+function openTaskDetail(taskId, context = {}) {
+  selectedTaskId = taskId;
+  modalState = { kind: "taskDetail", taskId, error: "", ...context };
 }
 
 function escapeHtml(value) {
@@ -5360,8 +5366,7 @@ async function handleTaskAction(action, taskId, rerender, actionButton = null) {
   }
 
   if (action === "view-task") {
-    selectedTaskId = taskId;
-    modalState = { kind: "taskDetail", taskId, error: "" };
+    openTaskDetail(taskId);
     rerender();
     return;
   }
@@ -5746,6 +5751,107 @@ async function handleImageUpload(input) {
   }
 }
 
+function captureTaskWaveScrollPositions(tasksPage) {
+  const nextPositions = new Map(taskWaveScrollPositions);
+  tasksPage.querySelectorAll("[data-task-wave-card-id]").forEach((waveCard) => {
+    const scrollArea = waveCard.querySelector(".task-wave-card-members-scroll");
+    if (scrollArea !== null) nextPositions.set(waveCard.dataset.taskWaveCardId, scrollArea.scrollLeft);
+  });
+  taskWaveScrollPositions = nextPositions;
+}
+
+function restoreTaskWaveScrollPositions(tasksPage) {
+  tasksPage.querySelectorAll("[data-task-wave-card-id]").forEach((waveCard) => {
+    const scrollArea = waveCard.querySelector(".task-wave-card-members-scroll");
+    const scrollLeft = taskWaveScrollPositions.get(waveCard.dataset.taskWaveCardId);
+    if (scrollArea !== null && Number.isFinite(scrollLeft)) scrollArea.scrollLeft = scrollLeft;
+  });
+}
+
+async function handleTaskModalAction(actionButton, rerender) {
+  if (modalState === null) return false;
+  const action = actionButton.dataset.action;
+
+  if (await handleTaskTemplateLinkAction(action, actionButton, rerender)) return true;
+  if (action === "close-task-modal") {
+    modalState = null;
+    rerender();
+    return true;
+  }
+  if (action === "remove-selected-standard-work-attachment") {
+    removeSelectedStandardWorkAttachment(actionButton);
+    return true;
+  }
+  if (action === "remove-product-image") {
+    removeProductImage(actionButton);
+    return true;
+  }
+  if (action === "remove-selected-submit-file") {
+    removeSelectedSubmitFile(actionButton);
+    return true;
+  }
+  if (action === "remove-existing-submit-file") {
+    removeExistingSubmitFile(actionButton, rerender);
+    return true;
+  }
+  if (actionButton.dataset.taskId !== undefined) {
+    await handleTaskAction(action, actionButton.dataset.taskId, rerender, actionButton);
+    return true;
+  }
+  return false;
+}
+
+function bindTaskModalFormEvents({
+  tasksPage,
+  taskForm,
+  resultForm,
+  returnTaskForm,
+  reviewDecisionForm,
+}, rerender) {
+  if (taskForm !== null) taskForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
+  tasksPage.addEventListener("input", (event) => {
+    if (handleTaskTemplatePickerSearchInput(event.target.closest("[data-task-template-picker-search]"), rerender)) return;
+  });
+  if (taskForm !== null) {
+    taskForm.addEventListener("input", (event) => {
+      if (event.target.name?.startsWith("custom__")) updateImagePreview(event.target);
+    });
+    taskForm.addEventListener("change", (event) => {
+      if (event.target.matches("[data-task-value-module-select]")) {
+        modalState = { ...modalState, categoryId: event.target.value, taskTemplateId: "", error: "" };
+        rerender();
+      }
+      if (event.target.matches("[data-task-template-select]")) {
+        modalState = { ...modalState, taskTemplateId: event.target.value };
+        rerender();
+      }
+      if (event.target.matches("[data-image-upload-key]")) handleImageUpload(event.target);
+      if (event.target.matches("[data-standard-work-attachments]")) renderSelectedStandardWorkAttachments(event.target);
+    });
+  }
+  if (resultForm !== null) resultForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
+  if (resultForm !== null) {
+    resultForm.addEventListener("change", (event) => {
+      if (event.target.matches("[data-submit-files]")) renderSelectedSubmitFiles(event.target);
+    });
+  }
+  if (returnTaskForm !== null) returnTaskForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
+  if (reviewDecisionForm !== null) {
+    reviewDecisionForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      await handleReviewDecision(event.currentTarget, event.submitter, rerender);
+    });
+  }
+  if (modalState?.kind === "launchedProcessDetail") {
+    bindLaunchedProcessDetailEvents(tasksPage, rerender, {
+      onTaskSelect: (taskId) => {
+        openTaskDetail(taskId, modalState?.source === "task-wave" ? { source: "task-wave" } : {});
+        rerender();
+      },
+    });
+  }
+}
+
 export function bindTasksPageEvents(rerender) {
   const tasksPage = document.querySelector(".tasks-page");
   const filterForm = document.querySelector(".task-filters");
@@ -5800,6 +5906,14 @@ export function bindTasksPageEvents(rerender) {
       });
   }
   bindActionLinkedTemplatePreviewEvents(tasksPage);
+  bindTaskModalFormEvents({
+    tasksPage,
+    taskForm,
+    resultForm,
+    returnTaskForm,
+    reviewDecisionForm,
+  }, rerender);
+  if (activeTaskTab === "task-waves") restoreTaskWaveScrollPositions(tasksPage);
 
   document.querySelectorAll("[data-task-tab]").forEach((tab) => {
     tab.addEventListener("click", () => {
@@ -5841,13 +5955,21 @@ export function bindTasksPageEvents(rerender) {
         return;
       }
       const button = event.target.closest("[data-action]");
+      if (button !== null && await handleTaskModalAction(button, rerender)) {
+        event.stopImmediatePropagation();
+        return;
+      }
       if (button === null) {
         const taskCard = event.target.closest("[data-task-card]");
         if (taskCard === null) return;
         event.stopImmediatePropagation();
-        activeTaskTab = "task-list";
-        window.location.hash = "tasks";
-        await handleTaskAction("view-task", taskCard.dataset.rowTaskId, rerender);
+        captureTaskWaveScrollPositions(tasksPage);
+        openTaskDetail(taskCard.dataset.rowTaskId, {
+          source: "task-wave",
+          waveId: taskCard.closest("[data-task-wave-card-id]")?.dataset.taskWaveCardId ?? selectedTaskWaveId,
+          status: taskWaveStatus,
+        });
+        rerender();
         return;
       }
       const action = button.dataset.action;
@@ -5882,6 +6004,7 @@ export function bindTasksPageEvents(rerender) {
         } else if (action === "back-task-waves") {
           selectedTaskWaveId = null;
         } else if (action === "view-task-wave") {
+          modalState = null;
           selectedTaskWaveId = button.dataset.waveId;
           await loadTaskWaveDetail(selectedTaskWaveId);
         } else if (action === "start-task-wave") {
@@ -5892,9 +6015,12 @@ export function bindTasksPageEvents(rerender) {
         } else if (action === "submit-task-wave") {
           await submitTaskWave(button.dataset.waveId, await collectTaskWaveDrafts(tasksPage));
         } else if (action === "view-wave-member-task") {
-          selectedTaskId = button.dataset.taskId;
-          activeTaskTab = "task-list";
-          window.location.hash = "tasks";
+          captureTaskWaveScrollPositions(tasksPage);
+          openTaskDetail(button.dataset.taskId, {
+            source: "task-wave",
+            waveId: selectedTaskWaveId,
+            status: taskWaveStatus,
+          });
         }
       } catch (error) {
         taskWaveError = error.message || "任务波次操作失败。";
@@ -5994,32 +6120,7 @@ export function bindTasksPageEvents(rerender) {
       rerender();
     });
 
-    tasksPage.addEventListener("input", (event) => {
-      if (handleTaskTemplatePickerSearchInput(event.target.closest("[data-task-template-picker-search]"), rerender)) return;
-    });
-
-    if (taskForm !== null) taskForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
-    if (taskForm !== null) {
-      bindActionProductSelectors(taskForm);
-      taskForm.addEventListener("input", (event) => {
-        if (event.target.name?.startsWith("custom__")) updateImagePreview(event.target);
-      });
-      taskForm.addEventListener("change", (event) => {
-        if (event.target.matches("[data-task-value-module-select]")) {
-          modalState = { ...modalState, categoryId: event.target.value, taskTemplateId: "", error: "" };
-          rerender();
-        }
-        if (event.target.matches("[data-task-template-select]")) {
-          modalState = { ...modalState, taskTemplateId: event.target.value };
-          rerender();
-        }
-        if (event.target.matches("[data-image-upload-key]")) {
-          handleImageUpload(event.target);
-        }
-      });
-    }
-    if (resultForm !== null) resultForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
-    if (returnTaskForm !== null) returnTaskForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
+    if (taskForm !== null) bindActionProductSelectors(taskForm);
     if (clearanceImportInput !== null) {
       clearanceImportInput.addEventListener("change", (event) => {
         const file = event.target.files?.[0];
@@ -6257,55 +6358,6 @@ export function bindTasksPageEvents(rerender) {
     rerender();
   });
 
-  if (taskForm !== null) taskForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
-  tasksPage.addEventListener("input", (event) => {
-    if (handleTaskTemplatePickerSearchInput(event.target.closest("[data-task-template-picker-search]"), rerender)) return;
-  });
-  if (taskForm !== null) {
-    taskForm.addEventListener("input", (event) => {
-      if (event.target.name?.startsWith("custom__")) updateImagePreview(event.target);
-    });
-    taskForm.addEventListener("change", (event) => {
-      if (event.target.matches("[data-task-value-module-select]")) {
-        modalState = { ...modalState, categoryId: event.target.value, taskTemplateId: "", error: "" };
-        rerender();
-      }
-      if (event.target.matches("[data-task-template-select]")) {
-        modalState = { ...modalState, taskTemplateId: event.target.value };
-        rerender();
-      }
-      if (event.target.matches("[data-image-upload-key]")) {
-        handleImageUpload(event.target);
-      }
-      if (event.target.matches("[data-standard-work-attachments]")) {
-        renderSelectedStandardWorkAttachments(event.target);
-      }
-    });
-  }
-  if (resultForm !== null) resultForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
-  if (resultForm !== null) {
-    resultForm.addEventListener("change", (event) => {
-      if (event.target.matches("[data-submit-files]")) {
-        renderSelectedSubmitFiles(event.target);
-      }
-    });
-  }
-  if (returnTaskForm !== null) returnTaskForm.addEventListener("submit", (event) => handleTaskSubmit(event, rerender));
-  if (reviewDecisionForm !== null) {
-    reviewDecisionForm.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      await handleReviewDecision(event.currentTarget, event.submitter, rerender);
-    });
-  }
-  if (modalState?.kind === "launchedProcessDetail") {
-    bindLaunchedProcessDetailEvents(tasksPage, rerender, {
-      onTaskSelect: (taskId) => {
-        selectedTaskId = taskId;
-        modalState = { kind: "taskDetail", taskId, error: "" };
-        rerender();
-      },
-    });
-  }
 }
 
 const taskWaveStatusLabels = {
@@ -6495,7 +6547,7 @@ function renderTaskWaveList() {
           const actionDeadline = getTaskWaveActionDeadline(waveView);
           const operation = wave.status === "waiting" ? "开始执行" : wave.status === "doing" ? "继续执行" : wave.status === "pending_acceptance" ? "查看提交" : wave.status === "done" ? "查看结果" : "查看";
           return `
-            <article class="task-wave-card">
+            <article class="task-wave-card" data-task-wave-card-id="${escapeHtml(wave.id)}">
               <div class="task-wave-card-header">
                 <div>
                   <strong>${escapeHtml(wave.businessCode)}</strong>
@@ -6676,7 +6728,15 @@ export function renderTasksPage() {
         : activeTaskTab === "clearance"
             ? renderClearancePage()
           : activeTaskTab === "task-waves"
-            ? renderTaskWaveDetail()
+            ? `
+              ${renderTaskWaveDetail()}
+              ${renderTaskDetailModal()}
+              ${renderLaunchedProcessDetailModal()}
+              ${renderTaskModal()}
+              ${renderResultModal()}
+              ${renderReturnTaskModal()}
+              ${renderWorkFormModal()}
+            `
           : activeTaskTab === "process-progress"
             ? `
               ${renderProcessProgressFilters()}
