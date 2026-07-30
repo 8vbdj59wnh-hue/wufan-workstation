@@ -3295,7 +3295,7 @@ function renderTaskCard(task) {
         <p class="task-card-action-title">${escapeHtml(actionName)}</p>
         <div class="task-card-status-row">
           ${renderTaskStatus(task)}
-          <span class="task-card-remaining ${remaining.overdue ? "is-overdue" : ""}">${escapeHtml(remaining.label)}</span>
+          <span class="task-card-remaining ${remaining.overdue ? "is-overdue" : ""}" data-task-remaining-task-id="${escapeHtml(task.id)}">${escapeHtml(remaining.label)}</span>
         </div>
         <div class="task-card-action-row">
           ${renderTaskCardExecutor(task)}
@@ -3314,6 +3314,38 @@ function renderTaskCardGrid() {
       ${cards.length === 0 ? `<div class="empty-detail">暂无匹配的任务</div>` : `<div class="task-card-grid">${cards.join("")}</div>`}
     </section>
   `;
+}
+
+function refreshTaskWaveClockDisplay() {
+  document.querySelectorAll("[data-task-wave-time]").forEach((element) => {
+    const wave = state.taskWaves.find((item) => item.id === element.dataset.taskWaveTime)
+      ?? state.taskWaveDetails[element.dataset.taskWaveTime]
+      ?? null;
+    if (wave === null) return;
+    const presentation = getTaskWaveTimePresentation(wave);
+    element.textContent = presentation.label;
+    element.classList.toggle("is-overdue", presentation.overdue);
+  });
+
+  document.querySelectorAll("[data-task-remaining-task-id]").forEach((element) => {
+    const task = state.tasks.find((item) => item.id === element.dataset.taskRemainingTaskId) ?? null;
+    if (task === null) return;
+    const remaining = getTaskRemainingText(task);
+    element.textContent = remaining.label;
+    element.classList.toggle("is-overdue", remaining.overdue);
+  });
+
+  document.querySelectorAll("[data-task-wave-member-time]").forEach((element) => {
+    const waveId = element.dataset.taskWaveMemberTime;
+    const wave = state.taskWaveDetails[waveId] ?? state.taskWaves.find((item) => item.id === waveId) ?? null;
+    const timing = getTaskWaveExecutionTiming(wave);
+    const label =
+      timing === null
+        ? wave?.status === "waiting" ? "波次未开始" : "时限未设置"
+        : timing.overdue ? "执行已超时" : "执行未超时";
+    element.textContent = label;
+    element.classList.toggle("is-overdue", Boolean(timing?.overdue));
+  });
 }
 
 function renderProcessProgressFilters() {
@@ -5745,7 +5777,7 @@ export function bindTasksPageEvents(rerender) {
         taskWaveClockTimer = null;
         return;
       }
-      rerender();
+      refreshTaskWaveClockDisplay();
     }, 60000);
   }
   if (
@@ -5802,14 +5834,35 @@ export function bindTasksPageEvents(rerender) {
     tasksPage.addEventListener("click", async (event) => {
       const statusButton = event.target.closest("[data-wave-status]");
       if (statusButton !== null) {
+        event.stopImmediatePropagation();
         taskWaveStatus = statusButton.dataset.waveStatus;
         selectedTaskWaveId = null;
         rerender();
         return;
       }
       const button = event.target.closest("[data-action]");
-      if (button === null) return;
+      if (button === null) {
+        const taskCard = event.target.closest("[data-task-card]");
+        if (taskCard === null) return;
+        event.stopImmediatePropagation();
+        activeTaskTab = "task-list";
+        window.location.hash = "tasks";
+        await handleTaskAction("view-task", taskCard.dataset.rowTaskId, rerender);
+        return;
+      }
       const action = button.dataset.action;
+      if (![
+        "open-wave-regeneration",
+        "close-wave-regeneration",
+        "confirm-wave-regeneration",
+        "back-task-waves",
+        "view-task-wave",
+        "start-task-wave",
+        "save-task-wave-draft",
+        "submit-task-wave",
+        "view-wave-member-task",
+      ].includes(action)) return;
+      event.stopImmediatePropagation();
       taskWaveError = "";
       try {
         if (action === "open-wave-regeneration") {
@@ -5863,7 +5916,6 @@ export function bindTasksPageEvents(rerender) {
       }
       rerender();
     });
-    return;
   }
 
   document.querySelector("[data-task-sort]")?.addEventListener("change", (event) => {
@@ -6436,7 +6488,7 @@ function renderTaskWaveList() {
       ${renderTaskWaveRegenerationFeedback()}
       <div class="task-wave-list">
         ${waves.length === 0 ? `<div class="empty-detail">暂无${taskWaveStatusLabels[taskWaveStatus]}波次</div>` : waves.map((wave) => {
-          const { done, node, standard } = getTaskWaveSummary(wave);
+          const { tasks, done, node, standard } = getTaskWaveSummary(wave);
           const executor = findName(people, wave.executorId, "未设置");
           const waveView = { ...wave, items: (wave.taskIds ?? []).map((taskId) => ({ taskId })) };
           const timePresentation = getTaskWaveTimePresentation(wave);
@@ -6444,21 +6496,32 @@ function renderTaskWaveList() {
           const operation = wave.status === "waiting" ? "开始执行" : wave.status === "doing" ? "继续执行" : wave.status === "pending_acceptance" ? "查看提交" : wave.status === "done" ? "查看结果" : "查看";
           return `
             <article class="task-wave-card">
-              <div>
-                <strong>${escapeHtml(wave.businessCode)}</strong>
-                <h3>${escapeHtml(node?.name ?? "未命名步骤")}</h3>
-                <p>${escapeHtml(standard?.name ?? "未关联行动标准")} · ${escapeHtml(getTaskWaveTypeLabel(wave))}</p>
+              <div class="task-wave-card-header">
+                <div>
+                  <strong>${escapeHtml(wave.businessCode)}</strong>
+                  <h3>${escapeHtml(node?.name ?? "未命名步骤")}</h3>
+                  <p>${escapeHtml(standard?.name ?? "未关联行动标准")} · ${escapeHtml(getTaskWaveTypeLabel(wave))}</p>
+                </div>
+                <div class="task-wave-card-meta">
+                  <span>执行人：${escapeHtml(executor)}</span>
+                  <span>任务：${done}/${wave.taskCount}</span>
+                  <span class="${timePresentation.overdue ? "is-overdue" : ""}" data-task-wave-time="${escapeHtml(wave.id)}">${escapeHtml(timePresentation.label)}</span>
+                  <span>最近行动截止：${escapeHtml(formatBusinessMinuteDateTime(actionDeadline, "未设置"))}</span>
+                  <span class="status-pill">${escapeHtml(taskWaveStatusLabels[wave.status] ?? wave.status)}</span>
+                </div>
+                <div class="row-actions">
+                  <button class="text-button" type="button" data-action="view-task-wave" data-wave-id="${escapeHtml(wave.id)}">查看</button>
+                  ${["waiting", "doing"].includes(wave.status) ? `<button class="primary-button" type="button" data-action="${wave.status === "waiting" ? "start-task-wave" : "view-task-wave"}" data-wave-id="${escapeHtml(wave.id)}">${operation}</button>` : ""}
+                </div>
               </div>
-              <div class="task-wave-card-meta">
-                <span>执行人：${escapeHtml(executor)}</span>
-                <span>任务：${done}/${wave.taskCount}</span>
-                <span class="${timePresentation.overdue ? "is-overdue" : ""}">${escapeHtml(timePresentation.label)}</span>
-                <span>最近行动截止：${escapeHtml(formatBusinessMinuteDateTime(actionDeadline, "未设置"))}</span>
-                <span class="status-pill">${escapeHtml(taskWaveStatusLabels[wave.status] ?? wave.status)}</span>
-              </div>
-              <div class="row-actions">
-                <button class="text-button" type="button" data-action="view-task-wave" data-wave-id="${escapeHtml(wave.id)}">查看</button>
-                ${["waiting", "doing"].includes(wave.status) ? `<button class="primary-button" type="button" data-action="${wave.status === "waiting" ? "start-task-wave" : "view-task-wave"}" data-wave-id="${escapeHtml(wave.id)}">${operation}</button>` : ""}
+              <div class="task-wave-card-members">
+                <div class="task-wave-card-members-heading">
+                  <strong>本波次任务 · ${tasks.length}项</strong>
+                  ${tasks.length > 3 ? `<span>向下滚动查看更多任务</span>` : ""}
+                </div>
+                <div class="task-wave-card-members-scroll">
+                  ${tasks.length === 0 ? `<div class="empty-detail">暂无可查看的成员任务</div>` : `<div class="task-card-grid">${tasks.map((task) => renderTaskCard(task)).join("")}</div>`}
+                </div>
               </div>
             </article>
           `;
@@ -6493,7 +6556,7 @@ function renderTaskWaveMemberResult(entry, editable) {
           <h3>${escapeHtml(task.name)}</h3>
           <span class="status-pill">${escapeHtml(getTaskBusinessStatus(task).label)}</span>
           <span>行动截止：${escapeHtml(formatBusinessMinuteDateTime(actionDeadline, "未设置"))}</span>
-          <span class="${executionTiming?.overdue ? "is-overdue" : ""}">${escapeHtml(executionText)}</span>
+          <span class="${executionTiming?.overdue ? "is-overdue" : ""}" data-task-wave-member-time="${escapeHtml(wave?.id ?? "")}">${escapeHtml(executionText)}</span>
         </div>
         <button class="text-button" type="button" data-action="view-wave-member-task" data-task-id="${escapeHtml(task.id)}">查看原任务</button>
       </div>
@@ -6526,7 +6589,7 @@ function renderTaskWaveDetail() {
       <button class="text-button" type="button" data-action="back-task-waves">← 返回任务波次</button>
       <div class="section-heading"><div><h2>${escapeHtml(wave.businessCode)}</h2><p>${escapeHtml(taskWaveStatusLabels[wave.status] ?? wave.status)}</p></div></div>
       <div class="task-wave-time-summary">
-        <strong class="${timePresentation.overdue ? "is-overdue" : ""}">${escapeHtml(timePresentation.label)}</strong>
+        <strong class="${timePresentation.overdue ? "is-overdue" : ""}" data-task-wave-time="${escapeHtml(wave.id)}">${escapeHtml(timePresentation.label)}</strong>
         <span>最近行动截止：${escapeHtml(formatBusinessMinuteDateTime(actionDeadline, "未设置"))}</span>
       </div>
       <div class="detail-grid">
