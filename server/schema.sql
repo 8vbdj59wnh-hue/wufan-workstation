@@ -263,7 +263,8 @@ CREATE TABLE IF NOT EXISTS task_waves (
   supersededAt TEXT,
   supersededByGenerationId TEXT,
   supersededByUserId TEXT,
-  supersedeReason TEXT
+  supersedeReason TEXT,
+  generationMaxTaskCount INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS task_wave_items (
@@ -363,6 +364,7 @@ CREATE TABLE IF NOT EXISTS process_template_nodes (
   requireRejectionReason INTEGER NOT NULL DEFAULT 0,
   waveEnabled INTEGER NOT NULL DEFAULT 0,
   waveSize INTEGER NOT NULL DEFAULT 10,
+  waveUnlimited INTEGER NOT NULL DEFAULT 0,
   waveTemplatePriority INTEGER NOT NULL DEFAULT 1,
   status TEXT NOT NULL,
   createdAt TEXT,

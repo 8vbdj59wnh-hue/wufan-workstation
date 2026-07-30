@@ -6382,6 +6382,7 @@ function renderTaskWaveRegenerationFeedback() {
       <span>新纳入任务：${result.unassignedNewTaskCount}项</span>
       <span>新生成待执行波次：${result.generatedWaveCount}个</span>
       <span>未能进入波次任务：${result.remainingTaskCount}项</span>
+      <span>不同关联模板任务：严格分开组波</span>
       ${(result.unassigned ?? []).length > 0 ? `<ul>${result.unassigned.map((item) => `<li>${escapeHtml(item.businessCode || item.taskId || "任务")}：${escapeHtml(item.reason)}</li>`).join("")}</ul>` : ""}
     </div>
   `;
@@ -6390,18 +6391,30 @@ function renderTaskWaveRegenerationFeedback() {
 function renderTaskWaveRegenerationDialog() {
   if (!taskWaveRegenerationOpen || taskWaveRegenerationPreview === null) return "";
   const preview = taskWaveRegenerationPreview;
+  const settings = preview.generationSettings ?? [];
   return `
     <div class="modal-backdrop">
       <section class="modal-card task-wave-regeneration-dialog" role="dialog" aria-modal="true" aria-labelledby="wave-regeneration-title">
         <h2 id="wave-regeneration-title">重新生成待执行波次</h2>
         <p>系统将保留所有已完成和执行中的波次，撤销当前待执行波次的有效安排，并将其中任务与新增任务重新组合。</p>
         <p>已完成和执行中的波次不会发生变化。</p>
+        <p>不同关联模板的任务将严格分开；每个波次至少2项，并按步骤配置的数量上限稳定拆分。</p>
         <div class="detail-grid">
           ${renderDetailField("保留的已完成波次", `${preview.preservedDoneWaveCount}个`)}
           ${renderDetailField("保留的执行中波次", `${preview.preservedDoingWaveCount}个`)}
           ${renderDetailField("将被替代的待执行波次", `${preview.waitingWaveCount}个`)}
           ${renderDetailField("待重新组合任务", `${preview.regroupTaskCount}项`)}
           ${renderDetailField("新增未入波次任务", `${preview.unassignedNewTaskCount}项`)}
+          ${renderDetailField("预计生成波次", `${preview.estimatedWaveCount ?? 0}个`)}
+          ${renderDetailField("预计暂不入波次", `${preview.estimatedUnassignedTaskCount ?? 0}项`)}
+          ${renderDetailField(
+            "当前组波设置",
+            settings.length === 0
+              ? "暂无启用波次的执行步骤"
+              : settings
+                  .map((item) => `${escapeHtml(item.processNodeName || item.processNodeId)}：${item.maxTaskCount === null ? "不限数量" : `最多${item.maxTaskCount}项`}`)
+                  .join("<br />"),
+          )}
         </div>
         <div class="modal-actions">
           <button class="secondary-button" type="button" data-action="close-wave-regeneration" ${taskWaveRegenerating ? "disabled" : ""}>取消</button>
@@ -6419,6 +6432,7 @@ function getTaskWaveMemberTasks(wave) {
 }
 
 function getTaskWaveTypeLabel(wave) {
+  if (wave.waveType === "same_template") return "同模板";
   if (wave.waveType === "template_priority") return "同模板";
   if (wave.waveType === "mixed") return "混合模板";
   return "无模板";

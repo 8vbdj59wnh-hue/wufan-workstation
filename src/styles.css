@@ -9132,3 +9132,21 @@ button.content-template-thumb {
     grid-row: span 2;
   }
 }
+.process-wave-limit-settings fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color, #dfe3e8);
+  border-radius: 10px;
+}
+
+.process-wave-limit-settings fieldset legend {
+  padding: 0 4px;
+  color: var(--text-secondary, #667085);
+  font-size: 13px;
+}
+
+.process-wave-limit-settings fieldset .checkbox-field {
+  display: inline-flex;
+  margin-right: 18px;
+}

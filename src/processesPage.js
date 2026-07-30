@@ -720,14 +720,24 @@ function renderNodeModal() {
             <span>启用任务波次</span>
           </label>
           <div data-wave-settings-detail ${node?.waveEnabled ? "" : "hidden"}>
-            <div class="form-grid">
-              <label><span>一个波次任务数</span><input name="waveSize" type="number" min="2" max="100" step="1" value="${Number.isInteger(Number(node?.waveSize)) ? Number(node.waveSize) : 10}" /></label>
-              <label class="checkbox-field">
-                <input type="checkbox" name="waveTemplatePriority" ${node?.waveTemplatePriority === false ? "" : "checked"} />
-                <span>同关联模板优先组波</span>
+            <div class="form-grid process-wave-limit-settings">
+              <fieldset>
+                <legend>波次任务数量</legend>
+                <label class="checkbox-field">
+                  <input type="radio" name="waveLimitMode" value="limited" ${node?.waveUnlimited ? "" : "checked"} />
+                  <span>设置上限</span>
+                </label>
+                <label class="checkbox-field">
+                  <input type="radio" name="waveLimitMode" value="unlimited" ${node?.waveUnlimited ? "checked" : ""} />
+                  <span>不限数量</span>
+                </label>
+              </fieldset>
+              <label data-wave-size-field ${node?.waveUnlimited ? "hidden" : ""}>
+                <span>每个波次最多任务数</span>
+                <input name="waveSize" type="number" min="2" max="100" step="1" value="${Number.isInteger(Number(node?.waveSize)) ? Number(node.waveSize) : 10}" ${node?.waveUnlimited ? "disabled" : ""} />
               </label>
             </div>
-            <p class="form-note">系统将在后续波次功能中，将同一行动标准、同一步骤节点、同一执行人的任务组成波次，并优先组合关联模板相同的任务。</p>
+            <p class="form-note">每个波次至少包含2项任务。系统仅组合相同行动标准、流程模板、关联模板、步骤节点和执行人的任务；不同关联模板绝不混合。</p>
           </div>
         </div>
             `
@@ -892,14 +902,13 @@ async function saveNode(form, rerender) {
   }
   const existingNode = modalState.id ? state.processTemplateNodes.find((node) => node.id === modalState.id) : null;
   const waveEnabled = stepType === "execution" && (form.elements.waveEnabled?.checked ?? false);
-  const waveSizeValue = stepType === "execution" ? getFormValue(form, "waveSize") : existingNode?.waveSize ?? 10;
+  const waveUnlimited =
+    stepType === "execution" && waveEnabled && getFormValue(form, "waveLimitMode") === "unlimited";
+  const waveSizeValue =
+    stepType === "execution" && !waveUnlimited ? getFormValue(form, "waveSize") : existingNode?.waveSize ?? 10;
   const rawWaveSize = waveSizeValue === "" ? 10 : Number(waveSizeValue);
   const waveSizeIsValid = Number.isInteger(rawWaveSize) && rawWaveSize >= 2 && rawWaveSize <= 100;
   const waveSize = waveSizeIsValid ? rawWaveSize : 10;
-  const waveTemplatePriority =
-    stepType === "execution"
-      ? form.elements.waveTemplatePriority?.checked ?? true
-      : existingNode?.waveTemplatePriority ?? true;
   const nextStepOrder =
     existingNode === null
       ? Math.max(0, ...getTemplateNodes(selectedTemplateId).map((node) => getProcessNodeStepOrder(node))) + 1
@@ -937,8 +946,9 @@ async function saveNode(form, rerender) {
     returnToNodeId: stepType === "review" ? getFormValue(form, "returnToNodeId") : null,
     requireRejectionReason: stepType === "review" && (form.elements.requireRejectionReason?.checked ?? false),
     waveEnabled,
+    waveUnlimited,
     waveSize,
-    waveTemplatePriority,
+    waveTemplatePriority: true,
     status: getFormValue(form, "status") || ProcessTemplateNodeStatus.Active,
   };
   const emptySubmitDefault = normalizeSubmitRequirement({ name: "" });
@@ -954,7 +964,9 @@ async function saveNode(form, rerender) {
     Object.assign(draft, normalizeSubmitRequirement({ name: draft.name }));
   }
   if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) return setModalError("请填写大于 0 的任务时长（分钟）。");
-  if (waveEnabled && !waveSizeIsValid) return setModalError("一个波次任务数必须是 2—100 的整数。");
+  if (waveEnabled && !waveUnlimited && !waveSizeIsValid) {
+    return setModalError("波次任务数量上限必须是 2—100 的整数。");
+  }
   if (draft.name === "") return setModalError(stepType === "review" ? "请填写审核步骤名称。" : "请填写步骤名称。");
   if (stepType === "review") {
     if (nextStepOrder <= 1) return setModalError("审核步骤不能作为流程第一步。");
@@ -1339,6 +1351,16 @@ export function bindProcessesPageEvents(rerender) {
     if (waveEnabledInput !== null) {
       const detail = waveEnabledInput.closest(".process-wave-settings")?.querySelector("[data-wave-settings-detail]");
       if (detail !== null && detail !== undefined) detail.hidden = !waveEnabledInput.checked;
+      return;
+    }
+    const waveLimitModeInput = event.target.closest('input[name="waveLimitMode"]');
+    if (waveLimitModeInput !== null) {
+      const settings = waveLimitModeInput.closest(".process-wave-settings");
+      const sizeField = settings?.querySelector("[data-wave-size-field]");
+      const sizeInput = settings?.querySelector('input[name="waveSize"]');
+      const unlimited = waveLimitModeInput.value === "unlimited";
+      if (sizeField !== null && sizeField !== undefined) sizeField.hidden = unlimited;
+      if (sizeInput !== null && sizeInput !== undefined) sizeInput.disabled = unlimited;
       return;
     }
     const stepTypeInput = event.target.closest('input[name="stepType"]');

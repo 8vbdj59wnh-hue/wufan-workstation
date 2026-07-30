@@ -323,12 +323,13 @@ const resourceConfigs = {
       "requireRejectionReason",
       "waveEnabled",
       "waveSize",
+      "waveUnlimited",
       "waveTemplatePriority",
       "status",
       "createdAt",
       "updatedAt",
     ],
-    booleanFields: ["needAcceptance", "requireFile", "requireLink", "requireRejectionReason", "waveEnabled", "waveTemplatePriority"],
+    booleanFields: ["needAcceptance", "requireFile", "requireLink", "requireRejectionReason", "waveEnabled", "waveUnlimited", "waveTemplatePriority"],
     jsonFields: ["submitFields"],
   },
   processInstances: {
@@ -790,6 +791,7 @@ function decodeRow(row, config) {
   if (config.table === "process_template_nodes") {
     if (decoded.waveEnabled === null || decoded.waveEnabled === undefined) decoded.waveEnabled = false;
     if (!Number.isInteger(Number(decoded.waveSize))) decoded.waveSize = 10;
+    if (decoded.waveUnlimited === null || decoded.waveUnlimited === undefined) decoded.waveUnlimited = false;
     if (decoded.waveTemplatePriority === null || decoded.waveTemplatePriority === undefined) decoded.waveTemplatePriority = true;
   }
   if (config.table === "tasks" && !decoded.taskType) decoded.taskType = "execution";
@@ -1418,7 +1420,8 @@ function runLightweightMigrations() {
       supersededAt TEXT,
       supersededByGenerationId TEXT,
       supersededByUserId TEXT,
-      supersedeReason TEXT
+      supersedeReason TEXT,
+      generationMaxTaskCount INTEGER
     );
     CREATE TABLE IF NOT EXISTS task_wave_items (
       id TEXT PRIMARY KEY,
@@ -1697,7 +1700,9 @@ function runLightweightMigrations() {
   ensureColumn("process_template_nodes", "requireRejectionReason", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn("process_template_nodes", "waveEnabled", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn("process_template_nodes", "waveSize", "INTEGER NOT NULL DEFAULT 10");
+  ensureColumn("process_template_nodes", "waveUnlimited", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn("process_template_nodes", "waveTemplatePriority", "INTEGER NOT NULL DEFAULT 1");
+  ensureColumn("task_waves", "generationMaxTaskCount", "INTEGER");
   ensureColumn("task_wave_items", "resultDraft", "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn("task_wave_items", "updatedAt", "TEXT");
   ensureColumn("task_wave_items", "submittedAt", "TEXT");
@@ -2052,7 +2057,6 @@ export function initializeDatabase({ reset = false } = {}) {
   ensureDefaultTemplateTags();
   ensureDefaultPublishingAccounts();
   ensureDefaultAdmin();
-  generateEligibleTaskWaves();
 }
 
 export function readResource(resourceKey) {
@@ -2173,6 +2177,26 @@ function normalizeLinkedTemplateIds(value) {
   return [...new Set(candidate.map((item) => String(item ?? "").trim()).filter(Boolean))];
 }
 
+function getTaskWaveTemplateBoundaryKey(linkedTemplateIds) {
+  const normalizedIds = normalizeLinkedTemplateIds(linkedTemplateIds).sort((left, right) => left.localeCompare(right));
+  return normalizedIds.length === 0 ? "none" : normalizedIds.join("\u001e");
+}
+
+export function splitTaskWaveGroupSizes(taskCount, maxTaskCount = null) {
+  const total = Number(taskCount);
+  if (!Number.isInteger(total) || total < 2) return [];
+  if (maxTaskCount === null || maxTaskCount === undefined) return [total];
+  const maximum = Number(maxTaskCount);
+  if (!Number.isInteger(maximum) || maximum < 2 || maximum > 100) {
+    throw new Error("波次任务数量上限必须是 2—100 的整数，或设置为不限。");
+  }
+  if (maximum === 2) return Array(Math.floor(total / 2)).fill(2);
+  const waveCount = Math.ceil(total / maximum);
+  const baseSize = Math.floor(total / waveCount);
+  const largerWaveCount = total % waveCount;
+  return Array.from({ length: waveCount }, (_, index) => baseSize + (index < largerWaveCount ? 1 : 0));
+}
+
 function getTaskWaveSortTime(task) {
   return String(task.readyAt ?? task.startDate ?? task.createdAt ?? task.updatedAt ?? "");
 }
@@ -2198,18 +2222,32 @@ function getNextTaskWaveBusinessCode(database, now) {
   return `${prefix}${String(highestSerial + 1).padStart(4, "0")}`;
 }
 
-function classifyTaskWaveBatch(tasks, templatePriorityEnabled) {
-  const primaryTemplateIds = [...new Set(tasks.map((task) => task.primaryTemplateId).filter(Boolean))];
-  const allWithoutTemplate = tasks.every((task) => task.primaryTemplateId === null);
-  if (allWithoutTemplate) return { waveType: "no_template", templateGroupKey: "none" };
-  if (templatePriorityEnabled && primaryTemplateIds.length === 1 && tasks.every((task) => task.primaryTemplateId === primaryTemplateIds[0])) {
-    return { waveType: "template_priority", templateGroupKey: primaryTemplateIds[0] };
-  }
-  return { waveType: "mixed", templateGroupKey: "mixed" };
+function classifyTaskWaveBatch(tasks) {
+  const templateGroupKey = getTaskWaveTemplateBoundaryKey(tasks[0]?.linkedTemplateIds);
+  return {
+    waveType: templateGroupKey === "none" ? "no_template" : "same_template",
+    templateGroupKey,
+  };
 }
 
-function createTaskWaveInTransaction(database, queue, tasks, templatePriorityEnabled, createdAt) {
-  const { waveType, templateGroupKey } = classifyTaskWaveBatch(tasks, templatePriorityEnabled);
+function createTaskWaveInTransaction(database, queue, tasks, createdAt) {
+  if (tasks.length < 2) throw new Error("一个任务波次至少需要 2 项任务。");
+  if (queue.maxTaskCount !== null && tasks.length > queue.maxTaskCount) {
+    throw new Error(`任务波次成员数量不能超过配置上限 ${queue.maxTaskCount}。`);
+  }
+  const expectedTemplateKey = getTaskWaveTemplateBoundaryKey(tasks[0]?.linkedTemplateIds);
+  const invalidTask = tasks.find(
+    (task) =>
+      task.waveTaskTemplateId !== queue.taskTemplateId ||
+      task.waveProcessTemplateId !== queue.processTemplateId ||
+      task.processNodeId !== queue.processNodeId ||
+      task.executorId !== queue.executorId ||
+      getTaskWaveTemplateBoundaryKey(task.linkedTemplateIds) !== expectedTemplateKey,
+  );
+  if (invalidTask !== undefined) {
+    throw new Error("任务波次成员必须属于同一行动标准、流程模板、关联模板、步骤节点和执行人。");
+  }
+  const { waveType, templateGroupKey } = classifyTaskWaveBatch(tasks);
   const waveId = `task-wave-${crypto.randomUUID()}`;
   const businessCode = getNextTaskWaveBusinessCode(database, new Date(createdAt));
   const unitDurationMinutes = resolveTaskWaveUnitDurationMinutes(null, tasks);
@@ -2217,10 +2255,12 @@ function createTaskWaveInTransaction(database, queue, tasks, templatePriorityEna
     .prepare(
       `INSERT INTO task_waves (
          id, businessCode, taskTemplateId, processTemplateId, processNodeId, executorId,
-         templateGroupKey, waveType, taskCount, status, unitDurationMinutes, waveDurationMinutes, createdAt, updatedAt
+         templateGroupKey, waveType, taskCount, status, unitDurationMinutes, waveDurationMinutes,
+         generationMaxTaskCount, createdAt, updatedAt
        ) VALUES (
          @id, @businessCode, @taskTemplateId, @processTemplateId, @processNodeId, @executorId,
-         @templateGroupKey, @waveType, @taskCount, 'waiting', @unitDurationMinutes, @waveDurationMinutes, @createdAt, @createdAt
+         @templateGroupKey, @waveType, @taskCount, 'waiting', @unitDurationMinutes, @waveDurationMinutes,
+         @generationMaxTaskCount, @createdAt, @createdAt
        )`,
     )
     .run({
@@ -2235,6 +2275,7 @@ function createTaskWaveInTransaction(database, queue, tasks, templatePriorityEna
       taskCount: tasks.length,
       unitDurationMinutes,
       waveDurationMinutes: unitDurationMinutes === null ? null : unitDurationMinutes * tasks.length,
+      generationMaxTaskCount: queue.maxTaskCount,
       createdAt,
     });
   const insertWaveItem = database.prepare(
@@ -2261,105 +2302,121 @@ function createTaskWaveInTransaction(database, queue, tasks, templatePriorityEna
   return { id: waveId, businessCode, waveType, templateGroupKey, taskCount: tasks.length };
 }
 
-function generateEligibleTaskWavesInTransaction(database) {
-  const candidates = database
-      .prepare(
-        `SELECT
-           t.*,
-           pi.taskTemplateId AS waveTaskTemplateId,
-           pi.templateId AS waveProcessTemplateId,
-           pi.customFields AS processInstanceCustomFields,
-           ptn.waveSize AS configuredWaveSize,
-           ptn.waveTemplatePriority AS configuredTemplatePriority
-         FROM tasks t
-         JOIN process_instances pi ON pi.id = t.processInstanceId
-         JOIN process_template_nodes ptn ON ptn.id = t.processNodeId
-         JOIN task_templates tt ON tt.id = pi.taskTemplateId
-         JOIN process_templates pt ON pt.id = pi.templateId
-         LEFT JOIN task_wave_items twi ON twi.taskId = t.id AND twi.isActive = 1
-         WHERE t.status = 'todo'
-           AND COALESCE(t.processInstanceId, '') <> ''
-           AND COALESCE(t.processNodeId, '') <> ''
-           AND COALESCE(t.executorId, '') <> ''
-           AND COALESCE(t.taskType, 'execution') <> 'review'
-           AND COALESCE(ptn.stepType, 'execution') = 'execution'
-           AND ptn.waveEnabled = 1
-           AND COALESCE(ptn.status, 'active') <> 'deleted'
-           AND COALESCE(pi.status, '') NOT IN ('done', 'completed', 'canceled', 'cancelled', 'stopped', 'terminated')
-           AND COALESCE(tt.status, 'active') <> 'deleted'
-           AND COALESCE(pt.status, 'active') <> 'deleted'
-           AND twi.taskId IS NULL`,
-      )
-      .all()
-      .map((task) => {
-        let customFields = {};
-        try {
-          customFields = JSON.parse(task.processInstanceCustomFields || "{}");
-        } catch {
-          customFields = {};
-        }
-        const linkedTemplateIds = normalizeLinkedTemplateIds(customFields.linkedTemplateIds);
-        return { ...task, linkedTemplateIds, primaryTemplateId: linkedTemplateIds[0] ?? null };
-      })
-      .sort(compareTaskWaveCandidates);
+function readEligibleTaskWaveCandidates(database, includeWaitingAssigned = false) {
+  return database
+    .prepare(
+      `SELECT
+         t.*,
+         pi.taskTemplateId AS waveTaskTemplateId,
+         pi.templateId AS waveProcessTemplateId,
+         pi.customFields AS processInstanceCustomFields,
+         ptn.waveSize AS configuredWaveSize,
+         ptn.waveUnlimited AS configuredWaveUnlimited
+       FROM tasks t
+       JOIN process_instances pi ON pi.id = t.processInstanceId
+       JOIN process_template_nodes ptn ON ptn.id = t.processNodeId
+       JOIN task_templates tt ON tt.id = pi.taskTemplateId
+       JOIN process_templates pt ON pt.id = pi.templateId
+       LEFT JOIN task_wave_items twi ON twi.taskId = t.id AND twi.isActive = 1
+       LEFT JOIN task_waves existingWave ON existingWave.id = twi.waveId
+       WHERE t.status = 'todo'
+         AND COALESCE(t.processInstanceId, '') <> ''
+         AND COALESCE(t.processNodeId, '') <> ''
+         AND COALESCE(t.executorId, '') <> ''
+         AND COALESCE(t.taskType, 'execution') <> 'review'
+         AND COALESCE(ptn.stepType, 'execution') = 'execution'
+         AND ptn.waveEnabled = 1
+         AND COALESCE(ptn.status, 'active') <> 'deleted'
+         AND COALESCE(pi.status, '') NOT IN ('done', 'completed', 'canceled', 'cancelled', 'stopped', 'terminated')
+         AND COALESCE(tt.status, 'active') <> 'deleted'
+         AND COALESCE(pt.status, 'active') <> 'deleted'
+         AND (twi.taskId IS NULL OR (@includeWaitingAssigned = 1 AND existingWave.status = 'waiting'))`,
+    )
+    .all({ includeWaitingAssigned: includeWaitingAssigned ? 1 : 0 })
+    .map((task) => {
+      let customFields = {};
+      try {
+        customFields = JSON.parse(task.processInstanceCustomFields || "{}");
+      } catch {
+        customFields = {};
+      }
+      const linkedTemplateIds = normalizeLinkedTemplateIds(customFields.linkedTemplateIds);
+      return {
+        ...task,
+        linkedTemplateIds,
+        primaryTemplateId: linkedTemplateIds[0] ?? null,
+        templateBoundaryKey: getTaskWaveTemplateBoundaryKey(linkedTemplateIds),
+      };
+    })
+    .sort(compareTaskWaveCandidates);
+}
 
+function buildTaskWaveQueuePlans(candidates) {
   const queues = new Map();
   for (const task of candidates) {
-      const queueKey = [task.waveTaskTemplateId, task.waveProcessTemplateId, task.processNodeId, task.executorId].join("\u001f");
-      if (!queues.has(queueKey)) {
-        queues.set(queueKey, {
-          taskTemplateId: task.waveTaskTemplateId,
-          processTemplateId: task.waveProcessTemplateId,
-          processNodeId: task.processNodeId,
-          executorId: task.executorId,
-          waveSize: Number(task.configuredWaveSize),
-          templatePriority: Number(task.configuredTemplatePriority) !== 0,
-          tasks: [],
-        });
-      }
-      queues.get(queueKey).tasks.push(task);
+    const queueKey = [task.waveTaskTemplateId, task.waveProcessTemplateId, task.processNodeId, task.executorId].join("\u001f");
+    if (!queues.has(queueKey)) {
+      queues.set(queueKey, {
+        taskTemplateId: task.waveTaskTemplateId,
+        processTemplateId: task.waveProcessTemplateId,
+        processNodeId: task.processNodeId,
+        executorId: task.executorId,
+        maxTaskCount: Number(task.configuredWaveUnlimited) !== 0 ? null : Number(task.configuredWaveSize),
+        tasks: [],
+      });
     }
-
-  const createdAt = new Date().toISOString();
-  const createdWaves = [];
-  const assignedTaskIds = new Set();
-  for (const queue of queues.values()) {
-      if (!Number.isInteger(queue.waveSize) || queue.waveSize < 2 || queue.waveSize > 100) continue;
-      const remaining = new Set(queue.tasks.map((task) => task.id));
-      if (queue.templatePriority) {
-        const templateGroups = new Map();
-        for (const task of queue.tasks) {
-          const templateKey = task.primaryTemplateId ?? "none";
-          if (!templateGroups.has(templateKey)) templateGroups.set(templateKey, []);
-          templateGroups.get(templateKey).push(task);
-        }
-        for (const groupTasks of templateGroups.values()) {
-          for (let index = 0; index + queue.waveSize <= groupTasks.length; index += queue.waveSize) {
-            const waveTasks = groupTasks.slice(index, index + queue.waveSize);
-            createdWaves.push(createTaskWaveInTransaction(database, queue, waveTasks, true, createdAt));
-            waveTasks.forEach((task) => assignedTaskIds.add(task.id));
-            waveTasks.forEach((task) => remaining.delete(task.id));
-          }
-        }
-      }
-      const remainingTasks = queue.tasks.filter((task) => remaining.has(task.id)).sort(compareTaskWaveCandidates);
-      for (let index = 0; index + queue.waveSize <= remainingTasks.length; index += queue.waveSize) {
-        const waveTasks = remainingTasks.slice(index, index + queue.waveSize);
-        createdWaves.push(createTaskWaveInTransaction(database, queue, waveTasks, queue.templatePriority, createdAt));
-        waveTasks.forEach((task) => assignedTaskIds.add(task.id));
-      }
+    queues.get(queueKey).tasks.push(task);
   }
-  const remainingTasks = candidates.filter((task) => !assignedTaskIds.has(task.id));
+
+  const plannedWaves = [];
+  const plannedTaskIds = new Set();
+  for (const queue of queues.values()) {
+    if (
+      queue.maxTaskCount !== null &&
+      (!Number.isInteger(queue.maxTaskCount) || queue.maxTaskCount < 2 || queue.maxTaskCount > 100)
+    ) {
+      continue;
+    }
+    const templateGroups = new Map();
+    for (const task of queue.tasks) {
+      if (!templateGroups.has(task.templateBoundaryKey)) templateGroups.set(task.templateBoundaryKey, []);
+      templateGroups.get(task.templateBoundaryKey).push(task);
+    }
+    for (const groupTasks of templateGroups.values()) {
+      const groupSizes = splitTaskWaveGroupSizes(groupTasks.length, queue.maxTaskCount);
+      let offset = 0;
+      for (const groupSize of groupSizes) {
+        const tasks = groupTasks.slice(offset, offset + groupSize);
+        plannedWaves.push({ queue, tasks });
+        tasks.forEach((task) => plannedTaskIds.add(task.id));
+        offset += groupSize;
+      }
+    }
+  }
+  return {
+    plannedWaves,
+    plannedTaskIds,
+    remainingTasks: candidates.filter((task) => !plannedTaskIds.has(task.id)),
+  };
+}
+
+function generateEligibleTaskWavesInTransaction(database) {
+  const candidates = readEligibleTaskWaveCandidates(database);
+  const plan = buildTaskWaveQueuePlans(candidates);
+  const createdAt = new Date().toISOString();
+  const createdWaves = plan.plannedWaves.map(({ queue, tasks }) =>
+    createTaskWaveInTransaction(database, queue, tasks, createdAt),
+  );
   return {
     createdCount: createdWaves.length,
     createdWaves,
     candidateCount: candidates.length,
-    assignedTaskCount: assignedTaskIds.size,
-    remainingTaskCount: remainingTasks.length,
-    remainingTasks: remainingTasks.map((task) => ({
+    assignedTaskCount: plan.plannedTaskIds.size,
+    remainingTaskCount: plan.remainingTasks.length,
+    remainingTasks: plan.remainingTasks.map((task) => ({
       taskId: task.id,
       businessCode: task.businessCode ?? "",
-      reason: "当前同组任务未达到波次数量",
+      reason: "当前相同行动标准、流程模板、关联模板、步骤和执行人的任务不足 2 项",
     })),
   };
 }
@@ -2367,6 +2424,24 @@ function generateEligibleTaskWavesInTransaction(database) {
 export function generateEligibleTaskWaves() {
   const database = getDatabase();
   return database.transaction(() => generateEligibleTaskWavesInTransaction(database)).immediate();
+}
+
+function readEnabledTaskWaveGenerationSettings(database) {
+  return database
+    .prepare(
+      `SELECT id AS processNodeId, name AS processNodeName, waveSize, waveUnlimited
+       FROM process_template_nodes
+       WHERE waveEnabled = 1
+         AND COALESCE(stepType, 'execution') = 'execution'
+         AND COALESCE(status, 'active') <> 'deleted'
+       ORDER BY name, id`,
+    )
+    .all()
+    .map((node) => ({
+      processNodeId: node.processNodeId,
+      processNodeName: node.processNodeName,
+      maxTaskCount: Number(node.waveUnlimited) !== 0 ? null : Number(node.waveSize),
+    }));
 }
 
 function countEligibleUnassignedWaveTasks(database) {
@@ -2412,6 +2487,10 @@ export function readTaskWaveRegenerationPreview() {
       .get()?.count ?? 0,
   );
   const unassignedNewTaskCount = countEligibleUnassignedWaveTasks(database);
+  const regroupCandidates = readEligibleTaskWaveCandidates(database, true);
+  const regroupPlan = buildTaskWaveQueuePlans(regroupCandidates);
+  const regroupTaskCount = sourceTaskCount + unassignedNewTaskCount;
+  const estimatedExcludedTaskCount = Math.max(0, regroupTaskCount - regroupCandidates.length);
   const isRunning =
     database.prepare("SELECT 1 FROM wave_regeneration_runs WHERE status = 'running' LIMIT 1").get() !== undefined;
   return {
@@ -2420,9 +2499,12 @@ export function readTaskWaveRegenerationPreview() {
     waitingWaveCount,
     sourceTaskCount,
     unassignedNewTaskCount,
-    regroupTaskCount: sourceTaskCount + unassignedNewTaskCount,
+    regroupTaskCount,
+    estimatedWaveCount: regroupPlan.plannedWaves.length,
+    estimatedUnassignedTaskCount: regroupPlan.remainingTasks.length + estimatedExcludedTaskCount,
     canRegenerate: !isRunning && (waitingWaveCount > 0 || unassignedNewTaskCount > 0),
     isRunning,
+    generationSettings: readEnabledTaskWaveGenerationSettings(database),
   };
 }
 
@@ -3649,17 +3731,20 @@ const productStatuses = new Set(["开发中", "待上架", "在售", "停售", "
 function normalizeAndValidateProcessTemplateNodeWave(item) {
   const stepType = item?.stepType === "review" ? "review" : "execution";
   const waveEnabled = stepType === "execution" && (item?.waveEnabled === true || item?.waveEnabled === 1 || item?.waveEnabled === "1");
+  const waveUnlimited =
+    waveEnabled && (item?.waveUnlimited === true || item?.waveUnlimited === 1 || item?.waveUnlimited === "1");
   const rawWaveSize = item?.waveSize === null || item?.waveSize === undefined || item?.waveSize === "" ? 10 : Number(item.waveSize);
   const waveSizeIsValid = Number.isInteger(rawWaveSize) && rawWaveSize >= 2 && rawWaveSize <= 100;
-  if (waveEnabled && !waveSizeIsValid) {
-    throw new Error("一个波次任务数必须是 2—100 的整数。");
+  if (waveEnabled && !waveUnlimited && !waveSizeIsValid) {
+    throw new Error("波次任务数量上限必须是 2—100 的整数。");
   }
   return {
     ...item,
     stepType,
     waveEnabled,
+    waveUnlimited,
     waveSize: waveSizeIsValid ? rawWaveSize : 10,
-    waveTemplatePriority: item?.waveTemplatePriority === false || item?.waveTemplatePriority === 0 || item?.waveTemplatePriority === "0" ? false : true,
+    waveTemplatePriority: true,
   };
 }
 
