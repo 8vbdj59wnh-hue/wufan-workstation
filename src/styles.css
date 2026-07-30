@@ -8872,18 +8872,56 @@ button.content-template-thumb {
   display: flex;
   flex-wrap: nowrap;
   align-items: flex-start;
-  gap: 12px;
+  gap: 10px;
   width: max-content;
   min-width: 100%;
 }
 
 .task-wave-card-members-scroll .task-card {
-  flex: 0 0 360px;
-  width: 360px;
-  min-width: 360px;
-  max-width: 360px;
+  flex: 0 0 260px;
+  width: 260px;
+  min-width: 260px;
+  max-width: 260px;
   margin: 0;
+  padding: 12px;
   scroll-snap-align: start;
+}
+
+.task-wave-card-members-scroll .task-card-cover,
+.task-wave-card-members-scroll .task-card-cover .task-cover-thumb,
+.task-wave-card-members-scroll .task-card-cover .task-cover-placeholder {
+  width: 160px;
+  height: 160px;
+}
+
+.task-wave-card-members-scroll .task-card-body {
+  gap: 8px;
+}
+
+.task-wave-card-members-scroll .task-card-title-row h3 {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: 16px;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.task-wave-card-members-scroll .task-card-status-row,
+.task-wave-card-members-scroll .task-card-action-row {
+  flex-wrap: wrap;
+}
+
+.task-wave-card-members-scroll .task-card-workflow-action {
+  max-width: 100%;
+}
+
+.task-wave-card-members-scroll .task-card-workflow-action button {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
 }
 
 .task-wave-time-summary {
@@ -8950,10 +8988,10 @@ button.content-template-thumb {
   }
 
   .task-wave-card-members-scroll .task-card {
-    flex-basis: min(320px, calc(100vw - 64px));
-    width: min(320px, calc(100vw - 64px));
-    min-width: min(320px, calc(100vw - 64px));
-    max-width: min(320px, calc(100vw - 64px));
+    flex-basis: min(250px, calc(100vw - 64px));
+    width: min(250px, calc(100vw - 64px));
+    min-width: min(250px, calc(100vw - 64px));
+    max-width: min(250px, calc(100vw - 64px));
   }
 }
 
