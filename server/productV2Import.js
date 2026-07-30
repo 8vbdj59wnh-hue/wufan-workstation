@@ -918,38 +918,6 @@ function commitInventory(batch, staging) {
         ON CONFLICT(productId) DO UPDATE SET erpGoodsId=excluded.erpGoodsId,merchantSkuCode=excluded.merchantSkuCode,
           matchMethod=excluded.matchMethod,sourceBatchId=excluded.sourceBatchId,latestStateJson=excluded.latestStateJson,updatedAt=excluded.updatedAt
       `).run(mappingId, row.systemProduct.id, goods.id, row.merchantSkuCode, "sku_code", batch.id, JSON.stringify(latestState), now, now);
-      const product = database.prepare("SELECT * FROM products WHERE id=?").get(row.systemProduct.id);
-      let galleryImages = product.galleryImages;
-      const nextMainImage = product.mainImage || value(record["图片链接"]) || null;
-      const skuName = product.skuName || value(record["规格名称"]) || null;
-      const material = product.material || value(record["材质"]) || null;
-      const style = product.style || value(record["风格"]) || null;
-      const placement = product.placement || value(record["摆放位置"]) || null;
-      let identifiers = {};
-      let priceInfo = {};
-      let warehouseInfo = {};
-      let unitInfo = {};
-      try { identifiers = JSON.parse(product.identifiers || "{}"); } catch {}
-      try { priceInfo = JSON.parse(product.priceInfo || "{}"); } catch {}
-      try { warehouseInfo = JSON.parse(product.warehouseInfo || "{}"); } catch {}
-      try { unitInfo = JSON.parse(product.unitInfo || "{}"); } catch {}
-      if (!identifiers.barcode && value(record["条码"])) identifiers.barcode = value(record["条码"]);
-      if (!unitInfo.unit && value(record["单位"])) unitInfo.unit = value(record["单位"]);
-      for (const [key, item] of Object.entries({ costPrice: latestState.costPrice, retailPrice: latestState.retailPrice })) {
-        if (item !== null) priceInfo[key] = item;
-      }
-      for (const [key, item] of Object.entries(latestState)) {
-        if (item !== null && item !== "") warehouseInfo[key] = item;
-      }
-      database.prepare(`
-        UPDATE products SET mainImage=?,galleryImages=?,skuName=?,material=?,style=?,placement=?,weightKg=COALESCE(weightKg,?),
-          volumeCm3=COALESCE(volumeCm3,?),identifiers=?,priceInfo=?,warehouseInfo=?,unitInfo=?,sourceUpdatedAt=?,lastImportedAt=?,updatedAt=?
-        WHERE id=?
-      `).run(
-        nextMainImage, galleryImages, skuName, material, style, placement, numberValue(record["单品重量"]),
-        numberValue(record["货品体积"]), JSON.stringify(identifiers), JSON.stringify(priceInfo), JSON.stringify(warehouseInfo), JSON.stringify(unitInfo),
-        now, now, now, row.systemProduct.id,
-      );
       stats.matched += 1;
     }
   });
