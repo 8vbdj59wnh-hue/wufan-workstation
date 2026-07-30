@@ -80,13 +80,25 @@ import {
   getTrendProducts,
 } from "./dataCenterService.js";
 import { createToken, verifyPassword, verifyToken } from "./security.js";
-import { canLaunchActionTemplate, getDataScope, hasPermission } from "../src/permissions.js";
+import {
+  canAccessTemplateCenter,
+  canLaunchActionTemplate,
+  getDataScope,
+  hasPermission,
+} from "../src/permissions.js";
 import { getProcessInstanceOwner } from "../src/data/processInstanceSelectors.js";
 import { normalizeProductSkuCode, splitProductSkuCodes } from "../src/data/productSku.js";
 
 const app = express();
 const host = process.env.HOST ?? "0.0.0.0";
 const port = Number(process.env.PORT ?? 3001);
+const applicationVersion = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+})();
 const imageUploadsDir = path.join(uploadsDir, "images");
 const fileUploadsDir = path.join(uploadsDir, "files");
 const standardWorkAttachmentsDir = path.join(uploadsDir, "standard-work-attachments");
@@ -231,30 +243,17 @@ app.use("/uploads", express.static(uploadsDir));
 
 app.get("/api/health", (_request, response) => {
   try {
-    fs.accessSync(databasePath, fs.constants.R_OK | fs.constants.W_OK);
-    fs.accessSync(uploadsDir, fs.constants.R_OK | fs.constants.W_OK);
-    const data = readAllData();
+    getDatabase().prepare("SELECT 1").get();
     response.json({
-      ok: true,
-      databasePath,
-      databaseWritable: true,
-      uploadsDir,
-      uploadsWritable: true,
-      counts: {
-        goals: data.goals?.length ?? 0,
-        workPlans: data.workPlans?.length ?? 0,
-        tasks: data.tasks?.length ?? 0,
-        processTemplates: data.processTemplates?.length ?? 0,
-        processTemplateNodes: data.processTemplateNodes?.length ?? 0,
-        taskTemplates: data.taskTemplates?.length ?? 0,
-      },
+      status: "ok",
+      database: "ok",
+      version: applicationVersion,
     });
-  } catch (error) {
+  } catch {
     response.status(500).json({
-      ok: false,
-      databasePath,
-      uploadsDir,
-      message: error.message || "本地数据库或上传目录不可用。",
+      status: "error",
+      database: "error",
+      version: applicationVersion,
     });
   }
 });
@@ -366,25 +365,238 @@ function canUsePublishingAccountOptions(user) {
   );
 }
 
-function canReadResource(resource, user) {
-  const productResources = new Set([
-    "products",
-    "action-products",
-    "product-import-batches",
-    "erp-goods",
-    "product-erp-mappings",
-    "sales-shops",
-    "sales-shop-aliases",
-    "sales-links",
-    "sales-link-skus",
-    "erp-import-batches",
-    "platform-sku-manual-bindings",
+function hasAnyPermission(user, permissions) {
+  return permissions.some((permission) => hasPermission(user, permission));
+}
+
+function canUseActionStandardOptions(user) {
+  return hasAnyPermission(user, [
+    "settings.viewStandardWorks",
+    "settings.editStandardWorks",
+    "processes.viewTemplates",
+    "workPlans.launch",
+    "goals.addWork",
   ]);
-  if (productResources.has(resource)) return hasPermission(user, "products.view");
-  if (resource === "permission-templates") return hasPermission(user, "settings.managePermissions");
-  if (resource === "stores") return canUseStoreOptions(user);
-  if (resource === "publishing-accounts") return canUsePublishingAccountOptions(user);
-  return true;
+}
+
+function canUseTemplateOptions(user) {
+  return (
+    canAccessTemplateCenter(user) ||
+    hasAnyPermission(user, [
+      "tasks.view",
+      "processes.viewInstances",
+      "workPlans.launch",
+      "contentSchedules.view",
+    ])
+  );
+}
+
+function permissionRule(permission) {
+  return ({ user }) => hasPermission(user, permission);
+}
+
+function anyPermissionRule(...permissions) {
+  return ({ user }) => hasAnyPermission(user, permissions);
+}
+
+const resourcePermissions = {
+  companies: {
+    read: anyPermissionRule("settings.viewOrg", "settings.editOrg"),
+    write: permissionRule("settings.editOrg"),
+  },
+  departments: {
+    read: anyPermissionRule("settings.viewOrg", "settings.editOrg"),
+    write: permissionRule("settings.editOrg"),
+  },
+  positions: {
+    read: anyPermissionRule("settings.viewOrg", "settings.editOrg"),
+    write: permissionRule("settings.editOrg"),
+  },
+  persons: {
+    read: anyPermissionRule("settings.viewPeople", "settings.editPeople", "settings.managePermissions"),
+    write: ({ user, body }) =>
+      hasPermission(
+        user,
+        ["permissions", "permissionTemplateId", "permissionOverrides"].some((key) =>
+          Object.prototype.hasOwnProperty.call(body, key),
+        )
+          ? "settings.managePermissions"
+          : "settings.editPeople",
+      ),
+    scope: "people",
+  },
+  people: {
+    read: anyPermissionRule("settings.viewPeople", "settings.editPeople", "settings.managePermissions"),
+    write: ({ user, body }) =>
+      hasPermission(
+        user,
+        ["permissions", "permissionTemplateId", "permissionOverrides"].some((key) =>
+          Object.prototype.hasOwnProperty.call(body, key),
+        )
+          ? "settings.managePermissions"
+          : "settings.editPeople",
+      ),
+    scope: "people",
+  },
+  "permission-templates": {
+    read: permissionRule("settings.managePermissions"),
+    write: permissionRule("settings.managePermissions"),
+  },
+  categories: {
+    read: permissionRule("settings.editCategories"),
+    write: permissionRule("settings.editCategories"),
+  },
+  stores: {
+    read: ({ user }) => canUseStoreOptions(user),
+    write: permissionRule("settings.editStores"),
+  },
+  "publishing-accounts": {
+    read: ({ user }) => canUsePublishingAccountOptions(user),
+    write: permissionRule("settings.editStandardWorkForms"),
+  },
+  "weekly-reports": {
+    read: permissionRule("assessment.view"),
+    write: ({ user, method }) =>
+      hasPermission(user, method === "POST" ? "assessment.fillWeeklyReport" : "assessment.editWeeklyReport"),
+    scope: "dataScope",
+  },
+  "weekly-report-problems": {
+    read: permissionRule("assessment.viewProblems"),
+    write: permissionRule("assessment.updateProblems"),
+    scope: "dataScope",
+  },
+  goals: {
+    read: permissionRule("goals.view"),
+    write: ({ user, method }) => hasPermission(user, method === "POST" ? "goals.create" : "goals.edit"),
+    scope: "dataScope",
+  },
+  "task-templates": {
+    read: ({ user }) => canUseActionStandardOptions(user),
+    write: ({ user, body }) =>
+      hasPermission(
+        user,
+        body.formFields !== undefined ? "settings.editStandardWorkForms" : "settings.editStandardWorks",
+      ),
+  },
+  tasks: {
+    read: permissionRule("tasks.view"),
+    write: ({ user, method, body }) => {
+      if (method === "POST" && body.source === "process") return hasPermission(user, "workPlans.launch");
+      if (
+        body.submitFormData !== undefined ||
+        body.submitFiles !== undefined ||
+        body.submitLinks !== undefined
+      ) {
+        return hasPermission(user, "tasks.submitResult");
+      }
+      return hasPermission(user, "tasks.changeStatus");
+    },
+    scope: "dataScope",
+  },
+  "process-templates": {
+    read: anyPermissionRule("processes.viewTemplates", "settings.viewStandardWorks"),
+    write: permissionRule("processes.editTemplates"),
+  },
+  "process-template-nodes": {
+    read: anyPermissionRule("processes.viewTemplates", "settings.viewStandardWorks"),
+    write: anyPermissionRule("processes.editSteps", "processes.sortSteps"),
+  },
+  "process-instances": {
+    read: permissionRule("processes.viewInstances"),
+    write: ({ user, method }) =>
+      hasPermission(user, method === "POST" ? "workPlans.launch" : "processes.editInstances"),
+    scope: "dataScope",
+  },
+  methodologies: {
+    read: permissionRule("methods.view"),
+    write: ({ user, method }) => hasPermission(user, method === "POST" ? "methods.create" : "methods.edit"),
+  },
+  templates: {
+    read: ({ user }) => canUseTemplateOptions(user),
+    write: ({ user }) => canAccessTemplateCenter(user),
+  },
+  "template-tag-categories": {
+    read: anyPermissionRule("settings.viewStandardWorks", "settings.editStandardWorkForms"),
+    write: permissionRule("settings.editStandardWorkForms"),
+  },
+  "template-tags": {
+    read: anyPermissionRule("settings.viewStandardWorks", "settings.editStandardWorkForms"),
+    write: permissionRule("settings.editStandardWorkForms"),
+  },
+  "standard-work-forms": {
+    read: ({ user }) => canUseActionStandardOptions(user),
+    write: permissionRule("settings.editStandardWorkForms"),
+  },
+  notifications: {
+    read: () => true,
+    write: ({ user, method, body, existing }) => {
+      const userId = String(user.id ?? "");
+      if (method === "POST") return String(body.userId ?? "") === userId;
+      return (
+        String(existing?.userId ?? "") === userId &&
+        String(body.userId ?? existing?.userId ?? "") === userId
+      );
+    },
+    scope: "notifications",
+  },
+  "issues-requirements": {
+    read: permissionRule("settings.editStandardWorkForms"),
+    write: permissionRule("settings.editStandardWorkForms"),
+    scope: "dataScope",
+  },
+  "content-schedules": {
+    read: permissionRule("contentSchedules.view"),
+    write: ({ user, method }) =>
+      hasPermission(user, method === "POST" ? "contentSchedules.create" : "contentSchedules.edit"),
+    scope: "dataScope",
+  },
+  "work-plans": {
+    read: anyPermissionRule("processes.viewInstances", "workPlans.launch"),
+    write: permissionRule("workPlans.launch"),
+    scope: "dataScope",
+  },
+  products: {
+    read: permissionRule("products.view"),
+    write: ({ user, method, body }) =>
+      hasPermission(
+        user,
+        method === "POST"
+          ? "products.create"
+          : body.status === "已归档"
+            ? "products.archive"
+            : "products.edit",
+      ),
+  },
+};
+
+function getResourceAuthorizationContext(resource, method, user, body = {}, existing = null) {
+  return { resource, method, user, body, existing };
+}
+
+function authorizeResourceAction(resource, action, context) {
+  const registration = resourcePermissions[resource];
+  if (registration === undefined || typeof registration[action] !== "function") return false;
+  return registration[action](context) === true;
+}
+
+function applyResourceReadScope(resource, items, user) {
+  const scope = resourcePermissions[resource]?.scope;
+  if (scope === "dataScope") return filterByScope(items, user);
+  if (scope === "people") {
+    const dataScope = getDataScope(user);
+    if (dataScope === "all") return items;
+    if (dataScope === "department") {
+      return items.filter((person) => person.id === user.id || person.departmentId === user.departmentId);
+    }
+    return items.filter((person) => person.id === user.id);
+  }
+  if (scope === "notifications") return items.filter((item) => item.userId === user.id);
+  return items;
+}
+
+function readExistingRouteResourceItem(resource, id) {
+  const items = readRouteResource(resource);
+  return items.find((item) => item.id === id) ?? null;
 }
 
 function filterDataByScope(data, user) {
@@ -455,48 +667,6 @@ function filterDataByScope(data, user) {
     weeklyReports: scopedWeeklyReports,
     weeklyReportProblems: scopedWeeklyReportProblems,
   };
-}
-
-function getResourceWritePermission(resource, method, body = {}) {
-  if (resource === "products") {
-    if (method === "POST") return "products.create";
-    return body.status === "已归档" ? "products.archive" : "products.edit";
-  }
-  if (resource === "action-products") return "products.__managedRelation";
-  if (resource === "goals") return method === "POST" ? "goals.create" : "goals.edit";
-  if (resource === "work-plans") return "workPlans.launch";
-  if (resource === "tasks") {
-    if (method === "POST" && body.source === "process") return "workPlans.launch";
-    if (body.submitFormData !== undefined || body.submitFiles !== undefined || body.submitLinks !== undefined) return "tasks.submitResult";
-    if (body.status !== undefined) return "tasks.changeStatus";
-    return "tasks.changeStatus";
-  }
-  if (resource === "task-templates") {
-    if (body.formFields !== undefined) return "settings.editStandardWorkForms";
-    return "settings.editStandardWorks";
-  }
-  if (resource === "process-templates") return "processes.editTemplates";
-  if (resource === "process-template-nodes") return ["processes.editSteps", "processes.sortSteps"];
-  if (resource === "process-instances") return method === "POST" ? "workPlans.launch" : "processes.editInstances";
-  if (resource === "methodologies") return method === "POST" ? "methods.create" : "methods.edit";
-  if (resource === "persons" || resource === "people") {
-    const writesPermissions = ["permissions", "permissionTemplateId", "permissionOverrides"].some((key) =>
-      Object.prototype.hasOwnProperty.call(body, key),
-    );
-    return writesPermissions ? "settings.managePermissions" : "settings.editPeople";
-  }
-  if (resource === "permission-templates") return "settings.managePermissions";
-  if (resource === "departments" || resource === "positions") return "settings.editOrg";
-  if (resource === "categories") return "settings.editCategories";
-  if (resource === "stores") return "settings.editStores";
-  if (resource === "publishing-accounts") return "settings.editStandardWorkForms";
-  if (resource === "weekly-reports") return method === "POST" ? "assessment.fillWeeklyReport" : "assessment.editWeeklyReport";
-  if (resource === "weekly-report-problems") return method === "POST" ? "assessment.updateProblems" : "assessment.updateProblems";
-  if (resource === "content-schedules") return method === "POST" ? "contentSchedules.create" : "contentSchedules.edit";
-  if (resource === "standard-work-forms") return "settings.editStandardWorkForms";
-  if (resource === "template-tag-categories" || resource === "template-tags") return "settings.editStandardWorkForms";
-  if (resource === "issues-requirements") return "settings.editStandardWorkForms";
-  return null;
 }
 
 function rejectLegacyContentScheduleWrite(resource, response) {
@@ -1575,11 +1745,17 @@ app.patch("/api/process-template-nodes/:id/status", requirePermission("processes
 
 app.get("/api/:resource", (request, response) => {
   try {
-    if (!canReadResource(request.params.resource, request.user)) {
+    const context = getResourceAuthorizationContext(
+      request.params.resource,
+      "GET",
+      request.user,
+    );
+    if (!authorizeResourceAction(request.params.resource, "read", context)) {
       response.status(403).json({ success: false, message: "你没有权限查看该数据" });
       return;
     }
-    response.json(readRouteResource(request.params.resource));
+    const items = readRouteResource(request.params.resource);
+    response.json(applyResourceReadScope(request.params.resource, items, request.user));
   } catch (error) {
     response.status(404).json({ error: error.message });
   }
@@ -1588,11 +1764,13 @@ app.get("/api/:resource", (request, response) => {
 app.post("/api/:resource", (request, response) => {
   try {
     if (rejectLegacyContentScheduleWrite(request.params.resource, response)) return;
-    const permission = getResourceWritePermission(request.params.resource, "POST", request.body ?? {});
-    const allowed = Array.isArray(permission)
-      ? permission.some((item) => hasPermission(request.user, item))
-      : permission === null || hasPermission(request.user, permission);
-    if (!allowed) {
+    const context = getResourceAuthorizationContext(
+      request.params.resource,
+      "POST",
+      request.user,
+      request.body ?? {},
+    );
+    if (!authorizeResourceAction(request.params.resource, "write", context)) {
       response.status(403).json({ success: false, message: "你没有权限进行该操作" });
       return;
     }
@@ -1609,6 +1787,23 @@ app.post("/api/:resource", (request, response) => {
 app.put("/api/:resource/:id", (request, response) => {
   try {
     if (rejectLegacyContentScheduleWrite(request.params.resource, response)) return;
+    const registration = resourcePermissions[request.params.resource];
+    if (registration === undefined || typeof registration.write !== "function") {
+      response.status(403).json({ success: false, message: "你没有权限进行该操作" });
+      return;
+    }
+    const existing = readExistingRouteResourceItem(request.params.resource, request.params.id);
+    const context = getResourceAuthorizationContext(
+      request.params.resource,
+      "PUT",
+      request.user,
+      request.body ?? {},
+      existing,
+    );
+    if (!authorizeResourceAction(request.params.resource, "write", context)) {
+      response.status(403).json({ success: false, message: "你没有权限进行该操作" });
+      return;
+    }
     if (request.params.resource === "tasks" && request.body?.status !== undefined) {
       const task = readAllData().tasks.find((item) => item.id === request.params.id);
       if (task === undefined) {
@@ -1631,14 +1826,6 @@ app.put("/api/:resource/:id", (request, response) => {
         return;
       }
       response.json(updateResource(request.params.resource, request.params.id, request.body));
-      return;
-    }
-    const permission = getResourceWritePermission(request.params.resource, "PUT", request.body ?? {});
-    const allowed = Array.isArray(permission)
-      ? permission.some((item) => hasPermission(request.user, item))
-      : permission === null || hasPermission(request.user, permission);
-    if (!allowed) {
-      response.status(403).json({ success: false, message: "你没有权限进行该操作" });
       return;
     }
     response.json(updateResource(request.params.resource, request.params.id, request.body));
