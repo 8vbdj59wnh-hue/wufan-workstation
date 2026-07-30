@@ -259,7 +259,11 @@ CREATE TABLE IF NOT EXISTS task_waves (
   submittedAt TEXT,
   completedAt TEXT,
   canceledAt TEXT,
-  cancelReason TEXT
+  cancelReason TEXT,
+  supersededAt TEXT,
+  supersededByGenerationId TEXT,
+  supersededByUserId TEXT,
+  supersedeReason TEXT
 );
 
 CREATE TABLE IF NOT EXISTS task_wave_items (
@@ -285,6 +289,24 @@ CREATE INDEX IF NOT EXISTS idx_task_waves_status ON task_waves(status);
 CREATE INDEX IF NOT EXISTS idx_task_wave_items_wave ON task_wave_items(waveId);
 CREATE INDEX IF NOT EXISTS idx_task_wave_items_task ON task_wave_items(taskId);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_task_wave_items_active_task ON task_wave_items(taskId) WHERE isActive = 1;
+
+CREATE TABLE IF NOT EXISTS wave_regeneration_runs (
+  id TEXT PRIMARY KEY,
+  createdBy TEXT NOT NULL,
+  createdAt TEXT NOT NULL,
+  completedAt TEXT,
+  status TEXT NOT NULL,
+  replacedWaveCount INTEGER NOT NULL DEFAULT 0,
+  sourceTaskCount INTEGER NOT NULL DEFAULT 0,
+  unassignedNewTaskCount INTEGER NOT NULL DEFAULT 0,
+  generatedWaveCount INTEGER NOT NULL DEFAULT 0,
+  remainingTaskCount INTEGER NOT NULL DEFAULT 0,
+  generatedWaveIds TEXT NOT NULL DEFAULT '[]',
+  errorSummary TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_wave_regeneration_runs_created ON wave_regeneration_runs(createdAt);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_wave_regeneration_runs_active ON wave_regeneration_runs(status) WHERE status = 'running';
 
 CREATE TABLE IF NOT EXISTS process_templates (
   id TEXT PRIMARY KEY,

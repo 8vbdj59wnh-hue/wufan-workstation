@@ -306,6 +306,26 @@ export async function loadTaskWaveDetail(waveId) {
   return data;
 }
 
+export async function loadTaskWaveRegenerationPreview() {
+  const response = await authFetch(`${apiBaseUrl}/api/task-waves-regeneration/preview`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success !== true) {
+    throw new Error(data.message ?? data.error ?? "重新生成范围读取失败。");
+  }
+  return data.preview;
+}
+
+export async function regenerateWaitingTaskWaves() {
+  const response = await authFetch(`${apiBaseUrl}/api/task-waves-regeneration/run`, { method: "POST" });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success !== true) {
+    throw new Error(data.message ?? data.error ?? "重新生成待执行波次失败。");
+  }
+  await loadTaskWaves();
+  state.taskWaveDetails = {};
+  return data.result;
+}
+
 async function runTaskWaveAction(waveId, action, body = {}, method = "POST") {
   const response = await authFetch(`${apiBaseUrl}/api/task-waves/${waveId}/${action}`, {
     method,

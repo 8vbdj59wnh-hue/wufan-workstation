@@ -8762,6 +8762,30 @@ button.content-template-thumb {
   margin-bottom: 18px;
 }
 
+.task-wave-management-heading {
+  margin-bottom: 8px;
+}
+
+.task-wave-regeneration-result {
+  display: flex;
+  gap: 10px 18px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 12px;
+  background: var(--soft-background, #f8fafc);
+}
+
+.task-wave-regeneration-result strong,
+.task-wave-regeneration-result ul {
+  flex-basis: 100%;
+}
+
+.task-wave-regeneration-dialog {
+  max-width: 680px;
+}
+
 .task-wave-status-tabs button {
   border: 0;
   border-bottom: 2px solid transparent;

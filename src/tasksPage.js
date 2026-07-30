@@ -17,6 +17,7 @@ import {
   launchWorkPlanDraftAsProcess,
   launchRectificationWorkForSource,
   loadTaskWaveDetail,
+  loadTaskWaveRegenerationPreview,
   loadTaskWaves,
   loadTemplates,
   normalizeSubmitRequirement,
@@ -29,6 +30,7 @@ import {
   startTaskWave,
   submitTaskWave,
   cancelTaskWave,
+  regenerateWaitingTaskWaves,
   updatePersistentResource,
   updateTaskWorkflow,
   uploadGenericFile,
@@ -182,6 +184,11 @@ let selectedTaskWaveId = null;
 let taskWaveStatus = "waiting";
 let taskWaveLoading = false;
 let taskWaveError = "";
+let taskWaveRegenerationPreview = null;
+let taskWaveRegenerationPreviewLoading = false;
+let taskWaveRegenerationOpen = false;
+let taskWaveRegenerating = false;
+let taskWaveRegenerationResult = null;
 let taskWaveClockTimer = null;
 let taskWaveClockHashListenerBound = false;
 
@@ -5741,11 +5748,31 @@ export function bindTasksPageEvents(rerender) {
       rerender();
     }, 60000);
   }
+  if (
+    activeTaskTab === "task-waves" &&
+    canCurrentUser("processes.editSteps") &&
+    taskWaveRegenerationPreview === null &&
+    !taskWaveRegenerationPreviewLoading
+  ) {
+    taskWaveRegenerationPreviewLoading = true;
+    loadTaskWaveRegenerationPreview()
+      .then((preview) => {
+        taskWaveRegenerationPreview = preview;
+      })
+      .catch((error) => {
+        taskWaveError = error.message || "重新生成范围读取失败。";
+      })
+      .finally(() => {
+        taskWaveRegenerationPreviewLoading = false;
+        rerender();
+      });
+  }
   bindActionLinkedTemplatePreviewEvents(tasksPage);
 
   document.querySelectorAll("[data-task-tab]").forEach((tab) => {
     tab.addEventListener("click", () => {
       activeTaskTab = tab.dataset.taskTab;
+      if (activeTaskTab === "task-waves") taskWaveRegenerationPreview = null;
       if (window.location.hash.replace(/^#/, "") === activeTaskTab) {
         rerender();
         return;
@@ -5785,7 +5812,21 @@ export function bindTasksPageEvents(rerender) {
       const action = button.dataset.action;
       taskWaveError = "";
       try {
-        if (action === "back-task-waves") {
+        if (action === "open-wave-regeneration") {
+          taskWaveRegenerationPreview = await loadTaskWaveRegenerationPreview();
+          taskWaveRegenerationOpen = true;
+          taskWaveRegenerationResult = null;
+        } else if (action === "close-wave-regeneration") {
+          taskWaveRegenerationOpen = false;
+        } else if (action === "confirm-wave-regeneration") {
+          taskWaveRegenerating = true;
+          rerender();
+          taskWaveRegenerationResult = await regenerateWaitingTaskWaves();
+          taskWaveRegenerationPreview = await loadTaskWaveRegenerationPreview();
+          taskWaveRegenerationOpen = false;
+          selectedTaskWaveId = null;
+          taskWaveStatus = "waiting";
+        } else if (action === "back-task-waves") {
           selectedTaskWaveId = null;
         } else if (action === "view-task-wave") {
           selectedTaskWaveId = button.dataset.waveId;
@@ -5804,6 +5845,8 @@ export function bindTasksPageEvents(rerender) {
         }
       } catch (error) {
         taskWaveError = error.message || "任务波次操作失败。";
+      } finally {
+        taskWaveRegenerating = false;
       }
       rerender();
     });
@@ -6219,7 +6262,51 @@ const taskWaveStatusLabels = {
   pending_acceptance: "待审核",
   done: "已完成",
   canceled: "已取消",
+  superseded: "已替代",
 };
+
+function renderTaskWaveRegenerationFeedback() {
+  const result = taskWaveRegenerationResult;
+  if (result === null) return "";
+  return `
+    <div class="task-wave-regeneration-result" role="status">
+      <strong>待执行波次已重新生成</strong>
+      <span>保留已完成波次：${result.preservedDoneWaveCount}个</span>
+      <span>保留执行中波次：${result.preservedDoingWaveCount}个</span>
+      <span>替代原待执行波次：${result.replacedWaveCount}个</span>
+      <span>重新组合任务：${result.regroupTaskCount}项</span>
+      <span>新纳入任务：${result.unassignedNewTaskCount}项</span>
+      <span>新生成待执行波次：${result.generatedWaveCount}个</span>
+      <span>未能进入波次任务：${result.remainingTaskCount}项</span>
+      ${(result.unassigned ?? []).length > 0 ? `<ul>${result.unassigned.map((item) => `<li>${escapeHtml(item.businessCode || item.taskId || "任务")}：${escapeHtml(item.reason)}</li>`).join("")}</ul>` : ""}
+    </div>
+  `;
+}
+
+function renderTaskWaveRegenerationDialog() {
+  if (!taskWaveRegenerationOpen || taskWaveRegenerationPreview === null) return "";
+  const preview = taskWaveRegenerationPreview;
+  return `
+    <div class="modal-backdrop">
+      <section class="modal-card task-wave-regeneration-dialog" role="dialog" aria-modal="true" aria-labelledby="wave-regeneration-title">
+        <h2 id="wave-regeneration-title">重新生成待执行波次</h2>
+        <p>系统将保留所有已完成和执行中的波次，撤销当前待执行波次的有效安排，并将其中任务与新增任务重新组合。</p>
+        <p>已完成和执行中的波次不会发生变化。</p>
+        <div class="detail-grid">
+          ${renderDetailField("保留的已完成波次", `${preview.preservedDoneWaveCount}个`)}
+          ${renderDetailField("保留的执行中波次", `${preview.preservedDoingWaveCount}个`)}
+          ${renderDetailField("将被替代的待执行波次", `${preview.waitingWaveCount}个`)}
+          ${renderDetailField("待重新组合任务", `${preview.regroupTaskCount}项`)}
+          ${renderDetailField("新增未入波次任务", `${preview.unassignedNewTaskCount}项`)}
+        </div>
+        <div class="modal-actions">
+          <button class="secondary-button" type="button" data-action="close-wave-regeneration" ${taskWaveRegenerating ? "disabled" : ""}>取消</button>
+          <button class="primary-button" type="button" data-action="confirm-wave-regeneration" ${taskWaveRegenerating || !preview.canRegenerate ? "disabled" : ""}>${taskWaveRegenerating ? "正在重新生成…" : "确认重新生成"}</button>
+        </div>
+      </section>
+    </div>
+  `;
+}
 
 function getTaskWaveMemberTasks(wave) {
   return (wave?.items ?? [])
@@ -6334,6 +6421,11 @@ function renderTaskWaveList() {
     });
   return `
     <section class="settings-section task-wave-page">
+      <div class="section-heading task-wave-management-heading">
+        <div><h2>任务波次</h2><p>按当前正式规则管理可执行任务组合</p></div>
+        ${canCurrentUser("processes.editSteps") ? `<button class="secondary-button" type="button" data-action="open-wave-regeneration" ${taskWaveRegenerationPreviewLoading || taskWaveRegenerating || taskWaveRegenerationPreview?.isRunning || taskWaveRegenerationPreview?.canRegenerate === false ? "disabled" : ""}>${taskWaveRegenerating ? "正在重新生成…" : "重新生成待执行波次"}</button>` : ""}
+      </div>
+      ${taskWaveRegenerationPreview?.canRegenerate === false ? `<p class="form-note">当前没有需要重新组合的任务</p>` : ""}
       <div class="task-wave-status-tabs">
         ${Object.entries(taskWaveStatusLabels).map(([value, label]) => `
           <button class="${taskWaveStatus === value ? "is-active" : ""}" type="button" data-wave-status="${value}">${label}</button>
@@ -6341,6 +6433,7 @@ function renderTaskWaveList() {
       </div>
       ${taskWaveLoading ? `<div class="empty-detail">正在读取任务波次…</div>` : ""}
       ${taskWaveError ? `<div class="form-error">${escapeHtml(taskWaveError)}</div>` : ""}
+      ${renderTaskWaveRegenerationFeedback()}
       <div class="task-wave-list">
         ${waves.length === 0 ? `<div class="empty-detail">暂无${taskWaveStatusLabels[taskWaveStatus]}波次</div>` : waves.map((wave) => {
           const { done, node, standard } = getTaskWaveSummary(wave);
@@ -6371,6 +6464,7 @@ function renderTaskWaveList() {
           `;
         }).join("")}
       </div>
+      ${renderTaskWaveRegenerationDialog()}
     </section>
   `;
 }
@@ -6443,6 +6537,10 @@ function renderTaskWaveDetail() {
         ${renderDetailField("波次类型", escapeHtml(getTaskWaveTypeLabel(wave)))}
         ${renderDetailField("关联模板", escapeHtml(getTaskWaveTemplateNames(wave)))}
         ${renderDetailField("任务数量", String(wave.taskCount))}
+        ${wave.status === "superseded" ? renderDetailField("被替代时间", escapeHtml(formatBusinessMinuteDateTime(wave.supersededAt, "—"))) : ""}
+        ${wave.status === "superseded" ? renderDetailField("替代原因", escapeHtml(wave.supersedeReason || "重新生成待执行波次")) : ""}
+        ${wave.status === "superseded" ? renderDetailField("重新生成操作", escapeHtml(wave.supersession?.runId ?? wave.supersededByGenerationId ?? "—")) : ""}
+        ${wave.status === "superseded" ? renderDetailField("新波次", escapeHtml((wave.supersession?.generatedWaveCodes ?? []).join("、") || "未生成新波次")) : ""}
       </div>
       <div class="task-wave-members">${members.map((entry) => renderTaskWaveMemberResult(entry, editable)).join("")}</div>
       ${taskWaveError ? `<div class="form-error">${escapeHtml(taskWaveError)}</div>` : ""}

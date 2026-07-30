@@ -29,7 +29,9 @@ import {
   readProductImportBatch,
   readRouteResource,
   readTaskWaveDetailForTaskIds,
+  readTaskWaveRegenerationPreview,
   readTaskWavesForTaskIds,
+  regenerateWaitingTaskWaves,
   saveTaskWaveDraft,
   startTaskWave,
   submitTaskWave,
@@ -1420,6 +1422,30 @@ app.get("/api/task-waves", (request, response) => {
     return;
   }
   response.json(readTaskWavesForTaskIds(getVisibleTaskIds(request.user)));
+});
+
+app.get("/api/task-waves-regeneration/preview", (request, response) => {
+  if (!isAdminUser(request.user) && !hasPermission(request.user, "processes.editSteps")) {
+    response.status(403).json({ success: false, message: "你没有权限重新生成任务波次。" });
+    return;
+  }
+  response.json({ success: true, preview: readTaskWaveRegenerationPreview() });
+});
+
+app.post("/api/task-waves-regeneration/run", (request, response) => {
+  if (!isAdminUser(request.user) && !hasPermission(request.user, "processes.editSteps")) {
+    response.status(403).json({ success: false, message: "你没有权限重新生成任务波次。" });
+    return;
+  }
+  try {
+    response.json({
+      success: true,
+      result: regenerateWaitingTaskWaves({ userId: getUserPersonId(request.user) }),
+    });
+  } catch (error) {
+    console.error("重新生成待执行波次失败", error);
+    response.status(400).json({ success: false, message: error.message || "重新生成待执行波次失败。" });
+  }
 });
 
 app.get("/api/task-waves/:id", (request, response) => {

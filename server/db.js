@@ -1414,7 +1414,11 @@ function runLightweightMigrations() {
       submittedAt TEXT,
       completedAt TEXT,
       canceledAt TEXT,
-      cancelReason TEXT
+      cancelReason TEXT,
+      supersededAt TEXT,
+      supersededByGenerationId TEXT,
+      supersededByUserId TEXT,
+      supersedeReason TEXT
     );
     CREATE TABLE IF NOT EXISTS task_wave_items (
       id TEXT PRIMARY KEY,
@@ -1438,6 +1442,22 @@ function runLightweightMigrations() {
     CREATE INDEX IF NOT EXISTS idx_task_wave_items_wave ON task_wave_items(waveId);
     CREATE INDEX IF NOT EXISTS idx_task_wave_items_task ON task_wave_items(taskId);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_task_wave_items_active_task ON task_wave_items(taskId) WHERE isActive = 1;
+    CREATE TABLE IF NOT EXISTS wave_regeneration_runs (
+      id TEXT PRIMARY KEY,
+      createdBy TEXT NOT NULL,
+      createdAt TEXT NOT NULL,
+      completedAt TEXT,
+      status TEXT NOT NULL,
+      replacedWaveCount INTEGER NOT NULL DEFAULT 0,
+      sourceTaskCount INTEGER NOT NULL DEFAULT 0,
+      unassignedNewTaskCount INTEGER NOT NULL DEFAULT 0,
+      generatedWaveCount INTEGER NOT NULL DEFAULT 0,
+      remainingTaskCount INTEGER NOT NULL DEFAULT 0,
+      generatedWaveIds TEXT NOT NULL DEFAULT '[]',
+      errorSummary TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_wave_regeneration_runs_created ON wave_regeneration_runs(createdAt);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_wave_regeneration_runs_active ON wave_regeneration_runs(status) WHERE status = 'running';
   `);
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS products (
@@ -1806,6 +1826,10 @@ function runLightweightMigrations() {
   ensureColumn("task_waves", "waveDurationMinutes", "INTEGER");
   ensureColumn("task_waves", "deadlineAt", "TEXT");
   ensureColumn("task_waves", "submittedAt", "TEXT");
+  ensureColumn("task_waves", "supersededAt", "TEXT");
+  ensureColumn("task_waves", "supersededByGenerationId", "TEXT");
+  ensureColumn("task_waves", "supersededByUserId", "TEXT");
+  ensureColumn("task_waves", "supersedeReason", "TEXT");
   ensureColumn("tasks", "submitType", "TEXT");
   ensureColumn("tasks", "submitDescription", "TEXT");
   ensureColumn("tasks", "submitFields", "TEXT");
@@ -2193,10 +2217,10 @@ function createTaskWaveInTransaction(database, queue, tasks, templatePriorityEna
     .prepare(
       `INSERT INTO task_waves (
          id, businessCode, taskTemplateId, processTemplateId, processNodeId, executorId,
-         templateGroupKey, waveType, taskCount, status, unitDurationMinutes, createdAt, updatedAt
+         templateGroupKey, waveType, taskCount, status, unitDurationMinutes, waveDurationMinutes, createdAt, updatedAt
        ) VALUES (
          @id, @businessCode, @taskTemplateId, @processTemplateId, @processNodeId, @executorId,
-         @templateGroupKey, @waveType, @taskCount, 'waiting', @unitDurationMinutes, @createdAt, @createdAt
+         @templateGroupKey, @waveType, @taskCount, 'waiting', @unitDurationMinutes, @waveDurationMinutes, @createdAt, @createdAt
        )`,
     )
     .run({
@@ -2210,6 +2234,7 @@ function createTaskWaveInTransaction(database, queue, tasks, templatePriorityEna
       waveType,
       taskCount: tasks.length,
       unitDurationMinutes,
+      waveDurationMinutes: unitDurationMinutes === null ? null : unitDurationMinutes * tasks.length,
       createdAt,
     });
   const insertWaveItem = database.prepare(
@@ -2236,10 +2261,8 @@ function createTaskWaveInTransaction(database, queue, tasks, templatePriorityEna
   return { id: waveId, businessCode, waveType, templateGroupKey, taskCount: tasks.length };
 }
 
-export function generateEligibleTaskWaves() {
-  const database = getDatabase();
-  const generate = database.transaction(() => {
-    const candidates = database
+function generateEligibleTaskWavesInTransaction(database) {
+  const candidates = database
       .prepare(
         `SELECT
            t.*,
@@ -2280,8 +2303,8 @@ export function generateEligibleTaskWaves() {
       })
       .sort(compareTaskWaveCandidates);
 
-    const queues = new Map();
-    for (const task of candidates) {
+  const queues = new Map();
+  for (const task of candidates) {
       const queueKey = [task.waveTaskTemplateId, task.waveProcessTemplateId, task.processNodeId, task.executorId].join("\u001f");
       if (!queues.has(queueKey)) {
         queues.set(queueKey, {
@@ -2297,9 +2320,10 @@ export function generateEligibleTaskWaves() {
       queues.get(queueKey).tasks.push(task);
     }
 
-    const createdAt = new Date().toISOString();
-    const createdWaves = [];
-    for (const queue of queues.values()) {
+  const createdAt = new Date().toISOString();
+  const createdWaves = [];
+  const assignedTaskIds = new Set();
+  for (const queue of queues.values()) {
       if (!Number.isInteger(queue.waveSize) || queue.waveSize < 2 || queue.waveSize > 100) continue;
       const remaining = new Set(queue.tasks.map((task) => task.id));
       if (queue.templatePriority) {
@@ -2313,6 +2337,7 @@ export function generateEligibleTaskWaves() {
           for (let index = 0; index + queue.waveSize <= groupTasks.length; index += queue.waveSize) {
             const waveTasks = groupTasks.slice(index, index + queue.waveSize);
             createdWaves.push(createTaskWaveInTransaction(database, queue, waveTasks, true, createdAt));
+            waveTasks.forEach((task) => assignedTaskIds.add(task.id));
             waveTasks.forEach((task) => remaining.delete(task.id));
           }
         }
@@ -2321,11 +2346,249 @@ export function generateEligibleTaskWaves() {
       for (let index = 0; index + queue.waveSize <= remainingTasks.length; index += queue.waveSize) {
         const waveTasks = remainingTasks.slice(index, index + queue.waveSize);
         createdWaves.push(createTaskWaveInTransaction(database, queue, waveTasks, queue.templatePriority, createdAt));
+        waveTasks.forEach((task) => assignedTaskIds.add(task.id));
       }
+  }
+  const remainingTasks = candidates.filter((task) => !assignedTaskIds.has(task.id));
+  return {
+    createdCount: createdWaves.length,
+    createdWaves,
+    candidateCount: candidates.length,
+    assignedTaskCount: assignedTaskIds.size,
+    remainingTaskCount: remainingTasks.length,
+    remainingTasks: remainingTasks.map((task) => ({
+      taskId: task.id,
+      businessCode: task.businessCode ?? "",
+      reason: "当前同组任务未达到波次数量",
+    })),
+  };
+}
+
+export function generateEligibleTaskWaves() {
+  const database = getDatabase();
+  return database.transaction(() => generateEligibleTaskWavesInTransaction(database)).immediate();
+}
+
+function countEligibleUnassignedWaveTasks(database) {
+  return Number(
+    database
+      .prepare(
+        `SELECT COUNT(*) AS count
+         FROM tasks t
+         JOIN process_instances pi ON pi.id = t.processInstanceId
+         JOIN process_template_nodes ptn ON ptn.id = t.processNodeId
+         JOIN task_templates tt ON tt.id = pi.taskTemplateId
+         JOIN process_templates pt ON pt.id = pi.templateId
+         LEFT JOIN task_wave_items twi ON twi.taskId = t.id AND twi.isActive = 1
+         WHERE t.status = 'todo'
+           AND COALESCE(t.processInstanceId, '') <> ''
+           AND COALESCE(t.processNodeId, '') <> ''
+           AND COALESCE(t.executorId, '') <> ''
+           AND COALESCE(t.taskType, 'execution') <> 'review'
+           AND COALESCE(ptn.stepType, 'execution') = 'execution'
+           AND ptn.waveEnabled = 1
+           AND COALESCE(ptn.status, 'active') <> 'deleted'
+           AND COALESCE(pi.status, '') NOT IN ('done', 'completed', 'canceled', 'cancelled', 'stopped', 'terminated')
+           AND COALESCE(tt.status, 'active') <> 'deleted'
+           AND COALESCE(pt.status, 'active') <> 'deleted'
+           AND twi.taskId IS NULL`,
+      )
+      .get()?.count ?? 0,
+  );
+}
+
+export function readTaskWaveRegenerationPreview() {
+  const database = getDatabase();
+  const countStatus = database.prepare("SELECT COUNT(*) AS count FROM task_waves WHERE status = @status");
+  const waitingWaveCount = Number(countStatus.get({ status: "waiting" })?.count ?? 0);
+  const sourceTaskCount = Number(
+    database
+      .prepare(
+        `SELECT COUNT(DISTINCT twi.taskId) AS count
+         FROM task_wave_items twi
+         JOIN task_waves tw ON tw.id = twi.waveId
+         WHERE tw.status = 'waiting' AND twi.isActive = 1`,
+      )
+      .get()?.count ?? 0,
+  );
+  const unassignedNewTaskCount = countEligibleUnassignedWaveTasks(database);
+  const isRunning =
+    database.prepare("SELECT 1 FROM wave_regeneration_runs WHERE status = 'running' LIMIT 1").get() !== undefined;
+  return {
+    preservedDoneWaveCount: Number(countStatus.get({ status: "done" })?.count ?? 0),
+    preservedDoingWaveCount: Number(countStatus.get({ status: "doing" })?.count ?? 0),
+    waitingWaveCount,
+    sourceTaskCount,
+    unassignedNewTaskCount,
+    regroupTaskCount: sourceTaskCount + unassignedNewTaskCount,
+    canRegenerate: !isRunning && (waitingWaveCount > 0 || unassignedNewTaskCount > 0),
+    isRunning,
+  };
+}
+
+export function regenerateWaitingTaskWaves(options = {}) {
+  const database = getDatabase();
+  const createdBy = String(options.userId ?? "").trim();
+  if (createdBy === "") throw new Error("无法确认本次重新生成的操作人。");
+  const regenerate = database.transaction(() => {
+    const now = new Date().toISOString();
+    const latestCompleted = database
+      .prepare(
+        `SELECT completedAt
+         FROM wave_regeneration_runs
+         WHERE status = 'completed' AND completedAt IS NOT NULL
+         ORDER BY completedAt DESC LIMIT 1`,
+      )
+      .get();
+    if (
+      latestCompleted?.completedAt &&
+      Date.now() - new Date(latestCompleted.completedAt).getTime() < 5000
+    ) {
+      throw new Error("待执行波次刚刚完成重新生成，请刷新后查看。");
     }
-    return { createdCount: createdWaves.length, createdWaves, candidateCount: candidates.length };
+    if (database.prepare("SELECT 1 FROM wave_regeneration_runs WHERE status = 'running' LIMIT 1").get()) {
+      throw new Error("任务波次正在重新生成，请稍候。");
+    }
+
+    const preview = readTaskWaveRegenerationPreview();
+    if (!preview.canRegenerate) throw new Error("当前没有需要重新组合的任务。");
+    const waitingWaves = database
+      .prepare("SELECT * FROM task_waves WHERE status = 'waiting' ORDER BY createdAt, id")
+      .all();
+    const invalidMember = database
+      .prepare(
+        `SELECT t.businessCode, t.status
+         FROM task_wave_items twi
+         JOIN task_waves tw ON tw.id = twi.waveId
+         JOIN tasks t ON t.id = twi.taskId
+         WHERE tw.status = 'waiting' AND twi.isActive = 1 AND t.status <> 'todo'
+         LIMIT 1`,
+      )
+      .get();
+    if (invalidMember !== undefined) {
+      throw new Error(`波次成员 ${invalidMember.businessCode || "任务"} 状态已变化，请刷新后重试。`);
+    }
+
+    const runId = `wave-regeneration-${crypto.randomUUID()}`;
+    database
+      .prepare(
+        `INSERT INTO wave_regeneration_runs (
+           id, createdBy, createdAt, status, replacedWaveCount, sourceTaskCount, unassignedNewTaskCount
+         ) VALUES (
+           @id, @createdBy, @createdAt, 'running', @replacedWaveCount, @sourceTaskCount, @unassignedNewTaskCount
+         )`,
+      )
+      .run({
+        id: runId,
+        createdBy,
+        createdAt: now,
+        replacedWaveCount: waitingWaves.length,
+        sourceTaskCount: preview.sourceTaskCount,
+        unassignedNewTaskCount: preview.unassignedNewTaskCount,
+      });
+
+    database
+      .prepare(
+        `UPDATE task_waves
+         SET status = 'superseded',
+             supersededAt = @now,
+             supersededByGenerationId = @runId,
+             supersededByUserId = @createdBy,
+             supersedeReason = '重新生成待执行波次',
+             updatedAt = @now
+         WHERE status = 'waiting'`,
+      )
+      .run({ now, runId, createdBy });
+    database
+      .prepare(
+        `UPDATE task_wave_items
+         SET isActive = 0, removedAt = @now, removeReason = '重新生成待执行波次', updatedAt = @now
+         WHERE isActive = 1
+           AND waveId IN (SELECT id FROM task_waves WHERE supersededByGenerationId = @runId)`,
+      )
+      .run({ now, runId });
+
+    const generated = generateEligibleTaskWavesInTransaction(database);
+    const expectedPoolCount = preview.sourceTaskCount + preview.unassignedNewTaskCount;
+    const excludedTaskCount = Math.max(0, expectedPoolCount - generated.candidateCount);
+    const remainingTaskCount = generated.remainingTaskCount + excludedTaskCount;
+    const unassigned = [
+      ...generated.remainingTasks,
+      ...(excludedTaskCount > 0
+        ? [{ taskId: "", businessCode: "", reason: `${excludedTaskCount}项任务当前已不符合正式组波条件` }]
+        : []),
+    ];
+    database
+      .prepare(
+        `UPDATE wave_regeneration_runs
+         SET completedAt = @completedAt,
+             status = 'completed',
+             generatedWaveCount = @generatedWaveCount,
+             remainingTaskCount = @remainingTaskCount,
+             generatedWaveIds = @generatedWaveIds
+         WHERE id = @id`,
+      )
+      .run({
+        id: runId,
+        completedAt: now,
+        generatedWaveCount: generated.createdCount,
+        remainingTaskCount,
+        generatedWaveIds: JSON.stringify(generated.createdWaves.map((wave) => wave.id)),
+      });
+    return {
+      runId,
+      ...preview,
+      replacedWaveCount: waitingWaves.length,
+      regroupTaskCount: expectedPoolCount,
+      generatedWaveCount: generated.createdCount,
+      generatedWaves: generated.createdWaves,
+      remainingTaskCount,
+      unassigned,
+    };
   });
-  return generate.immediate();
+  try {
+    return regenerate.immediate();
+  } catch (error) {
+    const failedAt = new Date().toISOString();
+    database
+      .prepare(
+        `INSERT INTO wave_regeneration_runs (
+           id, createdBy, createdAt, completedAt, status, errorSummary
+         ) VALUES (
+           @id, @createdBy, @createdAt, @completedAt, 'failed', @errorSummary
+         )`,
+      )
+      .run({
+        id: `wave-regeneration-${crypto.randomUUID()}`,
+        createdBy,
+        createdAt: failedAt,
+        completedAt: failedAt,
+        errorSummary: String(error?.message ?? "重新生成失败"),
+      });
+    throw error;
+  }
+}
+
+function getTaskWaveSupersessionInfo(database, wave) {
+  if (wave?.status !== "superseded" || !wave.supersededByGenerationId) return null;
+  const run = database
+    .prepare("SELECT * FROM wave_regeneration_runs WHERE id = @id LIMIT 1")
+    .get({ id: wave.supersededByGenerationId });
+  if (run === undefined) return null;
+  let generatedWaveIds = [];
+  try {
+    generatedWaveIds = JSON.parse(run.generatedWaveIds || "[]");
+  } catch {
+    generatedWaveIds = [];
+  }
+  const generatedWaveCodes =
+    generatedWaveIds.length === 0
+      ? []
+      : database
+          .prepare(`SELECT businessCode FROM task_waves WHERE id IN (${generatedWaveIds.map(() => "?").join(", ")}) ORDER BY businessCode`)
+          .all(...generatedWaveIds)
+          .map((item) => item.businessCode);
+  return { runId: run.id, createdAt: run.createdAt, generatedWaveCodes };
 }
 
 export function readTaskWavesForTaskIds(taskIds = []) {
@@ -2336,18 +2599,31 @@ export function readTaskWavesForTaskIds(taskIds = []) {
     .prepare(
       `SELECT DISTINCT tw.*
        FROM task_waves tw
-       JOIN task_wave_items twi ON twi.waveId = tw.id AND twi.isActive = 1
+       JOIN task_wave_items twi ON twi.waveId = tw.id
+        AND (twi.isActive = 1 OR tw.status = 'superseded')
        WHERE twi.taskId IN (${placeholders})
        ORDER BY tw.createdAt DESC, tw.id DESC`,
     )
     .all(...visibleTaskIds);
   const readTaskIds = getDatabase().prepare(
-    "SELECT taskId FROM task_wave_items WHERE waveId = @waveId AND isActive = 1 ORDER BY sortOrder, id",
+    `SELECT taskId
+     FROM task_wave_items
+     WHERE waveId = @waveId
+       AND (isActive = 1 OR @includeHistory = 1)
+     ORDER BY sortOrder, id`,
   );
+  const database = getDatabase();
   return waves.map((wave) => {
-    const taskIds = readTaskIds.all({ waveId: wave.id }).map((item) => item.taskId);
+    const taskIds = readTaskIds
+      .all({ waveId: wave.id, includeHistory: wave.status === "superseded" ? 1 : 0 })
+      .map((item) => item.taskId);
     const tasks = taskIds.map((taskId) => readExistingItem("tasks", taskId)).filter(Boolean);
-    return { ...wave, ...getTaskWaveTiming(wave, tasks), taskIds };
+    return {
+      ...wave,
+      ...getTaskWaveTiming(wave, tasks),
+      taskIds,
+      supersession: getTaskWaveSupersessionInfo(database, wave),
+    };
   });
 }
 
@@ -2357,8 +2633,14 @@ export function readTaskWaveDetailForTaskIds(waveId, taskIds = []) {
   const wave = getDatabase().prepare("SELECT * FROM task_waves WHERE id = @id LIMIT 1").get({ id: waveId });
   if (wave === undefined) return null;
   const allItems = getDatabase()
-    .prepare("SELECT * FROM task_wave_items WHERE waveId = @waveId AND isActive = 1 ORDER BY sortOrder, id")
-    .all({ waveId })
+    .prepare(
+      `SELECT *
+       FROM task_wave_items
+       WHERE waveId = @waveId
+         AND (isActive = 1 OR @includeHistory = 1)
+       ORDER BY sortOrder, id`,
+    )
+    .all({ waveId, includeHistory: wave.status === "superseded" ? 1 : 0 })
     .map((item) => {
       let resultDraft = {};
       try {
@@ -2371,7 +2653,12 @@ export function readTaskWaveDetailForTaskIds(waveId, taskIds = []) {
   const items = allItems.filter((item) => visibleTaskIds.has(item.taskId));
   if (items.length === 0) return null;
   const tasks = allItems.map((item) => readExistingItem("tasks", item.taskId)).filter(Boolean);
-  return { ...wave, ...getTaskWaveTiming(wave, tasks), items };
+  return {
+    ...wave,
+    ...getTaskWaveTiming(wave, tasks),
+    items,
+    supersession: getTaskWaveSupersessionInfo(getDatabase(), wave),
+  };
 }
 
 const activeTaskWaveStatuses = new Set(["waiting", "doing", "pending_acceptance"]);
