@@ -6517,7 +6517,7 @@ function renderTaskWaveList() {
               <div class="task-wave-card-members">
                 <div class="task-wave-card-members-heading">
                   <strong>本波次任务 · ${tasks.length}项</strong>
-                  ${tasks.length > 3 ? `<span>向下滚动查看更多任务</span>` : ""}
+                  ${tasks.length > 3 ? `<span>左右滑动查看更多任务</span>` : ""}
                 </div>
                 <div class="task-wave-card-members-scroll">
                   ${tasks.length === 0 ? `<div class="empty-detail">暂无可查看的成员任务</div>` : `<div class="task-card-grid">${tasks.map((task) => renderTaskCard(task)).join("")}</div>`}
