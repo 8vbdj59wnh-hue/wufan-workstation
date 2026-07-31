@@ -1247,7 +1247,7 @@ app.post("/api/products/import/:id/commit", requirePermission("products.create")
 });
 
 app.post("/api/products/erp-v2/parse", requirePermission("products.create"), (request, response) => {
-  uploadProductImport.single("file")(request, response, (error) => {
+  uploadProductImport.single("file")(request, response, async (error) => {
     if (error !== undefined) {
       response.status(error.code === "LIMIT_FILE_SIZE" ? 413 : 400).json({
         success: false,
@@ -1260,7 +1260,7 @@ app.post("/api/products/erp-v2/parse", requirePermission("products.create"), (re
       return;
     }
     try {
-      const result = parseErpV2Import({
+      const result = await parseErpV2Import({
         filePath: request.file.path,
         originalFilename: normalizeUploadedFileName(request.file.originalname),
         importType: String(request.body?.importType ?? ""),

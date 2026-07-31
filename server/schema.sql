@@ -624,6 +624,8 @@ CREATE TABLE IF NOT EXISTS erp_skus (
   barcode TEXT,
   unit TEXT,
   erpStatus TEXT,
+  mainImage TEXT,
+  galleryImages TEXT,
   firstSeenBatchId TEXT NOT NULL,
   lastSeenBatchId TEXT NOT NULL,
   currentState TEXT NOT NULL DEFAULT 'active',

@@ -25,6 +25,8 @@ export function listPendingErpSkus(search = "") {
       s.barcode,
       s.unit,
       s.erpStatus,
+      s.mainImage,
+      s.galleryImages,
       s.firstSeenBatchId,
       s.lastSeenBatchId,
       s.currentState,
@@ -82,13 +84,21 @@ export function createProductFromErpSku(erpSkuId) {
     `).get(normalizedSku);
     if (occupiedMapping) throw new Error("该SKU已被其他ERP映射占用，无法重复创建产品。");
 
+    let galleryImages = [];
+    try {
+      const parsedGallery = JSON.parse(sku.galleryImages || "[]");
+      if (Array.isArray(parsedGallery)) galleryImages = parsedGallery.filter(Boolean);
+    } catch {
+      galleryImages = [];
+    }
+    const mainImage = String(sku.mainImage ?? "").trim() || galleryImages[0] || null;
     const now = new Date().toISOString();
     const product = createResource("products", {
       id: stableId("product", normalizedSku),
       skuCode: sku.merchantSkuCode,
       name: String(sku.goodsName ?? "").trim() || sku.merchantSkuCode,
-      mainImage: null,
-      galleryImages: [],
+      mainImage,
+      galleryImages,
       brand: sku.brand || null,
       category: sku.category || null,
       specification: sku.specificationName || null,

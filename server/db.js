@@ -1735,6 +1735,8 @@ function runLightweightMigrations() {
   ensureColumn("sales_links", "missingAt", "TEXT");
   ensureColumn("sales_link_skus", "currentState", "TEXT NOT NULL DEFAULT 'active'");
   ensureColumn("sales_link_skus", "missingAt", "TEXT");
+  ensureColumn("erp_skus", "mainImage", "TEXT");
+  ensureColumn("erp_skus", "galleryImages", "TEXT");
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS erp_skus (
       id TEXT PRIMARY KEY,
@@ -1744,6 +1746,8 @@ function runLightweightMigrations() {
       barcode TEXT,
       unit TEXT,
       erpStatus TEXT,
+      mainImage TEXT,
+      galleryImages TEXT,
       firstSeenBatchId TEXT NOT NULL,
       lastSeenBatchId TEXT NOT NULL,
       currentState TEXT NOT NULL DEFAULT 'active',

@@ -4,6 +4,7 @@ import path from "node:path";
 import * as XLSX from "xlsx";
 import { getDatabase, uploadsDir } from "./db.js";
 import { generateErpFactSnapshot, readErpFactSnapshot } from "./erpFactSnapshots.js";
+import { parseProductWorkbook } from "./productImport.js";
 import { reconcileErpSyncRun } from "./erpReconciliation.js";
 
 const stagingRoot = path.join(uploadsDir, "product-v2-imports");
@@ -783,7 +784,7 @@ function buildPlatformPreview(rows, { platform = "", shop = "", status = "", que
   };
 }
 
-export function parseErpV2Import({
+export async function parseErpV2Import({
   filePath,
   originalFilename,
   importType,
@@ -818,7 +819,15 @@ export function parseErpV2Import({
   if (missing.length) throw new Error(`文件缺少必要字段：${missing.join("、")}`);
   const now = new Date().toISOString();
   const batchId = `erp-v2-${importType}-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
-  const staging = { ...parsed, importType, fileHash, originalFilename, parsedAt: now };
+  let records = parsed.records;
+  if (importType === "goods_info") {
+    const imageResult = await parseProductWorkbook(filePath, batchId, originalFilename);
+    records = parsed.records.map((item, index) => ({
+      ...item,
+      imageUrls: imageResult.staging.imageUrlsByRow[index + 1] ?? [],
+    }));
+  }
+  const staging = { ...parsed, records, importType, fileHash, originalFilename, parsedAt: now };
   writeStaging(batchId, staging);
   const validation = importType === "goods_info"
     ? goodsInfoValidation(staging)
@@ -1087,18 +1096,24 @@ function commitGoodsInfo(batch, staging) {
         goods = database.prepare("SELECT * FROM erp_goods WHERE lower(goodsCode)=lower(?)").get(row.goodsCode)
           ?? (row.existingGoodsId ? database.prepare("SELECT * FROM erp_goods WHERE id=?").get(row.existingGoodsId) : null);
       }
+      const stagingItem = staging.records.find((item) => item.rowNumber === row.rowNumber);
+      const imageUrls = Array.isArray(stagingItem?.imageUrls)
+        ? stagingItem.imageUrls.map((item) => value(item)).filter(Boolean)
+        : [];
       const skuId = id("erp-sku", lower(row.merchantSkuCode));
       database.prepare(`
         INSERT INTO erp_skus (
           id,merchantSkuCode,erpGoodsId,specificationName,barcode,unit,erpStatus,
-          firstSeenBatchId,lastSeenBatchId,currentState,createdAt,updatedAt
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+          mainImage,galleryImages,firstSeenBatchId,lastSeenBatchId,currentState,createdAt,updatedAt
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(merchantSkuCode) DO UPDATE SET
           erpGoodsId=excluded.erpGoodsId,
           specificationName=excluded.specificationName,
           barcode=excluded.barcode,
           unit=excluded.unit,
           erpStatus=excluded.erpStatus,
+          mainImage=COALESCE(excluded.mainImage,erp_skus.mainImage),
+          galleryImages=COALESCE(excluded.galleryImages,erp_skus.galleryImages),
           lastSeenBatchId=excluded.lastSeenBatchId,
           currentState='active',
           updatedAt=excluded.updatedAt
@@ -1110,6 +1125,8 @@ function commitGoodsInfo(batch, staging) {
         value(record["主条码"]) || value(record["条码"]) || null,
         value(record["基本单位"]) || value(record["单位"]) || null,
         value(record["单品状态"]) || null,
+        imageUrls[0] || null,
+        imageUrls.length > 0 ? JSON.stringify(imageUrls.slice(1)) : null,
         batch.id,
         batch.id,
         "active",
