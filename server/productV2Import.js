@@ -4,6 +4,7 @@ import path from "node:path";
 import * as XLSX from "xlsx";
 import { getDatabase, uploadsDir } from "./db.js";
 import { generateErpFactSnapshot, readErpFactSnapshot } from "./erpFactSnapshots.js";
+import { reconcileErpSyncRun } from "./erpReconciliation.js";
 
 const stagingRoot = path.join(uploadsDir, "product-v2-imports");
 const goodsInfoRequiredHeaders = ["货品编号", "商家编码", "货品名称"];
@@ -120,8 +121,10 @@ function normalizeBusinessDate(raw) {
 function decodeSyncRun(row) {
   if (!row) return null;
   let errorSummary = [];
+  let reconciliationSummary = {};
   try { errorSummary = JSON.parse(row.errorSummary || "[]"); } catch {}
-  return { ...row, errorSummary };
+  try { reconciliationSummary = JSON.parse(row.reconciliationSummaryJson || "{}"); } catch {}
+  return { ...row, errorSummary, reconciliationSummary };
 }
 
 function getSyncRunRow(syncRunId) {
@@ -269,8 +272,17 @@ export function attachErpImportBatchToSyncRun(syncRunId, batchId) {
 }
 
 export function recalculateErpSyncRun(syncRunId) {
-  const run = getDatabase().transaction(() => recalculateSyncRunInTransaction(syncRunId)).immediate();
-  if (run.status === "completed" && run.snapshotStatus !== "completed") {
+  let run = getDatabase().transaction(() => recalculateSyncRunInTransaction(syncRunId)).immediate();
+  if (run.status === "completed" && run.reconciliationStatus !== "completed") {
+    try {
+      reconcileErpSyncRun(run.id);
+    } catch (error) {
+      console.error(`ERP同步 ${run.syncCode} 缺失记录对账失败`, error);
+      return decodeSyncRun(getSyncRunRow(syncRunId));
+    }
+    run = decodeSyncRun(getSyncRunRow(syncRunId));
+  }
+  if (run.status === "completed" && run.reconciliationStatus === "completed" && run.snapshotStatus !== "completed") {
     try {
       generateErpFactSnapshot(run.id);
     } catch (error) {
@@ -885,7 +897,13 @@ function commitInventory(batch, staging) {
         updatedAt: now,
       };
       database.prepare(`
-        INSERT INTO erp_goods VALUES (@id,@goodsCode,@goodsName,@shortName,@brand,@category,@productType,@primarySupplier,@supplierGoodsCode,@sourceCreatedAt,@lastImportedAt,@createdAt,@updatedAt)
+        INSERT INTO erp_goods (
+          id,goodsCode,goodsName,shortName,brand,category,productType,primarySupplier,supplierGoodsCode,
+          sourceCreatedAt,lastImportedAt,createdAt,updatedAt
+        ) VALUES (
+          @id,@goodsCode,@goodsName,@shortName,@brand,@category,@productType,@primarySupplier,@supplierGoodsCode,
+          @sourceCreatedAt,@lastImportedAt,@createdAt,@updatedAt
+        )
         ON CONFLICT(goodsCode) DO UPDATE SET goodsName=excluded.goodsName,shortName=excluded.shortName,brand=excluded.brand,
           category=excluded.category,productType=excluded.productType,primarySupplier=excluded.primarySupplier,
           supplierGoodsCode=excluded.supplierGoodsCode,sourceCreatedAt=excluded.sourceCreatedAt,lastImportedAt=excluded.lastImportedAt,updatedAt=excluded.updatedAt
@@ -913,11 +931,19 @@ function commitInventory(batch, staging) {
       };
       const mappingId = id("product-erp-map", row.systemProduct.id);
       database.prepare(`
-        INSERT INTO product_erp_mappings (id,productId,erpGoodsId,merchantSkuCode,matchMethod,sourceBatchId,latestStateJson,createdAt,updatedAt)
-        VALUES (?,?,?,?,?,?,?,?,?)
+        INSERT INTO product_erp_mappings (
+          id,productId,erpGoodsId,merchantSkuCode,matchMethod,sourceBatchId,latestStateJson,
+          lastSeenInventoryBatchId,inventoryCurrentState,inventoryMissingAt,createdAt,updatedAt
+        )
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(productId) DO UPDATE SET erpGoodsId=excluded.erpGoodsId,merchantSkuCode=excluded.merchantSkuCode,
-          matchMethod=excluded.matchMethod,sourceBatchId=excluded.sourceBatchId,latestStateJson=excluded.latestStateJson,updatedAt=excluded.updatedAt
-      `).run(mappingId, row.systemProduct.id, goods.id, row.merchantSkuCode, "sku_code", batch.id, JSON.stringify(latestState), now, now);
+          matchMethod=excluded.matchMethod,latestStateJson=excluded.latestStateJson,
+          lastSeenInventoryBatchId=excluded.lastSeenInventoryBatchId,inventoryCurrentState='active',
+          inventoryMissingAt=NULL,updatedAt=excluded.updatedAt
+      `).run(
+        mappingId, row.systemProduct.id, goods.id, row.merchantSkuCode, "sku_code", null, JSON.stringify(latestState),
+        batch.id, "active", null, now, now,
+      );
       stats.matched += 1;
     }
   });
@@ -953,6 +979,9 @@ function commitGoodsInfo(batch, staging) {
           goodsCode: row.goodsCode,
           ...row.goodsFields,
           lastImportedAt: now,
+          lastSeenBatchId: batch.id,
+          currentState: "active",
+          missingAt: null,
           createdAt: goods?.createdAt ?? now,
           updatedAt: now,
         };
@@ -960,12 +989,19 @@ function commitGoodsInfo(batch, staging) {
           database.prepare(`
             UPDATE erp_goods SET goodsCode=@goodsCode,goodsName=@goodsName,shortName=@shortName,brand=@brand,
               category=@category,productType=@productType,primarySupplier=@primarySupplier,
-              supplierGoodsCode=@supplierGoodsCode,sourceCreatedAt=@sourceCreatedAt,lastImportedAt=@lastImportedAt,updatedAt=@updatedAt
+              supplierGoodsCode=@supplierGoodsCode,sourceCreatedAt=@sourceCreatedAt,lastImportedAt=@lastImportedAt,
+              lastSeenBatchId=@lastSeenBatchId,currentState=@currentState,missingAt=@missingAt,updatedAt=@updatedAt
             WHERE id=@id
           `).run(nextGoods);
         } else {
           database.prepare(`
-            INSERT INTO erp_goods VALUES (@id,@goodsCode,@goodsName,@shortName,@brand,@category,@productType,@primarySupplier,@supplierGoodsCode,@sourceCreatedAt,@lastImportedAt,@createdAt,@updatedAt)
+            INSERT INTO erp_goods (
+              id,goodsCode,goodsName,shortName,brand,category,productType,primarySupplier,supplierGoodsCode,
+              sourceCreatedAt,lastImportedAt,lastSeenBatchId,currentState,missingAt,createdAt,updatedAt
+            ) VALUES (
+              @id,@goodsCode,@goodsName,@shortName,@brand,@category,@productType,@primarySupplier,@supplierGoodsCode,
+              @sourceCreatedAt,@lastImportedAt,@lastSeenBatchId,@currentState,@missingAt,@createdAt,@updatedAt
+            )
           `).run(nextGoods);
         }
         if (!goods) stats.created += 1;
@@ -988,12 +1024,13 @@ function commitGoodsInfo(batch, staging) {
       database.prepare(`
         INSERT INTO product_erp_mappings (
           id,productId,erpGoodsId,merchantSkuCode,specificationName,unit,barcode,erpStatus,
-          matchMethod,sourceBatchId,latestStateJson,createdAt,updatedAt
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+          matchMethod,sourceBatchId,latestStateJson,currentState,missingAt,createdAt,updatedAt
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(productId) DO UPDATE SET
           erpGoodsId=excluded.erpGoodsId,merchantSkuCode=excluded.merchantSkuCode,
           specificationName=excluded.specificationName,unit=excluded.unit,barcode=excluded.barcode,erpStatus=excluded.erpStatus,
-          matchMethod=excluded.matchMethod,sourceBatchId=excluded.sourceBatchId,updatedAt=excluded.updatedAt
+          matchMethod=excluded.matchMethod,sourceBatchId=excluded.sourceBatchId,
+          currentState='active',missingAt=NULL,updatedAt=excluded.updatedAt
       `).run(
         mappingId,
         row.systemProduct.id,
@@ -1006,6 +1043,8 @@ function commitGoodsInfo(batch, staging) {
         existingMapping ? existingMapping.matchMethod : "sku_code",
         batch.id,
         JSON.stringify(latestState),
+        "active",
+        null,
         existingMapping?.createdAt ?? now,
         now,
       );
@@ -1072,13 +1111,21 @@ function commitPlatform(batch, staging, shopMappings) {
         category: value(staging.records.find((item) => item.rowNumber === first.rowNumber)?.record["平台类目"]) || null,
         identityStrength: first.platformGoodsId ? "strong" : "weak",
         lastModifiedAt: value(staging.records.find((item) => item.rowNumber === first.rowNumber)?.record["最后修改时间"]) || null,
-        lastSeenBatchId: batch.id, lastImportedAt: now, createdAt: link?.createdAt ?? now, updatedAt: now,
+        lastSeenBatchId: batch.id, currentState: "active", missingAt: null,
+        lastImportedAt: now, createdAt: link?.createdAt ?? now, updatedAt: now,
       };
       database.prepare(`
-        INSERT INTO sales_links VALUES (@id,@shopId,@platformGoodsId,@platformGoodsCode,@title,@canonicalUrl,@rawUrl,@status,@activityStatus,@category,@identityStrength,@lastModifiedAt,@lastSeenBatchId,@lastImportedAt,@createdAt,@updatedAt)
+        INSERT INTO sales_links (
+          id,shopId,platformGoodsId,platformGoodsCode,title,canonicalUrl,rawUrl,status,activityStatus,category,
+          identityStrength,lastModifiedAt,lastSeenBatchId,currentState,missingAt,lastImportedAt,createdAt,updatedAt
+        ) VALUES (
+          @id,@shopId,@platformGoodsId,@platformGoodsCode,@title,@canonicalUrl,@rawUrl,@status,@activityStatus,@category,
+          @identityStrength,@lastModifiedAt,@lastSeenBatchId,@currentState,@missingAt,@lastImportedAt,@createdAt,@updatedAt
+        )
         ON CONFLICT(id) DO UPDATE SET platformGoodsCode=excluded.platformGoodsCode,title=excluded.title,canonicalUrl=excluded.canonicalUrl,
           rawUrl=excluded.rawUrl,status=excluded.status,activityStatus=excluded.activityStatus,category=excluded.category,
-          lastModifiedAt=excluded.lastModifiedAt,lastSeenBatchId=excluded.lastSeenBatchId,lastImportedAt=excluded.lastImportedAt,updatedAt=excluded.updatedAt
+          lastModifiedAt=excluded.lastModifiedAt,lastSeenBatchId=excluded.lastSeenBatchId,currentState='active',
+          missingAt=NULL,lastImportedAt=excluded.lastImportedAt,updatedAt=excluded.updatedAt
       `).run(linkValues);
       if (!link) stats.created += 1;
       else stats.updated += 1;
@@ -1099,21 +1146,22 @@ function commitPlatform(batch, staging, shopMappings) {
           INSERT INTO sales_link_skus (
             id,salesLinkId,productId,platformSkuId,platformSkuCode,normalizedPlatformSkuCode,specificationName,
             normalizedSpecificationName,price,platformStock,occupiedStock,systemGoodsType,syncEnabled,lastSyncedStock,
-            lastSyncedAt,stopSyncReason,matchStatus,matchMethod,matchReason,lastSeenBatchId,createdAt,updatedAt
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            lastSyncedAt,stopSyncReason,matchStatus,matchMethod,matchReason,lastSeenBatchId,createdAt,updatedAt,
+            currentState,missingAt
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           ON CONFLICT(id) DO UPDATE SET productId=excluded.productId,platformSkuCode=excluded.platformSkuCode,
             normalizedPlatformSkuCode=excluded.normalizedPlatformSkuCode,specificationName=excluded.specificationName,
             normalizedSpecificationName=excluded.normalizedSpecificationName,price=excluded.price,platformStock=excluded.platformStock,
             occupiedStock=excluded.occupiedStock,systemGoodsType=excluded.systemGoodsType,syncEnabled=excluded.syncEnabled,
             lastSyncedStock=excluded.lastSyncedStock,lastSyncedAt=excluded.lastSyncedAt,stopSyncReason=excluded.stopSyncReason,
             matchStatus=excluded.matchStatus,matchMethod=excluded.matchMethod,matchReason=excluded.matchReason,
-            lastSeenBatchId=excluded.lastSeenBatchId,updatedAt=excluded.updatedAt
+            lastSeenBatchId=excluded.lastSeenBatchId,currentState='active',missingAt=NULL,updatedAt=excluded.updatedAt
         `).run(
           skuId, linkId, productId, row.platformSkuId || null, row.platformSkuCode || null, lower(row.platformSkuCode),
           row.specificationName || null, lower(row.specificationName), numberValue(source["价格"]), numberValue(source["平台库存"]),
           numberValue(source["占用库存"]), row.systemGoodsType || null, value(source["是否需要同步"]) === "是" ? 1 : 0,
           numberValue(source["最后同步库存"]), value(source["最后同步时间"]) || null, value(source["停止同步原因"]) || null,
-          matchStatus, matchMethod, row.matchReason, batch.id, sku?.createdAt ?? now, now,
+          matchStatus, matchMethod, row.matchReason, batch.id, sku?.createdAt ?? now, now, "active", null,
         );
         stats.skus += 1;
         if (matchStatus.startsWith("matched")) {

@@ -1458,6 +1458,8 @@ app.get("/api/products/platform-skus/unmatched", requirePermission("products.vie
     const search = `%${query}%`;
     const where = `
       x.productId IS NULL
+      AND x.currentState='active'
+      AND l.currentState='active'
       AND x.matchStatus NOT IN ('ignored','combination')
       AND (? = '' OR x.platformSkuCode LIKE ? OR x.platformSkuId LIKE ? OR x.specificationName LIKE ?
         OR l.title LIKE ? OR l.platformGoodsCode LIKE ? OR l.platformGoodsId LIKE ?)
@@ -1502,6 +1504,8 @@ app.get("/api/products/sales-summary", requirePermission("products.view"), (requ
       JOIN sales_links l ON l.id=x.salesLinkId
       JOIN sales_shops s ON s.id=l.shopId
       WHERE x.productId IS NOT NULL
+        AND x.currentState='active'
+        AND l.currentState='active'
         AND x.matchStatus IN ('matched_auto','matched_manual')
       GROUP BY x.productId
     `).all().map((row) => ({
@@ -1534,6 +1538,8 @@ app.get("/api/products/:id/sales-links", requirePermission("products.view"), (re
       JOIN sales_links l ON l.id=x.salesLinkId
       JOIN sales_shops s ON s.id=l.shopId
       WHERE x.productId=?
+        AND x.currentState='active'
+        AND l.currentState='active'
         AND x.matchStatus IN ('matched_auto','matched_manual')
       ORDER BY s.platform, s.displayName, l.title, x.platformSkuCode
     `).all(request.params.id);

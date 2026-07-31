@@ -794,6 +794,13 @@ export async function createErpSyncRun(businessDate) {
   return readApiJson(response, "ERP每日同步创建失败。");
 }
 
+export async function recalculateErpSyncRun(syncRunId) {
+  const response = await authFetch(`${apiBaseUrl}/api/products/erp-sync-runs/${encodeURIComponent(syncRunId)}/recalculate-status`, {
+    method: "POST",
+  });
+  return readApiJson(response, "ERP缺失记录对账重试失败。");
+}
+
 export async function generateErpSyncSnapshot(syncRunId) {
   const response = await authFetch(`${apiBaseUrl}/api/products/erp-sync-runs/${encodeURIComponent(syncRunId)}/generate-snapshot`, {
     method: "POST",

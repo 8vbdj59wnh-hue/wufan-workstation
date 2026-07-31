@@ -19,6 +19,7 @@ import {
   parseProductImport,
   parseProductV2Import,
   previewProductSkuChange,
+  recalculateErpSyncRun,
   resolveAssetUrl,
   state,
   updatePersistentResource,
@@ -836,6 +837,23 @@ function renderErpSyncDashboard() {
     }).join("")}</div>
     ${run.status === "completed" ? `<section class="erp-sync-snapshot-status">
       <div>
+        <span>缺失记录对账</span>
+        <strong>${run.reconciliationStatus === "completed" ? "已完成" : run.reconciliationStatus === "failed" ? "失败" : "处理中"}</strong>
+      </div>
+      ${run.reconciliationStatus === "completed"
+        ? `<div class="erp-sync-snapshot-summary">
+            <span>缺失货品：${run.reconciliationSummary?.goods?.current?.missing ?? 0}</span>
+            <span>缺失ERP关系：${run.reconciliationSummary?.mappings?.current?.missing ?? 0}</span>
+            <span>缺失库存事实：${run.reconciliationSummary?.inventory?.current?.missing ?? 0}</span>
+            <span>缺失链接：${run.reconciliationSummary?.links?.current?.missing ?? 0}</span>
+            <span>缺失平台SKU：${run.reconciliationSummary?.platformSkus?.current?.missing ?? 0}</span>
+          </div>`
+        : run.reconciliationStatus === "failed"
+          ? `<p class="form-error">三张表已完成，但缺失记录对账失败：${escapeHtml(run.reconciliationError || "未知错误")}</p>
+            <button class="secondary-button" type="button" data-action="retry-erp-reconciliation">重新执行对账</button>`
+          : `<p class="form-note">系统正在对账当日未出现的ERP事实，对账完成后生成快照。</p>`}
+      ${run.reconciliationStatus === "completed" ? `
+      <div>
         <span>历史快照</span>
         <strong>${run.snapshotStatus === "completed" ? "已生成" : run.snapshotStatus === "failed" ? "生成失败" : "生成中"}</strong>
       </div>
@@ -850,7 +868,7 @@ function renderErpSyncDashboard() {
         : run.snapshotStatus === "failed"
           ? `<p class="form-error">三张表已导入完成，但历史快照生成失败：${escapeHtml(run.snapshotError || "未知错误")}</p>
             <button class="secondary-button" type="button" data-action="retry-erp-snapshot">重新生成快照</button>`
-          : `<p class="form-note">三张表已完成，系统正在生成历史事实快照。</p>`}
+          : `<p class="form-note">缺失记录对账已完成，系统正在生成历史事实快照。</p>`}` : ""}
     </section>` : ""}
     ${(run.errorSummary ?? []).length ? `<div class="form-error">${(run.errorSummary ?? []).map((item) =>
       `${escapeHtml(item.importType)}：${escapeHtml(item.reason)}`).join("<br>")}</div>` : ""}
@@ -1332,6 +1350,17 @@ export function bindProductCenterPageEvents(rerender) {
         erpSyncState = { ...erpSyncState, loading: false, active: result.syncRun, error: "" };
       } catch (error) {
         erpSyncState = { ...erpSyncState, loading: false, error: error.message || "ERP历史快照生成失败。" };
+      }
+      rerender();
+    }
+    if (action === "retry-erp-reconciliation") {
+      erpSyncState = { ...erpSyncState, loading: true, error: "" };
+      rerender();
+      try {
+        const result = await recalculateErpSyncRun(erpSyncState.active.id);
+        erpSyncState = { ...erpSyncState, loading: false, active: result.syncRun, error: "" };
+      } catch (error) {
+        erpSyncState = { ...erpSyncState, loading: false, error: error.message || "ERP缺失记录对账重试失败。" };
       }
       rerender();
     }

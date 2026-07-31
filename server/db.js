@@ -513,15 +513,16 @@ const resourceConfigs = {
     table: "erp_goods",
     columns: [
       "id", "goodsCode", "goodsName", "shortName", "brand", "category", "productType",
-      "primarySupplier", "supplierGoodsCode", "sourceCreatedAt", "lastImportedAt", "createdAt", "updatedAt",
+      "primarySupplier", "supplierGoodsCode", "sourceCreatedAt", "lastImportedAt",
+      "lastSeenBatchId", "currentState", "missingAt", "createdAt", "updatedAt",
     ],
   },
   productErpMappings: {
     table: "product_erp_mappings",
     columns: [
       "id", "productId", "erpGoodsId", "merchantSkuCode", "specificationName", "unit", "barcode", "erpStatus",
-      "matchMethod", "sourceBatchId",
-      "latestStateJson", "createdAt", "updatedAt",
+      "matchMethod", "sourceBatchId", "latestStateJson", "currentState", "missingAt",
+      "lastSeenInventoryBatchId", "inventoryCurrentState", "inventoryMissingAt", "createdAt", "updatedAt",
     ],
     jsonFields: ["latestStateJson"],
   },
@@ -541,7 +542,7 @@ const resourceConfigs = {
     columns: [
       "id", "shopId", "platformGoodsId", "platformGoodsCode", "title", "canonicalUrl", "rawUrl",
       "status", "activityStatus", "category", "identityStrength", "lastModifiedAt", "lastSeenBatchId",
-      "lastImportedAt", "createdAt", "updatedAt",
+      "currentState", "missingAt", "lastImportedAt", "createdAt", "updatedAt",
     ],
   },
   salesLinkSkus: {
@@ -550,7 +551,7 @@ const resourceConfigs = {
       "id", "salesLinkId", "productId", "platformSkuId", "platformSkuCode", "normalizedPlatformSkuCode",
       "specificationName", "normalizedSpecificationName", "price", "platformStock", "occupiedStock",
       "systemGoodsType", "syncEnabled", "lastSyncedStock", "lastSyncedAt", "stopSyncReason",
-      "matchStatus", "matchMethod", "matchReason", "lastSeenBatchId", "createdAt", "updatedAt",
+      "matchStatus", "matchMethod", "matchReason", "lastSeenBatchId", "currentState", "missingAt", "createdAt", "updatedAt",
     ],
     booleanFields: ["syncEnabled"],
   },
@@ -1716,6 +1717,22 @@ function runLightweightMigrations() {
   ensureColumn("erp_sync_runs", "snapshotStatus", "TEXT NOT NULL DEFAULT 'pending'");
   ensureColumn("erp_sync_runs", "snapshotCompletedAt", "TEXT");
   ensureColumn("erp_sync_runs", "snapshotError", "TEXT");
+  ensureColumn("erp_sync_runs", "reconciliationStatus", "TEXT NOT NULL DEFAULT 'pending'");
+  ensureColumn("erp_sync_runs", "reconciledAt", "TEXT");
+  ensureColumn("erp_sync_runs", "reconciliationError", "TEXT");
+  ensureColumn("erp_sync_runs", "reconciliationSummaryJson", "TEXT");
+  ensureColumn("erp_goods", "lastSeenBatchId", "TEXT");
+  ensureColumn("erp_goods", "currentState", "TEXT NOT NULL DEFAULT 'active'");
+  ensureColumn("erp_goods", "missingAt", "TEXT");
+  ensureColumn("product_erp_mappings", "currentState", "TEXT NOT NULL DEFAULT 'active'");
+  ensureColumn("product_erp_mappings", "missingAt", "TEXT");
+  ensureColumn("product_erp_mappings", "lastSeenInventoryBatchId", "TEXT");
+  ensureColumn("product_erp_mappings", "inventoryCurrentState", "TEXT NOT NULL DEFAULT 'active'");
+  ensureColumn("product_erp_mappings", "inventoryMissingAt", "TEXT");
+  ensureColumn("sales_links", "currentState", "TEXT NOT NULL DEFAULT 'active'");
+  ensureColumn("sales_links", "missingAt", "TEXT");
+  ensureColumn("sales_link_skus", "currentState", "TEXT NOT NULL DEFAULT 'active'");
+  ensureColumn("sales_link_skus", "missingAt", "TEXT");
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS erp_sync_runs (
       id TEXT PRIMARY KEY,
@@ -1740,6 +1757,10 @@ function runLightweightMigrations() {
       snapshotStatus TEXT NOT NULL DEFAULT 'pending',
       snapshotCompletedAt TEXT,
       snapshotError TEXT,
+      reconciliationStatus TEXT NOT NULL DEFAULT 'pending',
+      reconciledAt TEXT,
+      reconciliationError TEXT,
+      reconciliationSummaryJson TEXT,
       updatedAt TEXT NOT NULL,
       UNIQUE(businessDate, version)
     );
@@ -1825,6 +1846,18 @@ function runLightweightMigrations() {
       ON sales_link_sku_daily_snapshots(productId,businessDate);
     CREATE INDEX IF NOT EXISTS idx_product_shop_daily_snapshots_product_date
       ON product_shop_daily_snapshots(productId,businessDate);
+    CREATE INDEX IF NOT EXISTS idx_erp_goods_current_seen
+      ON erp_goods(currentState,lastSeenBatchId);
+    CREATE INDEX IF NOT EXISTS idx_product_erp_mappings_current_seen
+      ON product_erp_mappings(currentState,sourceBatchId);
+    CREATE INDEX IF NOT EXISTS idx_product_erp_mappings_inventory_seen
+      ON product_erp_mappings(inventoryCurrentState,lastSeenInventoryBatchId);
+    CREATE INDEX IF NOT EXISTS idx_sales_links_current_seen
+      ON sales_links(currentState,lastSeenBatchId);
+    CREATE INDEX IF NOT EXISTS idx_sales_link_skus_current_seen
+      ON sales_link_skus(currentState,lastSeenBatchId);
+    CREATE INDEX IF NOT EXISTS idx_sales_link_skus_product_current
+      ON sales_link_skus(productId,currentState,matchStatus);
   `);
   ensureColumn("product_erp_daily_snapshots", "unitCost", "REAL");
   ensureColumn("task_waves", "unitDurationMinutes", "INTEGER");

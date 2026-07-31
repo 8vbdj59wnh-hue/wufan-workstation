@@ -36,14 +36,19 @@ function collectSnapshotFacts(database) {
     SELECT m.*,g.goodsCode
     FROM product_erp_mappings m
     JOIN erp_goods g ON g.id=m.erpGoodsId
+    WHERE m.currentState='active'
+      AND m.inventoryCurrentState='active'
+      AND g.currentState='active'
     ORDER BY m.id
   `).all().map((row) => ({ ...row, latestState: parseJson(row.latestStateJson, {}) }));
   const shops = database.prepare("SELECT id,platform,status FROM sales_shops ORDER BY id").all();
-  const links = database.prepare("SELECT * FROM sales_links ORDER BY id").all();
+  const links = database.prepare("SELECT * FROM sales_links WHERE currentState='active' ORDER BY id").all();
   const skus = database.prepare(`
     SELECT x.*,b.id AS manualBindingId
     FROM sales_link_skus x
     LEFT JOIN platform_sku_manual_bindings b ON b.salesLinkSkuId=x.id
+    JOIN sales_links l ON l.id=x.salesLinkId AND l.currentState='active'
+    WHERE x.currentState='active'
     ORDER BY x.id
   `).all();
   return { products, mappings, shops, links, skus };
@@ -228,6 +233,7 @@ export function generateErpFactSnapshot(syncRunId, { failAfterStage = "" } = {})
   const run = database.prepare("SELECT * FROM erp_sync_runs WHERE id=?").get(syncRunId);
   if (!run) throw new Error("ERP同步批次不存在。");
   if (run.status !== "completed") throw new Error("只有三张ERP表全部完成后才能生成历史快照。");
+  if (run.reconciliationStatus !== "completed") throw new Error("缺失记录对账完成后才能生成历史快照。");
   const now = new Date().toISOString();
   const snapshot = {
     id: snapshotIdForSyncRun(run.id),
