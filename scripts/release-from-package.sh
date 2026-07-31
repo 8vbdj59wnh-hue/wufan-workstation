@@ -161,7 +161,7 @@ for port in 5173 3001; do
 done
 curl --fail --silent --show-error http://127.0.0.1:3001/api/health \
   | "$NODE_COMMAND" -e \
-    'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{if(JSON.parse(s).ok!==true)process.exit(1)})'
+    'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const h=JSON.parse(s);const current=h.status==="ok"&&h.database==="ok";const legacy=h.ok===true;if(!current&&!legacy)process.exit(1)})'
 
 CLASSIFICATION_JSON="$(
   PROJECT_DIR="$PROJECT_DIR" NODE_COMMAND="$NODE_COMMAND" \
