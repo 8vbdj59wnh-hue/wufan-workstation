@@ -1713,6 +1713,7 @@ function runLightweightMigrations() {
   ensureColumn("product_erp_mappings", "erpStatus", "TEXT");
   ensureColumn("erp_import_batches", "syncRunId", "TEXT");
   ensureColumn("erp_import_batches", "businessDate", "TEXT");
+  ensureColumn("erp_import_batches", "importMode", "TEXT");
   ensureColumn("erp_sync_runs", "snapshotId", "TEXT");
   ensureColumn("erp_sync_runs", "snapshotStatus", "TEXT NOT NULL DEFAULT 'pending'");
   ensureColumn("erp_sync_runs", "snapshotCompletedAt", "TEXT");

@@ -765,11 +765,12 @@ export async function commitProductImport(batchId) {
   return body;
 }
 
-export async function parseProductV2Import(file, importType, syncRunId) {
+export async function parseProductV2Import(file, importType, syncRunId, importMode = "") {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("importType", importType);
   formData.append("syncRunId", syncRunId);
+  if (importMode) formData.append("importMode", importMode);
   const response = await authFetch(`${apiBaseUrl}/api/products/erp-v2/parse`, { method: "POST", body: formData });
   return readApiJson(response, "ERP 数据解析失败。");
 }
@@ -785,11 +786,11 @@ export async function loadErpSyncRun(syncRunId) {
   return readApiJson(response, "ERP每日同步读取失败。");
 }
 
-export async function createErpSyncRun(businessDate) {
+export async function createErpSyncRun(businessDate, syncType) {
   const response = await authFetch(`${apiBaseUrl}/api/products/erp-sync-runs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ businessDate }),
+    body: JSON.stringify({ businessDate, syncType }),
   });
   return readApiJson(response, "ERP每日同步创建失败。");
 }

@@ -640,6 +640,7 @@ CREATE INDEX IF NOT EXISTS idx_erp_skus_goods
 CREATE TABLE IF NOT EXISTS erp_import_batches (
   id TEXT PRIMARY KEY,
   importType TEXT NOT NULL,
+  importMode TEXT,
   syncRunId TEXT,
   businessDate TEXT,
   originalFilename TEXT NOT NULL,

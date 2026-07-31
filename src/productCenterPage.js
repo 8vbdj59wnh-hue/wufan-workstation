@@ -45,7 +45,13 @@ let productDetailId = "";
 let modalState = null;
 let skuChangeState = null;
 let importState = null;
-let erpSyncState = { loading: false, runs: [], active: null, error: "" };
+let erpSyncState = {
+  loading: false,
+  runs: [],
+  active: null,
+  error: "",
+  masterImportMode: "incremental",
+};
 let productSalesState = { productId: "", loading: false, loaded: false, rows: [], error: "" };
 let productSalesSummaryState = { loading: false, loaded: false, rows: [], error: "" };
 let unmatchedSkuState = { loading: false, loaded: false, rows: [], total: 0, query: "", error: "" };
@@ -828,6 +834,12 @@ function renderProductV2Upload() {
       <option value="inventory">库存明细（库存与销量）</option>
       <option value="platform_goods">平台货品（店铺、链接与平台SKU）</option>
     </select></label>`}
+    ${fixedImportType === "goods_info" ? `<fieldset class="product-import-mode-field">
+      <legend>主数据导入模式</legend>
+      <label><input type="radio" name="importMode" value="incremental" ${importState?.importMode !== "full" ? "checked" : ""} /> 增量新增</label>
+      <label><input type="radio" name="importMode" value="full" ${importState?.importMode === "full" ? "checked" : ""} /> 全量同步</label>
+      <small>增量新增不会把文件中未出现的历史货品或SKU标记为缺失。</small>
+    </fieldset>` : ""}
     <label class="product-import-file-field"><span>Excel 文件 *</span><input name="file" type="file" accept=".xls,.xlsx" required />
       <small>上传后先预览和校验，不会直接写入数据库。建议依次导入货品信息、库存明细、平台货品。</small></label>
     <div class="form-error" ${importState?.error ? "" : "hidden"}>${escapeHtml(importState?.error || "")}</div>
@@ -836,24 +848,45 @@ function renderProductV2Upload() {
 
 function renderErpSyncDashboard() {
   const run = erpSyncState.active;
-  const statusLabels = { draft: "草稿", syncing: "同步中", partial: "部分完成", completed: "已完成", failed: "失败" };
+  const statusLabels = {
+    draft: "草稿",
+    processing: "处理中",
+    syncing: "同步中",
+    partial: "部分完成",
+    completed: "已完成",
+    failed: "失败",
+  };
   const batchStatusLabels = {
     parsed: "待校验", validated: "待确认导入", importing: "导入中", completed: "已完成",
     committed: "已完成", failed: "失败",
   };
-  const types = [
+  const allTypes = [
     ["goods_info", "货品信息", "ERP货品主档与产品映射"],
     ["inventory", "库存明细", "库存与销量当前值"],
     ["platform_goods", "平台货品", "店铺、商品链接与平台SKU"],
   ];
+  const types = run?.syncType === "master_data"
+    ? allTypes.filter(([importType]) => importType === "goods_info")
+    : run?.syncType === "daily_business"
+      ? allTypes.filter(([importType]) => importType !== "goods_info")
+      : allTypes;
   if (erpSyncState.loading && !run) return `<div class="form-note">正在读取ERP每日同步状态…</div>`;
   if (!run) {
     const today = new Date().toLocaleDateString("sv-SE");
     return `<div class="erp-sync-create">
-      <p class="form-note">一次每日同步统一组织货品信息、库存明细和平台货品。业务日期表示三张文件共同对应的经营事实日期。</p>
+      <p class="form-note">ERP主数据与每日经营数据分别同步，互不阻塞。</p>
       <form id="erp-sync-create-form" class="product-import-upload-form">
         <label><span>业务日期 *</span><input name="businessDate" type="date" value="${escapeHtml(today)}" required /></label>
-        <button class="primary-button" type="submit" ${erpSyncState.loading ? "disabled" : ""}>${erpSyncState.loading ? "正在创建…" : "创建每日同步"}</button>
+        <label><span>同步类型 *</span><select name="syncType" required>
+          <option value="master_data">ERP主数据同步</option>
+          <option value="daily_business">ERP经营数据同步</option>
+        </select></label>
+        <fieldset class="product-import-mode-field" data-master-import-mode>
+          <legend>主数据导入模式</legend>
+          <label><input type="radio" name="importMode" value="incremental" checked /> 增量新增</label>
+          <label><input type="radio" name="importMode" value="full" /> 全量同步</label>
+        </fieldset>
+        <button class="primary-button" type="submit" ${erpSyncState.loading ? "disabled" : ""}>${erpSyncState.loading ? "正在创建…" : "创建同步"}</button>
       </form>
       ${erpSyncState.runs.length ? `<div class="erp-sync-history"><h3>最近同步</h3>${erpSyncState.runs.slice(0, 8).map((item) =>
         `<button class="erp-sync-history-item" type="button" data-action="open-erp-sync-run" data-sync-run-id="${escapeHtml(item.id)}">
@@ -865,6 +898,7 @@ function renderErpSyncDashboard() {
   return `<div class="erp-sync-dashboard">
     <div class="erp-sync-overview">
       <div><span>同步编码</span><strong>${escapeHtml(run.syncCode)}</strong></div>
+      <div><span>同步类型</span><strong>${run.syncType === "master_data" ? "ERP主数据同步" : run.syncType === "daily_business" ? "ERP经营数据同步" : "历史联合同步"}</strong></div>
       <div><span>业务日期</span><strong>${escapeHtml(run.businessDate)}</strong></div>
       <div><span>整体状态</span><strong>${escapeHtml(statusLabels[run.status] || run.status)}</strong></div>
       <div><span>版本</span><strong>V${run.version}</strong></div>
@@ -882,7 +916,8 @@ function renderErpSyncDashboard() {
         <div><h3>${label}</h3><p>${description}</p></div>
         <dl><div><dt>状态</dt><dd>${escapeHtml(batchStatusLabels[batch?.status] || (batch ? batch.status : "待导入"))}</dd></div>
           <div><dt>文件</dt><dd>${escapeHtml(batch?.originalFilename || "—")}</dd></div>
-          <div><dt>批次</dt><dd>${escapeHtml(batch?.id || "—")}</dd></div></dl>
+          <div><dt>批次</dt><dd>${escapeHtml(batch?.id || "—")}</dd></div>
+          ${importType === "goods_info" ? `<div><dt>导入模式</dt><dd>${batch?.importMode === "full" ? "全量同步" : "增量新增"}</dd></div>` : ""}</dl>
         ${action}
       </article>`;
     }).join("")}</div>
@@ -903,7 +938,12 @@ function renderErpSyncDashboard() {
           ? `<p class="form-error">三张表已完成，但缺失记录对账失败：${escapeHtml(run.reconciliationError || "未知错误")}</p>
             <button class="secondary-button" type="button" data-action="retry-erp-reconciliation">重新执行对账</button>`
           : `<p class="form-note">系统正在对账当日未出现的ERP事实，对账完成后生成快照。</p>`}
-      ${run.reconciliationStatus === "completed" ? `
+      ${run.reconciliationStatus === "completed" && run.syncType === "master_data" ? `
+      <div>
+        <span>历史快照</span>
+        <strong>不生成</strong>
+      </div>
+      <p class="form-note">主数据同步只维护ERP货品与SKU事实；历史经营快照由经营数据同步生成。</p>` : run.reconciliationStatus === "completed" ? `
       <div>
         <span>历史快照</span>
         <strong>${run.snapshotStatus === "completed" ? "已生成" : run.snapshotStatus === "failed" ? "生成失败" : "生成中"}</strong>
@@ -1138,6 +1178,7 @@ async function refreshErpSyncState(syncRunId = erpSyncState.active?.id) {
       runs: listResult.runs ?? [],
       active: detailResult?.syncRun ?? (syncRunId ? null : erpSyncState.active),
       error: "",
+      masterImportMode: erpSyncState.masterImportMode || "incremental",
     };
   } catch (error) {
     erpSyncState = { ...erpSyncState, loading: false, error: error.message || "ERP每日同步读取失败。" };
@@ -1446,6 +1487,9 @@ export function bindProductCenterPageEvents(rerender) {
         version: "v2",
         step: "upload",
         importType: button.dataset.importType,
+        importMode: button.dataset.importType === "goods_info"
+          ? erpSyncState.active?.batches?.goods_info?.importMode || erpSyncState.masterImportMode || "incremental"
+          : "",
         syncRun: erpSyncState.active,
         loading: false,
         error: "",
@@ -1723,11 +1767,15 @@ export function bindProductCenterPageEvents(rerender) {
   });
   document.querySelector("#erp-sync-create-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const businessDate = event.currentTarget.elements.businessDate.value;
+    const form = event.currentTarget;
+    const businessDate = form.elements.businessDate.value;
+    const syncType = form.elements.syncType.value;
+    const importMode = syncType === "master_data" ? form.elements.importMode.value : "";
     erpSyncState = { ...erpSyncState, loading: true, error: "" };
+    if (importMode) erpSyncState.masterImportMode = importMode;
     rerender();
     try {
-      const result = await createErpSyncRun(businessDate);
+      const result = await createErpSyncRun(businessDate, syncType);
       await refreshErpSyncState(result.syncRun.id);
     } catch (error) {
       erpSyncState = {
@@ -1739,12 +1787,17 @@ export function bindProductCenterPageEvents(rerender) {
     }
     rerender();
   });
+  document.querySelector("#erp-sync-create-form [name='syncType']")?.addEventListener("change", (event) => {
+    const modeField = document.querySelector("[data-master-import-mode]");
+    if (modeField) modeField.hidden = event.currentTarget.value !== "master_data";
+  });
   document.querySelector("#product-v2-import-upload-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
     const file = form.elements.file.files[0];
     if (!file) return;
     const importType = form.elements.importType.value;
+    const importMode = importType === "goods_info" ? form.elements.importMode?.value || "incremental" : "";
     const syncRun = importState.syncRun;
     if (!syncRun?.id) {
       importState = { ...importState, loading: false, error: "请先创建或恢复ERP每日同步批次。" };
@@ -1754,7 +1807,7 @@ export function bindProductCenterPageEvents(rerender) {
     importState = { ...importState, loading: true, error: "", importType };
     rerender();
     try {
-      const result = await parseProductV2Import(file, importType, syncRun.id);
+      const result = await parseProductV2Import(file, importType, syncRun.id, importMode);
       if (importType === "platform_goods") {
         importState = { version: "v2", step: "shops", loading: false, error: "", importType, syncRun: result.syncRun || syncRun, ...result };
       } else {

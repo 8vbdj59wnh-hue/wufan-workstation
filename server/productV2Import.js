@@ -81,19 +81,20 @@ function decodeBatch(row) {
 function saveBatch(batch) {
   getDatabase().prepare(`
     INSERT INTO erp_import_batches (
-      id, importType, syncRunId, businessDate, originalFilename, fileHash, status, totalRows, createdCount, updatedCount,
+      id, importType, importMode, syncRunId, businessDate, originalFilename, fileHash, status, totalRows, createdCount, updatedCount,
       unchangedCount, matchedCount, unmatchedCount, errorCount, summaryJson, createdBy, createdAt, completedAt
     ) VALUES (
-      @id, @importType, @syncRunId, @businessDate, @originalFilename, @fileHash, @status, @totalRows, @createdCount, @updatedCount,
+      @id, @importType, @importMode, @syncRunId, @businessDate, @originalFilename, @fileHash, @status, @totalRows, @createdCount, @updatedCount,
       @unchangedCount, @matchedCount, @unmatchedCount, @errorCount, @summaryJson, @createdBy, @createdAt, @completedAt
     )
     ON CONFLICT(id) DO UPDATE SET
-      syncRunId=excluded.syncRunId, businessDate=excluded.businessDate,
+      importMode=excluded.importMode, syncRunId=excluded.syncRunId, businessDate=excluded.businessDate,
       status=excluded.status, totalRows=excluded.totalRows, createdCount=excluded.createdCount,
       updatedCount=excluded.updatedCount, unchangedCount=excluded.unchangedCount,
       matchedCount=excluded.matchedCount, unmatchedCount=excluded.unmatchedCount,
       errorCount=excluded.errorCount, summaryJson=excluded.summaryJson, completedAt=excluded.completedAt
   `).run({
+    importMode: null,
     syncRunId: null,
     businessDate: null,
     ...batch,
@@ -131,6 +132,20 @@ function assertSyncImportType(syncType, importType) {
   if (!requiredImportTypes(normalizedSyncType).includes(importType)) {
     throw new Error(`同步类型 ${normalizedSyncType} 不允许导入 ${importType}。`);
   }
+}
+
+function normalizeImportMode(rawImportMode, { syncType, importType }) {
+  const raw = value(rawImportMode);
+  if (importType !== "goods_info") {
+    if (raw) throw new Error(`${importType} 不支持主数据导入模式。`);
+    return null;
+  }
+  const defaultMode = syncType === "master_data" ? "incremental" : "full";
+  const importMode = raw || defaultMode;
+  if (!["incremental", "full"].includes(importMode)) {
+    throw new Error("货品信息导入模式必须为 incremental 或 full。");
+  }
+  return importMode;
 }
 
 function normalizeBusinessDate(raw) {
@@ -768,11 +783,19 @@ function buildPlatformPreview(rows, { platform = "", shop = "", status = "", que
   };
 }
 
-export function parseErpV2Import({ filePath, originalFilename, importType, syncRunId, createdBy }) {
+export function parseErpV2Import({
+  filePath,
+  originalFilename,
+  importType,
+  importMode: rawImportMode,
+  syncRunId,
+  createdBy,
+}) {
   if (!["goods_info", "inventory", "platform_goods"].includes(importType)) throw new Error("导入类型无效。");
   const syncRun = readErpSyncRun(syncRunId);
   if (!syncRun) throw new Error("请先创建或恢复ERP每日同步批次。");
   assertSyncImportType(syncRun.syncType, importType);
+  const importMode = normalizeImportMode(rawImportMode, { syncType: syncRun.syncType, importType });
   if (syncRun.status === "completed") throw new Error("该ERP每日同步已完成，请创建同日重新同步版本。");
   const currentBatch = syncRun.batches?.[importType];
   if (currentBatch && ["completed", "committed"].includes(currentBatch.status)) {
@@ -803,7 +826,7 @@ export function parseErpV2Import({ filePath, originalFilename, importType, syncR
       ? inventoryValidation(staging)
       : platformValidation(staging, {});
   const batch = saveBatch({
-    id: batchId, importType, syncRunId: syncRun.id, businessDate: syncRun.businessDate,
+    id: batchId, importType, importMode, syncRunId: syncRun.id, businessDate: syncRun.businessDate,
     originalFilename, fileHash, status: "parsed", totalRows: validation.summary.total,
     createdCount: 0, updatedCount: 0, unchangedCount: 0, matchedCount: validation.summary.matched ?? validation.summary.matchedAuto ?? 0,
     unmatchedCount: validation.summary.unmatched ?? 0, errorCount: validation.summary.error ?? 0,

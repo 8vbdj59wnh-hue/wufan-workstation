@@ -1264,6 +1264,7 @@ app.post("/api/products/erp-v2/parse", requirePermission("products.create"), (re
         filePath: request.file.path,
         originalFilename: normalizeUploadedFileName(request.file.originalname),
         importType: String(request.body?.importType ?? ""),
+        importMode: String(request.body?.importMode ?? ""),
         syncRunId: String(request.body?.syncRunId ?? ""),
         createdBy: getUserPersonId(request.user),
       });

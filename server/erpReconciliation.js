@@ -23,6 +23,10 @@ export function reconcileErpSyncRun(syncRunId, { failAfterStage = "" } = {}) {
   const run = database.prepare("SELECT * FROM erp_sync_runs WHERE id=?").get(syncRunId);
   if (!run) throw new Error("ERP同步批次不存在。");
   const syncType = run.syncType || "legacy_combined";
+  const goodsInfoBatch = run.goodsInfoBatchId
+    ? database.prepare("SELECT importMode FROM erp_import_batches WHERE id=?").get(run.goodsInfoBatchId)
+    : null;
+  const goodsImportMode = goodsInfoBatch?.importMode || "full";
   if (!["master_data", "daily_business", "legacy_combined"].includes(syncType)) {
     throw new Error("ERP同步类型无效，不能执行缺失记录对账。");
   }
@@ -54,7 +58,7 @@ export function reconcileErpSyncRun(syncRunId, { failAfterStage = "" } = {}) {
         links: {},
         platformSkus: {},
       };
-      if (syncType !== "daily_business") {
+      if (syncType !== "daily_business" && !(syncType === "master_data" && goodsImportMode === "incremental")) {
         result.goods.missing = database.prepare(`
           UPDATE erp_goods
           SET currentState='missing',missingAt=COALESCE(missingAt,@now),updatedAt=@now
@@ -98,6 +102,7 @@ export function reconcileErpSyncRun(syncRunId, { failAfterStage = "" } = {}) {
       result.inventory.current = countState(database, "product_erp_mappings", "inventoryCurrentState");
       result.links.current = countState(database, "sales_links", "currentState");
       result.platformSkus.current = countState(database, "sales_link_skus", "currentState");
+      result.goods.importMode = syncType === "daily_business" ? null : goodsImportMode;
       database.prepare(`
         UPDATE erp_sync_runs
         SET reconciliationStatus='completed',reconciledAt=@now,reconciliationError=NULL,
