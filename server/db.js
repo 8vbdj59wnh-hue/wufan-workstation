@@ -1734,6 +1734,25 @@ function runLightweightMigrations() {
   ensureColumn("sales_link_skus", "currentState", "TEXT NOT NULL DEFAULT 'active'");
   ensureColumn("sales_link_skus", "missingAt", "TEXT");
   getDatabase().exec(`
+    CREATE TABLE IF NOT EXISTS erp_skus (
+      id TEXT PRIMARY KEY,
+      merchantSkuCode TEXT NOT NULL COLLATE NOCASE UNIQUE,
+      erpGoodsId TEXT NOT NULL,
+      specificationName TEXT,
+      barcode TEXT,
+      unit TEXT,
+      erpStatus TEXT,
+      firstSeenBatchId TEXT NOT NULL,
+      lastSeenBatchId TEXT NOT NULL,
+      currentState TEXT NOT NULL DEFAULT 'active',
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      FOREIGN KEY(erpGoodsId) REFERENCES erp_goods(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_erp_skus_current_code
+      ON erp_skus(currentState,merchantSkuCode);
+    CREATE INDEX IF NOT EXISTS idx_erp_skus_goods
+      ON erp_skus(erpGoodsId);
     CREATE TABLE IF NOT EXISTS erp_sync_runs (
       id TEXT PRIMARY KEY,
       syncCode TEXT NOT NULL UNIQUE,

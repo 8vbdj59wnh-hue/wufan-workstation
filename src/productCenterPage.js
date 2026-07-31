@@ -2,6 +2,7 @@ import {
   createId,
   changeProductSku,
   createPersistentResource,
+  createProductFromPendingErpSku,
   commitProductImport,
   commitProductV2Import,
   createErpSyncRun,
@@ -11,6 +12,7 @@ import {
   getNow,
   loadProductSalesLinks,
   loadProductSalesSummaries,
+  loadPendingErpSkus,
   loadErpSyncRun,
   loadProductV2Import,
   loadProductV2Preview,
@@ -47,6 +49,8 @@ let erpSyncState = { loading: false, runs: [], active: null, error: "" };
 let productSalesState = { productId: "", loading: false, loaded: false, rows: [], error: "" };
 let productSalesSummaryState = { loading: false, loaded: false, rows: [], error: "" };
 let unmatchedSkuState = { loading: false, loaded: false, rows: [], total: 0, query: "", error: "" };
+let productSubmodule = "products";
+let pendingSkuState = { loading: false, loaded: false, rows: [], query: "", error: "", notice: "" };
 let platformPreviewRequestId = 0;
 
 function escapeHtml(value) {
@@ -227,6 +231,7 @@ function renderProductCards(products, index) {
 }
 
 function renderProductList() {
+  if (productSubmodule === "pending-skus") return renderPendingSkuPage();
   const index = buildProductUiIndex();
   const products = getFilteredProducts(index);
   const totalPages = Math.max(1, Math.ceil(products.length / productPageSize));
@@ -241,6 +246,7 @@ function renderProductList() {
           ${canCreate ? `<button class="secondary-button" type="button" data-action="open-product-v2-import">导入ERP数据</button><button class="primary-button" type="button" data-action="new-product">新增产品</button>` : ""}
         </div>
       </div>
+      ${renderProductSubmoduleTabs()}
       <form class="filter-bar product-filter-bar" data-product-filter-form>
         <input type="search" name="query" value="${escapeHtml(filters.query)}" placeholder="搜索产品名称或SKU" />
         <select name="brand">${renderFilterOptions(uniqueValues("brand"), filters.brand, "全部品牌")}</select>
@@ -273,6 +279,51 @@ function renderProductList() {
       ${renderProductV2ImportModal()}
     </section>
   `;
+}
+
+function renderProductSubmoduleTabs() {
+  return `<nav class="product-submodule-tabs" aria-label="产品中心子模块">
+    <button type="button" data-action="product-submodule" data-submodule="products" class="${productSubmodule === "products" ? "is-active" : ""}">产品列表</button>
+    <button type="button" data-action="product-submodule" data-submodule="pending-skus" class="${productSubmodule === "pending-skus" ? "is-active" : ""}">待建立SKU</button>
+    <button type="button" data-action="open-product-v2-import">ERP同步</button>
+  </nav>`;
+}
+
+function renderPendingSkuPage() {
+  const canCreate = hasPermission(getCurrentUser(), "products.create");
+  return `<section class="product-center-page">
+    <div class="section-heading with-actions">
+      <div><h1>产品中心</h1><p>识别ERP已发现、尚未建立产品档案的SKU</p></div>
+    </div>
+    ${renderProductSubmoduleTabs()}
+    <form class="filter-bar pending-sku-filter-bar" data-pending-sku-search>
+      <input type="search" name="query" value="${escapeHtml(pendingSkuState.query)}" placeholder="搜索SKU、货品名称或ERP货品编码" />
+      <button class="secondary-button" type="submit">搜索</button>
+      ${pendingSkuState.query ? `<button class="text-button" type="button" data-action="clear-pending-sku-search">清空</button>` : ""}
+    </form>
+    ${pendingSkuState.error ? `<div class="form-error">${escapeHtml(pendingSkuState.error)}</div>` : ""}
+    ${pendingSkuState.notice ? `<div class="form-success">${escapeHtml(pendingSkuState.notice)}</div>` : ""}
+    ${pendingSkuState.loading ? `<div class="empty-state">正在读取待建立SKU…</div>` : `
+      <div class="product-list-toolbar"><span>共 ${pendingSkuState.rows.length} 个待建立SKU</span></div>
+      <div class="table-wrap"><table class="data-table pending-sku-table">
+        <thead><tr><th>SKU编码</th><th>ERP货品名称</th><th>ERP货品编号</th><th>规格名称</th><th>单位</th><th>条码</th><th>首次发现时间</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody>${pendingSkuState.rows.length === 0
+          ? `<tr><td colspan="9" class="empty-cell">暂无待建立SKU</td></tr>`
+          : pendingSkuState.rows.map((sku) => `<tr>
+              <td><strong>${escapeHtml(sku.merchantSkuCode)}</strong></td>
+              <td>${escapeHtml(sku.goodsName || "未命名ERP货品")}</td>
+              <td>${escapeHtml(sku.goodsCode || "—")}</td>
+              <td>${escapeHtml(sku.specificationName || "—")}</td>
+              <td>${escapeHtml(sku.unit || "—")}</td>
+              <td>${escapeHtml(sku.barcode || "—")}</td>
+              <td>${formatDateTime(sku.firstSeenAt)}</td>
+              <td><span class="status-badge">待建立</span></td>
+              <td>${canCreate ? `<button class="primary-button compact-button" type="button" data-action="create-product-from-pending-sku" data-erp-sku-id="${escapeHtml(sku.id)}" data-sku-code="${escapeHtml(sku.merchantSkuCode)}">创建产品</button>` : "仅可查看"}</td>
+            </tr>`).join("")}
+        </tbody>
+      </table></div>`}
+    ${renderProductV2ImportModal()}
+  </section>`;
 }
 
 function renderProductPagination(total, totalPages) {
@@ -1167,6 +1218,32 @@ async function refreshProductSalesSummaries(rerender) {
   rerender();
 }
 
+async function refreshPendingErpSkus(rerender, query = pendingSkuState.query) {
+  if (pendingSkuState.loading) return;
+  pendingSkuState = { ...pendingSkuState, query, loading: true, error: "", notice: "" };
+  rerender();
+  try {
+    const result = await loadPendingErpSkus(query);
+    pendingSkuState = {
+      loading: false,
+      loaded: true,
+      rows: result.rows ?? [],
+      query,
+      error: "",
+      notice: pendingSkuState.notice,
+    };
+  } catch (error) {
+    pendingSkuState = {
+      ...pendingSkuState,
+      loading: false,
+      loaded: true,
+      rows: [],
+      error: error.message || "待建立SKU读取失败。",
+    };
+  }
+  rerender();
+}
+
 async function refreshUnmatchedPlatformSkus(rerender, query = unmatchedSkuState.query) {
   unmatchedSkuState = { ...unmatchedSkuState, query, loading: true, error: "" };
   rerender();
@@ -1236,12 +1313,19 @@ export function bindProductCenterPageEvents(rerender) {
   if (routeProductId && productDetailTab === "sales" && productSalesState.productId !== routeProductId && !productSalesState.loading) {
     void refreshProductSalesLinks(routeProductId, rerender);
   }
-  if (!routeProductId && !unmatchedSkuState.loaded && !unmatchedSkuState.loading) {
+  if (!routeProductId && productSubmodule === "products" && !unmatchedSkuState.loaded && !unmatchedSkuState.loading) {
     void refreshUnmatchedPlatformSkus(rerender);
   }
-  if (!routeProductId && !productSalesSummaryState.loaded && !productSalesSummaryState.loading) {
+  if (!routeProductId && productSubmodule === "products" && !productSalesSummaryState.loaded && !productSalesSummaryState.loading) {
     void refreshProductSalesSummaries(rerender);
   }
+  if (!routeProductId && productSubmodule === "pending-skus" && !pendingSkuState.loaded && !pendingSkuState.loading) {
+    void refreshPendingErpSkus(rerender);
+  }
+  document.querySelector("[data-pending-sku-search]")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void refreshPendingErpSkus(rerender, event.currentTarget.elements.query.value.trim());
+  });
   document.querySelector("[data-unmatched-search]")?.addEventListener("submit", (event) => {
     event.preventDefault();
     void refreshUnmatchedPlatformSkus(rerender, event.currentTarget.elements.query.value.trim());
@@ -1285,6 +1369,38 @@ export function bindProductCenterPageEvents(rerender) {
     const button = event.target.closest("[data-action]");
     if (button === null) return;
     const action = button.dataset.action;
+    if (action === "product-submodule") {
+      productSubmodule = button.dataset.submodule === "pending-skus" ? "pending-skus" : "products";
+      rerender();
+    }
+    if (action === "clear-pending-sku-search") {
+      pendingSkuState = { ...pendingSkuState, query: "", loaded: false, error: "", notice: "" };
+      rerender();
+    }
+    if (action === "create-product-from-pending-sku") {
+      const skuCode = button.dataset.skuCode || "";
+      if (!window.confirm(`确认以SKU ${skuCode} 建立产品档案并关联ERP货品？`)) return;
+      button.disabled = true;
+      button.textContent = "正在创建…";
+      try {
+        const result = await createProductFromPendingErpSku(button.dataset.erpSkuId);
+        state.products = [result.product, ...state.products.filter((item) => item.id !== result.product.id)];
+        state.productErpMappings = [
+          result.mapping,
+          ...state.productErpMappings.filter((item) => item.id !== result.mapping.id),
+        ];
+        pendingSkuState = {
+          ...pendingSkuState,
+          rows: pendingSkuState.rows.filter((item) => item.id !== button.dataset.erpSkuId),
+          notice: `SKU ${result.product.skuCode} 的产品档案已创建。`,
+          error: "",
+        };
+        rerender();
+      } catch (error) {
+        pendingSkuState = { ...pendingSkuState, error: error.message || "产品创建失败。", notice: "" };
+        rerender();
+      }
+    }
     if (action === "set-product-view") { productViewMode = button.dataset.viewMode === "card" ? "card" : "list"; rerender(); }
     if (action === "product-page") {
       productPage = Math.max(1, Number(button.dataset.page) || 1);

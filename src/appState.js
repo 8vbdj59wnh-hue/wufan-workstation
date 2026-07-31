@@ -898,6 +898,20 @@ export async function loadProductSalesSummaries() {
   return readApiJson(response, "产品销售汇总读取失败。");
 }
 
+export async function loadPendingErpSkus(search = "") {
+  const query = new URLSearchParams({ search: String(search ?? "") });
+  const response = await authFetch(`${apiBaseUrl}/api/products/pending-skus?${query}`);
+  return readApiJson(response, "待建立SKU读取失败。");
+}
+
+export async function createProductFromPendingErpSku(erpSkuId) {
+  const response = await authFetch(
+    `${apiBaseUrl}/api/products/pending-skus/${encodeURIComponent(erpSkuId)}/create-product`,
+    { method: "POST" },
+  );
+  return readApiJson(response, "产品创建失败。");
+}
+
 export async function loadUnmatchedPlatformSkus({ query = "", limit = 100, offset = 0 } = {}) {
   const search = new URLSearchParams({ query, limit: String(limit), offset: String(offset) });
   const response = await authFetch(`${apiBaseUrl}/api/products/platform-skus/unmatched?${search}`);

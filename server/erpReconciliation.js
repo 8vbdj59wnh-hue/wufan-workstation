@@ -35,6 +35,7 @@ export function reconcileErpSyncRun(syncRunId, { failAfterStage = "" } = {}) {
     const summary = database.transaction(() => {
       const result = {
         goods: {},
+        erpSkus: {},
         mappings: {},
         inventory: {},
         links: {},
@@ -43,6 +44,11 @@ export function reconcileErpSyncRun(syncRunId, { failAfterStage = "" } = {}) {
       result.goods.missing = database.prepare(`
         UPDATE erp_goods
         SET currentState='missing',missingAt=COALESCE(missingAt,@now),updatedAt=@now
+        WHERE COALESCE(lastSeenBatchId,'')<>@batchId AND currentState='active'
+      `).run({ batchId: run.goodsInfoBatchId, now }).changes;
+      result.erpSkus.missing = database.prepare(`
+        UPDATE erp_skus
+        SET currentState='missing',updatedAt=@now
         WHERE COALESCE(lastSeenBatchId,'')<>@batchId AND currentState='active'
       `).run({ batchId: run.goodsInfoBatchId, now }).changes;
       result.mappings.missing = database.prepare(`
@@ -70,6 +76,7 @@ export function reconcileErpSyncRun(syncRunId, { failAfterStage = "" } = {}) {
       if (failAfterStage === "relations") throw new Error("测试注入：销售关系对账后回滚");
 
       result.goods.current = countState(database, "erp_goods", "currentState");
+      result.erpSkus.current = countState(database, "erp_skus", "currentState");
       result.mappings.current = countState(database, "product_erp_mappings", "currentState");
       result.inventory.current = countState(database, "product_erp_mappings", "inventoryCurrentState");
       result.links.current = countState(database, "sales_links", "currentState");

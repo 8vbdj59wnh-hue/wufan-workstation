@@ -9225,3 +9225,42 @@ button.content-template-thumb {
   display: inline-flex;
   margin-right: 18px;
 }
+
+.product-submodule-tabs {
+  display: flex;
+  gap: 6px;
+  margin: 0 0 18px;
+  padding: 4px;
+  width: fit-content;
+  max-width: 100%;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 12px;
+  background: var(--soft-background, #f8fafc);
+}
+
+.product-submodule-tabs button {
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted-text, #667085);
+  cursor: pointer;
+}
+
+.product-submodule-tabs button.is-active {
+  background: #fff;
+  color: var(--text-color, #111827);
+  box-shadow: 0 1px 3px rgb(15 23 42 / 10%);
+}
+
+.pending-sku-filter-bar input[type="search"] {
+  min-width: min(420px, 100%);
+}
+
+.pending-sku-table td {
+  vertical-align: middle;
+}
+
+.pending-sku-table .compact-button {
+  white-space: nowrap;
+}

@@ -1013,6 +1013,35 @@ function commitGoodsInfo(batch, staging) {
         goods = database.prepare("SELECT * FROM erp_goods WHERE lower(goodsCode)=lower(?)").get(row.goodsCode)
           ?? (row.existingGoodsId ? database.prepare("SELECT * FROM erp_goods WHERE id=?").get(row.existingGoodsId) : null);
       }
+      const skuId = id("erp-sku", lower(row.merchantSkuCode));
+      database.prepare(`
+        INSERT INTO erp_skus (
+          id,merchantSkuCode,erpGoodsId,specificationName,barcode,unit,erpStatus,
+          firstSeenBatchId,lastSeenBatchId,currentState,createdAt,updatedAt
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(merchantSkuCode) DO UPDATE SET
+          erpGoodsId=excluded.erpGoodsId,
+          specificationName=excluded.specificationName,
+          barcode=excluded.barcode,
+          unit=excluded.unit,
+          erpStatus=excluded.erpStatus,
+          lastSeenBatchId=excluded.lastSeenBatchId,
+          currentState='active',
+          updatedAt=excluded.updatedAt
+      `).run(
+        skuId,
+        row.merchantSkuCode,
+        goods.id,
+        row.specificationName || null,
+        value(record["主条码"]) || value(record["条码"]) || null,
+        value(record["基本单位"]) || value(record["单位"]) || null,
+        value(record["单品状态"]) || null,
+        batch.id,
+        batch.id,
+        "active",
+        now,
+        now,
+      );
       if (!row.systemProduct) {
         stats.pendingMappings += 1;
         continue;
