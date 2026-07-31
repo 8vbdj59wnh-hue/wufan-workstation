@@ -108,6 +108,31 @@ const syncRunBatchColumns = {
   platform_goods: "platformGoodsBatchId",
 };
 
+const syncTypeImportTypes = {
+  master_data: ["goods_info"],
+  daily_business: ["inventory", "platform_goods"],
+  legacy_combined: ["goods_info", "inventory", "platform_goods"],
+};
+
+function normalizeSyncType(raw, { allowLegacy = true } = {}) {
+  const syncType = value(raw) || (allowLegacy ? "legacy_combined" : "");
+  if (!Object.hasOwn(syncTypeImportTypes, syncType) || (!allowLegacy && syncType === "legacy_combined")) {
+    throw new Error("同步类型必须为 master_data 或 daily_business。");
+  }
+  return syncType;
+}
+
+function requiredImportTypes(syncType) {
+  return syncTypeImportTypes[normalizeSyncType(syncType)] ?? [];
+}
+
+function assertSyncImportType(syncType, importType) {
+  const normalizedSyncType = normalizeSyncType(syncType);
+  if (!requiredImportTypes(normalizedSyncType).includes(importType)) {
+    throw new Error(`同步类型 ${normalizedSyncType} 不允许导入 ${importType}。`);
+  }
+}
+
 function normalizeBusinessDate(raw) {
   const businessDate = value(raw);
   if (!/^\d{4}-\d{2}-\d{2}$/u.test(businessDate)) throw new Error("业务日期格式必须为 YYYY-MM-DD。");
@@ -124,7 +149,12 @@ function decodeSyncRun(row) {
   let reconciliationSummary = {};
   try { errorSummary = JSON.parse(row.errorSummary || "[]"); } catch {}
   try { reconciliationSummary = JSON.parse(row.reconciliationSummaryJson || "{}"); } catch {}
-  return { ...row, errorSummary, reconciliationSummary };
+  return {
+    ...row,
+    syncType: normalizeSyncType(row.syncType),
+    errorSummary,
+    reconciliationSummary,
+  };
 }
 
 function getSyncRunRow(syncRunId) {
@@ -144,9 +174,12 @@ function recalculateSyncRunInTransaction(syncRunId, referenceAt = new Date().toI
   if (!row) throw new Error("ERP同步批次不存在。");
   if (row.status === "completed") return decodeSyncRun(row);
   const batches = getSyncRunBatches(row);
-  const current = Object.values(batches).filter(Boolean);
+  const syncType = normalizeSyncType(row.syncType);
+  const expectedTypes = requiredImportTypes(syncType);
+  const expectedBatches = expectedTypes.map((importType) => batches[importType]);
+  const current = expectedBatches.filter(Boolean);
   const success = (batch) => ["completed", "committed"].includes(batch?.status);
-  const allCompleted = Object.values(batches).every((batch) =>
+  const allCompleted = expectedBatches.every((batch) =>
     success(batch)
     && batch.syncRunId === row.id
     && batch.businessDate === row.businessDate
@@ -154,8 +187,11 @@ function recalculateSyncRunInTransaction(syncRunId, referenceAt = new Date().toI
   );
   const productsExist = database.prepare("SELECT COUNT(*) AS total FROM products").get().total > 0;
   let status = "draft";
-  if (allCompleted && productsExist) status = "completed";
-  else if (current.some(success) || current.some((batch) => batch.status === "failed")) status = "partial";
+  if (allCompleted && (syncType === "master_data" || productsExist)) status = "completed";
+  else if (syncType === "master_data") {
+    if (current.some((batch) => batch.status === "failed")) status = "failed";
+    else if (current.length > 0) status = "processing";
+  } else if (current.some(success) || current.some((batch) => batch.status === "failed")) status = "partial";
   else if (current.length > 0) status = "syncing";
   const errors = current
     .filter((batch) => batch.status === "failed" || Number(batch.errorCount ?? 0) > 0)
@@ -185,15 +221,16 @@ function recalculateSyncRunInTransaction(syncRunId, referenceAt = new Date().toI
   return decodeSyncRun(getSyncRunRow(row.id));
 }
 
-export function createErpSyncRun({ businessDate: rawBusinessDate, createdBy = "" } = {}) {
+export function createErpSyncRun({ businessDate: rawBusinessDate, syncType: rawSyncType, createdBy = "" } = {}) {
   const database = getDatabase();
   const businessDate = normalizeBusinessDate(rawBusinessDate);
+  const syncType = normalizeSyncType(rawSyncType, { allowLegacy: false });
   return database.transaction(() => {
     const active = database.prepare(`
       SELECT * FROM erp_sync_runs
-      WHERE businessDate=? AND status IN ('draft','syncing','partial')
+      WHERE businessDate=? AND syncType=? AND status IN ('draft','processing','syncing','partial')
       ORDER BY version DESC LIMIT 1
-    `).get(businessDate);
+    `).get(businessDate, syncType);
     if (active) {
       const error = new Error(`该业务日期已有未完成同步：${active.syncCode}`);
       error.code = "ERP_SYNC_ACTIVE_EXISTS";
@@ -203,20 +240,27 @@ export function createErpSyncRun({ businessDate: rawBusinessDate, createdBy = ""
     const latest = database.prepare(`
       SELECT * FROM erp_sync_runs WHERE businessDate=? ORDER BY version DESC LIMIT 1
     `).get(businessDate);
+    const latestSameType = database.prepare(`
+      SELECT * FROM erp_sync_runs
+      WHERE businessDate=? AND syncType=?
+      ORDER BY version DESC LIMIT 1
+    `).get(businessDate, syncType);
     const version = Number(latest?.version ?? 0) + 1;
     const compactDate = businessDate.replaceAll("-", "");
-    const syncCode = `ERP-SYNC-${compactDate}-${String(version).padStart(4, "0")}`;
+    const codeType = syncType === "master_data" ? "MASTER" : "DAILY";
+    const syncCode = `ERP-${codeType}-${compactDate}-${String(version).padStart(4, "0")}`;
     const now = new Date().toISOString();
     const run = {
       id: `erp-sync-${crypto.randomUUID()}`,
       syncCode,
       businessDate,
       version,
+      syncType,
       status: "draft",
       goodsInfoBatchId: null,
       inventoryBatchId: null,
       platformGoodsBatchId: null,
-      supersedesRunId: latest?.status === "completed" ? latest.id : null,
+      supersedesRunId: latestSameType?.status === "completed" ? latestSameType.id : null,
       goodsInfoExportedAt: null,
       inventoryExportedAt: null,
       platformGoodsExportedAt: null,
@@ -230,11 +274,11 @@ export function createErpSyncRun({ businessDate: rawBusinessDate, createdBy = ""
     };
     database.prepare(`
       INSERT INTO erp_sync_runs (
-        id,syncCode,businessDate,version,status,goodsInfoBatchId,inventoryBatchId,platformGoodsBatchId,
+        id,syncCode,businessDate,version,syncType,status,goodsInfoBatchId,inventoryBatchId,platformGoodsBatchId,
         supersedesRunId,goodsInfoExportedAt,inventoryExportedAt,platformGoodsExportedAt,
         createdBy,createdAt,startedAt,completedAt,failedAt,errorSummary,updatedAt
       ) VALUES (
-        @id,@syncCode,@businessDate,@version,@status,@goodsInfoBatchId,@inventoryBatchId,@platformGoodsBatchId,
+        @id,@syncCode,@businessDate,@version,@syncType,@status,@goodsInfoBatchId,@inventoryBatchId,@platformGoodsBatchId,
         @supersedesRunId,@goodsInfoExportedAt,@inventoryExportedAt,@platformGoodsExportedAt,
         @createdBy,@createdAt,@startedAt,@completedAt,@failedAt,@errorSummary,@updatedAt
       )
@@ -253,6 +297,7 @@ export function attachErpImportBatchToSyncRun(syncRunId, batchId) {
     if (!batch) throw new Error("ERP导入子批次不存在。");
     const column = syncRunBatchColumns[batch.importType];
     if (!column) throw new Error("ERP导入类型无效。");
+    assertSyncImportType(run.syncType, batch.importType);
     if (batch.syncRunId && batch.syncRunId !== run.id) throw new Error("该子批次已属于其他ERP同步。");
     const previousBatchId = run[column];
     const previousBatch = previousBatchId ? decodeBatch(readBatch(previousBatchId)) : null;
@@ -282,7 +327,12 @@ export function recalculateErpSyncRun(syncRunId) {
     }
     run = decodeSyncRun(getSyncRunRow(syncRunId));
   }
-  if (run.status === "completed" && run.reconciliationStatus === "completed" && run.snapshotStatus !== "completed") {
+  if (
+    run.status === "completed"
+    && run.syncType !== "master_data"
+    && run.reconciliationStatus === "completed"
+    && run.snapshotStatus !== "completed"
+  ) {
     try {
       generateErpFactSnapshot(run.id);
     } catch (error) {
@@ -722,6 +772,7 @@ export function parseErpV2Import({ filePath, originalFilename, importType, syncR
   if (!["goods_info", "inventory", "platform_goods"].includes(importType)) throw new Error("导入类型无效。");
   const syncRun = readErpSyncRun(syncRunId);
   if (!syncRun) throw new Error("请先创建或恢复ERP每日同步批次。");
+  assertSyncImportType(syncRun.syncType, importType);
   if (syncRun.status === "completed") throw new Error("该ERP每日同步已完成，请创建同日重新同步版本。");
   const currentBatch = syncRun.batches?.[importType];
   if (currentBatch && ["completed", "committed"].includes(currentBatch.status)) {

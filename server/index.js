@@ -1306,6 +1306,7 @@ app.post("/api/products/erp-sync-runs", requirePermission("products.create"), (r
       success: true,
       syncRun: createErpSyncRun({
         businessDate: request.body?.businessDate,
+        syncType: request.body?.syncType,
         createdBy: getUserPersonId(request.user),
       }),
     });

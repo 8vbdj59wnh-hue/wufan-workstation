@@ -232,6 +232,11 @@ export function generateErpFactSnapshot(syncRunId, { failAfterStage = "" } = {})
   if (existing?.status === "completed") return { snapshot: existing, idempotent: true };
   const run = database.prepare("SELECT * FROM erp_sync_runs WHERE id=?").get(syncRunId);
   if (!run) throw new Error("ERP同步批次不存在。");
+  const syncType = run.syncType || "legacy_combined";
+  if (syncType === "master_data") throw new Error("ERP主数据同步不生成经营事实快照。");
+  if (!["daily_business", "legacy_combined"].includes(syncType)) {
+    throw new Error("ERP同步类型无效，不能生成历史快照。");
+  }
   if (run.status !== "completed") throw new Error("只有三张ERP表全部完成后才能生成历史快照。");
   if (run.reconciliationStatus !== "completed") throw new Error("缺失记录对账完成后才能生成历史快照。");
   const now = new Date().toISOString();

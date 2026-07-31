@@ -22,9 +22,22 @@ export function reconcileErpSyncRun(syncRunId, { failAfterStage = "" } = {}) {
   const database = getDatabase();
   const run = database.prepare("SELECT * FROM erp_sync_runs WHERE id=?").get(syncRunId);
   if (!run) throw new Error("ERP同步批次不存在。");
-  if (run.status !== "completed") throw new Error("只有三张ERP表全部完成后才能执行缺失记录对账。");
-  if (!run.goodsInfoBatchId || !run.inventoryBatchId || !run.platformGoodsBatchId) {
-    throw new Error("ERP同步子批次不完整，不能执行缺失记录对账。");
+  const syncType = run.syncType || "legacy_combined";
+  if (!["master_data", "daily_business", "legacy_combined"].includes(syncType)) {
+    throw new Error("ERP同步类型无效，不能执行缺失记录对账。");
+  }
+  if (run.status !== "completed") throw new Error("ERP同步完成后才能执行缺失记录对账。");
+  if (syncType === "master_data" && !run.goodsInfoBatchId) {
+    throw new Error("ERP主数据同步缺少货品信息批次，不能执行缺失记录对账。");
+  }
+  if (syncType === "daily_business" && (!run.inventoryBatchId || !run.platformGoodsBatchId)) {
+    throw new Error("ERP经营数据同步子批次不完整，不能执行缺失记录对账。");
+  }
+  if (
+    syncType === "legacy_combined"
+    && (!run.goodsInfoBatchId || !run.inventoryBatchId || !run.platformGoodsBatchId)
+  ) {
+    throw new Error("历史ERP联合同步子批次不完整，不能执行缺失记录对账。");
   }
   if (run.reconciliationStatus === "completed") {
     return { summary: decodeSummary(run.reconciliationSummaryJson), idempotent: true };
@@ -41,39 +54,43 @@ export function reconcileErpSyncRun(syncRunId, { failAfterStage = "" } = {}) {
         links: {},
         platformSkus: {},
       };
-      result.goods.missing = database.prepare(`
-        UPDATE erp_goods
-        SET currentState='missing',missingAt=COALESCE(missingAt,@now),updatedAt=@now
-        WHERE COALESCE(lastSeenBatchId,'')<>@batchId AND currentState='active'
-      `).run({ batchId: run.goodsInfoBatchId, now }).changes;
-      result.erpSkus.missing = database.prepare(`
-        UPDATE erp_skus
-        SET currentState='missing',updatedAt=@now
-        WHERE COALESCE(lastSeenBatchId,'')<>@batchId AND currentState='active'
-      `).run({ batchId: run.goodsInfoBatchId, now }).changes;
-      result.mappings.missing = database.prepare(`
-        UPDATE product_erp_mappings
-        SET currentState='missing',missingAt=COALESCE(missingAt,@now),updatedAt=@now
-        WHERE COALESCE(sourceBatchId,'')<>@batchId AND currentState='active'
-      `).run({ batchId: run.goodsInfoBatchId, now }).changes;
-      if (failAfterStage === "goods") throw new Error("测试注入：ERP货品对账后回滚");
+      if (syncType !== "daily_business") {
+        result.goods.missing = database.prepare(`
+          UPDATE erp_goods
+          SET currentState='missing',missingAt=COALESCE(missingAt,@now),updatedAt=@now
+          WHERE COALESCE(lastSeenBatchId,'')<>@batchId AND currentState='active'
+        `).run({ batchId: run.goodsInfoBatchId, now }).changes;
+        result.erpSkus.missing = database.prepare(`
+          UPDATE erp_skus
+          SET currentState='missing',updatedAt=@now
+          WHERE COALESCE(lastSeenBatchId,'')<>@batchId AND currentState='active'
+        `).run({ batchId: run.goodsInfoBatchId, now }).changes;
+        result.mappings.missing = database.prepare(`
+          UPDATE product_erp_mappings
+          SET currentState='missing',missingAt=COALESCE(missingAt,@now),updatedAt=@now
+          WHERE COALESCE(sourceBatchId,'')<>@batchId AND currentState='active'
+        `).run({ batchId: run.goodsInfoBatchId, now }).changes;
+        if (failAfterStage === "goods") throw new Error("测试注入：ERP货品对账后回滚");
+      }
 
-      result.inventory.missing = database.prepare(`
-        UPDATE product_erp_mappings
-        SET inventoryCurrentState='missing',inventoryMissingAt=COALESCE(inventoryMissingAt,@now),updatedAt=@now
-        WHERE COALESCE(lastSeenInventoryBatchId,'')<>@batchId AND inventoryCurrentState='active'
-      `).run({ batchId: run.inventoryBatchId, now }).changes;
-      result.links.missing = database.prepare(`
-        UPDATE sales_links
-        SET currentState='missing',missingAt=COALESCE(missingAt,@now),updatedAt=@now
-        WHERE COALESCE(lastSeenBatchId,'')<>@batchId AND currentState='active'
-      `).run({ batchId: run.platformGoodsBatchId, now }).changes;
-      result.platformSkus.missing = database.prepare(`
-        UPDATE sales_link_skus
-        SET currentState='missing',missingAt=COALESCE(missingAt,@now),updatedAt=@now
-        WHERE COALESCE(lastSeenBatchId,'')<>@batchId AND currentState='active'
-      `).run({ batchId: run.platformGoodsBatchId, now }).changes;
-      if (failAfterStage === "relations") throw new Error("测试注入：销售关系对账后回滚");
+      if (syncType !== "master_data") {
+        result.inventory.missing = database.prepare(`
+          UPDATE product_erp_mappings
+          SET inventoryCurrentState='missing',inventoryMissingAt=COALESCE(inventoryMissingAt,@now),updatedAt=@now
+          WHERE COALESCE(lastSeenInventoryBatchId,'')<>@batchId AND inventoryCurrentState='active'
+        `).run({ batchId: run.inventoryBatchId, now }).changes;
+        result.links.missing = database.prepare(`
+          UPDATE sales_links
+          SET currentState='missing',missingAt=COALESCE(missingAt,@now),updatedAt=@now
+          WHERE COALESCE(lastSeenBatchId,'')<>@batchId AND currentState='active'
+        `).run({ batchId: run.platformGoodsBatchId, now }).changes;
+        result.platformSkus.missing = database.prepare(`
+          UPDATE sales_link_skus
+          SET currentState='missing',missingAt=COALESCE(missingAt,@now),updatedAt=@now
+          WHERE COALESCE(lastSeenBatchId,'')<>@batchId AND currentState='active'
+        `).run({ batchId: run.platformGoodsBatchId, now }).changes;
+        if (failAfterStage === "relations") throw new Error("测试注入：销售关系对账后回滚");
+      }
 
       result.goods.current = countState(database, "erp_goods", "currentState");
       result.erpSkus.current = countState(database, "erp_skus", "currentState");

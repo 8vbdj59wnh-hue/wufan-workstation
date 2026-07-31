@@ -1721,6 +1721,7 @@ function runLightweightMigrations() {
   ensureColumn("erp_sync_runs", "reconciledAt", "TEXT");
   ensureColumn("erp_sync_runs", "reconciliationError", "TEXT");
   ensureColumn("erp_sync_runs", "reconciliationSummaryJson", "TEXT");
+  ensureColumn("erp_sync_runs", "syncType", "TEXT NOT NULL DEFAULT 'legacy_combined'");
   ensureColumn("erp_goods", "lastSeenBatchId", "TEXT");
   ensureColumn("erp_goods", "currentState", "TEXT NOT NULL DEFAULT 'active'");
   ensureColumn("erp_goods", "missingAt", "TEXT");
@@ -1758,6 +1759,7 @@ function runLightweightMigrations() {
       syncCode TEXT NOT NULL UNIQUE,
       businessDate TEXT NOT NULL,
       version INTEGER NOT NULL,
+      syncType TEXT NOT NULL DEFAULT 'legacy_combined',
       status TEXT NOT NULL,
       goodsInfoBatchId TEXT,
       inventoryBatchId TEXT,
@@ -1789,8 +1791,10 @@ function runLightweightMigrations() {
       ON erp_sync_runs(businessDate, version);
     CREATE INDEX IF NOT EXISTS idx_erp_sync_runs_status
       ON erp_sync_runs(status, updatedAt);
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_erp_sync_runs_one_active_date
-      ON erp_sync_runs(businessDate) WHERE status IN ('draft', 'syncing', 'partial');
+    DROP INDEX IF EXISTS idx_erp_sync_runs_one_active_date;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_erp_sync_runs_one_active_type_date
+      ON erp_sync_runs(syncType,businessDate)
+      WHERE status IN ('draft','processing','syncing','partial');
     CREATE TABLE IF NOT EXISTS erp_fact_snapshots (
       id TEXT PRIMARY KEY,
       syncRunId TEXT NOT NULL UNIQUE,

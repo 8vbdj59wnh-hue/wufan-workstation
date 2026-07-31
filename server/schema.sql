@@ -664,6 +664,7 @@ CREATE TABLE IF NOT EXISTS erp_sync_runs (
   syncCode TEXT NOT NULL UNIQUE,
   businessDate TEXT NOT NULL,
   version INTEGER NOT NULL,
+  syncType TEXT NOT NULL DEFAULT 'legacy_combined',
   status TEXT NOT NULL,
   goodsInfoBatchId TEXT,
   inventoryBatchId TEXT,
@@ -692,9 +693,6 @@ CREATE TABLE IF NOT EXISTS erp_sync_runs (
 
 CREATE INDEX IF NOT EXISTS idx_erp_sync_runs_business_date ON erp_sync_runs(businessDate, version);
 CREATE INDEX IF NOT EXISTS idx_erp_sync_runs_status ON erp_sync_runs(status, updatedAt);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_erp_sync_runs_one_active_date
-  ON erp_sync_runs(businessDate) WHERE status IN ('draft', 'syncing', 'partial');
-
 CREATE TABLE IF NOT EXISTS erp_fact_snapshots (
   id TEXT PRIMARY KEY,
   syncRunId TEXT NOT NULL UNIQUE,
