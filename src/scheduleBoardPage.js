@@ -52,6 +52,7 @@ import {
 
 const dayMs = 24 * 60 * 60 * 1000;
 const boardDayCount = 30;
+const boardPastDayCount = 7;
 const workdayStartHour = 8;
 const workdayEndHour = 24;
 const timeSlotHours = 2;
@@ -205,14 +206,15 @@ function getTodayDate() {
 
 function buildBoardDays() {
   const today = getTodayDate();
-  return Array.from({ length: boardDayCount }, (_, index) => {
-    const date = new Date(today.getTime() + index * dayMs);
+  return Array.from({ length: boardDayCount + boardPastDayCount }, (_, index) => {
+    const dayOffset = index - boardPastDayCount;
+    const date = new Date(today.getTime() + dayOffset * dayMs);
     return {
       date,
       key: formatDate(date),
       label: `${date.getMonth() + 1}月${date.getDate()}日`,
       weekday: ["日", "一", "二", "三", "四", "五", "六"][date.getDay()],
-      isToday: index === 0,
+      isToday: dayOffset === 0,
       isWeekend: date.getDay() === 0 || date.getDay() === 6,
     };
   });
@@ -1492,7 +1494,7 @@ export function renderScheduleBoardPage() {
   const launchedListRows = buildLaunchedListRows().filter(launchedRowMatchesFilters);
   const actionOverviewRows = buildActionOverviewRows().filter(launchedRowMatchesFilters);
   const contentNoteRows = actionOverviewRows.filter((row) => row.workPlan.taskTemplateId === publishContentNoteTemplateId);
-  const columnCount = filters.noDueDateOnly ? 1 : boardDayCount;
+  const columnCount = filters.noDueDateOnly ? 1 : boardDayCount + boardPastDayCount;
   return `
     <section class="schedule-board-page" style="--schedule-day-count: ${columnCount};">
       ${renderActionSubmoduleTabs()}
