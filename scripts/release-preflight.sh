@@ -158,7 +158,11 @@ NODE
 HEALTH_JSON="$(curl --fail --silent --show-error http://127.0.0.1:3001/api/health)"
 HEALTH_JSON="$HEALTH_JSON" "$NODE22_BIN/node" <<'NODE'
 const health = JSON.parse(process.env.HEALTH_JSON);
-if (health.ok !== true) throw new Error("health endpoint did not return ok:true");
+const currentContract = health.status === "ok" && health.database === "ok";
+const legacyContract = health.ok === true;
+if (!currentContract && !legacyContract) {
+  throw new Error("health endpoint did not report a healthy service and database");
+}
 NODE
 
 DISK_FREE_BYTES="$(df -Pk "$PROJECT_DIR" | awk 'NR == 2 { printf "%.0f\n", $4 * 1024 }')"

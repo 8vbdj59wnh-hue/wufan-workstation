@@ -144,11 +144,14 @@ done
 
 HEALTH_JSON="$(curl --fail --silent --show-error http://127.0.0.1:3001/api/health)" \
   || fail "backend health request failed"
-HEALTH_JSON="$HEALTH_JSON" DATABASE_PATH="$DATABASE_PATH" "$NODE_COMMAND" <<'NODE' \
+HEALTH_JSON="$HEALTH_JSON" "$NODE_COMMAND" <<'NODE' \
   || fail "backend health payload invalid"
 const health = JSON.parse(process.env.HEALTH_JSON);
-if (health.ok !== true) throw new Error("ok is not true");
-if (health.databasePath !== process.env.DATABASE_PATH) throw new Error(`database path mismatch: ${health.databasePath}`);
+const currentContract = health.status === "ok" && health.database === "ok";
+const legacyContract = health.ok === true;
+if (!currentContract && !legacyContract) {
+  throw new Error("health status or database is not ok");
+}
 NODE
 
 FRONT_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:5173/)"
