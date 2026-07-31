@@ -52,48 +52,49 @@ export function listPendingErpSkus(search = "") {
   `).all({ query, like });
 }
 
-export function createProductFromErpSku(erpSkuId) {
-  const database = getDatabase();
-  return database.transaction(() => {
-    const sku = database.prepare(`
+function prepareProductFromErpSku(database, erpSkuId) {
+  const sku = database.prepare(`
       SELECT s.*, g.goodsCode, g.goodsName, g.brand, g.category
       FROM erp_skus s
       JOIN erp_goods g ON g.id = s.erpGoodsId
       WHERE s.id = ?
       LIMIT 1
     `).get(erpSkuId);
-    if (!sku) throw new Error("待建立SKU不存在或已失效。");
-    if (sku.currentState !== "active") throw new Error("该ERP SKU当前不是有效状态，无法创建产品。");
+  if (!sku) throw new Error("待建立SKU不存在或已失效。");
+  if (sku.currentState !== "active") throw new Error("该ERP SKU当前不是有效状态，无法创建产品。");
 
-    const normalizedSku = normalizeSku(sku.merchantSkuCode);
-    if (!normalizedSku) throw new Error("ERP SKU编码为空，无法创建产品。");
-    const existingProduct = database.prepare(`
+  const normalizedSku = normalizeSku(sku.merchantSkuCode);
+  if (!normalizedSku) throw new Error("ERP SKU编码为空，无法创建产品。");
+  const existingProduct = database.prepare(`
       SELECT id, skuCode, name
       FROM products
       WHERE lower(trim(skuCode)) = ?
       LIMIT 1
     `).get(normalizedSku);
-    if (existingProduct) {
-      throw new Error(`SKU ${sku.merchantSkuCode} 已存在产品档案，请刷新待建立SKU列表。`);
-    }
-    const occupiedMapping = database.prepare(`
+  if (existingProduct) {
+    throw new Error(`SKU ${sku.merchantSkuCode} 已存在产品档案，请刷新待建立SKU列表。`);
+  }
+  const occupiedMapping = database.prepare(`
       SELECT id, productId
       FROM product_erp_mappings
       WHERE lower(trim(merchantSkuCode)) = ?
       LIMIT 1
     `).get(normalizedSku);
-    if (occupiedMapping) throw new Error("该SKU已被其他ERP映射占用，无法重复创建产品。");
+  if (occupiedMapping) throw new Error(`SKU ${sku.merchantSkuCode} 已被其他ERP映射占用，无法重复创建产品。`);
+  return { sku, normalizedSku };
+}
 
-    let galleryImages = [];
-    try {
-      const parsedGallery = JSON.parse(sku.galleryImages || "[]");
-      if (Array.isArray(parsedGallery)) galleryImages = parsedGallery.filter(Boolean);
-    } catch {
-      galleryImages = [];
-    }
-    const mainImage = String(sku.mainImage ?? "").trim() || galleryImages[0] || null;
-    const now = new Date().toISOString();
-    const product = createResource("products", {
+function insertProductFromPreparedErpSku({ sku, normalizedSku }) {
+  let galleryImages = [];
+  try {
+    const parsedGallery = JSON.parse(sku.galleryImages || "[]");
+    if (Array.isArray(parsedGallery)) galleryImages = parsedGallery.filter(Boolean);
+  } catch {
+    galleryImages = [];
+  }
+  const mainImage = String(sku.mainImage ?? "").trim() || galleryImages[0] || null;
+  const now = new Date().toISOString();
+  const product = createResource("products", {
       id: stableId("product", normalizedSku),
       skuCode: sku.merchantSkuCode,
       name: String(sku.goodsName ?? "").trim() || sku.merchantSkuCode,
@@ -106,8 +107,8 @@ export function createProductFromErpSku(erpSkuId) {
       sourceSystem: "ERP待建立SKU",
       createdAt: now,
       updatedAt: now,
-    });
-    const mapping = {
+  });
+  const mapping = {
       id: stableId("product-erp-map", product.id),
       productId: product.id,
       erpGoodsId: sku.erpGoodsId,
@@ -126,8 +127,8 @@ export function createProductFromErpSku(erpSkuId) {
       inventoryMissingAt: now,
       createdAt: now,
       updatedAt: now,
-    };
-    database.prepare(`
+  };
+  getDatabase().prepare(`
       INSERT INTO product_erp_mappings (
         id,productId,erpGoodsId,merchantSkuCode,specificationName,unit,barcode,erpStatus,
         matchMethod,sourceBatchId,latestStateJson,currentState,missingAt,
@@ -137,10 +138,38 @@ export function createProductFromErpSku(erpSkuId) {
         @matchMethod,@sourceBatchId,@latestStateJson,@currentState,@missingAt,
         @lastSeenInventoryBatchId,@inventoryCurrentState,@inventoryMissingAt,@createdAt,@updatedAt
       )
-    `).run(mapping);
+  `).run(mapping);
+  return {
+    product,
+    mapping: { ...mapping, latestStateJson: {} },
+  };
+}
+
+export function createProductFromErpSku(erpSkuId) {
+  const database = getDatabase();
+  return database.transaction(() => (
+    insertProductFromPreparedErpSku(prepareProductFromErpSku(database, erpSkuId))
+  ))();
+}
+
+export function createProductsFromErpSkus(erpSkuIds) {
+  const ids = [...new Set((Array.isArray(erpSkuIds) ? erpSkuIds : []).map((item) => String(item ?? "").trim()).filter(Boolean))];
+  if (ids.length === 0) throw new Error("请至少选择一个待建立SKU。");
+  const database = getDatabase();
+  return database.transaction(() => {
+    const prepared = ids.map((erpSkuId) => prepareProductFromErpSku(database, erpSkuId));
+    const normalizedCodes = new Set();
+    for (const item of prepared) {
+      if (normalizedCodes.has(item.normalizedSku)) {
+        throw new Error(`SKU ${item.sku.merchantSkuCode} 在本次选择中重复，无法批量创建。`);
+      }
+      normalizedCodes.add(item.normalizedSku);
+    }
+    const created = prepared.map((item) => insertProductFromPreparedErpSku(item));
     return {
-      product,
-      mapping: { ...mapping, latestStateJson: {} },
+      products: created.map((item) => item.product),
+      mappings: created.map((item) => item.mapping),
+      createdCount: created.length,
     };
   })();
 }

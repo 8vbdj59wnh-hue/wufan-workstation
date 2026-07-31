@@ -913,6 +913,15 @@ export async function createProductFromPendingErpSku(erpSkuId) {
   return readApiJson(response, "产品创建失败。");
 }
 
+export async function createProductsFromPendingErpSkus(erpSkuIds) {
+  const response = await authFetch(`${apiBaseUrl}/api/products/pending-skus/batch-create-products`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ erpSkuIds }),
+  });
+  return readApiJson(response, "产品批量创建失败。");
+}
+
 export async function loadUnmatchedPlatformSkus({ query = "", limit = 100, offset = 0 } = {}) {
   const search = new URLSearchParams({ query, limit: String(limit), offset: String(offset) });
   const response = await authFetch(`${apiBaseUrl}/api/products/platform-skus/unmatched?${search}`);

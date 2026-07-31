@@ -82,7 +82,7 @@ import {
   getSlowMovingProducts,
   getTrendProducts,
 } from "./dataCenterService.js";
-import { createProductFromErpSku, listPendingErpSkus } from "./erpSkuService.js";
+import { createProductFromErpSku, createProductsFromErpSkus, listPendingErpSkus } from "./erpSkuService.js";
 import { createToken, verifyPassword, verifyToken } from "./security.js";
 import {
   canAccessTemplateCenter,
@@ -1532,6 +1532,19 @@ app.get("/api/products/pending-skus", requirePermission("products.view"), (reque
     });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "待建立SKU读取失败。" });
+  }
+});
+
+app.post("/api/products/pending-skus/batch-create-products", requirePermission("products.create"), (request, response) => {
+  try {
+    response.status(201).json({
+      success: true,
+      ...createProductsFromErpSkus(request.body?.erpSkuIds),
+    });
+  } catch (error) {
+    const message = error.message || "产品批量创建失败。";
+    const conflict = message.includes("已存在") || message.includes("占用") || message.includes("重复");
+    response.status(conflict ? 409 : 400).json({ success: false, message });
   }
 });
 

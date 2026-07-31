@@ -3,6 +3,7 @@ import {
   changeProductSku,
   createPersistentResource,
   createProductFromPendingErpSku,
+  createProductsFromPendingErpSkus,
   commitProductImport,
   commitProductV2Import,
   createErpSyncRun,
@@ -57,6 +58,7 @@ let productSalesSummaryState = { loading: false, loaded: false, rows: [], error:
 let unmatchedSkuState = { loading: false, loaded: false, rows: [], total: 0, query: "", error: "" };
 let productSubmodule = "products";
 let pendingSkuState = { loading: false, loaded: false, rows: [], query: "", error: "", notice: "" };
+let selectedPendingSkuIds = new Set();
 let platformPreviewRequestId = 0;
 
 function escapeHtml(value) {
@@ -297,6 +299,8 @@ function renderProductSubmoduleTabs() {
 
 function renderPendingSkuPage() {
   const canCreate = hasPermission(getCurrentUser(), "products.create");
+  const selectedCount = selectedPendingSkuIds.size;
+  const allSelected = pendingSkuState.rows.length > 0 && pendingSkuState.rows.every((item) => selectedPendingSkuIds.has(item.id));
   return `<section class="product-center-page">
     <div class="section-heading with-actions">
       <div><h1>产品中心</h1><p>识别ERP已发现、尚未建立产品档案的SKU</p></div>
@@ -310,12 +314,21 @@ function renderPendingSkuPage() {
     ${pendingSkuState.error ? `<div class="form-error">${escapeHtml(pendingSkuState.error)}</div>` : ""}
     ${pendingSkuState.notice ? `<div class="form-success">${escapeHtml(pendingSkuState.notice)}</div>` : ""}
     ${pendingSkuState.loading ? `<div class="empty-state">正在读取待建立SKU…</div>` : `
-      <div class="product-list-toolbar"><span>共 ${pendingSkuState.rows.length} 个待建立SKU</span></div>
+      <div class="product-list-toolbar">
+        <span>共 ${pendingSkuState.rows.length} 个待建立SKU${selectedCount > 0 ? ` · 已选择 ${selectedCount} 个` : ""}</span>
+        ${canCreate ? `<button class="primary-button" type="button" data-action="batch-create-products-from-pending-skus" ${selectedCount === 0 ? "disabled" : ""}>批量创建产品</button>` : ""}
+      </div>
       <div class="table-wrap"><table class="data-table pending-sku-table">
-        <thead><tr><th>SKU编码</th><th>ERP货品名称</th><th>ERP货品编号</th><th>规格名称</th><th>单位</th><th>条码</th><th>首次发现时间</th><th>状态</th><th>操作</th></tr></thead>
+        <thead><tr>
+          <th class="pending-sku-select-cell">${canCreate ? `<input type="checkbox" data-pending-sku-select-all aria-label="选择全部待建立SKU" ${allSelected ? "checked" : ""} />` : "选择"}</th>
+          <th>产品图片</th><th>SKU编码</th><th>ERP货品名称</th><th>ERP货品编号</th><th>规格名称</th>
+          <th>单位</th><th>条码</th><th>首次发现时间</th><th>状态</th><th>操作</th>
+        </tr></thead>
         <tbody>${pendingSkuState.rows.length === 0
-          ? `<tr><td colspan="9" class="empty-cell">暂无待建立SKU</td></tr>`
+          ? `<tr><td colspan="11" class="empty-cell">暂无待建立SKU</td></tr>`
           : pendingSkuState.rows.map((sku) => `<tr>
+              <td class="pending-sku-select-cell">${canCreate ? `<input type="checkbox" data-pending-sku-select="${escapeHtml(sku.id)}" aria-label="选择SKU ${escapeHtml(sku.merchantSkuCode)}" ${selectedPendingSkuIds.has(sku.id) ? "checked" : ""} />` : "—"}</td>
+              <td>${renderImage({ mainImage: sku.mainImage, name: sku.goodsName || sku.merchantSkuCode }, "pending-sku-image")}</td>
               <td><strong>${escapeHtml(sku.merchantSkuCode)}</strong></td>
               <td>${escapeHtml(sku.goodsName || "未命名ERP货品")}</td>
               <td>${escapeHtml(sku.goodsCode || "—")}</td>
@@ -1273,6 +1286,7 @@ async function refreshPendingErpSkus(rerender, query = pendingSkuState.query) {
       error: "",
       notice: pendingSkuState.notice,
     };
+    selectedPendingSkuIds = new Set([...selectedPendingSkuIds].filter((id) => pendingSkuState.rows.some((item) => item.id === id)));
   } catch (error) {
     pendingSkuState = {
       ...pendingSkuState,
@@ -1367,6 +1381,18 @@ export function bindProductCenterPageEvents(rerender) {
     event.preventDefault();
     void refreshPendingErpSkus(rerender, event.currentTarget.elements.query.value.trim());
   });
+  document.querySelector("[data-pending-sku-select-all]")?.addEventListener("change", (event) => {
+    selectedPendingSkuIds = event.currentTarget.checked
+      ? new Set(pendingSkuState.rows.map((item) => item.id))
+      : new Set();
+    rerender();
+  });
+  document.querySelectorAll("[data-pending-sku-select]").forEach((checkbox) => checkbox.addEventListener("change", (event) => {
+    const id = event.currentTarget.dataset.pendingSkuSelect;
+    if (event.currentTarget.checked) selectedPendingSkuIds.add(id);
+    else selectedPendingSkuIds.delete(id);
+    rerender();
+  }));
   document.querySelector("[data-unmatched-search]")?.addEventListener("submit", (event) => {
     event.preventDefault();
     void refreshUnmatchedPlatformSkus(rerender, event.currentTarget.elements.query.value.trim());
@@ -1436,9 +1462,38 @@ export function bindProductCenterPageEvents(rerender) {
           notice: `SKU ${result.product.skuCode} 的产品档案已创建。`,
           error: "",
         };
+        selectedPendingSkuIds.delete(button.dataset.erpSkuId);
         rerender();
       } catch (error) {
         pendingSkuState = { ...pendingSkuState, error: error.message || "产品创建失败。", notice: "" };
+        rerender();
+      }
+    }
+    if (action === "batch-create-products-from-pending-skus") {
+      const erpSkuIds = [...selectedPendingSkuIds];
+      if (erpSkuIds.length === 0) return;
+      if (!window.confirm(`确认批量建立 ${erpSkuIds.length} 个产品档案并关联ERP货品？`)) return;
+      button.disabled = true;
+      button.textContent = "正在批量创建…";
+      try {
+        const result = await createProductsFromPendingErpSkus(erpSkuIds);
+        const productIds = new Set(result.products.map((item) => item.id));
+        const mappingIds = new Set(result.mappings.map((item) => item.id));
+        state.products = [...result.products, ...state.products.filter((item) => !productIds.has(item.id))];
+        state.productErpMappings = [
+          ...result.mappings,
+          ...state.productErpMappings.filter((item) => !mappingIds.has(item.id)),
+        ];
+        pendingSkuState = {
+          ...pendingSkuState,
+          rows: pendingSkuState.rows.filter((item) => !selectedPendingSkuIds.has(item.id)),
+          notice: `已成功创建 ${result.createdCount} 个产品档案。`,
+          error: "",
+        };
+        selectedPendingSkuIds = new Set();
+        rerender();
+      } catch (error) {
+        pendingSkuState = { ...pendingSkuState, error: error.message || "产品批量创建失败。", notice: "" };
         rerender();
       }
     }

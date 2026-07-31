@@ -9261,6 +9261,21 @@ button.content-template-thumb {
   vertical-align: middle;
 }
 
+.pending-sku-table .pending-sku-select-cell {
+  width: 46px;
+  text-align: center;
+}
+
+.pending-sku-image {
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  object-fit: cover;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .pending-sku-table .compact-button {
   white-space: nowrap;
 }
