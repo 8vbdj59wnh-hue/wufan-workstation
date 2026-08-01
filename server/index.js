@@ -61,6 +61,7 @@ import {
   listErpSyncRuns,
   markPlatformSku,
   parseErpV2Import,
+  parseWangdianGoodsImport,
   previewErpV2Import,
   readErpV2Import,
   readErpSyncRun,
@@ -69,6 +70,7 @@ import {
   updatePlatformSkuManualBinding,
   validateErpV2Import,
 } from "./productV2Import.js";
+import { hasWangdianConfig } from "./wangdianClient.js";
 import {
   generateErpFactSnapshot,
   listErpFactSnapshots,
@@ -1308,6 +1310,7 @@ app.post("/api/products/erp-sync-runs", requirePermission("products.create"), (r
       syncRun: createErpSyncRun({
         businessDate: request.body?.businessDate,
         syncType: request.body?.syncType,
+        dataSource: request.body?.dataSource,
         createdBy: getUserPersonId(request.user),
       }),
     });
@@ -1317,6 +1320,23 @@ app.post("/api/products/erp-sync-runs", requirePermission("products.create"), (r
       message: error.message || "ERP每日同步创建失败。",
       syncRun: error.syncRun ? readErpSyncRun(error.syncRun.id) : undefined,
     });
+  }
+});
+
+app.get("/api/products/wangdian/status", requirePermission("products.view"), (request, response) => {
+  response.json({ success: true, configured: hasWangdianConfig() });
+});
+
+app.post("/api/products/erp-sync-runs/:id/wangdian/preview", requirePermission("products.create"), async (request, response) => {
+  try {
+    const result = await parseWangdianGoodsImport({
+      syncRunId: request.params.id,
+      query: request.body ?? {},
+      createdBy: getUserPersonId(request.user),
+    });
+    response.json({ success: true, ...result });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "旺店通货品读取失败。" });
   }
 });
 

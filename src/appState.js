@@ -786,13 +786,22 @@ export async function loadErpSyncRun(syncRunId) {
   return readApiJson(response, "ERP每日同步读取失败。");
 }
 
-export async function createErpSyncRun(businessDate, syncType) {
+export async function createErpSyncRun(businessDate, syncType, dataSource = "excel") {
   const response = await authFetch(`${apiBaseUrl}/api/products/erp-sync-runs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ businessDate, syncType }),
+    body: JSON.stringify({ businessDate, syncType, dataSource }),
   });
   return readApiJson(response, "ERP每日同步创建失败。");
+}
+
+export async function previewWangdianGoods(syncRunId, query) {
+  const response = await authFetch(`${apiBaseUrl}/api/products/erp-sync-runs/${encodeURIComponent(syncRunId)}/wangdian/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(query),
+  });
+  return readApiJson(response, "旺店通货品读取失败。");
 }
 
 export async function recalculateErpSyncRun(syncRunId) {

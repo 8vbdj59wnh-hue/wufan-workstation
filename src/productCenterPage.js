@@ -21,6 +21,7 @@ import {
   listErpSyncRuns,
   parseProductImport,
   parseProductV2Import,
+  previewWangdianGoods,
   previewProductSkuChange,
   recalculateErpSyncRun,
   resolveAssetUrl,
@@ -859,6 +860,17 @@ function renderProductV2Upload() {
   </form>`;
 }
 
+function renderWangdianGoodsQuery() {
+  const date = importState.syncRun?.businessDate || new Date().toLocaleDateString("sv-SE");
+  return `<form id="wangdian-goods-query-form" class="product-import-upload-form">
+    <p class="form-note">从旺店通读取指定时间范围内发生变化的货品与SKU。读取后先进入现有预览与校验，不会直接写入产品数据。</p>
+    <label><span>开始修改时间 *</span><input name="startTime" type="datetime-local" value="${escapeHtml(`${date}T00:00`)}" required /></label>
+    <label><span>结束修改时间 *</span><input name="endTime" type="datetime-local" value="${escapeHtml(`${date}T23:59`)}" required /></label>
+    <small>旺店通单次查询跨度不能超过30天；API增量同步不会把未返回的历史货品标记为缺失。</small>
+    <div class="form-error" ${importState.error ? "" : "hidden"}>${escapeHtml(importState.error || "")}</div>
+  </form>`;
+}
+
 function renderErpSyncDashboard() {
   const run = erpSyncState.active;
   const statusLabels = {
@@ -894,6 +906,10 @@ function renderErpSyncDashboard() {
           <option value="master_data">ERP主数据同步</option>
           <option value="daily_business">ERP经营数据同步</option>
         </select></label>
+        <label data-master-data-source><span>主数据来源 *</span><select name="dataSource">
+          <option value="excel">Excel文件</option>
+          <option value="wangdian">旺店通API</option>
+        </select></label>
         <fieldset class="product-import-mode-field" data-master-import-mode>
           <legend>主数据导入模式</legend>
           <label><input type="radio" name="importMode" value="incremental" checked /> 增量新增</label>
@@ -912,6 +928,7 @@ function renderErpSyncDashboard() {
     <div class="erp-sync-overview">
       <div><span>同步编码</span><strong>${escapeHtml(run.syncCode)}</strong></div>
       <div><span>同步类型</span><strong>${run.syncType === "master_data" ? "ERP主数据同步" : run.syncType === "daily_business" ? "ERP经营数据同步" : "历史联合同步"}</strong></div>
+      <div><span>数据来源</span><strong>${run.dataSource === "wangdian" ? "旺店通API" : "Excel文件"}</strong></div>
       <div><span>业务日期</span><strong>${escapeHtml(run.businessDate)}</strong></div>
       <div><span>整体状态</span><strong>${escapeHtml(statusLabels[run.status] || run.status)}</strong></div>
       <div><span>版本</span><strong>V${run.version}</strong></div>
@@ -924,7 +941,9 @@ function renderErpSyncDashboard() {
       const completed = ["completed", "committed"].includes(batch?.status);
       const action = batch
         ? `<button class="secondary-button" type="button" data-action="resume-product-v2-import" data-batch-id="${escapeHtml(batch.id)}">${completed ? "查看结果" : batch.status === "failed" ? "查看失败并重试" : "继续处理"}</button>`
-        : `<button class="primary-button" type="button" data-action="upload-erp-sync-child" data-import-type="${importType}">上传文件</button>`;
+        : run.dataSource === "wangdian" && importType === "goods_info"
+          ? `<button class="primary-button" type="button" data-action="sync-wangdian-goods">同步旺店通货品</button>`
+          : `<button class="primary-button" type="button" data-action="upload-erp-sync-child" data-import-type="${importType}">上传文件</button>`;
       return `<article class="erp-sync-file-card">
         <div><h3>${label}</h3><p>${description}</p></div>
         <dl><div><dt>状态</dt><dd>${escapeHtml(batchStatusLabels[batch?.status] || (batch ? batch.status : "待导入"))}</dd></div>
@@ -1146,12 +1165,14 @@ function renderProductV2Complete() {
 function renderProductV2ImportModal() {
   if (importState?.version !== "v2") return "";
   let body = importState.step === "sync" ? renderErpSyncDashboard() : renderProductV2Upload();
+  if (importState.step === "wangdian") body = renderWangdianGoodsQuery();
   if (importState.step === "shops") body = renderShopMapping();
   if (importState.step === "preview") body = renderProductV2Preview();
   if (importState.step === "complete") body = renderProductV2Complete();
   let footer = importState.step === "sync"
     ? `<button class="secondary-button" type="button" data-action="close-product-import">关闭</button>`
     : `<button class="secondary-button" type="button" data-action="${importState.syncRun ? "back-to-erp-sync" : "close-product-import"}">返回</button><button class="primary-button" type="submit" form="product-v2-import-upload-form" ${importState.loading ? "disabled" : ""}>${importState.loading ? "正在解析…" : "上传并解析"}</button>`;
+  if (importState.step === "wangdian") footer = `<button class="secondary-button" type="button" data-action="back-to-erp-sync" ${importState.loading ? "disabled" : ""}>返回</button><button class="primary-button" type="submit" form="wangdian-goods-query-form" ${importState.loading ? "disabled" : ""}>${importState.loading ? "正在读取旺店通…" : "读取并生成预览"}</button>`;
   if (importState.step === "shops") footer = `<button class="secondary-button" type="button" data-action="close-product-import">取消</button><button class="primary-button" type="button" data-action="confirm-shop-mappings" ${importState.loading ? "disabled" : ""}>确认店铺并生成预览</button>`;
   if (importState.step === "preview") {
     const backendValidated = importState.batch?.status === "validated";
@@ -1551,6 +1572,18 @@ export function bindProductCenterPageEvents(rerender) {
       };
       rerender();
     }
+    if (action === "sync-wangdian-goods") {
+      importState = {
+        version: "v2",
+        step: "wangdian",
+        importType: "goods_info",
+        importMode: "incremental",
+        syncRun: erpSyncState.active,
+        loading: false,
+        error: "",
+      };
+      rerender();
+    }
     if (action === "back-to-erp-sync") {
       const syncRunId = importState.syncRun?.id || importState.result?.syncRun?.id || importState.batch?.syncRunId;
       await refreshErpSyncState(syncRunId);
@@ -1825,12 +1858,13 @@ export function bindProductCenterPageEvents(rerender) {
     const form = event.currentTarget;
     const businessDate = form.elements.businessDate.value;
     const syncType = form.elements.syncType.value;
+    const dataSource = syncType === "master_data" ? form.elements.dataSource.value : "excel";
     const importMode = syncType === "master_data" ? form.elements.importMode.value : "";
     erpSyncState = { ...erpSyncState, loading: true, error: "" };
     if (importMode) erpSyncState.masterImportMode = importMode;
     rerender();
     try {
-      const result = await createErpSyncRun(businessDate, syncType);
+      const result = await createErpSyncRun(businessDate, syncType, dataSource);
       await refreshErpSyncState(result.syncRun.id);
     } catch (error) {
       erpSyncState = {
@@ -1845,6 +1879,48 @@ export function bindProductCenterPageEvents(rerender) {
   document.querySelector("#erp-sync-create-form [name='syncType']")?.addEventListener("change", (event) => {
     const modeField = document.querySelector("[data-master-import-mode]");
     if (modeField) modeField.hidden = event.currentTarget.value !== "master_data";
+    const sourceField = document.querySelector("[data-master-data-source]");
+    if (sourceField) sourceField.hidden = event.currentTarget.value !== "master_data";
+  });
+  document.querySelector("#erp-sync-create-form [name='dataSource']")?.addEventListener("change", (event) => {
+    const fullMode = document.querySelector("#erp-sync-create-form [name='importMode'][value='full']");
+    const incrementalMode = document.querySelector("#erp-sync-create-form [name='importMode'][value='incremental']");
+    if (fullMode) fullMode.disabled = event.currentTarget.value === "wangdian";
+    if (event.currentTarget.value === "wangdian" && incrementalMode) incrementalMode.checked = true;
+  });
+  document.querySelector("#wangdian-goods-query-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const syncRun = importState.syncRun;
+    if (!syncRun?.id) return;
+    const toApiDateTime = (input) => input ? `${input.replace("T", " ")}:00` : "";
+    const query = {
+      startTime: toApiDateTime(form.elements.startTime.value),
+      endTime: toApiDateTime(form.elements.endTime.value),
+    };
+    importState = { ...importState, loading: true, error: "" };
+    rerender();
+    try {
+      const result = await previewWangdianGoods(syncRun.id, query);
+      const validated = await validateProductV2Import(result.batch.id);
+      importState = {
+        version: "v2",
+        step: "preview",
+        loading: false,
+        error: "",
+        importType: "goods_info",
+        importMode: "incremental",
+        syncRun: validated.syncRun || result.syncRun || syncRun,
+        duplicate: result.duplicate,
+        batch: validated.batch,
+        valid: validated.valid,
+        summary: validated.summary,
+        preview: validated.preview,
+      };
+    } catch (error) {
+      importState = { ...importState, step: "wangdian", loading: false, error: error.message || "旺店通货品读取失败。" };
+    }
+    rerender();
   });
   document.querySelector("#product-v2-import-upload-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();

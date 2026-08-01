@@ -1714,6 +1714,7 @@ function runLightweightMigrations() {
   ensureColumn("erp_import_batches", "syncRunId", "TEXT");
   ensureColumn("erp_import_batches", "businessDate", "TEXT");
   ensureColumn("erp_import_batches", "importMode", "TEXT");
+  ensureColumn("erp_import_batches", "dataSource", "TEXT NOT NULL DEFAULT 'excel'");
   ensureColumn("erp_sync_runs", "snapshotId", "TEXT");
   ensureColumn("erp_sync_runs", "snapshotStatus", "TEXT NOT NULL DEFAULT 'pending'");
   ensureColumn("erp_sync_runs", "snapshotCompletedAt", "TEXT");
@@ -1723,6 +1724,7 @@ function runLightweightMigrations() {
   ensureColumn("erp_sync_runs", "reconciliationError", "TEXT");
   ensureColumn("erp_sync_runs", "reconciliationSummaryJson", "TEXT");
   ensureColumn("erp_sync_runs", "syncType", "TEXT NOT NULL DEFAULT 'legacy_combined'");
+  ensureColumn("erp_sync_runs", "dataSource", "TEXT NOT NULL DEFAULT 'excel'");
   ensureColumn("erp_goods", "lastSeenBatchId", "TEXT");
   ensureColumn("erp_goods", "currentState", "TEXT NOT NULL DEFAULT 'active'");
   ensureColumn("erp_goods", "missingAt", "TEXT");
@@ -1765,6 +1767,7 @@ function runLightweightMigrations() {
       businessDate TEXT NOT NULL,
       version INTEGER NOT NULL,
       syncType TEXT NOT NULL DEFAULT 'legacy_combined',
+      dataSource TEXT NOT NULL DEFAULT 'excel',
       status TEXT NOT NULL,
       goodsInfoBatchId TEXT,
       inventoryBatchId TEXT,

@@ -6,6 +6,8 @@ import { getDatabase, uploadsDir } from "./db.js";
 import { generateErpFactSnapshot, readErpFactSnapshot } from "./erpFactSnapshots.js";
 import { parseProductWorkbook } from "./productImport.js";
 import { reconcileErpSyncRun } from "./erpReconciliation.js";
+import { queryWangdianGoods } from "./wangdianClient.js";
+import { adaptWangdianGoodsResponse, canonicalGoodsRecordsToStaging } from "./wangdianGoodsAdapter.js";
 
 const stagingRoot = path.join(uploadsDir, "product-v2-imports");
 const goodsInfoRequiredHeaders = ["货品编号", "商家编码", "货品名称"];
@@ -82,20 +84,21 @@ function decodeBatch(row) {
 function saveBatch(batch) {
   getDatabase().prepare(`
     INSERT INTO erp_import_batches (
-      id, importType, importMode, syncRunId, businessDate, originalFilename, fileHash, status, totalRows, createdCount, updatedCount,
+      id, importType, importMode, dataSource, syncRunId, businessDate, originalFilename, fileHash, status, totalRows, createdCount, updatedCount,
       unchangedCount, matchedCount, unmatchedCount, errorCount, summaryJson, createdBy, createdAt, completedAt
     ) VALUES (
-      @id, @importType, @importMode, @syncRunId, @businessDate, @originalFilename, @fileHash, @status, @totalRows, @createdCount, @updatedCount,
+      @id, @importType, @importMode, @dataSource, @syncRunId, @businessDate, @originalFilename, @fileHash, @status, @totalRows, @createdCount, @updatedCount,
       @unchangedCount, @matchedCount, @unmatchedCount, @errorCount, @summaryJson, @createdBy, @createdAt, @completedAt
     )
     ON CONFLICT(id) DO UPDATE SET
-      importMode=excluded.importMode, syncRunId=excluded.syncRunId, businessDate=excluded.businessDate,
+      importMode=excluded.importMode, dataSource=excluded.dataSource, syncRunId=excluded.syncRunId, businessDate=excluded.businessDate,
       status=excluded.status, totalRows=excluded.totalRows, createdCount=excluded.createdCount,
       updatedCount=excluded.updatedCount, unchangedCount=excluded.unchangedCount,
       matchedCount=excluded.matchedCount, unmatchedCount=excluded.unmatchedCount,
       errorCount=excluded.errorCount, summaryJson=excluded.summaryJson, completedAt=excluded.completedAt
   `).run({
     importMode: null,
+    dataSource: "excel",
     syncRunId: null,
     businessDate: null,
     ...batch,
@@ -237,10 +240,13 @@ function recalculateSyncRunInTransaction(syncRunId, referenceAt = new Date().toI
   return decodeSyncRun(getSyncRunRow(row.id));
 }
 
-export function createErpSyncRun({ businessDate: rawBusinessDate, syncType: rawSyncType, createdBy = "" } = {}) {
+export function createErpSyncRun({ businessDate: rawBusinessDate, syncType: rawSyncType, dataSource: rawDataSource = "excel", createdBy = "" } = {}) {
   const database = getDatabase();
   const businessDate = normalizeBusinessDate(rawBusinessDate);
   const syncType = normalizeSyncType(rawSyncType, { allowLegacy: false });
+  const dataSource = value(rawDataSource) || "excel";
+  if (!["excel", "wangdian"].includes(dataSource)) throw new Error("ERP同步数据来源无效。");
+  if (dataSource === "wangdian" && syncType !== "master_data") throw new Error("旺店通API第一版仅支持ERP主数据同步。");
   return database.transaction(() => {
     const active = database.prepare(`
       SELECT * FROM erp_sync_runs
@@ -272,6 +278,7 @@ export function createErpSyncRun({ businessDate: rawBusinessDate, syncType: rawS
       businessDate,
       version,
       syncType,
+      dataSource,
       status: "draft",
       goodsInfoBatchId: null,
       inventoryBatchId: null,
@@ -290,11 +297,11 @@ export function createErpSyncRun({ businessDate: rawBusinessDate, syncType: rawS
     };
     database.prepare(`
       INSERT INTO erp_sync_runs (
-        id,syncCode,businessDate,version,syncType,status,goodsInfoBatchId,inventoryBatchId,platformGoodsBatchId,
+        id,syncCode,businessDate,version,syncType,dataSource,status,goodsInfoBatchId,inventoryBatchId,platformGoodsBatchId,
         supersedesRunId,goodsInfoExportedAt,inventoryExportedAt,platformGoodsExportedAt,
         createdBy,createdAt,startedAt,completedAt,failedAt,errorSummary,updatedAt
       ) VALUES (
-        @id,@syncCode,@businessDate,@version,@syncType,@status,@goodsInfoBatchId,@inventoryBatchId,@platformGoodsBatchId,
+        @id,@syncCode,@businessDate,@version,@syncType,@dataSource,@status,@goodsInfoBatchId,@inventoryBatchId,@platformGoodsBatchId,
         @supersedesRunId,@goodsInfoExportedAt,@inventoryExportedAt,@platformGoodsExportedAt,
         @createdBy,@createdAt,@startedAt,@completedAt,@failedAt,@errorSummary,@updatedAt
       )
@@ -314,6 +321,7 @@ export function attachErpImportBatchToSyncRun(syncRunId, batchId) {
     const column = syncRunBatchColumns[batch.importType];
     if (!column) throw new Error("ERP导入类型无效。");
     assertSyncImportType(run.syncType, batch.importType);
+    if ((batch.dataSource || "excel") !== (run.dataSource || "excel")) throw new Error("ERP子批次数据来源与同步运行不一致。");
     if (batch.syncRunId && batch.syncRunId !== run.id) throw new Error("该子批次已属于其他ERP同步。");
     const previousBatchId = run[column];
     const previousBatch = previousBatchId ? decodeBatch(readBatch(previousBatchId)) : null;
@@ -796,6 +804,7 @@ export async function parseErpV2Import({
   const syncRun = readErpSyncRun(syncRunId);
   if (!syncRun) throw new Error("请先创建或恢复ERP每日同步批次。");
   assertSyncImportType(syncRun.syncType, importType);
+  if ((syncRun.dataSource || "excel") !== "excel") throw new Error("旺店通同步请使用“同步旺店通货品”入口。");
   const importMode = normalizeImportMode(rawImportMode, { syncType: syncRun.syncType, importType });
   if (syncRun.status === "completed") throw new Error("该ERP每日同步已完成，请创建同日重新同步版本。");
   const currentBatch = syncRun.batches?.[importType];
@@ -853,6 +862,123 @@ export async function parseErpV2Import({
     preview: importType === "platform_goods" ? [] : validation.rows.slice(0, 200),
     previewLinks: [],
     pagination: null,
+  };
+}
+
+function normalizeWangdianQuery(rawQuery = {}) {
+  const query = {
+    goods_no: value(rawQuery.goodsNo ?? rawQuery.goods_no),
+    spec_no: value(rawQuery.specNo ?? rawQuery.spec_no),
+    start_time: value(rawQuery.startTime ?? rawQuery.start_time),
+    end_time: value(rawQuery.endTime ?? rawQuery.end_time),
+    hide_deleted: 1,
+  };
+  if (!query.goods_no && !query.spec_no) {
+    if (!query.start_time || !query.end_time) throw new Error("旺店通同步必须提供起止修改时间，或指定货品编号/SKU编码。");
+    const start = new Date(query.start_time.replace(" ", "T"));
+    const end = new Date(query.end_time.replace(" ", "T"));
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) throw new Error("旺店通同步时间范围无效。");
+    if (end.getTime() - start.getTime() > 30 * 24 * 60 * 60 * 1000) throw new Error("旺店通接口单次查询时间跨度不能超过30天。");
+  } else {
+    delete query.start_time;
+    delete query.end_time;
+  }
+  return Object.fromEntries(Object.entries(query).filter(([, item]) => item !== ""));
+}
+
+export async function parseWangdianGoodsImport({ syncRunId, query: rawQuery = {}, createdBy = "" } = {}) {
+  const syncRun = readErpSyncRun(syncRunId);
+  if (!syncRun) throw new Error("请先创建或恢复ERP主数据同步批次。");
+  if (syncRun.syncType !== "master_data" || syncRun.dataSource !== "wangdian") {
+    throw new Error("当前同步不是旺店通ERP主数据同步。");
+  }
+  if (syncRun.status === "completed") throw new Error("该ERP主数据同步已完成，请创建同日重新同步版本。");
+  const currentBatch = syncRun.batches?.goods_info;
+  if (currentBatch && ["completed", "committed"].includes(currentBatch.status)) {
+    throw new Error("旺店通货品已完成同步，请创建同日重新同步版本。");
+  }
+  const query = normalizeWangdianQuery(rawQuery);
+  const pageSize = 100;
+  const canonicalByIdentity = new Map();
+  let totalCount = null;
+  let pageNo = 0;
+  let sourceGoodsCount = 0;
+  while (pageNo < 10_000) {
+    const payload = await queryWangdianGoods({ params: query, pageNo, pageSize });
+    const goodsList = Array.isArray(payload?.data?.goods_list) ? payload.data.goods_list : [];
+    if (pageNo === 0 && Number.isFinite(Number(payload?.data?.total_count))) totalCount = Number(payload.data.total_count);
+    sourceGoodsCount += goodsList.length;
+    for (const record of adaptWangdianGoodsResponse(payload)) {
+      const skuKey = lower(record.merchantSkuCode);
+      const goodsKey = lower(record.goodsCode);
+      if (skuKey) canonicalByIdentity.set(`${skuKey}|${goodsKey}`, record);
+    }
+    if (goodsList.length < pageSize || (totalCount !== null && sourceGoodsCount >= totalCount)) break;
+    pageNo += 1;
+  }
+  if (pageNo >= 10_000) throw new Error("旺店通分页数量异常，已停止读取。");
+  const canonicalRecords = [...canonicalByIdentity.values()];
+  if (canonicalRecords.length === 0) throw new Error("旺店通未返回可同步的SKU记录。");
+  const records = canonicalGoodsRecordsToStaging(canonicalRecords);
+  const now = new Date().toISOString();
+  const fileHash = crypto.createHash("sha256").update(JSON.stringify(canonicalRecords)).digest("hex");
+  const batchId = `erp-v2-goods_info-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+  const staging = {
+    sheetName: "旺店通货品档案API",
+    headers: goodsInfoRequiredHeaders,
+    records,
+    importType: "goods_info",
+    dataSource: "wangdian",
+    fileHash,
+    originalFilename: "旺店通货品档案API",
+    parsedAt: now,
+    sourceQuery: query,
+  };
+  writeStaging(batchId, staging);
+  const validation = goodsInfoValidation(staging);
+  const existing = decodeBatch(getDatabase().prepare(`
+    SELECT * FROM erp_import_batches
+    WHERE importType='goods_info' AND dataSource='wangdian' AND fileHash=? AND status IN ('committed','completed')
+    ORDER BY createdAt DESC LIMIT 1
+  `).get(fileHash));
+  const batch = saveBatch({
+    id: batchId,
+    importType: "goods_info",
+    importMode: "incremental",
+    dataSource: "wangdian",
+    syncRunId: syncRun.id,
+    businessDate: syncRun.businessDate,
+    originalFilename: "旺店通货品档案API",
+    fileHash,
+    status: "parsed",
+    totalRows: validation.summary.total,
+    createdCount: 0,
+    updatedCount: 0,
+    unchangedCount: 0,
+    matchedCount: validation.summary.matched ?? 0,
+    unmatchedCount: validation.summary.unmatched ?? 0,
+    errorCount: validation.summary.error ?? 0,
+    summaryJson: {
+      ...validation.summary,
+      dataSource: "wangdian",
+      sourceGoodsCount,
+      sourceSkuCount: canonicalRecords.length,
+      sourcePages: pageNo + 1,
+      sourceQuery: query,
+      duplicateCommittedBatchId: existing?.id ?? null,
+    },
+    createdBy,
+    createdAt: now,
+    completedAt: null,
+  });
+  const attachment = attachErpImportBatchToSyncRun(syncRun.id, batch.id);
+  return {
+    batch,
+    syncRun: readErpSyncRun(attachment.run.id),
+    duplicate: existing,
+    valid: validation.valid,
+    summary: validation.summary,
+    preview: validation.rows.slice(0, 200),
   };
 }
 
