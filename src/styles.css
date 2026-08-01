@@ -5774,20 +5774,42 @@ button.content-template-thumb {
 }
 
 .product-list-toolbar-actions,
-.product-sort-control {
+.product-business-sort {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.product-sort-control span {
+.product-business-sort {
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.product-business-sort span {
   color: #64748b;
   white-space: nowrap;
 }
 
-.product-sort-control select {
-  min-height: 36px;
-  min-width: 128px;
+.product-business-sort button {
+  min-height: 30px;
+  padding: 4px 9px;
+  border: 1px solid #dbe3ed;
+  border-radius: 999px;
+  background: #fff;
+  color: #475569;
+  cursor: pointer;
+}
+
+.product-business-sort button:hover {
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+
+.product-business-sort button.is-active {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 700;
 }
 
 .product-view-switch {

@@ -149,41 +149,36 @@ const productTextCollator = new Intl.Collator("zh-CN", { numeric: true, sensitiv
 
 function getProductSortNumber(product, index, field) {
   const stock = getProductErpContext(product.id, index).stock;
-  if (field === "stock") return Number(stock.currentStock ?? stock.actualStock ?? stock.stock ?? 0) || 0;
+  const actualStock = Number(stock.actualStock ?? 0) || 0;
+  if (field === "stock") return actualStock;
+  if (field === "capital") return actualStock * (Number(stock.costPrice ?? 0) || 0);
   return Number(stock.totalSales ?? 0) || 0;
 }
 
 function getSortedProducts(products, index) {
-  const direction = productSort.endsWith("-asc") ? 1 : -1;
   const stableSkuCompare = (left, right) => productTextCollator.compare(String(left.skuCode ?? ""), String(right.skuCode ?? ""));
   return [...products].sort((left, right) => {
     let comparison = 0;
-    if (productSort.startsWith("sku-")) comparison = stableSkuCompare(left, right);
-    else if (productSort.startsWith("name-")) comparison = productTextCollator.compare(String(left.name ?? ""), String(right.name ?? ""));
-    else if (productSort.startsWith("stock-")) comparison = getProductSortNumber(left, index, "stock") - getProductSortNumber(right, index, "stock");
+    if (productSort.startsWith("stock-")) comparison = getProductSortNumber(left, index, "stock") - getProductSortNumber(right, index, "stock");
     else if (productSort.startsWith("sales-")) comparison = getProductSortNumber(left, index, "sales") - getProductSortNumber(right, index, "sales");
+    else if (productSort.startsWith("capital-")) comparison = getProductSortNumber(left, index, "capital") - getProductSortNumber(right, index, "capital");
     else {
       const field = productSort === "created-desc" ? "createdAt" : "updatedAt";
       comparison = (Date.parse(left[field]) || 0) - (Date.parse(right[field]) || 0);
     }
-    return comparison === 0 ? stableSkuCompare(left, right) : comparison * direction;
+    return comparison === 0 ? stableSkuCompare(left, right) : comparison * -1;
   });
 }
 
-function renderProductSortOptions() {
+function renderProductBusinessSort() {
   const options = [
-    ["updated-desc", "最近更新"],
-    ["created-desc", "最新建立"],
-    ["sku-asc", "SKU升序"],
-    ["sku-desc", "SKU降序"],
-    ["name-asc", "名称升序"],
-    ["name-desc", "名称降序"],
-    ["stock-desc", "库存最高"],
-    ["stock-asc", "库存最低"],
-    ["sales-desc", "销量最高"],
-    ["sales-asc", "销量最低"],
+    ["updated-desc", "综合"],
+    ["sales-desc", "🔥销量"],
+    ["stock-desc", "📦库存"],
+    ["capital-desc", "💰资金占用"],
+    ["created-desc", "🆕新品"],
   ];
-  return options.map(([value, label]) => `<option value="${value}" ${productSort === value ? "selected" : ""}>${label}</option>`).join("");
+  return `<div class="product-business-sort" aria-label="产品经营排序"><span>经营排序：</span>${options.map(([value, label]) => `<button type="button" data-action="set-product-sort" data-product-sort="${value}" class="${productSort === value ? "is-active" : ""}" aria-pressed="${productSort === value}">${label}</button>`).join("")}</div>`;
 }
 
 function getProductErpContext(productId, index = null) {
@@ -317,7 +312,7 @@ function renderProductList() {
       <div class="product-list-toolbar">
         <span>共 ${products.length} 个 SKU</span>
         <div class="product-list-toolbar-actions">
-          <label class="product-sort-control"><span>排序</span><select data-product-sort>${renderProductSortOptions()}</select></label>
+          ${renderProductBusinessSort()}
           <div class="product-view-switch" aria-label="产品展示方式">
             <button type="button" data-action="set-product-view" data-view-mode="list" class="${productViewMode === "list" ? "is-active" : ""}">列表</button>
             <button type="button" data-action="set-product-view" data-view-mode="card" class="${productViewMode === "card" ? "is-active" : ""}">卡片</button>
@@ -1497,11 +1492,6 @@ export function bindProductCenterPageEvents(rerender) {
     productPage = 1;
     rerender();
   });
-  document.querySelector("[data-product-sort]")?.addEventListener("change", (event) => {
-    productSort = event.currentTarget.value;
-    productPage = 1;
-    rerender();
-  });
   const page = document.querySelector(".product-center-page");
   page?.addEventListener("keydown", (event) => {
     const card = event.target.closest(".product-archive-card");
@@ -1575,6 +1565,13 @@ export function bindProductCenterPageEvents(rerender) {
       }
     }
     if (action === "set-product-view") { productViewMode = button.dataset.viewMode === "card" ? "card" : "list"; rerender(); }
+    if (action === "set-product-sort") {
+      productSort = ["updated-desc", "sales-desc", "stock-desc", "capital-desc", "created-desc"].includes(button.dataset.productSort)
+        ? button.dataset.productSort
+        : "updated-desc";
+      productPage = 1;
+      rerender();
+    }
     if (action === "product-page") {
       productPage = Math.max(1, Number(button.dataset.page) || 1);
       rerender();
