@@ -865,6 +865,31 @@ export async function removeConnectionAction(connectionId, actionId) {
   return readApiJson(response, "经营动作删除失败。");
 }
 
+export async function loadConnectionDataMappings(filters = {}) {
+  const query = new URLSearchParams(Object.entries(filters).filter(([, item]) => item !== "" && item !== undefined));
+  const response = await authFetch(`${apiBaseUrl}/api/connection-data-mappings${query.size ? `?${query}` : ""}`);
+  return readApiJson(response, "外部数据映射读取失败。");
+}
+
+export async function createConnectionDataMapping(payload) {
+  const response = await authFetch(`${apiBaseUrl}/api/connection-data-mappings`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  });
+  return readApiJson(response, "外部数据映射创建失败。");
+}
+
+export async function updateConnectionDataMapping(mappingId, payload) {
+  const response = await authFetch(`${apiBaseUrl}/api/connection-data-mappings/${encodeURIComponent(mappingId)}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  });
+  return readApiJson(response, "外部数据映射更新失败。");
+}
+
+export async function removeConnectionDataMapping(mappingId) {
+  const response = await authFetch(`${apiBaseUrl}/api/connection-data-mappings/${encodeURIComponent(mappingId)}`, { method: "DELETE" });
+  return readApiJson(response, "外部数据映射删除失败。");
+}
+
 export async function validateProductV2Import(batchId, options = {}) {
   const response = await authFetch(`${apiBaseUrl}/api/products/erp-v2/${encodeURIComponent(batchId)}/validate`, {
     method: "POST",

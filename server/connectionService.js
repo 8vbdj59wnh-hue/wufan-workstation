@@ -3,6 +3,9 @@ import { getDatabase } from "./db.js";
 
 const profileStatuses = new Set(["active", "paused", "archived"]);
 const actionStatuses = new Set(["pending", "in_progress", "completed", "canceled"]);
+const mappingSourceTypes = new Set(["business_advisor", "wangdian", "taobao", "xiaohongshu", "douyin"]);
+const mappingStatuses = new Set(["matched", "pending", "ignored", "rejected"]);
+const mappingMethods = new Set(["goods_id", "sku", "manual"]);
 
 function value(raw) {
   return String(raw ?? "").trim();
@@ -140,4 +143,142 @@ export function deleteConnectionAction(connectionProfileId, actionId) {
   const result = getDatabase().prepare("DELETE FROM connection_actions WHERE id=? AND connectionProfileId=?").run(value(actionId), value(connectionProfileId));
   if (result.changes === 0) throw new Error("未找到经营动作。");
   return { success: true, id: value(actionId) };
+}
+
+function normalizeExternalData(raw) {
+  if (raw === null || raw === undefined || raw === "") return "{}";
+  if (typeof raw === "object") return JSON.stringify(raw);
+  try {
+    const parsed = JSON.parse(String(raw));
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+    return JSON.stringify(parsed);
+  } catch {
+    throw new Error("外部身份数据必须是有效JSON对象。");
+  }
+}
+
+function readConnectionRelation(connectionId) {
+  if (!connectionId) return null;
+  const row = getDatabase().prepare("SELECT id, salesLinkId FROM connection_profiles WHERE id=?").get(connectionId);
+  if (!row) throw new Error("所选连接档案不存在。");
+  return row;
+}
+
+const mappingSelect = `
+  SELECT m.id, m.sourceType, m.connectionId, m.salesLinkId, m.externalType, m.externalId,
+         m.externalShopId, m.externalDataJson, m.matchStatus, m.matchMethod,
+         m.confirmedBy, m.confirmedAt, m.createdAt, m.updatedAt,
+         c.name AS connectionName, c.status AS connectionStatus,
+         l.title AS salesLinkTitle, s.platform, s.displayName AS shopDisplayName, s.shopName
+  FROM connection_data_mappings m
+  LEFT JOIN connection_profiles c ON c.id=m.connectionId
+  LEFT JOIN sales_links l ON l.id=m.salesLinkId
+  LEFT JOIN sales_shops s ON s.id=l.shopId
+`;
+
+function parseMapping(row) {
+  if (!row) return row;
+  try {
+    return { ...row, externalData: JSON.parse(row.externalDataJson || "{}") };
+  } catch {
+    return { ...row, externalData: {} };
+  }
+}
+
+export function listConnectionDataMappings(filters = {}) {
+  const clauses = ["m.deletedAt IS NULL"];
+  const parameters = [];
+  const sourceType = value(filters.sourceType);
+  const matchStatus = value(filters.matchStatus);
+  const search = value(filters.search).toLowerCase();
+  if (sourceType) {
+    if (!mappingSourceTypes.has(sourceType)) throw new Error("外部数据来源无效。");
+    clauses.push("m.sourceType=?");
+    parameters.push(sourceType);
+  }
+  if (matchStatus) {
+    if (!mappingStatuses.has(matchStatus)) throw new Error("映射状态无效。");
+    clauses.push("m.matchStatus=?");
+    parameters.push(matchStatus);
+  }
+  if (search) {
+    clauses.push("(LOWER(m.externalId) LIKE ? OR LOWER(m.externalDataJson) LIKE ?)");
+    parameters.push(`%${search}%`, `%${search}%`);
+  }
+  return getDatabase().prepare(`${mappingSelect} WHERE ${clauses.join(" AND ")} ORDER BY m.updatedAt DESC, m.id DESC LIMIT 500`)
+    .all(...parameters).map(parseMapping);
+}
+
+export function readConnectionDataMapping(id) {
+  const row = getDatabase().prepare(`${mappingSelect} WHERE m.id=? AND m.deletedAt IS NULL`).get(value(id));
+  if (!row) throw new Error("外部数据映射不存在。");
+  return parseMapping(row);
+}
+
+export function createConnectionDataMapping(input, userId) {
+  const sourceType = value(input?.sourceType) || "business_advisor";
+  const externalType = value(input?.externalType) || "product";
+  const externalId = value(input?.externalId);
+  const externalShopId = value(input?.externalShopId);
+  const connectionId = value(input?.connectionId) || null;
+  const matchStatus = value(input?.matchStatus) || (connectionId ? "matched" : "pending");
+  let matchMethod = value(input?.matchMethod) || null;
+  if (!mappingSourceTypes.has(sourceType)) throw new Error("外部数据来源无效。");
+  if (!externalId) throw new Error("请填写外部商品ID。");
+  if (!mappingStatuses.has(matchStatus)) throw new Error("映射状态无效。");
+  if (matchMethod && !mappingMethods.has(matchMethod)) throw new Error("匹配方式无效。");
+  const relation = readConnectionRelation(connectionId);
+  if (matchStatus === "matched" && !relation) throw new Error("确认匹配时必须选择连接档案。");
+  if (matchStatus === "matched" && !matchMethod) matchMethod = "manual";
+  const database = getDatabase();
+  const create = database.transaction(() => {
+    const now = new Date().toISOString();
+    const id = `connection-mapping-${crypto.randomUUID()}`;
+    database.prepare(`
+      INSERT INTO connection_data_mappings (
+        id,sourceType,connectionId,salesLinkId,externalType,externalId,externalShopId,externalDataJson,
+        matchStatus,matchMethod,confirmedBy,confirmedAt,createdAt,updatedAt
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(id, sourceType, relation?.id ?? null, relation?.salesLinkId ?? null, externalType, externalId,
+      externalShopId, normalizeExternalData(input?.externalDataJson ?? input?.externalData), matchStatus, matchMethod,
+      matchStatus === "matched" ? value(userId) || null : null, matchStatus === "matched" ? now : null, now, now);
+    return id;
+  });
+  try {
+    return readConnectionDataMapping(create());
+  } catch (error) {
+    if (String(error?.code) === "SQLITE_CONSTRAINT_UNIQUE") throw new Error("该外部商品已存在有效映射。");
+    throw error;
+  }
+}
+
+export function updateConnectionDataMapping(id, input, userId) {
+  const current = readConnectionDataMapping(id);
+  const hasConnection = Object.prototype.hasOwnProperty.call(input ?? {}, "connectionId");
+  const connectionId = hasConnection ? value(input.connectionId) || null : current.connectionId;
+  const matchStatus = value(input?.matchStatus) || current.matchStatus;
+  let matchMethod = Object.prototype.hasOwnProperty.call(input ?? {}, "matchMethod") ? value(input.matchMethod) || null : current.matchMethod;
+  if (!mappingStatuses.has(matchStatus)) throw new Error("映射状态无效。");
+  if (matchMethod && !mappingMethods.has(matchMethod)) throw new Error("匹配方式无效。");
+  const relation = readConnectionRelation(connectionId);
+  if (matchStatus === "matched" && !relation) throw new Error("确认匹配时必须选择连接档案。");
+  if (matchStatus === "matched" && !matchMethod) matchMethod = "manual";
+  const now = new Date().toISOString();
+  const confirmedBy = matchStatus === "matched" ? value(userId) || current.confirmedBy || null : null;
+  const confirmedAt = matchStatus === "matched" ? current.confirmedAt || now : null;
+  getDatabase().prepare(`
+    UPDATE connection_data_mappings
+    SET connectionId=?,salesLinkId=?,matchStatus=?,matchMethod=?,confirmedBy=?,confirmedAt=?,updatedAt=?
+    WHERE id=? AND deletedAt IS NULL
+  `).run(relation?.id ?? null, relation?.salesLinkId ?? null, matchStatus, matchMethod, confirmedBy, confirmedAt, now, current.id);
+  return readConnectionDataMapping(current.id);
+}
+
+export function deleteConnectionDataMapping(id, userId) {
+  const now = new Date().toISOString();
+  const result = getDatabase().prepare(`
+    UPDATE connection_data_mappings SET deletedAt=?,deletedBy=?,updatedAt=? WHERE id=? AND deletedAt IS NULL
+  `).run(now, value(userId) || null, now, value(id));
+  if (result.changes === 0) throw new Error("外部数据映射不存在。");
+  return { success: true, id: value(id) };
 }

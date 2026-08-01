@@ -86,12 +86,16 @@ import {
 } from "./dataCenterService.js";
 import {
   createConnectionAction,
+  createConnectionDataMapping,
   createConnectionProfile,
   deleteConnectionAction,
+  deleteConnectionDataMapping,
   listAvailableSalesLinks,
   listConnectionActions,
+  listConnectionDataMappings,
   listConnectionProfiles,
   readConnectionProfile,
+  updateConnectionDataMapping,
 } from "./connectionService.js";
 import { createProductFromErpSku, createProductsFromErpSkus, listPendingErpSkus } from "./erpSkuService.js";
 import { createToken, verifyPassword, verifyToken } from "./security.js";
@@ -1499,6 +1503,38 @@ app.delete("/api/connections/:id/actions/:actionId", requirePermission("products
     response.json(deleteConnectionAction(request.params.id, request.params.actionId));
   } catch (error) {
     response.status(404).json({ success: false, message: error.message || "经营动作删除失败。" });
+  }
+});
+
+app.get("/api/connection-data-mappings", requirePermission("products.view"), (request, response) => {
+  try {
+    response.json({ success: true, items: listConnectionDataMappings(request.query) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "外部数据映射读取失败。" });
+  }
+});
+
+app.post("/api/connection-data-mappings", requirePermission("products.edit"), (request, response) => {
+  try {
+    response.status(201).json({ success: true, item: createConnectionDataMapping(request.body, request.user?.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "外部数据映射创建失败。" });
+  }
+});
+
+app.put("/api/connection-data-mappings/:id", requirePermission("products.edit"), (request, response) => {
+  try {
+    response.json({ success: true, item: updateConnectionDataMapping(request.params.id, request.body, request.user?.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "外部数据映射更新失败。" });
+  }
+});
+
+app.delete("/api/connection-data-mappings/:id", requirePermission("products.edit"), (request, response) => {
+  try {
+    response.json(deleteConnectionDataMapping(request.params.id, request.user?.id));
+  } catch (error) {
+    response.status(404).json({ success: false, message: error.message || "外部数据映射删除失败。" });
   }
 });
 

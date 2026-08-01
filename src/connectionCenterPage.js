@@ -4,8 +4,10 @@ import {
   getCurrentUser,
   loadAvailableSalesLinks,
   loadConnectionActions,
+  loadConnectionDataMappings,
   loadConnections,
   removeConnectionAction,
+  updateConnectionDataMapping,
   resolveAssetUrl,
   state,
 } from "./appState.js?v=20260705-state-singleton1";
@@ -21,6 +23,11 @@ const pageState = {
   detailTab: "overview",
   actions: [],
   modalOpen: false,
+  section: "connections",
+  mappings: [],
+  mappingLoading: false,
+  mappingFilters: { sourceType: "business_advisor", matchStatus: "pending", search: "" },
+  mappingModalId: "",
   error: "",
 };
 
@@ -53,7 +60,14 @@ function imageHtml(item) {
 }
 
 function statusText(status) {
-  return ({ active: "经营中", paused: "已暂停", archived: "已归档", pending: "待处理", in_progress: "进行中", completed: "已完成", canceled: "已取消" })[status] ?? status;
+  return ({ active: "经营中", paused: "已暂停", archived: "已归档", pending: "待确认", matched: "已匹配", ignored: "已忽略", rejected: "已拒绝", in_progress: "进行中", completed: "已完成", canceled: "已取消" })[status] ?? status;
+}
+
+function renderSectionNavigation() {
+  return `<nav class="connection-section-nav" aria-label="连接中心页面">
+    <button type="button" class="${pageState.section === "connections" ? "active" : ""}" data-connection-section="connections">连接列表</button>
+    <button type="button" class="${pageState.section === "mappings" ? "active" : ""}" data-connection-section="mappings">数据匹配</button>
+  </nav>`;
 }
 
 function renderToolbar() {
@@ -112,8 +126,33 @@ function renderCreateModal() {
   </form></section></div>`;
 }
 
+function externalData(mapping, key, fallback = "—") {
+  return mapping.externalData?.[key] || fallback;
+}
+
+function renderMappingPage() {
+  const rows = pageState.mappings;
+  return `<section class="connection-mapping-page">
+    <form class="connection-mapping-filters" data-mapping-filter-form>
+      <select name="sourceType" aria-label="数据来源"><option value="business_advisor" ${pageState.mappingFilters.sourceType === "business_advisor" ? "selected" : ""}>生意参谋</option><option value="wangdian" ${pageState.mappingFilters.sourceType === "wangdian" ? "selected" : ""}>旺店通</option><option value="taobao" ${pageState.mappingFilters.sourceType === "taobao" ? "selected" : ""}>淘宝</option><option value="xiaohongshu" ${pageState.mappingFilters.sourceType === "xiaohongshu" ? "selected" : ""}>小红书</option><option value="douyin" ${pageState.mappingFilters.sourceType === "douyin" ? "selected" : ""}>抖音</option></select>
+      <select name="matchStatus" aria-label="匹配状态"><option value="">全部状态</option><option value="pending" ${pageState.mappingFilters.matchStatus === "pending" ? "selected" : ""}>待确认</option><option value="matched" ${pageState.mappingFilters.matchStatus === "matched" ? "selected" : ""}>已匹配</option><option value="ignored" ${pageState.mappingFilters.matchStatus === "ignored" ? "selected" : ""}>已忽略</option><option value="rejected" ${pageState.mappingFilters.matchStatus === "rejected" ? "selected" : ""}>已拒绝</option></select>
+      <input name="search" value="${escapeHtml(pageState.mappingFilters.search)}" placeholder="搜索商品ID" />
+      <button type="submit" class="secondary-button">筛选</button>
+    </form>
+    ${pageState.mappingLoading ? `<div class="empty-state">正在读取数据匹配…</div>` : rows.length ? `<div class="connection-table-wrap"><table class="connection-table connection-mapping-table"><thead><tr><th>商品ID</th><th>商品名称</th><th>货号</th><th>候选连接</th><th>状态</th><th>操作</th></tr></thead><tbody>${rows.map((mapping) => `<tr><td><strong>${escapeHtml(mapping.externalId)}</strong><small>${escapeHtml(mapping.externalShopId || "未标注外部店铺")}</small></td><td>${escapeHtml(externalData(mapping, "goodsName", externalData(mapping, "title")))}</td><td>${escapeHtml(externalData(mapping, "sku", externalData(mapping, "merchantSkuCode")))}</td><td>${escapeHtml(mapping.connectionName || "待选择")}</td><td><span class="status-pill status-${escapeHtml(mapping.matchStatus)}">${escapeHtml(statusText(mapping.matchStatus))}</span></td><td><div class="connection-mapping-actions">${mapping.matchStatus === "pending" && canManage() ? `<button type="button" class="text-button" data-confirm-mapping="${escapeHtml(mapping.id)}">确认匹配</button><button type="button" class="text-button" data-ignore-mapping="${escapeHtml(mapping.id)}">忽略</button>` : ""}${mapping.connectionId ? `<button type="button" class="text-button" data-view-mapping-connection="${escapeHtml(mapping.connectionId)}">查看连接</button>` : ""}</div></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><strong>暂无符合条件的数据</strong><p>本阶段只提供映射接口与人工确认能力，不会自动导入外部文件。</p></div>`}
+  </section>`;
+}
+
+function renderMappingModal() {
+  if (!pageState.mappingModalId) return "";
+  const mapping = pageState.mappings.find((item) => item.id === pageState.mappingModalId);
+  if (!mapping) return "";
+  return `<div class="modal-backdrop" data-action="close-mapping-modal"><section class="modal-panel connection-modal" role="dialog" aria-modal="true" aria-label="确认数据匹配" data-mapping-modal><header><div><p class="eyebrow">${escapeHtml(mapping.externalId)}</p><h2>确认匹配连接</h2></div><button type="button" class="icon-button" data-action="close-mapping-modal" aria-label="关闭">×</button></header><form data-confirm-mapping-form><label>连接档案<select name="connectionId" required><option value="">请选择</option>${pageState.items.map((item) => `<option value="${escapeHtml(item.id)}" ${mapping.connectionId === item.id ? "selected" : ""}>${escapeHtml(`${item.name} · ${item.platform} · ${shopName(item)}`)}</option>`).join("")}</select></label><footer><button type="button" class="secondary-button" data-action="close-mapping-modal">取消</button><button type="submit" class="primary-button">确认匹配</button></footer></form></section></div>`;
+}
+
 export function renderConnectionCenterPage() {
-  return `<section class="connection-center-page">${pageState.error ? `<div class="form-error">${escapeHtml(pageState.error)}</div>` : ""}${pageState.loading ? `<div class="empty-state">正在读取连接…</div>` : pageState.selectedId ? renderDetail() : `${renderToolbar()}${renderList()}`}${renderCreateModal()}</section>`;
+  const pageContent = pageState.section === "mappings" ? renderMappingPage() : `${renderToolbar()}${renderList()}`;
+  return `<section class="connection-center-page">${pageState.error ? `<div class="form-error">${escapeHtml(pageState.error)}</div>` : ""}${pageState.loading ? `<div class="empty-state">正在读取连接…</div>` : pageState.selectedId ? renderDetail() : `${renderSectionNavigation()}${pageContent}`}${renderCreateModal()}${renderMappingModal()}</section>`;
 }
 
 async function loadPage(render) {
@@ -129,10 +168,21 @@ async function openConnection(id, render) {
   pageState.selectedId = id; pageState.detailTab = "overview"; pageState.actions = []; render();
 }
 
+async function loadMappings(render) {
+  pageState.mappingLoading = true; pageState.error = ""; render();
+  try { pageState.mappings = (await loadConnectionDataMappings(pageState.mappingFilters)).items ?? []; }
+  catch (error) { pageState.error = error.message; }
+  pageState.mappingLoading = false; render();
+}
+
 export function bindConnectionCenterPageEvents(render) {
   const root = document.querySelector(".connection-center-page");
   if (!root) return;
   if (!pageState.loaded && !pageState.loading) void loadPage(render);
+  root.querySelectorAll("[data-connection-section]").forEach((button) => button.addEventListener("click", () => {
+    pageState.section = button.dataset.connectionSection; pageState.selectedId = ""; render();
+    if (pageState.section === "mappings") void loadMappings(render);
+  }));
   root.querySelectorAll("[data-connection-view]").forEach((button) => button.addEventListener("click", () => { pageState.view = button.dataset.connectionView; render(); }));
   root.querySelectorAll("[data-open-connection]").forEach((element) => {
     const open = () => void openConnection(element.dataset.openConnection, render);
@@ -160,4 +210,19 @@ export function bindConnectionCenterPageEvents(render) {
     if (!window.confirm("确认删除这条经营动作？")) return;
     try { await removeConnectionAction(pageState.selectedId, button.dataset.deleteConnectionAction); pageState.actions = pageState.actions.filter((item) => item.id !== button.dataset.deleteConnectionAction); render(); } catch (error) { pageState.error = error.message; render(); }
   }));
+  root.querySelector("[data-mapping-filter-form]")?.addEventListener("submit", (event) => {
+    event.preventDefault(); const form = new FormData(event.currentTarget); pageState.mappingFilters = Object.fromEntries(form); void loadMappings(render);
+  });
+  root.querySelectorAll("[data-confirm-mapping]").forEach((button) => button.addEventListener("click", () => { pageState.mappingModalId = button.dataset.confirmMapping; render(); }));
+  root.querySelectorAll("[data-ignore-mapping]").forEach((button) => button.addEventListener("click", async () => {
+    try { const result = await updateConnectionDataMapping(button.dataset.ignoreMapping, { matchStatus: "ignored" }); pageState.mappings = pageState.mappings.map((item) => item.id === result.item.id ? result.item : item).filter((item) => pageState.mappingFilters.matchStatus !== "pending" || item.matchStatus === "pending"); render(); }
+    catch (error) { pageState.error = error.message; render(); }
+  }));
+  root.querySelectorAll("[data-view-mapping-connection]").forEach((button) => button.addEventListener("click", () => { pageState.section = "connections"; void openConnection(button.dataset.viewMappingConnection, render); }));
+  root.querySelectorAll('[data-action="close-mapping-modal"]').forEach((element) => element.addEventListener("click", (event) => { if (event.target.closest("[data-mapping-modal]") && !event.target.matches('[data-action="close-mapping-modal"]')) return; pageState.mappingModalId = ""; render(); }));
+  root.querySelector("[data-confirm-mapping-form]")?.addEventListener("submit", async (event) => {
+    event.preventDefault(); const form = new FormData(event.currentTarget);
+    try { const result = await updateConnectionDataMapping(pageState.mappingModalId, { connectionId: form.get("connectionId"), matchStatus: "matched", matchMethod: "manual" }); pageState.mappings = pageState.mappings.map((item) => item.id === result.item.id ? result.item : item).filter((item) => pageState.mappingFilters.matchStatus !== "pending" || item.matchStatus === "pending"); pageState.mappingModalId = ""; render(); }
+    catch (error) { pageState.error = error.message; render(); }
+  });
 }

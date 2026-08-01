@@ -1007,6 +1007,39 @@ CREATE TABLE IF NOT EXISTS connection_actions (
 CREATE INDEX IF NOT EXISTS idx_connection_actions_profile_created
   ON connection_actions(connectionProfileId, createdAt DESC);
 
+CREATE TABLE IF NOT EXISTS connection_data_mappings (
+  id TEXT PRIMARY KEY,
+  sourceType TEXT NOT NULL,
+  connectionId TEXT,
+  salesLinkId TEXT,
+  externalType TEXT NOT NULL,
+  externalId TEXT NOT NULL,
+  externalShopId TEXT NOT NULL DEFAULT '',
+  externalDataJson TEXT NOT NULL DEFAULT '{}',
+  matchStatus TEXT NOT NULL DEFAULT 'pending',
+  matchMethod TEXT,
+  confirmedBy TEXT,
+  confirmedAt TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  deletedAt TEXT,
+  deletedBy TEXT,
+  FOREIGN KEY(connectionId) REFERENCES connection_profiles(id),
+  FOREIGN KEY(salesLinkId) REFERENCES sales_links(id),
+  FOREIGN KEY(confirmedBy) REFERENCES persons(id),
+  FOREIGN KEY(deletedBy) REFERENCES persons(id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_data_mappings_external_active
+  ON connection_data_mappings(sourceType, externalId, externalShopId)
+  WHERE deletedAt IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_connection_data_mappings_status_source
+  ON connection_data_mappings(sourceType, matchStatus, updatedAt DESC);
+
+CREATE INDEX IF NOT EXISTS idx_connection_data_mappings_connection
+  ON connection_data_mappings(connectionId, salesLinkId);
+
 CREATE TABLE IF NOT EXISTS platform_sku_manual_bindings (
   id TEXT PRIMARY KEY,
   salesLinkSkuId TEXT NOT NULL UNIQUE,
