@@ -105,6 +105,7 @@ import {
   listConnectionImportBatches,
   previewConnectionImportBatch,
 } from "./connectionImportService.js";
+import { createConnectionPeriodSnapshots, listConnectionPeriodSnapshots } from "./connectionPeriodSnapshots.js";
 import { createProductFromErpSku, createProductsFromErpSkus, listPendingErpSkus } from "./erpSkuService.js";
 import { createToken, verifyPassword, verifyToken } from "./security.js";
 import {
@@ -1595,6 +1596,22 @@ app.post("/api/connection-import-batches/:id/commit", requirePermission("product
     response.json({ success: true, ...commitConnectionImportBatch(request.params.id, request.user?.id) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "自动匹配确认失败。" });
+  }
+});
+
+app.post("/api/connection-import-batches/:id/period-snapshots", requirePermission("products.edit"), (request, response) => {
+  try {
+    response.status(201).json({ success: true, ...createConnectionPeriodSnapshots(request.params.id, request.body ?? {}) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "经营周期快照生成失败。" });
+  }
+});
+
+app.get("/api/connections/:id/period-snapshots", requirePermission("products.view"), (request, response) => {
+  try {
+    response.json({ success: true, items: listConnectionPeriodSnapshots(request.params.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "连接经营趋势读取失败。" });
   }
 });
 

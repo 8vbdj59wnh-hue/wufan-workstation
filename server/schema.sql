@@ -1047,6 +1047,9 @@ CREATE TABLE IF NOT EXISTS connection_import_batches (
   fileName TEXT NOT NULL,
   fileHash TEXT NOT NULL,
   businessDate TEXT NOT NULL,
+  periodStart TEXT,
+  periodEnd TEXT,
+  periodType TEXT,
   status TEXT NOT NULL DEFAULT 'draft',
   totalRows INTEGER NOT NULL DEFAULT 0,
   matchedRows INTEGER NOT NULL DEFAULT 0,
@@ -1060,6 +1063,45 @@ CREATE TABLE IF NOT EXISTS connection_import_batches (
 
 CREATE INDEX IF NOT EXISTS idx_connection_import_batches_source_created
   ON connection_import_batches(sourceType, createdAt DESC);
+
+CREATE TABLE IF NOT EXISTS connection_period_snapshots (
+  id TEXT PRIMARY KEY,
+  connectionId TEXT,
+  salesLinkId TEXT NOT NULL,
+  mappingId TEXT NOT NULL,
+  importBatchId TEXT NOT NULL,
+  sourceType TEXT NOT NULL,
+  externalId TEXT NOT NULL,
+  externalDataJson TEXT NOT NULL DEFAULT '{}',
+  periodStart TEXT NOT NULL,
+  periodEnd TEXT NOT NULL,
+  periodType TEXT NOT NULL DEFAULT 'rolling_30d',
+  visitorCount REAL,
+  viewCount REAL,
+  cartCount REAL,
+  orderBuyerCount REAL,
+  payBuyerCount REAL,
+  conversionRate REAL,
+  payAmount REAL,
+  payQuantity REAL,
+  refundAmount REAL,
+  competitionScore REAL,
+  metricsJson TEXT NOT NULL DEFAULT '{}',
+  createdAt TEXT NOT NULL,
+  FOREIGN KEY(connectionId) REFERENCES connection_profiles(id),
+  FOREIGN KEY(salesLinkId) REFERENCES sales_links(id),
+  FOREIGN KEY(mappingId) REFERENCES connection_data_mappings(id),
+  FOREIGN KEY(importBatchId) REFERENCES connection_import_batches(id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_period_snapshots_external_period
+  ON connection_period_snapshots(sourceType, externalId, periodStart, periodEnd);
+
+CREATE INDEX IF NOT EXISTS idx_connection_period_snapshots_connection_period
+  ON connection_period_snapshots(connectionId, salesLinkId, periodEnd DESC, periodStart DESC);
+
+CREATE INDEX IF NOT EXISTS idx_connection_period_snapshots_sales_link_period
+  ON connection_period_snapshots(salesLinkId, periodEnd DESC, periodStart DESC);
 
 CREATE TABLE IF NOT EXISTS platform_sku_manual_bindings (
   id TEXT PRIMARY KEY,

@@ -24,6 +24,15 @@ function normalizeBusinessDate(raw) {
   return `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`;
 }
 
+function detectPeriodFromFileName(fileName) {
+  const dates = [...text(fileName).matchAll(/(20\d{2})[-_.年](\d{1,2})[-_.月](\d{1,2})/g)]
+    .map((match) => `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`);
+  if (dates.length < 2) return { periodStart: null, periodEnd: null, periodType: null };
+  const [periodStart, periodEnd] = dates;
+  const inclusiveDays = Math.round((Date.parse(`${periodEnd}T00:00:00Z`) - Date.parse(`${periodStart}T00:00:00Z`)) / 86400000) + 1;
+  return { periodStart, periodEnd, periodType: inclusiveDays === 30 ? "rolling_30d" : "custom_period" };
+}
+
 function batchFilePath(batchId) {
   return path.join(stagingDir, `${batchId}.workbook`);
 }
@@ -163,6 +172,7 @@ export function createConnectionImportBatch({ buffer, fileName, businessDate, ex
   const matched = matchBusinessAdvisorRows(parsed.rows);
   const resolvedBusinessDate = normalizeBusinessDate(businessDate) || parsed.businessDate;
   if (!resolvedBusinessDate) throw new Error("无法确定业务日期，请手动填写。");
+  const detectedPeriod = detectPeriodFromFileName(fileName);
   const id = `connection-import-${crypto.randomUUID()}`;
   const now = new Date().toISOString();
   const stats = {
@@ -176,10 +186,12 @@ export function createConnectionImportBatch({ buffer, fileName, businessDate, ex
   try {
     getDatabase().prepare(`
       INSERT INTO connection_import_batches (
-        id,sourceType,externalShopId,fileName,fileHash,businessDate,status,totalRows,matchedRows,pendingRows,errorRows,createdBy,createdAt,updatedAt
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        id,sourceType,externalShopId,fileName,fileHash,businessDate,periodStart,periodEnd,periodType,
+        status,totalRows,matchedRows,pendingRows,errorRows,createdBy,createdAt,updatedAt
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(id, "business_advisor", text(externalShopId), text(fileName) || "生意参谋商品数据.xls",
-      crypto.createHash("sha256").update(buffer).digest("hex"), resolvedBusinessDate, "validated",
+      crypto.createHash("sha256").update(buffer).digest("hex"), resolvedBusinessDate,
+      detectedPeriod.periodStart, detectedPeriod.periodEnd, detectedPeriod.periodType, "validated",
       stats.totalRows, stats.matchedRows, stats.pendingRows, stats.errorRows, text(userId) || null, now, now);
   } catch (error) {
     fs.rmSync(batchFilePath(id), { force: true });

@@ -1,6 +1,7 @@
 import {
   commitConnectionImport,
   confirmConnectionImportRow,
+  createConnectionPeriodSnapshots,
   createConnection,
   createConnectionAction,
   getCurrentUser,
@@ -9,6 +10,7 @@ import {
   loadConnectionDataMappings,
   loadConnectionImportBatches,
   loadConnectionImportPreview,
+  loadConnectionPeriodSnapshots,
   loadConnections,
   removeConnectionAction,
   ignoreConnectionImportRow,
@@ -26,8 +28,10 @@ const pageState = {
   availableLinks: [],
   selectedId: "",
   view: "list",
+  sort: "default",
   detailTab: "overview",
   actions: [],
+  periodSnapshots: [],
   modalOpen: false,
   section: "connections",
   mappings: [],
@@ -88,20 +92,28 @@ function renderToolbar() {
       <button type="button" class="${pageState.view === "list" ? "active" : ""}" data-connection-view="list">列表</button>
       <button type="button" class="${pageState.view === "cards" ? "active" : ""}" data-connection-view="cards">卡片</button>
     </div>
+    <div class="segmented-control" aria-label="连接经营排序">
+      <button type="button" class="${pageState.sort === "default" ? "active" : ""}" data-connection-sort="default">默认</button>
+      <button type="button" class="${pageState.sort === "latest" ? "active" : ""}" data-connection-sort="latest">最新经营</button>
+      <button type="button" class="${pageState.sort === "pay" ? "active" : ""}" data-connection-sort="pay">周期销售额</button>
+    </div>
     ${canManage() ? `<button type="button" class="primary-button" data-action="new-connection">建立连接档案</button>` : ""}
   </div>`;
 }
 
 function renderList() {
   if (!pageState.items.length) return `<div class="empty-state"><strong>还没有连接档案</strong><p>从已有销售链接中建立第一条经营连接。</p></div>`;
+  const items = [...pageState.items].sort((a, b) => pageState.sort === "latest"
+    ? String(b.latestPeriodEnd || "").localeCompare(String(a.latestPeriodEnd || ""))
+    : pageState.sort === "pay" ? Number(b.latestPayAmount || 0) - Number(a.latestPayAmount || 0) : 0);
   if (pageState.view === "cards") {
-    return `<div class="connection-card-grid">${pageState.items.map((item) => `<button type="button" class="connection-card" data-open-connection="${escapeHtml(item.id)}">
+    return `<div class="connection-card-grid">${items.map((item) => `<button type="button" class="connection-card" data-open-connection="${escapeHtml(item.id)}">
       ${imageHtml(item)}
-      <div class="connection-card-body"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(productNames(item))}</span><span>${escapeHtml(personName(item.ownerId))}</span><em class="status-pill status-${escapeHtml(item.status)}">${escapeHtml(statusText(item.status))}</em></div>
+      <div class="connection-card-body"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(productNames(item))}</span><span>${item.latestPeriodEnd ? `${escapeHtml(item.latestPeriodEnd)} · ¥${Number(item.latestPayAmount || 0).toLocaleString("zh-CN")}` : "暂无经营数据"}</span><em class="status-pill status-${escapeHtml(item.status)}">${escapeHtml(statusText(item.status))}</em></div>
     </button>`).join("")}</div>`;
   }
-  return `<div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>图片</th><th>连接名称</th><th>平台</th><th>店铺</th><th>产品</th><th>负责人</th><th>状态</th></tr></thead><tbody>${pageState.items.map((item) => `<tr tabindex="0" data-open-connection="${escapeHtml(item.id)}">
-    <td>${imageHtml(item)}</td><td><strong>${escapeHtml(item.name)}</strong></td><td>${escapeHtml(item.platform)}</td><td>${escapeHtml(shopName(item))}</td><td>${escapeHtml(productNames(item))}</td><td>${escapeHtml(personName(item.ownerId))}</td><td><span class="status-pill status-${escapeHtml(item.status)}">${escapeHtml(statusText(item.status))}</span></td>
+  return `<div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>图片</th><th>连接名称</th><th>平台</th><th>店铺</th><th>产品</th><th>最新经营数据</th><th>最近周期销售额</th><th>负责人</th><th>状态</th></tr></thead><tbody>${items.map((item) => `<tr tabindex="0" data-open-connection="${escapeHtml(item.id)}">
+    <td>${imageHtml(item)}</td><td><strong>${escapeHtml(item.name)}</strong></td><td>${escapeHtml(item.platform)}</td><td>${escapeHtml(shopName(item))}</td><td>${escapeHtml(productNames(item))}</td><td>${escapeHtml(item.latestPeriodEnd || "—")}</td><td>${item.latestPayAmount == null ? "—" : `¥${Number(item.latestPayAmount).toLocaleString("zh-CN")}`}</td><td>${escapeHtml(personName(item.ownerId))}</td><td><span class="status-pill status-${escapeHtml(item.status)}">${escapeHtml(statusText(item.status))}</span></td>
   </tr>`).join("")}</tbody></table></div>`;
 }
 
@@ -120,10 +132,13 @@ function renderActions(item) {
 function renderDetail() {
   const item = pageState.items.find((candidate) => candidate.id === pageState.selectedId);
   if (!item) return "";
-  const tabs = [["overview", "经营概况"], ["actions", "经营动作"], ["health", "体检"], ["trend", "趋势"]];
+  const tabs = [["overview", "经营概况"], ["actions", "经营动作"], ["health", "体检"], ["trend", "经营趋势"]];
   let body = `<div class="connection-overview"><dl><div><dt>平台</dt><dd>${escapeHtml(item.platform)}</dd></div><div><dt>店铺</dt><dd>${escapeHtml(shopName(item))}</dd></div><div><dt>负责人</dt><dd>${escapeHtml(personName(item.ownerId))}</dd></div><div><dt>状态</dt><dd>${escapeHtml(statusText(item.status))}</dd></div></dl><section><h3>关联产品</h3>${item.products?.length ? item.products.map((product) => `<a href="#products/${encodeURIComponent(product.id)}" data-product-id="${escapeHtml(product.id)}">${escapeHtml(product.name || product.skuCode)}</a>`).join("、") : "未关联产品"}</section></div>`;
   if (pageState.detailTab === "actions") body = renderActions(item);
-  if (["health", "trend"].includes(pageState.detailTab)) body = `<div class="empty-state"><strong>${pageState.detailTab === "health" ? "连接体检" : "经营趋势"}</strong><p>该能力将在后续阶段接入真实经营数据。</p></div>`;
+  if (pageState.detailTab === "health") body = `<div class="empty-state"><strong>连接体检</strong><p>该能力将在后续阶段接入真实经营数据。</p></div>`;
+  if (pageState.detailTab === "trend") body = pageState.periodSnapshots.length
+    ? `<div class="connection-table-wrap"><table class="connection-table connection-period-table"><thead><tr><th>经营周期</th><th>支付金额</th><th>访客</th><th>支付件数</th><th>转化率</th><th>退款金额</th></tr></thead><tbody>${pageState.periodSnapshots.map((snapshot) => `<tr><td>${escapeHtml(`${snapshot.periodStart} 至 ${snapshot.periodEnd}`)}</td><td>¥${Number(snapshot.payAmount || 0).toLocaleString("zh-CN")}</td><td>${Number(snapshot.visitorCount || 0).toLocaleString("zh-CN")}</td><td>${Number(snapshot.payQuantity || 0).toLocaleString("zh-CN")}</td><td>${snapshot.conversionRate == null ? "—" : `${(Number(snapshot.conversionRate) * 100).toFixed(2)}%`}</td><td>¥${Number(snapshot.refundAmount || 0).toLocaleString("zh-CN")}</td></tr>`).join("")}</tbody></table></div>`
+    : `<div class="empty-state"><strong>暂无经营周期数据</strong><p>确认生意参谋导入周期并生成快照后，将在这里按周期比较。</p></div>`;
   return `<section class="connection-detail"><button type="button" class="text-button" data-action="back-connections">← 返回连接列表</button><header>${imageHtml(item)}<div><p class="eyebrow">${escapeHtml(item.platform)} · ${escapeHtml(shopName(item))}</p><h2>${escapeHtml(item.name)}</h2><p>${escapeHtml(productNames(item))}</p></div></header><nav class="connection-tabs">${tabs.map(([id, label]) => `<button type="button" class="${pageState.detailTab === id ? "active" : ""}" data-connection-tab="${id}">${label}</button>`).join("")}</nav>${body}</section>`;
 }
 
@@ -181,7 +196,7 @@ function renderImportPage() {
   return `<section class="connection-import-page">
     ${canManage() ? `<form class="connection-import-form" data-connection-import-form><label>生意参谋Excel<input type="file" name="file" accept=".xls,.xlsx" required /></label><label>业务日期<input type="date" name="businessDate" /></label><label>外部店铺标识<input name="externalShopId" maxlength="100" placeholder="同一店铺请保持一致" /></label><button type="submit" class="primary-button">上传并生成预览</button></form>` : ""}
     ${pageState.importBatches.length ? `<label class="connection-import-history">历史批次<select data-import-batch-select><option value="">选择批次</option>${pageState.importBatches.map((item) => `<option value="${escapeHtml(item.id)}" ${batch?.id === item.id ? "selected" : ""}>${escapeHtml(`${item.businessDate} · ${item.fileName} · ${importStatusText(item.status)}`)}</option>`).join("")}</select></label>` : ""}
-    ${pageState.importLoading ? `<div class="empty-state">正在解析和匹配…</div>` : batch ? `<div class="connection-import-summary"><div><span>总数据</span><strong>${batch.totalRows}</strong></div><div><span>自动匹配</span><strong>${batch.matchedRows}</strong></div><div><span>待确认</span><strong>${batch.pendingRows}</strong></div><div><span>错误</span><strong>${batch.errorRows}</strong></div></div><div class="connection-import-meta"><span>${escapeHtml(batch.fileName)} · ${escapeHtml(batch.businessDate)}</span><span class="status-pill status-${escapeHtml(batch.status)}">${escapeHtml(importStatusText(batch.status))}</span>${canManage() && batch.status !== "completed" ? `<button type="button" class="primary-button" data-commit-import>确认自动匹配</button>` : ""}</div><nav class="connection-tabs"><button type="button" class="${pageState.importTab === "matched" ? "active" : ""}" data-import-tab="matched">已匹配 ${matchedRows.length}</button><button type="button" class="${pageState.importTab === "pending" ? "active" : ""}" data-import-tab="pending">待确认 ${pendingRows.length}</button><button type="button" class="${pageState.importTab === "error" ? "active" : ""}" data-import-tab="error">错误 ${errorRows.length}</button></nav>${renderImportRows(pageState.importTab === "pending" ? pendingRows : pageState.importTab === "error" ? errorRows : matchedRows)}` : `<div class="empty-state"><strong>尚未上传经营数据</strong><p>上传生意参谋商品经营Excel后，系统只生成匹配预览，不会创建经营快照。</p></div>`}
+    ${pageState.importLoading ? `<div class="empty-state">正在解析和匹配…</div>` : batch ? `<div class="connection-import-summary"><div><span>总数据</span><strong>${batch.totalRows}</strong></div><div><span>自动匹配</span><strong>${batch.matchedRows}</strong></div><div><span>待确认</span><strong>${batch.pendingRows}</strong></div><div><span>错误</span><strong>${batch.errorRows}</strong></div></div><div class="connection-import-meta"><span>${escapeHtml(batch.fileName)} · ${escapeHtml(batch.businessDate)}</span><span class="status-pill status-${escapeHtml(batch.status)}">${escapeHtml(importStatusText(batch.status))}</span>${canManage() && batch.status !== "completed" ? `<button type="button" class="primary-button" data-commit-import>确认自动匹配</button>` : ""}</div>${batch.status === "completed" ? `<form class="connection-period-confirm" data-period-snapshot-form><strong>检测周期：${escapeHtml(batch.periodStart || "待确认")} 至 ${escapeHtml(batch.periodEnd || "待确认")}</strong><span>确认后按整个周期保存经营事实，不会拆分成每日数据。</span><label>开始日期<input type="date" name="periodStart" value="${escapeHtml(batch.periodStart || "")}" required /></label><label>结束日期<input type="date" name="periodEnd" value="${escapeHtml(batch.periodEnd || "")}" required /></label><label>周期类型<select name="periodType"><option value="rolling_30d" ${batch.periodType === "rolling_30d" ? "selected" : ""}>近30天滚动周期</option><option value="calendar_month" ${batch.periodType === "calendar_month" ? "selected" : ""}>自然月</option><option value="custom_period" ${batch.periodType === "custom_period" ? "selected" : ""}>自定义周期</option></select></label>${canManage() ? `<button type="submit" class="primary-button">确认并生成周期快照</button>` : ""}</form>` : ""}<nav class="connection-tabs"><button type="button" class="${pageState.importTab === "matched" ? "active" : ""}" data-import-tab="matched">已匹配 ${matchedRows.length}</button><button type="button" class="${pageState.importTab === "pending" ? "active" : ""}" data-import-tab="pending">待确认 ${pendingRows.length}</button><button type="button" class="${pageState.importTab === "error" ? "active" : ""}" data-import-tab="error">错误 ${errorRows.length}</button></nav>${renderImportRows(pageState.importTab === "pending" ? pendingRows : pageState.importTab === "error" ? errorRows : matchedRows)}` : `<div class="empty-state"><strong>尚未上传经营数据</strong><p>上传生意参谋商品经营Excel后，先确认映射，再确认经营周期并生成周期快照。</p></div>`}
   </section>`;
 }
 
@@ -209,7 +224,7 @@ async function loadPage(render) {
 }
 
 async function openConnection(id, render) {
-  pageState.selectedId = id; pageState.detailTab = "overview"; pageState.actions = []; render();
+  pageState.selectedId = id; pageState.detailTab = "overview"; pageState.actions = []; pageState.periodSnapshots = []; render();
 }
 
 async function loadMappings(render) {
@@ -238,6 +253,7 @@ export function bindConnectionCenterPageEvents(render) {
     if (pageState.section === "imports") void loadImportBatches(render, true);
   }));
   root.querySelectorAll("[data-connection-view]").forEach((button) => button.addEventListener("click", () => { pageState.view = button.dataset.connectionView; render(); }));
+  root.querySelectorAll("[data-connection-sort]").forEach((button) => button.addEventListener("click", () => { pageState.sort = button.dataset.connectionSort; render(); }));
   root.querySelectorAll("[data-open-connection]").forEach((element) => {
     const open = () => void openConnection(element.dataset.openConnection, render);
     element.addEventListener("click", open);
@@ -255,6 +271,7 @@ export function bindConnectionCenterPageEvents(render) {
   root.querySelectorAll("[data-connection-tab]").forEach((button) => button.addEventListener("click", async () => {
     pageState.detailTab = button.dataset.connectionTab; render();
     if (pageState.detailTab === "actions") { try { pageState.actions = (await loadConnectionActions(pageState.selectedId)).items ?? []; render(); } catch (error) { pageState.error = error.message; render(); } }
+    if (pageState.detailTab === "trend") { try { pageState.periodSnapshots = (await loadConnectionPeriodSnapshots(pageState.selectedId)).items ?? []; render(); } catch (error) { pageState.error = error.message; render(); } }
   }));
   root.querySelector("[data-connection-action-form]")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const form = new FormData(event.currentTarget);
@@ -294,6 +311,11 @@ export function bindConnectionCenterPageEvents(render) {
   root.querySelectorAll("[data-import-tab]").forEach((button) => button.addEventListener("click", () => { pageState.importTab = button.dataset.importTab; render(); }));
   root.querySelector("[data-commit-import]")?.addEventListener("click", async () => {
     try { const result = await commitConnectionImport(pageState.currentImport.batch.id); pageState.currentImport = await loadConnectionImportPreview(result.batch.id); pageState.importBatches = pageState.importBatches.map((item) => item.id === result.batch.id ? result.batch : item); pageState.error = ""; render(); }
+    catch (error) { pageState.error = error.message; render(); }
+  });
+  root.querySelector("[data-period-snapshot-form]")?.addEventListener("submit", async (event) => {
+    event.preventDefault(); const period = Object.fromEntries(new FormData(event.currentTarget));
+    try { const result = await createConnectionPeriodSnapshots(pageState.currentImport.batch.id, period); pageState.currentImport = await loadConnectionImportPreview(result.batch.id); window.alert(`周期快照生成完成：新增 ${result.created} 条，已存在 ${result.existing} 条。`); render(); }
     catch (error) { pageState.error = error.message; render(); }
   });
   root.querySelectorAll("[data-confirm-import-row]").forEach((button) => button.addEventListener("click", () => { pageState.importModalExternalId = button.dataset.confirmImportRow; render(); }));

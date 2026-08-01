@@ -1959,6 +1959,9 @@ function runLightweightMigrations() {
   ensureColumn("persons", "permissionTemplateId", "TEXT");
   ensureColumn("persons", "permissionOverrides", "TEXT");
   ensureColumn("persons", "avatarUrl", "TEXT");
+  ensureColumn("connection_import_batches", "periodStart", "TEXT");
+  ensureColumn("connection_import_batches", "periodEnd", "TEXT");
+  ensureColumn("connection_import_batches", "periodType", "TEXT");
   backfillBusinessIdentifiers();
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS permission_templates (

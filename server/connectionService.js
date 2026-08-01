@@ -46,7 +46,11 @@ function enrichConnectionRows(rows) {
 const connectionSelect = `
   SELECT c.id, c.salesLinkId, c.name, c.ownerId, c.status, c.notes, c.createdBy, c.createdAt, c.updatedAt,
          l.title AS salesLinkTitle, l.canonicalUrl, l.rawUrl, l.platformGoodsCode, l.currentState AS salesLinkState,
-         s.id AS shopId, s.platform, s.displayName AS shopDisplayName, s.shopName
+         s.id AS shopId, s.platform, s.displayName AS shopDisplayName, s.shopName,
+         (SELECT periodEnd FROM connection_period_snapshots ps WHERE ps.salesLinkId=c.salesLinkId
+          ORDER BY periodEnd DESC,periodStart DESC,createdAt DESC LIMIT 1) AS latestPeriodEnd,
+         (SELECT payAmount FROM connection_period_snapshots ps WHERE ps.salesLinkId=c.salesLinkId
+          ORDER BY periodEnd DESC,periodStart DESC,createdAt DESC LIMIT 1) AS latestPayAmount
   FROM connection_profiles c
   JOIN sales_links l ON l.id=c.salesLinkId
   JOIN sales_shops s ON s.id=l.shopId

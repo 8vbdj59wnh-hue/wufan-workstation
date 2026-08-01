@@ -910,6 +910,17 @@ export async function commitConnectionImport(batchId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-import-batches/${encodeURIComponent(batchId)}/commit`, { method: "POST" }), "自动匹配确认失败。");
 }
 
+export async function createConnectionPeriodSnapshots(batchId, period) {
+  const response = await authFetch(`${apiBaseUrl}/api/connection-import-batches/${encodeURIComponent(batchId)}/period-snapshots`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...period, confirmed: true }),
+  });
+  return readApiJson(response, "经营周期快照生成失败。");
+}
+
+export async function loadConnectionPeriodSnapshots(connectionId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/period-snapshots`), "连接经营趋势读取失败。");
+}
+
 export async function confirmConnectionImportRow(batchId, externalId, selection) {
   const response = await authFetch(`${apiBaseUrl}/api/connection-import-batches/${encodeURIComponent(batchId)}/rows/${encodeURIComponent(externalId)}/confirm`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(selection),

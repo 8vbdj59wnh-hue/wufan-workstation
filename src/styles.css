@@ -76,6 +76,12 @@
 .connection-import-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .connection-import-meta > :first-child { margin-right: auto; color: var(--muted-text, #6b7280); }
 .connection-import-table tbody tr { cursor: default; }
+.connection-period-confirm { display: grid; grid-template-columns: minmax(220px, 1fr) 150px 150px 170px auto; gap: 10px; align-items: end; padding: 14px 16px; border: 1px solid #bfdbfe; border-radius: 12px; background: #eff6ff; }
+.connection-period-confirm > strong, .connection-period-confirm > span { grid-column: 1 / -1; }
+.connection-period-confirm > span { color: var(--muted-text, #6b7280); font-size: 12px; }
+.connection-period-confirm label { display: grid; gap: 5px; color: var(--muted-text, #6b7280); font-size: 12px; }
+.connection-period-confirm input, .connection-period-confirm select { width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid var(--border-color, #dbe3ee); border-radius: 9px; background: #fff; }
+.connection-period-table tbody tr { cursor: default; }
 .status-pill.status-matched { background: #eaf7ef; color: #247a45; }
 .status-pill.status-ignored, .status-pill.status-rejected { background: #f3f4f6; color: #6b7280; }
 .empty-state.compact { padding: 18px; }
@@ -84,6 +90,7 @@
   .connection-action-form { grid-template-columns: 1fr; }
   .connection-mapping-filters { grid-template-columns: 1fr; }
   .connection-import-form, .connection-import-summary { grid-template-columns: 1fr; }
+  .connection-period-confirm { grid-template-columns: 1fr; }
   .connection-toolbar { align-items: stretch; flex-direction: column; }
 }
 
