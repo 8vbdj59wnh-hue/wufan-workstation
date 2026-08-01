@@ -108,6 +108,7 @@ import {
 import { createConnectionPeriodSnapshots, listConnectionPeriodSnapshots } from "./connectionPeriodSnapshots.js";
 import { getConnectionGrowthAnalysis, listConnectionGrowthRankings } from "./connectionGrowthService.js";
 import { createConnectionHealthRecord, createImprovementAction, listAttentionConnectionHealthRecords, listConnectionHealthRecords } from "./connectionHealthService.js";
+import { createConnectionImprovement, getConnectionImprovementSummary, listConnectionImprovements, updateConnectionImprovement } from "./connectionImprovementService.js";
 import { createProductFromErpSku, createProductsFromErpSkus, listPendingErpSkus } from "./erpSkuService.js";
 import { createToken, verifyPassword, verifyToken } from "./security.js";
 import {
@@ -1666,6 +1667,38 @@ app.post("/api/connection-health-records/:id/improvement-action", requirePermiss
     response.status(201).json({ success: true, ...createImprovementAction(request.params.id, request.body, request.user?.id) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "改善行动创建失败。" });
+  }
+});
+
+app.get("/api/connection-improvements", requirePermission("products.view"), (request, response) => {
+  try {
+    response.json({ success: true, items: listConnectionImprovements(request.query) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "连接改善记录读取失败。" });
+  }
+});
+
+app.get("/api/connection-improvements/summary", requirePermission("products.view"), (_request, response) => {
+  try {
+    response.json({ success: true, summary: getConnectionImprovementSummary() });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "连接改善概览读取失败。" });
+  }
+});
+
+app.post("/api/connection-improvements", requirePermission("products.edit"), (request, response) => {
+  try {
+    response.status(201).json({ success: true, ...createConnectionImprovement(request.body ?? {}, request.user?.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "连接改善项目创建失败。" });
+  }
+});
+
+app.put("/api/connection-improvements/:id", requirePermission("products.edit"), (request, response) => {
+  try {
+    response.json({ success: true, item: updateConnectionImprovement(request.params.id, request.body ?? {}) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "连接改善结果保存失败。" });
   }
 });
 

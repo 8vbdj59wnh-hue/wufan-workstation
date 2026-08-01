@@ -951,6 +951,22 @@ export async function createConnectionImprovementAction(healthRecordId, payload)
   return readApiJson(response, "改善行动创建失败。");
 }
 
+export async function loadConnectionImprovements(filters = {}) {
+  const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== "" && value !== undefined));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-improvements${query.size ? `?${query}` : ""}`), "连接改善记录读取失败。");
+}
+
+export async function loadConnectionImprovementSummary() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-improvements/summary`), "连接改善概览读取失败。");
+}
+
+export async function updateConnectionImprovement(improvementId, payload) {
+  const response = await authFetch(`${apiBaseUrl}/api/connection-improvements/${encodeURIComponent(improvementId)}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  });
+  return readApiJson(response, "连接改善结果保存失败。");
+}
+
 export async function confirmConnectionImportRow(batchId, externalId, selection) {
   const response = await authFetch(`${apiBaseUrl}/api/connection-import-batches/${encodeURIComponent(batchId)}/rows/${encodeURIComponent(externalId)}/confirm`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(selection),

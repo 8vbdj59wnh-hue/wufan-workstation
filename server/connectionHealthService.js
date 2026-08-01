@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { createResource, getDatabase } from "./db.js";
 import { createConnectionAction } from "./connectionService.js";
 import { getConnectionGrowthAnalysis } from "./connectionGrowthService.js";
+import { createConnectionImprovement } from "./connectionImprovementService.js";
 
 function text(value) {
   return String(value ?? "").trim();
@@ -123,7 +124,9 @@ export function createImprovementAction(healthRecordId, input, userId) {
     const problemTitles = problems.map((problem) => problem.title).join("、") || "持续改善";
     const connectionAction = createConnectionAction(record.connectionId, { title: `系统发现问题：${problemTitles}`,
       description: `创建改善行动：${title}；关键行动ID：${instance.id}`, status: "pending" }, userId);
-    return { instance, connectionAction };
+    const improvement = createConnectionImprovement({ connectionId: record.connectionId, healthRecordId: record.id,
+      actionId: instance.id, title }, userId);
+    return { instance, connectionAction, improvement };
   });
   return create();
 }

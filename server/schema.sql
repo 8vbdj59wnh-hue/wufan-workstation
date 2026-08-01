@@ -1124,6 +1124,27 @@ CREATE INDEX IF NOT EXISTS idx_connection_health_records_status_created
 CREATE INDEX IF NOT EXISTS idx_connection_health_records_connection_created
   ON connection_health_records(connectionId, createdAt DESC);
 
+CREATE TABLE IF NOT EXISTS connection_improvements (
+  id TEXT PRIMARY KEY,
+  connectionId TEXT NOT NULL,
+  healthRecordId TEXT NOT NULL,
+  actionId TEXT NOT NULL,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'planned',
+  beforeMetricsJson TEXT NOT NULL DEFAULT '{}',
+  afterMetricsJson TEXT NOT NULL DEFAULT '{}',
+  resultSummary TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(connectionId) REFERENCES connection_profiles(id),
+  FOREIGN KEY(healthRecordId) REFERENCES connection_health_records(id),
+  FOREIGN KEY(actionId) REFERENCES process_instances(id),
+  UNIQUE(healthRecordId, actionId)
+);
+
+CREATE INDEX IF NOT EXISTS idx_connection_improvements_connection_status
+  ON connection_improvements(connectionId, status, updatedAt DESC);
+
 CREATE TABLE IF NOT EXISTS platform_sku_manual_bindings (
   id TEXT PRIMARY KEY,
   salesLinkSkuId TEXT NOT NULL UNIQUE,
