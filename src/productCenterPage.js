@@ -39,6 +39,7 @@ import { normalizeProductSkuCode } from "./data/productSku.js?v=20260728-product
 
 const productStatuses = ["开发中", "待上架", "在售", "停售", "清仓", "已归档"];
 let filters = { query: "", brand: "", category: "", status: "", erpStatus: "", platform: "", stockStatus: "" };
+let productSort = "updated-desc";
 let productViewMode = "card";
 let productPage = 1;
 const productPageSize = 48;
@@ -144,6 +145,47 @@ function getFilteredProducts(index) {
   });
 }
 
+const productTextCollator = new Intl.Collator("zh-CN", { numeric: true, sensitivity: "base" });
+
+function getProductSortNumber(product, index, field) {
+  const stock = getProductErpContext(product.id, index).stock;
+  if (field === "stock") return Number(stock.currentStock ?? stock.actualStock ?? stock.stock ?? 0) || 0;
+  return Number(stock.totalSales ?? 0) || 0;
+}
+
+function getSortedProducts(products, index) {
+  const direction = productSort.endsWith("-asc") ? 1 : -1;
+  const stableSkuCompare = (left, right) => productTextCollator.compare(String(left.skuCode ?? ""), String(right.skuCode ?? ""));
+  return [...products].sort((left, right) => {
+    let comparison = 0;
+    if (productSort.startsWith("sku-")) comparison = stableSkuCompare(left, right);
+    else if (productSort.startsWith("name-")) comparison = productTextCollator.compare(String(left.name ?? ""), String(right.name ?? ""));
+    else if (productSort.startsWith("stock-")) comparison = getProductSortNumber(left, index, "stock") - getProductSortNumber(right, index, "stock");
+    else if (productSort.startsWith("sales-")) comparison = getProductSortNumber(left, index, "sales") - getProductSortNumber(right, index, "sales");
+    else {
+      const field = productSort === "created-desc" ? "createdAt" : "updatedAt";
+      comparison = (Date.parse(left[field]) || 0) - (Date.parse(right[field]) || 0);
+    }
+    return comparison === 0 ? stableSkuCompare(left, right) : comparison * direction;
+  });
+}
+
+function renderProductSortOptions() {
+  const options = [
+    ["updated-desc", "最近更新"],
+    ["created-desc", "最新建立"],
+    ["sku-asc", "SKU升序"],
+    ["sku-desc", "SKU降序"],
+    ["name-asc", "名称升序"],
+    ["name-desc", "名称降序"],
+    ["stock-desc", "库存最高"],
+    ["stock-asc", "库存最低"],
+    ["sales-desc", "销量最高"],
+    ["sales-asc", "销量最低"],
+  ];
+  return options.map(([value, label]) => `<option value="${value}" ${productSort === value ? "selected" : ""}>${label}</option>`).join("");
+}
+
 function getProductErpContext(productId, index = null) {
   if (index) return index.erpByProduct.get(productId) ?? { mapping: null, goods: null, stock: {} };
   const mapping = state.productErpMappings.find((item) => item.productId === productId) ?? null;
@@ -242,7 +284,7 @@ function renderProductCards(products, index) {
 function renderProductList() {
   if (productSubmodule === "pending-skus") return renderPendingSkuPage();
   const index = buildProductUiIndex();
-  const products = getFilteredProducts(index);
+  const products = getSortedProducts(getFilteredProducts(index), index);
   const totalPages = Math.max(1, Math.ceil(products.length / productPageSize));
   productPage = Math.min(productPage, totalPages);
   const visibleProducts = products.slice((productPage - 1) * productPageSize, productPage * productPageSize);
@@ -274,9 +316,12 @@ function renderProductList() {
       </form>
       <div class="product-list-toolbar">
         <span>共 ${products.length} 个 SKU</span>
-        <div class="product-view-switch" aria-label="产品展示方式">
-          <button type="button" data-action="set-product-view" data-view-mode="list" class="${productViewMode === "list" ? "is-active" : ""}">列表</button>
-          <button type="button" data-action="set-product-view" data-view-mode="card" class="${productViewMode === "card" ? "is-active" : ""}">卡片</button>
+        <div class="product-list-toolbar-actions">
+          <label class="product-sort-control"><span>排序</span><select data-product-sort>${renderProductSortOptions()}</select></label>
+          <div class="product-view-switch" aria-label="产品展示方式">
+            <button type="button" data-action="set-product-view" data-view-mode="list" class="${productViewMode === "list" ? "is-active" : ""}">列表</button>
+            <button type="button" data-action="set-product-view" data-view-mode="card" class="${productViewMode === "card" ? "is-active" : ""}">卡片</button>
+          </div>
         </div>
       </div>
       ${productViewMode === "card" ? renderProductCards(visibleProducts, index) : renderProductTable(visibleProducts)}
@@ -1449,6 +1494,11 @@ export function bindProductCenterPageEvents(rerender) {
       platform: form.elements.platform.value,
       stockStatus: form.elements.stockStatus.value,
     };
+    productPage = 1;
+    rerender();
+  });
+  document.querySelector("[data-product-sort]")?.addEventListener("change", (event) => {
+    productSort = event.currentTarget.value;
     productPage = 1;
     rerender();
   });
