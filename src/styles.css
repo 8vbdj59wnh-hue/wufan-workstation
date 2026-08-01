@@ -103,6 +103,24 @@
 .connection-growth-card dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 0; }
 .connection-growth-card dl div { display: grid; align-content: center; gap: 6px; padding: 12px; border-radius: 10px; background: #f8fafc; }
 .connection-growth-card dd { margin: 0; font-size: 20px; font-weight: 700; }
+.connection-health-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.connection-health-summary div { display: grid; gap: 5px; padding: 13px 15px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 12px; background: #fff; }
+.connection-health-summary span { color: var(--muted-text, #6b7280); font-size: 12px; }
+.connection-health-summary strong { font-size: 22px; }
+.connection-health-report { display: grid; gap: 14px; }
+.connection-health-report > section:not(.connection-health-card) { padding: 16px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 13px; background: #fff; }
+.connection-health-report h3 { margin: 0 0 12px; }
+.connection-health-card { display: grid; grid-template-columns: auto auto auto 1fr; align-items: center; gap: 12px; padding: 18px; border-radius: 14px; background: #f0fdf4; }
+.connection-health-card.status-attention { background: #fffbeb; }
+.connection-health-card.status-risk { background: #fef2f2; }
+.connection-health-card strong { font-size: 34px; }
+.connection-health-card em { font-style: normal; font-weight: 700; }
+.connection-health-card small { justify-self: end; color: var(--muted-text, #6b7280); }
+.connection-health-list { display: grid; gap: 8px; }
+.connection-health-list article { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 12px; padding: 11px 13px; border-radius: 10px; background: #f8fafc; }
+.connection-health-list article small { grid-column: 1 / -1; color: var(--muted-text, #6b7280); }
+.connection-health-history { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.connection-health-history span { padding: 6px 9px; border-radius: 8px; background: #f3f4f6; font-size: 12px; }
 .status-pill.status-matched { background: #eaf7ef; color: #247a45; }
 .status-pill.status-ignored, .status-pill.status-rejected { background: #f3f4f6; color: #6b7280; }
 .empty-state.compact { padding: 18px; }
@@ -114,6 +132,9 @@
   .connection-period-confirm { grid-template-columns: 1fr; }
   .connection-growth-overview, .connection-growth-card { grid-template-columns: 1fr; }
   .connection-growth-card dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .connection-health-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .connection-health-card { grid-template-columns: 1fr auto auto; }
+  .connection-health-card small { grid-column: 1 / -1; justify-self: start; }
   .connection-toolbar { align-items: stretch; flex-direction: column; }
 }
 

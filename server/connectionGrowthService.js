@@ -16,6 +16,7 @@ function periodValue(rows) {
   const payAmount = rows.reduce((sum, row) => sum + Number(row.payAmount || 0), 0);
   const payQuantity = rows.reduce((sum, row) => sum + Number(row.payQuantity || 0), 0);
   return {
+    snapshotId: rows[0].id,
     periodStart: rows[0].periodStart,
     periodEnd: rows[0].periodEnd,
     periodType: rows[0].periodType,
@@ -87,7 +88,7 @@ function allAnalyses() {
   `).all();
   if (!profiles.length) return [];
   const snapshots = database.prepare(`
-    SELECT salesLinkId,periodStart,periodEnd,periodType,visitorCount,payBuyerCount,conversionRate,payAmount,payQuantity
+    SELECT id,salesLinkId,periodStart,periodEnd,periodType,visitorCount,payBuyerCount,conversionRate,payAmount,payQuantity
     FROM connection_period_snapshots ORDER BY periodEnd DESC,periodStart DESC,createdAt DESC
   `).all();
   const bySalesLink = new Map();

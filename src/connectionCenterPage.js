@@ -1,6 +1,8 @@
 import {
   commitConnectionImport,
   confirmConnectionImportRow,
+  createConnectionHealthRecord,
+  createConnectionImprovementAction,
   createConnectionPeriodSnapshots,
   createConnection,
   createConnectionAction,
@@ -12,6 +14,8 @@ import {
   loadConnectionImportPreview,
   loadConnectionGrowthAnalysis,
   loadConnectionGrowthRankings,
+  loadConnectionHealthRecords,
+  loadAttentionConnectionHealthRecords,
   loadConnectionPeriodSnapshots,
   loadConnections,
   removeConnectionAction,
@@ -36,6 +40,9 @@ const pageState = {
   periodSnapshots: [],
   growthAnalysis: null,
   growthRankings: { topGrowth: [], risks: [] },
+  healthRecords: [],
+  healthAttention: { items: [], counts: { risk: 0, attention: 0, traffic: 0, conversion: 0, sales: 0 } },
+  healthModalId: "",
   modalOpen: false,
   section: "connections",
   mappings: [],
@@ -56,6 +63,10 @@ function escapeHtml(value) {
 
 function canManage() {
   return hasPermission(getCurrentUser(), "products.edit");
+}
+
+function canCreateImprovement() {
+  return canManage() && hasPermission(getCurrentUser(), "workPlans.launch");
 }
 
 function personName(id) {
@@ -119,7 +130,16 @@ function renderGrowthOverview() {
   const top = pageState.growthRankings.topGrowth ?? [];
   const risks = pageState.growthRankings.risks ?? [];
   const cards = (items, emptyText) => items.length ? items.map((item) => `<button type="button" class="connection-growth-row" data-open-connection="${escapeHtml(item.connectionId)}"><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.platform)} · ${escapeHtml(item.shopDisplayName || item.shopName || "未命名店铺")}</small></span><em>${item.healthScore ?? "—"}分</em><b>${growthText(item.salesGrowth)}</b></button>`).join("") : `<div class="empty-state compact">${escapeHtml(emptyText)}</div>`;
-  return `<section class="connection-growth-overview"><article><header><strong>TOP10 成长连接</strong><span>按最新两期销售增长</span></header>${cards(top, "至少积累两个经营周期后显示排行")}</article><article><header><strong>需要关注</strong><span>健康分低于60</span></header>${cards(risks, "当前没有风险连接")}</article></section>`;
+  const counts = pageState.healthAttention.counts ?? {};
+  return `<section class="connection-health-summary"><div><span>风险连接</span><strong>${counts.risk || 0}</strong></div><div><span>关注连接</span><strong>${counts.attention || 0}</strong></div><div><span>流量问题</span><strong>${counts.traffic || 0}</strong></div><div><span>转化问题</span><strong>${counts.conversion || 0}</strong></div><div><span>销售下降</span><strong>${counts.sales || 0}</strong></div></section><section class="connection-growth-overview"><article><header><strong>TOP10 成长连接</strong><span>按最新两期销售增长</span></header>${cards(top, "至少积累两个经营周期后显示排行")}</article><article><header><strong>需要关注</strong><span>健康分低于60</span></header>${cards(risks, "当前没有风险连接")}</article></section>`;
+}
+
+function renderHealthReport() {
+  const analysis = pageState.growthAnalysis;
+  if (!analysis?.comparable) return `<div class="empty-state"><strong>暂无可用体检</strong><p>至少需要两个经营周期才能生成体检报告。</p></div>`;
+  const record = pageState.healthRecords.find((item) => item.snapshotId === analysis.currentPeriod.snapshotId);
+  if (!record) return `<div class="empty-state"><strong>当前周期尚未体检</strong><p>${escapeHtml(`${analysis.currentPeriod.periodStart} 至 ${analysis.currentPeriod.periodEnd}`)}</p>${canManage() ? `<button type="button" class="primary-button" data-generate-health>生成体检报告</button>` : ""}</div>`;
+  return `<div class="connection-health-report"><section class="connection-health-card status-${escapeHtml(record.healthStatus)}"><span>健康分</span><strong>${record.healthScore}</strong><em>${escapeHtml(({ healthy: "健康", attention: "关注", risk: "风险" })[record.healthStatus] || record.healthStatus)}</em><small>${escapeHtml(`${record.periodStart} 至 ${record.periodEnd}`)}</small></section><section><h3>发现问题</h3>${record.problems.length ? `<div class="connection-health-list">${record.problems.map((problem) => `<article><strong>⚠ ${escapeHtml(problem.title)}</strong><span>${escapeHtml(problem.value)}</span></article>`).join("")}</div>` : `<div class="empty-state compact">本周期未触发经营风险规则</div>`}</section><section><h3>改善建议</h3><div class="connection-health-list">${record.suggestions.map((suggestion) => `<article><strong>${escapeHtml(suggestion.title)}</strong><span>${escapeHtml(suggestion.reason)}</span>${suggestion.items?.length ? `<small>${escapeHtml(suggestion.items.join(" · "))}</small>` : ""}</article>`).join("")}</div></section>${canCreateImprovement() ? `<button type="button" class="primary-button" data-create-improvement="${escapeHtml(record.id)}">创建改善行动</button>` : ""}${pageState.healthRecords.length > 1 ? `<details><summary>历史体检记录（${pageState.healthRecords.length}）</summary><div class="connection-health-history">${pageState.healthRecords.map((item) => `<span>${escapeHtml(`${item.periodStart} 至 ${item.periodEnd}`)} · ${item.healthScore}分</span>`).join("")}</div></details>` : ""}</div>`;
 }
 
 function renderList() {
@@ -156,7 +176,7 @@ function renderDetail() {
   const tabs = [["overview", "经营概况"], ["actions", "经营动作"], ["health", "体检"], ["trend", "经营趋势"]];
   let body = `<div class="connection-overview"><dl><div><dt>平台</dt><dd>${escapeHtml(item.platform)}</dd></div><div><dt>店铺</dt><dd>${escapeHtml(shopName(item))}</dd></div><div><dt>负责人</dt><dd>${escapeHtml(personName(item.ownerId))}</dd></div><div><dt>状态</dt><dd>${escapeHtml(statusText(item.status))}</dd></div></dl><section><h3>关联产品</h3>${item.products?.length ? item.products.map((product) => `<a href="#products/${encodeURIComponent(product.id)}" data-product-id="${escapeHtml(product.id)}">${escapeHtml(product.name || product.skuCode)}</a>`).join("、") : "未关联产品"}</section></div>`;
   if (pageState.detailTab === "actions") body = renderActions(item);
-  if (pageState.detailTab === "health") body = `<div class="empty-state"><strong>连接体检</strong><p>该能力将在后续阶段接入真实经营数据。</p></div>`;
+  if (pageState.detailTab === "health") body = renderHealthReport();
   if (pageState.detailTab === "trend") {
     const analysis = pageState.growthAnalysis;
     const growthCard = analysis?.comparable ? `<section class="connection-growth-card"><div><span>健康分</span><strong>${analysis.healthScore}</strong><em>${escapeHtml(healthText(analysis.healthStatus))}</em></div><dl><div><dt>销售</dt><dd>${growthText(analysis.salesGrowth)}</dd></div><div><dt>访客</dt><dd>${growthText(analysis.visitorGrowth)}</dd></div><div><dt>转化</dt><dd>${growthText(analysis.conversionChange, { points: true })}</dd></div><div><dt>客单价</dt><dd>${growthText(analysis.customerValueChange)}</dd></div></dl></section>` : `<div class="empty-state compact"><strong>${escapeHtml(healthText(analysis?.healthStatus || "no_data"))}</strong><p>需要至少两个经营周期才能计算成长幅度和健康评分。</p></div>`;
@@ -233,24 +253,35 @@ function renderImportConfirmModal() {
   return `<div class="modal-backdrop" data-action="close-import-modal"><section class="modal-panel connection-modal" role="dialog" aria-modal="true" aria-label="确认经营数据连接" data-import-modal><header><div><p class="eyebrow">${escapeHtml(row.externalId)}</p><h2>确认销售连接</h2></div><button type="button" class="icon-button" data-action="close-import-modal" aria-label="关闭">×</button></header><form data-confirm-import-form><label>候选或已有连接<select name="selection" required><option value="">请选择</option>${candidateOptions}${connectionOptions}</select></label><footer><button type="button" class="secondary-button" data-action="close-import-modal">取消</button><button type="submit" class="primary-button">确认</button></footer></form></section></div>`;
 }
 
+function renderImprovementModal() {
+  if (!pageState.healthModalId) return "";
+  const record = pageState.healthRecords.find((item) => item.id === pageState.healthModalId);
+  if (!record) return "";
+  const goals = (state.goals ?? []).filter((goal) => goal.status === "active");
+  const templates = (state.taskTemplates ?? []).filter((template) => template.status === "active" && template.defaultProcessTemplateId);
+  const suggestedTitle = record.suggestions?.[0]?.title || "改善连接经营表现";
+  return `<div class="modal-backdrop" data-action="close-improvement-modal"><section class="modal-panel connection-modal" role="dialog" aria-modal="true" aria-label="创建改善行动" data-improvement-modal><header><div><p class="eyebrow">来源：连接体检</p><h2>创建改善行动</h2></div><button type="button" class="icon-button" data-action="close-improvement-modal" aria-label="关闭">×</button></header><form data-improvement-form><label>行动标题<input name="title" value="${escapeHtml(suggestedTitle)}" required maxlength="120" /></label><label>关联目标<select name="goalId" required><option value="">请选择目标</option>${goals.map((goal) => `<option value="${escapeHtml(goal.id)}">${escapeHtml(goal.name)}</option>`).join("")}</select></label><label>关键行动<select name="taskTemplateId" required><option value="">请选择已配置标准流程的关键行动</option>${templates.map((template) => `<option value="${escapeHtml(template.id)}">${escapeHtml(template.name)}</option>`).join("")}</select></label><p class="form-note">创建关键行动草稿并关联本次连接体检，不会自动创建任务。</p><footer><button type="button" class="secondary-button" data-action="close-improvement-modal">取消</button><button type="submit" class="primary-button">创建草稿</button></footer></form></section></div>`;
+}
+
 export function renderConnectionCenterPage() {
   const pageContent = pageState.section === "mappings" ? renderMappingPage() : pageState.section === "imports" ? renderImportPage() : `${renderGrowthOverview()}${renderToolbar()}${renderList()}`;
-  return `<section class="connection-center-page">${pageState.error ? `<div class="form-error">${escapeHtml(pageState.error)}</div>` : ""}${pageState.loading ? `<div class="empty-state">正在读取连接…</div>` : pageState.selectedId ? renderDetail() : `${renderSectionNavigation()}${pageContent}`}${renderCreateModal()}${renderMappingModal()}${renderImportConfirmModal()}</section>`;
+  return `<section class="connection-center-page">${pageState.error ? `<div class="form-error">${escapeHtml(pageState.error)}</div>` : ""}${pageState.loading ? `<div class="empty-state">正在读取连接…</div>` : pageState.selectedId ? renderDetail() : `${renderSectionNavigation()}${pageContent}`}${renderCreateModal()}${renderMappingModal()}${renderImportConfirmModal()}${renderImprovementModal()}</section>`;
 }
 
 async function loadPage(render) {
   pageState.loading = true; pageState.error = ""; render();
   try {
-    const [connections, rankings] = await Promise.all([loadConnections(), loadConnectionGrowthRankings()]);
+    const [connections, rankings, healthAttention] = await Promise.all([loadConnections(), loadConnectionGrowthRankings(), loadAttentionConnectionHealthRecords()]);
     pageState.items = connections.items ?? [];
     pageState.growthRankings = rankings;
+    pageState.healthAttention = healthAttention;
     pageState.loaded = true;
   } catch (error) { pageState.error = error.message; }
   pageState.loading = false; render();
 }
 
 async function openConnection(id, render) {
-  pageState.selectedId = id; pageState.detailTab = "overview"; pageState.actions = []; pageState.periodSnapshots = []; pageState.growthAnalysis = null; render();
+  pageState.selectedId = id; pageState.detailTab = "overview"; pageState.actions = []; pageState.periodSnapshots = []; pageState.growthAnalysis = null; pageState.healthRecords = []; pageState.healthModalId = ""; render();
 }
 
 async function loadMappings(render) {
@@ -298,7 +329,19 @@ export function bindConnectionCenterPageEvents(render) {
     pageState.detailTab = button.dataset.connectionTab; render();
     if (pageState.detailTab === "actions") { try { pageState.actions = (await loadConnectionActions(pageState.selectedId)).items ?? []; render(); } catch (error) { pageState.error = error.message; render(); } }
     if (pageState.detailTab === "trend") { try { const [snapshots, analysis] = await Promise.all([loadConnectionPeriodSnapshots(pageState.selectedId), loadConnectionGrowthAnalysis(pageState.selectedId)]); pageState.periodSnapshots = snapshots.items ?? []; pageState.growthAnalysis = analysis.item; render(); } catch (error) { pageState.error = error.message; render(); } }
+    if (pageState.detailTab === "health") { try { const [records, analysis] = await Promise.all([loadConnectionHealthRecords(pageState.selectedId), loadConnectionGrowthAnalysis(pageState.selectedId)]); pageState.healthRecords = records.items ?? []; pageState.growthAnalysis = analysis.item; render(); } catch (error) { pageState.error = error.message; render(); } }
   }));
+  root.querySelector("[data-generate-health]")?.addEventListener("click", async () => {
+    try { const result = await createConnectionHealthRecord(pageState.selectedId, pageState.growthAnalysis.currentPeriod.snapshotId); pageState.healthRecords = [result.item, ...pageState.healthRecords.filter((item) => item.id !== result.item.id)]; pageState.healthAttention = await loadAttentionConnectionHealthRecords(); render(); }
+    catch (error) { pageState.error = error.message; render(); }
+  });
+  root.querySelectorAll("[data-create-improvement]").forEach((button) => button.addEventListener("click", () => { pageState.healthModalId = button.dataset.createImprovement; render(); }));
+  root.querySelectorAll('[data-action="close-improvement-modal"]').forEach((element) => element.addEventListener("click", (event) => { if (event.target.closest("[data-improvement-modal]") && !event.target.matches('[data-action="close-improvement-modal"]')) return; pageState.healthModalId = ""; render(); }));
+  root.querySelector("[data-improvement-form]")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try { const result = await createConnectionImprovementAction(pageState.healthModalId, Object.fromEntries(new FormData(event.currentTarget))); pageState.healthModalId = ""; window.alert(`改善行动草稿已创建：${result.instance.businessCode || result.instance.id}`); render(); }
+    catch (error) { pageState.error = error.message; render(); }
+  });
   root.querySelector("[data-connection-action-form]")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const form = new FormData(event.currentTarget);
     try { const result = await createConnectionAction(pageState.selectedId, Object.fromEntries(form)); pageState.actions.unshift(result.item); pageState.error = ""; render(); } catch (error) { pageState.error = error.message; render(); }

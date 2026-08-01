@@ -1103,6 +1103,27 @@ CREATE INDEX IF NOT EXISTS idx_connection_period_snapshots_connection_period
 CREATE INDEX IF NOT EXISTS idx_connection_period_snapshots_sales_link_period
   ON connection_period_snapshots(salesLinkId, periodEnd DESC, periodStart DESC);
 
+CREATE TABLE IF NOT EXISTS connection_health_records (
+  id TEXT PRIMARY KEY,
+  connectionId TEXT NOT NULL,
+  snapshotId TEXT NOT NULL,
+  healthScore REAL NOT NULL,
+  healthStatus TEXT NOT NULL,
+  problemsJson TEXT NOT NULL DEFAULT '[]',
+  suggestionsJson TEXT NOT NULL DEFAULT '[]',
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(connectionId) REFERENCES connection_profiles(id),
+  FOREIGN KEY(snapshotId) REFERENCES connection_period_snapshots(id),
+  UNIQUE(connectionId, snapshotId)
+);
+
+CREATE INDEX IF NOT EXISTS idx_connection_health_records_status_created
+  ON connection_health_records(healthStatus, createdAt DESC);
+
+CREATE INDEX IF NOT EXISTS idx_connection_health_records_connection_created
+  ON connection_health_records(connectionId, createdAt DESC);
+
 CREATE TABLE IF NOT EXISTS platform_sku_manual_bindings (
   id TEXT PRIMARY KEY,
   salesLinkSkuId TEXT NOT NULL UNIQUE,

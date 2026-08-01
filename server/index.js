@@ -107,6 +107,7 @@ import {
 } from "./connectionImportService.js";
 import { createConnectionPeriodSnapshots, listConnectionPeriodSnapshots } from "./connectionPeriodSnapshots.js";
 import { getConnectionGrowthAnalysis, listConnectionGrowthRankings } from "./connectionGrowthService.js";
+import { createConnectionHealthRecord, createImprovementAction, listAttentionConnectionHealthRecords, listConnectionHealthRecords } from "./connectionHealthService.js";
 import { createProductFromErpSku, createProductsFromErpSkus, listPendingErpSkus } from "./erpSkuService.js";
 import { createToken, verifyPassword, verifyToken } from "./security.js";
 import {
@@ -1629,6 +1630,42 @@ app.get("/api/connection-growth-rankings", requirePermission("products.view"), (
     response.json({ success: true, ...listConnectionGrowthRankings(request.query.sort, request.query.limit) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "连接成长排行读取失败。" });
+  }
+});
+
+app.get("/api/connections/:id/health-records", requirePermission("products.view"), (request, response) => {
+  try {
+    response.json({ success: true, items: listConnectionHealthRecords(request.params.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "连接体检记录读取失败。" });
+  }
+});
+
+app.post("/api/connections/:id/health-records", requirePermission("products.edit"), (request, response) => {
+  try {
+    response.status(201).json({ success: true, ...createConnectionHealthRecord(request.params.id, request.body?.snapshotId) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "连接体检生成失败。" });
+  }
+});
+
+app.get("/api/connection-health-records/attention", requirePermission("products.view"), (_request, response) => {
+  try {
+    response.json({ success: true, ...listAttentionConnectionHealthRecords() });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "待关注连接读取失败。" });
+  }
+});
+
+app.post("/api/connection-health-records/:id/improvement-action", requirePermission("products.edit"), (request, response) => {
+  if (!hasPermission(request.user, "workPlans.launch")) {
+    response.status(403).json({ success: false, message: "你没有权限创建改善行动。" });
+    return;
+  }
+  try {
+    response.status(201).json({ success: true, ...createImprovementAction(request.params.id, request.body, request.user?.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "改善行动创建失败。" });
   }
 });
 
