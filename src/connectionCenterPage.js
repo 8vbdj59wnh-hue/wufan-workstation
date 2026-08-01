@@ -10,6 +10,8 @@ import {
   loadConnectionDataMappings,
   loadConnectionImportBatches,
   loadConnectionImportPreview,
+  loadConnectionGrowthAnalysis,
+  loadConnectionGrowthRankings,
   loadConnectionPeriodSnapshots,
   loadConnections,
   removeConnectionAction,
@@ -32,6 +34,8 @@ const pageState = {
   detailTab: "overview",
   actions: [],
   periodSnapshots: [],
+  growthAnalysis: null,
+  growthRankings: { topGrowth: [], risks: [] },
   modalOpen: false,
   section: "connections",
   mappings: [],
@@ -78,6 +82,16 @@ function statusText(status) {
   return ({ active: "经营中", paused: "已暂停", archived: "已归档", pending: "待确认", matched: "已匹配", ignored: "已忽略", rejected: "已拒绝", in_progress: "进行中", completed: "已完成", canceled: "已取消" })[status] ?? status;
 }
 
+function growthText(value, { points = false } = {}) {
+  if (value === null || value === undefined) return "—";
+  const amount = Number(value) * 100;
+  return `${amount > 0 ? "+" : ""}${amount.toFixed(points ? 2 : 1)}${points ? "个百分点" : "%"}`;
+}
+
+function healthText(status) {
+  return ({ growing: "成长", stable: "稳定", attention: "关注", risk: "风险", insufficient_data: "暂无对比周期", no_data: "暂无经营数据" })[status] ?? status;
+}
+
 function renderSectionNavigation() {
   return `<nav class="connection-section-nav" aria-label="连接中心页面">
     <button type="button" class="${pageState.section === "connections" ? "active" : ""}" data-connection-section="connections">连接列表</button>
@@ -99,6 +113,13 @@ function renderToolbar() {
     </div>
     ${canManage() ? `<button type="button" class="primary-button" data-action="new-connection">建立连接档案</button>` : ""}
   </div>`;
+}
+
+function renderGrowthOverview() {
+  const top = pageState.growthRankings.topGrowth ?? [];
+  const risks = pageState.growthRankings.risks ?? [];
+  const cards = (items, emptyText) => items.length ? items.map((item) => `<button type="button" class="connection-growth-row" data-open-connection="${escapeHtml(item.connectionId)}"><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.platform)} · ${escapeHtml(item.shopDisplayName || item.shopName || "未命名店铺")}</small></span><em>${item.healthScore ?? "—"}分</em><b>${growthText(item.salesGrowth)}</b></button>`).join("") : `<div class="empty-state compact">${escapeHtml(emptyText)}</div>`;
+  return `<section class="connection-growth-overview"><article><header><strong>TOP10 成长连接</strong><span>按最新两期销售增长</span></header>${cards(top, "至少积累两个经营周期后显示排行")}</article><article><header><strong>需要关注</strong><span>健康分低于60</span></header>${cards(risks, "当前没有风险连接")}</article></section>`;
 }
 
 function renderList() {
@@ -136,9 +157,12 @@ function renderDetail() {
   let body = `<div class="connection-overview"><dl><div><dt>平台</dt><dd>${escapeHtml(item.platform)}</dd></div><div><dt>店铺</dt><dd>${escapeHtml(shopName(item))}</dd></div><div><dt>负责人</dt><dd>${escapeHtml(personName(item.ownerId))}</dd></div><div><dt>状态</dt><dd>${escapeHtml(statusText(item.status))}</dd></div></dl><section><h3>关联产品</h3>${item.products?.length ? item.products.map((product) => `<a href="#products/${encodeURIComponent(product.id)}" data-product-id="${escapeHtml(product.id)}">${escapeHtml(product.name || product.skuCode)}</a>`).join("、") : "未关联产品"}</section></div>`;
   if (pageState.detailTab === "actions") body = renderActions(item);
   if (pageState.detailTab === "health") body = `<div class="empty-state"><strong>连接体检</strong><p>该能力将在后续阶段接入真实经营数据。</p></div>`;
-  if (pageState.detailTab === "trend") body = pageState.periodSnapshots.length
-    ? `<div class="connection-table-wrap"><table class="connection-table connection-period-table"><thead><tr><th>经营周期</th><th>支付金额</th><th>访客</th><th>支付件数</th><th>转化率</th><th>退款金额</th></tr></thead><tbody>${pageState.periodSnapshots.map((snapshot) => `<tr><td>${escapeHtml(`${snapshot.periodStart} 至 ${snapshot.periodEnd}`)}</td><td>¥${Number(snapshot.payAmount || 0).toLocaleString("zh-CN")}</td><td>${Number(snapshot.visitorCount || 0).toLocaleString("zh-CN")}</td><td>${Number(snapshot.payQuantity || 0).toLocaleString("zh-CN")}</td><td>${snapshot.conversionRate == null ? "—" : `${(Number(snapshot.conversionRate) * 100).toFixed(2)}%`}</td><td>¥${Number(snapshot.refundAmount || 0).toLocaleString("zh-CN")}</td></tr>`).join("")}</tbody></table></div>`
-    : `<div class="empty-state"><strong>暂无经营周期数据</strong><p>确认生意参谋导入周期并生成快照后，将在这里按周期比较。</p></div>`;
+  if (pageState.detailTab === "trend") {
+    const analysis = pageState.growthAnalysis;
+    const growthCard = analysis?.comparable ? `<section class="connection-growth-card"><div><span>健康分</span><strong>${analysis.healthScore}</strong><em>${escapeHtml(healthText(analysis.healthStatus))}</em></div><dl><div><dt>销售</dt><dd>${growthText(analysis.salesGrowth)}</dd></div><div><dt>访客</dt><dd>${growthText(analysis.visitorGrowth)}</dd></div><div><dt>转化</dt><dd>${growthText(analysis.conversionChange, { points: true })}</dd></div><div><dt>客单价</dt><dd>${growthText(analysis.customerValueChange)}</dd></div></dl></section>` : `<div class="empty-state compact"><strong>${escapeHtml(healthText(analysis?.healthStatus || "no_data"))}</strong><p>需要至少两个经营周期才能计算成长幅度和健康评分。</p></div>`;
+    const comparison = analysis?.currentPeriod ? `<div class="connection-table-wrap"><table class="connection-table connection-period-table"><thead><tr><th>周期</th><th>销售额</th><th>访客</th><th>转化率</th><th>客单价</th></tr></thead><tbody>${[["当前周期", analysis.currentPeriod], ["上一周期", analysis.previousPeriod]].filter(([, period]) => period).map(([label, period]) => `<tr><td><strong>${label}</strong><small>${escapeHtml(`${period.periodStart} 至 ${period.periodEnd}`)}</small></td><td>¥${Number(period.payAmount || 0).toLocaleString("zh-CN")}</td><td>${Number(period.visitorCount || 0).toLocaleString("zh-CN")}</td><td>${period.conversionRate == null ? "—" : `${(Number(period.conversionRate) * 100).toFixed(2)}%`}</td><td>${period.customerValue == null ? "—" : `¥${Number(period.customerValue).toFixed(2)}`}</td></tr>`).join("")}</tbody></table></div>` : "";
+    body = `<div class="connection-growth-detail">${growthCard}${comparison}</div>`;
+  }
   return `<section class="connection-detail"><button type="button" class="text-button" data-action="back-connections">← 返回连接列表</button><header>${imageHtml(item)}<div><p class="eyebrow">${escapeHtml(item.platform)} · ${escapeHtml(shopName(item))}</p><h2>${escapeHtml(item.name)}</h2><p>${escapeHtml(productNames(item))}</p></div></header><nav class="connection-tabs">${tabs.map(([id, label]) => `<button type="button" class="${pageState.detailTab === id ? "active" : ""}" data-connection-tab="${id}">${label}</button>`).join("")}</nav>${body}</section>`;
 }
 
@@ -210,21 +234,23 @@ function renderImportConfirmModal() {
 }
 
 export function renderConnectionCenterPage() {
-  const pageContent = pageState.section === "mappings" ? renderMappingPage() : pageState.section === "imports" ? renderImportPage() : `${renderToolbar()}${renderList()}`;
+  const pageContent = pageState.section === "mappings" ? renderMappingPage() : pageState.section === "imports" ? renderImportPage() : `${renderGrowthOverview()}${renderToolbar()}${renderList()}`;
   return `<section class="connection-center-page">${pageState.error ? `<div class="form-error">${escapeHtml(pageState.error)}</div>` : ""}${pageState.loading ? `<div class="empty-state">正在读取连接…</div>` : pageState.selectedId ? renderDetail() : `${renderSectionNavigation()}${pageContent}`}${renderCreateModal()}${renderMappingModal()}${renderImportConfirmModal()}</section>`;
 }
 
 async function loadPage(render) {
   pageState.loading = true; pageState.error = ""; render();
   try {
-    pageState.items = (await loadConnections()).items ?? [];
+    const [connections, rankings] = await Promise.all([loadConnections(), loadConnectionGrowthRankings()]);
+    pageState.items = connections.items ?? [];
+    pageState.growthRankings = rankings;
     pageState.loaded = true;
   } catch (error) { pageState.error = error.message; }
   pageState.loading = false; render();
 }
 
 async function openConnection(id, render) {
-  pageState.selectedId = id; pageState.detailTab = "overview"; pageState.actions = []; pageState.periodSnapshots = []; render();
+  pageState.selectedId = id; pageState.detailTab = "overview"; pageState.actions = []; pageState.periodSnapshots = []; pageState.growthAnalysis = null; render();
 }
 
 async function loadMappings(render) {
@@ -271,7 +297,7 @@ export function bindConnectionCenterPageEvents(render) {
   root.querySelectorAll("[data-connection-tab]").forEach((button) => button.addEventListener("click", async () => {
     pageState.detailTab = button.dataset.connectionTab; render();
     if (pageState.detailTab === "actions") { try { pageState.actions = (await loadConnectionActions(pageState.selectedId)).items ?? []; render(); } catch (error) { pageState.error = error.message; render(); } }
-    if (pageState.detailTab === "trend") { try { pageState.periodSnapshots = (await loadConnectionPeriodSnapshots(pageState.selectedId)).items ?? []; render(); } catch (error) { pageState.error = error.message; render(); } }
+    if (pageState.detailTab === "trend") { try { const [snapshots, analysis] = await Promise.all([loadConnectionPeriodSnapshots(pageState.selectedId), loadConnectionGrowthAnalysis(pageState.selectedId)]); pageState.periodSnapshots = snapshots.items ?? []; pageState.growthAnalysis = analysis.item; render(); } catch (error) { pageState.error = error.message; render(); } }
   }));
   root.querySelector("[data-connection-action-form]")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const form = new FormData(event.currentTarget);

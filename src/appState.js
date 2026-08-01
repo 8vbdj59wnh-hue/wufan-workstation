@@ -921,6 +921,14 @@ export async function loadConnectionPeriodSnapshots(connectionId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/period-snapshots`), "连接经营趋势读取失败。");
 }
 
+export async function loadConnectionGrowthAnalysis(connectionId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/growth-analysis`), "连接成长分析读取失败。");
+}
+
+export async function loadConnectionGrowthRankings() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-growth-rankings`), "连接成长排行读取失败。");
+}
+
 export async function confirmConnectionImportRow(batchId, externalId, selection) {
   const response = await authFetch(`${apiBaseUrl}/api/connection-import-batches/${encodeURIComponent(batchId)}/rows/${encodeURIComponent(externalId)}/confirm`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(selection),

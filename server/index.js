@@ -106,6 +106,7 @@ import {
   previewConnectionImportBatch,
 } from "./connectionImportService.js";
 import { createConnectionPeriodSnapshots, listConnectionPeriodSnapshots } from "./connectionPeriodSnapshots.js";
+import { getConnectionGrowthAnalysis, listConnectionGrowthRankings } from "./connectionGrowthService.js";
 import { createProductFromErpSku, createProductsFromErpSkus, listPendingErpSkus } from "./erpSkuService.js";
 import { createToken, verifyPassword, verifyToken } from "./security.js";
 import {
@@ -1612,6 +1613,22 @@ app.get("/api/connections/:id/period-snapshots", requirePermission("products.vie
     response.json({ success: true, items: listConnectionPeriodSnapshots(request.params.id) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "连接经营趋势读取失败。" });
+  }
+});
+
+app.get("/api/connections/:id/growth-analysis", requirePermission("products.view"), (request, response) => {
+  try {
+    response.json({ success: true, item: getConnectionGrowthAnalysis(request.params.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "连接成长分析读取失败。" });
+  }
+});
+
+app.get("/api/connection-growth-rankings", requirePermission("products.view"), (request, response) => {
+  try {
+    response.json({ success: true, ...listConnectionGrowthRankings(request.query.sort, request.query.limit) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "连接成长排行读取失败。" });
   }
 });
 
