@@ -44,6 +44,10 @@ const pageState = {
   selectedId: "",
   view: "list",
   sort: "default",
+  columnSort: { key: "", direction: "asc" },
+  listFilters: { shopId: "", productCode: "", ownerId: "", status: "" },
+  visibleColumns: ["image", "name", "platform", "shop", "products", "period", "payAmount", "growth", "health", "owner", "status"],
+  fieldSettingsOpen: false,
   detailTab: "overview",
   actions: [],
   periodSnapshots: [],
@@ -68,6 +72,47 @@ const pageState = {
   error: "",
 };
 
+const listConfigKey = "connection-center-list-config-v1";
+const listColumns = [
+  { key: "image", label: "图片", sortable: false },
+  { key: "name", label: "连接名称", sortable: true },
+  { key: "platform", label: "平台", sortable: true },
+  { key: "shop", label: "店铺", sortable: true },
+  { key: "products", label: "产品编码", sortable: true },
+  { key: "period", label: "最新经营数据", sortable: true },
+  { key: "payAmount", label: "最近周期销售额", sortable: true },
+  { key: "growth", label: "销售增长", sortable: true },
+  { key: "health", label: "健康分", sortable: true },
+  { key: "owner", label: "负责人", sortable: true },
+  { key: "status", label: "状态", sortable: true },
+];
+
+function loadListConfig() {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(listConfigKey) || "null");
+    if (!saved || typeof saved !== "object") return;
+    if (Array.isArray(saved.visibleColumns)) {
+      const valid = new Set(listColumns.map((column) => column.key));
+      const selected = saved.visibleColumns.filter((key) => valid.has(key));
+      if (selected.length) pageState.visibleColumns = selected;
+    }
+    if (saved.filters && typeof saved.filters === "object") pageState.listFilters = { ...pageState.listFilters, ...saved.filters };
+    if (["default", "sales", "growth", "risk", "newest"].includes(saved.sort)) pageState.sort = saved.sort;
+  } catch {
+    // Ignore invalid browser preferences and keep the safe defaults.
+  }
+}
+
+function saveListConfig() {
+  window.localStorage.setItem(listConfigKey, JSON.stringify({
+    visibleColumns: pageState.visibleColumns,
+    filters: pageState.listFilters,
+    sort: pageState.sort,
+  }));
+}
+
+loadListConfig();
+
 function escapeHtml(value) {
   return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 }
@@ -87,6 +132,15 @@ function personName(id) {
 
 function shopName(item) {
   return item.shopDisplayName || item.shopName || "未命名店铺";
+}
+
+function productCodes(item, preferredCode = "") {
+  const codes = (item.products ?? []).map((product) => product.skuCode).filter(Boolean);
+  if (!item.products?.length) return "未关联产品";
+  if (!codes.length) return "未设置产品编码";
+  const query = String(preferredCode).trim().toLowerCase();
+  const primary = codes.find((code) => query && code.toLowerCase().includes(query)) || codes[0];
+  return codes.length === 1 ? primary : `${primary} +${codes.length - 1}`;
 }
 
 function productNames(item) {
@@ -124,18 +178,33 @@ function renderSectionNavigation() {
 }
 
 function renderToolbar() {
-  return `<div class="connection-toolbar">
+  const shops = [...new Map(pageState.items.map((item) => [item.shopId, { id: item.shopId, name: shopName(item) }])).values()].sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+  const owners = (state.people ?? []).filter((person) => person.status === "active");
+  const filters = pageState.listFilters;
+  return `<div class="connection-list-tools">
+    <form class="connection-list-filters" data-connection-list-filters>
+      <select name="shopId" aria-label="店铺筛选"><option value="">全部店铺</option>${shops.map((shop) => `<option value="${escapeHtml(shop.id)}" ${filters.shopId === shop.id ? "selected" : ""}>${escapeHtml(shop.name)}</option>`).join("")}</select>
+      <input name="productCode" value="${escapeHtml(filters.productCode)}" placeholder="筛选产品编码" aria-label="关联产品编码筛选" />
+      <select name="ownerId" aria-label="负责人筛选"><option value="">全部负责人</option><option value="unassigned" ${filters.ownerId === "unassigned" ? "selected" : ""}>未设置负责人</option>${owners.map((person) => `<option value="${escapeHtml(person.id)}" ${filters.ownerId === person.id ? "selected" : ""}>${escapeHtml(person.name)}</option>`).join("")}</select>
+      <select name="status" aria-label="状态筛选"><option value="">全部状态</option>${["active", "paused", "archived"].map((status) => `<option value="${status}" ${filters.status === status ? "selected" : ""}>${escapeHtml(statusText(status))}</option>`).join("")}</select>
+      <button type="submit" class="secondary-button">筛选</button>
+      <button type="button" class="text-button" data-clear-connection-filters>清除</button>
+    </form>
+    <div class="connection-toolbar">
     <div class="segmented-control" aria-label="连接展示方式">
       <button type="button" class="${pageState.view === "list" ? "active" : ""}" data-connection-view="list">列表</button>
       <button type="button" class="${pageState.view === "cards" ? "active" : ""}" data-connection-view="cards">卡片</button>
     </div>
     <div class="segmented-control" aria-label="连接经营排序">
-      <button type="button" class="${pageState.sort === "default" ? "active" : ""}" data-connection-sort="default">默认</button>
-      <button type="button" class="${pageState.sort === "latest" ? "active" : ""}" data-connection-sort="latest">最新经营</button>
-      <button type="button" class="${pageState.sort === "pay" ? "active" : ""}" data-connection-sort="pay">周期销售额</button>
+      <button type="button" class="${pageState.sort === "default" ? "active" : ""}" data-connection-sort="default">综合</button>
+      <button type="button" class="${pageState.sort === "sales" ? "active" : ""}" data-connection-sort="sales">销售额</button>
+      <button type="button" class="${pageState.sort === "growth" ? "active" : ""}" data-connection-sort="growth">增长最快</button>
+      <button type="button" class="${pageState.sort === "risk" ? "active" : ""}" data-connection-sort="risk">风险最高</button>
+      <button type="button" class="${pageState.sort === "newest" ? "active" : ""}" data-connection-sort="newest">最新连接</button>
     </div>
+    <details class="connection-field-settings" ${pageState.fieldSettingsOpen ? "open" : ""}><summary>字段设置</summary><div>${listColumns.map((column) => `<label><input type="checkbox" value="${column.key}" data-connection-column-visibility ${pageState.visibleColumns.includes(column.key) ? "checked" : ""} />${escapeHtml(column.label)}</label>`).join("")}<button type="button" class="secondary-button" data-save-connection-list-config>保存当前列表配置</button></div></details>
     ${canManage() ? `<button type="button" class="primary-button" data-action="new-connection">建立连接档案</button>` : ""}
-  </div>`;
+  </div></div>`;
 }
 
 function renderGrowthOverview() {
@@ -174,18 +243,52 @@ function renderHealthReport() {
 
 function renderList() {
   if (!pageState.items.length) return `<div class="empty-state"><strong>还没有连接档案</strong><p>从已有销售链接中建立第一条经营连接。</p></div>`;
-  const items = [...pageState.items].sort((a, b) => pageState.sort === "latest"
-    ? String(b.latestPeriodEnd || "").localeCompare(String(a.latestPeriodEnd || ""))
-    : pageState.sort === "pay" ? Number(b.latestPayAmount || 0) - Number(a.latestPayAmount || 0) : 0);
+  const filters = pageState.listFilters;
+  const items = pageState.items.filter((item) => {
+    const codeQuery = String(filters.productCode || "").trim().toLowerCase();
+    return (!filters.shopId || item.shopId === filters.shopId)
+      && (!codeQuery || item.products?.some((product) => String(product.skuCode || "").toLowerCase().includes(codeQuery)))
+      && (!filters.ownerId || (filters.ownerId === "unassigned" ? !item.ownerId : item.ownerId === filters.ownerId))
+      && (!filters.status || item.status === filters.status);
+  });
+  const valueForColumn = (item, key) => ({
+    name: item.name || "", platform: item.platform || "", shop: shopName(item), products: productCodes(item),
+    period: item.latestPeriodEnd || "", payAmount: Number(item.latestPayAmount || 0), growth: item.salesGrowth == null ? -Infinity : Number(item.salesGrowth),
+    health: item.healthScore == null ? Infinity : Number(item.healthScore), owner: personName(item.ownerId), status: statusText(item.status),
+  })[key];
+  const compareValues = (left, right) => typeof left === "number" || typeof right === "number"
+    ? Number(left) - Number(right) : String(left).localeCompare(String(right), "zh-CN", { numeric: true });
+  items.sort((a, b) => {
+    if (pageState.columnSort.key) {
+      const result = compareValues(valueForColumn(a, pageState.columnSort.key), valueForColumn(b, pageState.columnSort.key));
+      return pageState.columnSort.direction === "asc" ? result : -result;
+    }
+    if (pageState.sort === "sales") return Number(b.latestPayAmount || 0) - Number(a.latestPayAmount || 0);
+    if (pageState.sort === "growth") return Number(b.salesGrowth ?? -Infinity) - Number(a.salesGrowth ?? -Infinity);
+    if (pageState.sort === "risk") return Number(a.healthScore ?? Infinity) - Number(b.healthScore ?? Infinity);
+    if (pageState.sort === "newest") return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
+    return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+  });
+  if (!items.length) return `<div class="empty-state"><strong>没有符合条件的连接</strong><p>请调整店铺、产品编码、负责人或状态筛选。</p></div>`;
   if (pageState.view === "cards") {
     return `<div class="connection-card-grid">${items.map((item) => `<button type="button" class="connection-card" data-open-connection="${escapeHtml(item.id)}">
       ${imageHtml(item)}
-      <div class="connection-card-body"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(productNames(item))}</span><span>${item.latestPeriodEnd ? `${escapeHtml(item.latestPeriodEnd)} · ¥${Number(item.latestPayAmount || 0).toLocaleString("zh-CN")}` : "暂无经营数据"}</span><em class="status-pill status-${escapeHtml(item.status)}">${escapeHtml(statusText(item.status))}</em></div>
+      <div class="connection-card-body"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(productCodes(item, filters.productCode))}</span><span>${item.latestPeriodEnd ? `${escapeHtml(item.latestPeriodEnd)} · ¥${Number(item.latestPayAmount || 0).toLocaleString("zh-CN")}` : "暂无经营数据"}</span><em class="status-pill status-${escapeHtml(item.status)}">${escapeHtml(statusText(item.status))}</em></div>
     </button>`).join("")}</div>`;
   }
-  return `<div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>图片</th><th>连接名称</th><th>平台</th><th>店铺</th><th>产品</th><th>最新经营数据</th><th>最近周期销售额</th><th>负责人</th><th>状态</th></tr></thead><tbody>${items.map((item) => `<tr tabindex="0" data-open-connection="${escapeHtml(item.id)}">
-    <td>${imageHtml(item)}</td><td><strong>${escapeHtml(item.name)}</strong></td><td>${escapeHtml(item.platform)}</td><td>${escapeHtml(shopName(item))}</td><td>${escapeHtml(productNames(item))}</td><td>${escapeHtml(item.latestPeriodEnd || "—")}</td><td>${item.latestPayAmount == null ? "—" : `¥${Number(item.latestPayAmount).toLocaleString("zh-CN")}`}</td><td>${escapeHtml(personName(item.ownerId))}</td><td><span class="status-pill status-${escapeHtml(item.status)}">${escapeHtml(statusText(item.status))}</span></td>
-  </tr>`).join("")}</tbody></table></div>`;
+  const visible = new Set(pageState.visibleColumns);
+  const header = listColumns.filter((column) => visible.has(column.key)).map((column) => {
+    const active = pageState.columnSort.key === column.key;
+    return `<th>${column.sortable ? `<button type="button" data-connection-column-sort="${column.key}">${escapeHtml(column.label)}${active ? (pageState.columnSort.direction === "asc" ? " ↑" : " ↓") : " ↕"}</button>` : escapeHtml(column.label)}</th>`;
+  }).join("");
+  const cell = (item, key) => ({
+    image: imageHtml(item), name: `<strong>${escapeHtml(item.name)}</strong>`, platform: escapeHtml(item.platform), shop: escapeHtml(shopName(item)),
+    products: escapeHtml(productCodes(item, filters.productCode)), period: escapeHtml(item.latestPeriodEnd || "—"),
+    payAmount: item.latestPayAmount == null ? "—" : `¥${Number(item.latestPayAmount).toLocaleString("zh-CN")}`,
+    growth: growthText(item.salesGrowth), health: item.healthScore == null ? "—" : `${Number(item.healthScore)}分`,
+    owner: escapeHtml(personName(item.ownerId)), status: `<span class="status-pill status-${escapeHtml(item.status)}">${escapeHtml(statusText(item.status))}</span>`,
+  })[key];
+  return `<div class="connection-table-wrap"><table class="connection-table"><thead><tr>${header}</tr></thead><tbody>${items.map((item) => `<tr tabindex="0" data-open-connection="${escapeHtml(item.id)}">${listColumns.filter((column) => visible.has(column.key)).map((column) => `<td>${cell(item, column.key)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
 }
 
 function renderPendingConnections() {
@@ -320,7 +423,11 @@ async function loadPage(render) {
   pageState.loading = true; pageState.error = ""; render();
   try {
     const [connections, rankings, healthAttention, improvementSummary] = await Promise.all([loadConnections(), loadConnectionGrowthRankings(), loadAttentionConnectionHealthRecords(), loadConnectionImprovementSummary()]);
-    pageState.items = connections.items ?? [];
+    const analysisByConnection = new Map((rankings.listMetrics ?? []).map((item) => [item.connectionId, item]));
+    pageState.items = (connections.items ?? []).map((item) => {
+      const analysis = analysisByConnection.get(item.id);
+      return { ...item, salesGrowth: analysis?.salesGrowth ?? null, healthScore: analysis?.healthScore ?? null, healthStatus: analysis?.healthStatus ?? "no_data" };
+    });
     pageState.growthRankings = rankings;
     pageState.healthAttention = healthAttention;
     pageState.improvementSummary = improvementSummary.summary;
@@ -388,7 +495,31 @@ export function bindConnectionCenterPageEvents(render) {
     catch (error) { pageState.error = error.message; render(); }
   });
   root.querySelectorAll("[data-connection-view]").forEach((button) => button.addEventListener("click", () => { pageState.view = button.dataset.connectionView; render(); }));
-  root.querySelectorAll("[data-connection-sort]").forEach((button) => button.addEventListener("click", () => { pageState.sort = button.dataset.connectionSort; render(); }));
+  root.querySelector("[data-connection-list-filters]")?.addEventListener("submit", (event) => {
+    event.preventDefault(); pageState.listFilters = Object.fromEntries(new FormData(event.currentTarget)); render();
+  });
+  root.querySelector("[data-clear-connection-filters]")?.addEventListener("click", () => {
+    pageState.listFilters = { shopId: "", productCode: "", ownerId: "", status: "" }; render();
+  });
+  root.querySelectorAll("[data-connection-sort]").forEach((button) => button.addEventListener("click", () => {
+    pageState.sort = button.dataset.connectionSort; pageState.columnSort = { key: "", direction: "asc" }; render();
+  }));
+  root.querySelectorAll("[data-connection-column-sort]").forEach((button) => button.addEventListener("click", (event) => {
+    event.stopPropagation(); const key = button.dataset.connectionColumnSort;
+    pageState.columnSort = pageState.columnSort.key === key
+      ? { key, direction: pageState.columnSort.direction === "asc" ? "desc" : "asc" }
+      : { key, direction: "asc" };
+    render();
+  }));
+  root.querySelectorAll("[data-connection-column-visibility]").forEach((checkbox) => checkbox.addEventListener("change", () => {
+    const selected = [...root.querySelectorAll("[data-connection-column-visibility]:checked")].map((item) => item.value);
+    if (!selected.length) { checkbox.checked = true; return; }
+    pageState.visibleColumns = selected; pageState.fieldSettingsOpen = true; render();
+  }));
+  root.querySelector(".connection-field-settings")?.addEventListener("toggle", (event) => { pageState.fieldSettingsOpen = event.currentTarget.open; });
+  root.querySelector("[data-save-connection-list-config]")?.addEventListener("click", () => {
+    saveListConfig(); pageState.fieldSettingsOpen = false; pageState.error = ""; render();
+  });
   root.querySelectorAll("[data-open-connection]").forEach((element) => {
     const open = () => void openConnection(element.dataset.openConnection, render);
     element.addEventListener("click", open);

@@ -80,7 +80,7 @@ function analyze(profile, snapshotRows) {
     conversionChange, customerValueChange, healthScore, healthStatus: healthStatus(healthScore) };
 }
 
-function allAnalyses() {
+export function listConnectionGrowthAnalyses() {
   const database = getDatabase();
   const profiles = database.prepare(`
     SELECT c.id AS connectionId,c.salesLinkId,c.name,c.status,s.platform,s.displayName AS shopDisplayName,s.shopName
@@ -101,14 +101,14 @@ function allAnalyses() {
 }
 
 export function getConnectionGrowthAnalysis(connectionId) {
-  const analysis = allAnalyses().find((item) => item.connectionId === text(connectionId));
+  const analysis = listConnectionGrowthAnalyses().find((item) => item.connectionId === text(connectionId));
   if (!analysis) throw new Error("未找到连接档案。");
   return analysis;
 }
 
 export function listConnectionGrowthRankings(sort = "overview", limit = 10) {
   const safeLimit = Math.max(1, Math.min(Number(limit) || 10, 50));
-  const analyses = allAnalyses();
+  const analyses = listConnectionGrowthAnalyses();
   const comparable = analyses.filter((item) => item.comparable);
   const topGrowth = [...comparable].sort((a, b) => b.salesGrowth - a.salesGrowth).slice(0, safeLimit);
   const declining = [...comparable].sort((a, b) => a.salesGrowth - b.salesGrowth).slice(0, safeLimit);
@@ -119,5 +119,11 @@ export function listConnectionGrowthRankings(sort = "overview", limit = 10) {
   if (sort === "growth") return { items: topGrowth };
   if (sort === "decline") return { items: declining };
   if (sort === "sales") return { items: salesTop };
-  return { topGrowth, declining, salesTop, risks };
+  const listMetrics = analyses.map((item) => ({
+    connectionId: item.connectionId,
+    salesGrowth: item.salesGrowth,
+    healthScore: item.healthScore,
+    healthStatus: item.healthStatus,
+  }));
+  return { topGrowth, declining, salesTop, risks, listMetrics };
 }
