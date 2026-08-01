@@ -70,17 +70,17 @@ export function readConnectionProfile(id) {
 export function listAvailableSalesLinks(search = "") {
   const query = value(search).toLowerCase();
   const rows = getDatabase().prepare(`
-    SELECT l.id AS salesLinkId, l.title AS salesLinkTitle, l.canonicalUrl, l.platformGoodsCode,
+    SELECT l.id AS salesLinkId, l.title AS salesLinkTitle, l.canonicalUrl, l.platformGoodsId, l.platformGoodsCode,
            s.platform, s.displayName AS shopDisplayName, s.shopName
     FROM sales_links l
     JOIN sales_shops s ON s.id=l.shopId
     LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
     WHERE c.id IS NULL AND COALESCE(l.currentState,'active')='active'
-      AND (?='' OR LOWER(COALESCE(l.title,'')) LIKE ? OR LOWER(COALESCE(l.platformGoodsCode,'')) LIKE ?
-        OR LOWER(COALESCE(s.displayName,s.shopName,'')) LIKE ?)
+      AND (?='' OR LOWER(COALESCE(l.title,'')) LIKE ? OR LOWER(COALESCE(l.platformGoodsId,'')) LIKE ?
+        OR LOWER(COALESCE(l.platformGoodsCode,'')) LIKE ? OR LOWER(COALESCE(s.displayName,s.shopName,'')) LIKE ?)
     ORDER BY l.updatedAt DESC, l.id DESC
     LIMIT 200
-  `).all(query, `%${query}%`, `%${query}%`, `%${query}%`);
+  `).all(query, `%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`);
   return enrichConnectionRows(rows);
 }
 
@@ -93,7 +93,7 @@ export function createConnectionProfile(input, userId) {
   const database = getDatabase();
   const create = database.transaction(() => {
     const link = database.prepare(`
-      SELECT l.id, l.title, l.platformGoodsCode, l.currentState, s.displayName, s.shopName
+      SELECT l.id, l.title, l.platformGoodsId, l.platformGoodsCode, l.currentState, s.displayName, s.shopName
       FROM sales_links l JOIN sales_shops s ON s.id=l.shopId WHERE l.id=?
     `).get(salesLinkId);
     if (!link) throw new Error("所选销售连接不存在。");
@@ -107,9 +107,70 @@ export function createConnectionProfile(input, userId) {
       INSERT INTO connection_profiles (id,salesLinkId,name,ownerId,status,notes,createdBy,createdAt,updatedAt)
       VALUES (?,?,?,?,?,?,?,?,?)
     `).run(id, salesLinkId, name, ownerId, status, value(input?.notes), value(userId) || null, now, now);
+    database.prepare(`
+      UPDATE connection_data_mappings
+      SET connectionId=?,
+          matchStatus=CASE WHEN sourceType='business_advisor' AND externalId=? THEN 'matched' ELSE matchStatus END,
+          matchMethod=CASE WHEN sourceType='business_advisor' AND externalId=? THEN 'goods_id' ELSE matchMethod END,
+          confirmedBy=CASE WHEN sourceType='business_advisor' AND externalId=? THEN COALESCE(confirmedBy,?) ELSE confirmedBy END,
+          confirmedAt=CASE WHEN sourceType='business_advisor' AND externalId=? THEN COALESCE(confirmedAt,?) ELSE confirmedAt END,
+          updatedAt=?
+      WHERE salesLinkId=? AND connectionId IS NULL AND deletedAt IS NULL
+    `).run(id, value(link.platformGoodsId), value(link.platformGoodsId), value(link.platformGoodsId), value(userId) || null,
+      value(link.platformGoodsId), now, now, salesLinkId);
     return id;
   });
   return readConnectionProfile(create());
+}
+
+export function createConnectionProfilesBatch(input, userId) {
+  const salesLinkIds = [...new Set((Array.isArray(input?.salesLinkIds) ? input.salesLinkIds : []).map(value).filter(Boolean))];
+  const ownerId = value(input?.ownerId) || null;
+  if (!salesLinkIds.length) throw new Error("请选择需要建立档案的销售连接。");
+  if (salesLinkIds.length > 200) throw new Error("单次最多建立200个连接档案。");
+  const database = getDatabase();
+  if (ownerId && !database.prepare("SELECT 1 FROM persons WHERE id=? AND status='active'").get(ownerId)) throw new Error("负责人不存在或已停用。");
+  const placeholdersText = placeholders(salesLinkIds);
+  const links = database.prepare(`
+    SELECT l.id,l.title,l.platformGoodsId,l.platformGoodsCode,l.currentState,s.displayName,s.shopName
+    FROM sales_links l JOIN sales_shops s ON s.id=l.shopId
+    WHERE l.id IN (${placeholdersText})
+  `).all(...salesLinkIds);
+  const linksById = new Map(links.map((link) => [link.id, link]));
+  for (const salesLinkId of salesLinkIds) {
+    const link = linksById.get(salesLinkId);
+    if (!link) throw new Error(`销售连接不存在：${salesLinkId}`);
+    if (String(link.currentState ?? "active") !== "active") throw new Error(`失效销售连接不能建立档案：${link.platformGoodsId || salesLinkId}`);
+    if (database.prepare("SELECT 1 FROM connection_profiles WHERE salesLinkId=?").get(salesLinkId)) throw new Error(`销售连接已建立档案：${link.platformGoodsId || salesLinkId}`);
+  }
+  const create = database.transaction(() => {
+    const now = new Date().toISOString();
+    const ids = [];
+    for (const salesLinkId of salesLinkIds) {
+      const link = linksById.get(salesLinkId);
+      const id = `connection-${crypto.randomUUID()}`;
+      const name = value(link.title) || value(link.platformGoodsCode) || value(link.displayName) || value(link.shopName) || "未命名连接";
+      database.prepare(`
+        INSERT INTO connection_profiles (id,salesLinkId,name,ownerId,status,notes,createdBy,createdAt,updatedAt)
+        VALUES (?,?,?,?,?,?,?,?,?)
+      `).run(id, salesLinkId, name, ownerId, "active", "", value(userId) || null, now, now);
+      database.prepare(`
+        UPDATE connection_data_mappings
+        SET connectionId=?,
+            matchStatus=CASE WHEN sourceType='business_advisor' AND externalId=? THEN 'matched' ELSE matchStatus END,
+            matchMethod=CASE WHEN sourceType='business_advisor' AND externalId=? THEN 'goods_id' ELSE matchMethod END,
+            confirmedBy=CASE WHEN sourceType='business_advisor' AND externalId=? THEN COALESCE(confirmedBy,?) ELSE confirmedBy END,
+            confirmedAt=CASE WHEN sourceType='business_advisor' AND externalId=? THEN COALESCE(confirmedAt,?) ELSE confirmedAt END,
+            updatedAt=?
+        WHERE salesLinkId=? AND connectionId IS NULL AND deletedAt IS NULL
+      `).run(id, value(link.platformGoodsId), value(link.platformGoodsId), value(link.platformGoodsId), value(userId) || null,
+        value(link.platformGoodsId), now, now, salesLinkId);
+      ids.push(id);
+    }
+    return ids;
+  });
+  const ids = create();
+  return { items: ids.map(readConnectionProfile), created: ids.length };
 }
 
 export function listConnectionActions(connectionProfileId) {
@@ -176,6 +237,14 @@ function readSalesLinkRelation(salesLinkId) {
   `).get(salesLinkId);
   if (!row) throw new Error("所选销售连接不存在。");
   return row;
+}
+
+function validateBusinessAdvisorIdentity(sourceType, externalId, relation, matchStatus, matchMethod) {
+  if (sourceType !== "business_advisor" || matchStatus !== "matched") return;
+  if (!relation?.connectionId) throw new Error("生意参谋数据需要先为销售连接建立连接档案。");
+  const link = getDatabase().prepare("SELECT platformGoodsId FROM sales_links WHERE id=?").get(relation.salesLinkId);
+  if (value(link?.platformGoodsId) !== externalId) throw new Error("生意参谋商品ID与销售连接商品ID不一致。");
+  if (matchMethod !== "goods_id") throw new Error("生意参谋数据只允许按商品ID精确匹配。");
 }
 
 const mappingSelect = `
@@ -249,7 +318,8 @@ export function createConnectionDataMapping(input, userId) {
     ? { connectionId: profileRelation.id, salesLinkId: profileRelation.salesLinkId }
     : salesRelation;
   if (matchStatus === "matched" && !relation) throw new Error("确认匹配时必须选择连接档案或销售连接。");
-  if (matchStatus === "matched" && !matchMethod) matchMethod = "manual";
+  if (matchStatus === "matched" && !matchMethod) matchMethod = sourceType === "business_advisor" ? "goods_id" : "manual";
+  validateBusinessAdvisorIdentity(sourceType, externalId, relation, matchStatus, matchMethod);
   const database = getDatabase();
   const create = database.transaction(() => {
     const now = new Date().toISOString();
@@ -289,7 +359,8 @@ export function updateConnectionDataMapping(id, input, userId) {
     ? { connectionId: profileRelation.id, salesLinkId: profileRelation.salesLinkId }
     : salesRelation;
   if (matchStatus === "matched" && !relation) throw new Error("确认匹配时必须选择连接档案或销售连接。");
-  if (matchStatus === "matched" && !matchMethod) matchMethod = "manual";
+  if (matchStatus === "matched" && !matchMethod) matchMethod = current.sourceType === "business_advisor" ? "goods_id" : "manual";
+  validateBusinessAdvisorIdentity(current.sourceType, current.externalId, relation, matchStatus, matchMethod);
   const now = new Date().toISOString();
   const confirmedBy = matchStatus === "matched" ? value(userId) || current.confirmedBy || null : null;
   const confirmedAt = matchStatus === "matched" ? current.confirmedAt || now : null;

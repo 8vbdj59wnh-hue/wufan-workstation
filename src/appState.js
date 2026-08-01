@@ -849,6 +849,13 @@ export async function createConnection(payload) {
   return readApiJson(response, "连接档案创建失败。");
 }
 
+export async function createConnectionsBatch(payload) {
+  const response = await authFetch(`${apiBaseUrl}/api/connections/batch`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  });
+  return readApiJson(response, "连接档案批量创建失败。");
+}
+
 export async function loadConnectionActions(connectionId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/actions`), "经营动作读取失败。");
 }

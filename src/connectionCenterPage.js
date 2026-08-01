@@ -5,6 +5,7 @@ import {
   createConnectionImprovementAction,
   createConnectionPeriodSnapshots,
   createConnection,
+  createConnectionsBatch,
   createConnectionAction,
   getCurrentUser,
   loadAvailableSalesLinks,
@@ -35,6 +36,7 @@ const pageState = {
   loading: false,
   items: [],
   availableLinks: [],
+  selectedPendingLinkIds: [],
   selectedId: "",
   view: "list",
   sort: "default",
@@ -111,6 +113,7 @@ function healthText(status) {
 function renderSectionNavigation() {
   return `<nav class="connection-section-nav" aria-label="连接中心页面">
     <button type="button" class="${pageState.section === "connections" ? "active" : ""}" data-connection-section="connections">连接列表</button>
+    <button type="button" class="${pageState.section === "pending-connections" ? "active" : ""}" data-connection-section="pending-connections">待创建连接</button>
     <button type="button" class="${pageState.section === "mappings" ? "active" : ""}" data-connection-section="mappings">数据匹配</button>
     <button type="button" class="${pageState.section === "imports" ? "active" : ""}" data-connection-section="imports">经营数据导入</button>
   </nav>`;
@@ -181,6 +184,13 @@ function renderList() {
   </tr>`).join("")}</tbody></table></div>`;
 }
 
+function renderPendingConnections() {
+  const selected = new Set(pageState.selectedPendingLinkIds);
+  return `<section class="connection-pending-page"><header class="connection-toolbar"><div><strong>待创建连接</strong><p>来源于ERP平台货品同步。连接身份以平台商品ID为准。</p></div>${canManage() ? `<button type="button" class="primary-button" data-batch-create-connections ${selected.size ? "" : "disabled"}>批量创建连接（${selected.size}）</button>` : ""}</header>
+    ${pageState.availableLinks.length ? `<div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>选择</th><th>图片</th><th>商品标题</th><th>平台</th><th>店铺</th><th>商品ID</th><th>操作</th></tr></thead><tbody>${pageState.availableLinks.map((item) => `<tr><td>${canManage() ? `<input type="checkbox" aria-label="选择 ${escapeHtml(item.salesLinkTitle || item.platformGoodsId)}" data-pending-link-select="${escapeHtml(item.salesLinkId)}" ${selected.has(item.salesLinkId) ? "checked" : ""} />` : ""}</td><td>${imageHtml(item)}</td><td><strong>${escapeHtml(item.salesLinkTitle || "未命名商品")}</strong></td><td>${escapeHtml(item.platform)}</td><td>${escapeHtml(shopName(item))}</td><td>${escapeHtml(item.platformGoodsId || "—")}</td><td>${canManage() ? `<button type="button" class="text-button" data-create-pending-connection="${escapeHtml(item.salesLinkId)}">创建连接</button>` : "—"}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><strong>没有待创建连接</strong><p>当前有效销售链接均已建立连接档案。</p></div>`}
+  </section>`;
+}
+
 function renderActions(item) {
   return `<div class="connection-actions-panel">
     ${canManage() ? `<form class="connection-action-form" data-connection-action-form>
@@ -234,7 +244,7 @@ function renderMappingPage() {
       <input name="search" value="${escapeHtml(pageState.mappingFilters.search)}" placeholder="搜索商品ID" />
       <button type="submit" class="secondary-button">筛选</button>
     </form>
-    ${pageState.mappingLoading ? `<div class="empty-state">正在读取数据匹配…</div>` : rows.length ? `<div class="connection-table-wrap"><table class="connection-table connection-mapping-table"><thead><tr><th>商品ID</th><th>商品名称</th><th>货号</th><th>候选连接</th><th>状态</th><th>操作</th></tr></thead><tbody>${rows.map((mapping) => `<tr><td><strong>${escapeHtml(mapping.externalId)}</strong><small>${escapeHtml(mapping.externalShopId || "未标注外部店铺")}</small></td><td>${escapeHtml(externalData(mapping, "goodsName", externalData(mapping, "title")))}</td><td>${escapeHtml(externalData(mapping, "sku", externalData(mapping, "merchantSkuCode")))}</td><td>${escapeHtml(mapping.connectionName || "待选择")}</td><td><span class="status-pill status-${escapeHtml(mapping.matchStatus)}">${escapeHtml(statusText(mapping.matchStatus))}</span></td><td><div class="connection-mapping-actions">${mapping.matchStatus === "pending" && canManage() ? `<button type="button" class="text-button" data-confirm-mapping="${escapeHtml(mapping.id)}">确认匹配</button><button type="button" class="text-button" data-ignore-mapping="${escapeHtml(mapping.id)}">忽略</button>` : ""}${mapping.connectionId ? `<button type="button" class="text-button" data-view-mapping-connection="${escapeHtml(mapping.connectionId)}">查看连接</button>` : ""}</div></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><strong>暂无符合条件的数据</strong><p>本阶段只提供映射接口与人工确认能力，不会自动导入外部文件。</p></div>`}
+    ${pageState.mappingLoading ? `<div class="empty-state">正在读取数据匹配…</div>` : rows.length ? `<div class="connection-table-wrap"><table class="connection-table connection-mapping-table"><thead><tr><th>商品ID</th><th>商品名称</th><th>货号</th><th>销售连接</th><th>状态</th><th>操作</th></tr></thead><tbody>${rows.map((mapping) => `<tr><td><strong>${escapeHtml(mapping.externalId)}</strong><small>${escapeHtml(mapping.externalShopId || "未标注外部店铺")}</small></td><td>${escapeHtml(externalData(mapping, "goodsName", externalData(mapping, "title")))}</td><td>${escapeHtml(externalData(mapping, "sku", externalData(mapping, "merchantSkuCode")))}</td><td>${escapeHtml(mapping.connectionName || mapping.salesLinkTitle || "未找到商品ID对应连接")}</td><td><span class="status-pill status-${escapeHtml(mapping.matchStatus)}">${escapeHtml(statusText(mapping.matchStatus))}</span></td><td><div class="connection-mapping-actions">${mapping.matchStatus === "pending" && canManage() ? `<button type="button" class="text-button" data-open-pending-connections>查看待创建连接</button><button type="button" class="text-button" data-ignore-mapping="${escapeHtml(mapping.id)}">忽略</button>` : ""}${mapping.connectionId ? `<button type="button" class="text-button" data-view-mapping-connection="${escapeHtml(mapping.connectionId)}">查看连接</button>` : ""}</div></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><strong>暂无符合条件的数据</strong><p>生意参谋仅按商品ID关联ERP销售连接，不使用货号、SKU或商品名称。</p></div>`}
   </section>`;
 }
 
@@ -252,7 +262,7 @@ function importStatusText(status) {
 function renderImportRows(rows) {
   if (!rows.length) return `<div class="empty-state compact">暂无数据</div>`;
   const pending = pageState.importTab === "pending";
-  return `<div class="connection-table-wrap"><table class="connection-table connection-import-table"><thead><tr><th>商品ID</th><th>商品名称</th><th>货号</th><th>${pending ? "候选连接" : "连接名称"}</th><th>匹配方式</th>${pending ? "<th>操作</th>" : ""}</tr></thead><tbody>${rows.map((row) => `<tr><td><strong>${escapeHtml(row.externalId || "—")}</strong></td><td>${escapeHtml(row.goodsName || "—")}</td><td>${escapeHtml(row.sku || "—")}</td><td>${pending ? escapeHtml(row.candidates?.length ? row.candidates.map((item) => item.connectionName).join("、") : "无候选") : escapeHtml(row.connectionName || "销售连接")}</td><td>${escapeHtml(row.matchMethod === "goods_id" ? "商品ID" : row.matchMethod === "manual" ? "人工确认" : "—")}</td>${pending ? `<td><div class="connection-mapping-actions">${canManage() ? `<button type="button" class="text-button" data-confirm-import-row="${escapeHtml(row.externalId)}">确认连接</button><button type="button" class="text-button" data-ignore-import-row="${escapeHtml(row.externalId)}">忽略</button>` : ""}</div></td>` : ""}</tr>`).join("")}</tbody></table></div>`;
+  return `<div class="connection-table-wrap"><table class="connection-table connection-import-table"><thead><tr><th>商品ID</th><th>商品名称</th><th>货号</th><th>${pending ? "处理状态" : "连接名称"}</th><th>匹配方式</th>${pending ? "<th>操作</th>" : ""}</tr></thead><tbody>${rows.map((row) => `<tr><td><strong>${escapeHtml(row.externalId || "—")}</strong></td><td>${escapeHtml(row.goodsName || "—")}</td><td>${escapeHtml(row.sku || "—")}</td><td>${pending ? escapeHtml(row.pendingReason === "missing_connection_profile" ? "销售链接已存在，需要先创建连接档案" : row.pendingReason === "ambiguous_goods_id" ? "商品ID对应多个销售链接，请检查ERP销售关系" : "未找到商品ID对应的销售链接") : escapeHtml(row.connectionName || "销售连接")}</td><td>${escapeHtml(row.matchMethod === "goods_id" ? "商品ID精确匹配" : "—")}</td>${pending ? `<td><div class="connection-mapping-actions">${canManage() && row.pendingReason === "missing_connection_profile" ? `<button type="button" class="text-button" data-open-pending-connections>创建连接档案</button>` : ""}${canManage() ? `<button type="button" class="text-button" data-ignore-import-row="${escapeHtml(row.externalId)}">忽略</button>` : ""}</div></td>` : ""}</tr>`).join("")}</tbody></table></div>`;
 }
 
 function renderImportPage() {
@@ -288,7 +298,7 @@ function renderImprovementModal() {
 }
 
 export function renderConnectionCenterPage() {
-  const pageContent = pageState.section === "mappings" ? renderMappingPage() : pageState.section === "imports" ? renderImportPage() : `${renderGrowthOverview()}${renderToolbar()}${renderList()}`;
+  const pageContent = pageState.section === "mappings" ? renderMappingPage() : pageState.section === "imports" ? renderImportPage() : pageState.section === "pending-connections" ? renderPendingConnections() : `${renderGrowthOverview()}${renderToolbar()}${renderList()}`;
   return `<section class="connection-center-page">${pageState.error ? `<div class="form-error">${escapeHtml(pageState.error)}</div>` : ""}${pageState.loading ? `<div class="empty-state">正在读取连接…</div>` : pageState.selectedId ? renderDetail() : `${renderSectionNavigation()}${pageContent}`}${renderCreateModal()}${renderMappingModal()}${renderImportConfirmModal()}${renderImprovementModal()}</section>`;
 }
 
@@ -316,6 +326,13 @@ async function loadMappings(render) {
   pageState.mappingLoading = false; render();
 }
 
+async function loadPendingConnections(render) {
+  pageState.loading = true; pageState.error = ""; render();
+  try { pageState.availableLinks = (await loadAvailableSalesLinks()).items ?? []; pageState.selectedPendingLinkIds = []; }
+  catch (error) { pageState.error = error.message; }
+  pageState.loading = false; render();
+}
+
 async function loadImportBatches(render, openLatest = false) {
   pageState.importLoading = true; pageState.error = ""; render();
   try {
@@ -331,9 +348,22 @@ export function bindConnectionCenterPageEvents(render) {
   if (!pageState.loaded && !pageState.loading) void loadPage(render);
   root.querySelectorAll("[data-connection-section]").forEach((button) => button.addEventListener("click", () => {
     pageState.section = button.dataset.connectionSection; pageState.selectedId = ""; render();
+    if (pageState.section === "pending-connections") void loadPendingConnections(render);
     if (pageState.section === "mappings") void loadMappings(render);
     if (pageState.section === "imports") void loadImportBatches(render, true);
   }));
+  root.querySelectorAll("[data-open-pending-connections]").forEach((button) => button.addEventListener("click", () => { pageState.section = "pending-connections"; pageState.selectedId = ""; void loadPendingConnections(render); }));
+  root.querySelectorAll("[data-pending-link-select]").forEach((checkbox) => checkbox.addEventListener("change", () => {
+    const selected = new Set(pageState.selectedPendingLinkIds); if (checkbox.checked) selected.add(checkbox.dataset.pendingLinkSelect); else selected.delete(checkbox.dataset.pendingLinkSelect); pageState.selectedPendingLinkIds = [...selected]; render();
+  }));
+  root.querySelectorAll("[data-create-pending-connection]").forEach((button) => button.addEventListener("click", async () => {
+    try { const result = await createConnection({ salesLinkId: button.dataset.createPendingConnection }); pageState.items.unshift(result.item); pageState.availableLinks = pageState.availableLinks.filter((item) => item.salesLinkId !== button.dataset.createPendingConnection); pageState.error = ""; render(); }
+    catch (error) { pageState.error = error.message; render(); }
+  }));
+  root.querySelector("[data-batch-create-connections]")?.addEventListener("click", async () => {
+    try { const result = await createConnectionsBatch({ salesLinkIds: pageState.selectedPendingLinkIds }); pageState.items = [...result.items, ...pageState.items]; const created = new Set(pageState.selectedPendingLinkIds); pageState.availableLinks = pageState.availableLinks.filter((item) => !created.has(item.salesLinkId)); pageState.selectedPendingLinkIds = []; pageState.error = ""; render(); }
+    catch (error) { pageState.error = error.message; render(); }
+  });
   root.querySelectorAll("[data-connection-view]").forEach((button) => button.addEventListener("click", () => { pageState.view = button.dataset.connectionView; render(); }));
   root.querySelectorAll("[data-connection-sort]").forEach((button) => button.addEventListener("click", () => { pageState.sort = button.dataset.connectionSort; render(); }));
   root.querySelectorAll("[data-open-connection]").forEach((element) => {

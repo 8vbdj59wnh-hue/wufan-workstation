@@ -57,7 +57,7 @@ export function createConnectionPeriodSnapshots(importBatchId, input = {}) {
   const database = getDatabase();
   const mappings = database.prepare(`
     SELECT id,connectionId,salesLinkId,externalId FROM connection_data_mappings
-    WHERE sourceType=? AND externalShopId=? AND matchStatus='matched' AND deletedAt IS NULL
+    WHERE sourceType=? AND externalShopId=? AND matchStatus='matched' AND connectionId IS NOT NULL AND deletedAt IS NULL
   `).all(preview.batch.sourceType, preview.batch.externalShopId);
   const mappingsByExternalId = new Map(mappings.map((mapping) => [mapping.externalId, mapping]));
   let created = 0;

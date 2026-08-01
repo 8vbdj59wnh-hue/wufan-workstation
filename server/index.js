@@ -88,6 +88,7 @@ import {
   createConnectionAction,
   createConnectionDataMapping,
   createConnectionProfile,
+  createConnectionProfilesBatch,
   deleteConnectionAction,
   deleteConnectionDataMapping,
   listAvailableSalesLinks,
@@ -1503,6 +1504,14 @@ app.post("/api/connections", requirePermission("products.edit"), (request, respo
     response.status(201).json({ success: true, item: createConnectionProfile(request.body, request.user?.id) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "连接档案创建失败。" });
+  }
+});
+
+app.post("/api/connections/batch", requirePermission("products.edit"), (request, response) => {
+  try {
+    response.status(201).json({ success: true, ...createConnectionProfilesBatch(request.body, request.user?.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "连接档案批量创建失败。" });
   }
 });
 

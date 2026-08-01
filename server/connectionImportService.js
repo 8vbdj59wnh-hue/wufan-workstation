@@ -13,10 +13,6 @@ function text(raw) {
   return result === "-" ? "" : result;
 }
 
-function normalizeSku(raw) {
-  return text(raw).toUpperCase();
-}
-
 function normalizeBusinessDate(raw) {
   const value = text(raw);
   const match = value.match(/^(\d{4})[-/]?(\d{1,2})[-/]?(\d{1,2})/);
@@ -95,8 +91,6 @@ function buildMatchIndexes() {
     WHERE COALESCE(l.currentState,'active')='active'
   `).all();
   const byGoodsId = new Map();
-  const byGoodsCode = new Map();
-  const byId = new Map(links.map((row) => [row.salesLinkId, row]));
   for (const row of links) {
     const goodsId = text(row.platformGoodsId);
     if (goodsId) {
@@ -104,31 +98,8 @@ function buildMatchIndexes() {
       items.push(row);
       byGoodsId.set(goodsId, items);
     }
-    const goodsCode = normalizeSku(row.platformGoodsCode);
-    if (goodsCode) {
-      const items = byGoodsCode.get(goodsCode) ?? [];
-      items.push(row);
-      byGoodsCode.set(goodsCode, items);
-    }
   }
-  const productsBySku = new Map();
-  for (const product of database.prepare("SELECT id,skuCode FROM products").all()) {
-    const sku = normalizeSku(product.skuCode);
-    if (!sku) continue;
-    const ids = productsBySku.get(sku) ?? [];
-    ids.push(product.id);
-    productsBySku.set(sku, ids);
-  }
-  const linksByProduct = new Map();
-  for (const relation of database.prepare(`
-    SELECT productId,salesLinkId FROM sales_link_skus
-    WHERE productId IS NOT NULL AND COALESCE(currentState,'active')='active'
-  `).all()) {
-    const ids = linksByProduct.get(relation.productId) ?? new Set();
-    ids.add(relation.salesLinkId);
-    linksByProduct.set(relation.productId, ids);
-  }
-  return { byGoodsId, byGoodsCode, byId, productsBySku, linksByProduct };
+  return { byGoodsId };
 }
 
 function uniqueCandidates(rows) {
@@ -140,14 +111,12 @@ export function matchBusinessAdvisorRows(rows) {
   return rows.map((row) => {
     if (row.parseError) return { ...row, previewStatus: "error", matchMethod: null, candidates: [] };
     const direct = uniqueCandidates(indexes.byGoodsId.get(row.externalId) ?? []);
-    if (direct.length === 1) {
+    if (direct.length === 1 && direct[0].connectionId) {
       return { ...row, previewStatus: "matched", matchMethod: "goods_id", ...direct[0], candidates: direct };
     }
-    const candidateRows = [...(indexes.byGoodsCode.get(normalizeSku(row.sku)) ?? [])];
-    for (const productId of indexes.productsBySku.get(normalizeSku(row.sku)) ?? []) {
-      for (const salesLinkId of indexes.linksByProduct.get(productId) ?? []) candidateRows.push(indexes.byId.get(salesLinkId));
-    }
-    return { ...row, previewStatus: "pending", matchMethod: null, candidates: uniqueCandidates([...direct, ...candidateRows]) };
+    const pendingReason = direct.length === 1 ? "missing_connection_profile"
+      : direct.length > 1 ? "ambiguous_goods_id" : "missing_sales_link";
+    return { ...row, previewStatus: "pending", matchMethod: null, pendingReason, candidates: direct };
   });
 }
 
@@ -239,18 +208,21 @@ function activeMapping(sourceType, externalId, externalShopId) {
   `).get(sourceType, externalId, externalShopId);
 }
 
-export function confirmConnectionImportRow(batchId, externalId, selection, userId) {
+export function confirmConnectionImportRow(batchId, externalId, _selection, userId) {
   const { batch, row } = findPreviewRow(batchId, externalId);
+  const direct = uniqueCandidates(buildMatchIndexes().byGoodsId.get(row.externalId) ?? []);
+  if (direct.length !== 1) throw new Error("商品ID未唯一匹配销售连接，不能确认。");
+  if (!direct[0].connectionId) throw new Error("该销售连接尚未建立连接档案，请先在待创建连接中建档。");
   return createConnectionDataMapping({
     sourceType: batch.sourceType,
     externalType: "product",
     externalId: row.externalId,
     externalShopId: batch.externalShopId,
     externalData: row.externalData,
-    connectionId: text(selection?.connectionId) || null,
-    salesLinkId: text(selection?.salesLinkId) || null,
+    connectionId: direct[0].connectionId,
+    salesLinkId: direct[0].salesLinkId,
     matchStatus: "matched",
-    matchMethod: "manual",
+    matchMethod: "goods_id",
   }, userId);
 }
 
