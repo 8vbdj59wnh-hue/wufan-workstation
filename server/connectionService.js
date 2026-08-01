@@ -164,6 +164,16 @@ function readConnectionRelation(connectionId) {
   return row;
 }
 
+function readSalesLinkRelation(salesLinkId) {
+  if (!salesLinkId) return null;
+  const row = getDatabase().prepare(`
+    SELECT l.id AS salesLinkId, c.id AS connectionId
+    FROM sales_links l LEFT JOIN connection_profiles c ON c.salesLinkId=l.id WHERE l.id=?
+  `).get(salesLinkId);
+  if (!row) throw new Error("所选销售连接不存在。");
+  return row;
+}
+
 const mappingSelect = `
   SELECT m.id, m.sourceType, m.connectionId, m.salesLinkId, m.externalType, m.externalId,
          m.externalShopId, m.externalDataJson, m.matchStatus, m.matchMethod,
@@ -221,14 +231,20 @@ export function createConnectionDataMapping(input, userId) {
   const externalId = value(input?.externalId);
   const externalShopId = value(input?.externalShopId);
   const connectionId = value(input?.connectionId) || null;
+  const requestedSalesLinkId = value(input?.salesLinkId) || null;
   const matchStatus = value(input?.matchStatus) || (connectionId ? "matched" : "pending");
   let matchMethod = value(input?.matchMethod) || null;
   if (!mappingSourceTypes.has(sourceType)) throw new Error("外部数据来源无效。");
   if (!externalId) throw new Error("请填写外部商品ID。");
   if (!mappingStatuses.has(matchStatus)) throw new Error("映射状态无效。");
   if (matchMethod && !mappingMethods.has(matchMethod)) throw new Error("匹配方式无效。");
-  const relation = readConnectionRelation(connectionId);
-  if (matchStatus === "matched" && !relation) throw new Error("确认匹配时必须选择连接档案。");
+  const profileRelation = readConnectionRelation(connectionId);
+  const salesRelation = readSalesLinkRelation(requestedSalesLinkId);
+  if (profileRelation && salesRelation && profileRelation.salesLinkId !== salesRelation.salesLinkId) throw new Error("连接档案与销售连接不一致。");
+  const relation = profileRelation
+    ? { connectionId: profileRelation.id, salesLinkId: profileRelation.salesLinkId }
+    : salesRelation;
+  if (matchStatus === "matched" && !relation) throw new Error("确认匹配时必须选择连接档案或销售连接。");
   if (matchStatus === "matched" && !matchMethod) matchMethod = "manual";
   const database = getDatabase();
   const create = database.transaction(() => {
@@ -239,7 +255,7 @@ export function createConnectionDataMapping(input, userId) {
         id,sourceType,connectionId,salesLinkId,externalType,externalId,externalShopId,externalDataJson,
         matchStatus,matchMethod,confirmedBy,confirmedAt,createdAt,updatedAt
       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    `).run(id, sourceType, relation?.id ?? null, relation?.salesLinkId ?? null, externalType, externalId,
+    `).run(id, sourceType, relation?.connectionId ?? null, relation?.salesLinkId ?? null, externalType, externalId,
       externalShopId, normalizeExternalData(input?.externalDataJson ?? input?.externalData), matchStatus, matchMethod,
       matchStatus === "matched" ? value(userId) || null : null, matchStatus === "matched" ? now : null, now, now);
     return id;
@@ -255,13 +271,20 @@ export function createConnectionDataMapping(input, userId) {
 export function updateConnectionDataMapping(id, input, userId) {
   const current = readConnectionDataMapping(id);
   const hasConnection = Object.prototype.hasOwnProperty.call(input ?? {}, "connectionId");
+  const hasSalesLink = Object.prototype.hasOwnProperty.call(input ?? {}, "salesLinkId");
   const connectionId = hasConnection ? value(input.connectionId) || null : current.connectionId;
+  const salesLinkId = hasSalesLink ? value(input.salesLinkId) || null : current.salesLinkId;
   const matchStatus = value(input?.matchStatus) || current.matchStatus;
   let matchMethod = Object.prototype.hasOwnProperty.call(input ?? {}, "matchMethod") ? value(input.matchMethod) || null : current.matchMethod;
   if (!mappingStatuses.has(matchStatus)) throw new Error("映射状态无效。");
   if (matchMethod && !mappingMethods.has(matchMethod)) throw new Error("匹配方式无效。");
-  const relation = readConnectionRelation(connectionId);
-  if (matchStatus === "matched" && !relation) throw new Error("确认匹配时必须选择连接档案。");
+  const profileRelation = readConnectionRelation(connectionId);
+  const salesRelation = readSalesLinkRelation(salesLinkId);
+  if (profileRelation && salesRelation && profileRelation.salesLinkId !== salesRelation.salesLinkId) throw new Error("连接档案与销售连接不一致。");
+  const relation = profileRelation
+    ? { connectionId: profileRelation.id, salesLinkId: profileRelation.salesLinkId }
+    : salesRelation;
+  if (matchStatus === "matched" && !relation) throw new Error("确认匹配时必须选择连接档案或销售连接。");
   if (matchStatus === "matched" && !matchMethod) matchMethod = "manual";
   const now = new Date().toISOString();
   const confirmedBy = matchStatus === "matched" ? value(userId) || current.confirmedBy || null : null;
@@ -270,7 +293,7 @@ export function updateConnectionDataMapping(id, input, userId) {
     UPDATE connection_data_mappings
     SET connectionId=?,salesLinkId=?,matchStatus=?,matchMethod=?,confirmedBy=?,confirmedAt=?,updatedAt=?
     WHERE id=? AND deletedAt IS NULL
-  `).run(relation?.id ?? null, relation?.salesLinkId ?? null, matchStatus, matchMethod, confirmedBy, confirmedAt, now, current.id);
+  `).run(relation?.connectionId ?? null, relation?.salesLinkId ?? null, matchStatus, matchMethod, confirmedBy, confirmedAt, now, current.id);
   return readConnectionDataMapping(current.id);
 }
 

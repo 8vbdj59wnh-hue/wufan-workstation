@@ -1,13 +1,19 @@
 import {
+  commitConnectionImport,
+  confirmConnectionImportRow,
   createConnection,
   createConnectionAction,
   getCurrentUser,
   loadAvailableSalesLinks,
   loadConnectionActions,
   loadConnectionDataMappings,
+  loadConnectionImportBatches,
+  loadConnectionImportPreview,
   loadConnections,
   removeConnectionAction,
+  ignoreConnectionImportRow,
   updateConnectionDataMapping,
+  uploadConnectionImport,
   resolveAssetUrl,
   state,
 } from "./appState.js?v=20260705-state-singleton1";
@@ -28,6 +34,11 @@ const pageState = {
   mappingLoading: false,
   mappingFilters: { sourceType: "business_advisor", matchStatus: "pending", search: "" },
   mappingModalId: "",
+  importBatches: [],
+  currentImport: null,
+  importLoading: false,
+  importTab: "matched",
+  importModalExternalId: "",
   error: "",
 };
 
@@ -67,6 +78,7 @@ function renderSectionNavigation() {
   return `<nav class="connection-section-nav" aria-label="连接中心页面">
     <button type="button" class="${pageState.section === "connections" ? "active" : ""}" data-connection-section="connections">连接列表</button>
     <button type="button" class="${pageState.section === "mappings" ? "active" : ""}" data-connection-section="mappings">数据匹配</button>
+    <button type="button" class="${pageState.section === "imports" ? "active" : ""}" data-connection-section="imports">经营数据导入</button>
   </nav>`;
 }
 
@@ -150,9 +162,41 @@ function renderMappingModal() {
   return `<div class="modal-backdrop" data-action="close-mapping-modal"><section class="modal-panel connection-modal" role="dialog" aria-modal="true" aria-label="确认数据匹配" data-mapping-modal><header><div><p class="eyebrow">${escapeHtml(mapping.externalId)}</p><h2>确认匹配连接</h2></div><button type="button" class="icon-button" data-action="close-mapping-modal" aria-label="关闭">×</button></header><form data-confirm-mapping-form><label>连接档案<select name="connectionId" required><option value="">请选择</option>${pageState.items.map((item) => `<option value="${escapeHtml(item.id)}" ${mapping.connectionId === item.id ? "selected" : ""}>${escapeHtml(`${item.name} · ${item.platform} · ${shopName(item)}`)}</option>`).join("")}</select></label><footer><button type="button" class="secondary-button" data-action="close-mapping-modal">取消</button><button type="submit" class="primary-button">确认匹配</button></footer></form></section></div>`;
 }
 
+function importStatusText(status) {
+  return ({ draft: "草稿", parsed: "已解析", validated: "待确认", completed: "已完成", failed: "失败" })[status] ?? status;
+}
+
+function renderImportRows(rows) {
+  if (!rows.length) return `<div class="empty-state compact">暂无数据</div>`;
+  const pending = pageState.importTab === "pending";
+  return `<div class="connection-table-wrap"><table class="connection-table connection-import-table"><thead><tr><th>商品ID</th><th>商品名称</th><th>货号</th><th>${pending ? "候选连接" : "连接名称"}</th><th>匹配方式</th>${pending ? "<th>操作</th>" : ""}</tr></thead><tbody>${rows.map((row) => `<tr><td><strong>${escapeHtml(row.externalId || "—")}</strong></td><td>${escapeHtml(row.goodsName || "—")}</td><td>${escapeHtml(row.sku || "—")}</td><td>${pending ? escapeHtml(row.candidates?.length ? row.candidates.map((item) => item.connectionName).join("、") : "无候选") : escapeHtml(row.connectionName || "销售连接")}</td><td>${escapeHtml(row.matchMethod === "goods_id" ? "商品ID" : row.matchMethod === "manual" ? "人工确认" : "—")}</td>${pending ? `<td><div class="connection-mapping-actions">${canManage() ? `<button type="button" class="text-button" data-confirm-import-row="${escapeHtml(row.externalId)}">确认连接</button><button type="button" class="text-button" data-ignore-import-row="${escapeHtml(row.externalId)}">忽略</button>` : ""}</div></td>` : ""}</tr>`).join("")}</tbody></table></div>`;
+}
+
+function renderImportPage() {
+  const current = pageState.currentImport;
+  const batch = current?.batch;
+  const matchedRows = current?.rows?.filter((row) => row.previewStatus === "matched") ?? [];
+  const pendingRows = current?.rows?.filter((row) => row.previewStatus === "pending") ?? [];
+  const errorRows = current?.rows?.filter((row) => row.previewStatus === "error") ?? [];
+  return `<section class="connection-import-page">
+    ${canManage() ? `<form class="connection-import-form" data-connection-import-form><label>生意参谋Excel<input type="file" name="file" accept=".xls,.xlsx" required /></label><label>业务日期<input type="date" name="businessDate" /></label><label>外部店铺标识<input name="externalShopId" maxlength="100" placeholder="同一店铺请保持一致" /></label><button type="submit" class="primary-button">上传并生成预览</button></form>` : ""}
+    ${pageState.importBatches.length ? `<label class="connection-import-history">历史批次<select data-import-batch-select><option value="">选择批次</option>${pageState.importBatches.map((item) => `<option value="${escapeHtml(item.id)}" ${batch?.id === item.id ? "selected" : ""}>${escapeHtml(`${item.businessDate} · ${item.fileName} · ${importStatusText(item.status)}`)}</option>`).join("")}</select></label>` : ""}
+    ${pageState.importLoading ? `<div class="empty-state">正在解析和匹配…</div>` : batch ? `<div class="connection-import-summary"><div><span>总数据</span><strong>${batch.totalRows}</strong></div><div><span>自动匹配</span><strong>${batch.matchedRows}</strong></div><div><span>待确认</span><strong>${batch.pendingRows}</strong></div><div><span>错误</span><strong>${batch.errorRows}</strong></div></div><div class="connection-import-meta"><span>${escapeHtml(batch.fileName)} · ${escapeHtml(batch.businessDate)}</span><span class="status-pill status-${escapeHtml(batch.status)}">${escapeHtml(importStatusText(batch.status))}</span>${canManage() && batch.status !== "completed" ? `<button type="button" class="primary-button" data-commit-import>确认自动匹配</button>` : ""}</div><nav class="connection-tabs"><button type="button" class="${pageState.importTab === "matched" ? "active" : ""}" data-import-tab="matched">已匹配 ${matchedRows.length}</button><button type="button" class="${pageState.importTab === "pending" ? "active" : ""}" data-import-tab="pending">待确认 ${pendingRows.length}</button><button type="button" class="${pageState.importTab === "error" ? "active" : ""}" data-import-tab="error">错误 ${errorRows.length}</button></nav>${renderImportRows(pageState.importTab === "pending" ? pendingRows : pageState.importTab === "error" ? errorRows : matchedRows)}` : `<div class="empty-state"><strong>尚未上传经营数据</strong><p>上传生意参谋商品经营Excel后，系统只生成匹配预览，不会创建经营快照。</p></div>`}
+  </section>`;
+}
+
+function renderImportConfirmModal() {
+  if (!pageState.importModalExternalId) return "";
+  const row = pageState.currentImport?.rows?.find((item) => item.externalId === pageState.importModalExternalId);
+  if (!row) return "";
+  const candidateOptions = (row.candidates ?? []).map((item) => `<option value="sales:${escapeHtml(item.salesLinkId)}">${escapeHtml(`${item.connectionName} · ${item.platform} · ${item.shopName}`)}</option>`).join("");
+  const connectionOptions = pageState.items.map((item) => `<option value="connection:${escapeHtml(item.id)}">${escapeHtml(`${item.name} · ${item.platform} · ${shopName(item)}`)}</option>`).join("");
+  return `<div class="modal-backdrop" data-action="close-import-modal"><section class="modal-panel connection-modal" role="dialog" aria-modal="true" aria-label="确认经营数据连接" data-import-modal><header><div><p class="eyebrow">${escapeHtml(row.externalId)}</p><h2>确认销售连接</h2></div><button type="button" class="icon-button" data-action="close-import-modal" aria-label="关闭">×</button></header><form data-confirm-import-form><label>候选或已有连接<select name="selection" required><option value="">请选择</option>${candidateOptions}${connectionOptions}</select></label><footer><button type="button" class="secondary-button" data-action="close-import-modal">取消</button><button type="submit" class="primary-button">确认</button></footer></form></section></div>`;
+}
+
 export function renderConnectionCenterPage() {
-  const pageContent = pageState.section === "mappings" ? renderMappingPage() : `${renderToolbar()}${renderList()}`;
-  return `<section class="connection-center-page">${pageState.error ? `<div class="form-error">${escapeHtml(pageState.error)}</div>` : ""}${pageState.loading ? `<div class="empty-state">正在读取连接…</div>` : pageState.selectedId ? renderDetail() : `${renderSectionNavigation()}${pageContent}`}${renderCreateModal()}${renderMappingModal()}</section>`;
+  const pageContent = pageState.section === "mappings" ? renderMappingPage() : pageState.section === "imports" ? renderImportPage() : `${renderToolbar()}${renderList()}`;
+  return `<section class="connection-center-page">${pageState.error ? `<div class="form-error">${escapeHtml(pageState.error)}</div>` : ""}${pageState.loading ? `<div class="empty-state">正在读取连接…</div>` : pageState.selectedId ? renderDetail() : `${renderSectionNavigation()}${pageContent}`}${renderCreateModal()}${renderMappingModal()}${renderImportConfirmModal()}</section>`;
 }
 
 async function loadPage(render) {
@@ -175,6 +219,15 @@ async function loadMappings(render) {
   pageState.mappingLoading = false; render();
 }
 
+async function loadImportBatches(render, openLatest = false) {
+  pageState.importLoading = true; pageState.error = ""; render();
+  try {
+    pageState.importBatches = (await loadConnectionImportBatches()).items ?? [];
+    if (openLatest && pageState.importBatches[0]) pageState.currentImport = await loadConnectionImportPreview(pageState.importBatches[0].id);
+  } catch (error) { pageState.error = error.message; }
+  pageState.importLoading = false; render();
+}
+
 export function bindConnectionCenterPageEvents(render) {
   const root = document.querySelector(".connection-center-page");
   if (!root) return;
@@ -182,6 +235,7 @@ export function bindConnectionCenterPageEvents(render) {
   root.querySelectorAll("[data-connection-section]").forEach((button) => button.addEventListener("click", () => {
     pageState.section = button.dataset.connectionSection; pageState.selectedId = ""; render();
     if (pageState.section === "mappings") void loadMappings(render);
+    if (pageState.section === "imports") void loadImportBatches(render, true);
   }));
   root.querySelectorAll("[data-connection-view]").forEach((button) => button.addEventListener("click", () => { pageState.view = button.dataset.connectionView; render(); }));
   root.querySelectorAll("[data-open-connection]").forEach((element) => {
@@ -223,6 +277,34 @@ export function bindConnectionCenterPageEvents(render) {
   root.querySelector("[data-confirm-mapping-form]")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const form = new FormData(event.currentTarget);
     try { const result = await updateConnectionDataMapping(pageState.mappingModalId, { connectionId: form.get("connectionId"), matchStatus: "matched", matchMethod: "manual" }); pageState.mappings = pageState.mappings.map((item) => item.id === result.item.id ? result.item : item).filter((item) => pageState.mappingFilters.matchStatus !== "pending" || item.matchStatus === "pending"); pageState.mappingModalId = ""; render(); }
+    catch (error) { pageState.error = error.message; render(); }
+  });
+  root.querySelector("[data-connection-import-form]")?.addEventListener("submit", async (event) => {
+    event.preventDefault(); const form = new FormData(event.currentTarget); const file = form.get("file");
+    pageState.importLoading = true; pageState.error = ""; render();
+    try { const result = await uploadConnectionImport(file, { businessDate: form.get("businessDate"), externalShopId: form.get("externalShopId") }); pageState.currentImport = result; pageState.importTab = "matched"; pageState.importBatches = [result.batch, ...pageState.importBatches.filter((item) => item.id !== result.batch.id)]; }
+    catch (error) { pageState.error = error.message; }
+    pageState.importLoading = false; render();
+  });
+  root.querySelector("[data-import-batch-select]")?.addEventListener("change", async (event) => {
+    if (!event.target.value) return; pageState.importLoading = true; render();
+    try { pageState.currentImport = await loadConnectionImportPreview(event.target.value); pageState.error = ""; } catch (error) { pageState.error = error.message; }
+    pageState.importLoading = false; render();
+  });
+  root.querySelectorAll("[data-import-tab]").forEach((button) => button.addEventListener("click", () => { pageState.importTab = button.dataset.importTab; render(); }));
+  root.querySelector("[data-commit-import]")?.addEventListener("click", async () => {
+    try { const result = await commitConnectionImport(pageState.currentImport.batch.id); pageState.currentImport = await loadConnectionImportPreview(result.batch.id); pageState.importBatches = pageState.importBatches.map((item) => item.id === result.batch.id ? result.batch : item); pageState.error = ""; render(); }
+    catch (error) { pageState.error = error.message; render(); }
+  });
+  root.querySelectorAll("[data-confirm-import-row]").forEach((button) => button.addEventListener("click", () => { pageState.importModalExternalId = button.dataset.confirmImportRow; render(); }));
+  root.querySelectorAll("[data-ignore-import-row]").forEach((button) => button.addEventListener("click", async () => {
+    try { await ignoreConnectionImportRow(pageState.currentImport.batch.id, button.dataset.ignoreImportRow); pageState.currentImport = await loadConnectionImportPreview(pageState.currentImport.batch.id); render(); }
+    catch (error) { pageState.error = error.message; render(); }
+  }));
+  root.querySelectorAll('[data-action="close-import-modal"]').forEach((element) => element.addEventListener("click", (event) => { if (event.target.closest("[data-import-modal]") && !event.target.matches('[data-action="close-import-modal"]')) return; pageState.importModalExternalId = ""; render(); }));
+  root.querySelector("[data-confirm-import-form]")?.addEventListener("submit", async (event) => {
+    event.preventDefault(); const selected = String(new FormData(event.currentTarget).get("selection") ?? ""); const [kind, id] = selected.split(":");
+    try { await confirmConnectionImportRow(pageState.currentImport.batch.id, pageState.importModalExternalId, kind === "connection" ? { connectionId: id } : { salesLinkId: id }); pageState.currentImport = await loadConnectionImportPreview(pageState.currentImport.batch.id); pageState.importModalExternalId = ""; render(); }
     catch (error) { pageState.error = error.message; render(); }
   });
 }

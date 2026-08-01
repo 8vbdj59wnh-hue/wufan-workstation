@@ -890,6 +890,37 @@ export async function removeConnectionDataMapping(mappingId) {
   return readApiJson(response, "外部数据映射删除失败。");
 }
 
+export async function loadConnectionImportBatches() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-import-batches`), "经营数据导入批次读取失败。");
+}
+
+export async function uploadConnectionImport(file, options = {}) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("businessDate", options.businessDate ?? "");
+  form.append("externalShopId", options.externalShopId ?? "");
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-import-batches`, { method: "POST", body: form }), "生意参谋文件上传失败。");
+}
+
+export async function loadConnectionImportPreview(batchId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-import-batches/${encodeURIComponent(batchId)}/preview`), "经营数据匹配预览读取失败。");
+}
+
+export async function commitConnectionImport(batchId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-import-batches/${encodeURIComponent(batchId)}/commit`, { method: "POST" }), "自动匹配确认失败。");
+}
+
+export async function confirmConnectionImportRow(batchId, externalId, selection) {
+  const response = await authFetch(`${apiBaseUrl}/api/connection-import-batches/${encodeURIComponent(batchId)}/rows/${encodeURIComponent(externalId)}/confirm`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(selection),
+  });
+  return readApiJson(response, "人工匹配确认失败。");
+}
+
+export async function ignoreConnectionImportRow(batchId, externalId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-import-batches/${encodeURIComponent(batchId)}/rows/${encodeURIComponent(externalId)}/ignore`, { method: "POST" }), "外部商品忽略失败。");
+}
+
 export async function validateProductV2Import(batchId, options = {}) {
   const response = await authFetch(`${apiBaseUrl}/api/products/erp-v2/${encodeURIComponent(batchId)}/validate`, {
     method: "POST",

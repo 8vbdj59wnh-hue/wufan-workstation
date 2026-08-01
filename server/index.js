@@ -97,6 +97,14 @@ import {
   readConnectionProfile,
   updateConnectionDataMapping,
 } from "./connectionService.js";
+import {
+  commitConnectionImportBatch,
+  confirmConnectionImportRow,
+  createConnectionImportBatch,
+  ignoreConnectionImportRow,
+  listConnectionImportBatches,
+  previewConnectionImportBatch,
+} from "./connectionImportService.js";
 import { createProductFromErpSku, createProductsFromErpSkus, listPendingErpSkus } from "./erpSkuService.js";
 import { createToken, verifyPassword, verifyToken } from "./security.js";
 import {
@@ -128,6 +136,18 @@ const uploadContentNoteWorkbook = multer({
     const ext = path.extname(file.originalname).toLowerCase();
     if (![".xlsx", ".xls", ".csv", ".tsv"].includes(ext)) {
       callback(new Error("只支持 .xlsx、.xls、.csv 或 .tsv 文件。"));
+      return;
+    }
+    callback(null, true);
+  },
+});
+const uploadConnectionWorkbook = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 30 * 1024 * 1024 },
+  fileFilter: (_request, file, callback) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (![".xlsx", ".xls"].includes(ext)) {
+      callback(new Error("生意参谋导入只支持 .xlsx 或 .xls 文件。"));
       return;
     }
     callback(null, true);
@@ -1535,6 +1555,62 @@ app.delete("/api/connection-data-mappings/:id", requirePermission("products.edit
     response.json(deleteConnectionDataMapping(request.params.id, request.user?.id));
   } catch (error) {
     response.status(404).json({ success: false, message: error.message || "外部数据映射删除失败。" });
+  }
+});
+
+app.get("/api/connection-import-batches", requirePermission("products.view"), (_request, response) => {
+  try {
+    response.json({ success: true, items: listConnectionImportBatches() });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "经营数据导入批次读取失败。" });
+  }
+});
+
+app.post("/api/connection-import-batches", requirePermission("products.edit"), (request, response) => {
+  uploadConnectionWorkbook.single("file")(request, response, (error) => {
+    if (error) {
+      response.status(400).json({ success: false, message: error.message || "生意参谋文件上传失败。" });
+      return;
+    }
+    try {
+      const result = createConnectionImportBatch({ buffer: request.file?.buffer, fileName: normalizeUploadedFileName(request.file?.originalname),
+        businessDate: request.body?.businessDate, externalShopId: request.body?.externalShopId, userId: request.user?.id });
+      response.status(201).json({ success: true, ...result });
+    } catch (uploadError) {
+      response.status(400).json({ success: false, message: uploadError.message || "生意参谋文件解析失败。" });
+    }
+  });
+});
+
+app.get("/api/connection-import-batches/:id/preview", requirePermission("products.view"), (request, response) => {
+  try {
+    response.json({ success: true, ...previewConnectionImportBatch(request.params.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "经营数据匹配预览读取失败。" });
+  }
+});
+
+app.post("/api/connection-import-batches/:id/commit", requirePermission("products.edit"), (request, response) => {
+  try {
+    response.json({ success: true, ...commitConnectionImportBatch(request.params.id, request.user?.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "自动匹配确认失败。" });
+  }
+});
+
+app.post("/api/connection-import-batches/:id/rows/:externalId/confirm", requirePermission("products.edit"), (request, response) => {
+  try {
+    response.status(201).json({ success: true, item: confirmConnectionImportRow(request.params.id, request.params.externalId, request.body, request.user?.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "人工匹配确认失败。" });
+  }
+});
+
+app.post("/api/connection-import-batches/:id/rows/:externalId/ignore", requirePermission("products.edit"), (request, response) => {
+  try {
+    response.status(201).json({ success: true, item: ignoreConnectionImportRow(request.params.id, request.params.externalId, request.user?.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "外部商品忽略失败。" });
   }
 });
 

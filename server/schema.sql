@@ -1040,6 +1040,27 @@ CREATE INDEX IF NOT EXISTS idx_connection_data_mappings_status_source
 CREATE INDEX IF NOT EXISTS idx_connection_data_mappings_connection
   ON connection_data_mappings(connectionId, salesLinkId);
 
+CREATE TABLE IF NOT EXISTS connection_import_batches (
+  id TEXT PRIMARY KEY,
+  sourceType TEXT NOT NULL,
+  externalShopId TEXT NOT NULL DEFAULT '',
+  fileName TEXT NOT NULL,
+  fileHash TEXT NOT NULL,
+  businessDate TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft',
+  totalRows INTEGER NOT NULL DEFAULT 0,
+  matchedRows INTEGER NOT NULL DEFAULT 0,
+  pendingRows INTEGER NOT NULL DEFAULT 0,
+  errorRows INTEGER NOT NULL DEFAULT 0,
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(createdBy) REFERENCES persons(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_connection_import_batches_source_created
+  ON connection_import_batches(sourceType, createdAt DESC);
+
 CREATE TABLE IF NOT EXISTS platform_sku_manual_bindings (
   id TEXT PRIMARY KEY,
   salesLinkSkuId TEXT NOT NULL UNIQUE,

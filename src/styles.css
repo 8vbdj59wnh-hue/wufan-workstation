@@ -64,6 +64,18 @@
 .connection-mapping-table td:first-child small { display: block; margin-top: 4px; color: var(--muted-text, #6b7280); }
 .connection-mapping-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .connection-mapping-actions .text-button { white-space: nowrap; }
+.connection-import-page { display: grid; gap: 16px; min-width: 0; }
+.connection-import-form { display: grid; grid-template-columns: minmax(240px, 1.5fr) minmax(150px, .7fr) minmax(180px, 1fr) auto; gap: 12px; align-items: end; padding: 16px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 14px; background: #fff; }
+.connection-import-form label, .connection-import-history { display: grid; gap: 6px; color: var(--muted-text, #6b7280); font-size: 12px; }
+.connection-import-form input, .connection-import-history select { width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 9px; background: #fff; color: var(--text-color, #111827); }
+.connection-import-history { max-width: 560px; }
+.connection-import-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.connection-import-summary > div { display: grid; gap: 5px; padding: 14px 16px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 12px; background: #fff; }
+.connection-import-summary span { color: var(--muted-text, #6b7280); font-size: 12px; }
+.connection-import-summary strong { font-size: 24px; }
+.connection-import-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.connection-import-meta > :first-child { margin-right: auto; color: var(--muted-text, #6b7280); }
+.connection-import-table tbody tr { cursor: default; }
 .status-pill.status-matched { background: #eaf7ef; color: #247a45; }
 .status-pill.status-ignored, .status-pill.status-rejected { background: #f3f4f6; color: #6b7280; }
 .empty-state.compact { padding: 18px; }
@@ -71,6 +83,7 @@
   .connection-overview dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .connection-action-form { grid-template-columns: 1fr; }
   .connection-mapping-filters { grid-template-columns: 1fr; }
+  .connection-import-form, .connection-import-summary { grid-template-columns: 1fr; }
   .connection-toolbar { align-items: stretch; flex-direction: column; }
 }
 
