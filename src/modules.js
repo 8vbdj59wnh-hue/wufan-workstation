@@ -24,6 +24,10 @@ export const modules = [
     name: "数据中心",
   },
   {
+    id: "connectionCenter",
+    name: "连接中心",
+  },
+  {
     id: "assessment",
     name: "工作结果",
   },

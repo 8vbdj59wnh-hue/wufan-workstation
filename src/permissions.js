@@ -382,6 +382,7 @@ export function canAccessModule(userOrPermissions, moduleId) {
     settings: "settings",
     products: "products",
     dataCenter: "dataCenter",
+    connectionCenter: "products",
   };
   const permissionKey = modulePermissionMap[moduleId] ?? moduleId;
   if (moduleId === "products") {
@@ -389,6 +390,9 @@ export function canAccessModule(userOrPermissions, moduleId) {
   }
   if (moduleId === "dataCenter") {
     return hasPermission(userOrPermissions, "dataCenter.view");
+  }
+  if (moduleId === "connectionCenter") {
+    return hasPermission(userOrPermissions, "products.view");
   }
   return hasPermission(userOrPermissions, `modules.${permissionKey}`);
 }

@@ -829,6 +829,42 @@ export async function loadDataCenterProductDetail(productId, source) {
   return readApiJson(response, "产品分析详情读取失败。");
 }
 
+export async function loadConnections() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections`), "连接列表读取失败。");
+}
+
+export async function loadAvailableSalesLinks(search = "") {
+  const query = search ? `?search=${encodeURIComponent(search)}` : "";
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/available-sales-links${query}`), "可建立连接读取失败。");
+}
+
+export async function loadConnection(connectionId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}`), "连接档案读取失败。");
+}
+
+export async function createConnection(payload) {
+  const response = await authFetch(`${apiBaseUrl}/api/connections`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  });
+  return readApiJson(response, "连接档案创建失败。");
+}
+
+export async function loadConnectionActions(connectionId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/actions`), "经营动作读取失败。");
+}
+
+export async function createConnectionAction(connectionId, payload) {
+  const response = await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/actions`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  });
+  return readApiJson(response, "经营动作创建失败。");
+}
+
+export async function removeConnectionAction(connectionId, actionId) {
+  const response = await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/actions/${encodeURIComponent(actionId)}`, { method: "DELETE" });
+  return readApiJson(response, "经营动作删除失败。");
+}
+
 export async function validateProductV2Import(batchId, options = {}) {
   const response = await authFetch(`${apiBaseUrl}/api/products/erp-v2/${encodeURIComponent(batchId)}/validate`, {
     method: "POST",

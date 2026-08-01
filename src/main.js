@@ -9,6 +9,7 @@ import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260705-s
 import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js?v=20260705-state-singleton1";
 import { bindProductCenterPageEvents, renderProductCenterPage } from "./productCenterPage.js?v=20260725-product-archive1";
 import { bindDataCenterPageEvents, renderDataCenterPage } from "./dataCenterPage.js?v=20260729-data-center-v5";
+import { bindConnectionCenterPageEvents, renderConnectionCenterPage } from "./connectionCenterPage.js?v=20260801-connection-center1";
 import { bindProductPreviewEvents, closeProductPreview, openProductPreview, renderProductPreviewModal } from "./productPreview.js?v=20260725-product-preview1";
 import { attachThumbnailHoverPreview } from "./thumbnailPreview.js?v=20260723-task-card-static1";
 import {
@@ -84,6 +85,8 @@ const moduleHashMap = {
   products: "products",
   dataCenter: "dataCenter",
   "data-center": "dataCenter",
+  connectionCenter: "connectionCenter",
+  "connection-center": "connectionCenter",
   "template-center": "templateCenter",
   methods: "processes",
   settings: "settings",
@@ -387,6 +390,10 @@ function renderPage() {
     content = renderDataCenterPage();
   }
 
+  if (canAccessActiveModule && activeModule.id === "connectionCenter") {
+    content = renderConnectionCenterPage();
+  }
+
   if (activeModule.id === "settings") {
     content = renderSettingsPage();
   }
@@ -661,6 +668,10 @@ function render({ navigation = false } = {}) {
 
   if (activeModuleId === "dataCenter") {
     bindDataCenterPageEvents(render);
+  }
+
+  if (activeModuleId === "connectionCenter") {
+    bindConnectionCenterPageEvents(render);
   }
 
   if (document.querySelector(".methodologies-page") !== null) {

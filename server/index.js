@@ -84,6 +84,15 @@ import {
   getSlowMovingProducts,
   getTrendProducts,
 } from "./dataCenterService.js";
+import {
+  createConnectionAction,
+  createConnectionProfile,
+  deleteConnectionAction,
+  listAvailableSalesLinks,
+  listConnectionActions,
+  listConnectionProfiles,
+  readConnectionProfile,
+} from "./connectionService.js";
 import { createProductFromErpSku, createProductsFromErpSkus, listPendingErpSkus } from "./erpSkuService.js";
 import { createToken, verifyPassword, verifyToken } from "./security.js";
 import {
@@ -1434,6 +1443,62 @@ app.get("/api/data-center/products/:productId", requirePermission("dataCenter.vi
     response.json({ success: true, detail });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "产品分析详情读取失败。" });
+  }
+});
+
+app.get("/api/connections", requirePermission("products.view"), (_request, response) => {
+  try {
+    response.json({ success: true, items: listConnectionProfiles() });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "连接列表读取失败。" });
+  }
+});
+
+app.get("/api/connections/available-sales-links", requirePermission("products.view"), (request, response) => {
+  try {
+    response.json({ success: true, items: listAvailableSalesLinks(request.query.search) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "可建立连接读取失败。" });
+  }
+});
+
+app.get("/api/connections/:id", requirePermission("products.view"), (request, response) => {
+  try {
+    response.json({ success: true, item: readConnectionProfile(request.params.id) });
+  } catch (error) {
+    response.status(404).json({ success: false, message: error.message || "连接档案不存在。" });
+  }
+});
+
+app.post("/api/connections", requirePermission("products.edit"), (request, response) => {
+  try {
+    response.status(201).json({ success: true, item: createConnectionProfile(request.body, request.user?.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "连接档案创建失败。" });
+  }
+});
+
+app.get("/api/connections/:id/actions", requirePermission("products.view"), (request, response) => {
+  try {
+    response.json({ success: true, items: listConnectionActions(request.params.id) });
+  } catch (error) {
+    response.status(404).json({ success: false, message: error.message || "经营动作读取失败。" });
+  }
+});
+
+app.post("/api/connections/:id/actions", requirePermission("products.edit"), (request, response) => {
+  try {
+    response.status(201).json({ success: true, item: createConnectionAction(request.params.id, request.body, request.user?.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "经营动作创建失败。" });
+  }
+});
+
+app.delete("/api/connections/:id/actions/:actionId", requirePermission("products.edit"), (request, response) => {
+  try {
+    response.json(deleteConnectionAction(request.params.id, request.params.actionId));
+  } catch (error) {
+    response.status(404).json({ success: false, message: error.message || "经营动作删除失败。" });
   }
 });
 

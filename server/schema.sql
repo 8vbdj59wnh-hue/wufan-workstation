@@ -972,6 +972,41 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_link_skus_fallback
   ON sales_link_skus(salesLinkId, normalizedPlatformSkuCode, normalizedSpecificationName)
   WHERE platformSkuId IS NULL OR platformSkuId = '';
 
+CREATE TABLE IF NOT EXISTS connection_profiles (
+  id TEXT PRIMARY KEY,
+  salesLinkId TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  ownerId TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  notes TEXT,
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(salesLinkId) REFERENCES sales_links(id),
+  FOREIGN KEY(ownerId) REFERENCES persons(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_connection_profiles_owner_status
+  ON connection_profiles(ownerId, status);
+
+CREATE TABLE IF NOT EXISTS connection_actions (
+  id TEXT PRIMARY KEY,
+  connectionProfileId TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
+  ownerId TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  dueDate TEXT,
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(connectionProfileId) REFERENCES connection_profiles(id) ON DELETE CASCADE,
+  FOREIGN KEY(ownerId) REFERENCES persons(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_connection_actions_profile_created
+  ON connection_actions(connectionProfileId, createdAt DESC);
+
 CREATE TABLE IF NOT EXISTS platform_sku_manual_bindings (
   id TEXT PRIMARY KEY,
   salesLinkSkuId TEXT NOT NULL UNIQUE,
