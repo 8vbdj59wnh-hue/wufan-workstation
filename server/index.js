@@ -1332,6 +1332,7 @@ app.post("/api/products/erp-sync-runs/:id/wangdian/preview", requirePermission("
     const result = await parseWangdianGoodsImport({
       syncRunId: request.params.id,
       query: request.body ?? {},
+      importMode: request.body?.importMode,
       createdBy: getUserPersonId(request.user),
     });
     response.json({ success: true, ...result });

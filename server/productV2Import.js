@@ -22,6 +22,13 @@ function lower(raw) {
   return value(raw).toLocaleLowerCase("zh-CN");
 }
 
+function normalizeDataSource(rawDataSource) {
+  const source = value(rawDataSource) || "excel";
+  if (source === "wangdian") return "wangdian_api";
+  if (!["excel", "wangdian_api"].includes(source)) throw new Error("ERP同步数据来源无效。");
+  return source;
+}
+
 function equivalentBusinessCode(left, right) {
   const normalizedLeft = lower(left);
   const normalizedRight = lower(right);
@@ -244,9 +251,8 @@ export function createErpSyncRun({ businessDate: rawBusinessDate, syncType: rawS
   const database = getDatabase();
   const businessDate = normalizeBusinessDate(rawBusinessDate);
   const syncType = normalizeSyncType(rawSyncType, { allowLegacy: false });
-  const dataSource = value(rawDataSource) || "excel";
-  if (!["excel", "wangdian"].includes(dataSource)) throw new Error("ERP同步数据来源无效。");
-  if (dataSource === "wangdian" && syncType !== "master_data") throw new Error("旺店通API第一版仅支持ERP主数据同步。");
+  const dataSource = normalizeDataSource(rawDataSource);
+  if (dataSource === "wangdian_api" && syncType !== "master_data") throw new Error("旺店通API第一版仅支持ERP主数据同步。");
   return database.transaction(() => {
     const active = database.prepare(`
       SELECT * FROM erp_sync_runs
@@ -321,7 +327,7 @@ export function attachErpImportBatchToSyncRun(syncRunId, batchId) {
     const column = syncRunBatchColumns[batch.importType];
     if (!column) throw new Error("ERP导入类型无效。");
     assertSyncImportType(run.syncType, batch.importType);
-    if ((batch.dataSource || "excel") !== (run.dataSource || "excel")) throw new Error("ERP子批次数据来源与同步运行不一致。");
+    if (normalizeDataSource(batch.dataSource) !== normalizeDataSource(run.dataSource)) throw new Error("ERP子批次数据来源与同步运行不一致。");
     if (batch.syncRunId && batch.syncRunId !== run.id) throw new Error("该子批次已属于其他ERP同步。");
     const previousBatchId = run[column];
     const previousBatch = previousBatchId ? decodeBatch(readBatch(previousBatchId)) : null;
@@ -804,7 +810,7 @@ export async function parseErpV2Import({
   const syncRun = readErpSyncRun(syncRunId);
   if (!syncRun) throw new Error("请先创建或恢复ERP每日同步批次。");
   assertSyncImportType(syncRun.syncType, importType);
-  if ((syncRun.dataSource || "excel") !== "excel") throw new Error("旺店通同步请使用“同步旺店通货品”入口。");
+  if (normalizeDataSource(syncRun.dataSource) !== "excel") throw new Error("旺店通同步请使用“同步旺店通货品”入口。");
   const importMode = normalizeImportMode(rawImportMode, { syncType: syncRun.syncType, importType });
   if (syncRun.status === "completed") throw new Error("该ERP每日同步已完成，请创建同日重新同步版本。");
   const currentBatch = syncRun.batches?.[importType];
@@ -865,7 +871,7 @@ export async function parseErpV2Import({
   };
 }
 
-function normalizeWangdianQuery(rawQuery = {}) {
+function normalizeWangdianQuery(rawQuery = {}, { allowLongRange = false } = {}) {
   const query = {
     goods_no: value(rawQuery.goodsNo ?? rawQuery.goods_no),
     spec_no: value(rawQuery.specNo ?? rawQuery.spec_no),
@@ -878,7 +884,7 @@ function normalizeWangdianQuery(rawQuery = {}) {
     const start = new Date(query.start_time.replace(" ", "T"));
     const end = new Date(query.end_time.replace(" ", "T"));
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) throw new Error("旺店通同步时间范围无效。");
-    if (end.getTime() - start.getTime() > 30 * 24 * 60 * 60 * 1000) throw new Error("旺店通接口单次查询时间跨度不能超过30天。");
+    if (!allowLongRange && end.getTime() - start.getTime() > 30 * 24 * 60 * 60 * 1000) throw new Error("旺店通增量同步单次查询时间跨度不能超过30天。");
   } else {
     delete query.start_time;
     delete query.end_time;
@@ -886,10 +892,101 @@ function normalizeWangdianQuery(rawQuery = {}) {
   return Object.fromEntries(Object.entries(query).filter(([, item]) => item !== ""));
 }
 
-export async function parseWangdianGoodsImport({ syncRunId, query: rawQuery = {}, createdBy = "" } = {}) {
+function formatWangdianDateTime(date) {
+  const pad = (number) => String(number).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function splitWangdianQueryWindows(query, importMode) {
+  if (query.goods_no || query.spec_no) {
+    if (importMode === "full") throw new Error("旺店通全量同步不能只查询单个货品或SKU。");
+    return [query];
+  }
+  if (importMode !== "full") return [query];
+  const start = new Date(query.start_time.replace(" ", "T"));
+  const end = new Date(query.end_time.replace(" ", "T"));
+  const windows = [];
+  let cursor = start;
+  while (cursor <= end) {
+    const windowEnd = new Date(Math.min(cursor.getTime() + 30 * 24 * 60 * 60 * 1000, end.getTime()));
+    windows.push({ ...query, start_time: formatWangdianDateTime(cursor), end_time: formatWangdianDateTime(windowEnd) });
+    cursor = new Date(windowEnd.getTime() + 1000);
+  }
+  return windows;
+}
+
+const wangdianImageExtensions = new Map([
+  ["image/jpeg", ".jpg"],
+  ["image/png", ".png"],
+  ["image/webp", ".webp"],
+  ["image/gif", ".gif"],
+]);
+
+function assertSafeWangdianImageUrl(rawUrl) {
+  const url = new URL(rawUrl);
+  if (!["http:", "https:"].includes(url.protocol)) throw new Error("旺店通图片地址不是可下载的HTTP地址。");
+  const host = url.hostname.toLowerCase();
+  if (
+    host === "localhost"
+    || host === "::1"
+    || /^127\./u.test(host)
+    || /^10\./u.test(host)
+    || /^192\.168\./u.test(host)
+    || /^169\.254\./u.test(host)
+    || /^172\.(1[6-9]|2\d|3[01])\./u.test(host)
+  ) throw new Error("旺店通图片地址指向受保护的内部网络。");
+  return url;
+}
+
+async function downloadWangdianImage(rawUrl, batchDir) {
+  const url = assertSafeWangdianImageUrl(rawUrl);
+  const response = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(20_000) });
+  assertSafeWangdianImageUrl(response.url);
+  if (!response.ok) throw new Error(`旺店通图片下载失败（HTTP ${response.status}）。`);
+  const contentType = value(response.headers.get("content-type")).split(";", 1)[0].toLowerCase();
+  const extension = wangdianImageExtensions.get(contentType);
+  if (!extension) throw new Error("旺店通图片格式不受支持。");
+  const declaredSize = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declaredSize) && declaredSize > 10 * 1024 * 1024) throw new Error("旺店通图片超过10MB限制。");
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.length === 0 || buffer.length > 10 * 1024 * 1024) throw new Error("旺店通图片为空或超过10MB限制。");
+  const filename = `${crypto.createHash("sha256").update(rawUrl).digest("hex").slice(0, 24)}${extension}`;
+  await fs.promises.writeFile(path.join(batchDir, filename), buffer, { flag: "wx" }).catch((error) => {
+    if (error.code !== "EEXIST") throw error;
+  });
+  return `/uploads/product-v2-imports/${path.basename(batchDir)}/${filename}`;
+}
+
+async function localizeWangdianImages(records, batchId) {
+  const sourceUrls = [...new Set(records.flatMap((record) => record.imageUrls ?? []).map(value).filter(Boolean))];
+  if (sourceUrls.length === 0) return records;
+  const batchDir = path.join(stagingRoot, batchId);
+  fs.mkdirSync(batchDir, { recursive: true });
+  const localBySource = new Map();
+  try {
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(4, sourceUrls.length) }, async () => {
+      while (cursor < sourceUrls.length) {
+        const sourceUrl = sourceUrls[cursor];
+        cursor += 1;
+        localBySource.set(sourceUrl, await downloadWangdianImage(sourceUrl, batchDir));
+      }
+    });
+    await Promise.all(workers);
+  } catch (error) {
+    fs.rmSync(batchDir, { recursive: true, force: true });
+    throw error;
+  }
+  return records.map((record) => ({
+    ...record,
+    imageUrls: (record.imageUrls ?? []).map((url) => localBySource.get(value(url))).filter(Boolean),
+  }));
+}
+
+export async function parseWangdianGoodsImport({ syncRunId, query: rawQuery = {}, importMode: rawImportMode, createdBy = "" } = {}) {
   const syncRun = readErpSyncRun(syncRunId);
   if (!syncRun) throw new Error("请先创建或恢复ERP主数据同步批次。");
-  if (syncRun.syncType !== "master_data" || syncRun.dataSource !== "wangdian") {
+  if (syncRun.syncType !== "master_data" || normalizeDataSource(syncRun.dataSource) !== "wangdian_api") {
     throw new Error("当前同步不是旺店通ERP主数据同步。");
   }
   if (syncRun.status === "completed") throw new Error("该ERP主数据同步已完成，请创建同日重新同步版本。");
@@ -897,38 +994,47 @@ export async function parseWangdianGoodsImport({ syncRunId, query: rawQuery = {}
   if (currentBatch && ["completed", "committed"].includes(currentBatch.status)) {
     throw new Error("旺店通货品已完成同步，请创建同日重新同步版本。");
   }
-  const query = normalizeWangdianQuery(rawQuery);
+  const importMode = normalizeImportMode(rawImportMode, { syncType: "master_data", importType: "goods_info" });
+  const query = normalizeWangdianQuery(rawQuery, { allowLongRange: importMode === "full" });
+  const queryWindows = splitWangdianQueryWindows(query, importMode);
   const pageSize = 100;
   const canonicalByIdentity = new Map();
-  let totalCount = null;
-  let pageNo = 0;
   let sourceGoodsCount = 0;
-  while (pageNo < 10_000) {
-    const payload = await queryWangdianGoods({ params: query, pageNo, pageSize });
-    const goodsList = Array.isArray(payload?.data?.goods_list) ? payload.data.goods_list : [];
-    if (pageNo === 0 && Number.isFinite(Number(payload?.data?.total_count))) totalCount = Number(payload.data.total_count);
-    sourceGoodsCount += goodsList.length;
-    for (const record of adaptWangdianGoodsResponse(payload)) {
-      const skuKey = lower(record.merchantSkuCode);
-      const goodsKey = lower(record.goodsCode);
-      if (skuKey) canonicalByIdentity.set(`${skuKey}|${goodsKey}`, record);
+  let sourcePages = 0;
+  for (const windowQuery of queryWindows) {
+    let totalCount = null;
+    let pageNo = 0;
+    let windowGoodsCount = 0;
+    while (pageNo < 10_000) {
+      const payload = await queryWangdianGoods({ params: windowQuery, pageNo, pageSize });
+      sourcePages += 1;
+      const goodsList = Array.isArray(payload?.data?.goods_list) ? payload.data.goods_list : [];
+      if (pageNo === 0 && Number.isFinite(Number(payload?.data?.total_count))) totalCount = Number(payload.data.total_count);
+      sourceGoodsCount += goodsList.length;
+      windowGoodsCount += goodsList.length;
+      for (const record of adaptWangdianGoodsResponse(payload)) {
+        const skuKey = lower(record.merchantSkuCode);
+        const goodsKey = lower(record.goodsCode);
+        if (skuKey) canonicalByIdentity.set(`${skuKey}|${goodsKey}`, record);
+      }
+      if (goodsList.length < pageSize || (totalCount !== null && windowGoodsCount >= totalCount)) break;
+      pageNo += 1;
     }
-    if (goodsList.length < pageSize || (totalCount !== null && sourceGoodsCount >= totalCount)) break;
-    pageNo += 1;
+    if (pageNo >= 10_000) throw new Error("旺店通分页数量异常，已停止读取。");
   }
-  if (pageNo >= 10_000) throw new Error("旺店通分页数量异常，已停止读取。");
-  const canonicalRecords = [...canonicalByIdentity.values()];
-  if (canonicalRecords.length === 0) throw new Error("旺店通未返回可同步的SKU记录。");
+  const sourceCanonicalRecords = [...canonicalByIdentity.values()];
+  if (sourceCanonicalRecords.length === 0) throw new Error("旺店通未返回可同步的SKU记录。");
+  const batchId = `erp-v2-goods_info-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+  const fileHash = crypto.createHash("sha256").update(JSON.stringify(sourceCanonicalRecords)).digest("hex");
+  const canonicalRecords = await localizeWangdianImages(sourceCanonicalRecords, batchId);
   const records = canonicalGoodsRecordsToStaging(canonicalRecords);
   const now = new Date().toISOString();
-  const fileHash = crypto.createHash("sha256").update(JSON.stringify(canonicalRecords)).digest("hex");
-  const batchId = `erp-v2-goods_info-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
   const staging = {
     sheetName: "旺店通货品档案API",
     headers: goodsInfoRequiredHeaders,
     records,
     importType: "goods_info",
-    dataSource: "wangdian",
+    dataSource: "wangdian_api",
     fileHash,
     originalFilename: "旺店通货品档案API",
     parsedAt: now,
@@ -938,14 +1044,14 @@ export async function parseWangdianGoodsImport({ syncRunId, query: rawQuery = {}
   const validation = goodsInfoValidation(staging);
   const existing = decodeBatch(getDatabase().prepare(`
     SELECT * FROM erp_import_batches
-    WHERE importType='goods_info' AND dataSource='wangdian' AND fileHash=? AND status IN ('committed','completed')
+    WHERE importType='goods_info' AND dataSource IN ('wangdian','wangdian_api') AND fileHash=? AND status IN ('committed','completed')
     ORDER BY createdAt DESC LIMIT 1
   `).get(fileHash));
   const batch = saveBatch({
     id: batchId,
     importType: "goods_info",
-    importMode: "incremental",
-    dataSource: "wangdian",
+    importMode,
+    dataSource: "wangdian_api",
     syncRunId: syncRun.id,
     businessDate: syncRun.businessDate,
     originalFilename: "旺店通货品档案API",
@@ -960,10 +1066,11 @@ export async function parseWangdianGoodsImport({ syncRunId, query: rawQuery = {}
     errorCount: validation.summary.error ?? 0,
     summaryJson: {
       ...validation.summary,
-      dataSource: "wangdian",
+      dataSource: "wangdian_api",
       sourceGoodsCount,
       sourceSkuCount: canonicalRecords.length,
-      sourcePages: pageNo + 1,
+      sourcePages,
+      sourceWindows: queryWindows.length,
       sourceQuery: query,
       duplicateCommittedBatchId: existing?.id ?? null,
     },

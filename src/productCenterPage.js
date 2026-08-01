@@ -864,9 +864,15 @@ function renderWangdianGoodsQuery() {
   const date = importState.syncRun?.businessDate || new Date().toLocaleDateString("sv-SE");
   return `<form id="wangdian-goods-query-form" class="product-import-upload-form">
     <p class="form-note">从旺店通读取指定时间范围内发生变化的货品与SKU。读取后先进入现有预览与校验，不会直接写入产品数据。</p>
+    <fieldset class="product-import-mode-field">
+      <legend>导入模式</legend>
+      <label><input type="radio" name="importMode" value="incremental" ${importState.importMode !== "full" ? "checked" : ""} /> 增量同步</label>
+      <label><input type="radio" name="importMode" value="full" ${importState.importMode === "full" ? "checked" : ""} /> 全量同步</label>
+    </fieldset>
+    <small>增量同步不会对未返回记录执行missing；全量同步要求所选范围覆盖完整ERP货品主档，否则未返回的历史货品与SKU将进入missing。</small>
     <label><span>开始修改时间 *</span><input name="startTime" type="datetime-local" value="${escapeHtml(`${date}T00:00`)}" required /></label>
     <label><span>结束修改时间 *</span><input name="endTime" type="datetime-local" value="${escapeHtml(`${date}T23:59`)}" required /></label>
-    <small>旺店通单次查询跨度不能超过30天；API增量同步不会把未返回的历史货品标记为缺失。</small>
+    <small>增量同步跨度不能超过30天；全量同步会由服务端按30天窗口分段读取。</small>
     <div class="form-error" ${importState.error ? "" : "hidden"}>${escapeHtml(importState.error || "")}</div>
   </form>`;
 }
@@ -908,7 +914,7 @@ function renderErpSyncDashboard() {
         </select></label>
         <label data-master-data-source><span>主数据来源 *</span><select name="dataSource">
           <option value="excel">Excel文件</option>
-          <option value="wangdian">旺店通API</option>
+          <option value="wangdian_api">旺店通API</option>
         </select></label>
         <fieldset class="product-import-mode-field" data-master-import-mode>
           <legend>主数据导入模式</legend>
@@ -928,7 +934,7 @@ function renderErpSyncDashboard() {
     <div class="erp-sync-overview">
       <div><span>同步编码</span><strong>${escapeHtml(run.syncCode)}</strong></div>
       <div><span>同步类型</span><strong>${run.syncType === "master_data" ? "ERP主数据同步" : run.syncType === "daily_business" ? "ERP经营数据同步" : "历史联合同步"}</strong></div>
-      <div><span>数据来源</span><strong>${run.dataSource === "wangdian" ? "旺店通API" : "Excel文件"}</strong></div>
+      <div><span>数据来源</span><strong>${["wangdian", "wangdian_api"].includes(run.dataSource) ? "旺店通API" : "Excel文件"}</strong></div>
       <div><span>业务日期</span><strong>${escapeHtml(run.businessDate)}</strong></div>
       <div><span>整体状态</span><strong>${escapeHtml(statusLabels[run.status] || run.status)}</strong></div>
       <div><span>版本</span><strong>V${run.version}</strong></div>
@@ -941,7 +947,7 @@ function renderErpSyncDashboard() {
       const completed = ["completed", "committed"].includes(batch?.status);
       const action = batch
         ? `<button class="secondary-button" type="button" data-action="resume-product-v2-import" data-batch-id="${escapeHtml(batch.id)}">${completed ? "查看结果" : batch.status === "failed" ? "查看失败并重试" : "继续处理"}</button>`
-        : run.dataSource === "wangdian" && importType === "goods_info"
+        : ["wangdian", "wangdian_api"].includes(run.dataSource) && importType === "goods_info"
           ? `<button class="primary-button" type="button" data-action="sync-wangdian-goods">同步旺店通货品</button>`
           : `<button class="primary-button" type="button" data-action="upload-erp-sync-child" data-import-type="${importType}">上传文件</button>`;
       return `<article class="erp-sync-file-card">
@@ -949,7 +955,7 @@ function renderErpSyncDashboard() {
         <dl><div><dt>状态</dt><dd>${escapeHtml(batchStatusLabels[batch?.status] || (batch ? batch.status : "待导入"))}</dd></div>
           <div><dt>文件</dt><dd>${escapeHtml(batch?.originalFilename || "—")}</dd></div>
           <div><dt>批次</dt><dd>${escapeHtml(batch?.id || "—")}</dd></div>
-          ${importType === "goods_info" ? `<div><dt>导入模式</dt><dd>${batch?.importMode === "full" ? "全量同步" : "增量新增"}</dd></div>` : ""}</dl>
+          ${importType === "goods_info" ? `<div><dt>导入模式</dt><dd>${batch ? (batch.importMode === "full" ? "全量同步" : "增量新增") : "提交时选择"}</dd></div>` : ""}</dl>
         ${action}
       </article>`;
     }).join("")}</div>
@@ -1577,7 +1583,7 @@ export function bindProductCenterPageEvents(rerender) {
         version: "v2",
         step: "wangdian",
         importType: "goods_info",
-        importMode: "incremental",
+        importMode: erpSyncState.masterImportMode || "incremental",
         syncRun: erpSyncState.active,
         loading: false,
         error: "",
@@ -1882,21 +1888,17 @@ export function bindProductCenterPageEvents(rerender) {
     const sourceField = document.querySelector("[data-master-data-source]");
     if (sourceField) sourceField.hidden = event.currentTarget.value !== "master_data";
   });
-  document.querySelector("#erp-sync-create-form [name='dataSource']")?.addEventListener("change", (event) => {
-    const fullMode = document.querySelector("#erp-sync-create-form [name='importMode'][value='full']");
-    const incrementalMode = document.querySelector("#erp-sync-create-form [name='importMode'][value='incremental']");
-    if (fullMode) fullMode.disabled = event.currentTarget.value === "wangdian";
-    if (event.currentTarget.value === "wangdian" && incrementalMode) incrementalMode.checked = true;
-  });
   document.querySelector("#wangdian-goods-query-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
     const syncRun = importState.syncRun;
     if (!syncRun?.id) return;
+    const selectedImportMode = form.elements.importMode.value || "incremental";
     const toApiDateTime = (input) => input ? `${input.replace("T", " ")}:00` : "";
     const query = {
       startTime: toApiDateTime(form.elements.startTime.value),
       endTime: toApiDateTime(form.elements.endTime.value),
+      importMode: selectedImportMode,
     };
     importState = { ...importState, loading: true, error: "" };
     rerender();
@@ -1909,7 +1911,7 @@ export function bindProductCenterPageEvents(rerender) {
         loading: false,
         error: "",
         importType: "goods_info",
-        importMode: "incremental",
+        importMode: selectedImportMode,
         syncRun: validated.syncRun || result.syncRun || syncRun,
         duplicate: result.duplicate,
         batch: validated.batch,
