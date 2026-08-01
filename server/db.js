@@ -1962,6 +1962,9 @@ function runLightweightMigrations() {
   ensureColumn("connection_import_batches", "periodStart", "TEXT");
   ensureColumn("connection_import_batches", "periodEnd", "TEXT");
   ensureColumn("connection_import_batches", "periodType", "TEXT");
+  ensureColumn("connection_profiles", "mainImage", "TEXT");
+  ensureColumn("connection_profiles", "imageSource", "TEXT");
+  ensureColumn("connection_profiles", "level", "TEXT NOT NULL DEFAULT 'new'");
   backfillBusinessIdentifiers();
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS permission_templates (

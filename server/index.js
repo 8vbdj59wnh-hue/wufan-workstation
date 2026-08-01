@@ -96,6 +96,7 @@ import {
   listConnectionDataMappings,
   listConnectionProfiles,
   readConnectionProfile,
+  updateConnectionProfile,
   updateConnectionDataMapping,
 } from "./connectionService.js";
 import {
@@ -1485,7 +1486,7 @@ app.get("/api/connections", requirePermission("products.view"), (_request, respo
 
 app.get("/api/connections/available-sales-links", requirePermission("products.view"), (request, response) => {
   try {
-    response.json({ success: true, items: listAvailableSalesLinks(request.query.search) });
+    response.json({ success: true, ...listAvailableSalesLinks(request.query) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "可建立连接读取失败。" });
   }
@@ -1496,6 +1497,14 @@ app.get("/api/connections/:id", requirePermission("products.view"), (request, re
     response.json({ success: true, item: readConnectionProfile(request.params.id) });
   } catch (error) {
     response.status(404).json({ success: false, message: error.message || "连接档案不存在。" });
+  }
+});
+
+app.put("/api/connections/:id", requirePermission("products.edit"), (request, response) => {
+  try {
+    response.json({ success: true, item: updateConnectionProfile(request.params.id, request.body) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "连接档案更新失败。" });
   }
 });
 

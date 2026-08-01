@@ -833,9 +833,10 @@ export async function loadConnections() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections`), "连接列表读取失败。");
 }
 
-export async function loadAvailableSalesLinks(search = "") {
-  const query = search ? `?search=${encodeURIComponent(search)}` : "";
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/available-sales-links${query}`), "可建立连接读取失败。");
+export async function loadAvailableSalesLinks(filters = {}) {
+  const normalized = typeof filters === "string" ? { search: filters } : filters;
+  const query = new URLSearchParams(Object.entries(normalized).filter(([, value]) => value !== "" && value !== undefined));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/available-sales-links${query.size ? `?${query}` : ""}`), "可建立连接读取失败。");
 }
 
 export async function loadConnection(connectionId) {
@@ -854,6 +855,13 @@ export async function createConnectionsBatch(payload) {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
   });
   return readApiJson(response, "连接档案批量创建失败。");
+}
+
+export async function updateConnection(connectionId, payload) {
+  const response = await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  });
+  return readApiJson(response, "连接档案更新失败。");
 }
 
 export async function loadConnectionActions(connectionId) {

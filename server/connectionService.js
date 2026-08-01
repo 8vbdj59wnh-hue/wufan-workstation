@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { getDatabase } from "./db.js";
 
 const profileStatuses = new Set(["active", "paused", "archived"]);
+const profileLevels = new Set(["new", "growing", "mature", "priority"]);
 const actionStatuses = new Set(["pending", "in_progress", "completed", "canceled"]);
 const mappingSourceTypes = new Set(["business_advisor", "wangdian", "taobao", "xiaohongshu", "douyin"]);
 const mappingStatuses = new Set(["matched", "pending", "ignored", "rejected"]);
@@ -44,8 +45,9 @@ function enrichConnectionRows(rows) {
 }
 
 const connectionSelect = `
-  SELECT c.id, c.salesLinkId, c.name, c.ownerId, c.status, c.notes, c.createdBy, c.createdAt, c.updatedAt,
-         l.title AS salesLinkTitle, l.canonicalUrl, l.rawUrl, l.platformGoodsCode, l.currentState AS salesLinkState,
+  SELECT c.id, c.salesLinkId, c.name, c.mainImage, c.imageSource, c.ownerId, c.status, c.level, c.notes,
+         c.createdBy, c.createdAt, c.updatedAt,
+         l.title AS salesLinkTitle, l.canonicalUrl, l.rawUrl, l.platformGoodsId, l.platformGoodsCode, l.currentState AS salesLinkState,
          s.id AS shopId, s.platform, s.displayName AS shopDisplayName, s.shopName,
          (SELECT periodEnd FROM connection_period_snapshots ps WHERE ps.salesLinkId=c.salesLinkId
           ORDER BY periodEnd DESC,periodStart DESC,createdAt DESC LIMIT 1) AS latestPeriodEnd,
@@ -67,21 +69,76 @@ export function readConnectionProfile(id) {
   return enrichConnectionRows([row])[0];
 }
 
-export function listAvailableSalesLinks(search = "") {
-  const query = value(search).toLowerCase();
+export function listAvailableSalesLinks(filters = {}) {
+  const normalizedFilters = typeof filters === "string" ? { search: filters } : filters;
+  const query = value(normalizedFilters.search).toLowerCase();
+  const platform = value(normalizedFilters.platform);
+  const shopId = value(normalizedFilters.shopId);
+  const productRelation = value(normalizedFilters.productRelation);
+  const connectionStatus = value(normalizedFilters.connectionStatus) || "pending";
+  if (productRelation && !["linked", "unlinked"].includes(productRelation)) throw new Error("产品关联筛选无效。");
+  if (!["pending", "existing", "all"].includes(connectionStatus)) throw new Error("连接状态筛选无效。");
+  const database = getDatabase();
+  const summary = database.prepare(`
+    SELECT COUNT(*) AS total,
+           SUM(CASE WHEN c.id IS NOT NULL THEN 1 ELSE 0 END) AS existing,
+           SUM(CASE WHEN c.id IS NULL THEN 1 ELSE 0 END) AS pending
+    FROM sales_links l LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
+    WHERE COALESCE(l.currentState,'active')='active'
+  `).get();
+  const optionRows = database.prepare(`
+    SELECT DISTINCT s.id AS shopId,s.platform,s.displayName AS shopDisplayName,s.shopName
+    FROM sales_links l JOIN sales_shops s ON s.id=l.shopId
+    WHERE COALESCE(l.currentState,'active')='active'
+    ORDER BY s.platform,COALESCE(s.displayName,s.shopName),s.id
+  `).all();
   const rows = getDatabase().prepare(`
     SELECT l.id AS salesLinkId, l.title AS salesLinkTitle, l.canonicalUrl, l.platformGoodsId, l.platformGoodsCode,
-           s.platform, s.displayName AS shopDisplayName, s.shopName
+           s.id AS shopId, s.platform, s.displayName AS shopDisplayName, s.shopName,
+           c.id AS connectionId,
+           CASE WHEN EXISTS (
+             SELECT 1 FROM sales_link_skus sku
+             WHERE sku.salesLinkId=l.id AND sku.productId IS NOT NULL AND COALESCE(sku.currentState,'active')='active'
+           ) THEN 1 ELSE 0 END AS hasLinkedProduct
     FROM sales_links l
     JOIN sales_shops s ON s.id=l.shopId
     LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
-    WHERE c.id IS NULL AND COALESCE(l.currentState,'active')='active'
+    WHERE COALESCE(l.currentState,'active')='active'
+      AND (?='all' OR (?='pending' AND c.id IS NULL) OR (?='existing' AND c.id IS NOT NULL))
+      AND (?='' OR s.platform=?)
+      AND (?='' OR s.id=?)
+      AND (?='' OR (?='linked' AND EXISTS (
+        SELECT 1 FROM sales_link_skus sku
+        WHERE sku.salesLinkId=l.id AND sku.productId IS NOT NULL AND COALESCE(sku.currentState,'active')='active'
+      )) OR (?='unlinked' AND NOT EXISTS (
+        SELECT 1 FROM sales_link_skus sku
+        WHERE sku.salesLinkId=l.id AND sku.productId IS NOT NULL AND COALESCE(sku.currentState,'active')='active'
+      )))
       AND (?='' OR LOWER(COALESCE(l.title,'')) LIKE ? OR LOWER(COALESCE(l.platformGoodsId,'')) LIKE ?
         OR LOWER(COALESCE(l.platformGoodsCode,'')) LIKE ? OR LOWER(COALESCE(s.displayName,s.shopName,'')) LIKE ?)
     ORDER BY l.updatedAt DESC, l.id DESC
-    LIMIT 200
-  `).all(query, `%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`);
-  return enrichConnectionRows(rows);
+    LIMIT 500
+  `).all(connectionStatus, connectionStatus, connectionStatus, platform, platform, shopId, shopId,
+    productRelation, productRelation, productRelation, query, `%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`);
+  const items = enrichConnectionRows(rows);
+  return {
+    items,
+    summary: { total: Number(summary.total || 0), existing: Number(summary.existing || 0), pending: Number(summary.pending || 0) },
+    options: {
+      platforms: [...new Set(optionRows.map((item) => item.platform).filter(Boolean))].sort(),
+      shops: optionRows.map((item) => ({ id: item.shopId, name: item.shopDisplayName || item.shopName, platform: item.platform })),
+    },
+  };
+}
+
+function connectionImageForSalesLink(database, salesLinkId) {
+  const product = database.prepare(`
+    SELECT p.mainImage FROM sales_link_skus sku JOIN products p ON p.id=sku.productId
+    WHERE sku.salesLinkId=? AND sku.productId IS NOT NULL AND COALESCE(sku.currentState,'active')='active'
+      AND COALESCE(p.mainImage,'')<>''
+    ORDER BY sku.createdAt,sku.id,p.id LIMIT 1
+  `).get(salesLinkId);
+  return product?.mainImage ? { mainImage: product.mainImage, imageSource: "product" } : { mainImage: null, imageSource: null };
 }
 
 export function createConnectionProfile(input, userId) {
@@ -103,10 +160,11 @@ export function createConnectionProfile(input, userId) {
     const now = new Date().toISOString();
     const id = `connection-${crypto.randomUUID()}`;
     const name = value(input?.name) || value(link.title) || value(link.platformGoodsCode) || value(link.displayName) || value(link.shopName) || "未命名连接";
+    const image = connectionImageForSalesLink(database, salesLinkId);
     database.prepare(`
-      INSERT INTO connection_profiles (id,salesLinkId,name,ownerId,status,notes,createdBy,createdAt,updatedAt)
-      VALUES (?,?,?,?,?,?,?,?,?)
-    `).run(id, salesLinkId, name, ownerId, status, value(input?.notes), value(userId) || null, now, now);
+      INSERT INTO connection_profiles (id,salesLinkId,name,mainImage,imageSource,ownerId,status,level,notes,createdBy,createdAt,updatedAt)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(id, salesLinkId, name, image.mainImage, image.imageSource, ownerId, status, "new", value(input?.notes), value(userId) || null, now, now);
     database.prepare(`
       UPDATE connection_data_mappings
       SET connectionId=?,
@@ -150,10 +208,11 @@ export function createConnectionProfilesBatch(input, userId) {
       const link = linksById.get(salesLinkId);
       const id = `connection-${crypto.randomUUID()}`;
       const name = value(link.title) || value(link.platformGoodsCode) || value(link.displayName) || value(link.shopName) || "未命名连接";
+      const image = connectionImageForSalesLink(database, salesLinkId);
       database.prepare(`
-        INSERT INTO connection_profiles (id,salesLinkId,name,ownerId,status,notes,createdBy,createdAt,updatedAt)
-        VALUES (?,?,?,?,?,?,?,?,?)
-      `).run(id, salesLinkId, name, ownerId, "active", "", value(userId) || null, now, now);
+        INSERT INTO connection_profiles (id,salesLinkId,name,mainImage,imageSource,ownerId,status,level,notes,createdBy,createdAt,updatedAt)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+      `).run(id, salesLinkId, name, image.mainImage, image.imageSource, ownerId, "active", "new", "", value(userId) || null, now, now);
       database.prepare(`
         UPDATE connection_data_mappings
         SET connectionId=?,
@@ -171,6 +230,22 @@ export function createConnectionProfilesBatch(input, userId) {
   });
   const ids = create();
   return { items: ids.map(readConnectionProfile), created: ids.length };
+}
+
+export function updateConnectionProfile(id, input) {
+  const current = readConnectionProfile(id);
+  const ownerId = input?.ownerId === undefined ? current.ownerId : value(input.ownerId) || null;
+  const name = input?.name === undefined ? current.name : value(input.name);
+  const status = input?.status === undefined ? current.status : value(input.status);
+  const level = input?.level === undefined ? current.level : value(input.level);
+  if (!name) throw new Error("请填写连接名称。");
+  if (!profileStatuses.has(status)) throw new Error("连接状态无效。");
+  if (!profileLevels.has(level)) throw new Error("连接等级无效。");
+  const database = getDatabase();
+  if (ownerId && !database.prepare("SELECT 1 FROM persons WHERE id=? AND status='active'").get(ownerId)) throw new Error("负责人不存在或已停用。");
+  database.prepare(`UPDATE connection_profiles SET name=?,ownerId=?,status=?,level=?,updatedAt=? WHERE id=?`)
+    .run(name, ownerId, status, level, new Date().toISOString(), current.id);
+  return readConnectionProfile(current.id);
 }
 
 export function listConnectionActions(connectionProfileId) {

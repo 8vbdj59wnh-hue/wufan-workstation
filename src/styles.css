@@ -14,6 +14,10 @@
 .connection-section-nav button { border: 0; border-bottom: 2px solid transparent; padding: 10px 14px; background: transparent; color: var(--muted-text, #6b7280); cursor: pointer; }
 .connection-section-nav button.active { border-color: var(--text-color, #111827); color: var(--text-color, #111827); font-weight: 600; }
 .connection-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.connection-pending-page form.connection-toolbar { justify-content: flex-start; flex-wrap: wrap; }
+.connection-pending-page form.connection-toolbar input,
+.connection-pending-page form.connection-toolbar select { min-width: 150px; }
+.connection-pending-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .connection-toolbar .segmented-control { display: inline-flex; padding: 3px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 10px; background: #fff; }
 .connection-toolbar .segmented-control button { border: 0; border-radius: 7px; padding: 7px 14px; background: transparent; color: var(--muted-text, #6b7280); cursor: pointer; }
 .connection-toolbar .segmented-control button.active { background: var(--text-color, #111827); color: #fff; }
