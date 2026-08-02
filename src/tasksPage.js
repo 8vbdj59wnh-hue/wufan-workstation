@@ -9,7 +9,6 @@ import {
   getCurrentWeek,
   getProcessNodeStepOrder,
   getProcessNodeDurationMinutes,
-  getCurrentUser,
   getNow,
   getLatestStandardWorkFormFields,
   hasOpenRectificationWorkForSource,
@@ -26,7 +25,6 @@ import {
   resolveAssetUrl,
   saveTaskWaveDraft,
   sortProcessNodes,
-  state,
   startTaskWave,
   submitTaskWave,
   cancelTaskWave,
@@ -36,7 +34,8 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260705-state-singleton1";
+} from "./services/taskCenterService.js?v=20260802-module-boundary1";
+import { getCurrentUser, state } from "./stores/appStore.js?v=20260802-module-boundary1";
 import { rerenderPreservingInputFocus } from "./inputFocus.js?v=20260723-input-focus1";
 import {
   canLaunchActionTemplate,

@@ -7,10 +7,6 @@ import * as XLSX from "xlsx";
 import {
   closeDatabase,
   createResource,
-  batchLinkProcessInstanceTemplates,
-  batchUpdateTaskStatus,
-  cancelTaskWave,
-  cancelProcessInstance,
   changeProductSku,
   createProductImportBatch,
   commitProductImportBatch,
@@ -19,71 +15,54 @@ import {
   deleteProcessTemplateNode,
   findLoginUser,
   findLoginUserById,
-  generateEligibleTaskWaves,
   getDatabase,
   getPublicUser,
   initializeDatabase,
-  batchLaunchWorkPlans,
-  launchWorkPlanWithProcess,
-  moveTaskTemplateToValueChain,
   readAllData,
   readProductImportBatch,
   previewProductSkuChange,
   readRouteResource,
   readRouteResourceItem,
-  readTaskWaveDetailForTaskIds,
-  readTaskWaveRegenerationPreview,
-  readTaskWavesForTaskIds,
-  regenerateWaitingTaskWaves,
-  saveTaskWaveDraft,
-  startTaskWave,
-  submitTaskWave,
   replaceActionProducts,
   replaceAllData,
   touchLastLoginAt,
   updateCurrentUserAvatar,
   updateProductImportBatch,
-  startProcessInstanceExecution,
-  updateProcessTemplateNodeStatus,
   updateResource,
-  updateTaskFromWorkflow,
   uploadsDir,
-} from "./db.js";
+} from "./modules/database/index.js";
 import {
-  parseProductWorkbook,
-  productImportFieldDefinitions,
-  readProductImportStaging,
-  validateProductImport,
-} from "./productImport.js";
-import {
+  createProductFromErpSku,
+  createProductsFromErpSkus,
   commitErpV2Import,
   createErpSyncRun,
-  listErpSyncRuns,
-  markPlatformSku,
-  parseErpV2Import,
-  parseWangdianGoodsImport,
-  previewErpV2Import,
-  readErpV2Import,
-  readErpSyncRun,
-  recalculateErpSyncRun,
-  removePlatformSkuManualBinding,
-  updatePlatformSkuManualBinding,
-  validateErpV2Import,
-} from "./productV2Import.js";
-import { hasWangdianConfig } from "./wangdianClient.js";
-import {
   generateErpFactSnapshot,
-  listErpFactSnapshots,
-  listProductFactSnapshots,
-  readErpFactSnapshot,
-} from "./erpFactSnapshots.js";
-import {
   getCapitalOccupationProducts,
   getDataCenterProductDetail,
   getDataCenterSummary,
   getSlowMovingProducts,
   getTrendProducts,
-} from "./dataCenterService.js";
+  hasWangdianConfig,
+  listErpSyncRuns,
+  listErpFactSnapshots,
+  listPendingErpSkus,
+  listProductFactSnapshots,
+  markPlatformSku,
+  parseProductWorkbook,
+  parseErpV2Import,
+  parseWangdianGoodsImport,
+  previewErpV2Import,
+  productImportFieldDefinitions,
+  readErpFactSnapshot,
+  readErpV2Import,
+  readErpSyncRun,
+  readProductImportStaging,
+  recalculateErpSyncRun,
+  removePlatformSkuManualBinding,
+  updatePlatformSkuManualBinding,
+  validateProductImport,
+  validateErpV2Import,
+} from "./modules/products/index.js";
 import {
   createConnectionAction,
   createConnectionDataMapping,
@@ -98,28 +77,55 @@ import {
   readConnectionProfile,
   updateConnectionProfile,
   updateConnectionDataMapping,
-} from "./connectionService.js";
-import {
   commitConnectionImportBatch,
   confirmConnectionImportRow,
   createConnectionImportBatch,
   ignoreConnectionImportRow,
   listConnectionImportBatches,
   previewConnectionImportBatch,
-} from "./connectionImportService.js";
-import { createConnectionPeriodSnapshots, listConnectionPeriodSnapshots } from "./connectionPeriodSnapshots.js";
-import { getConnectionGrowthAnalysis, listConnectionGrowthRankings } from "./connectionGrowthService.js";
-import { createConnectionHealthRecord, createImprovementAction, listAttentionConnectionHealthRecords, listConnectionHealthRecords } from "./connectionHealthService.js";
-import { createConnectionImprovement, getConnectionImprovementSummary, listConnectionImprovements, updateConnectionImprovement } from "./connectionImprovementService.js";
-import { createProductFromErpSku, createProductsFromErpSkus, listPendingErpSkus } from "./erpSkuService.js";
-import { createToken, verifyPassword, verifyToken } from "./security.js";
+  createConnectionPeriodSnapshots,
+  listConnectionPeriodSnapshots,
+  getConnectionGrowthAnalysis,
+  listConnectionGrowthRankings,
+  createConnectionHealthRecord,
+  createImprovementAction,
+  listAttentionConnectionHealthRecords,
+  listConnectionHealthRecords,
+  createConnectionImprovement,
+  getConnectionImprovementSummary,
+  listConnectionImprovements,
+  updateConnectionImprovement,
+} from "./modules/links/index.js";
 import {
+  batchLinkProcessInstanceTemplates,
+  batchUpdateTaskStatus,
+  cancelTaskWave,
+  cancelProcessInstance,
+  generateEligibleTaskWaves,
+  batchLaunchWorkPlans,
+  launchWorkPlanWithProcess,
+  moveTaskTemplateToValueChain,
+  readTaskWaveDetailForTaskIds,
+  readTaskWaveRegenerationPreview,
+  readTaskWavesForTaskIds,
+  regenerateWaitingTaskWaves,
+  saveTaskWaveDraft,
+  startTaskWave,
+  submitTaskWave,
+  startProcessInstanceExecution,
+  updateProcessTemplateNodeStatus,
+  updateTaskFromWorkflow,
+} from "./modules/tasks/index.js";
+import {
+  createToken,
+  verifyPassword,
+  verifyToken,
   canAccessTemplateCenter,
   canLaunchActionTemplate,
   getDataScope,
   hasPermission,
-} from "../src/permissions.js";
-import { normalizeProductSkuCode, splitProductSkuCodes } from "../src/data/productSku.js";
+} from "./modules/auth/index.js";
+import { normalizeProductSkuCode, splitProductSkuCodes } from "./modules/common/index.js";
 
 const app = express();
 const host = process.env.HOST ?? "0.0.0.0";

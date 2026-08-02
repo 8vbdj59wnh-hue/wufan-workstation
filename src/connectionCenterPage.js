@@ -7,7 +7,6 @@ import {
   createConnection,
   createConnectionsBatch,
   createConnectionAction,
-  getCurrentUser,
   loadAvailableSalesLinks,
   loadConnectionActions,
   loadConnectionDataMappings,
@@ -28,9 +27,10 @@ import {
   updateConnectionImprovement,
   uploadConnectionImport,
   resolveAssetUrl,
-  state,
-} from "./appState.js?v=20260705-state-singleton1";
+} from "./services/connectionCenterService.js?v=20260802-module-boundary1";
+import { getCurrentUser, state } from "./stores/appStore.js?v=20260802-module-boundary1";
 import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
+import { escapeHtml } from "./utils/html.js?v=20260802-module-boundary1";
 
 const pageState = {
   loaded: false,
@@ -112,10 +112,6 @@ function saveListConfig() {
 }
 
 loadListConfig();
-
-function escapeHtml(value) {
-  return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
-}
 
 function canManage() {
   return hasPermission(getCurrentUser(), "products.edit");

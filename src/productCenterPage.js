@@ -9,7 +9,6 @@ import {
   createErpSyncRun,
   generateErpSyncSnapshot,
   bindPlatformSku,
-  getCurrentUser,
   getNow,
   loadProductSalesLinks,
   loadProductSalesSummaries,
@@ -25,17 +24,18 @@ import {
   previewProductSkuChange,
   recalculateErpSyncRun,
   resolveAssetUrl,
-  state,
   updatePersistentResource,
   unbindPlatformSku,
   uploadImageFile,
   validateProductImportBatch,
   validateProductV2Import,
   markPlatformSku,
-} from "./appState.js?v=20260705-state-singleton1";
+} from "./services/productCenterService.js?v=20260802-module-boundary1";
+import { getCurrentUser, state } from "./stores/appStore.js?v=20260802-module-boundary1";
 import { getProcessInstanceBusinessStatus, getProcessInstanceOwner } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
 import { hasPermission } from "./permissions.js?v=20260725-product-center1";
 import { normalizeProductSkuCode } from "./data/productSku.js?v=20260728-product-sku1";
+import { escapeHtml } from "./utils/html.js?v=20260802-module-boundary1";
 
 const productStatuses = ["开发中", "待上架", "在售", "停售", "清仓", "已归档"];
 let filters = { query: "", brand: "", category: "", status: "", erpStatus: "", platform: "", stockStatus: "" };
@@ -62,14 +62,6 @@ let productSubmodule = "products";
 let pendingSkuState = { loading: false, loaded: false, rows: [], query: "", error: "", notice: "" };
 let selectedPendingSkuIds = new Set();
 let platformPreviewRequestId = 0;
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
 
 function getRouteProductId() {
   const match = window.location.hash.replace(/^#/, "").match(/^products\/(.+)$/);

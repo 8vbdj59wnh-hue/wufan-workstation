@@ -2,14 +2,14 @@ import { modules } from "./modules.js?v=20260705-state-singleton1";
 import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260705-state-singleton1";
 import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260722-processes-page1";
 import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260705-state-singleton1";
-import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260728-task-template-code-search2";
+import { bindTasksPageEvents, renderTasksPage, selectTask } from "./pages/tasksPage.js?v=20260802-module-boundary1";
 import { bindScheduleBoardPageEvents, renderScheduleBoardPage } from "./scheduleBoardPage.js?v=20260722-due-date-boundary2";
 import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260717-work-results-dashboard1";
 import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260705-state-singleton1";
 import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js?v=20260705-state-singleton1";
-import { bindProductCenterPageEvents, renderProductCenterPage } from "./productCenterPage.js?v=20260725-product-archive1";
+import { bindProductCenterPageEvents, renderProductCenterPage } from "./pages/productCenterPage.js?v=20260802-module-boundary1";
 import { bindDataCenterPageEvents, renderDataCenterPage } from "./dataCenterPage.js?v=20260729-data-center-v5";
-import { bindConnectionCenterPageEvents, renderConnectionCenterPage } from "./connectionCenterPage.js?v=20260801-connection-center1";
+import { bindConnectionCenterPageEvents, renderConnectionCenterPage } from "./pages/connectionCenterPage.js?v=20260802-module-boundary1";
 import { bindProductPreviewEvents, closeProductPreview, openProductPreview, renderProductPreviewModal } from "./productPreview.js?v=20260725-product-preview1";
 import { attachThumbnailHoverPreview } from "./thumbnailPreview.js?v=20260723-task-card-static1";
 import {
