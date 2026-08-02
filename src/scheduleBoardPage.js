@@ -31,6 +31,7 @@ import {
 } from "./data/modelOptions.js?v=20260705-state-singleton1";
 import { getActionImageUrls, getPrimaryImageUrl } from "./data/taskUtils.js?v=20260705-state-singleton1";
 import { renderActionImageGrid } from "./actionImages.js";
+import { getActionDeadlinePresentation } from "./data/actionDeadline.js?v=20260802-action-countdown1";
 import {
   getActionDisplayImages,
   getActionProducts,
@@ -93,6 +94,8 @@ let activeActionSubmodule =
 let selectedProcessInstanceId = null;
 let selectedLaunchedProcessIds = new Set();
 let batchActionTemplatePickerOpen = false;
+let actionCountdownTimer = null;
+let actionCountdownHashListenerBound = false;
 let selectedBatchActionTemplateIds = new Set();
 let batchActionTemplateError = "";
 let batchActionTemplateSaving = false;
@@ -1152,6 +1155,7 @@ function renderActionOverviewCard(row) {
   const displayImages = getProcessImageUrls(row);
   const businessStatus = selectProcessInstanceBusinessStatus(row.processInstance.id, state);
   const progress = selectProcessProgress(row.processInstance.id, state);
+  const deadline = getActionDeadlinePresentation(row.processInstance);
   return `
     <article
       class="schedule-action-overview-card"
@@ -1182,6 +1186,10 @@ function renderActionOverviewCard(row) {
         <div class="schedule-action-overview-meta">
           <span class="schedule-action-overview-status ${getActionOverviewStatusClass(businessStatus.status)}">${escapeHtml(businessStatus.label)}</span>
           ${renderActionOverviewOwner(row)}
+        </div>
+        <div class="schedule-action-overview-deadline ${deadline.overdue ? "is-overdue" : ""}">
+          <span>截止 ${escapeHtml(formatBusinessDateTime(row.processInstance.dueDate, "未设置"))}</span>
+          <strong data-action-deadline-id="${escapeAttribute(row.processInstance.id)}">${escapeHtml(deadline.label)}</strong>
         </div>
         <div class="schedule-action-overview-progress">
           <div>
@@ -1218,29 +1226,6 @@ function renderActionOverviewCards(rows) {
 
 function getActionInitiatorName(row) {
   return findName(state.people, row.processInstance?.initiatorId ?? "", "未设置");
-}
-
-function getDueTimestamp(value) {
-  const text = String(value ?? "").trim();
-  if (text === "") return null;
-  const date = new Date(text.length === 10 ? `${text}T23:59:59+08:00` : text);
-  const timestamp = date.getTime();
-  return Number.isFinite(timestamp) ? timestamp : null;
-}
-
-function formatDurationByHours(milliseconds) {
-  const totalHours = Math.max(1, Math.ceil(Math.abs(milliseconds) / (60 * 60 * 1000)));
-  const days = Math.floor(totalHours / 24);
-  const hours = totalHours % 24;
-  if (days > 0) return `${days}天${hours}小时`;
-  return `${hours}小时`;
-}
-
-function formatRemainingDueTime(value) {
-  const dueTimestamp = getDueTimestamp(value);
-  if (dueTimestamp === null) return "—";
-  const diff = dueTimestamp - Date.now();
-  return diff >= 0 ? `剩余 ${formatDurationByHours(diff)}` : `已超时 ${formatDurationByHours(diff)}`;
 }
 
 function getSelectedEditableProcessInstances(rows = buildLaunchedListRows()) {
@@ -1326,7 +1311,7 @@ function renderLaunchedActionList(rows) {
                           <td>${renderCellText(getActionOwnerName(row))}</td>
                           <td>${renderCellText(row.currentTaskName)}</td>
                           <td>${renderCellText(formatBusinessDateTime(processDueDate, ""))}</td>
-                          <td>${renderCellText(formatRemainingDueTime(processDueDate))}</td>
+                          <td><span class="schedule-action-list-deadline ${getActionDeadlinePresentation(row.processInstance).overdue ? "is-overdue" : ""}" data-action-deadline-id="${escapeAttribute(instanceId)}">${escapeHtml(getActionDeadlinePresentation(row.processInstance).label)}</span></td>
                           <td>
                             <span class="row-actions">
                               <button class="text-button" type="button" data-schedule-list-action="view" data-schedule-process-id="${escapeAttribute(instanceId)}">查看</button>
@@ -1529,6 +1514,35 @@ export function renderScheduleBoardPage() {
 
 export function bindScheduleBoardPageEvents(rerender) {
   hideSchedulePreview();
+  if (actionCountdownTimer !== null) window.clearInterval(actionCountdownTimer);
+  const refreshActionCountdowns = () => {
+    document.querySelectorAll("[data-action-deadline-id]").forEach((element) => {
+      const instance = state.processInstances.find((item) => item.id === element.dataset.actionDeadlineId) ?? null;
+      if (instance === null) return;
+      const presentation = getActionDeadlinePresentation(instance);
+      element.textContent = presentation.label;
+      element.classList.toggle("is-overdue", presentation.overdue);
+      element.closest(".schedule-action-overview-deadline")?.classList.toggle("is-overdue", presentation.overdue);
+      element.closest(".key-action-detail-countdown")?.classList.toggle("is-overdue", presentation.overdue);
+    });
+  };
+  refreshActionCountdowns();
+  actionCountdownTimer = window.setInterval(() => {
+    if (document.querySelector(".schedule-board-page") === null) {
+      window.clearInterval(actionCountdownTimer);
+      actionCountdownTimer = null;
+      return;
+    }
+    refreshActionCountdowns();
+  }, 60000);
+  if (!actionCountdownHashListenerBound) {
+    window.addEventListener("hashchange", () => {
+      if (document.querySelector(".schedule-board-page") !== null) return;
+      if (actionCountdownTimer !== null) window.clearInterval(actionCountdownTimer);
+      actionCountdownTimer = null;
+    });
+    actionCountdownHashListenerBound = true;
+  }
   const rerenderScheduleBoard = () => rerenderPreservingInnerScroll(rerender);
   bindContentNoteBatchEvents(document.querySelector(".schedule-board-page"), rerenderScheduleBoard);
   document.querySelectorAll(".linked-action-product, .schedule-action-product-names a").forEach((link) => {

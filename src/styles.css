@@ -7863,6 +7863,82 @@ button.content-template-thumb {
   gap: 7px;
 }
 
+.schedule-action-overview-deadline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-radius: 9px;
+  padding: 8px 10px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.schedule-action-overview-deadline strong,
+.schedule-action-list-deadline {
+  color: #2563eb;
+  font-weight: 700;
+}
+
+.schedule-action-overview-deadline.is-overdue {
+  background: #fff1f2;
+  color: #be123c;
+}
+
+.schedule-action-overview-deadline.is-overdue strong,
+.schedule-action-list-deadline.is-overdue {
+  color: #dc2626;
+}
+
+.key-action-detail-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.key-action-detail-summary > div {
+  display: grid;
+  gap: 5px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 11px 12px;
+  background: #f8fafc;
+}
+
+.key-action-detail-summary span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.key-action-detail-summary strong {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.key-action-detail-summary .key-action-detail-countdown strong {
+  color: #2563eb;
+}
+
+.key-action-detail-summary .key-action-detail-countdown.is-overdue {
+  border-color: #fecdd3;
+  background: #fff1f2;
+}
+
+.key-action-detail-summary .key-action-detail-countdown.is-overdue strong {
+  color: #dc2626;
+}
+
+@media (max-width: 900px) {
+  .key-action-detail-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .schedule-action-overview-progress > div {
   align-items: center;
   display: flex;

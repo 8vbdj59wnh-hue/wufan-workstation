@@ -22,6 +22,7 @@ import {
 import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
 import { bindActionProductSelectors, collectActionProductIds, getActionProductIds, renderActionProductSelector, renderLinkedActionProducts } from "./actionProductRelations.js?v=20260725-product-center1";
 import { hasPermission } from "./permissions.js?v=20260725-product-center1";
+import { getActionDeadlinePresentation } from "./data/actionDeadline.js?v=20260802-action-countdown1";
 import {
   collectBusinessDateTime,
   collectBusinessMinuteDateTime,
@@ -743,12 +744,20 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
   const tasks = getInstanceTasks(instance.id);
   const actionOwner = getProcessInstanceOwner(instance.id, state);
   const actionOwnerName = findName(people, actionOwner.userId, "未设置");
+  const businessStatus = selectProcessInstanceBusinessStatus(instance.id, state);
+  const deadline = getActionDeadlinePresentation(instance);
 
   return `
     <section class="settings-section process-detail launched-process-detail" data-launched-process-detail="${instance.id}">
       <div class="section-heading with-actions">
         <h2>已发起关键行动详情：${escapeHtml(instance.displayTitle ?? instance.name)}</h2>
         ${editable ? `<button class="primary-button" type="submit" form="launched-process-form-${instance.id}">保存修改</button>` : `<span class="muted-action">只读</span>`}
+      </div>
+      <div class="key-action-detail-summary">
+        <div><span>当前状态</span><strong>${escapeHtml(businessStatus.label)}</strong></div>
+        <div><span>行动负责人</span><strong>${escapeHtml(actionOwnerName)}</strong></div>
+        <div><span>截止时间</span><strong>${escapeHtml(formatBusinessDateTime(instance.dueDate, "未设置"))}</strong></div>
+        <div class="key-action-detail-countdown ${deadline.overdue ? "is-overdue" : ""}"><span>时间状态</span><strong data-action-deadline-id="${escapeHtml(instance.id)}">${escapeHtml(deadline.label)}</strong></div>
       </div>
       <form id="launched-process-form-${instance.id}" class="launched-process-form">
         <div class="form-error" hidden></div>
@@ -780,7 +789,7 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
             ${renderDetailField("价值链分类", escapeHtml(state.categories.find((category) => category.id === taskTemplate?.categoryId)?.name ?? "未设置"))}
             ${renderDetailField("行动负责人", actionOwnerName)}
             ${renderDetailField("发起人", findName(people, instance.initiatorId, "未设置"))}
-            ${renderDetailField("状态", selectProcessInstanceBusinessStatus(instance.id, state).label)}
+            ${renderDetailField("状态", businessStatus.label)}
             ${renderDetailField("步骤进度", getProgress(instance.id))}
             ${renderDetailField("创建时间", escapeHtml(instance.createdAt ?? instance.startedAt ?? "未记录"))}
             ${renderDetailField("发起时间", escapeHtml(instance.startedAt ?? "未记录"))}
