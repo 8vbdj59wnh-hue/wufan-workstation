@@ -1,9 +1,9 @@
 import { modules } from "./modules.js?v=20260705-state-singleton1";
-import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260705-state-singleton1";
-import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260722-processes-page1";
+import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260802-process-detail-priority1";
+import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260802-process-detail-priority1";
 import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260705-state-singleton1";
-import { bindTasksPageEvents, renderTasksPage, selectTask } from "./pages/tasksPage.js?v=20260802-module-boundary1";
-import { bindScheduleBoardPageEvents, renderScheduleBoardPage } from "./scheduleBoardPage.js?v=20260722-due-date-boundary2";
+import { bindTasksPageEvents, renderTasksPage, selectTask } from "./pages/tasksPage.js?v=20260802-process-detail-priority1";
+import { bindScheduleBoardPageEvents, renderScheduleBoardPage } from "./scheduleBoardPage.js?v=20260802-process-detail-priority1";
 import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260802-dashboard-v21";
 import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js?v=20260802-template-version1";
 import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js?v=20260802-template-version1";

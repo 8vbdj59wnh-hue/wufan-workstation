@@ -83,7 +83,7 @@ import {
   renderProductImageEditor,
   validateProductImages,
 } from "./actionImages.js";
-import { bindActionLinkedTemplatePreviewEvents, bindLaunchedProcessDetailEvents, renderActionLinkedTemplates, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260724-action-template-link1";
+import { bindActionLinkedTemplatePreviewEvents, bindLaunchedProcessDetailEvents, renderActionLinkedTemplates, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260802-process-detail-priority1";
 import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260802-template-center-v22";
 import { renderWorkFormViewer } from "./workFormViewer.js?v=20260705-state-singleton1";
 import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";

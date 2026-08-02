@@ -47,7 +47,7 @@ import {
   getProcessProgress as selectProcessProgress,
   isProcessInstanceOverdue as selectProcessInstanceOverdue,
 } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
-import { bindActionLinkedTemplatePreviewEvents, bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260724-action-template-link1";
+import { bindActionLinkedTemplatePreviewEvents, bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260802-process-detail-priority1";
 import { selectTask } from "./tasksPage.js?v=20260724-action-template-link1";
 import {
   collectBusinessDateTime,

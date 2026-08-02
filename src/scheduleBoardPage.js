@@ -17,7 +17,7 @@ import {
   renderActionTemplatePicker,
   renderLaunchedProcessDetail,
   updateActionTemplatePickerSelection,
-} from "./processInstanceDetail.js?v=20260724-batch-action-template1";
+} from "./processInstanceDetail.js?v=20260802-process-detail-priority1";
 import { formatBusinessDateTime } from "./businessTime.js?v=20260705-state-singleton1";
 import { rerenderPreservingInputFocus } from "./inputFocus.js?v=20260723-input-focus1";
 import {
