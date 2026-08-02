@@ -9558,3 +9558,30 @@ button.content-template-thumb {
 .finance-batches { gap: 6px; padding: 0 18px 18px; color: #667085; font-size: 13px; }
 @media (max-width: 1000px) { .finance-summary, .finance-analysis-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 680px) { .finance-summary, .finance-analysis-grid { grid-template-columns: 1fr; } .finance-rule-list article { grid-template-columns: 1fr; } }
+
+.product-v2-overview { display: grid; gap: 14px; padding: 18px; border: 1px solid #dfe8e4; border-radius: 16px; background: linear-gradient(145deg, #f6fbf9, #fff); }
+.product-v2-overview > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.product-v2-overview h2, .product-v2-overview h3, .product-v2-overview p { margin: 0; }
+.product-v2-overview header p { margin-top: 4px; color: #667085; font-size: 12px; }
+.product-v2-overview header > strong { color: #176b52; font-size: 22px; }
+.product-lifecycle-distribution { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.product-lifecycle-distribution div { display: grid; gap: 4px; padding: 11px; border-radius: 11px; background: #fff; box-shadow: 0 1px 2px rgb(15 23 42 / 6%); }
+.product-lifecycle-distribution span { color: #667085; font-size: 12px; }
+.product-lifecycle-distribution strong { font-size: 20px; }
+.product-v2-rankings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.product-v2-ranking { padding: 13px; border-radius: 12px; background: #fff; }
+.product-v2-ranking h3 { margin-bottom: 8px; font-size: 15px; }
+.product-v2-ranking button { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 9px; width: 100%; padding: 8px 0; border: 0; border-top: 1px solid #eef0f2; background: transparent; text-align: left; cursor: pointer; }
+.product-v2-ranking button strong { color: #176b52; }.product-v2-ranking button strong.is-risk { color: #c2413b; }.product-v2-ranking button small { color: #667085; }
+.product-business-analysis, .product-lifecycle-panel, .product-improvement-panel { display: grid; gap: 16px; }
+.product-business-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.product-business-metrics article { display: grid; gap: 7px; padding: 17px; border: 1px solid #e5e7eb; border-radius: 13px; background: #fff; }
+.product-business-metrics span, .product-business-metrics small { color: #667085; font-size: 12px; }.product-business-metrics strong { font-size: 22px; }
+.product-problem-list, .product-improvement-panel > section { padding: 16px; border: 1px solid #e5e7eb; border-radius: 13px; background: #fff; }
+.product-problem-list article { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 10px; align-items: center; padding: 10px 0; border-top: 1px solid #eef0f2; }
+.product-lifecycle-panel form, .product-improvement-issue form { display: flex; flex-wrap: wrap; gap: 9px; padding: 14px; border-radius: 12px; background: #f7f9f8; }
+.product-lifecycle-panel input, .product-lifecycle-panel select, .product-improvement-issue input, .product-improvement-issue select { min-height: 36px; padding: 7px 9px; border: 1px solid #d0d5dd; border-radius: 8px; background: #fff; }
+.product-lifecycle-timeline { display: grid; gap: 10px; }.product-lifecycle-timeline article { padding: 13px 15px; border-left: 3px solid #2f8063; background: #f8faf9; }.product-lifecycle-timeline p { margin: 5px 0; }.product-lifecycle-timeline small { color: #667085; }
+.product-improvement-issue, .product-improvement-record { display: grid; gap: 9px; padding: 12px 0; border-top: 1px solid #eef0f2; }.product-improvement-record > div { display: flex; justify-content: space-between; gap: 12px; }
+@media (max-width: 1000px) { .product-lifecycle-distribution, .product-business-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 680px) { .product-lifecycle-distribution, .product-business-metrics, .product-v2-rankings { grid-template-columns: 1fr; } }

@@ -882,6 +882,30 @@ export async function approveFinanceEntry(id) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/finance/entries/${encodeURIComponent(id)}/approve`, { method: "POST" }), "财务记录审批失败。");
 }
 
+export async function loadProductManagementOverview() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/overview`), "产品经营概览读取失败。");
+}
+
+export async function loadProductManagementDetail(productId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}`), "产品经营详情读取失败。");
+}
+
+export async function changeProductLifecycle(productId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}/lifecycle`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  }), "产品生命周期更新失败。");
+}
+
+export async function evaluateProductManagementHealth(productId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}/evaluate`, { method: "POST" }), "产品经营评价失败。");
+}
+
+export async function createProductImprovementAction(issueId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/issues/${encodeURIComponent(issueId)}/improvement-action`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  }), "产品改善行动创建失败。");
+}
+
 export async function loadConnections() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections`), "连接列表读取失败。");
 }

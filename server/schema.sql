@@ -1232,3 +1232,76 @@ CREATE INDEX IF NOT EXISTS idx_finance_entries_product_date
 
 CREATE INDEX IF NOT EXISTS idx_finance_entries_link_date
   ON finance_entries(salesLinkId, businessDate);
+
+CREATE TABLE IF NOT EXISTS product_lifecycle_events (
+  id TEXT PRIMARY KEY,
+  productId TEXT NOT NULL,
+  fromStatus TEXT,
+  toStatus TEXT NOT NULL,
+  reason TEXT,
+  changedBy TEXT,
+  changedAt TEXT NOT NULL,
+  FOREIGN KEY(productId) REFERENCES products(id),
+  FOREIGN KEY(changedBy) REFERENCES persons(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_lifecycle_events_product_time
+  ON product_lifecycle_events(productId, changedAt DESC);
+
+CREATE TABLE IF NOT EXISTS product_health_records (
+  id TEXT PRIMARY KEY,
+  productId TEXT NOT NULL,
+  snapshotKey TEXT NOT NULL,
+  healthScore REAL,
+  healthStatus TEXT NOT NULL,
+  metricsJson TEXT NOT NULL DEFAULT '{}',
+  problemsJson TEXT NOT NULL DEFAULT '[]',
+  suggestionsJson TEXT NOT NULL DEFAULT '[]',
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(productId) REFERENCES products(id),
+  UNIQUE(productId, snapshotKey)
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_health_records_status_time
+  ON product_health_records(healthStatus, updatedAt DESC);
+
+CREATE TABLE IF NOT EXISTS product_issues (
+  id TEXT PRIMARY KEY,
+  productId TEXT NOT NULL,
+  healthRecordId TEXT NOT NULL,
+  issueType TEXT NOT NULL,
+  title TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  detailJson TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'open',
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(productId) REFERENCES products(id),
+  FOREIGN KEY(healthRecordId) REFERENCES product_health_records(id),
+  UNIQUE(healthRecordId, issueType)
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_issues_product_status
+  ON product_issues(productId, status, updatedAt DESC);
+
+CREATE TABLE IF NOT EXISTS product_improvements (
+  id TEXT PRIMARY KEY,
+  productId TEXT NOT NULL,
+  issueId TEXT NOT NULL,
+  actionId TEXT NOT NULL,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'planned',
+  beforeMetricsJson TEXT NOT NULL DEFAULT '{}',
+  afterMetricsJson TEXT NOT NULL DEFAULT '{}',
+  resultSummary TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(productId) REFERENCES products(id),
+  FOREIGN KEY(issueId) REFERENCES product_issues(id),
+  FOREIGN KEY(actionId) REFERENCES process_instances(id),
+  UNIQUE(issueId, actionId)
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_improvements_product_status
+  ON product_improvements(productId, status, updatedAt DESC);

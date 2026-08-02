@@ -30,4 +30,9 @@ export {
   validateProductImportBatch,
   validateProductV2Import,
   markPlatformSku,
+  loadProductManagementOverview,
+  loadProductManagementDetail,
+  changeProductLifecycle,
+  evaluateProductManagementHealth,
+  createProductImprovementAction,
 } from "../appState.js?v=20260802-module-boundary1";

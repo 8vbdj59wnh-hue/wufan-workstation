@@ -140,6 +140,14 @@ import {
   removeFinanceRule,
   saveFinanceRule,
 } from "./financeService.js";
+import {
+  changeProductLifecycle,
+  createProductImprovementAction,
+  evaluateProductHealth,
+  getProductV2Detail,
+  getProductV2Overview,
+  productLifecycleStatuses,
+} from "./productManagementV2Service.js";
 
 const app = express();
 const host = process.env.HOST ?? "0.0.0.0";
@@ -1537,6 +1545,38 @@ app.put("/api/finance/rules/:id", requirePermission("finance.manage"), (request,
 app.delete("/api/finance/rules/:id", requirePermission("finance.manage"), (request, response) => {
   try { removeFinanceRule(request.params.id); response.json({ success: true }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "财务规则删除失败。" }); }
+});
+
+app.get("/api/product-management/overview", requirePermission("products.view"), (request, response) => {
+  try {
+    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
+    response.json({ success: true, overview: getProductV2Overview(), lifecycleStatuses: productLifecycleStatuses,
+      moduleData: { products: scoped.products ?? [], actionProducts: scoped.actionProducts ?? [], erpGoods: scoped.erpGoods ?? [],
+        productErpMappings: scoped.productErpMappings ?? [], salesShops: scoped.salesShops ?? [], salesShopAliases: scoped.salesShopAliases ?? [],
+        productImportBatches: scoped.productImportBatches ?? [], erpImportBatches: scoped.erpImportBatches ?? [],
+        platformSkuManualBindings: scoped.platformSkuManualBindings ?? [] } });
+  }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "产品经营概览读取失败。" }); }
+});
+
+app.get("/api/product-management/products/:id", requirePermission("products.view"), (request, response) => {
+  try { response.json({ success: true, detail: getProductV2Detail(request.params.id), lifecycleStatuses: productLifecycleStatuses }); }
+  catch (error) { response.status(404).json({ success: false, message: error.message || "产品经营详情读取失败。" }); }
+});
+
+app.post("/api/product-management/products/:id/lifecycle", requirePermission("products.edit"), (request, response) => {
+  try { response.json({ success: true, event: changeProductLifecycle(request.params.id, request.body, request.user.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "产品生命周期更新失败。" }); }
+});
+
+app.post("/api/product-management/products/:id/evaluate", requirePermission("products.edit"), (request, response) => {
+  try { response.json({ success: true, healthRecord: evaluateProductHealth(request.params.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "产品经营评价失败。" }); }
+});
+
+app.post("/api/product-management/issues/:id/improvement-action", requirePermission("products.edit"), (request, response) => {
+  try { response.status(201).json({ success: true, ...createProductImprovementAction(request.params.id, request.body, request.user.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "产品改善行动创建失败。" }); }
 });
 
 app.get("/api/data-center/trends", requirePermission("dataCenter.view"), (request, response) => {
