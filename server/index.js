@@ -100,6 +100,7 @@ import {
   getConnectionImprovementSummary,
   listConnectionImprovements,
   updateConnectionImprovement,
+  getConnectionHospital,
 } from "./modules/links/index.js";
 import {
   batchLinkProcessInstanceTemplates,
@@ -2023,6 +2024,14 @@ app.get("/api/connection-improvements/summary", requireLinkView, (_request, resp
     response.json({ success: true, summary: getConnectionImprovementSummary() });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "连接改善概览读取失败。" });
+  }
+});
+
+app.get("/api/connection-hospital", requireLinkHealth, (_request, response) => {
+  try {
+    response.json({ success: true, ...getConnectionHospital() });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "链接医院读取失败。" });
   }
 });
 

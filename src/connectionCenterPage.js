@@ -16,6 +16,7 @@ import {
   loadAttentionConnectionHealthRecords,
   loadConnectionImprovements,
   loadConnectionImprovementSummary,
+  loadConnectionHospital,
   loadConnectionPeriodSnapshots,
   loadConnections,
   loadMyConnectionWorkbench,
@@ -27,8 +28,8 @@ import {
   updateConnectionFollow,
   uploadConnectionImport,
   resolveAssetUrl,
-} from "./services/connectionCenterService.js?v=20260802-my-links1";
-import { getCurrentUser, state } from "./stores/appStore.js?v=20260802-module-boundary1";
+} from "./services/connectionCenterService.js?v=20260802-connection-hospital3";
+import { getCurrentUser, state } from "./appState.js?v=20260705-state-singleton1";
 import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
 import { escapeHtml } from "./utils/html.js?v=20260802-module-boundary1";
 
@@ -57,6 +58,7 @@ const pageState = {
   improvementSummary: { total: 0, effective: 0, observing: 0, failed: 0 },
   section: "connections",
   myWorkbench: { items: [], summary: { total: 0, better: 0, risk: 0, followed: 0 }, filter: "all", isAdmin: false, loading: false },
+  hospital: { zones: { diagnosis: [], treatment: [], observation: [] }, counts: { diagnosis: 0, treatment: 0, observation: 0 }, stage: "diagnosis", loading: false },
   mappings: [],
   mappingLoading: false,
   mappingFilters: { sourceType: "business_advisor", matchStatus: "pending", search: "" },
@@ -117,6 +119,10 @@ function canManage() {
 
 function canCreateImprovement() {
   return (hasPermission(getCurrentUser(), "links.improve") || canManage()) && hasPermission(getCurrentUser(), "workPlans.launch");
+}
+
+function canImprove() {
+  return hasPermission(getCurrentUser(), "links.improve") || hasPermission(getCurrentUser(), "products.edit");
 }
 
 function canViewHealth() {
@@ -184,10 +190,26 @@ function renderSectionNavigation() {
   return `<nav class="connection-section-nav" aria-label="连接中心页面">
     <button type="button" class="${pageState.section === "connections" ? "active" : ""}" data-connection-section="connections">连接列表</button>
     <button type="button" class="${pageState.section === "my-links" ? "active" : ""}" data-connection-section="my-links">我的链接</button>
+    ${canViewHealth() ? `<button type="button" class="${pageState.section === "hospital" ? "active" : ""}" data-connection-section="hospital">链接医院</button>` : ""}
     <button type="button" class="${pageState.section === "pending-connections" ? "active" : ""}" data-connection-section="pending-connections">待识别经营连接</button>
     <button type="button" class="${pageState.section === "mappings" ? "active" : ""}" data-connection-section="mappings">数据关联</button>
     <button type="button" class="${pageState.section === "imports" ? "active" : ""}" data-connection-section="imports">经营数据导入</button>
   </nav>`;
+}
+
+function hospitalMetric(value, points = false) { return growthText(value, { points }); }
+
+function renderConnectionHospital() {
+  const hospital = pageState.hospital; const stage = hospital.stage; const items = hospital.zones?.[stage] ?? [];
+  const meta = { diagnosis: ["诊断区", "发现异常并发起链接诊断行动"], treatment: ["治疗区", "执行关键行动和改善方案"], observation: ["观察区", "治疗完成后观察经营恢复"] };
+  const card = (item) => { const profile = pageState.items.find((profileItem) => profileItem.id === item.connectionId) ?? item; const taskProgress = item.taskCount ? `${item.completedTaskCount}/${item.taskCount}` : "尚未生成任务";
+    const operation = stage === "diagnosis" ? (!item.improvementId
+      ? item.healthRecord && canCreateImprovement() ? `<button type="button" class="primary-button" data-hospital-diagnose="${escapeHtml(item.connectionId)}">发起链接诊断行动</button>` : `<button type="button" class="secondary-button" data-open-connection="${escapeHtml(item.connectionId)}">进入详情完成体检</button>`
+      : item.improvementStatus === "planned" && canImprove() ? `<button type="button" class="primary-button" data-hospital-transition="${escapeHtml(item.improvementId)}" data-next-status="executing">诊断完成，进入治疗</button>` : "")
+      : stage === "treatment" && canImprove() ? `<button type="button" class="primary-button" data-hospital-transition="${escapeHtml(item.improvementId)}" data-next-status="observing">治疗完成，进入观察</button>`
+      : stage === "observation" && canImprove() ? `<div class="hospital-observation-actions"><button type="button" class="primary-button" data-hospital-transition="${escapeHtml(item.improvementId)}" data-next-status="effective">数据恢复</button><button type="button" class="secondary-button" data-hospital-transition="${escapeHtml(item.improvementId)}" data-next-status="failed">未恢复</button></div>` : "";
+    return `<article class="connection-hospital-card"><header><button type="button" data-open-connection="${escapeHtml(item.connectionId)}"><strong>${escapeHtml(item.connectionName)}</strong><small>${escapeHtml(`${item.platform} · ${item.shopName}`)}</small></button><span class="status-pill">${escapeHtml(meta[stage][0])}</span></header><p class="hospital-product">产品：${escapeHtml(productCodes(profile))}</p><div class="hospital-problem"><strong>${escapeHtml(item.problemTitle)}</strong><span>健康 ${item.healthScore == null ? "—" : `${item.healthScore}分`} · 负责人 ${escapeHtml(item.ownerName || "未分配")}</span></div><div class="hospital-metrics"><span>销售 ${hospitalMetric(item.salesGrowth)}</span><span>流量 ${hospitalMetric(item.visitorGrowth)}</span><span>转化 ${hospitalMetric(item.conversionChange, true)}</span><span>利润 ${hospitalMetric(item.profitGrowth)}</span></div>${stage !== "diagnosis" ? `<div class="hospital-treatment"><span>方案：${escapeHtml(item.treatmentPlan)}</span><span>行动：${escapeHtml(item.actionId || "—")}</span><span>任务进度：${escapeHtml(taskProgress)}</span></div>` : `<small>发现时间：${escapeHtml(item.discoveredAt || "—")}</small>`}<footer>${operation}<button type="button" class="text-button" data-open-connection="${escapeHtml(item.connectionId)}">查看连接详情</button></footer></article>`; };
+  return `<section class="connection-hospital"><header><div><p class="eyebrow">发现问题 → 诊断 → 治疗 → 观察恢复</p><h2>链接医院</h2></div></header><div class="connection-hospital-zones">${Object.entries(meta).map(([id, [label, description]]) => `<button type="button" class="${stage === id ? "is-active" : ""}" data-hospital-stage="${id}"><span>${label}</span><strong>${hospital.counts?.[id] || 0}</strong><small>${description}</small></button>`).join("")}</div>${hospital.loading ? `<div class="empty-state">正在读取链接健康状态…</div>` : items.length ? `<div class="connection-hospital-grid">${items.map(card).join("")}</div>` : `<div class="empty-state"><strong>${escapeHtml(meta[stage][0])}暂无链接</strong><p>${stage === "observation" ? "已恢复链接会自动退出观察区。" : "经营数据正常或尚未形成对应阶段记录。"}</p></div>`}</section>`;
 }
 
 function trendLabel(item) {
@@ -427,8 +449,15 @@ function renderImprovementModal() {
 }
 
 export function renderConnectionCenterPage() {
-  const pageContent = pageState.section === "my-links" ? renderMyLinksWorkbench() : pageState.section === "mappings" ? renderMappingPage() : pageState.section === "imports" ? renderImportPage() : pageState.section === "pending-connections" ? renderPendingConnections() : `${renderGrowthOverview()}${renderToolbar()}${renderList()}`;
+  const pageContent = pageState.section === "hospital" ? renderConnectionHospital() : pageState.section === "my-links" ? renderMyLinksWorkbench() : pageState.section === "mappings" ? renderMappingPage() : pageState.section === "imports" ? renderImportPage() : pageState.section === "pending-connections" ? renderPendingConnections() : `${renderGrowthOverview()}${renderToolbar()}${renderList()}`;
   return `<section class="connection-center-page">${pageState.error ? `<div class="form-error">${escapeHtml(pageState.error)}</div>` : ""}${pageState.loading ? `<div class="empty-state">正在读取连接…</div>` : pageState.selectedId ? renderDetail() : `${renderSectionNavigation()}${pageContent}`}${renderMappingModal()}${renderImprovementModal()}</section>`;
+}
+
+async function loadHospital(render) {
+  pageState.hospital.loading = true; pageState.error = ""; render();
+  try { const result = await loadConnectionHospital(); pageState.hospital = { ...pageState.hospital, ...result, loading: false }; }
+  catch (error) { pageState.error = error.message; pageState.hospital.loading = false; }
+  render();
 }
 
 async function loadMyLinks(render, filter = pageState.myWorkbench.filter) {
@@ -495,8 +524,18 @@ export function bindConnectionCenterPageEvents(render) {
     pageState.section = button.dataset.connectionSection; pageState.selectedId = ""; render();
     if (pageState.section === "pending-connections") void loadPendingConnections(render);
     if (pageState.section === "my-links") void loadMyLinks(render);
+    if (pageState.section === "hospital") void loadHospital(render);
     if (pageState.section === "mappings") void loadMappings(render);
     if (pageState.section === "imports") void loadImportBatches(render, true);
+  }));
+  root.querySelectorAll("[data-hospital-stage]").forEach((button) => button.addEventListener("click", () => { pageState.hospital.stage = button.dataset.hospitalStage; render(); }));
+  root.querySelectorAll("[data-hospital-diagnose]").forEach((button) => button.addEventListener("click", () => {
+    const item = pageState.hospital.zones.diagnosis.find((candidate) => candidate.connectionId === button.dataset.hospitalDiagnose);
+    if (!item?.healthRecord) return; pageState.healthRecords = [item.healthRecord]; pageState.healthModalId = item.healthRecord.id; render();
+  }));
+  root.querySelectorAll("[data-hospital-transition]").forEach((button) => button.addEventListener("click", async () => {
+    try { await updateConnectionImprovement(button.dataset.hospitalTransition, { status: button.dataset.nextStatus }); await loadHospital(render); }
+    catch (error) { pageState.error = error.message; render(); }
   }));
   root.querySelectorAll("[data-my-link-filter]").forEach((button) => button.addEventListener("click", () => { void loadMyLinks(render, button.dataset.myLinkFilter); }));
   root.querySelectorAll("[data-toggle-connection-follow]").forEach((button) => button.addEventListener("click", async () => {
@@ -560,7 +599,7 @@ export function bindConnectionCenterPageEvents(render) {
   root.querySelectorAll('[data-action="close-improvement-modal"]').forEach((element) => element.addEventListener("click", (event) => { if (event.target.closest("[data-improvement-modal]") && !event.target.matches('[data-action="close-improvement-modal"]')) return; pageState.healthModalId = ""; render(); }));
   root.querySelector("[data-improvement-form]")?.addEventListener("submit", async (event) => {
     event.preventDefault();
-    try { const result = await createConnectionImprovementAction(pageState.healthModalId, Object.fromEntries(new FormData(event.currentTarget))); pageState.healthModalId = ""; pageState.improvementSummary = (await loadConnectionImprovementSummary()).summary; window.alert(`改善行动草稿及改善项目已创建：${result.instance.businessCode || result.instance.id}`); render(); }
+    try { const result = await createConnectionImprovementAction(pageState.healthModalId, Object.fromEntries(new FormData(event.currentTarget))); pageState.healthModalId = ""; pageState.improvementSummary = (await loadConnectionImprovementSummary()).summary; if (pageState.section === "hospital") await loadHospital(render); window.alert(`改善行动草稿及改善项目已创建：${result.instance.businessCode || result.instance.id}`); render(); }
     catch (error) { pageState.error = error.message; render(); }
   });
   root.querySelectorAll("[data-improvement-result]").forEach((formElement) => formElement.addEventListener("submit", async (event) => {

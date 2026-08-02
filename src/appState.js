@@ -1170,6 +1170,10 @@ export async function loadConnectionImprovements(filters = {}) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-improvements${query.size ? `?${query}` : ""}`), "连接改善记录读取失败。");
 }
 
+export async function loadConnectionHospital() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-hospital`), "链接医院读取失败。");
+}
+
 export async function loadConnectionImprovementSummary() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-improvements/summary`), "连接改善概览读取失败。");
 }

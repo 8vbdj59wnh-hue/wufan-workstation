@@ -39,3 +39,4 @@ export {
   listConnectionImprovements,
   updateConnectionImprovement,
 } from "../../connectionImprovementService.js";
+export { getConnectionHospital } from "../../connectionHospitalService.js";
