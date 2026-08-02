@@ -14,6 +14,7 @@ export {
   loadConnectionImportPreview,
   loadConnectionGrowthAnalysis,
   loadConnectionGrowthRankings,
+  loadConnectionManagementOverview,
   loadConnectionHealthRecords,
   loadAttentionConnectionHealthRecords,
   loadConnectionImprovements,

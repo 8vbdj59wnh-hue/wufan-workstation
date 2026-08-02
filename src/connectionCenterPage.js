@@ -14,6 +14,7 @@ import {
   loadConnectionImportPreview,
   loadConnectionGrowthAnalysis,
   loadConnectionGrowthRankings,
+  loadConnectionManagementOverview,
   loadConnectionHealthRecords,
   loadAttentionConnectionHealthRecords,
   loadConnectionImprovements,
@@ -46,13 +47,14 @@ const pageState = {
   sort: "default",
   columnSort: { key: "", direction: "asc" },
   listFilters: { shopId: "", productCode: "", ownerId: "", status: "" },
-  visibleColumns: ["image", "name", "platform", "shop", "products", "period", "payAmount", "growth", "health", "owner", "status"],
+  visibleColumns: ["image", "name", "platform", "shop", "products", "period", "payAmount", "growth", "health", "profit", "owner", "status"],
   fieldSettingsOpen: false,
   detailTab: "overview",
   actions: [],
   periodSnapshots: [],
   growthAnalysis: null,
   growthRankings: { topGrowth: [], risks: [] },
+  managementOverview: { summary: {}, owners: [] },
   healthRecords: [],
   healthAttention: { items: [], counts: { risk: 0, attention: 0, traffic: 0, conversion: 0, sales: 0 } },
   healthModalId: "",
@@ -72,7 +74,7 @@ const pageState = {
   error: "",
 };
 
-const listConfigKey = "connection-center-list-config-v1";
+const listConfigKey = "connection-center-list-config-v2";
 const listColumns = [
   { key: "image", label: "图片", sortable: false },
   { key: "name", label: "连接名称", sortable: true },
@@ -83,6 +85,7 @@ const listColumns = [
   { key: "payAmount", label: "最近周期销售额", sortable: true },
   { key: "growth", label: "销售增长", sortable: true },
   { key: "health", label: "健康分", sortable: true },
+  { key: "profit", label: "同期净利润", sortable: true },
   { key: "owner", label: "负责人", sortable: true },
   { key: "status", label: "状态", sortable: true },
 ];
@@ -114,16 +117,25 @@ function saveListConfig() {
 loadListConfig();
 
 function canManage() {
-  return hasPermission(getCurrentUser(), "products.edit");
+  return hasPermission(getCurrentUser(), "links.manage") || hasPermission(getCurrentUser(), "products.edit");
 }
 
 function canCreateImprovement() {
-  return canManage() && hasPermission(getCurrentUser(), "workPlans.launch");
+  return (hasPermission(getCurrentUser(), "links.improve") || canManage()) && hasPermission(getCurrentUser(), "workPlans.launch");
+}
+
+function canViewHealth() {
+  return hasPermission(getCurrentUser(), "links.health") || hasPermission(getCurrentUser(), "products.view");
 }
 
 function personName(id) {
   const person = (state.people ?? []).find((item) => String(item.id) === String(id ?? ""));
-  return person?.name ?? "未设置";
+  const profileOwner = pageState.items.find((item) => String(item.ownerId ?? "") === String(id ?? "") && item.ownerName)?.ownerName;
+  return person?.name ?? profileOwner ?? "未设置";
+}
+
+function connectionOwnerName(item) {
+  return item.ownerName || personName(item.ownerId);
 }
 
 function shopName(item) {
@@ -175,7 +187,9 @@ function renderSectionNavigation() {
 
 function renderToolbar() {
   const shops = [...new Map(pageState.items.map((item) => [item.shopId, { id: item.shopId, name: shopName(item) }])).values()].sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
-  const owners = (state.people ?? []).filter((person) => person.status === "active");
+  const owners = [...new Map([...(state.people ?? []).filter((person) => person.status === "active"),
+    ...(pageState.managementOverview.owners ?? []).filter((owner) => owner.ownerId !== "unassigned")
+      .map((owner) => ({ id: owner.ownerId, name: owner.ownerName, status: "active" }))].map((person) => [person.id, person])).values()];
   const filters = pageState.listFilters;
   return `<div class="connection-list-tools">
     <form class="connection-list-filters" data-connection-list-filters>
@@ -209,7 +223,10 @@ function renderGrowthOverview() {
   const cards = (items, emptyText) => items.length ? items.map((item) => `<button type="button" class="connection-growth-row" data-open-connection="${escapeHtml(item.connectionId)}"><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.platform)} · ${escapeHtml(item.shopDisplayName || item.shopName || "未命名店铺")}</small></span><em>${item.healthScore ?? "—"}分</em><b>${growthText(item.salesGrowth)}</b></button>`).join("") : `<div class="empty-state compact">${escapeHtml(emptyText)}</div>`;
   const counts = pageState.healthAttention.counts ?? {};
   const improvements = pageState.improvementSummary;
-  return `<section class="connection-health-summary"><div><span>风险连接</span><strong>${counts.risk || 0}</strong></div><div><span>关注连接</span><strong>${counts.attention || 0}</strong></div><div><span>流量问题</span><strong>${counts.traffic || 0}</strong></div><div><span>转化问题</span><strong>${counts.conversion || 0}</strong></div><div><span>销售下降</span><strong>${counts.sales || 0}</strong></div></section><section class="connection-improvement-summary"><strong>改善项目</strong><span>全部 ${improvements.total || 0}</span><span>有效 ${improvements.effective || 0}</span><span>观察 ${improvements.observing || 0}</span><span>失败 ${improvements.failed || 0}</span></section><section class="connection-growth-overview"><article><header><strong>TOP10 成长连接</strong><span>按最新两期销售增长</span></header>${cards(top, "至少积累两个经营周期后显示排行")}</article><article><header><strong>需要关注</strong><span>健康分低于60</span></header>${cards(risks, "当前没有风险连接")}</article></section>`;
+  const summary = pageState.managementOverview.summary ?? {};
+  const owners = pageState.managementOverview.owners ?? [];
+  const money = (value) => `¥${Number(value || 0).toLocaleString("zh-CN", { maximumFractionDigits: 2 })}`;
+  return `<section class="connection-management-summary"><div><span>经营连接</span><strong>${summary.connectionCount || 0}</strong><small>经营中 ${summary.activeCount || 0}</small></div><div><span>最近周期销售额</span><strong>${money(summary.salesAmount)}</strong></div><div><span>同期已确认净利润</span><strong>${money(summary.netProfit)}</strong></div><div><span>平均销售增长</span><strong>${growthText(summary.averageGrowth)}</strong></div><div><span>风险连接</span><strong>${summary.riskCount || 0}</strong></div></section><section class="connection-health-summary"><div><span>风险体检</span><strong>${counts.risk || 0}</strong></div><div><span>关注体检</span><strong>${counts.attention || 0}</strong></div><div><span>流量问题</span><strong>${counts.traffic || 0}</strong></div><div><span>转化问题</span><strong>${counts.conversion || 0}</strong></div><div><span>销售下降</span><strong>${counts.sales || 0}</strong></div><div><span>利润下降</span><strong>${counts.profit || 0}</strong></div></section><section class="connection-improvement-summary"><strong>改善项目</strong><span>全部 ${improvements.total || 0}</span><span>有效 ${improvements.effective || 0}</span><span>观察 ${improvements.observing || 0}</span><span>失败 ${improvements.failed || 0}</span></section><section class="connection-growth-overview"><article><header><strong>TOP10 成长连接</strong><span>按最新两期销售增长</span></header>${cards(top, "至少积累两个经营周期后显示排行")}</article><article><header><strong>需要关注</strong><span>健康分低于60</span></header>${cards(risks, "当前没有风险连接")}</article></section><section class="connection-owner-contribution"><header><div><strong>负责人经营贡献</strong><span>按最近经营周期销售额排序</span></div></header>${owners.length ? `<div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>负责人</th><th>连接数</th><th>销售额</th><th>净利润</th><th>平均增长</th><th>风险连接</th><th>有效改善</th></tr></thead><tbody>${owners.slice(0, 20).map((owner) => `<tr><td><strong>${escapeHtml(owner.ownerName)}</strong></td><td>${owner.connectionCount}</td><td>${money(owner.salesAmount)}</td><td>${money(owner.netProfit)}</td><td>${growthText(owner.averageGrowth)}</td><td>${owner.riskCount}</td><td>${owner.effectiveImprovements}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state compact">暂无负责人经营数据</div>`}</section>`;
 }
 
 function improvementStatusText(status) {
@@ -250,7 +267,7 @@ function renderList() {
   const valueForColumn = (item, key) => ({
     name: item.name || "", platform: item.platform || "", shop: shopName(item), products: productCodes(item),
     period: item.latestPeriodEnd || "", payAmount: Number(item.latestPayAmount || 0), growth: item.salesGrowth == null ? -Infinity : Number(item.salesGrowth),
-    health: item.healthScore == null ? Infinity : Number(item.healthScore), owner: personName(item.ownerId), status: statusText(item.status),
+    health: item.healthScore == null ? Infinity : Number(item.healthScore), profit: Number(item.currentFinance?.netProfit || 0), owner: connectionOwnerName(item), status: statusText(item.status),
   })[key];
   const compareValues = (left, right) => typeof left === "number" || typeof right === "number"
     ? Number(left) - Number(right) : String(left).localeCompare(String(right), "zh-CN", { numeric: true });
@@ -282,7 +299,8 @@ function renderList() {
     products: escapeHtml(productCodes(item, filters.productCode)), period: escapeHtml(item.latestPeriodEnd || "—"),
     payAmount: item.latestPayAmount == null ? "—" : `¥${Number(item.latestPayAmount).toLocaleString("zh-CN")}`,
     growth: growthText(item.salesGrowth), health: item.healthScore == null ? "—" : `${Number(item.healthScore)}分`,
-    owner: escapeHtml(personName(item.ownerId)), status: `<span class="status-pill status-${escapeHtml(item.status)}">${escapeHtml(statusText(item.status))}</span>`,
+    profit: item.currentFinance == null ? "—" : `¥${Number(item.currentFinance.netProfit || 0).toLocaleString("zh-CN")}`,
+    owner: escapeHtml(connectionOwnerName(item)), status: `<span class="status-pill status-${escapeHtml(item.status)}">${escapeHtml(statusText(item.status))}</span>`,
   })[key];
   return `<div class="connection-table-wrap"><table class="connection-table"><thead><tr>${header}</tr></thead><tbody>${items.map((item) => `<tr tabindex="0" data-open-connection="${escapeHtml(item.id)}">${listColumns.filter((column) => visible.has(column.key)).map((column) => `<td>${cell(item, column.key)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
 }
@@ -319,15 +337,15 @@ function renderActions(item) {
 function renderDetail() {
   const item = pageState.items.find((candidate) => candidate.id === pageState.selectedId);
   if (!item) return "";
-  const tabs = [["overview", "经营概况"], ["actions", "经营动作"], ["health", "体检报告"], ["improvements", "改善记录"], ["trend", "经营趋势"]];
-  let body = `<div class="connection-overview"><dl><div><dt>平台</dt><dd>${escapeHtml(item.platform)}</dd></div><div><dt>店铺</dt><dd>${escapeHtml(shopName(item))}</dd></div><div><dt>商品ID</dt><dd>${escapeHtml(item.platformGoodsId || "—")}</dd></div><div><dt>负责人</dt><dd>${escapeHtml(personName(item.ownerId))}</dd></div><div><dt>状态</dt><dd>${escapeHtml(statusText(item.status))}</dd></div></dl>${canManage() ? `<form class="connection-action-form" data-connection-profile-form><label>连接名称<input name="name" value="${escapeHtml(item.name)}" required maxlength="120" /></label><label>负责人<select name="ownerId"><option value="">未设置</option>${(state.people ?? []).filter((person) => person.status === "active").map((person) => `<option value="${escapeHtml(person.id)}" ${item.ownerId === person.id ? "selected" : ""}>${escapeHtml(person.name)}</option>`).join("")}</select></label><button type="submit" class="secondary-button">保存档案</button></form>` : ""}<section><h3>关联产品</h3>${item.products?.length ? item.products.map((product) => `<a href="#products/${encodeURIComponent(product.id)}" data-product-id="${escapeHtml(product.id)}">${escapeHtml(product.name || product.skuCode)}</a>`).join("、") : "未关联产品"}</section></div>`;
+  const tabs = [["overview", "经营概况"], ["actions", "经营动作"], ...(canViewHealth() ? [["health", "体检报告"]] : []), ["improvements", "改善记录"], ["trend", "经营趋势"]];
+  let body = `<div class="connection-overview"><dl><div><dt>平台</dt><dd>${escapeHtml(item.platform)}</dd></div><div><dt>店铺</dt><dd>${escapeHtml(shopName(item))}</dd></div><div><dt>商品ID</dt><dd>${escapeHtml(item.platformGoodsId || "—")}</dd></div><div><dt>负责人</dt><dd>${escapeHtml(personName(item.ownerId))}</dd></div><div><dt>状态</dt><dd>${escapeHtml(statusText(item.status))}</dd></div></dl><section class="connection-operating-metrics"><div><span>最近周期销售额</span><strong>${item.latestPayAmount == null ? "—" : `¥${Number(item.latestPayAmount).toLocaleString("zh-CN")}`}</strong></div><div><span>销售增长</span><strong>${growthText(item.salesGrowth)}</strong></div><div><span>同期净利润</span><strong>${item.currentFinance == null ? "—" : `¥${Number(item.currentFinance.netProfit || 0).toLocaleString("zh-CN")}`}</strong></div><div><span>利润变化</span><strong>${growthText(item.profitGrowth)}</strong></div><div><span>健康状态</span><strong>${escapeHtml(healthText(item.healthStatus || "no_data"))}</strong></div></section>${canManage() ? `<form class="connection-action-form" data-connection-profile-form><label>连接名称<input name="name" value="${escapeHtml(item.name)}" required maxlength="120" /></label><label>负责人<select name="ownerId"><option value="">未设置</option>${(state.people ?? []).filter((person) => person.status === "active").map((person) => `<option value="${escapeHtml(person.id)}" ${item.ownerId === person.id ? "selected" : ""}>${escapeHtml(person.name)}</option>`).join("")}</select></label><button type="submit" class="secondary-button">保存档案</button></form>` : ""}<section><h3>关联产品</h3>${item.products?.length ? item.products.map((product) => `<a href="#products/${encodeURIComponent(product.id)}" data-product-id="${escapeHtml(product.id)}">${escapeHtml(product.name || product.skuCode)}</a>`).join("、") : "未关联产品"}</section></div>`;
   if (pageState.detailTab === "actions") body = renderActions(item);
   if (pageState.detailTab === "health") body = renderHealthReport();
   if (pageState.detailTab === "improvements") body = renderImprovements();
   if (pageState.detailTab === "trend") {
     const analysis = pageState.growthAnalysis;
-    const growthCard = analysis?.comparable ? `<section class="connection-growth-card"><div><span>健康分</span><strong>${analysis.healthScore}</strong><em>${escapeHtml(healthText(analysis.healthStatus))}</em></div><dl><div><dt>销售</dt><dd>${growthText(analysis.salesGrowth)}</dd></div><div><dt>访客</dt><dd>${growthText(analysis.visitorGrowth)}</dd></div><div><dt>转化</dt><dd>${growthText(analysis.conversionChange, { points: true })}</dd></div><div><dt>客单价</dt><dd>${growthText(analysis.customerValueChange)}</dd></div></dl></section>` : `<div class="empty-state compact"><strong>${escapeHtml(healthText(analysis?.healthStatus || "no_data"))}</strong><p>需要至少两个经营周期才能计算成长幅度和健康评分。</p></div>`;
-    const comparison = analysis?.currentPeriod ? `<div class="connection-table-wrap"><table class="connection-table connection-period-table"><thead><tr><th>周期</th><th>销售额</th><th>访客</th><th>转化率</th><th>客单价</th></tr></thead><tbody>${[["当前周期", analysis.currentPeriod], ["上一周期", analysis.previousPeriod]].filter(([, period]) => period).map(([label, period]) => `<tr><td><strong>${label}</strong><small>${escapeHtml(`${period.periodStart} 至 ${period.periodEnd}`)}</small></td><td>¥${Number(period.payAmount || 0).toLocaleString("zh-CN")}</td><td>${Number(period.visitorCount || 0).toLocaleString("zh-CN")}</td><td>${period.conversionRate == null ? "—" : `${(Number(period.conversionRate) * 100).toFixed(2)}%`}</td><td>${period.customerValue == null ? "—" : `¥${Number(period.customerValue).toFixed(2)}`}</td></tr>`).join("")}</tbody></table></div>` : "";
+    const growthCard = analysis?.comparable ? `<section class="connection-growth-card"><div><span>健康分</span><strong>${analysis.healthScore}</strong><em>${escapeHtml(healthText(analysis.healthStatus))}</em></div><dl><div><dt>销售</dt><dd>${growthText(analysis.salesGrowth)}</dd></div><div><dt>访客</dt><dd>${growthText(analysis.visitorGrowth)}</dd></div><div><dt>转化</dt><dd>${growthText(analysis.conversionChange, { points: true })}</dd></div><div><dt>客单价</dt><dd>${growthText(analysis.customerValueChange)}</dd></div><div><dt>净利润</dt><dd>${growthText(analysis.profitGrowth)}</dd></div></dl></section>` : `<div class="empty-state compact"><strong>${escapeHtml(healthText(analysis?.healthStatus || "no_data"))}</strong><p>需要至少两个经营周期才能计算成长幅度和健康评分。</p></div>`;
+    const comparison = analysis?.currentPeriod ? `<div class="connection-table-wrap"><table class="connection-table connection-period-table"><thead><tr><th>周期</th><th>销售额</th><th>访客/浏览</th><th>加购</th><th>转化率</th><th>客单价</th><th>净利润</th></tr></thead><tbody>${[["当前周期", analysis.currentPeriod, analysis.currentFinance], ["上一周期", analysis.previousPeriod, analysis.previousFinance]].filter(([, period]) => period).map(([label, period, finance]) => `<tr><td><strong>${label}</strong><small>${escapeHtml(`${period.periodStart} 至 ${period.periodEnd}`)}</small></td><td>¥${Number(period.payAmount || 0).toLocaleString("zh-CN")}</td><td>${Number(period.visitorCount || 0).toLocaleString("zh-CN")} / ${Number(period.viewCount || 0).toLocaleString("zh-CN")}</td><td>${Number(period.cartCount || 0).toLocaleString("zh-CN")}</td><td>${period.conversionRate == null ? "—" : `${(Number(period.conversionRate) * 100).toFixed(2)}%`}</td><td>${period.customerValue == null ? "—" : `¥${Number(period.customerValue).toFixed(2)}`}</td><td>${finance == null ? "—" : `¥${Number(finance.netProfit || 0).toLocaleString("zh-CN")}`}</td></tr>`).join("")}</tbody></table></div>` : "";
     body = `<div class="connection-growth-detail">${growthCard}${comparison}</div>`;
   }
   return `<section class="connection-detail"><button type="button" class="text-button" data-action="back-connections">← 返回连接列表</button><header>${imageHtml(item)}<div><p class="eyebrow">${escapeHtml(item.platform)} · ${escapeHtml(shopName(item))}</p><h2>${escapeHtml(item.name)}</h2><p>${escapeHtml(productNames(item))}</p></div></header><nav class="connection-tabs">${tabs.map(([id, label]) => `<button type="button" class="${pageState.detailTab === id ? "active" : ""}" data-connection-tab="${id}">${label}</button>`).join("")}</nav>${body}</section>`;
@@ -418,13 +436,14 @@ export function renderConnectionCenterPage() {
 async function loadPage(render) {
   pageState.loading = true; pageState.error = ""; render();
   try {
-    const [connections, rankings, healthAttention, improvementSummary] = await Promise.all([loadConnections(), loadConnectionGrowthRankings(), loadAttentionConnectionHealthRecords(), loadConnectionImprovementSummary()]);
+    const [connections, rankings, managementOverview, healthAttention, improvementSummary] = await Promise.all([loadConnections(), loadConnectionGrowthRankings(), loadConnectionManagementOverview(), canViewHealth() ? loadAttentionConnectionHealthRecords() : Promise.resolve({ items: [], counts: {} }), loadConnectionImprovementSummary()]);
     const analysisByConnection = new Map((rankings.listMetrics ?? []).map((item) => [item.connectionId, item]));
     pageState.items = (connections.items ?? []).map((item) => {
       const analysis = analysisByConnection.get(item.id);
-      return { ...item, salesGrowth: analysis?.salesGrowth ?? null, healthScore: analysis?.healthScore ?? null, healthStatus: analysis?.healthStatus ?? "no_data" };
+      return { ...item, salesGrowth: analysis?.salesGrowth ?? null, healthScore: analysis?.healthScore ?? null, healthStatus: analysis?.healthStatus ?? "no_data", currentFinance: analysis?.currentFinance ?? null, profitGrowth: analysis?.profitGrowth ?? null };
     });
     pageState.growthRankings = rankings;
+    pageState.managementOverview = managementOverview;
     pageState.healthAttention = healthAttention;
     pageState.improvementSummary = improvementSummary.summary;
     pageState.loaded = true;
@@ -526,7 +545,7 @@ export function bindConnectionCenterPageEvents(render) {
     event.preventDefault();
     try {
       const result = await updateConnection(pageState.selectedId, Object.fromEntries(new FormData(event.currentTarget)));
-      pageState.items = pageState.items.map((item) => item.id === result.item.id ? result.item : item);
+      pageState.items = pageState.items.map((item) => item.id === result.item.id ? { ...item, ...result.item } : item);
       pageState.error = ""; render();
     } catch (error) { pageState.error = error.message; render(); }
   });

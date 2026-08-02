@@ -47,6 +47,7 @@ function enrichConnectionRows(rows) {
 const connectionSelect = `
   SELECT c.id, c.salesLinkId, c.name, c.mainImage, c.imageSource, c.ownerId, c.status, c.level, c.notes,
          c.createdBy, c.createdAt, c.updatedAt,
+         (SELECT name FROM persons WHERE id=c.ownerId) AS ownerName,
          l.title AS salesLinkTitle, l.canonicalUrl, l.rawUrl, l.platformGoodsId, l.platformGoodsCode, l.currentState AS salesLinkState,
          s.id AS shopId, s.platform, s.displayName AS shopDisplayName, s.shopName,
          (SELECT periodEnd FROM connection_period_snapshots ps WHERE ps.salesLinkId=c.salesLinkId

@@ -86,6 +86,7 @@ import {
   createConnectionPeriodSnapshots,
   listConnectionPeriodSnapshots,
   getConnectionGrowthAnalysis,
+  getConnectionManagementOverview,
   listConnectionGrowthRankings,
   createConnectionHealthRecord,
   createImprovementAction,
@@ -374,6 +375,23 @@ function requirePermission(permissionPath) {
     next();
   };
 }
+
+function requireAnyPermission(...permissionPaths) {
+  return (request, response, next) => {
+    if (!permissionPaths.some((permissionPath) => hasPermission(request.user, permissionPath))) {
+      response.status(403).json({ success: false, message: "你没有权限进行该操作" });
+      return;
+    }
+    next();
+  };
+}
+
+const requireLinkView = requireAnyPermission("links.view", "products.view");
+const requireLinkManage = requireAnyPermission("links.manage", "products.edit");
+const requireLinkImport = requireAnyPermission("links.import", "products.edit");
+const requireLinkHealth = requireAnyPermission("links.health", "products.view");
+const requireLinkHealthManage = requireAnyPermission("links.health", "products.edit");
+const requireLinkImprove = requireAnyPermission("links.improve", "products.edit");
 
 function getRequestedActionTemplateIds(body = {}) {
   return [
@@ -1616,7 +1634,7 @@ app.get("/api/data-center/products/:productId", requirePermission("dataCenter.vi
   }
 });
 
-app.get("/api/connections", requirePermission("products.view"), (_request, response) => {
+app.get("/api/connections", requireLinkView, (_request, response) => {
   try {
     response.json({ success: true, items: listConnectionProfiles() });
   } catch (error) {
@@ -1624,7 +1642,7 @@ app.get("/api/connections", requirePermission("products.view"), (_request, respo
   }
 });
 
-app.get("/api/connections/available-sales-links", requirePermission("products.view"), (request, response) => {
+app.get("/api/connections/available-sales-links", requireLinkView, (request, response) => {
   try {
     response.json({ success: true, ...listAvailableSalesLinks(request.query) });
   } catch (error) {
@@ -1632,7 +1650,7 @@ app.get("/api/connections/available-sales-links", requirePermission("products.vi
   }
 });
 
-app.get("/api/connections/:id", requirePermission("products.view"), (request, response) => {
+app.get("/api/connections/:id", requireLinkView, (request, response) => {
   try {
     response.json({ success: true, item: readConnectionProfile(request.params.id) });
   } catch (error) {
@@ -1640,7 +1658,7 @@ app.get("/api/connections/:id", requirePermission("products.view"), (request, re
   }
 });
 
-app.put("/api/connections/:id", requirePermission("products.edit"), (request, response) => {
+app.put("/api/connections/:id", requireLinkManage, (request, response) => {
   try {
     response.json({ success: true, item: updateConnectionProfile(request.params.id, request.body) });
   } catch (error) {
@@ -1648,7 +1666,7 @@ app.put("/api/connections/:id", requirePermission("products.edit"), (request, re
   }
 });
 
-app.post("/api/connections", requirePermission("products.edit"), (request, response) => {
+app.post("/api/connections", requireLinkManage, (request, response) => {
   try {
     response.status(201).json({ success: true, item: createConnectionProfile(request.body, request.user?.id) });
   } catch (error) {
@@ -1656,7 +1674,7 @@ app.post("/api/connections", requirePermission("products.edit"), (request, respo
   }
 });
 
-app.post("/api/connections/batch", requirePermission("products.edit"), (request, response) => {
+app.post("/api/connections/batch", requireLinkManage, (request, response) => {
   try {
     response.status(201).json({ success: true, ...createConnectionProfilesBatch(request.body, request.user?.id) });
   } catch (error) {
@@ -1664,7 +1682,7 @@ app.post("/api/connections/batch", requirePermission("products.edit"), (request,
   }
 });
 
-app.get("/api/connections/:id/actions", requirePermission("products.view"), (request, response) => {
+app.get("/api/connections/:id/actions", requireLinkView, (request, response) => {
   try {
     response.json({ success: true, items: listConnectionActions(request.params.id) });
   } catch (error) {
@@ -1672,7 +1690,7 @@ app.get("/api/connections/:id/actions", requirePermission("products.view"), (req
   }
 });
 
-app.post("/api/connections/:id/actions", requirePermission("products.edit"), (request, response) => {
+app.post("/api/connections/:id/actions", requireLinkManage, (request, response) => {
   try {
     response.status(201).json({ success: true, item: createConnectionAction(request.params.id, request.body, request.user?.id) });
   } catch (error) {
@@ -1680,7 +1698,7 @@ app.post("/api/connections/:id/actions", requirePermission("products.edit"), (re
   }
 });
 
-app.delete("/api/connections/:id/actions/:actionId", requirePermission("products.edit"), (request, response) => {
+app.delete("/api/connections/:id/actions/:actionId", requireLinkManage, (request, response) => {
   try {
     response.json(deleteConnectionAction(request.params.id, request.params.actionId));
   } catch (error) {
@@ -1688,7 +1706,7 @@ app.delete("/api/connections/:id/actions/:actionId", requirePermission("products
   }
 });
 
-app.get("/api/connection-data-mappings", requirePermission("products.view"), (request, response) => {
+app.get("/api/connection-data-mappings", requireLinkView, (request, response) => {
   try {
     response.json({ success: true, items: listConnectionDataMappings(request.query) });
   } catch (error) {
@@ -1696,7 +1714,7 @@ app.get("/api/connection-data-mappings", requirePermission("products.view"), (re
   }
 });
 
-app.post("/api/connection-data-mappings", requirePermission("products.edit"), (request, response) => {
+app.post("/api/connection-data-mappings", requireLinkManage, (request, response) => {
   try {
     response.status(201).json({ success: true, item: createConnectionDataMapping(request.body, request.user?.id) });
   } catch (error) {
@@ -1704,7 +1722,7 @@ app.post("/api/connection-data-mappings", requirePermission("products.edit"), (r
   }
 });
 
-app.put("/api/connection-data-mappings/:id", requirePermission("products.edit"), (request, response) => {
+app.put("/api/connection-data-mappings/:id", requireLinkManage, (request, response) => {
   try {
     response.json({ success: true, item: updateConnectionDataMapping(request.params.id, request.body, request.user?.id) });
   } catch (error) {
@@ -1712,7 +1730,7 @@ app.put("/api/connection-data-mappings/:id", requirePermission("products.edit"),
   }
 });
 
-app.delete("/api/connection-data-mappings/:id", requirePermission("products.edit"), (request, response) => {
+app.delete("/api/connection-data-mappings/:id", requireLinkManage, (request, response) => {
   try {
     response.json(deleteConnectionDataMapping(request.params.id, request.user?.id));
   } catch (error) {
@@ -1720,7 +1738,7 @@ app.delete("/api/connection-data-mappings/:id", requirePermission("products.edit
   }
 });
 
-app.get("/api/connection-import-batches", requirePermission("products.view"), (_request, response) => {
+app.get("/api/connection-import-batches", requireLinkView, (_request, response) => {
   try {
     response.json({ success: true, items: listConnectionImportBatches() });
   } catch (error) {
@@ -1728,7 +1746,7 @@ app.get("/api/connection-import-batches", requirePermission("products.view"), (_
   }
 });
 
-app.post("/api/connection-import-batches", requirePermission("products.edit"), (request, response) => {
+app.post("/api/connection-import-batches", requireLinkImport, (request, response) => {
   uploadConnectionWorkbook.single("file")(request, response, (error) => {
     if (error) {
       response.status(400).json({ success: false, message: error.message || "生意参谋文件上传失败。" });
@@ -1744,7 +1762,7 @@ app.post("/api/connection-import-batches", requirePermission("products.edit"), (
   });
 });
 
-app.get("/api/connection-import-batches/:id/preview", requirePermission("products.view"), (request, response) => {
+app.get("/api/connection-import-batches/:id/preview", requireLinkView, (request, response) => {
   try {
     response.json({ success: true, ...previewConnectionImportBatch(request.params.id) });
   } catch (error) {
@@ -1752,7 +1770,7 @@ app.get("/api/connection-import-batches/:id/preview", requirePermission("product
   }
 });
 
-app.post("/api/connection-import-batches/:id/commit", requirePermission("products.edit"), (request, response) => {
+app.post("/api/connection-import-batches/:id/commit", requireLinkImport, (request, response) => {
   try {
     response.json({ success: true, ...commitConnectionImportBatch(request.params.id, request.user?.id) });
   } catch (error) {
@@ -1760,7 +1778,7 @@ app.post("/api/connection-import-batches/:id/commit", requirePermission("product
   }
 });
 
-app.post("/api/connection-import-batches/:id/period-snapshots", requirePermission("products.edit"), (request, response) => {
+app.post("/api/connection-import-batches/:id/period-snapshots", requireLinkImport, (request, response) => {
   try {
     response.status(201).json({ success: true, ...createConnectionPeriodSnapshots(request.params.id, request.body ?? {}) });
   } catch (error) {
@@ -1768,7 +1786,7 @@ app.post("/api/connection-import-batches/:id/period-snapshots", requirePermissio
   }
 });
 
-app.get("/api/connections/:id/period-snapshots", requirePermission("products.view"), (request, response) => {
+app.get("/api/connections/:id/period-snapshots", requireLinkView, (request, response) => {
   try {
     response.json({ success: true, items: listConnectionPeriodSnapshots(request.params.id) });
   } catch (error) {
@@ -1776,7 +1794,7 @@ app.get("/api/connections/:id/period-snapshots", requirePermission("products.vie
   }
 });
 
-app.get("/api/connections/:id/growth-analysis", requirePermission("products.view"), (request, response) => {
+app.get("/api/connections/:id/growth-analysis", requireLinkView, (request, response) => {
   try {
     response.json({ success: true, item: getConnectionGrowthAnalysis(request.params.id) });
   } catch (error) {
@@ -1784,7 +1802,7 @@ app.get("/api/connections/:id/growth-analysis", requirePermission("products.view
   }
 });
 
-app.get("/api/connection-growth-rankings", requirePermission("products.view"), (request, response) => {
+app.get("/api/connection-growth-rankings", requireLinkView, (request, response) => {
   try {
     response.json({ success: true, ...listConnectionGrowthRankings(request.query.sort, request.query.limit) });
   } catch (error) {
@@ -1792,7 +1810,15 @@ app.get("/api/connection-growth-rankings", requirePermission("products.view"), (
   }
 });
 
-app.get("/api/connections/:id/health-records", requirePermission("products.view"), (request, response) => {
+app.get("/api/connection-management/overview", requireLinkView, (_request, response) => {
+  try {
+    response.json({ success: true, ...getConnectionManagementOverview() });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "链接经营概览读取失败。" });
+  }
+});
+
+app.get("/api/connections/:id/health-records", requireLinkHealth, (request, response) => {
   try {
     response.json({ success: true, items: listConnectionHealthRecords(request.params.id) });
   } catch (error) {
@@ -1800,7 +1826,7 @@ app.get("/api/connections/:id/health-records", requirePermission("products.view"
   }
 });
 
-app.post("/api/connections/:id/health-records", requirePermission("products.edit"), (request, response) => {
+app.post("/api/connections/:id/health-records", requireLinkHealthManage, (request, response) => {
   try {
     response.status(201).json({ success: true, ...createConnectionHealthRecord(request.params.id, request.body?.snapshotId) });
   } catch (error) {
@@ -1808,7 +1834,7 @@ app.post("/api/connections/:id/health-records", requirePermission("products.edit
   }
 });
 
-app.get("/api/connection-health-records/attention", requirePermission("products.view"), (_request, response) => {
+app.get("/api/connection-health-records/attention", requireLinkHealth, (_request, response) => {
   try {
     response.json({ success: true, ...listAttentionConnectionHealthRecords() });
   } catch (error) {
@@ -1816,7 +1842,7 @@ app.get("/api/connection-health-records/attention", requirePermission("products.
   }
 });
 
-app.post("/api/connection-health-records/:id/improvement-action", requirePermission("products.edit"), (request, response) => {
+app.post("/api/connection-health-records/:id/improvement-action", requireLinkImprove, (request, response) => {
   if (!hasPermission(request.user, "workPlans.launch")) {
     response.status(403).json({ success: false, message: "你没有权限创建改善行动。" });
     return;
@@ -1828,7 +1854,7 @@ app.post("/api/connection-health-records/:id/improvement-action", requirePermiss
   }
 });
 
-app.get("/api/connection-improvements", requirePermission("products.view"), (request, response) => {
+app.get("/api/connection-improvements", requireLinkView, (request, response) => {
   try {
     response.json({ success: true, items: listConnectionImprovements(request.query) });
   } catch (error) {
@@ -1836,7 +1862,7 @@ app.get("/api/connection-improvements", requirePermission("products.view"), (req
   }
 });
 
-app.get("/api/connection-improvements/summary", requirePermission("products.view"), (_request, response) => {
+app.get("/api/connection-improvements/summary", requireLinkView, (_request, response) => {
   try {
     response.json({ success: true, summary: getConnectionImprovementSummary() });
   } catch (error) {
@@ -1844,7 +1870,7 @@ app.get("/api/connection-improvements/summary", requirePermission("products.view
   }
 });
 
-app.post("/api/connection-improvements", requirePermission("products.edit"), (request, response) => {
+app.post("/api/connection-improvements", requireLinkImprove, (request, response) => {
   try {
     response.status(201).json({ success: true, ...createConnectionImprovement(request.body ?? {}, request.user?.id) });
   } catch (error) {
@@ -1852,7 +1878,7 @@ app.post("/api/connection-improvements", requirePermission("products.edit"), (re
   }
 });
 
-app.put("/api/connection-improvements/:id", requirePermission("products.edit"), (request, response) => {
+app.put("/api/connection-improvements/:id", requireLinkImprove, (request, response) => {
   try {
     response.json({ success: true, item: updateConnectionImprovement(request.params.id, request.body ?? {}) });
   } catch (error) {
@@ -1860,7 +1886,7 @@ app.put("/api/connection-improvements/:id", requirePermission("products.edit"), 
   }
 });
 
-app.post("/api/connection-import-batches/:id/rows/:externalId/confirm", requirePermission("products.edit"), (request, response) => {
+app.post("/api/connection-import-batches/:id/rows/:externalId/confirm", requireLinkImport, (request, response) => {
   try {
     response.status(201).json({ success: true, item: confirmConnectionImportRow(request.params.id, request.params.externalId, request.body, request.user?.id) });
   } catch (error) {
@@ -1868,7 +1894,7 @@ app.post("/api/connection-import-batches/:id/rows/:externalId/confirm", requireP
   }
 });
 
-app.post("/api/connection-import-batches/:id/rows/:externalId/ignore", requirePermission("products.edit"), (request, response) => {
+app.post("/api/connection-import-batches/:id/rows/:externalId/ignore", requireLinkImport, (request, response) => {
   try {
     response.status(201).json({ success: true, item: ignoreConnectionImportRow(request.params.id, request.params.externalId, request.user?.id) });
   } catch (error) {

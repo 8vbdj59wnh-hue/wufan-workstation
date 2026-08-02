@@ -22,7 +22,7 @@ export {
   previewConnectionImportBatch,
 } from "../../connectionImportService.js";
 export { createConnectionPeriodSnapshots, listConnectionPeriodSnapshots } from "../../connectionPeriodSnapshots.js";
-export { getConnectionGrowthAnalysis, listConnectionGrowthRankings } from "../../connectionGrowthService.js";
+export { getConnectionGrowthAnalysis, getConnectionManagementOverview, listConnectionGrowthRankings } from "../../connectionGrowthService.js";
 export {
   createConnectionHealthRecord,
   createImprovementAction,

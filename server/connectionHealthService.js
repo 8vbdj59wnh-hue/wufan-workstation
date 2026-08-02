@@ -35,6 +35,10 @@ function evaluate(analysis) {
     problems.push({ type: "sales", title: "销售衰退风险", value: percentage(analysis.salesGrowth) });
     suggestions.push({ title: "重新分析经营策略", reason: "销售下降超过30%", items: ["商品竞争力", "流量来源", "运营策略"] });
   }
+  if (analysis.profitGrowth !== null && analysis.profitGrowth < -0.2) {
+    problems.push({ type: "profit", title: "利润下降", value: percentage(analysis.profitGrowth) });
+    suggestions.push({ title: "复核连接利润结构", reason: "同期净利润下降超过20%", items: ["退款", "商品成本", "平台费用", "推广费用"] });
+  }
   const healthyGrowth = analysis.salesGrowth > 0.2 && analysis.conversionChange >= 0;
   if (healthyGrowth && suggestions.length === 0) suggestions.push({ title: "保持当前增长策略", reason: "销售增长且转化稳定", items: [] });
   const healthStatus = problems.some((problem) => problem.type === "sales") || analysis.healthScore < 40
@@ -80,7 +84,7 @@ export function listAttentionConnectionHealthRecords() {
       AND NOT EXISTS (SELECT 1 FROM connection_health_records newer WHERE newer.connectionId=r.connectionId AND newer.createdAt>r.createdAt)
     ORDER BY CASE r.healthStatus WHEN 'risk' THEN 0 ELSE 1 END,r.healthScore ASC,r.createdAt DESC
   `).all().map(parseRecord);
-  const categories = { traffic: 0, conversion: 0, sales: 0 };
+  const categories = { traffic: 0, conversion: 0, sales: 0, profit: 0 };
   for (const item of items) for (const problem of item.problems) if (Object.prototype.hasOwnProperty.call(categories, problem.type)) categories[problem.type] += 1;
   return { items, counts: { risk: items.filter((item) => item.healthStatus === "risk").length,
     attention: items.filter((item) => item.healthStatus === "attention").length, ...categories } };

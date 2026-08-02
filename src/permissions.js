@@ -407,7 +407,7 @@ export function canAccessModule(userOrPermissions, moduleId) {
     return hasPermission(userOrPermissions, "finance.view");
   }
   if (moduleId === "connectionCenter") {
-    return hasPermission(userOrPermissions, "products.view");
+    return hasPermission(userOrPermissions, "links.view") || hasPermission(userOrPermissions, "products.view");
   }
   return hasPermission(userOrPermissions, `modules.${permissionKey}`);
 }

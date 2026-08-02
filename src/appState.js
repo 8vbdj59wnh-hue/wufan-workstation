@@ -1021,6 +1021,10 @@ export async function loadConnectionGrowthRankings() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-growth-rankings`), "连接成长排行读取失败。");
 }
 
+export async function loadConnectionManagementOverview() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-management/overview`), "链接经营概览读取失败。");
+}
+
 export async function loadConnectionHealthRecords(connectionId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/health-records`), "连接体检记录读取失败。");
 }
