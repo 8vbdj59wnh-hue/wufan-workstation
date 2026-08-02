@@ -6,7 +6,7 @@ import { bindTasksPageEvents, renderTasksPage, selectTask } from "./pages/tasksP
 import { bindScheduleBoardPageEvents, renderScheduleBoardPage } from "./scheduleBoardPage.js?v=20260802-action-countdown1";
 import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260802-dashboard-v21";
 import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js?v=20260802-template-version1";
-import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js?v=20260802-template-version1";
+import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js?v=20260802-action-standard-card1";
 import { bindProductCenterPageEvents, renderProductCenterPage } from "./pages/productCenterPage.js?v=20260802-module-boundary1";
 import { bindDataCenterPageEvents, renderDataCenterPage } from "./dataCenterPage.js?v=20260729-data-center-v5";
 import { bindConnectionCenterPageEvents, renderConnectionCenterPage } from "./pages/connectionCenterPage.js?v=20260802-module-boundary1";

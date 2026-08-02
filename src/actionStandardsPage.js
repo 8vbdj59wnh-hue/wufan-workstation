@@ -303,6 +303,12 @@ function renderStandardWorkCard(template, selectedProcessTemplateId = "") {
   const processStepLabel = processStepCount > 0 ? `${processStepCount}步` : "未配置";
   const versions = (state.templateAssetVersions ?? []).filter((item) => item.assetType === "action" && item.assetId === template.id);
   const currentVersion = versions.find((item) => item.status === "active") ?? versions.sort((left, right) => right.majorVersion - left.majorVersion || right.minorVersion - left.minorVersion)[0];
+  const launchCount = (state.processInstances ?? []).filter((instance) =>
+    instance.taskTemplateId === template.id ||
+    instance.standardWorkId === template.id ||
+    (template.defaultProcessTemplateId && instance.templateId === template.defaultProcessTemplateId),
+  ).length;
+  const description = String(template.description ?? template.completionStandard ?? "").trim() || "用于创建关键行动并生成标准步骤任务";
   return `
     <article class="standard-work-card ${isSelected ? "is-selected" : ""}"${draggable} data-standard-work-template-id="${escapeAttribute(template.id)}" data-process-template-id="${escapeAttribute(template.defaultProcessTemplateId ?? "")}">
       <div class="standard-work-card-title">
@@ -312,24 +318,20 @@ function renderStandardWorkCard(template, selectedProcessTemplateId = "") {
         </div>
         <span class="status-pill ${template.status === TaskTemplateStatus.Inactive ? "is-inactive" : ""}">${taskTemplateStatusNames[template.status]}</span>
       </div>
-      <div class="standard-work-card-meta">
-        <span>所属价值链</span>
-        <strong>${escapeHtml(getStandardWorkValueChain(template))}</strong>
+      <p class="standard-work-card-description">${escapeHtml(description)}</p>
+      <div class="standard-work-card-tags" aria-label="行动标准分类标签">
+        <span>${escapeHtml(departmentName)}</span>
+        <span>${escapeHtml(processStepLabel)}</span>
+        <span>${escapeHtml(currentVersion?.versionNumber || "V1.0")}</span>
       </div>
-      <div class="standard-work-card-meta">
-        <span>责任部门</span>
-        <strong>${escapeHtml(departmentName)}</strong>
+      <div class="standard-work-card-usage">
+        <span>已发起</span>
+        <strong>${launchCount}<em>次</em></strong>
       </div>
-      <div class="standard-work-card-meta">
-        <span>流程</span>
-        <strong>${escapeHtml(processStepLabel)}</strong>
-      </div>
-      <div class="standard-work-card-meta"><span>当前版本</span><strong>${escapeHtml(currentVersion?.versionNumber || "V1.0")}</strong></div>
       <div class="standard-work-card-actions">
-        ${renderTemplateActionButton("查看", "view-task-template", template.id)}
+        ${renderTemplateActionButton("查看详情", "view-task-template", template.id)}
         <button class="secondary-button" type="button" data-template-iterate="action" data-asset-id="${escapeAttribute(template.id)}">迭代</button><button type="button" hidden data-action="edit-task-template" data-template-id="${escapeAttribute(template.id)}"></button>
         <button class="text-button" type="button" data-template-version-history="action" data-asset-id="${escapeAttribute(template.id)}">版本历史</button>
-        ${canLaunchActionTemplate(getCurrentUser(), template.id) ? renderTemplateActionButton("发起", "launch-task-template", template.id) : ""}
       </div>
     </article>
   `;
