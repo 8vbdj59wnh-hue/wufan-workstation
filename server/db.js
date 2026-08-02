@@ -541,7 +541,8 @@ const resourceConfigs = {
     table: "sales_links",
     columns: [
       "id", "shopId", "platformGoodsId", "platformGoodsCode", "title", "canonicalUrl", "rawUrl",
-      "status", "activityStatus", "category", "identityStrength", "lastModifiedAt", "lastSeenBatchId",
+      "status", "activityStatus", "category", "identityStrength", "originSource", "enrichmentStatus",
+      "lastModifiedAt", "lastSeenBatchId",
       "currentState", "missingAt", "lastImportedAt", "createdAt", "updatedAt",
     ],
   },
@@ -1212,6 +1213,32 @@ function ensureColumn(table, column, definition) {
     getDatabase().exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
     console.log(`[db:migrate] added ${table}.${column}`);
   }
+}
+
+function backfillConnectionProfileOrigins() {
+  const database = getDatabase();
+  database.exec(`
+    UPDATE connection_profiles
+    SET originSource=CASE
+          WHEN EXISTS (
+            SELECT 1 FROM connection_data_mappings mapping
+            WHERE mapping.connectionId=connection_profiles.id
+              AND mapping.sourceType='business_advisor'
+              AND mapping.deletedAt IS NULL
+          ) THEN 'legacy_business_advisor_supported'
+          ELSE 'legacy_bulk_initialized'
+        END,
+        identifiedAt=COALESCE(NULLIF(identifiedAt,''),createdAt),
+        originImportBatchId=COALESCE(originImportBatchId,(
+          SELECT snapshot.importBatchId
+          FROM connection_period_snapshots snapshot
+          JOIN connection_data_mappings mapping ON mapping.id=snapshot.mappingId
+          WHERE mapping.connectionId=connection_profiles.id
+            AND mapping.sourceType='business_advisor'
+          ORDER BY snapshot.createdAt,snapshot.id LIMIT 1
+        ))
+    WHERE originSource IS NULL OR originSource='' OR originSource='legacy_unknown'
+  `);
 }
 
 function backfillBusinessIdentifiers() {
@@ -1965,6 +1992,12 @@ function runLightweightMigrations() {
   ensureColumn("connection_profiles", "mainImage", "TEXT");
   ensureColumn("connection_profiles", "imageSource", "TEXT");
   ensureColumn("connection_profiles", "level", "TEXT NOT NULL DEFAULT 'new'");
+  ensureColumn("connection_profiles", "originSource", "TEXT NOT NULL DEFAULT 'legacy_unknown'");
+  ensureColumn("connection_profiles", "originImportBatchId", "TEXT");
+  ensureColumn("connection_profiles", "identifiedAt", "TEXT");
+  ensureColumn("sales_links", "originSource", "TEXT NOT NULL DEFAULT 'legacy_unknown'");
+  ensureColumn("sales_links", "enrichmentStatus", "TEXT NOT NULL DEFAULT 'complete'");
+  backfillConnectionProfileOrigins();
   backfillBusinessIdentifiers();
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS permission_templates (

@@ -943,6 +943,8 @@ CREATE TABLE IF NOT EXISTS sales_links (
   activityStatus TEXT,
   category TEXT,
   identityStrength TEXT NOT NULL,
+  originSource TEXT NOT NULL DEFAULT 'legacy_unknown',
+  enrichmentStatus TEXT NOT NULL DEFAULT 'complete',
   lastModifiedAt TEXT,
   lastSeenBatchId TEXT,
   currentState TEXT NOT NULL DEFAULT 'active',
@@ -1003,10 +1005,14 @@ CREATE TABLE IF NOT EXISTS connection_profiles (
   status TEXT NOT NULL DEFAULT 'active',
   level TEXT NOT NULL DEFAULT 'new',
   notes TEXT,
+  originSource TEXT NOT NULL DEFAULT 'legacy_unknown',
+  originImportBatchId TEXT,
+  identifiedAt TEXT,
   createdBy TEXT,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
   FOREIGN KEY(salesLinkId) REFERENCES sales_links(id),
+  FOREIGN KEY(originImportBatchId) REFERENCES connection_import_batches(id),
   FOREIGN KEY(ownerId) REFERENCES persons(id)
 );
 

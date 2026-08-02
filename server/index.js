@@ -71,6 +71,8 @@ import {
   deleteConnectionAction,
   deleteConnectionDataMapping,
   listAvailableSalesLinks,
+  listConnectionImportShops,
+  listConnectionMappingRepairCandidates,
   listConnectionActions,
   listConnectionDataMappings,
   listConnectionProfiles,
@@ -1767,6 +1769,22 @@ app.get("/api/connections/available-sales-links", requireLinkView, (request, res
     response.json({ success: true, ...listAvailableSalesLinks(request.query) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "可建立连接读取失败。" });
+  }
+});
+
+app.get("/api/connections/import-shops", requireLinkView, (_request, response) => {
+  try {
+    response.json({ success: true, items: listConnectionImportShops() });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "生意参谋店铺读取失败。" });
+  }
+});
+
+app.get("/api/connection-data-mappings/repair-candidates", requireLinkManage, (_request, response) => {
+  try {
+    response.json({ success: true, items: listConnectionMappingRepairCandidates() });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "异常映射修复清单读取失败。" });
   }
 });
 

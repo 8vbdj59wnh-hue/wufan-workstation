@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import XLSX from "xlsx";
 import { getDatabase, uploadsDir } from "./db.js";
-import { createConnectionDataMapping } from "./connectionService.js";
+import { createConnectionDataMapping, ensureBusinessAdvisorConnection } from "./connectionService.js";
 
 const importStatuses = new Set(["draft", "parsed", "validated", "completed", "failed"]);
 const stagingDir = path.resolve(process.env.CONNECTION_IMPORT_DIR || path.join(uploadsDir, "connection-imports"));
@@ -80,7 +80,7 @@ function connectionCandidate(row) {
   };
 }
 
-function buildMatchIndexes() {
+function buildMatchIndexes(shopId = "") {
   const database = getDatabase();
   const links = database.prepare(`
     SELECT l.id AS salesLinkId,l.platformGoodsId,l.platformGoodsCode,l.title AS salesLinkTitle,
@@ -88,8 +88,8 @@ function buildMatchIndexes() {
     FROM sales_links l
     JOIN sales_shops s ON s.id=l.shopId
     LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
-    WHERE COALESCE(l.currentState,'active')='active'
-  `).all();
+    WHERE COALESCE(l.currentState,'active')='active' AND (?='' OR l.shopId=?)
+  `).all(text(shopId), text(shopId));
   const byGoodsId = new Map();
   for (const row of links) {
     const goodsId = text(row.platformGoodsId);
@@ -106,16 +106,18 @@ function uniqueCandidates(rows) {
   return [...new Map(rows.filter(Boolean).map((row) => [row.salesLinkId, connectionCandidate(row)])).values()];
 }
 
-export function matchBusinessAdvisorRows(rows) {
-  const indexes = buildMatchIndexes();
+export function matchBusinessAdvisorRows(rows, shopId = "") {
+  const indexes = buildMatchIndexes(shopId);
   return rows.map((row) => {
     if (row.parseError) return { ...row, previewStatus: "error", matchMethod: null, candidates: [] };
     const direct = uniqueCandidates(indexes.byGoodsId.get(row.externalId) ?? []);
-    if (direct.length === 1 && direct[0].connectionId) {
-      return { ...row, previewStatus: "matched", matchMethod: "goods_id", ...direct[0], candidates: direct };
+    if (direct.length === 1) {
+      return { ...row, previewStatus: "matched", matchMethod: "goods_id", resolutionAction: direct[0].connectionId ? "reuse" : "create_profile", ...direct[0], candidates: direct };
     }
-    const pendingReason = direct.length === 1 ? "missing_connection_profile"
-      : direct.length > 1 ? "ambiguous_goods_id" : "missing_sales_link";
+    if (direct.length === 0 && text(shopId)) {
+      return { ...row, previewStatus: "matched", matchMethod: "goods_id", resolutionAction: "create_sales_link_profile", candidates: [] };
+    }
+    const pendingReason = direct.length > 1 ? "ambiguous_goods_id" : "missing_sales_link";
     return { ...row, previewStatus: "pending", matchMethod: null, pendingReason, candidates: direct };
   });
 }
@@ -137,8 +139,11 @@ export function readConnectionImportBatch(id) {
 
 export function createConnectionImportBatch({ buffer, fileName, businessDate, externalShopId, userId }) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new Error("请选择生意参谋Excel文件。");
+  const shopId = text(externalShopId);
+  const shop = getDatabase().prepare("SELECT id FROM sales_shops WHERE id=? AND status='active'").get(shopId);
+  if (!shop) throw new Error("请选择生意参谋数据对应的平台店铺。");
   const parsed = parseBusinessAdvisorWorkbook(buffer);
-  const matched = matchBusinessAdvisorRows(parsed.rows);
+  const matched = matchBusinessAdvisorRows(parsed.rows, shopId);
   const resolvedBusinessDate = normalizeBusinessDate(businessDate) || parsed.businessDate;
   if (!resolvedBusinessDate) throw new Error("无法确定业务日期，请手动填写。");
   const detectedPeriod = detectPeriodFromFileName(fileName);
@@ -184,7 +189,7 @@ export function previewConnectionImportBatch(id) {
     WHERE m.sourceType=? AND m.externalShopId=? AND m.deletedAt IS NULL
   `).all(batch.sourceType, batch.externalShopId);
   const mappingsByExternalId = new Map(mappings.map((mapping) => [mapping.externalId, mapping]));
-  const rows = matchBusinessAdvisorRows(parsed.rows).map((row) => {
+  const rows = matchBusinessAdvisorRows(parsed.rows, batch.externalShopId).map((row) => {
     const mapping = mappingsByExternalId.get(row.externalId);
     if (!mapping) return row;
     return { ...row, previewStatus: mapping.matchStatus, matchMethod: mapping.matchMethod,
@@ -210,17 +215,17 @@ function activeMapping(sourceType, externalId, externalShopId) {
 
 export function confirmConnectionImportRow(batchId, externalId, _selection, userId) {
   const { batch, row } = findPreviewRow(batchId, externalId);
-  const direct = uniqueCandidates(buildMatchIndexes().byGoodsId.get(row.externalId) ?? []);
-  if (direct.length !== 1) throw new Error("商品ID未唯一匹配销售连接，不能确认。");
-  if (!direct[0].connectionId) throw new Error("该销售连接尚未建立连接档案，请先在待创建连接中建档。");
+  if (!batch.externalShopId) throw new Error("历史批次未记录店铺，不能自动创建连接档案。");
+  const relation = ensureBusinessAdvisorConnection({ importBatchId: batch.id, shopId: batch.externalShopId,
+    platformGoodsId: row.externalId, title: row.goodsName }, userId);
   return createConnectionDataMapping({
     sourceType: batch.sourceType,
     externalType: "product",
     externalId: row.externalId,
     externalShopId: batch.externalShopId,
     externalData: row.externalData,
-    connectionId: direct[0].connectionId,
-    salesLinkId: direct[0].salesLinkId,
+    connectionId: relation.connectionId,
+    salesLinkId: relation.salesLinkId,
     matchStatus: "matched",
     matchMethod: "goods_id",
   }, userId);
@@ -238,21 +243,32 @@ export function commitConnectionImportBatch(id, userId) {
   const database = getDatabase();
   let created = 0;
   let existing = 0;
+  let profilesCreated = 0;
+  let salesLinksCreated = 0;
   const commit = database.transaction(() => {
     for (const row of preview.rows.filter((item) => item.previewStatus === "matched")) {
+      if (!preview.batch.externalShopId) {
+        if (!row.connectionId || !row.salesLinkId) continue;
+      }
+      const relation = preview.batch.externalShopId
+        ? ensureBusinessAdvisorConnection({ importBatchId: preview.batch.id, shopId: preview.batch.externalShopId,
+          platformGoodsId: row.externalId, title: row.goodsName }, userId)
+        : { connectionId: row.connectionId, salesLinkId: row.salesLinkId, profileCreated: false, salesLinkCreated: false };
+      if (relation.profileCreated) profilesCreated += 1;
+      if (relation.salesLinkCreated) salesLinksCreated += 1;
       const current = activeMapping(preview.batch.sourceType, row.externalId, preview.batch.externalShopId);
       if (current) {
-        if (current.matchStatus === "matched" && current.salesLinkId === row.salesLinkId) { existing += 1; continue; }
+        if (current.matchStatus === "matched" && current.salesLinkId === relation.salesLinkId) { existing += 1; continue; }
         throw new Error(`商品 ${row.externalId} 已存在不同映射，请先人工处理。`);
       }
       createConnectionDataMapping({ sourceType: preview.batch.sourceType, externalType: "product", externalId: row.externalId,
-        externalShopId: preview.batch.externalShopId, externalData: row.externalData, connectionId: row.connectionId,
-        salesLinkId: row.salesLinkId, matchStatus: "matched", matchMethod: "goods_id" }, userId);
+        externalShopId: preview.batch.externalShopId, externalData: row.externalData, connectionId: relation.connectionId,
+        salesLinkId: relation.salesLinkId, matchStatus: "matched", matchMethod: "goods_id" }, userId);
       created += 1;
     }
     const now = new Date().toISOString();
     database.prepare("UPDATE connection_import_batches SET status='completed',updatedAt=? WHERE id=?").run(now, preview.batch.id);
   });
   commit();
-  return { batch: readConnectionImportBatch(preview.batch.id), created, existing };
+  return { batch: readConnectionImportBatch(preview.batch.id), created, existing, profilesCreated, salesLinksCreated };
 }

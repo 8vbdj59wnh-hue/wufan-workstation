@@ -11,6 +11,7 @@ export {
   loadConnectionActions,
   loadConnectionDataMappings,
   loadConnectionImportBatches,
+  loadConnectionImportShops,
   loadConnectionImportPreview,
   loadConnectionGrowthAnalysis,
   loadConnectionGrowthRankings,

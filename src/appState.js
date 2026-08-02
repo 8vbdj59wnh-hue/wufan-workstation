@@ -1019,6 +1019,10 @@ export async function loadAvailableSalesLinks(filters = {}) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/available-sales-links${query.size ? `?${query}` : ""}`), "可建立连接读取失败。");
 }
 
+export async function loadConnectionImportShops() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/import-shops`), "生意参谋店铺读取失败。");
+}
+
 export async function loadConnection(connectionId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}`), "连接档案读取失败。");
 }

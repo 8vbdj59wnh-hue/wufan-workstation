@@ -6,6 +6,8 @@ export {
   deleteConnectionAction,
   deleteConnectionDataMapping,
   listAvailableSalesLinks,
+  listConnectionImportShops,
+  listConnectionMappingRepairCandidates,
   listConnectionActions,
   listConnectionDataMappings,
   listConnectionProfiles,
