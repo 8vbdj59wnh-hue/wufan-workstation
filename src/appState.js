@@ -906,6 +906,53 @@ export async function createProductImprovementAction(issueId, payload) {
   }), "产品改善行动创建失败。");
 }
 
+export async function loadSupplyChainOverview() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/overview`), "供应链概览读取失败。");
+}
+
+export async function loadSuppliers(filters = {}) {
+  const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== "" && value !== undefined));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/suppliers${query.size ? `?${query}` : ""}`), "供应商列表读取失败。");
+}
+
+export async function loadSupplier(supplierId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/suppliers/${encodeURIComponent(supplierId)}`), "供应商详情读取失败。");
+}
+
+export async function saveSupplierProfile(payload, supplierId = "") {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/suppliers${supplierId ? `/${encodeURIComponent(supplierId)}` : ""}`, {
+    method: supplierId ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  }), "供应商保存失败。");
+}
+
+export async function addSupplierProductRelation(supplierId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/suppliers/${encodeURIComponent(supplierId)}/products`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "供应产品关联失败。");
+}
+
+export async function deleteSupplierProductRelation(supplierId, relationId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/suppliers/${encodeURIComponent(supplierId)}/products/${encodeURIComponent(relationId)}`, { method: "DELETE" }), "供应产品关系删除失败。");
+}
+
+export async function createSupplyPurchase(payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/purchases`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "采购记录创建失败。");
+}
+
+export async function updateSupplyPurchase(purchaseId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/purchases/${encodeURIComponent(purchaseId)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "采购状态更新失败。");
+}
+
+export async function createSupplyQualityIssue(payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/quality-issues`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "品质问题创建失败。");
+}
+
+export async function updateSupplyQualityIssue(issueId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/quality-issues/${encodeURIComponent(issueId)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "品质问题更新失败。");
+}
+
+export async function saveSupplyEvaluation(payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/evaluations`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "供应商评价保存失败。");
+}
+
 export async function loadConnections() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections`), "连接列表读取失败。");
 }

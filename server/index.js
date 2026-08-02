@@ -129,6 +129,19 @@ import {
 import { normalizeProductSkuCode, splitProductSkuCodes } from "./modules/common/index.js";
 import { getOperationDashboard } from "./operationManagementService.js";
 import {
+  addSupplierProduct,
+  createPurchaseOrder,
+  createQualityIssue,
+  getSupplyChainOverview,
+  listSuppliers,
+  readSupplier,
+  removeSupplierProduct,
+  saveSupplier,
+  saveSupplierEvaluation,
+  updatePurchaseOrder,
+  updateQualityIssue,
+} from "./supplyChainService.js";
+import {
   approveFinanceEntry,
   commitFinanceImportBatch,
   createFinanceImportBatch,
@@ -392,6 +405,10 @@ const requireLinkImport = requireAnyPermission("links.import", "products.edit");
 const requireLinkHealth = requireAnyPermission("links.health", "products.view");
 const requireLinkHealthManage = requireAnyPermission("links.health", "products.edit");
 const requireLinkImprove = requireAnyPermission("links.improve", "products.edit");
+const requireSupplyView = requireAnyPermission("supplyChain.view", "products.view");
+const requireSupplyManage = requireAnyPermission("supplyChain.manage", "products.edit");
+const requireSupplyPurchase = requireAnyPermission("supplyChain.purchase", "products.edit");
+const requireSupplyQuality = requireAnyPermission("supplyChain.quality", "products.edit");
 
 function getRequestedActionTemplateIds(body = {}) {
   return [
@@ -1563,6 +1580,71 @@ app.put("/api/finance/rules/:id", requirePermission("finance.manage"), (request,
 app.delete("/api/finance/rules/:id", requirePermission("finance.manage"), (request, response) => {
   try { removeFinanceRule(request.params.id); response.json({ success: true }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "财务规则删除失败。" }); }
+});
+
+app.get("/api/supply-chain/overview", requireSupplyView, (request, response) => {
+  try {
+    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
+    response.json({ success: true, ...getSupplyChainOverview(), moduleData: {
+      products: scoped.products ?? [], productErpMappings: scoped.productErpMappings ?? [],
+    } });
+  }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "供应链概览读取失败。" }); }
+});
+
+app.get("/api/supply-chain/suppliers", requireSupplyView, (request, response) => {
+  try { response.json({ success: true, items: listSuppliers(request.query) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "供应商列表读取失败。" }); }
+});
+
+app.get("/api/supply-chain/suppliers/:id", requireSupplyView, (request, response) => {
+  try { response.json({ success: true, detail: readSupplier(request.params.id) }); }
+  catch (error) { response.status(404).json({ success: false, message: error.message || "供应商不存在。" }); }
+});
+
+app.post("/api/supply-chain/suppliers", requireSupplyManage, (request, response) => {
+  try { response.status(201).json({ success: true, item: saveSupplier(request.body, request.user.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "供应商创建失败。" }); }
+});
+
+app.put("/api/supply-chain/suppliers/:id", requireSupplyManage, (request, response) => {
+  try { response.json({ success: true, item: saveSupplier(request.body, request.user.id, request.params.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "供应商更新失败。" }); }
+});
+
+app.post("/api/supply-chain/suppliers/:id/products", requireSupplyManage, (request, response) => {
+  try { response.status(201).json({ success: true, item: addSupplierProduct(request.params.id, request.body) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "供应产品关联失败。" }); }
+});
+
+app.delete("/api/supply-chain/suppliers/:id/products/:relationId", requireSupplyManage, (request, response) => {
+  try { response.json(removeSupplierProduct(request.params.id, request.params.relationId)); }
+  catch (error) { response.status(404).json({ success: false, message: error.message || "供应产品关系删除失败。" }); }
+});
+
+app.post("/api/supply-chain/purchases", requireSupplyPurchase, (request, response) => {
+  try { response.status(201).json({ success: true, item: createPurchaseOrder(request.body, request.user.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "采购记录创建失败。" }); }
+});
+
+app.put("/api/supply-chain/purchases/:id", requireSupplyPurchase, (request, response) => {
+  try { response.json({ success: true, item: updatePurchaseOrder(request.params.id, request.body) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "采购状态更新失败。" }); }
+});
+
+app.post("/api/supply-chain/quality-issues", requireSupplyQuality, (request, response) => {
+  try { response.status(201).json({ success: true, item: createQualityIssue(request.body) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "品质问题创建失败。" }); }
+});
+
+app.put("/api/supply-chain/quality-issues/:id", requireSupplyQuality, (request, response) => {
+  try { response.json({ success: true, item: updateQualityIssue(request.params.id, request.body) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "品质问题更新失败。" }); }
+});
+
+app.post("/api/supply-chain/evaluations", requireSupplyManage, (request, response) => {
+  try { response.status(201).json({ success: true, item: saveSupplierEvaluation(request.body, request.user.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "供应商评价保存失败。" }); }
 });
 
 app.get("/api/product-management/overview", requirePermission("products.view"), (request, response) => {

@@ -1305,3 +1305,123 @@ CREATE TABLE IF NOT EXISTS product_improvements (
 
 CREATE INDEX IF NOT EXISTS idx_product_improvements_product_status
   ON product_improvements(productId, status, updatedAt DESC);
+
+CREATE TABLE IF NOT EXISTS suppliers (
+  id TEXT PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  contactName TEXT,
+  contactPhone TEXT,
+  contactEmail TEXT,
+  address TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  notes TEXT,
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(createdBy) REFERENCES persons(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_suppliers_status_name ON suppliers(status, name);
+
+CREATE TABLE IF NOT EXISTS supplier_products (
+  id TEXT PRIMARY KEY,
+  supplierId TEXT NOT NULL,
+  productId TEXT NOT NULL,
+  productErpMappingId TEXT,
+  supplierSkuCode TEXT,
+  unitCost REAL,
+  safetyStock REAL,
+  leadTimeDays INTEGER,
+  isPrimary INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active',
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(supplierId) REFERENCES suppliers(id),
+  FOREIGN KEY(productId) REFERENCES products(id),
+  FOREIGN KEY(productErpMappingId) REFERENCES product_erp_mappings(id),
+  UNIQUE(supplierId, productId, productErpMappingId)
+);
+
+CREATE INDEX IF NOT EXISTS idx_supplier_products_product ON supplier_products(productId, status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_supplier_products_unique_product_level
+  ON supplier_products(supplierId, productId) WHERE productErpMappingId IS NULL;
+CREATE INDEX IF NOT EXISTS idx_supplier_products_supplier ON supplier_products(supplierId, status);
+
+CREATE TABLE IF NOT EXISTS purchase_orders (
+  id TEXT PRIMARY KEY,
+  businessCode TEXT NOT NULL UNIQUE,
+  supplierId TEXT NOT NULL,
+  orderType TEXT NOT NULL DEFAULT 'purchase',
+  status TEXT NOT NULL DEFAULT 'draft',
+  expectedAt TEXT,
+  orderedAt TEXT,
+  receivedAt TEXT,
+  notes TEXT,
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(supplierId) REFERENCES suppliers(id),
+  FOREIGN KEY(createdBy) REFERENCES persons(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_purchase_orders_supplier_status ON purchase_orders(supplierId, status, expectedAt);
+
+CREATE TABLE IF NOT EXISTS purchase_order_items (
+  id TEXT PRIMARY KEY,
+  purchaseOrderId TEXT NOT NULL,
+  productId TEXT NOT NULL,
+  productErpMappingId TEXT,
+  quantity REAL NOT NULL,
+  receivedQuantity REAL NOT NULL DEFAULT 0,
+  unitCost REAL,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(purchaseOrderId) REFERENCES purchase_orders(id) ON DELETE CASCADE,
+  FOREIGN KEY(productId) REFERENCES products(id),
+  FOREIGN KEY(productErpMappingId) REFERENCES product_erp_mappings(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_purchase_order_items_order ON purchase_order_items(purchaseOrderId);
+
+CREATE TABLE IF NOT EXISTS supplier_quality_issues (
+  id TEXT PRIMARY KEY,
+  supplierId TEXT NOT NULL,
+  productId TEXT,
+  purchaseOrderId TEXT,
+  title TEXT NOT NULL,
+  severity TEXT NOT NULL DEFAULT 'medium',
+  status TEXT NOT NULL DEFAULT 'open',
+  description TEXT,
+  resultSummary TEXT,
+  ownerId TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(supplierId) REFERENCES suppliers(id),
+  FOREIGN KEY(productId) REFERENCES products(id),
+  FOREIGN KEY(purchaseOrderId) REFERENCES purchase_orders(id),
+  FOREIGN KEY(ownerId) REFERENCES persons(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_supplier_quality_issues_supplier_status ON supplier_quality_issues(supplierId, status, createdAt DESC);
+
+CREATE TABLE IF NOT EXISTS supplier_evaluations (
+  id TEXT PRIMARY KEY,
+  supplierId TEXT NOT NULL,
+  periodStart TEXT NOT NULL,
+  periodEnd TEXT NOT NULL,
+  costScore REAL NOT NULL,
+  deliveryScore REAL NOT NULL,
+  qualityScore REAL NOT NULL,
+  cooperationScore REAL NOT NULL,
+  totalScore REAL NOT NULL,
+  notes TEXT,
+  evaluatedBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(supplierId) REFERENCES suppliers(id),
+  FOREIGN KEY(evaluatedBy) REFERENCES persons(id),
+  UNIQUE(supplierId, periodStart, periodEnd)
+);
+
+CREATE INDEX IF NOT EXISTS idx_supplier_evaluations_supplier_period ON supplier_evaluations(supplierId, periodEnd DESC);
