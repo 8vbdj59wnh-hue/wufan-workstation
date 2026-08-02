@@ -1,5 +1,6 @@
 import {
   createTemplate,
+  getCurrentUser,
   loadTemplates,
   resolveAssetUrl,
   state,
@@ -7,6 +8,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
 } from "./appState.js?v=20260705-state-singleton1";
+import { bindStandardWorkLibraryEvents, renderStandardWorkLibraryPage } from "./actionStandardsPage.js?v=20260722-action-standards-page1";
+import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js?v=20260802-template-center-v22";
+import { bindSettingsPageEvents, renderFormDesignSection } from "./settingsPage.js?v=20260802-template-center-form1";
 
 const materialTypeNames = {
   image: "图片",
@@ -433,9 +437,9 @@ function renderMaterialCard(material) {
 
 const assetCategories = [
   { id: "visual", name: "视觉模板", description: "图片、设计、拍摄与视频资产" },
-  { id: "action", name: "行动模板", description: "关键行动、流程与任务节点模板" },
-  { id: "form", name: "表单模板", description: "关键行动、任务与工作结果表单" },
-  { id: "standard", name: "工作标准模板", description: "方法论、SOP、作业与检查标准" },
+  { id: "action", name: "关键行动库", description: "价值链、改善行动与标准流程" },
+  { id: "form", name: "表单模板", description: "公共表单、业务表单与流程表单" },
+  { id: "standard", name: "任务操作说明书", description: "SOP、操作步骤、执行与验收标准" },
 ];
 
 function timestamp(value) {
@@ -467,14 +471,14 @@ function getFormAssets() {
     const action = (state.taskTemplates ?? []).find((item) => item.id === form.standardWorkId);
     const fields = form.formSchema?.fields ?? [];
     const tasks = (state.tasks ?? []).filter((task) => task.standardWorkId === form.standardWorkId || task.taskTemplateId === form.standardWorkId);
-    return { id: form.id, category: "form", title: `${action?.name || "行动标准"}表单`, code: action?.businessCode, description: "正式版本化工作表单", status: action?.status || "active",
+    return { id: form.id, category: "form", title: `${action?.name || "关键行动"}表单`, code: action?.businessCode, description: "正式版本化公共表单", status: action?.status || "active", formType: "公共表单", fields,
       tags: ["公共表单", `${fields.length}个字段`], content: fields.map((field) => field.label || field.name).filter(Boolean).join("、") || "空表单",
       scene: "用于关键行动、任务提交与工作结果记录", references: [`行动模板：${action?.name || form.standardWorkId}`, `任务引用：${tasks.length}`],
       useCount: tasks.length, lastUsedAt: latestDate(tasks.map((task) => task.completedAt || task.updatedAt || task.createdAt)), updatedAt: form.updatedAt || form.createdAt, href: "#processes" };
   });
   const inline = (state.taskTemplates ?? []).filter((item) => Array.isArray(item.formFields) && item.formFields.length).map((item) => {
     const tasks = (state.tasks ?? []).filter((task) => task.taskTemplateId === item.id);
-    return { id: `inline-${item.id}`, category: "form", title: `${item.name}任务表单`, code: item.businessCode, description: "行动模板内嵌表单", status: item.status,
+    return { id: `inline-${item.id}`, category: "form", title: `${item.name}任务表单`, code: item.businessCode, description: "关键行动内嵌业务表单", status: item.status, formType: "业务表单", fields: item.formFields,
       tags: ["任务表单", `${item.formFields.length}个字段`], content: item.formFields.map((field) => field.label || field.name).filter(Boolean).join("、"),
       scene: "用于该行动模板生成任务后的提交与验收", references: [`行动模板：${item.name}`, `任务引用：${tasks.length}`], useCount: tasks.length,
       lastUsedAt: latestDate(tasks.map((task) => task.completedAt || task.updatedAt || task.createdAt)), updatedAt: item.updatedAt || item.createdAt, href: "#processes" };
@@ -527,17 +531,19 @@ function renderUnifiedDetail() {
   if (!unifiedDetail) return "";
   const item = getUnifiedAssets().find((candidate) => candidate.id === unifiedDetail);
   if (!item) return "";
+  const formPreview = item.category === "form" ? `<section class="template-form-preview"><h3>完整字段结构与布局</h3><div class="template-form-preview-grid">${(item.fields ?? []).map((field) => `<div class="template-form-preview-field" style="--field-span:${Math.min(12, Math.max(1, Number(field.width) || 12))}"><span>${escapeHtml(field.label || field.name || "未命名字段")}${field.required ? " *" : ""}</span><small>${escapeHtml(field.type || "text")} · 宽度 ${escapeHtml(field.width || 12)}/12</small><div>${escapeHtml(field.placeholder || field.defaultValue || "字段输入区域")}</div></div>`).join("") || `<div class="empty-state compact">当前表单尚未配置字段</div>`}</div></section>` : "";
   return `<div class="modal-backdrop" role="presentation"><div class="modal-panel wide-modal template-asset-detail" role="dialog" aria-modal="true" aria-label="模板详情">
     <div class="modal-header"><div><h2>${escapeHtml(item.title)}</h2><p class="form-note">${escapeHtml(item.code || "无独立编码")} · ${escapeHtml(item.tags.join(" · "))}</p></div><button class="icon-button" type="button" data-action="close-unified-template-detail">×</button></div>
+    ${formPreview}
     <div class="template-asset-detail-grid"><section><h3>模板内容</h3><p>${escapeHtml(item.content)}</p></section><section><h3>使用场景</h3><p>${escapeHtml(item.scene)}</p></section><section><h3>使用记录</h3><p>累计引用 ${item.useCount} 次</p><p>最近使用：${escapeHtml(item.lastUsedAt || "暂无使用记录")}</p></section><section><h3>引用关系</h3>${item.references.map((reference) => `<p>${escapeHtml(reference)}</p>`).join("")}</section></div>
-    <div class="modal-actions"><a class="secondary-button" href="${escapeHtml(item.href)}">进入完整编辑</a><button class="primary-button" type="button" data-action="close-unified-template-detail">关闭</button></div>
+    <div class="modal-actions"><a class="secondary-button" href="${item.category === "form" ? "#templateCenter/form-design" : escapeHtml(item.href)}">进入完整编辑</a><button class="primary-button" type="button" data-action="close-unified-template-detail">关闭</button></div>
   </div></div>`;
 }
 
 function renderUnifiedLibrary() {
   const items = filteredUnifiedAssets();
   return `<div class="template-unified-library"><div class="section-heading"><div><h2>${escapeHtml(assetCategories.find((item) => item.id === assetCategory)?.name)}</h2><p class="form-note">统一查看内容、使用场景、使用记录和引用关系；底层数据与业务引用保持不变。</p></div><div class="template-unified-tools"><input type="search" data-unified-template-keyword value="${escapeHtml(unifiedKeyword)}" placeholder="搜索名称、编码、内容或标签"/><select data-unified-template-order><option value="recent-use" ${unifiedOrder === "recent-use" ? "selected" : ""}>最近使用</option><option value="recent-update" ${unifiedOrder === "recent-update" ? "selected" : ""}>最近更新</option><option value="name" ${unifiedOrder === "name" ? "selected" : ""}>名称</option></select></div></div>
-    <div class="template-asset-grid">${items.map((item) => `<article class="template-asset-card"><div class="template-asset-card-head"><span>${escapeHtml(assetCategories.find((category) => category.id === item.category)?.name)}</span><em>${escapeHtml(item.status || "—")}</em></div><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.description)}</p><div class="template-asset-tags">${item.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div><small>引用 ${item.useCount} 次 · ${escapeHtml(item.lastUsedAt ? `最近使用 ${item.lastUsedAt}` : "暂无使用记录")}</small><button class="secondary-button" type="button" data-unified-template-detail="${escapeHtml(item.id)}">查看详情</button></article>`).join("") || `<div class="empty-state">没有符合条件的模板资产</div>`}</div>${renderUnifiedDetail()}</div>`;
+    <div class="template-asset-grid">${items.map((item) => `<article class="template-asset-card"><div class="template-asset-card-head"><span>${escapeHtml(assetCategories.find((category) => category.id === item.category)?.name)}</span><em>${escapeHtml(item.status || "—")}</em></div><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.description)}</p>${item.category === "form" ? `<dl class="template-form-card-meta"><div><dt>使用场景</dt><dd>${escapeHtml(item.scene)}</dd></div><div><dt>表单类型</dt><dd>${escapeHtml(item.formType || "业务表单")}</dd></div><div><dt>更新时间</dt><dd>${escapeHtml(item.updatedAt || "暂无记录")}</dd></div></dl>` : `<div class="template-asset-tags">${item.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div><small>引用 ${item.useCount} 次 · ${escapeHtml(item.lastUsedAt ? `最近使用 ${item.lastUsedAt}` : "暂无使用记录")}</small>`}<button class="secondary-button" type="button" data-unified-template-detail="${escapeHtml(item.id)}">查看详情</button></article>`).join("") || `<div class="empty-state">没有符合条件的模板资产</div>`}</div>${renderUnifiedDetail()}</div>`;
 }
 
 function renderPreviewModal() {
@@ -620,6 +626,9 @@ function renderEditTagsModal() {
 }
 
 export function renderTemplateCenterPage() {
+  const route = window.location.hash.replace(/^#/, "");
+  const showingFormDesigner = route === "templateCenter/form-design";
+  if (showingFormDesigner) assetCategory = "form";
   const visibleMaterials = getFilteredMaterials();
   const canCreateTemplate = !templateUploading && isValidTemplatePayload({
     previewImage: uploadDraft.previewFile,
@@ -629,9 +638,9 @@ export function renderTemplateCenterPage() {
 
   return `
     <section class="template-center-page">
-      <header class="template-center-hero"><div><h1>模板中心</h1><p>企业视觉、行动、表单与工作标准的统一资产入口</p></div></header>
+      <header class="template-center-hero"><div><h1>模板中心</h1><p>企业视觉、改善行动、业务表单与任务操作标准的统一入口</p></div></header>
       <nav class="template-asset-tabs" aria-label="模板分类">${assetCategories.map((item) => `<button class="${assetCategory === item.id ? "is-active" : ""}" type="button" data-template-asset-category="${item.id}"><strong>${item.name}</strong><span>${item.description}</span></button>`).join("")}</nav>
-      ${assetCategory !== "visual" ? renderUnifiedLibrary() : `
+      ${assetCategory === "action" ? renderStandardWorkLibraryPage() : assetCategory === "standard" ? renderMethodologiesPage(getCurrentUser()) : showingFormDesigner ? `<div class="template-form-designer-header"><a class="text-button" href="#templateCenter">← 返回表单模板</a><h2>表单设计</h2><p class="form-note">继续使用原关键行动公共表单设计能力，保存后原业务引用立即生效。</p></div>${renderFormDesignSection()}` : assetCategory === "form" ? renderUnifiedLibrary() : `
       <div class="template-upload-taxonomy">
         <div class="template-upload-line">
           <label class="template-file-picker">
@@ -680,7 +689,10 @@ export function bindTemplateCenterPageEvents(rerender) {
   const page = document.querySelector(".template-center-page");
   if (page === null) return;
 
-  page.querySelectorAll("[data-template-asset-category]").forEach((button) => button.addEventListener("click", () => { assetCategory = button.dataset.templateAssetCategory; unifiedDetail = null; rerender(); }));
+  page.querySelectorAll("[data-template-asset-category]").forEach((button) => button.addEventListener("click", () => { assetCategory = button.dataset.templateAssetCategory; unifiedDetail = null; if (window.location.hash === "#templateCenter/form-design") window.history.replaceState(null, "", "#templateCenter"); rerender(); }));
+  if (assetCategory === "action") bindStandardWorkLibraryEvents(rerender, page);
+  if (assetCategory === "standard") bindMethodologiesPageEvents(rerender);
+  if (window.location.hash === "#templateCenter/form-design") bindSettingsPageEvents(rerender);
   page.querySelector("[data-unified-template-keyword]")?.addEventListener("input", (event) => { unifiedKeyword = event.target.value; rerender(); window.requestAnimationFrame(() => { const input = document.querySelector("[data-unified-template-keyword]"); input?.focus(); input?.setSelectionRange(event.target.value.length, event.target.value.length); }); });
   page.querySelector("[data-unified-template-order]")?.addEventListener("change", (event) => { unifiedOrder = event.target.value; rerender(); });
   page.querySelectorAll("[data-unified-template-detail]").forEach((button) => button.addEventListener("click", () => { unifiedDetail = button.dataset.unifiedTemplateDetail; rerender(); }));

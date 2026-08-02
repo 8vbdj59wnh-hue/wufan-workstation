@@ -156,13 +156,13 @@ function getMethodologyByNodeId(nodeId) {
   return state.methodologies.find((methodology) => methodology.processNodeId === nodeId) ?? null;
 }
 
-export function getMethodologyLinkByNodeId(nodeId, label = "查看方法论") {
+export function getMethodologyLinkByNodeId(nodeId, label = "查看操作说明书") {
   const methodology = getMethodologyByNodeId(nodeId);
   if (methodology === null) return `<a class="text-button" href="#methods">${label}</a>`;
   return `<a class="text-button" href="#methodology-${methodology.id}">${label}</a>`;
 }
 
-export function getMethodologyLinkByStandardWorkId(standardWorkId, label = "查看方法论") {
+export function getMethodologyLinkByStandardWorkId(standardWorkId, label = "查看操作说明书") {
   const methodology = state.methodologies.find((item) => item.standardWorkId === standardWorkId || item.taskTemplateId === standardWorkId) ?? null;
   if (methodology === null) return `<a class="text-button" href="#methods">${label}</a>`;
   return `<a class="text-button" href="#methodology-${methodology.id}">${label}</a>`;
@@ -242,10 +242,10 @@ function renderMethodologyList() {
     <section class="settings-section methodology-list">
       <div class="section-heading with-actions">
         <div>
-          <h2>方法论列表</h2>
+          <h2>任务操作说明书</h2>
           <p class="form-note">按标准节点沉淀标准操作说明，员工可在任务中查看。</p>
         </div>
-        ${canCreate() ? `<button class="primary-button" type="button" data-action="create-methodology">新增方法论</button>` : ""}
+        ${canCreate() ? `<button class="primary-button" type="button" data-action="create-methodology">新增操作说明书</button>` : ""}
       </div>
       <form class="task-filters methodology-search">
         <label>
@@ -256,10 +256,10 @@ function renderMethodologyList() {
       <div class="table-wrap">
         <table class="data-table">
           <thead>
-            <tr><th>方法论标题</th><th>价值链模块</th><th>适用标准</th><th>适用节点</th><th>适用部门</th><th>内容形式</th><th>状态</th></tr>
+            <tr><th>说明书标题</th><th>价值链模块</th><th>适用标准</th><th>适用节点</th><th>适用部门</th><th>内容形式</th><th>状态</th></tr>
           </thead>
           <tbody>
-            ${items.length === 0 ? `<tr><td colspan="7">暂无方法论</td></tr>` : items
+            ${items.length === 0 ? `<tr><td colspan="7">暂无任务操作说明书</td></tr>` : items
               .map((item) => {
                 const filled = (item.steps ?? []).some((step) => step.instruction || step.imageUrl || step.videoUrl);
                 const node = getMethodologyNode(item);
@@ -337,10 +337,10 @@ function renderMethodologyForm(methodology) {
       <div class="form-error" ${formError === "" ? "hidden" : ""}>${escapeHtml(formError)}</div>
       <div class="modal-actions top-form-actions">
         <button class="secondary-button" type="button" data-action="cancel-methodology-edit">取消</button>
-        <button class="primary-button" type="submit">保存方法论</button>
+        <button class="primary-button" type="submit">保存操作说明书</button>
       </div>
       <label><span>关联标准节点</span><select name="processNodeId">${renderNodeOptions(methodology.processNodeId ?? "")}</select></label>
-      <label><span>方法论标题</span><input name="title" value="${escapeHtml(methodology.title ?? "")}" /></label>
+      <label><span>说明书标题</span><input name="title" value="${escapeHtml(methodology.title ?? "")}" /></label>
       <label><span>简介</span><textarea name="description">${escapeHtml(methodology.description ?? "")}</textarea></label>
       <div class="section-heading with-actions">
         <h3>步骤内容</h3>
@@ -349,7 +349,7 @@ function renderMethodologyForm(methodology) {
       <div class="method-step-editor-list">${steps.map(renderStepEditor).join("")}</div>
       <div class="modal-actions">
         <button class="secondary-button" type="button" data-action="cancel-methodology-edit">取消</button>
-        <button class="primary-button" type="submit">保存方法论</button>
+        <button class="primary-button" type="submit">保存操作说明书</button>
       </div>
     </form>
   `;
@@ -416,13 +416,13 @@ function renderOperationalMethodology(methodology) {
 function renderMethodologyDetail() {
   const selected = getSelectedMethodology();
   if (selected === null && !canCreate()) {
-    return `<section class="settings-section"><div class="empty-note">暂无方法论</div></section>`;
+    return `<section class="settings-section"><div class="empty-note">暂无任务操作说明书</div></section>`;
   }
   const draft = selected ?? { id: "", title: "", steps: [] };
   if (editingId === draft.id || (selected === null && editingId === "new")) {
     return `
       <section class="settings-section methodology-detail">
-        <div class="section-heading"><h2>${editingId === "new" ? "新增方法论" : "编辑方法论"}</h2></div>
+        <div class="section-heading"><h2>${editingId === "new" ? "新增操作说明书" : "编辑操作说明书"}</h2></div>
         ${renderMethodologyForm(draft)}
       </section>
     `;
@@ -436,7 +436,7 @@ function renderMethodologyDetail() {
         </div>
         <div class="row-actions">
           <button class="secondary-button" type="button" data-action="back-to-methodology-list">返回列表</button>
-          ${canEdit() && selected.id !== demoMethodology.id ? `<button class="primary-button" type="button" data-action="edit-methodology" data-methodology-id="${selected.id}">编辑方法论</button>` : ""}
+          ${canEdit() && selected.id !== demoMethodology.id ? `<button class="primary-button" type="button" data-action="edit-methodology" data-methodology-id="${selected.id}">编辑操作说明书</button>` : ""}
         </div>
       </div>
       <div class="methodology-body">${renderOperationalMethodology(selected)}</div>
@@ -515,7 +515,7 @@ async function saveMethodology(form, rerender) {
     window.location.hash = `methodology-${draft.id}`;
     rerender();
   } catch (error) {
-    formError = error.message || "方法论保存失败，请检查本地数据库服务。";
+    formError = error.message || "操作说明书保存失败，请检查本地数据库服务。";
     rerender();
   }
 }
@@ -586,7 +586,7 @@ export function renderMethodologiesPage(currentUser = null) {
   activeUser = currentUser;
   syncSelectedFromHash();
   if (!hasPermission(currentUser, "methods.view")) {
-    return `<div class="methodologies-page"><section class="placeholder"><h2>你没有权限访问方法论模块</h2></section></div>`;
+    return `<div class="methodologies-page"><section class="placeholder"><h2>你没有权限访问任务操作说明书</h2></section></div>`;
   }
   return `
     <div class="methodologies-page">

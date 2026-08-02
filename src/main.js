@@ -5,8 +5,8 @@ import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=
 import { bindTasksPageEvents, renderTasksPage, selectTask } from "./pages/tasksPage.js?v=20260802-module-boundary1";
 import { bindScheduleBoardPageEvents, renderScheduleBoardPage } from "./scheduleBoardPage.js?v=20260722-due-date-boundary2";
 import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260802-dashboard-v21";
-import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js?v=20260802-template-center-v21";
-import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js?v=20260802-template-center-v21";
+import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js?v=20260802-template-center-v22";
+import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js?v=20260802-template-center-v22";
 import { bindProductCenterPageEvents, renderProductCenterPage } from "./pages/productCenterPage.js?v=20260802-module-boundary1";
 import { bindDataCenterPageEvents, renderDataCenterPage } from "./dataCenterPage.js?v=20260729-data-center-v5";
 import { bindConnectionCenterPageEvents, renderConnectionCenterPage } from "./pages/connectionCenterPage.js?v=20260802-module-boundary1";
@@ -166,6 +166,7 @@ function scrollToCurrentHashSection() {
 
 function getModuleIdFromHash() {
   const hash = getRouteHash();
+  if (hash.startsWith("templateCenter/")) return "templateCenter";
   if (hash.startsWith("products/")) return "products";
   if (hash.startsWith("process-template-")) return "processes";
   if (hash.startsWith("methodology-")) return "processes";
