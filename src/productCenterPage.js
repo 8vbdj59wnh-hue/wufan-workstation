@@ -33,7 +33,7 @@ import {
 } from "./services/productCenterService.js?v=20260802-module-boundary1";
 import { getCurrentUser, state } from "./stores/appStore.js?v=20260802-module-boundary1";
 import { getProcessInstanceBusinessStatus, getProcessInstanceOwner } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
-import { hasPermission } from "./permissions.js?v=20260725-product-center1";
+import { canAccessModule, hasPermission } from "./permissions.js?v=20260725-product-center1";
 import { normalizeProductSkuCode } from "./data/productSku.js?v=20260728-product-sku1";
 import { escapeHtml } from "./utils/html.js?v=20260802-module-boundary1";
 
@@ -281,6 +281,7 @@ function renderProductList() {
       <div class="section-heading with-actions">
         <div><h1>产品中心</h1><p>以 SKU 为单位维护唯一产品主数据</p></div>
         <div class="heading-actions">
+          ${canAccessModule(getCurrentUser(), "dataCenter") ? `<button class="secondary-button" type="button" data-action="open-product-analysis">经营分析</button>` : ""}
           ${canCreate ? `<button class="secondary-button" type="button" data-action="open-product-v2-import">导入ERP数据</button><button class="primary-button" type="button" data-action="new-product">新增产品</button>` : ""}
         </div>
       </div>
@@ -1584,6 +1585,7 @@ export function bindProductCenterPageEvents(rerender) {
       rerender();
     }
     if (action === "new-product") { modalState = { kind: "create", error: "" }; rerender(); }
+    if (action === "open-product-analysis") { window.location.hash = "dataCenter"; }
     if (action === "open-product-import") {
       importState = { version: "v2", step: "upload", importType: "goods_info", loading: false, error: "" };
       rerender();

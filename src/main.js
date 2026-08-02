@@ -10,6 +10,7 @@ import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templa
 import { bindProductCenterPageEvents, renderProductCenterPage } from "./pages/productCenterPage.js?v=20260802-module-boundary1";
 import { bindDataCenterPageEvents, renderDataCenterPage } from "./dataCenterPage.js?v=20260729-data-center-v5";
 import { bindConnectionCenterPageEvents, renderConnectionCenterPage } from "./pages/connectionCenterPage.js?v=20260802-module-boundary1";
+import { bindOperationDashboardPageEvents, renderOperationDashboardPage } from "./operationDashboardPage.js?v=20260802-operation-foundation1";
 import { bindProductPreviewEvents, closeProductPreview, openProductPreview, renderProductPreviewModal } from "./productPreview.js?v=20260725-product-preview1";
 import { attachThumbnailHoverPreview } from "./thumbnailPreview.js?v=20260723-task-card-static1";
 import {
@@ -74,6 +75,8 @@ app.addEventListener("click", (event) => {
 
 const moduleHashMap = {
   goals: "goals",
+  operationDashboard: "operationDashboard",
+  "operation-dashboard": "operationDashboard",
   tasks: "tasks",
   scheduleBoard: "scheduleBoard",
   "schedule-board": "scheduleBoard",
@@ -390,6 +393,10 @@ function renderPage() {
     content = renderDataCenterPage();
   }
 
+  if (canAccessActiveModule && activeModule.id === "operationDashboard") {
+    content = renderOperationDashboardPage();
+  }
+
   if (canAccessActiveModule && activeModule.id === "connectionCenter") {
     content = renderConnectionCenterPage();
   }
@@ -668,6 +675,10 @@ function render({ navigation = false } = {}) {
 
   if (activeModuleId === "dataCenter") {
     bindDataCenterPageEvents(render);
+  }
+
+  if (activeModuleId === "operationDashboard") {
+    bindOperationDashboardPageEvents(render);
   }
 
   if (activeModuleId === "connectionCenter") {

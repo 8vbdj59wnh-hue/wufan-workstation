@@ -829,6 +829,11 @@ export async function loadDataCenterProductDetail(productId, source) {
   return readApiJson(response, "产品分析详情读取失败。");
 }
 
+export async function loadOperationDashboard() {
+  const response = await authFetch(`${apiBaseUrl}/api/operation-dashboard`);
+  return readApiJson(response, "经营驾驶舱读取失败。");
+}
+
 export async function loadConnections() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections`), "连接列表读取失败。");
 }

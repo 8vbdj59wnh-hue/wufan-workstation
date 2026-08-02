@@ -126,6 +126,7 @@ import {
   hasPermission,
 } from "./modules/auth/index.js";
 import { normalizeProductSkuCode, splitProductSkuCodes } from "./modules/common/index.js";
+import { getOperationDashboard } from "./operationManagementService.js";
 
 const app = express();
 const host = process.env.HOST ?? "0.0.0.0";
@@ -1442,6 +1443,14 @@ app.get("/api/data-center/summary", requirePermission("dataCenter.view"), (_requ
     response.json({ success: true, summary: getDataCenterSummary() });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "数据中心概览读取失败。" });
+  }
+});
+
+app.get("/api/operation-dashboard", requirePermission("dataCenter.view"), (_request, response) => {
+  try {
+    response.json({ success: true, dashboard: getOperationDashboard() });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "经营驾驶舱读取失败。" });
   }
 });
 

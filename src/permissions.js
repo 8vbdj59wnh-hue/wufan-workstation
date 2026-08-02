@@ -381,6 +381,7 @@ export function canAccessModule(userOrPermissions, moduleId) {
     methods: "methods",
     settings: "settings",
     products: "products",
+    operationDashboard: "dataCenter",
     dataCenter: "dataCenter",
     connectionCenter: "products",
   };
@@ -388,7 +389,7 @@ export function canAccessModule(userOrPermissions, moduleId) {
   if (moduleId === "products") {
     return hasPermission(userOrPermissions, "products.view");
   }
-  if (moduleId === "dataCenter") {
+  if (moduleId === "dataCenter" || moduleId === "operationDashboard") {
     return hasPermission(userOrPermissions, "dataCenter.view");
   }
   if (moduleId === "connectionCenter") {
