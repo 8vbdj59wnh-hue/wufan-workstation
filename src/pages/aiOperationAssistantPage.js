@@ -1,1 +1,1 @@
-export { bindAiOperationAssistantPageEvents,renderAiOperationAssistantPage } from "../aiOperationAssistantPage.js?v=20260802-ai-operation1";
+export { bindAiOperationAssistantPageEvents,renderAiOperationAssistantPage } from "../aiOperationAssistantPage.js?v=20260802-ai-operation2";
