@@ -52,6 +52,10 @@ let templatesLoaded = false;
 let templatesLoading = false;
 let templateError = "";
 let templateUploading = false;
+let assetCategory = "visual";
+let unifiedKeyword = "";
+let unifiedOrder = "recent-use";
+let unifiedDetail = null;
 
 function createEmptyTags() {
   return Object.fromEntries(getTemplateTagCategories({ includeInactive: true }).map((category) => [category.id, []]));
@@ -427,6 +431,115 @@ function renderMaterialCard(material) {
   `;
 }
 
+const assetCategories = [
+  { id: "visual", name: "视觉模板", description: "图片、设计、拍摄与视频资产" },
+  { id: "action", name: "行动模板", description: "关键行动、流程与任务节点模板" },
+  { id: "form", name: "表单模板", description: "关键行动、任务与工作结果表单" },
+  { id: "standard", name: "工作标准模板", description: "方法论、SOP、作业与检查标准" },
+];
+
+function timestamp(value) {
+  const parsed = new Date(value ?? 0).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function latestDate(values) {
+  return values.filter(Boolean).sort((left, right) => timestamp(right) - timestamp(left))[0] ?? "";
+}
+
+function getActionAssets() {
+  return (state.taskTemplates ?? []).map((item) => {
+    const process = (state.processTemplates ?? []).find((candidate) => candidate.id === item.defaultProcessTemplateId);
+    const nodes = (state.processTemplateNodes ?? []).filter((node) => node.templateId === process?.id);
+    const instances = (state.processInstances ?? []).filter((instance) => instance.taskTemplateId === item.id || instance.templateId === process?.id);
+    return { id: item.id, category: "action", title: item.name, code: item.businessCode, description: item.description || item.completionStandard || "未填写说明", status: item.status,
+      tags: [process ? `流程 v${process.version ?? 1}` : "未绑定流程", `${nodes.length}个标准节点`, item.needAcceptance ? "需要验收" : "无需验收"],
+      content: process ? `${process.name}；${nodes.map((node) => node.name).join(" → ") || "尚未配置节点"}` : "尚未绑定关键行动标准流程",
+      scene: process?.purpose || item.description || "用于创建关键行动并生成标准任务",
+      references: [`流程：${process?.name || "未绑定"}`, `节点：${nodes.length}`, `已发起关键行动：${instances.length}`],
+      useCount: instances.length, lastUsedAt: latestDate(instances.map((instance) => instance.startedAt || instance.createdAt)), updatedAt: item.updatedAt || item.createdAt,
+      href: "#processes" };
+  });
+}
+
+function getFormAssets() {
+  const formal = (state.standardWorkForms ?? []).map((form) => {
+    const action = (state.taskTemplates ?? []).find((item) => item.id === form.standardWorkId);
+    const fields = form.formSchema?.fields ?? [];
+    const tasks = (state.tasks ?? []).filter((task) => task.standardWorkId === form.standardWorkId || task.taskTemplateId === form.standardWorkId);
+    return { id: form.id, category: "form", title: `${action?.name || "行动标准"}表单`, code: action?.businessCode, description: "正式版本化工作表单", status: action?.status || "active",
+      tags: ["公共表单", `${fields.length}个字段`], content: fields.map((field) => field.label || field.name).filter(Boolean).join("、") || "空表单",
+      scene: "用于关键行动、任务提交与工作结果记录", references: [`行动模板：${action?.name || form.standardWorkId}`, `任务引用：${tasks.length}`],
+      useCount: tasks.length, lastUsedAt: latestDate(tasks.map((task) => task.completedAt || task.updatedAt || task.createdAt)), updatedAt: form.updatedAt || form.createdAt, href: "#processes" };
+  });
+  const inline = (state.taskTemplates ?? []).filter((item) => Array.isArray(item.formFields) && item.formFields.length).map((item) => {
+    const tasks = (state.tasks ?? []).filter((task) => task.taskTemplateId === item.id);
+    return { id: `inline-${item.id}`, category: "form", title: `${item.name}任务表单`, code: item.businessCode, description: "行动模板内嵌表单", status: item.status,
+      tags: ["任务表单", `${item.formFields.length}个字段`], content: item.formFields.map((field) => field.label || field.name).filter(Boolean).join("、"),
+      scene: "用于该行动模板生成任务后的提交与验收", references: [`行动模板：${item.name}`, `任务引用：${tasks.length}`], useCount: tasks.length,
+      lastUsedAt: latestDate(tasks.map((task) => task.completedAt || task.updatedAt || task.createdAt)), updatedAt: item.updatedAt || item.createdAt, href: "#processes" };
+  });
+  return [...formal, ...inline];
+}
+
+function getStandardAssets() {
+  const methodologyAssets = (state.methodologies ?? []).map((item) => {
+    const action = (state.taskTemplates ?? []).find((candidate) => candidate.id === item.taskTemplateId || candidate.id === item.standardWorkId);
+    const node = (state.processTemplateNodes ?? []).find((candidate) => candidate.id === item.processNodeId);
+    const tasks = (state.tasks ?? []).filter((task) => task.processNodeId === item.processNodeId || task.taskTemplateId === item.taskTemplateId);
+    const steps = Array.isArray(item.steps) ? item.steps : [];
+    return { id: item.id, category: "standard", title: item.title, description: item.description || "未填写说明", status: "active",
+      tags: [node ? "节点作业标准" : "通用方法论", `${steps.length}个步骤`], content: steps.map((step) => step.title || step.name || step).join(" → ") || item.description || "暂无步骤",
+      scene: action ? `适用于行动模板：${action.name}` : node ? `适用于标准节点：${node.name}` : "企业通用工作标准",
+      references: [`行动模板：${action?.name || "未绑定"}`, `标准节点：${node?.name || "未绑定"}`, `任务引用：${tasks.length}`], useCount: tasks.length,
+      lastUsedAt: latestDate(tasks.map((task) => task.completedAt || task.updatedAt || task.createdAt)), updatedAt: item.updatedAt || item.createdAt,
+      href: `#methodology-${item.id}` };
+  });
+  const methodologyNodeIds = new Set((state.methodologies ?? []).map((item) => item.processNodeId).filter(Boolean));
+  const nodeAssets = (state.processTemplateNodes ?? []).filter((node) => !methodologyNodeIds.has(node.id)).map((node) => {
+    const process = (state.processTemplates ?? []).find((item) => item.id === node.templateId);
+    const action = (state.taskTemplates ?? []).find((item) => item.defaultProcessTemplateId === node.templateId);
+    const tasks = (state.tasks ?? []).filter((task) => task.processNodeId === node.id);
+    const standards = [node.completionStandard, node.reviewStandard, node.outputRequirement].filter(Boolean);
+    return { id: `node-${node.id}`, category: "standard", title: `${node.name}工作标准`, description: node.description || node.completionStandard || "流程节点作业标准", status: node.status,
+      tags: [node.needAcceptance ? "检查标准" : "作业标准", node.submitType || "任务执行"], content: standards.join("；") || "尚未填写完成与检查标准",
+      scene: `${process?.name || "关键行动流程"} · ${node.stageName || "标准步骤"}`,
+      references: [`行动模板：${action?.name || "未绑定"}`, `流程：${process?.name || node.templateId}`, `任务引用：${tasks.length}`], useCount: tasks.length,
+      lastUsedAt: latestDate(tasks.map((task) => task.completedAt || task.updatedAt || task.createdAt)), updatedAt: node.updatedAt || node.createdAt, href: "#processes" };
+  });
+  return [...methodologyAssets, ...nodeAssets];
+}
+
+function getUnifiedAssets() {
+  if (assetCategory === "action") return getActionAssets();
+  if (assetCategory === "form") return getFormAssets();
+  if (assetCategory === "standard") return getStandardAssets();
+  return [];
+}
+
+function filteredUnifiedAssets() {
+  const keyword = unifiedKeyword.trim().toLowerCase();
+  return getUnifiedAssets().filter((item) => `${item.title} ${item.code || ""} ${item.description} ${item.tags.join(" ")} ${item.content}`.toLowerCase().includes(keyword))
+    .sort((left, right) => unifiedOrder === "name" ? left.title.localeCompare(right.title, "zh-Hans-CN") : unifiedOrder === "recent-update" ? timestamp(right.updatedAt) - timestamp(left.updatedAt) : timestamp(right.lastUsedAt || right.updatedAt) - timestamp(left.lastUsedAt || left.updatedAt));
+}
+
+function renderUnifiedDetail() {
+  if (!unifiedDetail) return "";
+  const item = getUnifiedAssets().find((candidate) => candidate.id === unifiedDetail);
+  if (!item) return "";
+  return `<div class="modal-backdrop" role="presentation"><div class="modal-panel wide-modal template-asset-detail" role="dialog" aria-modal="true" aria-label="模板详情">
+    <div class="modal-header"><div><h2>${escapeHtml(item.title)}</h2><p class="form-note">${escapeHtml(item.code || "无独立编码")} · ${escapeHtml(item.tags.join(" · "))}</p></div><button class="icon-button" type="button" data-action="close-unified-template-detail">×</button></div>
+    <div class="template-asset-detail-grid"><section><h3>模板内容</h3><p>${escapeHtml(item.content)}</p></section><section><h3>使用场景</h3><p>${escapeHtml(item.scene)}</p></section><section><h3>使用记录</h3><p>累计引用 ${item.useCount} 次</p><p>最近使用：${escapeHtml(item.lastUsedAt || "暂无使用记录")}</p></section><section><h3>引用关系</h3>${item.references.map((reference) => `<p>${escapeHtml(reference)}</p>`).join("")}</section></div>
+    <div class="modal-actions"><a class="secondary-button" href="${escapeHtml(item.href)}">进入完整编辑</a><button class="primary-button" type="button" data-action="close-unified-template-detail">关闭</button></div>
+  </div></div>`;
+}
+
+function renderUnifiedLibrary() {
+  const items = filteredUnifiedAssets();
+  return `<div class="template-unified-library"><div class="section-heading"><div><h2>${escapeHtml(assetCategories.find((item) => item.id === assetCategory)?.name)}</h2><p class="form-note">统一查看内容、使用场景、使用记录和引用关系；底层数据与业务引用保持不变。</p></div><div class="template-unified-tools"><input type="search" data-unified-template-keyword value="${escapeHtml(unifiedKeyword)}" placeholder="搜索名称、编码、内容或标签"/><select data-unified-template-order><option value="recent-use" ${unifiedOrder === "recent-use" ? "selected" : ""}>最近使用</option><option value="recent-update" ${unifiedOrder === "recent-update" ? "selected" : ""}>最近更新</option><option value="name" ${unifiedOrder === "name" ? "selected" : ""}>名称</option></select></div></div>
+    <div class="template-asset-grid">${items.map((item) => `<article class="template-asset-card"><div class="template-asset-card-head"><span>${escapeHtml(assetCategories.find((category) => category.id === item.category)?.name)}</span><em>${escapeHtml(item.status || "—")}</em></div><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.description)}</p><div class="template-asset-tags">${item.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div><small>引用 ${item.useCount} 次 · ${escapeHtml(item.lastUsedAt ? `最近使用 ${item.lastUsedAt}` : "暂无使用记录")}</small><button class="secondary-button" type="button" data-unified-template-detail="${escapeHtml(item.id)}">查看详情</button></article>`).join("") || `<div class="empty-state">没有符合条件的模板资产</div>`}</div>${renderUnifiedDetail()}</div>`;
+}
+
 function renderPreviewModal() {
   const material = getMaterials().find((item) => item.id === previewMaterialId);
   if (material === undefined) return "";
@@ -516,6 +629,9 @@ export function renderTemplateCenterPage() {
 
   return `
     <section class="template-center-page">
+      <header class="template-center-hero"><div><h1>模板中心</h1><p>企业视觉、行动、表单与工作标准的统一资产入口</p></div></header>
+      <nav class="template-asset-tabs" aria-label="模板分类">${assetCategories.map((item) => `<button class="${assetCategory === item.id ? "is-active" : ""}" type="button" data-template-asset-category="${item.id}"><strong>${item.name}</strong><span>${item.description}</span></button>`).join("")}</nav>
+      ${assetCategory !== "visual" ? renderUnifiedLibrary() : `
       <div class="template-upload-taxonomy">
         <div class="template-upload-line">
           <label class="template-file-picker">
@@ -553,6 +669,7 @@ export function renderTemplateCenterPage() {
           }
         </div>
       </div>
+      `}
       ${renderPreviewModal()}
       ${renderEditTagsModal()}
     </section>
@@ -562,6 +679,12 @@ export function renderTemplateCenterPage() {
 export function bindTemplateCenterPageEvents(rerender) {
   const page = document.querySelector(".template-center-page");
   if (page === null) return;
+
+  page.querySelectorAll("[data-template-asset-category]").forEach((button) => button.addEventListener("click", () => { assetCategory = button.dataset.templateAssetCategory; unifiedDetail = null; rerender(); }));
+  page.querySelector("[data-unified-template-keyword]")?.addEventListener("input", (event) => { unifiedKeyword = event.target.value; rerender(); window.requestAnimationFrame(() => { const input = document.querySelector("[data-unified-template-keyword]"); input?.focus(); input?.setSelectionRange(event.target.value.length, event.target.value.length); }); });
+  page.querySelector("[data-unified-template-order]")?.addEventListener("change", (event) => { unifiedOrder = event.target.value; rerender(); });
+  page.querySelectorAll("[data-unified-template-detail]").forEach((button) => button.addEventListener("click", () => { unifiedDetail = button.dataset.unifiedTemplateDetail; rerender(); }));
+  page.querySelectorAll('[data-action="close-unified-template-detail"]').forEach((button) => button.addEventListener("click", () => { unifiedDetail = null; rerender(); }));
 
   page.querySelector("[data-template-keyword]")?.addEventListener("input", (event) => {
     filters.keyword = event.target.value;

@@ -388,6 +388,8 @@ export function canAccessTemplateCenter(userOrPermissions) {
   const role = userOrPermissions.role ?? userOrPermissions.authRole ?? "user";
   if (["admin", "system_admin", "company_manager"].includes(role)) return true;
   if (hasPermission(userOrPermissions, "settings.viewStandardWorks")) return true;
+  if (hasPermission(userOrPermissions, "processes.viewTemplates")) return true;
+  if (hasPermission(userOrPermissions, "methods.view")) return true;
 
   // 临时兼容：模板中心还没有独立权限项，先按视觉/营销/运营/渠道相关部门开放。
   const departmentId = String(userOrPermissions.departmentId ?? "").toLowerCase();

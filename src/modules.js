@@ -14,6 +14,7 @@ export const modules = [
   {
     id: "processes",
     name: "行动标准",
+    hidden: true,
   },
   {
     id: "products",

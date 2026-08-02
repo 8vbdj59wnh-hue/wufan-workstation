@@ -5,8 +5,8 @@ import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=
 import { bindTasksPageEvents, renderTasksPage, selectTask } from "./pages/tasksPage.js?v=20260802-module-boundary1";
 import { bindScheduleBoardPageEvents, renderScheduleBoardPage } from "./scheduleBoardPage.js?v=20260722-due-date-boundary2";
 import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260717-work-results-dashboard1";
-import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260705-state-singleton1";
-import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js?v=20260705-state-singleton1";
+import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js?v=20260802-template-center-v21";
+import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js?v=20260802-template-center-v21";
 import { bindProductCenterPageEvents, renderProductCenterPage } from "./pages/productCenterPage.js?v=20260802-module-boundary1";
 import { bindDataCenterPageEvents, renderDataCenterPage } from "./dataCenterPage.js?v=20260729-data-center-v5";
 import { bindConnectionCenterPageEvents, renderConnectionCenterPage } from "./pages/connectionCenterPage.js?v=20260802-module-boundary1";
@@ -180,7 +180,7 @@ function getActiveModule() {
 }
 
 function getAccessibleModules() {
-  return modules.filter((module) => canAccessModule(getCurrentUser(), module.id));
+  return modules.filter((module) => !module.hidden && canAccessModule(getCurrentUser(), module.id));
 }
 
 function escapeHtml(value) {
@@ -386,7 +386,9 @@ function renderPage() {
   }
 
   if (activeModule.id === "processes") {
-    content = renderProcessesPage();
+    content = /^(#methods|#methodologies|#methodology-)/.test(window.location.hash)
+      ? renderMethodologiesPage(currentUser)
+      : renderProcessesPage();
   }
 
   if (activeModule.id === "assessment") {
