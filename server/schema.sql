@@ -447,6 +447,27 @@ CREATE TABLE IF NOT EXISTS standard_work_forms (
   updatedAt TEXT
 );
 
+CREATE TABLE IF NOT EXISTS template_asset_versions (
+  id TEXT PRIMARY KEY,
+  assetType TEXT NOT NULL,
+  assetId TEXT NOT NULL,
+  versionNumber TEXT NOT NULL,
+  majorVersion INTEGER NOT NULL,
+  minorVersion INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  contentJson TEXT NOT NULL,
+  changeSummary TEXT,
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  activatedAt TEXT,
+  deactivatedAt TEXT,
+  archivedAt TEXT,
+  UNIQUE(assetType, assetId, versionNumber)
+);
+
+CREATE INDEX IF NOT EXISTS idx_template_asset_versions_asset ON template_asset_versions(assetType, assetId, majorVersion DESC, minorVersion DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_template_asset_versions_active ON template_asset_versions(assetType, assetId) WHERE status = 'active';
+
 CREATE TABLE IF NOT EXISTS notifications (
   id TEXT PRIMARY KEY,
   userId TEXT NOT NULL,

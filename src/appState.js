@@ -54,6 +54,7 @@ const processExecutorInitiatorRule = "initiator";
 let persistenceAvailable = false;
 let loadedFromDatabase = false;
 let currentUser = null;
+const pendingTemplateIterations = new Map();
 let taskWavesLoaded = false;
 let persistenceStatus = {
   kind: "warning",
@@ -89,6 +90,7 @@ export const state = {
   templateTags: initialTemplateTags.map((tag) => ({ ...tag })),
   issuesRequirements: initialIssuesRequirements.map((item) => ({ ...item })),
   standardWorkForms: initialStandardWorkForms.map((form) => ({ ...form })),
+  templateAssetVersions: [],
   products: [],
   actionProducts: [],
   productImportBatches: [],
@@ -629,14 +631,56 @@ export async function createPersistentResource(resource, item) {
 }
 
 export async function updatePersistentResource(resource, id, item) {
-  const response = await authFetch(`${apiBaseUrl}/api/${resource}/${id}`, {
-    method: "PUT",
+  const versionTypes = { templates: "visual", "task-templates": "action", "standard-work-forms": "form", methodologies: "manual" };
+  const assetType = versionTypes[resource];
+  const iterationKey = assetType ? `${assetType}:${id}` : "";
+  const iteration = pendingTemplateIterations.get(iterationKey) ?? { bump: "minor", changeSummary: "内容迭代" };
+  const response = await authFetch(assetType ? `${apiBaseUrl}/api/template-assets/${assetType}/${encodeURIComponent(id)}/iterate` : `${apiBaseUrl}/api/${resource}/${id}`, {
+    method: assetType ? "POST" : "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(item),
+    body: JSON.stringify(assetType ? { content: item, ...iteration } : item),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.message ?? data.error ?? "保存失败，请检查本地数据库服务。");
-  return data;
+  if (assetType && data.version) {
+    pendingTemplateIterations.delete(iterationKey);
+    state.templateAssetVersions = [data.version, ...state.templateAssetVersions.filter((version) => !(version.assetType === assetType && version.assetId === id && version.status === "active"))];
+  }
+  return assetType ? data.item : data;
+}
+
+export function prepareTemplateIteration(assetType, assetId, options = {}) {
+  pendingTemplateIterations.set(`${assetType}:${assetId}`, {
+    bump: options.bump === "major" ? "major" : "minor",
+    changeSummary: String(options.changeSummary ?? "内容迭代").trim() || "内容迭代",
+  });
+}
+
+export async function loadTemplateAssetVersions(assetType = "", assetId = "") {
+  const query = new URLSearchParams();
+  if (assetType) query.set("assetType", assetType);
+  if (assetId) query.set("assetId", assetId);
+  const response = await authFetch(`${apiBaseUrl}/api/template-assets/versions${query.size ? `?${query}` : ""}`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.message ?? data.error ?? "模板版本读取失败。");
+  const items = data.items ?? [];
+  state.templateAssetVersions = assetType || assetId
+    ? [...items, ...state.templateAssetVersions.filter((version) => !(
+      (!assetType || version.assetType === assetType) && (!assetId || version.assetId === assetId)
+    ))]
+    : items;
+  return state.templateAssetVersions;
+}
+
+export async function changeTemplateAssetVersionStatus(assetType, assetId, versionId, action) {
+  const response = await authFetch(`${apiBaseUrl}/api/template-assets/${encodeURIComponent(assetType)}/${encodeURIComponent(assetId)}/versions/${encodeURIComponent(versionId)}/${encodeURIComponent(action)}`, { method: "POST" });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.message ?? data.error ?? "模板版本状态更新失败。");
+  state.templateAssetVersions = [
+    ...(data.items ?? []),
+    ...state.templateAssetVersions.filter((version) => !(version.assetType === assetType && version.assetId === assetId)),
+  ];
+  return data.items ?? [];
 }
 
 export async function previewProductSkuChange(productId, item) {

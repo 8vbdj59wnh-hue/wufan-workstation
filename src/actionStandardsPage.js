@@ -301,6 +301,8 @@ function renderStandardWorkCard(template, selectedProcessTemplateId = "") {
   const departmentName = findName(departments, template.departmentId, "未设置");
   const processStepCount = template.defaultProcessTemplateId ? getStandardWorkProcessNodes(template.defaultProcessTemplateId).length : 0;
   const processStepLabel = processStepCount > 0 ? `${processStepCount}步` : "未配置";
+  const versions = (state.templateAssetVersions ?? []).filter((item) => item.assetType === "action" && item.assetId === template.id);
+  const currentVersion = versions.find((item) => item.status === "active") ?? versions.sort((left, right) => right.majorVersion - left.majorVersion || right.minorVersion - left.minorVersion)[0];
   return `
     <article class="standard-work-card ${isSelected ? "is-selected" : ""}"${draggable} data-standard-work-template-id="${escapeAttribute(template.id)}" data-process-template-id="${escapeAttribute(template.defaultProcessTemplateId ?? "")}">
       <div class="standard-work-card-title">
@@ -322,9 +324,11 @@ function renderStandardWorkCard(template, selectedProcessTemplateId = "") {
         <span>流程</span>
         <strong>${escapeHtml(processStepLabel)}</strong>
       </div>
+      <div class="standard-work-card-meta"><span>当前版本</span><strong>${escapeHtml(currentVersion?.versionNumber || "V1.0")}</strong></div>
       <div class="standard-work-card-actions">
         ${renderTemplateActionButton("查看", "view-task-template", template.id)}
-        ${renderTemplateActionButton("编辑", "edit-task-template", template.id)}
+        <button class="secondary-button" type="button" data-template-iterate="action" data-asset-id="${escapeAttribute(template.id)}">迭代</button><button type="button" hidden data-action="edit-task-template" data-template-id="${escapeAttribute(template.id)}"></button>
+        <button class="text-button" type="button" data-template-version-history="action" data-asset-id="${escapeAttribute(template.id)}">版本历史</button>
         ${canLaunchActionTemplate(getCurrentUser(), template.id) ? renderTemplateActionButton("发起", "launch-task-template", template.id) : ""}
       </div>
     </article>

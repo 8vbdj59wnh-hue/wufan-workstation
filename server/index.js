@@ -165,6 +165,14 @@ import {
   getProductBusinessAnalysis,
   productLifecycleStatuses,
 } from "./productManagementV2Service.js";
+import {
+  bootstrapTemplateVersions,
+  changeTemplateVersionStatus,
+  ensureInitialTemplateVersion,
+  iterateTemplate,
+  listTemplateVersions,
+  versionedTemplateResources,
+} from "./templateVersionService.js";
 
 const app = express();
 const host = process.env.HOST ?? "0.0.0.0";
@@ -218,6 +226,7 @@ const uploadFinanceWorkbook = multer({
 });
 
 initializeDatabase();
+bootstrapTemplateVersions();
 fs.mkdirSync(imageUploadsDir, { recursive: true });
 fs.mkdirSync(fileUploadsDir, { recursive: true });
 fs.mkdirSync(standardWorkAttachmentsDir, { recursive: true });
@@ -2726,6 +2735,52 @@ app.patch("/api/process-template-nodes/:id/status", requirePermission("processes
   }
 });
 
+const templateVersionResourceByType = { visual: "templates", action: "task-templates", form: "standard-work-forms", manual: "methodologies" };
+
+function canWriteTemplateVersion(request, assetType, assetId, body = {}) {
+  const resource = templateVersionResourceByType[assetType];
+  if (!resource) return false;
+  const existing = readRouteResourceItem(resource, assetId);
+  const context = getResourceAuthorizationContext(resource, "PUT", request.user, body, existing);
+  return authorizeResourceAction(resource, "write", context);
+}
+
+app.get("/api/template-assets/versions", (request, response) => {
+  if (!canAccessTemplateCenter(request.user)) {
+    response.status(403).json({ success: false, message: "你没有权限查看模板版本。" });
+    return;
+  }
+  try {
+    response.json({ success: true, items: listTemplateVersions(String(request.query.assetType ?? ""), String(request.query.assetId ?? "")) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "模板版本读取失败。" });
+  }
+});
+
+app.post("/api/template-assets/:assetType/:assetId/iterate", (request, response) => {
+  if (!canWriteTemplateVersion(request, request.params.assetType, request.params.assetId, request.body?.content ?? {})) {
+    response.status(403).json({ success: false, message: "你没有权限迭代该模板。" });
+    return;
+  }
+  try {
+    response.status(201).json({ success: true, ...iterateTemplate(request.params.assetType, request.params.assetId, request.body ?? {}, request.user.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "模板迭代失败。" });
+  }
+});
+
+app.post("/api/template-assets/:assetType/:assetId/versions/:versionId/:action", (request, response) => {
+  if (!canWriteTemplateVersion(request, request.params.assetType, request.params.assetId)) {
+    response.status(403).json({ success: false, message: "你没有权限管理该模板版本。" });
+    return;
+  }
+  try {
+    response.json({ success: true, items: changeTemplateVersionStatus(request.params.assetType, request.params.assetId, request.params.versionId, request.params.action, request.user.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "模板版本状态更新失败。" });
+  }
+});
+
 app.get("/api/:resource", (request, response) => {
   try {
     const context = getResourceAuthorizationContext(
@@ -2761,7 +2816,14 @@ app.post("/api/:resource", (request, response) => {
       new Set(["work-plans", "process-instances"]).has(request.params.resource) &&
       rejectUnauthorizedActionTemplateLaunch(request.user, request.body ?? {}, response)
     ) return;
-    response.status(201).json(createResource(request.params.resource, request.body));
+    const created = versionedTemplateResources.has(request.params.resource)
+      ? getDatabase().transaction(() => {
+          const item = createResource(request.params.resource, request.body);
+          ensureInitialTemplateVersion(request.params.resource, item, request.user.id);
+          return item;
+        })()
+      : createResource(request.params.resource, request.body);
+    response.status(201).json(created);
   } catch (error) {
     response.status(404).json({ error: error.message });
   }
@@ -2770,6 +2832,10 @@ app.post("/api/:resource", (request, response) => {
 app.put("/api/:resource/:id", (request, response) => {
   try {
     if (rejectLegacyContentScheduleWrite(request.params.resource, response)) return;
+    if (versionedTemplateResources.has(request.params.resource)) {
+      response.status(409).json({ success: false, message: "模板内容不能直接覆盖，请使用迭代生成新版本。" });
+      return;
+    }
     const registration = resourcePermissions[request.params.resource];
     if (registration === undefined || typeof registration.write !== "function") {
       response.status(403).json({ success: false, message: "你没有权限进行该操作" });

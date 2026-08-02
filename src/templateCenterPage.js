@@ -1,15 +1,19 @@
 import {
   createTemplate,
+  changeTemplateAssetVersionStatus,
   getCurrentUser,
+  loadPersistentData,
+  loadTemplateAssetVersions,
   loadTemplates,
   resolveAssetUrl,
+  prepareTemplateIteration,
   state,
   updateTemplate,
   uploadGenericFile,
   uploadImageFile,
 } from "./appState.js?v=20260705-state-singleton1";
-import { bindStandardWorkLibraryEvents, renderStandardWorkLibraryPage } from "./actionStandardsPage.js?v=20260722-action-standards-page1";
-import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js?v=20260802-template-center-v22";
+import { bindStandardWorkLibraryEvents, renderStandardWorkLibraryPage } from "./actionStandardsPage.js?v=20260802-template-version1";
+import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js?v=20260802-template-version1";
 import { bindSettingsPageEvents, renderFormDesignSection } from "./settingsPage.js?v=20260802-template-center-form1";
 
 const materialTypeNames = {
@@ -60,6 +64,10 @@ let assetCategory = "visual";
 let unifiedKeyword = "";
 let unifiedOrder = "recent-use";
 let unifiedDetail = null;
+let versionHistoryAsset = null;
+let versionsLoaded = false;
+let versionsLoading = false;
+let versionError = "";
 
 function createEmptyTags() {
   return Object.fromEntries(getTemplateTagCategories({ includeInactive: true }).map((category) => [category.id, []]));
@@ -415,6 +423,7 @@ function renderMaterialCard(material) {
         <div class="template-material-title-row">
           <h3 title="${escapeHtml(templateName)}">${escapeHtml(templateName)}</h3>
         </div>
+        ${renderVersionControls("visual", material.id)}
         <div class="template-material-code">
           <span>模板编码</span>
           ${
@@ -425,7 +434,7 @@ function renderMaterialCard(material) {
           <em aria-live="polite"></em>
         </div>
         <div class="template-material-actions">
-          <button class="secondary-button" type="button" data-action="edit-material-tags" data-material-id="${escapeHtml(material.id)}">编辑</button>
+          <button class="secondary-button" type="button" data-template-iterate="visual" data-asset-id="${escapeHtml(material.id)}">迭代</button>
           ${previewDownloadAction}
           ${sourceDownloadAction}
         </div>
@@ -441,6 +450,36 @@ const assetCategories = [
   { id: "form", name: "表单模板", description: "公共表单、业务表单与流程表单" },
   { id: "standard", name: "任务操作说明书", description: "SOP、操作步骤、执行与验收标准" },
 ];
+
+const versionStatusNames = { active: "启用", inactive: "停用", archived: "归档", superseded: "历史版本" };
+
+function getAssetVersions(assetType, assetId) {
+  return (state.templateAssetVersions ?? []).filter((item) => item.assetType === assetType && item.assetId === assetId)
+    .slice().sort((left, right) => right.majorVersion - left.majorVersion || right.minorVersion - left.minorVersion);
+}
+
+function getCurrentAssetVersion(assetType, assetId) {
+  const versions = getAssetVersions(assetType, assetId);
+  return versions.find((item) => item.status === "active") ?? versions[0] ?? null;
+}
+
+function renderVersionControls(assetType, assetId) {
+  const current = getCurrentAssetVersion(assetType, assetId);
+  return `<div class="template-version-controls"><span>${escapeHtml(current?.versionNumber || "V1.0")}</span><em>${escapeHtml(versionStatusNames[current?.status] || (versionsLoading ? "读取中" : "启用"))}</em><button class="text-button" type="button" data-template-version-history="${assetType}" data-asset-id="${escapeHtml(assetId)}">版本历史</button></div>`;
+}
+
+function summarizeVersionDifference(version, olderVersion) {
+  if (!olderVersion) return "初始版本";
+  const keys = new Set([...Object.keys(olderVersion.content ?? {}), ...Object.keys(version.content ?? {})]);
+  const changed = [...keys].filter((key) => JSON.stringify(olderVersion.content?.[key]) !== JSON.stringify(version.content?.[key]));
+  return changed.length ? `变化字段：${changed.join("、")}` : "内容无差异";
+}
+
+function renderVersionHistoryModal() {
+  if (!versionHistoryAsset) return "";
+  const versions = getAssetVersions(versionHistoryAsset.assetType, versionHistoryAsset.assetId);
+  return `<div class="modal-backdrop" role="presentation"><div class="modal-panel wide-modal" role="dialog" aria-modal="true" aria-label="版本历史"><div class="modal-header"><div><h2>版本管理</h2><p class="form-note">历史内容只读保留；启用历史版本会恢复该版本为当前业务版本。</p></div><button class="icon-button" type="button" data-action="close-template-version-history">×</button></div>${versionError ? `<div class="form-error">${escapeHtml(versionError)}</div>` : ""}<div class="template-version-list">${versions.map((version, index) => `<article><div><strong>${escapeHtml(version.versionNumber)}</strong><span>${escapeHtml(versionStatusNames[version.status] || version.status)}</span></div><p>${escapeHtml(version.changeSummary || "未填写修改说明")}</p><p class="form-note">${escapeHtml(summarizeVersionDifference(version, versions[index + 1]))}</p><small>${escapeHtml(version.createdAt)} · 创建人 ${escapeHtml(version.createdBy || "系统迁移")} · 使用 ${version.useCount ?? 0} 次</small><details><summary>查看该版本内容</summary><pre>${escapeHtml(JSON.stringify(version.content, null, 2))}</pre></details><div class="toolbar-actions">${version.status !== "active" && version.status !== "archived" ? `<button class="secondary-button" type="button" data-template-version-action="activate" data-version-id="${escapeHtml(version.id)}">启用</button>` : ""}${version.status === "active" ? `<button class="secondary-button" type="button" data-template-version-action="deactivate" data-version-id="${escapeHtml(version.id)}">停用</button>` : ""}${version.status !== "archived" ? `<button class="text-button" type="button" data-template-version-action="archive" data-version-id="${escapeHtml(version.id)}">归档</button>` : ""}</div></article>`).join("") || `<div class="empty-state">暂无版本记录</div>`}</div><div class="modal-actions"><button class="primary-button" type="button" data-action="close-template-version-history">关闭</button></div></div></div>`;
+}
 
 function timestamp(value) {
   const parsed = new Date(value ?? 0).getTime();
@@ -471,14 +510,14 @@ function getFormAssets() {
     const action = (state.taskTemplates ?? []).find((item) => item.id === form.standardWorkId);
     const fields = form.formSchema?.fields ?? [];
     const tasks = (state.tasks ?? []).filter((task) => task.standardWorkId === form.standardWorkId || task.taskTemplateId === form.standardWorkId);
-    return { id: form.id, category: "form", title: `${action?.name || "关键行动"}表单`, code: action?.businessCode, description: "正式版本化公共表单", status: action?.status || "active", formType: "公共表单", fields,
+    return { id: form.id, category: "form", versionAssetType: "form", versionAssetId: form.id, title: `${action?.name || "关键行动"}表单`, code: action?.businessCode, description: "正式版本化公共表单", status: action?.status || "active", formType: "公共表单", fields,
       tags: ["公共表单", `${fields.length}个字段`], content: fields.map((field) => field.label || field.name).filter(Boolean).join("、") || "空表单",
       scene: "用于关键行动、任务提交与工作结果记录", references: [`行动模板：${action?.name || form.standardWorkId}`, `任务引用：${tasks.length}`],
       useCount: tasks.length, lastUsedAt: latestDate(tasks.map((task) => task.completedAt || task.updatedAt || task.createdAt)), updatedAt: form.updatedAt || form.createdAt, href: "#processes" };
   });
   const inline = (state.taskTemplates ?? []).filter((item) => Array.isArray(item.formFields) && item.formFields.length).map((item) => {
     const tasks = (state.tasks ?? []).filter((task) => task.taskTemplateId === item.id);
-    return { id: `inline-${item.id}`, category: "form", title: `${item.name}任务表单`, code: item.businessCode, description: "关键行动内嵌业务表单", status: item.status, formType: "业务表单", fields: item.formFields,
+    return { id: `inline-${item.id}`, category: "form", versionAssetType: "action", versionAssetId: item.id, title: `${item.name}任务表单`, code: item.businessCode, description: "关键行动内嵌业务表单", status: item.status, formType: "业务表单", fields: item.formFields,
       tags: ["任务表单", `${item.formFields.length}个字段`], content: item.formFields.map((field) => field.label || field.name).filter(Boolean).join("、"),
       scene: "用于该行动模板生成任务后的提交与验收", references: [`行动模板：${item.name}`, `任务引用：${tasks.length}`], useCount: tasks.length,
       lastUsedAt: latestDate(tasks.map((task) => task.completedAt || task.updatedAt || task.createdAt)), updatedAt: item.updatedAt || item.createdAt, href: "#processes" };
@@ -543,7 +582,7 @@ function renderUnifiedDetail() {
 function renderUnifiedLibrary() {
   const items = filteredUnifiedAssets();
   return `<div class="template-unified-library"><div class="section-heading"><div><h2>${escapeHtml(assetCategories.find((item) => item.id === assetCategory)?.name)}</h2><p class="form-note">统一查看内容、使用场景、使用记录和引用关系；底层数据与业务引用保持不变。</p></div><div class="template-unified-tools"><input type="search" data-unified-template-keyword value="${escapeHtml(unifiedKeyword)}" placeholder="搜索名称、编码、内容或标签"/><select data-unified-template-order><option value="recent-use" ${unifiedOrder === "recent-use" ? "selected" : ""}>最近使用</option><option value="recent-update" ${unifiedOrder === "recent-update" ? "selected" : ""}>最近更新</option><option value="name" ${unifiedOrder === "name" ? "selected" : ""}>名称</option></select></div></div>
-    <div class="template-asset-grid">${items.map((item) => `<article class="template-asset-card"><div class="template-asset-card-head"><span>${escapeHtml(assetCategories.find((category) => category.id === item.category)?.name)}</span><em>${escapeHtml(item.status || "—")}</em></div><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.description)}</p>${item.category === "form" ? `<dl class="template-form-card-meta"><div><dt>使用场景</dt><dd>${escapeHtml(item.scene)}</dd></div><div><dt>表单类型</dt><dd>${escapeHtml(item.formType || "业务表单")}</dd></div><div><dt>更新时间</dt><dd>${escapeHtml(item.updatedAt || "暂无记录")}</dd></div></dl>` : `<div class="template-asset-tags">${item.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div><small>引用 ${item.useCount} 次 · ${escapeHtml(item.lastUsedAt ? `最近使用 ${item.lastUsedAt}` : "暂无使用记录")}</small>`}<button class="secondary-button" type="button" data-unified-template-detail="${escapeHtml(item.id)}">查看详情</button></article>`).join("") || `<div class="empty-state">没有符合条件的模板资产</div>`}</div>${renderUnifiedDetail()}</div>`;
+    <div class="template-asset-grid">${items.map((item) => `<article class="template-asset-card"><div class="template-asset-card-head"><span>${escapeHtml(assetCategories.find((category) => category.id === item.category)?.name)}</span><em>${escapeHtml(item.status || "—")}</em></div><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.description)}</p>${item.category === "form" ? `<dl class="template-form-card-meta"><div><dt>使用场景</dt><dd>${escapeHtml(item.scene)}</dd></div><div><dt>表单类型</dt><dd>${escapeHtml(item.formType || "业务表单")}</dd></div><div><dt>更新时间</dt><dd>${escapeHtml(item.updatedAt || "暂无记录")}</dd></div></dl>${renderVersionControls(item.versionAssetType, item.versionAssetId)}<div class="toolbar-actions"><button class="secondary-button" type="button" data-template-iterate="${item.versionAssetType}" data-asset-id="${escapeHtml(item.versionAssetId)}">迭代</button><button class="text-button" type="button" data-unified-template-detail="${escapeHtml(item.id)}">查看详情</button></div>` : `<div class="template-asset-tags">${item.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div><small>引用 ${item.useCount} 次 · ${escapeHtml(item.lastUsedAt ? `最近使用 ${item.lastUsedAt}` : "暂无使用记录")}</small><button class="secondary-button" type="button" data-unified-template-detail="${escapeHtml(item.id)}">查看详情</button>`}</article>`).join("") || `<div class="empty-state">没有符合条件的模板资产</div>`}</div>${renderUnifiedDetail()}</div>`;
 }
 
 function renderPreviewModal() {
@@ -681,6 +720,7 @@ export function renderTemplateCenterPage() {
       `}
       ${renderPreviewModal()}
       ${renderEditTagsModal()}
+      ${renderVersionHistoryModal()}
     </section>
   `;
 }
@@ -693,6 +733,77 @@ export function bindTemplateCenterPageEvents(rerender) {
   if (assetCategory === "action") bindStandardWorkLibraryEvents(rerender, page);
   if (assetCategory === "standard") bindMethodologiesPageEvents(rerender);
   if (window.location.hash === "#templateCenter/form-design") bindSettingsPageEvents(rerender);
+
+  if (!versionsLoaded && !versionsLoading) {
+    versionsLoading = true;
+    loadTemplateAssetVersions()
+      .then(() => { versionError = ""; })
+      .catch((error) => {
+        console.error("模板版本读取失败", error);
+        versionError = "模板版本读取失败，请检查本地数据库服务。";
+      })
+      .finally(() => {
+        versionsLoaded = true;
+        versionsLoading = false;
+        rerender();
+      });
+  }
+
+  page.querySelectorAll("[data-template-version-history]").forEach((button) => button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    versionHistoryAsset = { assetType: button.dataset.templateVersionHistory, assetId: button.dataset.assetId };
+    rerender();
+  }));
+  page.querySelectorAll('[data-action="close-template-version-history"]').forEach((button) => button.addEventListener("click", () => {
+    versionHistoryAsset = null;
+    rerender();
+  }));
+  page.querySelectorAll("[data-template-version-action]").forEach((button) => button.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    if (!versionHistoryAsset) return;
+    const action = button.dataset.templateVersionAction;
+    if (action === "archive" && !window.confirm("归档后将退出日常使用，但历史和引用仍会保留。确认归档？")) return;
+    try {
+      versionError = "";
+      await changeTemplateAssetVersionStatus(versionHistoryAsset.assetType, versionHistoryAsset.assetId, button.dataset.versionId, action);
+      await loadPersistentData();
+      await loadTemplateAssetVersions(versionHistoryAsset.assetType, versionHistoryAsset.assetId);
+    } catch (error) {
+      versionError = error.message || "模板版本状态更新失败。";
+    }
+    rerender();
+  }));
+  page.querySelectorAll("[data-template-iterate]").forEach((button) => button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const assetType = button.dataset.templateIterate;
+    const assetId = button.dataset.assetId;
+    const changeSummary = window.prompt("请输入本次迭代说明：", "内容迭代");
+    if (changeSummary === null) return;
+    const bump = window.confirm("是否升级为大版本（例如 V1.1 → V2.0）？\n选择“取消”将生成小版本。") ? "major" : "minor";
+    prepareTemplateIteration(assetType, assetId, { bump, changeSummary });
+    if (assetType === "visual") {
+      editingTagsMaterialId = assetId;
+      editingTagQuery = "";
+      rerender();
+      return;
+    }
+    if (assetType === "form") {
+      window.location.hash = "templateCenter/form-design";
+      return;
+    }
+    if (assetType === "action") {
+      const editButton = [...page.querySelectorAll('[data-action="edit-task-template"]')].find((candidate) => candidate.dataset.templateId === assetId);
+      editButton?.click();
+      return;
+    }
+    if (assetType === "manual") {
+      const editButton = [...page.querySelectorAll('[data-action="edit-methodology"]')].find((candidate) => candidate.dataset.methodologyId === assetId);
+      if (editButton) editButton.click();
+      else window.location.hash = `methodology-${assetId}`;
+    }
+  }));
   page.querySelector("[data-unified-template-keyword]")?.addEventListener("input", (event) => { unifiedKeyword = event.target.value; rerender(); window.requestAnimationFrame(() => { const input = document.querySelector("[data-unified-template-keyword]"); input?.focus(); input?.setSelectionRange(event.target.value.length, event.target.value.length); }); });
   page.querySelector("[data-unified-template-order]")?.addEventListener("change", (event) => { unifiedOrder = event.target.value; rerender(); });
   page.querySelectorAll("[data-unified-template-detail]").forEach((button) => button.addEventListener("click", () => { unifiedDetail = button.dataset.unifiedTemplateDetail; rerender(); }));

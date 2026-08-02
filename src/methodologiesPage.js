@@ -256,10 +256,10 @@ function renderMethodologyList() {
       <div class="table-wrap">
         <table class="data-table">
           <thead>
-            <tr><th>说明书标题</th><th>价值链模块</th><th>适用标准</th><th>适用节点</th><th>适用部门</th><th>内容形式</th><th>状态</th></tr>
+            <tr><th>说明书标题</th><th>当前版本</th><th>价值链模块</th><th>适用标准</th><th>适用节点</th><th>适用部门</th><th>内容形式</th><th>状态</th></tr>
           </thead>
           <tbody>
-            ${items.length === 0 ? `<tr><td colspan="7">暂无任务操作说明书</td></tr>` : items
+            ${items.length === 0 ? `<tr><td colspan="8">暂无任务操作说明书</td></tr>` : items
               .map((item) => {
                 const filled = (item.steps ?? []).some((step) => step.instruction || step.imageUrl || step.videoUrl);
                 const node = getMethodologyNode(item);
@@ -268,9 +268,12 @@ function renderMethodologyList() {
                 const departmentName = item.departmentName ?? "未设置";
                 const valueModuleName = getMethodologyValueModuleName(item);
                 const mediaTypes = item.mediaTypes?.join(" / ") ?? "文字";
+                const versions = (state.templateAssetVersions ?? []).filter((version) => version.assetType === "manual" && version.assetId === item.id);
+                const currentVersion = versions.find((version) => version.status === "active") ?? versions.sort((left, right) => right.majorVersion - left.majorVersion || right.minorVersion - left.minorVersion)[0];
                 return `
                   <tr class="${item.id === selectedMethodologyId ? "is-selected" : ""}" data-methodology-id="${item.id}">
                     <td><a class="methodology-title-link" href="#methodology-${item.id}">${escapeHtml(item.title)}</a></td>
+                    <td><button class="text-button" type="button" data-template-version-history="manual" data-asset-id="${escapeHtml(item.id)}">${escapeHtml(currentVersion?.versionNumber || "V1.0")}</button></td>
                     <td>${escapeHtml(valueModuleName)}</td>
                     <td>${escapeHtml(flowName)}</td>
                     <td>${escapeHtml(nodeName)}</td>
@@ -436,7 +439,7 @@ function renderMethodologyDetail() {
         </div>
         <div class="row-actions">
           <button class="secondary-button" type="button" data-action="back-to-methodology-list">返回列表</button>
-          ${canEdit() && selected.id !== demoMethodology.id ? `<button class="primary-button" type="button" data-action="edit-methodology" data-methodology-id="${selected.id}">编辑操作说明书</button>` : ""}
+          ${canEdit() && selected.id !== demoMethodology.id ? `<button class="primary-button" type="button" data-template-iterate="manual" data-asset-id="${selected.id}">迭代操作说明书</button><button type="button" hidden data-action="edit-methodology" data-methodology-id="${selected.id}"></button>` : ""}
         </div>
       </div>
       <div class="methodology-body">${renderOperationalMethodology(selected)}</div>
