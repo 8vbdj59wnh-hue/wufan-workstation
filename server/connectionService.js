@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { getDatabase } from "./db.js";
+import { listConnectionGrowthAnalyses } from "./connectionGrowthService.js";
 
 const profileStatuses = new Set(["active", "paused", "archived"]);
 const profileLevels = new Set(["new", "growing", "mature", "priority"]);
@@ -63,6 +64,61 @@ const connectionSelect = `
 export function listConnectionProfiles() {
   const rows = getDatabase().prepare(`${connectionSelect} ORDER BY c.updatedAt DESC, c.id DESC`).all();
   return enrichConnectionRows(rows);
+}
+
+function changeDirection(analysis) {
+  const changes = [analysis.salesGrowth, analysis.visitorGrowth, analysis.conversionChange, analysis.profitGrowth]
+    .filter((item) => item !== null && item !== undefined).map(Number);
+  const severeDecline = Number(analysis.salesGrowth) <= -0.2 || Number(analysis.visitorGrowth) <= -0.2
+    || Number(analysis.conversionChange) <= -0.01 || Number(analysis.profitGrowth) <= -0.2;
+  const decliningCount = changes.filter((item) => item < 0).length;
+  const growingCount = changes.filter((item) => item > 0).length;
+  if (severeDecline || ["attention", "risk"].includes(analysis.healthStatus) || decliningCount >= 2) return "worse";
+  if (growingCount > decliningCount) return "better";
+  return "stable";
+}
+
+export function getMyConnectionWorkbench(userId, isAdmin = false, filter = "all") {
+  const personId = value(userId);
+  if (!personId) throw new Error("无法识别当前登录人员。");
+  if (!["all", "better", "worse", "followed"].includes(filter)) throw new Error("我的链接筛选无效。");
+  const profiles = listConnectionProfiles().filter((item) => isAdmin || item.ownerId === personId);
+  const analyses = new Map(listConnectionGrowthAnalyses().map((item) => [item.connectionId, item]));
+  const followedIds = new Set(getDatabase().prepare("SELECT connectionId FROM connection_follows WHERE userId=?").all(personId).map((item) => item.connectionId));
+  const items = profiles.map((profile) => {
+    const analysis = analyses.get(profile.id) ?? {};
+    const trend = changeDirection(analysis);
+    const followed = followedIds.has(profile.id);
+    const riskPriority = trend === "worse"
+      ? (Number(analysis.salesGrowth) <= -0.2 || Number(analysis.visitorGrowth) <= -0.2 || Number(analysis.profitGrowth) <= -0.2 ? 0 : 1)
+      : followed ? 2 : 3;
+    return { ...profile, followed, trend, riskPriority,
+      currentPayAmount: analysis.currentPeriod?.payAmount ?? null,
+      salesGrowth: analysis.salesGrowth ?? null, visitorGrowth: analysis.visitorGrowth ?? null,
+      conversionChange: analysis.conversionChange ?? null, profitGrowth: analysis.profitGrowth ?? null,
+      healthScore: analysis.healthScore ?? null, healthStatus: analysis.healthStatus ?? "no_data" };
+  }).filter((item) => filter === "all" || (filter === "followed" ? item.followed : item.trend === filter))
+    .sort((left, right) => left.riskPriority - right.riskPriority
+      || Number(left.healthScore ?? 101) - Number(right.healthScore ?? 101)
+      || Number(left.salesGrowth ?? 0) - Number(right.salesGrowth ?? 0));
+  return { items, isAdmin: Boolean(isAdmin), summary: {
+    total: profiles.length,
+    better: profiles.reduce((count, item) => count + (changeDirection(analyses.get(item.id) ?? {}) === "better" ? 1 : 0), 0),
+    risk: profiles.reduce((count, item) => count + (changeDirection(analyses.get(item.id) ?? {}) === "worse" ? 1 : 0), 0),
+    followed: profiles.filter((item) => followedIds.has(item.id)).length,
+  } };
+}
+
+export function setConnectionFollow(connectionId, userId, followed, isAdmin = false) {
+  const id = value(connectionId); const personId = value(userId); const database = getDatabase();
+  const profile = database.prepare("SELECT ownerId FROM connection_profiles WHERE id=?").get(id);
+  if (!profile) throw new Error("未找到连接档案。");
+  if (!isAdmin && profile.ownerId !== personId) throw new Error("只能关注自己负责的链接。");
+  if (!database.prepare("SELECT 1 FROM persons WHERE id=? AND status='active'").get(personId)) throw new Error("无法识别当前登录人员。");
+  if (followed) database.prepare(`INSERT INTO connection_follows (id,userId,connectionId,createdAt) VALUES (?,?,?,?)
+    ON CONFLICT(userId,connectionId) DO NOTHING`).run(`connection-follow-${crypto.randomUUID()}`, personId, id, new Date().toISOString());
+  else database.prepare("DELETE FROM connection_follows WHERE userId=? AND connectionId=?").run(personId, id);
+  return { connectionId: id, followed: Boolean(followed) };
 }
 
 export function listConnectionImportShops() {

@@ -22,6 +22,8 @@ export {
   loadConnectionImprovementSummary,
   loadConnectionPeriodSnapshots,
   loadConnections,
+  loadMyConnectionWorkbench,
+  updateConnectionFollow,
   removeConnectionAction,
   ignoreConnectionImportRow,
   updateConnectionDataMapping,

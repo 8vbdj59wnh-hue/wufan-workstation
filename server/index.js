@@ -76,6 +76,8 @@ import {
   listConnectionActions,
   listConnectionDataMappings,
   listConnectionProfiles,
+  getMyConnectionWorkbench,
+  setConnectionFollow,
   readConnectionProfile,
   updateConnectionProfile,
   updateConnectionDataMapping,
@@ -1761,6 +1763,22 @@ app.get("/api/connections", requireLinkView, (_request, response) => {
     response.json({ success: true, items: listConnectionProfiles() });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "连接列表读取失败。" });
+  }
+});
+
+app.get("/api/connections-workbench/mine", requireLinkView, (request, response) => {
+  try {
+    response.json({ success: true, ...getMyConnectionWorkbench(getUserPersonId(request.user), isAdminUser(request.user), String(request.query.filter ?? "all")) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "我的链接读取失败。" });
+  }
+});
+
+app.put("/api/connections-workbench/:id/follow", requireLinkView, (request, response) => {
+  try {
+    response.json({ success: true, item: setConnectionFollow(request.params.id, getUserPersonId(request.user), request.body?.followed === true, isAdminUser(request.user)) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "链接关注状态更新失败。" });
   }
 });
 

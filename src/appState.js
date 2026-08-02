@@ -1013,6 +1013,17 @@ export async function loadConnections() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections`), "连接列表读取失败。");
 }
 
+export async function loadMyConnectionWorkbench(filter = "all") {
+  const query = new URLSearchParams({ filter });
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections-workbench/mine?${query}`), "我的链接读取失败。");
+}
+
+export async function updateConnectionFollow(connectionId, followed) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections-workbench/${encodeURIComponent(connectionId)}/follow`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ followed }),
+  }), "链接关注状态更新失败。");
+}
+
 export async function loadAvailableSalesLinks(filters = {}) {
   const normalized = typeof filters === "string" ? { search: filters } : filters;
   const query = new URLSearchParams(Object.entries(normalized).filter(([, value]) => value !== "" && value !== undefined));

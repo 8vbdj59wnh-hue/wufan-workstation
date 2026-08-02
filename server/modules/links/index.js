@@ -11,6 +11,8 @@ export {
   listConnectionActions,
   listConnectionDataMappings,
   listConnectionProfiles,
+  getMyConnectionWorkbench,
+  setConnectionFollow,
   readConnectionProfile,
   updateConnectionProfile,
   updateConnectionDataMapping,

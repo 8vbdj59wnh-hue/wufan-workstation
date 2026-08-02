@@ -18,14 +18,16 @@ import {
   loadConnectionImprovementSummary,
   loadConnectionPeriodSnapshots,
   loadConnections,
+  loadMyConnectionWorkbench,
   removeConnectionAction,
   ignoreConnectionImportRow,
   updateConnectionDataMapping,
   updateConnection,
   updateConnectionImprovement,
+  updateConnectionFollow,
   uploadConnectionImport,
   resolveAssetUrl,
-} from "./services/connectionCenterService.js?v=20260802-module-boundary1";
+} from "./services/connectionCenterService.js?v=20260802-my-links1";
 import { getCurrentUser, state } from "./stores/appStore.js?v=20260802-module-boundary1";
 import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
 import { escapeHtml } from "./utils/html.js?v=20260802-module-boundary1";
@@ -54,6 +56,7 @@ const pageState = {
   improvements: [],
   improvementSummary: { total: 0, effective: 0, observing: 0, failed: 0 },
   section: "connections",
+  myWorkbench: { items: [], summary: { total: 0, better: 0, risk: 0, followed: 0 }, filter: "all", isAdmin: false, loading: false },
   mappings: [],
   mappingLoading: false,
   mappingFilters: { sourceType: "business_advisor", matchStatus: "pending", search: "" },
@@ -180,10 +183,33 @@ function healthText(status) {
 function renderSectionNavigation() {
   return `<nav class="connection-section-nav" aria-label="连接中心页面">
     <button type="button" class="${pageState.section === "connections" ? "active" : ""}" data-connection-section="connections">连接列表</button>
+    <button type="button" class="${pageState.section === "my-links" ? "active" : ""}" data-connection-section="my-links">我的链接</button>
     <button type="button" class="${pageState.section === "pending-connections" ? "active" : ""}" data-connection-section="pending-connections">待识别经营连接</button>
     <button type="button" class="${pageState.section === "mappings" ? "active" : ""}" data-connection-section="mappings">数据关联</button>
     <button type="button" class="${pageState.section === "imports" ? "active" : ""}" data-connection-section="imports">经营数据导入</button>
   </nav>`;
+}
+
+function trendLabel(item) {
+  if (item.trend === "better") return { text: "经营向好", className: "better" };
+  if (item.trend === "worse") return { text: "需要关注", className: "worse" };
+  return { text: item.healthStatus === "insufficient_data" ? "暂无对比周期" : "经营平稳", className: "stable" };
+}
+
+function trendDetails(item) {
+  return [["销售", item.salesGrowth, false], ["流量", item.visitorGrowth, false], ["转化", item.conversionChange, true], ["利润", item.profitGrowth, false]]
+    .filter(([, value]) => value !== null && value !== undefined)
+    .map(([label, value, points]) => `${label} ${growthText(value, { points })}`).join(" · ") || "尚无可比较变化";
+}
+
+function renderMyLinksWorkbench() {
+  const workbench = pageState.myWorkbench; const summary = workbench.summary ?? {};
+  const tabs = [["all", "全部"], ["better", "变好"], ["worse", "变差"], ["followed", "我的关注"]];
+  return `<section class="my-links-workbench"><header><div><p class="eyebrow">运营日常经营工作台</p><h2>我的链接</h2><p>${workbench.isAdmin ? "管理员视角展示全部经营链接。" : "仅展示由当前登录人员负责的经营链接。"}</p></div></header>
+    <div class="my-links-summary"><button type="button" data-my-link-filter="all"><span>我的链接</span><strong>${summary.total || 0}</strong></button><button type="button" data-my-link-filter="better"><span>向好链接</span><strong>${summary.better || 0}</strong></button><button type="button" data-my-link-filter="worse"><span>风险链接</span><strong>${summary.risk || 0}</strong></button><button type="button" data-my-link-filter="followed"><span>关注链接</span><strong>${summary.followed || 0}</strong></button></div>
+    <nav class="segmented-control my-links-filters" aria-label="我的链接筛选">${tabs.map(([id, label]) => `<button type="button" class="${workbench.filter === id ? "active" : ""}" data-my-link-filter="${id}">${label}</button>`).join("")}</nav>
+    ${workbench.loading ? `<div class="empty-state">正在读取我的链接…</div>` : workbench.items.length ? `<div class="my-links-grid">${workbench.items.map((item) => { const trend = trendLabel(item); return `<article class="my-link-card"><button type="button" class="my-link-main" data-open-connection="${escapeHtml(item.id)}">${imageHtml(item)}<span class="my-link-content"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(`${shopName(item)} · ${productCodes(item)}`)}</small><span class="my-link-metrics"><em>销售额 <b>${item.currentPayAmount == null ? "—" : `¥${Number(item.currentPayAmount).toLocaleString("zh-CN")}`}</b></em><em>增长 <b>${growthText(item.salesGrowth)}</b></em><em>健康 <b>${escapeHtml(healthText(item.healthStatus))}${item.healthScore == null ? "" : ` ${item.healthScore}分`}</b></em><em>状态 <b>${escapeHtml(statusText(item.status))}</b></em></span><small class="my-link-changes">${escapeHtml(trendDetails(item))}</small><span class="my-link-trend is-${trend.className}">${trend.text}</span></span></button><button type="button" class="my-link-follow ${item.followed ? "is-followed" : ""}" data-toggle-connection-follow="${escapeHtml(item.id)}" data-followed="${item.followed ? "true" : "false"}" aria-label="${item.followed ? "取消关注" : "关注链接"}">${item.followed ? "★ 已关注" : "☆ 关注"}</button></article>`; }).join("")}</div>` : `<div class="empty-state"><strong>暂无符合条件的链接</strong><p>${workbench.filter === "followed" ? "你还没有关注链接。" : "当前账号没有符合此经营状态的负责链接。"}</p></div>`}
+  </section>`;
 }
 
 function renderToolbar() {
@@ -401,8 +427,15 @@ function renderImprovementModal() {
 }
 
 export function renderConnectionCenterPage() {
-  const pageContent = pageState.section === "mappings" ? renderMappingPage() : pageState.section === "imports" ? renderImportPage() : pageState.section === "pending-connections" ? renderPendingConnections() : `${renderGrowthOverview()}${renderToolbar()}${renderList()}`;
+  const pageContent = pageState.section === "my-links" ? renderMyLinksWorkbench() : pageState.section === "mappings" ? renderMappingPage() : pageState.section === "imports" ? renderImportPage() : pageState.section === "pending-connections" ? renderPendingConnections() : `${renderGrowthOverview()}${renderToolbar()}${renderList()}`;
   return `<section class="connection-center-page">${pageState.error ? `<div class="form-error">${escapeHtml(pageState.error)}</div>` : ""}${pageState.loading ? `<div class="empty-state">正在读取连接…</div>` : pageState.selectedId ? renderDetail() : `${renderSectionNavigation()}${pageContent}`}${renderMappingModal()}${renderImprovementModal()}</section>`;
+}
+
+async function loadMyLinks(render, filter = pageState.myWorkbench.filter) {
+  pageState.myWorkbench.loading = true; pageState.myWorkbench.filter = filter; pageState.error = ""; render();
+  try { const result = await loadMyConnectionWorkbench(filter); pageState.myWorkbench = { ...pageState.myWorkbench, ...result, filter, loading: false }; }
+  catch (error) { pageState.error = error.message; pageState.myWorkbench.loading = false; }
+  render();
 }
 
 async function loadPage(render) {
@@ -461,8 +494,14 @@ export function bindConnectionCenterPageEvents(render) {
   root.querySelectorAll("[data-connection-section]").forEach((button) => button.addEventListener("click", () => {
     pageState.section = button.dataset.connectionSection; pageState.selectedId = ""; render();
     if (pageState.section === "pending-connections") void loadPendingConnections(render);
+    if (pageState.section === "my-links") void loadMyLinks(render);
     if (pageState.section === "mappings") void loadMappings(render);
     if (pageState.section === "imports") void loadImportBatches(render, true);
+  }));
+  root.querySelectorAll("[data-my-link-filter]").forEach((button) => button.addEventListener("click", () => { void loadMyLinks(render, button.dataset.myLinkFilter); }));
+  root.querySelectorAll("[data-toggle-connection-follow]").forEach((button) => button.addEventListener("click", async () => {
+    try { await updateConnectionFollow(button.dataset.toggleConnectionFollow, button.dataset.followed !== "true"); await loadMyLinks(render); }
+    catch (error) { pageState.error = error.message; render(); }
   }));
   root.querySelectorAll("[data-open-pending-connections]").forEach((button) => button.addEventListener("click", () => { pageState.section = "pending-connections"; pageState.selectedId = ""; void loadPendingConnections(render); }));
   root.querySelector("[data-open-business-import]")?.addEventListener("click", () => { pageState.section = "imports"; pageState.selectedId = ""; void loadImportBatches(render, true); });

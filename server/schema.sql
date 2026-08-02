@@ -1019,6 +1019,19 @@ CREATE TABLE IF NOT EXISTS connection_profiles (
 CREATE INDEX IF NOT EXISTS idx_connection_profiles_owner_status
   ON connection_profiles(ownerId, status);
 
+CREATE TABLE IF NOT EXISTS connection_follows (
+  id TEXT PRIMARY KEY,
+  userId TEXT NOT NULL,
+  connectionId TEXT NOT NULL,
+  createdAt TEXT NOT NULL,
+  FOREIGN KEY(userId) REFERENCES persons(id) ON DELETE CASCADE,
+  FOREIGN KEY(connectionId) REFERENCES connection_profiles(id) ON DELETE CASCADE,
+  UNIQUE(userId, connectionId)
+);
+
+CREATE INDEX IF NOT EXISTS idx_connection_follows_user_created
+  ON connection_follows(userId, createdAt DESC);
+
 CREATE TABLE IF NOT EXISTS connection_actions (
   id TEXT PRIMARY KEY,
   connectionProfileId TEXT NOT NULL,
