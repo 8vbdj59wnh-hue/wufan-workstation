@@ -101,6 +101,10 @@ import {
   listConnectionImprovements,
   updateConnectionImprovement,
   getConnectionHospital,
+  getConnectionBenchmarks,
+  listConnectionBenchmarkCandidates,
+  replaceConnectionBenchmarks,
+  getConnectionBenchmarkComparison,
 } from "./modules/links/index.js";
 import {
   batchLinkProcessInstanceTemplates,
@@ -1820,6 +1824,38 @@ app.put("/api/connections/:id", requireLinkManage, (request, response) => {
     response.json({ success: true, item: updateConnectionProfile(request.params.id, request.body) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "连接档案更新失败。" });
+  }
+});
+
+app.get("/api/connections/:id/benchmarks", requireLinkView, (request, response) => {
+  try {
+    response.json({ success: true, ...getConnectionBenchmarks(request.params.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "对标链接读取失败。" });
+  }
+});
+
+app.get("/api/connections/:id/benchmark-candidates", requireLinkView, (request, response) => {
+  try {
+    response.json({ success: true, items: listConnectionBenchmarkCandidates(request.params.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "竞品候选读取失败。" });
+  }
+});
+
+app.put("/api/connections/:id/benchmarks", requireLinkManage, (request, response) => {
+  try {
+    response.json({ success: true, ...replaceConnectionBenchmarks(request.params.id, request.body?.benchmarkConnectionIds, getUserPersonId(request.user)) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "对标链接保存失败。" });
+  }
+});
+
+app.get("/api/connections/:id/benchmarks/:benchmarkId/comparison", requireLinkView, (request, response) => {
+  try {
+    response.json({ success: true, ...getConnectionBenchmarkComparison(request.params.id, request.params.benchmarkId) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "竞品对比读取失败。" });
   }
 });
 

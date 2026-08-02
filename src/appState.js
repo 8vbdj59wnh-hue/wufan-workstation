@@ -1174,6 +1174,24 @@ export async function loadConnectionHospital() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-hospital`), "链接医院读取失败。");
 }
 
+export async function loadConnectionBenchmarks(connectionId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/benchmarks`), "对标链接读取失败。");
+}
+
+export async function loadConnectionBenchmarkCandidates(connectionId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/benchmark-candidates`), "竞品候选读取失败。");
+}
+
+export async function saveConnectionBenchmarks(connectionId, benchmarkConnectionIds) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/benchmarks`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ benchmarkConnectionIds }),
+  }), "对标链接保存失败。");
+}
+
+export async function loadConnectionBenchmarkComparison(connectionId, benchmarkConnectionId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/benchmarks/${encodeURIComponent(benchmarkConnectionId)}/comparison`), "竞品对比读取失败。");
+}
+
 export async function loadConnectionImprovementSummary() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-improvements/summary`), "连接改善概览读取失败。");
 }

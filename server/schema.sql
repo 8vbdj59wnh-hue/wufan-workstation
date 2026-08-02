@@ -1019,6 +1019,24 @@ CREATE TABLE IF NOT EXISTS connection_profiles (
 CREATE INDEX IF NOT EXISTS idx_connection_profiles_owner_status
   ON connection_profiles(ownerId, status);
 
+CREATE TABLE IF NOT EXISTS connection_benchmarks (
+  id TEXT PRIMARY KEY,
+  connectionId TEXT NOT NULL,
+  benchmarkConnectionId TEXT NOT NULL,
+  sourceType TEXT NOT NULL DEFAULT 'internal',
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(connectionId) REFERENCES connection_profiles(id) ON DELETE CASCADE,
+  FOREIGN KEY(benchmarkConnectionId) REFERENCES connection_profiles(id) ON DELETE CASCADE,
+  FOREIGN KEY(createdBy) REFERENCES persons(id),
+  UNIQUE(connectionId, benchmarkConnectionId),
+  CHECK(connectionId <> benchmarkConnectionId)
+);
+
+CREATE INDEX IF NOT EXISTS idx_connection_benchmarks_target
+  ON connection_benchmarks(benchmarkConnectionId, createdAt DESC);
+
 CREATE TABLE IF NOT EXISTS connection_follows (
   id TEXT PRIMARY KEY,
   userId TEXT NOT NULL,
