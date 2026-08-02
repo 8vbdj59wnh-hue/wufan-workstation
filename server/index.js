@@ -141,6 +141,7 @@ import {
   updatePurchaseOrder,
   updateQualityIssue,
 } from "./supplyChainService.js";
+import { addConsumption, addFollowup, addTag, getCustomer, listCustomers, overview as getCustomerOverview, saveCustomer } from "./customerService.js";
 import {
   approveFinanceEntry,
   commitFinanceImportBatch,
@@ -409,6 +410,11 @@ const requireSupplyView = requireAnyPermission("supplyChain.view", "products.vie
 const requireSupplyManage = requireAnyPermission("supplyChain.manage", "products.edit");
 const requireSupplyPurchase = requireAnyPermission("supplyChain.purchase", "products.edit");
 const requireSupplyQuality = requireAnyPermission("supplyChain.quality", "products.edit");
+const requireCustomerView = requirePermission("customers.view");
+const requireCustomerManage = requirePermission("customers.manage");
+const requireCustomerMaintain = requirePermission("customers.maintain");
+function customerScope(user,query={}){const scope=getDataScope(user);if(scope==="self")return{...query,ownerId:user.id};if(scope==="department")return{...query,departmentId:user.departmentId};return query;}
+function assertCustomerAccess(user,customerId){if(!listCustomers(customerScope(user,{id:customerId}),true).length)throw new Error("你无权操作该客户。");}
 
 function getRequestedActionTemplateIds(body = {}) {
   return [
@@ -1646,6 +1652,15 @@ app.post("/api/supply-chain/evaluations", requireSupplyManage, (request, respons
   try { response.status(201).json({ success: true, item: saveSupplierEvaluation(request.body, request.user.id) }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "供应商评价保存失败。" }); }
 });
+
+app.get("/api/customer-center/overview", requireCustomerView, (request,response)=>{try{response.json({success:true,...getCustomerOverview(customerScope(request.user))});}catch(error){response.status(400).json({success:false,message:error.message||"客户概览读取失败。"});}});
+app.get("/api/customer-center/customers", requireCustomerView, (request,response)=>{try{response.json({success:true,items:listCustomers(customerScope(request.user,request.query),hasPermission(request.user,"customers.manage"))});}catch(error){response.status(400).json({success:false,message:error.message||"客户列表读取失败。"});}});
+app.get("/api/customer-center/customers/:id", requireCustomerView, (request,response)=>{try{if(!listCustomers(customerScope(request.user,{id:request.params.id}),true).length)return response.status(403).json({success:false,message:"你无权查看该客户。"});response.json({success:true,detail:getCustomer(request.params.id,hasPermission(request.user,"customers.manage"))});}catch(error){response.status(404).json({success:false,message:error.message||"客户不存在。"});}});
+app.post("/api/customer-center/customers", requireCustomerManage, (request,response)=>{try{const payload={...request.body,ownerId:request.body?.ownerId||request.user.id};response.status(201).json({success:true,item:saveCustomer(payload,request.user.id)});}catch(error){response.status(400).json({success:false,message:error.message||"客户创建失败。"});}});
+app.put("/api/customer-center/customers/:id", requireCustomerManage, (request,response)=>{try{assertCustomerAccess(request.user,request.params.id);const current=getCustomer(request.params.id,true).customer;response.json({success:true,item:saveCustomer({...request.body,ownerId:request.body?.ownerId||current.ownerId},request.user.id,request.params.id)});}catch(error){response.status(400).json({success:false,message:error.message||"客户更新失败。"});}});
+app.post("/api/customer-center/customers/:id/consumptions", requireCustomerManage, (request,response)=>{try{assertCustomerAccess(request.user,request.params.id);response.status(201).json({success:true,item:addConsumption(request.params.id,request.body)});}catch(error){response.status(400).json({success:false,message:error.message||"消费记录保存失败。"});}});
+app.post("/api/customer-center/customers/:id/tags", requireCustomerMaintain, (request,response)=>{try{assertCustomerAccess(request.user,request.params.id);response.status(201).json({success:true,item:addTag(request.params.id,request.body,request.user.id)});}catch(error){response.status(400).json({success:false,message:error.message||"客户标签保存失败。"});}});
+app.post("/api/customer-center/customers/:id/followups", requireCustomerMaintain, (request,response)=>{try{assertCustomerAccess(request.user,request.params.id);response.status(201).json({success:true,item:addFollowup(request.params.id,request.body,request.user.id)});}catch(error){response.status(400).json({success:false,message:error.message||"跟进记录保存失败。"});}});
 
 app.get("/api/product-management/overview", requirePermission("products.view"), (request, response) => {
   try {

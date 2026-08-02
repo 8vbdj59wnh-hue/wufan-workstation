@@ -1425,3 +1425,84 @@ CREATE TABLE IF NOT EXISTS supplier_evaluations (
 );
 
 CREATE INDEX IF NOT EXISTS idx_supplier_evaluations_supplier_period ON supplier_evaluations(supplierId, periodEnd DESC);
+
+CREATE TABLE IF NOT EXISTS customers (
+  id TEXT PRIMARY KEY,
+  customerCode TEXT NOT NULL UNIQUE,
+  displayName TEXT NOT NULL,
+  businessType TEXT NOT NULL,
+  sourceChannel TEXT,
+  externalCustomerId TEXT,
+  memberExternalId TEXT,
+  phone TEXT,
+  email TEXT,
+  city TEXT,
+  lifecycleStatus TEXT NOT NULL DEFAULT 'new',
+  privacyLevel TEXT NOT NULL DEFAULT 'restricted',
+  ownerId TEXT,
+  notes TEXT,
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(ownerId) REFERENCES persons(id),
+  FOREIGN KEY(createdBy) REFERENCES persons(id),
+  UNIQUE(businessType, sourceChannel, externalCustomerId)
+);
+CREATE INDEX IF NOT EXISTS idx_customers_type_lifecycle ON customers(businessType,lifecycleStatus,updatedAt DESC);
+CREATE INDEX IF NOT EXISTS idx_customers_owner ON customers(ownerId,lifecycleStatus);
+
+CREATE TABLE IF NOT EXISTS customer_consumptions (
+  id TEXT PRIMARY KEY,
+  customerId TEXT NOT NULL,
+  businessType TEXT NOT NULL,
+  externalOrderId TEXT,
+  sourceChannel TEXT,
+  productId TEXT,
+  salesLinkId TEXT,
+  consumedAt TEXT NOT NULL,
+  amount REAL NOT NULL DEFAULT 0,
+  quantity REAL NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'completed',
+  notes TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(customerId) REFERENCES customers(id),
+  FOREIGN KEY(productId) REFERENCES products(id),
+  FOREIGN KEY(salesLinkId) REFERENCES sales_links(id),
+  UNIQUE(businessType,sourceChannel,externalOrderId)
+);
+CREATE INDEX IF NOT EXISTS idx_customer_consumptions_customer_date ON customer_consumptions(customerId,consumedAt DESC);
+
+CREATE TABLE IF NOT EXISTS customer_tags (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  category TEXT NOT NULL,
+  color TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS customer_tag_relations (
+  customerId TEXT NOT NULL,
+  tagId TEXT NOT NULL,
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  PRIMARY KEY(customerId,tagId),
+  FOREIGN KEY(customerId) REFERENCES customers(id) ON DELETE CASCADE,
+  FOREIGN KEY(tagId) REFERENCES customer_tags(id) ON DELETE CASCADE,
+  FOREIGN KEY(createdBy) REFERENCES persons(id)
+);
+
+CREATE TABLE IF NOT EXISTS customer_followups (
+  id TEXT PRIMARY KEY,
+  customerId TEXT NOT NULL,
+  followupType TEXT NOT NULL,
+  content TEXT NOT NULL,
+  nextFollowupAt TEXT,
+  status TEXT NOT NULL DEFAULT 'open',
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(customerId) REFERENCES customers(id),
+  FOREIGN KEY(createdBy) REFERENCES persons(id)
+);
+CREATE INDEX IF NOT EXISTS idx_customer_followups_customer ON customer_followups(customerId,createdAt DESC);

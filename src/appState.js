@@ -953,6 +953,14 @@ export async function saveSupplyEvaluation(payload) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/evaluations`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "供应商评价保存失败。");
 }
 
+export async function loadCustomerOverview(){return readApiJson(await authFetch(`${apiBaseUrl}/api/customer-center/overview`),"客户概览读取失败。");}
+export async function loadCustomers(filters={}){const query=new URLSearchParams(Object.entries(filters).filter(([,v])=>v!==""&&v!==undefined));return readApiJson(await authFetch(`${apiBaseUrl}/api/customer-center/customers${query.size?`?${query}`:""}`),"客户列表读取失败。");}
+export async function loadCustomer(customerId){return readApiJson(await authFetch(`${apiBaseUrl}/api/customer-center/customers/${encodeURIComponent(customerId)}`),"客户详情读取失败。");}
+export async function saveCustomerProfile(payload,customerId=""){return readApiJson(await authFetch(`${apiBaseUrl}/api/customer-center/customers${customerId?`/${encodeURIComponent(customerId)}`:""}`,{method:customerId?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),"客户保存失败。");}
+export async function addCustomerConsumption(customerId,payload){return readApiJson(await authFetch(`${apiBaseUrl}/api/customer-center/customers/${encodeURIComponent(customerId)}/consumptions`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),"消费记录保存失败。");}
+export async function addCustomerTag(customerId,payload){return readApiJson(await authFetch(`${apiBaseUrl}/api/customer-center/customers/${encodeURIComponent(customerId)}/tags`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),"客户标签保存失败。");}
+export async function addCustomerFollowup(customerId,payload){return readApiJson(await authFetch(`${apiBaseUrl}/api/customer-center/customers/${encodeURIComponent(customerId)}/followups`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),"客户跟进保存失败。");}
+
 export async function loadConnections() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections`), "连接列表读取失败。");
 }

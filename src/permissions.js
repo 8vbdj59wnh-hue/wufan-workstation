@@ -23,6 +23,7 @@ export const permissionGroups = [
       { key: "products", label: "可访问产品中心" },
       { key: "dataCenter", label: "可访问数据中心" },
       { key: "finance", label: "可访问财务中心" },
+      { key: "customers", label: "可访问客户中心" },
     ],
   },
   {
@@ -71,6 +72,16 @@ export const permissionGroups = [
       { key: "view", label: "查看财务数据" },
       { key: "manage", label: "导入和管理财务数据" },
       { key: "approve", label: "审核财务数据" },
+    ],
+  },
+  {
+    key: "customers",
+    title: "客户中心权限",
+    permissions: [
+      { key: "view", label: "查看客户（隐私信息脱敏）" },
+      { key: "manage", label: "管理客户档案与消费记录" },
+      { key: "maintain", label: "维护客户标签与跟进" },
+      { key: "analyze", label: "查看客户价值分析" },
     ],
   },
   {
@@ -396,6 +407,7 @@ export function canAccessModule(userOrPermissions, moduleId) {
     financeCenter: "finance",
     connectionCenter: "products",
     supplyChainCenter: "products",
+    customerCenter: "customers",
   };
   const permissionKey = modulePermissionMap[moduleId] ?? moduleId;
   if (moduleId === "products") {
@@ -412,6 +424,9 @@ export function canAccessModule(userOrPermissions, moduleId) {
   }
   if (moduleId === "supplyChainCenter") {
     return hasPermission(userOrPermissions, "supplyChain.view") || hasPermission(userOrPermissions, "products.view");
+  }
+  if (moduleId === "customerCenter") {
+    return hasPermission(userOrPermissions, "customers.view");
   }
   return hasPermission(userOrPermissions, `modules.${permissionKey}`);
 }

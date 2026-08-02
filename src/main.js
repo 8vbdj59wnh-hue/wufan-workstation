@@ -13,6 +13,7 @@ import { bindConnectionCenterPageEvents, renderConnectionCenterPage } from "./pa
 import { bindOperationDashboardPageEvents, renderOperationDashboardPage } from "./operationDashboardPage.js?v=20260802-operation-foundation1";
 import { bindFinanceCenterPageEvents, renderFinanceCenterPage } from "./financeCenterPage.js?v=20260802-finance-center1";
 import { bindSupplyChainCenterPageEvents, renderSupplyChainCenterPage } from "./pages/supplyChainCenterPage.js?v=20260802-supply-chain1";
+import { bindCustomerCenterPageEvents, renderCustomerCenterPage } from "./pages/customerCenterPage.js?v=20260802-customer-center1";
 import { bindProductPreviewEvents, closeProductPreview, openProductPreview, renderProductPreviewModal } from "./productPreview.js?v=20260725-product-preview1";
 import { attachThumbnailHoverPreview } from "./thumbnailPreview.js?v=20260723-task-card-static1";
 import {
@@ -96,6 +97,8 @@ const moduleHashMap = {
   "connection-center": "connectionCenter",
   supplyChainCenter: "supplyChainCenter",
   "supply-chain-center": "supplyChainCenter",
+  customerCenter: "customerCenter",
+  "customer-center": "customerCenter",
   "template-center": "templateCenter",
   methods: "processes",
   settings: "settings",
@@ -414,6 +417,9 @@ function renderPage() {
   if (canAccessActiveModule && activeModule.id === "supplyChainCenter") {
     content = renderSupplyChainCenterPage();
   }
+  if (canAccessActiveModule && activeModule.id === "customerCenter") {
+    content = renderCustomerCenterPage();
+  }
 
   if (activeModule.id === "settings") {
     content = renderSettingsPage();
@@ -705,6 +711,9 @@ function render({ navigation = false } = {}) {
 
   if (activeModuleId === "supplyChainCenter") {
     bindSupplyChainCenterPageEvents(render);
+  }
+  if (activeModuleId === "customerCenter") {
+    bindCustomerCenterPageEvents(render);
   }
 
   if (document.querySelector(".methodologies-page") !== null) {

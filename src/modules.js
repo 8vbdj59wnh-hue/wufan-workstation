@@ -24,6 +24,10 @@ export const modules = [
     name: "供应链中心",
   },
   {
+    id: "customerCenter",
+    name: "客户中心",
+  },
+  {
     id: "operationDashboard",
     name: "经营驾驶舱",
   },
