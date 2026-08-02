@@ -10059,7 +10059,7 @@ button.content-template-thumb {
 .template-form-preview{margin:18px}.template-form-preview-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:12px;padding:16px;border-radius:16px;background:#f6f7f9}.template-form-preview-field{grid-column:span var(--field-span);display:grid;gap:6px;min-width:0}.template-form-preview-field span{font-weight:700}.template-form-preview-field small{color:#667085}.template-form-preview-field div{min-height:38px;padding:9px 11px;border:1px solid #dfe3e8;border-radius:10px;background:#fff;color:#667085}.template-form-designer-header{margin:22px 0 14px}@media(max-width:620px){.template-form-preview-field{grid-column:1/-1}}
 .template-form-card-meta{display:grid;gap:7px;margin:0}.template-form-card-meta div{display:grid;grid-template-columns:72px 1fr;gap:8px}.template-form-card-meta dt{color:#667085}.template-form-card-meta dd{margin:0;color:#344054;overflow-wrap:anywhere}
 
-/* 模板中心关键行动库：价值链分区占满可用宽度，行动标准在分区内响应式排列。 */
+/* 模板中心关键行动库：保留价值链分列、行动标准竖向排列，并让分类列响应式换行。 */
 .template-center-page .standard-work-library-host,
 .template-center-page .standard-work-library-host .settings-section,
 .template-center-page .standard-work-board-wrap,
@@ -10077,7 +10077,7 @@ button.content-template-thumb {
 }
 
 .template-center-page .standard-work-board {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   width: 100%;
   min-width: 0;
   gap: 14px;
@@ -10094,7 +10094,7 @@ button.content-template-thumb {
 }
 
 .template-center-page .standard-work-card-list {
-  grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   width: 100%;
 }
