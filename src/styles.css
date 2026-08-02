@@ -10059,6 +10059,83 @@ button.content-template-thumb {
 .template-form-preview{margin:18px}.template-form-preview-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:12px;padding:16px;border-radius:16px;background:#f6f7f9}.template-form-preview-field{grid-column:span var(--field-span);display:grid;gap:6px;min-width:0}.template-form-preview-field span{font-weight:700}.template-form-preview-field small{color:#667085}.template-form-preview-field div{min-height:38px;padding:9px 11px;border:1px solid #dfe3e8;border-radius:10px;background:#fff;color:#667085}.template-form-designer-header{margin:22px 0 14px}@media(max-width:620px){.template-form-preview-field{grid-column:1/-1}}
 .template-form-card-meta{display:grid;gap:7px;margin:0}.template-form-card-meta div{display:grid;grid-template-columns:72px 1fr;gap:8px}.template-form-card-meta dt{color:#667085}.template-form-card-meta dd{margin:0;color:#344054;overflow-wrap:anywhere}
 
+/* 模板中心关键行动库：价值链分区占满可用宽度，行动标准在分区内响应式排列。 */
+.template-center-page .standard-work-library-host,
+.template-center-page .standard-work-library-host .settings-section,
+.template-center-page .standard-work-board-wrap,
+.template-center-page .standard-work-board,
+.template-center-page .standard-work-column,
+.template-center-page .standard-work-card-list,
+.template-center-page .standard-work-card {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.template-center-page .standard-work-board-wrap {
+  overflow-x: clip;
+}
+
+.template-center-page .standard-work-board {
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
+  min-width: 0;
+  gap: 14px;
+}
+
+.template-center-page .standard-work-column {
+  width: 100%;
+  padding: 14px;
+  border-radius: 12px;
+}
+
+.template-center-page .standard-work-column-header {
+  margin-bottom: 12px;
+}
+
+.template-center-page .standard-work-card-list {
+  grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
+  gap: 10px;
+  width: 100%;
+}
+
+.template-center-page .standard-work-card {
+  width: 100%;
+  gap: 7px;
+  padding: 12px;
+}
+
+.template-center-page .standard-work-card-title,
+.template-center-page .standard-work-card-title > div,
+.template-center-page .standard-work-card-actions {
+  min-width: 0;
+}
+
+.template-center-page .standard-work-card-title h4,
+.template-center-page .standard-work-business-code,
+.template-center-page .standard-work-card-description {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.template-center-page .standard-work-business-code {
+  width: 100%;
+}
+
+.template-center-page .standard-work-drop-hint {
+  min-width: 0;
+}
+
+@media (max-width: 620px) {
+  .template-center-page .standard-work-column {
+    padding: 10px;
+  }
+
+  .template-center-page .standard-work-card-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .unified-dashboard-page{display:grid;gap:14px}.unified-dashboard-hero{padding:22px;border:1px solid #dce9e3;border-radius:16px;background:linear-gradient(135deg,#effaf5,#fff)}.unified-dashboard-hero h1,.unified-dashboard-hero p{margin:0}.unified-dashboard-hero h1{margin:3px 0 6px}.unified-dashboard-hero>div>p:last-child{color:#667085}.unified-dashboard-tabs{display:flex;gap:8px;padding:5px;border:1px solid #e5e7eb;border-radius:12px;background:#fff;width:max-content}.unified-dashboard-tabs button{padding:9px 16px;border:0;border-radius:8px;background:transparent;cursor:pointer}.unified-dashboard-tabs button.is-active{background:#176b52;color:#fff}.unified-dashboard-tabs button:disabled{cursor:not-allowed;opacity:.45}.dashboard-entry-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.dashboard-entry-card{display:grid;grid-template-columns:auto minmax(0,1fr);gap:16px;padding:22px;border:1px solid #e5e7eb;border-radius:16px;background:#fff}.dashboard-entry-card h2,.dashboard-entry-card p{margin:0}.dashboard-entry-card h2{margin:4px 0 8px}.dashboard-entry-card strong{display:block;margin-top:14px;color:#344054}.dashboard-entry-card>button{grid-column:2;justify-self:start}.dashboard-entry-icon{display:grid;place-items:center;width:52px;height:52px;border-radius:15px;background:#eaf7f1;color:#176b52;font-size:22px;font-weight:800}.dashboard-entry-card.is-management .dashboard-entry-icon{background:#eef2ff;color:#4338ca}.unified-dashboard-content>.operation-dashboard,.unified-dashboard-content>.assessment-page{margin:0}@media(max-width:760px){.dashboard-entry-grid{grid-template-columns:1fr}.unified-dashboard-tabs{width:100%;overflow:auto}.dashboard-entry-card{grid-template-columns:1fr}.dashboard-entry-card>button{grid-column:1}}
 .template-version-controls {
   display: flex;
