@@ -1174,6 +1174,12 @@ export async function loadConnectionHospital() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-hospital`), "链接医院读取失败。");
 }
 
+export async function joinConnectionDiagnosis(connectionId, payload = {}) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/diagnosis-entry`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  }), "加入诊断失败。");
+}
+
 export async function loadConnectionBenchmarks(connectionId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/benchmarks`), "对标链接读取失败。");
 }

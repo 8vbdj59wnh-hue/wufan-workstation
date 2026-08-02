@@ -101,6 +101,7 @@ import {
   listConnectionImprovements,
   updateConnectionImprovement,
   getConnectionHospital,
+  joinConnectionDiagnosis,
   listConnectionBenchmarkTargets,
   listConnectionBenchmarkCandidates,
   createConnectionBenchmarkTarget,
@@ -2086,6 +2087,14 @@ app.get("/api/connection-hospital", requireLinkHealth, (_request, response) => {
     response.json({ success: true, ...getConnectionHospital() });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "链接医院读取失败。" });
+  }
+});
+
+app.post("/api/connections/:id/diagnosis-entry", requireLinkImprove, (request, response) => {
+  try {
+    response.status(201).json({ success: true, item: joinConnectionDiagnosis(request.params.id, request.body, getUserPersonId(request.user), isAdminUser(request.user)) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "加入诊断失败。" });
   }
 });
 

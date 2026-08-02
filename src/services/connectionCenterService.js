@@ -20,6 +20,7 @@ export {
   loadAttentionConnectionHealthRecords,
   loadConnectionImprovements,
   loadConnectionHospital,
+  joinConnectionDiagnosis,
   loadConnectionBenchmarks,
   loadConnectionBenchmarkCandidates,
   loadConnectionBenchmarkComparison,

@@ -17,6 +17,7 @@ import {
   loadConnectionImprovements,
   loadConnectionImprovementSummary,
   loadConnectionHospital,
+  joinConnectionDiagnosis,
   loadConnectionBenchmarks,
   loadConnectionBenchmarkCandidates,
   loadConnectionBenchmarkComparison,
@@ -33,7 +34,7 @@ import {
   updateConnectionFollow,
   uploadConnectionImport,
   resolveAssetUrl,
-} from "./services/connectionCenterService.js?v=20260802-connection-benchmark2";
+} from "./services/connectionCenterService.js?v=20260803-manual-diagnosis1";
 import { getCurrentUser, state } from "./appState.js?v=20260705-state-singleton1";
 import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
 import { escapeHtml } from "./utils/html.js?v=20260802-module-boundary1";
@@ -64,6 +65,7 @@ const pageState = {
   section: "connections",
   myWorkbench: { items: [], summary: { total: 0, better: 0, risk: 0, followed: 0 }, filter: "all", isAdmin: false, loading: false },
   hospital: { zones: { diagnosis: [], treatment: [], observation: [] }, counts: { diagnosis: 0, treatment: 0, observation: 0 }, stage: "diagnosis", loading: false },
+  diagnosisModalId: "",
   benchmarks: { items: [], candidates: [], comparison: null, comparisonId: "", loading: false },
   mappings: [],
   mappingLoading: false,
@@ -133,6 +135,23 @@ function canImprove() {
 
 function canViewHealth() {
   return hasPermission(getCurrentUser(), "links.health") || hasPermission(getCurrentUser(), "products.view");
+}
+
+function connectionAnomalies(item) {
+  const problems = [];
+  if (Number(item.salesGrowth) < -0.2) problems.push({ title: "销售明显下降", value: growthText(item.salesGrowth) });
+  if (Number(item.visitorGrowth) < -0.2) problems.push({ title: "流量下降", value: growthText(item.visitorGrowth) });
+  if (Number(item.conversionChange) < -0.01) problems.push({ title: "转化下降", value: growthText(item.conversionChange, { points: true }) });
+  if (Number(item.profitGrowth) < -0.2) problems.push({ title: "利润下降", value: growthText(item.profitGrowth) });
+  if (!problems.length && item.healthScore !== null && item.healthScore !== undefined && Number(item.healthScore) < 60) problems.push({ title: "健康状态异常", value: `${item.healthScore}分` });
+  return problems;
+}
+
+function canJoinDiagnosis(item) {
+  const user = getCurrentUser(); const personId = user?.personId ?? user?.id ?? "";
+  const isAdmin = ["admin", "system_admin"].includes(user?.role) || user?.authRole === "admin";
+  return canImprove() && (isAdmin || (item.ownerId && item.ownerId === personId)) && connectionAnomalies(item).length > 0
+    && !(pageState.hospital.admittedConnectionIds ?? []).includes(item.id);
 }
 
 function personName(id) {
@@ -214,7 +233,7 @@ function renderConnectionHospital() {
       : item.improvementStatus === "planned" && canImprove() ? `<button type="button" class="primary-button" data-hospital-transition="${escapeHtml(item.improvementId)}" data-next-status="executing">诊断完成，进入治疗</button>` : "")
       : stage === "treatment" && canImprove() ? `<button type="button" class="primary-button" data-hospital-transition="${escapeHtml(item.improvementId)}" data-next-status="observing">治疗完成，进入观察</button>`
       : stage === "observation" && canImprove() ? `<div class="hospital-observation-actions"><button type="button" class="primary-button" data-hospital-transition="${escapeHtml(item.improvementId)}" data-next-status="effective">数据恢复</button><button type="button" class="secondary-button" data-hospital-transition="${escapeHtml(item.improvementId)}" data-next-status="failed">未恢复</button></div>` : "";
-    return `<article class="connection-hospital-card"><header><button type="button" data-open-connection="${escapeHtml(item.connectionId)}"><strong>${escapeHtml(item.connectionName)}</strong><small>${escapeHtml(`${item.platform} · ${item.shopName}`)}</small></button><span class="status-pill">${escapeHtml(meta[stage][0])}</span></header><p class="hospital-product">产品：${escapeHtml(productCodes(profile))}</p><div class="hospital-problem"><strong>${escapeHtml(item.problemTitle)}</strong><span>健康 ${item.healthScore == null ? "—" : `${item.healthScore}分`} · 负责人 ${escapeHtml(item.ownerName || "未分配")}</span></div><div class="hospital-metrics"><span>销售 ${hospitalMetric(item.salesGrowth)}</span><span>流量 ${hospitalMetric(item.visitorGrowth)}</span><span>转化 ${hospitalMetric(item.conversionChange, true)}</span><span>利润 ${hospitalMetric(item.profitGrowth)}</span></div>${stage !== "diagnosis" ? `<div class="hospital-treatment"><span>方案：${escapeHtml(item.treatmentPlan)}</span><span>行动：${escapeHtml(item.actionId || "—")}</span><span>任务进度：${escapeHtml(taskProgress)}</span></div>` : `<small>发现时间：${escapeHtml(item.discoveredAt || "—")}</small>`}<footer>${operation}<button type="button" class="text-button" data-open-connection="${escapeHtml(item.connectionId)}">查看连接详情</button></footer></article>`; };
+    return `<article class="connection-hospital-card"><header><button type="button" data-open-connection="${escapeHtml(item.connectionId)}"><strong>${escapeHtml(item.connectionName)}</strong><small>${escapeHtml(`${item.platform} · ${item.shopName}`)}</small></button><span class="status-pill">${escapeHtml(meta[stage][0])}</span></header><p class="hospital-product">产品：${escapeHtml(productCodes(profile))}</p><div class="hospital-problem"><strong>${escapeHtml(item.problemTitle)}</strong><span>健康 ${item.healthScore == null ? "—" : `${item.healthScore}分`} · 负责人 ${escapeHtml(item.ownerName || "未分配")}</span></div><div class="hospital-metrics"><span>销售 ${hospitalMetric(item.salesGrowth)}</span><span>流量 ${hospitalMetric(item.visitorGrowth)}</span><span>转化 ${hospitalMetric(item.conversionChange, true)}</span><span>利润 ${hospitalMetric(item.profitGrowth)}</span></div>${stage !== "diagnosis" ? `<div class="hospital-treatment"><span>方案：${escapeHtml(item.treatmentPlan)}</span><span>行动：${escapeHtml(item.actionId || "—")}</span><span>任务进度：${escapeHtml(taskProgress)}</span></div>` : `<div class="hospital-treatment"><span>加入时间：${escapeHtml(item.discoveredAt || "—")}</span><span>当前状态：等待发起诊断行动</span>${item.diagnosisEntry?.notes ? `<span>备注：${escapeHtml(item.diagnosisEntry.notes)}</span>` : ""}</div>`}<footer>${operation}<button type="button" class="text-button" data-open-connection="${escapeHtml(item.connectionId)}">查看连接详情</button></footer></article>`; };
   return `<section class="connection-hospital"><header><div><p class="eyebrow">发现问题 → 诊断 → 治疗 → 观察恢复</p><h2>链接医院</h2></div></header><div class="connection-hospital-zones">${Object.entries(meta).map(([id, [label, description]]) => `<button type="button" class="${stage === id ? "is-active" : ""}" data-hospital-stage="${id}"><span>${label}</span><strong>${hospital.counts?.[id] || 0}</strong><small>${description}</small></button>`).join("")}</div>${hospital.loading ? `<div class="empty-state">正在读取链接健康状态…</div>` : items.length ? `<div class="connection-hospital-grid">${items.map(card).join("")}</div>` : `<div class="empty-state"><strong>${escapeHtml(meta[stage][0])}暂无链接</strong><p>${stage === "observation" ? "已恢复链接会自动退出观察区。" : "经营数据正常或尚未形成对应阶段记录。"}</p></div>`}</section>`;
 }
 
@@ -236,7 +255,7 @@ function renderMyLinksWorkbench() {
   return `<section class="my-links-workbench"><header><div><p class="eyebrow">运营日常经营工作台</p><h2>我的链接</h2><p>${workbench.isAdmin ? "管理员视角展示全部经营链接。" : "仅展示由当前登录人员负责的经营链接。"}</p></div></header>
     <div class="my-links-summary"><button type="button" data-my-link-filter="all"><span>我的链接</span><strong>${summary.total || 0}</strong></button><button type="button" data-my-link-filter="better"><span>向好链接</span><strong>${summary.better || 0}</strong></button><button type="button" data-my-link-filter="worse"><span>风险链接</span><strong>${summary.risk || 0}</strong></button><button type="button" data-my-link-filter="followed"><span>关注链接</span><strong>${summary.followed || 0}</strong></button></div>
     <nav class="segmented-control my-links-filters" aria-label="我的链接筛选">${tabs.map(([id, label]) => `<button type="button" class="${workbench.filter === id ? "active" : ""}" data-my-link-filter="${id}">${label}</button>`).join("")}</nav>
-    ${workbench.loading ? `<div class="empty-state">正在读取我的链接…</div>` : workbench.items.length ? `<div class="my-links-grid">${workbench.items.map((item) => { const trend = trendLabel(item); return `<article class="my-link-card"><button type="button" class="my-link-main" data-open-connection="${escapeHtml(item.id)}">${imageHtml(item)}<span class="my-link-content"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(`${shopName(item)} · ${productCodes(item)}`)}</small><span class="my-link-metrics"><em>销售额 <b>${item.currentPayAmount == null ? "—" : `¥${Number(item.currentPayAmount).toLocaleString("zh-CN")}`}</b></em><em>增长 <b>${growthText(item.salesGrowth)}</b></em><em>健康 <b>${escapeHtml(healthText(item.healthStatus))}${item.healthScore == null ? "" : ` ${item.healthScore}分`}</b></em><em>状态 <b>${escapeHtml(statusText(item.status))}</b></em></span><small class="my-link-changes">${escapeHtml(trendDetails(item))}</small><span class="my-link-trend is-${trend.className}">${trend.text}</span></span></button><button type="button" class="my-link-follow ${item.followed ? "is-followed" : ""}" data-toggle-connection-follow="${escapeHtml(item.id)}" data-followed="${item.followed ? "true" : "false"}" aria-label="${item.followed ? "取消关注" : "关注链接"}">${item.followed ? "★ 已关注" : "☆ 关注"}</button></article>`; }).join("")}</div>` : `<div class="empty-state"><strong>暂无符合条件的链接</strong><p>${workbench.filter === "followed" ? "你还没有关注链接。" : "当前账号没有符合此经营状态的负责链接。"}</p></div>`}
+    ${workbench.loading ? `<div class="empty-state">正在读取我的链接…</div>` : workbench.items.length ? `<div class="my-links-grid">${workbench.items.map((item) => { const trend = trendLabel(item); const anomalies = connectionAnomalies(item); return `<article class="my-link-card"><button type="button" class="my-link-main" data-open-connection="${escapeHtml(item.id)}">${imageHtml(item)}<span class="my-link-content"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(`${shopName(item)} · ${productCodes(item)}`)}</small><span class="my-link-metrics"><em>销售额 <b>${item.currentPayAmount == null ? "—" : `¥${Number(item.currentPayAmount).toLocaleString("zh-CN")}`}</b></em><em>增长 <b>${growthText(item.salesGrowth)}</b></em><em>健康 <b>${escapeHtml(healthText(item.healthStatus))}${item.healthScore == null ? "" : ` ${item.healthScore}分`}</b></em><em>状态 <b>${escapeHtml(statusText(item.status))}</b></em></span><small class="my-link-changes">${escapeHtml(trendDetails(item))}</small><span class="my-link-trend is-${trend.className}">${trend.text}</span></span></button><button type="button" class="my-link-follow ${item.followed ? "is-followed" : ""}" data-toggle-connection-follow="${escapeHtml(item.id)}" data-followed="${item.followed ? "true" : "false"}" aria-label="${item.followed ? "取消关注" : "关注链接"}">${item.followed ? "★ 已关注" : "☆ 关注"}</button>${anomalies.length ? `<div class="connection-anomaly-reminder"><span>⚠ ${escapeHtml(anomalies.map((problem) => problem.title).join("、"))}</span>${canJoinDiagnosis(item) ? `<button type="button" data-join-diagnosis="${escapeHtml(item.id)}">加入诊断</button>` : `<small>${(pageState.hospital.admittedConnectionIds ?? []).includes(item.id) ? "已加入诊断区" : "异常提醒"}</small>`}</div>` : ""}</article>`; }).join("")}</div>` : `<div class="empty-state"><strong>暂无符合条件的链接</strong><p>${workbench.filter === "followed" ? "你还没有关注链接。" : "当前账号没有符合此经营状态的负责链接。"}</p></div>`}
   </section>`;
 }
 
@@ -339,10 +358,7 @@ function renderList() {
   });
   if (!items.length) return `<div class="empty-state"><strong>没有符合条件的连接</strong><p>请调整店铺、产品编码、负责人或状态筛选。</p></div>`;
   if (pageState.view === "cards") {
-    return `<div class="connection-card-grid">${items.map((item) => `<button type="button" class="connection-card" data-open-connection="${escapeHtml(item.id)}">
-      ${imageHtml(item)}
-      <div class="connection-card-body"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(productCodes(item, filters.productCode))}</span><span>${item.latestPeriodEnd ? `${escapeHtml(item.latestPeriodEnd)} · ¥${Number(item.latestPayAmount || 0).toLocaleString("zh-CN")}` : "暂无经营数据"}</span>${Number(item.benchmarkCount || 0) ? `<span class="connection-benchmark-status">对标：${escapeHtml(item.firstBenchmarkName)}${Number(item.benchmarkCount) > 1 ? ` +${Number(item.benchmarkCount) - 1}` : ""}</span>` : `<span class="connection-benchmark-status is-empty">未设置竞品</span>`}<em class="status-pill status-${escapeHtml(item.status)}">${escapeHtml(statusText(item.status))}</em></div>
-    </button>`).join("")}</div>`;
+    return `<div class="connection-card-grid">${items.map((item) => { const anomalies = connectionAnomalies(item); return `<article class="connection-card ${anomalies.length ? "has-anomaly" : ""}"><button type="button" class="connection-card-main" data-open-connection="${escapeHtml(item.id)}">${imageHtml(item)}<span class="connection-card-body"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(productCodes(item, filters.productCode))}</span><span>${item.latestPeriodEnd ? `${escapeHtml(item.latestPeriodEnd)} · ¥${Number(item.latestPayAmount || 0).toLocaleString("zh-CN")}` : "暂无经营数据"}</span>${Number(item.benchmarkCount || 0) ? `<span class="connection-benchmark-status">对标：${escapeHtml(item.firstBenchmarkName)}${Number(item.benchmarkCount) > 1 ? ` +${Number(item.benchmarkCount) - 1}` : ""}</span>` : `<span class="connection-benchmark-status is-empty">未设置对标</span>`}<em class="status-pill status-${escapeHtml(item.status)}">${escapeHtml(statusText(item.status))}</em></span></button>${anomalies.length ? `<footer><span>⚠ ${escapeHtml(anomalies.map((problem) => problem.title).join("、"))}</span>${canJoinDiagnosis(item) ? `<button type="button" class="primary-button" data-join-diagnosis="${escapeHtml(item.id)}">加入诊断</button>` : `<small>${(pageState.hospital.admittedConnectionIds ?? []).includes(item.id) ? "已加入诊断区" : "异常提醒"}</small>`}</footer>` : ""}</article>`; }).join("")}</div>`;
   }
   const visible = new Set(pageState.visibleColumns);
   const header = listColumns.filter((column) => visible.has(column.key)).map((column) => {
@@ -427,6 +443,15 @@ function renderBenchmarkModal() {
   return `<div class="modal-backdrop" data-close-benchmark-comparison><section class="modal-panel benchmark-comparison-modal" role="dialog" aria-modal="true" aria-label="链接对标分析" data-benchmark-comparison-modal><header><div><p class="eyebrow">两个商品详情页并排分析</p><h2>链接对标分析</h2></div><button type="button" class="icon-button" data-close-benchmark-comparison aria-label="关闭">×</button></header><div class="benchmark-comparison-grid">${renderOwnProductPage("我的链接", comparison.mine)}${renderTargetProductPage("对标链接", comparison.target)}</div></section></div>`;
 }
 
+function renderDiagnosisModal() {
+  if (!pageState.diagnosisModalId) return "";
+  const item = pageState.items.find((candidate) => candidate.id === pageState.diagnosisModalId)
+    ?? pageState.myWorkbench.items.find((candidate) => candidate.id === pageState.diagnosisModalId);
+  if (!item) return "";
+  const problems = connectionAnomalies(item);
+  return `<div class="modal-backdrop" data-close-diagnosis-modal><section class="modal-panel connection-modal" role="dialog" aria-modal="true" aria-label="加入诊断区" data-diagnosis-modal><header><div><p class="eyebrow">人工确认经营异常</p><h2>加入诊断区</h2></div><button type="button" class="icon-button" data-close-diagnosis-modal aria-label="关闭">×</button></header><div class="diagnosis-confirm-summary"><strong>${escapeHtml(item.name)}</strong>${problems.map((problem) => `<span><b>${escapeHtml(problem.title)}</b>${escapeHtml(problem.value)}</span>`).join("")}</div><form data-diagnosis-confirm-form><label>诊断备注<textarea name="notes" rows="4" placeholder="说明为什么需要进入诊断，以及建议优先检查的方向"></textarea></label><p class="form-note">确认后只加入诊断区，不会自动创建关键行动或任务。</p><footer><button type="button" class="secondary-button" data-close-diagnosis-modal>取消</button><button type="submit" class="primary-button">确认加入诊断</button></footer></form></section></div>`;
+}
+
 function externalData(mapping, key, fallback = "—") {
   return mapping.externalData?.[key] || fallback;
 }
@@ -486,7 +511,7 @@ function renderImprovementModal() {
 
 export function renderConnectionCenterPage() {
   const pageContent = pageState.section === "hospital" ? renderConnectionHospital() : pageState.section === "my-links" ? renderMyLinksWorkbench() : pageState.section === "mappings" ? renderMappingPage() : pageState.section === "imports" ? renderImportPage() : pageState.section === "pending-connections" ? renderPendingConnections() : `${renderGrowthOverview()}${renderToolbar()}${renderList()}`;
-  return `<section class="connection-center-page">${pageState.error ? `<div class="form-error">${escapeHtml(pageState.error)}</div>` : ""}${pageState.loading ? `<div class="empty-state">正在读取连接…</div>` : pageState.selectedId ? renderDetail() : `${renderSectionNavigation()}${pageContent}`}${renderMappingModal()}${renderImprovementModal()}${renderBenchmarkModal()}</section>`;
+  return `<section class="connection-center-page">${pageState.error ? `<div class="form-error">${escapeHtml(pageState.error)}</div>` : ""}${pageState.loading ? `<div class="empty-state">正在读取连接…</div>` : pageState.selectedId ? renderDetail() : `${renderSectionNavigation()}${pageContent}`}${renderMappingModal()}${renderImprovementModal()}${renderBenchmarkModal()}${renderDiagnosisModal()}</section>`;
 }
 
 async function loadHospital(render) {
@@ -506,16 +531,19 @@ async function loadMyLinks(render, filter = pageState.myWorkbench.filter) {
 async function loadPage(render) {
   pageState.loading = true; pageState.error = ""; render();
   try {
-    const [connections, rankings, managementOverview, healthAttention, improvementSummary, importShops] = await Promise.all([loadConnections(), loadConnectionGrowthRankings(), loadConnectionManagementOverview(), canViewHealth() ? loadAttentionConnectionHealthRecords() : Promise.resolve({ items: [], counts: {} }), loadConnectionImprovementSummary(), loadConnectionImportShops()]);
+    const [connections, rankings, managementOverview, healthAttention, improvementSummary, importShops, hospital] = await Promise.all([loadConnections(), loadConnectionGrowthRankings(), loadConnectionManagementOverview(), canViewHealth() ? loadAttentionConnectionHealthRecords() : Promise.resolve({ items: [], counts: {} }), loadConnectionImprovementSummary(), loadConnectionImportShops(), canViewHealth() ? loadConnectionHospital() : Promise.resolve({ zones: { diagnosis: [], treatment: [], observation: [] }, counts: {}, admittedConnectionIds: [] })]);
     const analysisByConnection = new Map((rankings.listMetrics ?? []).map((item) => [item.connectionId, item]));
     pageState.items = (connections.items ?? []).map((item) => {
       const analysis = analysisByConnection.get(item.id);
-      return { ...item, salesGrowth: analysis?.salesGrowth ?? null, healthScore: analysis?.healthScore ?? null, healthStatus: analysis?.healthStatus ?? "no_data", currentFinance: analysis?.currentFinance ?? null, profitGrowth: analysis?.profitGrowth ?? null };
+      return { ...item, salesGrowth: analysis?.salesGrowth ?? null, visitorGrowth: analysis?.visitorGrowth ?? null,
+        conversionChange: analysis?.conversionChange ?? null, healthScore: analysis?.healthScore ?? null,
+        healthStatus: analysis?.healthStatus ?? "no_data", currentFinance: analysis?.currentFinance ?? null, profitGrowth: analysis?.profitGrowth ?? null };
     });
     pageState.growthRankings = rankings;
     pageState.managementOverview = managementOverview;
     pageState.healthAttention = healthAttention;
     pageState.improvementSummary = improvementSummary.summary;
+    pageState.hospital = { ...pageState.hospital, ...hospital };
     pageState.importShops = importShops.items ?? [];
     pageState.loaded = true;
   } catch (error) { pageState.error = error.message; }
@@ -582,6 +610,19 @@ export function bindConnectionCenterPageEvents(render) {
     try { await updateConnectionImprovement(button.dataset.hospitalTransition, { status: button.dataset.nextStatus }); await loadHospital(render); }
     catch (error) { pageState.error = error.message; render(); }
   }));
+  root.querySelectorAll("[data-join-diagnosis]").forEach((button) => button.addEventListener("click", () => {
+    pageState.diagnosisModalId = button.dataset.joinDiagnosis; render();
+  }));
+  root.querySelectorAll("[data-close-diagnosis-modal]").forEach((element) => element.addEventListener("click", (event) => {
+    if (event.target.closest("[data-diagnosis-modal]") && !event.target.matches("[data-close-diagnosis-modal]")) return;
+    pageState.diagnosisModalId = ""; render();
+  }));
+  root.querySelector("[data-diagnosis-confirm-form]")?.addEventListener("submit", async (event) => {
+    event.preventDefault(); const connectionId = pageState.diagnosisModalId;
+    try { await joinConnectionDiagnosis(connectionId, Object.fromEntries(new FormData(event.currentTarget))); pageState.diagnosisModalId = ""; await loadHospital(render);
+      pageState.section = "hospital"; pageState.hospital.stage = "diagnosis"; pageState.selectedId = ""; render(); }
+    catch (error) { pageState.error = error.message; render(); }
+  });
   root.querySelectorAll("[data-my-link-filter]").forEach((button) => button.addEventListener("click", () => { void loadMyLinks(render, button.dataset.myLinkFilter); }));
   root.querySelectorAll("[data-toggle-connection-follow]").forEach((button) => button.addEventListener("click", async () => {
     try { await updateConnectionFollow(button.dataset.toggleConnectionFollow, button.dataset.followed !== "true"); await loadMyLinks(render); }

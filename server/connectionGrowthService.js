@@ -157,6 +157,8 @@ export function listConnectionGrowthRankings(sort = "overview", limit = 10) {
   const listMetrics = analyses.map((item) => ({
     connectionId: item.connectionId,
     salesGrowth: item.salesGrowth,
+    visitorGrowth: item.visitorGrowth,
+    conversionChange: item.conversionChange,
     healthScore: item.healthScore,
     healthStatus: item.healthStatus,
     currentFinance: item.currentFinance,

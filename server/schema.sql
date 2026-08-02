@@ -1195,6 +1195,27 @@ CREATE INDEX IF NOT EXISTS idx_connection_health_records_status_created
 CREATE INDEX IF NOT EXISTS idx_connection_health_records_connection_created
   ON connection_health_records(connectionId, createdAt DESC);
 
+CREATE TABLE IF NOT EXISTS connection_diagnosis_entries (
+  id TEXT PRIMARY KEY,
+  connectionId TEXT NOT NULL,
+  initiatedBy TEXT,
+  joinedAt TEXT NOT NULL,
+  anomalyReasonsJson TEXT NOT NULL DEFAULT '[]',
+  notes TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(connectionId) REFERENCES connection_profiles(id) ON DELETE CASCADE,
+  FOREIGN KEY(initiatedBy) REFERENCES persons(id),
+  CHECK(status IN ('active','closed'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_diagnosis_entries_active
+  ON connection_diagnosis_entries(connectionId) WHERE status='active';
+
+CREATE INDEX IF NOT EXISTS idx_connection_diagnosis_entries_joined
+  ON connection_diagnosis_entries(status, joinedAt DESC);
+
 CREATE TABLE IF NOT EXISTS connection_improvements (
   id TEXT PRIMARY KEY,
   connectionId TEXT NOT NULL,

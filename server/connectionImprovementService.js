@@ -107,8 +107,18 @@ export function updateConnectionImprovement(id, input) {
   const afterMetrics = input?.afterMetrics === undefined ? current.afterMetrics : normalizeMetrics(input.afterMetrics);
   const resultSummary = input?.resultSummary === undefined ? current.resultSummary : text(input.resultSummary);
   const now = new Date().toISOString();
-  getDatabase().prepare(`UPDATE connection_improvements SET status=?,afterMetricsJson=?,resultSummary=?,updatedAt=? WHERE id=?`)
-    .run(nextStatus, JSON.stringify(afterMetrics), resultSummary, now, current.id);
+  const database = getDatabase();
+  database.transaction(() => {
+    database.prepare(`UPDATE connection_improvements SET status=?,afterMetricsJson=?,resultSummary=?,updatedAt=? WHERE id=?`)
+      .run(nextStatus, JSON.stringify(afterMetrics), resultSummary, now, current.id);
+    if (nextStatus === "effective" || nextStatus === "closed") {
+      database.prepare(`
+        UPDATE connection_diagnosis_entries
+        SET status='closed',updatedAt=?
+        WHERE connectionId=? AND status='active'
+      `).run(now, current.connectionId);
+    }
+  })();
   return readConnectionImprovement(current.id);
 }
 
