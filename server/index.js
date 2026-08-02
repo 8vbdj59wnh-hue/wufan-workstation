@@ -101,9 +101,11 @@ import {
   listConnectionImprovements,
   updateConnectionImprovement,
   getConnectionHospital,
-  getConnectionBenchmarks,
+  listConnectionBenchmarkTargets,
   listConnectionBenchmarkCandidates,
-  replaceConnectionBenchmarks,
+  createConnectionBenchmarkTarget,
+  updateConnectionBenchmarkTarget,
+  deleteConnectionBenchmarkTarget,
   getConnectionBenchmarkComparison,
 } from "./modules/links/index.js";
 import {
@@ -1829,7 +1831,7 @@ app.put("/api/connections/:id", requireLinkManage, (request, response) => {
 
 app.get("/api/connections/:id/benchmarks", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, ...getConnectionBenchmarks(request.params.id) });
+    response.json({ success: true, items: listConnectionBenchmarkTargets(request.params.id) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "对标链接读取失败。" });
   }
@@ -1843,17 +1845,33 @@ app.get("/api/connections/:id/benchmark-candidates", requireLinkView, (request, 
   }
 });
 
-app.put("/api/connections/:id/benchmarks", requireLinkManage, (request, response) => {
+app.post("/api/connections/:id/benchmarks", requireLinkManage, (request, response) => {
   try {
-    response.json({ success: true, ...replaceConnectionBenchmarks(request.params.id, request.body?.benchmarkConnectionIds, getUserPersonId(request.user)) });
+    response.status(201).json({ success: true, item: createConnectionBenchmarkTarget(request.params.id, request.body, getUserPersonId(request.user)) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "对标链接保存失败。" });
   }
 });
 
-app.get("/api/connections/:id/benchmarks/:benchmarkId/comparison", requireLinkView, (request, response) => {
+app.put("/api/connections/:id/benchmarks/:targetId", requireLinkManage, (request, response) => {
   try {
-    response.json({ success: true, ...getConnectionBenchmarkComparison(request.params.id, request.params.benchmarkId) });
+    response.json({ success: true, item: updateConnectionBenchmarkTarget(request.params.id, request.params.targetId, request.body) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "对标链接更新失败。" });
+  }
+});
+
+app.delete("/api/connections/:id/benchmarks/:targetId", requireLinkManage, (request, response) => {
+  try {
+    response.json(deleteConnectionBenchmarkTarget(request.params.id, request.params.targetId));
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "对标链接删除失败。" });
+  }
+});
+
+app.get("/api/connections/:id/benchmarks/:targetId/comparison", requireLinkView, (request, response) => {
+  try {
+    response.json({ success: true, ...getConnectionBenchmarkComparison(request.params.id, request.params.targetId) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "竞品对比读取失败。" });
   }

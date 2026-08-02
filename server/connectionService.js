@@ -56,9 +56,8 @@ const connectionSelect = `
           ORDER BY periodEnd DESC,periodStart DESC,createdAt DESC LIMIT 1) AS latestPeriodEnd,
          (SELECT payAmount FROM connection_period_snapshots ps WHERE ps.salesLinkId=c.salesLinkId
           ORDER BY periodEnd DESC,periodStart DESC,createdAt DESC LIMIT 1) AS latestPayAmount
-         ,(SELECT COUNT(*) FROM connection_benchmarks b WHERE b.connectionId=c.id) AS benchmarkCount
-         ,(SELECT target.name FROM connection_benchmarks b JOIN connection_profiles target ON target.id=b.benchmarkConnectionId
-           WHERE b.connectionId=c.id ORDER BY b.createdAt,b.id LIMIT 1) AS firstBenchmarkName
+         ,(SELECT COUNT(*) FROM connection_benchmark_targets b WHERE b.connectionId=c.id) AS benchmarkCount
+         ,(SELECT b.title FROM connection_benchmark_targets b WHERE b.connectionId=c.id ORDER BY b.createdAt,b.id LIMIT 1) AS firstBenchmarkName
   FROM connection_profiles c
   JOIN sales_links l ON l.id=c.salesLinkId
   JOIN sales_shops s ON s.id=l.shopId

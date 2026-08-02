@@ -41,8 +41,10 @@ export {
 } from "../../connectionImprovementService.js";
 export { getConnectionHospital } from "../../connectionHospitalService.js";
 export {
-  getConnectionBenchmarks,
+  listConnectionBenchmarkTargets,
   listConnectionBenchmarkCandidates,
-  replaceConnectionBenchmarks,
+  createConnectionBenchmarkTarget,
+  updateConnectionBenchmarkTarget,
+  deleteConnectionBenchmarkTarget,
   getConnectionBenchmarkComparison,
 } from "../../connectionBenchmarkService.js";

@@ -1241,6 +1241,24 @@ function backfillConnectionProfileOrigins() {
   `);
 }
 
+function migrateLegacyConnectionBenchmarks() {
+  const database = getDatabase();
+  const legacyTable = database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='connection_benchmarks'").get();
+  if (!legacyTable) return;
+  database.exec(`
+    INSERT OR IGNORE INTO connection_benchmark_targets (
+      id,connectionId,targetType,internalConnectionId,targetUrl,platform,title,mainImage,notes,createdBy,createdAt,updatedAt
+    )
+    SELECT b.id,b.connectionId,'internal',b.benchmarkConnectionId,l.canonicalUrl,s.platform,
+           COALESCE(c.name,l.title,'历史系统内对标链接'),c.mainImage,
+           '由旧版系统内竞品关系兼容迁移',b.createdBy,b.createdAt,b.updatedAt
+    FROM connection_benchmarks b
+    JOIN connection_profiles c ON c.id=b.benchmarkConnectionId
+    JOIN sales_links l ON l.id=c.salesLinkId
+    JOIN sales_shops s ON s.id=l.shopId
+  `);
+}
+
 function backfillBusinessIdentifiers() {
   const database = getDatabase();
   const backfill = database.transaction(() => {
@@ -1998,6 +2016,7 @@ function runLightweightMigrations() {
   ensureColumn("sales_links", "originSource", "TEXT NOT NULL DEFAULT 'legacy_unknown'");
   ensureColumn("sales_links", "enrichmentStatus", "TEXT NOT NULL DEFAULT 'complete'");
   backfillConnectionProfileOrigins();
+  migrateLegacyConnectionBenchmarks();
   backfillBusinessIdentifiers();
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS permission_templates (

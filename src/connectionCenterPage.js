@@ -20,6 +20,8 @@ import {
   loadConnectionBenchmarks,
   loadConnectionBenchmarkCandidates,
   loadConnectionBenchmarkComparison,
+  createConnectionBenchmark,
+  removeConnectionBenchmark,
   loadConnectionPeriodSnapshots,
   loadConnections,
   loadMyConnectionWorkbench,
@@ -29,10 +31,9 @@ import {
   updateConnection,
   updateConnectionImprovement,
   updateConnectionFollow,
-  saveConnectionBenchmarks,
   uploadConnectionImport,
   resolveAssetUrl,
-} from "./services/connectionCenterService.js?v=20260802-connection-benchmark1";
+} from "./services/connectionCenterService.js?v=20260802-connection-benchmark2";
 import { getCurrentUser, state } from "./appState.js?v=20260705-state-singleton1";
 import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
 import { escapeHtml } from "./utils/html.js?v=20260802-module-boundary1";
@@ -63,7 +64,7 @@ const pageState = {
   section: "connections",
   myWorkbench: { items: [], summary: { total: 0, better: 0, risk: 0, followed: 0 }, filter: "all", isAdmin: false, loading: false },
   hospital: { zones: { diagnosis: [], treatment: [], observation: [] }, counts: { diagnosis: 0, treatment: 0, observation: 0 }, stage: "diagnosis", loading: false },
-  benchmarks: { relations: [], items: [], candidates: [], comparison: null, comparisonId: "", loading: false },
+  benchmarks: { items: [], candidates: [], comparison: null, comparisonId: "", loading: false },
   mappings: [],
   mappingLoading: false,
   mappingFilters: { sourceType: "business_advisor", matchStatus: "pending", search: "" },
@@ -381,7 +382,7 @@ function renderActions(item) {
 function renderDetail() {
   const item = pageState.items.find((candidate) => candidate.id === pageState.selectedId);
   if (!item) return "";
-  const tabs = [["overview", "经营概况"], ["actions", "经营动作"], ...(canViewHealth() ? [["health", "体检报告"]] : []), ["improvements", "改善记录"], ["trend", "经营趋势"], ["benchmarks", `竞品对比${pageState.benchmarks.relations.length ? ` ${pageState.benchmarks.relations.length}` : ""}`]];
+  const tabs = [["overview", "经营概况"], ["actions", "经营动作"], ...(canViewHealth() ? [["health", "体检报告"]] : []), ["improvements", "改善记录"], ["trend", "经营趋势"], ["benchmarks", `链接对标${pageState.benchmarks.items.length ? ` ${pageState.benchmarks.items.length}` : ""}`]];
   let body = `<div class="connection-overview"><dl><div><dt>平台</dt><dd>${escapeHtml(item.platform)}</dd></div><div><dt>店铺</dt><dd>${escapeHtml(shopName(item))}</dd></div><div><dt>商品ID</dt><dd>${escapeHtml(item.platformGoodsId || "—")}</dd></div><div><dt>负责人</dt><dd>${escapeHtml(personName(item.ownerId))}</dd></div><div><dt>状态</dt><dd>${escapeHtml(statusText(item.status))}</dd></div></dl><section class="connection-operating-metrics"><div><span>最近周期销售额</span><strong>${item.latestPayAmount == null ? "—" : `¥${Number(item.latestPayAmount).toLocaleString("zh-CN")}`}</strong></div><div><span>销售增长</span><strong>${growthText(item.salesGrowth)}</strong></div><div><span>同期净利润</span><strong>${item.currentFinance == null ? "—" : `¥${Number(item.currentFinance.netProfit || 0).toLocaleString("zh-CN")}`}</strong></div><div><span>利润变化</span><strong>${growthText(item.profitGrowth)}</strong></div><div><span>健康状态</span><strong>${escapeHtml(healthText(item.healthStatus || "no_data"))}</strong></div></section>${canManage() ? `<form class="connection-action-form" data-connection-profile-form><label>连接名称<input name="name" value="${escapeHtml(item.name)}" required maxlength="120" /></label><label>负责人<select name="ownerId"><option value="">未设置</option>${(state.people ?? []).filter((person) => person.status === "active").map((person) => `<option value="${escapeHtml(person.id)}" ${item.ownerId === person.id ? "selected" : ""}>${escapeHtml(person.name)}</option>`).join("")}</select></label><button type="submit" class="secondary-button">保存档案</button></form>` : ""}<section><h3>关联产品</h3>${item.products?.length ? item.products.map((product) => `<a href="#products/${encodeURIComponent(product.id)}" data-product-id="${escapeHtml(product.id)}">${escapeHtml(product.name || product.skuCode)}</a>`).join("、") : "未关联产品"}</section></div>`;
   body = body.replace("<div><dt>负责人</dt>", `<div><dt>档案来源</dt><dd>${escapeHtml(originText(item.originSource))}</dd></div><div><dt>识别时间</dt><dd>${escapeHtml(item.identifiedAt || item.createdAt || "—")}</dd></div><div><dt>负责人</dt>`);
   if (pageState.detailTab === "actions") body = renderActions(item);
@@ -403,28 +404,27 @@ function benchmarkPercent(value) { return value === null || value === undefined 
 
 function renderBenchmarkPanel(item) {
   const benchmark = pageState.benchmarks;
-  const selected = new Set(benchmark.relations.map((relation) => relation.benchmarkConnectionId));
-  return `<section class="connection-benchmark-panel"><header><div><h3>竞品对标</h3><p>经营指标实时读取双方现有经营事实，不复制数据。</p></div></header>
-    ${canManage() ? `<form data-benchmark-settings><div class="benchmark-candidate-list">${benchmark.candidates.map((candidate) => `<label><input type="checkbox" name="benchmarkConnectionId" value="${escapeHtml(candidate.id)}" ${selected.has(candidate.id) ? "checked" : ""} /><span><strong>${escapeHtml(candidate.name)}</strong><small>${escapeHtml(`${candidate.platform} · ${candidate.shopDisplayName || candidate.shopName || "未命名店铺"}`)}</small></span></label>`).join("") || `<span class="form-note">暂无其他系统内连接可供选择。</span>`}</div><button type="submit" class="secondary-button">保存对标链接</button></form>` : ""}
-    ${benchmark.loading ? `<div class="empty-state compact">正在读取竞品数据…</div>` : benchmark.items.length ? `<div class="benchmark-selected-list">${benchmark.items.map((entry) => `<article><div>${imageHtml(entry.benchmark)}<span><strong>${escapeHtml(entry.benchmark.name)}</strong><small>${escapeHtml(`${entry.benchmark.platform} · ${entry.benchmark.shopDisplayName || entry.benchmark.shopName}`)}</small></span></div><button type="button" class="primary-button" data-open-benchmark-comparison="${escapeHtml(entry.benchmarkConnectionId)}">打开对比窗口</button></article>`).join("")}</div>` : `<div class="empty-state"><strong>尚未设置竞品链接</strong><p>从系统已有经营链接中选择一个或多个对标对象。</p></div>`}
+  return `<section class="connection-benchmark-panel"><header><div><h3>链接对标分析</h3><p>保存市场对标资料，左右并排查看两个商品详情页。</p></div></header>
+    ${canManage() ? `<form data-benchmark-settings><div class="benchmark-target-form"><label>对标类型<select name="targetType" data-benchmark-target-type><option value="external">外部市场链接</option><option value="internal">系统内优秀链接</option></select></label><label data-external-benchmark-field>对标链接URL<input name="targetUrl" type="url" placeholder="https://..." /></label><label data-internal-benchmark-field hidden>系统内链接<select name="internalConnectionId"><option value="">请选择</option>${benchmark.candidates.map((candidate) => `<option value="${escapeHtml(candidate.id)}">${escapeHtml(`${candidate.name} · ${candidate.platform} · ${candidate.shopDisplayName || candidate.shopName || "未命名店铺"}`)}</option>`).join("")}</select></label><label>平台<input name="platform" placeholder="淘宝、天猫、抖音等" /></label><label>商品标题<input name="title" required maxlength="200" /></label><label>商品图片URL<input name="mainImage" type="url" placeholder="无图片可留空" /></label><label>商品价格<input name="price" type="number" min="0" step="0.01" /></label><label>销量信息<input name="salesInfo" placeholder="按采集页面原文填写" /></label><label>评价信息<input name="reviewInfo" placeholder="按采集页面原文填写" /></label><label>商品卖点<textarea name="sellingPoints" rows="2"></textarea></label><label>详情页内容<textarea name="detailContent" rows="3"></textarea></label><label>备注<textarea name="notes" rows="2"></textarea></label></div><button type="submit" class="primary-button">添加对标链接</button></form>` : ""}
+    ${benchmark.loading ? `<div class="empty-state compact">正在读取对标资料…</div>` : benchmark.items.length ? `<div class="benchmark-selected-list">${benchmark.items.map((target) => `<article><div>${target.mainImage ? `<img src="${escapeHtml(resolveAssetUrl(target.mainImage))}" alt="" />` : `<span class="connection-image-placeholder">无图</span>`}<span><strong>${escapeHtml(target.title)}</strong><small>${escapeHtml(`${target.platform || "未标注平台"} · ${target.targetType === "internal" ? "系统内链接" : target.targetUrl || "外部链接"}`)}</small></span></div><div><button type="button" class="primary-button" data-open-benchmark-comparison="${escapeHtml(target.id)}">打开对比页面</button>${canManage() ? `<button type="button" class="text-button danger" data-delete-benchmark="${escapeHtml(target.id)}">删除</button>` : ""}</div></article>`).join("")}</div>` : `<div class="empty-state"><strong>尚未设置对标链接</strong><p>可以添加外部市场竞品，也可以选择系统内其他优秀链接。</p></div>`}
   </section>`;
 }
 
-function renderBenchmarkSide(label, item) {
+function renderOwnProductPage(label, item) {
   const period = item?.currentPeriod ?? {}; const finance = item?.currentFinance; const metrics = item?.metrics ?? {};
-  const rows = [
-    ["平台", item?.platform || "—"], ["店铺", item?.shopDisplayName || item?.shopName || "—"], ["产品", productCodes(item || {})], ["负责人", item?.ownerName || "未分配"],
-    ["销售额", benchmarkMoney(period.payAmount)], ["销量", benchmarkNumber(period.payQuantity)], ["增长率", growthText(item?.salesGrowth)], ["客单价", benchmarkMoney(period.customerValue)], ["利润", benchmarkMoney(finance?.netProfit)],
-    ["访客", benchmarkNumber(period.visitorCount)], ["浏览量", benchmarkNumber(period.viewCount)], ["收藏", benchmarkNumber(metrics.favoriteCount)], ["加购", benchmarkNumber(period.cartCount)],
-    ["转化率", benchmarkPercent(period.conversionRate)], ["点击率", benchmarkPercent(metrics.clickRate)], ["价格", benchmarkMoney(metrics.price)], ["评价", benchmarkNumber(metrics.reviewCount)],
-  ];
-  return `<article class="benchmark-side"><header><span>${escapeHtml(label)}</span>${imageHtml(item || {})}<div><strong>${escapeHtml(item?.name || "—")}</strong><small>${escapeHtml(item?.platformGoodsId || "—")}</small></div></header><dl>${rows.map(([name, value]) => `<div><dt>${escapeHtml(name)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl><section><h4>最近经营趋势</h4>${item?.trend?.length ? `<div class="benchmark-trend">${item.trend.map((point) => `<span title="${escapeHtml(`${point.periodStart} 至 ${point.periodEnd}`)}"><i style="--benchmark-value:${Math.max(4, Math.min(100, Number(point.payAmount || 0) / Math.max(...item.trend.map((entry) => Number(entry.payAmount || 0)), 1) * 100))}%"></i><small>${escapeHtml(point.periodEnd.slice(5))}</small></span>`).join("")}</div>` : `<p class="form-note">暂无趋势数据</p>`}</section></article>`;
+  return `<article class="benchmark-phone-page"><span class="benchmark-page-label">${escapeHtml(label)}</span><div class="benchmark-product-image">${imageHtml(item || {})}</div><section><h3>${escapeHtml(item?.name || "暂无标题")}</h3><strong class="benchmark-price">${benchmarkMoney(metrics.price)}</strong><div class="benchmark-commerce-row"><span>销量 ${benchmarkNumber(period.payQuantity)}</span><span>评价 ${benchmarkNumber(metrics.reviewCount)}</span></div></section><dl><div><dt>销售额</dt><dd>${benchmarkMoney(period.payAmount)}</dd></div><div><dt>转化率</dt><dd>${benchmarkPercent(period.conversionRate)}</dd></div><div><dt>利润</dt><dd>${benchmarkMoney(finance?.netProfit)}</dd></div><div><dt>增长率</dt><dd>${growthText(item?.salesGrowth)}</dd></div></dl><section><h4>商品卖点</h4><p>${escapeHtml(metrics.sellingPoints || "暂无数据")}</p></section><section><h4>详情页内容</h4><p>${escapeHtml(metrics.detailContent || "暂无数据")}</p></section><footer>${escapeHtml(`${item?.platform || "—"} · ${item?.shopDisplayName || item?.shopName || "—"} · ${productCodes(item || {})}`)}</footer></article>`;
+}
+
+function renderTargetProductPage(label, target) {
+  const internal = target?.internal;
+  if (internal) return renderOwnProductPage(label, internal);
+  return `<article class="benchmark-phone-page"><span class="benchmark-page-label">${escapeHtml(label)}</span><div class="benchmark-product-image">${target?.mainImage ? `<img src="${escapeHtml(resolveAssetUrl(target.mainImage))}" alt="${escapeHtml(target.title)}" />` : `<span class="connection-image-placeholder">暂无商品图片</span>`}</div><section><h3>${escapeHtml(target?.title || "暂无标题")}</h3><strong class="benchmark-price">${benchmarkMoney(target?.price)}</strong><div class="benchmark-commerce-row"><span>销量 ${escapeHtml(target?.salesInfo || "暂无数据")}</span><span>评价 ${escapeHtml(target?.reviewInfo || "暂无数据")}</span></div></section><section><h4>商品卖点</h4><p>${escapeHtml(target?.sellingPoints || "暂无数据")}</p></section><section><h4>详情页内容</h4><p>${escapeHtml(target?.detailContent || "暂无数据")}</p></section><section><h4>备注</h4><p>${escapeHtml(target?.notes || "暂无数据")}</p></section><footer>${escapeHtml(target?.platform || "未标注平台")}${target?.targetUrl ? ` · <a href="${escapeHtml(target.targetUrl)}" target="_blank" rel="noopener noreferrer">打开原链接</a>` : ""}</footer></article>`;
 }
 
 function renderBenchmarkModal() {
   const comparison = pageState.benchmarks.comparison;
   if (!comparison) return "";
-  return `<div class="modal-backdrop" data-close-benchmark-comparison><section class="modal-panel benchmark-comparison-modal" role="dialog" aria-modal="true" aria-label="链接竞品对比" data-benchmark-comparison-modal><header><div><p class="eyebrow">系统内链接实时对标</p><h2>链接竞品对比</h2></div><button type="button" class="icon-button" data-close-benchmark-comparison aria-label="关闭">×</button></header><div class="benchmark-comparison-grid">${renderBenchmarkSide("我的链接", comparison.mine)}${renderBenchmarkSide("竞品链接", comparison.competitor)}</div></section></div>`;
+  return `<div class="modal-backdrop" data-close-benchmark-comparison><section class="modal-panel benchmark-comparison-modal" role="dialog" aria-modal="true" aria-label="链接对标分析" data-benchmark-comparison-modal><header><div><p class="eyebrow">两个商品详情页并排分析</p><h2>链接对标分析</h2></div><button type="button" class="icon-button" data-close-benchmark-comparison aria-label="关闭">×</button></header><div class="benchmark-comparison-grid">${renderOwnProductPage("我的链接", comparison.mine)}${renderTargetProductPage("对标链接", comparison.target)}</div></section></div>`;
 }
 
 function externalData(mapping, key, fallback = "—") {
@@ -523,7 +523,7 @@ async function loadPage(render) {
 }
 
 async function openConnection(id, render) {
-  pageState.selectedId = id; pageState.detailTab = "overview"; pageState.actions = []; pageState.periodSnapshots = []; pageState.growthAnalysis = null; pageState.healthRecords = []; pageState.healthModalId = ""; pageState.improvements = []; pageState.benchmarks = { relations: [], items: [], candidates: [], comparison: null, comparisonId: "", loading: false }; render();
+  pageState.selectedId = id; pageState.detailTab = "overview"; pageState.actions = []; pageState.periodSnapshots = []; pageState.growthAnalysis = null; pageState.healthRecords = []; pageState.healthModalId = ""; pageState.improvements = []; pageState.benchmarks = { items: [], candidates: [], comparison: null, comparisonId: "", loading: false }; render();
 }
 
 async function loadBenchmarks(render) {
@@ -638,13 +638,24 @@ export function bindConnectionCenterPageEvents(render) {
     if (pageState.detailTab === "benchmarks") await loadBenchmarks(render);
   }));
   root.querySelector("[data-benchmark-settings]")?.addEventListener("submit", async (event) => {
-    event.preventDefault(); const ids = new FormData(event.currentTarget).getAll("benchmarkConnectionId");
-    try { const result = await saveConnectionBenchmarks(pageState.selectedId, ids); pageState.benchmarks = { ...pageState.benchmarks, ...result };
-      const first = result.items?.[0]?.benchmark; pageState.items = pageState.items.map((item) => item.id === pageState.selectedId
-        ? { ...item, benchmarkCount: result.relations?.length || 0, firstBenchmarkName: first?.name || null } : item);
+    event.preventDefault(); const payload = Object.fromEntries(new FormData(event.currentTarget));
+    try { const result = await createConnectionBenchmark(pageState.selectedId, payload); pageState.benchmarks.items.push(result.item);
+      pageState.items = pageState.items.map((item) => item.id === pageState.selectedId
+        ? { ...item, benchmarkCount: pageState.benchmarks.items.length, firstBenchmarkName: pageState.benchmarks.items[0]?.title || null } : item);
       pageState.error = ""; render(); }
     catch (error) { pageState.error = error.message; render(); }
   });
+  root.querySelector("[data-benchmark-target-type]")?.addEventListener("change", (event) => {
+    const internal = event.target.value === "internal"; const externalField = root.querySelector("[data-external-benchmark-field]"); const internalField = root.querySelector("[data-internal-benchmark-field]");
+    if (externalField) externalField.hidden = internal; if (internalField) internalField.hidden = !internal;
+    const titleInput = root.querySelector('[data-benchmark-settings] [name="title"]'); if (titleInput) titleInput.required = !internal;
+  });
+  root.querySelectorAll("[data-delete-benchmark]").forEach((button) => button.addEventListener("click", async () => {
+    if (!window.confirm("确认删除这个对标链接？")) return;
+    try { await removeConnectionBenchmark(pageState.selectedId, button.dataset.deleteBenchmark); pageState.benchmarks.items = pageState.benchmarks.items.filter((item) => item.id !== button.dataset.deleteBenchmark);
+      pageState.items = pageState.items.map((item) => item.id === pageState.selectedId ? { ...item, benchmarkCount: pageState.benchmarks.items.length, firstBenchmarkName: pageState.benchmarks.items[0]?.title || null } : item); render(); }
+    catch (error) { pageState.error = error.message; render(); }
+  }));
   root.querySelectorAll("[data-open-benchmark-comparison]").forEach((button) => button.addEventListener("click", async () => {
     pageState.benchmarks.loading = true; render();
     try { const result = await loadConnectionBenchmarkComparison(pageState.selectedId, button.dataset.openBenchmarkComparison); pageState.benchmarks.comparison = result; pageState.benchmarks.comparisonId = button.dataset.openBenchmarkComparison; pageState.error = ""; }

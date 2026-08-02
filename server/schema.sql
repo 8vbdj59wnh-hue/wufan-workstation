@@ -1019,23 +1019,33 @@ CREATE TABLE IF NOT EXISTS connection_profiles (
 CREATE INDEX IF NOT EXISTS idx_connection_profiles_owner_status
   ON connection_profiles(ownerId, status);
 
-CREATE TABLE IF NOT EXISTS connection_benchmarks (
+CREATE TABLE IF NOT EXISTS connection_benchmark_targets (
   id TEXT PRIMARY KEY,
   connectionId TEXT NOT NULL,
-  benchmarkConnectionId TEXT NOT NULL,
-  sourceType TEXT NOT NULL DEFAULT 'internal',
+  targetType TEXT NOT NULL DEFAULT 'external',
+  internalConnectionId TEXT,
+  targetUrl TEXT,
+  platform TEXT,
+  title TEXT NOT NULL,
+  mainImage TEXT,
+  price REAL,
+  salesInfo TEXT,
+  reviewInfo TEXT,
+  sellingPoints TEXT,
+  detailContent TEXT,
+  notes TEXT,
   createdBy TEXT,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
   FOREIGN KEY(connectionId) REFERENCES connection_profiles(id) ON DELETE CASCADE,
-  FOREIGN KEY(benchmarkConnectionId) REFERENCES connection_profiles(id) ON DELETE CASCADE,
+  FOREIGN KEY(internalConnectionId) REFERENCES connection_profiles(id) ON DELETE SET NULL,
   FOREIGN KEY(createdBy) REFERENCES persons(id),
-  UNIQUE(connectionId, benchmarkConnectionId),
-  CHECK(connectionId <> benchmarkConnectionId)
+  CHECK(targetType IN ('external','internal')),
+  CHECK(internalConnectionId IS NULL OR connectionId <> internalConnectionId)
 );
 
-CREATE INDEX IF NOT EXISTS idx_connection_benchmarks_target
-  ON connection_benchmarks(benchmarkConnectionId, createdAt DESC);
+CREATE INDEX IF NOT EXISTS idx_connection_benchmark_targets_connection
+  ON connection_benchmark_targets(connectionId, createdAt DESC);
 
 CREATE TABLE IF NOT EXISTS connection_follows (
   id TEXT PRIMARY KEY,

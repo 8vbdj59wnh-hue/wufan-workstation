@@ -1182,14 +1182,24 @@ export async function loadConnectionBenchmarkCandidates(connectionId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/benchmark-candidates`), "竞品候选读取失败。");
 }
 
-export async function saveConnectionBenchmarks(connectionId, benchmarkConnectionIds) {
+export async function createConnectionBenchmark(connectionId, payload) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/benchmarks`, {
-    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ benchmarkConnectionIds }),
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
   }), "对标链接保存失败。");
 }
 
-export async function loadConnectionBenchmarkComparison(connectionId, benchmarkConnectionId) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/benchmarks/${encodeURIComponent(benchmarkConnectionId)}/comparison`), "竞品对比读取失败。");
+export async function updateConnectionBenchmark(connectionId, targetId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/benchmarks/${encodeURIComponent(targetId)}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  }), "对标链接更新失败。");
+}
+
+export async function removeConnectionBenchmark(connectionId, targetId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/benchmarks/${encodeURIComponent(targetId)}`, { method: "DELETE" }), "对标链接删除失败。");
+}
+
+export async function loadConnectionBenchmarkComparison(connectionId, targetId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/benchmarks/${encodeURIComponent(targetId)}/comparison`), "对标分析读取失败。");
 }
 
 export async function loadConnectionImprovementSummary() {
