@@ -1,5 +1,9 @@
 export const modules = [
   {
+    id: "dashboard",
+    name: "驾驶舱",
+  },
+  {
     id: "goals",
     name: "目标",
   },
@@ -17,8 +21,20 @@ export const modules = [
     hidden: true,
   },
   {
+    id: "templateCenter",
+    name: "模板中心",
+  },
+  {
     id: "products",
     name: "产品中心",
+  },
+  {
+    id: "connectionCenter",
+    name: "连接中心",
+  },
+  {
+    id: "financeCenter",
+    name: "财务中心",
   },
   {
     id: "supplyChainCenter",
@@ -33,28 +49,18 @@ export const modules = [
     name: "AI经营助手",
   },
   {
-    id: "operationDashboard",
-    name: "经营驾驶舱",
-  },
-  {
     id: "dataCenter",
     name: "数据中心",
   },
   {
-    id: "financeCenter",
-    name: "财务中心",
-  },
-  {
-    id: "connectionCenter",
-    name: "连接中心",
+    id: "operationDashboard",
+    name: "经营驾驶舱",
+    hidden: true,
   },
   {
     id: "assessment",
     name: "工作结果",
-  },
-  {
-    id: "templateCenter",
-    name: "模板中心",
+    hidden: true,
   },
   {
     id: "settings",

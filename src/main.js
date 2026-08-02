@@ -4,7 +4,7 @@ import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js
 import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260705-state-singleton1";
 import { bindTasksPageEvents, renderTasksPage, selectTask } from "./pages/tasksPage.js?v=20260802-module-boundary1";
 import { bindScheduleBoardPageEvents, renderScheduleBoardPage } from "./scheduleBoardPage.js?v=20260722-due-date-boundary2";
-import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260717-work-results-dashboard1";
+import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260802-dashboard-v21";
 import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js?v=20260802-template-center-v21";
 import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js?v=20260802-template-center-v21";
 import { bindProductCenterPageEvents, renderProductCenterPage } from "./pages/productCenterPage.js?v=20260802-module-boundary1";
@@ -15,6 +15,7 @@ import { bindFinanceCenterPageEvents, renderFinanceCenterPage } from "./financeC
 import { bindSupplyChainCenterPageEvents, renderSupplyChainCenterPage } from "./pages/supplyChainCenterPage.js?v=20260802-supply-chain1";
 import { bindCustomerCenterPageEvents, renderCustomerCenterPage } from "./pages/customerCenterPage.js?v=20260802-customer-center1";
 import { bindAiOperationAssistantPageEvents, renderAiOperationAssistantPage } from "./pages/aiOperationAssistantPage.js?v=20260802-ai-operation1";
+import { bindDashboardPageEvents, renderDashboardPage } from "./dashboardPage.js?v=20260802-dashboard-v21";
 import { bindProductPreviewEvents, closeProductPreview, openProductPreview, renderProductPreviewModal } from "./productPreview.js?v=20260725-product-preview1";
 import { attachThumbnailHoverPreview } from "./thumbnailPreview.js?v=20260723-task-card-static1";
 import {
@@ -78,16 +79,19 @@ app.addEventListener("click", (event) => {
 });
 
 const moduleHashMap = {
+  dashboard: "dashboard",
+  "dashboard-operation": "dashboard",
+  "dashboard-management": "dashboard",
   goals: "goals",
-  operationDashboard: "operationDashboard",
-  "operation-dashboard": "operationDashboard",
+  operationDashboard: "dashboard",
+  "operation-dashboard": "dashboard",
   tasks: "tasks",
   scheduleBoard: "scheduleBoard",
   "schedule-board": "scheduleBoard",
   "task-schedule-board": "scheduleBoard",
   "schedule-board/content-note": "scheduleBoard",
   processes: "processes",
-  assessment: "assessment",
+  assessment: "dashboard",
   templateCenter: "templateCenter",
   products: "products",
   dataCenter: "dataCenter",
@@ -115,11 +119,11 @@ const moduleHashMap = {
   contentSchedules: "scheduleBoard",
   "process-templates": "processes",
   "started-processes": "processes",
-  "assessment-stats": "assessment",
-  "assessment-reports": "assessment",
-  "assessment-problems": "assessment",
-  "assessment-rectifications": "assessment",
-  "assessment-person-profiles": "assessment",
+  "assessment-stats": "dashboard",
+  "assessment-reports": "dashboard",
+  "assessment-problems": "dashboard",
+  "assessment-rectifications": "dashboard",
+  "assessment-person-profiles": "dashboard",
   methodologies: "processes",
   methods: "processes",
   organization: "settings",
@@ -375,6 +379,10 @@ function renderPage() {
     content = `<section class="placeholder"><h2>你没有权限访问该页面</h2><p>请联系管理员调整账号权限。</p></section>`;
   } else if (activeModule.id === "goals") {
     content = renderGoalsPage();
+  }
+
+  if (canAccessActiveModule && activeModule.id === "dashboard") {
+    content = renderDashboardPage();
   }
 
   if (activeModule.id === "tasks") {
@@ -725,6 +733,9 @@ function render({ navigation = false } = {}) {
   }
   if (activeModuleId === "aiOperationAssistant") {
     bindAiOperationAssistantPageEvents(render);
+  }
+  if (activeModuleId === "dashboard") {
+    bindDashboardPageEvents(render);
   }
 
   if (document.querySelector(".methodologies-page") !== null) {

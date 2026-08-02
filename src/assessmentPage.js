@@ -70,6 +70,7 @@ let rectificationFilters = {
 };
 
 const tabHashMap = {
+  "dashboard-management": "stats",
   assessment: "stats",
   "assessment-stats": "stats",
   "assessment-reports": "reports",
@@ -1889,13 +1890,13 @@ export function bindAssessmentPageEvents(rerender) {
 export function renderAssessmentPage() {
   syncAssessmentTabFromHash();
   if (!canCurrentUser("assessment.view")) {
-    return `<section class="placeholder"><h2>你没有权限访问工作结果模块</h2><p>请联系管理员调整账号权限。</p></section>`;
+    return `<section class="placeholder"><h2>你没有权限访问管理驾驶舱</h2><p>请联系管理员调整账号权限。</p></section>`;
   }
   return `
     <div class="assessment-page">
       <div class="section-heading with-actions page-toolbar">
         <div>
-          <h2>工作结果</h2>
+          <h2>管理驾驶舱</h2>
           <p class="form-note">公司的每日管理入口，优先回答今天发生了什么、哪些事情需要介入、哪些经验已经沉淀为新的标准。</p>
         </div>
       </div>

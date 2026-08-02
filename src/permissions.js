@@ -400,6 +400,9 @@ export function canAccessTemplateCenter(userOrPermissions) {
 }
 
 export function canAccessModule(userOrPermissions, moduleId) {
+  if (moduleId === "dashboard") {
+    return hasPermission(userOrPermissions, "dataCenter.view") || hasPermission(userOrPermissions, "assessment.view");
+  }
   if (moduleId === "templateCenter") return canAccessTemplateCenter(userOrPermissions);
   if (moduleId === "processes") {
     return hasPermission(userOrPermissions, "modules.processes") ||
