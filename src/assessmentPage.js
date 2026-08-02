@@ -21,6 +21,7 @@ import { hasTaskOverdueRecord, isCanceledStatus, isDoneStatus, isTaskOverdue } f
 import {
   getCurrentExecutor as selectCurrentExecutor,
   getCurrentProcessTask as selectCurrentProcessTask,
+  getProcessInstanceOwner as selectProcessInstanceOwner,
   isTaskExecutionStarted,
 } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
 import {
@@ -50,6 +51,7 @@ let dashboardFilters = {
   days: 30,
 };
 let showAllTodayEvents = false;
+let activeTodayOverview = "startedActions";
 let reportFilters = {
   weekStart: "",
   departmentId: "",
@@ -478,7 +480,7 @@ function renderOptions(items, selectedId, emptyLabel) {
 
 function renderAssessmentTabs() {
   const tabs = [
-    ["stats", "工作统计", "assessment-stats"],
+    ["stats", "今日概览", "assessment-stats"],
     ["reports", "目标推进周报", "assessment-reports"],
     ["problems", "问题汇总", "assessment-problems"],
     ["rectifications", "改善工作", "assessment-rectifications"],
@@ -716,25 +718,119 @@ function renderTodayWorkResultStream() {
   `;
 }
 
+function getActionOwnerName(instance) {
+  const ownerId = selectProcessInstanceOwner(instance.id, state).userId;
+  return findName(state.people, ownerId, "未设置");
+}
+
+function getTodayStartedActions() {
+  return (state.processInstances ?? [])
+    .filter((instance) => isTodayValue(instance.createdAt) && isVisibleByAssessmentScope({
+      ...instance,
+      ownerId: selectProcessInstanceOwner(instance.id, state).userId,
+    }))
+    .sort((left, right) => String(right.createdAt ?? "").localeCompare(String(left.createdAt ?? "")));
+}
+
+function getTodayCompletedActions() {
+  return (state.processInstances ?? [])
+    .filter((instance) => instance.status === ProcessInstanceStatus.Done && isTodayValue(instance.completedAt) && isVisibleByAssessmentScope({
+      ...instance,
+      ownerId: selectProcessInstanceOwner(instance.id, state).userId,
+    }))
+    .sort((left, right) => String(right.completedAt ?? "").localeCompare(String(left.completedAt ?? "")));
+}
+
+function getTodayExceptionItems() {
+  const problemItems = (state.weeklyReportProblems ?? [])
+    .filter((problem) => isTodayValue(problem.createdAt) && isVisibleByAssessmentScope(problem))
+    .map((problem) => ({
+      id: `problem-${problem.id}`,
+      name: problem.title ?? problem.problemTitle ?? problem.description ?? "未命名问题",
+      source: "问题汇总",
+      owner: findName(state.people, problem.ownerId ?? problem.responsibleId ?? problem.submitterId, "未设置"),
+      status: problem.status ?? "待处理",
+      createdAt: problem.createdAt ?? "",
+    }));
+  const taskItems = (state.tasks ?? [])
+    .filter((task) => {
+      if (!isTaskVisibleForStatistics(task) || !isVisibleByAssessmentScope(task)) return false;
+      const returnedToday = getTaskReturnRecords(task).some((record) => isTodayValue(getTaskRecordDate(record)));
+      const rejectedToday = getTaskReviewRejectRecords(task).some((record) => isTodayValue(getTaskRecordDate(record)));
+      return returnedToday || rejectedToday || isTodayValue(task.customFields?.assessmentOverdueRecordedAt);
+    })
+    .map((task) => {
+      const returnedToday = getTaskReturnRecords(task).some((record) => isTodayValue(getTaskRecordDate(record)));
+      const rejectedToday = getTaskReviewRejectRecords(task).some((record) => isTodayValue(getTaskRecordDate(record)));
+      const source = rejectedToday ? "任务验收退回" : returnedToday ? "任务返工" : "任务超时";
+      return {
+        id: `task-${task.id}`,
+        name: task.name,
+        source,
+        owner: findName(state.people, task.ownerId ?? task.executorId ?? task.assigneeId, "未设置"),
+        status: taskStatusNames[task.status] ?? task.status ?? "待处理",
+        createdAt: task.updatedAt ?? task.customFields?.assessmentOverdueRecordedAt ?? "",
+      };
+    });
+  return [...problemItems, ...taskItems].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)));
+}
+
+function getTodayCompletedImprovements() {
+  return getVisibleRectificationRows()
+    .filter((row) => matchesRectificationFocus(row, "todayDone"))
+    .sort((left, right) => String(getRectificationDoneAt(right)).localeCompare(String(getRectificationDoneAt(left))));
+}
+
+function getTodayOverviewSections() {
+  return {
+    startedActions: getTodayStartedActions(),
+    completedActions: getTodayCompletedActions(),
+    exceptions: getTodayExceptionItems(),
+    completedImprovements: getTodayCompletedImprovements(),
+  };
+}
+
+function renderTodayOverviewList(key, rows) {
+  const emptyLabels = {
+    startedActions: "今天暂无新发起的关键行动",
+    completedActions: "今天暂无完成的关键行动",
+    exceptions: "今天暂无新增异常",
+    completedImprovements: "今天暂无完成的改善项目",
+  };
+  if (key === "startedActions") {
+    return `<div class="table-wrap assessment-today-overview-list"><table class="data-table"><thead><tr><th>行动名称</th><th>负责人</th><th>发起时间</th><th>当前状态</th></tr></thead><tbody>${rows.length ? rows.map((instance) => `<tr><td><strong>${escapeHtml(instance.displayTitle ?? instance.name ?? "未命名关键行动")}</strong></td><td>${escapeHtml(getActionOwnerName(instance))}</td><td>${escapeHtml(formatBusinessDateTime(instance.createdAt, "未记录"))}</td><td>${escapeHtml(processInstanceStatusNames[instance.status] ?? instance.status)}</td></tr>`).join("") : `<tr><td colspan="4">${emptyLabels[key]}</td></tr>`}</tbody></table></div>`;
+  }
+  if (key === "completedActions") {
+    return `<div class="table-wrap assessment-today-overview-list"><table class="data-table"><thead><tr><th>行动名称</th><th>完成人</th><th>完成时间</th><th>结果状态</th></tr></thead><tbody>${rows.length ? rows.map((instance) => `<tr><td><strong>${escapeHtml(instance.displayTitle ?? instance.name ?? "未命名关键行动")}</strong></td><td>${escapeHtml(findName(state.people, instance.completedBy ?? selectProcessInstanceOwner(instance.id, state).userId, "未设置"))}</td><td>${escapeHtml(formatBusinessDateTime(instance.completedAt, "未记录"))}</td><td>${escapeHtml(processInstanceStatusNames[instance.status] ?? "已完成")}</td></tr>`).join("") : `<tr><td colspan="4">${emptyLabels[key]}</td></tr>`}</tbody></table></div>`;
+  }
+  if (key === "exceptions") {
+    return `<div class="table-wrap assessment-today-overview-list"><table class="data-table"><thead><tr><th>异常名称</th><th>来源</th><th>负责人</th><th>当前状态</th></tr></thead><tbody>${rows.length ? rows.map((item) => `<tr><td><strong>${escapeHtml(item.name)}</strong></td><td>${escapeHtml(item.source)}</td><td>${escapeHtml(item.owner)}</td><td>${escapeHtml(item.status)}</td></tr>`).join("") : `<tr><td colspan="4">${emptyLabels[key]}</td></tr>`}</tbody></table></div>`;
+  }
+  return `<div class="table-wrap assessment-today-overview-list"><table class="data-table"><thead><tr><th>改善项目名称</th><th>负责人</th><th>完成时间</th><th>改善结果</th></tr></thead><tbody>${rows.length ? rows.map((row) => `<tr><td><strong>${escapeHtml(row.processInstance?.displayTitle ?? row.processInstance?.name ?? row.workPlan.title ?? "未命名改善")}</strong></td><td>${escapeHtml(findName(state.people, row.ownerId, "未设置"))}</td><td>${escapeHtml(formatBusinessDateTime(getRectificationDoneAt(row), "未记录"))}</td><td>${escapeHtml(getRectificationVerificationResult(row) || "已完成验证")}</td></tr>`).join("") : `<tr><td colspan="4">${emptyLabels[key]}</td></tr>`}</tbody></table></div>`;
+}
+
 function renderTodayOverview() {
-  const summary = getTodayManagementSummary();
+  const sections = getTodayOverviewSections();
   const items = [
-    ["今日完成任务", summary.completedTasks],
-    ["今日新增异常", summary.todayExceptions],
-    ["今日新增改善", summary.todayRectifications],
-    ["今日完成改善", summary.todayDoneRectifications],
+    ["startedActions", "新发起行动数", sections.startedActions.length],
+    ["completedActions", "完成行动数", sections.completedActions.length],
+    ["exceptions", "新增异常数", sections.exceptions.length],
+    ["completedImprovements", "完成改善数", sections.completedImprovements.length],
   ];
+  const activeItem = items.find(([key]) => key === activeTodayOverview) ?? items[0];
   return `
-    <section class="settings-section">
-      <div class="section-heading"><h2>今日概览</h2></div>
-      <div class="assessment-dashboard-metrics is-compact">
-        ${items.map(([label, value]) => `
-          <div>
+    <section class="settings-section assessment-today-overview">
+      <div class="section-heading"><div><h2>今日概览</h2><p class="form-note">点击统计卡片查看今天的具体管理事项。</p></div></div>
+      <div class="assessment-today-overview-cards" role="tablist" aria-label="今日概览分类">
+        ${items.map(([key, label, value]) => `
+          <button class="${activeItem[0] === key ? "is-active" : ""}" type="button" role="tab" aria-selected="${activeItem[0] === key ? "true" : "false"}" data-assessment-today-overview="${key}">
             <span>${escapeHtml(label)}</span>
             <strong>${value}</strong>
-          </div>
+            <em>查看明细</em>
+          </button>
         `).join("")}
       </div>
+      ${renderTodayOverviewList(activeItem[0], sections[activeItem[0]])}
     </section>
   `;
 }
@@ -1780,6 +1876,12 @@ export function bindAssessmentPageEvents(rerender) {
   });
 
   page.addEventListener("click", (event) => {
+    const todayOverviewButton = event.target.closest("[data-assessment-today-overview]");
+    if (todayOverviewButton !== null) {
+      activeTodayOverview = todayOverviewButton.dataset.assessmentTodayOverview ?? "startedActions";
+      rerender();
+      return;
+    }
     const button = event.target.closest("[data-assessment-action]");
     if (button === null) return;
     const action = button.dataset.assessmentAction;

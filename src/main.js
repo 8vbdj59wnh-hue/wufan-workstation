@@ -4,7 +4,7 @@ import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js
 import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260705-state-singleton1";
 import { bindTasksPageEvents, renderTasksPage, selectTask } from "./pages/tasksPage.js?v=20260802-process-detail-priority1";
 import { bindScheduleBoardPageEvents, renderScheduleBoardPage } from "./scheduleBoardPage.js?v=20260802-action-countdown1";
-import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260802-dashboard-v21";
+import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260802-today-overview1";
 import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js?v=20260802-template-version1";
 import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js?v=20260802-action-standard-card1";
 import { bindProductCenterPageEvents, renderProductCenterPage } from "./pages/productCenterPage.js?v=20260802-module-boundary1";
@@ -15,7 +15,7 @@ import { bindFinanceCenterPageEvents, renderFinanceCenterPage } from "./financeC
 import { bindSupplyChainCenterPageEvents, renderSupplyChainCenterPage } from "./pages/supplyChainCenterPage.js?v=20260802-supply-chain1";
 import { bindCustomerCenterPageEvents, renderCustomerCenterPage } from "./pages/customerCenterPage.js?v=20260802-customer-center1";
 import { bindAiOperationAssistantPageEvents, renderAiOperationAssistantPage } from "./pages/aiOperationAssistantPage.js?v=20260802-ai-operation2";
-import { bindDashboardPageEvents, renderDashboardPage } from "./dashboardPage.js?v=20260802-dashboard-v21";
+import { bindDashboardPageEvents, renderDashboardPage } from "./dashboardPage.js?v=20260802-today-overview1";
 import { bindProductPreviewEvents, closeProductPreview, openProductPreview, renderProductPreviewModal } from "./productPreview.js?v=20260725-product-preview1";
 import { attachThumbnailHoverPreview } from "./thumbnailPreview.js?v=20260723-task-card-static1";
 import {

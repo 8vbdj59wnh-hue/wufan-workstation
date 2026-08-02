@@ -3222,6 +3222,73 @@ button.content-template-thumb {
   color: #b45309;
 }
 
+.assessment-today-overview {
+  display: grid;
+  gap: 14px;
+}
+
+.assessment-today-overview-cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.assessment-today-overview-cards button {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 15px;
+  background: #fff;
+  color: #64748b;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+.assessment-today-overview-cards button:hover,
+.assessment-today-overview-cards button:focus-visible {
+  border-color: #93c5fd;
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.1);
+  transform: translateY(-1px);
+}
+
+.assessment-today-overview-cards button.is-active {
+  border-color: #2563eb;
+  background: #eff6ff;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+}
+
+.assessment-today-overview-cards span {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.assessment-today-overview-cards strong {
+  color: #0f172a;
+  font-size: 30px;
+  line-height: 1;
+}
+
+.assessment-today-overview-cards button.is-active strong {
+  color: #2563eb;
+}
+
+.assessment-today-overview-cards em {
+  font-size: 11px;
+  font-style: normal;
+}
+
+.assessment-today-overview-list {
+  min-height: 120px;
+}
+
+@media (max-width: 900px) {
+  .assessment-today-overview-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .work-result-section-primary {
   border-color: #bfdbfe;
   background: #f8fbff;
