@@ -2,12 +2,55 @@ import crypto from "node:crypto";
 import { createResource, getDatabase } from "./db.js";
 
 export const productLifecycleStatuses = ["开发中", "上架", "成长期", "成熟期", "风险期", "淘汰"];
+export const productBusinessZones = ["new", "hit", "active", "clearance"];
+const newProductCycleDays = Math.max(1, Number(process.env.PRODUCT_NEW_CYCLE_DAYS) || 30);
+const explicitNewStatuses = new Set(["新品", "开发中", "待上架", "上架"]);
+const clearanceStatuses = new Set(["风险期", "淘汰", "清仓", "停售"]);
 
 function text(value) { return String(value ?? "").trim(); }
 function number(value) { return value === null || value === undefined ? null : Number(value); }
 function parseJson(value, fallback) { try { return JSON.parse(value || JSON.stringify(fallback)); } catch { return fallback; } }
 function now() { return new Date().toISOString(); }
 function ratio(current, previous) { return previous === null || previous === 0 || current === null ? null : (current - previous) / Math.abs(previous); }
+
+export function classifyProductBusinessZones(items, options = {}) {
+  const cycleDays = Math.max(1, Number(options.newCycleDays) || newProductCycleDays);
+  const nowTime = Number(options.nowTime) || Date.now();
+  const cycleStart = nowTime - cycleDays * 86400000;
+  const isNew = (item) => {
+    if (explicitNewStatuses.has(item.status)) return true;
+    if (clearanceStatuses.has(item.status)) return false;
+    const listedTime = Date.parse(item.listedAt || "");
+    return Number.isFinite(listedTime) && listedTime >= cycleStart && listedTime <= nowTime;
+  };
+  const newIds = new Set(items.filter(isNew).map((item) => item.id));
+  const sustained = items.filter((item) => !newIds.has(item.id) && !clearanceStatuses.has(item.status)
+    && Number(item.analysis?.sales?.sales30d || 0) > 0
+    && (Number(item.analysis?.sales?.previousSales30d || 0) > 0
+      || Number(item.analysis?.sales?.sales90d || 0) > Number(item.analysis?.sales?.sales30d || 0)));
+  const topCount = sustained.length ? Math.max(1, Math.ceil(sustained.length * 0.2)) : 0;
+  const topBy = (read) => new Set([...sustained].filter((item) => read(item) > 0)
+    .sort((left, right) => read(right) - read(left)).slice(0, topCount).map((item) => item.id));
+  const topRevenueIds = topBy((item) => Number(item.analysis?.finance?.revenue || 0));
+  const topSalesIds = topBy((item) => Number(item.analysis?.sales?.sales30d || 0));
+  const hitIds = new Set([...topRevenueIds, ...topSalesIds]);
+  const positiveSales = items.filter((item) => !newIds.has(item.id) && !hitIds.has(item.id))
+    .map((item) => Number(item.analysis?.sales?.sales30d || 0)).filter((value) => value > 0).sort((left, right) => left - right);
+  const lowSalesThreshold = positiveSales.length >= 5 ? positiveSales[Math.max(0, Math.ceil(positiveSales.length * 0.2) - 1)] : 0;
+  const counts = Object.fromEntries(productBusinessZones.map((zone) => [zone, 0]));
+  const classified = items.map((item) => {
+    const sales30d = Number(item.analysis?.sales?.sales30d || 0);
+    const stock = Number(item.analysis?.inventory?.actualStock || 0);
+    let businessZone = null;
+    if (newIds.has(item.id)) businessZone = "new";
+    else if (hitIds.has(item.id)) businessZone = "hit";
+    else if (stock > 0 && (clearanceStatuses.has(item.status) || sales30d <= 0 || (lowSalesThreshold > 0 && sales30d <= lowSalesThreshold))) businessZone = "clearance";
+    else if (sales30d > 0) businessZone = "active";
+    if (businessZone) counts[businessZone] += 1;
+    return { ...item, businessZone };
+  });
+  return { items: classified, counts, rules: { newProductCycleDays: cycleDays, hitTopPercent: 20, lowSalesPercent: 20 } };
+}
 
 function latestProductSnapshots(database, productId) {
   const rows = database.prepare(`
@@ -105,22 +148,34 @@ export function getProductV2Detail(productId) {
 
 export function getProductV2Overview() {
   const database = getDatabase(); const products = database.prepare("SELECT id,name,skuCode,status,mainImage,createdAt,updatedAt FROM products WHERE status<>'已归档'").all();
+  const listedRows = database.prepare(`SELECT productId,MIN(changedAt) listedAt FROM product_lifecycle_events
+    WHERE toStatus IN ('新品','上架','在售') GROUP BY productId`).all();
+  const listedByProduct = new Map(listedRows.map((row) => [row.productId, row.listedAt]));
   const snapshots = database.prepare(`SELECT * FROM (SELECT p.*,f.businessDate,f.id factSnapshotId,ROW_NUMBER() OVER (PARTITION BY p.productId ORDER BY f.businessDate DESC,f.createdAt DESC) position
     FROM product_daily_snapshots p JOIN erp_fact_snapshots f ON f.id=p.snapshotId WHERE f.status='completed') WHERE position<=2`).all();
   const snapshotsByProduct = new Map(); for (const row of snapshots) { const value=snapshotsByProduct.get(row.productId)||{}; value[row.position===1?"current":"previous"]=row; snapshotsByProduct.set(row.productId,value); }
+  const liveRows = database.prepare(`SELECT productId,
+    SUM(COALESCE(CAST(json_extract(latestStateJson,'$.sales30d') AS REAL),0)) sales30d,
+    SUM(COALESCE(CAST(json_extract(latestStateJson,'$.sales90d') AS REAL),0)) sales90d,
+    SUM(COALESCE(CAST(json_extract(latestStateJson,'$.actualStock') AS REAL),0)) actualStock
+    FROM product_erp_mappings WHERE productId IS NOT NULL GROUP BY productId`).all();
+  const liveByProduct = new Map(liveRows.map((row) => [row.productId, row]));
   const financeRows = database.prepare(`SELECT productId,
     SUM(CASE WHEN entryType='income' THEN amount ELSE 0 END) grossIncome,SUM(CASE WHEN entryType='refund' THEN amount ELSE 0 END) refunds,
     SUM(CASE WHEN entryType='cost' THEN amount ELSE 0 END) cost,SUM(CASE WHEN entryType='expense' THEN amount ELSE 0 END) expense
     FROM finance_entries WHERE productId IS NOT NULL AND status IN ('confirmed','approved') GROUP BY productId`).all();
   const financeByProduct = new Map(financeRows.map((row)=>{const revenue=Number(row.grossIncome||0)-Number(row.refunds||0);const grossProfit=revenue-Number(row.cost||0);const netProfit=grossProfit-Number(row.expense||0);return [row.productId,{revenue,refunds:Number(row.refunds||0),cost:Number(row.cost||0),expense:Number(row.expense||0),grossProfit,netProfit,profitMargin:revenue?netProfit/revenue:null}];}));
   const emptyFinance = { revenue:null,refunds:null,cost:null,expense:null,grossProfit:null,netProfit:null,profitMargin:null };
-  const items = products.map((product) => { const pair=snapshotsByProduct.get(product.id)||{};const currentSales=number(pair.current?.sales30d);const previousSales=number(pair.previous?.sales30d);const actualStock=number(pair.current?.totalStock);const analysis={ product,snapshotKey:pair.current?.factSnapshotId??null,
-    sales:{businessDate:pair.current?.businessDate??null,sales30d:currentSales,previousSales30d:previousSales,growth:ratio(currentSales,previousSales)},
+  const rawItems = products.map((product) => { const pair=snapshotsByProduct.get(product.id)||{};const live=liveByProduct.get(product.id)||{};const currentSales=number(pair.current?.sales30d)??number(live.sales30d);const previousSales=number(pair.previous?.sales30d);const sales90d=number(live.sales90d);const actualStock=number(pair.current?.totalStock)??number(live.actualStock);const listedAt=listedByProduct.get(product.id)??null;const analysis={ product,snapshotKey:pair.current?.factSnapshotId??null,
+    sales:{businessDate:pair.current?.businessDate??null,sales30d:currentSales,sales90d,previousSales30d:previousSales,growth:ratio(currentSales,previousSales)},
     inventory:{actualStock,turnover:actualStock!==null&&currentSales!==null&&actualStock+currentSales>0?currentSales/(actualStock+currentSales):null,risk:actualStock!==null&&actualStock>0&&(currentSales??0)===0?"积压":actualStock===0?"缺货":"正常"},
-    finance:financeByProduct.get(product.id)||emptyFinance,connections:{current:null,previous:null,salesAmountGrowth:null,visitorGrowth:null,conversionChange:null} }; const health=evaluate(analysis);return {...product,analysis,...health}; });
+    finance:financeByProduct.get(product.id)||emptyFinance,connections:{current:null,previous:null,salesAmountGrowth:null,visitorGrowth:null,conversionChange:null} }; const health=evaluate(analysis);return {...product,listedAt,analysis,...health}; });
+  const zones = classifyProductBusinessZones(rawItems);
+  const items = zones.items;
   const lifecycle = Object.fromEntries(productLifecycleStatuses.map((status) => [status, items.filter((item) => item.status === status).length]));
   lifecycle["待归类"] = items.filter((item) => !productLifecycleStatuses.includes(item.status)).length;
-  return { total: items.length, lifecycle, growth: items.filter((item) => item.healthStatus === "growth").sort((a,b) => (b.healthScore ?? -1)-(a.healthScore ?? -1)).slice(0,10),
+  return { total: items.length, lifecycle, businessZones: zones.counts, businessZoneRules: zones.rules,
+    growth: items.filter((item) => item.healthStatus === "growth").sort((a,b) => (b.healthScore ?? -1)-(a.healthScore ?? -1)).slice(0,10),
     risks: items.filter((item) => ["attention","risk"].includes(item.healthStatus)).sort((a,b) => (a.healthScore ?? 101)-(b.healthScore ?? 101)).slice(0,10), items };
 }
 

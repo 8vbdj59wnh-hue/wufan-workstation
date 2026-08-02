@@ -6448,7 +6448,8 @@ button.content-template-thumb {
 
 .product-card-metrics {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px 2px;
   margin-top: 2px;
   padding-top: 7px;
   border-top: 1px solid #edf2f7;
@@ -6469,6 +6470,11 @@ button.content-template-thumb {
 }
 
 .product-card-metrics span {
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.product-card-listed-at {
   color: #94a3b8;
   font-size: 10px;
 }
@@ -9993,6 +9999,15 @@ button.content-template-thumb {
 @media (max-width: 680px) { .finance-summary, .finance-analysis-grid { grid-template-columns: 1fr; } .finance-rule-list article { grid-template-columns: 1fr; } }
 
 .product-v2-overview { display: grid; gap: 14px; padding: 18px; border: 1px solid #dfe8e4; border-radius: 16px; background: linear-gradient(145deg, #f6fbf9, #fff); }
+.product-business-zones { display: grid; gap: 12px; padding: 16px; border: 1px solid #e1e8e5; border-radius: 15px; background: #fff; }
+.product-business-zones > header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.product-business-zones h2, .product-business-zones p { margin: 0; }.product-business-zones p, .product-business-zones header small { color: #667085; font-size: 12px; }.product-business-zones p { margin-top: 4px; }
+.product-business-zone-tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 9px; }
+.product-business-zone-tabs button { display: grid; gap: 4px; min-width: 0; padding: 12px; border: 1px solid #e5e7eb; border-radius: 12px; background: #f9fafb; color: #344054; text-align: left; cursor: pointer; }
+.product-business-zone-tabs button:hover { border-color: #a8cfbf; background: #f5fbf8; }.product-business-zone-tabs button.is-active { border-color: #258a68; background: #eef9f4; box-shadow: 0 0 0 1px rgb(37 138 104 / 12%); }
+.product-business-zone-tabs span { font-weight: 700; }.product-business-zone-tabs strong { color: #173f34; font-size: 22px; }.product-business-zone-tabs small { overflow: hidden; color: #667085; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.product-zone-badge { display: inline-flex; align-items: center; width: fit-content; padding: 4px 7px; border-radius: 999px; background: #f2f4f7; color: #475467; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.product-zone-badge.is-new { background: #eef4ff; color: #315aa8; }.product-zone-badge.is-hit { background: #fff1e8; color: #b54708; }.product-zone-badge.is-active { background: #ecfdf3; color: #027a48; }.product-zone-badge.is-clearance { background: #fff1f3; color: #c01048; }
 .product-v2-overview > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .product-v2-overview h2, .product-v2-overview h3, .product-v2-overview p { margin: 0; }
 .product-v2-overview header p { margin-top: 4px; color: #667085; font-size: 12px; }
@@ -10016,8 +10031,8 @@ button.content-template-thumb {
 .product-lifecycle-panel input, .product-lifecycle-panel select, .product-improvement-issue input, .product-improvement-issue select { min-height: 36px; padding: 7px 9px; border: 1px solid #d0d5dd; border-radius: 8px; background: #fff; }
 .product-lifecycle-timeline { display: grid; gap: 10px; }.product-lifecycle-timeline article { padding: 13px 15px; border-left: 3px solid #2f8063; background: #f8faf9; }.product-lifecycle-timeline p { margin: 5px 0; }.product-lifecycle-timeline small { color: #667085; }
 .product-improvement-issue, .product-improvement-record { display: grid; gap: 9px; padding: 12px 0; border-top: 1px solid #eef0f2; }.product-improvement-record > div { display: flex; justify-content: space-between; gap: 12px; }
-@media (max-width: 1000px) { .product-lifecycle-distribution, .product-business-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (max-width: 680px) { .product-lifecycle-distribution, .product-business-metrics, .product-v2-rankings { grid-template-columns: 1fr; } }
+@media (max-width: 1000px) { .product-lifecycle-distribution, .product-business-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }.product-business-zone-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 680px) { .product-lifecycle-distribution, .product-business-metrics, .product-v2-rankings, .product-business-zone-tabs { grid-template-columns: 1fr; }.product-business-zones > header { align-items: flex-start; flex-direction: column; } }
 
 .supply-chain-page { display: grid; gap: 16px; }
 .supply-chain-page .subtabs { display: flex; flex-wrap: wrap; gap: 6px; width: fit-content; padding: 4px; border: 1px solid #e5e7eb; border-radius: 12px; background: #f8fafc; }

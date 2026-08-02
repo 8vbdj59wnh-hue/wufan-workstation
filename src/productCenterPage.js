@@ -46,6 +46,7 @@ const productStatuses = ["开发中", "上架", "成长期", "成熟期", "风�
 let filters = { query: "", brand: "", category: "", status: "", erpStatus: "", platform: "", stockStatus: "" };
 let productSort = "updated-desc";
 let productViewMode = "card";
+let productBusinessZone = "all";
 let productPage = 1;
 const productPageSize = 48;
 let productDetailTab = "basic";
@@ -119,7 +120,8 @@ function buildProductUiIndex() {
     actionIds.add(relation.actionId);
     actionIdsByProduct.set(relation.productId, actionIds);
   }
-  return { erpByProduct, salesByProduct, actionIdsByProduct };
+  const managementByProduct = new Map((productManagementState.overview?.items ?? []).map((item) => [item.id, item]));
+  return { erpByProduct, salesByProduct, actionIdsByProduct, managementByProduct };
 }
 
 function getFilteredProducts(index) {
@@ -136,7 +138,8 @@ function getFilteredProducts(index) {
       || (filters.stockStatus === "available" && stock > 10)
       || (filters.stockStatus === "low" && stock > 0 && stock <= 10)
       || (filters.stockStatus === "empty" && stock <= 0);
-    return matchesQuery && (!filters.brand || product.brand === filters.brand) &&
+    const businessZone = index.managementByProduct.get(product.id)?.businessZone ?? null;
+    return matchesQuery && (productBusinessZone === "all" || businessZone === productBusinessZone) && (!filters.brand || product.brand === filters.brand) &&
       (!filters.category || product.category === filters.category) && (!filters.status || product.status === filters.status) &&
       (!filters.erpStatus || (filters.erpStatus === "linked" ? erp.mapping !== null : erp.mapping === null)) &&
       (!filters.platform || platforms.has(filters.platform)) && matchesStock;
@@ -177,6 +180,34 @@ function renderProductBusinessSort() {
     ["created-desc", "🆕新品"],
   ];
   return `<div class="product-business-sort" aria-label="产品经营排序"><span>经营排序：</span>${options.map(([value, label]) => `<button type="button" data-action="set-product-sort" data-product-sort="${value}" class="${productSort === value ? "is-active" : ""}" aria-pressed="${productSort === value}">${label}</button>`).join("")}</div>`;
+}
+
+const productBusinessZoneMeta = {
+  new: { label: "新品区", description: "新品验证与上市周期", icon: "🆕" },
+  hit: { label: "爆款区", description: "持续销售且排名靠前", icon: "🔥" },
+  active: { label: "动销区", description: "稳定产生销售", icon: "📈" },
+  clearance: { label: "清仓区", description: "有库存且低销或衰退", icon: "📦" },
+};
+
+function renderProductBusinessZones(index) {
+  const productIds = new Set(state.products.map((item) => item.id));
+  const counts = { new: 0, hit: 0, active: 0, clearance: 0 };
+  for (const item of index.managementByProduct.values()) {
+    if (productIds.has(item.id) && Object.hasOwn(counts, item.businessZone)) counts[item.businessZone] += 1;
+  }
+  const rules = productManagementState.overview?.businessZoneRules;
+  return `<section class="product-business-zones" aria-label="产品经营分区">
+    <header><div><h2>产品经营分区</h2><p>基于生命周期、销售、库存和利润数据动态识别，不改变产品生命周期。</p></div>${rules ? `<small>新品周期 ${rules.newProductCycleDays} 天 · 排名阈值前 ${rules.hitTopPercent}%</small>` : ""}</header>
+    <div class="product-business-zone-tabs">
+      <button type="button" data-action="set-product-zone" data-product-zone="all" class="${productBusinessZone === "all" ? "is-active" : ""}"><span>全部产品</span><strong>${state.products.length}</strong><small>查看完整产品池</small></button>
+      ${Object.entries(productBusinessZoneMeta).map(([zone, meta]) => `<button type="button" data-action="set-product-zone" data-product-zone="${zone}" class="${productBusinessZone === zone ? "is-active" : ""}"><span>${meta.icon} ${meta.label}</span><strong>${counts[zone]}</strong><small>${meta.description}</small></button>`).join("")}
+    </div>
+  </section>`;
+}
+
+function businessZoneBadge(zone) {
+  const meta = productBusinessZoneMeta[zone];
+  return meta ? `<span class="product-zone-badge is-${zone}">${meta.label}</span>` : `<span class="product-zone-badge">待识别</span>`;
 }
 
 function getProductErpContext(productId, index = null) {
@@ -231,17 +262,18 @@ function renderProductActions(product) {
   </div>`;
 }
 
-function renderProductTable(products) {
+function renderProductTable(products, index) {
   return `<div class="table-wrap">
     <table class="data-table product-table">
-      <thead><tr><th>产品主图</th><th>SKU编码</th><th>产品名称</th><th>生命周期</th><th>销售额</th><th>增长</th><th>净利润</th><th>库存</th><th>负责人</th><th>操作</th></tr></thead>
+      <thead><tr><th>产品主图</th><th>SKU编码</th><th>产品名称</th><th>经营区</th><th>生命周期</th><th>上架时间</th><th>销售额</th><th>销量</th><th>增长</th><th>净利润</th><th>库存</th><th>负责人</th><th>操作</th></tr></thead>
       <tbody>
-        ${products.length === 0 ? `<tr><td colspan="10" class="empty-cell">暂无匹配产品</td></tr>` : products.map((product) => {
+        ${products.length === 0 ? `<tr><td colspan="13" class="empty-cell">暂无匹配产品</td></tr>` : products.map((product) => {
           const relatedCount = getRelatedActions(product.id).length;
-          const business = productManagementState.overview?.items?.find((item) => item.id === product.id)?.analysis;
+          const management = index.managementByProduct.get(product.id);
+          const business = management?.analysis;
           return `<tr>
             <td>${renderImage(product)}</td><td><strong>${escapeHtml(product.skuCode)}</strong></td><td>${escapeHtml(product.name)}</td>
-            <td><span class="status-badge">${escapeHtml(product.status)}</span></td><td>${formatMoney(business?.finance?.revenue)}</td><td>${formatPercent(business?.sales?.growth)}</td>
+            <td>${businessZoneBadge(management?.businessZone)}</td><td><span class="status-badge">${escapeHtml(product.status)}</span></td><td>${formatDateTime(management?.listedAt)}</td><td>${formatMoney(business?.finance?.revenue)}</td><td>${formatMetric(business?.sales?.sales30d)}</td><td>${formatPercent(business?.sales?.growth)}</td>
             <td>${formatMoney(business?.finance?.netProfit)}</td><td>${formatMetric(business?.inventory?.actualStock)}</td><td>${escapeHtml(findName(state.people, product.ownerId))}<small> · ${relatedCount}个行动</small></td>
             <td>${renderProductActions(product)}</td>
           </tr>`;
@@ -257,14 +289,15 @@ function renderProductCards(products, index) {
     ${products.map((product) => {
       const erp = getProductErpContext(product.id, index);
       const sales = getProductSalesSummary(product.id, index);
-      const business = productManagementState.overview?.items?.find((item) => item.id === product.id)?.analysis;
+      const management = index.managementByProduct.get(product.id);
+      const business = management?.analysis;
       return `
       <article class="product-archive-card" data-action="view-product" data-product-id="${escapeHtml(product.id)}" role="button" tabindex="0" aria-label="查看产品：${escapeHtml(product.name)}">
         <div class="product-archive-card-media">${renderImage(product, "product-card-image")}</div>
         <div class="product-archive-card-body">
           <div class="product-archive-card-heading">
             <h3 title="${escapeHtml(product.name)}">${escapeHtml(product.name)}</h3>
-            <span class="status-badge">${escapeHtml(product.status)}</span>
+            ${businessZoneBadge(management?.businessZone)}
           </div>
           <div class="product-card-identities">
             <span>SKU <strong>${escapeHtml(product.skuCode || "—")}</strong></span>
@@ -272,11 +305,13 @@ function renderProductCards(products, index) {
           </div>
           <div class="product-card-metrics">
             <div><strong>${formatMoney(business?.finance?.revenue)}</strong><span>销售额</span></div>
+            <div><strong>${formatMetric(business?.sales?.sales30d)}</strong><span>30天销量</span></div>
             <div><strong>${formatPercent(business?.sales?.growth)}</strong><span>增长</span></div>
             <div><strong>${formatMoney(business?.finance?.netProfit)}</strong><span>净利润</span></div>
             <div><strong>${formatMetric(business?.inventory?.actualStock ?? erp.stock.actualStock)}</strong><span>库存</span></div>
             <div><strong>${sales.loaded ? sales.linkCount : "—"}</strong><span>销售链接</span></div>
           </div>
+          <small class="product-card-listed-at">上架时间 ${formatDateTime(management?.listedAt)}</small>
           <div class="product-card-more">
             <button class="icon-button" type="button" data-action="toggle-product-menu" data-product-id="${escapeHtml(product.id)}" aria-label="产品操作">•••</button>
             <div class="product-card-menu" data-product-menu="${escapeHtml(product.id)}" hidden>${renderProductActions(product)}</div>
@@ -309,6 +344,7 @@ function renderProductList() {
       ${productManagementState.error ? `<div class="form-error">${escapeHtml(productManagementState.error)}</div>` : ""}
       ${productManagementState.notice ? `<div class="form-success">${escapeHtml(productManagementState.notice)}</div>` : ""}
       ${renderProductManagementOverview()}
+      ${renderProductBusinessZones(index)}
       <form class="filter-bar product-filter-bar" data-product-filter-form>
         <input type="search" name="query" value="${escapeHtml(filters.query)}" placeholder="搜索产品名称或SKU" />
         <select name="brand">${renderFilterOptions(uniqueValues("brand"), filters.brand, "全部品牌")}</select>
@@ -335,7 +371,7 @@ function renderProductList() {
           </div>
         </div>
       </div>
-      ${productViewMode === "card" ? renderProductCards(visibleProducts, index) : renderProductTable(visibleProducts)}
+      ${productViewMode === "card" ? renderProductCards(visibleProducts, index) : renderProductTable(visibleProducts, index)}
       ${renderProductPagination(products.length, totalPages)}
       ${renderProductImportRecords()}
       ${renderUnmatchedPlatformSkus()}
@@ -1654,6 +1690,13 @@ export function bindProductCenterPageEvents(rerender) {
       productSort = ["updated-desc", "sales-desc", "stock-desc", "capital-desc", "created-desc"].includes(button.dataset.productSort)
         ? button.dataset.productSort
         : "updated-desc";
+      productPage = 1;
+      rerender();
+    }
+    if (action === "set-product-zone") {
+      productBusinessZone = ["all", "new", "hit", "active", "clearance"].includes(button.dataset.productZone)
+        ? button.dataset.productZone
+        : "all";
       productPage = 1;
       rerender();
     }
