@@ -1158,3 +1158,77 @@ CREATE TABLE IF NOT EXISTS platform_sku_manual_bindings (
   FOREIGN KEY(salesLinkSkuId) REFERENCES sales_link_skus(id),
   FOREIGN KEY(productId) REFERENCES products(id)
 );
+
+CREATE TABLE IF NOT EXISTS finance_import_batches (
+  id TEXT PRIMARY KEY,
+  fileName TEXT NOT NULL,
+  fileHash TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'parsed',
+  totalRows INTEGER NOT NULL DEFAULT 0,
+  matchedRows INTEGER NOT NULL DEFAULT 0,
+  pendingRows INTEGER NOT NULL DEFAULT 0,
+  previewJson TEXT NOT NULL DEFAULT '[]',
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(createdBy) REFERENCES persons(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_finance_import_batches_created
+  ON finance_import_batches(createdAt DESC);
+
+CREATE TABLE IF NOT EXISTS finance_rules (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  keywordsJson TEXT NOT NULL DEFAULT '[]',
+  entryType TEXT NOT NULL,
+  category TEXT NOT NULL,
+  priority INTEGER NOT NULL DEFAULT 100,
+  status TEXT NOT NULL DEFAULT 'active',
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(createdBy) REFERENCES persons(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_finance_rules_status_priority
+  ON finance_rules(status, priority ASC, createdAt ASC);
+
+CREATE TABLE IF NOT EXISTS finance_entries (
+  id TEXT PRIMARY KEY,
+  importBatchId TEXT,
+  businessDate TEXT NOT NULL,
+  entryType TEXT NOT NULL,
+  category TEXT NOT NULL,
+  amount REAL NOT NULL,
+  description TEXT,
+  platform TEXT,
+  productId TEXT,
+  salesLinkId TEXT,
+  externalId TEXT,
+  sourceDataJson TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'confirmed',
+  createdBy TEXT,
+  approvedBy TEXT,
+  approvedAt TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(importBatchId) REFERENCES finance_import_batches(id),
+  FOREIGN KEY(productId) REFERENCES products(id),
+  FOREIGN KEY(salesLinkId) REFERENCES sales_links(id),
+  FOREIGN KEY(createdBy) REFERENCES persons(id),
+  FOREIGN KEY(approvedBy) REFERENCES persons(id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_finance_entries_batch_external
+  ON finance_entries(importBatchId, externalId)
+  WHERE importBatchId IS NOT NULL AND externalId IS NOT NULL AND externalId <> '';
+
+CREATE INDEX IF NOT EXISTS idx_finance_entries_date_type
+  ON finance_entries(businessDate, entryType, status);
+
+CREATE INDEX IF NOT EXISTS idx_finance_entries_product_date
+  ON finance_entries(productId, businessDate);
+
+CREATE INDEX IF NOT EXISTS idx_finance_entries_link_date
+  ON finance_entries(salesLinkId, businessDate);

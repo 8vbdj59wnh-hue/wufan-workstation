@@ -28,6 +28,10 @@ export const modules = [
     name: "数据中心",
   },
   {
+    id: "financeCenter",
+    name: "财务中心",
+  },
+  {
     id: "connectionCenter",
     name: "连接中心",
   },

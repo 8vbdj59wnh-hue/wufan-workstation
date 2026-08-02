@@ -127,6 +127,19 @@ import {
 } from "./modules/auth/index.js";
 import { normalizeProductSkuCode, splitProductSkuCodes } from "./modules/common/index.js";
 import { getOperationDashboard } from "./operationManagementService.js";
+import {
+  approveFinanceEntry,
+  commitFinanceImportBatch,
+  createFinanceImportBatch,
+  getFinanceAnalysis,
+  getFinanceStatement,
+  listFinanceEntries,
+  listFinanceImportBatches,
+  listFinanceRules,
+  readFinanceImportBatch,
+  removeFinanceRule,
+  saveFinanceRule,
+} from "./financeService.js";
 
 const app = express();
 const host = process.env.HOST ?? "0.0.0.0";
@@ -161,6 +174,18 @@ const uploadConnectionWorkbook = multer({
     const ext = path.extname(file.originalname).toLowerCase();
     if (![".xlsx", ".xls"].includes(ext)) {
       callback(new Error("生意参谋导入只支持 .xlsx 或 .xls 文件。"));
+      return;
+    }
+    callback(null, true);
+  },
+});
+const uploadFinanceWorkbook = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 30 * 1024 * 1024 },
+  fileFilter: (_request, file, callback) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (![".xlsx", ".xls", ".csv"].includes(ext)) {
+      callback(new Error("财务账单只支持 .xlsx、.xls 或 .csv 文件。"));
       return;
     }
     callback(null, true);
@@ -1452,6 +1477,66 @@ app.get("/api/operation-dashboard", requirePermission("dataCenter.view"), (_requ
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "经营驾驶舱读取失败。" });
   }
+});
+
+app.get("/api/finance/statement", requirePermission("finance.view"), (request, response) => {
+  try { response.json({ success: true, statement: getFinanceStatement(request.query) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "利润表读取失败。" }); }
+});
+
+app.get("/api/finance/analysis", requirePermission("finance.view"), (request, response) => {
+  try { response.json({ success: true, analysis: getFinanceAnalysis(request.query) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "财务分析读取失败。" }); }
+});
+
+app.get("/api/finance/entries", requirePermission("finance.view"), (request, response) => {
+  try { response.json({ success: true, items: listFinanceEntries(request.query) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "财务记录读取失败。" }); }
+});
+
+app.post("/api/finance/entries/:id/approve", requirePermission("finance.approve"), (request, response) => {
+  try { approveFinanceEntry(request.params.id, request.user.id); response.json({ success: true }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "财务记录审核失败。" }); }
+});
+
+app.get("/api/finance/import-batches", requirePermission("finance.view"), (_request, response) => {
+  try { response.json({ success: true, items: listFinanceImportBatches() }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "账单批次读取失败。" }); }
+});
+
+app.post("/api/finance/import-batches", requirePermission("finance.manage"), uploadFinanceWorkbook.single("file"), (request, response) => {
+  try { response.status(201).json({ success: true, batch: createFinanceImportBatch(request.file, request.user.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "账单解析失败。" }); }
+});
+
+app.get("/api/finance/import-batches/:id", requirePermission("finance.view"), (request, response) => {
+  try { response.json({ success: true, batch: readFinanceImportBatch(request.params.id) }); }
+  catch (error) { response.status(404).json({ success: false, message: error.message || "账单批次不存在。" }); }
+});
+
+app.post("/api/finance/import-batches/:id/commit", requirePermission("finance.manage"), (request, response) => {
+  try { response.json({ success: true, ...commitFinanceImportBatch(request.params.id, request.body, request.user.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "账单确认失败。" }); }
+});
+
+app.get("/api/finance/rules", requirePermission("finance.view"), (_request, response) => {
+  try { response.json({ success: true, items: listFinanceRules() }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "财务规则读取失败。" }); }
+});
+
+app.post("/api/finance/rules", requirePermission("finance.manage"), (request, response) => {
+  try { response.status(201).json({ success: true, item: saveFinanceRule(request.body, request.user.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "财务规则保存失败。" }); }
+});
+
+app.put("/api/finance/rules/:id", requirePermission("finance.manage"), (request, response) => {
+  try { response.json({ success: true, item: saveFinanceRule(request.body, request.user.id, request.params.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "财务规则更新失败。" }); }
+});
+
+app.delete("/api/finance/rules/:id", requirePermission("finance.manage"), (request, response) => {
+  try { removeFinanceRule(request.params.id); response.json({ success: true }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "财务规则删除失败。" }); }
 });
 
 app.get("/api/data-center/trends", requirePermission("dataCenter.view"), (request, response) => {

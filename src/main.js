@@ -11,6 +11,7 @@ import { bindProductCenterPageEvents, renderProductCenterPage } from "./pages/pr
 import { bindDataCenterPageEvents, renderDataCenterPage } from "./dataCenterPage.js?v=20260729-data-center-v5";
 import { bindConnectionCenterPageEvents, renderConnectionCenterPage } from "./pages/connectionCenterPage.js?v=20260802-module-boundary1";
 import { bindOperationDashboardPageEvents, renderOperationDashboardPage } from "./operationDashboardPage.js?v=20260802-operation-foundation1";
+import { bindFinanceCenterPageEvents, renderFinanceCenterPage } from "./financeCenterPage.js?v=20260802-finance-center1";
 import { bindProductPreviewEvents, closeProductPreview, openProductPreview, renderProductPreviewModal } from "./productPreview.js?v=20260725-product-preview1";
 import { attachThumbnailHoverPreview } from "./thumbnailPreview.js?v=20260723-task-card-static1";
 import {
@@ -88,6 +89,8 @@ const moduleHashMap = {
   products: "products",
   dataCenter: "dataCenter",
   "data-center": "dataCenter",
+  financeCenter: "financeCenter",
+  "finance-center": "financeCenter",
   connectionCenter: "connectionCenter",
   "connection-center": "connectionCenter",
   "template-center": "templateCenter",
@@ -397,6 +400,10 @@ function renderPage() {
     content = renderOperationDashboardPage();
   }
 
+  if (canAccessActiveModule && activeModule.id === "financeCenter") {
+    content = renderFinanceCenterPage();
+  }
+
   if (canAccessActiveModule && activeModule.id === "connectionCenter") {
     content = renderConnectionCenterPage();
   }
@@ -679,6 +686,10 @@ function render({ navigation = false } = {}) {
 
   if (activeModuleId === "operationDashboard") {
     bindOperationDashboardPageEvents(render);
+  }
+
+  if (activeModuleId === "financeCenter") {
+    bindFinanceCenterPageEvents(render);
   }
 
   if (activeModuleId === "connectionCenter") {

@@ -834,6 +834,54 @@ export async function loadOperationDashboard() {
   return readApiJson(response, "经营驾驶舱读取失败。");
 }
 
+export async function loadFinanceStatement(params = {}) {
+  const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/finance/statement${query.size ? `?${query}` : ""}`), "利润表读取失败。");
+}
+
+export async function loadFinanceAnalysis(params = {}) {
+  const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/finance/analysis${query.size ? `?${query}` : ""}`), "财务分析读取失败。");
+}
+
+export async function loadFinanceEntries(params = {}) {
+  const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/finance/entries${query.size ? `?${query}` : ""}`), "财务记录读取失败。");
+}
+
+export async function loadFinanceImportBatches() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/finance/import-batches`), "账单批次读取失败。");
+}
+
+export async function uploadFinanceBill(file) {
+  const form = new FormData(); form.append("file", file);
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/finance/import-batches`, { method: "POST", body: form }), "账单解析失败。");
+}
+
+export async function commitFinanceBill(batchId, adjustments = []) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/finance/import-batches/${encodeURIComponent(batchId)}/commit`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ adjustments }),
+  }), "账单确认失败。");
+}
+
+export async function loadFinanceRules() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/finance/rules`), "财务规则读取失败。");
+}
+
+export async function createFinanceRule(payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/finance/rules`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  }), "财务规则保存失败。");
+}
+
+export async function deleteFinanceRule(id) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/finance/rules/${encodeURIComponent(id)}`, { method: "DELETE" }), "财务规则删除失败。");
+}
+
+export async function approveFinanceEntry(id) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/finance/entries/${encodeURIComponent(id)}/approve`, { method: "POST" }), "财务记录审批失败。");
+}
+
 export async function loadConnections() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections`), "连接列表读取失败。");
 }
