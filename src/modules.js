@@ -28,6 +28,10 @@ export const modules = [
     name: "客户中心",
   },
   {
+    id: "aiOperationAssistant",
+    name: "AI经营助手",
+  },
+  {
     id: "operationDashboard",
     name: "经营驾驶舱",
   },

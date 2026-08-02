@@ -960,6 +960,10 @@ export async function saveCustomerProfile(payload,customerId=""){return readApiJ
 export async function addCustomerConsumption(customerId,payload){return readApiJson(await authFetch(`${apiBaseUrl}/api/customer-center/customers/${encodeURIComponent(customerId)}/consumptions`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),"消费记录保存失败。");}
 export async function addCustomerTag(customerId,payload){return readApiJson(await authFetch(`${apiBaseUrl}/api/customer-center/customers/${encodeURIComponent(customerId)}/tags`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),"客户标签保存失败。");}
 export async function addCustomerFollowup(customerId,payload){return readApiJson(await authFetch(`${apiBaseUrl}/api/customer-center/customers/${encodeURIComponent(customerId)}/followups`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),"客户跟进保存失败。");}
+export async function loadAiAnalyses(){return readApiJson(await authFetch(`${apiBaseUrl}/api/ai-operation/analyses`),"经营分析记录读取失败。");}
+export async function createAiAnalysis(payload){return readApiJson(await authFetch(`${apiBaseUrl}/api/ai-operation/analyses`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),"经营分析生成失败。");}
+export async function confirmAiAnalysis(id){return readApiJson(await authFetch(`${apiBaseUrl}/api/ai-operation/analyses/${encodeURIComponent(id)}/confirm`,{method:"POST"}),"经营分析确认失败。");}
+export async function createAiAnalysisAction(id,payload){return readApiJson(await authFetch(`${apiBaseUrl}/api/ai-operation/analyses/${encodeURIComponent(id)}/action`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),"改善行动创建失败。");}
 
 export async function loadConnections() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections`), "连接列表读取失败。");
