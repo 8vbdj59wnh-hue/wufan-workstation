@@ -34,7 +34,7 @@ import {
   UnassignedDepartmentId,
 } from "./data/workResultStats.js?v=20260717-work-results-dashboard1";
 import { formatBusinessDateTime } from "./businessTime.js?v=20260705-state-singleton1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260724-action-template-link1";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260803-action-product-search1";
 
 const today = new Date().toISOString().slice(0, 10);
 let activeAssessmentTab = "stats";

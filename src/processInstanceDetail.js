@@ -20,7 +20,7 @@ import {
   validatePublicFormFields,
 } from "./workFormEditor.js?v=20260722-public-form-editor1";
 import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
-import { bindActionProductSelectors, collectActionProductIds, getActionProductIds, renderActionProductSelector, renderLinkedActionProducts } from "./actionProductRelations.js?v=20260725-product-center1";
+import { bindActionProductSelectors, collectActionProductIds, getActionProductIds, renderActionProductSelector, renderLinkedActionProducts } from "./actionProductRelations.js?v=20260803-action-product-search1";
 import { hasPermission } from "./permissions.js?v=20260725-product-center1";
 import { getActionDeadlinePresentation } from "./data/actionDeadline.js?v=20260802-action-countdown1";
 import {
@@ -814,7 +814,7 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
         </div>
         <div class="detail-block">
           <h3>关联产品</h3>
-          ${canManageActionProducts(instance) ? renderActionProductSelector(getActionProductIds(instance.id), { label: "选择产品" }) : renderLinkedActionProducts(instance.id)}
+          ${canManageActionProducts(instance) ? renderActionProductSelector(getActionProductIds(instance.id), { label: "选择产品", actionId: instance.id }) : renderLinkedActionProducts(instance.id)}
         </div>
         <div class="detail-block action-linked-template-section">
           <div class="section-heading with-actions compact-heading">

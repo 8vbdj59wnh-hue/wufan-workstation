@@ -12,7 +12,7 @@ import {
   uploadGenericFile,
   uploadImageFile,
 } from "./appState.js?v=20260705-state-singleton1";
-import { bindStandardWorkLibraryEvents, renderStandardWorkLibraryPage } from "./actionStandardsPage.js?v=20260802-action-standard-card1";
+import { bindStandardWorkLibraryEvents, renderStandardWorkLibraryPage } from "./actionStandardsPage.js?v=20260803-action-product-search1";
 import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js?v=20260802-template-version1";
 import { bindSettingsPageEvents, renderFormDesignSection } from "./settingsPage.js?v=20260802-template-center-form1";
 

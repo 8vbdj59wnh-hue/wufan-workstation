@@ -47,7 +47,7 @@ import {
   getProcessProgress as selectProcessProgress,
   isProcessInstanceOverdue as selectProcessInstanceOverdue,
 } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
-import { bindActionLinkedTemplatePreviewEvents, bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260802-process-detail-priority1";
+import { bindActionLinkedTemplatePreviewEvents, bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260803-action-product-search1";
 import { selectTask } from "./tasksPage.js?v=20260724-action-template-link1";
 import {
   collectBusinessDateTime,
@@ -63,7 +63,7 @@ import {
   validatePublicFormFields,
 } from "./workFormEditor.js?v=20260722-public-form-editor1";
 import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
-import { bindActionProductSelectors, collectActionProductIds, renderActionProductSelector } from "./actionProductRelations.js?v=20260725-product-center1";
+import { bindActionProductSelectors, collectActionProductIds, renderActionProductSelector } from "./actionProductRelations.js?v=20260803-action-product-search1";
 
 const departments = state.departments;
 const categories = state.categories;
