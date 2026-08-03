@@ -45,9 +45,10 @@ export function joinConnectionDiagnosis(connectionId, input = {}, userId, isAdmi
   return { ...item, anomalyReasons: reasons };
 }
 
-export function getConnectionHospital() {
+export function getConnectionHospital(userId = "", isAdmin = true) {
   const database = getDatabase();
-  const analyses = listConnectionGrowthAnalyses();
+  const operatorId = String(userId ?? "").trim();
+  const analyses = listConnectionGrowthAnalyses().filter((item) => isAdmin || (operatorId && item.ownerId === operatorId));
   const records = database.prepare(`SELECT * FROM connection_health_records ORDER BY createdAt DESC,id DESC`).all();
   const latestRecord = new Map();
   for (const row of records) if (!latestRecord.has(row.connectionId)) latestRecord.set(row.connectionId, row);

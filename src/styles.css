@@ -10229,3 +10229,49 @@ button.content-template-thumb {
   word-break: break-word;
   font-size: 11px;
 }
+
+.connection-workbench-home { display: grid; gap: 18px; }
+.connection-workbench-home > header h2, .connection-workbench-home > header p { margin: 0; }
+.connection-workbench-home > header > span { display: block; margin-top: 5px; color: #667085; }
+.connection-workbench-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.connection-workbench-summary button { display: grid; gap: 6px; padding: 15px; border: 1px solid #dfe8e4; border-radius: 14px; background: linear-gradient(145deg, #f6fbf9, #fff); color: #475467; text-align: left; cursor: pointer; }
+.connection-workbench-summary button:hover { border-color: #258a68; }
+.connection-workbench-summary strong { color: #173f34; font-size: 27px; }
+.connection-workbench-block { display: grid; gap: 12px; padding: 16px; border: 1px solid #e4e7ec; border-radius: 16px; background: #fff; }
+.connection-workbench-block.is-priority { border-color: #f4b4bd; background: #fffafb; }
+.connection-workbench-block.is-risk { border-color: #f8d0d5; }
+.connection-workbench-block > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.connection-workbench-block h3, .connection-workbench-block p { margin: 0; }
+.connection-workbench-block p { margin-top: 3px; color: #667085; font-size: 12px; }
+.connection-workbench-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
+.connection-workbench-link-card { position: relative; min-width: 0; overflow: hidden; border: 1px solid #e4e7ec; border-radius: 12px; }
+.connection-workbench-link-card > button:first-child { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 10px; width: 100%; padding: 11px; border: 0; background: #fff; color: inherit; text-align: left; cursor: pointer; }
+.connection-workbench-link-card.has-follow > button:first-child { padding-right: 82px; }
+.connection-workbench-link-card .connection-cover { width: 58px; height: 58px; border-radius: 9px; object-fit: cover; }
+.connection-workbench-link-card > button > span { display: grid; gap: 4px; min-width: 0; }
+.connection-workbench-link-card strong, .connection-workbench-link-card small, .connection-workbench-link-card em { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.connection-workbench-link-card small, .connection-workbench-link-card em { color: #667085; font-size: 11px; font-style: normal; }
+.connection-workbench-link-card .my-link-trend { font-style: normal; }
+.connection-workbench-issues { display: grid; gap: 8px; }
+.connection-workbench-issues > button { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 11px 12px; border: 1px solid #f8d0d5; border-radius: 11px; background: #fff; color: inherit; text-align: left; cursor: pointer; }
+.connection-workbench-issues span { display: grid; gap: 3px; min-width: 0; }
+.connection-workbench-issues small { overflow: hidden; color: #667085; text-overflow: ellipsis; white-space: nowrap; }
+.connection-workbench-issues em { padding: 4px 8px; border-radius: 999px; background: #fff1f3; color: #c01048; font-size: 11px; font-style: normal; }
+.connection-workbench-issues b { color: #475467; font-size: 12px; }
+.connection-workbench-mine-stats { display: flex; gap: 8px; flex-wrap: wrap; }
+.connection-workbench-mine-stats span { padding: 6px 10px; border-radius: 999px; background: #f2f4f7; color: #475467; font-size: 12px; }
+.connection-workbench-mine-stats b { color: #173f34; }
+.connection-workbench-block.is-all-links { padding: 0; border: 0; background: transparent; }
+.connection-workbench-block.is-all-links > header { padding: 16px; border: 1px solid #e4e7ec; border-radius: 16px; background: #fff; }
+
+@media (max-width: 900px) {
+  .connection-workbench-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 650px) {
+  .connection-workbench-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .connection-workbench-card-grid { grid-template-columns: 1fr; }
+  .connection-workbench-issues > button { grid-template-columns: minmax(0, 1fr) auto; }
+  .connection-workbench-issues b { display: none; }
+  .connection-workbench-block > header { align-items: flex-start; flex-direction: column; }
+}

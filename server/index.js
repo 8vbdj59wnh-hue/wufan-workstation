@@ -2082,9 +2082,9 @@ app.get("/api/connection-improvements/summary", requireLinkView, (_request, resp
   }
 });
 
-app.get("/api/connection-hospital", requireLinkHealth, (_request, response) => {
+app.get("/api/connection-hospital", requireLinkHealth, (request, response) => {
   try {
-    response.json({ success: true, ...getConnectionHospital() });
+    response.json({ success: true, ...getConnectionHospital(getUserPersonId(request.user), isAdminUser(request.user)) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "链接医院读取失败。" });
   }
