@@ -84,7 +84,7 @@ import {
   renderProductImageEditor,
   validateProductImages,
 } from "./actionImages.js";
-import { bindActionLinkedTemplatePreviewEvents, bindLaunchedProcessDetailEvents, renderActionLinkedTemplates, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260724-action-template-link1";
+import { bindActionLinkedTemplatePreviewEvents, bindLaunchedProcessDetailEvents, renderActionLinkedTemplates, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260803-action-product-manual-link1";
 import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260705-state-singleton1";
 import { renderWorkFormViewer } from "./workFormViewer.js?v=20260705-state-singleton1";
 import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
@@ -99,7 +99,7 @@ import {
   getActionProducts,
   renderActionProductSelector,
   renderLinkedActionProducts,
-} from "./actionProductRelations.js?v=20260725-product-center1";
+} from "./actionProductRelations.js?v=20260803-action-product-manual-link1";
 import {
   collectBusinessDateTime,
   collectBusinessMinuteDateTime,

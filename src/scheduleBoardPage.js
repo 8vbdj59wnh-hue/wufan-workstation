@@ -17,7 +17,7 @@ import {
   renderActionTemplatePicker,
   renderLaunchedProcessDetail,
   updateActionTemplatePickerSelection,
-} from "./processInstanceDetail.js?v=20260724-batch-action-template1";
+} from "./processInstanceDetail.js?v=20260803-action-product-manual-link1";
 import { formatBusinessDateTime } from "./businessTime.js?v=20260705-state-singleton1";
 import { rerenderPreservingInputFocus } from "./inputFocus.js?v=20260723-input-focus1";
 import {
@@ -35,7 +35,7 @@ import {
   getActionDisplayImages,
   getActionProducts,
   renderLinkedActionProducts,
-} from "./actionProductRelations.js?v=20260730-schedule-hover-grid1";
+} from "./actionProductRelations.js?v=20260803-action-product-manual-link1";
 import {
   getCurrentExecutor as selectCurrentExecutor,
   getCurrentProcessTask as selectCurrentProcessTask,
