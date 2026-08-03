@@ -598,6 +598,7 @@ function renderProductSalesGroups(rows) {
       title: row.title,
       platformGoodsId: row.platformGoodsId,
       platformGoodsCode: row.platformGoodsCode,
+      connectionProfileId: row.connectionProfileId,
       rawUrl: row.rawUrl,
       status: row.linkStatus,
       skus: [],
@@ -618,6 +619,7 @@ function renderProductSalesGroups(rows) {
             <span>平台货品编号：${escapeHtml(link.platformGoodsCode || "—")}</span>
             <span>状态：${escapeHtml(link.status || "—")}</span>
             ${link.rawUrl ? `<a class="text-button" href="${escapeHtml(link.rawUrl)}" target="_blank" rel="noopener noreferrer">打开链接</a>` : ""}
+            ${link.connectionProfileId ? `<a class="text-button" href="#connectionCenter/${encodeURIComponent(link.connectionProfileId)}">进入经营链接详情</a>` : ""}
           </div>
           <div class="table-wrap"><table class="data-table"><thead><tr><th>平台SKU编码</th><th>产品编码</th><th>产品名称</th><th>规格名称</th><th>价格</th><th>平台库存</th><th>关联时间</th><th>关联状态</th><th>匹配方式</th><th>操作</th></tr></thead>
             <tbody>${link.skus.map((sku) => { const product = state.products.find((item) => item.id === sku.productId); const manualBinding = state.platformSkuManualBindings.find((item) => item.salesLinkSkuId === sku.id); return `<tr><td>${escapeHtml(sku.platformSkuCode || sku.platformSkuId || "—")}</td><td><strong>${escapeHtml(product?.skuCode || "—")}</strong></td><td>${escapeHtml(product?.name || "—")}</td><td>${escapeHtml(sku.specificationName || "—")}</td>

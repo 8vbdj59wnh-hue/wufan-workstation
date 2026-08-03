@@ -26,6 +26,7 @@ import {
   removeConnectionBenchmark,
   loadConnectionPeriodSnapshots,
   loadConnections,
+  loadConnectionCoreDetail,
   loadMyConnectionWorkbench,
   removeConnectionAction,
   ignoreConnectionImportRow,
@@ -52,8 +53,8 @@ const pageState = {
   view: "list",
   sort: "default",
   columnSort: { key: "", direction: "asc" },
-  listFilters: { platform: "", shopId: "", productCode: "", ownerId: "", healthStatus: "", status: "" },
-  visibleColumns: ["image", "name", "platform", "shop", "products", "period", "payAmount", "growth", "health", "profit", "origin", "owner", "status"],
+  listFilters: { platform: "", shopId: "", productCode: "", ownerId: "", healthStatus: "", status: "", salesStatus: "", profitStatus: "", productRelation: "", skuCount: "" },
+  visibleColumns: ["image", "name", "platform", "shop", "goodsId", "erpSales", "erpProfit", "relations", "health", "owner", "status"],
   fieldSettingsOpen: false,
   detailTab: "overview",
   actions: [],
@@ -80,6 +81,9 @@ const pageState = {
   importLoading: false,
   importTab: "matched",
   foundation: { definitions: {}, templates: [], batches: [], errors: [], loading: false },
+  coreDetail: null,
+  coreDetailLoading: false,
+  salesPeriodType: "month",
   error: "",
 };
 
@@ -89,6 +93,10 @@ const listColumns = [
   { key: "name", label: "连接名称", sortable: true },
   { key: "platform", label: "平台", sortable: true },
   { key: "shop", label: "店铺", sortable: true },
+  { key: "goodsId", label: "商品ID", sortable: true },
+  { key: "erpSales", label: "ERP销售额", sortable: true },
+  { key: "erpProfit", label: "ERP利润", sortable: true },
+  { key: "relations", label: "产品 / SKU", sortable: true },
   { key: "products", label: "产品编码", sortable: true },
   { key: "period", label: "最新经营数据", sortable: true },
   { key: "payAmount", label: "最近周期销售额", sortable: true },
@@ -317,6 +325,10 @@ function renderToolbar() {
       <input name="productCode" value="${escapeHtml(filters.productCode)}" placeholder="筛选产品编码" aria-label="关联产品编码筛选" />
       <select name="ownerId" aria-label="负责人筛选"><option value="">全部负责人</option><option value="unassigned" ${filters.ownerId === "unassigned" ? "selected" : ""}>未设置负责人</option>${owners.map((person) => `<option value="${escapeHtml(person.id)}" ${filters.ownerId === person.id ? "selected" : ""}>${escapeHtml(person.name)}</option>`).join("")}</select>
       <select name="healthStatus" aria-label="健康状态筛选"><option value="">全部健康状态</option>${["growing", "stable", "attention", "risk", "insufficient_data", "no_data"].map((status) => `<option value="${status}" ${filters.healthStatus === status ? "selected" : ""}>${escapeHtml(healthText(status))}</option>`).join("")}</select>
+      <select name="salesStatus" aria-label="销售状态筛选"><option value="">全部销售状态</option><option value="selling" ${filters.salesStatus === "selling" ? "selected" : ""}>有真实销售</option><option value="no_sales" ${filters.salesStatus === "no_sales" ? "selected" : ""}>暂无真实销售</option></select>
+      <select name="profitStatus" aria-label="利润状态筛选"><option value="">全部利润状态</option><option value="profit" ${filters.profitStatus === "profit" ? "selected" : ""}>盈利</option><option value="loss" ${filters.profitStatus === "loss" ? "selected" : ""}>亏损</option><option value="unknown" ${filters.profitStatus === "unknown" ? "selected" : ""}>无利润数据</option></select>
+      <select name="productRelation" aria-label="产品关联筛选"><option value="">全部产品关联</option><option value="linked" ${filters.productRelation === "linked" ? "selected" : ""}>已关联产品</option><option value="unlinked" ${filters.productRelation === "unlinked" ? "selected" : ""}>未关联产品</option></select>
+      <select name="skuCount" aria-label="SKU数量筛选"><option value="">全部SKU数量</option><option value="single" ${filters.skuCount === "single" ? "selected" : ""}>单SKU</option><option value="multiple" ${filters.skuCount === "multiple" ? "selected" : ""}>多SKU</option><option value="none" ${filters.skuCount === "none" ? "selected" : ""}>无SKU</option></select>
       <select name="status" aria-label="状态筛选"><option value="">全部状态</option>${["active", "paused", "archived"].map((status) => `<option value="${status}" ${filters.status === status ? "selected" : ""}>${escapeHtml(statusText(status))}</option>`).join("")}</select>
       <button type="submit" class="secondary-button">筛选</button>
       <button type="button" class="text-button" data-clear-connection-filters>清除</button>
@@ -385,10 +397,14 @@ function renderList() {
       && (!codeQuery || item.products?.some((product) => String(product.skuCode || "").toLowerCase().includes(codeQuery)))
       && (!filters.ownerId || (filters.ownerId === "unassigned" ? !item.ownerId : item.ownerId === filters.ownerId))
       && (!filters.healthStatus || item.healthStatus === filters.healthStatus)
+      && (!filters.salesStatus || (filters.salesStatus === "selling" ? Number(item.erpSales?.shippedQuantity || 0) > 0 : Number(item.erpSales?.shippedQuantity || 0) <= 0))
+      && (!filters.profitStatus || (filters.profitStatus === "unknown" ? item.erpSales?.profitAmount == null : item.erpSales?.profitAmount != null && (filters.profitStatus === "profit" ? Number(item.erpSales.profitAmount) >= 0 : Number(item.erpSales.profitAmount) < 0)))
+      && (!filters.productRelation || (filters.productRelation === "linked" ? Number(item.productCount || 0) > 0 : Number(item.productCount || 0) === 0))
+      && (!filters.skuCount || (filters.skuCount === "none" ? Number(item.skuCount || 0) === 0 : filters.skuCount === "single" ? Number(item.skuCount || 0) === 1 : Number(item.skuCount || 0) > 1))
       && (!filters.status || item.status === filters.status);
   });
   const valueForColumn = (item, key) => ({
-    name: item.name || "", platform: item.platform || "", shop: shopName(item), products: productCodes(item),
+    name: item.name || "", platform: item.platform || "", shop: shopName(item), goodsId: item.platformGoodsId || "", erpSales: Number(item.erpSales?.salesAmount || 0), erpProfit: Number(item.erpSales?.profitAmount || 0), relations: Number(item.skuCount || 0), products: productCodes(item),
     period: item.latestPeriodEnd || "", payAmount: Number(item.latestPayAmount || 0), growth: item.salesGrowth == null ? -Infinity : Number(item.salesGrowth),
     health: item.healthScore == null ? Infinity : Number(item.healthScore), profit: Number(item.currentFinance?.netProfit || 0), origin: originText(item.originSource), owner: connectionOwnerName(item), status: statusText(item.status),
   })[key];
@@ -407,7 +423,7 @@ function renderList() {
   });
   if (!items.length) return `<div class="empty-state"><strong>没有符合条件的连接</strong><p>请调整店铺、产品编码、负责人或状态筛选。</p></div>`;
   if (pageState.view === "cards") {
-    return `<div class="connection-card-grid">${items.map((item) => { const anomalies = connectionAnomalies(item); return `<article class="connection-card ${anomalies.length ? "has-anomaly" : ""}"><button type="button" class="connection-card-main" data-open-connection="${escapeHtml(item.id)}">${imageHtml(item)}<span class="connection-card-body"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(productCodes(item, filters.productCode))}</span><span>${item.latestPeriodEnd ? `${escapeHtml(item.latestPeriodEnd)} · ¥${Number(item.latestPayAmount || 0).toLocaleString("zh-CN")}` : "暂无经营数据"}</span>${Number(item.benchmarkCount || 0) ? `<span class="connection-benchmark-status">对标：${escapeHtml(item.firstBenchmarkName)}${Number(item.benchmarkCount) > 1 ? ` +${Number(item.benchmarkCount) - 1}` : ""}</span>` : `<span class="connection-benchmark-status is-empty">未设置对标</span>`}<em class="status-pill status-${escapeHtml(item.status)}">${escapeHtml(statusText(item.status))}</em></span></button>${anomalies.length ? `<footer><span>⚠ ${escapeHtml(anomalies.map((problem) => problem.title).join("、"))}</span>${canJoinDiagnosis(item) ? `<button type="button" class="primary-button" data-join-diagnosis="${escapeHtml(item.id)}">加入诊断</button>` : `<small>${(pageState.hospital.admittedConnectionIds ?? []).includes(item.id) ? "已加入诊断区" : "异常提醒"}</small>`}</footer>` : ""}</article>`; }).join("")}</div>`;
+    return `<div class="connection-card-grid">${items.map((item) => { const anomalies = connectionAnomalies(item); return `<article class="connection-card ${anomalies.length ? "has-anomaly" : ""}"><button type="button" class="connection-card-main" data-open-connection="${escapeHtml(item.id)}">${imageHtml(item)}<span class="connection-card-body"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(`${item.platform} · ${shopName(item)} · 商品ID ${item.platformGoodsId || "—"}`)}</small><span class="connection-v3-card-metrics"><em>销量 <b>${coreNumber(item.erpSales?.shippedQuantity)}</b></em><em>销售额 <b>${coreMoney(item.erpSales?.salesAmount)}</b></em><em>利润 <b>${coreMoney(item.erpSales?.profitAmount)}</b></em><em>利润率 <b>${corePercent(item.erpSales?.profitMargin)}</b></em></span><span>${item.productCount || 0} 个产品 · ${item.skuCount || 0} 个SKU</span><span>${escapeHtml(healthText(item.healthStatus || "no_data"))} · ${growthText(item.salesGrowth)}</span><em class="status-pill status-${escapeHtml(item.status)}">${escapeHtml(statusText(item.status))}</em></span></button>${anomalies.length ? `<footer><span>⚠ ${escapeHtml(anomalies.map((problem) => problem.title).join("、"))}</span>${canJoinDiagnosis(item) ? `<button type="button" class="primary-button" data-join-diagnosis="${escapeHtml(item.id)}">加入诊断</button>` : `<small>${(pageState.hospital.admittedConnectionIds ?? []).includes(item.id) ? "已加入诊断区" : "异常提醒"}</small>`}</footer>` : ""}</article>`; }).join("")}</div>`;
   }
   const visible = new Set(pageState.visibleColumns);
   const header = listColumns.filter((column) => visible.has(column.key)).map((column) => {
@@ -415,7 +431,7 @@ function renderList() {
     return `<th>${column.sortable ? `<button type="button" data-connection-column-sort="${column.key}">${escapeHtml(column.label)}${active ? (pageState.columnSort.direction === "asc" ? " ↑" : " ↓") : " ↕"}</button>` : escapeHtml(column.label)}</th>`;
   }).join("");
   const cell = (item, key) => ({
-    image: imageHtml(item), name: `<strong>${escapeHtml(item.name)}</strong>`, platform: escapeHtml(item.platform), shop: escapeHtml(shopName(item)),
+    image: imageHtml(item), name: `<strong>${escapeHtml(item.name)}</strong>`, platform: escapeHtml(item.platform), shop: escapeHtml(shopName(item)), goodsId: escapeHtml(item.platformGoodsId || "—"), erpSales: `${coreMoney(item.erpSales?.salesAmount)}<small>销量 ${coreNumber(item.erpSales?.shippedQuantity)}</small>`, erpProfit: `${coreMoney(item.erpSales?.profitAmount)}<small>${corePercent(item.erpSales?.profitMargin)}</small>`, relations: `${item.productCount || 0} 产品 / ${item.skuCount || 0} SKU`,
     products: escapeHtml(productCodes(item, filters.productCode)), period: escapeHtml(item.latestPeriodEnd || "—"),
     payAmount: item.latestPayAmount == null ? "—" : `¥${Number(item.latestPayAmount).toLocaleString("zh-CN")}`,
     growth: growthText(item.salesGrowth), health: item.healthScore == null ? "—" : `${Number(item.healthScore)}分`,
@@ -444,12 +460,33 @@ function renderActions(item) {
   </div>`;
 }
 
+function coreMoney(value) { return value === null || value === undefined ? "—" : `¥${Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 2 })}`; }
+function coreNumber(value) { return value === null || value === undefined ? "—" : Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 2 }); }
+function corePercent(value) { return value === null || value === undefined ? "—" : `${(Number(value) * 100).toFixed(2)}%`; }
+function renderCoreOverview(item, core) {
+  const sales = core?.salesOverview ?? item.erpSales ?? {}; const platform = core?.platformPerformance;
+  return `<div class="connection-v3-detail"><section class="connection-v3-basic"><h3>基础信息</h3><dl><div><dt>商品标题</dt><dd>${escapeHtml(item.salesLinkTitle || item.name)}</dd></div><div><dt>平台 / 店铺</dt><dd>${escapeHtml(`${item.platform} / ${shopName(item)}`)}</dd></div><div><dt>商品ID / SPU</dt><dd>${escapeHtml(item.platformGoodsId || "—")}</dd></div><div><dt>负责人</dt><dd>${escapeHtml(connectionOwnerName(item))}</dd></div><div><dt>商品链接</dt><dd>${item.canonicalUrl || item.rawUrl ? `<a href="${escapeHtml(item.canonicalUrl || item.rawUrl)}" target="_blank" rel="noopener noreferrer">打开平台商品</a>` : "—"}</dd></div></dl></section><section><h3>经营概览（ERP真实销售）</h3><div class="connection-v3-metrics"><div><span>发货销量</span><strong>${coreNumber(sales.shippedQuantity)}</strong></div><div><span>销售金额</span><strong>${coreMoney(sales.salesAmount)}</strong></div><div><span>成本</span><strong>${coreMoney(sales.costAmount)}</strong></div><div><span>利润</span><strong>${coreMoney(sales.profitAmount)}</strong></div><div><span>利润率</span><strong>${corePercent(sales.profitMargin)}</strong></div></div><small>${sales.periodStart ? escapeHtml(`${sales.periodStart} 至 ${sales.periodEnd}`) : "暂无ERP销售周期"}</small></section><section><h3>平台表现</h3>${platform ? `<div class="connection-v3-metrics"><div><span>访客</span><strong>${coreNumber(platform.visitorCount)}</strong></div><div><span>浏览</span><strong>${coreNumber(platform.viewCount)}</strong></div><div><span>点击</span><strong>${coreNumber(platform.metrics?.clickCount)}</strong></div><div><span>收藏</span><strong>${coreNumber(platform.metrics?.favoriteCount)}</strong></div><div><span>加购</span><strong>${coreNumber(platform.cartCount)}</strong></div><div><span>转化率</span><strong>${corePercent(platform.conversionRate)}</strong></div></div>` : `<div class="empty-state compact">暂无平台经营数据</div>`}</section></div>`;
+}
+function renderErpSales(core) {
+  const rows = (core?.erpTrend ?? []).filter((item) => item.periodType === pageState.salesPeriodType);
+  return `<section class="connection-v3-panel"><header><div><h3>ERP真实销售趋势</h3><p>按已导入周期展示发货、销售与利润，不与平台表现混用。</p></div><div class="segmented-control">${[["day","日"],["week","周"],["month","月"]].map(([id,label]) => `<button type="button" data-sales-period-type="${id}" class="${pageState.salesPeriodType===id?"active":""}">${label}</button>`).join("")}</div></header>${rows.length ? `<div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>周期</th><th>发货销量</th><th>销售金额</th><th>成本</th><th>利润</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${escapeHtml(`${row.periodStart} ~ ${row.periodEnd}`)}</td><td>${coreNumber(row.shippedQuantity)}</td><td>${coreMoney(row.salesAmount)}</td><td>${coreMoney(row.costAmount)}</td><td>${coreMoney(row.profitAmount)}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state">暂无${({day:"日",week:"周",month:"月"})[pageState.salesPeriodType]}粒度ERP销售数据</div>`}</section>`;
+}
+function renderSkuSales(core) { const rows=core?.skuSales??[]; return `<section class="connection-v3-panel"><h3>SKU销售分析</h3>${rows.length?`<div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>SKU编码</th><th>SKU名称</th><th>销量</th><th>销售额</th><th>销售占比</th></tr></thead><tbody>${rows.map((row)=>`<tr><td><strong>${escapeHtml(row.skuCode)}</strong></td><td>${escapeHtml(row.skuName)}</td><td>${coreNumber(row.shippedQuantity)}</td><td>${coreMoney(row.salesAmount)}</td><td>${corePercent(row.salesShare)}</td></tr>`).join("")}</tbody></table></div>`:`<div class="empty-state">暂无SKU真实销售数据</div>`}</section>`; }
+function renderCoreProducts(core) { const rows=core?.products??[]; return `<section class="connection-v3-panel"><h3>关联产品</h3>${rows.length?`<div class="connection-v3-product-grid">${rows.map((product)=>`<a href="#products/${encodeURIComponent(product.id)}">${product.mainImage?`<img src="${escapeHtml(resolveAssetUrl(product.mainImage))}" alt="" />`:`<span class="connection-cover-empty">无图</span>`}<strong>${escapeHtml(product.name)}</strong><span>产品编码 ${escapeHtml(product.skuCode)}</span><small>${product.skuCount} 个关联SKU</small></a>`).join("")}</div>`:`<div class="empty-state">当前链接未关联产品</div>`}</section>`; }
+function renderInventory(core) { const rows=core?.inventory??[]; const risk={out:"缺货",low:"库存偏低",high:"库存偏高",normal:"正常"}; return `<section class="connection-v3-panel"><h3>库存供应</h3>${rows.length?`<div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>SKU</th><th>产品</th><th>当前库存</th><th>可售库存</th><th>销售速度</th><th>库存天数</th><th>风险</th></tr></thead><tbody>${rows.map((row)=>`<tr><td><strong>${escapeHtml(row.skuCode)}</strong><small>${escapeHtml(row.specificationName||"")}</small></td><td>${escapeHtml(row.productName||"未关联产品")}</td><td>${coreNumber(row.currentStock)}</td><td>${coreNumber(row.availableStock)}</td><td>${coreNumber(row.salesVelocity)}</td><td>${row.stockDays==null?"—":`${Number(row.stockDays).toFixed(1)}天`}</td><td><span class="status-pill stock-${row.stockRisk}">${risk[row.stockRisk]}</span></td></tr>`).join("")}</tbody></table></div>`:`<div class="empty-state">暂无关联SKU库存事实</div>`}</section>`; }
+
 function renderDetail() {
   const item = pageState.items.find((candidate) => candidate.id === pageState.selectedId);
   if (!item) return "";
-  const tabs = [["overview", "经营概况"], ["actions", "经营动作"], ...(canViewHealth() ? [["health", "体检报告"]] : []), ["improvements", "改善记录"], ["trend", "经营趋势"], ["benchmarks", `链接对标${pageState.benchmarks.items.length ? ` ${pageState.benchmarks.items.length}` : ""}`]];
+  const tabs = [["overview", "基础与经营概览"], ["erp-sales", "ERP真实销售"], ["sku-sales", "SKU销售分析"], ["products", "产品关联"], ["inventory", "库存供应"], ["actions", "经营动作"], ...(canViewHealth() ? [["health", "体检报告"]] : []), ["improvements", "改善记录"], ["trend", "经营趋势"], ["benchmarks", `链接对标${pageState.benchmarks.items.length ? ` ${pageState.benchmarks.items.length}` : ""}`]];
   let body = `<div class="connection-overview"><dl><div><dt>平台</dt><dd>${escapeHtml(item.platform)}</dd></div><div><dt>店铺</dt><dd>${escapeHtml(shopName(item))}</dd></div><div><dt>商品ID</dt><dd>${escapeHtml(item.platformGoodsId || "—")}</dd></div><div><dt>负责人</dt><dd>${escapeHtml(personName(item.ownerId))}</dd></div><div><dt>状态</dt><dd>${escapeHtml(statusText(item.status))}</dd></div></dl><section class="connection-operating-metrics"><div><span>最近周期销售额</span><strong>${item.latestPayAmount == null ? "—" : `¥${Number(item.latestPayAmount).toLocaleString("zh-CN")}`}</strong></div><div><span>销售增长</span><strong>${growthText(item.salesGrowth)}</strong></div><div><span>同期净利润</span><strong>${item.currentFinance == null ? "—" : `¥${Number(item.currentFinance.netProfit || 0).toLocaleString("zh-CN")}`}</strong></div><div><span>利润变化</span><strong>${growthText(item.profitGrowth)}</strong></div><div><span>健康状态</span><strong>${escapeHtml(healthText(item.healthStatus || "no_data"))}</strong></div></section>${canManage() ? `<form class="connection-action-form" data-connection-profile-form><label>连接名称<input name="name" value="${escapeHtml(item.name)}" required maxlength="120" /></label><label>负责人<select name="ownerId"><option value="">未设置</option>${(state.people ?? []).filter((person) => person.status === "active").map((person) => `<option value="${escapeHtml(person.id)}" ${item.ownerId === person.id ? "selected" : ""}>${escapeHtml(person.name)}</option>`).join("")}</select></label><button type="submit" class="secondary-button">保存档案</button></form>` : ""}<section><h3>关联产品</h3>${item.products?.length ? item.products.map((product) => `<a href="#products/${encodeURIComponent(product.id)}" data-product-id="${escapeHtml(product.id)}">${escapeHtml(product.name || product.skuCode)}</a>`).join("、") : "未关联产品"}</section></div>`;
   body = body.replace("<div><dt>负责人</dt>", `<div><dt>档案来源</dt><dd>${escapeHtml(originText(item.originSource))}</dd></div><div><dt>识别时间</dt><dd>${escapeHtml(item.identifiedAt || item.createdAt || "—")}</dd></div><div><dt>负责人</dt>`);
+  if (pageState.coreDetailLoading) body = `<div class="empty-state">正在读取链接经营详情…</div>`;
+  else if (pageState.detailTab === "overview") body = renderCoreOverview(item, pageState.coreDetail);
+  else if (pageState.detailTab === "erp-sales") body = renderErpSales(pageState.coreDetail);
+  else if (pageState.detailTab === "sku-sales") body = renderSkuSales(pageState.coreDetail);
+  else if (pageState.detailTab === "products") body = renderCoreProducts(pageState.coreDetail);
+  else if (pageState.detailTab === "inventory") body = renderInventory(pageState.coreDetail);
   if (pageState.detailTab === "actions") body = renderActions(item);
   if (pageState.detailTab === "health") body = renderHealthReport();
   if (pageState.detailTab === "improvements") body = renderImprovements();
@@ -601,7 +638,11 @@ async function loadPage(render) {
 }
 
 async function openConnection(id, render) {
-  pageState.selectedId = id; pageState.detailTab = "overview"; pageState.actions = []; pageState.periodSnapshots = []; pageState.growthAnalysis = null; pageState.healthRecords = []; pageState.healthModalId = ""; pageState.improvements = []; pageState.benchmarks = { items: [], candidates: [], comparison: null, comparisonId: "", loading: false }; render();
+  if (window.location.hash !== `#connectionCenter/${encodeURIComponent(id)}`) window.history.replaceState(null, "", `#connectionCenter/${encodeURIComponent(id)}`);
+  pageState.selectedId = id; pageState.detailTab = "overview"; pageState.coreDetail = null; pageState.coreDetailLoading = true; pageState.actions = []; pageState.periodSnapshots = []; pageState.growthAnalysis = null; pageState.healthRecords = []; pageState.healthModalId = ""; pageState.improvements = []; pageState.benchmarks = { items: [], candidates: [], comparison: null, comparisonId: "", loading: false }; render();
+  try { pageState.coreDetail = await loadConnectionCoreDetail(id); pageState.error = ""; }
+  catch (error) { pageState.error = error.message; }
+  pageState.coreDetailLoading = false; render();
 }
 
 async function loadBenchmarks(render) {
@@ -650,6 +691,10 @@ export function bindConnectionCenterPageEvents(render) {
   const root = document.querySelector(".connection-center-page");
   if (!root) return;
   if (!pageState.loaded && !pageState.loading) void loadPage(render);
+  const routeHash = window.location.hash.replace(/^#/, ""); const hasDetailRoute = routeHash.startsWith("connectionCenter/");
+  const routeConnectionId = hasDetailRoute ? decodeURIComponent(routeHash.slice("connectionCenter/".length)) : "";
+  if (pageState.loaded && hasDetailRoute && pageState.selectedId !== routeConnectionId) void openConnection(routeConnectionId, render);
+  if (pageState.loaded && !hasDetailRoute && pageState.selectedId) { pageState.selectedId = ""; pageState.coreDetail = null; render(); return; }
   root.querySelectorAll("[data-connection-section]").forEach((button) => button.addEventListener("click", () => {
     pageState.section = button.dataset.connectionSection; pageState.selectedId = ""; render();
     if (pageState.section === "pending-connections") void loadPendingConnections(render);
@@ -704,7 +749,7 @@ export function bindConnectionCenterPageEvents(render) {
     event.preventDefault(); pageState.listFilters = Object.fromEntries(new FormData(event.currentTarget)); render();
   });
   root.querySelector("[data-clear-connection-filters]")?.addEventListener("click", () => {
-    pageState.listFilters = { platform: "", shopId: "", productCode: "", ownerId: "", healthStatus: "", status: "" }; render();
+    pageState.listFilters = { platform: "", shopId: "", productCode: "", ownerId: "", healthStatus: "", status: "", salesStatus: "", profitStatus: "", productRelation: "", skuCount: "" }; render();
   });
   root.querySelectorAll("[data-connection-sort]").forEach((button) => button.addEventListener("click", () => {
     pageState.sort = button.dataset.connectionSort; pageState.columnSort = { key: "", direction: "asc" }; render();
@@ -730,7 +775,7 @@ export function bindConnectionCenterPageEvents(render) {
     element.addEventListener("click", open);
     element.addEventListener("keydown", (event) => { if (["Enter", " "].includes(event.key)) open(); });
   });
-  root.querySelector('[data-action="back-connections"]')?.addEventListener("click", () => { pageState.selectedId = ""; render(); });
+  root.querySelector('[data-action="back-connections"]')?.addEventListener("click", () => { pageState.selectedId = ""; window.location.hash = "connectionCenter"; render(); });
   root.querySelector("[data-connection-profile-form]")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
@@ -747,6 +792,7 @@ export function bindConnectionCenterPageEvents(render) {
     if (pageState.detailTab === "improvements") { try { pageState.improvements = (await loadConnectionImprovements({ connectionId: pageState.selectedId })).items ?? []; render(); } catch (error) { pageState.error = error.message; render(); } }
     if (pageState.detailTab === "benchmarks") await loadBenchmarks(render);
   }));
+  root.querySelectorAll("[data-sales-period-type]").forEach((button) => button.addEventListener("click", () => { pageState.salesPeriodType = button.dataset.salesPeriodType; render(); }));
   root.querySelector("[data-benchmark-settings]")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const payload = Object.fromEntries(new FormData(event.currentTarget));
     try { const result = await createConnectionBenchmark(pageState.selectedId, payload); pageState.benchmarks.items.push(result.item);

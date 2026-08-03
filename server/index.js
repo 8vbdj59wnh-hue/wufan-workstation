@@ -75,7 +75,6 @@ import {
   listConnectionMappingRepairCandidates,
   listConnectionActions,
   listConnectionDataMappings,
-  listConnectionProfiles,
   getMyConnectionWorkbench,
   setConnectionFollow,
   readConnectionProfile,
@@ -118,6 +117,7 @@ import {
   listConnectionImportErrors,
   listConnectionImportTemplates,
 } from "./connectionDataFoundationService.js";
+import { getConnectionCoreDetail, listConnectionCoreProfiles } from "./connectionCorePageService.js";
 import {
   batchLinkProcessInstanceTemplates,
   batchUpdateTaskStatus,
@@ -1775,12 +1775,17 @@ app.get("/api/data-center/products/:productId", requirePermission("dataCenter.vi
   }
 });
 
-app.get("/api/connections", requireLinkView, (_request, response) => {
+app.get("/api/connections", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, items: listConnectionProfiles() });
+    response.json({ success: true, items: listConnectionCoreProfiles(getUserPersonId(request.user), isAdminUser(request.user)) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "连接列表读取失败。" });
   }
+});
+
+app.get("/api/connections/:id/core-detail", requireLinkView, (request, response) => {
+  try { response.json({ success: true, ...getConnectionCoreDetail(request.params.id, getUserPersonId(request.user), isAdminUser(request.user)) }); }
+  catch (error) { response.status(error.message?.includes("只能查看") ? 403 : 404).json({ success: false, message: error.message || "链接经营详情读取失败。" }); }
 });
 
 app.get("/api/connections-workbench/mine", requireLinkView, (request, response) => {
@@ -2336,10 +2341,11 @@ app.get("/api/products/:id/sales-links", requirePermission("products.view"), (re
       SELECT
         x.*, l.shopId, l.platformGoodsId, l.platformGoodsCode, l.title, l.rawUrl, l.canonicalUrl,
         l.status AS linkStatus, l.activityStatus, l.category, l.identityStrength,
-        s.platform, s.shopName, s.displayName
+        s.platform, s.shopName, s.displayName, c.id AS connectionProfileId
       FROM sales_link_skus x
       JOIN sales_links l ON l.id=x.salesLinkId
       JOIN sales_shops s ON s.id=l.shopId
+      LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
       WHERE x.productId=?
         AND x.currentState='active'
         AND l.currentState='active'

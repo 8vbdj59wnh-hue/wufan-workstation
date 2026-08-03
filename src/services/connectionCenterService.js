@@ -31,6 +31,7 @@ export {
   loadConnectionImprovementSummary,
   loadConnectionPeriodSnapshots,
   loadConnections,
+  loadConnectionCoreDetail,
   loadMyConnectionWorkbench,
   updateConnectionFollow,
   removeConnectionAction,

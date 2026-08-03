@@ -168,6 +168,7 @@ function getModuleIdFromHash() {
   const hash = getRouteHash();
   if (hash.startsWith("templateCenter/")) return "templateCenter";
   if (hash.startsWith("products/")) return "products";
+  if (hash.startsWith("connectionCenter/")) return "connectionCenter";
   if (hash.startsWith("process-template-")) return "processes";
   if (hash.startsWith("methodology-")) return "processes";
   return moduleHashMap[hash] ?? modules[0].id;
