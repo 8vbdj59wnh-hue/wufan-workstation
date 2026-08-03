@@ -142,7 +142,7 @@ function renderDetail() {
 export function renderDataCenterPage() {
   const config = viewConfig[view];
   return `<section class="data-center-page">
-    <div class="section-heading"><div><h1>数据中心</h1><p>${escapeHtml(config.description)}</p></div></div>
+    <div class="section-heading"><div><h1>数据中心</h1><p>${escapeHtml(config.description)}</p></div><button type="button" class="secondary-button" data-action="open-operation-dashboard">经营驾驶舱</button></div>
     <div class="subtabs">${Object.entries(viewConfig).map(([key, item]) => `<button class="${view === key ? "is-active" : ""}" data-action="switch-data-center-view" data-view="${key}">${item.label}</button>`).join("")}</div>
     <form id="data-center-filter" class="data-center-filter"><input name="search" value="${escapeHtml(query.search)}" placeholder="搜索产品名称或编码" />
       ${view === "trends" ? `<select name="direction"><option value="focus" ${query.direction === "focus" ? "selected" : ""}>重点：上涨与下滑</option><option value="" ${query.direction === "" ? "selected" : ""}>全部趋势</option>${["up", "down", "stable", "volatile", "insufficient"].map((item) => `<option value="${item}" ${query.direction === item ? "selected" : ""}>${statusLabel(item)}</option>`).join("")}</select>` : ""}
@@ -186,4 +186,5 @@ export function bindDataCenterPageEvents(rerender) {
     rerender();
   });
   document.querySelectorAll("[data-action='close-data-center-detail']").forEach((button) => button.addEventListener("click", () => { detail = null; rerender(); }));
+  document.querySelector("[data-action='open-operation-dashboard']")?.addEventListener("click", () => { window.location.hash = "operationDashboard"; });
 }

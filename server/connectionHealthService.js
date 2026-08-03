@@ -35,6 +35,10 @@ function evaluate(analysis) {
     problems.push({ type: "sales", title: "销售衰退风险", value: percentage(analysis.salesGrowth) });
     suggestions.push({ title: "重新分析经营策略", reason: "销售下降超过30%", items: ["商品竞争力", "流量来源", "运营策略"] });
   }
+  if (analysis.profitGrowth !== null && analysis.profitGrowth < -0.2) {
+    problems.push({ type: "profit", title: "利润下降", value: percentage(analysis.profitGrowth) });
+    suggestions.push({ title: "复核连接利润结构", reason: "同期净利润下降超过20%", items: ["退款", "商品成本", "平台费用", "推广费用"] });
+  }
   const healthyGrowth = analysis.salesGrowth > 0.2 && analysis.conversionChange >= 0;
   if (healthyGrowth && suggestions.length === 0) suggestions.push({ title: "保持当前增长策略", reason: "销售增长且转化稳定", items: [] });
   const healthStatus = problems.some((problem) => problem.type === "sales") || analysis.healthScore < 40
@@ -69,7 +73,7 @@ export function createConnectionHealthRecord(connectionId, snapshotId) {
   return { item: listConnectionHealthRecords(connectionId).find((item) => item.id === id), created: true };
 }
 
-export function listAttentionConnectionHealthRecords() {
+export function listAttentionConnectionHealthRecords(userId = "", isAdmin = false) {
   const items = getDatabase().prepare(`
     SELECT r.*,c.name,c.salesLinkId,s.periodStart,s.periodEnd,sh.platform,sh.displayName AS shopDisplayName,sh.shopName
     FROM connection_health_records r
@@ -77,10 +81,11 @@ export function listAttentionConnectionHealthRecords() {
     JOIN connection_period_snapshots s ON s.id=r.snapshotId
     JOIN sales_links l ON l.id=c.salesLinkId JOIN sales_shops sh ON sh.id=l.shopId
     WHERE r.healthStatus IN ('attention','risk')
+      AND (?=1 OR c.ownerId=?)
       AND NOT EXISTS (SELECT 1 FROM connection_health_records newer WHERE newer.connectionId=r.connectionId AND newer.createdAt>r.createdAt)
     ORDER BY CASE r.healthStatus WHEN 'risk' THEN 0 ELSE 1 END,r.healthScore ASC,r.createdAt DESC
-  `).all().map(parseRecord);
-  const categories = { traffic: 0, conversion: 0, sales: 0 };
+  `).all(isAdmin ? 1 : 0, text(userId)).map(parseRecord);
+  const categories = { traffic: 0, conversion: 0, sales: 0, profit: 0 };
   for (const item of items) for (const problem of item.problems) if (Object.prototype.hasOwnProperty.call(categories, problem.type)) categories[problem.type] += 1;
   return { items, counts: { risk: items.filter((item) => item.healthStatus === "risk").length,
     attention: items.filter((item) => item.healthStatus === "attention").length, ...categories } };
@@ -121,6 +126,15 @@ export function createImprovementAction(healthRecordId, input, userId) {
       createdAt: now,
       updatedAt: now,
     });
+    const linkedProducts = database.prepare(`
+      SELECT DISTINCT s.productId FROM connection_profiles c
+      JOIN sales_link_skus s ON s.salesLinkId=c.salesLinkId
+      WHERE c.id=? AND s.productId IS NOT NULL AND COALESCE(s.currentState,'active')='active'
+    `).all(record.connectionId);
+    for (const product of linkedProducts) {
+      database.prepare(`INSERT OR IGNORE INTO action_products (id,actionId,productId,createdAt) VALUES (?,?,?,?)`)
+        .run(`action-product-${crypto.randomUUID()}`, instance.id, product.productId, now);
+    }
     const problemTitles = problems.map((problem) => problem.title).join("、") || "持续改善";
     const connectionAction = createConnectionAction(record.connectionId, { title: `系统发现问题：${problemTitles}`,
       description: `创建改善行动：${title}；关键行动ID：${instance.id}`, status: "pending" }, userId);

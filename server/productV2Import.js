@@ -1463,6 +1463,8 @@ function commitPlatform(batch, staging, shopMappings) {
         activityStatus: value(staging.records.find((item) => item.rowNumber === first.rowNumber)?.record["活动状态"]) || null,
         category: value(staging.records.find((item) => item.rowNumber === first.rowNumber)?.record["平台类目"]) || null,
         identityStrength: first.platformGoodsId ? "strong" : "weak",
+        originSource: link?.originSource && link.originSource !== "legacy_unknown" ? link.originSource : "erp_platform_goods",
+        enrichmentStatus: "complete",
         lastModifiedAt: value(staging.records.find((item) => item.rowNumber === first.rowNumber)?.record["最后修改时间"]) || null,
         lastSeenBatchId: batch.id, currentState: "active", missingAt: null,
         lastImportedAt: now, createdAt: link?.createdAt ?? now, updatedAt: now,
@@ -1470,13 +1472,15 @@ function commitPlatform(batch, staging, shopMappings) {
       database.prepare(`
         INSERT INTO sales_links (
           id,shopId,platformGoodsId,platformGoodsCode,title,canonicalUrl,rawUrl,status,activityStatus,category,
-          identityStrength,lastModifiedAt,lastSeenBatchId,currentState,missingAt,lastImportedAt,createdAt,updatedAt
+          identityStrength,originSource,enrichmentStatus,lastModifiedAt,lastSeenBatchId,currentState,missingAt,lastImportedAt,createdAt,updatedAt
         ) VALUES (
           @id,@shopId,@platformGoodsId,@platformGoodsCode,@title,@canonicalUrl,@rawUrl,@status,@activityStatus,@category,
-          @identityStrength,@lastModifiedAt,@lastSeenBatchId,@currentState,@missingAt,@lastImportedAt,@createdAt,@updatedAt
+          @identityStrength,@originSource,@enrichmentStatus,@lastModifiedAt,@lastSeenBatchId,@currentState,@missingAt,@lastImportedAt,@createdAt,@updatedAt
         )
         ON CONFLICT(id) DO UPDATE SET platformGoodsCode=excluded.platformGoodsCode,title=excluded.title,canonicalUrl=excluded.canonicalUrl,
           rawUrl=excluded.rawUrl,status=excluded.status,activityStatus=excluded.activityStatus,category=excluded.category,
+          originSource=CASE WHEN sales_links.originSource IS NULL OR sales_links.originSource='' OR sales_links.originSource='legacy_unknown'
+            THEN excluded.originSource ELSE sales_links.originSource END,enrichmentStatus='complete',
           lastModifiedAt=excluded.lastModifiedAt,lastSeenBatchId=excluded.lastSeenBatchId,currentState='active',
           missingAt=NULL,lastImportedAt=excluded.lastImportedAt,updatedAt=excluded.updatedAt
       `).run(linkValues);

@@ -22,6 +22,9 @@ export const permissionGroups = [
       { key: "settings", label: "可访问设置模块" },
       { key: "products", label: "可访问产品中心" },
       { key: "dataCenter", label: "可访问数据中心" },
+      { key: "finance", label: "可访问财务中心" },
+      { key: "customers", label: "可访问客户中心" },
+      { key: "aiAssistant", label: "可访问AI经营助手" },
     ],
   },
   {
@@ -61,6 +64,35 @@ export const permissionGroups = [
     title: "数据中心权限",
     permissions: [
       { key: "view", label: "查看数据中心" },
+    ],
+  },
+  {
+    key: "finance",
+    title: "财务中心权限",
+    permissions: [
+      { key: "view", label: "查看财务数据" },
+      { key: "manage", label: "导入和管理财务数据" },
+      { key: "approve", label: "审核财务数据" },
+    ],
+  },
+  {
+    key: "customers",
+    title: "客户中心权限",
+    permissions: [
+      { key: "view", label: "查看客户（隐私信息脱敏）" },
+      { key: "manage", label: "管理客户档案与消费记录" },
+      { key: "maintain", label: "维护客户标签与跟进" },
+      { key: "analyze", label: "查看客户价值分析" },
+    ],
+  },
+  {
+    key: "aiAssistant",
+    title: "AI经营助手权限",
+    permissions: [
+      { key: "view", label: "查看AI经营分析" },
+      { key: "analyze", label: "生成可追溯经营分析" },
+      { key: "confirm", label: "人工确认分析建议" },
+      { key: "createAction", label: "将已确认建议转为关键行动" },
     ],
   },
   {
@@ -356,6 +388,8 @@ export function canAccessTemplateCenter(userOrPermissions) {
   const role = userOrPermissions.role ?? userOrPermissions.authRole ?? "user";
   if (["admin", "system_admin", "company_manager"].includes(role)) return true;
   if (hasPermission(userOrPermissions, "settings.viewStandardWorks")) return true;
+  if (hasPermission(userOrPermissions, "processes.viewTemplates")) return true;
+  if (hasPermission(userOrPermissions, "methods.view")) return true;
 
   // 临时兼容：模板中心还没有独立权限项，先按视觉/营销/运营/渠道相关部门开放。
   const departmentId = String(userOrPermissions.departmentId ?? "").toLowerCase();
@@ -366,6 +400,9 @@ export function canAccessTemplateCenter(userOrPermissions) {
 }
 
 export function canAccessModule(userOrPermissions, moduleId) {
+  if (moduleId === "dashboard") {
+    return hasPermission(userOrPermissions, "dataCenter.view") || hasPermission(userOrPermissions, "assessment.view");
+  }
   if (moduleId === "templateCenter") return canAccessTemplateCenter(userOrPermissions);
   if (moduleId === "processes") {
     return hasPermission(userOrPermissions, "modules.processes") ||
@@ -381,18 +418,35 @@ export function canAccessModule(userOrPermissions, moduleId) {
     methods: "methods",
     settings: "settings",
     products: "products",
+    operationDashboard: "dataCenter",
     dataCenter: "dataCenter",
+    financeCenter: "finance",
     connectionCenter: "products",
+    supplyChainCenter: "products",
+    customerCenter: "customers",
+    aiOperationAssistant: "aiAssistant",
   };
   const permissionKey = modulePermissionMap[moduleId] ?? moduleId;
   if (moduleId === "products") {
     return hasPermission(userOrPermissions, "products.view");
   }
-  if (moduleId === "dataCenter") {
+  if (moduleId === "dataCenter" || moduleId === "operationDashboard") {
     return hasPermission(userOrPermissions, "dataCenter.view");
   }
+  if (moduleId === "financeCenter") {
+    return hasPermission(userOrPermissions, "finance.view");
+  }
   if (moduleId === "connectionCenter") {
-    return hasPermission(userOrPermissions, "products.view");
+    return hasPermission(userOrPermissions, "links.view") || hasPermission(userOrPermissions, "products.view");
+  }
+  if (moduleId === "supplyChainCenter") {
+    return hasPermission(userOrPermissions, "supplyChain.view") || hasPermission(userOrPermissions, "products.view");
+  }
+  if (moduleId === "customerCenter") {
+    return hasPermission(userOrPermissions, "customers.view");
+  }
+  if (moduleId === "aiOperationAssistant") {
+    return hasPermission(userOrPermissions, "aiAssistant.view");
   }
   return hasPermission(userOrPermissions, `modules.${permissionKey}`);
 }

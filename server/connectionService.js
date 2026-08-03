@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
 import { getDatabase } from "./db.js";
+import { listConnectionGrowthAnalyses } from "./connectionGrowthService.js";
+import { readConnectionV3MetricsMap } from "./connectionV3MetricsService.js";
 
 const profileStatuses = new Set(["active", "paused", "archived"]);
 const profileLevels = new Set(["new", "growing", "mature", "priority"]);
@@ -7,6 +9,7 @@ const actionStatuses = new Set(["pending", "in_progress", "completed", "canceled
 const mappingSourceTypes = new Set(["business_advisor", "wangdian", "taobao", "xiaohongshu", "douyin"]);
 const mappingStatuses = new Set(["matched", "pending", "ignored", "rejected"]);
 const mappingMethods = new Set(["goods_id", "sku", "manual"]);
+const businessAdvisorSource = "business_advisor";
 
 function value(raw) {
   return String(raw ?? "").trim();
@@ -46,13 +49,16 @@ function enrichConnectionRows(rows) {
 
 const connectionSelect = `
   SELECT c.id, c.salesLinkId, c.name, c.mainImage, c.imageSource, c.ownerId, c.status, c.level, c.notes,
-         c.createdBy, c.createdAt, c.updatedAt,
+         c.originSource, c.originImportBatchId, c.identifiedAt, c.createdBy, c.createdAt, c.updatedAt,
+         (SELECT name FROM persons WHERE id=c.ownerId) AS ownerName,
          l.title AS salesLinkTitle, l.canonicalUrl, l.rawUrl, l.platformGoodsId, l.platformGoodsCode, l.currentState AS salesLinkState,
          s.id AS shopId, s.platform, s.displayName AS shopDisplayName, s.shopName,
          (SELECT periodEnd FROM connection_period_snapshots ps WHERE ps.salesLinkId=c.salesLinkId
           ORDER BY periodEnd DESC,periodStart DESC,createdAt DESC LIMIT 1) AS latestPeriodEnd,
          (SELECT payAmount FROM connection_period_snapshots ps WHERE ps.salesLinkId=c.salesLinkId
           ORDER BY periodEnd DESC,periodStart DESC,createdAt DESC LIMIT 1) AS latestPayAmount
+         ,(SELECT COUNT(*) FROM connection_benchmark_targets b WHERE b.connectionId=c.id) AS benchmarkCount
+         ,(SELECT b.title FROM connection_benchmark_targets b WHERE b.connectionId=c.id ORDER BY b.createdAt,b.id LIMIT 1) AS firstBenchmarkName
   FROM connection_profiles c
   JOIN sales_links l ON l.id=c.salesLinkId
   JOIN sales_shops s ON s.id=l.shopId
@@ -63,10 +69,102 @@ export function listConnectionProfiles() {
   return enrichConnectionRows(rows);
 }
 
+function changeDirection(analysis) {
+  const changes = [analysis.salesGrowth, analysis.visitorGrowth, analysis.conversionChange, analysis.profitGrowth]
+    .filter((item) => item !== null && item !== undefined).map(Number);
+  const severeDecline = Number(analysis.salesGrowth) <= -0.2 || Number(analysis.visitorGrowth) <= -0.2
+    || Number(analysis.conversionChange) <= -0.01 || Number(analysis.profitGrowth) <= -0.2;
+  const decliningCount = changes.filter((item) => item < 0).length;
+  const growingCount = changes.filter((item) => item > 0).length;
+  if (severeDecline || ["attention", "risk"].includes(analysis.healthStatus) || decliningCount >= 2) return "worse";
+  if (growingCount > decliningCount) return "better";
+  return "stable";
+}
+
+export function getMyConnectionWorkbench(userId, isAdmin = false, filter = "all") {
+  const personId = value(userId);
+  if (!personId) throw new Error("无法识别当前登录人员。");
+  if (!["all", "better", "worse", "followed"].includes(filter)) throw new Error("我的链接筛选无效。");
+  const profiles = listConnectionProfiles().filter((item) => isAdmin || item.ownerId === personId);
+  const analyses = new Map(listConnectionGrowthAnalyses().map((item) => [item.connectionId, item]));
+  const v3Metrics = readConnectionV3MetricsMap(profiles.map((item) => item.salesLinkId));
+  const followedIds = new Set(getDatabase().prepare("SELECT connectionId FROM connection_follows WHERE userId=?").all(personId).map((item) => item.connectionId));
+  const allItems = profiles.map((profile) => {
+    const analysis = analyses.get(profile.id) ?? {};
+    const v3 = v3Metrics.get(profile.salesLinkId);
+    const combined = { ...analysis,
+      salesGrowth: v3.salesGrowth ?? analysis.salesGrowth,
+      profitGrowth: v3.profitGrowth ?? analysis.profitGrowth };
+    const trend = changeDirection(combined);
+    const followed = followedIds.has(profile.id);
+    const riskPriority = trend === "worse"
+      ? (Number(combined.salesGrowth) <= -0.2 || Number(analysis.visitorGrowth) <= -0.2 || Number(combined.profitGrowth) <= -0.2 ? 0 : 1)
+      : followed ? 2 : 3;
+    return { ...profile, followed, trend, riskPriority, erpSales: v3.current,
+      currentPayAmount: v3.current.salesAmount ?? analysis.currentPeriod?.payAmount ?? null,
+      salesGrowth: combined.salesGrowth ?? null, visitorGrowth: analysis.visitorGrowth ?? null,
+      conversionChange: analysis.conversionChange ?? null, profitGrowth: combined.profitGrowth ?? null,
+      healthScore: analysis.healthScore ?? null, healthStatus: analysis.healthStatus ?? "no_data" };
+  });
+  const items = allItems.filter((item) => filter === "all" || (filter === "followed" ? item.followed : item.trend === filter))
+    .sort((left, right) => left.riskPriority - right.riskPriority
+      || Number(left.healthScore ?? 101) - Number(right.healthScore ?? 101)
+      || Number(left.salesGrowth ?? 0) - Number(right.salesGrowth ?? 0));
+  return { items, isAdmin: Boolean(isAdmin), summary: {
+    total: profiles.length,
+    better: allItems.reduce((count, item) => count + (item.trend === "better" ? 1 : 0), 0),
+    risk: allItems.reduce((count, item) => count + (item.trend === "worse" ? 1 : 0), 0),
+    followed: profiles.filter((item) => followedIds.has(item.id)).length,
+  } };
+}
+
+export function setConnectionFollow(connectionId, userId, followed, isAdmin = false) {
+  const id = value(connectionId); const personId = value(userId); const database = getDatabase();
+  const profile = database.prepare("SELECT ownerId FROM connection_profiles WHERE id=?").get(id);
+  if (!profile) throw new Error("未找到连接档案。");
+  if (!isAdmin && profile.ownerId !== personId) throw new Error("只能关注自己负责的链接。");
+  if (!database.prepare("SELECT 1 FROM persons WHERE id=? AND status='active'").get(personId)) throw new Error("无法识别当前登录人员。");
+  if (followed) database.prepare(`INSERT INTO connection_follows (id,userId,connectionId,createdAt) VALUES (?,?,?,?)
+    ON CONFLICT(userId,connectionId) DO NOTHING`).run(`connection-follow-${crypto.randomUUID()}`, personId, id, new Date().toISOString());
+  else database.prepare("DELETE FROM connection_follows WHERE userId=? AND connectionId=?").run(personId, id);
+  return { connectionId: id, followed: Boolean(followed) };
+}
+
+export function listConnectionImportShops() {
+  return getDatabase().prepare(`
+    SELECT id,platform,shopName,displayName,status
+    FROM sales_shops
+    WHERE status='active'
+    ORDER BY platform,COALESCE(displayName,shopName),id
+  `).all();
+}
+
 export function readConnectionProfile(id) {
   const row = getDatabase().prepare(`${connectionSelect} WHERE c.id=?`).get(value(id));
   if (!row) throw new Error("未找到连接档案。");
   return enrichConnectionRows([row])[0];
+}
+
+export function assertConnectionVisible(id, userId = "", isAdmin = false) {
+  const profile = readConnectionProfile(id);
+  if (!isAdmin && (!value(userId) || profile.ownerId !== value(userId))) {
+    const error = new Error("只能访问自己负责的链接。");
+    error.statusCode = 403;
+    throw error;
+  }
+  return profile;
+}
+
+export function readHealthRecordConnectionId(id) {
+  const row = getDatabase().prepare("SELECT connectionId FROM connection_health_records WHERE id=?").get(value(id));
+  if (!row) throw new Error("体检记录不存在。");
+  return row.connectionId;
+}
+
+export function readImprovementConnectionId(id) {
+  const row = getDatabase().prepare("SELECT connectionId FROM connection_improvements WHERE id=?").get(value(id));
+  if (!row) throw new Error("改善项目不存在。");
+  return row.connectionId;
 }
 
 export function listAvailableSalesLinks(filters = {}) {
@@ -142,94 +240,79 @@ function connectionImageForSalesLink(database, salesLinkId) {
 }
 
 export function createConnectionProfile(input, userId) {
-  const salesLinkId = value(input?.salesLinkId);
-  const ownerId = value(input?.ownerId) || null;
-  const status = value(input?.status) || "active";
-  if (!salesLinkId) throw new Error("请选择销售连接。");
-  if (!profileStatuses.has(status)) throw new Error("连接状态无效。");
-  const database = getDatabase();
-  const create = database.transaction(() => {
-    const link = database.prepare(`
-      SELECT l.id, l.title, l.platformGoodsId, l.platformGoodsCode, l.currentState, s.displayName, s.shopName
-      FROM sales_links l JOIN sales_shops s ON s.id=l.shopId WHERE l.id=?
-    `).get(salesLinkId);
-    if (!link) throw new Error("所选销售连接不存在。");
-    if (String(link.currentState ?? "active") !== "active") throw new Error("失效销售连接不能建立连接档案。");
-    if (database.prepare("SELECT 1 FROM connection_profiles WHERE salesLinkId=?").get(salesLinkId)) throw new Error("该销售连接已建立档案。");
-    if (ownerId && !database.prepare("SELECT 1 FROM persons WHERE id=? AND status='active'").get(ownerId)) throw new Error("负责人不存在或已停用。");
-    const now = new Date().toISOString();
-    const id = `connection-${crypto.randomUUID()}`;
-    const name = value(input?.name) || value(link.title) || value(link.platformGoodsCode) || value(link.displayName) || value(link.shopName) || "未命名连接";
-    const image = connectionImageForSalesLink(database, salesLinkId);
-    database.prepare(`
-      INSERT INTO connection_profiles (id,salesLinkId,name,mainImage,imageSource,ownerId,status,level,notes,createdBy,createdAt,updatedAt)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-    `).run(id, salesLinkId, name, image.mainImage, image.imageSource, ownerId, status, "new", value(input?.notes), value(userId) || null, now, now);
-    database.prepare(`
-      UPDATE connection_data_mappings
-      SET connectionId=?,
-          matchStatus=CASE WHEN sourceType='business_advisor' AND externalId=? THEN 'matched' ELSE matchStatus END,
-          matchMethod=CASE WHEN sourceType='business_advisor' AND externalId=? THEN 'goods_id' ELSE matchMethod END,
-          confirmedBy=CASE WHEN sourceType='business_advisor' AND externalId=? THEN COALESCE(confirmedBy,?) ELSE confirmedBy END,
-          confirmedAt=CASE WHEN sourceType='business_advisor' AND externalId=? THEN COALESCE(confirmedAt,?) ELSE confirmedAt END,
-          updatedAt=?
-      WHERE salesLinkId=? AND connectionId IS NULL AND deletedAt IS NULL
-    `).run(id, value(link.platformGoodsId), value(link.platformGoodsId), value(link.platformGoodsId), value(userId) || null,
-      value(link.platformGoodsId), now, now, salesLinkId);
-    return id;
-  });
-  return readConnectionProfile(create());
+  void input;
+  void userId;
+  throw new Error("新连接档案只能通过生意参谋经营数据导入创建。");
 }
 
 export function createConnectionProfilesBatch(input, userId) {
-  const salesLinkIds = [...new Set((Array.isArray(input?.salesLinkIds) ? input.salesLinkIds : []).map(value).filter(Boolean))];
-  const ownerId = value(input?.ownerId) || null;
-  if (!salesLinkIds.length) throw new Error("请选择需要建立档案的销售连接。");
-  if (salesLinkIds.length > 200) throw new Error("单次最多建立200个连接档案。");
+  void input;
+  void userId;
+  throw new Error("已停用从ERP销售链接批量建立连接档案，请通过生意参谋经营数据导入识别连接。");
+}
+
+export function ensureBusinessAdvisorConnection(input, userId) {
+  const importBatchId = value(input?.importBatchId);
+  const shopId = value(input?.shopId);
+  const platformGoodsId = value(input?.platformGoodsId);
+  const title = value(input?.title) || `经营链接 ${platformGoodsId}`;
+  if (!importBatchId || !shopId || !platformGoodsId) throw new Error("生意参谋建档缺少来源批次、店铺或商品ID。");
   const database = getDatabase();
-  if (ownerId && !database.prepare("SELECT 1 FROM persons WHERE id=? AND status='active'").get(ownerId)) throw new Error("负责人不存在或已停用。");
-  const placeholdersText = placeholders(salesLinkIds);
-  const links = database.prepare(`
-    SELECT l.id,l.title,l.platformGoodsId,l.platformGoodsCode,l.currentState,s.displayName,s.shopName
-    FROM sales_links l JOIN sales_shops s ON s.id=l.shopId
-    WHERE l.id IN (${placeholdersText})
-  `).all(...salesLinkIds);
-  const linksById = new Map(links.map((link) => [link.id, link]));
-  for (const salesLinkId of salesLinkIds) {
-    const link = linksById.get(salesLinkId);
-    if (!link) throw new Error(`销售连接不存在：${salesLinkId}`);
-    if (String(link.currentState ?? "active") !== "active") throw new Error(`失效销售连接不能建立档案：${link.platformGoodsId || salesLinkId}`);
-    if (database.prepare("SELECT 1 FROM connection_profiles WHERE salesLinkId=?").get(salesLinkId)) throw new Error(`销售连接已建立档案：${link.platformGoodsId || salesLinkId}`);
-  }
-  const create = database.transaction(() => {
+  const ensure = database.transaction(() => {
+    const batch = database.prepare("SELECT id,sourceType,status FROM connection_import_batches WHERE id=?").get(importBatchId);
+    if (!batch || batch.sourceType !== businessAdvisorSource) throw new Error("连接档案来源批次不是生意参谋导入。");
+    if (!["validated", "completed"].includes(batch.status)) throw new Error("生意参谋导入批次尚未通过校验。");
+    const shop = database.prepare("SELECT id,platform,shopName,displayName,status FROM sales_shops WHERE id=?").get(shopId);
+    if (!shop || shop.status !== "active") throw new Error("请选择有效的平台店铺。");
+    let link = database.prepare("SELECT * FROM sales_links WHERE shopId=? AND platformGoodsId=?").get(shopId, platformGoodsId);
+    let salesLinkCreated = false;
     const now = new Date().toISOString();
-    const ids = [];
-    for (const salesLinkId of salesLinkIds) {
-      const link = linksById.get(salesLinkId);
-      const id = `connection-${crypto.randomUUID()}`;
-      const name = value(link.title) || value(link.platformGoodsCode) || value(link.displayName) || value(link.shopName) || "未命名连接";
-      const image = connectionImageForSalesLink(database, salesLinkId);
+    if (!link) {
+      const id = `sales-link-${crypto.randomUUID()}`;
       database.prepare(`
-        INSERT INTO connection_profiles (id,salesLinkId,name,mainImage,imageSource,ownerId,status,level,notes,createdBy,createdAt,updatedAt)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-      `).run(id, salesLinkId, name, image.mainImage, image.imageSource, ownerId, "active", "new", "", value(userId) || null, now, now);
-      database.prepare(`
-        UPDATE connection_data_mappings
-        SET connectionId=?,
-            matchStatus=CASE WHEN sourceType='business_advisor' AND externalId=? THEN 'matched' ELSE matchStatus END,
-            matchMethod=CASE WHEN sourceType='business_advisor' AND externalId=? THEN 'goods_id' ELSE matchMethod END,
-            confirmedBy=CASE WHEN sourceType='business_advisor' AND externalId=? THEN COALESCE(confirmedBy,?) ELSE confirmedBy END,
-            confirmedAt=CASE WHEN sourceType='business_advisor' AND externalId=? THEN COALESCE(confirmedAt,?) ELSE confirmedAt END,
-            updatedAt=?
-        WHERE salesLinkId=? AND connectionId IS NULL AND deletedAt IS NULL
-      `).run(id, value(link.platformGoodsId), value(link.platformGoodsId), value(link.platformGoodsId), value(userId) || null,
-        value(link.platformGoodsId), now, now, salesLinkId);
-      ids.push(id);
+        INSERT INTO sales_links (
+          id,shopId,platformGoodsId,platformGoodsCode,title,canonicalUrl,rawUrl,status,activityStatus,category,
+          identityStrength,originSource,enrichmentStatus,lastModifiedAt,lastSeenBatchId,currentState,missingAt,
+          lastImportedAt,createdAt,updatedAt
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `).run(id, shopId, platformGoodsId, null, title, null, null, "待ERP补充", null, null,
+        "strong", businessAdvisorSource, "pending_erp", null, null, "active", null, now, now, now);
+      link = database.prepare("SELECT * FROM sales_links WHERE id=?").get(id);
+      salesLinkCreated = true;
     }
-    return ids;
+    let profile = database.prepare("SELECT * FROM connection_profiles WHERE salesLinkId=?").get(link.id);
+    let profileCreated = false;
+    if (!profile) {
+      const id = `connection-${crypto.randomUUID()}`;
+      const image = connectionImageForSalesLink(database, link.id);
+      database.prepare(`
+        INSERT INTO connection_profiles (
+          id,salesLinkId,name,mainImage,imageSource,ownerId,status,level,notes,originSource,
+          originImportBatchId,identifiedAt,createdBy,createdAt,updatedAt
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `).run(id, link.id, title, image.mainImage, image.imageSource, null, "active", "new", "",
+        businessAdvisorSource, importBatchId, now, value(userId) || null, now, now);
+      profile = database.prepare("SELECT * FROM connection_profiles WHERE id=?").get(id);
+      profileCreated = true;
+    }
+    return { connectionId: profile.id, salesLinkId: link.id, profileCreated, salesLinkCreated };
   });
-  const ids = create();
-  return { items: ids.map(readConnectionProfile), created: ids.length };
+  return ensure();
+}
+
+export function listConnectionMappingRepairCandidates() {
+  return getDatabase().prepare(`
+    SELECT m.id AS mappingId,m.externalId,m.externalShopId,m.salesLinkId,m.createdAt,
+           l.shopId,s.platform,s.displayName AS shopDisplayName,s.shopName,
+           c.id AS candidateConnectionId
+    FROM connection_data_mappings m
+    JOIN sales_links l ON l.id=m.salesLinkId
+    JOIN sales_shops s ON s.id=l.shopId
+    LEFT JOIN connection_profiles c ON c.salesLinkId=m.salesLinkId
+    WHERE m.sourceType='business_advisor' AND m.matchStatus='matched'
+      AND m.connectionId IS NULL AND m.deletedAt IS NULL
+    ORDER BY m.createdAt,m.id
+  `).all();
 }
 
 export function updateConnectionProfile(id, input) {

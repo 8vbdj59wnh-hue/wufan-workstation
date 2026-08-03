@@ -42,7 +42,7 @@ import {
 import { isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
 import { getProcessInstanceBusinessStatus as selectProcessInstanceBusinessStatus } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
 import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260803-action-product-manual-link1";
-import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260705-state-singleton1";
+import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260802-template-center-v22";
 import { bindActionProductSelectors, collectActionProductIds, renderActionProductSelector } from "./actionProductRelations.js?v=20260803-action-product-manual-link1";
 import { bindStandardWorkLibraryEvents, openTaskTemplateLaunchModal, renderStandardWorkLibraryPage } from "./actionStandardsPage.js?v=20260803-action-product-manual-link1";
 import { selectTask } from "./tasksPage.js?v=20260724-action-template-link1";

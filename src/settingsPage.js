@@ -2151,7 +2151,7 @@ function renderFormDesignPropertyPanel(field) {
   `;
 }
 
-function renderFormDesignSection() {
+export function renderFormDesignSection() {
   return `
     <section class="settings-section" id="form-design">
       <div class="section-heading">

@@ -22,6 +22,7 @@ import {
 import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
 import { bindActionProductSelectors, collectActionProductIds, getActionProductIds, renderActionProductSelector, renderLinkedActionProducts } from "./actionProductRelations.js?v=20260803-action-product-manual-link1";
 import { hasPermission } from "./permissions.js?v=20260725-product-center1";
+import { getActionDeadlinePresentation } from "./data/actionDeadline.js?v=20260802-action-countdown1";
 import {
   collectBusinessDateTime,
   collectBusinessMinuteDateTime,
@@ -391,12 +392,12 @@ function getInstanceReturnRecords(instanceId) {
   return [...uniqueRecords.values()].sort((left, right) => String(right.returnedAt ?? "").localeCompare(String(left.returnedAt ?? "")));
 }
 
-function renderReturnRecords(instanceId) {
+function renderReturnRecords(instanceId, { embedded = false } = {}) {
   const records = getInstanceReturnRecords(instanceId);
   if (records.length === 0) return "";
 
   return `
-    <div class="detail-block">
+    <div class="${embedded ? "process-record-section" : "detail-block"}">
       <h3>退回记录</h3>
       <div class="return-record-list">
         ${records
@@ -448,12 +449,15 @@ function renderStandardWorkAttachments(instance) {
   `;
 }
 
-function renderEditableStandardWorkAttachments(instance, editable) {
+function renderEditableStandardWorkAttachments(instance, editable, { embedded = false } = {}) {
   const attachments = getStandardWorkAttachments(instance);
-  if (!editable) return renderStandardWorkAttachments(instance);
+  if (!editable) {
+    if (!embedded) return renderStandardWorkAttachments(instance);
+    return `<div class="process-record-section"><h3>附件</h3>${attachments.length === 0 ? `<p>暂无附件</p>` : `<ul class="attachment-list">${attachments.map((attachment) => { const href = resolveAssetUrl(attachment.filePath ?? attachment.url ?? ""); const name = attachment.originalName ?? attachment.filename ?? attachment.filePath ?? "未命名附件"; return `<li><a href="${escapeHtml(href)}" target="_blank" rel="noreferrer" download>${escapeHtml(name)}</a>${attachment.ext ? `<span>${escapeHtml(attachment.ext)}</span>` : ""}</li>`; }).join("")}</ul>`}</div>`;
+  }
 
   return `
-    <div class="detail-block standard-work-attachments-field">
+    <div class="${embedded ? "process-record-section" : "detail-block"} standard-work-attachments-field">
       <h3>附件</h3>
       <p class="form-note">支持 .xlsx、.xls、.csv，单个文件不超过 20MB。新增附件会追加到已有附件；删除只移除关联，不删除 uploads 里的实际文件。</p>
       <div data-existing-standard-work-attachments>
@@ -539,40 +543,115 @@ function renderTaskExecutorCell(instance, task, displayedExecutorId) {
   `;
 }
 
-function renderStepTask(instance, task, editable, stepIndex) {
-  const canEdit = editable && canEditTask(task);
-  const stepLabel = formatProcessStepLabel(stepIndex + 1);
-  const taskDueDateFieldName = `task__${task.id}__dueDate`;
-  const processNode = getNode(task.processNodeId);
-  const displayedOwnerId = processNode === null ? task.ownerId : processNode.ownerId;
-  const displayedExecutorId = task.executorId || processNode?.executorId || "";
+function groupStepTasks(tasks) {
+  const groups = [];
+  const byKey = new Map();
+  tasks.forEach((task) => {
+    const node = getNode(task.processNodeId);
+    const key = task.processNodeId || `task-${task.id}`;
+    if (!byKey.has(key)) {
+      const group = { key, node, stepIndex: groups.length, tasks: [] };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    byKey.get(key).tasks.push(task);
+  });
+  return groups;
+}
 
-  if (!canEdit) {
-    return `
-      <tr>
-        <td><strong>${stepLabel}</strong><br />${escapeHtml(task.name)}</td>
-        <td><span class="status-pill">${escapeHtml(getTaskBusinessStatus(task).label)}</span></td>
-        <td>${findName(people, displayedOwnerId, "未设置")}</td>
-        <td>${renderTaskExecutorCell(instance, task, displayedExecutorId)}</td>
-        <td>${formatBusinessMinuteDateTime(task.dueDate)}</td>
-        <td><button class="text-button" type="button" data-launched-process-task-id="${task.id}">查看任务</button></td>
-      </tr>
-    `;
-  }
+function getStepGroupStatus(tasks) {
+  if (tasks.length === 0) return "未安排";
+  if (tasks.every((task) => task.status === TaskStatus.Done)) return "已完成";
+  const activeTask = tasks.find((task) => task.status === TaskStatus.Doing)
+    ?? tasks.find((task) => task.status === TaskStatus.Todo)
+    ?? tasks.find((task) => task.status === TaskStatus.Waiting)
+    ?? tasks.find((task) => task.status !== TaskStatus.Canceled)
+    ?? tasks[0];
+  return getTaskBusinessStatus(activeTask).label;
+}
+
+function renderStepTaskCard(instance, group, editable) {
+  const tasks = group.tasks;
+  const completed = tasks.filter((task) => task.status === TaskStatus.Done).length;
+  const percent = tasks.length === 0 ? 0 : Math.round((completed / tasks.length) * 100);
+  const currentTask = tasks.find((task) => task.status === TaskStatus.Doing)
+    ?? tasks.find((task) => task.status === TaskStatus.Todo)
+    ?? tasks.find((task) => task.status === TaskStatus.Waiting)
+    ?? tasks[0];
+  const processNode = group.node;
+  const ownerId = processNode?.ownerId || currentTask?.ownerId || "";
+  const executorId = currentTask?.executorId || processNode?.executorId || "";
+  const startAt = currentTask?.startedAt || currentTask?.readyAt || currentTask?.startDate || currentTask?.createdAt || "";
+  const dueAt = currentTask?.dueDate || "";
+  const stepName = processNode?.name || currentTask?.name || "未命名步骤";
 
   return `
-    <tr>
-      <td><strong>${stepLabel}</strong><br />${escapeHtml(task.name)}</td>
-      <td><span class="status-pill">${escapeHtml(getTaskBusinessStatus(task).label)}</span></td>
-      <td><select name="task__${task.id}__ownerId">${renderOptions(people, task.ownerId, "请选择负责人")}</select></td>
-      <td>${renderTaskExecutorCell(instance, task, displayedExecutorId)}</td>
-      <td>
-        <input name="${taskDueDateFieldName}Date" type="date" value="${escapeHtml(getBusinessDatePart(task.dueDate))}" data-task-due-date-control="${task.id}" />
-        <select name="${taskDueDateFieldName}Time" data-task-due-date-control="${task.id}">${renderBusinessMinuteOptions(getBusinessMinutePart(task.dueDate), "时间")}</select>
-        <input name="${taskDueDateFieldName}Changed" type="hidden" value="false" />
-      </td>
-      <td><button class="text-button" type="button" data-launched-process-task-id="${task.id}">查看任务</button></td>
-    </tr>
+    <article class="process-step-card">
+      <header class="process-step-card-header">
+        <div class="process-step-number">${escapeHtml(formatProcessStepLabel(group.stepIndex + 1))}</div>
+        <div class="process-step-title"><h4>${escapeHtml(stepName)}</h4><p>${tasks.length} 项任务 · ${completed} 项完成</p></div>
+        <span class="status-pill">${escapeHtml(getStepGroupStatus(tasks))}</span>
+      </header>
+      <div class="process-step-progress" aria-label="步骤完成进度 ${percent}%"><span style="width:${percent}%"></span></div>
+      <div class="process-step-summary">
+        <div><span>当前负责人</span>${renderPersonIdentity(ownerId)}</div>
+        <div><span>当前执行人</span>${renderPersonIdentity(executorId)}</div>
+        <div><span>开始时间</span><strong>${escapeHtml(formatBusinessMinuteDateTime(startAt))}</strong></div>
+        <div><span>截止时间</span><strong>${escapeHtml(formatBusinessMinuteDateTime(dueAt))}</strong></div>
+        <div><span>完成进度</span><strong>${completed}/${tasks.length}</strong></div>
+      </div>
+      <div class="process-step-task-list">
+        ${group.tasks.map((task) => {
+          const canEdit = editable && canEditTask(task);
+          const taskDueDateFieldName = `task__${task.id}__dueDate`;
+          const taskNode = getNode(task.processNodeId);
+          const displayedExecutorId = task.executorId || taskNode?.executorId || "";
+          return `<div class="process-step-task-row">
+            <button class="process-step-task-link" type="button" data-launched-process-task-id="${escapeHtml(task.id)}"><span>${escapeHtml(task.name)}</span><small>查看任务 →</small></button>
+            <span class="status-pill">${escapeHtml(getTaskBusinessStatus(task).label)}</span>
+            <div>${renderTaskExecutorCell(instance, task, displayedExecutorId)}</div>
+            ${canEdit ? `<label class="process-step-owner-edit"><span>负责人</span><select name="task__${task.id}__ownerId">${renderOptions(people, task.ownerId, "请选择负责人")}</select></label>` : `<span class="process-step-owner-readonly">负责人：${escapeHtml(findName(people, taskNode?.ownerId || task.ownerId, "未设置"))}</span>`}
+            ${canEdit ? `<div class="process-step-due-edit"><input name="${taskDueDateFieldName}Date" type="date" value="${escapeHtml(getBusinessDatePart(task.dueDate))}" data-task-due-date-control="${task.id}" /><select name="${taskDueDateFieldName}Time" data-task-due-date-control="${task.id}">${renderBusinessMinuteOptions(getBusinessMinutePart(task.dueDate), "时间")}</select><input name="${taskDueDateFieldName}Changed" type="hidden" value="false" /></div>` : `<span>${escapeHtml(formatBusinessMinuteDateTime(task.dueDate))}</span>`}
+          </div>`;
+        }).join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderStandardStepTasks(instance, tasks, editable) {
+  const groups = groupStepTasks(tasks);
+  const progress = selectProcessProgress(instance.id, state);
+  return `
+    <section class="detail-block process-step-priority-block">
+      <div class="section-heading with-actions compact-heading">
+        <div><h3>标准步骤任务</h3><p class="form-note">先看当前执行步骤、责任人和任务进度，再处理关键行动信息。</p></div>
+        <strong class="process-overall-progress">总进度 ${progress.completed}/${progress.total}</strong>
+      </div>
+      ${groups.length === 0 ? `<div class="empty-detail">当前关键行动尚未生成标准步骤任务</div>` : `<div class="process-step-card-list">${groups.map((group) => renderStepTaskCard(instance, group, editable)).join("")}</div>`}
+    </section>
+  `;
+}
+
+function renderProcessRecords(instance, editable) {
+  return `
+    <section class="detail-block process-records-block">
+      <h3>过程记录</h3>
+      <div class="process-record-columns">
+        <div><h4>操作与问题记录</h4>${renderReturnRecords(instance.id, { embedded: true }) || `<p class="form-note">暂无退回或问题记录</p>`}</div>
+        <div><h4>沟通与附件记录</h4>${renderEditableStandardWorkAttachments(instance, editable, { embedded: true })}</div>
+      </div>
+    </section>
+  `;
+}
+
+function renderResultReview(tasks) {
+  const completedTasks = tasks.filter((task) => task.status === TaskStatus.Done || task.completedAt || task.resultText);
+  return `
+    <section class="detail-block process-result-review-block">
+      <h3>结果与复盘</h3>
+      ${completedTasks.length === 0 ? `<p class="form-note">暂无已提交的工作结果或验收结果</p>` : `<div class="process-result-list">${completedTasks.map((task) => `<article><div><strong>${escapeHtml(task.name)}</strong><span class="status-pill">${escapeHtml(getTaskBusinessStatus(task).label)}</span></div><p>${escapeHtml(task.resultText || task.reviewComment || "已完成，暂无文字结果")}</p><small>完成时间：${escapeHtml(formatBusinessMinuteDateTime(task.completedAt))} · 验收：${escapeHtml(task.reviewStatus || (task.needAcceptance ? "待验收" : "无需验收"))}</small><button class="text-button" type="button" data-launched-process-task-id="${escapeHtml(task.id)}">查看任务详情</button></article>`).join("")}</div>`}
+    </section>
   `;
 }
 
@@ -665,6 +744,8 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
   const tasks = getInstanceTasks(instance.id);
   const actionOwner = getProcessInstanceOwner(instance.id, state);
   const actionOwnerName = findName(people, actionOwner.userId, "未设置");
+  const businessStatus = selectProcessInstanceBusinessStatus(instance.id, state);
+  const deadline = getActionDeadlinePresentation(instance);
 
   return `
     <section class="settings-section process-detail launched-process-detail" data-launched-process-detail="${instance.id}">
@@ -672,10 +753,17 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
         <h2>已发起关键行动详情：${escapeHtml(instance.displayTitle ?? instance.name)}</h2>
         ${editable ? `<button class="primary-button" type="submit" form="launched-process-form-${instance.id}">保存修改</button>` : `<span class="muted-action">只读</span>`}
       </div>
+      <div class="key-action-detail-summary">
+        <div><span>当前状态</span><strong>${escapeHtml(businessStatus.label)}</strong></div>
+        <div><span>行动负责人</span><strong>${escapeHtml(actionOwnerName)}</strong></div>
+        <div><span>截止时间</span><strong>${escapeHtml(formatBusinessDateTime(instance.dueDate, "未设置"))}</strong></div>
+        <div class="key-action-detail-countdown ${deadline.overdue ? "is-overdue" : ""}"><span>时间状态</span><strong data-action-deadline-id="${escapeHtml(instance.id)}">${escapeHtml(deadline.label)}</strong></div>
+      </div>
       <form id="launched-process-form-${instance.id}" class="launched-process-form">
         <div class="form-error" hidden></div>
-        <div class="detail-block">
-          <h3>基本信息</h3>
+        ${renderStandardStepTasks(instance, tasks, editable)}
+        <div class="detail-block key-action-information-block">
+          <h3>关键行动信息</h3>
           <div class="form-grid">
             <label>
               <span>本次标准名称</span>
@@ -698,11 +786,13 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
             ${renderDetailField("关键行动编号", escapeHtml(instance.businessCode ?? "未编号"))}
             ${renderDetailField("关键行动", escapeHtml(taskTemplate?.name ?? "未关联关键行动"))}
             ${renderDetailField("关键行动标准流程", `${escapeHtml(template?.name ?? "未设置")} v${instance.templateVersion}`)}
+            ${renderDetailField("价值链分类", escapeHtml(state.categories.find((category) => category.id === taskTemplate?.categoryId)?.name ?? "未设置"))}
             ${renderDetailField("行动负责人", actionOwnerName)}
             ${renderDetailField("发起人", findName(people, instance.initiatorId, "未设置"))}
-            ${renderDetailField("状态", selectProcessInstanceBusinessStatus(instance.id, state).label)}
+            ${renderDetailField("状态", businessStatus.label)}
             ${renderDetailField("步骤进度", getProgress(instance.id))}
-            ${renderDetailField("发起时间", instance.startedAt)}
+            ${renderDetailField("创建时间", escapeHtml(instance.createdAt ?? instance.startedAt ?? "未记录"))}
+            ${renderDetailField("发起时间", escapeHtml(instance.startedAt ?? "未记录"))}
             ${
               instance.status === ProcessInstanceStatus.Canceled
                 ? `
@@ -737,21 +827,8 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
           </div>
           ${editable ? `<div data-action-template-picker-host></div>` : ""}
         </div>
-        ${renderEditableStandardWorkAttachments(instance, editable)}
-        ${renderReturnRecords(instance.id)}
-        <div class="detail-block">
-          <h3>标准步骤任务</h3>
-          <div class="table-wrap">
-            <table class="data-table process-instance-task-table">
-              <thead>
-                <tr>
-                  <th>步骤名称</th><th>当前状态</th><th>负责人</th><th>执行人</th><th>截止时间</th><th>操作</th>
-                </tr>
-              </thead>
-              <tbody>${tasks.map((task, index) => renderStepTask(instance, task, editable, index)).join("")}</tbody>
-            </table>
-          </div>
-        </div>
+        ${renderProcessRecords(instance, editable)}
+        ${renderResultReview(tasks)}
       </form>
       ${renderTaskExecutorPicker(instance)}
     </section>

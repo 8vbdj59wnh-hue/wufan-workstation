@@ -54,6 +54,7 @@ const processExecutorInitiatorRule = "initiator";
 let persistenceAvailable = false;
 let loadedFromDatabase = false;
 let currentUser = null;
+const pendingTemplateIterations = new Map();
 let taskWavesLoaded = false;
 let persistenceStatus = {
   kind: "warning",
@@ -89,6 +90,7 @@ export const state = {
   templateTags: initialTemplateTags.map((tag) => ({ ...tag })),
   issuesRequirements: initialIssuesRequirements.map((item) => ({ ...item })),
   standardWorkForms: initialStandardWorkForms.map((form) => ({ ...form })),
+  templateAssetVersions: [],
   products: [],
   actionProducts: [],
   productImportBatches: [],
@@ -629,14 +631,56 @@ export async function createPersistentResource(resource, item) {
 }
 
 export async function updatePersistentResource(resource, id, item) {
-  const response = await authFetch(`${apiBaseUrl}/api/${resource}/${id}`, {
-    method: "PUT",
+  const versionTypes = { templates: "visual", "task-templates": "action", "standard-work-forms": "form", methodologies: "manual" };
+  const assetType = versionTypes[resource];
+  const iterationKey = assetType ? `${assetType}:${id}` : "";
+  const iteration = pendingTemplateIterations.get(iterationKey) ?? { bump: "minor", changeSummary: "内容迭代" };
+  const response = await authFetch(assetType ? `${apiBaseUrl}/api/template-assets/${assetType}/${encodeURIComponent(id)}/iterate` : `${apiBaseUrl}/api/${resource}/${id}`, {
+    method: assetType ? "POST" : "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(item),
+    body: JSON.stringify(assetType ? { content: item, ...iteration } : item),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.message ?? data.error ?? "保存失败，请检查本地数据库服务。");
-  return data;
+  if (assetType && data.version) {
+    pendingTemplateIterations.delete(iterationKey);
+    state.templateAssetVersions = [data.version, ...state.templateAssetVersions.filter((version) => !(version.assetType === assetType && version.assetId === id && version.status === "active"))];
+  }
+  return assetType ? data.item : data;
+}
+
+export function prepareTemplateIteration(assetType, assetId, options = {}) {
+  pendingTemplateIterations.set(`${assetType}:${assetId}`, {
+    bump: options.bump === "major" ? "major" : "minor",
+    changeSummary: String(options.changeSummary ?? "内容迭代").trim() || "内容迭代",
+  });
+}
+
+export async function loadTemplateAssetVersions(assetType = "", assetId = "") {
+  const query = new URLSearchParams();
+  if (assetType) query.set("assetType", assetType);
+  if (assetId) query.set("assetId", assetId);
+  const response = await authFetch(`${apiBaseUrl}/api/template-assets/versions${query.size ? `?${query}` : ""}`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.message ?? data.error ?? "模板版本读取失败。");
+  const items = data.items ?? [];
+  state.templateAssetVersions = assetType || assetId
+    ? [...items, ...state.templateAssetVersions.filter((version) => !(
+      (!assetType || version.assetType === assetType) && (!assetId || version.assetId === assetId)
+    ))]
+    : items;
+  return state.templateAssetVersions;
+}
+
+export async function changeTemplateAssetVersionStatus(assetType, assetId, versionId, action) {
+  const response = await authFetch(`${apiBaseUrl}/api/template-assets/${encodeURIComponent(assetType)}/${encodeURIComponent(assetId)}/versions/${encodeURIComponent(versionId)}/${encodeURIComponent(action)}`, { method: "POST" });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.message ?? data.error ?? "模板版本状态更新失败。");
+  state.templateAssetVersions = [
+    ...(data.items ?? []),
+    ...state.templateAssetVersions.filter((version) => !(version.assetType === assetType && version.assetId === assetId)),
+  ];
+  return data.items ?? [];
 }
 
 export async function previewProductSkuChange(productId, item) {
@@ -829,14 +873,169 @@ export async function loadDataCenterProductDetail(productId, source) {
   return readApiJson(response, "产品分析详情读取失败。");
 }
 
+export async function loadOperationDashboard() {
+  const response = await authFetch(`${apiBaseUrl}/api/operation-dashboard`);
+  return readApiJson(response, "经营驾驶舱读取失败。");
+}
+
+export async function loadFinanceStatement(params = {}) {
+  const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/finance/statement${query.size ? `?${query}` : ""}`), "利润表读取失败。");
+}
+
+export async function loadFinanceAnalysis(params = {}) {
+  const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/finance/analysis${query.size ? `?${query}` : ""}`), "财务分析读取失败。");
+}
+
+export async function loadFinanceEntries(params = {}) {
+  const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/finance/entries${query.size ? `?${query}` : ""}`), "财务记录读取失败。");
+}
+
+export async function loadFinanceImportBatches() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/finance/import-batches`), "账单批次读取失败。");
+}
+
+export async function uploadFinanceBill(file) {
+  const form = new FormData(); form.append("file", file);
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/finance/import-batches`, { method: "POST", body: form }), "账单解析失败。");
+}
+
+export async function commitFinanceBill(batchId, adjustments = []) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/finance/import-batches/${encodeURIComponent(batchId)}/commit`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ adjustments }),
+  }), "账单确认失败。");
+}
+
+export async function loadFinanceRules() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/finance/rules`), "财务规则读取失败。");
+}
+
+export async function createFinanceRule(payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/finance/rules`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  }), "财务规则保存失败。");
+}
+
+export async function deleteFinanceRule(id) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/finance/rules/${encodeURIComponent(id)}`, { method: "DELETE" }), "财务规则删除失败。");
+}
+
+export async function approveFinanceEntry(id) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/finance/entries/${encodeURIComponent(id)}/approve`, { method: "POST" }), "财务记录审批失败。");
+}
+
+export async function loadProductManagementOverview() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/overview`), "产品经营概览读取失败。");
+}
+
+export async function loadProductManagementDetail(productId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}`), "产品经营详情读取失败。");
+}
+
+export async function changeProductLifecycle(productId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}/lifecycle`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  }), "产品生命周期更新失败。");
+}
+
+export async function evaluateProductManagementHealth(productId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}/evaluate`, { method: "POST" }), "产品经营评价失败。");
+}
+
+export async function createProductImprovementAction(issueId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/issues/${encodeURIComponent(issueId)}/improvement-action`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  }), "产品改善行动创建失败。");
+}
+
+export async function loadSupplyChainOverview() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/overview`), "供应链概览读取失败。");
+}
+
+export async function loadSuppliers(filters = {}) {
+  const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== "" && value !== undefined));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/suppliers${query.size ? `?${query}` : ""}`), "供应商列表读取失败。");
+}
+
+export async function loadSupplier(supplierId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/suppliers/${encodeURIComponent(supplierId)}`), "供应商详情读取失败。");
+}
+
+export async function saveSupplierProfile(payload, supplierId = "") {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/suppliers${supplierId ? `/${encodeURIComponent(supplierId)}` : ""}`, {
+    method: supplierId ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  }), "供应商保存失败。");
+}
+
+export async function addSupplierProductRelation(supplierId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/suppliers/${encodeURIComponent(supplierId)}/products`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "供应产品关联失败。");
+}
+
+export async function deleteSupplierProductRelation(supplierId, relationId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/suppliers/${encodeURIComponent(supplierId)}/products/${encodeURIComponent(relationId)}`, { method: "DELETE" }), "供应产品关系删除失败。");
+}
+
+export async function createSupplyPurchase(payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/purchases`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "采购记录创建失败。");
+}
+
+export async function updateSupplyPurchase(purchaseId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/purchases/${encodeURIComponent(purchaseId)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "采购状态更新失败。");
+}
+
+export async function createSupplyQualityIssue(payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/quality-issues`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "品质问题创建失败。");
+}
+
+export async function updateSupplyQualityIssue(issueId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/quality-issues/${encodeURIComponent(issueId)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "品质问题更新失败。");
+}
+
+export async function saveSupplyEvaluation(payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/evaluations`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "供应商评价保存失败。");
+}
+
+export async function loadCustomerOverview(){return readApiJson(await authFetch(`${apiBaseUrl}/api/customer-center/overview`),"客户概览读取失败。");}
+export async function loadCustomers(filters={}){const query=new URLSearchParams(Object.entries(filters).filter(([,v])=>v!==""&&v!==undefined));return readApiJson(await authFetch(`${apiBaseUrl}/api/customer-center/customers${query.size?`?${query}`:""}`),"客户列表读取失败。");}
+export async function loadCustomer(customerId){return readApiJson(await authFetch(`${apiBaseUrl}/api/customer-center/customers/${encodeURIComponent(customerId)}`),"客户详情读取失败。");}
+export async function saveCustomerProfile(payload,customerId=""){return readApiJson(await authFetch(`${apiBaseUrl}/api/customer-center/customers${customerId?`/${encodeURIComponent(customerId)}`:""}`,{method:customerId?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),"客户保存失败。");}
+export async function addCustomerConsumption(customerId,payload){return readApiJson(await authFetch(`${apiBaseUrl}/api/customer-center/customers/${encodeURIComponent(customerId)}/consumptions`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),"消费记录保存失败。");}
+export async function addCustomerTag(customerId,payload){return readApiJson(await authFetch(`${apiBaseUrl}/api/customer-center/customers/${encodeURIComponent(customerId)}/tags`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),"客户标签保存失败。");}
+export async function addCustomerFollowup(customerId,payload){return readApiJson(await authFetch(`${apiBaseUrl}/api/customer-center/customers/${encodeURIComponent(customerId)}/followups`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),"客户跟进保存失败。");}
+export async function loadAiAnalyses(){return readApiJson(await authFetch(`${apiBaseUrl}/api/ai-operation/analyses`),"经营分析记录读取失败。");}
+export async function createAiAnalysis(payload){return readApiJson(await authFetch(`${apiBaseUrl}/api/ai-operation/analyses`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),"经营分析生成失败。");}
+export async function confirmAiAnalysis(id){return readApiJson(await authFetch(`${apiBaseUrl}/api/ai-operation/analyses/${encodeURIComponent(id)}/confirm`,{method:"POST"}),"经营分析确认失败。");}
+export async function createAiAnalysisAction(id,payload){return readApiJson(await authFetch(`${apiBaseUrl}/api/ai-operation/analyses/${encodeURIComponent(id)}/action`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),"改善行动创建失败。");}
+
 export async function loadConnections() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections`), "连接列表读取失败。");
+}
+
+export async function loadConnectionCoreDetail(connectionId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/core-detail`), "链接经营详情读取失败。");
+}
+
+export async function loadMyConnectionWorkbench(filter = "all") {
+  const query = new URLSearchParams({ filter });
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections-workbench/mine?${query}`), "我的链接读取失败。");
+}
+
+export async function updateConnectionFollow(connectionId, followed) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections-workbench/${encodeURIComponent(connectionId)}/follow`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ followed }),
+  }), "链接关注状态更新失败。");
 }
 
 export async function loadAvailableSalesLinks(filters = {}) {
   const normalized = typeof filters === "string" ? { search: filters } : filters;
   const query = new URLSearchParams(Object.entries(normalized).filter(([, value]) => value !== "" && value !== undefined));
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/available-sales-links${query.size ? `?${query}` : ""}`), "可建立连接读取失败。");
+}
+
+export async function loadConnectionImportShops() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/import-shops`), "生意参谋店铺读取失败。");
 }
 
 export async function loadConnection(connectionId) {
@@ -909,6 +1108,30 @@ export async function loadConnectionImportBatches() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-import-batches`), "经营数据导入批次读取失败。");
 }
 
+export async function loadConnectionDataFoundation() {
+  const [definitions, templates, batches, errors] = await Promise.all([
+    readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/definitions`), "导入类型读取失败。"),
+    readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/templates`), "导入模板读取失败。"),
+    readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/batches`), "导入记录读取失败。"),
+    readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/errors`), "导入异常读取失败。"),
+  ]);
+  return { definitions: definitions.definitions ?? {}, templates: templates.items ?? [], batches: batches.items ?? [], errors: errors.items ?? [] };
+}
+
+export async function uploadConnectionFoundationImport(file, options = {}) {
+  const form = new FormData(); form.append("file", file); form.append("importType", options.importType ?? "");
+  form.append("sourcePlatform", options.sourcePlatform ?? ""); form.append("templateVersionId", options.templateVersionId ?? "");
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/imports`, { method: "POST", body: form }), "链接数据导入失败。");
+}
+
+export async function createConnectionFoundationTemplate(payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/templates`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "导入模板创建失败。");
+}
+
+export async function iterateConnectionFoundationTemplate(templateId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/templates/${encodeURIComponent(templateId)}/versions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "导入模板迭代失败。");
+}
+
 export async function uploadConnectionImport(file, options = {}) {
   const form = new FormData();
   form.append("file", file);
@@ -944,6 +1167,14 @@ export async function loadConnectionGrowthRankings() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-growth-rankings`), "连接成长排行读取失败。");
 }
 
+export async function loadConnectionManagementOverview() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-management/overview`), "链接经营概览读取失败。");
+}
+
+export async function loadConnectionBusinessCockpit() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-business-cockpit`), "链接经营驾驶舱读取失败。");
+}
+
 export async function loadConnectionHealthRecords(connectionId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/health-records`), "连接体检记录读取失败。");
 }
@@ -969,6 +1200,44 @@ export async function createConnectionImprovementAction(healthRecordId, payload)
 export async function loadConnectionImprovements(filters = {}) {
   const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== "" && value !== undefined));
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-improvements${query.size ? `?${query}` : ""}`), "连接改善记录读取失败。");
+}
+
+export async function loadConnectionHospital() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-hospital`), "链接医院读取失败。");
+}
+
+export async function joinConnectionDiagnosis(connectionId, payload = {}) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/diagnosis-entry`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  }), "加入诊断失败。");
+}
+
+export async function loadConnectionBenchmarks(connectionId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/benchmarks`), "对标链接读取失败。");
+}
+
+export async function loadConnectionBenchmarkCandidates(connectionId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/benchmark-candidates`), "竞品候选读取失败。");
+}
+
+export async function createConnectionBenchmark(connectionId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/benchmarks`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  }), "对标链接保存失败。");
+}
+
+export async function updateConnectionBenchmark(connectionId, targetId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/benchmarks/${encodeURIComponent(targetId)}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  }), "对标链接更新失败。");
+}
+
+export async function removeConnectionBenchmark(connectionId, targetId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/benchmarks/${encodeURIComponent(targetId)}`, { method: "DELETE" }), "对标链接删除失败。");
+}
+
+export async function loadConnectionBenchmarkComparison(connectionId, targetId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/benchmarks/${encodeURIComponent(targetId)}/comparison`), "对标分析读取失败。");
 }
 
 export async function loadConnectionImprovementSummary() {

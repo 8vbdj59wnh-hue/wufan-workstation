@@ -7,10 +7,6 @@ import * as XLSX from "xlsx";
 import {
   closeDatabase,
   createResource,
-  batchLinkProcessInstanceTemplates,
-  batchUpdateTaskStatus,
-  cancelTaskWave,
-  cancelProcessInstance,
   changeProductSku,
   createProductImportBatch,
   commitProductImportBatch,
@@ -19,71 +15,54 @@ import {
   deleteProcessTemplateNode,
   findLoginUser,
   findLoginUserById,
-  generateEligibleTaskWaves,
   getDatabase,
   getPublicUser,
   initializeDatabase,
-  batchLaunchWorkPlans,
-  launchWorkPlanWithProcess,
-  moveTaskTemplateToValueChain,
   readAllData,
   readProductImportBatch,
   previewProductSkuChange,
   readRouteResource,
   readRouteResourceItem,
-  readTaskWaveDetailForTaskIds,
-  readTaskWaveRegenerationPreview,
-  readTaskWavesForTaskIds,
-  regenerateWaitingTaskWaves,
-  saveTaskWaveDraft,
-  startTaskWave,
-  submitTaskWave,
   replaceActionProducts,
   replaceAllData,
   touchLastLoginAt,
   updateCurrentUserAvatar,
   updateProductImportBatch,
-  startProcessInstanceExecution,
-  updateProcessTemplateNodeStatus,
   updateResource,
-  updateTaskFromWorkflow,
   uploadsDir,
-} from "./db.js";
+} from "./modules/database/index.js";
 import {
-  parseProductWorkbook,
-  productImportFieldDefinitions,
-  readProductImportStaging,
-  validateProductImport,
-} from "./productImport.js";
-import {
+  createProductFromErpSku,
+  createProductsFromErpSkus,
   commitErpV2Import,
   createErpSyncRun,
-  listErpSyncRuns,
-  markPlatformSku,
-  parseErpV2Import,
-  parseWangdianGoodsImport,
-  previewErpV2Import,
-  readErpV2Import,
-  readErpSyncRun,
-  recalculateErpSyncRun,
-  removePlatformSkuManualBinding,
-  updatePlatformSkuManualBinding,
-  validateErpV2Import,
-} from "./productV2Import.js";
-import { hasWangdianConfig } from "./wangdianClient.js";
-import {
   generateErpFactSnapshot,
-  listErpFactSnapshots,
-  listProductFactSnapshots,
-  readErpFactSnapshot,
-} from "./erpFactSnapshots.js";
-import {
   getCapitalOccupationProducts,
   getDataCenterProductDetail,
   getDataCenterSummary,
   getSlowMovingProducts,
   getTrendProducts,
-} from "./dataCenterService.js";
+  hasWangdianConfig,
+  listErpSyncRuns,
+  listErpFactSnapshots,
+  listPendingErpSkus,
+  listProductFactSnapshots,
+  markPlatformSku,
+  parseProductWorkbook,
+  parseErpV2Import,
+  parseWangdianGoodsImport,
+  previewErpV2Import,
+  productImportFieldDefinitions,
+  readErpFactSnapshot,
+  readErpV2Import,
+  readErpSyncRun,
+  readProductImportStaging,
+  recalculateErpSyncRun,
+  removePlatformSkuManualBinding,
+  updatePlatformSkuManualBinding,
+  validateProductImport,
+  validateErpV2Import,
+} from "./modules/products/index.js";
 import {
   createConnectionAction,
   createConnectionDataMapping,
@@ -92,34 +71,133 @@ import {
   deleteConnectionAction,
   deleteConnectionDataMapping,
   listAvailableSalesLinks,
+  listConnectionImportShops,
+  listConnectionMappingRepairCandidates,
   listConnectionActions,
   listConnectionDataMappings,
-  listConnectionProfiles,
+  getMyConnectionWorkbench,
+  setConnectionFollow,
+  assertConnectionVisible,
+  readHealthRecordConnectionId,
+  readImprovementConnectionId,
   readConnectionProfile,
   updateConnectionProfile,
   updateConnectionDataMapping,
-} from "./connectionService.js";
-import {
   commitConnectionImportBatch,
   confirmConnectionImportRow,
   createConnectionImportBatch,
   ignoreConnectionImportRow,
   listConnectionImportBatches,
   previewConnectionImportBatch,
-} from "./connectionImportService.js";
-import { createConnectionPeriodSnapshots, listConnectionPeriodSnapshots } from "./connectionPeriodSnapshots.js";
-import { getConnectionGrowthAnalysis, listConnectionGrowthRankings } from "./connectionGrowthService.js";
-import { createConnectionHealthRecord, createImprovementAction, listAttentionConnectionHealthRecords, listConnectionHealthRecords } from "./connectionHealthService.js";
-import { createConnectionImprovement, getConnectionImprovementSummary, listConnectionImprovements, updateConnectionImprovement } from "./connectionImprovementService.js";
-import { createProductFromErpSku, createProductsFromErpSkus, listPendingErpSkus } from "./erpSkuService.js";
-import { createToken, verifyPassword, verifyToken } from "./security.js";
+  createConnectionPeriodSnapshots,
+  listConnectionPeriodSnapshots,
+  getConnectionGrowthAnalysis,
+  getConnectionManagementOverview,
+  listConnectionGrowthRankings,
+  createConnectionHealthRecord,
+  createImprovementAction,
+  listAttentionConnectionHealthRecords,
+  listConnectionHealthRecords,
+  createConnectionImprovement,
+  getConnectionImprovementSummary,
+  listConnectionImprovements,
+  updateConnectionImprovement,
+  getConnectionHospital,
+  joinConnectionDiagnosis,
+  listConnectionBenchmarkTargets,
+  listConnectionBenchmarkCandidates,
+  createConnectionBenchmarkTarget,
+  updateConnectionBenchmarkTarget,
+  deleteConnectionBenchmarkTarget,
+  getConnectionBenchmarkComparison,
+} from "./modules/links/index.js";
 import {
+  createConnectionImportTemplate,
+  getConnectionImportDefinitions,
+  importConnectionData,
+  iterateConnectionImportTemplate,
+  listConnectionFoundationBatches,
+  listConnectionImportErrors,
+  listConnectionImportTemplates,
+} from "./connectionDataFoundationService.js";
+import { getConnectionCoreDetail, listConnectionCoreProfiles } from "./connectionCorePageService.js";
+import { getConnectionBusinessCockpit } from "./connectionBusinessCockpitService.js";
+import {
+  batchLinkProcessInstanceTemplates,
+  batchUpdateTaskStatus,
+  cancelTaskWave,
+  cancelProcessInstance,
+  generateEligibleTaskWaves,
+  batchLaunchWorkPlans,
+  launchWorkPlanWithProcess,
+  moveTaskTemplateToValueChain,
+  readTaskWaveDetailForTaskIds,
+  readTaskWaveRegenerationPreview,
+  readTaskWavesForTaskIds,
+  regenerateWaitingTaskWaves,
+  saveTaskWaveDraft,
+  startTaskWave,
+  submitTaskWave,
+  startProcessInstanceExecution,
+  updateProcessTemplateNodeStatus,
+  updateTaskFromWorkflow,
+} from "./modules/tasks/index.js";
+import {
+  createToken,
+  verifyPassword,
+  verifyToken,
   canAccessTemplateCenter,
   canLaunchActionTemplate,
   getDataScope,
   hasPermission,
-} from "../src/permissions.js";
-import { normalizeProductSkuCode, splitProductSkuCodes } from "../src/data/productSku.js";
+} from "./modules/auth/index.js";
+import { normalizeProductSkuCode, splitProductSkuCodes } from "./modules/common/index.js";
+import { getOperationDashboard } from "./operationManagementService.js";
+import {
+  addSupplierProduct,
+  createPurchaseOrder,
+  createQualityIssue,
+  getSupplyChainOverview,
+  listSuppliers,
+  readSupplier,
+  removeSupplierProduct,
+  saveSupplier,
+  saveSupplierEvaluation,
+  updatePurchaseOrder,
+  updateQualityIssue,
+} from "./supplyChainService.js";
+import { addConsumption, addFollowup, addTag, getCustomer, listCustomers, overview as getCustomerOverview, saveCustomer } from "./customerService.js";
+import { confirmAnalysis,createAnalysis,createAnalysisAction,listAnalyses,readAnalysis } from "./aiOperationAssistantService.js";
+import {
+  approveFinanceEntry,
+  commitFinanceImportBatch,
+  createFinanceImportBatch,
+  getFinanceAnalysis,
+  getFinanceStatement,
+  listFinanceEntries,
+  listFinanceImportBatches,
+  listFinanceRules,
+  readFinanceImportBatch,
+  removeFinanceRule,
+  saveFinanceRule,
+} from "./financeService.js";
+import {
+  changeProductLifecycle,
+  createProductImprovementAction,
+  evaluateProductHealth,
+  getProductV2Detail,
+  getProductV2Overview,
+  getProductBusinessAnalysis,
+  productLifecycleStatuses,
+} from "./productManagementV2Service.js";
+import {
+  bootstrapTemplateVersions,
+  changeTemplateVersionStatus,
+  ensureInitialTemplateVersion,
+  iterateTemplate,
+  listTemplateVersions,
+  versionedTemplateResources,
+} from "./templateVersionService.js";
 
 const app = express();
 const host = process.env.HOST ?? "0.0.0.0";
@@ -159,8 +237,21 @@ const uploadConnectionWorkbook = multer({
     callback(null, true);
   },
 });
+const uploadFinanceWorkbook = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 30 * 1024 * 1024 },
+  fileFilter: (_request, file, callback) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (![".xlsx", ".xls", ".csv"].includes(ext)) {
+      callback(new Error("财务账单只支持 .xlsx、.xls 或 .csv 文件。"));
+      return;
+    }
+    callback(null, true);
+  },
+});
 
 initializeDatabase();
+bootstrapTemplateVersions();
 fs.mkdirSync(imageUploadsDir, { recursive: true });
 fs.mkdirSync(fileUploadsDir, { recursive: true });
 fs.mkdirSync(standardWorkAttachmentsDir, { recursive: true });
@@ -335,6 +426,36 @@ function requirePermission(permissionPath) {
   };
 }
 
+function requireAnyPermission(...permissionPaths) {
+  return (request, response, next) => {
+    if (!permissionPaths.some((permissionPath) => hasPermission(request.user, permissionPath))) {
+      response.status(403).json({ success: false, message: "你没有权限进行该操作" });
+      return;
+    }
+    next();
+  };
+}
+
+const requireLinkView = requireAnyPermission("links.view", "products.view");
+const requireLinkManage = requireAnyPermission("links.manage", "products.edit");
+const requireLinkImport = requireAnyPermission("links.import", "products.edit");
+const requireLinkHealth = requireAnyPermission("links.health", "products.view");
+const requireLinkHealthManage = requireAnyPermission("links.health", "products.edit");
+const requireLinkImprove = requireAnyPermission("links.improve", "products.edit");
+const requireSupplyView = requireAnyPermission("supplyChain.view", "products.view");
+const requireSupplyManage = requireAnyPermission("supplyChain.manage", "products.edit");
+const requireSupplyPurchase = requireAnyPermission("supplyChain.purchase", "products.edit");
+const requireSupplyQuality = requireAnyPermission("supplyChain.quality", "products.edit");
+const requireCustomerView = requirePermission("customers.view");
+const requireCustomerManage = requirePermission("customers.manage");
+const requireCustomerMaintain = requirePermission("customers.maintain");
+const requireAiView = requirePermission("aiAssistant.view");
+const requireAiAnalyze = requirePermission("aiAssistant.analyze");
+const requireAiConfirm = requirePermission("aiAssistant.confirm");
+const requireAiAction = requirePermission("aiAssistant.createAction");
+function customerScope(user,query={}){const scope=getDataScope(user);if(scope==="self")return{...query,ownerId:user.id};if(scope==="department")return{...query,departmentId:user.departmentId};return query;}
+function assertCustomerAccess(user,customerId){if(!listCustomers(customerScope(user,{id:customerId}),true).length)throw new Error("你无权操作该客户。");}
+
 function getRequestedActionTemplateIds(body = {}) {
   return [
     body?.processInstance?.taskTemplateId ?? body?.processInstance?.standardWorkId,
@@ -364,6 +485,35 @@ function isAdminUser(user) {
 function getUserPersonId(user) {
   return user?.personId ?? user?.id ?? "";
 }
+
+function requireVisibleConnection(resolveConnectionId = (request) => request.params.id) {
+  return (request, response, next) => {
+    try {
+      assertConnectionVisible(resolveConnectionId(request), getUserPersonId(request.user), isAdminUser(request.user));
+      next();
+    } catch (error) {
+      response.status(error.statusCode || 404).json({ success: false, message: error.message || "连接档案不存在。" });
+    }
+  };
+}
+
+const requireConnectionAccess = requireVisibleConnection();
+const requireHealthRecordAccess = requireVisibleConnection((request) => readHealthRecordConnectionId(request.params.id));
+const requireImprovementAccess = requireVisibleConnection((request) => readImprovementConnectionId(request.params.id));
+const requireBodyConnectionAccess = requireVisibleConnection((request) => request.body?.connectionId);
+const requireOptionalBenchmarkConnectionAccess = (request, response, next) => {
+  if (request.body?.targetType !== "internal" || !request.body?.internalConnectionId) { next(); return; }
+  return requireVisibleConnection((currentRequest) => currentRequest.body.internalConnectionId)(request, response, next);
+};
+const requireBenchmarkComparisonAccess = (request, response, next) => {
+  const target = getDatabase().prepare(`
+    SELECT targetType,internalConnectionId FROM connection_benchmark_targets
+    WHERE id=? AND connectionId=?
+  `).get(request.params.targetId, request.params.id);
+  if (!target) { response.status(404).json({ success: false, message: "未找到对标链接。" }); return; }
+  if (target.targetType !== "internal" || !target.internalConnectionId) { next(); return; }
+  return requireVisibleConnection(() => target.internalConnectionId)(request, response, next);
+};
 
 function canEditProcessInstance(user, instance) {
   if (instance === undefined || instance === null) return false;
@@ -1439,6 +1589,188 @@ app.get("/api/data-center/summary", requirePermission("dataCenter.view"), (_requ
   }
 });
 
+app.get("/api/operation-dashboard", requirePermission("dataCenter.view"), (_request, response) => {
+  try {
+    response.json({ success: true, dashboard: getOperationDashboard() });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "经营驾驶舱读取失败。" });
+  }
+});
+
+app.get("/api/finance/statement", requirePermission("finance.view"), (request, response) => {
+  try { response.json({ success: true, statement: getFinanceStatement(request.query) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "利润表读取失败。" }); }
+});
+
+app.get("/api/finance/analysis", requirePermission("finance.view"), (request, response) => {
+  try { response.json({ success: true, analysis: getFinanceAnalysis(request.query) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "财务分析读取失败。" }); }
+});
+
+app.get("/api/finance/entries", requirePermission("finance.view"), (request, response) => {
+  try { response.json({ success: true, items: listFinanceEntries(request.query) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "财务记录读取失败。" }); }
+});
+
+app.post("/api/finance/entries/:id/approve", requirePermission("finance.approve"), (request, response) => {
+  try { approveFinanceEntry(request.params.id, request.user.id); response.json({ success: true }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "财务记录审核失败。" }); }
+});
+
+app.get("/api/finance/import-batches", requirePermission("finance.view"), (_request, response) => {
+  try { response.json({ success: true, items: listFinanceImportBatches() }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "账单批次读取失败。" }); }
+});
+
+app.post("/api/finance/import-batches", requirePermission("finance.manage"), uploadFinanceWorkbook.single("file"), (request, response) => {
+  try { response.status(201).json({ success: true, batch: createFinanceImportBatch(request.file, request.user.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "账单解析失败。" }); }
+});
+
+app.get("/api/finance/import-batches/:id", requirePermission("finance.view"), (request, response) => {
+  try { response.json({ success: true, batch: readFinanceImportBatch(request.params.id) }); }
+  catch (error) { response.status(404).json({ success: false, message: error.message || "账单批次不存在。" }); }
+});
+
+app.post("/api/finance/import-batches/:id/commit", requirePermission("finance.manage"), (request, response) => {
+  try { response.json({ success: true, ...commitFinanceImportBatch(request.params.id, request.body, request.user.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "账单确认失败。" }); }
+});
+
+app.get("/api/finance/rules", requirePermission("finance.view"), (_request, response) => {
+  try { response.json({ success: true, items: listFinanceRules() }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "财务规则读取失败。" }); }
+});
+
+app.post("/api/finance/rules", requirePermission("finance.manage"), (request, response) => {
+  try { response.status(201).json({ success: true, item: saveFinanceRule(request.body, request.user.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "财务规则保存失败。" }); }
+});
+
+app.put("/api/finance/rules/:id", requirePermission("finance.manage"), (request, response) => {
+  try { response.json({ success: true, item: saveFinanceRule(request.body, request.user.id, request.params.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "财务规则更新失败。" }); }
+});
+
+app.delete("/api/finance/rules/:id", requirePermission("finance.manage"), (request, response) => {
+  try { removeFinanceRule(request.params.id); response.json({ success: true }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "财务规则删除失败。" }); }
+});
+
+app.get("/api/supply-chain/overview", requireSupplyView, (request, response) => {
+  try {
+    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
+    response.json({ success: true, ...getSupplyChainOverview(), moduleData: {
+      products: scoped.products ?? [], productErpMappings: scoped.productErpMappings ?? [],
+    } });
+  }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "供应链概览读取失败。" }); }
+});
+
+app.get("/api/supply-chain/suppliers", requireSupplyView, (request, response) => {
+  try { response.json({ success: true, items: listSuppliers(request.query) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "供应商列表读取失败。" }); }
+});
+
+app.get("/api/supply-chain/suppliers/:id", requireSupplyView, (request, response) => {
+  try { response.json({ success: true, detail: readSupplier(request.params.id) }); }
+  catch (error) { response.status(404).json({ success: false, message: error.message || "供应商不存在。" }); }
+});
+
+app.post("/api/supply-chain/suppliers", requireSupplyManage, (request, response) => {
+  try { response.status(201).json({ success: true, item: saveSupplier(request.body, request.user.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "供应商创建失败。" }); }
+});
+
+app.put("/api/supply-chain/suppliers/:id", requireSupplyManage, (request, response) => {
+  try { response.json({ success: true, item: saveSupplier(request.body, request.user.id, request.params.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "供应商更新失败。" }); }
+});
+
+app.post("/api/supply-chain/suppliers/:id/products", requireSupplyManage, (request, response) => {
+  try { response.status(201).json({ success: true, item: addSupplierProduct(request.params.id, request.body) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "供应产品关联失败。" }); }
+});
+
+app.delete("/api/supply-chain/suppliers/:id/products/:relationId", requireSupplyManage, (request, response) => {
+  try { response.json(removeSupplierProduct(request.params.id, request.params.relationId)); }
+  catch (error) { response.status(404).json({ success: false, message: error.message || "供应产品关系删除失败。" }); }
+});
+
+app.post("/api/supply-chain/purchases", requireSupplyPurchase, (request, response) => {
+  try { response.status(201).json({ success: true, item: createPurchaseOrder(request.body, request.user.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "采购记录创建失败。" }); }
+});
+
+app.put("/api/supply-chain/purchases/:id", requireSupplyPurchase, (request, response) => {
+  try { response.json({ success: true, item: updatePurchaseOrder(request.params.id, request.body) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "采购状态更新失败。" }); }
+});
+
+app.post("/api/supply-chain/quality-issues", requireSupplyQuality, (request, response) => {
+  try { response.status(201).json({ success: true, item: createQualityIssue(request.body) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "品质问题创建失败。" }); }
+});
+
+app.put("/api/supply-chain/quality-issues/:id", requireSupplyQuality, (request, response) => {
+  try { response.json({ success: true, item: updateQualityIssue(request.params.id, request.body) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "品质问题更新失败。" }); }
+});
+
+app.post("/api/supply-chain/evaluations", requireSupplyManage, (request, response) => {
+  try { response.status(201).json({ success: true, item: saveSupplierEvaluation(request.body, request.user.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "供应商评价保存失败。" }); }
+});
+
+app.get("/api/customer-center/overview", requireCustomerView, (request,response)=>{try{response.json({success:true,...getCustomerOverview(customerScope(request.user))});}catch(error){response.status(400).json({success:false,message:error.message||"客户概览读取失败。"});}});
+app.get("/api/customer-center/customers", requireCustomerView, (request,response)=>{try{response.json({success:true,items:listCustomers(customerScope(request.user,request.query),hasPermission(request.user,"customers.manage"))});}catch(error){response.status(400).json({success:false,message:error.message||"客户列表读取失败。"});}});
+app.get("/api/customer-center/customers/:id", requireCustomerView, (request,response)=>{try{if(!listCustomers(customerScope(request.user,{id:request.params.id}),true).length)return response.status(403).json({success:false,message:"你无权查看该客户。"});response.json({success:true,detail:getCustomer(request.params.id,hasPermission(request.user,"customers.manage"))});}catch(error){response.status(404).json({success:false,message:error.message||"客户不存在。"});}});
+app.post("/api/customer-center/customers", requireCustomerManage, (request,response)=>{try{const payload={...request.body,ownerId:request.body?.ownerId||request.user.id};response.status(201).json({success:true,item:saveCustomer(payload,request.user.id)});}catch(error){response.status(400).json({success:false,message:error.message||"客户创建失败。"});}});
+app.put("/api/customer-center/customers/:id", requireCustomerManage, (request,response)=>{try{assertCustomerAccess(request.user,request.params.id);const current=getCustomer(request.params.id,true).customer;response.json({success:true,item:saveCustomer({...request.body,ownerId:request.body?.ownerId||current.ownerId},request.user.id,request.params.id)});}catch(error){response.status(400).json({success:false,message:error.message||"客户更新失败。"});}});
+app.post("/api/customer-center/customers/:id/consumptions", requireCustomerManage, (request,response)=>{try{assertCustomerAccess(request.user,request.params.id);response.status(201).json({success:true,item:addConsumption(request.params.id,request.body)});}catch(error){response.status(400).json({success:false,message:error.message||"消费记录保存失败。"});}});
+app.post("/api/customer-center/customers/:id/tags", requireCustomerMaintain, (request,response)=>{try{assertCustomerAccess(request.user,request.params.id);response.status(201).json({success:true,item:addTag(request.params.id,request.body,request.user.id)});}catch(error){response.status(400).json({success:false,message:error.message||"客户标签保存失败。"});}});
+app.post("/api/customer-center/customers/:id/followups", requireCustomerMaintain, (request,response)=>{try{assertCustomerAccess(request.user,request.params.id);response.status(201).json({success:true,item:addFollowup(request.params.id,request.body,request.user.id)});}catch(error){response.status(400).json({success:false,message:error.message||"跟进记录保存失败。"});}});
+
+function aiEnterpriseKnowledge(){const db=getDatabase();const safe=(sql)=>{try{return db.prepare(sql).all();}catch{return[];}};return{actionStandards:safe("SELECT id,name FROM task_templates WHERE status='active' AND defaultProcessTemplateId IS NOT NULL ORDER BY updatedAt DESC LIMIT 30"),effectiveImprovements:[...safe("SELECT id,title,resultSummary,'connection' AS objectType FROM connection_improvements WHERE status='effective' ORDER BY updatedAt DESC LIMIT 15"),...safe("SELECT id,title,resultSummary,'product' AS objectType FROM product_improvements WHERE status='effective' ORDER BY updatedAt DESC LIMIT 15")]};}
+function aiEvidence(request){const type=String(request.body?.analysisType||"");let evidence;if(type==="company"){if(!hasPermission(request.user,"dataCenter.view"))throw new Error("没有经营驾驶舱权限。");evidence=getOperationDashboard();}else if(type==="product"){if(!hasPermission(request.user,"products.view"))throw new Error("没有产品数据权限。");const scoped=filterDataByScope(readAllData({exclude:["salesLinks","salesLinkSkus"]}),request.user);if(!scoped.products?.some(item=>item.id===request.body?.objectId))throw new Error("无权分析该产品。");evidence=getProductBusinessAnalysis(request.body.objectId);}else if(type==="connection"){if(!hasPermission(request.user,"links.view")&&!hasPermission(request.user,"products.view"))throw new Error("没有连接数据权限。");evidence=getConnectionGrowthAnalysis(request.body.objectId);}else if(type==="finance"){if(!hasPermission(request.user,"finance.view"))throw new Error("没有财务数据权限。");evidence=getFinanceStatement(request.body||{});}else if(type==="supply"){if(!hasPermission(request.user,"supplyChain.view")&&!hasPermission(request.user,"products.view"))throw new Error("没有供应链数据权限。");evidence=getSupplyChainOverview();}else if(type==="customer"){if(!hasPermission(request.user,"customers.view"))throw new Error("没有客户数据权限。");evidence=getCustomerOverview(customerScope(request.user));}else throw new Error("分析类型无效。");return{...evidence,knowledge:aiEnterpriseKnowledge()};}
+app.get("/api/ai-operation/analyses",requireAiView,(request,response)=>{try{response.json({success:true,items:listAnalyses(request.user.id,getDataScope(request.user)==="all")});}catch(error){response.status(400).json({success:false,message:error.message||"分析记录读取失败。"});}});
+app.get("/api/ai-operation/analyses/:id",requireAiView,(request,response)=>{try{const item=readAnalysis(request.params.id);if(getDataScope(request.user)!=="all"&&item.generatedBy!==request.user.id)return response.status(403).json({success:false,message:"无权查看该分析。"});response.json({success:true,item});}catch(error){response.status(404).json({success:false,message:error.message||"分析不存在。"});}});
+app.post("/api/ai-operation/analyses",requireAiAnalyze,(request,response)=>{try{response.status(201).json({success:true,item:createAnalysis(request.body,request.user.id,aiEvidence(request))});}catch(error){response.status(400).json({success:false,message:error.message||"经营分析失败。"});}});
+app.post("/api/ai-operation/analyses/:id/confirm",requireAiConfirm,(request,response)=>{try{const item=readAnalysis(request.params.id);if(getDataScope(request.user)!=="all"&&item.generatedBy!==request.user.id)return response.status(403).json({success:false,message:"无权确认该分析。"});response.json({success:true,item:confirmAnalysis(item.id,request.user.id)});}catch(error){response.status(400).json({success:false,message:error.message||"分析确认失败。"});}});
+app.post("/api/ai-operation/analyses/:id/action",requireAiAction,(request,response)=>{try{const item=readAnalysis(request.params.id);if(getDataScope(request.user)!=="all"&&item.generatedBy!==request.user.id)return response.status(403).json({success:false,message:"无权转化该分析。"});response.status(201).json({success:true,...createAnalysisAction(item.id,request.body,request.user.id)});}catch(error){response.status(400).json({success:false,message:error.message||"改善行动创建失败。"});}});
+
+app.get("/api/product-management/overview", requirePermission("products.view"), (request, response) => {
+  try {
+    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
+    response.json({ success: true, overview: getProductV2Overview(), lifecycleStatuses: productLifecycleStatuses,
+      moduleData: { products: scoped.products ?? [], actionProducts: scoped.actionProducts ?? [], erpGoods: scoped.erpGoods ?? [],
+        productErpMappings: scoped.productErpMappings ?? [], salesShops: scoped.salesShops ?? [], salesShopAliases: scoped.salesShopAliases ?? [],
+        productImportBatches: scoped.productImportBatches ?? [], erpImportBatches: scoped.erpImportBatches ?? [],
+        platformSkuManualBindings: scoped.platformSkuManualBindings ?? [] } });
+  }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "产品经营概览读取失败。" }); }
+});
+
+app.get("/api/product-management/products/:id", requirePermission("products.view"), (request, response) => {
+  try { response.json({ success: true, detail: getProductV2Detail(request.params.id), lifecycleStatuses: productLifecycleStatuses }); }
+  catch (error) { response.status(404).json({ success: false, message: error.message || "产品经营详情读取失败。" }); }
+});
+
+app.post("/api/product-management/products/:id/lifecycle", requirePermission("products.edit"), (request, response) => {
+  try { response.json({ success: true, event: changeProductLifecycle(request.params.id, request.body, request.user.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "产品生命周期更新失败。" }); }
+});
+
+app.post("/api/product-management/products/:id/evaluate", requirePermission("products.edit"), (request, response) => {
+  try { response.json({ success: true, healthRecord: evaluateProductHealth(request.params.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "产品经营评价失败。" }); }
+});
+
+app.post("/api/product-management/issues/:id/improvement-action", requirePermission("products.edit"), (request, response) => {
+  try { response.status(201).json({ success: true, ...createProductImprovementAction(request.params.id, request.body, request.user.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "产品改善行动创建失败。" }); }
+});
+
 app.get("/api/data-center/trends", requirePermission("dataCenter.view"), (request, response) => {
   try {
     response.json({ success: true, ...getTrendProducts(request.query) });
@@ -1476,15 +1808,36 @@ app.get("/api/data-center/products/:productId", requirePermission("dataCenter.vi
   }
 });
 
-app.get("/api/connections", requirePermission("products.view"), (_request, response) => {
+app.get("/api/connections", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, items: listConnectionProfiles() });
+    response.json({ success: true, items: listConnectionCoreProfiles(getUserPersonId(request.user), isAdminUser(request.user)) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "连接列表读取失败。" });
   }
 });
 
-app.get("/api/connections/available-sales-links", requirePermission("products.view"), (request, response) => {
+app.get("/api/connections/:id/core-detail", requireLinkView, requireConnectionAccess, (request, response) => {
+  try { response.json({ success: true, ...getConnectionCoreDetail(request.params.id, getUserPersonId(request.user), isAdminUser(request.user)) }); }
+  catch (error) { response.status(error.message?.includes("只能查看") ? 403 : 404).json({ success: false, message: error.message || "链接经营详情读取失败。" }); }
+});
+
+app.get("/api/connections-workbench/mine", requireLinkView, (request, response) => {
+  try {
+    response.json({ success: true, ...getMyConnectionWorkbench(getUserPersonId(request.user), isAdminUser(request.user), String(request.query.filter ?? "all")) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "我的链接读取失败。" });
+  }
+});
+
+app.put("/api/connections-workbench/:id/follow", requireLinkView, (request, response) => {
+  try {
+    response.json({ success: true, item: setConnectionFollow(request.params.id, getUserPersonId(request.user), request.body?.followed === true, isAdminUser(request.user)) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "链接关注状态更新失败。" });
+  }
+});
+
+app.get("/api/connections/available-sales-links", requireLinkView, (request, response) => {
   try {
     response.json({ success: true, ...listAvailableSalesLinks(request.query) });
   } catch (error) {
@@ -1492,7 +1845,23 @@ app.get("/api/connections/available-sales-links", requirePermission("products.vi
   }
 });
 
-app.get("/api/connections/:id", requirePermission("products.view"), (request, response) => {
+app.get("/api/connections/import-shops", requireLinkView, (_request, response) => {
+  try {
+    response.json({ success: true, items: listConnectionImportShops() });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "生意参谋店铺读取失败。" });
+  }
+});
+
+app.get("/api/connection-data-mappings/repair-candidates", requireLinkManage, (_request, response) => {
+  try {
+    response.json({ success: true, items: listConnectionMappingRepairCandidates() });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "异常映射修复清单读取失败。" });
+  }
+});
+
+app.get("/api/connections/:id", requireLinkView, requireConnectionAccess, (request, response) => {
   try {
     response.json({ success: true, item: readConnectionProfile(request.params.id) });
   } catch (error) {
@@ -1500,7 +1869,7 @@ app.get("/api/connections/:id", requirePermission("products.view"), (request, re
   }
 });
 
-app.put("/api/connections/:id", requirePermission("products.edit"), (request, response) => {
+app.put("/api/connections/:id", requireLinkManage, requireConnectionAccess, (request, response) => {
   try {
     response.json({ success: true, item: updateConnectionProfile(request.params.id, request.body) });
   } catch (error) {
@@ -1508,7 +1877,55 @@ app.put("/api/connections/:id", requirePermission("products.edit"), (request, re
   }
 });
 
-app.post("/api/connections", requirePermission("products.edit"), (request, response) => {
+app.get("/api/connections/:id/benchmarks", requireLinkView, requireConnectionAccess, (request, response) => {
+  try {
+    response.json({ success: true, items: listConnectionBenchmarkTargets(request.params.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "对标链接读取失败。" });
+  }
+});
+
+app.get("/api/connections/:id/benchmark-candidates", requireLinkView, requireConnectionAccess, (request, response) => {
+  try {
+    response.json({ success: true, items: listConnectionBenchmarkCandidates(request.params.id, getUserPersonId(request.user), isAdminUser(request.user)) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "竞品候选读取失败。" });
+  }
+});
+
+app.post("/api/connections/:id/benchmarks", requireLinkManage, requireConnectionAccess, requireOptionalBenchmarkConnectionAccess, (request, response) => {
+  try {
+    response.status(201).json({ success: true, item: createConnectionBenchmarkTarget(request.params.id, request.body, getUserPersonId(request.user)) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "对标链接保存失败。" });
+  }
+});
+
+app.put("/api/connections/:id/benchmarks/:targetId", requireLinkManage, requireConnectionAccess, requireOptionalBenchmarkConnectionAccess, (request, response) => {
+  try {
+    response.json({ success: true, item: updateConnectionBenchmarkTarget(request.params.id, request.params.targetId, request.body) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "对标链接更新失败。" });
+  }
+});
+
+app.delete("/api/connections/:id/benchmarks/:targetId", requireLinkManage, requireConnectionAccess, (request, response) => {
+  try {
+    response.json(deleteConnectionBenchmarkTarget(request.params.id, request.params.targetId));
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "对标链接删除失败。" });
+  }
+});
+
+app.get("/api/connections/:id/benchmarks/:targetId/comparison", requireLinkView, requireConnectionAccess, requireBenchmarkComparisonAccess, (request, response) => {
+  try {
+    response.json({ success: true, ...getConnectionBenchmarkComparison(request.params.id, request.params.targetId) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "竞品对比读取失败。" });
+  }
+});
+
+app.post("/api/connections", requireLinkManage, (request, response) => {
   try {
     response.status(201).json({ success: true, item: createConnectionProfile(request.body, request.user?.id) });
   } catch (error) {
@@ -1516,7 +1933,7 @@ app.post("/api/connections", requirePermission("products.edit"), (request, respo
   }
 });
 
-app.post("/api/connections/batch", requirePermission("products.edit"), (request, response) => {
+app.post("/api/connections/batch", requireLinkManage, (request, response) => {
   try {
     response.status(201).json({ success: true, ...createConnectionProfilesBatch(request.body, request.user?.id) });
   } catch (error) {
@@ -1524,7 +1941,7 @@ app.post("/api/connections/batch", requirePermission("products.edit"), (request,
   }
 });
 
-app.get("/api/connections/:id/actions", requirePermission("products.view"), (request, response) => {
+app.get("/api/connections/:id/actions", requireLinkView, requireConnectionAccess, (request, response) => {
   try {
     response.json({ success: true, items: listConnectionActions(request.params.id) });
   } catch (error) {
@@ -1532,7 +1949,7 @@ app.get("/api/connections/:id/actions", requirePermission("products.view"), (req
   }
 });
 
-app.post("/api/connections/:id/actions", requirePermission("products.edit"), (request, response) => {
+app.post("/api/connections/:id/actions", requireLinkManage, requireConnectionAccess, (request, response) => {
   try {
     response.status(201).json({ success: true, item: createConnectionAction(request.params.id, request.body, request.user?.id) });
   } catch (error) {
@@ -1540,7 +1957,7 @@ app.post("/api/connections/:id/actions", requirePermission("products.edit"), (re
   }
 });
 
-app.delete("/api/connections/:id/actions/:actionId", requirePermission("products.edit"), (request, response) => {
+app.delete("/api/connections/:id/actions/:actionId", requireLinkManage, requireConnectionAccess, (request, response) => {
   try {
     response.json(deleteConnectionAction(request.params.id, request.params.actionId));
   } catch (error) {
@@ -1548,7 +1965,7 @@ app.delete("/api/connections/:id/actions/:actionId", requirePermission("products
   }
 });
 
-app.get("/api/connection-data-mappings", requirePermission("products.view"), (request, response) => {
+app.get("/api/connection-data-mappings", requireLinkView, (request, response) => {
   try {
     response.json({ success: true, items: listConnectionDataMappings(request.query) });
   } catch (error) {
@@ -1556,7 +1973,7 @@ app.get("/api/connection-data-mappings", requirePermission("products.view"), (re
   }
 });
 
-app.post("/api/connection-data-mappings", requirePermission("products.edit"), (request, response) => {
+app.post("/api/connection-data-mappings", requireLinkManage, (request, response) => {
   try {
     response.status(201).json({ success: true, item: createConnectionDataMapping(request.body, request.user?.id) });
   } catch (error) {
@@ -1564,7 +1981,7 @@ app.post("/api/connection-data-mappings", requirePermission("products.edit"), (r
   }
 });
 
-app.put("/api/connection-data-mappings/:id", requirePermission("products.edit"), (request, response) => {
+app.put("/api/connection-data-mappings/:id", requireLinkManage, (request, response) => {
   try {
     response.json({ success: true, item: updateConnectionDataMapping(request.params.id, request.body, request.user?.id) });
   } catch (error) {
@@ -1572,7 +1989,7 @@ app.put("/api/connection-data-mappings/:id", requirePermission("products.edit"),
   }
 });
 
-app.delete("/api/connection-data-mappings/:id", requirePermission("products.edit"), (request, response) => {
+app.delete("/api/connection-data-mappings/:id", requireLinkManage, (request, response) => {
   try {
     response.json(deleteConnectionDataMapping(request.params.id, request.user?.id));
   } catch (error) {
@@ -1580,7 +1997,47 @@ app.delete("/api/connection-data-mappings/:id", requirePermission("products.edit
   }
 });
 
-app.get("/api/connection-import-batches", requirePermission("products.view"), (_request, response) => {
+app.get("/api/connection-data-foundation/definitions", requireLinkView, (_request, response) => {
+  response.json({ success: true, definitions: getConnectionImportDefinitions() });
+});
+
+app.get("/api/connection-data-foundation/templates", requireLinkView, (_request, response) => {
+  try { response.json({ success: true, items: listConnectionImportTemplates() }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "导入模板读取失败。" }); }
+});
+
+app.post("/api/connection-data-foundation/templates", requireLinkImport, (request, response) => {
+  try { response.status(201).json({ success: true, item: createConnectionImportTemplate(request.body, request.user?.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "导入模板创建失败。" }); }
+});
+
+app.post("/api/connection-data-foundation/templates/:id/versions", requireLinkImport, (request, response) => {
+  try { response.status(201).json({ success: true, item: iterateConnectionImportTemplate(request.params.id, request.body, request.user?.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "导入模板迭代失败。" }); }
+});
+
+app.get("/api/connection-data-foundation/batches", requireLinkView, (_request, response) => {
+  try { response.json({ success: true, items: listConnectionFoundationBatches() }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "导入记录读取失败。" }); }
+});
+
+app.get("/api/connection-data-foundation/errors", requireLinkView, (request, response) => {
+  try { response.json({ success: true, items: listConnectionImportErrors(request.query.batchId) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "导入异常读取失败。" }); }
+});
+
+app.post("/api/connection-data-foundation/imports", requireLinkImport, (request, response) => {
+  uploadConnectionWorkbook.single("file")(request, response, (error) => {
+    if (error) { response.status(400).json({ success: false, message: error.message || "链接数据文件上传失败。" }); return; }
+    try {
+      const result = importConnectionData({ buffer: request.file?.buffer, fileName: normalizeUploadedFileName(request.file?.originalname), importType: request.body?.importType,
+        templateVersionId: request.body?.templateVersionId, sourcePlatform: request.body?.sourcePlatform, userId: request.user?.id });
+      response.status(result.idempotent ? 200 : 201).json({ success: true, ...result });
+    } catch (uploadError) { response.status(400).json({ success: false, message: uploadError.message || "链接数据导入失败。" }); }
+  });
+});
+
+app.get("/api/connection-import-batches", requireLinkView, (_request, response) => {
   try {
     response.json({ success: true, items: listConnectionImportBatches() });
   } catch (error) {
@@ -1588,7 +2045,7 @@ app.get("/api/connection-import-batches", requirePermission("products.view"), (_
   }
 });
 
-app.post("/api/connection-import-batches", requirePermission("products.edit"), (request, response) => {
+app.post("/api/connection-import-batches", requireLinkImport, (request, response) => {
   uploadConnectionWorkbook.single("file")(request, response, (error) => {
     if (error) {
       response.status(400).json({ success: false, message: error.message || "生意参谋文件上传失败。" });
@@ -1604,7 +2061,7 @@ app.post("/api/connection-import-batches", requirePermission("products.edit"), (
   });
 });
 
-app.get("/api/connection-import-batches/:id/preview", requirePermission("products.view"), (request, response) => {
+app.get("/api/connection-import-batches/:id/preview", requireLinkView, (request, response) => {
   try {
     response.json({ success: true, ...previewConnectionImportBatch(request.params.id) });
   } catch (error) {
@@ -1612,7 +2069,7 @@ app.get("/api/connection-import-batches/:id/preview", requirePermission("product
   }
 });
 
-app.post("/api/connection-import-batches/:id/commit", requirePermission("products.edit"), (request, response) => {
+app.post("/api/connection-import-batches/:id/commit", requireLinkImport, (request, response) => {
   try {
     response.json({ success: true, ...commitConnectionImportBatch(request.params.id, request.user?.id) });
   } catch (error) {
@@ -1620,7 +2077,7 @@ app.post("/api/connection-import-batches/:id/commit", requirePermission("product
   }
 });
 
-app.post("/api/connection-import-batches/:id/period-snapshots", requirePermission("products.edit"), (request, response) => {
+app.post("/api/connection-import-batches/:id/period-snapshots", requireLinkImport, (request, response) => {
   try {
     response.status(201).json({ success: true, ...createConnectionPeriodSnapshots(request.params.id, request.body ?? {}) });
   } catch (error) {
@@ -1628,7 +2085,7 @@ app.post("/api/connection-import-batches/:id/period-snapshots", requirePermissio
   }
 });
 
-app.get("/api/connections/:id/period-snapshots", requirePermission("products.view"), (request, response) => {
+app.get("/api/connections/:id/period-snapshots", requireLinkView, requireConnectionAccess, (request, response) => {
   try {
     response.json({ success: true, items: listConnectionPeriodSnapshots(request.params.id) });
   } catch (error) {
@@ -1636,7 +2093,7 @@ app.get("/api/connections/:id/period-snapshots", requirePermission("products.vie
   }
 });
 
-app.get("/api/connections/:id/growth-analysis", requirePermission("products.view"), (request, response) => {
+app.get("/api/connections/:id/growth-analysis", requireLinkView, requireConnectionAccess, (request, response) => {
   try {
     response.json({ success: true, item: getConnectionGrowthAnalysis(request.params.id) });
   } catch (error) {
@@ -1644,15 +2101,31 @@ app.get("/api/connections/:id/growth-analysis", requirePermission("products.view
   }
 });
 
-app.get("/api/connection-growth-rankings", requirePermission("products.view"), (request, response) => {
+app.get("/api/connection-growth-rankings", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, ...listConnectionGrowthRankings(request.query.sort, request.query.limit) });
+    response.json({ success: true, ...listConnectionGrowthRankings(request.query.sort, request.query.limit, getUserPersonId(request.user), isAdminUser(request.user)) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "连接成长排行读取失败。" });
   }
 });
 
-app.get("/api/connections/:id/health-records", requirePermission("products.view"), (request, response) => {
+app.get("/api/connection-management/overview", requireLinkView, (request, response) => {
+  try {
+    response.json({ success: true, ...getConnectionManagementOverview(getUserPersonId(request.user), isAdminUser(request.user)) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "链接经营概览读取失败。" });
+  }
+});
+
+app.get("/api/connection-business-cockpit", requireLinkView, (request, response) => {
+  try {
+    response.json({ success: true, ...getConnectionBusinessCockpit(getUserPersonId(request.user), isAdminUser(request.user)) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "链接经营驾驶舱读取失败。" });
+  }
+});
+
+app.get("/api/connections/:id/health-records", requireLinkHealth, requireConnectionAccess, (request, response) => {
   try {
     response.json({ success: true, items: listConnectionHealthRecords(request.params.id) });
   } catch (error) {
@@ -1660,7 +2133,7 @@ app.get("/api/connections/:id/health-records", requirePermission("products.view"
   }
 });
 
-app.post("/api/connections/:id/health-records", requirePermission("products.edit"), (request, response) => {
+app.post("/api/connections/:id/health-records", requireLinkHealthManage, requireConnectionAccess, (request, response) => {
   try {
     response.status(201).json({ success: true, ...createConnectionHealthRecord(request.params.id, request.body?.snapshotId) });
   } catch (error) {
@@ -1668,15 +2141,15 @@ app.post("/api/connections/:id/health-records", requirePermission("products.edit
   }
 });
 
-app.get("/api/connection-health-records/attention", requirePermission("products.view"), (_request, response) => {
+app.get("/api/connection-health-records/attention", requireLinkHealth, (request, response) => {
   try {
-    response.json({ success: true, ...listAttentionConnectionHealthRecords() });
+    response.json({ success: true, ...listAttentionConnectionHealthRecords(getUserPersonId(request.user), isAdminUser(request.user)) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "待关注连接读取失败。" });
   }
 });
 
-app.post("/api/connection-health-records/:id/improvement-action", requirePermission("products.edit"), (request, response) => {
+app.post("/api/connection-health-records/:id/improvement-action", requireLinkImprove, requireHealthRecordAccess, (request, response) => {
   if (!hasPermission(request.user, "workPlans.launch")) {
     response.status(403).json({ success: false, message: "你没有权限创建改善行动。" });
     return;
@@ -1688,23 +2161,39 @@ app.post("/api/connection-health-records/:id/improvement-action", requirePermiss
   }
 });
 
-app.get("/api/connection-improvements", requirePermission("products.view"), (request, response) => {
+app.get("/api/connection-improvements", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, items: listConnectionImprovements(request.query) });
+    response.json({ success: true, items: listConnectionImprovements(request.query, getUserPersonId(request.user), isAdminUser(request.user)) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "连接改善记录读取失败。" });
   }
 });
 
-app.get("/api/connection-improvements/summary", requirePermission("products.view"), (_request, response) => {
+app.get("/api/connection-improvements/summary", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, summary: getConnectionImprovementSummary() });
+    response.json({ success: true, summary: getConnectionImprovementSummary(getUserPersonId(request.user), isAdminUser(request.user)) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "连接改善概览读取失败。" });
   }
 });
 
-app.post("/api/connection-improvements", requirePermission("products.edit"), (request, response) => {
+app.get("/api/connection-hospital", requireLinkHealth, (request, response) => {
+  try {
+    response.json({ success: true, ...getConnectionHospital(getUserPersonId(request.user), isAdminUser(request.user)) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "链接医院读取失败。" });
+  }
+});
+
+app.post("/api/connections/:id/diagnosis-entry", requireLinkImprove, requireConnectionAccess, (request, response) => {
+  try {
+    response.status(201).json({ success: true, item: joinConnectionDiagnosis(request.params.id, request.body, getUserPersonId(request.user), isAdminUser(request.user)) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "加入诊断失败。" });
+  }
+});
+
+app.post("/api/connection-improvements", requireLinkImprove, requireBodyConnectionAccess, (request, response) => {
   try {
     response.status(201).json({ success: true, ...createConnectionImprovement(request.body ?? {}, request.user?.id) });
   } catch (error) {
@@ -1712,7 +2201,7 @@ app.post("/api/connection-improvements", requirePermission("products.edit"), (re
   }
 });
 
-app.put("/api/connection-improvements/:id", requirePermission("products.edit"), (request, response) => {
+app.put("/api/connection-improvements/:id", requireLinkImprove, requireImprovementAccess, (request, response) => {
   try {
     response.json({ success: true, item: updateConnectionImprovement(request.params.id, request.body ?? {}) });
   } catch (error) {
@@ -1720,7 +2209,7 @@ app.put("/api/connection-improvements/:id", requirePermission("products.edit"), 
   }
 });
 
-app.post("/api/connection-import-batches/:id/rows/:externalId/confirm", requirePermission("products.edit"), (request, response) => {
+app.post("/api/connection-import-batches/:id/rows/:externalId/confirm", requireLinkImport, (request, response) => {
   try {
     response.status(201).json({ success: true, item: confirmConnectionImportRow(request.params.id, request.params.externalId, request.body, request.user?.id) });
   } catch (error) {
@@ -1728,7 +2217,7 @@ app.post("/api/connection-import-batches/:id/rows/:externalId/confirm", requireP
   }
 });
 
-app.post("/api/connection-import-batches/:id/rows/:externalId/ignore", requirePermission("products.edit"), (request, response) => {
+app.post("/api/connection-import-batches/:id/rows/:externalId/ignore", requireLinkImport, (request, response) => {
   try {
     response.status(201).json({ success: true, item: ignoreConnectionImportRow(request.params.id, request.params.externalId, request.user?.id) });
   } catch (error) {
@@ -1893,10 +2382,11 @@ app.get("/api/products/:id/sales-links", requirePermission("products.view"), (re
       SELECT
         x.*, l.shopId, l.platformGoodsId, l.platformGoodsCode, l.title, l.rawUrl, l.canonicalUrl,
         l.status AS linkStatus, l.activityStatus, l.category, l.identityStrength,
-        s.platform, s.shopName, s.displayName
+        s.platform, s.shopName, s.displayName, c.id AS connectionProfileId
       FROM sales_link_skus x
       JOIN sales_links l ON l.id=x.salesLinkId
       JOIN sales_shops s ON s.id=l.shopId
+      LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
       WHERE x.productId=?
         AND x.currentState='active'
         AND l.currentState='active'
@@ -2449,6 +2939,52 @@ app.patch("/api/process-template-nodes/:id/status", requirePermission("processes
   }
 });
 
+const templateVersionResourceByType = { visual: "templates", action: "task-templates", form: "standard-work-forms", manual: "methodologies" };
+
+function canWriteTemplateVersion(request, assetType, assetId, body = {}) {
+  const resource = templateVersionResourceByType[assetType];
+  if (!resource) return false;
+  const existing = readRouteResourceItem(resource, assetId);
+  const context = getResourceAuthorizationContext(resource, "PUT", request.user, body, existing);
+  return authorizeResourceAction(resource, "write", context);
+}
+
+app.get("/api/template-assets/versions", (request, response) => {
+  if (!canAccessTemplateCenter(request.user)) {
+    response.status(403).json({ success: false, message: "你没有权限查看模板版本。" });
+    return;
+  }
+  try {
+    response.json({ success: true, items: listTemplateVersions(String(request.query.assetType ?? ""), String(request.query.assetId ?? "")) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "模板版本读取失败。" });
+  }
+});
+
+app.post("/api/template-assets/:assetType/:assetId/iterate", (request, response) => {
+  if (!canWriteTemplateVersion(request, request.params.assetType, request.params.assetId, request.body?.content ?? {})) {
+    response.status(403).json({ success: false, message: "你没有权限迭代该模板。" });
+    return;
+  }
+  try {
+    response.status(201).json({ success: true, ...iterateTemplate(request.params.assetType, request.params.assetId, request.body ?? {}, request.user.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "模板迭代失败。" });
+  }
+});
+
+app.post("/api/template-assets/:assetType/:assetId/versions/:versionId/:action", (request, response) => {
+  if (!canWriteTemplateVersion(request, request.params.assetType, request.params.assetId)) {
+    response.status(403).json({ success: false, message: "你没有权限管理该模板版本。" });
+    return;
+  }
+  try {
+    response.json({ success: true, items: changeTemplateVersionStatus(request.params.assetType, request.params.assetId, request.params.versionId, request.params.action, request.user.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "模板版本状态更新失败。" });
+  }
+});
+
 app.get("/api/:resource", (request, response) => {
   try {
     const context = getResourceAuthorizationContext(
@@ -2484,7 +3020,14 @@ app.post("/api/:resource", (request, response) => {
       new Set(["work-plans", "process-instances"]).has(request.params.resource) &&
       rejectUnauthorizedActionTemplateLaunch(request.user, request.body ?? {}, response)
     ) return;
-    response.status(201).json(createResource(request.params.resource, request.body));
+    const created = versionedTemplateResources.has(request.params.resource)
+      ? getDatabase().transaction(() => {
+          const item = createResource(request.params.resource, request.body);
+          ensureInitialTemplateVersion(request.params.resource, item, request.user.id);
+          return item;
+        })()
+      : createResource(request.params.resource, request.body);
+    response.status(201).json(created);
   } catch (error) {
     response.status(404).json({ error: error.message });
   }
@@ -2493,6 +3036,10 @@ app.post("/api/:resource", (request, response) => {
 app.put("/api/:resource/:id", (request, response) => {
   try {
     if (rejectLegacyContentScheduleWrite(request.params.resource, response)) return;
+    if (versionedTemplateResources.has(request.params.resource)) {
+      response.status(409).json({ success: false, message: "模板内容不能直接覆盖，请使用迭代生成新版本。" });
+      return;
+    }
     const registration = resourcePermissions[request.params.resource];
     if (registration === undefined || typeof registration.write !== "function") {
       response.status(403).json({ success: false, message: "你没有权限进行该操作" });

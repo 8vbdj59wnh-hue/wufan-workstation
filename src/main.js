@@ -2,14 +2,20 @@ import { modules } from "./modules.js?v=20260705-state-singleton1";
 import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260803-action-product-manual-link1";
 import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260803-action-product-manual-link1";
 import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260705-state-singleton1";
-import { bindTasksPageEvents, renderTasksPage, selectTask } from "./tasksPage.js?v=20260803-action-product-manual-link1";
+import { bindTasksPageEvents, renderTasksPage, selectTask } from "./pages/tasksPage.js?v=20260803-action-product-manual-link1";
 import { bindScheduleBoardPageEvents, renderScheduleBoardPage } from "./scheduleBoardPage.js?v=20260803-action-product-manual-link1";
 import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260803-action-product-manual-link1";
-import { bindMethodologiesPageEvents } from "./methodologiesPage.js?v=20260705-state-singleton1";
+import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js?v=20260802-template-version1";
 import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js?v=20260803-action-product-manual-link1";
-import { bindProductCenterPageEvents, renderProductCenterPage } from "./productCenterPage.js?v=20260725-product-archive1";
+import { bindProductCenterPageEvents, renderProductCenterPage } from "./pages/productCenterPage.js?v=20260803-product-link-search1";
 import { bindDataCenterPageEvents, renderDataCenterPage } from "./dataCenterPage.js?v=20260729-data-center-v5";
-import { bindConnectionCenterPageEvents, renderConnectionCenterPage } from "./connectionCenterPage.js?v=20260801-connection-center1";
+import { bindConnectionCenterPageEvents, renderConnectionCenterPage } from "./pages/connectionCenterPage.js?v=20260803-connection-workbench1";
+import { bindOperationDashboardPageEvents, renderOperationDashboardPage } from "./operationDashboardPage.js?v=20260802-operation-foundation1";
+import { bindFinanceCenterPageEvents, renderFinanceCenterPage } from "./financeCenterPage.js?v=20260802-finance-center1";
+import { bindSupplyChainCenterPageEvents, renderSupplyChainCenterPage } from "./pages/supplyChainCenterPage.js?v=20260802-supply-chain1";
+import { bindCustomerCenterPageEvents, renderCustomerCenterPage } from "./pages/customerCenterPage.js?v=20260802-customer-center1";
+import { bindAiOperationAssistantPageEvents, renderAiOperationAssistantPage } from "./pages/aiOperationAssistantPage.js?v=20260802-ai-operation2";
+import { bindDashboardPageEvents, renderDashboardPage } from "./dashboardPage.js?v=20260802-today-overview1";
 import { bindProductPreviewEvents, closeProductPreview, openProductPreview, renderProductPreviewModal } from "./productPreview.js?v=20260725-product-preview1";
 import { attachThumbnailHoverPreview } from "./thumbnailPreview.js?v=20260723-task-card-static1";
 import {
@@ -73,20 +79,33 @@ app.addEventListener("click", (event) => {
 });
 
 const moduleHashMap = {
+  dashboard: "dashboard",
+  "dashboard-operation": "dashboard",
+  "dashboard-management": "dashboard",
   goals: "goals",
+  operationDashboard: "dashboard",
+  "operation-dashboard": "dashboard",
   tasks: "tasks",
   scheduleBoard: "scheduleBoard",
   "schedule-board": "scheduleBoard",
   "task-schedule-board": "scheduleBoard",
   "schedule-board/content-note": "scheduleBoard",
   processes: "processes",
-  assessment: "assessment",
+  assessment: "dashboard",
   templateCenter: "templateCenter",
   products: "products",
   dataCenter: "dataCenter",
   "data-center": "dataCenter",
+  financeCenter: "financeCenter",
+  "finance-center": "financeCenter",
   connectionCenter: "connectionCenter",
   "connection-center": "connectionCenter",
+  supplyChainCenter: "supplyChainCenter",
+  "supply-chain-center": "supplyChainCenter",
+  customerCenter: "customerCenter",
+  "customer-center": "customerCenter",
+  aiOperationAssistant: "aiOperationAssistant",
+  "ai-operation-assistant": "aiOperationAssistant",
   "template-center": "templateCenter",
   methods: "processes",
   settings: "settings",
@@ -100,11 +119,11 @@ const moduleHashMap = {
   contentSchedules: "scheduleBoard",
   "process-templates": "processes",
   "started-processes": "processes",
-  "assessment-stats": "assessment",
-  "assessment-reports": "assessment",
-  "assessment-problems": "assessment",
-  "assessment-rectifications": "assessment",
-  "assessment-person-profiles": "assessment",
+  "assessment-stats": "dashboard",
+  "assessment-reports": "dashboard",
+  "assessment-problems": "dashboard",
+  "assessment-rectifications": "dashboard",
+  "assessment-person-profiles": "dashboard",
   methodologies: "processes",
   methods: "processes",
   organization: "settings",
@@ -147,7 +166,9 @@ function scrollToCurrentHashSection() {
 
 function getModuleIdFromHash() {
   const hash = getRouteHash();
+  if (hash.startsWith("templateCenter/")) return "templateCenter";
   if (hash.startsWith("products/")) return "products";
+  if (hash.startsWith("connectionCenter/")) return "connectionCenter";
   if (hash.startsWith("process-template-")) return "processes";
   if (hash.startsWith("methodology-")) return "processes";
   return moduleHashMap[hash] ?? modules[0].id;
@@ -165,7 +186,7 @@ function getActiveModule() {
 }
 
 function getAccessibleModules() {
-  return modules.filter((module) => canAccessModule(getCurrentUser(), module.id));
+  return modules.filter((module) => !module.hidden && canAccessModule(getCurrentUser(), module.id));
 }
 
 function escapeHtml(value) {
@@ -362,6 +383,10 @@ function renderPage() {
     content = renderGoalsPage();
   }
 
+  if (canAccessActiveModule && activeModule.id === "dashboard") {
+    content = renderDashboardPage();
+  }
+
   if (activeModule.id === "tasks") {
     content = renderTasksPage();
   }
@@ -371,7 +396,9 @@ function renderPage() {
   }
 
   if (activeModule.id === "processes") {
-    content = renderProcessesPage();
+    content = /^(#methods|#methodologies|#methodology-)/.test(window.location.hash)
+      ? renderMethodologiesPage(currentUser)
+      : renderProcessesPage();
   }
 
   if (activeModule.id === "assessment") {
@@ -390,8 +417,26 @@ function renderPage() {
     content = renderDataCenterPage();
   }
 
+  if (canAccessActiveModule && activeModule.id === "operationDashboard") {
+    content = renderOperationDashboardPage();
+  }
+
+  if (canAccessActiveModule && activeModule.id === "financeCenter") {
+    content = renderFinanceCenterPage();
+  }
+
   if (canAccessActiveModule && activeModule.id === "connectionCenter") {
     content = renderConnectionCenterPage();
+  }
+
+  if (canAccessActiveModule && activeModule.id === "supplyChainCenter") {
+    content = renderSupplyChainCenterPage();
+  }
+  if (canAccessActiveModule && activeModule.id === "customerCenter") {
+    content = renderCustomerCenterPage();
+  }
+  if (canAccessActiveModule && activeModule.id === "aiOperationAssistant") {
+    content = renderAiOperationAssistantPage();
   }
 
   if (activeModule.id === "settings") {
@@ -670,8 +715,29 @@ function render({ navigation = false } = {}) {
     bindDataCenterPageEvents(render);
   }
 
+  if (activeModuleId === "operationDashboard") {
+    bindOperationDashboardPageEvents(render);
+  }
+
+  if (activeModuleId === "financeCenter") {
+    bindFinanceCenterPageEvents(render);
+  }
+
   if (activeModuleId === "connectionCenter") {
     bindConnectionCenterPageEvents(render);
+  }
+
+  if (activeModuleId === "supplyChainCenter") {
+    bindSupplyChainCenterPageEvents(render);
+  }
+  if (activeModuleId === "customerCenter") {
+    bindCustomerCenterPageEvents(render);
+  }
+  if (activeModuleId === "aiOperationAssistant") {
+    bindAiOperationAssistantPageEvents(render);
+  }
+  if (activeModuleId === "dashboard") {
+    bindDashboardPageEvents(render);
   }
 
   if (document.querySelector(".methodologies-page") !== null) {

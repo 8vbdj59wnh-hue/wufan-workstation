@@ -541,7 +541,8 @@ const resourceConfigs = {
     table: "sales_links",
     columns: [
       "id", "shopId", "platformGoodsId", "platformGoodsCode", "title", "canonicalUrl", "rawUrl",
-      "status", "activityStatus", "category", "identityStrength", "lastModifiedAt", "lastSeenBatchId",
+      "status", "activityStatus", "category", "identityStrength", "originSource", "enrichmentStatus",
+      "lastModifiedAt", "lastSeenBatchId",
       "currentState", "missingAt", "lastImportedAt", "createdAt", "updatedAt",
     ],
   },
@@ -1212,6 +1213,50 @@ function ensureColumn(table, column, definition) {
     getDatabase().exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
     console.log(`[db:migrate] added ${table}.${column}`);
   }
+}
+
+function backfillConnectionProfileOrigins() {
+  const database = getDatabase();
+  database.exec(`
+    UPDATE connection_profiles
+    SET originSource=CASE
+          WHEN EXISTS (
+            SELECT 1 FROM connection_data_mappings mapping
+            WHERE mapping.connectionId=connection_profiles.id
+              AND mapping.sourceType='business_advisor'
+              AND mapping.deletedAt IS NULL
+          ) THEN 'legacy_business_advisor_supported'
+          ELSE 'legacy_bulk_initialized'
+        END,
+        identifiedAt=COALESCE(NULLIF(identifiedAt,''),createdAt),
+        originImportBatchId=COALESCE(originImportBatchId,(
+          SELECT snapshot.importBatchId
+          FROM connection_period_snapshots snapshot
+          JOIN connection_data_mappings mapping ON mapping.id=snapshot.mappingId
+          WHERE mapping.connectionId=connection_profiles.id
+            AND mapping.sourceType='business_advisor'
+          ORDER BY snapshot.createdAt,snapshot.id LIMIT 1
+        ))
+    WHERE originSource IS NULL OR originSource='' OR originSource='legacy_unknown'
+  `);
+}
+
+function migrateLegacyConnectionBenchmarks() {
+  const database = getDatabase();
+  const legacyTable = database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='connection_benchmarks'").get();
+  if (!legacyTable) return;
+  database.exec(`
+    INSERT OR IGNORE INTO connection_benchmark_targets (
+      id,connectionId,targetType,internalConnectionId,targetUrl,platform,title,mainImage,notes,createdBy,createdAt,updatedAt
+    )
+    SELECT b.id,b.connectionId,'internal',b.benchmarkConnectionId,l.canonicalUrl,s.platform,
+           COALESCE(c.name,l.title,'历史系统内对标链接'),c.mainImage,
+           '由旧版系统内竞品关系兼容迁移',b.createdBy,b.createdAt,b.updatedAt
+    FROM connection_benchmarks b
+    JOIN connection_profiles c ON c.id=b.benchmarkConnectionId
+    JOIN sales_links l ON l.id=c.salesLinkId
+    JOIN sales_shops s ON s.id=l.shopId
+  `);
 }
 
 function backfillBusinessIdentifiers() {
@@ -1962,9 +2007,21 @@ function runLightweightMigrations() {
   ensureColumn("connection_import_batches", "periodStart", "TEXT");
   ensureColumn("connection_import_batches", "periodEnd", "TEXT");
   ensureColumn("connection_import_batches", "periodType", "TEXT");
+  ensureColumn("connection_import_batches", "importType", "TEXT");
+  ensureColumn("connection_import_batches", "templateVersionId", "TEXT");
+  ensureColumn("connection_import_batches", "sourcePlatform", "TEXT");
+  ensureColumn("connection_import_batches", "completedAt", "TEXT");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_import_batches_type_hash ON connection_import_batches(importType,fileHash) WHERE importType IS NOT NULL");
   ensureColumn("connection_profiles", "mainImage", "TEXT");
   ensureColumn("connection_profiles", "imageSource", "TEXT");
   ensureColumn("connection_profiles", "level", "TEXT NOT NULL DEFAULT 'new'");
+  ensureColumn("connection_profiles", "originSource", "TEXT NOT NULL DEFAULT 'legacy_unknown'");
+  ensureColumn("connection_profiles", "originImportBatchId", "TEXT");
+  ensureColumn("connection_profiles", "identifiedAt", "TEXT");
+  ensureColumn("sales_links", "originSource", "TEXT NOT NULL DEFAULT 'legacy_unknown'");
+  ensureColumn("sales_links", "enrichmentStatus", "TEXT NOT NULL DEFAULT 'complete'");
+  backfillConnectionProfileOrigins();
+  migrateLegacyConnectionBenchmarks();
   backfillBusinessIdentifiers();
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS permission_templates (

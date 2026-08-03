@@ -447,6 +447,27 @@ CREATE TABLE IF NOT EXISTS standard_work_forms (
   updatedAt TEXT
 );
 
+CREATE TABLE IF NOT EXISTS template_asset_versions (
+  id TEXT PRIMARY KEY,
+  assetType TEXT NOT NULL,
+  assetId TEXT NOT NULL,
+  versionNumber TEXT NOT NULL,
+  majorVersion INTEGER NOT NULL,
+  minorVersion INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  contentJson TEXT NOT NULL,
+  changeSummary TEXT,
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  activatedAt TEXT,
+  deactivatedAt TEXT,
+  archivedAt TEXT,
+  UNIQUE(assetType, assetId, versionNumber)
+);
+
+CREATE INDEX IF NOT EXISTS idx_template_asset_versions_asset ON template_asset_versions(assetType, assetId, majorVersion DESC, minorVersion DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_template_asset_versions_active ON template_asset_versions(assetType, assetId) WHERE status = 'active';
+
 CREATE TABLE IF NOT EXISTS notifications (
   id TEXT PRIMARY KEY,
   userId TEXT NOT NULL,
@@ -922,6 +943,8 @@ CREATE TABLE IF NOT EXISTS sales_links (
   activityStatus TEXT,
   category TEXT,
   identityStrength TEXT NOT NULL,
+  originSource TEXT NOT NULL DEFAULT 'legacy_unknown',
+  enrichmentStatus TEXT NOT NULL DEFAULT 'complete',
   lastModifiedAt TEXT,
   lastSeenBatchId TEXT,
   currentState TEXT NOT NULL DEFAULT 'active',
@@ -982,15 +1005,60 @@ CREATE TABLE IF NOT EXISTS connection_profiles (
   status TEXT NOT NULL DEFAULT 'active',
   level TEXT NOT NULL DEFAULT 'new',
   notes TEXT,
+  originSource TEXT NOT NULL DEFAULT 'legacy_unknown',
+  originImportBatchId TEXT,
+  identifiedAt TEXT,
   createdBy TEXT,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
   FOREIGN KEY(salesLinkId) REFERENCES sales_links(id),
+  FOREIGN KEY(originImportBatchId) REFERENCES connection_import_batches(id),
   FOREIGN KEY(ownerId) REFERENCES persons(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_connection_profiles_owner_status
   ON connection_profiles(ownerId, status);
+
+CREATE TABLE IF NOT EXISTS connection_benchmark_targets (
+  id TEXT PRIMARY KEY,
+  connectionId TEXT NOT NULL,
+  targetType TEXT NOT NULL DEFAULT 'external',
+  internalConnectionId TEXT,
+  targetUrl TEXT,
+  platform TEXT,
+  title TEXT NOT NULL,
+  mainImage TEXT,
+  price REAL,
+  salesInfo TEXT,
+  reviewInfo TEXT,
+  sellingPoints TEXT,
+  detailContent TEXT,
+  notes TEXT,
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(connectionId) REFERENCES connection_profiles(id) ON DELETE CASCADE,
+  FOREIGN KEY(internalConnectionId) REFERENCES connection_profiles(id) ON DELETE SET NULL,
+  FOREIGN KEY(createdBy) REFERENCES persons(id),
+  CHECK(targetType IN ('external','internal')),
+  CHECK(internalConnectionId IS NULL OR connectionId <> internalConnectionId)
+);
+
+CREATE INDEX IF NOT EXISTS idx_connection_benchmark_targets_connection
+  ON connection_benchmark_targets(connectionId, createdAt DESC);
+
+CREATE TABLE IF NOT EXISTS connection_follows (
+  id TEXT PRIMARY KEY,
+  userId TEXT NOT NULL,
+  connectionId TEXT NOT NULL,
+  createdAt TEXT NOT NULL,
+  FOREIGN KEY(userId) REFERENCES persons(id) ON DELETE CASCADE,
+  FOREIGN KEY(connectionId) REFERENCES connection_profiles(id) ON DELETE CASCADE,
+  UNIQUE(userId, connectionId)
+);
+
+CREATE INDEX IF NOT EXISTS idx_connection_follows_user_created
+  ON connection_follows(userId, createdAt DESC);
 
 CREATE TABLE IF NOT EXISTS connection_actions (
   id TEXT PRIMARY KEY,
@@ -1061,11 +1129,110 @@ CREATE TABLE IF NOT EXISTS connection_import_batches (
   createdBy TEXT,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
+  importType TEXT,
+  templateVersionId TEXT,
+  sourcePlatform TEXT,
+  completedAt TEXT,
   FOREIGN KEY(createdBy) REFERENCES persons(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_connection_import_batches_source_created
   ON connection_import_batches(sourceType, createdAt DESC);
+
+CREATE TABLE IF NOT EXISTS connection_import_templates (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  sourcePlatform TEXT NOT NULL DEFAULT '',
+  dataType TEXT NOT NULL,
+  currentVersionId TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(createdBy) REFERENCES persons(id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_import_templates_name_type
+  ON connection_import_templates(name,dataType);
+
+CREATE TABLE IF NOT EXISTS connection_import_template_versions (
+  id TEXT PRIMARY KEY,
+  templateId TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  fieldMappingsJson TEXT NOT NULL DEFAULT '{}',
+  requiredFieldsJson TEXT NOT NULL DEFAULT '[]',
+  fieldTypesJson TEXT NOT NULL DEFAULT '{}',
+  matchRulesJson TEXT NOT NULL DEFAULT '{}',
+  changeNote TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  FOREIGN KEY(templateId) REFERENCES connection_import_templates(id),
+  FOREIGN KEY(createdBy) REFERENCES persons(id),
+  UNIQUE(templateId,version)
+);
+
+CREATE TABLE IF NOT EXISTS connection_import_rows (
+  id TEXT PRIMARY KEY,
+  batchId TEXT NOT NULL,
+  rowNumber INTEGER NOT NULL,
+  externalKey TEXT,
+  rawDataJson TEXT NOT NULL DEFAULT '{}',
+  normalizedDataJson TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL,
+  errorType TEXT,
+  errorMessage TEXT,
+  createdAt TEXT NOT NULL,
+  FOREIGN KEY(batchId) REFERENCES connection_import_batches(id),
+  UNIQUE(batchId,rowNumber)
+);
+
+CREATE INDEX IF NOT EXISTS idx_connection_import_rows_batch_status
+  ON connection_import_rows(batchId,status,rowNumber);
+
+CREATE TABLE IF NOT EXISTS connection_sku_sales_facts (
+  id TEXT PRIMARY KEY,
+  batchId TEXT NOT NULL,
+  salesLinkId TEXT NOT NULL,
+  salesLinkSkuId TEXT NOT NULL,
+  platformGoodsId TEXT NOT NULL,
+  skuCode TEXT NOT NULL,
+  periodStart TEXT NOT NULL,
+  periodEnd TEXT NOT NULL,
+  shippedQuantity REAL,
+  salesAmount REAL,
+  costAmount REAL,
+  profitAmount REAL,
+  rawDataJson TEXT NOT NULL DEFAULT '{}',
+  createdAt TEXT NOT NULL,
+  FOREIGN KEY(batchId) REFERENCES connection_import_batches(id),
+  FOREIGN KEY(salesLinkId) REFERENCES sales_links(id),
+  FOREIGN KEY(salesLinkSkuId) REFERENCES sales_link_skus(id),
+  UNIQUE(salesLinkSkuId,periodStart,periodEnd)
+);
+
+CREATE INDEX IF NOT EXISTS idx_connection_sku_sales_link_period
+  ON connection_sku_sales_facts(salesLinkId,periodEnd DESC,periodStart DESC);
+
+CREATE TABLE IF NOT EXISTS connection_sku_inventory_facts (
+  id TEXT PRIMARY KEY,
+  batchId TEXT NOT NULL,
+  salesLinkSkuId TEXT NOT NULL,
+  skuCode TEXT NOT NULL,
+  businessDate TEXT NOT NULL,
+  currentStock REAL,
+  availableStock REAL,
+  unitCost REAL,
+  salesVelocity REAL,
+  rawDataJson TEXT NOT NULL DEFAULT '{}',
+  createdAt TEXT NOT NULL,
+  FOREIGN KEY(batchId) REFERENCES connection_import_batches(id),
+  FOREIGN KEY(salesLinkSkuId) REFERENCES sales_link_skus(id),
+  UNIQUE(salesLinkSkuId,businessDate)
+);
+
+CREATE INDEX IF NOT EXISTS idx_connection_sku_inventory_sku_date
+  ON connection_sku_inventory_facts(salesLinkSkuId,businessDate DESC);
 
 CREATE TABLE IF NOT EXISTS connection_period_snapshots (
   id TEXT PRIMARY KEY,
@@ -1127,6 +1294,27 @@ CREATE INDEX IF NOT EXISTS idx_connection_health_records_status_created
 CREATE INDEX IF NOT EXISTS idx_connection_health_records_connection_created
   ON connection_health_records(connectionId, createdAt DESC);
 
+CREATE TABLE IF NOT EXISTS connection_diagnosis_entries (
+  id TEXT PRIMARY KEY,
+  connectionId TEXT NOT NULL,
+  initiatedBy TEXT,
+  joinedAt TEXT NOT NULL,
+  anomalyReasonsJson TEXT NOT NULL DEFAULT '[]',
+  notes TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(connectionId) REFERENCES connection_profiles(id) ON DELETE CASCADE,
+  FOREIGN KEY(initiatedBy) REFERENCES persons(id),
+  CHECK(status IN ('active','closed'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_diagnosis_entries_active
+  ON connection_diagnosis_entries(connectionId) WHERE status='active';
+
+CREATE INDEX IF NOT EXISTS idx_connection_diagnosis_entries_joined
+  ON connection_diagnosis_entries(status, joinedAt DESC);
+
 CREATE TABLE IF NOT EXISTS connection_improvements (
   id TEXT PRIMARY KEY,
   connectionId TEXT NOT NULL,
@@ -1158,3 +1346,377 @@ CREATE TABLE IF NOT EXISTS platform_sku_manual_bindings (
   FOREIGN KEY(salesLinkSkuId) REFERENCES sales_link_skus(id),
   FOREIGN KEY(productId) REFERENCES products(id)
 );
+
+CREATE TABLE IF NOT EXISTS finance_import_batches (
+  id TEXT PRIMARY KEY,
+  fileName TEXT NOT NULL,
+  fileHash TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'parsed',
+  totalRows INTEGER NOT NULL DEFAULT 0,
+  matchedRows INTEGER NOT NULL DEFAULT 0,
+  pendingRows INTEGER NOT NULL DEFAULT 0,
+  previewJson TEXT NOT NULL DEFAULT '[]',
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(createdBy) REFERENCES persons(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_finance_import_batches_created
+  ON finance_import_batches(createdAt DESC);
+
+CREATE TABLE IF NOT EXISTS finance_rules (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  keywordsJson TEXT NOT NULL DEFAULT '[]',
+  entryType TEXT NOT NULL,
+  category TEXT NOT NULL,
+  priority INTEGER NOT NULL DEFAULT 100,
+  status TEXT NOT NULL DEFAULT 'active',
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(createdBy) REFERENCES persons(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_finance_rules_status_priority
+  ON finance_rules(status, priority ASC, createdAt ASC);
+
+CREATE TABLE IF NOT EXISTS finance_entries (
+  id TEXT PRIMARY KEY,
+  importBatchId TEXT,
+  businessDate TEXT NOT NULL,
+  entryType TEXT NOT NULL,
+  category TEXT NOT NULL,
+  amount REAL NOT NULL,
+  description TEXT,
+  platform TEXT,
+  productId TEXT,
+  salesLinkId TEXT,
+  externalId TEXT,
+  sourceDataJson TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'confirmed',
+  createdBy TEXT,
+  approvedBy TEXT,
+  approvedAt TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(importBatchId) REFERENCES finance_import_batches(id),
+  FOREIGN KEY(productId) REFERENCES products(id),
+  FOREIGN KEY(salesLinkId) REFERENCES sales_links(id),
+  FOREIGN KEY(createdBy) REFERENCES persons(id),
+  FOREIGN KEY(approvedBy) REFERENCES persons(id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_finance_entries_batch_external
+  ON finance_entries(importBatchId, externalId)
+  WHERE importBatchId IS NOT NULL AND externalId IS NOT NULL AND externalId <> '';
+
+CREATE INDEX IF NOT EXISTS idx_finance_entries_date_type
+  ON finance_entries(businessDate, entryType, status);
+
+CREATE INDEX IF NOT EXISTS idx_finance_entries_product_date
+  ON finance_entries(productId, businessDate);
+
+CREATE INDEX IF NOT EXISTS idx_finance_entries_link_date
+  ON finance_entries(salesLinkId, businessDate);
+
+CREATE TABLE IF NOT EXISTS product_lifecycle_events (
+  id TEXT PRIMARY KEY,
+  productId TEXT NOT NULL,
+  fromStatus TEXT,
+  toStatus TEXT NOT NULL,
+  reason TEXT,
+  changedBy TEXT,
+  changedAt TEXT NOT NULL,
+  FOREIGN KEY(productId) REFERENCES products(id),
+  FOREIGN KEY(changedBy) REFERENCES persons(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_lifecycle_events_product_time
+  ON product_lifecycle_events(productId, changedAt DESC);
+
+CREATE TABLE IF NOT EXISTS product_health_records (
+  id TEXT PRIMARY KEY,
+  productId TEXT NOT NULL,
+  snapshotKey TEXT NOT NULL,
+  healthScore REAL,
+  healthStatus TEXT NOT NULL,
+  metricsJson TEXT NOT NULL DEFAULT '{}',
+  problemsJson TEXT NOT NULL DEFAULT '[]',
+  suggestionsJson TEXT NOT NULL DEFAULT '[]',
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(productId) REFERENCES products(id),
+  UNIQUE(productId, snapshotKey)
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_health_records_status_time
+  ON product_health_records(healthStatus, updatedAt DESC);
+
+CREATE TABLE IF NOT EXISTS product_issues (
+  id TEXT PRIMARY KEY,
+  productId TEXT NOT NULL,
+  healthRecordId TEXT NOT NULL,
+  issueType TEXT NOT NULL,
+  title TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  detailJson TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'open',
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(productId) REFERENCES products(id),
+  FOREIGN KEY(healthRecordId) REFERENCES product_health_records(id),
+  UNIQUE(healthRecordId, issueType)
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_issues_product_status
+  ON product_issues(productId, status, updatedAt DESC);
+
+CREATE TABLE IF NOT EXISTS product_improvements (
+  id TEXT PRIMARY KEY,
+  productId TEXT NOT NULL,
+  issueId TEXT NOT NULL,
+  actionId TEXT NOT NULL,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'planned',
+  beforeMetricsJson TEXT NOT NULL DEFAULT '{}',
+  afterMetricsJson TEXT NOT NULL DEFAULT '{}',
+  resultSummary TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(productId) REFERENCES products(id),
+  FOREIGN KEY(issueId) REFERENCES product_issues(id),
+  FOREIGN KEY(actionId) REFERENCES process_instances(id),
+  UNIQUE(issueId, actionId)
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_improvements_product_status
+  ON product_improvements(productId, status, updatedAt DESC);
+
+CREATE TABLE IF NOT EXISTS suppliers (
+  id TEXT PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  contactName TEXT,
+  contactPhone TEXT,
+  contactEmail TEXT,
+  address TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  notes TEXT,
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(createdBy) REFERENCES persons(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_suppliers_status_name ON suppliers(status, name);
+
+CREATE TABLE IF NOT EXISTS supplier_products (
+  id TEXT PRIMARY KEY,
+  supplierId TEXT NOT NULL,
+  productId TEXT NOT NULL,
+  productErpMappingId TEXT,
+  supplierSkuCode TEXT,
+  unitCost REAL,
+  safetyStock REAL,
+  leadTimeDays INTEGER,
+  isPrimary INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active',
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(supplierId) REFERENCES suppliers(id),
+  FOREIGN KEY(productId) REFERENCES products(id),
+  FOREIGN KEY(productErpMappingId) REFERENCES product_erp_mappings(id),
+  UNIQUE(supplierId, productId, productErpMappingId)
+);
+
+CREATE INDEX IF NOT EXISTS idx_supplier_products_product ON supplier_products(productId, status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_supplier_products_unique_product_level
+  ON supplier_products(supplierId, productId) WHERE productErpMappingId IS NULL;
+CREATE INDEX IF NOT EXISTS idx_supplier_products_supplier ON supplier_products(supplierId, status);
+
+CREATE TABLE IF NOT EXISTS purchase_orders (
+  id TEXT PRIMARY KEY,
+  businessCode TEXT NOT NULL UNIQUE,
+  supplierId TEXT NOT NULL,
+  orderType TEXT NOT NULL DEFAULT 'purchase',
+  status TEXT NOT NULL DEFAULT 'draft',
+  expectedAt TEXT,
+  orderedAt TEXT,
+  receivedAt TEXT,
+  notes TEXT,
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(supplierId) REFERENCES suppliers(id),
+  FOREIGN KEY(createdBy) REFERENCES persons(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_purchase_orders_supplier_status ON purchase_orders(supplierId, status, expectedAt);
+
+CREATE TABLE IF NOT EXISTS purchase_order_items (
+  id TEXT PRIMARY KEY,
+  purchaseOrderId TEXT NOT NULL,
+  productId TEXT NOT NULL,
+  productErpMappingId TEXT,
+  quantity REAL NOT NULL,
+  receivedQuantity REAL NOT NULL DEFAULT 0,
+  unitCost REAL,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(purchaseOrderId) REFERENCES purchase_orders(id) ON DELETE CASCADE,
+  FOREIGN KEY(productId) REFERENCES products(id),
+  FOREIGN KEY(productErpMappingId) REFERENCES product_erp_mappings(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_purchase_order_items_order ON purchase_order_items(purchaseOrderId);
+
+CREATE TABLE IF NOT EXISTS supplier_quality_issues (
+  id TEXT PRIMARY KEY,
+  supplierId TEXT NOT NULL,
+  productId TEXT,
+  purchaseOrderId TEXT,
+  title TEXT NOT NULL,
+  severity TEXT NOT NULL DEFAULT 'medium',
+  status TEXT NOT NULL DEFAULT 'open',
+  description TEXT,
+  resultSummary TEXT,
+  ownerId TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(supplierId) REFERENCES suppliers(id),
+  FOREIGN KEY(productId) REFERENCES products(id),
+  FOREIGN KEY(purchaseOrderId) REFERENCES purchase_orders(id),
+  FOREIGN KEY(ownerId) REFERENCES persons(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_supplier_quality_issues_supplier_status ON supplier_quality_issues(supplierId, status, createdAt DESC);
+
+CREATE TABLE IF NOT EXISTS supplier_evaluations (
+  id TEXT PRIMARY KEY,
+  supplierId TEXT NOT NULL,
+  periodStart TEXT NOT NULL,
+  periodEnd TEXT NOT NULL,
+  costScore REAL NOT NULL,
+  deliveryScore REAL NOT NULL,
+  qualityScore REAL NOT NULL,
+  cooperationScore REAL NOT NULL,
+  totalScore REAL NOT NULL,
+  notes TEXT,
+  evaluatedBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(supplierId) REFERENCES suppliers(id),
+  FOREIGN KEY(evaluatedBy) REFERENCES persons(id),
+  UNIQUE(supplierId, periodStart, periodEnd)
+);
+
+CREATE INDEX IF NOT EXISTS idx_supplier_evaluations_supplier_period ON supplier_evaluations(supplierId, periodEnd DESC);
+
+CREATE TABLE IF NOT EXISTS customers (
+  id TEXT PRIMARY KEY,
+  customerCode TEXT NOT NULL UNIQUE,
+  displayName TEXT NOT NULL,
+  businessType TEXT NOT NULL,
+  sourceChannel TEXT,
+  externalCustomerId TEXT,
+  memberExternalId TEXT,
+  phone TEXT,
+  email TEXT,
+  city TEXT,
+  lifecycleStatus TEXT NOT NULL DEFAULT 'new',
+  privacyLevel TEXT NOT NULL DEFAULT 'restricted',
+  ownerId TEXT,
+  notes TEXT,
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(ownerId) REFERENCES persons(id),
+  FOREIGN KEY(createdBy) REFERENCES persons(id),
+  UNIQUE(businessType, sourceChannel, externalCustomerId)
+);
+CREATE INDEX IF NOT EXISTS idx_customers_type_lifecycle ON customers(businessType,lifecycleStatus,updatedAt DESC);
+CREATE INDEX IF NOT EXISTS idx_customers_owner ON customers(ownerId,lifecycleStatus);
+
+CREATE TABLE IF NOT EXISTS customer_consumptions (
+  id TEXT PRIMARY KEY,
+  customerId TEXT NOT NULL,
+  businessType TEXT NOT NULL,
+  externalOrderId TEXT,
+  sourceChannel TEXT,
+  productId TEXT,
+  salesLinkId TEXT,
+  consumedAt TEXT NOT NULL,
+  amount REAL NOT NULL DEFAULT 0,
+  quantity REAL NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'completed',
+  notes TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(customerId) REFERENCES customers(id),
+  FOREIGN KEY(productId) REFERENCES products(id),
+  FOREIGN KEY(salesLinkId) REFERENCES sales_links(id),
+  UNIQUE(businessType,sourceChannel,externalOrderId)
+);
+CREATE INDEX IF NOT EXISTS idx_customer_consumptions_customer_date ON customer_consumptions(customerId,consumedAt DESC);
+
+CREATE TABLE IF NOT EXISTS customer_tags (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  category TEXT NOT NULL,
+  color TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS customer_tag_relations (
+  customerId TEXT NOT NULL,
+  tagId TEXT NOT NULL,
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  PRIMARY KEY(customerId,tagId),
+  FOREIGN KEY(customerId) REFERENCES customers(id) ON DELETE CASCADE,
+  FOREIGN KEY(tagId) REFERENCES customer_tags(id) ON DELETE CASCADE,
+  FOREIGN KEY(createdBy) REFERENCES persons(id)
+);
+
+CREATE TABLE IF NOT EXISTS customer_followups (
+  id TEXT PRIMARY KEY,
+  customerId TEXT NOT NULL,
+  followupType TEXT NOT NULL,
+  content TEXT NOT NULL,
+  nextFollowupAt TEXT,
+  status TEXT NOT NULL DEFAULT 'open',
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(customerId) REFERENCES customers(id),
+  FOREIGN KEY(createdBy) REFERENCES persons(id)
+);
+CREATE INDEX IF NOT EXISTS idx_customer_followups_customer ON customer_followups(customerId,createdAt DESC);
+
+CREATE TABLE IF NOT EXISTS ai_analysis_records (
+  id TEXT PRIMARY KEY,
+  analysisType TEXT NOT NULL,
+  objectType TEXT,
+  objectId TEXT,
+  title TEXT NOT NULL,
+  question TEXT,
+  providerMode TEXT NOT NULL,
+  ruleVersion TEXT NOT NULL,
+  sourceSnapshotJson TEXT NOT NULL,
+  sourceReferencesJson TEXT NOT NULL,
+  findingsJson TEXT NOT NULL,
+  suggestionsJson TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft',
+  generatedBy TEXT NOT NULL,
+  confirmedBy TEXT,
+  confirmedAt TEXT,
+  actionId TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(generatedBy) REFERENCES persons(id),
+  FOREIGN KEY(confirmedBy) REFERENCES persons(id),
+  FOREIGN KEY(actionId) REFERENCES process_instances(id)
+);
+CREATE INDEX IF NOT EXISTS idx_ai_analysis_records_user_status ON ai_analysis_records(generatedBy,status,createdAt DESC);
