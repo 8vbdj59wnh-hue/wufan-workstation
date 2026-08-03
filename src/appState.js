@@ -1120,8 +1120,12 @@ export async function loadConnectionDataFoundation() {
 
 export async function uploadConnectionFoundationImport(file, options = {}) {
   const form = new FormData(); form.append("file", file); form.append("importType", options.importType ?? "");
-  form.append("sourcePlatform", options.sourcePlatform ?? ""); form.append("templateVersionId", options.templateVersionId ?? "");
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/imports`, { method: "POST", body: form }), "链接数据导入失败。");
+  form.append("templateVersionId", options.templateVersionId ?? "");
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/imports/preview`, { method: "POST", body: form }), "链接数据预览失败。");
+}
+
+export async function confirmConnectionFoundationImport(batchId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/imports/${encodeURIComponent(batchId)}/confirm`, { method: "POST" }), "链接数据确认导入失败。");
 }
 
 export async function createConnectionFoundationTemplate(payload) {

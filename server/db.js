@@ -2010,8 +2010,13 @@ function runLightweightMigrations() {
   ensureColumn("connection_import_batches", "importType", "TEXT");
   ensureColumn("connection_import_batches", "templateVersionId", "TEXT");
   ensureColumn("connection_import_batches", "sourcePlatform", "TEXT");
+  ensureColumn("connection_import_batches", "previewSummaryJson", "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn("connection_import_batches", "completedAt", "TEXT");
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_import_batches_type_hash ON connection_import_batches(importType,fileHash) WHERE importType IS NOT NULL");
+  // A platform goods id can legitimately repeat across shops. The sales link already
+  // carries the stable platform + shop + goods identity, so period facts key by link.
+  db.exec("DROP INDEX IF EXISTS idx_connection_period_snapshots_external_period");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_period_snapshots_link_period ON connection_period_snapshots(sourceType,salesLinkId,periodStart,periodEnd)");
   ensureColumn("connection_profiles", "mainImage", "TEXT");
   ensureColumn("connection_profiles", "imageSource", "TEXT");
   ensureColumn("connection_profiles", "level", "TEXT NOT NULL DEFAULT 'new'");

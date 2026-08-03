@@ -1132,6 +1132,7 @@ CREATE TABLE IF NOT EXISTS connection_import_batches (
   importType TEXT,
   templateVersionId TEXT,
   sourcePlatform TEXT,
+  previewSummaryJson TEXT NOT NULL DEFAULT '{}',
   completedAt TEXT,
   FOREIGN KEY(createdBy) REFERENCES persons(id)
 );
@@ -1264,8 +1265,8 @@ CREATE TABLE IF NOT EXISTS connection_period_snapshots (
   FOREIGN KEY(importBatchId) REFERENCES connection_import_batches(id)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_period_snapshots_external_period
-  ON connection_period_snapshots(sourceType, externalId, periodStart, periodEnd);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_period_snapshots_link_period
+  ON connection_period_snapshots(sourceType, salesLinkId, periodStart, periodEnd);
 
 CREATE INDEX IF NOT EXISTS idx_connection_period_snapshots_connection_period
   ON connection_period_snapshots(connectionId, salesLinkId, periodEnd DESC, periodStart DESC);

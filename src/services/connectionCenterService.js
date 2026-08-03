@@ -1,5 +1,6 @@
 export {
   commitConnectionImport,
+  confirmConnectionFoundationImport,
   confirmConnectionImportRow,
   createConnectionHealthRecord,
   createConnectionImprovementAction,

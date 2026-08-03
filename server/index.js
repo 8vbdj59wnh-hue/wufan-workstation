@@ -113,12 +113,13 @@ import {
 } from "./modules/links/index.js";
 import {
   createConnectionImportTemplate,
+  confirmConnectionDataImport,
   getConnectionImportDefinitions,
-  importConnectionData,
   iterateConnectionImportTemplate,
   listConnectionFoundationBatches,
   listConnectionImportErrors,
   listConnectionImportTemplates,
+  previewConnectionDataImport,
 } from "./connectionDataFoundationService.js";
 import { getConnectionCoreDetail, listConnectionCoreProfiles } from "./connectionCorePageService.js";
 import { getConnectionBusinessCockpit } from "./connectionBusinessCockpitService.js";
@@ -2026,15 +2027,20 @@ app.get("/api/connection-data-foundation/errors", requireLinkView, (request, res
   catch (error) { response.status(400).json({ success: false, message: error.message || "导入异常读取失败。" }); }
 });
 
-app.post("/api/connection-data-foundation/imports", requireLinkImport, (request, response) => {
+app.post("/api/connection-data-foundation/imports/preview", requireLinkImport, (request, response) => {
   uploadConnectionWorkbook.single("file")(request, response, (error) => {
     if (error) { response.status(400).json({ success: false, message: error.message || "链接数据文件上传失败。" }); return; }
     try {
-      const result = importConnectionData({ buffer: request.file?.buffer, fileName: normalizeUploadedFileName(request.file?.originalname), importType: request.body?.importType,
-        templateVersionId: request.body?.templateVersionId, sourcePlatform: request.body?.sourcePlatform, userId: request.user?.id });
+      const result = previewConnectionDataImport({ buffer: request.file?.buffer, fileName: normalizeUploadedFileName(request.file?.originalname), importType: request.body?.importType,
+        templateVersionId: request.body?.templateVersionId, userId: request.user?.id });
       response.status(result.idempotent ? 200 : 201).json({ success: true, ...result });
-    } catch (uploadError) { response.status(400).json({ success: false, message: uploadError.message || "链接数据导入失败。" }); }
+    } catch (uploadError) { response.status(400).json({ success: false, message: uploadError.message || "链接数据预览失败。" }); }
   });
+});
+
+app.post("/api/connection-data-foundation/imports/:id/confirm", requireLinkImport, (request, response) => {
+  try { response.json({ success: true, ...confirmConnectionDataImport(request.params.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "链接数据确认导入失败。" }); }
 });
 
 app.get("/api/connection-import-batches", requireLinkView, (_request, response) => {

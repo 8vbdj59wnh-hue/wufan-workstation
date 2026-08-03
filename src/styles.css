@@ -100,6 +100,12 @@
 .connection-foundation-import-form { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)) auto; gap: 12px; align-items: end; padding: 16px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 14px; background: #fff; }
 .connection-foundation-import-form label { display: grid; gap: 6px; font-size: 12px; color: var(--muted-text, #6b7280); }
 .connection-foundation-import-form input, .connection-foundation-import-form select, .connection-foundation-template-form input, .connection-foundation-template-form select, .connection-foundation-template-form textarea { width: 100%; min-width: 0; box-sizing: border-box; padding: 9px 10px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 9px; background: #fff; }
+.connection-import-preview { margin: 16px 0; padding: 18px; border: 1px solid #bfdbfe; border-radius: 14px; background: #f8fbff; }
+.connection-import-preview.is-blocked { border-color: #fecaca; background: #fff7f7; }
+.connection-import-preview > header, .connection-import-preview > footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.connection-import-preview-grid { display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); gap: 10px; margin: 16px 0; }
+.connection-import-preview-grid span { display: grid; gap: 5px; padding: 11px; border-radius: 10px; background: #fff; color: #667085; font-size: 12px; }
+.connection-import-preview-grid strong { color: #101828; font-size: 14px; overflow-wrap: anywhere; }
 .connection-foundation-panel { display: grid; gap: 12px; }
 .connection-foundation-template-form { display: grid; grid-template-columns: 1fr 1fr 1fr 2fr 1fr auto; gap: 10px; align-items: center; }
 .connection-template-list { display: grid; gap: 8px; }
@@ -208,7 +214,7 @@
   .connection-overview dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .connection-action-form { grid-template-columns: 1fr; }
   .connection-mapping-filters { grid-template-columns: 1fr; }
-  .connection-import-form, .connection-import-summary, .connection-foundation-import-form, .connection-foundation-template-form, .connection-import-type-grid { grid-template-columns: 1fr; }
+  .connection-import-form, .connection-import-summary, .connection-foundation-import-form, .connection-foundation-template-form, .connection-import-type-grid, .connection-import-preview-grid { grid-template-columns: 1fr; }
   .connection-v3-basic dl, .connection-v3-metrics { grid-template-columns: 1fr 1fr; }
   .connection-period-confirm { grid-template-columns: 1fr; }
   .connection-growth-overview, .connection-growth-card { grid-template-columns: 1fr; }
