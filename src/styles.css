@@ -7109,6 +7109,8 @@ button.content-template-thumb {
 .action-product-quick-link,
 .action-product-search-section { display: grid; gap: 7px; padding: 10px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; }
 .action-product-quick-link { border-color: #bfdbfe; background: #eff6ff; }
+.action-product-search-section > summary { cursor: pointer; font-weight: 600; color: #334155; }
+.action-product-search-content { display: grid; gap: 8px; margin-top: 10px; }
 .action-product-search-row { display: grid; grid-template-columns: minmax(220px, 420px) auto; align-items: center; gap: 8px; }
 .action-product-search { width: 100%; }
 .action-product-selected { display: flex; flex-wrap: wrap; gap: 8px; }
