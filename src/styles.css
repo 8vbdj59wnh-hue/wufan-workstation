@@ -7470,6 +7470,9 @@ button.content-template-thumb {
 
 .action-product-selector { display: grid; gap: 10px; margin: 14px 0; }
 .action-product-selector .field-label { font-weight: 600; }
+.action-product-quick-link,
+.action-product-search-section { display: grid; gap: 7px; padding: 10px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; }
+.action-product-quick-link { border-color: #bfdbfe; background: #eff6ff; }
 .action-product-search-row { display: grid; grid-template-columns: minmax(220px, 420px) auto; align-items: center; gap: 8px; }
 .action-product-search { width: 100%; }
 .action-product-selected { display: flex; flex-wrap: wrap; gap: 8px; }
