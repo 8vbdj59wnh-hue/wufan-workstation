@@ -141,9 +141,9 @@ export function getConnectionGrowthAnalysis(connectionId) {
   return analysis;
 }
 
-export function listConnectionGrowthRankings(sort = "overview", limit = 10) {
+export function listConnectionGrowthRankings(sort = "overview", limit = 10, userId = "", isAdmin = false) {
   const safeLimit = Math.max(1, Math.min(Number(limit) || 10, 50));
-  const analyses = listConnectionGrowthAnalyses();
+  const analyses = listConnectionGrowthAnalyses().filter((item) => isAdmin || item.ownerId === text(userId));
   const comparable = analyses.filter((item) => item.comparable);
   const topGrowth = [...comparable].sort((a, b) => b.salesGrowth - a.salesGrowth).slice(0, safeLimit);
   const declining = [...comparable].sort((a, b) => a.salesGrowth - b.salesGrowth).slice(0, safeLimit);
@@ -167,9 +167,9 @@ export function listConnectionGrowthRankings(sort = "overview", limit = 10) {
   return { topGrowth, declining, salesTop, risks, listMetrics };
 }
 
-export function getConnectionManagementOverview() {
+export function getConnectionManagementOverview(userId = "", isAdmin = false) {
   const database = getDatabase();
-  const analyses = listConnectionGrowthAnalyses();
+  const analyses = listConnectionGrowthAnalyses().filter((item) => isAdmin || item.ownerId === text(userId));
   const comparable = analyses.filter((item) => item.comparable);
   const effectiveByOwner = new Map(database.prepare(`
     SELECT COALESCE(c.ownerId,'unassigned') ownerId,COUNT(*) count

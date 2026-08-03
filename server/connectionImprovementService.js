@@ -48,9 +48,10 @@ export function readConnectionImprovement(id) {
   return parseImprovement(row);
 }
 
-export function listConnectionImprovements(filters = {}) {
+export function listConnectionImprovements(filters = {}, userId = "", isAdmin = false) {
   const clauses = ["1=1"];
   const values = [];
+  if (!isAdmin) { clauses.push("c.ownerId=?"); values.push(text(userId)); }
   if (text(filters.connectionId)) { clauses.push("i.connectionId=?"); values.push(text(filters.connectionId)); }
   if (text(filters.status)) {
     if (!statuses.has(text(filters.status))) throw new Error("改善项目状态无效。");
@@ -122,14 +123,16 @@ export function updateConnectionImprovement(id, input) {
   return readConnectionImprovement(current.id);
 }
 
-export function getConnectionImprovementSummary() {
+export function getConnectionImprovementSummary(userId = "", isAdmin = false) {
   const row = getDatabase().prepare(`
     SELECT COUNT(*) total,
-      SUM(CASE WHEN status='effective' THEN 1 ELSE 0 END) effective,
-      SUM(CASE WHEN status='observing' THEN 1 ELSE 0 END) observing,
-      SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) failed
-    FROM connection_improvements
-  `).get();
+      SUM(CASE WHEN i.status='effective' THEN 1 ELSE 0 END) effective,
+      SUM(CASE WHEN i.status='observing' THEN 1 ELSE 0 END) observing,
+      SUM(CASE WHEN i.status='failed' THEN 1 ELSE 0 END) failed
+    FROM connection_improvements i
+    JOIN connection_profiles c ON c.id=i.connectionId
+    WHERE (?=1 OR c.ownerId=?)
+  `).get(isAdmin ? 1 : 0, text(userId));
   return { total: Number(row.total || 0), effective: Number(row.effective || 0),
     observing: Number(row.observing || 0), failed: Number(row.failed || 0) };
 }

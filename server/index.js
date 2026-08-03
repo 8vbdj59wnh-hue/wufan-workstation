@@ -77,6 +77,9 @@ import {
   listConnectionDataMappings,
   getMyConnectionWorkbench,
   setConnectionFollow,
+  assertConnectionVisible,
+  readHealthRecordConnectionId,
+  readImprovementConnectionId,
   readConnectionProfile,
   updateConnectionProfile,
   updateConnectionDataMapping,
@@ -482,6 +485,35 @@ function isAdminUser(user) {
 function getUserPersonId(user) {
   return user?.personId ?? user?.id ?? "";
 }
+
+function requireVisibleConnection(resolveConnectionId = (request) => request.params.id) {
+  return (request, response, next) => {
+    try {
+      assertConnectionVisible(resolveConnectionId(request), getUserPersonId(request.user), isAdminUser(request.user));
+      next();
+    } catch (error) {
+      response.status(error.statusCode || 404).json({ success: false, message: error.message || "连接档案不存在。" });
+    }
+  };
+}
+
+const requireConnectionAccess = requireVisibleConnection();
+const requireHealthRecordAccess = requireVisibleConnection((request) => readHealthRecordConnectionId(request.params.id));
+const requireImprovementAccess = requireVisibleConnection((request) => readImprovementConnectionId(request.params.id));
+const requireBodyConnectionAccess = requireVisibleConnection((request) => request.body?.connectionId);
+const requireOptionalBenchmarkConnectionAccess = (request, response, next) => {
+  if (request.body?.targetType !== "internal" || !request.body?.internalConnectionId) { next(); return; }
+  return requireVisibleConnection((currentRequest) => currentRequest.body.internalConnectionId)(request, response, next);
+};
+const requireBenchmarkComparisonAccess = (request, response, next) => {
+  const target = getDatabase().prepare(`
+    SELECT targetType,internalConnectionId FROM connection_benchmark_targets
+    WHERE id=? AND connectionId=?
+  `).get(request.params.targetId, request.params.id);
+  if (!target) { response.status(404).json({ success: false, message: "未找到对标链接。" }); return; }
+  if (target.targetType !== "internal" || !target.internalConnectionId) { next(); return; }
+  return requireVisibleConnection(() => target.internalConnectionId)(request, response, next);
+};
 
 function canEditProcessInstance(user, instance) {
   if (instance === undefined || instance === null) return false;
@@ -1784,7 +1816,7 @@ app.get("/api/connections", requireLinkView, (request, response) => {
   }
 });
 
-app.get("/api/connections/:id/core-detail", requireLinkView, (request, response) => {
+app.get("/api/connections/:id/core-detail", requireLinkView, requireConnectionAccess, (request, response) => {
   try { response.json({ success: true, ...getConnectionCoreDetail(request.params.id, getUserPersonId(request.user), isAdminUser(request.user)) }); }
   catch (error) { response.status(error.message?.includes("只能查看") ? 403 : 404).json({ success: false, message: error.message || "链接经营详情读取失败。" }); }
 });
@@ -1829,7 +1861,7 @@ app.get("/api/connection-data-mappings/repair-candidates", requireLinkManage, (_
   }
 });
 
-app.get("/api/connections/:id", requireLinkView, (request, response) => {
+app.get("/api/connections/:id", requireLinkView, requireConnectionAccess, (request, response) => {
   try {
     response.json({ success: true, item: readConnectionProfile(request.params.id) });
   } catch (error) {
@@ -1837,7 +1869,7 @@ app.get("/api/connections/:id", requireLinkView, (request, response) => {
   }
 });
 
-app.put("/api/connections/:id", requireLinkManage, (request, response) => {
+app.put("/api/connections/:id", requireLinkManage, requireConnectionAccess, (request, response) => {
   try {
     response.json({ success: true, item: updateConnectionProfile(request.params.id, request.body) });
   } catch (error) {
@@ -1845,7 +1877,7 @@ app.put("/api/connections/:id", requireLinkManage, (request, response) => {
   }
 });
 
-app.get("/api/connections/:id/benchmarks", requireLinkView, (request, response) => {
+app.get("/api/connections/:id/benchmarks", requireLinkView, requireConnectionAccess, (request, response) => {
   try {
     response.json({ success: true, items: listConnectionBenchmarkTargets(request.params.id) });
   } catch (error) {
@@ -1853,15 +1885,15 @@ app.get("/api/connections/:id/benchmarks", requireLinkView, (request, response) 
   }
 });
 
-app.get("/api/connections/:id/benchmark-candidates", requireLinkView, (request, response) => {
+app.get("/api/connections/:id/benchmark-candidates", requireLinkView, requireConnectionAccess, (request, response) => {
   try {
-    response.json({ success: true, items: listConnectionBenchmarkCandidates(request.params.id) });
+    response.json({ success: true, items: listConnectionBenchmarkCandidates(request.params.id, getUserPersonId(request.user), isAdminUser(request.user)) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "竞品候选读取失败。" });
   }
 });
 
-app.post("/api/connections/:id/benchmarks", requireLinkManage, (request, response) => {
+app.post("/api/connections/:id/benchmarks", requireLinkManage, requireConnectionAccess, requireOptionalBenchmarkConnectionAccess, (request, response) => {
   try {
     response.status(201).json({ success: true, item: createConnectionBenchmarkTarget(request.params.id, request.body, getUserPersonId(request.user)) });
   } catch (error) {
@@ -1869,7 +1901,7 @@ app.post("/api/connections/:id/benchmarks", requireLinkManage, (request, respons
   }
 });
 
-app.put("/api/connections/:id/benchmarks/:targetId", requireLinkManage, (request, response) => {
+app.put("/api/connections/:id/benchmarks/:targetId", requireLinkManage, requireConnectionAccess, requireOptionalBenchmarkConnectionAccess, (request, response) => {
   try {
     response.json({ success: true, item: updateConnectionBenchmarkTarget(request.params.id, request.params.targetId, request.body) });
   } catch (error) {
@@ -1877,7 +1909,7 @@ app.put("/api/connections/:id/benchmarks/:targetId", requireLinkManage, (request
   }
 });
 
-app.delete("/api/connections/:id/benchmarks/:targetId", requireLinkManage, (request, response) => {
+app.delete("/api/connections/:id/benchmarks/:targetId", requireLinkManage, requireConnectionAccess, (request, response) => {
   try {
     response.json(deleteConnectionBenchmarkTarget(request.params.id, request.params.targetId));
   } catch (error) {
@@ -1885,7 +1917,7 @@ app.delete("/api/connections/:id/benchmarks/:targetId", requireLinkManage, (requ
   }
 });
 
-app.get("/api/connections/:id/benchmarks/:targetId/comparison", requireLinkView, (request, response) => {
+app.get("/api/connections/:id/benchmarks/:targetId/comparison", requireLinkView, requireConnectionAccess, requireBenchmarkComparisonAccess, (request, response) => {
   try {
     response.json({ success: true, ...getConnectionBenchmarkComparison(request.params.id, request.params.targetId) });
   } catch (error) {
@@ -1909,7 +1941,7 @@ app.post("/api/connections/batch", requireLinkManage, (request, response) => {
   }
 });
 
-app.get("/api/connections/:id/actions", requireLinkView, (request, response) => {
+app.get("/api/connections/:id/actions", requireLinkView, requireConnectionAccess, (request, response) => {
   try {
     response.json({ success: true, items: listConnectionActions(request.params.id) });
   } catch (error) {
@@ -1917,7 +1949,7 @@ app.get("/api/connections/:id/actions", requireLinkView, (request, response) => 
   }
 });
 
-app.post("/api/connections/:id/actions", requireLinkManage, (request, response) => {
+app.post("/api/connections/:id/actions", requireLinkManage, requireConnectionAccess, (request, response) => {
   try {
     response.status(201).json({ success: true, item: createConnectionAction(request.params.id, request.body, request.user?.id) });
   } catch (error) {
@@ -1925,7 +1957,7 @@ app.post("/api/connections/:id/actions", requireLinkManage, (request, response) 
   }
 });
 
-app.delete("/api/connections/:id/actions/:actionId", requireLinkManage, (request, response) => {
+app.delete("/api/connections/:id/actions/:actionId", requireLinkManage, requireConnectionAccess, (request, response) => {
   try {
     response.json(deleteConnectionAction(request.params.id, request.params.actionId));
   } catch (error) {
@@ -2053,7 +2085,7 @@ app.post("/api/connection-import-batches/:id/period-snapshots", requireLinkImpor
   }
 });
 
-app.get("/api/connections/:id/period-snapshots", requireLinkView, (request, response) => {
+app.get("/api/connections/:id/period-snapshots", requireLinkView, requireConnectionAccess, (request, response) => {
   try {
     response.json({ success: true, items: listConnectionPeriodSnapshots(request.params.id) });
   } catch (error) {
@@ -2061,7 +2093,7 @@ app.get("/api/connections/:id/period-snapshots", requireLinkView, (request, resp
   }
 });
 
-app.get("/api/connections/:id/growth-analysis", requireLinkView, (request, response) => {
+app.get("/api/connections/:id/growth-analysis", requireLinkView, requireConnectionAccess, (request, response) => {
   try {
     response.json({ success: true, item: getConnectionGrowthAnalysis(request.params.id) });
   } catch (error) {
@@ -2071,15 +2103,15 @@ app.get("/api/connections/:id/growth-analysis", requireLinkView, (request, respo
 
 app.get("/api/connection-growth-rankings", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, ...listConnectionGrowthRankings(request.query.sort, request.query.limit) });
+    response.json({ success: true, ...listConnectionGrowthRankings(request.query.sort, request.query.limit, getUserPersonId(request.user), isAdminUser(request.user)) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "连接成长排行读取失败。" });
   }
 });
 
-app.get("/api/connection-management/overview", requireLinkView, (_request, response) => {
+app.get("/api/connection-management/overview", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, ...getConnectionManagementOverview() });
+    response.json({ success: true, ...getConnectionManagementOverview(getUserPersonId(request.user), isAdminUser(request.user)) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "链接经营概览读取失败。" });
   }
@@ -2093,7 +2125,7 @@ app.get("/api/connection-business-cockpit", requireLinkView, (request, response)
   }
 });
 
-app.get("/api/connections/:id/health-records", requireLinkHealth, (request, response) => {
+app.get("/api/connections/:id/health-records", requireLinkHealth, requireConnectionAccess, (request, response) => {
   try {
     response.json({ success: true, items: listConnectionHealthRecords(request.params.id) });
   } catch (error) {
@@ -2101,7 +2133,7 @@ app.get("/api/connections/:id/health-records", requireLinkHealth, (request, resp
   }
 });
 
-app.post("/api/connections/:id/health-records", requireLinkHealthManage, (request, response) => {
+app.post("/api/connections/:id/health-records", requireLinkHealthManage, requireConnectionAccess, (request, response) => {
   try {
     response.status(201).json({ success: true, ...createConnectionHealthRecord(request.params.id, request.body?.snapshotId) });
   } catch (error) {
@@ -2109,15 +2141,15 @@ app.post("/api/connections/:id/health-records", requireLinkHealthManage, (reques
   }
 });
 
-app.get("/api/connection-health-records/attention", requireLinkHealth, (_request, response) => {
+app.get("/api/connection-health-records/attention", requireLinkHealth, (request, response) => {
   try {
-    response.json({ success: true, ...listAttentionConnectionHealthRecords() });
+    response.json({ success: true, ...listAttentionConnectionHealthRecords(getUserPersonId(request.user), isAdminUser(request.user)) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "待关注连接读取失败。" });
   }
 });
 
-app.post("/api/connection-health-records/:id/improvement-action", requireLinkImprove, (request, response) => {
+app.post("/api/connection-health-records/:id/improvement-action", requireLinkImprove, requireHealthRecordAccess, (request, response) => {
   if (!hasPermission(request.user, "workPlans.launch")) {
     response.status(403).json({ success: false, message: "你没有权限创建改善行动。" });
     return;
@@ -2131,15 +2163,15 @@ app.post("/api/connection-health-records/:id/improvement-action", requireLinkImp
 
 app.get("/api/connection-improvements", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, items: listConnectionImprovements(request.query) });
+    response.json({ success: true, items: listConnectionImprovements(request.query, getUserPersonId(request.user), isAdminUser(request.user)) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "连接改善记录读取失败。" });
   }
 });
 
-app.get("/api/connection-improvements/summary", requireLinkView, (_request, response) => {
+app.get("/api/connection-improvements/summary", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, summary: getConnectionImprovementSummary() });
+    response.json({ success: true, summary: getConnectionImprovementSummary(getUserPersonId(request.user), isAdminUser(request.user)) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "连接改善概览读取失败。" });
   }
@@ -2153,7 +2185,7 @@ app.get("/api/connection-hospital", requireLinkHealth, (request, response) => {
   }
 });
 
-app.post("/api/connections/:id/diagnosis-entry", requireLinkImprove, (request, response) => {
+app.post("/api/connections/:id/diagnosis-entry", requireLinkImprove, requireConnectionAccess, (request, response) => {
   try {
     response.status(201).json({ success: true, item: joinConnectionDiagnosis(request.params.id, request.body, getUserPersonId(request.user), isAdminUser(request.user)) });
   } catch (error) {
@@ -2161,7 +2193,7 @@ app.post("/api/connections/:id/diagnosis-entry", requireLinkImprove, (request, r
   }
 });
 
-app.post("/api/connection-improvements", requireLinkImprove, (request, response) => {
+app.post("/api/connection-improvements", requireLinkImprove, requireBodyConnectionAccess, (request, response) => {
   try {
     response.status(201).json({ success: true, ...createConnectionImprovement(request.body ?? {}, request.user?.id) });
   } catch (error) {
@@ -2169,7 +2201,7 @@ app.post("/api/connection-improvements", requireLinkImprove, (request, response)
   }
 });
 
-app.put("/api/connection-improvements/:id", requireLinkImprove, (request, response) => {
+app.put("/api/connection-improvements/:id", requireLinkImprove, requireImprovementAccess, (request, response) => {
   try {
     response.json({ success: true, item: updateConnectionImprovement(request.params.id, request.body ?? {}) });
   } catch (error) {

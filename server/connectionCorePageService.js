@@ -15,13 +15,26 @@ function latestSalesSummary(database, salesLinkId) {
   return readConnectionV3Metrics(salesLinkId).current;
 }
 
+function readRelationCounts(database, salesLinkIds) {
+  const ids = [...new Set(salesLinkIds.filter(Boolean))];
+  if (!ids.length) return new Map();
+  const marks = ids.map(() => "?").join(",");
+  return new Map(database.prepare(`
+    SELECT salesLinkId,COUNT(*) skuCount,COUNT(DISTINCT productId) productCount
+    FROM sales_link_skus
+    WHERE salesLinkId IN (${marks}) AND COALESCE(currentState,'active')='active'
+    GROUP BY salesLinkId
+  `).all(...ids).map((row) => [row.salesLinkId, row]));
+}
+
 export function listConnectionCoreProfiles(userId = "", isAdmin = false) {
   const database = getDatabase();
-  const profiles = listConnectionProfiles().filter((item) => isAdmin || !text(userId) || item.ownerId === text(userId));
+  const profiles = listConnectionProfiles().filter((item) => isAdmin || item.ownerId === text(userId));
   const metrics = readConnectionV3MetricsMap(profiles.map((item) => item.salesLinkId));
+  const relationCounts = readRelationCounts(database, profiles.map((item) => item.salesLinkId));
   return profiles.map((item) => {
     const sales = metrics.get(item.salesLinkId)?.current ?? latestSalesSummary(database, item.salesLinkId);
-    const relation = database.prepare(`SELECT COUNT(*) skuCount,COUNT(DISTINCT productId) productCount FROM sales_link_skus WHERE salesLinkId=? AND COALESCE(currentState,'active')='active'`).get(item.salesLinkId);
+    const relation = relationCounts.get(item.salesLinkId) ?? {};
     return { ...item, erpSales: sales, skuCount: Number(relation.skuCount || 0), productCount: Number(relation.productCount || 0) };
   });
 }

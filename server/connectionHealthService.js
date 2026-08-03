@@ -73,7 +73,7 @@ export function createConnectionHealthRecord(connectionId, snapshotId) {
   return { item: listConnectionHealthRecords(connectionId).find((item) => item.id === id), created: true };
 }
 
-export function listAttentionConnectionHealthRecords() {
+export function listAttentionConnectionHealthRecords(userId = "", isAdmin = false) {
   const items = getDatabase().prepare(`
     SELECT r.*,c.name,c.salesLinkId,s.periodStart,s.periodEnd,sh.platform,sh.displayName AS shopDisplayName,sh.shopName
     FROM connection_health_records r
@@ -81,9 +81,10 @@ export function listAttentionConnectionHealthRecords() {
     JOIN connection_period_snapshots s ON s.id=r.snapshotId
     JOIN sales_links l ON l.id=c.salesLinkId JOIN sales_shops sh ON sh.id=l.shopId
     WHERE r.healthStatus IN ('attention','risk')
+      AND (?=1 OR c.ownerId=?)
       AND NOT EXISTS (SELECT 1 FROM connection_health_records newer WHERE newer.connectionId=r.connectionId AND newer.createdAt>r.createdAt)
     ORDER BY CASE r.healthStatus WHEN 'risk' THEN 0 ELSE 1 END,r.healthScore ASC,r.createdAt DESC
-  `).all().map(parseRecord);
+  `).all(isAdmin ? 1 : 0, text(userId)).map(parseRecord);
   const categories = { traffic: 0, conversion: 0, sales: 0, profit: 0 };
   for (const item of items) for (const problem of item.problems) if (Object.prototype.hasOwnProperty.call(categories, problem.type)) categories[problem.type] += 1;
   return { items, counts: { risk: items.filter((item) => item.healthStatus === "risk").length,

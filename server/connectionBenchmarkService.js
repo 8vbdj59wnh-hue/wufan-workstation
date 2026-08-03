@@ -56,12 +56,12 @@ export function listConnectionBenchmarkTargets(connectionId) {
   return database.prepare(`SELECT * FROM connection_benchmark_targets WHERE connectionId=? ORDER BY createdAt,id`).all(id).map(normalizeTarget);
 }
 
-export function listConnectionBenchmarkCandidates(connectionId) {
+export function listConnectionBenchmarkCandidates(connectionId, userId = "", isAdmin = false) {
   const id = text(connectionId); const database = getDatabase();
   if (!database.prepare("SELECT 1 FROM connection_profiles WHERE id=?").get(id)) throw new Error("未找到连接档案。");
   return database.prepare(`SELECT c.id,c.name,c.mainImage,c.status,l.canonicalUrl,l.platformGoodsId,s.platform,s.displayName shopDisplayName,s.shopName
     FROM connection_profiles c JOIN sales_links l ON l.id=c.salesLinkId JOIN sales_shops s ON s.id=l.shopId
-    WHERE c.id<>? ORDER BY c.name,c.id`).all(id);
+    WHERE c.id<>? AND (?=1 OR c.ownerId=?) ORDER BY c.name,c.id`).all(id, isAdmin ? 1 : 0, text(userId));
 }
 
 export function createConnectionBenchmarkTarget(connectionId, input, userId) {

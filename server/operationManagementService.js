@@ -107,8 +107,8 @@ export function getOperationDashboard() {
   const database = getDatabase();
   const snapshots = officialSnapshots(database);
   const productAnalysis = productRankings(database, snapshots);
-  const connectionRankings = listConnectionGrowthRankings("overview", 10);
-  const attention = listAttentionConnectionHealthRecords();
+  const connectionRankings = listConnectionGrowthRankings("overview", 10, "", true);
+  const attention = listAttentionConnectionHealthRecords("", true);
   return {
     generatedAt: new Date().toISOString(),
     definitions: operationMetricDefinitions,
@@ -121,7 +121,7 @@ export function getOperationDashboard() {
     products: productAnalysis,
     connections: { topGrowth: connectionRankings.topGrowth, risks: connectionRankings.risks, salesTop: connectionRankings.salesTop },
     execution: executionSummary(database),
-    improvements: getConnectionImprovementSummary(),
+    improvements: getConnectionImprovementSummary("", true),
     finance: { available: false, message: "财务基础数据尚未接入；利润指标不作估算。" },
   };
 }

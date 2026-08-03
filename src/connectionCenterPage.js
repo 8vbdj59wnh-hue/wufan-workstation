@@ -54,7 +54,7 @@ const pageState = {
   view: "list",
   sort: "default",
   columnSort: { key: "", direction: "asc" },
-  listFilters: { platform: "", shopId: "", productCode: "", ownerId: "", healthStatus: "", status: "", salesStatus: "", profitStatus: "", productRelation: "", skuCount: "" },
+  listFilters: { search: "", platform: "", shopId: "", productCode: "", ownerId: "", healthStatus: "", status: "", salesStatus: "", profitStatus: "", productRelation: "", skuCount: "" },
   visibleColumns: ["image", "name", "platform", "shop", "goodsId", "erpSales", "erpProfit", "relations", "health", "owner", "status"],
   fieldSettingsOpen: false,
   detailTab: "basic",
@@ -191,6 +191,14 @@ function productCodes(item, preferredCode = "") {
   const query = String(preferredCode).trim().toLowerCase();
   const primary = codes.find((code) => query && code.toLowerCase().includes(query)) || codes[0];
   return codes.length === 1 ? primary : `${primary} +${codes.length - 1}`;
+}
+
+export function matchesConnectionAssetSearch(item, query) {
+  const normalized = String(query || "").trim().toLowerCase();
+  if (!normalized) return true;
+  return [item.name, item.salesLinkTitle, item.platformGoodsId, item.platform, shopName(item),
+    ...(item.products ?? []).flatMap((product) => [product.skuCode, product.name])]
+    .some((part) => String(part || "").toLowerCase().includes(normalized));
 }
 
 function productNames(item) {
@@ -339,6 +347,7 @@ function renderToolbar() {
   const filters = pageState.listFilters;
   return `<div class="connection-list-tools">
     <form class="connection-list-filters" data-connection-list-filters>
+      <input name="search" value="${escapeHtml(filters.search)}" placeholder="搜索名称 / 商品ID / 店铺 / 平台 / 产品编码" aria-label="链接资产统一搜索" />
       <select name="platform" aria-label="平台筛选"><option value="">全部平台</option>${platforms.map((platform) => `<option value="${escapeHtml(platform)}" ${filters.platform === platform ? "selected" : ""}>${escapeHtml(platform)}</option>`).join("")}</select>
       <select name="shopId" aria-label="店铺筛选"><option value="">全部店铺</option>${shops.map((shop) => `<option value="${escapeHtml(shop.id)}" ${filters.shopId === shop.id ? "selected" : ""}>${escapeHtml(shop.name)}</option>`).join("")}</select>
       <input name="productCode" value="${escapeHtml(filters.productCode)}" placeholder="筛选产品编码" aria-label="关联产品编码筛选" />
@@ -432,8 +441,10 @@ function renderList() {
   if (!pageState.items.length) return `<div class="empty-state"><strong>还没有连接档案</strong><p>从已有销售链接中建立第一条经营连接。</p></div>`;
   const filters = pageState.listFilters;
   const items = pageState.items.filter((item) => {
+    const searchQuery = String(filters.search || "").trim().toLowerCase();
     const codeQuery = String(filters.productCode || "").trim().toLowerCase();
-    return (!filters.shopId || item.shopId === filters.shopId)
+    return matchesConnectionAssetSearch(item, searchQuery)
+      && (!filters.shopId || item.shopId === filters.shopId)
       && (!filters.platform || item.platform === filters.platform)
       && (!codeQuery || item.products?.some((product) => String(product.skuCode || "").toLowerCase().includes(codeQuery)))
       && (!filters.ownerId || (filters.ownerId === "unassigned" ? !item.ownerId : item.ownerId === filters.ownerId))
@@ -837,7 +848,7 @@ export function bindConnectionCenterPageEvents(render) {
     event.preventDefault(); pageState.listFilters = Object.fromEntries(new FormData(event.currentTarget)); render();
   });
   root.querySelector("[data-clear-connection-filters]")?.addEventListener("click", () => {
-    pageState.listFilters = { platform: "", shopId: "", productCode: "", ownerId: "", healthStatus: "", status: "", salesStatus: "", profitStatus: "", productRelation: "", skuCount: "" }; render();
+    pageState.listFilters = { search: "", platform: "", shopId: "", productCode: "", ownerId: "", healthStatus: "", status: "", salesStatus: "", profitStatus: "", productRelation: "", skuCount: "" }; render();
   });
   root.querySelectorAll("[data-connection-sort]").forEach((button) => button.addEventListener("click", () => {
     pageState.sort = button.dataset.connectionSort; pageState.columnSort = { key: "", direction: "asc" }; render();

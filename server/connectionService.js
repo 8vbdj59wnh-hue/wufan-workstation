@@ -145,6 +145,28 @@ export function readConnectionProfile(id) {
   return enrichConnectionRows([row])[0];
 }
 
+export function assertConnectionVisible(id, userId = "", isAdmin = false) {
+  const profile = readConnectionProfile(id);
+  if (!isAdmin && (!value(userId) || profile.ownerId !== value(userId))) {
+    const error = new Error("只能访问自己负责的链接。");
+    error.statusCode = 403;
+    throw error;
+  }
+  return profile;
+}
+
+export function readHealthRecordConnectionId(id) {
+  const row = getDatabase().prepare("SELECT connectionId FROM connection_health_records WHERE id=?").get(value(id));
+  if (!row) throw new Error("体检记录不存在。");
+  return row.connectionId;
+}
+
+export function readImprovementConnectionId(id) {
+  const row = getDatabase().prepare("SELECT connectionId FROM connection_improvements WHERE id=?").get(value(id));
+  if (!row) throw new Error("改善项目不存在。");
+  return row.connectionId;
+}
+
 export function listAvailableSalesLinks(filters = {}) {
   const normalizedFilters = typeof filters === "string" ? { search: filters } : filters;
   const query = value(normalizedFilters.search).toLowerCase();
