@@ -10350,3 +10350,15 @@ button.content-template-thumb {
   .platform-product-search-results > button { grid-template-columns: 46px minmax(0, 1fr); }
   .platform-product-search-results i { grid-column: 2; justify-self: start; }
 }
+
+.my-links-section-title { margin: 0; color: #173f34; font-size: 15px; }
+.my-links-summary { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.hospital-metrics { grid-template-columns: repeat(auto-fit, minmax(86px, 1fr)); }
+.connection-operation-bar { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 12px 0; padding: 13px 15px; border: 1px solid #dce9e4; border-radius: 13px; background: #f5fbf8; }
+.connection-operation-bar > div { display: grid; gap: 3px; }
+.connection-operation-bar span, .connection-operation-bar small { color: #667085; font-size: 12px; }
+.connection-operation-bar strong { color: #173f34; font-size: 17px; }
+@media (max-width: 760px) {
+  .my-links-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .connection-operation-bar { align-items: flex-start; flex-direction: column; }
+}

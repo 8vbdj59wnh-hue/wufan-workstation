@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { getDatabase } from "./db.js";
 import { listConnectionGrowthAnalyses } from "./connectionGrowthService.js";
+import { readConnectionV3Metrics, readConnectionV3MetricsMap } from "./connectionV3MetricsService.js";
 
 function parseJson(value, fallback = []) { try { return JSON.parse(value || JSON.stringify(fallback)); } catch { return fallback; } }
 
@@ -31,9 +32,13 @@ export function joinConnectionDiagnosis(connectionId, input = {}, userId, isAdmi
   const id = String(connectionId ?? "").trim(); const database = getDatabase();
   const analysis = listConnectionGrowthAnalyses().find((item) => item.connectionId === id);
   if (!analysis) throw new Error("未找到连接档案。");
+  const v3 = readConnectionV3Metrics(analysis.salesLinkId);
+  const operatingAnalysis = { ...analysis,
+    salesGrowth: v3.salesGrowth ?? analysis.salesGrowth,
+    profitGrowth: v3.profitGrowth ?? analysis.profitGrowth };
   const operatorId = String(userId ?? "").trim();
   if (!isAdmin && (!analysis.ownerId || analysis.ownerId !== operatorId)) throw new Error("只有该链接负责人或管理员可以加入诊断。");
-  const reasons = analysisProblems(analysis);
+  const reasons = analysisProblems(operatingAnalysis);
   if (!reasons.length && !["attention", "risk"].includes(analysis.healthStatus)) throw new Error("当前链接没有需要确认的经营异常。");
   const existing = database.prepare("SELECT * FROM connection_diagnosis_entries WHERE connectionId=? AND status='active'").get(id);
   if (existing) return { ...existing, anomalyReasons: parseJson(existing.anomalyReasonsJson) };
@@ -49,6 +54,7 @@ export function getConnectionHospital(userId = "", isAdmin = true) {
   const database = getDatabase();
   const operatorId = String(userId ?? "").trim();
   const analyses = listConnectionGrowthAnalyses().filter((item) => isAdmin || (operatorId && item.ownerId === operatorId));
+  const v3Metrics = readConnectionV3MetricsMap(analyses.map((item) => item.salesLinkId));
   const records = database.prepare(`SELECT * FROM connection_health_records ORDER BY createdAt DESC,id DESC`).all();
   const latestRecord = new Map();
   for (const row of records) if (!latestRecord.has(row.connectionId)) latestRecord.set(row.connectionId, row);
@@ -68,22 +74,28 @@ export function getConnectionHospital(userId = "", isAdmin = true) {
   const entryByConnection = new Map(diagnosisEntries.map((item) => [item.connectionId, item]));
   const result = { diagnosis: [], treatment: [], observation: [] };
   for (const analysis of analyses) {
+    const v3 = v3Metrics.get(analysis.salesLinkId);
+    const operatingAnalysis = { ...analysis,
+      salesGrowth: v3.salesGrowth ?? analysis.salesGrowth,
+      profitGrowth: v3.profitGrowth ?? analysis.profitGrowth };
     const health = latestRecord.get(analysis.connectionId) ?? null;
     const improvement = activeImprovement.get(analysis.connectionId) ?? null;
     const diagnosisEntry = entryByConnection.get(analysis.connectionId) ?? null;
     const healthProblems = health ? parseJson(health.problemsJson) : [];
     const entryProblems = diagnosisEntry ? parseJson(diagnosisEntry.anomalyReasonsJson) : [];
-    const problems = entryProblems.length ? entryProblems : healthProblems.length ? healthProblems : analysisProblems(analysis);
+    const problems = entryProblems.length ? entryProblems : healthProblems.length ? healthProblems : analysisProblems(operatingAnalysis);
     if (!diagnosisEntry && !improvement) continue;
     const stage = (!improvement && diagnosisEntry) || ["planned", "failed"].includes(improvement?.status) ? "diagnosis"
-      : improvement.status === "executing" ? "treatment" : improvement.status === "observing" && !isRecovered(analysis, improvement) ? "observation" : null;
+      : improvement.status === "executing" ? "treatment" : improvement.status === "observing" ? "observation" : null;
     if (!stage) continue;
     const suggestions = health ? parseJson(health.suggestionsJson) : [];
     result[stage].push({
       connectionId: analysis.connectionId, connectionName: analysis.name, ownerId: analysis.ownerId, ownerName: analysis.ownerName,
       platform: analysis.platform, shopName: analysis.shopDisplayName || analysis.shopName, healthScore: analysis.healthScore,
-      healthStatus: analysis.healthStatus, salesGrowth: analysis.salesGrowth, visitorGrowth: analysis.visitorGrowth,
-      conversionChange: analysis.conversionChange, profitGrowth: analysis.profitGrowth, problems,
+      healthStatus: analysis.healthStatus, salesGrowth: operatingAnalysis.salesGrowth, visitorGrowth: analysis.visitorGrowth,
+      conversionChange: analysis.conversionChange, profitGrowth: operatingAnalysis.profitGrowth, problems,
+      erpSales: v3.current, platformPerformance: v3.platform,
+      recoveryStatus: improvement?.status === "observing" ? (isRecovered(operatingAnalysis, improvement) ? "recovered" : "observing") : null,
       problemTitle: problems[0]?.title || "经营数据异常", discoveredAt: diagnosisEntry?.joinedAt || health?.createdAt || analysis.currentPeriod?.periodEnd || null,
       diagnosisEntry: diagnosisEntry ? { ...diagnosisEntry, anomalyReasons: entryProblems } : null,
       healthRecord: health ? { ...health, problems: healthProblems, suggestions } : null,

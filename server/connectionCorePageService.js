@@ -1,5 +1,6 @@
 import { getDatabase } from "./db.js";
 import { listConnectionProfiles, readConnectionProfile } from "./connectionService.js";
+import { readConnectionV3Metrics, readConnectionV3MetricsMap } from "./connectionV3MetricsService.js";
 
 function text(value) { return String(value ?? "").trim(); }
 function parseJson(value, fallback = {}) { try { return JSON.parse(value || ""); } catch { return fallback; } }
@@ -11,16 +12,15 @@ function periodType(start, end) {
 }
 
 function latestSalesSummary(database, salesLinkId) {
-  const period = database.prepare(`SELECT periodStart,periodEnd FROM connection_sku_sales_facts WHERE salesLinkId=? ORDER BY periodEnd DESC,periodStart DESC,createdAt DESC LIMIT 1`).get(salesLinkId);
-  if (!period) return { periodStart: null, periodEnd: null, shippedQuantity: null, salesAmount: null, costAmount: null, profitAmount: null, profitMargin: null };
-  const row = database.prepare(`SELECT SUM(COALESCE(shippedQuantity,0)) shippedQuantity,SUM(COALESCE(salesAmount,0)) salesAmount,SUM(COALESCE(costAmount,0)) costAmount,SUM(COALESCE(profitAmount,0)) profitAmount FROM connection_sku_sales_facts WHERE salesLinkId=? AND periodStart=? AND periodEnd=?`).get(salesLinkId, period.periodStart, period.periodEnd);
-  return { ...period, ...row, profitMargin: Number(row.salesAmount) ? Number(row.profitAmount || 0) / Number(row.salesAmount) : null };
+  return readConnectionV3Metrics(salesLinkId).current;
 }
 
 export function listConnectionCoreProfiles(userId = "", isAdmin = false) {
   const database = getDatabase();
-  return listConnectionProfiles().filter((item) => isAdmin || !text(userId) || item.ownerId === text(userId)).map((item) => {
-    const sales = latestSalesSummary(database, item.salesLinkId);
+  const profiles = listConnectionProfiles().filter((item) => isAdmin || !text(userId) || item.ownerId === text(userId));
+  const metrics = readConnectionV3MetricsMap(profiles.map((item) => item.salesLinkId));
+  return profiles.map((item) => {
+    const sales = metrics.get(item.salesLinkId)?.current ?? latestSalesSummary(database, item.salesLinkId);
     const relation = database.prepare(`SELECT COUNT(*) skuCount,COUNT(DISTINCT productId) productCount FROM sales_link_skus WHERE salesLinkId=? AND COALESCE(currentState,'active')='active'`).get(item.salesLinkId);
     return { ...item, erpSales: sales, skuCount: Number(relation.skuCount || 0), productCount: Number(relation.productCount || 0) };
   });

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { getDatabase } from "./db.js";
 import { listConnectionGrowthAnalyses } from "./connectionGrowthService.js";
+import { readConnectionV3MetricsMap } from "./connectionV3MetricsService.js";
 
 const profileStatuses = new Set(["active", "paused", "archived"]);
 const profileLevels = new Set(["new", "growing", "mature", "priority"]);
@@ -86,27 +87,33 @@ export function getMyConnectionWorkbench(userId, isAdmin = false, filter = "all"
   if (!["all", "better", "worse", "followed"].includes(filter)) throw new Error("我的链接筛选无效。");
   const profiles = listConnectionProfiles().filter((item) => isAdmin || item.ownerId === personId);
   const analyses = new Map(listConnectionGrowthAnalyses().map((item) => [item.connectionId, item]));
+  const v3Metrics = readConnectionV3MetricsMap(profiles.map((item) => item.salesLinkId));
   const followedIds = new Set(getDatabase().prepare("SELECT connectionId FROM connection_follows WHERE userId=?").all(personId).map((item) => item.connectionId));
-  const items = profiles.map((profile) => {
+  const allItems = profiles.map((profile) => {
     const analysis = analyses.get(profile.id) ?? {};
-    const trend = changeDirection(analysis);
+    const v3 = v3Metrics.get(profile.salesLinkId);
+    const combined = { ...analysis,
+      salesGrowth: v3.salesGrowth ?? analysis.salesGrowth,
+      profitGrowth: v3.profitGrowth ?? analysis.profitGrowth };
+    const trend = changeDirection(combined);
     const followed = followedIds.has(profile.id);
     const riskPriority = trend === "worse"
-      ? (Number(analysis.salesGrowth) <= -0.2 || Number(analysis.visitorGrowth) <= -0.2 || Number(analysis.profitGrowth) <= -0.2 ? 0 : 1)
+      ? (Number(combined.salesGrowth) <= -0.2 || Number(analysis.visitorGrowth) <= -0.2 || Number(combined.profitGrowth) <= -0.2 ? 0 : 1)
       : followed ? 2 : 3;
-    return { ...profile, followed, trend, riskPriority,
-      currentPayAmount: analysis.currentPeriod?.payAmount ?? null,
-      salesGrowth: analysis.salesGrowth ?? null, visitorGrowth: analysis.visitorGrowth ?? null,
-      conversionChange: analysis.conversionChange ?? null, profitGrowth: analysis.profitGrowth ?? null,
+    return { ...profile, followed, trend, riskPriority, erpSales: v3.current,
+      currentPayAmount: v3.current.salesAmount ?? analysis.currentPeriod?.payAmount ?? null,
+      salesGrowth: combined.salesGrowth ?? null, visitorGrowth: analysis.visitorGrowth ?? null,
+      conversionChange: analysis.conversionChange ?? null, profitGrowth: combined.profitGrowth ?? null,
       healthScore: analysis.healthScore ?? null, healthStatus: analysis.healthStatus ?? "no_data" };
-  }).filter((item) => filter === "all" || (filter === "followed" ? item.followed : item.trend === filter))
+  });
+  const items = allItems.filter((item) => filter === "all" || (filter === "followed" ? item.followed : item.trend === filter))
     .sort((left, right) => left.riskPriority - right.riskPriority
       || Number(left.healthScore ?? 101) - Number(right.healthScore ?? 101)
       || Number(left.salesGrowth ?? 0) - Number(right.salesGrowth ?? 0));
   return { items, isAdmin: Boolean(isAdmin), summary: {
     total: profiles.length,
-    better: profiles.reduce((count, item) => count + (changeDirection(analyses.get(item.id) ?? {}) === "better" ? 1 : 0), 0),
-    risk: profiles.reduce((count, item) => count + (changeDirection(analyses.get(item.id) ?? {}) === "worse" ? 1 : 0), 0),
+    better: allItems.reduce((count, item) => count + (item.trend === "better" ? 1 : 0), 0),
+    risk: allItems.reduce((count, item) => count + (item.trend === "worse" ? 1 : 0), 0),
     followed: profiles.filter((item) => followedIds.has(item.id)).length,
   } };
 }

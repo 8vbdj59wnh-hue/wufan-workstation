@@ -125,6 +125,15 @@ export function createImprovementAction(healthRecordId, input, userId) {
       createdAt: now,
       updatedAt: now,
     });
+    const linkedProducts = database.prepare(`
+      SELECT DISTINCT s.productId FROM connection_profiles c
+      JOIN sales_link_skus s ON s.salesLinkId=c.salesLinkId
+      WHERE c.id=? AND s.productId IS NOT NULL AND COALESCE(s.currentState,'active')='active'
+    `).all(record.connectionId);
+    for (const product of linkedProducts) {
+      database.prepare(`INSERT OR IGNORE INTO action_products (id,actionId,productId,createdAt) VALUES (?,?,?,?)`)
+        .run(`action-product-${crypto.randomUUID()}`, instance.id, product.productId, now);
+    }
     const problemTitles = problems.map((problem) => problem.title).join("、") || "持续改善";
     const connectionAction = createConnectionAction(record.connectionId, { title: `系统发现问题：${problemTitles}`,
       description: `创建改善行动：${title}；关键行动ID：${instance.id}`, status: "pending" }, userId);
