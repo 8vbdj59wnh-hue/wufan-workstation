@@ -79,14 +79,31 @@ function renderProductThumb(product) {
     : `<span class="product-image-placeholder">无图</span>`;
 }
 
-function renderSelectedProducts(products) {
+function relationSkuCodes(productId) {
+  return (state.productErpMappings ?? []).filter((item) => item.productId === productId)
+    .flatMap((item) => [item.merchantSkuCode, item.barcode]).filter(Boolean);
+}
+
+function normalizeCode(value) { return String(value ?? "").trim().toLowerCase(); }
+
+function relationCreatedAt(actionId, productId) {
+  return state.actionProducts.find((item) => item.actionId === actionId && item.productId === productId)?.createdAt ?? "";
+}
+
+function formatRelationTime(value) {
+  if (!value) return "本次新增，保存后生效";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString("zh-CN", { hour12: false });
+}
+
+function renderSelectedProducts(products, actionId = "") {
   if (products.length === 0) return `<p class="form-note">尚未选择关联产品</p>`;
   return products
     .map(
       (product) => `
         <div class="action-product-selected-item">
           ${renderProductThumb(product)}
-          <span><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(product.skuCode)}</small></span>
+          <span><strong>${escapeHtml(product.name)}</strong><small>产品编码：${escapeHtml(product.skuCode)}</small><small>关联时间：${escapeHtml(formatRelationTime(relationCreatedAt(actionId, product.id)))}</small></span>
           <button class="icon-button" type="button" data-action="remove-action-product" data-product-id="${escapeHtml(product.id)}" aria-label="移除${escapeHtml(product.name)}">×</button>
         </div>
       `,
@@ -94,22 +111,26 @@ function renderSelectedProducts(products) {
     .join("");
 }
 
-export function renderActionProductSelector(selectedIds = [], { label = "关联产品" } = {}) {
+export function renderActionProductSelector(selectedIds = [], { label = "关联产品", actionId = "" } = {}) {
   const selected = new Set(selectedIds);
   const selectedProducts = state.products.filter((product) => selected.has(product.id));
-  const products = state.products.filter((product) => product.status !== "已归档" || selected.has(product.id));
+  const products = state.products.filter((product) => product.status !== "已归档" || selected.has(product.id))
+    .sort((left, right) => String(left.skuCode ?? "").localeCompare(String(right.skuCode ?? ""), "zh-CN", { numeric: true }));
   return `
-    <div class="action-product-selector" data-action-product-selector>
+    <div class="action-product-selector" data-action-product-selector data-action-id="${escapeHtml(actionId)}">
       <span class="field-label">${escapeHtml(label)}</span>
-      <div class="action-product-selected" data-action-product-selected>${renderSelectedProducts(selectedProducts)}</div>
-      <input class="action-product-search" type="search" placeholder="输入SKU编码或产品名称搜索" data-action-product-search autocomplete="off" />
+      <div class="action-product-selected" data-action-product-selected>${renderSelectedProducts(selectedProducts, actionId)}</div>
+      <div class="action-product-search-row"><input class="action-product-search" type="search" placeholder="输入产品编码、SKU编码或产品名称" data-action-product-search autocomplete="off" /><button class="secondary-button" type="button" data-action="quick-link-action-product">快速查找</button></div>
+      <p class="form-note" data-action-product-search-message>优先输入完整产品编码，可直接进入关联确认。</p>
+      <div class="action-product-confirm" data-action-product-confirm hidden></div>
       <div class="action-product-options" data-action-product-options>
         ${products.length === 0 ? `<p class="form-note">产品中心暂无可选产品</p>` : products.map((product) => `
-          <label class="action-product-option" data-search="${escapeHtml(`${product.skuCode} ${product.name}`.toLowerCase())}">
-            <input type="checkbox" name="actionProductId" value="${escapeHtml(product.id)}" ${selected.has(product.id) ? "checked" : ""} />
+          <article class="action-product-option" data-product-id="${escapeHtml(product.id)}" data-product-code="${escapeHtml(normalizeCode(product.skuCode))}" data-search="${escapeHtml(`${product.skuCode} ${product.name} ${relationSkuCodes(product.id).join(" ")}`.toLowerCase())}" hidden>
+            <input type="checkbox" name="actionProductId" value="${escapeHtml(product.id)}" ${selected.has(product.id) ? "checked" : ""} hidden />
             ${renderProductThumb(product)}
-            <span><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(product.skuCode)}</small></span>
-          </label>
+            <span><strong>${escapeHtml(product.name)}</strong><small>产品编码：${escapeHtml(product.skuCode)}</small><small>SKU：${escapeHtml(relationSkuCodes(product.id).join("、") || product.skuCode)}</small></span>
+            <button class="text-button" type="button" data-action="choose-action-product" data-product-id="${escapeHtml(product.id)}">${selected.has(product.id) ? "已关联" : "选择"}</button>
+          </article>
         `).join("")}
       </div>
     </div>
@@ -120,22 +141,58 @@ function refreshSelected(selector) {
   const selectedIds = collectActionProductIds(selector);
   const selectedProducts = state.products.filter((product) => selectedIds.includes(product.id));
   const host = selector.querySelector("[data-action-product-selected]");
-  if (host !== null) host.innerHTML = renderSelectedProducts(selectedProducts);
+  if (host !== null) host.innerHTML = renderSelectedProducts(selectedProducts, selector.dataset.actionId);
+  selector.querySelectorAll(".action-product-option").forEach((option) => {
+    const checked = option.querySelector('[name="actionProductId"]')?.checked === true;
+    const button = option.querySelector('[data-action="choose-action-product"]');
+    if (button) button.textContent = checked ? "已关联" : "选择";
+  });
+}
+
+function renderProductConfirmation(product) {
+  return `${renderProductThumb(product)}<span><strong>${escapeHtml(product.name)}</strong><small>产品编码：${escapeHtml(product.skuCode)}</small><small>SKU：${escapeHtml(relationSkuCodes(product.id).join("、") || product.skuCode)}</small></span><button class="primary-button" type="button" data-action="confirm-action-product" data-product-id="${escapeHtml(product.id)}">确认关联</button>`;
+}
+
+function filterProductOptions(selector, query) {
+  const normalized = normalizeCode(query); const options = [...selector.querySelectorAll(".action-product-option")];
+  const matches = options.filter((option) => normalized && option.dataset.search.includes(normalized));
+  matches.sort((left, right) => Number(right.dataset.productCode === normalized) - Number(left.dataset.productCode === normalized));
+  options.forEach((option) => { option.hidden = !matches.includes(option); });
+  const host = selector.querySelector("[data-action-product-options]"); matches.forEach((option) => host?.append(option));
+  return matches;
 }
 
 export function bindActionProductSelectors(root = document) {
   root.querySelectorAll("[data-action-product-selector]").forEach((selector) => {
     selector.addEventListener("input", (event) => {
       if (!event.target.matches("[data-action-product-search]")) return;
-      const query = event.target.value.trim().toLowerCase();
-      selector.querySelectorAll(".action-product-option").forEach((option) => {
-        option.hidden = query !== "" && !option.dataset.search.includes(query);
-      });
-    });
-    selector.addEventListener("change", (event) => {
-      if (event.target.name === "actionProductId") refreshSelected(selector);
+      const matches = filterProductOptions(selector, event.target.value);
+      const message = selector.querySelector("[data-action-product-search-message]");
+      if (message) message.textContent = event.target.value.trim() ? `找到 ${matches.length} 个匹配产品` : "优先输入完整产品编码，可直接进入关联确认。";
     });
     selector.addEventListener("click", (event) => {
+      const action = event.target.closest("[data-action]")?.dataset.action;
+      if (action === "quick-link-action-product") {
+        const query = selector.querySelector("[data-action-product-search]")?.value.trim() ?? "";
+        const matches = filterProductOptions(selector, query); const exact = matches.filter((option) => option.dataset.productCode === normalizeCode(query));
+        const candidate = exact.length === 1 ? exact[0] : matches.length === 1 ? matches[0] : null;
+        const message = selector.querySelector("[data-action-product-search-message]");
+        if (message) message.textContent = !query ? "请输入产品编码、SKU编码或产品名称。" : !matches.length ? "未找到对应产品。" : candidate ? "已定位唯一产品，请确认关联。" : `找到 ${matches.length} 个产品，请选择。`;
+        if (candidate) {
+          const product = state.products.find((item) => item.id === candidate.dataset.productId); const confirm = selector.querySelector("[data-action-product-confirm]");
+          if (confirm && product) { confirm.innerHTML = renderProductConfirmation(product); confirm.hidden = false; }
+        }
+        return;
+      }
+      if (action === "choose-action-product") {
+        const product = state.products.find((item) => item.id === event.target.closest("[data-product-id]")?.dataset.productId); const confirm = selector.querySelector("[data-action-product-confirm]");
+        if (confirm && product) { confirm.innerHTML = renderProductConfirmation(product); confirm.hidden = false; }
+        return;
+      }
+      if (action === "confirm-action-product") {
+        const input = selector.querySelector(`[name="actionProductId"][value="${CSS.escape(event.target.closest("[data-product-id]").dataset.productId)}"]`);
+        if (input) input.checked = true; const confirm = selector.querySelector("[data-action-product-confirm]"); if (confirm) confirm.hidden = true; refreshSelected(selector); return;
+      }
       const button = event.target.closest("[data-action='remove-action-product']");
       if (button === null) return;
       const input = selector.querySelector(`[name="actionProductId"][value="${CSS.escape(button.dataset.productId)}"]`);
@@ -157,7 +214,7 @@ export function renderLinkedActionProducts(actionId, { compact = false } = {}) {
       ${products.map((product) => `
         <a class="linked-action-product" href="#products/${encodeURIComponent(product.id)}">
           ${renderProductThumb(product)}
-          <span><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(product.skuCode)}</small></span>
+          <span><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(product.skuCode)}</small>${compact ? "" : `<small>关联时间：${escapeHtml(formatRelationTime(relationCreatedAt(actionId, product.id)))}</small>`}</span>
         </a>
       `).join("")}
     </div>

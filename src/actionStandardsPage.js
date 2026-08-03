@@ -52,7 +52,7 @@ import {
   renderBusinessMinuteOptions,
 } from "./businessTime.js?v=20260705-state-singleton1";
 import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
-import { bindActionProductSelectors, collectActionProductIds, renderActionProductSelector } from "./actionProductRelations.js?v=20260725-product-center1";
+import { bindActionProductSelectors, collectActionProductIds, renderActionProductSelector } from "./actionProductRelations.js?v=20260803-action-product-search1";
 import {
   getPublishingAccountFieldOptions,
   isPublishingAccountField,
