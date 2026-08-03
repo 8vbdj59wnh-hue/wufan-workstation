@@ -118,6 +118,7 @@ import {
   listConnectionImportTemplates,
 } from "./connectionDataFoundationService.js";
 import { getConnectionCoreDetail, listConnectionCoreProfiles } from "./connectionCorePageService.js";
+import { getConnectionBusinessCockpit } from "./connectionBusinessCockpitService.js";
 import {
   batchLinkProcessInstanceTemplates,
   batchUpdateTaskStatus,
@@ -2081,6 +2082,14 @@ app.get("/api/connection-management/overview", requireLinkView, (_request, respo
     response.json({ success: true, ...getConnectionManagementOverview() });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "链接经营概览读取失败。" });
+  }
+});
+
+app.get("/api/connection-business-cockpit", requireLinkView, (request, response) => {
+  try {
+    response.json({ success: true, ...getConnectionBusinessCockpit(getUserPersonId(request.user), isAdminUser(request.user)) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "链接经营驾驶舱读取失败。" });
   }
 });
 

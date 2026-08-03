@@ -1171,6 +1171,10 @@ export async function loadConnectionManagementOverview() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-management/overview`), "链接经营概览读取失败。");
 }
 
+export async function loadConnectionBusinessCockpit() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-business-cockpit`), "链接经营驾驶舱读取失败。");
+}
+
 export async function loadConnectionHealthRecords(connectionId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/health-records`), "连接体检记录读取失败。");
 }
