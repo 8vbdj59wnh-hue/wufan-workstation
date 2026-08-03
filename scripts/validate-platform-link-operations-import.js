@@ -45,10 +45,51 @@ for (let index = 0; index < expected.length; index += 1) {
   if (preview.preview.filteredRows !== expectedRows) throw new Error(`${templateName} 有效行数应为 ${expectedRows}，实际为 ${preview.preview.filteredRows}`);
   if (preview.blocked || preview.preview.errors) throw new Error(`${templateName} 预览存在阻断或异常。`);
   const confirmed = confirmConnectionDataImport(preview.batch.id);
+  const importedRows = database.prepare("SELECT normalizedDataJson FROM connection_import_rows WHERE batchId=? AND status='success'").all(preview.batch.id);
+  let assetCoverage = 0; let factCoverage = 0;
+  for (const importedRow of importedRows) {
+    const row = JSON.parse(importedRow.normalizedDataJson || "{}");
+    const link = database.prepare("SELECT id FROM sales_links WHERE shopId=? AND platformGoodsId=?").get(row.shopId, row.platformGoodsId);
+    const profile = link ? database.prepare("SELECT id FROM connection_profiles WHERE salesLinkId=?").get(link.id) : null;
+    if (link && profile) assetCoverage += 1;
+    const snapshot = link ? database.prepare("SELECT id FROM connection_period_snapshots WHERE sourceType='platform_operation' AND salesLinkId=? AND periodStart=? AND periodEnd=?").get(link.id, row.periodStart, row.periodEnd) : null;
+    if (snapshot) factCoverage += 1;
+  }
+  if (assetCoverage !== expectedRows) throw new Error(`${templateName} 链接资产覆盖应为 ${expectedRows}，实际为 ${assetCoverage}`);
+  if (factCoverage !== expectedRows) throw new Error(`${templateName} 经营事实覆盖应为 ${expectedRows}，实际为 ${factCoverage}`);
   const repeated = previewConnectionDataImport({ buffer: fs.readFileSync(filePath), fileName: path.basename(filePath), importType: "platform_link_operations", templateVersionId: template.currentVersionId, userId: null });
   if (!repeated.idempotent || !["completed", "completed_with_errors"].includes(repeated.batch.status)) throw new Error(`${templateName} 重复导入保护失败。`);
-  results.push({ templateName, ...preview.preview, result: confirmed.result, repeatedBatchId: repeated.batch.id });
+  results.push({ templateName, ...preview.preview, result: confirmed.result, assetCoverage, factCoverage, repeatedBatchId: repeated.batch.id });
 }
+
+const erpCandidate = database.prepare(`
+  SELECT sl.id AS salesLinkId,sl.platformGoodsId,ss.platformSkuCode AS skuCode,sh.platform,sh.shopName
+  FROM sales_links sl
+  JOIN sales_shops sh ON sh.id=sl.shopId
+  JOIN sales_link_skus ss ON ss.salesLinkId=sl.id
+  WHERE COALESCE(ss.platformSkuCode,'')<>''
+  ORDER BY sl.id,ss.id LIMIT 1
+`).get();
+if (!erpCandidate) throw new Error("缺少可用于ERP真实销售回归的链接SKU。");
+const erpWorkbook = XLSX.utils.book_new();
+XLSX.utils.book_append_sheet(erpWorkbook, XLSX.utils.json_to_sheet([{
+  platform: erpCandidate.platform,
+  shop: erpCandidate.shopName,
+  platformGoodsId: erpCandidate.platformGoodsId,
+  skuCode: erpCandidate.skuCode,
+  periodStart: "2099-01-01",
+  periodEnd: "2099-01-01",
+  shippedQuantity: 1,
+  salesAmount: 100,
+  costAmount: 60,
+  profitAmount: 40,
+}]), "ERP真实销售");
+const erpPreview = previewConnectionDataImport({ buffer: XLSX.write(erpWorkbook, { type: "buffer", bookType: "xlsx" }), fileName: "ERP真实销售回归.xlsx", importType: "erp_sales", userId: null });
+if (erpPreview.blocked || erpPreview.preview.errors) throw new Error("ERP真实销售回归预览失败。");
+const erpConfirmed = confirmConnectionDataImport(erpPreview.batch.id);
+const erpFact = database.prepare("SELECT * FROM connection_sku_sales_facts WHERE batchId=? AND salesLinkId=? AND skuCode=?").get(erpPreview.batch.id, erpCandidate.salesLinkId, erpCandidate.skuCode);
+if (!erpFact || Number(erpFact.profitAmount) !== 40) throw new Error("ERP真实销售事实回归失败。");
+const erpSalesRegression = { batchId: erpPreview.batch.id, importedRows: erpConfirmed.batch.matchedRows, factVerified: true, salesLinkId: erpFact.salesLinkId, skuCode: erpFact.skuCode };
 
 const jdTemplate = templates.find((item) => item.name === "京东-点意链接经营模板");
 const jdWorkbook = XLSX.read(fs.readFileSync(path.resolve(files[3])), { type: "buffer", raw: true });
@@ -71,5 +112,5 @@ const foreignKeys = database.pragma("foreign_key_check");
 const historicalSnapshotDigestAfter = snapshotDigest(historicalSnapshotIds);
 const indexes = database.prepare("SELECT name,sql FROM sqlite_master WHERE type='index' AND tbl_name='connection_period_snapshots' ORDER BY name").all();
 const crossShopIdentityPeriods = database.prepare("SELECT externalId,periodStart,periodEnd,COUNT(DISTINCT salesLinkId) AS linkCount FROM connection_period_snapshots WHERE sourceType='platform_operation' GROUP BY externalId,periodStart,periodEnd HAVING linkCount>1").all();
-console.log(JSON.stringify({ database: process.env.WUFAN_DB_PATH, before, after, results, anomalyTests: { duplicateBlocked: duplicatePreview.blocked, duplicateGoodsIds: duplicatePreview.preview.duplicateGoodsIds, missingPeriodErrors: missingPeriodPreview.preview.errors }, historicalSnapshotsUnchanged: historicalSnapshotDigestBefore === historicalSnapshotDigestAfter, snapshotIndexReview: { indexes, crossShopIdentityPeriods: crossShopIdentityPeriods.length }, integrity, foreignKeys }, null, 2));
+console.log(JSON.stringify({ database: process.env.WUFAN_DB_PATH, before, after, results, erpSalesRegression, anomalyTests: { duplicateBlocked: duplicatePreview.blocked, duplicateGoodsIds: duplicatePreview.preview.duplicateGoodsIds, missingPeriodErrors: missingPeriodPreview.preview.errors }, historicalSnapshotsUnchanged: historicalSnapshotDigestBefore === historicalSnapshotDigestAfter, snapshotIndexReview: { indexes, crossShopIdentityPeriods: crossShopIdentityPeriods.length }, integrity, foreignKeys }, null, 2));
 closeDatabase();

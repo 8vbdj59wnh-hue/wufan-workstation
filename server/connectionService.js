@@ -242,13 +242,13 @@ function connectionImageForSalesLink(database, salesLinkId) {
 export function createConnectionProfile(input, userId) {
   void input;
   void userId;
-  throw new Error("新连接档案只能通过生意参谋经营数据导入创建。");
+  throw new Error("新链接资产请通过平台链接经营导入创建。");
 }
 
 export function createConnectionProfilesBatch(input, userId) {
   void input;
   void userId;
-  throw new Error("已停用从ERP销售链接批量建立连接档案，请通过生意参谋经营数据导入识别连接。");
+  throw new Error("已停用从ERP销售链接批量建立连接档案，请通过平台链接经营导入创建链接资产。");
 }
 
 export function ensureBusinessAdvisorConnection(input, userId) {

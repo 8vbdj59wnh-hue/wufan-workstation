@@ -251,9 +251,7 @@ function renderSectionNavigation() {
 function renderConnectionDataCenter() {
   const tabs = [
     ["data-foundation", "数据导入"],
-    ["imports", "经营数据导入"],
     ["mappings", "字段映射"],
-    ["pending-connections", "待关联数据"],
   ];
   const content = pageState.dataCenterTab === "imports" ? renderImportPage()
     : pageState.dataCenterTab === "mappings" ? renderMappingPage()
@@ -269,7 +267,7 @@ function renderDataFoundation() {
   const preview = foundation.preview;
   const previewPanel = preview ? `<section class="connection-import-preview ${preview.blocked ? "is-blocked" : ""}"><header><div><p class="eyebrow">IMPORT PREVIEW</p><h3>平台链接经营导入预览</h3></div><span class="status-pill">${preview.blocked ? "已阻断" : preview.batch?.status === "completed" || preview.batch?.status === "completed_with_errors" ? "已导入" : "待确认"}</span></header><div class="connection-import-preview-grid"><span>模板<strong>${escapeHtml(preview.preview?.templateName || "—")}</strong></span><span>平台<strong>${escapeHtml(preview.preview?.platform || "—")}</strong></span><span>店铺<strong>${escapeHtml(preview.preview?.shop || "—")}</strong></span><span>数据周期<strong>${escapeHtml(preview.preview?.periodStart && preview.preview?.periodEnd ? `${preview.preview.periodStart} 至 ${preview.preview.periodEnd}` : "多个周期 / 无法汇总")}</strong></span><span>原始行数<strong>${escapeHtml(preview.preview?.rawRows ?? 0)}</strong></span><span>过滤后行数<strong>${escapeHtml(preview.preview?.filteredRows ?? 0)}</strong></span><span>新增链接<strong>${escapeHtml(preview.preview?.newLinks ?? 0)}</strong></span><span>更新链接<strong>${escapeHtml(preview.preview?.updatedLinks ?? 0)}</strong></span><span>经营事实<strong>${escapeHtml(preview.preview?.operationFacts ?? 0)}</strong></span><span>异常数量<strong>${escapeHtml(preview.preview?.errors ?? 0)}</strong></span></div>${preview.preview?.duplicateGoodsIds?.length ? `<p class="form-error">过滤后商品ID重复：${escapeHtml(preview.preview.duplicateGoodsIds.join("、"))}</p>` : ""}<footer><small>确认前不会创建链接档案或写入经营事实。</small>${canManage() && !preview.blocked && !["completed", "completed_with_errors"].includes(preview.batch?.status) ? `<button type="button" class="primary-button" data-confirm-foundation-import="${escapeHtml(preview.batch.id)}">确认导入</button>` : ""}</footer></section>` : "";
   return `<section class="connection-foundation-page">
-    <header class="connection-section-heading"><div><p class="eyebrow">LINK DATA FOUNDATION</p><h2>链接数据导入中心</h2><p>统一管理链接档案、平台经营、ERP销售、产品关系和库存数据。</p></div></header>
+    <header class="connection-section-heading"><div><p class="eyebrow">LINK DATA FOUNDATION</p><h2>链接数据导入中心</h2><p>平台链接经营表一次完成链接资产建档和经营事实写入；旺店通数据继续补充真实销售、产品关系与库存。</p></div></header>
     ${renderImportStatus(foundation.loading ? "parsed" : foundation.batches?.[0]?.status)}
     <div class="connection-import-type-grid">${types.map(([key, definition]) => `<article><strong>${escapeHtml(definition.label)}</strong><span>必填：${escapeHtml((definition.required || []).join("、"))}</span></article>`).join("")}</div>
     ${canManage() ? `<form class="connection-foundation-import-form" data-foundation-import-form><label>导入类型<select name="importType" required>${types.map(([key, definition]) => `<option value="${escapeHtml(key)}">${escapeHtml(definition.label)}</option>`).join("")}</select></label><label>导入模板<select name="templateVersionId"><option value="">请选择模板（ERP可自动识别）</option>${foundation.templates.map((item) => `<option value="${escapeHtml(item.currentVersionId)}" data-template-type="${escapeHtml(item.dataType)}" ${item.dataType === defaultType ? "" : "hidden disabled"}>${escapeHtml(item.name)} · V${escapeHtml(item.version)}</option>`).join("")}</select></label><label>Excel文件<input type="file" name="file" accept=".xls,.xlsx" required /></label><button type="submit" class="primary-button">读取并生成预览</button></form>` : ""}
@@ -380,7 +378,7 @@ function renderToolbar() {
       <button type="button" class="${pageState.sort === "newest" ? "active" : ""}" data-connection-sort="newest">最新连接</button>
     </div>
     <details class="connection-field-settings" ${pageState.fieldSettingsOpen ? "open" : ""}><summary>字段设置</summary><div>${listColumns.map((column) => `<label><input type="checkbox" value="${column.key}" data-connection-column-visibility ${pageState.visibleColumns.includes(column.key) ? "checked" : ""} />${escapeHtml(column.label)}</label>`).join("")}<button type="button" class="secondary-button" data-save-connection-list-config>保存当前列表配置</button></div></details>
-    <span class="form-note">新连接档案由生意参谋经营数据导入识别创建</span>
+    <span class="form-note">平台链接经营导入会直接创建或更新链接资产，并写入对应周期的经营事实</span>
   </div></div>`;
 }
 
@@ -444,7 +442,7 @@ function renderHealthReport() {
 }
 
 function renderList() {
-  if (!pageState.items.length) return `<div class="empty-state"><strong>还没有连接档案</strong><p>从已有销售链接中建立第一条经营连接。</p></div>`;
+  if (!pageState.items.length) return `<div class="empty-state"><strong>还没有链接资产</strong><p>请在数据中心选择平台链接经营模板，上传平台导出表建立第一条链接资产。</p></div>`;
   const filters = pageState.listFilters;
   const items = pageState.items.filter((item) => {
     const searchQuery = String(filters.search || "").trim().toLowerCase();
@@ -501,8 +499,8 @@ function renderList() {
 
 function renderPendingConnections() {
   const pendingRows = pageState.currentImport?.rows?.filter((row) => row.previewStatus === "pending") ?? [];
-  return `<section class="connection-pending-page"><header class="connection-toolbar"><div><strong>待识别经营连接</strong><p>只展示生意参谋导入中尚未识别的商品，不再从ERP销售链接直接建立连接档案。</p></div>${canManage() ? `<button type="button" class="primary-button" data-open-business-import>上传生意参谋数据</button>` : ""}</header>
-    ${pendingRows.length ? `<div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>商品ID</th><th>商品名称</th><th>原因</th></tr></thead><tbody>${pendingRows.map((row) => `<tr><td><strong>${escapeHtml(row.externalId || "—")}</strong></td><td>${escapeHtml(row.goodsName || "—")}</td><td>${escapeHtml(row.pendingReason === "ambiguous_goods_id" ? "同一店铺商品ID存在多个候选，请核对销售身份" : "历史批次缺少有效店铺，无法安全识别")}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><strong>当前没有待识别经营连接</strong><p>上传生意参谋文件并选择平台店铺后，系统会按商品ID创建或复用连接档案。</p></div>`}
+  return `<section class="connection-pending-page"><header class="connection-toolbar"><div><strong>历史待识别数据</strong><p>仅用于处理升级前的生意参谋历史批次；新的链接资产统一通过平台链接经营导入创建。</p></div></header>
+    ${pendingRows.length ? `<div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>商品ID</th><th>商品名称</th><th>原因</th></tr></thead><tbody>${pendingRows.map((row) => `<tr><td><strong>${escapeHtml(row.externalId || "—")}</strong></td><td>${escapeHtml(row.goodsName || "—")}</td><td>${escapeHtml(row.pendingReason === "ambiguous_goods_id" ? "同一店铺商品ID存在多个候选，请核对销售身份" : "历史批次缺少有效店铺，无法安全识别")}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><strong>当前没有历史待识别数据</strong><p>新的平台数据请使用数据导入页中的平台链接经营模板。</p></div>`}
   </section>`;
 }
 
