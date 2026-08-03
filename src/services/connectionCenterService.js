@@ -33,6 +33,8 @@ export {
   loadConnectionImprovementSummary,
   loadConnectionPeriodSnapshots,
   loadConnectionAssets,
+  previewConnectionOwnerImport,
+  confirmConnectionOwnerImport,
   loadConnections,
   loadConnectionCoreDetail,
   loadMyConnectionWorkbench,

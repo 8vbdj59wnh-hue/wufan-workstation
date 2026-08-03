@@ -122,6 +122,7 @@ import {
   previewConnectionDataImport,
 } from "./connectionDataFoundationService.js";
 import { getConnectionCoreDetail, listConnectionCoreProfiles } from "./connectionCorePageService.js";
+import { confirmConnectionOwnerImport, previewConnectionOwnerImport } from "./connectionOwnerImportService.js";
 import { getConnectionBusinessCockpit } from "./connectionBusinessCockpitService.js";
 import {
   batchLinkProcessInstanceTemplates,
@@ -1823,6 +1824,28 @@ app.get("/api/connection-assets", requireLinkView, (request, response) => {
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "链接资产读取失败。" });
   }
+});
+
+app.post("/api/connection-assets/owner-imports/preview", requireLinkManage, (request, response) => {
+  uploadConnectionWorkbook.single("file")(request, response, (error) => {
+    if (error) { response.status(400).json({ success: false, message: error.message || "负责人匹配文件上传失败。" }); return; }
+    try {
+      const result = previewConnectionOwnerImport({
+        buffer: request.file?.buffer,
+        fileName: normalizeUploadedFileName(request.file?.originalname),
+        shopId: request.body?.shopId,
+        userId: getUserPersonId(request.user),
+      });
+      response.status(result.idempotent ? 200 : 201).json({ success: true, ...result });
+    } catch (uploadError) {
+      response.status(400).json({ success: false, message: uploadError.message || "负责人匹配预览失败。" });
+    }
+  });
+});
+
+app.post("/api/connection-assets/owner-imports/:id/confirm", requireLinkManage, (request, response) => {
+  try { response.json({ success: true, ...confirmConnectionOwnerImport(request.params.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "负责人批量更新失败。" }); }
 });
 
 app.get("/api/connections/:id/core-detail", requireLinkView, requireConnectionAccess, (request, response) => {

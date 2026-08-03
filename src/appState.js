@@ -1017,6 +1017,15 @@ export async function loadConnectionAssets() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-assets`), "链接资产读取失败。");
 }
 
+export async function previewConnectionOwnerImport(file, shopId) {
+  const form = new FormData(); form.append("file", file); form.append("shopId", shopId);
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-assets/owner-imports/preview`, { method: "POST", body: form }), "负责人匹配预览失败。");
+}
+
+export async function confirmConnectionOwnerImport(batchId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-assets/owner-imports/${encodeURIComponent(batchId)}/confirm`, { method: "POST" }), "负责人批量更新失败。");
+}
+
 export async function loadConnectionCoreDetail(connectionId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/core-detail`), "链接经营详情读取失败。");
 }

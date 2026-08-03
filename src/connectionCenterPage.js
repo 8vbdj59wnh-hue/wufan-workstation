@@ -28,6 +28,8 @@ import {
   removeConnectionBenchmark,
   loadConnectionPeriodSnapshots,
   loadConnectionAssets,
+  previewConnectionOwnerImport,
+  confirmConnectionOwnerImport,
   loadConnectionCoreDetail,
   loadMyConnectionWorkbench,
   removeConnectionAction,
@@ -88,6 +90,7 @@ const pageState = {
   foundation: { definitions: {}, templates: [], batches: [], errors: [], loading: false, preview: null },
   coreDetail: null,
   coreDetailLoading: false,
+  ownerImport: { loading: false, result: null },
   salesPeriodType: "month",
   error: "",
 };
@@ -356,7 +359,7 @@ function renderToolbar() {
       <select name="platform" aria-label="平台筛选"><option value="">全部平台</option>${platforms.map((platform) => `<option value="${escapeHtml(platform)}" ${filters.platform === platform ? "selected" : ""}>${escapeHtml(platform)}</option>`).join("")}</select>
       <select name="shopId" aria-label="店铺筛选"><option value="">全部店铺</option>${shops.map((shop) => `<option value="${escapeHtml(shop.id)}" ${filters.shopId === shop.id ? "selected" : ""}>${escapeHtml(shop.name)}</option>`).join("")}</select>
       <input name="productCode" value="${escapeHtml(filters.productCode)}" placeholder="筛选产品编码" aria-label="关联产品编码筛选" />
-      <select name="ownerId" aria-label="负责人筛选"><option value="">全部负责人</option><option value="unassigned" ${filters.ownerId === "unassigned" ? "selected" : ""}>未设置负责人</option>${owners.map((person) => `<option value="${escapeHtml(person.id)}" ${filters.ownerId === person.id ? "selected" : ""}>${escapeHtml(person.name)}</option>`).join("")}</select>
+      <select name="ownerId" aria-label="负责人筛选"><option value="">全部负责人</option><option value="unassigned" ${filters.ownerId === "unassigned" ? "selected" : ""}>未分配负责人</option><option value="assigned" ${filters.ownerId === "assigned" ? "selected" : ""}>已分配负责人</option>${owners.map((person) => `<option value="${escapeHtml(person.id)}" ${filters.ownerId === person.id ? "selected" : ""}>${escapeHtml(person.name)}</option>`).join("")}</select>
       <select name="healthStatus" aria-label="健康状态筛选"><option value="">全部健康状态</option>${["growing", "stable", "attention", "risk", "insufficient_data", "no_data"].map((status) => `<option value="${status}" ${filters.healthStatus === status ? "selected" : ""}>${escapeHtml(healthText(status))}</option>`).join("")}</select>
       <select name="salesStatus" aria-label="销售状态筛选"><option value="">全部销售状态</option><option value="selling" ${filters.salesStatus === "selling" ? "selected" : ""}>有真实销售</option><option value="no_sales" ${filters.salesStatus === "no_sales" ? "selected" : ""}>暂无真实销售</option></select>
       <select name="profitStatus" aria-label="利润状态筛选"><option value="">全部利润状态</option><option value="profit" ${filters.profitStatus === "profit" ? "selected" : ""}>盈利</option><option value="loss" ${filters.profitStatus === "loss" ? "selected" : ""}>亏损</option><option value="unknown" ${filters.profitStatus === "unknown" ? "selected" : ""}>无利润数据</option></select>
@@ -396,7 +399,27 @@ function renderGrowthOverview() {
 }
 
 function renderConnectionAssets() {
-  return `<section class="connection-assets"><header class="connection-section-heading"><div><p class="eyebrow">LINK ASSETS</p><h2>链接资产</h2><p>统一查看、筛选和管理公司的销售链接档案。</p></div></header>${renderGrowthOverview()}${renderToolbar()}${renderList()}</section>`;
+  return `<section class="connection-assets"><header class="connection-section-heading"><div><p class="eyebrow">LINK ASSETS</p><h2>链接资产</h2><p>统一查看、筛选和管理公司的销售链接档案。</p></div></header>${renderOwnerImport()}${renderGrowthOverview()}${renderToolbar()}${renderList()}</section>`;
+}
+
+function renderOwnerImport() {
+  if (!canManage()) return "";
+  const result = pageState.ownerImport.result; const preview = result?.preview ?? {}; const rows = result?.rows ?? [];
+  const statusText = { matched: "已匹配", unmatched: "未匹配", conflict: "冲突", ignored: "已忽略", success: "已更新" };
+  return `<details class="connection-foundation-panel connection-owner-import" ${result ? "open" : ""}>
+    <summary>批量匹配负责人</summary>
+    <p class="form-note">按“店铺 + 商品ID”精确匹配链接资产；不使用商品名称、SKU或货号。</p>
+    <form data-connection-owner-import-form class="connection-foundation-import-form">
+      <label>店铺<select name="shopId" required><option value="">请选择店铺</option>${pageState.importShops.map((shop) => `<option value="${escapeHtml(shop.id)}">${escapeHtml(`${shop.platform} · ${shop.displayName || shop.shopName}`)}</option>`).join("")}</select></label>
+      <label>负责人匹配Excel<input type="file" name="file" accept=".xls,.xlsx" required /></label>
+      <button type="submit" class="secondary-button" ${pageState.ownerImport.loading ? "disabled" : ""}>${pageState.ownerImport.loading ? "正在解析…" : "生成匹配预览"}</button>
+    </form>
+    ${result ? `<section class="connection-import-preview ${result.blocked ? "is-blocked" : ""}"><header><div><h3>负责人匹配预览</h3><p>${escapeHtml(`${preview.platform || ""} · ${preview.shop || ""}`)}</p></div><span class="status-pill">${result.blocked ? "已阻断" : result.batch?.status === "completed" ? "已完成" : "待确认"}</span></header>
+      <div class="connection-import-preview-grid"><span>总行数<strong>${preview.totalRows || 0}</strong></span><span>成功匹配<strong>${preview.matchedRows || 0}</strong></span><span>未匹配<strong>${preview.unmatchedRows || 0}</strong></span><span>冲突<strong>${preview.conflictRows || 0}</strong></span><span>空负责人<strong>${preview.ignoredRows || 0}</strong></span></div>
+      <div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>行</th><th>商品ID</th><th>链接标题</th><th>当前负责人</th><th>新负责人</th><th>状态</th><th>说明</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${row.rowNumber}</td><td>${escapeHtml(row.data?.platformGoodsId || "—")}</td><td>${escapeHtml(row.data?.linkTitle || "—")}</td><td>${escapeHtml(row.data?.currentOwnerName || "未分配")}</td><td>${escapeHtml(row.data?.newOwnerName || "—")}</td><td>${escapeHtml(statusText[row.status] || row.status)}</td><td>${escapeHtml(row.errorMessage || "—")}</td></tr>`).join("")}</tbody></table></div>
+      ${!result.blocked && result.batch?.status !== "completed" ? `<footer><button type="button" class="primary-button" data-confirm-owner-import="${escapeHtml(result.batch.id)}">确认批量更新</button></footer>` : ""}
+    </section>` : ""}
+  </details>`;
 }
 
 function cockpitStageText(stage) { return ({ normal:"正常",diagnosis:"诊断中",treatment:"治疗中",observation:"观察中" })[stage] ?? stage; }
@@ -452,7 +475,7 @@ function renderList() {
       && (!filters.shopId || item.shopId === filters.shopId)
       && (!filters.platform || item.platform === filters.platform)
       && (!codeQuery || item.products?.some((product) => String(product.skuCode || "").toLowerCase().includes(codeQuery)))
-      && (!filters.ownerId || (filters.ownerId === "unassigned" ? !item.ownerId : item.ownerId === filters.ownerId))
+      && (!filters.ownerId || (filters.ownerId === "unassigned" ? !item.ownerId : filters.ownerId === "assigned" ? Boolean(item.ownerId) : item.ownerId === filters.ownerId))
       && (!filters.healthStatus || item.healthStatus === filters.healthStatus)
       && (!filters.salesStatus || (filters.salesStatus === "selling" ? Number(item.erpSales?.shippedQuantity || 0) > 0 : Number(item.erpSales?.shippedQuantity || 0) <= 0))
       && (!filters.profitStatus || (filters.profitStatus === "unknown" ? item.erpSales?.profitAmount == null : item.erpSales?.profitAmount != null && (filters.profitStatus === "profit" ? Number(item.erpSales.profitAmount) >= 0 : Number(item.erpSales.profitAmount) < 0)))
@@ -815,6 +838,7 @@ export function bindConnectionCenterPageEvents(render) {
     pageState.myWorkbench = { items: [], summary: { total: 0, better: 0, risk: 0, followed: 0 }, filter: "all", isAdmin: false, loading: false };
     pageState.selectedId = "";
     pageState.coreDetail = null;
+    pageState.ownerImport = { loading: false, result: null };
   }
   if (!pageState.loaded && !pageState.loading) void loadPage(render);
   const routeHash = window.location.hash.replace(/^#/, ""); const hasDetailRoute = routeHash.startsWith("connectionCenter/");
@@ -875,6 +899,23 @@ export function bindConnectionCenterPageEvents(render) {
   }));
   root.querySelectorAll("[data-open-pending-connections]").forEach((button) => button.addEventListener("click", () => { pageState.section = "data-center"; pageState.dataCenterTab = "pending-connections"; pageState.selectedId = ""; void loadPendingConnections(render); }));
   root.querySelector("[data-open-business-import]")?.addEventListener("click", () => { pageState.section = "data-center"; pageState.dataCenterTab = "imports"; pageState.selectedId = ""; void loadImportBatches(render, true); });
+  root.querySelector("[data-connection-owner-import-form]")?.addEventListener("submit", async (event) => {
+    event.preventDefault(); const form = new FormData(event.currentTarget);
+    pageState.ownerImport.loading = true; pageState.error = ""; render();
+    try { pageState.ownerImport.result = await previewConnectionOwnerImport(form.get("file"), form.get("shopId")); }
+    catch (error) { pageState.error = error.message; }
+    pageState.ownerImport.loading = false; render();
+  });
+  root.querySelector("[data-confirm-owner-import]")?.addEventListener("click", async (event) => {
+    pageState.ownerImport.loading = true; pageState.error = ""; render();
+    try {
+      const result = await confirmConnectionOwnerImport(event.currentTarget.dataset.confirmOwnerImport);
+      pageState.ownerImport.result = result;
+      await Promise.all([loadConnectionAssetsPage(render), loadMyLinks(render)]);
+      window.alert(`负责人更新完成：更新 ${result.result?.updated || 0} 条，原负责人未变化 ${result.result?.unchanged || 0} 条。`);
+    } catch (error) { pageState.error = error.message; }
+    pageState.ownerImport.loading = false; render();
+  });
   root.querySelectorAll("[data-connection-view]").forEach((button) => button.addEventListener("click", () => { pageState.view = button.dataset.connectionView; render(); }));
   root.querySelector("[data-connection-list-filters]")?.addEventListener("submit", (event) => {
     event.preventDefault(); pageState.listFilters = Object.fromEntries(new FormData(event.currentTarget)); render();
