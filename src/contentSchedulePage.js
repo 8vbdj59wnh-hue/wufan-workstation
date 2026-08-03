@@ -58,7 +58,7 @@ import {
   bindLaunchedProcessDetailEvents,
   canEditLaunchedProcessInstance,
   renderLaunchedProcessDetail,
-} from "./processInstanceDetail.js?v=20260803-action-product-search1";
+} from "./processInstanceDetail.js?v=20260803-action-product-quick-link1";
 
 const defaultDepartmentId = "dept-marketing";
 const defaultOwnerId = "person-005";

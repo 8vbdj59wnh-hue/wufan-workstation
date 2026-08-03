@@ -103,7 +103,7 @@ function renderSelectedProducts(products, actionId = "") {
       (product) => `
         <div class="action-product-selected-item">
           ${renderProductThumb(product)}
-          <span><strong>${escapeHtml(product.name)}</strong><small>产品编码：${escapeHtml(product.skuCode)}</small><small>关联时间：${escapeHtml(formatRelationTime(relationCreatedAt(actionId, product.id)))}</small></span>
+          <span><strong>${escapeHtml(product.name)}</strong><small>产品编码：${escapeHtml(product.skuCode)}</small><small>SKU：${escapeHtml(relationSkuCodes(product.id).join("、") || product.skuCode)}</small><small>关联时间：${escapeHtml(formatRelationTime(relationCreatedAt(actionId, product.id)))}</small></span>
           <button class="icon-button" type="button" data-action="remove-action-product" data-product-id="${escapeHtml(product.id)}" aria-label="移除${escapeHtml(product.name)}">×</button>
         </div>
       `,
@@ -120,8 +120,16 @@ export function renderActionProductSelector(selectedIds = [], { label = "关联�
     <div class="action-product-selector" data-action-product-selector data-action-id="${escapeHtml(actionId)}">
       <span class="field-label">${escapeHtml(label)}</span>
       <div class="action-product-selected" data-action-product-selected>${renderSelectedProducts(selectedProducts, actionId)}</div>
-      <div class="action-product-search-row"><input class="action-product-search" type="search" placeholder="输入产品编码、SKU编码或产品名称" data-action-product-search autocomplete="off" /><button class="secondary-button" type="button" data-action="quick-link-action-product">快速查找</button></div>
-      <p class="form-note" data-action-product-search-message>优先输入完整产品编码，可直接进入关联确认。</p>
+      <div class="action-product-quick-link">
+        <strong>编码快速关联</strong>
+        <div class="action-product-search-row"><input class="action-product-search" type="search" placeholder="输入完整产品编码" data-action-product-quick-code autocomplete="off" /><button class="primary-button" type="button" data-action="quick-link-action-product">关联</button></div>
+        <p class="form-note" data-action-product-quick-message>输入产品编码后可直接确认，成功后可继续添加下一个产品。</p>
+      </div>
+      <div class="action-product-search-section">
+        <strong>搜索选择产品</strong>
+        <input class="action-product-search" type="search" placeholder="搜索产品编码、SKU编码或产品名称" data-action-product-search autocomplete="off" />
+        <p class="form-note" data-action-product-search-message>输入关键词查看匹配产品。</p>
+      </div>
       <div class="action-product-confirm" data-action-product-confirm hidden></div>
       <div class="action-product-options" data-action-product-options>
         ${products.length === 0 ? `<p class="form-note">产品中心暂无可选产品</p>` : products.map((product) => `
@@ -149,8 +157,8 @@ function refreshSelected(selector) {
   });
 }
 
-function renderProductConfirmation(product) {
-  return `${renderProductThumb(product)}<span><strong>${escapeHtml(product.name)}</strong><small>产品编码：${escapeHtml(product.skuCode)}</small><small>SKU：${escapeHtml(relationSkuCodes(product.id).join("、") || product.skuCode)}</small></span><button class="primary-button" type="button" data-action="confirm-action-product" data-product-id="${escapeHtml(product.id)}">确认关联</button>`;
+function renderProductConfirmation(product, isSelected = false) {
+  return `${renderProductThumb(product)}<span><strong>${escapeHtml(product.name)}</strong><small>产品编码：${escapeHtml(product.skuCode)}</small><small>SKU：${escapeHtml(relationSkuCodes(product.id).join("、") || product.skuCode)}</small></span><button class="primary-button" type="button" data-action="confirm-action-product" data-product-id="${escapeHtml(product.id)}" ${isSelected ? "disabled" : ""}>${isSelected ? "已关联" : "确认关联"}</button>`;
 }
 
 function filterProductOptions(selector, query) {
@@ -168,30 +176,63 @@ export function bindActionProductSelectors(root = document) {
       if (!event.target.matches("[data-action-product-search]")) return;
       const matches = filterProductOptions(selector, event.target.value);
       const message = selector.querySelector("[data-action-product-search-message]");
-      if (message) message.textContent = event.target.value.trim() ? `找到 ${matches.length} 个匹配产品` : "优先输入完整产品编码，可直接进入关联确认。";
+      if (message) message.textContent = event.target.value.trim() ? `找到 ${matches.length} 个匹配产品` : "输入关键词查看匹配产品。";
+    });
+    selector.addEventListener("keydown", (event) => {
+      if (!event.target.matches("[data-action-product-quick-code]") || event.key !== "Enter") return;
+      event.preventDefault();
+      selector.querySelector('[data-action="quick-link-action-product"]')?.click();
     });
     selector.addEventListener("click", (event) => {
       const action = event.target.closest("[data-action]")?.dataset.action;
       if (action === "quick-link-action-product") {
-        const query = selector.querySelector("[data-action-product-search]")?.value.trim() ?? "";
-        const matches = filterProductOptions(selector, query); const exact = matches.filter((option) => option.dataset.productCode === normalizeCode(query));
-        const candidate = exact.length === 1 ? exact[0] : matches.length === 1 ? matches[0] : null;
-        const message = selector.querySelector("[data-action-product-search-message]");
-        if (message) message.textContent = !query ? "请输入产品编码、SKU编码或产品名称。" : !matches.length ? "未找到对应产品。" : candidate ? "已定位唯一产品，请确认关联。" : `找到 ${matches.length} 个产品，请选择。`;
+        const query = selector.querySelector("[data-action-product-quick-code]")?.value.trim() ?? "";
+        const matches = [...selector.querySelectorAll(".action-product-option")]
+          .filter((option) => option.dataset.productCode === normalizeCode(query));
+        selector.querySelectorAll(".action-product-option").forEach((option) => { option.hidden = !matches.includes(option); });
+        const candidate = matches.length === 1 ? matches[0] : null;
+        const message = selector.querySelector("[data-action-product-quick-message]");
+        if (message) message.textContent = !query ? "请输入产品编码。" : !matches.length ? "未找到对应产品。" : candidate ? "已找到产品，请确认关联。" : `找到 ${matches.length} 个同编码产品，请选择。`;
         if (candidate) {
-          const product = state.products.find((item) => item.id === candidate.dataset.productId); const confirm = selector.querySelector("[data-action-product-confirm]");
-          if (confirm && product) { confirm.innerHTML = renderProductConfirmation(product); confirm.hidden = false; }
+          const product = state.products.find((item) => item.id === candidate.dataset.productId);
+          const input = candidate.querySelector('[name="actionProductId"]');
+          const confirm = selector.querySelector("[data-action-product-confirm]");
+          if (confirm && product) {
+            confirm.innerHTML = renderProductConfirmation(product, input?.checked === true);
+            confirm.hidden = false;
+          }
         }
         return;
       }
       if (action === "choose-action-product") {
-        const product = state.products.find((item) => item.id === event.target.closest("[data-product-id]")?.dataset.productId); const confirm = selector.querySelector("[data-action-product-confirm]");
-        if (confirm && product) { confirm.innerHTML = renderProductConfirmation(product); confirm.hidden = false; }
+        const option = event.target.closest(".action-product-option");
+        const product = state.products.find((item) => item.id === option?.dataset.productId);
+        const confirm = selector.querySelector("[data-action-product-confirm]");
+        if (confirm && product) {
+          confirm.innerHTML = renderProductConfirmation(product, option?.querySelector('[name="actionProductId"]')?.checked === true);
+          confirm.hidden = false;
+        }
         return;
       }
       if (action === "confirm-action-product") {
-        const input = selector.querySelector(`[name="actionProductId"][value="${CSS.escape(event.target.closest("[data-product-id]").dataset.productId)}"]`);
-        if (input) input.checked = true; const confirm = selector.querySelector("[data-action-product-confirm]"); if (confirm) confirm.hidden = true; refreshSelected(selector); return;
+        const productId = event.target.closest("[data-product-id]")?.dataset.productId ?? "";
+        const input = selector.querySelector(`[name="actionProductId"][value="${CSS.escape(productId)}"]`);
+        const message = selector.querySelector("[data-action-product-quick-message]");
+        if (input?.checked) {
+          if (message) message.textContent = "该产品已经关联，无需重复添加。";
+          return;
+        }
+        if (input) input.checked = true;
+        const confirm = selector.querySelector("[data-action-product-confirm]");
+        if (confirm) confirm.hidden = true;
+        const quickInput = selector.querySelector("[data-action-product-quick-code]");
+        if (quickInput) quickInput.value = "";
+        const searchInput = selector.querySelector("[data-action-product-search]");
+        if (searchInput) searchInput.value = "";
+        filterProductOptions(selector, "");
+        if (message) message.textContent = "已添加关联产品，可继续输入下一个产品编码。";
+        refreshSelected(selector);
+        return;
       }
       const button = event.target.closest("[data-action='remove-action-product']");
       if (button === null) return;
