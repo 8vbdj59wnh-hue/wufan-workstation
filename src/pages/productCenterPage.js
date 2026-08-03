@@ -1,1 +1,1 @@
-export { bindProductCenterPageEvents, renderProductCenterPage } from "../productCenterPage.js?v=20260802-product-business-zones1";
+export { bindProductCenterPageEvents, renderProductCenterPage } from "../productCenterPage.js?v=20260803-product-link-search1";

@@ -64,6 +64,7 @@ let erpSyncState = {
 let productSalesState = { productId: "", loading: false, loaded: false, rows: [], error: "" };
 let productSalesSummaryState = { loading: false, loaded: false, rows: [], error: "" };
 let unmatchedSkuState = { loading: false, loaded: false, rows: [], total: 0, query: "", error: "" };
+let platformProductLinkState = { skuId: "", query: "", selectedProductId: "", error: "" };
 let productSubmodule = "products";
 let pendingSkuState = { loading: false, loaded: false, rows: [], query: "", error: "", notice: "" };
 let selectedPendingSkuIds = new Set();
@@ -618,11 +619,10 @@ function renderProductSalesGroups(rows) {
             <span>状态：${escapeHtml(link.status || "—")}</span>
             ${link.rawUrl ? `<a class="text-button" href="${escapeHtml(link.rawUrl)}" target="_blank" rel="noopener noreferrer">打开链接</a>` : ""}
           </div>
-          <div class="table-wrap"><table class="data-table"><thead><tr><th>平台SKU编码</th><th>规格名称</th><th>价格</th><th>平台库存</th><th>匹配方式</th><th>操作</th></tr></thead>
-            <tbody>${link.skus.map((sku) => `<tr><td>${escapeHtml(sku.platformSkuCode || sku.platformSkuId || "—")}</td><td>${escapeHtml(sku.specificationName || "—")}</td>
-              <td>${sku.price ?? "—"}</td><td>${sku.platformStock ?? "—"}</td>
-              <td>${escapeHtml(sku.matchMethod === "manual" ? "人工绑定" : sku.matchMethod === "sku_code" ? "规格编码匹配" : sku.matchMethod === "goods_single_sku" ? "单规格货品匹配" : sku.matchStatus || "—")}</td>
-              <td>${sku.matchStatus === "matched_manual" ? `<button class="text-button" type="button" data-action="unbind-platform-sku" data-sku-id="${escapeHtml(sku.id)}">取消人工绑定</button>` : "—"}</td></tr>`).join("")}</tbody>
+          <div class="table-wrap"><table class="data-table"><thead><tr><th>平台SKU编码</th><th>产品编码</th><th>产品名称</th><th>规格名称</th><th>价格</th><th>平台库存</th><th>关联时间</th><th>关联状态</th><th>匹配方式</th><th>操作</th></tr></thead>
+            <tbody>${link.skus.map((sku) => { const product = state.products.find((item) => item.id === sku.productId); const manualBinding = state.platformSkuManualBindings.find((item) => item.salesLinkSkuId === sku.id); return `<tr><td>${escapeHtml(sku.platformSkuCode || sku.platformSkuId || "—")}</td><td><strong>${escapeHtml(product?.skuCode || "—")}</strong></td><td>${escapeHtml(product?.name || "—")}</td><td>${escapeHtml(sku.specificationName || "—")}</td>
+              <td>${sku.price ?? "—"}</td><td>${sku.platformStock ?? "—"}</td><td>${formatDateTime(manualBinding?.createdAt || sku.updatedAt)}</td><td><span class="status-badge">${escapeHtml(sku.currentState === "active" ? "关联有效" : sku.currentState || "—")}</span></td><td>${escapeHtml(sku.matchMethod === "manual" ? "人工绑定" : sku.matchMethod === "sku_code" ? "规格编码匹配" : sku.matchMethod === "goods_single_sku" ? "单规格货品匹配" : sku.matchStatus || "—")}</td>
+              <td>${sku.matchStatus === "matched_manual" ? `<button class="text-button" type="button" data-action="unbind-platform-sku" data-sku-id="${escapeHtml(sku.id)}">取消关联</button>` : "—"}</td></tr>`; }).join("")}</tbody>
           </table></div>
         </details>`).join("")}
       </div>`).join("")}
@@ -644,13 +644,46 @@ function renderUnmatchedPlatformSkus() {
           <td>${sku.rawUrl ? `<a class="text-button" href="${escapeHtml(sku.rawUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(sku.title || "打开链接")}</a>` : escapeHtml(sku.title || "-")}</td>
           <td>${escapeHtml(sku.platformGoodsCode || "-")}</td><td>${escapeHtml(sku.platformSkuCode || sku.platformSkuId || "-")}</td>
           <td>${escapeHtml(sku.specificationName || "-")}</td><td>${escapeHtml(sku.possibleErpGoodsCode ? `${sku.possibleErpGoodsCode} · ${sku.possibleErpGoodsName || ""}` : "—")}</td><td>${escapeHtml(sku.matchReason || sku.matchStatus || "-")}</td>
-          <td><input list="platform-product-options" data-platform-bind-product="${escapeHtml(sku.id)}" placeholder="输入SKU或产品名" /></td>
-          <td class="table-actions"><button class="text-button" type="button" data-action="bind-platform-sku" data-sku-id="${escapeHtml(sku.id)}">绑定</button>
+          <td><button class="secondary-button compact-button" type="button" data-action="open-platform-product-link" data-sku-id="${escapeHtml(sku.id)}">搜索并关联</button></td>
+          <td class="table-actions">
             <button class="text-button" type="button" data-action="mark-platform-combination" data-sku-id="${escapeHtml(sku.id)}">组合装</button>
             <button class="text-button" type="button" data-action="ignore-platform-sku" data-sku-id="${escapeHtml(sku.id)}">忽略</button></td></tr>`;
       }).join("")}</tbody></table></div>
-    <datalist id="platform-product-options">${state.products.map((product) => `<option value="${escapeHtml(product.skuCode)} · ${escapeHtml(product.name)}"></option>`).join("")}</datalist>
   </section>`;
+}
+
+function productRelationSkuCodes(productId) {
+  return (state.productErpMappings ?? []).filter((item) => item.productId === productId)
+    .flatMap((item) => [item.merchantSkuCode, item.barcode]).filter(Boolean);
+}
+
+function platformProductMatches(query) {
+  const raw = String(query ?? "").trim(); const normalized = normalizeProductSkuCode(raw); const lowered = raw.toLowerCase();
+  if (!raw) return [];
+  return state.products.filter((product) => product.status !== "已归档").map((product) => {
+    const codes = [product.skuCode, ...productRelationSkuCodes(product.id)].filter(Boolean);
+    const exactProductCode = normalizeProductSkuCode(product.skuCode) === normalized;
+    const exactSkuCode = codes.some((code) => normalizeProductSkuCode(code) === normalized);
+    const matched = exactSkuCode || String(product.name ?? "").toLowerCase().includes(lowered)
+      || codes.some((code) => normalizeProductSkuCode(code).includes(normalized));
+    return { product, codes, exactProductCode, exactSkuCode, matched };
+  }).filter((item) => item.matched).sort((left, right) => Number(right.exactProductCode) - Number(left.exactProductCode)
+    || Number(right.exactSkuCode) - Number(left.exactSkuCode)
+    || String(left.product.skuCode).localeCompare(String(right.product.skuCode), "zh-CN", { numeric: true })).slice(0, 30);
+}
+
+function renderPlatformProductLinkModal() {
+  if (!platformProductLinkState.skuId) return "";
+  const sku = unmatchedSkuState.rows.find((item) => item.id === platformProductLinkState.skuId);
+  if (!sku) return "";
+  const matches = platformProductMatches(platformProductLinkState.query); const selected = state.products.find((item) => item.id === platformProductLinkState.selectedProductId);
+  return `<div class="modal-backdrop"><section class="modal-panel platform-product-link-modal" role="dialog" aria-modal="true" aria-label="产品编码搜索与关联"><header class="modal-header"><div><p class="eyebrow">平台SKU快速关联</p><h2>搜索并关联产品</h2><small>${escapeHtml(sku.platformSkuCode || sku.platformSkuId || "未命名平台SKU")} · ${escapeHtml(sku.specificationName || "未设置规格")}</small></div><button class="icon-button" type="button" data-action="close-platform-product-link" aria-label="关闭">×</button></header>
+    <form class="platform-product-quick-search" data-platform-product-search><label>产品编码、SKU编码或产品名称<input name="query" value="${escapeHtml(platformProductLinkState.query)}" placeholder="优先输入完整产品编码" autofocus autocomplete="off" /></label><button class="secondary-button" type="submit">查询</button></form>
+    ${platformProductLinkState.error ? `<div class="form-error">${escapeHtml(platformProductLinkState.error)}</div>` : ""}
+    ${platformProductLinkState.query && !matches.length ? `<div class="empty-state compact"><strong>未找到对应产品</strong><p>请核对产品编码，或改用SKU编码、产品名称搜索。</p></div>` : ""}
+    ${matches.length ? `<div class="platform-product-search-results">${matches.map(({ product, codes, exactProductCode }) => `<button type="button" class="${selected?.id === product.id ? "is-selected" : ""}" data-action="select-platform-product" data-product-id="${escapeHtml(product.id)}">${renderImage(product, "platform-product-result-image")}<span><strong>${escapeHtml(product.skuCode)}</strong><small>${escapeHtml(product.name)}</small><em>ERP/SKU：${escapeHtml(codes.join("、") || "—")}</em></span><i>${selected?.id === product.id ? "已选择" : exactProductCode ? "编码精确匹配" : "可关联"}</i></button>`).join("")}</div>` : !platformProductLinkState.query ? `<div class="empty-state compact">输入产品编码可最快定位；也支持SKU编码和产品名称。</div>` : ""}
+    ${selected ? `<section class="platform-product-link-confirm"><h3>关联确认</h3><div>${renderImage(selected, "platform-product-result-image")}<span><strong>${escapeHtml(selected.name)}</strong><small>产品编码：${escapeHtml(selected.skuCode)}</small><small>SKU：${escapeHtml(productRelationSkuCodes(selected.id).join("、") || selected.skuCode)}</small></span></div><button class="primary-button" type="button" data-action="confirm-platform-product-link">确认关联</button></section>` : ""}
+  </section></div>`;
 }
 
 function renderProductDetail(product) {
@@ -1358,7 +1391,7 @@ async function refreshErpSyncState(syncRunId = erpSyncState.active?.id) {
 export function renderProductCenterPage() {
   const productId = getRouteProductId();
   const product = state.products.find((item) => item.id === productId);
-  return product ? renderProductDetail(product) : renderProductList();
+  return `${product ? renderProductDetail(product) : renderProductList()}${renderPlatformProductLinkModal()}`;
 }
 
 function setModalError(message, rerender) {
@@ -1558,6 +1591,14 @@ export function bindProductCenterPageEvents(rerender) {
   document.querySelector("[data-pending-sku-search]")?.addEventListener("submit", (event) => {
     event.preventDefault();
     void refreshPendingErpSkus(rerender, event.currentTarget.elements.query.value.trim());
+  });
+  document.querySelector("[data-platform-product-search]")?.addEventListener("submit", (event) => {
+    event.preventDefault(); const query = event.currentTarget.elements.query.value.trim(); const matches = platformProductMatches(query);
+    const exact = matches.filter((item) => item.exactProductCode);
+    platformProductLinkState = { ...platformProductLinkState, query,
+      selectedProductId: exact.length === 1 ? exact[0].product.id : matches.length === 1 ? matches[0].product.id : "",
+      error: query && !matches.length ? "未找到对应产品。" : "" };
+    rerender();
   });
   document.querySelector("[data-pending-sku-select-all]")?.addEventListener("change", (event) => {
     selectedPendingSkuIds = event.currentTarget.checked
@@ -1963,16 +2004,18 @@ export function bindProductCenterPageEvents(rerender) {
     if (action === "platform-preview-page") {
       await refreshPlatformPreview(rerender, { page: Number(button.dataset.page) || 1 });
     }
-    if (action === "bind-platform-sku") {
-      const input = document.querySelector(`[data-platform-bind-product="${CSS.escape(button.dataset.skuId)}"]`);
-      const product = state.products.find((item) => `${item.skuCode} · ${item.name}` === input?.value.trim());
-      if (product) await bindPlatformSku(button.dataset.skuId, product.id);
-      await Promise.all([
-        refreshUnmatchedPlatformSkus(rerender),
-        refreshProductSalesSummaries(rerender),
-      ]);
+    if (action === "open-platform-product-link") { platformProductLinkState = { skuId: button.dataset.skuId, query: "", selectedProductId: "", error: "" }; rerender(); }
+    if (action === "close-platform-product-link") { platformProductLinkState = { skuId: "", query: "", selectedProductId: "", error: "" }; rerender(); }
+    if (action === "select-platform-product") { platformProductLinkState = { ...platformProductLinkState, selectedProductId: button.dataset.productId, error: "" }; rerender(); }
+    if (action === "confirm-platform-product-link") {
+      if (!platformProductLinkState.selectedProductId) { platformProductLinkState = { ...platformProductLinkState, error: "请先选择产品。" }; rerender(); return; }
+      try { await bindPlatformSku(platformProductLinkState.skuId, platformProductLinkState.selectedProductId);
+        platformProductLinkState = { skuId: "", query: "", selectedProductId: "", error: "" };
+        await Promise.all([refreshUnmatchedPlatformSkus(rerender), refreshProductSalesSummaries(rerender)]); }
+      catch (error) { platformProductLinkState = { ...platformProductLinkState, error: error.message || "产品关联失败。" }; rerender(); }
     }
     if (action === "unbind-platform-sku") {
+      if (!window.confirm("确认取消该平台SKU与产品的人工关联？")) return;
       await unbindPlatformSku(button.dataset.skuId);
       await Promise.all([
         refreshProductSalesLinks(getRouteProductId(), rerender),

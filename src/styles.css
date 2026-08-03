@@ -10275,3 +10275,25 @@ button.content-template-thumb {
   .connection-workbench-issues b { display: none; }
   .connection-workbench-block > header { align-items: flex-start; flex-direction: column; }
 }
+
+.platform-product-link-modal { width: min(760px, 94vw); max-height: 88vh; overflow: auto; }
+.platform-product-quick-search { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; }
+.platform-product-quick-search label { display: grid; gap: 6px; color: #475467; font-size: 12px; }
+.platform-product-search-results { display: grid; gap: 8px; max-height: 320px; overflow: auto; }
+.platform-product-search-results > button { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px; border: 1px solid #e4e7ec; border-radius: 11px; background: #fff; color: inherit; text-align: left; cursor: pointer; }
+.platform-product-search-results > button:hover, .platform-product-search-results > button.is-selected { border-color: #258a68; background: #f3fbf7; }
+.platform-product-result-image { width: 52px; height: 52px; border-radius: 9px; object-fit: cover; }
+.platform-product-search-results span { display: grid; gap: 3px; min-width: 0; }
+.platform-product-search-results small, .platform-product-search-results em { overflow: hidden; color: #667085; font-size: 11px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.platform-product-search-results i { padding: 4px 8px; border-radius: 999px; background: #eef9f4; color: #18745a; font-size: 11px; font-style: normal; white-space: nowrap; }
+.platform-product-link-confirm { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; padding: 13px; border: 1px solid #a8cfbf; border-radius: 12px; background: #f5fbf8; }
+.platform-product-link-confirm h3 { grid-column: 1 / -1; margin: 0; }
+.platform-product-link-confirm > div { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 10px; align-items: center; }
+.platform-product-link-confirm span { display: grid; gap: 4px; }
+.platform-product-link-confirm small { color: #667085; }
+
+@media (max-width: 650px) {
+  .platform-product-quick-search, .platform-product-link-confirm { grid-template-columns: 1fr; }
+  .platform-product-search-results > button { grid-template-columns: 46px minmax(0, 1fr); }
+  .platform-product-search-results i { grid-column: 2; justify-self: start; }
+}
