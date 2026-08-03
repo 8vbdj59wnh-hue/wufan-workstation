@@ -27,7 +27,7 @@ import {
   createConnectionBenchmark,
   removeConnectionBenchmark,
   loadConnectionPeriodSnapshots,
-  loadConnections,
+  loadConnectionAssets,
   loadConnectionCoreDetail,
   loadMyConnectionWorkbench,
   removeConnectionAction,
@@ -48,6 +48,7 @@ import { escapeHtml } from "./utils/html.js?v=20260802-module-boundary1";
 
 const pageState = {
   loaded: false,
+  loadedUserId: "",
   loading: false,
   items: [],
   importShops: [],
@@ -712,19 +713,36 @@ async function loadMyLinks(render, filter = pageState.myWorkbench.filter) {
   render();
 }
 
+function applyConnectionAssetData(connections, rankings, managementOverview) {
+  const analysisByConnection = new Map((rankings.listMetrics ?? []).map((item) => [item.connectionId, item]));
+  pageState.items = (connections.items ?? []).map((item) => {
+    const analysis = analysisByConnection.get(item.id);
+    return { ...item, salesGrowth: analysis?.salesGrowth ?? null, visitorGrowth: analysis?.visitorGrowth ?? null,
+      conversionChange: analysis?.conversionChange ?? null, healthScore: analysis?.healthScore ?? null,
+      healthStatus: analysis?.healthStatus ?? "no_data", currentFinance: analysis?.currentFinance ?? null, profitGrowth: analysis?.profitGrowth ?? null };
+  });
+  pageState.growthRankings = rankings;
+  pageState.managementOverview = managementOverview;
+}
+
+async function loadConnectionAssetsPage(render) {
+  pageState.error = "";
+  try {
+    const [connections, rankings, managementOverview] = await Promise.all([
+      loadConnectionAssets(), loadConnectionGrowthRankings(), loadConnectionManagementOverview(),
+    ]);
+    applyConnectionAssetData(connections, rankings, managementOverview);
+  } catch (error) {
+    pageState.error = error.message;
+  }
+  render();
+}
+
 async function loadPage(render) {
   pageState.loading = true; pageState.error = ""; render();
   try {
-    const [connections, rankings, managementOverview, cockpit, healthAttention, improvementSummary, importShops, hospital, myWorkbench] = await Promise.all([loadConnections(), loadConnectionGrowthRankings(), loadConnectionManagementOverview(), loadConnectionBusinessCockpit(), canViewHealth() ? loadAttentionConnectionHealthRecords() : Promise.resolve({ items: [], counts: {} }), loadConnectionImprovementSummary(), loadConnectionImportShops(), canViewHealth() ? loadConnectionHospital() : Promise.resolve({ zones: { diagnosis: [], treatment: [], observation: [] }, counts: {}, admittedConnectionIds: [] }), loadMyConnectionWorkbench("all")]);
-    const analysisByConnection = new Map((rankings.listMetrics ?? []).map((item) => [item.connectionId, item]));
-    pageState.items = (connections.items ?? []).map((item) => {
-      const analysis = analysisByConnection.get(item.id);
-      return { ...item, salesGrowth: analysis?.salesGrowth ?? null, visitorGrowth: analysis?.visitorGrowth ?? null,
-        conversionChange: analysis?.conversionChange ?? null, healthScore: analysis?.healthScore ?? null,
-        healthStatus: analysis?.healthStatus ?? "no_data", currentFinance: analysis?.currentFinance ?? null, profitGrowth: analysis?.profitGrowth ?? null };
-    });
-    pageState.growthRankings = rankings;
-    pageState.managementOverview = managementOverview;
+    const [connections, rankings, managementOverview, cockpit, healthAttention, improvementSummary, importShops, hospital, myWorkbench] = await Promise.all([loadConnectionAssets(), loadConnectionGrowthRankings(), loadConnectionManagementOverview(), loadConnectionBusinessCockpit(), canViewHealth() ? loadAttentionConnectionHealthRecords() : Promise.resolve({ items: [], counts: {} }), loadConnectionImprovementSummary(), loadConnectionImportShops(), canViewHealth() ? loadConnectionHospital() : Promise.resolve({ zones: { diagnosis: [], treatment: [], observation: [] }, counts: {}, admittedConnectionIds: [] }), loadMyConnectionWorkbench("all")]);
+    applyConnectionAssetData(connections, rankings, managementOverview);
     pageState.cockpit = { ...pageState.cockpit, ...cockpit };
     pageState.healthAttention = healthAttention;
     pageState.improvementSummary = improvementSummary.summary;
@@ -732,6 +750,7 @@ async function loadPage(render) {
     pageState.myWorkbench = { ...pageState.myWorkbench, ...myWorkbench, filter: "all", loading: false };
     pageState.importShops = importShops.items ?? [];
     pageState.loaded = true;
+    pageState.loadedUserId = String(getCurrentUser()?.personId ?? getCurrentUser()?.id ?? "");
   } catch (error) { pageState.error = error.message; }
   pageState.loading = false; render();
 }
@@ -789,6 +808,14 @@ async function loadDataFoundation(render) {
 export function bindConnectionCenterPageEvents(render) {
   const root = document.querySelector(".connection-center-page");
   if (!root) return;
+  const currentUserId = String(getCurrentUser()?.personId ?? getCurrentUser()?.id ?? "");
+  if (pageState.loaded && pageState.loadedUserId !== currentUserId) {
+    pageState.loaded = false;
+    pageState.items = [];
+    pageState.myWorkbench = { items: [], summary: { total: 0, better: 0, risk: 0, followed: 0 }, filter: "all", isAdmin: false, loading: false };
+    pageState.selectedId = "";
+    pageState.coreDetail = null;
+  }
   if (!pageState.loaded && !pageState.loading) void loadPage(render);
   const routeHash = window.location.hash.replace(/^#/, ""); const hasDetailRoute = routeHash.startsWith("connectionCenter/");
   const routeConnectionId = hasDetailRoute ? decodeURIComponent(routeHash.slice("connectionCenter/".length)) : "";
@@ -796,6 +823,7 @@ export function bindConnectionCenterPageEvents(render) {
   if (pageState.loaded && !hasDetailRoute && pageState.selectedId) { pageState.selectedId = ""; pageState.coreDetail = null; render(); return; }
   root.querySelectorAll("[data-connection-section]").forEach((button) => button.addEventListener("click", () => {
     pageState.section = button.dataset.connectionSection; pageState.selectedId = ""; render();
+    if (pageState.section === "connections") void loadConnectionAssetsPage(render);
     if (pageState.section === "my-links") void loadMyLinks(render);
     if (pageState.section === "hospital") void loadHospital(render);
     if (pageState.section === "data-center") void loadDataFoundation(render);
@@ -991,7 +1019,7 @@ export function bindConnectionCenterPageEvents(render) {
   });
   root.querySelector("[data-confirm-foundation-import]")?.addEventListener("click", async (event) => {
     pageState.foundation.loading = true; pageState.error = ""; render();
-    try { const result = await confirmConnectionFoundationImport(event.currentTarget.dataset.confirmFoundationImport); pageState.foundation.preview = result; await loadDataFoundation(render); window.alert(`导入完成：新增链接 ${result.result?.createdLinks || 0}，更新链接 ${result.result?.updatedLinks || 0}，新增经营事实 ${result.result?.factsCreated || 0}。`); }
+    try { const result = await confirmConnectionFoundationImport(event.currentTarget.dataset.confirmFoundationImport); pageState.foundation.preview = result; await loadDataFoundation(render); await loadConnectionAssetsPage(render); window.alert(`导入完成：新增链接 ${result.result?.createdLinks || 0}，更新链接 ${result.result?.updatedLinks || 0}，新增经营事实 ${result.result?.factsCreated || 0}。`); }
     catch (error) { pageState.error = error.message; pageState.foundation.loading = false; render(); }
   });
   root.querySelector("[data-foundation-template-form]")?.addEventListener("submit", async (event) => {

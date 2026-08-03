@@ -32,6 +32,7 @@ export {
   removeConnectionBenchmark,
   loadConnectionImprovementSummary,
   loadConnectionPeriodSnapshots,
+  loadConnectionAssets,
   loadConnections,
   loadConnectionCoreDetail,
   loadMyConnectionWorkbench,

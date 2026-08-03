@@ -1817,6 +1817,14 @@ app.get("/api/connections", requireLinkView, (request, response) => {
   }
 });
 
+app.get("/api/connection-assets", requireLinkView, (request, response) => {
+  try {
+    response.json({ success: true, items: listConnectionCoreProfiles(getUserPersonId(request.user), isAdminUser(request.user)) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "链接资产读取失败。" });
+  }
+});
+
 app.get("/api/connections/:id/core-detail", requireLinkView, requireConnectionAccess, (request, response) => {
   try { response.json({ success: true, ...getConnectionCoreDetail(request.params.id, getUserPersonId(request.user), isAdminUser(request.user)) }); }
   catch (error) { response.status(error.message?.includes("只能查看") ? 403 : 404).json({ success: false, message: error.message || "链接经营详情读取失败。" }); }

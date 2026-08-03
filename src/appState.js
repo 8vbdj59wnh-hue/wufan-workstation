@@ -1013,6 +1013,10 @@ export async function loadConnections() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections`), "连接列表读取失败。");
 }
 
+export async function loadConnectionAssets() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-assets`), "链接资产读取失败。");
+}
+
 export async function loadConnectionCoreDetail(connectionId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/core-detail`), "链接经营详情读取失败。");
 }
