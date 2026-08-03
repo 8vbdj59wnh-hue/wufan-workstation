@@ -2007,6 +2007,11 @@ function runLightweightMigrations() {
   ensureColumn("connection_import_batches", "periodStart", "TEXT");
   ensureColumn("connection_import_batches", "periodEnd", "TEXT");
   ensureColumn("connection_import_batches", "periodType", "TEXT");
+  ensureColumn("connection_import_batches", "importType", "TEXT");
+  ensureColumn("connection_import_batches", "templateVersionId", "TEXT");
+  ensureColumn("connection_import_batches", "sourcePlatform", "TEXT");
+  ensureColumn("connection_import_batches", "completedAt", "TEXT");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_import_batches_type_hash ON connection_import_batches(importType,fileHash) WHERE importType IS NOT NULL");
   ensureColumn("connection_profiles", "mainImage", "TEXT");
   ensureColumn("connection_profiles", "imageSource", "TEXT");
   ensureColumn("connection_profiles", "level", "TEXT NOT NULL DEFAULT 'new'");

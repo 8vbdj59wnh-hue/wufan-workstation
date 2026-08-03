@@ -7,6 +7,7 @@ import {
   loadConnectionActions,
   loadConnectionDataMappings,
   loadConnectionImportBatches,
+  loadConnectionDataFoundation,
   loadConnectionImportShops,
   loadConnectionImportPreview,
   loadConnectionGrowthAnalysis,
@@ -33,6 +34,9 @@ import {
   updateConnectionImprovement,
   updateConnectionFollow,
   uploadConnectionImport,
+  uploadConnectionFoundationImport,
+  createConnectionFoundationTemplate,
+  iterateConnectionFoundationTemplate,
   resolveAssetUrl,
 } from "./services/connectionCenterService.js?v=20260803-connection-workbench1";
 import { getCurrentUser, state } from "./appState.js?v=20260705-state-singleton1";
@@ -75,6 +79,7 @@ const pageState = {
   currentImport: null,
   importLoading: false,
   importTab: "matched",
+  foundation: { definitions: {}, templates: [], batches: [], errors: [], loading: false },
   error: "",
 };
 
@@ -195,6 +200,7 @@ function statusText(status) {
 function originText(originSource) {
   return ({
     business_advisor: "生意参谋识别",
+    platform_link_import: "平台链接导入",
     legacy_business_advisor_supported: "历史档案 · 已有经营数据",
     legacy_bulk_initialized: "历史批量初始化",
     legacy_unknown: "历史来源未确认",
@@ -220,7 +226,21 @@ function renderSectionNavigation() {
     <button type="button" class="${pageState.section === "pending-connections" ? "active" : ""}" data-connection-section="pending-connections">待识别经营连接</button>
     <button type="button" class="${pageState.section === "mappings" ? "active" : ""}" data-connection-section="mappings">数据关联</button>
     <button type="button" class="${pageState.section === "imports" ? "active" : ""}" data-connection-section="imports">经营数据导入</button>
+    <button type="button" class="${pageState.section === "data-foundation" ? "active" : ""}" data-connection-section="data-foundation">数据导入</button>
   </nav>`;
+}
+
+function renderDataFoundation() {
+  const foundation = pageState.foundation; const types = Object.entries(foundation.definitions);
+  const typeLabel = (key) => foundation.definitions[key]?.label || key;
+  return `<section class="connection-foundation-page">
+    <header class="connection-section-heading"><div><p class="eyebrow">LINK DATA FOUNDATION</p><h2>链接数据导入中心</h2><p>统一管理链接档案、平台经营、ERP销售、产品关系和库存数据。</p></div></header>
+    <div class="connection-import-type-grid">${types.map(([key, definition]) => `<article><strong>${escapeHtml(definition.label)}</strong><span>必填：${escapeHtml((definition.required || []).join("、"))}</span></article>`).join("")}</div>
+    ${canManage() ? `<form class="connection-foundation-import-form" data-foundation-import-form><label>导入类型<select name="importType" required>${types.map(([key, definition]) => `<option value="${escapeHtml(key)}">${escapeHtml(definition.label)}</option>`).join("")}</select></label><label>来源平台<input name="sourcePlatform" placeholder="天猫 / 淘宝 / 小红书 / 京东 / ERP" /></label><label>映射模板<select name="templateVersionId"><option value="">自动识别标准字段</option>${foundation.templates.map((item) => `<option value="${escapeHtml(item.currentVersionId)}">${escapeHtml(item.name)} · V${escapeHtml(item.version)}</option>`).join("")}</select></label><label>Excel文件<input type="file" name="file" accept=".xls,.xlsx" required /></label><button type="submit" class="primary-button">导入并校验</button></form>` : ""}
+    <section class="connection-foundation-panel"><h3>导入模板管理</h3>${canManage() ? `<form data-foundation-template-form class="connection-foundation-template-form"><input name="name" placeholder="模板名称" required /><select name="dataType">${types.map(([key, definition]) => `<option value="${escapeHtml(key)}">${escapeHtml(definition.label)}</option>`).join("")}</select><input name="sourcePlatform" placeholder="来源平台" /><textarea name="fieldMappingsJson" placeholder='字段映射，例如 {"商品ID":"platformGoodsId"}' required></textarea><input name="changeNote" placeholder="版本说明" /><button type="submit" class="secondary-button">新增模板 V1</button></form>` : ""}<div class="connection-template-list">${foundation.templates.map((item) => `<article><div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(typeLabel(item.dataType))} · V${escapeHtml(item.version)} · ${escapeHtml(item.status)}</span></div>${canManage() ? `<button type="button" class="text-button" data-iterate-foundation-template="${escapeHtml(item.id)}">迭代版本</button>` : ""}</article>`).join("") || "<p>暂无自定义模板，可直接使用标准字段自动识别。</p>"}</div></section>
+    <section class="connection-foundation-panel"><h3>导入记录</h3><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>文件</th><th>类型</th><th>时间</th><th>成功</th><th>异常</th><th>状态</th></tr></thead><tbody>${foundation.batches.map((item) => `<tr><td>${escapeHtml(item.fileName)}</td><td>${escapeHtml(typeLabel(item.importType))}</td><td>${escapeHtml(item.createdAt)}</td><td>${escapeHtml(item.matchedRows)}</td><td>${escapeHtml(item.errorRows)}</td><td>${escapeHtml(item.status)}</td></tr>`).join("") || `<tr><td colspan="6">暂无导入记录</td></tr>`}</tbody></table></div></section>
+    <section class="connection-foundation-panel"><h3>异常列表</h3><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>文件</th><th>行号</th><th>外部标识</th><th>异常类型</th><th>说明</th></tr></thead><tbody>${foundation.errors.map((item) => `<tr><td>${escapeHtml(item.fileName)}</td><td>${escapeHtml(item.rowNumber)}</td><td>${escapeHtml(item.externalKey || "—")}</td><td>${escapeHtml(item.errorType)}</td><td>${escapeHtml(item.errorMessage)}</td></tr>`).join("") || `<tr><td colspan="5">暂无导入异常</td></tr>`}</tbody></table></div></section>
+  </section>`;
 }
 
 function hospitalMetric(value, points = false) { return growthText(value, { points }); }
@@ -539,7 +559,7 @@ function renderImprovementModal() {
 }
 
 export function renderConnectionCenterPage() {
-  const pageContent = pageState.section === "workbench" ? renderConnectionWorkbenchHome() : pageState.section === "hospital" ? renderConnectionHospital() : pageState.section === "my-links" ? renderMyLinksWorkbench() : pageState.section === "mappings" ? renderMappingPage() : pageState.section === "imports" ? renderImportPage() : pageState.section === "pending-connections" ? renderPendingConnections() : `${renderGrowthOverview()}${renderToolbar()}${renderList()}`;
+  const pageContent = pageState.section === "workbench" ? renderConnectionWorkbenchHome() : pageState.section === "hospital" ? renderConnectionHospital() : pageState.section === "my-links" ? renderMyLinksWorkbench() : pageState.section === "mappings" ? renderMappingPage() : pageState.section === "imports" ? renderImportPage() : pageState.section === "data-foundation" ? renderDataFoundation() : pageState.section === "pending-connections" ? renderPendingConnections() : `${renderGrowthOverview()}${renderToolbar()}${renderList()}`;
   return `<section class="connection-center-page">${pageState.error ? `<div class="form-error">${escapeHtml(pageState.error)}</div>` : ""}${pageState.loading ? `<div class="empty-state">正在读取连接…</div>` : pageState.selectedId ? renderDetail() : `${renderSectionNavigation()}${pageContent}`}${renderMappingModal()}${renderImprovementModal()}${renderBenchmarkModal()}${renderDiagnosisModal()}</section>`;
 }
 
@@ -619,6 +639,13 @@ async function loadImportBatches(render, openLatest = false) {
   pageState.importLoading = false; render();
 }
 
+async function loadDataFoundation(render) {
+  pageState.foundation.loading = true; pageState.error = ""; render();
+  try { pageState.foundation = { ...(await loadConnectionDataFoundation()), loading: false }; }
+  catch (error) { pageState.error = error.message; pageState.foundation.loading = false; }
+  render();
+}
+
 export function bindConnectionCenterPageEvents(render) {
   const root = document.querySelector(".connection-center-page");
   if (!root) return;
@@ -630,6 +657,7 @@ export function bindConnectionCenterPageEvents(render) {
     if (pageState.section === "hospital") void loadHospital(render);
     if (pageState.section === "mappings") void loadMappings(render);
     if (pageState.section === "imports") void loadImportBatches(render, true);
+    if (pageState.section === "data-foundation") void loadDataFoundation(render);
   }));
   root.querySelectorAll("[data-workbench-go]").forEach((button) => button.addEventListener("click", () => {
     pageState.section = button.dataset.workbenchGo; pageState.selectedId = ""; render();
@@ -796,6 +824,24 @@ export function bindConnectionCenterPageEvents(render) {
     catch (error) { pageState.error = error.message; }
     pageState.importLoading = false; render();
   });
+  root.querySelector("[data-foundation-import-form]")?.addEventListener("submit", async (event) => {
+    event.preventDefault(); const form = new FormData(event.currentTarget); pageState.foundation.loading = true; pageState.error = ""; render();
+    try {
+      const result = await uploadConnectionFoundationImport(form.get("file"), { importType: form.get("importType"), sourcePlatform: form.get("sourcePlatform"), templateVersionId: form.get("templateVersionId") });
+      await loadDataFoundation(render); window.alert(result.idempotent ? "该文件已经导入，本次未重复写入。" : `导入完成：成功 ${result.batch.matchedRows} 条，异常 ${result.batch.errorRows} 条。`);
+    } catch (error) { pageState.error = error.message; pageState.foundation.loading = false; render(); }
+  });
+  root.querySelector("[data-foundation-template-form]")?.addEventListener("submit", async (event) => {
+    event.preventDefault(); const form = new FormData(event.currentTarget);
+    try { await createConnectionFoundationTemplate({ ...Object.fromEntries(form), fieldMappings: JSON.parse(form.get("fieldMappingsJson")) }); await loadDataFoundation(render); }
+    catch (error) { pageState.error = error.message; render(); }
+  });
+  root.querySelectorAll("[data-iterate-foundation-template]").forEach((button) => button.addEventListener("click", async () => {
+    const template = pageState.foundation.templates.find((item) => item.id === button.dataset.iterateFoundationTemplate);
+    const note = window.prompt("填写本次模板迭代说明："); if (note === null) return;
+    try { await iterateConnectionFoundationTemplate(template.id, { fieldMappings: template.fieldMappings, changeNote: note }); await loadDataFoundation(render); }
+    catch (error) { pageState.error = error.message; render(); }
+  }));
   root.querySelector("[data-import-batch-select]")?.addEventListener("change", async (event) => {
     if (!event.target.value) return; pageState.importLoading = true; render();
     try { pageState.currentImport = await loadConnectionImportPreview(event.target.value); pageState.error = ""; } catch (error) { pageState.error = error.message; }

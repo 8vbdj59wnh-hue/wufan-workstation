@@ -1129,11 +1129,110 @@ CREATE TABLE IF NOT EXISTS connection_import_batches (
   createdBy TEXT,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
+  importType TEXT,
+  templateVersionId TEXT,
+  sourcePlatform TEXT,
+  completedAt TEXT,
   FOREIGN KEY(createdBy) REFERENCES persons(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_connection_import_batches_source_created
   ON connection_import_batches(sourceType, createdAt DESC);
+
+CREATE TABLE IF NOT EXISTS connection_import_templates (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  sourcePlatform TEXT NOT NULL DEFAULT '',
+  dataType TEXT NOT NULL,
+  currentVersionId TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(createdBy) REFERENCES persons(id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_import_templates_name_type
+  ON connection_import_templates(name,dataType);
+
+CREATE TABLE IF NOT EXISTS connection_import_template_versions (
+  id TEXT PRIMARY KEY,
+  templateId TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  fieldMappingsJson TEXT NOT NULL DEFAULT '{}',
+  requiredFieldsJson TEXT NOT NULL DEFAULT '[]',
+  fieldTypesJson TEXT NOT NULL DEFAULT '{}',
+  matchRulesJson TEXT NOT NULL DEFAULT '{}',
+  changeNote TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  FOREIGN KEY(templateId) REFERENCES connection_import_templates(id),
+  FOREIGN KEY(createdBy) REFERENCES persons(id),
+  UNIQUE(templateId,version)
+);
+
+CREATE TABLE IF NOT EXISTS connection_import_rows (
+  id TEXT PRIMARY KEY,
+  batchId TEXT NOT NULL,
+  rowNumber INTEGER NOT NULL,
+  externalKey TEXT,
+  rawDataJson TEXT NOT NULL DEFAULT '{}',
+  normalizedDataJson TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL,
+  errorType TEXT,
+  errorMessage TEXT,
+  createdAt TEXT NOT NULL,
+  FOREIGN KEY(batchId) REFERENCES connection_import_batches(id),
+  UNIQUE(batchId,rowNumber)
+);
+
+CREATE INDEX IF NOT EXISTS idx_connection_import_rows_batch_status
+  ON connection_import_rows(batchId,status,rowNumber);
+
+CREATE TABLE IF NOT EXISTS connection_sku_sales_facts (
+  id TEXT PRIMARY KEY,
+  batchId TEXT NOT NULL,
+  salesLinkId TEXT NOT NULL,
+  salesLinkSkuId TEXT NOT NULL,
+  platformGoodsId TEXT NOT NULL,
+  skuCode TEXT NOT NULL,
+  periodStart TEXT NOT NULL,
+  periodEnd TEXT NOT NULL,
+  shippedQuantity REAL,
+  salesAmount REAL,
+  costAmount REAL,
+  profitAmount REAL,
+  rawDataJson TEXT NOT NULL DEFAULT '{}',
+  createdAt TEXT NOT NULL,
+  FOREIGN KEY(batchId) REFERENCES connection_import_batches(id),
+  FOREIGN KEY(salesLinkId) REFERENCES sales_links(id),
+  FOREIGN KEY(salesLinkSkuId) REFERENCES sales_link_skus(id),
+  UNIQUE(salesLinkSkuId,periodStart,periodEnd)
+);
+
+CREATE INDEX IF NOT EXISTS idx_connection_sku_sales_link_period
+  ON connection_sku_sales_facts(salesLinkId,periodEnd DESC,periodStart DESC);
+
+CREATE TABLE IF NOT EXISTS connection_sku_inventory_facts (
+  id TEXT PRIMARY KEY,
+  batchId TEXT NOT NULL,
+  salesLinkSkuId TEXT NOT NULL,
+  skuCode TEXT NOT NULL,
+  businessDate TEXT NOT NULL,
+  currentStock REAL,
+  availableStock REAL,
+  unitCost REAL,
+  salesVelocity REAL,
+  rawDataJson TEXT NOT NULL DEFAULT '{}',
+  createdAt TEXT NOT NULL,
+  FOREIGN KEY(batchId) REFERENCES connection_import_batches(id),
+  FOREIGN KEY(salesLinkSkuId) REFERENCES sales_link_skus(id),
+  UNIQUE(salesLinkSkuId,businessDate)
+);
+
+CREATE INDEX IF NOT EXISTS idx_connection_sku_inventory_sku_date
+  ON connection_sku_inventory_facts(salesLinkSkuId,businessDate DESC);
 
 CREATE TABLE IF NOT EXISTS connection_period_snapshots (
   id TEXT PRIMARY KEY,

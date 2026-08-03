@@ -110,6 +110,15 @@ import {
   getConnectionBenchmarkComparison,
 } from "./modules/links/index.js";
 import {
+  createConnectionImportTemplate,
+  getConnectionImportDefinitions,
+  importConnectionData,
+  iterateConnectionImportTemplate,
+  listConnectionFoundationBatches,
+  listConnectionImportErrors,
+  listConnectionImportTemplates,
+} from "./connectionDataFoundationService.js";
+import {
   batchLinkProcessInstanceTemplates,
   batchUpdateTaskStatus,
   cancelTaskWave,
@@ -1948,6 +1957,46 @@ app.delete("/api/connection-data-mappings/:id", requireLinkManage, (request, res
   } catch (error) {
     response.status(404).json({ success: false, message: error.message || "外部数据映射删除失败。" });
   }
+});
+
+app.get("/api/connection-data-foundation/definitions", requireLinkView, (_request, response) => {
+  response.json({ success: true, definitions: getConnectionImportDefinitions() });
+});
+
+app.get("/api/connection-data-foundation/templates", requireLinkView, (_request, response) => {
+  try { response.json({ success: true, items: listConnectionImportTemplates() }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "导入模板读取失败。" }); }
+});
+
+app.post("/api/connection-data-foundation/templates", requireLinkImport, (request, response) => {
+  try { response.status(201).json({ success: true, item: createConnectionImportTemplate(request.body, request.user?.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "导入模板创建失败。" }); }
+});
+
+app.post("/api/connection-data-foundation/templates/:id/versions", requireLinkImport, (request, response) => {
+  try { response.status(201).json({ success: true, item: iterateConnectionImportTemplate(request.params.id, request.body, request.user?.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "导入模板迭代失败。" }); }
+});
+
+app.get("/api/connection-data-foundation/batches", requireLinkView, (_request, response) => {
+  try { response.json({ success: true, items: listConnectionFoundationBatches() }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "导入记录读取失败。" }); }
+});
+
+app.get("/api/connection-data-foundation/errors", requireLinkView, (request, response) => {
+  try { response.json({ success: true, items: listConnectionImportErrors(request.query.batchId) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "导入异常读取失败。" }); }
+});
+
+app.post("/api/connection-data-foundation/imports", requireLinkImport, (request, response) => {
+  uploadConnectionWorkbook.single("file")(request, response, (error) => {
+    if (error) { response.status(400).json({ success: false, message: error.message || "链接数据文件上传失败。" }); return; }
+    try {
+      const result = importConnectionData({ buffer: request.file?.buffer, fileName: normalizeUploadedFileName(request.file?.originalname), importType: request.body?.importType,
+        templateVersionId: request.body?.templateVersionId, sourcePlatform: request.body?.sourcePlatform, userId: request.user?.id });
+      response.status(result.idempotent ? 200 : 201).json({ success: true, ...result });
+    } catch (uploadError) { response.status(400).json({ success: false, message: uploadError.message || "链接数据导入失败。" }); }
+  });
 });
 
 app.get("/api/connection-import-batches", requireLinkView, (_request, response) => {

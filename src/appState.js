@@ -1104,6 +1104,30 @@ export async function loadConnectionImportBatches() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-import-batches`), "经营数据导入批次读取失败。");
 }
 
+export async function loadConnectionDataFoundation() {
+  const [definitions, templates, batches, errors] = await Promise.all([
+    readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/definitions`), "导入类型读取失败。"),
+    readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/templates`), "导入模板读取失败。"),
+    readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/batches`), "导入记录读取失败。"),
+    readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/errors`), "导入异常读取失败。"),
+  ]);
+  return { definitions: definitions.definitions ?? {}, templates: templates.items ?? [], batches: batches.items ?? [], errors: errors.items ?? [] };
+}
+
+export async function uploadConnectionFoundationImport(file, options = {}) {
+  const form = new FormData(); form.append("file", file); form.append("importType", options.importType ?? "");
+  form.append("sourcePlatform", options.sourcePlatform ?? ""); form.append("templateVersionId", options.templateVersionId ?? "");
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/imports`, { method: "POST", body: form }), "链接数据导入失败。");
+}
+
+export async function createConnectionFoundationTemplate(payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/templates`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "导入模板创建失败。");
+}
+
+export async function iterateConnectionFoundationTemplate(templateId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/templates/${encodeURIComponent(templateId)}/versions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "导入模板迭代失败。");
+}
+
 export async function uploadConnectionImport(file, options = {}) {
   const form = new FormData();
   form.append("file", file);

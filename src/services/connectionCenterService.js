@@ -11,6 +11,7 @@ export {
   loadConnectionActions,
   loadConnectionDataMappings,
   loadConnectionImportBatches,
+  loadConnectionDataFoundation,
   loadConnectionImportShops,
   loadConnectionImportPreview,
   loadConnectionGrowthAnalysis,
@@ -38,5 +39,8 @@ export {
   updateConnection,
   updateConnectionImprovement,
   uploadConnectionImport,
+  uploadConnectionFoundationImport,
+  createConnectionFoundationTemplate,
+  iterateConnectionFoundationTemplate,
   resolveAssetUrl,
 } from "../appState.js?v=20260705-state-singleton1";
