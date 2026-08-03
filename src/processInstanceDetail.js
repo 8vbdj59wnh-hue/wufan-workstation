@@ -20,7 +20,7 @@ import {
   validatePublicFormFields,
 } from "./workFormEditor.js?v=20260722-public-form-editor1";
 import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
-import { bindActionProductSelectors, collectActionProductIds, getActionProductIds, renderActionProductSelector, renderLinkedActionProducts } from "./actionProductRelations.js?v=20260803-action-product-quick-link1";
+import { bindActionProductSelectors, collectActionProductIds, getActionProductIds, renderActionProductSelector, renderLinkedActionProducts } from "./actionProductRelations.js?v=20260803-action-product-manual-link1";
 import { hasPermission } from "./permissions.js?v=20260725-product-center1";
 import { getActionDeadlinePresentation } from "./data/actionDeadline.js?v=20260802-action-countdown1";
 import {

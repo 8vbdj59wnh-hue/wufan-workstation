@@ -121,26 +121,28 @@ export function renderActionProductSelector(selectedIds = [], { label = "关联�
       <span class="field-label">${escapeHtml(label)}</span>
       <div class="action-product-selected" data-action-product-selected>${renderSelectedProducts(selectedProducts, actionId)}</div>
       <div class="action-product-quick-link">
-        <strong>编码快速关联</strong>
+        <strong>手动关联</strong>
         <div class="action-product-search-row"><input class="action-product-search" type="search" placeholder="输入完整产品编码" data-action-product-quick-code autocomplete="off" /><button class="primary-button" type="button" data-action="quick-link-action-product">关联</button></div>
-        <p class="form-note" data-action-product-quick-message>输入产品编码后可直接确认，成功后可继续添加下一个产品。</p>
+        <p class="form-note" data-action-product-quick-message>输入准确产品编码后直接关联，可连续添加多个产品。</p>
       </div>
-      <div class="action-product-search-section">
-        <strong>搜索选择产品</strong>
-        <input class="action-product-search" type="search" placeholder="搜索产品编码、SKU编码或产品名称" data-action-product-search autocomplete="off" />
-        <p class="form-note" data-action-product-search-message>输入关键词查看匹配产品。</p>
-      </div>
-      <div class="action-product-confirm" data-action-product-confirm hidden></div>
-      <div class="action-product-options" data-action-product-options>
-        ${products.length === 0 ? `<p class="form-note">产品中心暂无可选产品</p>` : products.map((product) => `
-          <article class="action-product-option" data-product-id="${escapeHtml(product.id)}" data-product-code="${escapeHtml(normalizeCode(product.skuCode))}" data-search="${escapeHtml(`${product.skuCode} ${product.name} ${relationSkuCodes(product.id).join(" ")}`.toLowerCase())}" hidden>
-            <input type="checkbox" name="actionProductId" value="${escapeHtml(product.id)}" ${selected.has(product.id) ? "checked" : ""} hidden />
-            ${renderProductThumb(product)}
-            <span><strong>${escapeHtml(product.name)}</strong><small>产品编码：${escapeHtml(product.skuCode)}</small><small>SKU：${escapeHtml(relationSkuCodes(product.id).join("、") || product.skuCode)}</small></span>
-            <button class="text-button" type="button" data-action="choose-action-product" data-product-id="${escapeHtml(product.id)}">${selected.has(product.id) ? "已关联" : "选择"}</button>
-          </article>
-        `).join("")}
-      </div>
+      <details class="action-product-search-section" data-action-product-search-details>
+        <summary>搜索关联</summary>
+        <div class="action-product-search-content">
+          <input class="action-product-search" type="search" placeholder="搜索产品编码、SKU编码或产品名称" data-action-product-search autocomplete="off" />
+          <p class="form-note" data-action-product-search-message>输入关键词查看匹配产品。</p>
+          <div class="action-product-confirm" data-action-product-confirm hidden></div>
+          <div class="action-product-options" data-action-product-options>
+            ${products.length === 0 ? `<p class="form-note">产品中心暂无可选产品</p>` : products.map((product) => `
+              <article class="action-product-option" data-product-id="${escapeHtml(product.id)}" data-product-code="${escapeHtml(normalizeCode(product.skuCode))}" data-search="${escapeHtml(`${product.skuCode} ${product.name} ${relationSkuCodes(product.id).join(" ")}`.toLowerCase())}" hidden>
+                <input type="checkbox" name="actionProductId" value="${escapeHtml(product.id)}" ${selected.has(product.id) ? "checked" : ""} hidden />
+                ${renderProductThumb(product)}
+                <span><strong>${escapeHtml(product.name)}</strong><small>产品编码：${escapeHtml(product.skuCode)}</small><small>SKU：${escapeHtml(relationSkuCodes(product.id).join("、") || product.skuCode)}</small></span>
+                <button class="text-button" type="button" data-action="choose-action-product" data-product-id="${escapeHtml(product.id)}">${selected.has(product.id) ? "已关联" : "选择"}</button>
+              </article>
+            `).join("")}
+          </div>
+        </div>
+      </details>
     </div>
   `;
 }
@@ -190,18 +192,29 @@ export function bindActionProductSelectors(root = document) {
         const matches = [...selector.querySelectorAll(".action-product-option")]
           .filter((option) => option.dataset.productCode === normalizeCode(query));
         selector.querySelectorAll(".action-product-option").forEach((option) => { option.hidden = !matches.includes(option); });
-        const candidate = matches.length === 1 ? matches[0] : null;
         const message = selector.querySelector("[data-action-product-quick-message]");
-        if (message) message.textContent = !query ? "请输入产品编码。" : !matches.length ? "未找到对应产品。" : candidate ? "已找到产品，请确认关联。" : `找到 ${matches.length} 个同编码产品，请选择。`;
-        if (candidate) {
-          const product = state.products.find((item) => item.id === candidate.dataset.productId);
-          const input = candidate.querySelector('[name="actionProductId"]');
-          const confirm = selector.querySelector("[data-action-product-confirm]");
-          if (confirm && product) {
-            confirm.innerHTML = renderProductConfirmation(product, input?.checked === true);
-            confirm.hidden = false;
-          }
+        if (!query || !matches.length) {
+          if (message) message.textContent = !query ? "请输入产品编码。" : "未找到对应产品。";
+          return;
         }
+        if (matches.length > 1) {
+          const details = selector.querySelector("[data-action-product-search-details]");
+          if (details) details.open = true;
+          const searchMessage = selector.querySelector("[data-action-product-search-message]");
+          if (searchMessage) searchMessage.textContent = `存在 ${matches.length} 个同编码产品，请选择。`;
+          if (message) message.textContent = "存在多个匹配产品，已进入搜索选择模式。";
+          return;
+        }
+        const input = matches[0].querySelector('[name="actionProductId"]');
+        if (input?.checked) {
+          if (message) message.textContent = "该产品已关联。";
+          return;
+        }
+        if (input) input.checked = true;
+        const quickInput = selector.querySelector("[data-action-product-quick-code]");
+        if (quickInput) quickInput.value = "";
+        if (message) message.textContent = "关联成功，可继续输入下一个产品编码。";
+        refreshSelected(selector);
         return;
       }
       if (action === "choose-action-product") {
