@@ -1130,8 +1130,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_link_skus_fallback
   ON sales_link_skus(salesLinkId, normalizedPlatformSkuCode, normalizedSpecificationName)
   WHERE platformSkuId IS NULL OR platformSkuId = '';
 
-CREATE INDEX IF NOT EXISTS idx_sales_link_skus_erp_sku ON sales_link_skus(erpSkuId);
-
 CREATE TABLE IF NOT EXISTS wangdian_shop_mappings (
   id TEXT PRIMARY KEY,
   wangdianShopNo TEXT NOT NULL COLLATE NOCASE UNIQUE,
