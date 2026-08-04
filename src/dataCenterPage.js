@@ -1,4 +1,4 @@
-import { createDataSyncBatch, getCurrentUser, loadDataCenterProductDetail, loadDataCenterView, loadDataSyncCenter, resolveAssetUrl, updateDataSyncTaskStatus } from "./appState.js";
+import { commitErpGoodsDataSync, createDataSyncBatch, getCurrentUser, loadDataCenterProductDetail, loadDataCenterView, loadDataSyncCenter, loadErpGoodsDataSyncPreview, previewErpGoodsDataSync, resolveAssetUrl, updateDataSyncTaskStatus } from "./appState.js";
 import { canAccessModule } from "./permissions.js";
 
 let view = "trends";
@@ -6,6 +6,7 @@ let loading = false;
 let error = "";
 let result = null;
 let detail = null;
+let syncPreview = null;
 let query = { search: "", page: 1, pageSize: 48, direction: "focus", status: "", sort: "" };
 
 const viewConfig = {
@@ -133,7 +134,9 @@ function renderRows() {
 function renderDataSyncCenter() {
   if (!result) return "";
   const taskStatus = { enabled: "已启用", paused: "已暂停" };
-  const batchStatus = { queued: "等待", running: "执行中", succeeded: "成功", partial: "部分成功", failed: "失败" };
+  const batchStatus = { queued: "等待", running: "执行中", preview_ready: "待确认", superseded: "历史预览", succeeded: "成功", partial: "部分成功", failed: "失败" };
+  const erpTask = (result.tasks ?? []).find((task) => task.taskCode === "erp_goods");
+  const today = new Date().toLocaleDateString("sv-SE");
   return `<div class="data-sync-center">
     <div class="data-center-overview">
       <div><span>同步任务</span><strong>${result.counts?.taskCount ?? 0}</strong></div>
@@ -144,9 +147,16 @@ function renderDataSyncCenter() {
       <div><span>历史导入批次</span><strong>${result.legacy?.erpImportBatches ?? 0}</strong></div>
     </div>
     <section><h2>同步任务</h2><div class="table-wrap"><table class="data-table"><thead><tr><th>名称</th><th>来源</th><th>方式</th><th>默认模式</th><th>周期</th><th>最近成功</th><th>下次执行</th><th>状态</th><th>操作</th></tr></thead><tbody>
-      ${(result.tasks ?? []).map((task) => `<tr><td><strong>${escapeHtml(task.name)}</strong><small>${escapeHtml(task.sourceMethod || task.syncType)}</small></td><td>${escapeHtml(task.sourceType)}</td><td>${task.executionMode === "both" ? "自动 + 手动" : "手动"}</td><td>${task.defaultSyncMode === "full" ? "全量" : "增量"}</td><td>${escapeHtml(task.scheduleDescription || "人工触发")}</td><td>${formatDate(task.lastSuccessAt)}</td><td>${formatDate(task.nextRunAt)}</td><td><span class="status-badge">${taskStatus[task.status] || task.status}</span></td><td><button class="text-button" data-action="toggle-data-sync-task" data-task-id="${escapeHtml(task.id)}" data-next-status="${task.status === "enabled" ? "paused" : "enabled"}">${task.status === "enabled" ? "暂停" : "启用"}</button>${task.status === "enabled" ? `<button class="text-button" data-action="create-data-sync-batch" data-task-id="${escapeHtml(task.id)}" data-sync-mode="${escapeHtml(task.defaultSyncMode)}">立即执行</button>` : ""}</td></tr>`).join("")}
+      ${(result.tasks ?? []).map((task) => `<tr><td><strong>${escapeHtml(task.name)}</strong><small>${escapeHtml(task.sourceMethod || task.syncType)}</small></td><td>${escapeHtml(task.sourceType)}</td><td>${task.executionMode === "both" ? "自动 + 手动" : "手动"}</td><td>${task.defaultSyncMode === "full" ? "全量" : "增量"}</td><td>${escapeHtml(task.scheduleDescription || "人工触发")}</td><td>${formatDate(task.lastSuccessAt)}</td><td>${formatDate(task.nextRunAt)}</td><td><span class="status-badge">${taskStatus[task.status] || task.status}</span></td><td><button class="text-button" data-action="toggle-data-sync-task" data-task-id="${escapeHtml(task.id)}" data-next-status="${task.status === "enabled" ? "paused" : "enabled"}">${task.status === "enabled" ? "暂停" : "启用"}</button>${task.status === "enabled" && task.taskCode !== "erp_goods" ? `<button class="text-button" data-action="create-data-sync-batch" data-task-id="${escapeHtml(task.id)}" data-sync-mode="${escapeHtml(task.defaultSyncMode)}">创建手动批次</button>` : ""}</td></tr>`).join("")}
     </tbody></table></div></section>
-    <section><h2>同步历史</h2><div class="table-wrap"><table class="data-table"><thead><tr><th>任务</th><th>触发</th><th>模式</th><th>状态</th><th>数量</th><th>新增/更新/失效</th><th>异常</th><th>开始</th><th>结束</th></tr></thead><tbody>${(result.batches ?? []).length ? result.batches.map((batch) => `<tr><td>${escapeHtml(batch.taskName)}</td><td>${batch.triggerMode === "automatic" ? "自动" : "手动"}</td><td>${batch.syncMode === "full" ? "全量" : "增量"}</td><td>${batchStatus[batch.status] || batch.status}</td><td>${batch.totalCount}</td><td>${batch.createdCount}/${batch.updatedCount}/${batch.invalidatedCount}</td><td>${batch.exceptionCount}</td><td>${formatDate(batch.startedAt || batch.createdAt)}</td><td>${formatDate(batch.completedAt)}</td></tr>`).join("") : `<tr><td colspan="9">尚无统一框架批次；历史ERP同步记录保持在原系统中。</td></tr>`}</tbody></table></div></section>
+    ${erpTask ? `<section><h2>ERP货品同步执行</h2>${erpTask.status !== "enabled" ? `<div class="data-center-notice">ERP货品同步任务当前已暂停。启用后才可生成全量或增量预览；启用自动调度前请先完成一次全量同步。</div>` : `<form id="erp-data-sync-form" class="data-center-filter">
+      <label><span>开始时间</span><input name="requestStart" type="datetime-local" value="2021-01-01T00:00" /></label>
+      <label><span>结束时间</span><input name="requestEnd" type="datetime-local" value="${today}T23:59" /></label>
+      <button type="button" class="secondary-button" data-action="preview-erp-data-sync" data-sync-mode="full" data-task-id="${escapeHtml(erpTask.id)}">生成全量预览</button>
+      <button type="button" class="primary-button" data-action="preview-erp-data-sync" data-sync-mode="incremental" data-task-id="${escapeHtml(erpTask.id)}">执行增量预览</button>
+    </form>`}
+    ${syncPreview ? `<div class="data-center-notice"><strong>${syncPreview.isCurrent === false ? "历史预览" : "当前有效预览"} V${syncPreview.summary?.previewVersion ?? "—"}</strong><p>统一批次：${escapeHtml(syncPreview.dataSyncBatch?.id)}；ERP货品 ${syncPreview.summary?.validGoods ?? 0}；SKU ${syncPreview.summary?.total ?? 0}；新增 ${syncPreview.summary?.created ?? 0}；更新 ${syncPreview.summary?.updated ?? 0}；异常 ${syncPreview.summary?.error ?? 0}。</p>${syncPreview.isCurrent === false ? `<span>该版本已被更新预览替代，仅供查看。</span>` : `<button class="primary-button" data-action="commit-erp-data-sync" data-batch-id="${escapeHtml(syncPreview.dataSyncBatch?.id)}" ${syncPreview.summary?.error ? "disabled" : ""}>确认提交当前预览</button>`}</div>` : ""}</section>` : ""}
+    <section><h2>同步历史</h2><div class="table-wrap"><table class="data-table"><thead><tr><th>任务</th><th>触发</th><th>模式</th><th>状态</th><th>数量</th><th>新增/更新/失效</th><th>异常</th><th>开始</th><th>结束</th><th>操作</th></tr></thead><tbody>${(result.batches ?? []).length ? result.batches.map((batch) => `<tr><td>${escapeHtml(batch.taskName)}</td><td>${batch.triggerMode === "automatic" ? "自动" : "手动"}</td><td>${batch.syncMode === "full" ? "全量" : "增量"}</td><td>${batchStatus[batch.status] || batch.status}</td><td>${batch.totalCount}</td><td>${batch.createdCount}/${batch.updatedCount}/${batch.invalidatedCount}</td><td>${batch.exceptionCount}</td><td>${formatDate(batch.startedAt || batch.createdAt)}</td><td>${formatDate(batch.completedAt)}</td><td>${["preview_ready", "superseded"].includes(batch.status) && batch.sourceBatchType === "erp_import_batch" ? `<button class="text-button" data-action="load-erp-data-sync-preview" data-batch-id="${escapeHtml(batch.id)}">查看预览</button>` : "—"}</td></tr>`).join("") : `<tr><td colspan="10">尚无统一框架批次；历史ERP同步记录保持在原系统中。</td></tr>`}</tbody></table></div></section>
     <section><h2>异常记录</h2><div class="table-wrap"><table class="data-table"><thead><tr><th>任务</th><th>类型</th><th>级别</th><th>说明</th><th>状态</th><th>时间</th></tr></thead><tbody>${(result.exceptions ?? []).length ? result.exceptions.map((item) => `<tr><td>${escapeHtml(item.taskName)}</td><td>${escapeHtml(item.exceptionType)}</td><td>${escapeHtml(item.severity)}</td><td>${escapeHtml(item.message)}</td><td>${item.status === "open" ? "待处理" : "已处理"}</td><td>${formatDate(item.createdAt)}</td></tr>`).join("") : `<tr><td colspan="6">当前没有同步异常</td></tr>`}</tbody></table></div></section>
   </div>`;
 }
@@ -226,4 +236,27 @@ export function bindDataCenterPageEvents(rerender) {
   document.querySelectorAll("[data-action='create-data-sync-batch']").forEach((button) => button.addEventListener("click", async () => {
     try { await createDataSyncBatch(button.dataset.taskId, { syncMode: button.dataset.syncMode }); await refresh(rerender); } catch (caught) { error = caught.message; rerender(); }
   }));
+  document.querySelectorAll("[data-action='preview-erp-data-sync']").forEach((button) => button.addEventListener("click", async () => {
+    const form = document.querySelector("#erp-data-sync-form");
+    const syncMode = button.dataset.syncMode;
+    const requestStart = syncMode === "full" ? form?.elements.requestStart?.value : "";
+    const requestEnd = form?.elements.requestEnd?.value;
+    loading = true; error = ""; rerender();
+    try {
+      syncPreview = await previewErpGoodsDataSync(button.dataset.taskId, { syncMode, requestStart, requestEnd });
+      await refresh(rerender);
+    } catch (caught) { loading = false; error = caught.message; rerender(); }
+  }));
+  document.querySelectorAll("[data-action='load-erp-data-sync-preview']").forEach((button) => button.addEventListener("click", async () => {
+    try { syncPreview = await loadErpGoodsDataSyncPreview(button.dataset.batchId); rerender(); } catch (caught) { error = caught.message; rerender(); }
+  }));
+  document.querySelector("[data-action='commit-erp-data-sync']")?.addEventListener("click", async (event) => {
+    const batchId = event.currentTarget.dataset.batchId;
+    loading = true; error = ""; rerender();
+    try {
+      await commitErpGoodsDataSync(batchId);
+      syncPreview = null;
+      await refresh(rerender);
+    } catch (caught) { loading = false; error = caught.message; rerender(); }
+  });
 }

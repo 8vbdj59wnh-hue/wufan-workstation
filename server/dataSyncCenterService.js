@@ -25,7 +25,7 @@ export function getDataSyncCenterOverview({ batchLimit = 50, exceptionLimit = 50
   const counts = db.prepare(`SELECT
     (SELECT COUNT(*) FROM data_sync_tasks) taskCount,
     (SELECT COUNT(*) FROM data_sync_tasks WHERE status='enabled') enabledTaskCount,
-    (SELECT COUNT(*) FROM data_sync_batches WHERE status IN ('queued','running')) activeBatchCount,
+    (SELECT COUNT(*) FROM data_sync_batches WHERE status IN ('queued','running','preview_ready')) activeBatchCount,
     (SELECT COUNT(*) FROM data_sync_exceptions WHERE status='open') openExceptionCount
   `).get();
   return { tasks, batches, exceptions, legacy, counts };
@@ -34,12 +34,38 @@ export function getDataSyncCenterOverview({ batchLimit = 50, exceptionLimit = 50
 export function setDataSyncTaskStatus(taskId, status) {
   if (!["enabled", "paused"].includes(status)) throw new Error("同步任务状态无效。");
   const db = getDatabase();
-  const result = db.prepare("UPDATE data_sync_tasks SET status=?,updatedAt=? WHERE id=?").run(status, now(), taskId);
+  const task = decodeTask(db.prepare("SELECT * FROM data_sync_tasks WHERE id=?").get(taskId));
+  if (!task) throw new Error("同步任务不存在。");
+  const updatedAt = now();
+  const nextRunAt = status === "enabled" && task.executionMode === "both" ? nextScheduledAt(task.scheduleCron, new Date(updatedAt)) : null;
+  const result = db.prepare("UPDATE data_sync_tasks SET status=?,nextRunAt=?,updatedAt=? WHERE id=?").run(status, nextRunAt, updatedAt, taskId);
   if (!result.changes) throw new Error("同步任务不存在。");
   return decodeTask(db.prepare("SELECT * FROM data_sync_tasks WHERE id=?").get(taskId));
 }
 
+function nextScheduledAt(cron, reference = new Date()) {
+  const match = String(cron || "").match(/^(\d{1,2})\s+(\d{1,2})\s+\*\s+\*\s+\*$/u);
+  if (!match) return null;
+  const next = new Date(reference);
+  next.setSeconds(0, 0);
+  next.setHours(Number(match[2]), Number(match[1]), 0, 0);
+  if (next <= reference) next.setDate(next.getDate() + 1);
+  return next.toISOString();
+}
+
+export function getDataSyncTask(taskId) {
+  return decodeTask(getDatabase().prepare("SELECT * FROM data_sync_tasks WHERE id=?").get(taskId));
+}
+
+export function getDataSyncBatch(batchId) {
+  return decodeBatch(getDatabase().prepare("SELECT * FROM data_sync_batches WHERE id=?").get(batchId));
+}
+
 export function createManualDataSyncBatch(taskId, { syncMode = "", requestStart = null, requestEnd = null, createdBy = "" } = {}) {
+  return createDataSyncBatch(taskId, { triggerMode: "manual", syncMode, requestStart, requestEnd, createdBy });
+}
+
+export function createDataSyncBatch(taskId, { triggerMode = "manual", syncMode = "", requestStart = null, requestEnd = null, createdBy = "" } = {}) {
   const db = getDatabase();
   const task = decodeTask(db.prepare("SELECT * FROM data_sync_tasks WHERE id=?").get(taskId));
   if (!task) throw new Error("同步任务不存在。");
@@ -48,7 +74,7 @@ export function createManualDataSyncBatch(taskId, { syncMode = "", requestStart 
   if (!["full", "incremental"].includes(mode)) throw new Error("同步模式无效。");
   const createdAt = now();
   const batch = {
-    id: `data-sync-batch-${crypto.randomUUID()}`, taskId, triggerMode: "manual", syncMode: mode, status: "queued",
+    id: `data-sync-batch-${crypto.randomUUID()}`, taskId, triggerMode, syncMode: mode, status: "queued",
     requestStart: requestStart || null, requestEnd: requestEnd || null, createdBy: createdBy || null, createdAt,
   };
   db.transaction(() => {
@@ -58,6 +84,49 @@ export function createManualDataSyncBatch(taskId, { syncMode = "", requestStart 
     );
   }).immediate();
   return decodeBatch(db.prepare("SELECT * FROM data_sync_batches WHERE id=?").get(batch.id));
+}
+
+export function markDataSyncBatchPreviewReady(batchId, { sourceBatchId, summary = {}, requestStart = null, requestEnd = null } = {}) {
+  const db = getDatabase();
+  const completedAt = now();
+  return db.transaction(() => {
+    const batch = db.prepare("SELECT * FROM data_sync_batches WHERE id=?").get(batchId);
+    if (!batch || !["queued", "running"].includes(batch.status)) throw new Error("同步批次不存在或当前状态不可生成预览。");
+    const exceptionCount = Number(summary.invalid || 0) + Number(summary.error || 0);
+    db.prepare("UPDATE data_sync_batches SET status='superseded' WHERE taskId=? AND status='preview_ready' AND id<>?").run(batch.taskId, batchId);
+    db.prepare(`UPDATE data_sync_batches SET status='preview_ready',requestStart=COALESCE(?,requestStart),requestEnd=COALESCE(?,requestEnd),totalCount=?,createdCount=?,updatedCount=?,exceptionCount=?,sourceBatchType='erp_import_batch',sourceBatchId=?,completedAt=NULL WHERE id=?`).run(
+      requestStart, requestEnd, Number(summary.total || 0), Number(summary.created || 0), Number(summary.updated || 0), exceptionCount, sourceBatchId, batchId,
+    );
+    db.prepare("INSERT INTO data_sync_logs (id,batchId,level,eventType,message,detailJson,createdAt) VALUES (?,?,?,?,?,?,?)").run(
+      `data-sync-log-${crypto.randomUUID()}`, batchId, exceptionCount ? "warn" : "info", "preview_ready", "旺店通ERP货品同步预览已生成。", JSON.stringify({ sourceBatchId, summary }), completedAt,
+    );
+    if (exceptionCount) db.prepare(`INSERT INTO data_sync_exceptions (id,taskId,batchId,exceptionType,severity,status,message,rawDataJson,createdAt) VALUES (?,?,?,?,?,'open',?,?,?)`).run(
+      `data-sync-exception-${crypto.randomUUID()}`, batch.taskId, batchId, "data_validation", "error", `ERP同步预览存在 ${exceptionCount} 项校验异常。`, JSON.stringify(summary), completedAt,
+    );
+    return decodeBatch(db.prepare("SELECT * FROM data_sync_batches WHERE id=?").get(batchId));
+  }).immediate();
+}
+
+export function assertCurrentDataSyncPreview(batchId) {
+  const db = getDatabase();
+  const batch = db.prepare("SELECT * FROM data_sync_batches WHERE id=?").get(batchId);
+  if (batch?.status === "superseded") throw new Error("该预览已被更新版本替代，请提交当前最新有效预览。");
+  if (!batch || batch.status !== "preview_ready") throw new Error("当前同步批次不是可提交预览。");
+  const current = db.prepare("SELECT id FROM data_sync_batches WHERE taskId=? AND status='preview_ready' ORDER BY createdAt DESC,id DESC LIMIT 1").get(batch.taskId);
+  if (current?.id !== batch.id) throw new Error("该预览已被更新版本替代，请提交当前最新有效预览。");
+  return decodeBatch(batch);
+}
+
+export function listDueDataSyncTasks(referenceAt = now()) {
+  return getDatabase().prepare("SELECT * FROM data_sync_tasks WHERE status='enabled' AND executionMode='both' AND nextRunAt IS NOT NULL AND nextRunAt<=? ORDER BY nextRunAt").all(referenceAt).map(decodeTask);
+}
+
+export function advanceDataSyncTaskSchedule(taskId, referenceAt = new Date()) {
+  const task = getDataSyncTask(taskId);
+  if (!task) throw new Error("同步任务不存在。");
+  const nextRunAt = nextScheduledAt(task.scheduleCron, referenceAt);
+  getDatabase().prepare("UPDATE data_sync_tasks SET nextRunAt=?,updatedAt=? WHERE id=?").run(nextRunAt, now(), taskId);
+  return nextRunAt;
 }
 
 export function startDataSyncBatch(batchId) {
@@ -75,7 +144,7 @@ export function completeDataSyncBatch(batchId, result = {}) {
   const completedAt = now();
   return db.transaction(() => {
     const batch = db.prepare("SELECT * FROM data_sync_batches WHERE id=?").get(batchId);
-    if (!batch || !["queued", "running"].includes(batch.status)) throw new Error("同步批次不存在或已结束。");
+    if (!batch || !["queued", "running", "preview_ready"].includes(batch.status)) throw new Error("同步批次不存在或已结束。");
     const exceptions = Array.isArray(result.exceptions) ? result.exceptions : [];
     db.prepare(`UPDATE data_sync_batches SET status=?,totalCount=?,createdCount=?,updatedCount=?,invalidatedCount=?,exceptionCount=?,errorMessage=?,startedAt=COALESCE(startedAt,?),completedAt=? WHERE id=?`).run(
       status, Number(result.totalCount || 0), Number(result.createdCount || 0), Number(result.updatedCount || 0), Number(result.invalidatedCount || 0), exceptions.length, result.errorMessage || null, completedAt, completedAt, batchId,
