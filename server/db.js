@@ -1807,6 +1807,7 @@ function runLightweightMigrations() {
   ensureColumn("wangdian_goods_sync_logs", "successCount", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn("wangdian_goods_sync_logs", "failedCount", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn("data_sync_batches", "scopeJson", "TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn("data_sync_batches", "progressJson", "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn("data_sync_batches", "fileName", "TEXT");
   ensureColumn("data_sync_batches", "fileHash", "TEXT");
   ensureColumn("data_sync_batches", "periodStart", "TEXT");

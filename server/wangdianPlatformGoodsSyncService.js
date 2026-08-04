@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { getDatabase, uploadsDir } from "./db.js";
 import { queryWangdianPlatformGoods } from "./wangdianClient.js";
+import { clearDataSyncCheckpoint, runWangdianPagedWindows } from "./dataSyncPagedExecution.js";
 
 const stagingRoot = path.join(uploadsDir, "wangdian-platform-goods-sync");
 const restrictedPlatforms = new Set(["淘宝", "天猫", "taobao", "tmall"]);
@@ -117,25 +118,12 @@ export async function previewWangdianPlatformGoodsSync({ dataSyncBatchId, import
   const id = `wdt-platform-sync-${crypto.randomUUID()}`;
   const startedAt = new Date().toISOString();
   database.prepare(`INSERT INTO wangdian_platform_goods_sync_logs (id,dataSyncBatchId,importMode,requestStart,requestEnd,requestJson,status,windowCount,createdBy,startedAt) VALUES (?,?,?,?,?,?,'running',?,?,?)`).run(id, dataSyncBatchId, mode, query.start_time, query.end_time, JSON.stringify({ query, windows, scope }), windows.length, text(createdBy) || null, startedAt);
-  const rows = [];
+  let rows = [];
   let pages = 0;
   try {
-    for (const window of windows) {
-      let pageNo = 0;
-      let received = 0;
-      let total = null;
-      while (pageNo < 10000) {
-        const payload = await queryApi({ params: window, pageNo, pageSize: 100 });
-        pages += 1;
-        const list = Array.isArray(payload?.data?.goods_list) ? payload.data.goods_list : [];
-        if (pageNo === 0 && Number.isFinite(Number(payload?.data?.total_count))) total = Number(payload.data.total_count);
-        rows.push(...list);
-        received += list.length;
-        if (list.length < 100 || (total !== null && received >= total)) break;
-        pageNo += 1;
-      }
-      if (pageNo >= 10000) throw new Error("旺店通平台货品分页异常，已停止读取。");
-    }
+    const paged = await runWangdianPagedWindows({ batchId: dataSyncBatchId, windows, pageSize: 100, queryPage: queryApi, extractItems: (payload) => Array.isArray(payload?.data?.goods_list) ? payload.data.goods_list : [] });
+    rows = paged.rows;
+    pages = paged.pageCount;
     const analysis = analyzeRows(id, rows, scope);
     const insert = database.prepare(`INSERT INTO wangdian_platform_goods_sync_exceptions (id,syncLogId,rowNumber,exceptionType,shopNo,platformGoodsId,platformSkuId,merchantNo,message,rawDataJson,createdAt) VALUES (@id,@syncLogId,@rowNumber,@exceptionType,@shopNo,@platformGoodsId,@platformSkuId,@merchantNo,@message,@rawDataJson,@createdAt)`);
     database.transaction(() => analysis.exceptions.forEach((item) => insert.run(item)))();
@@ -144,6 +132,7 @@ export async function previewWangdianPlatformGoodsSync({ dataSyncBatchId, import
     const projectedCreated = analysis.valid.filter((item) => item.plannedAction === "create").length;
     const projectedUpdated = analysis.valid.length - projectedCreated;
     database.prepare(`UPDATE wangdian_platform_goods_sync_logs SET status='previewed',pageCount=?,sourceRowCount=?,matchedCount=?,exceptionCount=?,createdCount=?,updatedCount=?,completedAt=? WHERE id=?`).run(pages, rows.length, analysis.valid.length, analysis.exceptions.length, projectedCreated, projectedUpdated, new Date().toISOString(), id);
+    clearDataSyncCheckpoint(dataSyncBatchId);
     return { ...readWangdianPlatformGoodsSync(id), canCommit: analysis.canCommit };
   } catch (error) {
     database.prepare(`UPDATE wangdian_platform_goods_sync_logs SET status='failed',pageCount=?,sourceRowCount=?,exceptionCount=exceptionCount+1,errorMessage=?,completedAt=? WHERE id=?`).run(pages, rows.length, error.message || "旺店通平台货品接口错误", new Date().toISOString(), id);

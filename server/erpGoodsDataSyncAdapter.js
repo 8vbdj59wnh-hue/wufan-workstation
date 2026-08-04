@@ -7,6 +7,8 @@ import {
   getDataSyncTask,
   listDueDataSyncTasks,
   markDataSyncBatchPreviewReady,
+  interruptDataSyncBatch,
+  resumeDataSyncBatch,
   startDataSyncBatch,
 } from "./dataSyncCenterService.js";
 import { commitErpV2Import, parseWangdianGoodsImport, readErpV2Import, validateErpV2Import } from "./productV2Import.js";
@@ -21,13 +23,15 @@ function requestRange(task, syncMode, requestStart, requestEnd) {
   return { requestStart: requestStart || task.lastSuccessAt, requestEnd: end };
 }
 
-export async function previewErpGoodsDataSync({ taskId, syncMode = "", requestStart = null, requestEnd = null, triggerMode = "manual", createdBy = "", queryGoods } = {}) {
+export async function previewErpGoodsDataSync({ taskId, resumeBatchId = "", syncMode = "", requestStart = null, requestEnd = null, triggerMode = "manual", createdBy = "", queryGoods } = {}) {
   const task = getDataSyncTask(taskId);
   if (!task || task.taskCode !== "erp_goods") throw new Error("ERP货品同步任务不存在。");
-  const mode = syncMode || task.defaultSyncMode;
-  const range = requestRange(task, mode, requestStart, requestEnd);
-  const batch = createDataSyncBatch(task.id, { triggerMode, syncMode: mode, ...range, createdBy });
-  startDataSyncBatch(batch.id);
+  const existing = resumeBatchId ? getDataSyncBatch(resumeBatchId) : null;
+  if (existing && existing.taskId !== task.id) throw new Error("续跑批次与ERP货品同步任务不匹配。");
+  const mode = existing?.syncMode || syncMode || task.defaultSyncMode;
+  const range = existing ? { requestStart: existing.requestStart, requestEnd: existing.requestEnd } : requestRange(task, mode, requestStart, requestEnd);
+  const batch = existing ? resumeDataSyncBatch(existing.id) : createDataSyncBatch(task.id, { triggerMode, syncMode: mode, ...range, createdBy });
+  if (!existing) startDataSyncBatch(batch.id);
   try {
     const parsed = await parseWangdianGoodsImport({
       dataSyncBatchId: batch.id,
@@ -44,7 +48,7 @@ export async function previewErpGoodsDataSync({ taskId, syncMode = "", requestSt
     });
     return { dataSyncBatch, importBatch: validated.batch, summary: validated.summary, preview: validated.preview, syncLog: parsed.syncLog };
   } catch (error) {
-    completeDataSyncBatch(batch.id, { status: "failed", errorMessage: error.message, exceptions: [{ exceptionType: "api_or_validation_error", message: error.message }] });
+    interruptDataSyncBatch(batch.id, error);
     throw error;
   }
 }

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { getDatabase, uploadsDir } from "./db.js";
 import { queryWangdianInventory } from "./wangdianClient.js";
+import { clearDataSyncCheckpoint, runWangdianPagedWindows } from "./dataSyncPagedExecution.js";
 
 const stagingRoot = path.join(uploadsDir, "wangdian-inventory-sync");
 const text = (value) => String(value ?? "").trim();
@@ -143,25 +144,12 @@ export async function previewWangdianInventorySync(input = {}, userId = "", quer
   database.prepare(`INSERT INTO wangdian_inventory_sync_batches (id,dataSyncBatchId,importMode,businessDate,requestStart,requestEnd,requestJson,status,windowCount,createdBy,startedAt) VALUES (?,?,?,?,?,?,?,'running',?,?,?)`).run(
     id, dataSyncBatch.id, request.importMode, request.businessDate, request.query.start_time, request.query.end_time, JSON.stringify({ query: request.query, windows, safetyLookbackMinutes: request.safetyLookbackMinutes, scope }), windows.length, text(userId) || null, startedAt,
   );
-  const sourceRows = [];
+  let sourceRows = [];
   let pageCount = 0;
   try {
-    for (const window of windows) {
-      let pageNo = 0;
-      let readCount = 0;
-      let totalCount = null;
-      while (pageNo < 10000) {
-        const payload = await queryApi({ params: window, pageNo, pageSize: 500 });
-        pageCount += 1;
-        const rows = Array.isArray(payload?.data?.detail_list) ? payload.data.detail_list : [];
-        if (pageNo === 0 && Number.isFinite(Number(payload?.data?.total_count))) totalCount = Number(payload.data.total_count);
-        sourceRows.push(...rows);
-        readCount += rows.length;
-        if (rows.length < 500 || (totalCount !== null && readCount >= totalCount)) break;
-        pageNo += 1;
-      }
-      if (pageNo >= 10000) throw new Error("旺店通库存分页异常，已停止读取。");
-    }
+    const paged = await runWangdianPagedWindows({ batchId: dataSyncBatch.id, windows, pageSize: 500, queryPage: queryApi, extractItems: (payload) => Array.isArray(payload?.data?.detail_list) ? payload.data.detail_list : [] });
+    sourceRows = paged.rows;
+    pageCount = paged.pageCount;
     const analysis = analyzeRows(id, request.businessDate, sourceRows, scope);
     const insertException = database.prepare(`INSERT INTO wangdian_inventory_sync_exceptions (id,syncBatchId,rowNumber,exceptionType,specNo,warehouseId,warehouseNo,message,rawDataJson,createdAt) VALUES (@id,@syncBatchId,@rowNumber,@exceptionType,@specNo,@warehouseId,@warehouseNo,@message,@rawDataJson,@createdAt)`);
     database.transaction(() => analysis.exceptions.forEach((item) => insertException.run(item)))();
@@ -171,6 +159,7 @@ export async function previewWangdianInventorySync(input = {}, userId = "", quer
     const projectedCreated = analysis.valid.filter((item) => !existingKeys.has(`${item.erpSkuId}|${item.warehouseId}`)).length;
     const projectedUpdated = analysis.valid.length - projectedCreated;
     database.prepare(`UPDATE wangdian_inventory_sync_batches SET status='previewed',pageCount=?,sourceRowCount=?,matchedCount=?,exceptionCount=?,createdCount=?,updatedCount=?,completedAt=? WHERE id=?`).run(pageCount, sourceRows.length, analysis.valid.length, analysis.exceptions.length, projectedCreated, projectedUpdated, new Date().toISOString(), id);
+    clearDataSyncCheckpoint(dataSyncBatch.id);
     return readBatch(id);
   } catch (error) {
     database.prepare(`UPDATE wangdian_inventory_sync_batches SET status='failed',pageCount=?,sourceRowCount=?,exceptionCount=exceptionCount+1,errorMessage=?,completedAt=? WHERE id=?`).run(pageCount, sourceRows.length, error.message || "旺店通库存接口错误", new Date().toISOString(), id);

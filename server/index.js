@@ -1682,6 +1682,7 @@ app.post("/api/data-sync-center/tasks/:id/erp-goods/preview", requirePermission(
   try {
     const result = await previewErpGoodsDataSync({
       taskId: request.params.id,
+      resumeBatchId: request.body?.resumeBatchId,
       syncMode: request.body?.syncMode,
       requestStart: request.body?.requestStart,
       requestEnd: request.body?.requestEnd,
@@ -1719,7 +1720,7 @@ app.post("/api/data-sync-center/shop-mappings", requirePermission("dataCenter.vi
 
 app.post("/api/data-sync-center/tasks/:id/platform-goods/preview", requirePermission("dataCenter.view"), requireAdminUser, async (request, response) => {
   try {
-    const result = await previewPlatformGoodsDataSync({ taskId: request.params.id, syncMode: request.body?.syncMode, requestStart: request.body?.requestStart, requestEnd: request.body?.requestEnd, scope: request.body?.scope, createdBy: getUserPersonId(request.user) });
+    const result = await previewPlatformGoodsDataSync({ taskId: request.params.id, resumeBatchId: request.body?.resumeBatchId, syncMode: request.body?.syncMode, requestStart: request.body?.requestStart, requestEnd: request.body?.requestEnd, scope: request.body?.scope, createdBy: getUserPersonId(request.user) });
     response.status(201).json({ success: true, ...result });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "平台SKU关系同步预览失败。" });
@@ -1744,7 +1745,7 @@ app.post("/api/data-sync-center/batches/:id/platform-goods/commit", requirePermi
 
 app.post("/api/data-sync-center/tasks/:id/inventory/preview", requirePermission("dataCenter.view"), requireAdminUser, async (request, response) => {
   try {
-    const result = await previewInventoryDataSync({ taskId: request.params.id, syncMode: request.body?.syncMode, requestStart: request.body?.requestStart, requestEnd: request.body?.requestEnd, businessDate: request.body?.businessDate, scope: request.body?.scope, createdBy: getUserPersonId(request.user) });
+    const result = await previewInventoryDataSync({ taskId: request.params.id, resumeBatchId: request.body?.resumeBatchId, syncMode: request.body?.syncMode, requestStart: request.body?.requestStart, requestEnd: request.body?.requestEnd, businessDate: request.body?.businessDate, scope: request.body?.scope, createdBy: getUserPersonId(request.user) });
     response.status(201).json({ success: true, ...result });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "库存同步预览失败。" });

@@ -7,6 +7,8 @@ import {
   getDataSyncTask,
   listDueDataSyncTasks,
   markDataSyncBatchPreviewReady,
+  interruptDataSyncBatch,
+  resumeDataSyncBatch,
   startDataSyncBatch,
 } from "./dataSyncCenterService.js";
 import { commitWangdianInventorySync, previewWangdianInventorySync, readWangdianInventorySyncBatch } from "./wangdianInventorySyncService.js";
@@ -29,19 +31,22 @@ function summary(batch) {
   return { total: Number(batch.sourceRowCount || 0), matched: Number(batch.matchedCount || 0), created: Number(batch.createdCount || 0), updated: Number(batch.updatedCount || 0), unchanged: Number(batch.unchangedCount || 0), exceptionCount: Number(batch.exceptionCount || 0), pageCount: Number(batch.pageCount || 0), businessDate: batch.businessDate };
 }
 
-export async function previewInventoryDataSync({ taskId, syncMode = "", requestStart = null, requestEnd = null, businessDate = "", scope = {}, triggerMode = "manual", createdBy = "", queryApi } = {}) {
+export async function previewInventoryDataSync({ taskId, resumeBatchId = "", syncMode = "", requestStart = null, requestEnd = null, businessDate = "", scope = {}, triggerMode = "manual", createdBy = "", queryApi } = {}) {
   const task = getDataSyncTask(taskId);
   if (!task || task.taskCode !== "wangdian_inventory") throw new Error("库存同步任务不存在。");
-  const mode = syncMode || task.defaultSyncMode;
-  const range = requestRange(task, mode, requestStart, requestEnd);
-  const batch = createDataSyncBatch(task.id, { triggerMode, syncMode: mode, ...range, scope, createdBy });
-  startDataSyncBatch(batch.id);
+  const existing = resumeBatchId ? getDataSyncBatch(resumeBatchId) : null;
+  if (existing && existing.taskId !== task.id) throw new Error("续跑批次与库存同步任务不匹配。");
+  const mode = existing?.syncMode || syncMode || task.defaultSyncMode;
+  const range = existing ? { requestStart: existing.requestStart, requestEnd: existing.requestEnd } : requestRange(task, mode, requestStart, requestEnd);
+  const effectiveScope = existing?.scope || scope;
+  const batch = existing ? resumeDataSyncBatch(existing.id) : createDataSyncBatch(task.id, { triggerMode, syncMode: mode, ...range, scope: effectiveScope, createdBy });
+  if (!existing) startDataSyncBatch(batch.id);
   try {
-    const inventory = await previewWangdianInventorySync({ dataSyncBatchId: batch.id, importMode: mode, startTime: range.requestStart, endTime: range.requestEnd, businessDate: businessDate || String(range.requestEnd).slice(0, 10), specNos: scope.specNos, warehouseIds: scope.warehouseIds }, createdBy, queryApi);
+    const inventory = await previewWangdianInventorySync({ dataSyncBatchId: batch.id, importMode: mode, startTime: range.requestStart, endTime: range.requestEnd, businessDate: businessDate || String(range.requestEnd).slice(0, 10), specNos: effectiveScope.specNos, warehouseIds: effectiveScope.warehouseIds }, createdBy, queryApi);
     const dataSyncBatch = markDataSyncBatchPreviewReady(batch.id, { sourceBatchType: "wangdian_inventory_sync", sourceBatchId: inventory.id, summary: summary(inventory), exceptions: unifiedExceptions(inventory.exceptions), message: "旺店通库存同步预览已生成。", ...range });
     return { dataSyncBatch, inventorySync: inventory, summary: summary(inventory), isCurrent: true };
   } catch (error) {
-    completeDataSyncBatch(batch.id, { status: "failed", errorMessage: error.message, exceptions: [{ exceptionType: "api_or_validation_error", message: error.message }] });
+    interruptDataSyncBatch(batch.id, error);
     throw error;
   }
 }

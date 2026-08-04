@@ -7,6 +7,8 @@ import {
   getDataSyncTask,
   listDueDataSyncTasks,
   markDataSyncBatchPreviewReady,
+  interruptDataSyncBatch,
+  resumeDataSyncBatch,
   startDataSyncBatch,
 } from "./dataSyncCenterService.js";
 import {
@@ -48,20 +50,23 @@ function summary(log) {
   };
 }
 
-export async function previewPlatformGoodsDataSync({ taskId, syncMode = "", requestStart = null, requestEnd = null, scope = {}, triggerMode = "manual", createdBy = "", queryApi } = {}) {
+export async function previewPlatformGoodsDataSync({ taskId, resumeBatchId = "", syncMode = "", requestStart = null, requestEnd = null, scope = {}, triggerMode = "manual", createdBy = "", queryApi } = {}) {
   const task = getDataSyncTask(taskId);
   if (!task || task.taskCode !== "wangdian_platform_goods") throw new Error("平台货品关系同步任务不存在。");
-  const mode = syncMode || task.defaultSyncMode;
-  const range = requestRange(task, mode, requestStart, requestEnd);
-  const batch = createDataSyncBatch(task.id, { triggerMode, syncMode: mode, ...range, scope, createdBy });
-  startDataSyncBatch(batch.id);
+  const existing = resumeBatchId ? getDataSyncBatch(resumeBatchId) : null;
+  if (existing && existing.taskId !== task.id) throw new Error("续跑批次与平台货品关系同步任务不匹配。");
+  const mode = existing?.syncMode || syncMode || task.defaultSyncMode;
+  const range = existing ? { requestStart: existing.requestStart, requestEnd: existing.requestEnd } : requestRange(task, mode, requestStart, requestEnd);
+  const effectiveScope = existing?.scope || scope;
+  const batch = existing ? resumeDataSyncBatch(existing.id) : createDataSyncBatch(task.id, { triggerMode, syncMode: mode, ...range, scope: effectiveScope, createdBy });
+  if (!existing) startDataSyncBatch(batch.id);
   try {
     const preview = await previewWangdianPlatformGoodsSync({
       dataSyncBatchId: batch.id,
       importMode: mode,
       startTime: range.requestStart,
       endTime: range.requestEnd,
-      scope,
+      scope: effectiveScope,
       createdBy,
       ...(queryApi ? { queryApi } : {}),
     });
@@ -75,7 +80,7 @@ export async function previewPlatformGoodsDataSync({ taskId, syncMode = "", requ
     });
     return { dataSyncBatch, platformSync: preview, summary: summary(preview), isCurrent: true };
   } catch (error) {
-    completeDataSyncBatch(batch.id, { status: "failed", errorMessage: error.message, exceptions: [{ exceptionType: "api_or_validation_error", message: error.message }] });
+    interruptDataSyncBatch(batch.id, error);
     throw error;
   }
 }

@@ -753,6 +753,7 @@ CREATE TABLE IF NOT EXISTS data_sync_batches (
   periodStart TEXT,
   periodEnd TEXT,
   scopeJson TEXT NOT NULL DEFAULT '{}',
+  progressJson TEXT NOT NULL DEFAULT '{}',
   totalCount INTEGER NOT NULL DEFAULT 0,
   createdCount INTEGER NOT NULL DEFAULT 0,
   updatedCount INTEGER NOT NULL DEFAULT 0,

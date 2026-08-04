@@ -8,6 +8,7 @@ import { parseProductWorkbook } from "./productImport.js";
 import { reconcileErpSyncRun } from "./erpReconciliation.js";
 import { queryWangdianGoods } from "./wangdianClient.js";
 import { adaptWangdianGoodsResponse, canonicalGoodsRecordsToStaging } from "./wangdianGoodsAdapter.js";
+import { clearDataSyncCheckpoint, runWangdianPagedWindows } from "./dataSyncPagedExecution.js";
 
 const stagingRoot = path.join(uploadsDir, "product-v2-imports");
 const goodsInfoRequiredHeaders = ["货品编号", "商家编码", "货品名称"];
@@ -1019,28 +1020,23 @@ export async function parseWangdianGoodsImport({ syncRunId, dataSyncBatchId, que
   const canonicalByIdentity = new Map();
   let sourceGoodsCount = 0;
   let sourcePages = 0;
-  try { for (const windowQuery of queryWindows) {
-    let totalCount = null;
-    let pageNo = 0;
-    let windowGoodsCount = 0;
-    while (pageNo < 10_000) {
-      const payload = await queryGoods({ params: windowQuery, pageNo, pageSize });
-      sourcePages += 1;
-      const goodsList = Array.isArray(payload?.data?.goods_list) ? payload.data.goods_list : [];
-      if (pageNo === 0 && Number.isFinite(Number(payload?.data?.total_count))) totalCount = Number(payload.data.total_count);
-      sourceGoodsCount += goodsList.length;
-      windowGoodsCount += goodsList.length;
-      for (const record of adaptWangdianGoodsResponse(payload)) {
-        const skuKey = lower(record.merchantSkuCode);
-        const goodsKey = lower(record.goodsCode);
-        const identity = skuKey ? `${skuKey}|${goodsKey}` : `invalid|${sourcePages}|${pageNo}|${canonicalByIdentity.size}`;
-        canonicalByIdentity.set(identity, record);
-      }
-      if (goodsList.length < pageSize || (totalCount !== null && windowGoodsCount >= totalCount)) break;
-      pageNo += 1;
+  try {
+    const paged = await runWangdianPagedWindows({
+      batchId: dataSyncBatch?.id ?? syncRun.id,
+      windows: queryWindows,
+      pageSize,
+      queryPage: queryGoods,
+      extractItems: (payload) => Array.isArray(payload?.data?.goods_list) ? payload.data.goods_list : [],
+    });
+    sourceGoodsCount = paged.rows.length;
+    sourcePages = paged.pageCount;
+    for (const record of adaptWangdianGoodsResponse({ data: { goods_list: paged.rows } })) {
+      const skuKey = lower(record.merchantSkuCode);
+      const goodsKey = lower(record.goodsCode);
+      const identity = skuKey ? `${skuKey}|${goodsKey}` : `invalid|${canonicalByIdentity.size}`;
+      canonicalByIdentity.set(identity, record);
     }
-    if (pageNo >= 10_000) throw new Error("旺店通分页数量异常，已停止读取。");
-  } } catch (error) {
+  } catch (error) {
     getDatabase().prepare(`UPDATE wangdian_goods_sync_logs SET status='failed',pageCount=?,goodsCount=?,skuCount=?,errorCount=1,errorMessage=?,completedAt=? WHERE id=?`).run(sourcePages, sourceGoodsCount, canonicalByIdentity.size, error.message || "旺店通接口错误", new Date().toISOString(), logId);
     throw error;
   }
@@ -1115,6 +1111,7 @@ export async function parseWangdianGoodsImport({ syncRunId, dataSyncBatchId, que
   });
   const attachment = syncRun ? attachErpImportBatchToSyncRun(syncRun.id, batch.id) : null;
   getDatabase().prepare(`UPDATE wangdian_goods_sync_logs SET importBatchId=?,status='previewed',pageCount=?,goodsCount=?,skuCount=?,successCount=?,failedCount=?,errorCount=?,completedAt=? WHERE id=?`).run(batch.id, sourcePages, sourceGoodsCount, canonicalRecords.length, validation.summary.total - validation.summary.invalid, validation.summary.invalid, validation.summary.error ?? 0, new Date().toISOString(), logId);
+  clearDataSyncCheckpoint(dataSyncBatch?.id ?? syncRun.id);
   return {
     batch,
     syncRun: attachment ? readErpSyncRun(attachment.run.id) : null,

@@ -9,13 +9,13 @@ function decodeTask(row) {
 }
 
 function decodeBatch(row) {
-  return row ? { ...row, scope: parseJson(row.scopeJson), totalCount: Number(row.totalCount || 0), createdCount: Number(row.createdCount || 0), updatedCount: Number(row.updatedCount || 0), invalidatedCount: Number(row.invalidatedCount || 0), exceptionCount: Number(row.exceptionCount || 0) } : null;
+  return row ? { ...row, scope: parseJson(row.scopeJson), progress: parseJson(row.progressJson), totalCount: Number(row.totalCount || 0), createdCount: Number(row.createdCount || 0), updatedCount: Number(row.updatedCount || 0), invalidatedCount: Number(row.invalidatedCount || 0), exceptionCount: Number(row.exceptionCount || 0) } : null;
 }
 
 export function getDataSyncCenterOverview({ batchLimit = 50, exceptionLimit = 50 } = {}) {
   const db = getDatabase();
   const tasks = db.prepare("SELECT * FROM data_sync_tasks ORDER BY transportType, name").all().map(decodeTask);
-  const batches = db.prepare("SELECT b.*,t.name taskName,t.syncType FROM data_sync_batches b JOIN data_sync_tasks t ON t.id=b.taskId ORDER BY b.createdAt DESC LIMIT ?").all(Math.min(200, Math.max(1, Number(batchLimit) || 50))).map(decodeBatch);
+  const batches = db.prepare("SELECT b.*,t.name taskName,t.syncType,t.taskCode FROM data_sync_batches b JOIN data_sync_tasks t ON t.id=b.taskId ORDER BY b.createdAt DESC LIMIT ?").all(Math.min(200, Math.max(1, Number(batchLimit) || 50))).map(decodeBatch);
   const exceptions = db.prepare("SELECT e.*,t.name taskName FROM data_sync_exceptions e JOIN data_sync_tasks t ON t.id=e.taskId ORDER BY CASE e.status WHEN 'open' THEN 0 ELSE 1 END,e.createdAt DESC LIMIT ?").all(Math.min(200, Math.max(1, Number(exceptionLimit) || 50))).map((row) => ({ ...row, rawData: parseJson(row.rawDataJson) }));
   const legacy = {
     erpSyncRuns: db.prepare("SELECT COUNT(*) total FROM erp_sync_runs").get().total,
@@ -27,7 +27,7 @@ export function getDataSyncCenterOverview({ batchLimit = 50, exceptionLimit = 50
   const counts = db.prepare(`SELECT
     (SELECT COUNT(*) FROM data_sync_tasks) taskCount,
     (SELECT COUNT(*) FROM data_sync_tasks WHERE status='enabled') enabledTaskCount,
-    (SELECT COUNT(*) FROM data_sync_batches WHERE status IN ('queued','running','preview_ready')) activeBatchCount,
+    (SELECT COUNT(*) FROM data_sync_batches WHERE status IN ('queued','running','preview_ready','interrupted')) activeBatchCount,
     (SELECT COUNT(*) FROM data_sync_exceptions WHERE status='open') openExceptionCount
   `).get();
   return { tasks, batches, exceptions, legacy, counts, salesShops, wangdianShopMappings };
@@ -138,6 +138,31 @@ export function startDataSyncBatch(batchId) {
   const result = db.prepare("UPDATE data_sync_batches SET status='running',startedAt=? WHERE id=? AND status='queued'").run(startedAt, batchId);
   if (!result.changes) throw new Error("同步批次不存在或当前状态不可启动。");
   db.prepare("INSERT INTO data_sync_logs (id,batchId,level,eventType,message,detailJson,createdAt) VALUES (?,?,?,?,?,?,?)").run(`data-sync-log-${crypto.randomUUID()}`, batchId, "info", "batch_started", "同步批次开始执行。", "{}", startedAt);
+  return decodeBatch(db.prepare("SELECT * FROM data_sync_batches WHERE id=?").get(batchId));
+}
+
+export function interruptDataSyncBatch(batchId, error) {
+  const db = getDatabase();
+  const interruptedAt = now();
+  const message = error?.message || String(error || "同步读取中断。");
+  const result = db.prepare("UPDATE data_sync_batches SET status='interrupted',errorMessage=?,completedAt=? WHERE id=? AND status='running'").run(message, interruptedAt, batchId);
+  if (!result.changes) throw new Error("同步批次不存在或当前状态不可中断。");
+  db.prepare("INSERT INTO data_sync_logs (id,batchId,level,eventType,message,detailJson,createdAt) VALUES (?,?,?,?,?,?,?)").run(
+    `data-sync-log-${crypto.randomUUID()}`, batchId, "error", "batch_interrupted", "同步读取中断，断点已保留。", JSON.stringify({ message }), interruptedAt,
+  );
+  return decodeBatch(db.prepare("SELECT * FROM data_sync_batches WHERE id=?").get(batchId));
+}
+
+export function resumeDataSyncBatch(batchId) {
+  const db = getDatabase();
+  const resumedAt = now();
+  const batch = db.prepare("SELECT b.*,t.status taskStatus FROM data_sync_batches b JOIN data_sync_tasks t ON t.id=b.taskId WHERE b.id=?").get(batchId);
+  if (!batch || batch.status !== "interrupted") throw new Error("同步批次不存在或当前状态不可续跑。");
+  if (batch.taskStatus !== "enabled") throw new Error("同步任务已暂停，请先启用后再续跑。");
+  db.prepare("UPDATE data_sync_batches SET status='running',errorMessage=NULL,completedAt=NULL WHERE id=?").run(batchId);
+  db.prepare("INSERT INTO data_sync_logs (id,batchId,level,eventType,message,detailJson,createdAt) VALUES (?,?,?,?,?,?,?)").run(
+    `data-sync-log-${crypto.randomUUID()}`, batchId, "info", "batch_resumed", "同步批次从断点继续执行。", batch.progressJson || "{}", resumedAt,
+  );
   return decodeBatch(db.prepare("SELECT * FROM data_sync_batches WHERE id=?").get(batchId));
 }
 

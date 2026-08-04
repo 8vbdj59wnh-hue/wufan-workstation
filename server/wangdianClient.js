@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { wangdianRequestScheduler } from "./wangdianRequestScheduler.js";
 
 const WDT_EPOCH_SECONDS = 1325347200;
 const DEFAULT_METHOD = "goods.Goods.queryWithSpec";
@@ -61,6 +62,8 @@ export async function callWangdianApi({
   fetchImpl = globalThis.fetch,
   now = Date.now(),
   timeoutMs = 30_000,
+  onScheduleEvent,
+  scheduler = fetchImpl === globalThis.fetch ? wangdianRequestScheduler : null,
 } = {}) {
   if (typeof fetchImpl !== "function") throw new Error("当前运行环境不支持旺店通HTTP请求。");
   const safePageNo = Math.max(0, Number(pageNo) || 0);
@@ -80,28 +83,29 @@ export async function callWangdianApi({
   const sign = signWangdianRequest({ ...publicParameters, body: requestBody }, config.secret);
   const url = new URL(config.apiUrl);
   for (const [key, item] of Object.entries({ ...publicParameters, sign })) url.searchParams.set(key, String(item));
-  let response;
-  try {
-    response = await fetchImpl(url, {
+  const request = async () => {
+    let response;
+    try {
+      response = await fetchImpl(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: requestBody,
       signal: AbortSignal.timeout(timeoutMs),
-    });
-  } catch (error) {
-    throw new Error(`旺店通接口连接失败：${error.name === "TimeoutError" ? "请求超时" : "网络不可用或地址不可达"}`);
-  }
-  let payload;
-  try {
-    payload = await response.json();
-  } catch {
-    throw new Error(`旺店通接口返回非JSON响应（HTTP ${response.status}）。`);
-  }
-  if (!response.ok) throw new Error(`旺店通接口HTTP ${response.status}。`);
-  if (Number(payload?.status) !== 0) {
-    throw new Error(`旺店通接口失败（${payload?.status ?? "未知状态"}）：${value(payload?.message) || "未知错误"}`);
-  }
-  return payload;
+      });
+    } catch (error) {
+      throw new Error(`旺店通接口连接失败：${error.name === "TimeoutError" ? "请求超时" : "网络不可用或地址不可达"}`);
+    }
+    let payload;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new Error(`旺店通接口返回非JSON响应（HTTP ${response.status}）。`);
+    }
+    if (!response.ok) throw new Error(`旺店通接口HTTP ${response.status}。`);
+    if (Number(payload?.status) !== 0) throw new Error(`旺店通接口失败（${payload?.status ?? "未知状态"}）：${value(payload?.message) || "未知错误"}`);
+    return payload;
+  };
+  return scheduler ? scheduler.execute(request, { onEvent: onScheduleEvent }) : request();
 }
 
 export async function queryWangdianGoods({ params = {}, pageNo = 0, pageSize = 100, ...options } = {}) {
