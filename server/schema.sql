@@ -250,6 +250,7 @@ CREATE TABLE IF NOT EXISTS task_waves (
   waveType TEXT NOT NULL,
   taskCount INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'waiting',
+  acceptingTasks INTEGER NOT NULL DEFAULT 0,
   collectUntil TEXT,
   lockedAt TEXT,
   createdAt TEXT NOT NULL,

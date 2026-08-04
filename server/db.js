@@ -1453,6 +1453,7 @@ function runLightweightMigrations() {
       waveType TEXT NOT NULL,
       taskCount INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'waiting',
+      acceptingTasks INTEGER NOT NULL DEFAULT 0,
       collectUntil TEXT,
       lockedAt TEXT,
       createdAt TEXT NOT NULL,
@@ -1751,8 +1752,16 @@ function runLightweightMigrations() {
   ensureColumn("process_template_nodes", "waveUnlimited", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn("process_template_nodes", "waveTemplatePriority", "INTEGER NOT NULL DEFAULT 1");
   ensureColumn("task_waves", "generationMaxTaskCount", "INTEGER");
+  ensureColumn("task_waves", "acceptingTasks", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn("task_waves", "collectUntil", "TEXT");
   ensureColumn("task_waves", "lockedAt", "TEXT");
+  getDatabase()
+    .prepare(
+      `UPDATE task_waves
+       SET status = 'waiting', acceptingTasks = 1
+       WHERE status = 'waiting_collect'`,
+    )
+    .run();
   ensureColumn("task_wave_items", "resultDraft", "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn("task_wave_items", "updatedAt", "TEXT");
   ensureColumn("task_wave_items", "submittedAt", "TEXT");
@@ -2390,8 +2399,9 @@ function lockExpiredCollectingTaskWavesInTransaction(database, referenceAt) {
   return database
     .prepare(
       `UPDATE task_waves
-       SET status = 'waiting', lockedAt = @referenceAt, updatedAt = @referenceAt
-       WHERE status = 'waiting_collect'
+       SET acceptingTasks = 0, collectUntil = NULL, lockedAt = @referenceAt, updatedAt = @referenceAt
+       WHERE status = 'waiting'
+         AND acceptingTasks = 1
          AND collectUntil IS NOT NULL
          AND collectUntil <= @referenceAt`,
     )
@@ -2420,18 +2430,19 @@ function createTaskWaveInTransaction(database, queue, tasks, createdAt) {
   const businessCode = getNextTaskWaveBusinessCode(database, new Date(createdAt));
   const unitDurationMinutes = resolveTaskWaveUnitDurationMinutes(null, tasks);
   const reachesMaximum = queue.maxTaskCount !== null && tasks.length >= queue.maxTaskCount;
-  const status = reachesMaximum ? "waiting" : "waiting_collect";
+  const status = "waiting";
+  const acceptingTasks = reachesMaximum ? 0 : 1;
   const collectUntil = reachesMaximum ? null : getTaskWaveCollectUntil(createdAt);
   const lockedAt = reachesMaximum ? createdAt : null;
   database
     .prepare(
       `INSERT INTO task_waves (
          id, businessCode, taskTemplateId, processTemplateId, processNodeId, executorId,
-         templateGroupKey, waveType, taskCount, status, collectUntil, lockedAt,
+         templateGroupKey, waveType, taskCount, status, acceptingTasks, collectUntil, lockedAt,
          unitDurationMinutes, waveDurationMinutes, generationMaxTaskCount, createdAt, updatedAt
        ) VALUES (
          @id, @businessCode, @taskTemplateId, @processTemplateId, @processNodeId, @executorId,
-         @templateGroupKey, @waveType, @taskCount, @status, @collectUntil, @lockedAt,
+         @templateGroupKey, @waveType, @taskCount, @status, @acceptingTasks, @collectUntil, @lockedAt,
          @unitDurationMinutes, @waveDurationMinutes, @generationMaxTaskCount, @createdAt, @createdAt
        )`,
     )
@@ -2446,6 +2457,7 @@ function createTaskWaveInTransaction(database, queue, tasks, createdAt) {
       waveType,
       taskCount: tasks.length,
       status,
+      acceptingTasks,
       collectUntil,
       lockedAt,
       unitDurationMinutes,
@@ -2474,7 +2486,7 @@ function createTaskWaveInTransaction(database, queue, tasks, createdAt) {
       joinedAt: createdAt,
     });
   });
-  return { id: waveId, businessCode, waveType, templateGroupKey, taskCount: tasks.length, status, collectUntil };
+  return { id: waveId, businessCode, waveType, templateGroupKey, taskCount: tasks.length, status, acceptingTasks, collectUntil };
 }
 
 function appendTasksToCollectingWaveInTransaction(database, wave, tasks, joinedAt) {
@@ -2512,11 +2524,11 @@ function appendTasksToCollectingWaveInTransaction(database, wave, tasks, joinedA
       `UPDATE task_waves
        SET taskCount = @taskCount,
            waveDurationMinutes = CASE WHEN unitDurationMinutes IS NULL THEN NULL ELSE unitDurationMinutes * @taskCount END,
-           status = CASE WHEN @reachesMaximum = 1 THEN 'waiting' ELSE status END,
+           acceptingTasks = CASE WHEN @reachesMaximum = 1 THEN 0 ELSE acceptingTasks END,
            lockedAt = CASE WHEN @reachesMaximum = 1 THEN @joinedAt ELSE lockedAt END,
            collectUntil = CASE WHEN @reachesMaximum = 1 THEN NULL ELSE collectUntil END,
            updatedAt = @joinedAt
-       WHERE id = @id AND status = 'waiting_collect'`,
+       WHERE id = @id AND status = 'waiting' AND acceptingTasks = 1`,
     )
     .run({ id: wave.id, taskCount, reachesMaximum: reachesMaximum ? 1 : 0, joinedAt });
   return selected;
@@ -2642,7 +2654,8 @@ function appendCandidatesToCollectingWavesInTransaction(database, candidates, re
   const collectingWaves = database
     .prepare(
       `SELECT * FROM task_waves
-       WHERE status = 'waiting_collect'
+       WHERE status = 'waiting'
+         AND acceptingTasks = 1
        ORDER BY createdAt, id`,
     )
     .all();
@@ -2740,8 +2753,10 @@ function countEligibleUnassignedWaveTasks(database) {
 export function readTaskWaveRegenerationPreview() {
   const database = getDatabase();
   const countStatus = database.prepare("SELECT COUNT(*) AS count FROM task_waves WHERE status = @status");
-  const collectingWaveCount = Number(countStatus.get({ status: "waiting_collect" })?.count ?? 0);
-  const waitingWaveCount = Number(countStatus.get({ status: "waiting" })?.count ?? 0) + collectingWaveCount;
+  const collectingWaveCount = Number(
+    database.prepare("SELECT COUNT(*) AS count FROM task_waves WHERE status = 'waiting' AND acceptingTasks = 1").get()?.count ?? 0,
+  );
+  const waitingWaveCount = Number(countStatus.get({ status: "waiting" })?.count ?? 0);
   const sourceTaskCount = Number(
     database
       .prepare(
@@ -3066,7 +3081,7 @@ function refreshTaskWaveStatusInTransaction(database, waveId, referenceAt = new 
   if (statuses.every((item) => item === "done")) status = "done";
   else if (statuses.some((item) => item === "doing")) status = "doing";
   else if (statuses.some((item) => item === "pending_acceptance")) status = "pending_acceptance";
-  else if (statuses.every((item) => item === "todo") && wave.status !== "waiting_collect") status = "waiting";
+  else if (statuses.every((item) => item === "todo")) status = "waiting";
   const completedAt = status === "done" ? wave.completedAt ?? referenceAt : null;
   database
     .prepare("UPDATE task_waves SET status = @status, completedAt = @completedAt, updatedAt = @updatedAt WHERE id = @id")
@@ -3117,6 +3132,9 @@ export function startTaskWave(waveId, options = {}) {
       .prepare(
         `UPDATE task_waves
          SET status = 'doing',
+             acceptingTasks = 0,
+             collectUntil = NULL,
+             lockedAt = @now,
              startedAt = @now,
              unitDurationMinutes = @unitDurationMinutes,
              waveDurationMinutes = @waveDurationMinutes,
