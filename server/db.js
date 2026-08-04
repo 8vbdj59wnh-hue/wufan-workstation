@@ -2804,20 +2804,6 @@ export function regenerateWaitingTaskWaves(options = {}) {
     const waitingWaves = database
       .prepare("SELECT * FROM task_waves WHERE status IN ('waiting_collect', 'waiting') ORDER BY createdAt, id")
       .all();
-    const invalidMember = database
-      .prepare(
-        `SELECT t.businessCode, t.status
-         FROM task_wave_items twi
-         JOIN task_waves tw ON tw.id = twi.waveId
-         JOIN tasks t ON t.id = twi.taskId
-         WHERE tw.status IN ('waiting_collect', 'waiting') AND twi.isActive = 1 AND t.status <> 'todo'
-         LIMIT 1`,
-      )
-      .get();
-    if (invalidMember !== undefined) {
-      throw new Error(`波次成员 ${invalidMember.businessCode || "任务"} 状态已变化，请刷新后重试。`);
-    }
-
     const runId = `wave-regeneration-${crypto.randomUUID()}`;
     database
       .prepare(
