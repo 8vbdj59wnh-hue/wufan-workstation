@@ -498,6 +498,8 @@ function goodsInfoFields(record, existing = {}) {
     primarySupplier: value(record["主供应商"]) || existing.primarySupplier || null,
     supplierGoodsCode: value(record["主供应商货号"]) || existing.supplierGoodsCode || null,
     sourceCreatedAt: value(record["创建时间"]) || value(record["单品创建时间"]) || existing.sourceCreatedAt || null,
+    sourceUpdatedAt: value(record["源修改时间"]) || existing.sourceUpdatedAt || null,
+    rawSourceData: value(record["旺店通货品原文"]) || existing.rawSourceData || "{}",
   };
 }
 
@@ -877,7 +879,7 @@ function normalizeWangdianQuery(rawQuery = {}, { allowLongRange = false } = {}) 
     spec_no: value(rawQuery.specNo ?? rawQuery.spec_no),
     start_time: value(rawQuery.startTime ?? rawQuery.start_time),
     end_time: value(rawQuery.endTime ?? rawQuery.end_time),
-    hide_deleted: 1,
+    hide_deleted: Number(rawQuery.hideDeleted ?? rawQuery.hide_deleted) === 1 ? 1 : 0,
   };
   if (!query.goods_no && !query.spec_no) {
     if (!query.start_time || !query.end_time) throw new Error("旺店通同步必须提供起止修改时间，或指定货品编号/SKU编码。");
@@ -885,6 +887,8 @@ function normalizeWangdianQuery(rawQuery = {}, { allowLongRange = false } = {}) 
     const end = new Date(query.end_time.replace(" ", "T"));
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) throw new Error("旺店通同步时间范围无效。");
     if (!allowLongRange && end.getTime() - start.getTime() > 30 * 24 * 60 * 60 * 1000) throw new Error("旺店通增量同步单次查询时间跨度不能超过30天。");
+    const lookbackMinutes = Math.min(1440, Math.max(0, Number(rawQuery.safetyLookbackMinutes ?? 5) || 0));
+    query.start_time = formatWangdianDateTime(new Date(start.getTime() - lookbackMinutes * 60 * 1000));
   } else {
     delete query.start_time;
     delete query.end_time;
@@ -902,7 +906,6 @@ function splitWangdianQueryWindows(query, importMode) {
     if (importMode === "full") throw new Error("旺店通全量同步不能只查询单个货品或SKU。");
     return [query];
   }
-  if (importMode !== "full") return [query];
   const start = new Date(query.start_time.replace(" ", "T"));
   const end = new Date(query.end_time.replace(" ", "T"));
   const windows = [];
@@ -983,7 +986,14 @@ async function localizeWangdianImages(records, batchId) {
   }));
 }
 
-export async function parseWangdianGoodsImport({ syncRunId, query: rawQuery = {}, importMode: rawImportMode, createdBy = "" } = {}) {
+export function listWangdianGoodsSyncLogs(limit = 50) {
+  return getDatabase().prepare(`SELECT * FROM wangdian_goods_sync_logs ORDER BY startedAt DESC LIMIT ?`).all(Math.min(200, Math.max(1, Number(limit) || 50))).map((row) => ({
+    ...row,
+    requestJson: JSON.parse(row.requestJson || "{}"),
+  }));
+}
+
+export async function parseWangdianGoodsImport({ syncRunId, query: rawQuery = {}, importMode: rawImportMode, createdBy = "", queryGoods = queryWangdianGoods } = {}) {
   const syncRun = readErpSyncRun(syncRunId);
   if (!syncRun) throw new Error("请先创建或恢复ERP主数据同步批次。");
   if (syncRun.syncType !== "master_data" || normalizeDataSource(syncRun.dataSource) !== "wangdian_api") {
@@ -997,16 +1007,22 @@ export async function parseWangdianGoodsImport({ syncRunId, query: rawQuery = {}
   const importMode = normalizeImportMode(rawImportMode, { syncType: "master_data", importType: "goods_info" });
   const query = normalizeWangdianQuery(rawQuery, { allowLongRange: importMode === "full" });
   const queryWindows = splitWangdianQueryWindows(query, importMode);
+  const logId = `wangdian-goods-sync-${crypto.randomUUID()}`;
+  const startedAt = new Date().toISOString();
+  getDatabase().prepare(`INSERT INTO wangdian_goods_sync_logs (id,syncRunId,interfaceMethod,importMode,requestStart,requestEnd,requestJson,status,windowCount,createdBy,startedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
+    logId, syncRun.id, "goods.Goods.queryWithSpec", importMode, query.start_time || null, query.end_time || null,
+    JSON.stringify({ query, windows: queryWindows }), "running", queryWindows.length, value(createdBy) || null, startedAt,
+  );
   const pageSize = 100;
   const canonicalByIdentity = new Map();
   let sourceGoodsCount = 0;
   let sourcePages = 0;
-  for (const windowQuery of queryWindows) {
+  try { for (const windowQuery of queryWindows) {
     let totalCount = null;
     let pageNo = 0;
     let windowGoodsCount = 0;
     while (pageNo < 10_000) {
-      const payload = await queryWangdianGoods({ params: windowQuery, pageNo, pageSize });
+      const payload = await queryGoods({ params: windowQuery, pageNo, pageSize });
       sourcePages += 1;
       const goodsList = Array.isArray(payload?.data?.goods_list) ? payload.data.goods_list : [];
       if (pageNo === 0 && Number.isFinite(Number(payload?.data?.total_count))) totalCount = Number(payload.data.total_count);
@@ -1015,15 +1031,23 @@ export async function parseWangdianGoodsImport({ syncRunId, query: rawQuery = {}
       for (const record of adaptWangdianGoodsResponse(payload)) {
         const skuKey = lower(record.merchantSkuCode);
         const goodsKey = lower(record.goodsCode);
-        if (skuKey) canonicalByIdentity.set(`${skuKey}|${goodsKey}`, record);
+        const identity = skuKey ? `${skuKey}|${goodsKey}` : `invalid|${sourcePages}|${pageNo}|${canonicalByIdentity.size}`;
+        canonicalByIdentity.set(identity, record);
       }
       if (goodsList.length < pageSize || (totalCount !== null && windowGoodsCount >= totalCount)) break;
       pageNo += 1;
     }
     if (pageNo >= 10_000) throw new Error("旺店通分页数量异常，已停止读取。");
+  } } catch (error) {
+    getDatabase().prepare(`UPDATE wangdian_goods_sync_logs SET status='failed',pageCount=?,goodsCount=?,skuCount=?,errorCount=1,errorMessage=?,completedAt=? WHERE id=?`).run(sourcePages, sourceGoodsCount, canonicalByIdentity.size, error.message || "旺店通接口错误", new Date().toISOString(), logId);
+    throw error;
   }
   const sourceCanonicalRecords = [...canonicalByIdentity.values()];
-  if (sourceCanonicalRecords.length === 0) throw new Error("旺店通未返回可同步的SKU记录。");
+  if (sourceCanonicalRecords.length === 0) {
+    const message = "旺店通未返回可同步的SKU记录。";
+    getDatabase().prepare(`UPDATE wangdian_goods_sync_logs SET status='failed',pageCount=?,goodsCount=?,skuCount=0,errorCount=1,errorMessage=?,completedAt=? WHERE id=?`).run(sourcePages, sourceGoodsCount, message, new Date().toISOString(), logId);
+    throw new Error(message);
+  }
   const batchId = `erp-v2-goods_info-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
   const fileHash = crypto.createHash("sha256").update(JSON.stringify(sourceCanonicalRecords)).digest("hex");
   const canonicalRecords = await localizeWangdianImages(sourceCanonicalRecords, batchId);
@@ -1079,6 +1103,7 @@ export async function parseWangdianGoodsImport({ syncRunId, query: rawQuery = {}
     completedAt: null,
   });
   const attachment = attachErpImportBatchToSyncRun(syncRun.id, batch.id);
+  getDatabase().prepare(`UPDATE wangdian_goods_sync_logs SET importBatchId=?,status='previewed',pageCount=?,goodsCount=?,skuCount=?,successCount=?,failedCount=?,errorCount=?,completedAt=? WHERE id=?`).run(batch.id, sourcePages, sourceGoodsCount, canonicalRecords.length, validation.summary.total - validation.summary.invalid, validation.summary.invalid, validation.summary.error ?? 0, new Date().toISOString(), logId);
   return {
     batch,
     syncRun: readErpSyncRun(attachment.run.id),
@@ -1086,6 +1111,7 @@ export async function parseWangdianGoodsImport({ syncRunId, query: rawQuery = {}
     valid: validation.valid,
     summary: validation.summary,
     preview: validation.rows.slice(0, 200),
+    syncLog: listWangdianGoodsSyncLogs(200).find((item) => item.id === logId),
   };
 }
 
@@ -1296,7 +1322,7 @@ function commitGoodsInfo(batch, staging) {
           ...row.goodsFields,
           lastImportedAt: now,
           lastSeenBatchId: batch.id,
-          currentState: "active",
+          currentState: value(record["货品删除状态"]) === "deleted" ? "deleted" : "active",
           missingAt: null,
           createdAt: goods?.createdAt ?? now,
           updatedAt: now,
@@ -1305,7 +1331,8 @@ function commitGoodsInfo(batch, staging) {
           database.prepare(`
             UPDATE erp_goods SET goodsCode=@goodsCode,goodsName=@goodsName,shortName=@shortName,brand=@brand,
               category=@category,productType=@productType,primarySupplier=@primarySupplier,
-              supplierGoodsCode=@supplierGoodsCode,sourceCreatedAt=@sourceCreatedAt,lastImportedAt=@lastImportedAt,
+          supplierGoodsCode=@supplierGoodsCode,sourceCreatedAt=@sourceCreatedAt,lastImportedAt=@lastImportedAt,
+              sourceUpdatedAt=@sourceUpdatedAt,rawSourceData=@rawSourceData,
               lastSeenBatchId=@lastSeenBatchId,currentState=@currentState,missingAt=@missingAt,updatedAt=@updatedAt
             WHERE id=@id
           `).run(nextGoods);
@@ -1313,10 +1340,10 @@ function commitGoodsInfo(batch, staging) {
           database.prepare(`
             INSERT INTO erp_goods (
               id,goodsCode,goodsName,shortName,brand,category,productType,primarySupplier,supplierGoodsCode,
-              sourceCreatedAt,lastImportedAt,lastSeenBatchId,currentState,missingAt,createdAt,updatedAt
+              sourceCreatedAt,sourceUpdatedAt,rawSourceData,lastImportedAt,lastSeenBatchId,currentState,missingAt,createdAt,updatedAt
             ) VALUES (
               @id,@goodsCode,@goodsName,@shortName,@brand,@category,@productType,@primarySupplier,@supplierGoodsCode,
-              @sourceCreatedAt,@lastImportedAt,@lastSeenBatchId,@currentState,@missingAt,@createdAt,@updatedAt
+              @sourceCreatedAt,@sourceUpdatedAt,@rawSourceData,@lastImportedAt,@lastSeenBatchId,@currentState,@missingAt,@createdAt,@updatedAt
             )
           `).run(nextGoods);
         }
@@ -1337,8 +1364,8 @@ function commitGoodsInfo(batch, staging) {
       database.prepare(`
         INSERT INTO erp_skus (
           id,merchantSkuCode,erpGoodsId,specificationName,barcode,unit,erpStatus,
-          mainImage,galleryImages,firstSeenBatchId,lastSeenBatchId,currentState,createdAt,updatedAt
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          mainImage,galleryImages,sourceUpdatedAt,rawSourceData,firstSeenBatchId,lastSeenBatchId,currentState,createdAt,updatedAt
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(merchantSkuCode) DO UPDATE SET
           erpGoodsId=excluded.erpGoodsId,
           specificationName=excluded.specificationName,
@@ -1347,8 +1374,10 @@ function commitGoodsInfo(batch, staging) {
           erpStatus=excluded.erpStatus,
           mainImage=COALESCE(excluded.mainImage,erp_skus.mainImage),
           galleryImages=COALESCE(excluded.galleryImages,erp_skus.galleryImages),
+          sourceUpdatedAt=COALESCE(excluded.sourceUpdatedAt,erp_skus.sourceUpdatedAt),
+          rawSourceData=COALESCE(excluded.rawSourceData,erp_skus.rawSourceData),
           lastSeenBatchId=excluded.lastSeenBatchId,
-          currentState='active',
+          currentState=CASE WHEN excluded.erpStatus='inactive' THEN 'deleted' ELSE 'active' END,
           updatedAt=excluded.updatedAt
       `).run(
         skuId,
@@ -1360,9 +1389,11 @@ function commitGoodsInfo(batch, staging) {
         value(record["单品状态"]) || null,
         imageUrls[0] || null,
         imageUrls.length > 0 ? JSON.stringify(imageUrls.slice(1)) : null,
+        value(record["源修改时间"]) || null,
+        value(record["旺店通SKU原文"]) || "{}",
         batch.id,
         batch.id,
-        "active",
+        value(record["单品状态"]) === "inactive" ? "deleted" : "active",
         now,
         now,
       );
@@ -1584,6 +1615,11 @@ export function commitErpV2Import(batchId, { shopMappings = {} } = {}) {
       completedAt,
     });
     const syncRun = nextBatch.syncRunId ? recalculateErpSyncRun(nextBatch.syncRunId) : null;
+    if (nextBatch.dataSource === "wangdian_api") {
+      database.prepare(`UPDATE wangdian_goods_sync_logs SET status='completed',successCount=?,failedCount=?,errorCount=?,completedAt=? WHERE importBatchId=?`).run(
+        (stats.created ?? 0) + (stats.updated ?? 0) + (stats.unchanged ?? 0), stats.errors ?? 0, stats.errors ?? 0, completedAt, nextBatch.id,
+      );
+    }
     return {
       batch: nextBatch,
       idempotent: false,
@@ -1603,6 +1639,9 @@ export function commitErpV2Import(batchId, { shopMappings = {} } = {}) {
       completedAt: null,
     });
     if (failedBatch.syncRunId) recalculateErpSyncRun(failedBatch.syncRunId);
+    if (failedBatch.dataSource === "wangdian_api") {
+      getDatabase().prepare(`UPDATE wangdian_goods_sync_logs SET status='failed',failedCount=MAX(failedCount,1),errorCount=MAX(errorCount,1),errorMessage=?,completedAt=? WHERE importBatchId=?`).run(error.message || "旺店通货品导入失败。", new Date().toISOString(), failedBatch.id);
+    }
     throw error;
   }
 }

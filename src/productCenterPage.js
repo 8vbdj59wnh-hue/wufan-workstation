@@ -1068,6 +1068,8 @@ function renderErpSyncDashboard() {
   if (erpSyncState.loading && !run) return `<div class="form-note">正在读取ERP每日同步状态…</div>`;
   if (!run) {
     const today = new Date().toLocaleDateString("sv-SE");
+    const user = getCurrentUser();
+    const canUseWangdian = ["admin", "system_admin"].includes(user?.role) || user?.authRole === "admin";
     return `<div class="erp-sync-create">
       <p class="form-note">ERP主数据与每日经营数据分别同步，互不阻塞。</p>
       <form id="erp-sync-create-form" class="product-import-upload-form">
@@ -1078,7 +1080,7 @@ function renderErpSyncDashboard() {
         </select></label>
         <label data-master-data-source><span>主数据来源 *</span><select name="dataSource">
           <option value="excel">Excel文件</option>
-          <option value="wangdian_api">旺店通API</option>
+          ${canUseWangdian ? `<option value="wangdian_api">旺店通API</option>` : ""}
         </select></label>
         <fieldset class="product-import-mode-field" data-master-import-mode>
           <legend>主数据导入模式</legend>

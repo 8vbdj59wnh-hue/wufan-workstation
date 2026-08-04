@@ -8,6 +8,7 @@ export {
   commitErpV2Import,
   createErpSyncRun,
   listErpSyncRuns,
+  listWangdianGoodsSyncLogs,
   markPlatformSku,
   parseErpV2Import,
   parseWangdianGoodsImport,

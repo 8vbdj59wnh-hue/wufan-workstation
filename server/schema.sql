@@ -632,6 +632,8 @@ CREATE TABLE IF NOT EXISTS erp_goods (
   primarySupplier TEXT,
   supplierGoodsCode TEXT,
   sourceCreatedAt TEXT,
+  sourceUpdatedAt TEXT,
+  rawSourceData TEXT NOT NULL DEFAULT '{}',
   lastImportedAt TEXT,
   lastSeenBatchId TEXT,
   currentState TEXT NOT NULL DEFAULT 'active',
@@ -650,6 +652,8 @@ CREATE TABLE IF NOT EXISTS erp_skus (
   erpStatus TEXT,
   mainImage TEXT,
   galleryImages TEXT,
+  sourceUpdatedAt TEXT,
+  rawSourceData TEXT NOT NULL DEFAULT '{}',
   firstSeenBatchId TEXT NOT NULL,
   lastSeenBatchId TEXT NOT NULL,
   currentState TEXT NOT NULL DEFAULT 'active',
@@ -687,6 +691,34 @@ CREATE TABLE IF NOT EXISTS erp_import_batches (
 );
 
 CREATE INDEX IF NOT EXISTS idx_erp_import_batches_hash ON erp_import_batches(importType, fileHash);
+
+CREATE TABLE IF NOT EXISTS wangdian_goods_sync_logs (
+  id TEXT PRIMARY KEY,
+  syncRunId TEXT,
+  importBatchId TEXT,
+  interfaceMethod TEXT NOT NULL DEFAULT 'goods.Goods.queryWithSpec',
+  importMode TEXT NOT NULL,
+  requestStart TEXT,
+  requestEnd TEXT,
+  requestJson TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL,
+  windowCount INTEGER NOT NULL DEFAULT 0,
+  pageCount INTEGER NOT NULL DEFAULT 0,
+  goodsCount INTEGER NOT NULL DEFAULT 0,
+  skuCount INTEGER NOT NULL DEFAULT 0,
+  successCount INTEGER NOT NULL DEFAULT 0,
+  failedCount INTEGER NOT NULL DEFAULT 0,
+  errorCount INTEGER NOT NULL DEFAULT 0,
+  errorMessage TEXT,
+  createdBy TEXT,
+  startedAt TEXT NOT NULL,
+  completedAt TEXT,
+  FOREIGN KEY(syncRunId) REFERENCES erp_sync_runs(id),
+  FOREIGN KEY(importBatchId) REFERENCES erp_import_batches(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_wangdian_goods_sync_logs_time
+  ON wangdian_goods_sync_logs(startedAt DESC);
 CREATE TABLE IF NOT EXISTS erp_sync_runs (
   id TEXT PRIMARY KEY,
   syncCode TEXT NOT NULL UNIQUE,

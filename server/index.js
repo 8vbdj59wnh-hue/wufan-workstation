@@ -44,6 +44,7 @@ import {
   getTrendProducts,
   hasWangdianConfig,
   listErpSyncRuns,
+  listWangdianGoodsSyncLogs,
   listErpFactSnapshots,
   listPendingErpSkus,
   listProductFactSnapshots,
@@ -482,6 +483,24 @@ function rejectUnauthorizedActionTemplateLaunch(user, body, response, trustedTem
 
 function isAdminUser(user) {
   return user?.role === "admin" || user?.role === "system_admin" || user?.authRole === "admin";
+}
+
+function requireAdminUser(request, response, next) {
+  if (isAdminUser(request.user)) { next(); return; }
+  response.status(403).json({ success: false, message: "仅管理员可以执行旺店通货品同步。" });
+}
+
+function requireAdminForWangdianBatch(request, response, next) {
+  try {
+    const result = readErpV2Import(request.params.id);
+    if (result?.batch?.dataSource === "wangdian_api" && !isAdminUser(request.user)) {
+      response.status(403).json({ success: false, message: "仅管理员可以访问旺店通同步批次。" });
+      return;
+    }
+    next();
+  } catch {
+    next();
+  }
 }
 
 function getUserPersonId(user) {
@@ -1473,12 +1492,13 @@ app.post("/api/products/erp-v2/parse", requirePermission("products.create"), (re
 
 app.get("/api/products/erp-sync-runs", requirePermission("products.view"), (request, response) => {
   try {
+    const runs = listErpSyncRuns({
+      businessDate: String(request.query.businessDate ?? ""),
+      includeHistorical: String(request.query.includeHistorical ?? "true") !== "false",
+    });
     response.json({
       success: true,
-      runs: listErpSyncRuns({
-        businessDate: String(request.query.businessDate ?? ""),
-        includeHistorical: String(request.query.includeHistorical ?? "true") !== "false",
-      }),
+      runs: isAdminUser(request.user) ? runs : runs.filter((run) => run.dataSource !== "wangdian_api"),
     });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "ERP每日同步列表读取失败。" });
@@ -1491,11 +1511,19 @@ app.get("/api/products/erp-sync-runs/:id", requirePermission("products.view"), (
     response.status(404).json({ success: false, message: "ERP每日同步批次不存在。" });
     return;
   }
+  if (syncRun.dataSource === "wangdian_api" && !isAdminUser(request.user)) {
+    response.status(403).json({ success: false, message: "仅管理员可以访问旺店通同步批次。" });
+    return;
+  }
   response.json({ success: true, syncRun });
 });
 
 app.post("/api/products/erp-sync-runs", requirePermission("products.create"), (request, response) => {
   try {
+    if (String(request.body?.dataSource ?? "") === "wangdian_api" && !isAdminUser(request.user)) {
+      response.status(403).json({ success: false, message: "仅管理员可以创建旺店通同步。" });
+      return;
+    }
     response.json({
       success: true,
       syncRun: createErpSyncRun({
@@ -1514,11 +1542,15 @@ app.post("/api/products/erp-sync-runs", requirePermission("products.create"), (r
   }
 });
 
-app.get("/api/products/wangdian/status", requirePermission("products.view"), (request, response) => {
+app.get("/api/products/wangdian/status", requirePermission("products.view"), requireAdminUser, (request, response) => {
   response.json({ success: true, configured: hasWangdianConfig() });
 });
 
-app.post("/api/products/erp-sync-runs/:id/wangdian/preview", requirePermission("products.create"), async (request, response) => {
+app.get("/api/products/wangdian/sync-logs", requirePermission("products.view"), requireAdminUser, (request, response) => {
+  response.json({ success: true, items: listWangdianGoodsSyncLogs(request.query.limit) });
+});
+
+app.post("/api/products/erp-sync-runs/:id/wangdian/preview", requirePermission("products.create"), requireAdminUser, async (request, response) => {
   try {
     const result = await parseWangdianGoodsImport({
       syncRunId: request.params.id,
@@ -2262,7 +2294,7 @@ app.post("/api/connection-import-batches/:id/rows/:externalId/ignore", requireLi
   }
 });
 
-app.post("/api/products/erp-v2/:id/validate", requirePermission("products.create"), (request, response) => {
+app.post("/api/products/erp-v2/:id/validate", requirePermission("products.create"), requireAdminForWangdianBatch, (request, response) => {
   try {
     response.json({ success: true, ...validateErpV2Import(request.params.id, request.body ?? {}) });
   } catch (error) {
@@ -2271,7 +2303,7 @@ app.post("/api/products/erp-v2/:id/validate", requirePermission("products.create
   }
 });
 
-app.get("/api/products/erp-v2/:id", requirePermission("products.create"), (request, response) => {
+app.get("/api/products/erp-v2/:id", requirePermission("products.create"), requireAdminForWangdianBatch, (request, response) => {
   try {
     response.json({ success: true, ...readErpV2Import(request.params.id) });
   } catch (error) {
@@ -2279,7 +2311,7 @@ app.get("/api/products/erp-v2/:id", requirePermission("products.create"), (reque
   }
 });
 
-app.post("/api/products/erp-v2/:id/preview", requirePermission("products.create"), (request, response) => {
+app.post("/api/products/erp-v2/:id/preview", requirePermission("products.create"), requireAdminForWangdianBatch, (request, response) => {
   try {
     response.json({ success: true, ...previewErpV2Import(request.params.id, request.body ?? {}) });
   } catch (error) {
@@ -2288,7 +2320,7 @@ app.post("/api/products/erp-v2/:id/preview", requirePermission("products.create"
   }
 });
 
-app.post("/api/products/erp-v2/:id/commit", requirePermission("products.create"), (request, response) => {
+app.post("/api/products/erp-v2/:id/commit", requirePermission("products.create"), requireAdminForWangdianBatch, (request, response) => {
   try {
     const result = commitErpV2Import(request.params.id, request.body ?? {});
     response.json({ success: true, ...result, data: filterDataByScope(readAllData(), request.user) });
