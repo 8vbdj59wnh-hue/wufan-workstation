@@ -1112,7 +1112,10 @@ function renderErpSyncDashboard() {
       const batch = run.batches?.[importType];
       const completed = ["completed", "committed"].includes(batch?.status);
       const action = batch
-        ? `<button class="secondary-button" type="button" data-action="resume-product-v2-import" data-batch-id="${escapeHtml(batch.id)}">${completed ? "查看结果" : batch.status === "failed" ? "查看失败并重试" : "继续处理"}</button>`
+        ? `<button class="secondary-button" type="button" data-action="resume-product-v2-import" data-batch-id="${escapeHtml(batch.id)}">${completed ? "查看结果" : batch.status === "failed" ? "查看失败并重试" : "继续处理"}</button>
+          ${!completed && ["wangdian", "wangdian_api"].includes(run.dataSource) && importType === "goods_info"
+            ? `<button class="primary-button" type="button" data-action="regenerate-wangdian-preview">重新生成预览</button>`
+            : ""}`
         : ["wangdian", "wangdian_api"].includes(run.dataSource) && importType === "goods_info"
           ? `<button class="primary-button" type="button" data-action="sync-wangdian-goods">同步旺店通货品</button>`
           : `<button class="primary-button" type="button" data-action="upload-erp-sync-child" data-import-type="${importType}">上传文件</button>`;
@@ -1199,6 +1202,7 @@ function renderProductV2Preview() {
     const mappingLabels = { existing: "已关联产品", auto: "可自动关联产品", pending: "待人工关联产品", error: "错误行" };
     const goodsLabels = { new: "新增ERP货品", update: "更新ERP货品", unchanged: "无变化" };
     return `<div class="product-import-preview">
+      ${summary.previewVersion ? `<div class="form-note"><strong>当前有效预览：V${summary.previewVersion}</strong> · 批次 ${escapeHtml(importState.batch?.id || "—")}。重新生成后旧预览仍保留，但只有最新预览可以提交。</div>` : ""}
       <div class="import-summary-grid">
         ${[
           ["文件行数", summary.total], ["有效货品", summary.validGoods], ["新增ERP货品", summary.created],
@@ -1809,6 +1813,18 @@ export function bindProductCenterPageEvents(rerender) {
         step: "wangdian",
         importType: "goods_info",
         importMode: erpSyncState.masterImportMode || "incremental",
+        syncRun: erpSyncState.active,
+        loading: false,
+        error: "",
+      };
+      rerender();
+    }
+    if (action === "regenerate-wangdian-preview") {
+      importState = {
+        version: "v2",
+        step: "wangdian",
+        importType: "goods_info",
+        importMode: erpSyncState.active?.batches?.goods_info?.importMode || erpSyncState.masterImportMode || "incremental",
         syncRun: erpSyncState.active,
         loading: false,
         error: "",

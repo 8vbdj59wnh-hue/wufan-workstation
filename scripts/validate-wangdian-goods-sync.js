@@ -75,7 +75,29 @@ assert.equal(fullPreview.valid, true);
 assert.ok(pageCalls.some((item) => item.pageNo === 1), "应读取第二页");
 assert.ok(new Set(pageCalls.map((item) => item.params.start_time)).size >= 2, "全量范围应拆成多个不超过30天的窗口");
 service.validateErpV2Import(fullPreview.batch.id);
-const fullCommit = service.commitErpV2Import(fullPreview.batch.id);
+const fullPreviewV2 = await service.parseWangdianGoodsImport({
+  syncRunId: fullRun.id,
+  importMode: "full",
+  query: { startTime: "2026-06-25 00:00:00", endTime: "2026-08-01 01:00:00" },
+  createdBy: "person-admin",
+  queryGoods: async ({ params, pageNo }) => {
+    const suffix = params.start_time.slice(5, 10).replace("-", "");
+    const list = pageNo === 0
+      ? Array.from({ length: 100 }, (_, index) => goods(index + 1, suffix))
+      : pageNo === 1 ? [goods(101, suffix)] : [];
+    return { status: 0, data: { goods_list: list, total_count: 101 } };
+  },
+});
+assert.equal(fullPreviewV2.batch.summaryJson.previewVersion, 2);
+const fullValidatedV2 = service.validateErpV2Import(fullPreviewV2.batch.id);
+assert.equal(fullValidatedV2.summary.previewVersion, 2);
+assert.equal(database.prepare("SELECT COUNT(*) count FROM erp_import_batches WHERE syncRunId=? AND importType='goods_info'").get(fullRun.id).count, 2);
+assert.equal(service.readErpSyncRun(fullRun.id).goodsInfoBatchId, fullPreviewV2.batch.id);
+const fullPreviewLogs = service.listWangdianGoodsSyncLogs(10).filter((item) => item.syncRunId === fullRun.id);
+assert.equal(fullPreviewLogs.length, 2);
+assert.notEqual(fullPreviewLogs[0].requestEnd, fullPreviewLogs[1].requestEnd);
+assert.throws(() => service.commitErpV2Import(fullPreview.batch.id), /当前有效预览/u);
+const fullCommit = service.commitErpV2Import(fullPreviewV2.batch.id);
 assert.equal(fullCommit.idempotent, false);
 const goodsAfterFull = database.prepare("SELECT COUNT(*) count FROM erp_goods").get().count;
 const skusAfterFull = database.prepare("SELECT COUNT(*) count FROM erp_skus").get().count;
@@ -83,7 +105,7 @@ assert.equal(goodsAfterFull, 202);
 assert.equal(skusAfterFull, 202);
 assert.equal(database.prepare("SELECT COUNT(*) count FROM products").get().count, productsBefore, "不得自动创建products");
 
-const repeated = service.commitErpV2Import(fullPreview.batch.id);
+const repeated = service.commitErpV2Import(fullPreviewV2.batch.id);
 assert.equal(repeated.idempotent, true);
 assert.equal(database.prepare("SELECT COUNT(*) count FROM erp_goods").get().count, goodsAfterFull);
 assert.equal(database.prepare("SELECT COUNT(*) count FROM erp_skus").get().count, skusAfterFull);

@@ -1053,6 +1053,11 @@ export async function parseWangdianGoodsImport({ syncRunId, query: rawQuery = {}
   const canonicalRecords = await localizeWangdianImages(sourceCanonicalRecords, batchId);
   const records = canonicalGoodsRecordsToStaging(canonicalRecords);
   const now = new Date().toISOString();
+  const previewVersion = Number(getDatabase().prepare(`
+    SELECT COUNT(*) AS total
+    FROM erp_import_batches
+    WHERE syncRunId=? AND importType='goods_info' AND dataSource='wangdian_api'
+  `).get(syncRun.id)?.total ?? 0) + 1;
   const staging = {
     sheetName: "旺店通货品档案API",
     headers: goodsInfoRequiredHeaders,
@@ -1096,6 +1101,7 @@ export async function parseWangdianGoodsImport({ syncRunId, query: rawQuery = {}
       sourcePages,
       sourceWindows: queryWindows.length,
       sourceQuery: query,
+      previewVersion,
       duplicateCommittedBatchId: existing?.id ?? null,
     },
     createdBy,
@@ -1131,7 +1137,7 @@ export function validateErpV2Import(batchId, { shopMappings = {}, previewFilters
     matchedCount: validation.summary.matched ?? validation.summary.matchedAuto ?? 0,
     unmatchedCount: validation.summary.unmatched ?? 0,
     errorCount: validation.summary.error ?? 0,
-    summaryJson: { ...validation.summary, shopMappings: validation.shopMappings ?? [] },
+    summaryJson: { ...batch.summaryJson, ...validation.summary, shopMappings: validation.shopMappings ?? [] },
   });
   const platformPreview = batch.importType === "platform_goods"
     ? buildPlatformPreview(validation.rows, { ...previewFilters, page, pageSize })
@@ -1139,6 +1145,7 @@ export function validateErpV2Import(batchId, { shopMappings = {}, previewFilters
   const syncRun = nextBatch.syncRunId ? recalculateErpSyncRun(nextBatch.syncRunId) : null;
   return {
     ...validation,
+    summary: nextBatch.summaryJson,
     batch: nextBatch,
     valid: nextBatch.status === "validated",
     rows: undefined,
@@ -1570,6 +1577,13 @@ function commitPlatform(batch, staging, shopMappings) {
 export function commitErpV2Import(batchId, { shopMappings = {} } = {}) {
   let batch = decodeBatch(readBatch(batchId));
   if (!batch) throw new Error("导入批次不存在。");
+  if (batch.syncRunId) {
+    const run = getSyncRunRow(batch.syncRunId);
+    const currentColumn = syncRunBatchColumns[batch.importType];
+    if (!run || !currentColumn || run[currentColumn] !== batch.id) {
+      throw new Error("该预览已被更新版本替代，请返回同步任务并选择当前有效预览后再提交。");
+    }
+  }
   if (["committed", "completed"].includes(batch.status)) {
     return {
       batch,
