@@ -77,6 +77,13 @@ import {
   runDueErpGoodsSyncTasks,
 } from "./erpGoodsDataSyncAdapter.js";
 import {
+  commitPlatformGoodsDataSync,
+  previewPlatformGoodsDataSync,
+  readPlatformGoodsDataSyncPreview,
+  runDuePlatformGoodsSyncTasks,
+} from "./platformGoodsDataSyncAdapter.js";
+import { saveWangdianShopMapping } from "./wangdianPlatformGoodsSyncService.js";
+import {
   createConnectionAction,
   createConnectionDataMapping,
   createConnectionProfile,
@@ -1692,6 +1699,39 @@ app.get("/api/data-sync-center/batches/:id/erp-goods/preview", requirePermission
     response.json({ success: true, ...readErpGoodsDataSyncPreview(request.params.id) });
   } catch (error) {
     response.status(404).json({ success: false, message: error.message || "ERP货品同步预览读取失败。" });
+  }
+});
+
+app.post("/api/data-sync-center/shop-mappings", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+  try {
+    response.json({ success: true, mapping: saveWangdianShopMapping(request.body, getUserPersonId(request.user)) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "旺店通店铺映射保存失败。" });
+  }
+});
+
+app.post("/api/data-sync-center/tasks/:id/platform-goods/preview", requirePermission("dataCenter.view"), requireAdminUser, async (request, response) => {
+  try {
+    const result = await previewPlatformGoodsDataSync({ taskId: request.params.id, syncMode: request.body?.syncMode, requestStart: request.body?.requestStart, requestEnd: request.body?.requestEnd, scope: request.body?.scope, createdBy: getUserPersonId(request.user) });
+    response.status(201).json({ success: true, ...result });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "平台SKU关系同步预览失败。" });
+  }
+});
+
+app.get("/api/data-sync-center/batches/:id/platform-goods/preview", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+  try {
+    response.json({ success: true, ...readPlatformGoodsDataSyncPreview(request.params.id) });
+  } catch (error) {
+    response.status(404).json({ success: false, message: error.message || "平台SKU关系同步预览读取失败。" });
+  }
+});
+
+app.post("/api/data-sync-center/batches/:id/platform-goods/commit", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+  try {
+    response.json({ success: true, ...commitPlatformGoodsDataSync(request.params.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "平台SKU关系同步提交失败。" });
   }
 });
 
@@ -3347,7 +3387,7 @@ const dataSyncSchedulerTimer = setInterval(async () => {
   if (dataSyncSchedulerRunning) return;
   dataSyncSchedulerRunning = true;
   try {
-    const results = await runDueErpGoodsSyncTasks();
+    const results = [...await runDueErpGoodsSyncTasks(), ...await runDuePlatformGoodsSyncTasks()];
     for (const result of results.filter((item) => !item.success)) console.error("ERP货品自动同步失败", result.error);
   } catch (error) {
     console.error("数据同步中心调度失败", error);

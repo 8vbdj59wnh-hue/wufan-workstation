@@ -898,6 +898,22 @@ export async function loadErpGoodsDataSyncPreview(batchId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/batches/${encodeURIComponent(batchId)}/erp-goods/preview`), "ERP货品同步预览读取失败。");
 }
 
+export async function saveWangdianShopMapping(input) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/shop-mappings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }), "旺店通店铺映射保存失败。");
+}
+
+export async function previewPlatformGoodsDataSync(taskId, options = {}) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/tasks/${encodeURIComponent(taskId)}/platform-goods/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(options) }), "平台SKU关系同步预览失败。");
+}
+
+export async function loadPlatformGoodsDataSyncPreview(batchId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/batches/${encodeURIComponent(batchId)}/platform-goods/preview`), "平台SKU关系同步预览读取失败。");
+}
+
+export async function commitPlatformGoodsDataSync(batchId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/batches/${encodeURIComponent(batchId)}/platform-goods/commit`, { method: "POST" }), "平台SKU关系同步提交失败。");
+}
+
 export async function resolveDataSyncException(exceptionId, note = "") {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/exceptions/${encodeURIComponent(exceptionId)}/resolve`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note }),

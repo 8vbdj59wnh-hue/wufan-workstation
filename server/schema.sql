@@ -748,6 +748,7 @@ CREATE TABLE IF NOT EXISTS data_sync_batches (
   status TEXT NOT NULL,
   requestStart TEXT,
   requestEnd TEXT,
+  scopeJson TEXT NOT NULL DEFAULT '{}',
   totalCount INTEGER NOT NULL DEFAULT 0,
   createdCount INTEGER NOT NULL DEFAULT 0,
   updatedCount INTEGER NOT NULL DEFAULT 0,
@@ -804,11 +805,12 @@ INSERT OR IGNORE INTO data_sync_tasks
   (id,taskCode,name,syncType,sourceType,sourceMethod,transportType,executionMode,defaultSyncMode,scheduleCron,scheduleDescription,status,configJson,createdAt,updatedAt)
 VALUES
   ('sync-task-erp-goods','erp_goods','ERP货品同步','wangdian_erp_goods','wangdian_api','goods.Goods.queryWithSpec','api','both','incremental','0 2 * * *','每天02:00','paused','{}',datetime('now'),datetime('now')),
-  ('sync-task-platform-goods','platform_goods','平台货品关系同步','platform_goods','wangdian_api','goods.ApiGoods.search','api','both','incremental','30 2 * * *','每天02:30','paused','{}',datetime('now'),datetime('now')),
+  ('sync-task-platform-goods','wangdian_platform_goods','平台货品关系同步','wangdian_platform_goods','wangdian_api','goods.ApiGoods.search','api','both','incremental','30 2 * * *','每天02:30','paused','{}',datetime('now'),datetime('now')),
   ('sync-task-inventory','inventory','库存同步','inventory','wangdian_api','wms.StockSpec.search2','api','both','incremental','0 3 * * *','每天03:00','paused','{}',datetime('now'),datetime('now')),
   ('sync-task-platform-operations','platform_operations','平台经营数据导入','platform_operations','excel',NULL,'excel','manual','incremental',NULL,NULL,'enabled','{}',datetime('now'),datetime('now')),
   ('sync-task-real-sales','real_sales','真实销售导入','real_sales','excel',NULL,'excel','manual','incremental',NULL,NULL,'enabled','{}',datetime('now'),datetime('now'));
 UPDATE data_sync_tasks SET syncType='wangdian_erp_goods',updatedAt=datetime('now') WHERE id='sync-task-erp-goods' AND syncType='erp_goods';
+UPDATE data_sync_tasks SET taskCode='wangdian_platform_goods',syncType='wangdian_platform_goods',updatedAt=datetime('now') WHERE id='sync-task-platform-goods' AND taskCode='platform_goods';
 CREATE TABLE IF NOT EXISTS erp_sync_runs (
   id TEXT PRIMARY KEY,
   syncCode TEXT NOT NULL UNIQUE,
@@ -1089,6 +1091,7 @@ CREATE TABLE IF NOT EXISTS sales_link_skus (
   id TEXT PRIMARY KEY,
   salesLinkId TEXT NOT NULL,
   productId TEXT,
+  erpSkuId TEXT,
   platformSkuId TEXT,
   platformSkuCode TEXT,
   normalizedPlatformSkuCode TEXT,
@@ -1111,7 +1114,8 @@ CREATE TABLE IF NOT EXISTS sales_link_skus (
   createdAt TEXT,
   updatedAt TEXT,
   FOREIGN KEY(salesLinkId) REFERENCES sales_links(id),
-  FOREIGN KEY(productId) REFERENCES products(id)
+  FOREIGN KEY(productId) REFERENCES products(id),
+  FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_link_skus_platform_id
@@ -1119,6 +1123,62 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_link_skus_platform_id
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_link_skus_fallback
   ON sales_link_skus(salesLinkId, normalizedPlatformSkuCode, normalizedSpecificationName)
   WHERE platformSkuId IS NULL OR platformSkuId = '';
+
+CREATE INDEX IF NOT EXISTS idx_sales_link_skus_erp_sku ON sales_link_skus(erpSkuId);
+
+CREATE TABLE IF NOT EXISTS wangdian_shop_mappings (
+  id TEXT PRIMARY KEY,
+  wangdianShopNo TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  wangdianShopId TEXT,
+  shopId TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(shopId) REFERENCES sales_shops(id)
+);
+
+CREATE TABLE IF NOT EXISTS wangdian_platform_goods_sync_logs (
+  id TEXT PRIMARY KEY,
+  dataSyncBatchId TEXT,
+  interfaceMethod TEXT NOT NULL DEFAULT 'goods.ApiGoods.search',
+  importMode TEXT NOT NULL,
+  requestStart TEXT,
+  requestEnd TEXT,
+  requestJson TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL,
+  windowCount INTEGER NOT NULL DEFAULT 0,
+  pageCount INTEGER NOT NULL DEFAULT 0,
+  sourceRowCount INTEGER NOT NULL DEFAULT 0,
+  matchedCount INTEGER NOT NULL DEFAULT 0,
+  exceptionCount INTEGER NOT NULL DEFAULT 0,
+  createdCount INTEGER NOT NULL DEFAULT 0,
+  updatedCount INTEGER NOT NULL DEFAULT 0,
+  errorMessage TEXT,
+  createdBy TEXT,
+  startedAt TEXT NOT NULL,
+  completedAt TEXT,
+  FOREIGN KEY(dataSyncBatchId) REFERENCES data_sync_batches(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_wangdian_platform_sync_time ON wangdian_platform_goods_sync_logs(startedAt DESC);
+
+CREATE TABLE IF NOT EXISTS wangdian_platform_goods_sync_exceptions (
+  id TEXT PRIMARY KEY,
+  syncLogId TEXT NOT NULL,
+  rowNumber INTEGER,
+  exceptionType TEXT NOT NULL,
+  shopNo TEXT,
+  platformGoodsId TEXT,
+  platformSkuId TEXT,
+  merchantNo TEXT,
+  message TEXT NOT NULL,
+  rawDataJson TEXT NOT NULL DEFAULT '{}',
+  createdAt TEXT NOT NULL,
+  FOREIGN KEY(syncLogId) REFERENCES wangdian_platform_goods_sync_logs(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_wangdian_platform_exceptions_log ON wangdian_platform_goods_sync_exceptions(syncLogId,exceptionType);
 
 CREATE TABLE IF NOT EXISTS connection_profiles (
   id TEXT PRIMARY KEY,

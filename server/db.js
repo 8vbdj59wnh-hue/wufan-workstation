@@ -1797,6 +1797,8 @@ function runLightweightMigrations() {
   ensureColumn("sales_links", "missingAt", "TEXT");
   ensureColumn("sales_link_skus", "currentState", "TEXT NOT NULL DEFAULT 'active'");
   ensureColumn("sales_link_skus", "missingAt", "TEXT");
+  ensureColumn("sales_link_skus", "erpSkuId", "TEXT");
+  getDatabase().exec("CREATE INDEX IF NOT EXISTS idx_sales_link_skus_erp_sku ON sales_link_skus(erpSkuId)");
   ensureColumn("erp_skus", "mainImage", "TEXT");
   ensureColumn("erp_skus", "galleryImages", "TEXT");
   ensureColumn("erp_skus", "sourceUpdatedAt", "TEXT");
@@ -1804,6 +1806,7 @@ function runLightweightMigrations() {
   ensureColumn("wangdian_goods_sync_logs", "importBatchId", "TEXT");
   ensureColumn("wangdian_goods_sync_logs", "successCount", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn("wangdian_goods_sync_logs", "failedCount", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn("data_sync_batches", "scopeJson", "TEXT NOT NULL DEFAULT '{}'");
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS erp_skus (
       id TEXT PRIMARY KEY,
