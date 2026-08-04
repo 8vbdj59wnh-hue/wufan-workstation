@@ -84,6 +84,12 @@ import {
 } from "./platformGoodsDataSyncAdapter.js";
 import { saveWangdianShopMapping } from "./wangdianPlatformGoodsSyncService.js";
 import {
+  commitInventoryDataSync,
+  previewInventoryDataSync,
+  readInventoryDataSyncPreview,
+  runDueInventorySyncTasks,
+} from "./inventoryDataSyncAdapter.js";
+import {
   createConnectionAction,
   createConnectionDataMapping,
   createConnectionProfile,
@@ -1732,6 +1738,31 @@ app.post("/api/data-sync-center/batches/:id/platform-goods/commit", requirePermi
     response.json({ success: true, ...commitPlatformGoodsDataSync(request.params.id) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "平台SKU关系同步提交失败。" });
+  }
+});
+
+app.post("/api/data-sync-center/tasks/:id/inventory/preview", requirePermission("dataCenter.view"), requireAdminUser, async (request, response) => {
+  try {
+    const result = await previewInventoryDataSync({ taskId: request.params.id, syncMode: request.body?.syncMode, requestStart: request.body?.requestStart, requestEnd: request.body?.requestEnd, businessDate: request.body?.businessDate, scope: request.body?.scope, createdBy: getUserPersonId(request.user) });
+    response.status(201).json({ success: true, ...result });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "库存同步预览失败。" });
+  }
+});
+
+app.get("/api/data-sync-center/batches/:id/inventory/preview", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+  try {
+    response.json({ success: true, ...readInventoryDataSyncPreview(request.params.id) });
+  } catch (error) {
+    response.status(404).json({ success: false, message: error.message || "库存同步预览读取失败。" });
+  }
+});
+
+app.post("/api/data-sync-center/batches/:id/inventory/commit", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+  try {
+    response.json({ success: true, ...commitInventoryDataSync(request.params.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "库存同步提交失败。" });
   }
 });
 
@@ -3387,7 +3418,7 @@ const dataSyncSchedulerTimer = setInterval(async () => {
   if (dataSyncSchedulerRunning) return;
   dataSyncSchedulerRunning = true;
   try {
-    const results = [...await runDueErpGoodsSyncTasks(), ...await runDuePlatformGoodsSyncTasks()];
+    const results = [...await runDueErpGoodsSyncTasks(), ...await runDuePlatformGoodsSyncTasks(), ...await runDueInventorySyncTasks()];
     for (const result of results.filter((item) => !item.success)) console.error("ERP货品自动同步失败", result.error);
   } catch (error) {
     console.error("数据同步中心调度失败", error);

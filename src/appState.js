@@ -914,6 +914,18 @@ export async function commitPlatformGoodsDataSync(batchId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/batches/${encodeURIComponent(batchId)}/platform-goods/commit`, { method: "POST" }), "平台SKU关系同步提交失败。");
 }
 
+export async function previewInventoryDataSync(taskId, options = {}) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/tasks/${encodeURIComponent(taskId)}/inventory/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(options) }), "库存同步预览失败。");
+}
+
+export async function loadInventoryDataSyncPreview(batchId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/batches/${encodeURIComponent(batchId)}/inventory/preview`), "库存同步预览读取失败。");
+}
+
+export async function commitInventoryDataSync(batchId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/batches/${encodeURIComponent(batchId)}/inventory/commit`, { method: "POST" }), "库存同步提交失败。");
+}
+
 export async function resolveDataSyncException(exceptionId, note = "") {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/exceptions/${encodeURIComponent(exceptionId)}/resolve`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note }),

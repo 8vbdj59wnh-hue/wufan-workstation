@@ -1807,6 +1807,7 @@ function runLightweightMigrations() {
   ensureColumn("wangdian_goods_sync_logs", "successCount", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn("wangdian_goods_sync_logs", "failedCount", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn("data_sync_batches", "scopeJson", "TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn("wangdian_inventory_sync_batches", "dataSyncBatchId", "TEXT");
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS erp_skus (
       id TEXT PRIMARY KEY,

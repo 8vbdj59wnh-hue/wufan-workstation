@@ -125,3 +125,14 @@ export async function queryWangdianPlatformGoods({ params = {}, pageNo = 0, page
     calcTotal: pageNo === 0 ? 1 : 0,
   });
 }
+
+export async function queryWangdianInventory({ params = {}, pageNo = 0, pageSize = 500, ...options } = {}) {
+  return callWangdianApi({
+    ...options,
+    method: "wms.StockSpec.search2",
+    body: { ...params, mask: params.mask ?? 3 },
+    pageNo,
+    pageSize,
+    calcTotal: pageNo === 0 ? 1 : 0,
+  });
+}
