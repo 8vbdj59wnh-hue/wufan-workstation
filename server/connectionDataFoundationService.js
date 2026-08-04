@@ -343,9 +343,12 @@ export function previewConnectionDataImport({ buffer, fileName, importType, temp
     if (missing.length) Object.assign(item, { status: "error", errorType: missing.some((field) => dateFields.has(field)) ? "missing_period" : "missing_field", errorMessage: `缺少必填字段：${missing.join("、")}` });
     else if (invalidNumbers.length) Object.assign(item, { status: "error", errorType: "invalid_format", errorMessage: `数值格式错误：${invalidNumbers.join("、")}` });
   }
+  const duplicateKey = (data) => importType === "erp_sales"
+    ? [data.platform, data.shop, data.platformGoodsId, data.skuCode, data.periodStart, data.periodEnd].map(text).join("|")
+    : text(data.platformGoodsId);
   const duplicateKeys = new Set(); const seen = new Set();
-  for (const item of rows.filter((row) => row.status === "validated")) { const key = text(item.data.platformGoodsId); if (seen.has(key)) duplicateKeys.add(key); seen.add(key); }
-  for (const item of rows.filter((row) => duplicateKeys.has(text(row.data.platformGoodsId)))) Object.assign(item, { status: "error", errorType: "duplicate_identity", errorMessage: "过滤后同一商品ID存在重复，已阻断本批次确认。" });
+  for (const item of rows.filter((row) => row.status === "validated")) { const key = duplicateKey(item.data); if (seen.has(key)) duplicateKeys.add(key); seen.add(key); }
+  for (const item of rows.filter((row) => duplicateKeys.has(duplicateKey(row.data)))) Object.assign(item, { status: "error", errorType: "duplicate_identity", errorMessage: importType === "erp_sales" ? "同一链接SKU及周期存在重复销售数据，已阻断本批次确认。" : "过滤后同一商品ID存在重复，已阻断本批次确认。" });
   const counts = previewSummary(database, rows, importType); const errorRows = rows.filter((item) => item.status === "error").length; const validRows = rows.length - errorRows;
   const periods = [...new Set(rows.filter((item) => item.status === "validated").map((item) => `${item.data.periodStart}|${item.data.periodEnd}`))];
   const preview = { templateName: version?.templateName || "自动字段映射", platform: text(matchRules.fixedFields?.platform), shopId: text(matchRules.fixedFields?.shopId), shop: text(matchRules.fixedFields?.shop), sheetName: workbook.sheetName, periodStart: periods.length === 1 ? periods[0].split("|")[0] : "", periodEnd: periods.length === 1 ? periods[0].split("|")[1] : "", rawRows: workbook.rawRows.length, filteredRows: filtered.length, newLinks: counts.createLinks, updatedLinks: counts.updateLinks, operationFacts: counts.facts, errors: errorRows, duplicateGoodsIds: [...duplicateKeys] };

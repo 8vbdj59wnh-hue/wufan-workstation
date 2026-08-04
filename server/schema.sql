@@ -748,6 +748,10 @@ CREATE TABLE IF NOT EXISTS data_sync_batches (
   status TEXT NOT NULL,
   requestStart TEXT,
   requestEnd TEXT,
+  fileName TEXT,
+  fileHash TEXT,
+  periodStart TEXT,
+  periodEnd TEXT,
   scopeJson TEXT NOT NULL DEFAULT '{}',
   totalCount INTEGER NOT NULL DEFAULT 0,
   createdCount INTEGER NOT NULL DEFAULT 0,
@@ -808,10 +812,11 @@ VALUES
   ('sync-task-platform-goods','wangdian_platform_goods','平台货品关系同步','wangdian_platform_goods','wangdian_api','goods.ApiGoods.search','api','both','incremental','30 2 * * *','每天02:30','paused','{}',datetime('now'),datetime('now')),
   ('sync-task-inventory','wangdian_inventory','库存同步','wangdian_inventory','wangdian_api','wms.StockSpec.search2','api','both','incremental','0 3 * * *','每天03:00','paused','{}',datetime('now'),datetime('now')),
   ('sync-task-platform-operations','platform_operations','平台经营数据导入','platform_operations','excel',NULL,'excel','manual','incremental',NULL,NULL,'enabled','{}',datetime('now'),datetime('now')),
-  ('sync-task-real-sales','real_sales','真实销售导入','real_sales','excel',NULL,'excel','manual','incremental',NULL,NULL,'enabled','{}',datetime('now'),datetime('now'));
+  ('sync-task-real-sales','sales_fact_excel_import','真实销售导入','sales_fact_excel_import','excel',NULL,'excel','manual','incremental',NULL,NULL,'enabled','{}',datetime('now'),datetime('now'));
 UPDATE data_sync_tasks SET syncType='wangdian_erp_goods',updatedAt=datetime('now') WHERE id='sync-task-erp-goods' AND syncType='erp_goods';
 UPDATE data_sync_tasks SET taskCode='wangdian_platform_goods',syncType='wangdian_platform_goods',updatedAt=datetime('now') WHERE id='sync-task-platform-goods' AND taskCode='platform_goods';
 UPDATE data_sync_tasks SET taskCode='wangdian_inventory',syncType='wangdian_inventory',updatedAt=datetime('now') WHERE id='sync-task-inventory' AND taskCode='inventory';
+UPDATE data_sync_tasks SET taskCode='sales_fact_excel_import',syncType='sales_fact_excel_import',name='真实销售导入',executionMode='manual',updatedAt=datetime('now') WHERE id='sync-task-real-sales' AND (taskCode<>'sales_fact_excel_import' OR syncType<>'sales_fact_excel_import');
 CREATE TABLE IF NOT EXISTS erp_sync_runs (
   id TEXT PRIMARY KEY,
   syncCode TEXT NOT NULL UNIQUE,

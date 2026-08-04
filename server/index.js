@@ -89,6 +89,7 @@ import {
   readInventoryDataSyncPreview,
   runDueInventorySyncTasks,
 } from "./inventoryDataSyncAdapter.js";
+import { commitSalesFactDataSync, previewSalesFactDataSync, readSalesFactDataSyncPreview } from "./salesFactDataSyncAdapter.js";
 import {
   createConnectionAction,
   createConnectionDataMapping,
@@ -1764,6 +1765,26 @@ app.post("/api/data-sync-center/batches/:id/inventory/commit", requirePermission
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "库存同步提交失败。" });
   }
+});
+
+app.post("/api/data-sync-center/tasks/:id/sales-facts/preview", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+  uploadConnectionWorkbook.single("file")(request, response, (error) => {
+    if (error) { response.status(400).json({ success: false, message: error.message || "真实销售文件上传失败。" }); return; }
+    try {
+      const result = previewSalesFactDataSync({ taskId: request.params.id, buffer: request.file?.buffer, fileName: normalizeUploadedFileName(request.file?.originalname), createdBy: getUserPersonId(request.user) });
+      response.status(result.idempotent ? 200 : 201).json({ success: true, ...result });
+    } catch (uploadError) { response.status(400).json({ success: false, message: uploadError.message || "真实销售导入预览失败。" }); }
+  });
+});
+
+app.get("/api/data-sync-center/batches/:id/sales-facts/preview", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+  try { response.json({ success: true, ...readSalesFactDataSyncPreview(request.params.id) }); }
+  catch (error) { response.status(404).json({ success: false, message: error.message || "真实销售导入预览读取失败。" }); }
+});
+
+app.post("/api/data-sync-center/batches/:id/sales-facts/commit", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+  try { response.json({ success: true, ...commitSalesFactDataSync(request.params.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "真实销售导入提交失败。" }); }
 });
 
 app.post("/api/data-sync-center/exceptions/:id/resolve", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {

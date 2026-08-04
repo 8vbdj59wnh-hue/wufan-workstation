@@ -1807,6 +1807,12 @@ function runLightweightMigrations() {
   ensureColumn("wangdian_goods_sync_logs", "successCount", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn("wangdian_goods_sync_logs", "failedCount", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn("data_sync_batches", "scopeJson", "TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn("data_sync_batches", "fileName", "TEXT");
+  ensureColumn("data_sync_batches", "fileHash", "TEXT");
+  ensureColumn("data_sync_batches", "periodStart", "TEXT");
+  ensureColumn("data_sync_batches", "periodEnd", "TEXT");
+  getDatabase().exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_data_sync_batches_task_file_hash ON data_sync_batches(taskId,fileHash) WHERE fileHash IS NOT NULL AND fileHash<>''");
+  getDatabase().prepare("UPDATE data_sync_tasks SET taskCode='sales_fact_excel_import',syncType='sales_fact_excel_import',name='真实销售导入',executionMode='manual',updatedAt=datetime('now') WHERE id='sync-task-real-sales' AND (taskCode<>'sales_fact_excel_import' OR syncType<>'sales_fact_excel_import')").run();
   ensureColumn("wangdian_inventory_sync_batches", "dataSyncBatchId", "TEXT");
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS erp_skus (

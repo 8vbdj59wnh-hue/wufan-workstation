@@ -67,7 +67,7 @@ export function createManualDataSyncBatch(taskId, { syncMode = "", requestStart 
   return createDataSyncBatch(taskId, { triggerMode: "manual", syncMode, requestStart, requestEnd, createdBy });
 }
 
-export function createDataSyncBatch(taskId, { triggerMode = "manual", syncMode = "", requestStart = null, requestEnd = null, scope = {}, createdBy = "" } = {}) {
+export function createDataSyncBatch(taskId, { triggerMode = "manual", syncMode = "", requestStart = null, requestEnd = null, fileName = null, fileHash = null, periodStart = null, periodEnd = null, scope = {}, createdBy = "" } = {}) {
   const db = getDatabase();
   const task = decodeTask(db.prepare("SELECT * FROM data_sync_tasks WHERE id=?").get(taskId));
   if (!task) throw new Error("同步任务不存在。");
@@ -77,10 +77,10 @@ export function createDataSyncBatch(taskId, { triggerMode = "manual", syncMode =
   const createdAt = now();
   const batch = {
     id: `data-sync-batch-${crypto.randomUUID()}`, taskId, triggerMode, syncMode: mode, status: "queued",
-    requestStart: requestStart || null, requestEnd: requestEnd || null, scopeJson: JSON.stringify(scope || {}), createdBy: createdBy || null, createdAt,
+    requestStart: requestStart || null, requestEnd: requestEnd || null, fileName: fileName || null, fileHash: fileHash || null, periodStart: periodStart || null, periodEnd: periodEnd || null, scopeJson: JSON.stringify(scope || {}), createdBy: createdBy || null, createdAt,
   };
   db.transaction(() => {
-    db.prepare(`INSERT INTO data_sync_batches (id,taskId,triggerMode,syncMode,status,requestStart,requestEnd,scopeJson,createdBy,createdAt) VALUES (@id,@taskId,@triggerMode,@syncMode,@status,@requestStart,@requestEnd,@scopeJson,@createdBy,@createdAt)`).run(batch);
+    db.prepare(`INSERT INTO data_sync_batches (id,taskId,triggerMode,syncMode,status,requestStart,requestEnd,fileName,fileHash,periodStart,periodEnd,scopeJson,createdBy,createdAt) VALUES (@id,@taskId,@triggerMode,@syncMode,@status,@requestStart,@requestEnd,@fileName,@fileHash,@periodStart,@periodEnd,@scopeJson,@createdBy,@createdAt)`).run(batch);
     db.prepare(`INSERT INTO data_sync_logs (id,batchId,level,eventType,message,detailJson,createdAt) VALUES (?,?,?,?,?,?,?)`).run(
       `data-sync-log-${crypto.randomUUID()}`, batch.id, "info", "batch_queued", "管理员已创建手动同步批次，等待对应同步适配器执行。", JSON.stringify({ taskCode: task.taskCode, syncMode: mode }), createdAt,
     );
@@ -150,7 +150,7 @@ export function completeDataSyncBatch(batchId, result = {}) {
     if (!batch || !["queued", "running", "preview_ready"].includes(batch.status)) throw new Error("同步批次不存在或已结束。");
     const exceptions = Array.isArray(result.exceptions) ? result.exceptions : [];
     db.prepare(`UPDATE data_sync_batches SET status=?,totalCount=?,createdCount=?,updatedCount=?,invalidatedCount=?,exceptionCount=?,errorMessage=?,startedAt=COALESCE(startedAt,?),completedAt=? WHERE id=?`).run(
-      status, Number(result.totalCount || 0), Number(result.createdCount || 0), Number(result.updatedCount || 0), Number(result.invalidatedCount || 0), exceptions.length, result.errorMessage || null, completedAt, completedAt, batchId,
+      status, Number(result.totalCount || 0), Number(result.createdCount || 0), Number(result.updatedCount || 0), Number(result.invalidatedCount || 0), Number(result.exceptionCount ?? exceptions.length), result.errorMessage || null, completedAt, completedAt, batchId,
     );
     for (const item of exceptions) {
       db.prepare(`INSERT INTO data_sync_exceptions (id,taskId,batchId,exceptionType,severity,status,message,entityType,entityId,rawDataJson,createdAt) VALUES (?,?,?,?,?,'open',?,?,?,?,?)`).run(
