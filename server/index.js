@@ -65,6 +65,12 @@ import {
   validateErpV2Import,
 } from "./modules/products/index.js";
 import {
+  createManualDataSyncBatch,
+  getDataSyncCenterOverview,
+  resolveDataSyncException,
+  setDataSyncTaskStatus,
+} from "./dataSyncCenterService.js";
+import {
   createConnectionAction,
   createConnectionDataMapping,
   createConnectionProfile,
@@ -1620,6 +1626,43 @@ app.get("/api/data-center/summary", requirePermission("dataCenter.view"), (_requ
     response.json({ success: true, summary: getDataCenterSummary() });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "数据中心概览读取失败。" });
+  }
+});
+
+app.get("/api/data-sync-center", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+  try {
+    response.json({ success: true, ...getDataSyncCenterOverview(request.query ?? {}) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "数据同步中心读取失败。" });
+  }
+});
+
+app.post("/api/data-sync-center/tasks/:id/status", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+  try {
+    response.json({ success: true, task: setDataSyncTaskStatus(request.params.id, String(request.body?.status ?? "")) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "同步任务状态更新失败。" });
+  }
+});
+
+app.post("/api/data-sync-center/tasks/:id/run", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+  try {
+    response.status(201).json({ success: true, batch: createManualDataSyncBatch(request.params.id, {
+      syncMode: request.body?.syncMode,
+      requestStart: request.body?.requestStart,
+      requestEnd: request.body?.requestEnd,
+      createdBy: getUserPersonId(request.user),
+    }) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "手动同步批次创建失败。" });
+  }
+});
+
+app.post("/api/data-sync-center/exceptions/:id/resolve", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+  try {
+    response.json({ success: true, exception: resolveDataSyncException(request.params.id, { note: request.body?.note, resolvedBy: getUserPersonId(request.user) }) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "同步异常处理失败。" });
   }
 });
 

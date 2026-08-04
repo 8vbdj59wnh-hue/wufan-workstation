@@ -1,4 +1,4 @@
-import { getCurrentUser, loadDataCenterProductDetail, loadDataCenterView, resolveAssetUrl } from "./appState.js";
+import { createDataSyncBatch, getCurrentUser, loadDataCenterProductDetail, loadDataCenterView, loadDataSyncCenter, resolveAssetUrl, updateDataSyncTaskStatus } from "./appState.js";
 import { canAccessModule } from "./permissions.js";
 
 let view = "trends";
@@ -12,7 +12,13 @@ const viewConfig = {
   trends: { label: "趋势变化", endpoint: "trends", description: "识别产品sales30d历史序列的上涨、下滑、稳定和数据不足。" },
   "slow-moving": { label: "长期滞销", endpoint: "slow-moving", description: "识别有库存且长期处于低销量区间的产品。" },
   capital: { label: "资金占用", endpoint: "capital-occupation", description: "按ERP规格实际库存 × 单位成本汇总库存资金。" },
+  sync: { label: "数据同步", endpoint: "sync", description: "统一管理外部数据同步任务、执行批次、日志与异常。", adminOnly: true },
 };
+
+function isAdmin() {
+  const user = getCurrentUser();
+  return ["admin", "system_admin"].includes(user?.role) || user?.authRole === "admin";
+}
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => ({
@@ -50,6 +56,7 @@ function sortOptions() {
 
 function renderOverview() {
   if (!result) return "";
+  if (view === "sync") return "";
   if (view === "trends") {
     return `${result.availableBusinessDays < 7 ? `<div class="data-center-notice"><strong>历史数据正在积累</strong><p>当前已有${result.availableBusinessDays ?? 0}个业务日快照；2—6日仅说明较前一阶段变化，不作正式趋势判断，正式趋势至少需要7个业务日。</p></div>` : ""}
     <div class="data-center-overview">
@@ -81,6 +88,7 @@ function renderOverview() {
 }
 
 function renderRows() {
+  if (view === "sync") return renderDataSyncCenter();
   const rows = result?.rows ?? [];
   if (!rows.length) return `<div class="empty-state"><strong>当前没有符合条件的产品</strong><p>数据中心不会为了产生结果而降低判断阈值。</p></div>`;
   if (view === "trends") {
@@ -122,6 +130,31 @@ function renderRows() {
   </article>`).join("")}</div>`;
 }
 
+function renderDataSyncCenter() {
+  if (!result) return "";
+  const taskStatus = { enabled: "已启用", paused: "已暂停" };
+  const batchStatus = { queued: "等待", running: "执行中", succeeded: "成功", partial: "部分成功", failed: "失败" };
+  return `<div class="data-sync-center">
+    <div class="data-center-overview">
+      <div><span>同步任务</span><strong>${result.counts?.taskCount ?? 0}</strong></div>
+      <div><span>已启用</span><strong>${result.counts?.enabledTaskCount ?? 0}</strong></div>
+      <div><span>执行中/等待</span><strong>${result.counts?.activeBatchCount ?? 0}</strong></div>
+      <div><span>待处理异常</span><strong>${result.counts?.openExceptionCount ?? 0}</strong></div>
+      <div><span>历史ERP同步</span><strong>${result.legacy?.erpSyncRuns ?? 0}</strong></div>
+      <div><span>历史导入批次</span><strong>${result.legacy?.erpImportBatches ?? 0}</strong></div>
+    </div>
+    <section><h2>同步任务</h2><div class="table-wrap"><table class="data-table"><thead><tr><th>名称</th><th>来源</th><th>方式</th><th>默认模式</th><th>周期</th><th>最近成功</th><th>下次执行</th><th>状态</th><th>操作</th></tr></thead><tbody>
+      ${(result.tasks ?? []).map((task) => `<tr><td><strong>${escapeHtml(task.name)}</strong><small>${escapeHtml(task.sourceMethod || task.syncType)}</small></td><td>${escapeHtml(task.sourceType)}</td><td>${task.executionMode === "both" ? "自动 + 手动" : "手动"}</td><td>${task.defaultSyncMode === "full" ? "全量" : "增量"}</td><td>${escapeHtml(task.scheduleDescription || "人工触发")}</td><td>${formatDate(task.lastSuccessAt)}</td><td>${formatDate(task.nextRunAt)}</td><td><span class="status-badge">${taskStatus[task.status] || task.status}</span></td><td><button class="text-button" data-action="toggle-data-sync-task" data-task-id="${escapeHtml(task.id)}" data-next-status="${task.status === "enabled" ? "paused" : "enabled"}">${task.status === "enabled" ? "暂停" : "启用"}</button>${task.status === "enabled" ? `<button class="text-button" data-action="create-data-sync-batch" data-task-id="${escapeHtml(task.id)}" data-sync-mode="${escapeHtml(task.defaultSyncMode)}">立即执行</button>` : ""}</td></tr>`).join("")}
+    </tbody></table></div></section>
+    <section><h2>同步历史</h2><div class="table-wrap"><table class="data-table"><thead><tr><th>任务</th><th>触发</th><th>模式</th><th>状态</th><th>数量</th><th>新增/更新/失效</th><th>异常</th><th>开始</th><th>结束</th></tr></thead><tbody>${(result.batches ?? []).length ? result.batches.map((batch) => `<tr><td>${escapeHtml(batch.taskName)}</td><td>${batch.triggerMode === "automatic" ? "自动" : "手动"}</td><td>${batch.syncMode === "full" ? "全量" : "增量"}</td><td>${batchStatus[batch.status] || batch.status}</td><td>${batch.totalCount}</td><td>${batch.createdCount}/${batch.updatedCount}/${batch.invalidatedCount}</td><td>${batch.exceptionCount}</td><td>${formatDate(batch.startedAt || batch.createdAt)}</td><td>${formatDate(batch.completedAt)}</td></tr>`).join("") : `<tr><td colspan="9">尚无统一框架批次；历史ERP同步记录保持在原系统中。</td></tr>`}</tbody></table></div></section>
+    <section><h2>异常记录</h2><div class="table-wrap"><table class="data-table"><thead><tr><th>任务</th><th>类型</th><th>级别</th><th>说明</th><th>状态</th><th>时间</th></tr></thead><tbody>${(result.exceptions ?? []).length ? result.exceptions.map((item) => `<tr><td>${escapeHtml(item.taskName)}</td><td>${escapeHtml(item.exceptionType)}</td><td>${escapeHtml(item.severity)}</td><td>${escapeHtml(item.message)}</td><td>${item.status === "open" ? "待处理" : "已处理"}</td><td>${formatDate(item.createdAt)}</td></tr>`).join("") : `<tr><td colspan="6">当前没有同步异常</td></tr>`}</tbody></table></div></section>
+  </div>`;
+}
+
+function formatDate(value) {
+  return value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "—";
+}
+
 function renderDetail() {
   if (!detail) return "";
   const current = detail.current;
@@ -143,12 +176,12 @@ export function renderDataCenterPage() {
   const config = viewConfig[view];
   return `<section class="data-center-page">
     <div class="section-heading"><div><h1>数据中心</h1><p>${escapeHtml(config.description)}</p></div><button type="button" class="secondary-button" data-action="open-operation-dashboard">经营驾驶舱</button></div>
-    <div class="subtabs">${Object.entries(viewConfig).map(([key, item]) => `<button class="${view === key ? "is-active" : ""}" data-action="switch-data-center-view" data-view="${key}">${item.label}</button>`).join("")}</div>
-    <form id="data-center-filter" class="data-center-filter"><input name="search" value="${escapeHtml(query.search)}" placeholder="搜索产品名称或编码" />
+    <div class="subtabs">${Object.entries(viewConfig).filter(([, item]) => !item.adminOnly || isAdmin()).map(([key, item]) => `<button class="${view === key ? "is-active" : ""}" data-action="switch-data-center-view" data-view="${key}">${item.label}</button>`).join("")}</div>
+    ${view === "sync" ? "" : `<form id="data-center-filter" class="data-center-filter"><input name="search" value="${escapeHtml(query.search)}" placeholder="搜索产品名称或编码" />
       ${view === "trends" ? `<select name="direction"><option value="focus" ${query.direction === "focus" ? "selected" : ""}>重点：上涨与下滑</option><option value="" ${query.direction === "" ? "selected" : ""}>全部趋势</option>${["up", "down", "stable", "volatile", "insufficient"].map((item) => `<option value="${item}" ${query.direction === item ? "selected" : ""}>${statusLabel(item)}</option>`).join("")}</select>` : ""}
       ${view === "slow-moving" ? `<select name="status"><option value="">全部状态</option>${["long_term", "suspected", "observing", "invalid"].map((item) => `<option value="${item}" ${query.status === item ? "selected" : ""}>${statusLabel(item)}</option>`).join("")}</select>` : ""}
       <select name="sort">${sortOptions().map(([value, label]) => `<option value="${value}" ${query.sort === value ? "selected" : ""}>${label}</option>`).join("")}</select>
-      <button class="secondary-button" type="submit">筛选</button></form>
+      <button class="secondary-button" type="submit">筛选</button></form>`}
     ${loading ? `<div class="form-note">正在计算经营结果…</div>` : error ? `<div class="form-error">${escapeHtml(error)}</div>` : `${renderOverview()}${renderRows()}`}
     ${result?.pagination ? `<div class="pagination"><button data-action="data-center-page" data-page="${result.pagination.page - 1}" ${result.pagination.page <= 1 ? "disabled" : ""}>上一页</button><span>${result.pagination.page} / ${result.pagination.pages}，共 ${result.pagination.total} 项</span><button data-action="data-center-page" data-page="${result.pagination.page + 1}" ${result.pagination.page >= result.pagination.pages ? "disabled" : ""}>下一页</button></div>` : ""}
     ${renderDetail()}
@@ -158,7 +191,7 @@ export function renderDataCenterPage() {
 async function refresh(rerender) {
   loading = true; error = ""; rerender();
   try {
-    result = await loadDataCenterView(viewConfig[view].endpoint, query);
+    result = view === "sync" ? await loadDataSyncCenter() : await loadDataCenterView(viewConfig[view].endpoint, query);
   } catch (caught) {
     error = caught.message || "数据中心读取失败。";
   }
@@ -187,4 +220,10 @@ export function bindDataCenterPageEvents(rerender) {
   });
   document.querySelectorAll("[data-action='close-data-center-detail']").forEach((button) => button.addEventListener("click", () => { detail = null; rerender(); }));
   document.querySelector("[data-action='open-operation-dashboard']")?.addEventListener("click", () => { window.location.hash = "operationDashboard"; });
+  document.querySelectorAll("[data-action='toggle-data-sync-task']").forEach((button) => button.addEventListener("click", async () => {
+    try { await updateDataSyncTaskStatus(button.dataset.taskId, button.dataset.nextStatus); await refresh(rerender); } catch (caught) { error = caught.message; rerender(); }
+  }));
+  document.querySelectorAll("[data-action='create-data-sync-batch']").forEach((button) => button.addEventListener("click", async () => {
+    try { await createDataSyncBatch(button.dataset.taskId, { syncMode: button.dataset.syncMode }); await refresh(rerender); } catch (caught) { error = caught.message; rerender(); }
+  }));
 }

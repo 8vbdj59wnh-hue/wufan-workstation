@@ -868,6 +868,28 @@ export async function loadDataCenterView(view, params = {}) {
   return readApiJson(response, "数据中心读取失败。");
 }
 
+export async function loadDataSyncCenter() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center`), "数据同步中心读取失败。");
+}
+
+export async function updateDataSyncTaskStatus(taskId, status) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/tasks/${encodeURIComponent(taskId)}/status`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }),
+  }), "同步任务状态更新失败。");
+}
+
+export async function createDataSyncBatch(taskId, options = {}) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/tasks/${encodeURIComponent(taskId)}/run`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(options),
+  }), "手动同步批次创建失败。");
+}
+
+export async function resolveDataSyncException(exceptionId, note = "") {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/exceptions/${encodeURIComponent(exceptionId)}/resolve`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note }),
+  }), "同步异常处理失败。");
+}
+
 export async function loadDataCenterProductDetail(productId, source) {
   const response = await authFetch(`${apiBaseUrl}/api/data-center/products/${encodeURIComponent(productId)}?source=${encodeURIComponent(source)}`);
   return readApiJson(response, "产品分析详情读取失败。");

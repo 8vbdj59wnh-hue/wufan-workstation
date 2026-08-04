@@ -719,6 +719,95 @@ CREATE TABLE IF NOT EXISTS wangdian_goods_sync_logs (
 
 CREATE INDEX IF NOT EXISTS idx_wangdian_goods_sync_logs_time
   ON wangdian_goods_sync_logs(startedAt DESC);
+
+CREATE TABLE IF NOT EXISTS data_sync_tasks (
+  id TEXT PRIMARY KEY,
+  taskCode TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  syncType TEXT NOT NULL,
+  sourceType TEXT NOT NULL,
+  sourceMethod TEXT,
+  transportType TEXT NOT NULL,
+  executionMode TEXT NOT NULL,
+  defaultSyncMode TEXT NOT NULL,
+  scheduleCron TEXT,
+  scheduleDescription TEXT,
+  status TEXT NOT NULL DEFAULT 'paused',
+  lastSuccessAt TEXT,
+  nextRunAt TEXT,
+  configJson TEXT NOT NULL DEFAULT '{}',
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS data_sync_batches (
+  id TEXT PRIMARY KEY,
+  taskId TEXT NOT NULL,
+  triggerMode TEXT NOT NULL,
+  syncMode TEXT NOT NULL,
+  status TEXT NOT NULL,
+  requestStart TEXT,
+  requestEnd TEXT,
+  totalCount INTEGER NOT NULL DEFAULT 0,
+  createdCount INTEGER NOT NULL DEFAULT 0,
+  updatedCount INTEGER NOT NULL DEFAULT 0,
+  invalidatedCount INTEGER NOT NULL DEFAULT 0,
+  exceptionCount INTEGER NOT NULL DEFAULT 0,
+  sourceBatchType TEXT,
+  sourceBatchId TEXT,
+  errorMessage TEXT,
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  startedAt TEXT,
+  completedAt TEXT,
+  FOREIGN KEY(taskId) REFERENCES data_sync_tasks(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_data_sync_batches_task_time ON data_sync_batches(taskId, createdAt DESC);
+CREATE INDEX IF NOT EXISTS idx_data_sync_batches_status ON data_sync_batches(status, createdAt DESC);
+
+CREATE TABLE IF NOT EXISTS data_sync_logs (
+  id TEXT PRIMARY KEY,
+  batchId TEXT NOT NULL,
+  level TEXT NOT NULL,
+  eventType TEXT NOT NULL,
+  message TEXT NOT NULL,
+  detailJson TEXT NOT NULL DEFAULT '{}',
+  createdAt TEXT NOT NULL,
+  FOREIGN KEY(batchId) REFERENCES data_sync_batches(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_data_sync_logs_batch_time ON data_sync_logs(batchId, createdAt DESC);
+
+CREATE TABLE IF NOT EXISTS data_sync_exceptions (
+  id TEXT PRIMARY KEY,
+  taskId TEXT NOT NULL,
+  batchId TEXT,
+  exceptionType TEXT NOT NULL,
+  severity TEXT NOT NULL DEFAULT 'error',
+  status TEXT NOT NULL DEFAULT 'open',
+  message TEXT NOT NULL,
+  entityType TEXT,
+  entityId TEXT,
+  rawDataJson TEXT NOT NULL DEFAULT '{}',
+  resolutionNote TEXT,
+  createdAt TEXT NOT NULL,
+  resolvedAt TEXT,
+  resolvedBy TEXT,
+  FOREIGN KEY(taskId) REFERENCES data_sync_tasks(id),
+  FOREIGN KEY(batchId) REFERENCES data_sync_batches(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_data_sync_exceptions_status ON data_sync_exceptions(status, createdAt DESC);
+
+INSERT OR IGNORE INTO data_sync_tasks
+  (id,taskCode,name,syncType,sourceType,sourceMethod,transportType,executionMode,defaultSyncMode,scheduleCron,scheduleDescription,status,configJson,createdAt,updatedAt)
+VALUES
+  ('sync-task-erp-goods','erp_goods','ERP货品同步','erp_goods','wangdian_api','goods.Goods.queryWithSpec','api','both','incremental','0 2 * * *','每天02:00','paused','{}',datetime('now'),datetime('now')),
+  ('sync-task-platform-goods','platform_goods','平台货品关系同步','platform_goods','wangdian_api','goods.ApiGoods.search','api','both','incremental','30 2 * * *','每天02:30','paused','{}',datetime('now'),datetime('now')),
+  ('sync-task-inventory','inventory','库存同步','inventory','wangdian_api','wms.StockSpec.search2','api','both','incremental','0 3 * * *','每天03:00','paused','{}',datetime('now'),datetime('now')),
+  ('sync-task-platform-operations','platform_operations','平台经营数据导入','platform_operations','excel',NULL,'excel','manual','incremental',NULL,NULL,'enabled','{}',datetime('now'),datetime('now')),
+  ('sync-task-real-sales','real_sales','真实销售导入','real_sales','excel',NULL,'excel','manual','incremental',NULL,NULL,'enabled','{}',datetime('now'),datetime('now'));
 CREATE TABLE IF NOT EXISTS erp_sync_runs (
   id TEXT PRIMARY KEY,
   syncCode TEXT NOT NULL UNIQUE,
