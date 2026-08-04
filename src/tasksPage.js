@@ -1559,7 +1559,7 @@ function getTaskWaveForTask(taskId) {
 
 function getActiveTaskWave(taskId) {
   return state.taskWaves.find(
-    (wave) => ["waiting", "doing", "pending_acceptance"].includes(wave.status) && wave.taskIds?.includes(taskId),
+    (wave) => ["waiting_collect", "waiting", "doing", "pending_acceptance"].includes(wave.status) && wave.taskIds?.includes(taskId),
   ) ?? null;
 }
 
@@ -2866,7 +2866,7 @@ function getVisibleTaskIdsFromRows(rows) {
     .filter(
       (taskId) =>
         !state.taskWaves.some(
-          (wave) => ["waiting", "doing", "pending_acceptance"].includes(wave.status) && wave.taskIds?.includes(taskId),
+          (wave) => ["waiting_collect", "waiting", "doing", "pending_acceptance"].includes(wave.status) && wave.taskIds?.includes(taskId),
         ),
     );
 }
@@ -3217,6 +3217,7 @@ function getTaskRemainingText(task) {
         overdue: waveTiming.overdue,
       };
     }
+    if (wave.status === "waiting_collect") return { label: "波次正在收集任务", overdue: false };
     if (wave.status === "waiting") return { label: "波次待执行", overdue: false };
   }
   if (isDoneStatus(task.status)) return { label: "已完成", overdue: false };
@@ -6360,6 +6361,7 @@ export function bindTasksPageEvents(rerender) {
 }
 
 const taskWaveStatusLabels = {
+  waiting_collect: "待收集",
   waiting: "待执行",
   doing: "执行中",
   pending_acceptance: "待审核",
@@ -6483,6 +6485,15 @@ function getTaskWaveTimePresentation(wave) {
       : unitDurationMinutes === null || taskCount <= 0
         ? null
         : unitDurationMinutes * taskCount;
+  if (wave?.status === "waiting_collect") {
+    const collectUntil = parseTaskComparableTime(wave.collectUntil);
+    const now = parseTaskComparableTime(getNow());
+    const remainingMinutes = collectUntil === null || now === null ? null : Math.max(0, Math.ceil((collectUntil - now) / 60000));
+    return {
+      label: remainingMinutes === null ? "正在收集任务" : `收集剩余：${formatTaskWaveDuration(remainingMinutes)}`,
+      overdue: false,
+    };
+  }
   if (wave?.status === "waiting") {
     return {
       label: waveDurationMinutes === null ? "时限未设置" : `波次时限：${waveDurationMinutes}分钟`,
@@ -6558,7 +6569,7 @@ function renderTaskWaveList() {
           const waveView = { ...wave, items: (wave.taskIds ?? []).map((taskId) => ({ taskId })) };
           const timePresentation = getTaskWaveTimePresentation(wave);
           const actionDeadline = getTaskWaveActionDeadline(waveView);
-          const operation = wave.status === "waiting" ? "开始执行" : wave.status === "doing" ? "继续执行" : wave.status === "pending_acceptance" ? "查看提交" : wave.status === "done" ? "查看结果" : "查看";
+          const operation = wave.status === "waiting_collect" ? "查看收集" : wave.status === "waiting" ? "开始执行" : wave.status === "doing" ? "继续执行" : wave.status === "pending_acceptance" ? "查看提交" : wave.status === "done" ? "查看结果" : "查看";
           return `
             <article class="task-wave-card" data-task-wave-card-id="${escapeHtml(wave.id)}">
               <div class="task-wave-card-header">

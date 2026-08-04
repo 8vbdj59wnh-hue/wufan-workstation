@@ -2793,6 +2793,7 @@ app.get("/api/task-waves", (request, response) => {
     response.status(403).json({ success: false, message: "你没有权限查看任务波次。" });
     return;
   }
+  generateEligibleTaskWaves();
   const visibleTaskIds = getVisibleTaskIds(request.user);
   const visibleTaskIdSet = new Set(visibleTaskIds);
   response.json(
@@ -3220,10 +3221,17 @@ const server = app.listen(port, host, () => {
   console.log(`SQLite database: ${databasePath}`);
 });
 
-const keepAliveTimer = setInterval(() => {}, 60_000);
+const taskWaveCollectionTimer = setInterval(() => {
+  try {
+    generateEligibleTaskWaves();
+  } catch (error) {
+    console.error("任务波次自动收集失败", error);
+  }
+}, 60_000);
+taskWaveCollectionTimer.unref();
 
 function shutdown() {
-  clearInterval(keepAliveTimer);
+  clearInterval(taskWaveCollectionTimer);
   server.close(() => {
     closeDatabase();
     process.exit(0);

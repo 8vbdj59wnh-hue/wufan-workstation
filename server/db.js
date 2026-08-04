@@ -1453,6 +1453,8 @@ function runLightweightMigrations() {
       waveType TEXT NOT NULL,
       taskCount INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'waiting',
+      collectUntil TEXT,
+      lockedAt TEXT,
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL,
       startedAt TEXT,
@@ -1749,6 +1751,8 @@ function runLightweightMigrations() {
   ensureColumn("process_template_nodes", "waveUnlimited", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn("process_template_nodes", "waveTemplatePriority", "INTEGER NOT NULL DEFAULT 1");
   ensureColumn("task_waves", "generationMaxTaskCount", "INTEGER");
+  ensureColumn("task_waves", "collectUntil", "TEXT");
+  ensureColumn("task_waves", "lockedAt", "TEXT");
   ensureColumn("task_wave_items", "resultDraft", "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn("task_wave_items", "updatedAt", "TEXT");
   ensureColumn("task_wave_items", "submittedAt", "TEXT");
@@ -2320,6 +2324,10 @@ function getTaskWaveTemplateBoundaryKey(linkedTemplateIds) {
   return normalizedIds.length === 0 ? "none" : normalizedIds.join("\u001e");
 }
 
+function getTaskWaveQueueKey(task) {
+  return [task.waveTaskTemplateId, task.waveProcessTemplateId, task.processNodeId, task.executorId].join("\u001f");
+}
+
 export function splitTaskWaveGroupSizes(taskCount, maxTaskCount = null) {
   const total = Number(taskCount);
   if (!Number.isInteger(total) || total < 2) return [];
@@ -2368,8 +2376,30 @@ function classifyTaskWaveBatch(tasks) {
   };
 }
 
+const TASK_WAVE_MIN_TASK_COUNT = 2;
+const TASK_WAVE_COLLECT_WINDOW_MINUTES = Math.max(
+  1,
+  Number.parseInt(process.env.TASK_WAVE_COLLECT_WINDOW_MINUTES ?? "30", 10) || 30,
+);
+
+function getTaskWaveCollectUntil(createdAt) {
+  return new Date(new Date(createdAt).getTime() + TASK_WAVE_COLLECT_WINDOW_MINUTES * 60_000).toISOString();
+}
+
+function lockExpiredCollectingTaskWavesInTransaction(database, referenceAt) {
+  return database
+    .prepare(
+      `UPDATE task_waves
+       SET status = 'waiting', lockedAt = @referenceAt, updatedAt = @referenceAt
+       WHERE status = 'waiting_collect'
+         AND collectUntil IS NOT NULL
+         AND collectUntil <= @referenceAt`,
+    )
+    .run({ referenceAt }).changes;
+}
+
 function createTaskWaveInTransaction(database, queue, tasks, createdAt) {
-  if (tasks.length < 2) throw new Error("一个任务波次至少需要 2 项任务。");
+  if (tasks.length < TASK_WAVE_MIN_TASK_COUNT) throw new Error("一个任务波次至少需要 2 项任务。");
   if (queue.maxTaskCount !== null && tasks.length > queue.maxTaskCount) {
     throw new Error(`任务波次成员数量不能超过配置上限 ${queue.maxTaskCount}。`);
   }
@@ -2389,16 +2419,20 @@ function createTaskWaveInTransaction(database, queue, tasks, createdAt) {
   const waveId = `task-wave-${crypto.randomUUID()}`;
   const businessCode = getNextTaskWaveBusinessCode(database, new Date(createdAt));
   const unitDurationMinutes = resolveTaskWaveUnitDurationMinutes(null, tasks);
+  const reachesMaximum = queue.maxTaskCount !== null && tasks.length >= queue.maxTaskCount;
+  const status = reachesMaximum ? "waiting" : "waiting_collect";
+  const collectUntil = reachesMaximum ? null : getTaskWaveCollectUntil(createdAt);
+  const lockedAt = reachesMaximum ? createdAt : null;
   database
     .prepare(
       `INSERT INTO task_waves (
          id, businessCode, taskTemplateId, processTemplateId, processNodeId, executorId,
-         templateGroupKey, waveType, taskCount, status, unitDurationMinutes, waveDurationMinutes,
-         generationMaxTaskCount, createdAt, updatedAt
+         templateGroupKey, waveType, taskCount, status, collectUntil, lockedAt,
+         unitDurationMinutes, waveDurationMinutes, generationMaxTaskCount, createdAt, updatedAt
        ) VALUES (
          @id, @businessCode, @taskTemplateId, @processTemplateId, @processNodeId, @executorId,
-         @templateGroupKey, @waveType, @taskCount, 'waiting', @unitDurationMinutes, @waveDurationMinutes,
-         @generationMaxTaskCount, @createdAt, @createdAt
+         @templateGroupKey, @waveType, @taskCount, @status, @collectUntil, @lockedAt,
+         @unitDurationMinutes, @waveDurationMinutes, @generationMaxTaskCount, @createdAt, @createdAt
        )`,
     )
     .run({
@@ -2411,6 +2445,9 @@ function createTaskWaveInTransaction(database, queue, tasks, createdAt) {
       templateGroupKey,
       waveType,
       taskCount: tasks.length,
+      status,
+      collectUntil,
+      lockedAt,
       unitDurationMinutes,
       waveDurationMinutes: unitDurationMinutes === null ? null : unitDurationMinutes * tasks.length,
       generationMaxTaskCount: queue.maxTaskCount,
@@ -2437,7 +2474,52 @@ function createTaskWaveInTransaction(database, queue, tasks, createdAt) {
       joinedAt: createdAt,
     });
   });
-  return { id: waveId, businessCode, waveType, templateGroupKey, taskCount: tasks.length };
+  return { id: waveId, businessCode, waveType, templateGroupKey, taskCount: tasks.length, status, collectUntil };
+}
+
+function appendTasksToCollectingWaveInTransaction(database, wave, tasks, joinedAt) {
+  if (tasks.length === 0) return [];
+  const currentCount = Number(wave.taskCount);
+  const maximum = wave.generationMaxTaskCount === null ? null : Number(wave.generationMaxTaskCount);
+  const available = maximum === null ? tasks.length : Math.max(0, maximum - currentCount);
+  const selected = tasks.slice(0, available);
+  if (selected.length === 0) return [];
+  const insertWaveItem = database.prepare(
+    `INSERT INTO task_wave_items (
+       id, waveId, taskId, processInstanceId, linkedTemplateIds, primaryTemplateId,
+       sortOrder, joinedAt, isActive
+     ) VALUES (
+       @id, @waveId, @taskId, @processInstanceId, @linkedTemplateIds, @primaryTemplateId,
+       @sortOrder, @joinedAt, 1
+     )`,
+  );
+  selected.forEach((task, index) => {
+    insertWaveItem.run({
+      id: `task-wave-item-${crypto.randomUUID()}`,
+      waveId: wave.id,
+      taskId: task.id,
+      processInstanceId: task.processInstanceId,
+      linkedTemplateIds: JSON.stringify(task.linkedTemplateIds),
+      primaryTemplateId: task.primaryTemplateId,
+      sortOrder: currentCount + index + 1,
+      joinedAt,
+    });
+  });
+  const taskCount = currentCount + selected.length;
+  const reachesMaximum = maximum !== null && taskCount >= maximum;
+  database
+    .prepare(
+      `UPDATE task_waves
+       SET taskCount = @taskCount,
+           waveDurationMinutes = CASE WHEN unitDurationMinutes IS NULL THEN NULL ELSE unitDurationMinutes * @taskCount END,
+           status = CASE WHEN @reachesMaximum = 1 THEN 'waiting' ELSE status END,
+           lockedAt = CASE WHEN @reachesMaximum = 1 THEN @joinedAt ELSE lockedAt END,
+           collectUntil = CASE WHEN @reachesMaximum = 1 THEN NULL ELSE collectUntil END,
+           updatedAt = @joinedAt
+       WHERE id = @id AND status = 'waiting_collect'`,
+    )
+    .run({ id: wave.id, taskCount, reachesMaximum: reachesMaximum ? 1 : 0, joinedAt });
+  return selected;
 }
 
 function readEligibleTaskWaveCandidates(database, includeWaitingAssigned = false) {
@@ -2468,7 +2550,7 @@ function readEligibleTaskWaveCandidates(database, includeWaitingAssigned = false
          AND COALESCE(pi.status, '') NOT IN ('done', 'completed', 'canceled', 'cancelled', 'stopped', 'terminated')
          AND COALESCE(tt.status, 'active') <> 'deleted'
          AND COALESCE(pt.status, 'active') <> 'deleted'
-         AND (twi.taskId IS NULL OR (@includeWaitingAssigned = 1 AND existingWave.status = 'waiting'))`,
+         AND (twi.taskId IS NULL OR (@includeWaitingAssigned = 1 AND existingWave.status IN ('waiting_collect', 'waiting')))`,
     )
     .all({ includeWaitingAssigned: includeWaitingAssigned ? 1 : 0 })
     .map((task) => {
@@ -2492,7 +2574,7 @@ function readEligibleTaskWaveCandidates(database, includeWaitingAssigned = false
 function buildTaskWaveQueuePlans(candidates) {
   const queues = new Map();
   for (const task of candidates) {
-    const queueKey = [task.waveTaskTemplateId, task.waveProcessTemplateId, task.processNodeId, task.executorId].join("\u001f");
+    const queueKey = getTaskWaveQueueKey(task);
     if (!queues.has(queueKey)) {
       queues.set(queueKey, {
         taskTemplateId: task.waveTaskTemplateId,
@@ -2521,7 +2603,17 @@ function buildTaskWaveQueuePlans(candidates) {
       templateGroups.get(task.templateBoundaryKey).push(task);
     }
     for (const groupTasks of templateGroups.values()) {
-      const groupSizes = splitTaskWaveGroupSizes(groupTasks.length, queue.maxTaskCount);
+      const groupSizes = [];
+      if (queue.maxTaskCount === null) {
+        if (groupTasks.length >= TASK_WAVE_MIN_TASK_COUNT) groupSizes.push(groupTasks.length);
+      } else {
+        let remaining = groupTasks.length;
+        while (remaining >= queue.maxTaskCount) {
+          groupSizes.push(queue.maxTaskCount);
+          remaining -= queue.maxTaskCount;
+        }
+        if (remaining >= TASK_WAVE_MIN_TASK_COUNT) groupSizes.push(remaining);
+      }
       let offset = 0;
       for (const groupSize of groupSizes) {
         const tasks = groupTasks.slice(offset, offset + groupSize);
@@ -2538,10 +2630,42 @@ function buildTaskWaveQueuePlans(candidates) {
   };
 }
 
+function appendCandidatesToCollectingWavesInTransaction(database, candidates, referenceAt) {
+  const assignedTaskIds = new Set();
+  const appendedWaves = [];
+  const candidateGroups = new Map();
+  for (const task of candidates) {
+    const key = `${getTaskWaveQueueKey(task)}\u001f${task.templateBoundaryKey}`;
+    if (!candidateGroups.has(key)) candidateGroups.set(key, []);
+    candidateGroups.get(key).push(task);
+  }
+  const collectingWaves = database
+    .prepare(
+      `SELECT * FROM task_waves
+       WHERE status = 'waiting_collect'
+       ORDER BY createdAt, id`,
+    )
+    .all();
+  for (const wave of collectingWaves) {
+    const key = [wave.taskTemplateId, wave.processTemplateId, wave.processNodeId, wave.executorId, wave.templateGroupKey].join("\u001f");
+    const availableTasks = candidateGroups.get(key) ?? [];
+    if (availableTasks.length === 0) continue;
+    const selected = appendTasksToCollectingWaveInTransaction(database, wave, availableTasks, referenceAt);
+    if (selected.length === 0) continue;
+    selected.forEach((task) => assignedTaskIds.add(task.id));
+    candidateGroups.set(key, availableTasks.slice(selected.length));
+    appendedWaves.push({ waveId: wave.id, appendedTaskCount: selected.length });
+  }
+  return { assignedTaskIds, appendedWaves };
+}
+
 function generateEligibleTaskWavesInTransaction(database) {
-  const candidates = readEligibleTaskWaveCandidates(database);
-  const plan = buildTaskWaveQueuePlans(candidates);
   const createdAt = new Date().toISOString();
+  const lockedExpiredCount = lockExpiredCollectingTaskWavesInTransaction(database, createdAt);
+  const candidates = readEligibleTaskWaveCandidates(database);
+  const appended = appendCandidatesToCollectingWavesInTransaction(database, candidates, createdAt);
+  const remainingCandidates = candidates.filter((task) => !appended.assignedTaskIds.has(task.id));
+  const plan = buildTaskWaveQueuePlans(remainingCandidates);
   const createdWaves = plan.plannedWaves.map(({ queue, tasks }) =>
     createTaskWaveInTransaction(database, queue, tasks, createdAt),
   );
@@ -2549,7 +2673,10 @@ function generateEligibleTaskWavesInTransaction(database) {
     createdCount: createdWaves.length,
     createdWaves,
     candidateCount: candidates.length,
-    assignedTaskCount: plan.plannedTaskIds.size,
+    appendedWaveCount: appended.appendedWaves.length,
+    appendedWaves: appended.appendedWaves,
+    lockedExpiredCount,
+    assignedTaskCount: plan.plannedTaskIds.size + appended.assignedTaskIds.size,
     remainingTaskCount: plan.remainingTasks.length,
     remainingTasks: plan.remainingTasks.map((task) => ({
       taskId: task.id,
@@ -2613,14 +2740,15 @@ function countEligibleUnassignedWaveTasks(database) {
 export function readTaskWaveRegenerationPreview() {
   const database = getDatabase();
   const countStatus = database.prepare("SELECT COUNT(*) AS count FROM task_waves WHERE status = @status");
-  const waitingWaveCount = Number(countStatus.get({ status: "waiting" })?.count ?? 0);
+  const collectingWaveCount = Number(countStatus.get({ status: "waiting_collect" })?.count ?? 0);
+  const waitingWaveCount = Number(countStatus.get({ status: "waiting" })?.count ?? 0) + collectingWaveCount;
   const sourceTaskCount = Number(
     database
       .prepare(
         `SELECT COUNT(DISTINCT twi.taskId) AS count
          FROM task_wave_items twi
          JOIN task_waves tw ON tw.id = twi.waveId
-         WHERE tw.status = 'waiting' AND twi.isActive = 1`,
+         WHERE tw.status IN ('waiting_collect', 'waiting') AND twi.isActive = 1`,
       )
       .get()?.count ?? 0,
   );
@@ -2635,6 +2763,7 @@ export function readTaskWaveRegenerationPreview() {
     preservedDoneWaveCount: Number(countStatus.get({ status: "done" })?.count ?? 0),
     preservedDoingWaveCount: Number(countStatus.get({ status: "doing" })?.count ?? 0),
     waitingWaveCount,
+    collectingWaveCount,
     sourceTaskCount,
     unassignedNewTaskCount,
     regroupTaskCount,
@@ -2673,7 +2802,7 @@ export function regenerateWaitingTaskWaves(options = {}) {
     const preview = readTaskWaveRegenerationPreview();
     if (!preview.canRegenerate) throw new Error("当前没有需要重新组合的任务。");
     const waitingWaves = database
-      .prepare("SELECT * FROM task_waves WHERE status = 'waiting' ORDER BY createdAt, id")
+      .prepare("SELECT * FROM task_waves WHERE status IN ('waiting_collect', 'waiting') ORDER BY createdAt, id")
       .all();
     const invalidMember = database
       .prepare(
@@ -2681,7 +2810,7 @@ export function regenerateWaitingTaskWaves(options = {}) {
          FROM task_wave_items twi
          JOIN task_waves tw ON tw.id = twi.waveId
          JOIN tasks t ON t.id = twi.taskId
-         WHERE tw.status = 'waiting' AND twi.isActive = 1 AND t.status <> 'todo'
+         WHERE tw.status IN ('waiting_collect', 'waiting') AND twi.isActive = 1 AND t.status <> 'todo'
          LIMIT 1`,
       )
       .get();
@@ -2716,7 +2845,7 @@ export function regenerateWaitingTaskWaves(options = {}) {
              supersededByUserId = @createdBy,
              supersedeReason = '重新生成待执行波次',
              updatedAt = @now
-         WHERE status = 'waiting'`,
+         WHERE status IN ('waiting_collect', 'waiting')`,
       )
       .run({ now, runId, createdBy });
     database
@@ -2881,7 +3010,7 @@ export function readTaskWaveDetailForTaskIds(waveId, taskIds = []) {
   };
 }
 
-const activeTaskWaveStatuses = new Set(["waiting", "doing", "pending_acceptance"]);
+const activeTaskWaveStatuses = new Set(["waiting_collect", "waiting", "doing", "pending_acceptance"]);
 
 function readActiveTaskWaveForTask(taskId) {
   return getDatabase()
@@ -2891,7 +3020,7 @@ function readActiveTaskWaveForTask(taskId) {
        JOIN task_waves tw ON tw.id = twi.waveId
        WHERE twi.taskId = @taskId
          AND twi.isActive = 1
-         AND tw.status IN ('waiting', 'doing', 'pending_acceptance')
+         AND tw.status IN ('waiting_collect', 'waiting', 'doing', 'pending_acceptance')
        LIMIT 1`,
     )
     .get({ taskId }) ?? null;
@@ -2951,7 +3080,7 @@ function refreshTaskWaveStatusInTransaction(database, waveId, referenceAt = new 
   if (statuses.every((item) => item === "done")) status = "done";
   else if (statuses.some((item) => item === "doing")) status = "doing";
   else if (statuses.some((item) => item === "pending_acceptance")) status = "pending_acceptance";
-  else if (statuses.every((item) => item === "todo")) status = "waiting";
+  else if (statuses.every((item) => item === "todo") && wave.status !== "waiting_collect") status = "waiting";
   const completedAt = status === "done" ? wave.completedAt ?? referenceAt : null;
   database
     .prepare("UPDATE task_waves SET status = @status, completedAt = @completedAt, updatedAt = @updatedAt WHERE id = @id")
