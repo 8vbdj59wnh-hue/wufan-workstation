@@ -14,7 +14,7 @@ import {
   stopProcess,
   updateProcessTemplateNodeStatus,
   updatePersistentResource,
-} from "./appState.js?v=20260705-state-singleton1";
+} from "./appState.js";
 import { canLaunchActionTemplate, hasPermission } from "./permissions.js?v=20260724-action-launch-permissions1";
 import {
   CategoryType,

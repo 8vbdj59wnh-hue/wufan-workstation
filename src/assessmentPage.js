@@ -7,7 +7,7 @@ import {
   launchRectificationWorkForSource,
   state,
   updatePersistentResource,
-} from "./appState.js?v=20260705-state-singleton1";
+} from "./appState.js";
 import { getDataScope, hasPermission } from "./permissions.js?v=20260705-state-singleton1";
 import {
   ProcessInstanceStatus,

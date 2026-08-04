@@ -9,7 +9,7 @@ import {
   state,
   updatePersistentResource,
   uploadStandardWorkAttachment,
-} from "./appState.js?v=20260705-state-singleton1";
+} from "./appState.js";
 import {
   canLaunchActionTemplate,
   canLaunchAnyActionTemplate,

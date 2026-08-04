@@ -36,7 +36,7 @@ import {
   updateCurrentUserAvatar,
   uploadImageFile,
   validateCurrentSession,
-} from "./appState.js?v=20260705-state-singleton1";
+} from "./appState.js";
 import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260705-state-singleton1";
 
 const app = document.querySelector("#app");

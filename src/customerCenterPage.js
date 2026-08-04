@@ -1,4 +1,4 @@
-import { addCustomerConsumption,addCustomerFollowup,addCustomerTag,getCurrentUser,loadCustomer,loadCustomerOverview,loadCustomers,saveCustomerProfile } from "./appState.js?v=20260802-customer-center1";
+import { addCustomerConsumption,addCustomerFollowup,addCustomerTag,getCurrentUser,loadCustomer,loadCustomerOverview,loadCustomers,saveCustomerProfile } from "./appState.js";
 import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
 let tab="overview",loading=false,error="",overview=null,customers=[],selected=null,detailTab="profile",filters={search:"",businessType:"",lifecycleStatus:""};
 const h=(v)=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"})[c]),n=(v)=>Number(v||0).toLocaleString("zh-CN"),money=(v)=>`¥${Number(v||0).toLocaleString("zh-CN",{maximumFractionDigits:2})}`;

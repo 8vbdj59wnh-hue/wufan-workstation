@@ -1,6 +1,6 @@
 import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260802-today-overview1";
 import { bindOperationDashboardPageEvents, renderOperationDashboardPage } from "./operationDashboardPage.js?v=20260802-operation-foundation1";
-import { getCurrentUser } from "./appState.js?v=20260705-state-singleton1";
+import { getCurrentUser } from "./appState.js";
 import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
 
 function currentView() {

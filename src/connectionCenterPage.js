@@ -44,7 +44,7 @@ import {
   iterateConnectionFoundationTemplate,
   resolveAssetUrl,
 } from "./services/connectionCenterService.js?v=20260803-connection-workbench1";
-import { getCurrentUser, state } from "./appState.js?v=20260705-state-singleton1";
+import { getCurrentUser, state } from "./appState.js";
 import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
 import { escapeHtml } from "./utils/html.js?v=20260802-module-boundary1";
 

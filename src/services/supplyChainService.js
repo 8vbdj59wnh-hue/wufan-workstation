@@ -10,4 +10,4 @@ export {
   saveSupplyEvaluation,
   updateSupplyPurchase,
   updateSupplyQualityIssue,
-} from "../appState.js?v=20260802-module-boundary1";
+} from "../appState.js";

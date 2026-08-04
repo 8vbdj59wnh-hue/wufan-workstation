@@ -49,4 +49,4 @@ export {
   createConnectionFoundationTemplate,
   iterateConnectionFoundationTemplate,
   resolveAssetUrl,
-} from "../appState.js?v=20260705-state-singleton1";
+} from "../appState.js";

@@ -2,7 +2,7 @@ import {
   addSupplierProductRelation, createSupplyPurchase, createSupplyQualityIssue, deleteSupplierProductRelation,
   getCurrentUser, loadSupplier, loadSuppliers, loadSupplyChainOverview, saveSupplyEvaluation,
   saveSupplierProfile, updateSupplyPurchase, updateSupplyQualityIssue,
-} from "./appState.js?v=20260802-supply-chain1";
+} from "./appState.js";
 import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
 
 let activeTab = "overview";

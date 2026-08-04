@@ -1,4 +1,4 @@
-import { formatProcessStepLabel, getCurrentUser, getLatestStandardWorkFormFields, getNow, getProcessNodeStepOrder, loadTemplates, resolveAssetUrl, state, updateActionProducts, updatePersistentResource, updateProcessTaskExecutor, uploadStandardWorkAttachment } from "./appState.js?v=20260705-state-singleton1";
+import { formatProcessStepLabel, getCurrentUser, getLatestStandardWorkFormFields, getNow, getProcessNodeStepOrder, loadTemplates, resolveAssetUrl, state, updateActionProducts, updatePersistentResource, updateProcessTaskExecutor, uploadStandardWorkAttachment } from "./appState.js";
 import {
   GoalStatus,
   ProcessInstanceStatus,

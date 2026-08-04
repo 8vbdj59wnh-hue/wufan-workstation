@@ -7,7 +7,7 @@ import {
   startProcessInstanceExecution,
   state,
   updatePersistentResource,
-} from "./appState.js?v=20260705-state-singleton1";
+} from "./appState.js";
 import { selectTask } from "./tasksPage.js?v=20260724-action-template-link1";
 import {
   bindActionLinkedTemplatePreviewEvents,

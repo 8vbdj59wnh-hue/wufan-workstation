@@ -1,4 +1,4 @@
-import { resolveAssetUrl, state } from "./appState.js?v=20260705-state-singleton1";
+import { resolveAssetUrl, state } from "./appState.js";
 import { getProcessInstanceBusinessStatus } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
 
 let previewProductId = "";

@@ -1,4 +1,4 @@
-import { createPersistentResource, defaultCompanySlogan, getCurrentUser, getLatestStandardWorkForm, loadPersistentData, resolveAssetUrl, state, updatePersistentResource, uploadGenericFile, validateCurrentSession } from "./appState.js?v=20260705-state-singleton1";
+import { createPersistentResource, defaultCompanySlogan, getCurrentUser, getLatestStandardWorkForm, loadPersistentData, resolveAssetUrl, state, updatePersistentResource, uploadGenericFile, validateCurrentSession } from "./appState.js";
 import {
   actionLaunchScopeOptions,
   createEmptyPermissions,

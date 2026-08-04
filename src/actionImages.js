@@ -1,4 +1,4 @@
-import { resolveAssetUrl, uploadImageFile } from "./appState.js?v=20260705-state-singleton1";
+import { resolveAssetUrl, uploadImageFile } from "./appState.js";
 import { getActionImageUrls } from "./data/taskUtils.js?v=20260705-state-singleton1";
 
 const productImageFieldKeys = new Set(["coverImageUrl", "productImage", "productImages"]);

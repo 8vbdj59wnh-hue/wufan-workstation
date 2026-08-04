@@ -1,7 +1,7 @@
 import {
   approveFinanceEntry, commitFinanceBill, createFinanceRule, deleteFinanceRule, getCurrentUser, loadFinanceAnalysis,
   loadFinanceEntries, loadFinanceImportBatches, loadFinanceRules, loadFinanceStatement, uploadFinanceBill,
-} from "./appState.js?v=20260705-state-singleton1";
+} from "./appState.js";
 import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
 
 let tab = "overview";

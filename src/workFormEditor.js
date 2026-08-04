@@ -1,4 +1,4 @@
-import { resolveAssetUrl, state, uploadImageFile } from "./appState.js?v=20260705-state-singleton1";
+import { resolveAssetUrl, state, uploadImageFile } from "./appState.js";
 import {
   collectBusinessDateTime,
   getBusinessDatePart,

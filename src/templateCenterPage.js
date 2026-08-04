@@ -11,7 +11,7 @@ import {
   updateTemplate,
   uploadGenericFile,
   uploadImageFile,
-} from "./appState.js?v=20260705-state-singleton1";
+} from "./appState.js";
 import { bindStandardWorkLibraryEvents, renderStandardWorkLibraryPage } from "./actionStandardsPage.js?v=20260803-action-product-manual-link1";
 import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js?v=20260802-template-version1";
 import { bindSettingsPageEvents, renderFormDesignSection } from "./settingsPage.js?v=20260802-template-center-form1";

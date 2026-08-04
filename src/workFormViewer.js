@@ -1,4 +1,4 @@
-import { resolveAssetUrl, state } from "./appState.js?v=20260705-state-singleton1";
+import { resolveAssetUrl, state } from "./appState.js";
 import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
 import { getActionImageUrls } from "./data/taskUtils.js?v=20260705-state-singleton1";
 import { renderActionImageGrid } from "./actionImages.js";
