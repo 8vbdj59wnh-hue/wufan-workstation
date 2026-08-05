@@ -13,9 +13,23 @@ import {
 } from "./dataSyncCenterService.js";
 import {
   commitWangdianPlatformGoodsSync,
+  listWangdianShopMappings,
   previewWangdianPlatformGoodsSync,
   readWangdianPlatformGoodsSync,
 } from "./wangdianPlatformGoodsSyncService.js";
+
+function validateManualScope(scope = {}, triggerMode = "manual") {
+  if (triggerMode !== "manual") return;
+  const shopIds = Array.isArray(scope.shops) ? scope.shops.filter(Boolean) : [];
+  const platforms = Array.isArray(scope.platforms) ? scope.platforms.filter(Boolean) : [];
+  if (shopIds.length !== 1) throw new Error("请选择一个系统店铺后再生成平台SKU关系预览。");
+  if (platforms.length !== 1) throw new Error("请选择平台后再生成平台SKU关系预览。");
+  const mapping = listWangdianShopMappings().find((item) => item.status === "active" && item.shopId === shopIds[0]);
+  if (!mapping) throw new Error("当前系统店铺尚未配置旺店通店铺编号，禁止生成同步预览。");
+  if (String(mapping.platform || "").trim().toLocaleLowerCase("zh-CN") !== String(platforms[0]).trim().toLocaleLowerCase("zh-CN")) {
+    throw new Error("所选平台与系统店铺不一致，禁止生成同步预览。");
+  }
+}
 
 function requestRange(task, syncMode, requestStart, requestEnd) {
   const end = requestEnd || new Date().toISOString();
@@ -58,6 +72,7 @@ export async function previewPlatformGoodsDataSync({ taskId, resumeBatchId = "",
   const mode = existing?.syncMode || syncMode || task.defaultSyncMode;
   const range = existing ? { requestStart: existing.requestStart, requestEnd: existing.requestEnd } : requestRange(task, mode, requestStart, requestEnd);
   const effectiveScope = existing?.scope || scope;
+  validateManualScope(effectiveScope, triggerMode);
   const batch = existing ? resumeDataSyncBatch(existing.id) : createDataSyncBatch(task.id, { triggerMode, syncMode: mode, ...range, scope: effectiveScope, createdBy });
   if (!existing) startDataSyncBatch(batch.id);
   try {

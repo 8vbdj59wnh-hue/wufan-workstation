@@ -67,6 +67,35 @@ export function saveWangdianShopMapping(input = {}, userId = "") {
   return listWangdianShopMappings().find((item) => item.id === row.id);
 }
 
+export async function discoverWangdianPlatformShops({ startTime, endTime, queryApi = queryWangdianPlatformGoods } = {}) {
+  const end = endTime ? new Date(String(endTime).replace(" ", "T")) : new Date();
+  const start = startTime ? new Date(String(startTime).replace(" ", "T")) : new Date(end.getTime() - 30 * 86400000);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) throw new Error("旺店通店铺识别时间范围无效。");
+  const payload = await queryApi({
+    params: { start_time: formatDateTime(start), end_time: formatDateTime(end) },
+    pageNo: 0,
+    pageSize: 100,
+  });
+  const rows = Array.isArray(payload?.data?.goods_list) ? payload.data.goods_list : [];
+  const candidates = new Map();
+  for (const row of rows) {
+    const shopNo = text(row.shop_no);
+    if (!shopNo) continue;
+    const current = candidates.get(lower(shopNo)) ?? { shopNo, sampleCount: 0, samplePlatformGoodsIds: [] };
+    current.sampleCount += 1;
+    const goodsId = text(row.goods_id);
+    if (goodsId && current.samplePlatformGoodsIds.length < 5 && !current.samplePlatformGoodsIds.includes(goodsId)) current.samplePlatformGoodsIds.push(goodsId);
+    candidates.set(lower(shopNo), current);
+  }
+  const mappings = new Map(listWangdianShopMappings().map((item) => [lower(item.wangdianShopNo), item]));
+  return {
+    readOnly: true,
+    returnedRows: rows.length,
+    totalCount: Number(payload?.data?.total_count ?? payload?.total_count ?? rows.length),
+    candidates: [...candidates.values()].map((item) => ({ ...item, mapping: mappings.get(lower(item.shopNo)) ?? null })),
+  };
+}
+
 function makeException(logId, rowNumber, type, source, message) {
   return { id: `wdt-platform-exception-${crypto.randomUUID()}`, syncLogId: logId, rowNumber, exceptionType: type, shopNo: text(source.shop_no), platformGoodsId: text(source.goods_id), platformSkuId: text(source.spec_id), merchantNo: text(source.merchant_no), message, rawDataJson: JSON.stringify(source), createdAt: new Date().toISOString() };
 }

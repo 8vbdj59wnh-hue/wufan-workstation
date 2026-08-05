@@ -1,4 +1,4 @@
-import { commitErpGoodsDataSync, commitInventoryDataSync, commitPlatformGoodsDataSync, commitSalesFactDataSync, createDataSyncBatch, getCurrentUser, loadDataCenterProductDetail, loadDataCenterView, loadDataSyncCenter, loadErpGoodsDataSyncPreview, loadInventoryDataSyncPreview, loadPlatformGoodsDataSyncPreview, loadSalesFactDataSyncPreview, previewErpGoodsDataSync, previewInventoryDataSync, previewPlatformGoodsDataSync, previewSalesFactDataSync, resolveAssetUrl, saveWangdianShopMapping, updateDataSyncTaskStatus } from "./appState.js";
+import { commitErpGoodsDataSync, commitInventoryDataSync, commitPlatformGoodsDataSync, commitSalesFactDataSync, createDataSyncBatch, discoverWangdianPlatformShops, getCurrentUser, loadDataCenterProductDetail, loadDataCenterView, loadDataSyncCenter, loadErpGoodsDataSyncPreview, loadInventoryDataSyncPreview, loadPlatformGoodsDataSyncPreview, loadSalesFactDataSyncPreview, previewErpGoodsDataSync, previewInventoryDataSync, previewPlatformGoodsDataSync, previewSalesFactDataSync, resolveAssetUrl, saveWangdianShopMapping, updateDataSyncTaskStatus } from "./appState.js";
 import { canAccessModule } from "./permissions.js";
 
 let view = "trends";
@@ -10,6 +10,7 @@ let syncPreview = null;
 let platformSyncPreview = null;
 let inventorySyncPreview = null;
 let salesFactSyncPreview = null;
+let discoveredWangdianShops = null;
 let query = { search: "", page: 1, pageSize: 48, direction: "focus", status: "", sort: "" };
 
 const viewConfig = {
@@ -170,8 +171,9 @@ function renderDataSyncCenter() {
       <button type="button" class="secondary-button" data-action="preview-platform-data-sync" data-sync-mode="full" data-task-id="${escapeHtml(platformTask.id)}">生成全量预览</button>
       <button type="button" class="primary-button" data-action="preview-platform-data-sync" data-sync-mode="incremental" data-task-id="${escapeHtml(platformTask.id)}">执行增量预览</button>
     </form>`}
-    <form id="wangdian-shop-mapping-form" class="data-center-filter"><input name="wangdianShopNo" placeholder="旺店通店铺编号" required /><select name="shopId" required><option value="">选择系统店铺</option>${(result.salesShops ?? []).map((shop) => `<option value="${escapeHtml(shop.id)}">${escapeHtml(`${shop.platform} · ${shop.displayName || shop.shopName}`)}</option>`).join("")}</select><button class="secondary-button" type="submit">保存店铺映射</button></form>
+    <form id="wangdian-shop-mapping-form" class="data-center-filter"><input name="wangdianShopNo" placeholder="旺店通店铺编号" required /><select name="shopId" required><option value="">选择系统店铺</option>${(result.salesShops ?? []).map((shop) => `<option value="${escapeHtml(shop.id)}">${escapeHtml(`${shop.platform} · ${shop.displayName || shop.shopName}`)}</option>`).join("")}</select><button class="secondary-button" type="submit">保存店铺映射</button><button class="text-button" type="button" data-action="discover-wangdian-shops">只读识别店铺编号</button></form>
     ${(result.wangdianShopMappings ?? []).length ? `<p>已映射：${result.wangdianShopMappings.map((item) => escapeHtml(`${item.wangdianShopNo} → ${item.platform} · ${item.displayName || item.shopName}`)).join("；")}</p>` : `<p class="form-note">尚未配置旺店通店铺映射。</p>`}
+    ${discoveredWangdianShops ? `<div class="data-center-notice"><strong>旺店通只读识别结果</strong><p>本次读取 ${discoveredWangdianShops.returnedRows ?? 0} 行；识别到 ${(discoveredWangdianShops.candidates ?? []).length} 个店铺编号。</p>${(discoveredWangdianShops.candidates ?? []).map((item) => `<span>${escapeHtml(item.shopNo)} · 样本 ${item.sampleCount} 行 · 商品ID ${escapeHtml((item.samplePlatformGoodsIds ?? []).join("、") || "—")}${item.mapping ? ` · 已映射至 ${escapeHtml(item.mapping.displayName || item.mapping.shopName)}` : " · 未映射"}</span>`).join("")}</div>` : ""}
     ${platformSyncPreview ? `<div class="data-center-notice"><strong>${platformSyncPreview.isCurrent === false ? "历史预览" : "当前有效预览"}</strong><p>统一批次：${escapeHtml(platformSyncPreview.dataSyncBatch?.id)}；原始行 ${platformSyncPreview.summary?.total ?? 0}；有效匹配 ${platformSyncPreview.summary?.matched ?? 0}；新增 ${platformSyncPreview.summary?.created ?? 0}；更新 ${platformSyncPreview.summary?.updated ?? 0}；异常 ${platformSyncPreview.summary?.exceptionCount ?? 0}。</p>${platformSyncPreview.isCurrent === false ? `<span>该版本已被更新预览替代，仅供查看。</span>` : `<button class="primary-button" data-action="commit-platform-data-sync" data-batch-id="${escapeHtml(platformSyncPreview.dataSyncBatch?.id)}" ${platformSyncPreview.summary?.canCommit === false ? "disabled" : ""}>确认提交当前预览</button>`}</div>` : ""}</section>` : ""}
     ${inventoryTask ? `<section><h2>库存同步执行</h2>${inventoryTask.status !== "enabled" ? `<div class="data-center-notice">库存同步任务当前已暂停。首次全量同步并确认库存口径后，再启用自动调度。</div>` : `<form id="inventory-data-sync-form" class="data-center-filter">
       <label><span>业务日期</span><input name="businessDate" type="date" value="${today}" /></label>
@@ -295,11 +297,20 @@ export function bindDataCenterPageEvents(rerender) {
     event.preventDefault(); const form = new FormData(event.currentTarget);
     try { await saveWangdianShopMapping({ wangdianShopNo: form.get("wangdianShopNo"), shopId: form.get("shopId") }); await refresh(rerender); } catch (caught) { error = caught.message; rerender(); }
   });
+  document.querySelector("[data-action='discover-wangdian-shops']")?.addEventListener("click", async () => {
+    const form = document.querySelector("#platform-data-sync-form");
+    try {
+      discoveredWangdianShops = await discoverWangdianPlatformShops({ startTime: form?.elements.requestStart?.value, endTime: form?.elements.requestEnd?.value });
+      rerender();
+    } catch (caught) { error = caught.message; rerender(); }
+  });
   document.querySelectorAll("[data-action='preview-platform-data-sync']").forEach((button) => button.addEventListener("click", async () => {
     const form = document.querySelector("#platform-data-sync-form");
     const syncMode = button.dataset.syncMode;
     const requestStart = syncMode === "full" ? form?.elements.requestStart?.value : "";
     const requestEnd = form?.elements.requestEnd?.value;
+    const platform = form?.elements.platform?.value?.trim() || "";
+    const shopId = form?.elements.shopId?.value?.trim() || "";
     loading = true; error = ""; rerender();
     try { platformSyncPreview = await previewPlatformGoodsDataSync(button.dataset.taskId, { syncMode, requestStart, requestEnd, scope: { shops: shopId ? [shopId] : [], platforms: platform ? [platform] : [] } }); await refresh(rerender); } catch (caught) { loading = false; error = caught.message; rerender(); }
   }));

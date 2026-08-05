@@ -82,7 +82,7 @@ import {
   readPlatformGoodsDataSyncPreview,
   runDuePlatformGoodsSyncTasks,
 } from "./platformGoodsDataSyncAdapter.js";
-import { saveWangdianShopMapping } from "./wangdianPlatformGoodsSyncService.js";
+import { discoverWangdianPlatformShops, saveWangdianShopMapping } from "./wangdianPlatformGoodsSyncService.js";
 import {
   commitInventoryDataSync,
   previewInventoryDataSync,
@@ -1715,6 +1715,14 @@ app.post("/api/data-sync-center/shop-mappings", requirePermission("dataCenter.vi
     response.json({ success: true, mapping: saveWangdianShopMapping(request.body, getUserPersonId(request.user)) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "旺店通店铺映射保存失败。" });
+  }
+});
+
+app.post("/api/data-sync-center/shop-mappings/discover", requirePermission("dataCenter.view"), requireAdminUser, async (request, response) => {
+  try {
+    response.json({ success: true, ...(await discoverWangdianPlatformShops({ startTime: request.body?.startTime, endTime: request.body?.endTime })) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "旺店通店铺识别失败。" });
   }
 });
 
