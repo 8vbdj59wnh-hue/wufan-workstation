@@ -67,32 +67,66 @@ export function saveWangdianShopMapping(input = {}, userId = "") {
   return listWangdianShopMappings().find((item) => item.id === row.id);
 }
 
-export async function discoverWangdianPlatformShops({ startTime, endTime, queryApi = queryWangdianPlatformGoods } = {}) {
+export async function discoverWangdianPlatformShops({ startTime, endTime, shopId, queryApi = queryWangdianPlatformGoods, pageSize = 100, maxPages = 500 } = {}) {
+  const database = getDatabase();
   const end = endTime ? new Date(String(endTime).replace(" ", "T")) : new Date();
   const start = startTime ? new Date(String(startTime).replace(" ", "T")) : new Date(end.getTime() - 30 * 86400000);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) throw new Error("旺店通店铺识别时间范围无效。");
-  const payload = await queryApi({
-    params: { start_time: formatDateTime(start), end_time: formatDateTime(end) },
-    pageNo: 0,
-    pageSize: 100,
-  });
-  const rows = Array.isArray(payload?.data?.goods_list) ? payload.data.goods_list : [];
+  const targetShopId = text(shopId);
+  if (!targetShopId) throw new Error("请先选择需要识别的系统店铺。");
+  const targetShop = database.prepare("SELECT id,platform,shopName,displayName FROM sales_shops WHERE id=? AND status='active'").get(targetShopId);
+  if (!targetShop) throw new Error("系统店铺不存在或已停用。");
+  const targetGoodsIds = new Set(database.prepare("SELECT platformGoodsId FROM sales_links WHERE shopId=? AND platformGoodsId IS NOT NULL AND platformGoodsId<>''").all(targetShopId).map((row) => text(row.platformGoodsId)));
+  const safePageSize = Math.min(100, Math.max(1, Number(pageSize) || 100));
+  const safeMaxPages = Math.min(1000, Math.max(1, Number(maxPages) || 500));
   const candidates = new Map();
-  for (const row of rows) {
-    const shopNo = text(row.shop_no);
-    if (!shopNo) continue;
-    const current = candidates.get(lower(shopNo)) ?? { shopNo, sampleCount: 0, samplePlatformGoodsIds: [] };
-    current.sampleCount += 1;
-    const goodsId = text(row.goods_id);
-    if (goodsId && current.samplePlatformGoodsIds.length < 5 && !current.samplePlatformGoodsIds.includes(goodsId)) current.samplePlatformGoodsIds.push(goodsId);
-    candidates.set(lower(shopNo), current);
+  let totalCount = 0;
+  let returnedRows = 0;
+  let pageCount = 0;
+  for (let pageNo = 0; pageNo < safeMaxPages; pageNo += 1) {
+    const payload = await queryApi({ params: { start_time: formatDateTime(start), end_time: formatDateTime(end) }, pageNo, pageSize: safePageSize });
+    const rows = Array.isArray(payload?.data?.goods_list) ? payload.data.goods_list : [];
+    if (pageNo === 0) totalCount = Number(payload?.data?.total_count ?? payload?.total_count ?? rows.length) || rows.length;
+    pageCount += 1;
+    returnedRows += rows.length;
+    for (const row of rows) {
+      const shopNo = text(row.shop_no);
+      if (!shopNo) continue;
+      const current = candidates.get(lower(shopNo)) ?? { shopNo, returnedRows: 0, goodsIds: new Set(), matchedGoodsIds: new Set() };
+      current.returnedRows += 1;
+      const goodsId = text(row.goods_id);
+      if (goodsId) {
+        current.goodsIds.add(goodsId);
+        if (targetGoodsIds.has(goodsId)) current.matchedGoodsIds.add(goodsId);
+      }
+      candidates.set(lower(shopNo), current);
+    }
+    if (!rows.length || rows.length < safePageSize || returnedRows >= totalCount) break;
   }
   const mappings = new Map(listWangdianShopMappings().map((item) => [lower(item.wangdianShopNo), item]));
+  const rankedCandidates = [...candidates.values()].map((item) => {
+    const returnedGoodsCount = item.goodsIds.size;
+    const matchedGoodsCount = item.matchedGoodsIds.size;
+    return {
+      shopNo: item.shopNo,
+      returnedRows: item.returnedRows,
+      returnedGoodsCount,
+      matchedGoodsCount,
+      matchRate: returnedGoodsCount ? matchedGoodsCount / returnedGoodsCount : 0,
+      samplePlatformGoodsIds: [...item.goodsIds].slice(0, 5),
+      matchedPlatformGoodsIds: [...item.matchedGoodsIds].slice(0, 10),
+      mapping: mappings.get(lower(item.shopNo)) ?? null,
+    };
+  }).sort((left, right) => right.matchedGoodsCount - left.matchedGoodsCount || right.matchRate - left.matchRate || right.returnedGoodsCount - left.returnedGoodsCount);
   return {
     readOnly: true,
-    returnedRows: rows.length,
-    totalCount: Number(payload?.data?.total_count ?? payload?.total_count ?? rows.length),
-    candidates: [...candidates.values()].map((item) => ({ ...item, mapping: mappings.get(lower(item.shopNo)) ?? null })),
+    targetShop,
+    targetLinkCount: targetGoodsIds.size,
+    returnedRows,
+    totalCount,
+    pageCount,
+    truncated: pageCount >= safeMaxPages && returnedRows < totalCount,
+    candidates: rankedCandidates,
   };
 }
 

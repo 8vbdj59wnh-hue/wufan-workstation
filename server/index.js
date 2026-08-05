@@ -1720,7 +1720,7 @@ app.post("/api/data-sync-center/shop-mappings", requirePermission("dataCenter.vi
 
 app.post("/api/data-sync-center/shop-mappings/discover", requirePermission("dataCenter.view"), requireAdminUser, async (request, response) => {
   try {
-    response.json({ success: true, ...(await discoverWangdianPlatformShops({ startTime: request.body?.startTime, endTime: request.body?.endTime })) });
+    response.json({ success: true, ...(await discoverWangdianPlatformShops({ startTime: request.body?.startTime, endTime: request.body?.endTime, shopId: request.body?.shopId })) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "旺店通店铺识别失败。" });
   }
