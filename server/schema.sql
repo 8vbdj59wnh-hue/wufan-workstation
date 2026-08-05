@@ -1143,6 +1143,48 @@ CREATE TABLE IF NOT EXISTS wangdian_shop_mappings (
   FOREIGN KEY(shopId) REFERENCES sales_shops(id)
 );
 
+CREATE TABLE IF NOT EXISTS wangdian_shop_discovery_batches (
+  id TEXT PRIMARY KEY,
+  targetShopId TEXT NOT NULL,
+  requestStart TEXT NOT NULL,
+  requestEnd TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'waiting',
+  currentPage INTEGER NOT NULL DEFAULT 0,
+  totalPages INTEGER,
+  totalRows INTEGER,
+  readRows INTEGER NOT NULL DEFAULT 0,
+  errorMessage TEXT,
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  startedAt TEXT,
+  completedAt TEXT,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(targetShopId) REFERENCES sales_shops(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_wangdian_shop_discovery_status
+  ON wangdian_shop_discovery_batches(status, updatedAt DESC);
+
+CREATE TABLE IF NOT EXISTS wangdian_shop_discovery_candidates (
+  batchId TEXT NOT NULL,
+  shopNo TEXT NOT NULL COLLATE NOCASE,
+  returnedRows INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(batchId, shopNo),
+  FOREIGN KEY(batchId) REFERENCES wangdian_shop_discovery_batches(id)
+);
+
+CREATE TABLE IF NOT EXISTS wangdian_shop_discovery_goods (
+  batchId TEXT NOT NULL,
+  shopNo TEXT NOT NULL COLLATE NOCASE,
+  platformGoodsId TEXT NOT NULL,
+  matched INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(batchId, shopNo, platformGoodsId),
+  FOREIGN KEY(batchId) REFERENCES wangdian_shop_discovery_batches(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_wangdian_shop_discovery_goods_match
+  ON wangdian_shop_discovery_goods(batchId, matched, shopNo);
+
 CREATE TABLE IF NOT EXISTS wangdian_platform_goods_sync_logs (
   id TEXT PRIMARY KEY,
   dataSyncBatchId TEXT,

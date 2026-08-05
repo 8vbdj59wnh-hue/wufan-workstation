@@ -1,4 +1,4 @@
-import { commitErpGoodsDataSync, commitInventoryDataSync, commitPlatformGoodsDataSync, commitSalesFactDataSync, createDataSyncBatch, discoverWangdianPlatformShops, getCurrentUser, loadDataCenterProductDetail, loadDataCenterView, loadDataSyncCenter, loadErpGoodsDataSyncPreview, loadInventoryDataSyncPreview, loadPlatformGoodsDataSyncPreview, loadSalesFactDataSyncPreview, previewErpGoodsDataSync, previewInventoryDataSync, previewPlatformGoodsDataSync, previewSalesFactDataSync, resolveAssetUrl, saveWangdianShopMapping, updateDataSyncTaskStatus } from "./appState.js";
+import { commitErpGoodsDataSync, commitInventoryDataSync, commitPlatformGoodsDataSync, commitSalesFactDataSync, createDataSyncBatch, discoverWangdianPlatformShops, getCurrentUser, loadDataCenterProductDetail, loadDataCenterView, loadDataSyncCenter, loadErpGoodsDataSyncPreview, loadInventoryDataSyncPreview, loadPlatformGoodsDataSyncPreview, loadSalesFactDataSyncPreview, loadWangdianShopDiscoveryBatch, previewErpGoodsDataSync, previewInventoryDataSync, previewPlatformGoodsDataSync, previewSalesFactDataSync, resolveAssetUrl, resumeWangdianShopDiscoveryBatch, saveWangdianShopMapping, updateDataSyncTaskStatus } from "./appState.js";
 import { canAccessModule } from "./permissions.js";
 
 let view = "trends";
@@ -11,7 +11,27 @@ let platformSyncPreview = null;
 let inventorySyncPreview = null;
 let salesFactSyncPreview = null;
 let discoveredWangdianShops = null;
+let shopDiscoveryPolling = false;
 let query = { search: "", page: 1, pageSize: 48, direction: "focus", status: "", sort: "" };
+
+async function pollShopDiscoveryBatch(batchId, rerender) {
+  if (!batchId || shopDiscoveryPolling) return;
+  shopDiscoveryPolling = true;
+  try {
+    while (true) {
+      const response = await loadWangdianShopDiscoveryBatch(batchId);
+      discoveredWangdianShops = response.batch;
+      rerender();
+      if (!["waiting", "running"].includes(discoveredWangdianShops.status)) break;
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+  } catch (caught) {
+    error = caught.message || "店铺识别进度读取失败。";
+    rerender();
+  } finally {
+    shopDiscoveryPolling = false;
+  }
+}
 
 const viewConfig = {
   trends: { label: "趋势变化", endpoint: "trends", description: "识别产品sales30d历史序列的上涨、下滑、稳定和数据不足。" },
@@ -173,7 +193,7 @@ function renderDataSyncCenter() {
     </form>`}
     <form id="wangdian-shop-mapping-form" class="data-center-filter"><input name="wangdianShopNo" placeholder="旺店通店铺编号" required /><select name="shopId" required><option value="">选择系统店铺</option>${(result.salesShops ?? []).map((shop) => `<option value="${escapeHtml(shop.id)}">${escapeHtml(`${shop.platform} · ${shop.displayName || shop.shopName}`)}</option>`).join("")}</select><button class="secondary-button" type="submit">保存店铺映射</button><button class="text-button" type="button" data-action="discover-wangdian-shops">只读识别店铺编号</button></form>
     ${(result.wangdianShopMappings ?? []).length ? `<p>已映射：${result.wangdianShopMappings.map((item) => escapeHtml(`${item.wangdianShopNo} → ${item.platform} · ${item.displayName || item.shopName}`)).join("；")}</p>` : `<p class="form-note">尚未配置旺店通店铺映射。</p>`}
-    ${discoveredWangdianShops ? `<div class="data-center-notice"><strong>旺店通只读识别结果</strong><p>目标：${escapeHtml(`${discoveredWangdianShops.targetShop?.platform || "—"} · ${discoveredWangdianShops.targetShop?.displayName || discoveredWangdianShops.targetShop?.shopName || "—"}`)}（链接 ${discoveredWangdianShops.targetLinkCount ?? 0}）；分页读取 ${discoveredWangdianShops.returnedRows ?? 0}/${discoveredWangdianShops.totalCount ?? 0} 行，共 ${discoveredWangdianShops.pageCount ?? 0} 页；识别到 ${(discoveredWangdianShops.candidates ?? []).length} 个店铺编号。${discoveredWangdianShops.truncated ? "结果达到分页上限，尚未完整读取。" : ""}</p><div class="table-wrap"><table class="data-table"><thead><tr><th>排名</th><th>shop_no</th><th>返回商品数</th><th>匹配商品数</th><th>匹配率</th><th>命中商品样本</th><th>映射状态</th></tr></thead><tbody>${(discoveredWangdianShops.candidates ?? []).map((item, index) => `<tr><td>${index + 1}</td><td><strong>${escapeHtml(item.shopNo)}</strong></td><td>${item.returnedGoodsCount ?? 0}</td><td>${item.matchedGoodsCount ?? 0}</td><td>${number((item.matchRate ?? 0) * 100, 2)}%</td><td>${escapeHtml((item.matchedPlatformGoodsIds ?? []).join("、") || "—")}</td><td>${item.mapping ? `已映射至 ${escapeHtml(item.mapping.displayName || item.mapping.shopName)}` : "未映射"}</td></tr>`).join("")}</tbody></table></div></div>` : ""}
+    ${discoveredWangdianShops ? `<div class="data-center-notice"><strong>旺店通店铺识别批次</strong><p>状态：${escapeHtml({waiting:"等待",running:"执行中",completed:"已完成",failed:"失败"}[discoveredWangdianShops.status] || discoveredWangdianShops.status)}；目标：${escapeHtml(`${discoveredWangdianShops.platform || "—"} · ${discoveredWangdianShops.displayName || discoveredWangdianShops.shopName || "—"}`)}；进度 ${discoveredWangdianShops.currentPage ?? 0}/${discoveredWangdianShops.totalPages ?? "—"} 页；已读取 ${discoveredWangdianShops.readRows ?? 0}/${discoveredWangdianShops.totalRows ?? "—"} 行。</p>${discoveredWangdianShops.errorMessage ? `<span>${escapeHtml(discoveredWangdianShops.errorMessage)}</span><button class="text-button" data-action="resume-shop-discovery" data-batch-id="${escapeHtml(discoveredWangdianShops.id)}">从断点继续</button>` : ""}<div class="table-wrap"><table class="data-table"><thead><tr><th>排名</th><th>shop_no</th><th>返回商品数</th><th>匹配商品数</th><th>匹配率</th><th>命中商品样本</th><th>映射状态</th></tr></thead><tbody>${(discoveredWangdianShops.candidates ?? []).map((item, index) => `<tr><td>${index + 1}</td><td><strong>${escapeHtml(item.shopNo)}</strong></td><td>${item.returnedGoodsCount ?? 0}</td><td>${item.matchedGoodsCount ?? 0}</td><td>${number((item.matchRate ?? 0) * 100, 2)}%</td><td>${escapeHtml((item.matchedPlatformGoodsIds ?? []).join("、") || "—")}</td><td>${item.mapping ? `已映射至 ${escapeHtml(item.mapping.displayName || item.mapping.shopName)}` : "未映射"}</td></tr>`).join("") || `<tr><td colspan="7">批次执行中，候选结果正在累计。</td></tr>`}</tbody></table></div></div>` : ""}
     ${platformSyncPreview ? `<div class="data-center-notice"><strong>${platformSyncPreview.isCurrent === false ? "历史预览" : "当前有效预览"}</strong><p>统一批次：${escapeHtml(platformSyncPreview.dataSyncBatch?.id)}；原始行 ${platformSyncPreview.summary?.total ?? 0}；有效匹配 ${platformSyncPreview.summary?.matched ?? 0}；新增 ${platformSyncPreview.summary?.created ?? 0}；更新 ${platformSyncPreview.summary?.updated ?? 0}；异常 ${platformSyncPreview.summary?.exceptionCount ?? 0}。</p>${platformSyncPreview.isCurrent === false ? `<span>该版本已被更新预览替代，仅供查看。</span>` : `<button class="primary-button" data-action="commit-platform-data-sync" data-batch-id="${escapeHtml(platformSyncPreview.dataSyncBatch?.id)}" ${platformSyncPreview.summary?.canCommit === false ? "disabled" : ""}>确认提交当前预览</button>`}</div>` : ""}</section>` : ""}
     ${inventoryTask ? `<section><h2>库存同步执行</h2>${inventoryTask.status !== "enabled" ? `<div class="data-center-notice">库存同步任务当前已暂停。首次全量同步并确认库存口径后，再启用自动调度。</div>` : `<form id="inventory-data-sync-form" class="data-center-filter">
       <label><span>业务日期</span><input name="businessDate" type="date" value="${today}" /></label>
@@ -241,6 +261,7 @@ async function refresh(rerender) {
 
 export function bindDataCenterPageEvents(rerender) {
   if (!result && !loading) refresh(rerender);
+  if (view === "sync" && result?.latestShopDiscoveryBatch?.id && !discoveredWangdianShops && !shopDiscoveryPolling) pollShopDiscoveryBatch(result.latestShopDiscoveryBatch.id, rerender);
   document.querySelectorAll("[data-action='switch-data-center-view']").forEach((button) => button.addEventListener("click", () => {
     view = button.dataset.view; query = { search: "", page: 1, pageSize: 48, direction: button.dataset.view === "trends" ? "focus" : "", status: "", sort: "" }; result = null; detail = null; refresh(rerender);
   }));
@@ -301,8 +322,18 @@ export function bindDataCenterPageEvents(rerender) {
     const form = document.querySelector("#platform-data-sync-form");
     const mappingForm = document.querySelector("#wangdian-shop-mapping-form");
     try {
-      discoveredWangdianShops = await discoverWangdianPlatformShops({ startTime: form?.elements.requestStart?.value, endTime: form?.elements.requestEnd?.value, shopId: mappingForm?.elements.shopId?.value });
+      const response = await discoverWangdianPlatformShops({ startTime: form?.elements.requestStart?.value, endTime: form?.elements.requestEnd?.value, shopId: mappingForm?.elements.shopId?.value });
+      discoveredWangdianShops = response.batch;
       rerender();
+      pollShopDiscoveryBatch(discoveredWangdianShops.id, rerender);
+    } catch (caught) { error = caught.message; rerender(); }
+  });
+  document.querySelector("[data-action='resume-shop-discovery']")?.addEventListener("click", async (event) => {
+    try {
+      const response = await resumeWangdianShopDiscoveryBatch(event.currentTarget.dataset.batchId);
+      discoveredWangdianShops = response.batch;
+      rerender();
+      pollShopDiscoveryBatch(discoveredWangdianShops.id, rerender);
     } catch (caught) { error = caught.message; rerender(); }
   });
   document.querySelectorAll("[data-action='preview-platform-data-sync']").forEach((button) => button.addEventListener("click", async () => {

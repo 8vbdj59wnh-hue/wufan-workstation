@@ -82,7 +82,7 @@ import {
   readPlatformGoodsDataSyncPreview,
   runDuePlatformGoodsSyncTasks,
 } from "./platformGoodsDataSyncAdapter.js";
-import { discoverWangdianPlatformShops, saveWangdianShopMapping } from "./wangdianPlatformGoodsSyncService.js";
+import { createWangdianShopDiscoveryBatch, queueWangdianShopDiscoveryBatch, readWangdianShopDiscoveryBatch, resumePendingWangdianShopDiscoveryBatches, resumeWangdianShopDiscoveryBatch, saveWangdianShopMapping } from "./wangdianPlatformGoodsSyncService.js";
 import {
   commitInventoryDataSync,
   previewInventoryDataSync,
@@ -1718,11 +1718,29 @@ app.post("/api/data-sync-center/shop-mappings", requirePermission("dataCenter.vi
   }
 });
 
-app.post("/api/data-sync-center/shop-mappings/discover", requirePermission("dataCenter.view"), requireAdminUser, async (request, response) => {
+app.post("/api/data-sync-center/shop-mappings/discover", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
   try {
-    response.json({ success: true, ...(await discoverWangdianPlatformShops({ startTime: request.body?.startTime, endTime: request.body?.endTime, shopId: request.body?.shopId })) });
+    const batch = createWangdianShopDiscoveryBatch({ startTime: request.body?.startTime, endTime: request.body?.endTime, shopId: request.body?.shopId, createdBy: getUserPersonId(request.user) });
+    queueWangdianShopDiscoveryBatch(batch.id);
+    response.status(202).json({ success: true, batch });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "旺店通店铺识别失败。" });
+  }
+});
+
+app.get("/api/data-sync-center/shop-discovery-batches/:id", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+  try {
+    response.json({ success: true, batch: readWangdianShopDiscoveryBatch(request.params.id) });
+  } catch (error) {
+    response.status(404).json({ success: false, message: error.message || "店铺识别批次不存在。" });
+  }
+});
+
+app.post("/api/data-sync-center/shop-discovery-batches/:id/resume", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+  try {
+    response.json({ success: true, batch: resumeWangdianShopDiscoveryBatch(request.params.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "店铺识别批次恢复失败。" });
   }
 });
 
@@ -3433,6 +3451,8 @@ const server = app.listen(port, host, () => {
   console.log(`Local access: http://127.0.0.1:${port}`);
   console.log(`SQLite database: ${databasePath}`);
 });
+
+resumePendingWangdianShopDiscoveryBatches();
 
 const taskWaveCollectionTimer = setInterval(() => {
   try {

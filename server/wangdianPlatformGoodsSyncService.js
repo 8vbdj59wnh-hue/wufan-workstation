@@ -130,6 +130,130 @@ export async function discoverWangdianPlatformShops({ startTime, endTime, shopId
   };
 }
 
+const activeShopDiscoveryBatches = new Set();
+
+function readShopDiscoveryBatchRow(batchId) {
+  const database = getDatabase();
+  const batch = database.prepare(`SELECT b.*,s.platform,s.shopName,s.displayName FROM wangdian_shop_discovery_batches b JOIN sales_shops s ON s.id=b.targetShopId WHERE b.id=?`).get(batchId);
+  if (!batch) return null;
+  const mappings = new Map(listWangdianShopMappings().map((item) => [lower(item.wangdianShopNo), item]));
+  const candidates = database.prepare(`
+    SELECT c.shopNo,c.returnedRows,COUNT(g.platformGoodsId) returnedGoodsCount,
+      COALESCE(SUM(g.matched),0) matchedGoodsCount
+    FROM wangdian_shop_discovery_candidates c
+    LEFT JOIN wangdian_shop_discovery_goods g ON g.batchId=c.batchId AND lower(g.shopNo)=lower(c.shopNo)
+    WHERE c.batchId=?
+    GROUP BY c.batchId,c.shopNo,c.returnedRows
+    ORDER BY matchedGoodsCount DESC,
+      CASE WHEN COUNT(g.platformGoodsId)>0 THEN CAST(COALESCE(SUM(g.matched),0) AS REAL)/COUNT(g.platformGoodsId) ELSE 0 END DESC,
+      returnedGoodsCount DESC
+  `).all(batchId).map((item) => {
+    const matchedPlatformGoodsIds = database.prepare(`SELECT platformGoodsId FROM wangdian_shop_discovery_goods WHERE batchId=? AND lower(shopNo)=lower(?) AND matched=1 ORDER BY platformGoodsId LIMIT 10`).all(batchId, item.shopNo).map((row) => row.platformGoodsId);
+    const samplePlatformGoodsIds = database.prepare(`SELECT platformGoodsId FROM wangdian_shop_discovery_goods WHERE batchId=? AND lower(shopNo)=lower(?) ORDER BY platformGoodsId LIMIT 5`).all(batchId, item.shopNo).map((row) => row.platformGoodsId);
+    return {
+      ...item,
+      returnedRows: Number(item.returnedRows || 0),
+      returnedGoodsCount: Number(item.returnedGoodsCount || 0),
+      matchedGoodsCount: Number(item.matchedGoodsCount || 0),
+      matchRate: Number(item.returnedGoodsCount || 0) ? Number(item.matchedGoodsCount || 0) / Number(item.returnedGoodsCount || 0) : 0,
+      matchedPlatformGoodsIds,
+      samplePlatformGoodsIds,
+      mapping: mappings.get(lower(item.shopNo)) ?? null,
+    };
+  });
+  return { ...batch, currentPage: Number(batch.currentPage || 0), totalPages: batch.totalPages === null ? null : Number(batch.totalPages), totalRows: batch.totalRows === null ? null : Number(batch.totalRows), readRows: Number(batch.readRows || 0), candidates };
+}
+
+export function readWangdianShopDiscoveryBatch(batchId) {
+  const batch = readShopDiscoveryBatchRow(batchId);
+  if (!batch) throw new Error("店铺识别批次不存在。");
+  return batch;
+}
+
+export function createWangdianShopDiscoveryBatch({ shopId, startTime, endTime, createdBy = "" } = {}) {
+  const database = getDatabase();
+  const end = endTime ? new Date(String(endTime).replace(" ", "T")) : new Date();
+  const start = startTime ? new Date(String(startTime).replace(" ", "T")) : new Date(end.getTime() - 30 * 86400000);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) throw new Error("旺店通店铺识别时间范围无效。");
+  const targetShopId = text(shopId);
+  if (!targetShopId) throw new Error("请先选择需要识别的系统店铺。");
+  const targetShop = database.prepare("SELECT id FROM sales_shops WHERE id=? AND status='active'").get(targetShopId);
+  if (!targetShop) throw new Error("系统店铺不存在或已停用。");
+  const now = new Date().toISOString();
+  const batch = { id: `wdt-shop-discovery-${crypto.randomUUID()}`, targetShopId, requestStart: formatDateTime(start), requestEnd: formatDateTime(end), status: "waiting", createdBy: text(createdBy) || null, createdAt: now, updatedAt: now };
+  database.prepare(`INSERT INTO wangdian_shop_discovery_batches (id,targetShopId,requestStart,requestEnd,status,createdBy,createdAt,updatedAt) VALUES (@id,@targetShopId,@requestStart,@requestEnd,@status,@createdBy,@createdAt,@updatedAt)`).run(batch);
+  return readShopDiscoveryBatchRow(batch.id);
+}
+
+export async function runWangdianShopDiscoveryBatch(batchId, { queryApi = queryWangdianPlatformGoods, pageSize = 100 } = {}) {
+  if (activeShopDiscoveryBatches.has(batchId)) return readShopDiscoveryBatchRow(batchId);
+  activeShopDiscoveryBatches.add(batchId);
+  const database = getDatabase();
+  try {
+    const claimedAt = new Date().toISOString();
+    const claimed = database.prepare(`UPDATE wangdian_shop_discovery_batches SET status='running',startedAt=COALESCE(startedAt,?),errorMessage=NULL,updatedAt=? WHERE id=? AND status='waiting'`).run(claimedAt, claimedAt, batchId);
+    if (!claimed.changes) return readWangdianShopDiscoveryBatch(batchId);
+    const batch = database.prepare("SELECT * FROM wangdian_shop_discovery_batches WHERE id=?").get(batchId);
+    const targetGoodsIds = new Set(database.prepare("SELECT platformGoodsId FROM sales_links WHERE shopId=? AND platformGoodsId IS NOT NULL AND platformGoodsId<>''").all(batch.targetShopId).map((row) => text(row.platformGoodsId)));
+    let pageNo = Number(batch.currentPage || 0);
+    let readRows = Number(batch.readRows || 0);
+    let totalRows = batch.totalRows === null ? null : Number(batch.totalRows);
+    let totalPages = batch.totalPages === null ? null : Number(batch.totalPages);
+    const persistPage = database.transaction((rows, nextPage) => {
+      const upsertCandidate = database.prepare(`INSERT INTO wangdian_shop_discovery_candidates (batchId,shopNo,returnedRows) VALUES (?,?,1) ON CONFLICT(batchId,shopNo) DO UPDATE SET returnedRows=returnedRows+1`);
+      const insertGoods = database.prepare(`INSERT OR IGNORE INTO wangdian_shop_discovery_goods (batchId,shopNo,platformGoodsId,matched) VALUES (?,?,?,?)`);
+      for (const row of rows) {
+        const shopNo = text(row.shop_no);
+        if (!shopNo) continue;
+        upsertCandidate.run(batchId, shopNo);
+        const goodsId = text(row.goods_id);
+        if (goodsId) insertGoods.run(batchId, shopNo, goodsId, targetGoodsIds.has(goodsId) ? 1 : 0);
+      }
+      readRows += rows.length;
+      database.prepare(`UPDATE wangdian_shop_discovery_batches SET currentPage=?,totalPages=?,totalRows=?,readRows=?,updatedAt=? WHERE id=?`).run(nextPage, totalPages, totalRows, readRows, new Date().toISOString(), batchId);
+    });
+    for (; pageNo < 10000; pageNo += 1) {
+      const payload = await queryApi({ params: { start_time: batch.requestStart, end_time: batch.requestEnd }, pageNo, pageSize });
+      const rows = Array.isArray(payload?.data?.goods_list) ? payload.data.goods_list : [];
+      if (pageNo === 0 && totalRows === null) {
+        totalRows = Number(payload?.data?.total_count ?? payload?.total_count ?? rows.length) || rows.length;
+        totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+      }
+      persistPage(rows, pageNo + 1);
+      if (!rows.length || rows.length < pageSize || (totalRows !== null && readRows >= totalRows)) break;
+    }
+    if (pageNo >= 10000) throw new Error("旺店通店铺识别分页数量异常，已停止读取。");
+    const completedAt = new Date().toISOString();
+    database.prepare(`UPDATE wangdian_shop_discovery_batches SET status='completed',completedAt=?,updatedAt=? WHERE id=?`).run(completedAt, completedAt, batchId);
+  } catch (error) {
+    const failedAt = new Date().toISOString();
+    database.prepare(`UPDATE wangdian_shop_discovery_batches SET status='failed',errorMessage=?,updatedAt=? WHERE id=?`).run(error.message || "店铺识别失败。", failedAt, batchId);
+  } finally {
+    activeShopDiscoveryBatches.delete(batchId);
+  }
+  return readShopDiscoveryBatchRow(batchId);
+}
+
+export function queueWangdianShopDiscoveryBatch(batchId, options = {}) {
+  setImmediate(() => runWangdianShopDiscoveryBatch(batchId, options).catch((error) => console.error("旺店通店铺识别后台批次失败", error)));
+}
+
+export function resumeWangdianShopDiscoveryBatch(batchId, options = {}) {
+  const database = getDatabase();
+  const updated = database.prepare(`UPDATE wangdian_shop_discovery_batches SET status='waiting',errorMessage=NULL,updatedAt=? WHERE id=? AND status='failed'`).run(new Date().toISOString(), batchId);
+  const batch = readWangdianShopDiscoveryBatch(batchId);
+  if (updated.changes || batch.status === "waiting") queueWangdianShopDiscoveryBatch(batchId, options);
+  return batch;
+}
+
+export function resumePendingWangdianShopDiscoveryBatches() {
+  const database = getDatabase();
+  database.prepare(`UPDATE wangdian_shop_discovery_batches SET status='waiting',updatedAt=? WHERE status='running'`).run(new Date().toISOString());
+  const rows = database.prepare(`SELECT id FROM wangdian_shop_discovery_batches WHERE status='waiting' ORDER BY createdAt`).all();
+  for (const row of rows) queueWangdianShopDiscoveryBatch(row.id);
+  return rows.length;
+}
+
 function makeException(logId, rowNumber, type, source, message) {
   return { id: `wdt-platform-exception-${crypto.randomUUID()}`, syncLogId: logId, rowNumber, exceptionType: type, shopNo: text(source.shop_no), platformGoodsId: text(source.goods_id), platformSkuId: text(source.spec_id), merchantNo: text(source.merchant_no), message, rawDataJson: JSON.stringify(source), createdAt: new Date().toISOString() };
 }

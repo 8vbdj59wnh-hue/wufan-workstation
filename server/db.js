@@ -1813,6 +1813,43 @@ function runLightweightMigrations() {
   ensureColumn("data_sync_batches", "periodStart", "TEXT");
   ensureColumn("data_sync_batches", "periodEnd", "TEXT");
   getDatabase().exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_data_sync_batches_task_file_hash ON data_sync_batches(taskId,fileHash) WHERE fileHash IS NOT NULL AND fileHash<>''");
+  getDatabase().exec(`
+    CREATE TABLE IF NOT EXISTS wangdian_shop_discovery_batches (
+      id TEXT PRIMARY KEY,
+      targetShopId TEXT NOT NULL,
+      requestStart TEXT NOT NULL,
+      requestEnd TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'waiting',
+      currentPage INTEGER NOT NULL DEFAULT 0,
+      totalPages INTEGER,
+      totalRows INTEGER,
+      readRows INTEGER NOT NULL DEFAULT 0,
+      errorMessage TEXT,
+      createdBy TEXT,
+      createdAt TEXT NOT NULL,
+      startedAt TEXT,
+      completedAt TEXT,
+      updatedAt TEXT NOT NULL,
+      FOREIGN KEY(targetShopId) REFERENCES sales_shops(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_wangdian_shop_discovery_status ON wangdian_shop_discovery_batches(status,updatedAt DESC);
+    CREATE TABLE IF NOT EXISTS wangdian_shop_discovery_candidates (
+      batchId TEXT NOT NULL,
+      shopNo TEXT NOT NULL COLLATE NOCASE,
+      returnedRows INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY(batchId,shopNo),
+      FOREIGN KEY(batchId) REFERENCES wangdian_shop_discovery_batches(id)
+    );
+    CREATE TABLE IF NOT EXISTS wangdian_shop_discovery_goods (
+      batchId TEXT NOT NULL,
+      shopNo TEXT NOT NULL COLLATE NOCASE,
+      platformGoodsId TEXT NOT NULL,
+      matched INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY(batchId,shopNo,platformGoodsId),
+      FOREIGN KEY(batchId) REFERENCES wangdian_shop_discovery_batches(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_wangdian_shop_discovery_goods_match ON wangdian_shop_discovery_goods(batchId,matched,shopNo);
+  `);
   getDatabase().prepare("UPDATE data_sync_tasks SET taskCode='sales_fact_excel_import',syncType='sales_fact_excel_import',name='真实销售导入',executionMode='manual',updatedAt=datetime('now') WHERE id='sync-task-real-sales' AND (taskCode<>'sales_fact_excel_import' OR syncType<>'sales_fact_excel_import')").run();
   ensureColumn("wangdian_inventory_sync_batches", "dataSyncBatchId", "TEXT");
   getDatabase().exec(`

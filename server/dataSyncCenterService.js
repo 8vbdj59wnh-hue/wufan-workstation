@@ -24,13 +24,14 @@ export function getDataSyncCenterOverview({ batchLimit = 50, exceptionLimit = 50
   };
   const salesShops = db.prepare("SELECT id,platform,shopName,displayName,status FROM sales_shops WHERE status='active' ORDER BY platform,displayName").all();
   const wangdianShopMappings = db.prepare(`SELECT m.*,s.platform,s.shopName,s.displayName FROM wangdian_shop_mappings m JOIN sales_shops s ON s.id=m.shopId ORDER BY m.wangdianShopNo`).all();
+  const latestShopDiscoveryBatch = db.prepare(`SELECT id,status,targetShopId,currentPage,totalPages,totalRows,readRows,errorMessage,createdAt,updatedAt FROM wangdian_shop_discovery_batches ORDER BY createdAt DESC LIMIT 1`).get() ?? null;
   const counts = db.prepare(`SELECT
     (SELECT COUNT(*) FROM data_sync_tasks) taskCount,
     (SELECT COUNT(*) FROM data_sync_tasks WHERE status='enabled') enabledTaskCount,
     (SELECT COUNT(*) FROM data_sync_batches WHERE status IN ('queued','running','preview_ready','interrupted')) activeBatchCount,
     (SELECT COUNT(*) FROM data_sync_exceptions WHERE status='open') openExceptionCount
   `).get();
-  return { tasks, batches, exceptions, legacy, counts, salesShops, wangdianShopMappings };
+  return { tasks, batches, exceptions, legacy, counts, salesShops, wangdianShopMappings, latestShopDiscoveryBatch };
 }
 
 export function setDataSyncTaskStatus(taskId, status) {

@@ -906,6 +906,14 @@ export async function discoverWangdianPlatformShops(input = {}) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/shop-mappings/discover`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }), "旺店通店铺识别失败。");
 }
 
+export async function loadWangdianShopDiscoveryBatch(batchId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/shop-discovery-batches/${encodeURIComponent(batchId)}`), "旺店通店铺识别进度读取失败。");
+}
+
+export async function resumeWangdianShopDiscoveryBatch(batchId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/shop-discovery-batches/${encodeURIComponent(batchId)}/resume`, { method: "POST" }), "旺店通店铺识别恢复失败。");
+}
+
 export async function previewPlatformGoodsDataSync(taskId, options = {}) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/tasks/${encodeURIComponent(taskId)}/platform-goods/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(options) }), "平台SKU关系同步预览失败。");
 }
