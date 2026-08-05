@@ -952,6 +952,22 @@ export async function commitSalesFactDataSync(batchId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/batches/${encodeURIComponent(batchId)}/sales-facts/commit`, { method: "POST" }), "真实销售导入提交失败。");
 }
 
+export async function previewPlatformGoodsExcelDataSync(taskId, { file, shopId, sourceShopName }) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("shopId", shopId || "");
+  form.append("sourceShopName", sourceShopName || "");
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/tasks/${encodeURIComponent(taskId)}/platform-goods-excel/preview`, { method: "POST", body: form }), "平台货品Excel预览失败。");
+}
+
+export async function loadPlatformGoodsExcelDataSyncPreview(batchId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/batches/${encodeURIComponent(batchId)}/platform-goods-excel/preview`), "平台货品Excel预览读取失败。");
+}
+
+export async function commitPlatformGoodsExcelDataSync(batchId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/batches/${encodeURIComponent(batchId)}/platform-goods-excel/commit`, { method: "POST" }), "平台货品Excel关系提交失败。");
+}
+
 export async function resolveDataSyncException(exceptionId, note = "") {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/exceptions/${encodeURIComponent(exceptionId)}/resolve`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note }),

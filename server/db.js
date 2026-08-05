@@ -1851,6 +1851,31 @@ function runLightweightMigrations() {
     CREATE INDEX IF NOT EXISTS idx_wangdian_shop_discovery_goods_match ON wangdian_shop_discovery_goods(batchId,matched,shopNo);
   `);
   getDatabase().prepare("UPDATE data_sync_tasks SET taskCode='sales_fact_excel_import',syncType='sales_fact_excel_import',name='真实销售导入',executionMode='manual',updatedAt=datetime('now') WHERE id='sync-task-real-sales' AND (taskCode<>'sales_fact_excel_import' OR syncType<>'sales_fact_excel_import')").run();
+  getDatabase().exec(`
+    INSERT OR IGNORE INTO data_sync_tasks
+      (id,taskCode,name,syncType,sourceType,sourceMethod,transportType,executionMode,defaultSyncMode,scheduleCron,scheduleDescription,status,configJson,createdAt,updatedAt)
+    VALUES
+      ('sync-task-platform-goods-excel','platform_goods_excel_import','平台货品关系导入','platform_goods_excel_import','excel',NULL,'excel','manual','full',NULL,NULL,'enabled','{}',datetime('now'),datetime('now'));
+    CREATE TABLE IF NOT EXISTS platform_goods_excel_import_rows (
+      batchId TEXT NOT NULL,
+      rowNumber INTEGER NOT NULL,
+      sourceShopName TEXT,
+      platformGoodsId TEXT,
+      platformSkuId TEXT,
+      merchantSkuCode TEXT,
+      systemGoodsType TEXT,
+      salesLinkId TEXT,
+      salesLinkSkuId TEXT,
+      erpSkuId TEXT,
+      action TEXT NOT NULL,
+      exceptionType TEXT,
+      message TEXT,
+      rawDataJson TEXT NOT NULL DEFAULT '{}',
+      PRIMARY KEY(batchId,rowNumber),
+      FOREIGN KEY(batchId) REFERENCES data_sync_batches(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_platform_goods_excel_rows_action ON platform_goods_excel_import_rows(batchId,action);
+  `);
   ensureColumn("wangdian_inventory_sync_batches", "dataSyncBatchId", "TEXT");
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS erp_skus (

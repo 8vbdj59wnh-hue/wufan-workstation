@@ -90,6 +90,7 @@ import {
   runDueInventorySyncTasks,
 } from "./inventoryDataSyncAdapter.js";
 import { commitSalesFactDataSync, previewSalesFactDataSync, readSalesFactDataSyncPreview } from "./salesFactDataSyncAdapter.js";
+import { commitPlatformGoodsExcelDataSync, previewPlatformGoodsExcelDataSync, readPlatformGoodsExcelDataSyncPreview } from "./platformGoodsExcelDataSyncAdapter.js";
 import {
   createConnectionAction,
   createConnectionDataMapping,
@@ -1812,6 +1813,33 @@ app.get("/api/data-sync-center/batches/:id/sales-facts/preview", requirePermissi
 app.post("/api/data-sync-center/batches/:id/sales-facts/commit", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
   try { response.json({ success: true, ...commitSalesFactDataSync(request.params.id) }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "真实销售导入提交失败。" }); }
+});
+
+app.post("/api/data-sync-center/tasks/:id/platform-goods-excel/preview", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+  uploadConnectionWorkbook.single("file")(request, response, (error) => {
+    if (error) { response.status(400).json({ success: false, message: error.message || "平台货品Excel上传失败。" }); return; }
+    try {
+      const result = previewPlatformGoodsExcelDataSync({
+        taskId: request.params.id,
+        buffer: request.file?.buffer,
+        fileName: normalizeUploadedFileName(request.file?.originalname),
+        shopId: request.body?.shopId,
+        sourceShopName: request.body?.sourceShopName,
+        createdBy: getUserPersonId(request.user),
+      });
+      response.status(result.idempotent ? 200 : 201).json({ success: true, ...result });
+    } catch (uploadError) { response.status(400).json({ success: false, message: uploadError.message || "平台货品Excel预览失败。" }); }
+  });
+});
+
+app.get("/api/data-sync-center/batches/:id/platform-goods-excel/preview", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+  try { response.json({ success: true, ...readPlatformGoodsExcelDataSyncPreview(request.params.id) }); }
+  catch (error) { response.status(404).json({ success: false, message: error.message || "平台货品Excel预览读取失败。" }); }
+});
+
+app.post("/api/data-sync-center/batches/:id/platform-goods-excel/commit", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+  try { response.json({ success: true, ...commitPlatformGoodsExcelDataSync(request.params.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "平台货品Excel关系提交失败。" }); }
 });
 
 app.post("/api/data-sync-center/exceptions/:id/resolve", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
