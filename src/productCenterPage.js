@@ -1199,7 +1199,7 @@ function renderProductV2Preview() {
   const isInventory = importState.importType === "inventory";
   if (!isGoodsInfo && !isInventory) return renderPlatformV2Preview();
   if (isGoodsInfo) {
-    const mappingLabels = { existing: "已关联产品", auto: "可自动关联产品", pending: "待人工关联产品", error: "错误行" };
+    const mappingLabels = { existing: "保留现有产品映射", auto: "不自动关联", pending: "待人工关联产品", skipped: "异常隔离" };
     const goodsLabels = { new: "新增ERP货品", update: "更新ERP货品", unchanged: "无变化" };
     return `<div class="product-import-preview">
       ${summary.previewVersion ? `<div class="form-note"><strong>当前有效预览：V${summary.previewVersion}</strong> · 批次 ${escapeHtml(importState.batch?.id || "—")}。重新生成后旧预览仍保留，但只有最新预览可以提交。</div>` : ""}
@@ -1208,7 +1208,7 @@ function renderProductV2Preview() {
           ["文件行数", summary.total], ["有效货品", summary.validGoods], ["新增ERP货品", summary.created],
           ["更新ERP货品", summary.updated], ["已有映射", summary.existingMappings],
           ["自动建立映射", summary.autoMappings], ["待人工关联", summary.pendingMappings],
-          ["无变化", summary.unchanged], ["无效行", summary.invalid], ["错误", summary.error],
+          ["无变化", summary.unchanged], ["可导入SKU", summary.importable], ["异常跳过SKU", summary.skipped], ["警告", summary.warnings],
         ].map(([label, count]) => `<div><span>${label}</span><strong>${count ?? 0}</strong></div>`).join("")}
       </div>
       ${importState.duplicate ? `<div class="form-warning">相同文件曾于 ${formatDateTime(importState.duplicate.completedAt)} 导入；再次确认将幂等更新，不会重复创建ERP货品、产品或映射。</div>` : ""}
@@ -1221,10 +1221,10 @@ function renderProductV2Preview() {
           <td>${escapeHtml(row.specificationName || "—")}</td><td>${escapeHtml(row.category || "—")}</td>
           <td>${escapeHtml(row.systemProduct ? `${row.systemProduct.skuCode} · ${row.systemProduct.name}` : "—")}</td>
           <td>${escapeHtml(`${goodsLabels[row.goodsAction] || row.goodsAction}；${mappingLabels[row.mappingAction] || row.mappingAction}`)}</td>
-          <td>${row.errors?.length ? "失败" : "通过"}</td><td>${escapeHtml(row.errors?.join("；") || "—")}</td>
+          <td>${row.errors?.length ? "隔离跳过" : row.warnings?.length ? "警告后继续" : "通过"}</td><td>${escapeHtml([...(row.errors ?? []), ...(row.warnings ?? [])].join("；") || "—")}</td>
         </tr>`).join("")}
       </tbody></table></div>
-      <p class="form-note">待人工关联不阻止ERP货品主档导入，也不会自动创建products；预览最多展示前 ${importState.preview?.length ?? 0} 行。</p>
+      <p class="form-note">异常SKU按行隔离，不阻止其他SKU提交；同步不会自动创建products，也不会新增或修改product_erp_mappings。预览最多展示前 ${importState.preview?.length ?? 0} 行。</p>
     </div>`;
   }
   const columns = `<th>行号</th><th>货品编号</th><th>商家编码</th><th>ERP名称</th><th>系统产品</th><th>匹配状态</th><th>新增货品</th><th>更新字段</th><th>错误说明</th>`;

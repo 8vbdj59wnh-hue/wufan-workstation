@@ -41,12 +41,37 @@ export async function previewErpGoodsDataSync({ taskId, resumeBatchId = "", sync
       ...(queryGoods ? { queryGoods } : {}),
     });
     const validated = validateErpV2Import(parsed.batch.id);
+    const exceptions = (parsed.imageWarnings ?? []).map((warning) => ({
+      exceptionType: "image_download_warning",
+      severity: "warning",
+      message: warning.message || "旺店通图片下载失败，已跳过该辅助字段。",
+      entityType: "erp_sku",
+      entityId: warning.merchantSkuCodes?.[0] || null,
+      rawData: warning,
+    }));
+    exceptions.push(...(validated.exceptions ?? []), ...(validated.warnings ?? []));
+    if (!validated.valid) throw new Error("旺店通返回数据中没有可解析的ERP SKU身份，批次已阻断。");
     const dataSyncBatch = markDataSyncBatchPreviewReady(batch.id, {
       sourceBatchId: parsed.batch.id,
-      summary: validated.summary,
+      summary: {
+        ...validated.summary,
+        exceptionCount: validated.summary.skipped,
+        warningCount: Number(validated.summary.warnings || 0) + (parsed.imageWarnings?.length ?? 0),
+      },
+      exceptions,
       ...range,
+      message: `ERP同步预览已生成：可导入 ${validated.summary.importable} 个SKU，隔离 ${validated.summary.skipped} 个异常SKU。`,
     });
-    return { dataSyncBatch, importBatch: validated.batch, summary: validated.summary, preview: validated.preview, syncLog: parsed.syncLog };
+    return {
+      dataSyncBatch,
+      importBatch: validated.batch,
+      summary: {
+        ...validated.summary,
+        warningCount: Number(validated.summary.warnings || 0) + (parsed.imageWarnings?.length ?? 0),
+      },
+      preview: validated.preview,
+      syncLog: parsed.syncLog,
+    };
   } catch (error) {
     interruptDataSyncBatch(batch.id, error);
     throw error;
@@ -59,14 +84,14 @@ export function commitErpGoodsDataSync(batchId) {
   try {
     const result = commitErpV2Import(batch.sourceBatchId);
     const summary = result.summary ?? {};
-    const status = Number(summary.errors || 0) > 0 ? "partial" : "succeeded";
+    const status = Number(summary.skipped || 0) > 0 ? "partial" : "succeeded";
     const dataSyncBatch = completeDataSyncBatch(batch.id, {
       status,
-      totalCount: Number(summary.created || 0) + Number(summary.updated || 0) + Number(summary.unchanged || 0),
+      totalCount: Number(summary.importedSkus || 0) + Number(summary.skipped || 0),
       createdCount: summary.created,
       updatedCount: summary.updated,
       invalidatedCount: summary.missingGoods || 0,
-      exceptions: Number(summary.errors || 0) > 0 ? [{ exceptionType: "data_validation", message: `ERP同步提交存在 ${summary.errors} 项异常。` }] : [],
+      exceptions: [],
     });
     return { ...result, dataSyncBatch };
   } catch (error) {
@@ -80,7 +105,9 @@ export function readErpGoodsDataSyncPreview(batchId) {
   if (!batch || !["preview_ready", "superseded"].includes(batch.status) || !batch.sourceBatchId) throw new Error("ERP货品同步预览不存在或已结束。");
   const imported = readErpV2Import(batch.sourceBatchId);
   const isCurrent = batch.status === "preview_ready";
-  return { dataSyncBatch: batch, importBatch: imported.batch, summary: { ...imported.summary, ...imported.batch.summaryJson }, preview: imported.preview, isCurrent };
+  const summary = { ...imported.summary, ...imported.batch.summaryJson };
+  summary.warningCount = Number(summary.warnings || 0) + Number(summary.imageWarningCount || 0);
+  return { dataSyncBatch: batch, importBatch: imported.batch, summary, preview: imported.preview, isCurrent };
 }
 
 export async function runDueErpGoodsSyncTasks({ createdBy = "system-scheduler", queryGoods } = {}) {

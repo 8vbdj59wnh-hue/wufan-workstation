@@ -50,6 +50,7 @@ export function canonicalGoodsRecordsToStaging(records) {
     canonical,
     record: {
       "货品编号": canonical.goodsCode,
+      "旺店通货品ID": canonical.rawGoods?.goods_id ?? "",
       "商家编码": canonical.merchantSkuCode,
       "货品名称": canonical.goodsName,
       "简称": canonical.shortName,

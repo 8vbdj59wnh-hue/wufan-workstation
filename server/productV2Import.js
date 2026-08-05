@@ -507,14 +507,26 @@ function goodsInfoFields(record, existing = {}) {
 function goodsInfoValidation(staging) {
   const database = getDatabase();
   const canonicalGoodsFields = new Map();
+  const sourceGoodsIdsByCode = new Map();
+  const goodsCodesBySku = new Map();
   for (const { record } of staging.records) {
     const goodsKey = lower(record["货品编号"]);
+    const skuKey = lower(record["商家编码"]);
     if (!goodsKey || value(record["货品编号"]) === "总计:") continue;
+    const sourceGoodsId = value(record["旺店通货品ID"]);
+    const sourceGoodsIds = sourceGoodsIdsByCode.get(goodsKey) ?? new Set();
+    if (sourceGoodsId) sourceGoodsIds.add(sourceGoodsId);
+    sourceGoodsIdsByCode.set(goodsKey, sourceGoodsIds);
     const current = canonicalGoodsFields.get(goodsKey) ?? {};
     const candidate = goodsInfoFields(record);
     canonicalGoodsFields.set(goodsKey, Object.fromEntries(
       Object.keys(candidate).map((key) => [key, current[key] ?? candidate[key] ?? null]),
     ));
+    if (skuKey) {
+      const goodsCodes = goodsCodesBySku.get(skuKey) ?? new Set();
+      goodsCodes.add(goodsKey);
+      goodsCodesBySku.set(skuKey, goodsCodes);
+    }
   }
   const productsBySku = new Map();
   for (const product of database.prepare("SELECT id, skuCode, name FROM products").all()) {
@@ -529,7 +541,6 @@ function goodsInfoValidation(staging) {
     FROM product_erp_mappings m
     JOIN erp_goods g ON g.id=m.erpGoodsId
   `).all().map((item) => [lower(item.merchantSkuCode), item]));
-  const seenSkuGoods = new Map();
   const goodsActions = new Map();
   const rows = [];
   const summary = {
@@ -541,6 +552,9 @@ function goodsInfoValidation(staging) {
     existingMappings: 0,
     autoMappings: 0,
     pendingMappings: 0,
+    importable: 0,
+    skipped: 0,
+    warnings: 0,
     invalid: 0,
     error: 0,
   };
@@ -552,21 +566,23 @@ function goodsInfoValidation(staging) {
     if (!goodsCode && !merchantSkuCode && !goodsName) continue;
     if (goodsCode === "总计:" || merchantSkuCode === "总计:") continue;
     const errors = [];
-    if (!goodsCode) errors.push("ERP货品编码为空");
-    if (!merchantSkuCode) errors.push("商家编码为空");
-    if (!goodsName) errors.push("货品名称为空");
+    const warnings = [];
+    if (!goodsCode) errors.push("ERP货品编码为空，无法建立SKU所属货品关系");
+    if (!merchantSkuCode) errors.push("商家编码spec_no为空，无法识别ERP SKU身份");
+    if (!goodsName) warnings.push("货品名称为空，已按非核心展示字段继续处理");
     const skuKey = lower(merchantSkuCode);
     const goodsKey = lower(goodsCode);
-    if (skuKey && seenSkuGoods.has(skuKey) && seenSkuGoods.get(skuKey) !== goodsKey) {
-      errors.push(`同一商家编码对应多个货品编号：${seenSkuGoods.get(skuKey)}、${goodsCode}`);
-    }
-    if (skuKey) seenSkuGoods.set(skuKey, goodsKey);
+    const sourceGoodsIds = sourceGoodsIdsByCode.get(goodsKey) ?? new Set();
+    if (sourceGoodsIds.size > 1) warnings.push(`ERP货品编码存在多个历史旺店通goods_id：${[...sourceGoodsIds].join("、")}；goods_id仅保留用于来源审计`);
+    const skuGoodsCodes = goodsCodesBySku.get(skuKey) ?? new Set();
+    if (skuKey && skuGoodsCodes.size > 1) errors.push(`同一spec_no对应多个goods_no：${[...skuGoodsCodes].join("、")}`);
+    if (value(record["单品状态"]) === "inactive") errors.push("旺店通SKU已删除或停用，不进入当前ERP SKU业务主表");
     const existingMapping = mappingsBySku.get(skuKey) ?? null;
     if (existingMapping && !equivalentBusinessCode(existingMapping.goodsCode, goodsCode)) {
-      errors.push(`现有映射指向货品 ${existingMapping.goodsCode}，与本行 ${goodsCode} 冲突`);
+      errors.push(`SKU历史归属冲突：现有产品映射指向货品 ${existingMapping.goodsCode}，本行属于 ${goodsCode}`);
     }
     const productMatches = productsBySku.get(skuKey) ?? [];
-    if (!existingMapping && productMatches.length > 1) errors.push("商家编码匹配到多个系统产品");
+    if (!existingMapping && productMatches.length > 1) warnings.push("spec_no匹配到多个系统产品；本次不修改产品映射，留待人工处理");
     const product = existingMapping
       ? productMatches.find((candidate) => candidate.id === existingMapping.productId) ?? null
       : productMatches.length === 1 ? productMatches[0] : null;
@@ -585,14 +601,12 @@ function goodsInfoValidation(staging) {
         ? "update"
         : "unchanged";
     }
-    if (goodsKey && !goodsActions.has(goodsKey)) goodsActions.set(goodsKey, goodsAction);
+    if (!errors.length && goodsKey && !goodsActions.has(goodsKey)) goodsActions.set(goodsKey, goodsAction);
     const mappingAction = errors.length
-      ? "error"
+      ? "skipped"
       : existingMapping
         ? "existing"
-        : product
-          ? "auto"
-          : "pending";
+        : "pending";
     rows.push({
       rowNumber: item.rowNumber,
       goodsCode,
@@ -605,8 +619,10 @@ function goodsInfoValidation(staging) {
       goodsFields: nextFields,
       goodsAction,
       mappingAction,
-      status: errors.length ? "error" : "valid",
+      status: errors.length ? "skipped" : warnings.length ? "warning" : "valid",
       errors,
+      warnings,
+      sourceGoodsIds: [...sourceGoodsIds],
     });
   }
   summary.total = rows.length;
@@ -615,11 +631,65 @@ function goodsInfoValidation(staging) {
   summary.updated = [...goodsActions.values()].filter((item) => item === "update").length;
   summary.unchanged = [...goodsActions.values()].filter((item) => item === "unchanged").length;
   summary.existingMappings = rows.filter((row) => row.mappingAction === "existing").length;
-  summary.autoMappings = rows.filter((row) => row.mappingAction === "auto").length;
+  summary.autoMappings = 0;
   summary.pendingMappings = rows.filter((row) => row.mappingAction === "pending").length;
-  summary.invalid = rows.filter((row) => row.errors.length > 0).length;
-  summary.error = rows.reduce((total, row) => total + row.errors.length, 0);
-  return { valid: rows.length > 0 && summary.error === 0, rows, summary };
+  const importableRows = rows.filter((row) => row.errors.length === 0);
+  const skippedRows = rows.filter((row) => row.errors.length > 0);
+  const skippedGroups = new Map();
+  for (const row of skippedRows) {
+    const key = row.merchantSkuCode ? `sku:${lower(row.merchantSkuCode)}` : `row:${row.rowNumber}`;
+    const group = skippedGroups.get(key) ?? {
+      merchantSkuCode: row.merchantSkuCode || null,
+      goodsCodes: new Set(),
+      sourceGoodsIds: new Set(),
+      rowNumbers: [],
+      reasons: new Set(),
+    };
+    if (row.goodsCode) group.goodsCodes.add(row.goodsCode);
+    for (const sourceGoodsId of row.sourceGoodsIds) group.sourceGoodsIds.add(sourceGoodsId);
+    group.rowNumbers.push(row.rowNumber);
+    for (const reason of row.errors) group.reasons.add(reason);
+    skippedGroups.set(key, group);
+  }
+  summary.importable = new Set(importableRows.map((row) => lower(row.merchantSkuCode))).size;
+  summary.skipped = skippedGroups.size;
+  summary.skippedRows = skippedRows.length;
+  summary.uniqueSkuCount = summary.importable + summary.skipped;
+  summary.warnings = rows.reduce((total, row) => total + row.warnings.length, 0);
+  summary.invalid = summary.skippedRows;
+  summary.error = summary.skipped;
+  return {
+    valid: rows.length > 0 && summary.importable > 0,
+    rows,
+    summary,
+    exceptions: [...skippedGroups.values()].map((group) => ({
+      exceptionType: group.merchantSkuCode ? "erp_sku_row_isolated" : "erp_sku_identity_missing",
+      severity: "error",
+      message: [...group.reasons].join("；"),
+      entityType: "erp_sku",
+      entityId: group.merchantSkuCode,
+      rawData: {
+        rowNumbers: group.rowNumbers,
+        spec_no: group.merchantSkuCode,
+        goods_no: [...group.goodsCodes],
+        goods_id: [...group.sourceGoodsIds],
+        reasons: [...group.reasons],
+      },
+    })),
+    warnings: rows.flatMap((row) => row.warnings.map((message) => ({
+      exceptionType: "erp_sku_row_warning",
+      severity: "warning",
+      message,
+      entityType: "erp_sku",
+      entityId: row.merchantSkuCode || null,
+      rawData: {
+        rowNumber: row.rowNumber,
+        spec_no: row.merchantSkuCode || null,
+        goods_no: row.goodsCode || null,
+        goods_id: row.sourceGoodsIds,
+      },
+    }))),
+  };
 }
 
 function normalizeShopMappings(staging, submitted = {}) {
@@ -963,28 +1033,46 @@ async function downloadWangdianImage(rawUrl, batchDir) {
 
 async function localizeWangdianImages(records, batchId) {
   const sourceUrls = [...new Set(records.flatMap((record) => record.imageUrls ?? []).map(value).filter(Boolean))];
-  if (sourceUrls.length === 0) return records;
+  if (sourceUrls.length === 0) return { records, warnings: [] };
   const batchDir = path.join(stagingRoot, batchId);
   fs.mkdirSync(batchDir, { recursive: true });
   const localBySource = new Map();
-  try {
-    let cursor = 0;
-    const workers = Array.from({ length: Math.min(4, sourceUrls.length) }, async () => {
-      while (cursor < sourceUrls.length) {
-        const sourceUrl = sourceUrls[cursor];
-        cursor += 1;
-        localBySource.set(sourceUrl, await downloadWangdianImage(sourceUrl, batchDir));
-      }
-    });
-    await Promise.all(workers);
-  } catch (error) {
-    fs.rmSync(batchDir, { recursive: true, force: true });
-    throw error;
+  const referencesBySource = new Map();
+  for (const record of records) {
+    for (const sourceUrl of record.imageUrls ?? []) {
+      const reference = referencesBySource.get(sourceUrl) ?? { goodsCodes: new Set(), merchantSkuCodes: new Set() };
+      if (value(record.goodsCode)) reference.goodsCodes.add(value(record.goodsCode));
+      if (value(record.merchantSkuCode)) reference.merchantSkuCodes.add(value(record.merchantSkuCode));
+      referencesBySource.set(sourceUrl, reference);
+    }
   }
-  return records.map((record) => ({
-    ...record,
-    imageUrls: (record.imageUrls ?? []).map((url) => localBySource.get(value(url))).filter(Boolean),
-  }));
+  const warnings = [];
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(4, sourceUrls.length) }, async () => {
+    while (cursor < sourceUrls.length) {
+      const sourceUrl = sourceUrls[cursor];
+      cursor += 1;
+      try {
+        localBySource.set(sourceUrl, await downloadWangdianImage(sourceUrl, batchDir));
+      } catch (error) {
+        const related = referencesBySource.get(sourceUrl);
+        warnings.push({
+          sourceUrl,
+          message: error.message || "旺店通图片下载失败。",
+          goodsCodes: [...(related?.goodsCodes ?? [])],
+          merchantSkuCodes: [...(related?.merchantSkuCodes ?? [])],
+        });
+      }
+    }
+  });
+  await Promise.all(workers);
+  return {
+    records: records.map((record) => ({
+      ...record,
+      imageUrls: (record.imageUrls ?? []).map((url) => localBySource.get(value(url))).filter(Boolean),
+    })),
+    warnings,
+  };
 }
 
 export function listWangdianGoodsSyncLogs(limit = 50) {
@@ -1048,7 +1136,8 @@ export async function parseWangdianGoodsImport({ syncRunId, dataSyncBatchId, que
   }
   const batchId = `erp-v2-goods_info-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
   const fileHash = crypto.createHash("sha256").update(JSON.stringify(sourceCanonicalRecords)).digest("hex");
-  const canonicalRecords = await localizeWangdianImages(sourceCanonicalRecords, batchId);
+  const localizedImages = await localizeWangdianImages(sourceCanonicalRecords, batchId);
+  const canonicalRecords = localizedImages.records;
   const records = canonicalGoodsRecordsToStaging(canonicalRecords);
   const now = new Date().toISOString();
   const previewVersion = dataSyncBatch
@@ -1101,6 +1190,7 @@ export async function parseWangdianGoodsImport({ syncRunId, dataSyncBatchId, que
       sourcePages,
       sourceWindows: queryWindows.length,
       sourceQuery: query,
+      imageWarningCount: localizedImages.warnings.length,
       previewVersion,
       dataSyncBatchId: dataSyncBatchId || null,
       duplicateCommittedBatchId: existing?.id ?? null,
@@ -1119,6 +1209,7 @@ export async function parseWangdianGoodsImport({ syncRunId, dataSyncBatchId, que
     valid: validation.valid,
     summary: validation.summary,
     preview: validation.rows.slice(0, 200),
+    imageWarnings: localizedImages.warnings,
     syncLog: listWangdianGoodsSyncLogs(200).find((item) => item.id === logId),
   };
 }
@@ -1305,9 +1396,10 @@ function commitInventory(batch, staging) {
 function commitGoodsInfo(batch, staging) {
   const database = getDatabase();
   const validation = goodsInfoValidation(staging);
-  if (!validation.valid) throw new Error("货品信息存在编码缺失或冲突，请返回预览处理后重试。");
+  if (!validation.valid) throw new Error("当前批次没有可解析的ERP SKU身份，不能提交。");
   const now = new Date().toISOString();
   const stats = {
+    importedSkus: 0,
     created: 0,
     updated: 0,
     unchanged: 0,
@@ -1315,12 +1407,15 @@ function commitGoodsInfo(batch, staging) {
     existingMappings: 0,
     autoMappings: 0,
     pendingMappings: 0,
-    errors: 0,
+    skipped: validation.summary.skipped,
+    warnings: validation.summary.warnings,
+    errors: validation.summary.skipped,
   };
+  const stagingByRow = new Map(staging.records.map((item) => [item.rowNumber, item]));
   database.transaction(() => {
     const countedGoods = new Set();
-    for (const row of validation.rows) {
-      const record = staging.records.find((item) => item.rowNumber === row.rowNumber)?.record ?? {};
+    for (const row of validation.rows.filter((item) => item.errors.length === 0)) {
+      const record = stagingByRow.get(row.rowNumber)?.record ?? {};
       const goodsKey = lower(row.goodsCode);
       let goods = database.prepare("SELECT * FROM erp_goods WHERE lower(goodsCode)=lower(?)").get(row.goodsCode)
         ?? (row.existingGoodsId ? database.prepare("SELECT * FROM erp_goods WHERE id=?").get(row.existingGoodsId) : null);
@@ -1365,7 +1460,7 @@ function commitGoodsInfo(batch, staging) {
         goods = database.prepare("SELECT * FROM erp_goods WHERE lower(goodsCode)=lower(?)").get(row.goodsCode)
           ?? (row.existingGoodsId ? database.prepare("SELECT * FROM erp_goods WHERE id=?").get(row.existingGoodsId) : null);
       }
-      const stagingItem = staging.records.find((item) => item.rowNumber === row.rowNumber);
+      const stagingItem = stagingByRow.get(row.rowNumber);
       const imageUrls = Array.isArray(stagingItem?.imageUrls)
         ? stagingItem.imageUrls.map((item) => value(item)).filter(Boolean)
         : [];
@@ -1406,44 +1501,13 @@ function commitGoodsInfo(batch, staging) {
         now,
         now,
       );
-      if (!row.systemProduct) {
+      stats.importedSkus += 1;
+      if (row.mappingAction === "existing") {
+        stats.matched += 1;
+        stats.existingMappings += 1;
+      } else {
         stats.pendingMappings += 1;
-        continue;
       }
-      const existingMapping = database.prepare("SELECT * FROM product_erp_mappings WHERE productId=?").get(row.systemProduct.id);
-      let latestState = {};
-      try { latestState = JSON.parse(existingMapping?.latestStateJson || "{}"); } catch {}
-      const mappingId = existingMapping?.id ?? id("product-erp-map", row.systemProduct.id);
-      database.prepare(`
-        INSERT INTO product_erp_mappings (
-          id,productId,erpGoodsId,merchantSkuCode,specificationName,unit,barcode,erpStatus,
-          matchMethod,sourceBatchId,latestStateJson,currentState,missingAt,createdAt,updatedAt
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(productId) DO UPDATE SET
-          erpGoodsId=excluded.erpGoodsId,merchantSkuCode=excluded.merchantSkuCode,
-          specificationName=excluded.specificationName,unit=excluded.unit,barcode=excluded.barcode,erpStatus=excluded.erpStatus,
-          matchMethod=excluded.matchMethod,sourceBatchId=excluded.sourceBatchId,
-          currentState='active',missingAt=NULL,updatedAt=excluded.updatedAt
-      `).run(
-        mappingId,
-        row.systemProduct.id,
-        goods.id,
-        row.merchantSkuCode,
-        row.specificationName || null,
-        value(record["基本单位"]) || value(record["单位"]) || null,
-        value(record["主条码"]) || value(record["条码"]) || null,
-        value(record["单品状态"]) || null,
-        existingMapping ? existingMapping.matchMethod : "sku_code",
-        batch.id,
-        JSON.stringify(latestState),
-        "active",
-        null,
-        existingMapping?.createdAt ?? now,
-        now,
-      );
-      stats.matched += 1;
-      if (existingMapping) stats.existingMappings += 1;
-      else stats.autoMappings += 1;
     }
   })();
   return stats;
