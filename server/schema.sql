@@ -1154,6 +1154,33 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_link_skus_fallback
   ON sales_link_skus(salesLinkId, normalizedPlatformSkuCode, normalizedSpecificationName)
   WHERE platformSkuId IS NULL OR platformSkuId = '';
 
+CREATE TABLE IF NOT EXISTS sales_link_sku_erp_mappings (
+  id TEXT PRIMARY KEY,
+  salesLinkSkuId TEXT NOT NULL,
+  erpSkuId TEXT NOT NULL,
+  mappingType TEXT NOT NULL DEFAULT 'single',
+  quantity REAL NOT NULL DEFAULT 1,
+  currentState TEXT NOT NULL DEFAULT 'active',
+  sourceType TEXT NOT NULL DEFAULT 'legacy_migration',
+  sourceBatchId TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  invalidatedAt TEXT,
+  FOREIGN KEY(salesLinkSkuId) REFERENCES sales_link_skus(id),
+  FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),
+  UNIQUE(salesLinkSkuId,erpSkuId),
+  CHECK(mappingType IN ('single','combo')),
+  CHECK(quantity > 0),
+  CHECK(currentState IN ('active','inactive'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_sales_link_sku_erp_mapping_link_state
+  ON sales_link_sku_erp_mappings(salesLinkSkuId,currentState);
+CREATE INDEX IF NOT EXISTS idx_sales_link_sku_erp_mapping_erp_state
+  ON sales_link_sku_erp_mappings(erpSkuId,currentState);
+CREATE INDEX IF NOT EXISTS idx_sales_link_sku_erp_mapping_batch
+  ON sales_link_sku_erp_mappings(sourceBatchId);
+
 CREATE TABLE IF NOT EXISTS wangdian_shop_mappings (
   id TEXT PRIMARY KEY,
   wangdianShopNo TEXT NOT NULL COLLATE NOCASE UNIQUE,
@@ -1545,6 +1572,7 @@ CREATE TABLE IF NOT EXISTS connection_sku_sales_facts (
   batchId TEXT NOT NULL,
   salesLinkId TEXT NOT NULL,
   salesLinkSkuId TEXT NOT NULL,
+  erpSkuId TEXT,
   platformGoodsId TEXT NOT NULL,
   skuCode TEXT NOT NULL,
   periodStart TEXT NOT NULL,
@@ -1558,7 +1586,7 @@ CREATE TABLE IF NOT EXISTS connection_sku_sales_facts (
   FOREIGN KEY(batchId) REFERENCES connection_import_batches(id),
   FOREIGN KEY(salesLinkId) REFERENCES sales_links(id),
   FOREIGN KEY(salesLinkSkuId) REFERENCES sales_link_skus(id),
-  UNIQUE(salesLinkSkuId,periodStart,periodEnd)
+  FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_connection_sku_sales_link_period

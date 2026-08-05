@@ -1215,6 +1215,106 @@ function ensureColumn(table, column, definition) {
   }
 }
 
+function migrateSalesLinkSkuErpRelationsV2() {
+  const database = getDatabase();
+  const migratedAt = new Date().toISOString();
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS sales_link_sku_erp_mappings (
+      id TEXT PRIMARY KEY,
+      salesLinkSkuId TEXT NOT NULL,
+      erpSkuId TEXT NOT NULL,
+      mappingType TEXT NOT NULL DEFAULT 'single',
+      quantity REAL NOT NULL DEFAULT 1,
+      currentState TEXT NOT NULL DEFAULT 'active',
+      sourceType TEXT NOT NULL DEFAULT 'legacy_migration',
+      sourceBatchId TEXT,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      invalidatedAt TEXT,
+      FOREIGN KEY(salesLinkSkuId) REFERENCES sales_link_skus(id),
+      FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),
+      UNIQUE(salesLinkSkuId,erpSkuId),
+      CHECK(mappingType IN ('single','combo')),
+      CHECK(quantity > 0),
+      CHECK(currentState IN ('active','inactive'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_sales_link_sku_erp_mapping_link_state
+      ON sales_link_sku_erp_mappings(salesLinkSkuId,currentState);
+    CREATE INDEX IF NOT EXISTS idx_sales_link_sku_erp_mapping_erp_state
+      ON sales_link_sku_erp_mappings(erpSkuId,currentState);
+    CREATE INDEX IF NOT EXISTS idx_sales_link_sku_erp_mapping_batch
+      ON sales_link_sku_erp_mappings(sourceBatchId);
+  `);
+  database.prepare(`
+    INSERT OR IGNORE INTO sales_link_sku_erp_mappings
+      (id,salesLinkSkuId,erpSkuId,mappingType,quantity,currentState,sourceType,sourceBatchId,createdAt,updatedAt)
+    SELECT 'sales-link-sku-erp-map-' || lower(hex(randomblob(16))),s.id,s.erpSkuId,'single',1,'active','legacy_migration',s.lastSeenBatchId,
+      COALESCE(NULLIF(s.updatedAt,''),NULLIF(s.createdAt,''),?),COALESCE(NULLIF(s.updatedAt,''),NULLIF(s.createdAt,''),?)
+    FROM sales_link_skus s
+    JOIN erp_skus e ON e.id=s.erpSkuId
+    WHERE s.erpSkuId IS NOT NULL AND s.erpSkuId<>'' AND COALESCE(s.systemGoodsType,'') NOT LIKE '%组合%'
+  `).run(migratedAt, migratedAt);
+}
+
+function migrateConnectionSkuSalesFactsV2() {
+  const database = getDatabase();
+  const table = database.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='connection_sku_sales_facts'").get();
+  const sql = String(table?.sql || "");
+  const hasErpSkuId = database.prepare("PRAGMA table_info(connection_sku_sales_facts)").all().some((item) => item.name === "erpSkuId");
+  const hasLegacyIdentity = /UNIQUE\s*\(\s*salesLinkSkuId\s*,\s*periodStart\s*,\s*periodEnd\s*\)/i.test(sql);
+  if (!hasErpSkuId || hasLegacyIdentity) {
+    database.transaction(() => {
+      database.exec("DROP TABLE IF EXISTS connection_sku_sales_facts_v2");
+      database.exec(`
+        CREATE TABLE connection_sku_sales_facts_v2 (
+          id TEXT PRIMARY KEY,
+          batchId TEXT NOT NULL,
+          salesLinkId TEXT NOT NULL,
+          salesLinkSkuId TEXT NOT NULL,
+          erpSkuId TEXT,
+          platformGoodsId TEXT NOT NULL,
+          skuCode TEXT NOT NULL,
+          periodStart TEXT NOT NULL,
+          periodEnd TEXT NOT NULL,
+          shippedQuantity REAL,
+          salesAmount REAL,
+          costAmount REAL,
+          profitAmount REAL,
+          rawDataJson TEXT NOT NULL DEFAULT '{}',
+          createdAt TEXT NOT NULL,
+          FOREIGN KEY(batchId) REFERENCES connection_import_batches(id),
+          FOREIGN KEY(salesLinkId) REFERENCES sales_links(id),
+          FOREIGN KEY(salesLinkSkuId) REFERENCES sales_link_skus(id),
+          FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id)
+        )
+      `);
+      database.exec(`
+        INSERT INTO connection_sku_sales_facts_v2
+          (id,batchId,salesLinkId,salesLinkSkuId,erpSkuId,platformGoodsId,skuCode,periodStart,periodEnd,shippedQuantity,salesAmount,costAmount,profitAmount,rawDataJson,createdAt)
+        SELECT f.id,f.batchId,f.salesLinkId,f.salesLinkSkuId,
+          ${hasErpSkuId ? "COALESCE(f.erpSkuId,s.erpSkuId,(SELECT e.id FROM erp_skus e WHERE LOWER(e.merchantSkuCode)=LOWER(f.skuCode) LIMIT 1))" : "COALESCE(s.erpSkuId,(SELECT e.id FROM erp_skus e WHERE LOWER(e.merchantSkuCode)=LOWER(f.skuCode) LIMIT 1))"},
+          f.platformGoodsId,f.skuCode,f.periodStart,f.periodEnd,f.shippedQuantity,f.salesAmount,f.costAmount,f.profitAmount,f.rawDataJson,f.createdAt
+        FROM connection_sku_sales_facts f
+        LEFT JOIN sales_link_skus s ON s.id=f.salesLinkSkuId
+      `);
+      database.exec("DROP TABLE connection_sku_sales_facts");
+      database.exec("ALTER TABLE connection_sku_sales_facts_v2 RENAME TO connection_sku_sales_facts");
+    })();
+  }
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_connection_sku_sales_link_period
+      ON connection_sku_sales_facts(salesLinkId,periodEnd DESC,periodStart DESC);
+    CREATE INDEX IF NOT EXISTS idx_connection_sku_sales_erp_period
+      ON connection_sku_sales_facts(erpSkuId,periodEnd DESC,periodStart DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_sku_sales_v2_identity
+      ON connection_sku_sales_facts(salesLinkSkuId,erpSkuId,periodStart,periodEnd)
+      WHERE erpSkuId IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_sku_sales_legacy_identity
+      ON connection_sku_sales_facts(salesLinkSkuId,periodStart,periodEnd)
+      WHERE erpSkuId IS NULL;
+  `);
+}
+
 function backfillConnectionProfileOrigins() {
   const database = getDatabase();
   database.exec(`
@@ -1803,6 +1903,8 @@ function runLightweightMigrations() {
   ensureColumn("erp_skus", "galleryImages", "TEXT");
   ensureColumn("erp_skus", "sourceUpdatedAt", "TEXT");
   ensureColumn("erp_skus", "rawSourceData", "TEXT NOT NULL DEFAULT '{}'");
+  migrateSalesLinkSkuErpRelationsV2();
+  migrateConnectionSkuSalesFactsV2();
   ensureColumn("wangdian_goods_sync_logs", "importBatchId", "TEXT");
   ensureColumn("wangdian_goods_sync_logs", "successCount", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn("wangdian_goods_sync_logs", "failedCount", "INTEGER NOT NULL DEFAULT 0");
