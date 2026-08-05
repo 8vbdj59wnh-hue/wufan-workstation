@@ -18,8 +18,8 @@ const typeDefinitions = {
   },
   erp_sales: {
     label: "ERP真实销售导入",
-    required: ["platform", "shop", "platformGoodsId", "skuCode", "periodStart", "periodEnd"],
-    fields: ["platform", "shop", "platformGoodsId", "skuCode", "periodStart", "periodEnd", "shippedQuantity", "salesAmount", "costAmount", "profitAmount"],
+    required: ["shop", "platformGoodsId", "platformSkuId", "skuCode", "periodStart", "periodEnd"],
+    fields: ["platform", "shop", "platformGoodsId", "platformSkuId", "skuCode", "periodStart", "periodEnd", "shippedQuantity", "salesAmount", "costAmount", "profitAmount"],
   },
   erp_product_relations: {
     label: "ERP产品关系导入",
@@ -45,7 +45,7 @@ const aliases = {
   platformGoodsId: ["商品ID", "平台货品ID", "SPU", "platformGoodsId"],
   title: ["商品标题", "商品名称", "商品NAME", "SPU名称", "title"], mainImage: ["商品主图", "主图", "mainImage"],
   url: ["商品链接", "链接", "url"], category: ["类目", "一级类目", "一级品类", "category"], status: ["商品状态", "状态", "status"],
-  periodStart: ["周期开始", "开始日期", "统计日期", "时间", "periodStart"], periodEnd: ["周期结束", "结束日期", "统计日期", "时间", "periodEnd"],
+  periodStart: ["周期开始", "开始日期", "统计日期", "日期", "时间", "periodStart"], periodEnd: ["周期结束", "结束日期", "统计日期", "日期", "时间", "periodEnd"],
   visitorCount: ["访客", "访客数", "商品访客数", "visitorCount"], viewCount: ["浏览", "浏览量", "商品浏览量", "viewCount"],
   clickCount: ["点击", "点击量", "clickCount"], favoriteCount: ["收藏", "收藏数", "商品收藏人数", "新增加入心愿单人数", "favoriteCount"],
   cartCount: ["加购", "加购数", "商品加购人数", "新增加购人数", "加购客户数", "cartCount"],
@@ -53,9 +53,9 @@ const aliases = {
   conversionRate: ["转化率", "支付转化率", "商品支付转化率", "成交转化率", "conversionRate"],
   payAmount: ["支付金额", "成交金额", "销售额", "payAmount"], payQuantity: ["支付件数", "成交商品件数", "销量", "payQuantity"],
   refundAmount: ["成功退款金额", "退款金额（支付时间）", "取消及售后退款金额", "refundAmount"], competitionScore: ["竞争力评分", "competitionScore"],
-  skuCode: ["SKU编码", "商家编码", "货号", "skuCode"], platformSkuId: ["平台SKU ID", "platformSkuId"],
-  specificationName: ["规格", "规格名称", "specificationName"], shippedQuantity: ["发货销量", "发货数量", "shippedQuantity"],
-  salesAmount: ["销售金额", "salesAmount"], costAmount: ["成本", "成本金额", "costAmount"], profitAmount: ["利润", "profitAmount"],
+  skuCode: ["SKU编码", "商家编码", "货号", "skuCode"], platformSkuId: ["平台SKU ID", "平台规格ID", "platformSkuId"],
+  specificationName: ["规格", "规格名称", "specificationName"], shippedQuantity: ["发货销量", "发货数量", "销量", "quantity", "shippedQuantity"],
+  salesAmount: ["销售金额", "销售额", "salesAmount"], costAmount: ["成本", "成本金额", "costAmount"], profitAmount: ["利润", "profitAmount"],
   businessDate: ["业务日期", "库存日期", "businessDate"], currentStock: ["当前库存", "实际库存", "currentStock"],
   availableStock: ["可售库存", "可用库存", "availableStock"], unitCost: ["单位成本", "成本价", "unitCost"], salesVelocity: ["销售速度", "日均销量", "salesVelocity"],
 };
@@ -160,6 +160,11 @@ function normalizeRow(raw, mapping, matchRules, sheetName) {
   return row;
 }
 
+function salesFactV2Period(value, endOfDay = false) {
+  const date = normalizeDate(value);
+  return date ? `${date}T${endOfDay ? "23:59:59" : "00:00:00"}` : "";
+}
+
 function platformTemplateConfigs() {
   const businessMapping = {
     "商品ID": "platformGoodsId", "商品名称": "title", "统计日期": "periodStart", "商品状态": "status",
@@ -178,9 +183,14 @@ function platformTemplateConfigs() {
 function findShop(database, platform, shopName, candidates = []) {
   const platformNames = { tmall: ["tmall", "天猫"], taobao: ["taobao", "淘宝"], xiaohongshu: ["xiaohongshu", "小红书"], jd: ["jd", "京东"] }[normalized(platform)] || [text(platform)];
   const names = [...new Set([shopName, ...candidates].map(text).filter(Boolean))];
-  for (const platformValue of platformNames) for (const name of names) {
-    const shop = database.prepare("SELECT * FROM sales_shops WHERE LOWER(platform)=LOWER(?) AND (LOWER(displayName)=LOWER(?) OR LOWER(shopName)=LOWER(?)) ORDER BY CASE WHEN LOWER(displayName)=LOWER(?) THEN 0 ELSE 1 END,id LIMIT 1").get(platformValue, name, name, name);
-    if (shop) return shop;
+  for (const name of names) {
+    const rows = text(platform)
+      ? platformNames.flatMap((platformValue) => database.prepare(`SELECT DISTINCT s.* FROM sales_shops s LEFT JOIN sales_shop_aliases a ON a.shopId=s.id
+          WHERE LOWER(s.platform)=LOWER(?) AND (LOWER(s.displayName)=LOWER(?) OR LOWER(s.shopName)=LOWER(?) OR LOWER(a.rawName)=LOWER(?))`).all(platformValue, name, name, name))
+      : database.prepare(`SELECT DISTINCT s.* FROM sales_shops s LEFT JOIN sales_shop_aliases a ON a.shopId=s.id
+          WHERE LOWER(s.displayName)=LOWER(?) OR LOWER(s.shopName)=LOWER(?) OR LOWER(a.rawName)=LOWER(?)`).all(name, name, name);
+    const unique = [...new Map(rows.map((row) => [row.id, row])).values()];
+    if (unique.length === 1) return unique[0];
   }
   return null;
 }
@@ -289,6 +299,7 @@ function insertPlatformSnapshot(database, row, raw, batchId, link, profile, mapp
 }
 
 function findLinkSku(database, linkId, skuCode) { return database.prepare("SELECT * FROM sales_link_skus WHERE salesLinkId=? AND LOWER(COALESCE(normalizedPlatformSkuCode,platformSkuCode,''))=LOWER(?)").get(linkId, text(skuCode)); }
+function findLinkSkuByPlatformId(database, linkId, platformSkuId) { return database.prepare("SELECT * FROM sales_link_skus WHERE salesLinkId=? AND platformSkuId=?").get(linkId, text(platformSkuId)); }
 function requireLink(database, row) { const link = findLink(database, row); if (!link) throw Object.assign(new Error("商品ID不存在。"), { type: "missing_goods_id" }); return link; }
 function requireLinkSku(database, link, skuCode) { const sku = findLinkSku(database, link.id, skuCode); if (!sku) throw Object.assign(new Error("SKU不存在。"), { type: "missing_sku" }); return sku; }
 
@@ -303,8 +314,13 @@ function applyRow(database, importType, row, batchId, raw) {
     const link = requireLink(database, row); const profile = database.prepare("SELECT * FROM connection_profiles WHERE salesLinkId=?").get(link.id); if (!profile) throw Object.assign(new Error("链接档案不存在。"), { type: "missing_connection_profile" }); const mapping = ensurePlatformMapping(database, row, link, profile, raw); insertPlatformSnapshot(database, row, raw, batchId, link, profile, mapping); return { link, profile };
   }
   if (importType === "erp_sales") {
-    const link = requireLink(database, row); const sku = requireLinkSku(database, link, row.skuCode);
-    database.prepare(`INSERT OR IGNORE INTO connection_sku_sales_facts (id,batchId,salesLinkId,salesLinkSkuId,platformGoodsId,skuCode,periodStart,periodEnd,shippedQuantity,salesAmount,costAmount,profitAmount,rawDataJson,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id("connection-sku-sales"), batchId, link.id, sku.id, text(row.platformGoodsId), text(row.skuCode), text(row.periodStart), text(row.periodEnd), row.shippedQuantity, row.salesAmount, row.costAmount, row.profitAmount, JSON.stringify(raw), createdAt); return { link, sku };
+    const link = requireLink(database, row); const sku = findLinkSkuByPlatformId(database, link.id, row.platformSkuId);
+    if (!sku) throw Object.assign(new Error("平台SKU不存在。"), { type: "missing_sku" });
+    const erpSku = database.prepare("SELECT * FROM erp_skus WHERE LOWER(merchantSkuCode)=LOWER(?)").get(text(row.skuCode));
+    if (!erpSku) throw Object.assign(new Error("ERP SKU编码不存在。"), { type: "missing_erp_sku" });
+    const mapping = database.prepare("SELECT * FROM sales_link_sku_erp_mappings WHERE salesLinkSkuId=? AND erpSkuId=? AND currentState='active'").get(sku.id, erpSku.id);
+    if (!mapping) throw Object.assign(new Error("平台SKU与ERP SKU关系不存在。"), { type: "missing_erp_mapping" });
+    database.prepare(`INSERT OR IGNORE INTO connection_sku_sales_facts (id,batchId,salesLinkId,salesLinkSkuId,erpSkuId,platformGoodsId,skuCode,periodStart,periodEnd,shippedQuantity,salesAmount,costAmount,profitAmount,rawDataJson,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id("connection-sku-sales"), batchId, link.id, sku.id, erpSku.id, text(row.platformGoodsId), text(row.skuCode), text(row.periodStart), text(row.periodEnd), row.shippedQuantity, row.salesAmount, row.costAmount, row.profitAmount, JSON.stringify(raw), createdAt); return { link, sku, erpSku };
   }
   if (importType === "erp_product_relations") {
     const link = requireLink(database, row); const product = database.prepare("SELECT * FROM products WHERE LOWER(skuCode)=LOWER(?)").get(text(row.skuCode)); if (!product) throw Object.assign(new Error("SKU不存在对应产品。"), { type: "missing_sku" }); let sku = findLinkSku(database, link.id, row.skuCode);
@@ -326,17 +342,29 @@ function previewSummary(database, rows, importType) {
   return { createLinks, updateLinks, facts };
 }
 
-export function previewConnectionDataImport({ buffer, fileName, importType, templateVersionId, userId }) {
+export function previewConnectionDataImport({ buffer, fileName, importType, templateVersionId, userId, parserVersion = "" }) {
   if (!Buffer.isBuffer(buffer) || !buffer.length) throw new Error("请选择Excel文件。");
   const definition = typeDefinitions[text(importType)]; if (!definition) throw new Error("导入类型无效。");
   if (definition.requiresTemplate && !text(templateVersionId)) throw new Error("请选择平台链接经营导入模板。");
-  const database = getDatabase(); const hash = crypto.createHash("sha256").update(buffer).digest("hex");
-  const existing = database.prepare("SELECT * FROM connection_import_batches WHERE importType=? AND fileHash=? ORDER BY createdAt DESC LIMIT 1").get(importType, hash);
+  const database = getDatabase(); const sourceFileHash = crypto.createHash("sha256").update(buffer).digest("hex");
+  const hash = parserVersion ? crypto.createHash("sha256").update(buffer).update(`\0${parserVersion}`).digest("hex") : sourceFileHash;
+  const existing = database.prepare("SELECT * FROM connection_import_batches WHERE importType=? AND fileHash=? ORDER BY createdAt DESC").all(importType, hash)
+    .find((item) => text(json(item.previewSummaryJson, {}).parserVersion) === text(parserVersion));
   if (existing) return { batch: existing, preview: json(existing.previewSummaryJson, {}), rows: listConnectionFoundationRows(existing.id), idempotent: true, blocked: existing.status === "blocked" };
   const version = versionRow(database, templateVersionId); if (version && version.dataType !== importType) throw new Error("模板与导入类型不匹配。");
   const matchRules = version?.matchRules || {}; const workbook = readWorkbook(buffer, matchRules); const mapping = version?.fieldMappings || defaultMapping(workbook.headers, definition.fields);
   const filtered = workbook.rawRows.filter((item) => rowMatchesFilters(item.raw, matchRules.rowFilters || []));
-  const rows = filtered.map((item) => ({ ...item, data: normalizeRow(item.raw, mapping, matchRules, workbook.sheetName), status: "validated", errorType: null, errorMessage: null }));
+  const normalizedRows = filtered.map((item) => {
+    const data = normalizeRow(item.raw, mapping, matchRules, workbook.sheetName);
+    if (importType === "erp_sales" && parserVersion === "sales-fact-v2") {
+      const businessDate = item.raw["日期"] ?? data.periodStart ?? data.periodEnd;
+      data.periodStart = salesFactV2Period(businessDate);
+      data.periodEnd = salesFactV2Period(businessDate, true);
+    }
+    return { ...item, data, status: "validated", errorType: null, errorMessage: null };
+  });
+  const rows = normalizedRows.filter((item) => !(importType === "erp_sales" && parserVersion === "sales-fact-v2"
+    && (/^合计[:：]?$/.test(text(item.data.shop)) || normalized(item.data.platformGoodsId) === "na")));
   for (const item of rows) {
     const missing = definition.required.filter((field) => text(item.data[field]) === "");
     const invalidNumbers = Object.entries(mapping).filter(([source, target]) => numericFields.has(target) && text(item.raw[source]) !== "" && item.data[target] === null).map(([, target]) => target);
@@ -344,17 +372,21 @@ export function previewConnectionDataImport({ buffer, fileName, importType, temp
     else if (invalidNumbers.length) Object.assign(item, { status: "error", errorType: "invalid_format", errorMessage: `数值格式错误：${invalidNumbers.join("、")}` });
   }
   const duplicateKey = (data) => importType === "erp_sales"
-    ? [data.platform, data.shop, data.platformGoodsId, data.skuCode, data.periodStart, data.periodEnd].map(text).join("|")
+    ? [data.shop, data.platformGoodsId, data.platformSkuId, data.skuCode, data.periodStart, data.periodEnd].map(text).join("|")
     : text(data.platformGoodsId);
   const duplicateKeys = new Set(); const seen = new Set();
   for (const item of rows.filter((row) => row.status === "validated")) { const key = duplicateKey(item.data); if (seen.has(key)) duplicateKeys.add(key); seen.add(key); }
-  for (const item of rows.filter((row) => duplicateKeys.has(duplicateKey(row.data)))) Object.assign(item, { status: "error", errorType: "duplicate_identity", errorMessage: importType === "erp_sales" ? "同一链接SKU及周期存在重复销售数据，已阻断本批次确认。" : "过滤后同一商品ID存在重复，已阻断本批次确认。" });
+  for (const item of rows.filter((row) => duplicateKeys.has(duplicateKey(row.data)))) Object.assign(item, { status: "error", errorType: "duplicate_identity", errorMessage: importType === "erp_sales" ? "同一平台SKU、ERP SKU及周期存在重复销售数据，已隔离。" : "过滤后同一商品ID存在重复，已阻断本批次确认。" });
   const counts = previewSummary(database, rows, importType); const errorRows = rows.filter((item) => item.status === "error").length; const validRows = rows.length - errorRows;
   const periods = [...new Set(rows.filter((item) => item.status === "validated").map((item) => `${item.data.periodStart}|${item.data.periodEnd}`))];
-  const preview = { templateName: version?.templateName || "自动字段映射", platform: text(matchRules.fixedFields?.platform), shopId: text(matchRules.fixedFields?.shopId), shop: text(matchRules.fixedFields?.shop), sheetName: workbook.sheetName, periodStart: periods.length === 1 ? periods[0].split("|")[0] : "", periodEnd: periods.length === 1 ? periods[0].split("|")[1] : "", rawRows: workbook.rawRows.length, filteredRows: filtered.length, newLinks: counts.createLinks, updatedLinks: counts.updateLinks, operationFacts: counts.facts, errors: errorRows, duplicateGoodsIds: [...duplicateKeys] };
-  const batchId = id("connection-import"); const createdAt = now(); const batchStatus = duplicateKeys.size ? "blocked" : "validated";
+  const periodStarts = periods.map((item) => item.split("|")[0]).filter(Boolean).sort();
+  const periodEnds = periods.map((item) => item.split("|")[1]).filter(Boolean).sort();
+  const previewPeriodStart = parserVersion === "sales-fact-v2" ? periodStarts[0] || "" : periods.length === 1 ? periodStarts[0] : "";
+  const previewPeriodEnd = parserVersion === "sales-fact-v2" ? periodEnds.at(-1) || "" : periods.length === 1 ? periodEnds[0] : "";
+  const preview = { parserVersion: text(parserVersion), sourceFileHash, templateName: version?.templateName || "自动字段映射", platform: text(matchRules.fixedFields?.platform), shopId: text(matchRules.fixedFields?.shopId), shop: text(matchRules.fixedFields?.shop), sheetName: workbook.sheetName, periodStart: previewPeriodStart, periodEnd: previewPeriodEnd, rawRows: workbook.rawRows.length, filteredRows: rows.length, ignoredSummaryRows: normalizedRows.length - rows.length, newLinks: counts.createLinks, updatedLinks: counts.updateLinks, operationFacts: counts.facts, errors: errorRows, duplicateGoodsIds: [...duplicateKeys] };
+  const batchId = id("connection-import"); const createdAt = now(); const batchStatus = duplicateKeys.size && !(importType === "erp_sales" && parserVersion === "sales-fact-v2") ? "blocked" : "validated";
   database.transaction(() => {
-    database.prepare(`INSERT INTO connection_import_batches (id,sourceType,externalShopId,fileName,fileHash,businessDate,periodStart,periodEnd,periodType,status,totalRows,matchedRows,pendingRows,errorRows,createdBy,createdAt,updatedAt,importType,templateVersionId,sourcePlatform,previewSummaryJson) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(batchId, importType, preview.shopId, text(fileName) || "链接数据.xlsx", hash, preview.periodEnd || createdAt.slice(0, 10), preview.periodStart || null, preview.periodEnd || null, text(matchRules.periodType) || null, batchStatus, workbook.rawRows.length, 0, validRows, errorRows, text(userId) || null, createdAt, createdAt, importType, version?.id ?? null, preview.platform, JSON.stringify(preview));
+    database.prepare(`INSERT INTO connection_import_batches (id,sourceType,externalShopId,fileName,fileHash,businessDate,periodStart,periodEnd,periodType,status,totalRows,matchedRows,pendingRows,errorRows,createdBy,createdAt,updatedAt,importType,templateVersionId,sourcePlatform,previewSummaryJson) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(batchId, importType, preview.shopId, text(fileName) || "链接数据.xlsx", hash, preview.periodEnd || createdAt.slice(0, 10), preview.periodStart || null, preview.periodEnd || null, text(matchRules.periodType) || null, batchStatus, rows.length, 0, validRows, errorRows, text(userId) || null, createdAt, createdAt, importType, version?.id ?? null, preview.platform, JSON.stringify(preview));
     const insert = database.prepare(`INSERT INTO connection_import_rows (id,batchId,rowNumber,externalKey,rawDataJson,normalizedDataJson,status,errorType,errorMessage,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?)`);
     for (const item of rows) insert.run(id("connection-import-row"), batchId, item.rowNumber, text(item.data.platformGoodsId || item.data.skuCode), JSON.stringify(item.raw), JSON.stringify(item.data), item.status, item.errorType, item.errorMessage, createdAt);
   })();
