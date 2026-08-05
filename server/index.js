@@ -221,6 +221,11 @@ import {
   productLifecycleStatuses,
 } from "./productManagementV2Service.js";
 import {
+  createProductProfileForErpSku,
+  getProductCenterV2SkuDetail,
+  listProductCenterV2Skus,
+} from "./productCenterV2Service.js";
+import {
   bootstrapTemplateVersions,
   changeTemplateVersionStatus,
   ensureInitialTemplateVersion,
@@ -2010,6 +2015,24 @@ app.get("/api/product-management/overview", requirePermission("products.view"), 
         platformSkuManualBindings: scoped.platformSkuManualBindings ?? [] } });
   }
   catch (error) { response.status(400).json({ success: false, message: error.message || "产品经营概览读取失败。" }); }
+});
+
+app.get("/api/product-center-v2/skus", requirePermission("products.view"), (request, response) => {
+  try { response.json({ success: true, ...listProductCenterV2Skus(request.query) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "ERP SKU列表读取失败。" }); }
+});
+
+app.get("/api/product-center-v2/skus/:id", requirePermission("products.view"), (request, response) => {
+  try { response.json({ success: true, detail: getProductCenterV2SkuDetail(request.params.id) }); }
+  catch (error) { response.status(404).json({ success: false, message: error.message || "ERP SKU详情读取失败。" }); }
+});
+
+app.post("/api/product-center-v2/skus/:id/product-profile", requirePermission("products.create"), (request, response) => {
+  try { response.status(201).json({ success: true, ...createProductProfileForErpSku(request.params.id) }); }
+  catch (error) {
+    const message = error.message || "产品档案创建失败。";
+    response.status(message.includes("已存在") || message.includes("占用") ? 409 : 400).json({ success: false, message });
+  }
 });
 
 app.get("/api/product-management/products/:id", requirePermission("products.view"), (request, response) => {

@@ -1036,6 +1036,19 @@ export async function loadProductManagementOverview() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/overview`), "产品经营概览读取失败。");
 }
 
+export async function loadProductCenterV2Skus({ search = "", profileStatus = "all", erpStatus = "", limit = 50, offset = 0 } = {}) {
+  const query = new URLSearchParams({ search, profileStatus, erpStatus, limit: String(limit), offset: String(offset) });
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-center-v2/skus?${query}`), "ERP SKU列表读取失败。");
+}
+
+export async function loadProductCenterV2SkuDetail(erpSkuId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-center-v2/skus/${encodeURIComponent(erpSkuId)}`), "ERP SKU详情读取失败。");
+}
+
+export async function createProductProfileForErpSku(erpSkuId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-center-v2/skus/${encodeURIComponent(erpSkuId)}/product-profile`, { method: "POST" }), "产品档案创建失败。");
+}
+
 export async function loadProductManagementDetail(productId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}`), "产品经营详情读取失败。");
 }

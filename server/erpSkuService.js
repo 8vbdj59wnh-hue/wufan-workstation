@@ -112,6 +112,7 @@ function insertProductFromPreparedErpSku({ sku, normalizedSku }) {
       id: stableId("product-erp-map", product.id),
       productId: product.id,
       erpGoodsId: sku.erpGoodsId,
+      erpSkuId: sku.id,
       merchantSkuCode: sku.merchantSkuCode,
       specificationName: sku.specificationName || null,
       unit: sku.unit || null,
@@ -130,11 +131,11 @@ function insertProductFromPreparedErpSku({ sku, normalizedSku }) {
   };
   getDatabase().prepare(`
       INSERT INTO product_erp_mappings (
-        id,productId,erpGoodsId,merchantSkuCode,specificationName,unit,barcode,erpStatus,
+        id,productId,erpGoodsId,erpSkuId,merchantSkuCode,specificationName,unit,barcode,erpStatus,
         matchMethod,sourceBatchId,latestStateJson,currentState,missingAt,
         lastSeenInventoryBatchId,inventoryCurrentState,inventoryMissingAt,createdAt,updatedAt
       ) VALUES (
-        @id,@productId,@erpGoodsId,@merchantSkuCode,@specificationName,@unit,@barcode,@erpStatus,
+        @id,@productId,@erpGoodsId,@erpSkuId,@merchantSkuCode,@specificationName,@unit,@barcode,@erpStatus,
         @matchMethod,@sourceBatchId,@latestStateJson,@currentState,@missingAt,
         @lastSeenInventoryBatchId,@inventoryCurrentState,@inventoryMissingAt,@createdAt,@updatedAt
       )

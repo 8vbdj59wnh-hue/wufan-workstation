@@ -520,7 +520,7 @@ const resourceConfigs = {
   productErpMappings: {
     table: "product_erp_mappings",
     columns: [
-      "id", "productId", "erpGoodsId", "merchantSkuCode", "specificationName", "unit", "barcode", "erpStatus",
+      "id", "productId", "erpGoodsId", "erpSkuId", "merchantSkuCode", "specificationName", "unit", "barcode", "erpStatus",
       "matchMethod", "sourceBatchId", "latestStateJson", "currentState", "missingAt",
       "lastSeenInventoryBatchId", "inventoryCurrentState", "inventoryMissingAt", "createdAt", "updatedAt",
     ],
@@ -1215,6 +1215,74 @@ function ensureColumn(table, column, definition) {
   }
 }
 
+function migrateProductErpMappingsV2() {
+  const database = getDatabase();
+  const columns = database.prepare("PRAGMA table_info(product_erp_mappings)").all();
+  const foreignKeys = database.prepare("PRAGMA foreign_key_list(product_erp_mappings)").all();
+  const hasErpSkuId = columns.some((item) => item.name === "erpSkuId");
+  const hasErpSkuForeignKey = foreignKeys.some((item) => item.from === "erpSkuId" && item.table === "erp_skus");
+  if (!hasErpSkuId || !hasErpSkuForeignKey) {
+    database.pragma("foreign_keys = OFF");
+    try {
+      database.transaction(() => {
+        database.exec("DROP TABLE IF EXISTS product_erp_mappings_v2");
+        database.exec(`
+          CREATE TABLE product_erp_mappings_v2 (
+            id TEXT PRIMARY KEY,
+            productId TEXT NOT NULL UNIQUE,
+            erpGoodsId TEXT NOT NULL,
+            erpSkuId TEXT,
+            merchantSkuCode TEXT NOT NULL COLLATE NOCASE UNIQUE,
+            specificationName TEXT,
+            unit TEXT,
+            barcode TEXT,
+            erpStatus TEXT,
+            matchMethod TEXT NOT NULL,
+            sourceBatchId TEXT,
+            latestStateJson TEXT,
+            currentState TEXT NOT NULL DEFAULT 'active',
+            missingAt TEXT,
+            lastSeenInventoryBatchId TEXT,
+            inventoryCurrentState TEXT NOT NULL DEFAULT 'active',
+            inventoryMissingAt TEXT,
+            createdAt TEXT,
+            updatedAt TEXT,
+            FOREIGN KEY(productId) REFERENCES products(id),
+            FOREIGN KEY(erpGoodsId) REFERENCES erp_goods(id),
+            FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id)
+          );
+        `);
+        database.exec(`
+          INSERT INTO product_erp_mappings_v2 (
+            id,productId,erpGoodsId,erpSkuId,merchantSkuCode,specificationName,unit,barcode,erpStatus,
+            matchMethod,sourceBatchId,latestStateJson,currentState,missingAt,lastSeenInventoryBatchId,
+            inventoryCurrentState,inventoryMissingAt,createdAt,updatedAt
+          )
+          SELECT m.id,m.productId,m.erpGoodsId,
+            (SELECT s.id FROM erp_skus s WHERE LOWER(TRIM(s.merchantSkuCode))=LOWER(TRIM(m.merchantSkuCode)) LIMIT 1),
+            m.merchantSkuCode,m.specificationName,m.unit,m.barcode,m.erpStatus,m.matchMethod,m.sourceBatchId,
+            m.latestStateJson,m.currentState,m.missingAt,m.lastSeenInventoryBatchId,m.inventoryCurrentState,
+            m.inventoryMissingAt,m.createdAt,m.updatedAt
+          FROM product_erp_mappings m;
+        `);
+        database.exec("DROP TABLE product_erp_mappings");
+        database.exec("ALTER TABLE product_erp_mappings_v2 RENAME TO product_erp_mappings");
+      })();
+    } finally {
+      database.pragma("foreign_keys = ON");
+    }
+    console.log("[db:migrate] upgraded product_erp_mappings with erpSkuId foreign key");
+  }
+  database.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_product_erp_mappings_erp_sku
+      ON product_erp_mappings(erpSkuId) WHERE erpSkuId IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_product_erp_mappings_current_seen
+      ON product_erp_mappings(currentState,sourceBatchId);
+    CREATE INDEX IF NOT EXISTS idx_product_erp_mappings_inventory_seen
+      ON product_erp_mappings(inventoryCurrentState,lastSeenInventoryBatchId);
+  `);
+}
+
 function migrateSalesLinkSkuErpRelationsV2() {
   const database = getDatabase();
   const migratedAt = new Date().toISOString();
@@ -1903,6 +1971,7 @@ function runLightweightMigrations() {
   ensureColumn("erp_skus", "galleryImages", "TEXT");
   ensureColumn("erp_skus", "sourceUpdatedAt", "TEXT");
   ensureColumn("erp_skus", "rawSourceData", "TEXT NOT NULL DEFAULT '{}'");
+  migrateProductErpMappingsV2();
   migrateSalesLinkSkuErpRelationsV2();
   migrateConnectionSkuSalesFactsV2();
   ensureColumn("wangdian_goods_sync_logs", "importBatchId", "TEXT");

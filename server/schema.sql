@@ -1032,6 +1032,7 @@ CREATE TABLE IF NOT EXISTS product_erp_mappings (
   id TEXT PRIMARY KEY,
   productId TEXT NOT NULL UNIQUE,
   erpGoodsId TEXT NOT NULL,
+  erpSkuId TEXT,
   merchantSkuCode TEXT NOT NULL COLLATE NOCASE UNIQUE,
   specificationName TEXT,
   unit TEXT,
@@ -1048,7 +1049,8 @@ CREATE TABLE IF NOT EXISTS product_erp_mappings (
   createdAt TEXT,
   updatedAt TEXT,
   FOREIGN KEY(productId) REFERENCES products(id),
-  FOREIGN KEY(erpGoodsId) REFERENCES erp_goods(id)
+  FOREIGN KEY(erpGoodsId) REFERENCES erp_goods(id),
+  FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id)
 );
 
 CREATE TABLE IF NOT EXISTS product_sku_changes (
