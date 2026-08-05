@@ -1222,6 +1222,15 @@ function migrateProductErpMappingsV2() {
   const hasErpSkuId = columns.some((item) => item.name === "erpSkuId");
   const hasErpSkuForeignKey = foreignKeys.some((item) => item.from === "erpSkuId" && item.table === "erp_skus");
   if (!hasErpSkuId || !hasErpSkuForeignKey) {
+    const unmatched = database.prepare(`
+      SELECT COUNT(*) total
+      FROM product_erp_mappings m
+      LEFT JOIN erp_skus s ON LOWER(TRIM(s.merchantSkuCode))=LOWER(TRIM(m.merchantSkuCode))
+      WHERE s.id IS NULL
+    `).get().total;
+    if (Number(unmatched) > 0) {
+      throw new Error(`product_erp_mappings V2 migration requires exact ERP SKU matches; unmatched=${unmatched}`);
+    }
     database.pragma("foreign_keys = OFF");
     try {
       database.transaction(() => {
