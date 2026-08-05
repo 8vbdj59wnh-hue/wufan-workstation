@@ -414,24 +414,39 @@ function renderProductSkuV2List() {
       <button class="primary-button" type="submit">查询</button>
       <button class="text-button" type="button" data-action="clear-product-v2-filter">清空</button>
     </form>
-    ${productSkuV2State.loading ? `<div class="empty-state">正在读取ERP SKU…</div>` : `<div class="table-wrap"><table class="data-table product-sku-v2-table">
-      <thead><tr><th>SKU编码</th><th>SKU名称</th><th>ERP状态</th><th>当前库存</th><th>可发库存</th><th>成本</th><th>档案状态</th><th>负责人</th><th>生命周期</th><th>链接</th><th>操作</th></tr></thead>
-      <tbody>${rows.length ? rows.map((item) => `<tr>
-        <td><a class="text-button" href="#products/sku/${encodeURIComponent(item.erpSkuId)}"><strong>${escapeHtml(item.merchantSkuCode)}</strong></a></td>
-        <td>${escapeHtml(item.productName || item.goodsName || item.specificationName || "—")}<small>${escapeHtml(item.specificationName || "")}</small></td>
-        <td><span class="status-badge">${escapeHtml(item.erpStatus || "未设置")}</span></td>
-        <td>${formatMetric(item.stockNum)}</td><td>${formatMetric(item.availableSendStock)}</td><td>${formatMoney(item.costPrice)}</td>
-        <td><span class="status-badge">${item.productId ? "已建档" : "未建档"}</span></td>
-        <td>${escapeHtml(findName(state.people, item.ownerId))}</td><td>${escapeHtml(item.lifecycleStatus || "—")}</td>
-        <td>${Number(item.linkCount || 0)}条</td>
-        <td>${item.productId ? `<a class="text-button" href="#products/${encodeURIComponent(item.productId)}">经营档案</a>` : hasPermission(getCurrentUser(), "products.create") ? `<button class="primary-button compact-button" type="button" data-action="create-product-v2-profile" data-erp-sku-id="${escapeHtml(item.erpSkuId)}">创建档案</button>` : "仅可查看"}</td>
-      </tr>`).join("") : `<tr><td colspan="11" class="empty-cell">没有符合条件的ERP SKU</td></tr>`}</tbody>
-    </table></div>`}
+    ${productSkuV2State.loading ? `<div class="empty-state">正在读取ERP SKU…</div>` : renderProductSkuV2Cards(rows)}
     <nav class="product-pagination"><span>第 ${productSkuV2State.page}/${totalPages} 页 · 共 ${pagination.total || 0} 个SKU</span><div>
       <button class="secondary-button" type="button" data-action="product-v2-page" data-page="${productSkuV2State.page - 1}" ${productSkuV2State.page <= 1 ? "disabled" : ""}>上一页</button>
       <button class="secondary-button" type="button" data-action="product-v2-page" data-page="${productSkuV2State.page + 1}" ${productSkuV2State.page >= totalPages ? "disabled" : ""}>下一页</button>
     </div></nav>
   </section>`;
+}
+
+function renderProductSkuV2Cards(rows) {
+  if (!rows.length) return `<div class="product-card-empty">没有符合条件的ERP SKU</div>`;
+  return `<div class="product-card-grid product-sku-v2-card-grid">${rows.map((item) => {
+    const product = item.productId ? state.products.find((entry) => entry.id === item.productId) : null;
+    const title = item.productName || item.goodsName || item.specificationName || item.merchantSkuCode;
+    const imageSource = { mainImage: item.productImage || item.skuImage, name: title };
+    return `<article class="product-archive-card ${item.productId ? "is-profiled" : "is-unprofiled"}" data-action="view-product-v2-sku" data-erp-sku-id="${escapeHtml(item.erpSkuId)}" role="button" tabindex="0" aria-label="查看SKU：${escapeHtml(title)}">
+      <div class="product-archive-card-media">${renderImage(imageSource, "product-card-image")}</div>
+      <div class="product-archive-card-body">
+        <div class="product-archive-card-heading"><h3 title="${escapeHtml(title)}">${escapeHtml(title)}</h3><span class="status-badge">${item.productId ? "已建档" : "未建立产品档案"}</span></div>
+        <div class="product-card-identities"><span>SKU <strong>${escapeHtml(item.merchantSkuCode || "—")}</strong></span><span>ERP <strong>${escapeHtml(item.erpStatus || "未设置")}</strong></span></div>
+        <div class="product-card-metrics">
+          <div><strong>${formatMetric(item.stockNum)}</strong><span>当前库存</span></div>
+          <div><strong>${formatMetric(item.availableSendStock)}</strong><span>可发库存</span></div>
+          <div><strong>${formatMoney(item.costPrice)}</strong><span>成本</span></div>
+          <div><strong>${Number(item.linkCount || 0)}</strong><span>销售链接</span></div>
+          <div><strong>${escapeHtml(findName(state.people, item.ownerId))}</strong><span>负责人</span></div>
+          <div><strong>${escapeHtml(item.lifecycleStatus || "—")}</strong><span>生命周期</span></div>
+        </div>
+        <small class="product-card-listed-at">${item.productId ? "产品经营档案已建立" : "未建立产品档案，可补充负责人、生命周期等经营属性"}</small>
+        ${!item.productId && hasPermission(getCurrentUser(), "products.create") ? `<button class="primary-button compact-button" type="button" data-action="create-product-v2-profile" data-erp-sku-id="${escapeHtml(item.erpSkuId)}">创建产品档案</button>` : ""}
+        ${product ? `<div class="product-card-more"><button class="icon-button" type="button" data-action="toggle-product-menu" data-product-id="${escapeHtml(product.id)}" aria-label="产品操作">•••</button><div class="product-card-menu" data-product-menu="${escapeHtml(product.id)}" hidden>${renderProductActions(product)}</div></div>` : ""}
+      </div>
+    </article>`;
+  }).join("")}</div>`;
 }
 
 function renderProductSkuV2Detail() {
@@ -1772,6 +1787,10 @@ export function bindProductCenterPageEvents(rerender) {
     const button = event.target.closest("[data-action]");
     if (button === null) return;
     const action = button.dataset.action;
+    if (action === "view-product-v2-sku") {
+      window.location.hash = `products/sku/${encodeURIComponent(button.dataset.erpSkuId)}`;
+      return;
+    }
     if (action === "product-v2-page") {
       productSkuV2State = { ...productSkuV2State, page: Math.max(1, Number(button.dataset.page) || 1), loaded: false };
       void refreshProductSkuV2List(rerender);
