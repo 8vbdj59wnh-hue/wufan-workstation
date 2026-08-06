@@ -19,6 +19,7 @@ import {
   getPublicUser,
   initializeDatabase,
   readAllData,
+  readResource,
   readProductImportBatch,
   previewProductSkuChange,
   readRouteResource,
@@ -157,8 +158,8 @@ import {
   listConnectionImportTemplates,
   previewConnectionDataImport,
 } from "./connectionDataFoundationService.js";
-import { getConnectionCoreDetail, listConnectionCoreProfiles } from "./connectionCorePageService.js";
-import { cancelConnectionOwnerImport, confirmConnectionOwnerImport, getCurrentConnectionOwnerImport, previewConnectionOwnerImport, rebuildConnectionOwnerImportPreview } from "./connectionOwnerImportService.js";
+import { getConnectionCoreDetail, listConnectionCoreProfiles, listConnectionCoreProfilesPage } from "./connectionCorePageService.js";
+import { cancelConnectionOwnerImport, confirmConnectionOwnerImport, getCurrentConnectionOwnerImport, listConnectionOwnerImportRows, previewConnectionOwnerImport, rebuildConnectionOwnerImportPreview } from "./connectionOwnerImportService.js";
 import { getConnectionBusinessCockpit } from "./connectionBusinessCockpitService.js";
 import {
   batchLinkProcessInstanceTemplates,
@@ -230,6 +231,7 @@ import {
 } from "./productManagementV2Service.js";
 import {
   createProductProfileForErpSku,
+  getProductCenterV2Metadata,
   getProductCenterV2SkuDetail,
   listProductCenterV2Skus,
 } from "./productCenterV2Service.js";
@@ -1257,6 +1259,27 @@ app.get("/api/data", (request, response) => {
   }
 });
 
+app.get("/api/bootstrap", (request, response) => {
+  try {
+    const moduleName = String(request.query.module ?? "dashboard");
+    const common = ["companies", "departments", "positions", "people", "permissionTemplates", "categories", "stores", "publishingAccounts", "notifications",
+      "taskTemplates", "processTemplates", "processTemplateNodes", "templates", "templateTagCategories", "templateTags", "issuesRequirements", "standardWorkForms"];
+    const moduleResources = {
+      dashboard: [],
+      dashboardManagement: ["goals", "tasks", "taskTemplates", "processInstances", "workPlans", "weeklyReports", "weeklyReportProblems"],
+      products: [],
+      connectionCenter: ["goals", "taskTemplates", "processTemplates", "processTemplateNodes"],
+      tasks: ["goals", "tasks", "taskTemplates", "processTemplates", "processTemplateNodes", "processInstances", "workPlans", "contentSchedules", "actionProducts"],
+      "task-list": ["goals", "tasks", "taskTemplates", "processTemplates", "processTemplateNodes", "processInstances", "workPlans", "contentSchedules", "actionProducts"],
+      scheduleBoard: ["goals", "tasks", "taskTemplates", "processTemplates", "processTemplateNodes", "processInstances", "workPlans", "contentSchedules", "actionProducts"],
+    };
+    if (!(moduleName in moduleResources)) { response.status(400).json({ success: false, message: "该模块尚未接入轻量启动。" }); return; }
+    const keys = [...new Set([...common, ...moduleResources[moduleName]])];
+    const snapshot = Object.fromEntries(keys.map((key) => [key, readResource(key)]));
+    response.json(filterDataByScope(snapshot, request.user));
+  } catch (error) { response.status(400).json({ success: false, message: error.message || "轻量启动数据读取失败。" }); }
+});
+
 app.post("/api/data", requirePermission("settings.managePermissions"), (request, response) => {
   try {
     const fullSnapshotSaveAllowed =
@@ -2028,6 +2051,11 @@ app.get("/api/product-center-v2/skus", requirePermission("products.view"), (requ
   catch (error) { response.status(400).json({ success: false, message: error.message || "ERP SKU列表读取失败。" }); }
 });
 
+app.get("/api/product-center-v2/metadata", requirePermission("products.view"), (request, response) => {
+  try { response.json({ success: true, ...getProductCenterV2Metadata() }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "ERP SKU筛选摘要读取失败。" }); }
+});
+
 app.get("/api/product-center-v2/skus/:id", requirePermission("products.view"), (request, response) => {
   try { response.json({ success: true, detail: getProductCenterV2SkuDetail(request.params.id) }); }
   catch (error) { response.status(404).json({ success: false, message: error.message || "ERP SKU详情读取失败。" }); }
@@ -2100,7 +2128,7 @@ app.get("/api/data-center/products/:productId", requirePermission("dataCenter.vi
 
 app.get("/api/connections", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, items: listConnectionCoreProfiles(getUserPersonId(request.user), isAdminUser(request.user)) });
+    response.json({ success: true, ...listConnectionCoreProfilesPage(request.query, getUserPersonId(request.user), isAdminUser(request.user)) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "连接列表读取失败。" });
   }
@@ -2108,7 +2136,7 @@ app.get("/api/connections", requireLinkView, (request, response) => {
 
 app.get("/api/connection-assets", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, items: listConnectionCoreProfiles(getUserPersonId(request.user), isAdminUser(request.user)) });
+    response.json({ success: true, ...listConnectionCoreProfilesPage(request.query, getUserPersonId(request.user), isAdminUser(request.user)) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "链接资产读取失败。" });
   }
@@ -2135,6 +2163,16 @@ app.get("/api/connection-assets/owner-imports/current", requireLinkManage, (requ
   catch (error) { response.status(400).json({ success: false, message: error.message || "负责人匹配预览读取失败。" }); }
 });
 
+app.get("/api/connection-assets/owner-imports/:id/changes", requireLinkManage, (request, response) => {
+  try { response.json({ success: true, ...listConnectionOwnerImportRows(request.params.id, getUserPersonId(request.user), { ...request.query, kind: "changes" }) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "负责人变更明细读取失败。" }); }
+});
+
+app.get("/api/connection-assets/owner-imports/:id/errors", requireLinkManage, (request, response) => {
+  try { response.json({ success: true, ...listConnectionOwnerImportRows(request.params.id, getUserPersonId(request.user), { ...request.query, kind: "errors" }) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "负责人异常明细读取失败。" }); }
+});
+
 app.post("/api/connection-assets/owner-imports/:id/confirm", requireLinkManage, (request, response) => {
   try { response.json({ success: true, ...confirmConnectionOwnerImport(request.params.id, getUserPersonId(request.user)) }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "负责人批量更新失败。" }); }
@@ -2157,6 +2195,11 @@ app.get("/api/connections/:id/core-detail", requireLinkView, requireConnectionAc
 
 app.get("/api/connections-workbench/mine", requireLinkView, (request, response) => {
   try {
+    if (request.query.page && String(request.query.filter ?? "all") === "all") {
+      const page = listConnectionCoreProfilesPage(request.query, getUserPersonId(request.user), isAdminUser(request.user));
+      response.json({ success: true, ...page, isAdmin: isAdminUser(request.user), summary: { total: page.pagination.total, better: 0, risk: 0, followed: 0 } });
+      return;
+    }
     response.json({ success: true, ...getMyConnectionWorkbench(getUserPersonId(request.user), isAdminUser(request.user), String(request.query.filter ?? "all")) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "我的链接读取失败。" });

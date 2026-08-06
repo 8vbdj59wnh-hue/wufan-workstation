@@ -13,6 +13,7 @@ export {
   getPublicUser,
   initializeDatabase,
   readAllData,
+  readResource,
   readProductImportBatch,
   previewProductSkuChange,
   readRouteResource,

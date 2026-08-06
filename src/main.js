@@ -177,6 +177,7 @@ function getModuleIdFromHash() {
 let activeModuleId = getModuleIdFromHash();
 let lastRenderedRouteHash = null;
 let loginError = "";
+let loadedDataModuleId = "";
 let notificationPanelOpen = false;
 let sidebarMode = "fixed";
 let sidebarDrawerOpen = false;
@@ -528,9 +529,10 @@ function renderLoginPage() {
     const loadingNoticeTimer = scheduleStartupLoadingNotice();
     renderAuthenticatedStartup();
     const firstAccessibleModule = getFirstAccessibleModule(getCurrentUser(), modules);
-    await loadPersistentData({ includeTaskWaves: firstAccessibleModule?.id === "tasks" });
-    window.clearTimeout(loadingNoticeTimer);
     window.location.hash = firstAccessibleModule?.id ?? "goals";
+    await loadPersistentData({ includeTaskWaves: firstAccessibleModule?.id === "tasks" });
+    loadedDataModuleId = getModuleIdFromHash();
+    window.clearTimeout(loadingNoticeTimer);
     render();
     void syncTaskNotificationsForCurrentUser().catch((error) => console.error("任务提醒同步失败", error));
   });
@@ -804,6 +806,11 @@ window.addEventListener("unhandledrejection", (event) => {
   if (app.innerHTML.trim() === "") renderStartupError(event.reason);
 });
 window.addEventListener("hashchange", async () => {
+  const nextModuleId = getModuleIdFromHash();
+  if (nextModuleId !== loadedDataModuleId) {
+    await loadPersistentData({ includeTaskWaves: nextModuleId === "tasks" }).catch((error) => console.error("模块数据按需加载失败", error));
+    loadedDataModuleId = nextModuleId;
+  }
   if (getModuleIdFromHash() === "tasks") {
     await ensureTaskWavesLoaded().catch((error) => console.error("任务波次按需加载失败", error));
   }
@@ -849,7 +856,7 @@ try {
     renderLoginPage();
   } else {
     renderAuthenticatedStartup();
-    await loadPersistentData();
+    await loadPersistentData(); loadedDataModuleId = getModuleIdFromHash();
     window.clearTimeout(loadingNoticeTimer);
     render();
     void syncTaskNotificationsForCurrentUser().catch((error) => console.error("任务提醒同步失败", error));

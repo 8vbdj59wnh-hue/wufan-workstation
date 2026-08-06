@@ -36,6 +36,7 @@ import {
   evaluateProductManagementHealth,
   createProductImprovementAction,
   loadProductCenterV2Skus,
+  loadProductCenterV2Metadata,
   loadProductCenterV2SkuDetail,
   createProductProfileForErpSku,
 } from "./services/productCenterService.js?v=20260802-module-boundary1";
@@ -74,6 +75,9 @@ let selectedPendingSkuIds = new Set();
 let platformPreviewRequestId = 0;
 let productManagementState = { overview: null, details: new Map(), loadingOverview: false, loadingProductId: "", error: "", notice: "" };
 let productSkuV2State = { loading: false, loaded: false, rows: [], detail: null, detailId: "", search: "", profileStatus: "all", erpStatus: "", brand: "", category: "", lifecycleStatus: "", platform: "", stockStatus: "", businessZone: "all", sort: "updated-desc", facets: { brands: [], categories: [], lifecycleStatuses: [], platforms: [] }, page: 1, pageSize: 50, pagination: { total: 0 }, summary: { total: 0, profiled: 0, unprofiled: 0, businessZones: {} }, error: "", notice: "" };
+let productSkuV2RequestId = 0;
+let productSkuV2SearchTimer = 0;
+let productSkuV2MetadataLoading = false;
 
 function getRouteProductId() {
   const match = window.location.hash.replace(/^#/, "").match(/^products\/(?!sku\/)(.+)$/);
@@ -1513,7 +1517,7 @@ export function renderProductCenterPage() {
 }
 
 async function refreshProductSkuV2List(rerender) {
-  if (productSkuV2State.loading) return;
+  const requestId = ++productSkuV2RequestId;
   productSkuV2State = { ...productSkuV2State, loading: true, error: "" }; rerender();
   try {
     const result = await loadProductCenterV2Skus({ search: productSkuV2State.search, profileStatus: productSkuV2State.profileStatus,
@@ -1521,8 +1525,13 @@ async function refreshProductSkuV2List(rerender) {
       lifecycleStatus: productSkuV2State.lifecycleStatus, platform: productSkuV2State.platform, stockStatus: productSkuV2State.stockStatus,
       businessZone: productSkuV2State.businessZone, sort: productSkuV2State.sort,
       limit: productSkuV2State.pageSize, offset: (productSkuV2State.page - 1) * productSkuV2State.pageSize });
-    productSkuV2State = { ...productSkuV2State, loading: false, loaded: true, rows: result.rows || [], pagination: result.pagination || { total: 0 }, summary: result.summary || { total: 0, profiled: 0, unprofiled: 0, businessZones: {} }, facets: result.facets || productSkuV2State.facets, error: "" };
-  } catch (error) { productSkuV2State = { ...productSkuV2State, loading: false, loaded: true, rows: [], error: error.message || "ERP SKU列表读取失败。" }; }
+    if (requestId !== productSkuV2RequestId) return;
+    productSkuV2State = { ...productSkuV2State, loading: false, loaded: true, rows: result.rows || [], pagination: result.pagination || { total: 0 }, summary: { ...productSkuV2State.summary, ...(result.summary || {}) }, facets: result.facets || productSkuV2State.facets, error: "" };
+    if (!productSkuV2MetadataLoading && !Object.keys(productSkuV2State.summary.businessZones || {}).length) {
+      productSkuV2MetadataLoading = true;
+      void loadProductCenterV2Metadata().then((metadata) => { productSkuV2State = { ...productSkuV2State, summary: metadata.summary || productSkuV2State.summary, facets: metadata.facets || productSkuV2State.facets }; rerender(); }).catch(() => {}).finally(() => { productSkuV2MetadataLoading = false; });
+    }
+  } catch (error) { if (requestId !== productSkuV2RequestId) return; productSkuV2State = { ...productSkuV2State, loading: false, loaded: true, rows: [], error: error.message || "ERP SKU列表读取失败。" }; }
   rerender();
 }
 
@@ -1793,6 +1802,10 @@ export function bindProductCenterPageEvents(rerender) {
       lifecycleStatus: form.elements.lifecycleStatus.value, platform: form.elements.platform.value, stockStatus: form.elements.stockStatus.value,
       page: 1, loaded: false, notice: "" };
     void refreshProductSkuV2List(rerender);
+  });
+  document.querySelector('[data-product-v2-filter] input[name="search"]')?.addEventListener("input", (event) => {
+    window.clearTimeout(productSkuV2SearchTimer); const value = event.currentTarget.value;
+    productSkuV2SearchTimer = window.setTimeout(() => { productSkuV2State = { ...productSkuV2State, search: value.trim(), page: 1, loaded: false }; void refreshProductSkuV2List(rerender); }, 280);
   });
   document.querySelector("[data-product-lifecycle-form]")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const form=event.currentTarget; const productId=form.dataset.productId;

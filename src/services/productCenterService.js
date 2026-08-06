@@ -32,6 +32,7 @@ export {
   markPlatformSku,
   loadProductManagementOverview,
   loadProductCenterV2Skus,
+  loadProductCenterV2Metadata,
   loadProductCenterV2SkuDetail,
   createProductProfileForErpSku,
   loadProductManagementDetail,

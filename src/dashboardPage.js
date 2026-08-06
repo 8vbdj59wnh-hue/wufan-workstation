@@ -1,6 +1,6 @@
 import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260802-today-overview1";
 import { bindOperationDashboardPageEvents, renderOperationDashboardPage } from "./operationDashboardPage.js?v=20260802-operation-foundation1";
-import { getCurrentUser } from "./appState.js";
+import { ensureDashboardManagementLoaded, getCurrentUser } from "./appState.js";
 import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
 
 function currentView() {
@@ -39,6 +39,7 @@ export function renderDashboardPage() {
 }
 
 export function bindDashboardPageEvents(rerender) {
+  if (currentView() === "management") void ensureDashboardManagementLoaded().then((changed) => { if (changed) rerender(); }).catch(() => {});
   const page = document.querySelector(".unified-dashboard-page");
   if (!page) return;
   page.querySelectorAll("[data-dashboard-view]").forEach((button) => button.addEventListener("click", () => {

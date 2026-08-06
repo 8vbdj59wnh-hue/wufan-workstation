@@ -56,6 +56,8 @@ let loadedFromDatabase = false;
 let currentUser = null;
 const pendingTemplateIterations = new Map();
 let taskWavesLoaded = false;
+let dashboardManagementLoaded = false;
+let dashboardManagementPromise = null;
 let persistenceStatus = {
   kind: "warning",
   message: "",
@@ -269,11 +271,13 @@ export function applyDataSnapshot(data) {
 export async function loadPersistentData({ includeTaskWaves = null } = {}) {
   try {
     const route = window.location.hash.replace(/^#/, "").split("/")[0];
+    const lightweightModules = new Set(["", "dashboard", "dashboard-management", "products", "connectionCenter", "tasks", "task-list", "scheduleBoard"]);
+    const bootstrapModule = route === "dashboard-management" ? "dashboardManagement" : (route || "dashboard");
     const shouldLoadTaskWaves =
       includeTaskWaves ??
       ["tasks", "task-list", "task-waves", "clearance", "process-progress"].includes(route);
     const [response, waveResponse] = await Promise.all([
-      authFetch(`${apiBaseUrl}/api/data`),
+      authFetch(lightweightModules.has(route) ? `${apiBaseUrl}/api/bootstrap?module=${encodeURIComponent(bootstrapModule)}` : `${apiBaseUrl}/api/data`),
       shouldLoadTaskWaves ? authFetch(`${apiBaseUrl}/api/task-waves`) : Promise.resolve(null),
     ]);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -304,6 +308,17 @@ export async function loadPersistentData({ includeTaskWaves = null } = {}) {
     };
     throw new Error(`数据库数据加载失败：${error.message ?? "无法连接本地数据库服务"}`);
   }
+}
+
+export async function ensureDashboardManagementLoaded() {
+  if (dashboardManagementLoaded) return false;
+  if (dashboardManagementPromise) return dashboardManagementPromise;
+  dashboardManagementPromise = (async () => {
+    const response = await authFetch(`${apiBaseUrl}/api/bootstrap?module=dashboardManagement`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    applyDataSnapshot(await response.json()); dashboardManagementLoaded = true; return true;
+  })().finally(() => { dashboardManagementPromise = null; });
+  return dashboardManagementPromise;
 }
 
 export async function loadTaskWaves() {
@@ -1039,6 +1054,10 @@ export async function loadProductCenterV2Skus({ search = "", profileStatus = "al
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-center-v2/skus?${query}`), "ERP SKU列表读取失败。");
 }
 
+export async function loadProductCenterV2Metadata() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-center-v2/metadata`), "ERP SKU筛选摘要读取失败。");
+}
+
 export async function loadProductCenterV2SkuDetail(erpSkuId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-center-v2/skus/${encodeURIComponent(erpSkuId)}`), "ERP SKU详情读取失败。");
 }
@@ -1126,12 +1145,14 @@ export async function createAiAnalysis(payload){return readApiJson(await authFet
 export async function confirmAiAnalysis(id){return readApiJson(await authFetch(`${apiBaseUrl}/api/ai-operation/analyses/${encodeURIComponent(id)}/confirm`,{method:"POST"}),"经营分析确认失败。");}
 export async function createAiAnalysisAction(id,payload){return readApiJson(await authFetch(`${apiBaseUrl}/api/ai-operation/analyses/${encodeURIComponent(id)}/action`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),"改善行动创建失败。");}
 
-export async function loadConnections() {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections`), "连接列表读取失败。");
+export async function loadConnections(filters = {}) {
+  const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== "" && value !== undefined));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections${query.size ? `?${query}` : ""}`), "连接列表读取失败。");
 }
 
-export async function loadConnectionAssets() {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-assets`), "链接资产读取失败。");
+export async function loadConnectionAssets(filters = {}) {
+  const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== "" && value !== undefined));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-assets${query.size ? `?${query}` : ""}`), "链接资产读取失败。");
 }
 
 export async function previewConnectionOwnerImport(file) {
@@ -1142,6 +1163,10 @@ export async function previewConnectionOwnerImport(file) {
 export async function loadCurrentConnectionOwnerImport() {
   const payload = await readApiJson(await authFetch(`${apiBaseUrl}/api/connection-assets/owner-imports/current`), "负责人匹配预览读取失败。");
   return payload.result;
+}
+
+export async function loadConnectionOwnerImportRows(batchId, kind = "changes", page = 1, pageSize = 50) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-assets/owner-imports/${encodeURIComponent(batchId)}/${kind}?page=${page}&pageSize=${pageSize}`), "负责人匹配明细读取失败。");
 }
 
 export async function confirmConnectionOwnerImport(batchId) {
@@ -1160,8 +1185,8 @@ export async function loadConnectionCoreDetail(connectionId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/core-detail`), "链接经营详情读取失败。");
 }
 
-export async function loadMyConnectionWorkbench(filter = "all") {
-  const query = new URLSearchParams({ filter });
+export async function loadMyConnectionWorkbench(filter = "all", page = 1, pageSize = 50) {
+  const query = new URLSearchParams({ filter, page, pageSize });
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections-workbench/mine?${query}`), "我的链接读取失败。");
 }
 

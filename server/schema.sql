@@ -1428,6 +1428,8 @@ CREATE TABLE IF NOT EXISTS erp_sku_inventory_daily_summaries (
 );
 
 CREATE INDEX IF NOT EXISTS idx_erp_sku_inventory_summary_date ON erp_sku_inventory_daily_summaries(businessDate,erpSkuId);
+CREATE INDEX IF NOT EXISTS idx_erp_sku_inventory_summary_sku_date ON erp_sku_inventory_daily_summaries(erpSkuId,businessDate DESC,updatedAt DESC);
+CREATE INDEX IF NOT EXISTS idx_sales_link_skus_link_state ON sales_link_skus(salesLinkId,currentState);
 
 CREATE TABLE IF NOT EXISTS connection_profiles (
   id TEXT PRIMARY KEY,

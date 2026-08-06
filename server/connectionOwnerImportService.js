@@ -121,11 +121,31 @@ function batchResult(database, batch, idempotent = false) {
   return { batch, preview, rows, submission: submissionState(database, batch), idempotent, blocked: batch.status === "blocked" };
 }
 
+function batchSummaryResult(database, batch, idempotent = false) {
+  const preview = json(batch.previewSummaryJson);
+  return { batch, preview: { ...preview, ownerChangeGroups: (preview.ownerChangeGroups || []).map((group) => ({ ...group, links: undefined })) },
+    submission: submissionState(database, batch), idempotent, blocked: batch.status === "blocked" };
+}
+
+export function listConnectionOwnerImportRows(batchId, userId, { kind = "changes", page = 1, pageSize = 50 } = {}) {
+  const database = getDatabase();
+  const batch = database.prepare("SELECT * FROM connection_import_batches WHERE id=? AND importType=?").get(text(batchId), IMPORT_TYPE);
+  if (!batch) throw new Error("负责人匹配批次不存在。");
+  if (batch.createdBy && batch.createdBy !== text(userId)) throw new Error("无权查看其他用户创建的负责人匹配预览。");
+  const size = Math.min(200, Math.max(20, Number(pageSize) || 50)); const currentPage = Math.max(1, Number(page) || 1);
+  const condition = kind === "errors" ? "status NOT IN ('matched','success')" : "status IN ('matched','success')";
+  const total = Number(database.prepare(`SELECT COUNT(*) count FROM connection_import_rows WHERE batchId=? AND ${condition}`).get(batch.id)?.count || 0);
+  const rows = database.prepare(`SELECT * FROM connection_import_rows WHERE batchId=? AND ${condition} ORDER BY rowNumber,id LIMIT ? OFFSET ?`).all(batch.id, size, (currentPage - 1) * size).map((row) => ({
+    ...row, rawData: json(row.rawDataJson), data: json(row.normalizedDataJson), rawDataJson: undefined, normalizedDataJson: undefined,
+  }));
+  return { rows, pagination: { page: currentPage, pageSize: size, total, totalPages: Math.max(1, Math.ceil(total / size)) } };
+}
+
 export function getCurrentConnectionOwnerImport(userId) {
   const database = getDatabase();
   const batch = database.prepare(`SELECT * FROM connection_import_batches
     WHERE importType=? AND createdBy IS ? ORDER BY createdAt DESC,id DESC LIMIT 1`).get(IMPORT_TYPE, text(userId) || null);
-  return batch ? batchResult(database, batch) : null;
+  return batch ? batchSummaryResult(database, batch) : null;
 }
 
 export function previewConnectionOwnerImport({ buffer, fileName, userId, replaceBatchId = "", preserveFileHash = "" }) {
@@ -133,7 +153,7 @@ export function previewConnectionOwnerImport({ buffer, fileName, userId, replace
   const database = getDatabase();
   const hash = crypto.createHash("sha256").update(buffer).update(`|${PARSER_VERSION}`).digest("hex");
   const existing = replaceBatchId ? null : database.prepare("SELECT * FROM connection_import_batches WHERE importType=? AND fileHash=? AND status<>'cancelled' ORDER BY createdAt DESC LIMIT 1").get(IMPORT_TYPE, hash);
-  if (existing) return batchResult(database, existing, true);
+  if (existing) return batchSummaryResult(database, existing, true);
 
   const sourceRows = readRows(buffer);
   if (!sourceRows.length) throw new Error("Excel中没有负责人匹配数据。");
@@ -248,7 +268,7 @@ export function previewConnectionOwnerImport({ buffer, fileName, userId, replace
       VALUES (?,?,?,?,?,?,?,?,?,?)`);
     for (const row of rows) insert.run(id("connection-owner-import-row"), batchId, row.rowNumber, `${normalizePlatform(row.platformRaw)}|${row.shopName}|${row.platformGoodsId}`, JSON.stringify(row.raw), JSON.stringify(row.data), row.status, row.errorType, row.errorMessage, createdAt);
   })();
-  return batchResult(database, database.prepare("SELECT * FROM connection_import_batches WHERE id=?").get(batchId));
+  return batchSummaryResult(database, database.prepare("SELECT * FROM connection_import_batches WHERE id=?").get(batchId));
 }
 
 export function rebuildConnectionOwnerImportPreview(batchId, userId) {
@@ -268,7 +288,7 @@ export function confirmConnectionOwnerImport(batchId, userId) {
   const batch = database.prepare("SELECT * FROM connection_import_batches WHERE id=? AND importType=?").get(text(batchId), IMPORT_TYPE);
   if (!batch) throw new Error("负责人匹配批次不存在。");
   if (batch.createdBy && batch.createdBy !== text(userId)) throw new Error("无权提交其他用户创建的负责人匹配预览。");
-  if (["completed", "partial"].includes(batch.status)) return { ...batchResult(database, batch, true), result: json(batch.previewSummaryJson).result || { updated: 0, unchanged: 0 } };
+  if (["completed", "partial"].includes(batch.status)) return { ...batchSummaryResult(database, batch, true), result: json(batch.previewSummaryJson).result || { updated: 0, unchanged: 0 } };
   const submission = submissionState(database, batch);
   if (!submission.canSubmit) throw new Error(submission.reason);
   const rows = database.prepare("SELECT * FROM connection_import_rows WHERE batchId=? AND status='matched' ORDER BY rowNumber").all(batch.id);
@@ -288,7 +308,7 @@ export function confirmConnectionOwnerImport(batchId, userId) {
     database.prepare("UPDATE connection_import_batches SET status=?,completedAt=?,updatedAt=?,previewSummaryJson=? WHERE id=?").run(finalStatus, completedAt, completedAt, JSON.stringify(preview), batch.id);
   })();
   const completed = database.prepare("SELECT * FROM connection_import_batches WHERE id=?").get(batch.id);
-  return { ...batchResult(database, completed), result: { updated, unchanged } };
+  return { ...batchSummaryResult(database, completed), result: { updated, unchanged } };
 }
 
 export function cancelConnectionOwnerImport(batchId, userId) {
@@ -298,5 +318,5 @@ export function cancelConnectionOwnerImport(batchId, userId) {
   if (batch.createdBy && batch.createdBy !== text(userId)) throw new Error("无权取消其他用户创建的预览。");
   if (["completed", "partial"].includes(batch.status)) throw new Error("已提交批次不能取消。");
   if (batch.status !== "cancelled") database.prepare("UPDATE connection_import_batches SET status='cancelled',updatedAt=? WHERE id=?").run(now(), batch.id);
-  return batchResult(database, database.prepare("SELECT * FROM connection_import_batches WHERE id=?").get(batch.id));
+  return batchSummaryResult(database, database.prepare("SELECT * FROM connection_import_batches WHERE id=?").get(batch.id));
 }

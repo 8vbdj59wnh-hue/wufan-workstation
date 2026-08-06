@@ -34,6 +34,7 @@ import {
   readConnectionFoundationBulkImport,
   previewConnectionOwnerImport,
   loadCurrentConnectionOwnerImport,
+  loadConnectionOwnerImportRows,
   loadCurrentConnectionSalesFactImport,
   previewConnectionSalesFactImport,
   previewPlatformLinkShopMappingImport,
@@ -64,6 +65,9 @@ const pageState = {
   loadedUserId: "",
   loading: false,
   items: [],
+  pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 },
+  assetMetaLoaded: false,
+  loadedSections: new Set(),
   importShops: [],
   selectedId: "",
   view: "list",
@@ -86,7 +90,7 @@ const pageState = {
   improvementSummary: { total: 0, effective: 0, observing: 0, failed: 0 },
   section: "cockpit",
   dataCenterTab: "data-foundation",
-  myWorkbench: { items: [], summary: { total: 0, better: 0, risk: 0, followed: 0 }, filter: "all", isAdmin: false, loading: false },
+  myWorkbench: { items: [], summary: { total: 0, better: 0, risk: 0, followed: 0 }, pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 }, filter: "all", isAdmin: false, loading: false },
   hospital: { zones: { diagnosis: [], treatment: [], observation: [] }, counts: { diagnosis: 0, treatment: 0, observation: 0 }, stage: "diagnosis", loading: false },
   diagnosisModalId: "",
   benchmarks: { items: [], candidates: [], comparison: null, comparisonId: "", loading: false },
@@ -101,10 +105,12 @@ const pageState = {
   foundation: { definitions: {}, templates: [], batches: [], errors: [], loading: false, preview: null, bulkPreview: null, salesPreview: null, salesLoading: false, salesError: "", salesMessage: "", salesFileName: "", salesFile: null, shopMappingPreview: null },
   coreDetail: null,
   coreDetailLoading: false,
-  ownerImport: { loading: false, result: null, showCompletion: false },
+  ownerImport: { loading: false, result: null, showCompletion: false, detailKind: "", detailRows: [], detailPagination: null },
   salesPeriodType: "month",
   error: "",
 };
+let connectionListRequestId = 0;
+let connectionSearchTimer = 0;
 
 const listConfigKey = "connection-center-list-config-v2";
 const listColumns = [
@@ -354,7 +360,7 @@ function renderMyLinksWorkbench() {
     <h3 class="my-links-section-title">今日概览</h3><div class="my-links-summary"><button type="button" data-my-link-filter="all"><span>我的链接</span><strong>${summary.total || 0}</strong></button><button type="button" data-my-link-filter="better"><span>向好链接</span><strong>${summary.better || 0}</strong></button><button type="button" data-my-link-filter="worse"><span>风险链接</span><strong>${summary.risk || 0}</strong></button><button type="button" data-workbench-hospital="diagnosis"><span>诊断中</span><strong>${pageState.hospital.counts?.diagnosis || 0}</strong></button><button type="button" data-workbench-hospital="treatment"><span>治疗中</span><strong>${pageState.hospital.counts?.treatment || 0}</strong></button></div>
     <section class="connection-workbench-block is-priority"><header><div><h3>今日待处理事项</h3><p>待诊断 ${pageState.hospital.counts?.diagnosis || 0} · 治疗中 ${pageState.hospital.counts?.treatment || 0} · 观察中 ${pageState.hospital.counts?.observation || 0}</p></div><button type="button" class="text-button" data-workbench-go="hospital">进入链接医院 →</button></header>${issueList}</section>
     <nav class="segmented-control my-links-filters" aria-label="我的链接筛选">${tabs.map(([id, label]) => `<button type="button" class="${workbench.filter === id ? "active" : ""}" data-my-link-filter="${id}">${label}</button>`).join("")}</nav>
-    ${workbench.loading ? `<div class="empty-state">正在读取我的链接…</div>` : workbench.items.length ? `<div class="my-links-grid">${workbench.items.map((item) => { const trend = trendLabel(item); const anomalies = connectionAnomalies(item); return `<article class="my-link-card"><button type="button" class="my-link-main" data-open-connection="${escapeHtml(item.id)}">${imageHtml(item)}<span class="my-link-content"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(`${item.platform} · ${shopName(item)} · ${productCodes(item)}`)}</small><span class="my-link-metrics"><em>ERP销售 <b>${coreMoney(item.erpSales?.salesAmount)}</b></em><em>ERP利润 <b>${coreMoney(item.erpSales?.profitAmount)}</b></em><em>增长 <b>${growthText(item.salesGrowth)}</b></em><em>健康 <b>${escapeHtml(healthText(item.healthStatus))}${item.healthScore == null ? "" : ` ${item.healthScore}分`}</b></em></span><small class="my-link-changes">${escapeHtml(trendDetails(item))}</small><span class="my-link-trend is-${trend.className}">${trend.text}</span></span></button><button type="button" class="my-link-follow ${item.followed ? "is-followed" : ""}" data-toggle-connection-follow="${escapeHtml(item.id)}" data-followed="${item.followed ? "true" : "false"}" aria-label="${item.followed ? "取消关注" : "关注链接"}">${item.followed ? "★ 已关注" : "☆ 关注"}</button>${anomalies.length ? `<div class="connection-anomaly-reminder"><span>⚠ ${escapeHtml(anomalies.map((problem) => problem.title).join("、"))}</span>${canJoinDiagnosis(item) ? `<button type="button" data-join-diagnosis="${escapeHtml(item.id)}">加入诊断</button>` : `<small>${(pageState.hospital.admittedConnectionIds ?? []).includes(item.id) ? "已加入诊断区" : "异常提醒"}</small>`}</div>` : ""}</article>`; }).join("")}</div>` : `<div class="empty-state"><strong>暂无符合条件的链接</strong><p>${workbench.filter === "followed" ? "你还没有关注链接。" : "当前账号没有符合此经营状态的负责链接。"}</p></div>`}
+    ${workbench.loading ? `<div class="empty-state">正在读取我的链接…</div>` : workbench.items.length ? `<div class="my-links-grid">${workbench.items.map((item) => { const trend = trendLabel(item); const anomalies = connectionAnomalies(item); return `<article class="my-link-card"><button type="button" class="my-link-main" data-open-connection="${escapeHtml(item.id)}">${imageHtml(item)}<span class="my-link-content"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(`${item.platform} · ${shopName(item)} · ${productCodes(item)}`)}</small><span class="my-link-metrics"><em>ERP销售 <b>${coreMoney(item.erpSales?.salesAmount)}</b></em><em>ERP利润 <b>${coreMoney(item.erpSales?.profitAmount)}</b></em><em>增长 <b>${growthText(item.salesGrowth)}</b></em><em>健康 <b>${escapeHtml(healthText(item.healthStatus))}${item.healthScore == null ? "" : ` ${item.healthScore}分`}</b></em></span><small class="my-link-changes">${escapeHtml(trendDetails(item))}</small><span class="my-link-trend is-${trend.className}">${trend.text}</span></span></button><button type="button" class="my-link-follow ${item.followed ? "is-followed" : ""}" data-toggle-connection-follow="${escapeHtml(item.id)}" data-followed="${item.followed ? "true" : "false"}" aria-label="${item.followed ? "取消关注" : "关注链接"}">${item.followed ? "★ 已关注" : "☆ 关注"}</button>${anomalies.length ? `<div class="connection-anomaly-reminder"><span>⚠ ${escapeHtml(anomalies.map((problem) => problem.title).join("、"))}</span>${canJoinDiagnosis(item) ? `<button type="button" data-join-diagnosis="${escapeHtml(item.id)}">加入诊断</button>` : `<small>${(pageState.hospital.admittedConnectionIds ?? []).includes(item.id) ? "已加入诊断区" : "异常提醒"}</small>`}</div>` : ""}</article>`; }).join("")}</div>${workbench.filter === "all" ? `<nav class="pagination"><button type="button" data-my-links-page="${(workbench.pagination?.page || 1) - 1}" ${(workbench.pagination?.page || 1) <= 1 ? "disabled" : ""}>上一页</button><span>第 ${workbench.pagination?.page || 1} / ${workbench.pagination?.totalPages || 1} 页</span><button type="button" data-my-links-page="${(workbench.pagination?.page || 1) + 1}" ${(workbench.pagination?.page || 1) >= (workbench.pagination?.totalPages || 1) ? "disabled" : ""}>下一页</button></nav>` : ""}` : `<div class="empty-state"><strong>暂无符合条件的链接</strong><p>${workbench.filter === "followed" ? "你还没有关注链接。" : "当前账号没有符合此经营状态的负责链接。"}</p></div>`}
   </section>`;
 }
 
@@ -439,7 +445,7 @@ function renderConnectionAssets() {
 
 function renderOwnerImport() {
   if (!canManage()) return "";
-  const result = pageState.ownerImport.result; const preview = result?.preview ?? {}; const rows = result?.rows ?? [];
+  const result = pageState.ownerImport.result; const preview = result?.preview ?? {}; const rows = pageState.ownerImport.detailRows ?? [];
   const statusText = { matched: "已匹配", unmatched: "未匹配", conflict: "冲突", ignored: "已忽略", success: "已更新" };
   const batchStatus = { validated: "待确认", preview_ready: "待确认", completed: "已完成", partial: "部分完成", cancelled: "已取消" };
   const exceptions = rows.filter((row) => row.status !== "matched" && row.status !== "success");
@@ -460,8 +466,8 @@ function renderOwnerImport() {
     ${result ? `<section class="connection-import-preview"><header><div><h3>本次负责人匹配</h3><p>${escapeHtml(result.batch?.fileName || "负责人匹配表")}</p></div><span class="status-pill">${batchStatus[result.batch?.status] || result.batch?.status}</span></header>
       <div class="connection-owner-change-summary"><span>文件总行数<strong>${preview.totalRows || 0}</strong></span><span>可更新链接<strong>${preview.updatableLinks || 0}</strong></span><span>负责人变更<strong>${preview.changeRows || 0}</strong></span><span>保持不变<strong>${preview.unchangedRows || 0}</strong></span><span>异常<strong>${Number(preview.unmatchedRows || 0) + Number(preview.conflictRows || 0) + Number(preview.ignoredRows || 0)}</strong></span></div>
       <div class="connection-import-preview-grid"><span>可更新链接<strong>${preview.updatableLinks || 0}</strong></span><span>涉及负责人<strong>${preview.ownerCount || 0}</strong></span><span>涉及平台<strong>${preview.platformCount || 0}</strong></span><span>涉及店铺<strong>${preview.shopCount || 0}</strong></span><span>异常行<strong>${Number(preview.unmatchedRows || 0) + Number(preview.conflictRows || 0)}</strong></span><span>不会更新<strong>${skipped}</strong></span></div>
-      <details open><summary>查看匹配明细（${rows.length}）</summary><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>行</th><th>平台</th><th>店铺</th><th>商品ID</th><th>链接标题</th><th>当前负责人</th><th>新负责人</th><th>状态</th><th>说明</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${row.rowNumber}</td><td>${escapeHtml(row.data?.platform || row.rawData?.平台 || "—")}</td><td>${escapeHtml(row.data?.shopName || row.rawData?.店铺 || "—")}</td><td>${escapeHtml(row.data?.platformGoodsId || "—")}</td><td>${escapeHtml(row.data?.linkTitle || "—")}</td><td>${escapeHtml(row.data?.currentOwnerName || "未分配")}</td><td>${escapeHtml(row.data?.newOwnerName || "—")}</td><td>${escapeHtml(statusText[row.status] || row.status)}</td><td>${escapeHtml(row.errorMessage || "—")}</td></tr>`).join("")}</tbody></table></div></details>
-      <details><summary>查看异常（${exceptions.length}）</summary>${exceptions.length ? `<ul>${exceptions.map((row) => `<li>第${row.rowNumber}行：${escapeHtml(row.errorMessage || row.errorType || "未知异常")}</li>`).join("")}</ul>` : `<p class="form-note">无异常行。</p>`}</details>
+      <div class="connection-owner-detail-actions"><button type="button" class="secondary-button" data-owner-import-detail="changes">查看匹配明细</button><button type="button" class="secondary-button" data-owner-import-detail="errors">查看异常</button></div>
+      ${pageState.ownerImport.detailKind ? `<section class="connection-table-wrap"><table class="connection-table"><thead><tr><th>行</th><th>平台</th><th>店铺</th><th>商品ID</th><th>链接标题</th><th>当前负责人</th><th>新负责人</th><th>状态</th><th>说明</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${row.rowNumber}</td><td>${escapeHtml(row.data?.platform || row.rawData?.平台 || "—")}</td><td>${escapeHtml(row.data?.shopName || row.rawData?.店铺 || "—")}</td><td>${escapeHtml(row.data?.platformGoodsId || "—")}</td><td>${escapeHtml(row.data?.linkTitle || "—")}</td><td>${escapeHtml(row.data?.currentOwnerName || "未分配")}</td><td>${escapeHtml(row.data?.newOwnerName || "—")}</td><td>${escapeHtml(statusText[row.status] || row.status)}</td><td>${escapeHtml(row.errorMessage || "—")}</td></tr>`).join("")}</tbody></table></section>` : ""}
       <section class="connection-owner-change-groups"><h4>负责人变更</h4>${changeGroups.length ? changeGroups.map((group) => `<details><summary><span>${escapeHtml(group.currentOwnerName)} <b>→</b> ${escapeHtml(group.newOwnerName)}</span><strong>${group.linkCount}条链接</strong></summary><ul>${(group.links || []).map((link) => `<li><strong>${escapeHtml(link.title || link.platformGoodsId || "未命名链接")}</strong><span>${escapeHtml(`${link.platform || "—"} · ${link.shop || "—"} · ${link.platformGoodsId || "—"}`)}</span></li>`).join("")}</ul></details>`).join("") : `<p class="form-note">本次没有负责人变更。</p>`}</section>
       <aside class="connection-owner-overwrite-note"><strong>本次将按导入文件覆盖更新负责人。</strong><p>导入后，符合匹配条件的链接负责人将更新为文件中的负责人，不会保留旧负责人。</p><small>不会修改：店铺、链接身份、平台SKU、ERP SKU、库存、销售数据。</small></aside>
       ${!["completed", "partial", "cancelled"].includes(result.batch?.status) ? `<footer><button type="button" class="primary-button" data-confirm-owner-import="${escapeHtml(result.batch.id)}" ${canSubmit ? "" : "disabled"}>确认匹配负责人</button>${!canSubmit && result.preview?.parserVersion !== "connection-owner-v3-shop-platform-inference" ? `<button type="button" class="secondary-button" data-rebuild-owner-import="${escapeHtml(result.batch.id)}">重新校验当前预览</button>` : ""}<button type="button" class="secondary-button" data-cancel-owner-import="${escapeHtml(result.batch.id)}">取消本次预览</button>${canSubmit ? "" : `<span class="form-note">${escapeHtml(result?.submission?.reason || "当前用户没有提交权限。")}</span>`}</footer>` : ""}
@@ -515,21 +521,7 @@ function renderHealthReport() {
 function renderList() {
   if (!pageState.items.length) return `<div class="empty-state"><strong>还没有链接资产</strong><p>请在数据中心选择平台链接经营模板，上传平台导出表建立第一条链接资产。</p></div>`;
   const filters = pageState.listFilters;
-  const items = pageState.items.filter((item) => {
-    const searchQuery = String(filters.search || "").trim().toLowerCase();
-    const codeQuery = String(filters.productCode || "").trim().toLowerCase();
-    return matchesConnectionAssetSearch(item, searchQuery)
-      && (!filters.shopId || item.shopId === filters.shopId)
-      && (!filters.platform || item.platform === filters.platform)
-      && (!codeQuery || item.products?.some((product) => String(product.skuCode || "").toLowerCase().includes(codeQuery)))
-      && (!filters.ownerId || (filters.ownerId === "unassigned" ? !item.ownerId : filters.ownerId === "assigned" ? Boolean(item.ownerId) : item.ownerId === filters.ownerId))
-      && (!filters.healthStatus || item.healthStatus === filters.healthStatus)
-      && (!filters.salesStatus || (filters.salesStatus === "selling" ? Number(item.erpSales?.shippedQuantity || 0) > 0 : Number(item.erpSales?.shippedQuantity || 0) <= 0))
-      && (!filters.profitStatus || (filters.profitStatus === "unknown" ? item.erpSales?.profitAmount == null : item.erpSales?.profitAmount != null && (filters.profitStatus === "profit" ? Number(item.erpSales.profitAmount) >= 0 : Number(item.erpSales.profitAmount) < 0)))
-      && (!filters.productRelation || (filters.productRelation === "linked" ? Number(item.productCount || 0) > 0 : Number(item.productCount || 0) === 0))
-      && (!filters.skuCount || (filters.skuCount === "none" ? Number(item.skuCount || 0) === 0 : filters.skuCount === "single" ? Number(item.skuCount || 0) === 1 : Number(item.skuCount || 0) > 1))
-      && (!filters.status || item.status === filters.status);
-  });
+  const items = [...pageState.items];
   const valueForColumn = (item, key) => ({
     name: item.name || "", platform: item.platform || "", shop: shopName(item), goodsId: item.platformGoodsId || "", erpSales: Number(item.erpSales?.salesAmount || 0), erpProfit: Number(item.erpSales?.profitAmount || 0), relations: Number(item.skuCount || 0), products: productCodes(item),
     period: item.latestPeriodEnd || "", payAmount: Number(item.latestPayAmount || 0), growth: item.salesGrowth == null ? -Infinity : Number(item.salesGrowth),
@@ -537,20 +529,9 @@ function renderList() {
   })[key];
   const compareValues = (left, right) => typeof left === "number" || typeof right === "number"
     ? Number(left) - Number(right) : String(left).localeCompare(String(right), "zh-CN", { numeric: true });
-  items.sort((a, b) => {
-    if (pageState.columnSort.key) {
-      const result = compareValues(valueForColumn(a, pageState.columnSort.key), valueForColumn(b, pageState.columnSort.key));
-      return pageState.columnSort.direction === "asc" ? result : -result;
-    }
-    if (pageState.sort === "sales") return Number(b.latestPayAmount || 0) - Number(a.latestPayAmount || 0);
-    if (pageState.sort === "growth") return Number(b.salesGrowth ?? -Infinity) - Number(a.salesGrowth ?? -Infinity);
-    if (pageState.sort === "risk") return Number(a.healthScore ?? Infinity) - Number(b.healthScore ?? Infinity);
-    if (pageState.sort === "newest") return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
-    return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
-  });
   if (!items.length) return `<div class="empty-state"><strong>没有符合条件的连接</strong><p>请调整店铺、产品编码、负责人或状态筛选。</p></div>`;
   if (pageState.view === "cards") {
-    return `<div class="connection-card-grid">${items.map((item) => { const anomalies = connectionAnomalies(item); const trend = trendLabel(item); return `<article class="connection-card ${anomalies.length ? "has-anomaly" : ""}"><button type="button" class="connection-card-main" data-open-connection="${escapeHtml(item.id)}">${imageHtml(item)}<span class="connection-card-body"><strong class="connection-card-title">${escapeHtml(item.name)}</strong><small class="connection-card-identity">${escapeHtml(`${item.platform} · ${shopName(item)} · 商品ID ${item.platformGoodsId || "—"}`)}</small><span class="connection-v3-card-metrics"><em>销售额 <b>${coreMoney(item.erpSales?.salesAmount)}</b></em><em>利润 <b>${coreMoney(item.erpSales?.profitAmount)}</b></em><em>利润率 <b>${corePercent(item.erpSales?.profitMargin)}</b></em></span><span class="connection-card-relations">${item.productCount || 0} 个产品 · ${item.skuCount || 0} 个SKU</span><span class="connection-card-state"><em class="connection-health-pill is-${escapeHtml(item.healthStatus || "no_data")}">${escapeHtml(healthText(item.healthStatus || "no_data"))}</em><em class="connection-trend-pill is-${trend.className}">${trend.className === "better" ? "↗" : trend.className === "worse" ? "↘" : "→"} ${growthText(item.salesGrowth)}</em><em class="status-pill status-${escapeHtml(item.status)}">${escapeHtml(statusText(item.status))}</em></span></span></button>${anomalies.length ? `<footer><span>⚠ ${escapeHtml(anomalies.map((problem) => problem.title).join("、"))}</span>${canJoinDiagnosis(item) ? `<button type="button" class="primary-button" data-join-diagnosis="${escapeHtml(item.id)}">加入诊断</button>` : `<small>${(pageState.hospital.admittedConnectionIds ?? []).includes(item.id) ? "已加入诊断区" : "异常提醒"}</small>`}</footer>` : ""}</article>`; }).join("")}</div>`;
+    return `<div class="connection-card-grid">${items.map((item) => { const anomalies = connectionAnomalies(item); const trend = trendLabel(item); return `<article class="connection-card ${anomalies.length ? "has-anomaly" : ""}"><button type="button" class="connection-card-main" data-open-connection="${escapeHtml(item.id)}">${imageHtml(item)}<span class="connection-card-body"><strong class="connection-card-title">${escapeHtml(item.name)}</strong><small class="connection-card-identity">${escapeHtml(`${item.platform} · ${shopName(item)} · 商品ID ${item.platformGoodsId || "—"}`)}</small><span class="connection-v3-card-metrics"><em>销售额 <b>${coreMoney(item.erpSales?.salesAmount)}</b></em><em>利润 <b>${coreMoney(item.erpSales?.profitAmount)}</b></em><em>利润率 <b>${corePercent(item.erpSales?.profitMargin)}</b></em></span><span class="connection-card-relations">${item.productCount || 0} 个产品 · ${item.skuCount || 0} 个SKU</span><span class="connection-card-state"><em class="connection-health-pill is-${escapeHtml(item.healthStatus || "no_data")}">${escapeHtml(healthText(item.healthStatus || "no_data"))}</em><em class="connection-trend-pill is-${trend.className}">${trend.className === "better" ? "↗" : trend.className === "worse" ? "↘" : "→"} ${growthText(item.salesGrowth)}</em><em class="status-pill status-${escapeHtml(item.status)}">${escapeHtml(statusText(item.status))}</em></span></span></button>${anomalies.length ? `<footer><span>⚠ ${escapeHtml(anomalies.map((problem) => problem.title).join("、"))}</span>${canJoinDiagnosis(item) ? `<button type="button" class="primary-button" data-join-diagnosis="${escapeHtml(item.id)}">加入诊断</button>` : `<small>${(pageState.hospital.admittedConnectionIds ?? []).includes(item.id) ? "已加入诊断区" : "异常提醒"}</small>`}</footer>` : ""}</article>`; }).join("")}</div>${renderConnectionPagination()}`;
   }
   const visible = new Set(pageState.visibleColumns);
   const header = listColumns.filter((column) => visible.has(column.key)).map((column) => {
@@ -565,7 +546,12 @@ function renderList() {
     profit: item.currentFinance == null ? "—" : `¥${Number(item.currentFinance.netProfit || 0).toLocaleString("zh-CN")}`,
     origin: escapeHtml(originText(item.originSource)), owner: escapeHtml(connectionOwnerName(item)), status: `<span class="status-pill status-${escapeHtml(item.status)}">${escapeHtml(statusText(item.status))}</span>`,
   })[key];
-  return `<div class="connection-table-wrap"><table class="connection-table"><thead><tr>${header}</tr></thead><tbody>${items.map((item) => `<tr tabindex="0" data-open-connection="${escapeHtml(item.id)}">${listColumns.filter((column) => visible.has(column.key)).map((column) => `<td>${cell(item, column.key)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+  return `<div class="connection-table-wrap"><table class="connection-table"><thead><tr>${header}</tr></thead><tbody>${items.map((item) => `<tr tabindex="0" data-open-connection="${escapeHtml(item.id)}">${listColumns.filter((column) => visible.has(column.key)).map((column) => `<td>${cell(item, column.key)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>${renderConnectionPagination()}`;
+}
+
+function renderConnectionPagination() {
+  const pagination = pageState.pagination;
+  return `<nav class="pagination" aria-label="链接资产分页"><button type="button" class="secondary-button" data-connection-page="${pagination.page - 1}" ${pagination.page <= 1 ? "disabled" : ""}>上一页</button><span>第 ${pagination.page} / ${pagination.totalPages} 页 · 共 ${pagination.total} 条</span><button type="button" class="secondary-button" data-connection-page="${pagination.page + 1}" ${pagination.page >= pagination.totalPages ? "disabled" : ""}>下一页</button></nav>`;
 }
 
 function renderPendingConnections() {
@@ -778,7 +764,7 @@ async function loadHospital(render) {
 
 async function loadMyLinks(render, filter = pageState.myWorkbench.filter) {
   pageState.myWorkbench.loading = true; pageState.myWorkbench.filter = filter; pageState.error = ""; render();
-  try { const result = await loadMyConnectionWorkbench(filter); pageState.myWorkbench = { ...pageState.myWorkbench, ...result, filter, loading: false }; }
+  try { const page = filter === pageState.myWorkbench.filter ? pageState.myWorkbench.pagination?.page || 1 : 1; const result = await loadMyConnectionWorkbench(filter, page, 50); pageState.myWorkbench = { ...pageState.myWorkbench, ...result, filter, pagination: result.pagination || pageState.myWorkbench.pagination, loading: false }; }
   catch (error) { pageState.error = error.message; pageState.myWorkbench.loading = false; }
   render();
 }
@@ -797,12 +783,23 @@ function applyConnectionAssetData(connections, rankings, managementOverview) {
 
 async function loadConnectionAssetsPage(render) {
   pageState.error = "";
+  const requestId = ++connectionListRequestId;
   try {
-    const [connections, rankings, managementOverview, ownerImport] = await Promise.all([
-      loadConnectionAssets(), loadConnectionGrowthRankings(), loadConnectionManagementOverview(), canManage() ? loadCurrentConnectionOwnerImport() : Promise.resolve(null),
-    ]);
+    const sortMap = { default: ["default", "desc"], newest: ["newest", "desc"], sales: ["erpSales", "desc"] };
+    const [sortField, sortDirection] = sortMap[pageState.sort] || [pageState.columnSort.key || "default", pageState.columnSort.direction || "desc"];
+    const connections = await loadConnectionAssets({ page: pageState.pagination.page, pageSize: pageState.pagination.pageSize,
+      keyword: pageState.listFilters.search, platform: pageState.listFilters.platform, shopId: pageState.listFilters.shopId,
+      ownerId: pageState.listFilters.ownerId, status: pageState.listFilters.status, productCode: pageState.listFilters.productCode,
+      salesStatus: pageState.listFilters.salesStatus, profitStatus: pageState.listFilters.profitStatus,
+      productRelation: pageState.listFilters.productRelation, skuCount: pageState.listFilters.skuCount, sortField, sortDirection });
+    const [rankings, managementOverview] = pageState.assetMetaLoaded
+      ? [pageState.growthRankings, pageState.managementOverview]
+      : await Promise.all([loadConnectionGrowthRankings(), loadConnectionManagementOverview()]);
+    if (requestId !== connectionListRequestId) return;
     applyConnectionAssetData(connections, rankings, managementOverview);
-    if (ownerImport) pageState.ownerImport.result = ownerImport;
+    pageState.pagination = connections.pagination || pageState.pagination;
+    pageState.assetMetaLoaded = true;
+    pageState.loadedSections.add("connections");
   } catch (error) {
     pageState.error = error.message;
   }
@@ -812,15 +809,11 @@ async function loadConnectionAssetsPage(render) {
 async function loadPage(render) {
   pageState.loading = true; pageState.error = ""; render();
   try {
-    const [connections, rankings, managementOverview, cockpit, healthAttention, improvementSummary, importShops, hospital, myWorkbench, ownerImport] = await Promise.all([loadConnectionAssets(), loadConnectionGrowthRankings(), loadConnectionManagementOverview(), loadConnectionBusinessCockpit(), canViewHealth() ? loadAttentionConnectionHealthRecords() : Promise.resolve({ items: [], counts: {} }), loadConnectionImprovementSummary(), loadConnectionImportShops(), canViewHealth() ? loadConnectionHospital() : Promise.resolve({ zones: { diagnosis: [], treatment: [], observation: [] }, counts: {}, admittedConnectionIds: [] }), loadMyConnectionWorkbench("all"), canManage() ? loadCurrentConnectionOwnerImport() : Promise.resolve(null)]);
-    applyConnectionAssetData(connections, rankings, managementOverview);
+    const [cockpit, healthAttention, improvementSummary] = await Promise.all([loadConnectionBusinessCockpit(), canViewHealth() ? loadAttentionConnectionHealthRecords() : Promise.resolve({ items: [], counts: {} }), loadConnectionImprovementSummary()]);
     pageState.cockpit = { ...pageState.cockpit, ...cockpit };
     pageState.healthAttention = healthAttention;
     pageState.improvementSummary = improvementSummary.summary;
-    pageState.hospital = { ...pageState.hospital, ...hospital };
-    pageState.myWorkbench = { ...pageState.myWorkbench, ...myWorkbench, filter: "all", loading: false };
-    pageState.importShops = importShops.items ?? [];
-    pageState.ownerImport.result = ownerImport;
+    pageState.loadedSections.add("cockpit");
     pageState.loaded = true;
     pageState.loadedUserId = String(getCurrentUser()?.personId ?? getCurrentUser()?.id ?? "");
   } catch (error) { pageState.error = error.message; }
@@ -873,8 +866,10 @@ async function loadImportBatches(render, openLatest = false) {
 async function loadDataFoundation(render) {
   pageState.foundation.loading = true; pageState.error = ""; render();
   try {
-    const [loaded, currentSalesPreview] = await Promise.all([loadConnectionDataFoundation(), loadCurrentConnectionSalesFactImport()]);
+    const [loaded, currentSalesPreview, ownerImport] = await Promise.all([loadConnectionDataFoundation(), loadCurrentConnectionSalesFactImport(), canManage() ? loadCurrentConnectionOwnerImport() : Promise.resolve(null)]);
     pageState.foundation = { ...loaded, loading: false, preview: pageState.foundation.preview ?? null, bulkPreview: loaded.bulkPreview ?? pageState.foundation.bulkPreview ?? null, salesPreview: pageState.foundation.salesPreview ?? currentSalesPreview ?? null, salesLoading: pageState.foundation.salesLoading ?? false, salesError: pageState.foundation.salesError ?? "", salesMessage: pageState.foundation.salesMessage ?? "", salesFileName: pageState.foundation.salesFileName ?? "", salesFile: pageState.foundation.salesFile ?? null, shopMappingPreview: pageState.foundation.shopMappingPreview ?? null };
+    pageState.ownerImport.result = ownerImport;
+    pageState.loadedSections.add("data-import");
     if (["waiting", "running"].includes(pageState.foundation.bulkPreview?.batch?.status)) window.setTimeout(() => void pollConnectionBulkPreview(pageState.foundation.bulkPreview.batch.id, render), 800);
   }
   catch (error) { pageState.error = error.message; pageState.foundation.loading = false; }
@@ -954,6 +949,9 @@ export function bindConnectionCenterPageEvents(render) {
     catch (error) { pageState.error = error.message; render(); }
   });
   root.querySelectorAll("[data-my-link-filter]").forEach((button) => button.addEventListener("click", () => { void loadMyLinks(render, button.dataset.myLinkFilter); }));
+  root.querySelectorAll("[data-my-links-page]").forEach((button) => button.addEventListener("click", () => {
+    pageState.myWorkbench.pagination.page = Number(button.dataset.myLinksPage); void loadMyLinks(render, "all");
+  }));
   root.querySelectorAll("[data-toggle-connection-follow]").forEach((button) => button.addEventListener("click", async () => {
     try { await updateConnectionFollow(button.dataset.toggleConnectionFollow, button.dataset.followed !== "true"); await loadMyLinks(render); }
     catch (error) { pageState.error = error.message; render(); }
@@ -967,6 +965,14 @@ export function bindConnectionCenterPageEvents(render) {
     catch (error) { pageState.error = error.message; }
     pageState.ownerImport.loading = false; render();
   });
+  root.querySelectorAll("[data-owner-import-detail]").forEach((button) => button.addEventListener("click", async () => {
+    const batchId = pageState.ownerImport.result?.batch?.id; if (!batchId) return;
+    pageState.ownerImport.loading = true; pageState.error = ""; render();
+    try { const detail = await loadConnectionOwnerImportRows(batchId, button.dataset.ownerImportDetail, 1, 50);
+      pageState.ownerImport.detailKind = button.dataset.ownerImportDetail; pageState.ownerImport.detailRows = detail.rows || []; pageState.ownerImport.detailPagination = detail.pagination; }
+    catch (error) { pageState.error = error.message; }
+    pageState.ownerImport.loading = false; render();
+  }));
   root.querySelector("[data-confirm-owner-import]")?.addEventListener("click", async (event) => {
     pageState.ownerImport.loading = true; pageState.error = ""; render();
     try {
@@ -994,20 +1000,28 @@ export function bindConnectionCenterPageEvents(render) {
   });
   root.querySelectorAll("[data-connection-view]").forEach((button) => button.addEventListener("click", () => { pageState.view = button.dataset.connectionView; render(); }));
   root.querySelector("[data-connection-list-filters]")?.addEventListener("submit", (event) => {
-    event.preventDefault(); pageState.listFilters = Object.fromEntries(new FormData(event.currentTarget)); render();
+    event.preventDefault(); pageState.listFilters = Object.fromEntries(new FormData(event.currentTarget)); pageState.pagination.page = 1; void loadConnectionAssetsPage(render);
+  });
+  root.querySelector('[data-connection-list-filters] input[name="search"]')?.addEventListener("input", (event) => {
+    window.clearTimeout(connectionSearchTimer); const value = event.currentTarget.value;
+    connectionSearchTimer = window.setTimeout(() => { pageState.listFilters.search = value; pageState.pagination.page = 1; void loadConnectionAssetsPage(render); }, 280);
   });
   root.querySelector("[data-clear-connection-filters]")?.addEventListener("click", () => {
-    pageState.listFilters = { search: "", platform: "", shopId: "", productCode: "", ownerId: "", healthStatus: "", status: "", salesStatus: "", profitStatus: "", productRelation: "", skuCount: "" }; render();
+    pageState.listFilters = { search: "", platform: "", shopId: "", productCode: "", ownerId: "", healthStatus: "", status: "", salesStatus: "", profitStatus: "", productRelation: "", skuCount: "" }; pageState.pagination.page = 1; void loadConnectionAssetsPage(render);
   });
   root.querySelectorAll("[data-connection-sort]").forEach((button) => button.addEventListener("click", () => {
-    pageState.sort = button.dataset.connectionSort; pageState.columnSort = { key: "", direction: "asc" }; render();
+    pageState.sort = button.dataset.connectionSort; pageState.columnSort = { key: "", direction: "asc" }; pageState.pagination.page = 1; void loadConnectionAssetsPage(render);
   }));
   root.querySelectorAll("[data-connection-column-sort]").forEach((button) => button.addEventListener("click", (event) => {
     event.stopPropagation(); const key = button.dataset.connectionColumnSort;
     pageState.columnSort = pageState.columnSort.key === key
       ? { key, direction: pageState.columnSort.direction === "asc" ? "desc" : "asc" }
       : { key, direction: "asc" };
-    render();
+    pageState.pagination.page = 1; void loadConnectionAssetsPage(render);
+  }));
+  root.querySelectorAll("[data-connection-page]").forEach((button) => button.addEventListener("click", () => {
+    const page = Number(button.dataset.connectionPage); if (page < 1 || page > pageState.pagination.totalPages) return;
+    pageState.pagination.page = page; void loadConnectionAssetsPage(render);
   }));
   root.querySelectorAll("[data-connection-column-visibility]").forEach((checkbox) => checkbox.addEventListener("change", () => {
     const selected = [...root.querySelectorAll("[data-connection-column-visibility]:checked")].map((item) => item.value);
