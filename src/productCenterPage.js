@@ -73,7 +73,7 @@ let pendingSkuState = { loading: false, loaded: false, rows: [], query: "", erro
 let selectedPendingSkuIds = new Set();
 let platformPreviewRequestId = 0;
 let productManagementState = { overview: null, details: new Map(), loadingOverview: false, loadingProductId: "", error: "", notice: "" };
-let productSkuV2State = { loading: false, loaded: false, rows: [], detail: null, detailId: "", search: "", profileStatus: "all", erpStatus: "", page: 1, pageSize: 50, pagination: { total: 0 }, summary: { total: 0, profiled: 0, unprofiled: 0 }, error: "", notice: "" };
+let productSkuV2State = { loading: false, loaded: false, rows: [], detail: null, detailId: "", search: "", profileStatus: "all", erpStatus: "", brand: "", category: "", lifecycleStatus: "", platform: "", stockStatus: "", businessZone: "all", sort: "updated-desc", facets: { brands: [], categories: [], lifecycleStatuses: [], platforms: [] }, page: 1, pageSize: 50, pagination: { total: 0 }, summary: { total: 0, profiled: 0, unprofiled: 0, businessZones: {} }, error: "", notice: "" };
 
 function getRouteProductId() {
   const match = window.location.hash.replace(/^#/, "").match(/^products\/(?!sku\/)(.+)$/);
@@ -396,7 +396,7 @@ function renderProductList() {
 }
 
 function renderProductSkuV2List() {
-  const { rows, summary, pagination } = productSkuV2State;
+  const { rows, summary, pagination, facets } = productSkuV2State;
   const totalPages = Math.max(1, Math.ceil(Number(pagination.total || 0) / productSkuV2State.pageSize));
   return `<section class="product-center-page product-sku-v2-page">
     <div class="section-heading with-actions"><div><h1>产品中心</h1><p>以ERP SKU为唯一身份，产品档案承载经营管理属性</p></div></div>
@@ -407,13 +407,30 @@ function renderProductSkuV2List() {
       <article><span>已建档</span><strong>${summary.profiled ?? 0}</strong></article>
       <article><span>未建档</span><strong>${summary.unprofiled ?? 0}</strong></article>
     </section>
-    <form class="filter-bar" data-product-v2-filter>
+    <section class="product-business-zones" aria-label="产品经营分区">
+      <header><div><h2>产品经营分区</h2><p>基于 ERP SKU 的销售、库存、生命周期动态识别。</p></div><small>新品周期 ${summary.businessZoneRules?.newProductCycleDays ?? 30} 天 · 爆款阈值前 ${summary.businessZoneRules?.hitTopPercent ?? 20}%</small></header>
+      <div class="product-business-zone-tabs">
+        <button type="button" data-action="set-product-v2-zone" data-product-zone="all" class="${productSkuV2State.businessZone === "all" ? "is-active" : ""}"><span>全部SKU</span><strong>${summary.total ?? 0}</strong><small>查看完整SKU池</small></button>
+        ${Object.entries(productBusinessZoneMeta).map(([zone, meta]) => `<button type="button" data-action="set-product-v2-zone" data-product-zone="${zone}" class="${productSkuV2State.businessZone === zone ? "is-active" : ""}"><span>${meta.icon} ${meta.label}</span><strong>${summary.businessZones?.[zone] ?? 0}</strong><small>${meta.description}</small></button>`).join("")}
+      </div>
+    </section>
+    <form class="filter-bar product-filter-bar" data-product-v2-filter>
       <input type="search" name="search" value="${escapeHtml(productSkuV2State.search)}" placeholder="搜索SKU编码、货品名称、规格" />
+      <select name="brand">${renderFilterOptions(facets.brands ?? [], productSkuV2State.brand, "全部品牌")}</select>
+      <select name="category">${renderFilterOptions(facets.categories ?? [], productSkuV2State.category, "全部分类")}</select>
       <select name="profileStatus"><option value="all">全部SKU</option><option value="profiled" ${productSkuV2State.profileStatus === "profiled" ? "selected" : ""}>已建档</option><option value="unprofiled" ${productSkuV2State.profileStatus === "unprofiled" ? "selected" : ""}>未建档</option></select>
-      <input name="erpStatus" value="${escapeHtml(productSkuV2State.erpStatus)}" placeholder="ERP状态" />
+      <details class="product-more-filters" ${productSkuV2State.erpStatus || productSkuV2State.lifecycleStatus || productSkuV2State.platform || productSkuV2State.stockStatus ? "open" : ""}>
+        <summary>更多筛选</summary><div>
+          <input name="erpStatus" value="${escapeHtml(productSkuV2State.erpStatus)}" placeholder="ERP状态" />
+          <select name="lifecycleStatus">${renderFilterOptions(facets.lifecycleStatuses ?? [], productSkuV2State.lifecycleStatus, "全部生命周期")}</select>
+          <select name="platform">${renderFilterOptions(facets.platforms ?? [], productSkuV2State.platform, "全部销售平台")}</select>
+          <select name="stockStatus"><option value="">全部库存</option><option value="available" ${productSkuV2State.stockStatus === "available" ? "selected" : ""}>有库存</option><option value="low" ${productSkuV2State.stockStatus === "low" ? "selected" : ""}>低库存</option><option value="empty" ${productSkuV2State.stockStatus === "empty" ? "selected" : ""}>无库存</option></select>
+        </div>
+      </details>
       <button class="primary-button" type="submit">查询</button>
       <button class="text-button" type="button" data-action="clear-product-v2-filter">清空</button>
     </form>
+    <div class="product-list-toolbar"><span>当前筛选 ${pagination.total || 0} 个SKU</span>${renderProductV2BusinessSort()}</div>
     ${productSkuV2State.loading ? `<div class="empty-state">正在读取ERP SKU…</div>` : renderProductSkuV2Cards(rows)}
     <nav class="product-pagination"><span>第 ${productSkuV2State.page}/${totalPages} 页 · 共 ${pagination.total || 0} 个SKU</span><div>
       <button class="secondary-button" type="button" data-action="product-v2-page" data-page="${productSkuV2State.page - 1}" ${productSkuV2State.page <= 1 ? "disabled" : ""}>上一页</button>
@@ -432,6 +449,7 @@ function renderProductSkuV2Cards(rows) {
       <div class="product-archive-card-media">${renderImage(imageSource, "product-card-image")}</div>
       <div class="product-archive-card-body">
         <div class="product-archive-card-heading"><h3 title="${escapeHtml(title)}">${escapeHtml(title)}</h3><span class="status-badge">${item.productId ? "已建档" : "未建立产品档案"}</span></div>
+        <div class="product-v2-card-tags">${businessZoneBadge(item.businessZone)}${item.displayBrand ? `<span>${escapeHtml(item.displayBrand)}</span>` : ""}${item.displayCategory ? `<span>${escapeHtml(item.displayCategory)}</span>` : ""}</div>
         <div class="product-card-identities"><span>SKU <strong>${escapeHtml(item.merchantSkuCode || "—")}</strong></span><span>ERP <strong>${escapeHtml(item.erpStatus || "未设置")}</strong></span></div>
         <div class="product-card-metrics">
           <div><strong>${formatMetric(item.stockNum)}</strong><span>当前库存</span></div>
@@ -447,6 +465,11 @@ function renderProductSkuV2Cards(rows) {
       </div>
     </article>`;
   }).join("")}</div>`;
+}
+
+function renderProductV2BusinessSort() {
+  const options = [["updated-desc", "综合"], ["sales-desc", "🔥销量"], ["stock-desc", "📦库存"], ["capital-desc", "💰资金占用"], ["created-desc", "🆕新品"]];
+  return `<div class="product-business-sort" aria-label="产品经营排序"><span>经营排序：</span>${options.map(([value, label]) => `<button type="button" data-action="set-product-v2-sort" data-product-sort="${value}" class="${productSkuV2State.sort === value ? "is-active" : ""}" aria-pressed="${productSkuV2State.sort === value}">${label}</button>`).join("")}</div>`;
 }
 
 function renderProductSkuV2Detail() {
@@ -1494,8 +1517,11 @@ async function refreshProductSkuV2List(rerender) {
   productSkuV2State = { ...productSkuV2State, loading: true, error: "" }; rerender();
   try {
     const result = await loadProductCenterV2Skus({ search: productSkuV2State.search, profileStatus: productSkuV2State.profileStatus,
-      erpStatus: productSkuV2State.erpStatus, limit: productSkuV2State.pageSize, offset: (productSkuV2State.page - 1) * productSkuV2State.pageSize });
-    productSkuV2State = { ...productSkuV2State, loading: false, loaded: true, rows: result.rows || [], pagination: result.pagination || { total: 0 }, summary: result.summary || { total: 0, profiled: 0, unprofiled: 0 }, error: "" };
+      erpStatus: productSkuV2State.erpStatus, brand: productSkuV2State.brand, category: productSkuV2State.category,
+      lifecycleStatus: productSkuV2State.lifecycleStatus, platform: productSkuV2State.platform, stockStatus: productSkuV2State.stockStatus,
+      businessZone: productSkuV2State.businessZone, sort: productSkuV2State.sort,
+      limit: productSkuV2State.pageSize, offset: (productSkuV2State.page - 1) * productSkuV2State.pageSize });
+    productSkuV2State = { ...productSkuV2State, loading: false, loaded: true, rows: result.rows || [], pagination: result.pagination || { total: 0 }, summary: result.summary || { total: 0, profiled: 0, unprofiled: 0, businessZones: {} }, facets: result.facets || productSkuV2State.facets, error: "" };
   } catch (error) { productSkuV2State = { ...productSkuV2State, loading: false, loaded: true, rows: [], error: error.message || "ERP SKU列表读取失败。" }; }
   rerender();
 }
@@ -1763,7 +1789,9 @@ export function bindProductCenterPageEvents(rerender) {
   document.querySelector("[data-product-v2-filter]")?.addEventListener("submit", (event) => {
     event.preventDefault(); const form = event.currentTarget;
     productSkuV2State = { ...productSkuV2State, search: form.elements.search.value.trim(), profileStatus: form.elements.profileStatus.value,
-      erpStatus: form.elements.erpStatus.value.trim(), page: 1, loaded: false, notice: "" };
+      erpStatus: form.elements.erpStatus.value.trim(), brand: form.elements.brand.value, category: form.elements.category.value,
+      lifecycleStatus: form.elements.lifecycleStatus.value, platform: form.elements.platform.value, stockStatus: form.elements.stockStatus.value,
+      page: 1, loaded: false, notice: "" };
     void refreshProductSkuV2List(rerender);
   });
   document.querySelector("[data-product-lifecycle-form]")?.addEventListener("submit", async (event) => {
@@ -1797,7 +1825,17 @@ export function bindProductCenterPageEvents(rerender) {
       return;
     }
     if (action === "clear-product-v2-filter") {
-      productSkuV2State = { ...productSkuV2State, search: "", profileStatus: "all", erpStatus: "", page: 1, loaded: false, notice: "" };
+      productSkuV2State = { ...productSkuV2State, search: "", profileStatus: "all", erpStatus: "", brand: "", category: "", lifecycleStatus: "", platform: "", stockStatus: "", businessZone: "all", sort: "updated-desc", page: 1, loaded: false, notice: "" };
+      void refreshProductSkuV2List(rerender);
+      return;
+    }
+    if (action === "set-product-v2-zone") {
+      productSkuV2State = { ...productSkuV2State, businessZone: button.dataset.productZone || "all", page: 1, loaded: false };
+      void refreshProductSkuV2List(rerender);
+      return;
+    }
+    if (action === "set-product-v2-sort") {
+      productSkuV2State = { ...productSkuV2State, sort: button.dataset.productSort || "updated-desc", page: 1, loaded: false };
       void refreshProductSkuV2List(rerender);
       return;
     }

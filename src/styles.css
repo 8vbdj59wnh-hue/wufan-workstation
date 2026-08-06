@@ -6475,6 +6475,24 @@ button.content-template-thumb {
   font-weight: 700;
 }
 
+.product-v2-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.product-v2-card-tags > span:not(.product-zone-badge) {
+  max-width: 130px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #f1f5f9;
+  padding: 3px 8px;
+  color: #64748b;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .product-view-switch {
   display: inline-flex;
   gap: 2px;

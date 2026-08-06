@@ -7,7 +7,7 @@ import { bindScheduleBoardPageEvents, renderScheduleBoardPage } from "./schedule
 import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260803-action-product-manual-link1";
 import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js?v=20260802-template-version1";
 import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js?v=20260803-action-product-manual-link1";
-import { bindProductCenterPageEvents, renderProductCenterPage } from "./pages/productCenterPage.js?v=20260803-product-link-search1";
+import { bindProductCenterPageEvents, renderProductCenterPage } from "./pages/productCenterPage.js?v=20260806-product-v2-business-view1";
 import { bindDataCenterPageEvents, renderDataCenterPage } from "./dataCenterPage.js?v=20260729-data-center-v5";
 import { bindConnectionCenterPageEvents, renderConnectionCenterPage } from "./pages/connectionCenterPage.js?v=20260806-bulk-platform-import1";
 import { bindOperationDashboardPageEvents, renderOperationDashboardPage } from "./operationDashboardPage.js?v=20260802-operation-foundation1";
