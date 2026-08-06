@@ -6179,7 +6179,7 @@ button.content-template-thumb {
 }
 
 .schedule-pending-list {
-  grid-template-columns: repeat(2, 112px);
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   align-content: start;
   padding: 8px;
@@ -6203,8 +6203,8 @@ button.content-template-thumb {
 .schedule-pending-card {
   display: grid;
   gap: 10px;
-  width: 112px;
-  padding: 6px;
+  width: 100%;
+  padding: 8px;
   border: 1px solid #e5e7eb;
   border-radius: 6px;
   cursor: pointer;
@@ -6215,8 +6215,8 @@ button.content-template-thumb {
 }
 
 .schedule-pending-card-media {
-  width: 100px;
-  height: 100px;
+  width: 100%;
+  height: auto;
   aspect-ratio: 1;
   overflow: hidden;
   border: 1px solid #e5e7eb;
@@ -6246,17 +6246,98 @@ button.content-template-thumb {
 }
 
 .schedule-pending-card-body strong {
-  overflow: hidden;
   color: #111827;
   font-size: 13px;
   line-height: 1.35;
+}
+
+.schedule-pending-action-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.schedule-pending-action-copy > strong {
+  display: -webkit-box;
+  overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.schedule-pending-action-copy p {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .schedule-pending-card-body span {
   color: #6b7280;
   font-size: 12px;
+}
+
+.schedule-pending-visual-templates {
+  display: grid;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.schedule-pending-section-label {
+  color: #475569 !important;
+  font-size: 11px !important;
+  font-weight: 600;
+}
+
+.schedule-pending-visual-template-list {
+  display: grid;
+  gap: 6px;
+}
+
+.schedule-pending-visual-template {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.schedule-pending-visual-template-cover {
+  display: grid;
+  width: 44px;
+  aspect-ratio: 1;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.schedule-pending-visual-template-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.schedule-pending-visual-template > strong {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 12px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.schedule-pending-execution-meta {
+  display: grid;
+  gap: 3px;
+  padding-top: 8px;
+  border-top: 1px solid #e5e7eb;
 }
 
 .schedule-pending-card-body .schedule-process-start-button {

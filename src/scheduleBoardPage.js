@@ -35,7 +35,6 @@ import { getActionDeadlinePresentation } from "./data/actionDeadline.js?v=202608
 import {
   getActionDisplayImages,
   getActionProducts,
-  renderLinkedActionProducts,
 } from "./actionProductRelations.js?v=20260803-action-product-manual-link1";
 import {
   getCurrentExecutor as selectCurrentExecutor,
@@ -794,6 +793,46 @@ function getProcessCurrentProgressText(tasks) {
   return progress.current?.name ?? "暂无任务";
 }
 
+function getLinkedVisualTemplates(processInstance) {
+  const linkedTemplateIds = processInstance?.customFields?.linkedTemplateIds;
+  if (!Array.isArray(linkedTemplateIds)) return [];
+  const templateById = new Map((state.templates ?? []).map((template) => [template.id, template]));
+  return [...new Set(linkedTemplateIds.map((id) => String(id ?? "").trim()).filter(Boolean))]
+    .map((templateId) => templateById.get(templateId) ?? null)
+    .filter(Boolean);
+}
+
+function getVisualTemplateCover(template) {
+  const previewUrl = template?.previewImage?.fileUrl ?? template?.previewImage?.url ?? "";
+  if (previewUrl !== "") return resolveAssetUrl(previewUrl);
+  if (template?.fileType === "image" && template?.fileUrl) return resolveAssetUrl(template.fileUrl);
+  return "";
+}
+
+function renderPendingVisualTemplates(processInstance) {
+  const templates = getLinkedVisualTemplates(processInstance);
+  if (templates.length === 0) return "";
+  return `
+    <section class="schedule-pending-visual-templates" aria-label="关联视觉模板">
+      <span class="schedule-pending-section-label">关联视觉模板</span>
+      <div class="schedule-pending-visual-template-list">
+        ${templates.map((template) => {
+          const coverUrl = getVisualTemplateCover(template);
+          const templateName = template.name || "未命名视觉模板";
+          return `
+            <div class="schedule-pending-visual-template">
+              <div class="schedule-pending-visual-template-cover">
+                ${coverUrl === "" ? `<span>无封面</span>` : `<img src="${escapeAttribute(coverUrl)}" alt="${escapeAttribute(templateName)}" />`}
+              </div>
+              <strong title="${escapeAttribute(templateName)}">${escapeHtml(templateName)}</strong>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    </section>
+  `;
+}
+
 function renderProcessBlock(row) {
   if (row.processInstance === null) return "";
   const canDrag = canDragProcess(row);
@@ -841,6 +880,9 @@ function renderPendingProcessCard(row) {
   const title = getProcessCardTitle(row);
   const displayImages = getProcessImageUrls(row);
   const initiatorName = findName(state.people, row.processInstance.initiatorId ?? "", "未设置");
+  const ownerName = getActionOwnerName(row);
+  const description = String(row.processInstance.description ?? "").trim();
+  const dueDate = formatBusinessDateTime(row.processInstance.dueDate, "未设置");
   return `
     <article
       class="schedule-pending-card ${savingWorkPlanIds.has(row.workPlan.id) ? "is-saving" : ""}"
@@ -866,9 +908,17 @@ function renderPendingProcessCard(row) {
         })}
       </div>
       <div class="schedule-pending-card-body">
-        <strong>${escapeHtml(title)}</strong>
-        ${row.processInstance && getActionProducts(row.processInstance.id).length ? renderLinkedActionProducts(row.processInstance.id, { compact: true }) : ""}
-        <span>发起人：${escapeHtml(initiatorName)}</span>
+        <div class="schedule-pending-action-copy">
+          <strong title="${escapeAttribute(title)}">${escapeHtml(title)}</strong>
+          ${description === "" ? "" : `<p>${escapeHtml(description)}</p>`}
+        </div>
+        ${renderPendingVisualTemplates(row.processInstance)}
+        <div class="schedule-pending-execution-meta">
+          <span>负责人：${escapeHtml(ownerName)}</span>
+          <span>状态：${escapeHtml(row.statusLabel)}</span>
+          <span>截止：${escapeHtml(dueDate)}</span>
+          <span>发起人：${escapeHtml(initiatorName)}</span>
+        </div>
         ${
           canStart
             ? `<button class="schedule-process-start-button" type="button" data-schedule-start-process-id="${escapeAttribute(row.processInstance.id)}">开始执行</button>`
