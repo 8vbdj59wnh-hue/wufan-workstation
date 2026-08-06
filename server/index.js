@@ -91,6 +91,7 @@ import {
 } from "./inventoryDataSyncAdapter.js";
 import { commitSalesFactDataSync, previewSalesFactDataSync, readSalesFactDataSyncPreview } from "./salesFactDataSyncAdapter.js";
 import { commitPlatformGoodsExcelDataSync, previewPlatformGoodsExcelDataSync, readPlatformGoodsExcelDataSyncPreview } from "./platformGoodsExcelDataSyncAdapter.js";
+import { confirmPlatformLinkShopMappings, listPlatformLinkShopMappings, previewPlatformLinkShopMappings } from "./platformLinkShopMappingImportService.js";
 import {
   createConnectionAction,
   createConnectionDataMapping,
@@ -2354,6 +2355,48 @@ app.post("/api/connection-data-foundation/imports/preview", requireLinkImport, (
 app.post("/api/connection-data-foundation/imports/:id/confirm", requireLinkImport, (request, response) => {
   try { response.json({ success: true, ...confirmConnectionDataImport(request.params.id) }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "链接数据确认导入失败。" }); }
+});
+
+app.post("/api/connection-data-foundation/sales-facts/preview", requireLinkImport, (request, response) => {
+  uploadConnectionWorkbook.single("file")(request, response, (error) => {
+    if (error) { response.status(400).json({ success: false, message: error.message || "链接利润表上传失败。" }); return; }
+    try {
+      const task = getDatabase().prepare("SELECT id FROM data_sync_tasks WHERE taskCode='sales_fact_excel_import' AND status='enabled'").get();
+      if (!task) throw new Error("链接利润表导入任务未启用。");
+      const result = previewSalesFactDataSync({ taskId: task.id, buffer: request.file?.buffer, fileName: normalizeUploadedFileName(request.file?.originalname), createdBy: getUserPersonId(request.user) });
+      response.status(result.idempotent ? 200 : 201).json({ success: true, ...result });
+    } catch (uploadError) { response.status(400).json({ success: false, message: uploadError.message || "链接利润表预览失败。" }); }
+  });
+});
+
+app.get("/api/connection-data-foundation/sales-facts/:id", requireLinkImport, (request, response) => {
+  try { response.json({ success: true, ...readSalesFactDataSyncPreview(request.params.id) }); }
+  catch (error) { response.status(404).json({ success: false, message: error.message || "链接利润表预览读取失败。" }); }
+});
+
+app.post("/api/connection-data-foundation/sales-facts/:id/confirm", requireLinkImport, (request, response) => {
+  try { response.json({ success: true, ...commitSalesFactDataSync(request.params.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "链接利润表确认导入失败。" }); }
+});
+
+app.get("/api/connection-data-foundation/shop-mappings", requireLinkView, (request, response) => {
+  try { response.json({ success: true, items: listPlatformLinkShopMappings(request.query.limit) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "店铺匹配配置读取失败。" }); }
+});
+
+app.post("/api/connection-data-foundation/shop-mappings/preview", requireLinkImport, (request, response) => {
+  uploadConnectionWorkbook.single("file")(request, response, (error) => {
+    if (error) { response.status(400).json({ success: false, message: error.message || "店铺匹配表上传失败。" }); return; }
+    try {
+      const result = previewPlatformLinkShopMappings({ buffer: request.file?.buffer, fileName: normalizeUploadedFileName(request.file?.originalname), createdBy: getUserPersonId(request.user) });
+      response.status(result.idempotent ? 200 : 201).json({ success: true, ...result });
+    } catch (uploadError) { response.status(400).json({ success: false, message: uploadError.message || "店铺匹配预览失败。" }); }
+  });
+});
+
+app.post("/api/connection-data-foundation/shop-mappings/:id/confirm", requireLinkImport, (request, response) => {
+  try { response.json({ success: true, ...confirmPlatformLinkShopMappings(request.params.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "店铺匹配确认失败。" }); }
 });
 
 app.get("/api/connection-import-batches", requireLinkView, (_request, response) => {

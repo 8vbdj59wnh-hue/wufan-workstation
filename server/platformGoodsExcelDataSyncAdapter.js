@@ -5,6 +5,7 @@ import { assertCurrentDataSyncPreview, completeDataSyncBatch, createDataSyncBatc
 
 const TASK_CODE = "platform_goods_excel_import";
 const SOURCE_BATCH_TYPE = "platform_goods_excel_import";
+const PARSER_VERSION = "platform-goods-excel-v2-mapping";
 const text = (value) => String(value ?? "").trim();
 
 function normalizeCell(value) {
@@ -98,11 +99,14 @@ function analyzeRows(rows, { shopId, sourceShopName }) {
     if (matchedErpSkus.length > 1) { evaluated.push(exception(row, "ambiguous_erp_sku", "ERP SKU编码存在歧义。")); continue; }
     const platformSku = matchedPlatformSkus[0];
     const erpSku = matchedErpSkus[0];
-    if (platformSku.erpSkuId && platformSku.erpSkuId !== erpSku.id) {
-      evaluated.push(exception(row, "existing_erp_sku_conflict", "平台SKU已关联不同ERP SKU，本行已阻断。", { currentErpSkuId: platformSku.erpSkuId, expectedErpSkuId: erpSku.id }));
+    const activeMappings = db.prepare("SELECT erpSkuId FROM sales_link_sku_erp_mappings WHERE salesLinkSkuId=? AND currentState='active'").all(platformSku.id);
+    const exactMapping = activeMappings.some((item) => item.erpSkuId === erpSku.id);
+    const conflictingMappings = activeMappings.filter((item) => item.erpSkuId !== erpSku.id);
+    if (conflictingMappings.length) {
+      evaluated.push(exception(row, "existing_erp_sku_conflict", "平台SKU已存在不同的V2 ERP SKU关系，本行已阻断。", { currentErpSkuIds: conflictingMappings.map((item) => item.erpSkuId), expectedErpSkuId: erpSku.id }));
       continue;
     }
-    evaluated.push({ ...row, salesLinkId: salesLink.id, salesLinkSkuId: platformSku.id, erpSkuId: erpSku.id, action: platformSku.erpSkuId === erpSku.id ? "already_linked" : "link", exceptionType: null, message: platformSku.erpSkuId === erpSku.id ? "关系已存在。" : "可补充ERP SKU关系。" });
+    evaluated.push({ ...row, salesLinkId: salesLink.id, salesLinkSkuId: platformSku.id, erpSkuId: erpSku.id, action: exactMapping ? "already_linked" : "link", exceptionType: null, message: exactMapping ? "V2关系已存在。" : "可补充V2 ERP SKU关系。" });
   }
   return { shop, filtered, evaluated };
 }
@@ -112,7 +116,7 @@ function summaryFor(batch, rows) {
   const exceptions = rows.filter((row) => row.action === "exception");
   const types = Object.fromEntries([...new Set(exceptions.map((row) => row.exceptionType))].map((type) => [type, exceptions.filter((row) => row.exceptionType === type).length]));
   return {
-    fileName: batch.fileName, fileHash: batch.fileHash, periodStart: batch.periodStart, periodEnd: batch.periodEnd,
+    fileName: batch.fileName, fileHash: batch.scope?.sourceFileHash || batch.fileHash, parserVersion: batch.scope?.parserVersion || PARSER_VERSION, periodStart: batch.periodStart, periodEnd: batch.periodEnd,
     sourceRows: rows.length, totalPlatformSkus: rows.filter((row) => row.platformSkuId).length,
     linkable: count("link"), alreadyLinked: count("already_linked"), exceptionCount: exceptions.length,
     bundleCount: types.bundle_sku || 0, exceptionTypes: types,
@@ -124,14 +128,15 @@ export function previewPlatformGoodsExcelDataSync({ taskId, buffer, fileName, sh
   if (!task || task.taskCode !== TASK_CODE) throw new Error("平台货品关系导入任务不存在。");
   if (!shopId) throw new Error("请选择系统店铺。");
   if (!text(sourceShopName)) throw new Error("请填写Excel店铺名称。");
-  const fileHash = crypto.createHash("sha256").update(buffer || Buffer.alloc(0)).digest("hex");
+  const sourceFileHash = crypto.createHash("sha256").update(buffer || Buffer.alloc(0)).digest("hex");
+  const fileHash = crypto.createHash("sha256").update(buffer || Buffer.alloc(0)).update(`\0${PARSER_VERSION}`).digest("hex");
   const existing = getDatabase().prepare("SELECT id FROM data_sync_batches WHERE taskId=? AND fileHash=? ORDER BY createdAt DESC LIMIT 1").get(taskId, fileHash);
   if (existing) return { ...readPlatformGoodsExcelDataSyncPreview(existing.id), idempotent: true };
 
   const parsed = parseWorkbook(buffer);
   const analysis = analyzeRows(parsed.rows, { shopId, sourceShopName: text(sourceShopName) });
   const dates = analysis.filtered.map((row) => row.sourceModifiedAt).filter(Boolean).sort();
-  const batch = createDataSyncBatch(taskId, { triggerMode: "manual", syncMode: "full", fileName, fileHash, periodStart: dates[0] || null, periodEnd: dates.at(-1) || null, scope: { shopId, sourceShopName: text(sourceShopName), sheetName: parsed.sheetName }, createdBy });
+  const batch = createDataSyncBatch(taskId, { triggerMode: "manual", syncMode: "full", fileName, fileHash, periodStart: dates[0] || null, periodEnd: dates.at(-1) || null, scope: { shopId, sourceShopName: text(sourceShopName), sheetName: parsed.sheetName, parserVersion: PARSER_VERSION, sourceFileHash }, createdBy });
   const db = getDatabase();
   const insert = db.prepare(`INSERT INTO platform_goods_excel_import_rows (batchId,rowNumber,sourceShopName,platformGoodsId,platformSkuId,merchantSkuCode,systemGoodsType,salesLinkId,salesLinkSkuId,erpSkuId,action,exceptionType,message,rawDataJson) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   db.transaction(() => {
@@ -141,7 +146,7 @@ export function previewPlatformGoodsExcelDataSync({ taskId, buffer, fileName, sh
   const summary = summaryFor({ ...batch, periodStart: dates[0] || null, periodEnd: dates.at(-1) || null }, staged);
   const exceptions = staged.filter((row) => row.action === "exception").map((row) => ({ exceptionType: row.exceptionType, severity: "error", message: row.message, entityType: "platform_sku", entityId: row.platformSkuId, rawData: JSON.parse(row.rawDataJson || "{}") }));
   markDataSyncBatchPreviewReady(batch.id, { sourceBatchType: SOURCE_BATCH_TYPE, sourceBatchId: batch.id, summary: { total: summary.totalPlatformSkus, updated: summary.linkable, exceptionCount: summary.exceptionCount }, exceptions, message: "平台货品Excel关系预览已生成。" });
-  db.prepare("UPDATE data_sync_batches SET periodStart=?,periodEnd=?,scopeJson=? WHERE id=?").run(dates[0] || null, dates.at(-1) || null, JSON.stringify({ shopId, sourceShopName: text(sourceShopName), sheetName: parsed.sheetName }), batch.id);
+  db.prepare("UPDATE data_sync_batches SET periodStart=?,periodEnd=?,scopeJson=? WHERE id=?").run(dates[0] || null, dates.at(-1) || null, JSON.stringify({ shopId, sourceShopName: text(sourceShopName), sheetName: parsed.sheetName, parserVersion: PARSER_VERSION, sourceFileHash }), batch.id);
   return readPlatformGoodsExcelDataSyncPreview(batch.id);
 }
 
@@ -159,18 +164,25 @@ export function commitPlatformGoodsExcelDataSync(batchId) {
   if (batch.sourceBatchType !== SOURCE_BATCH_TYPE) throw new Error("当前批次不是平台货品Excel导入预览。");
   const db = getDatabase();
   const rows = db.prepare("SELECT * FROM platform_goods_excel_import_rows WHERE batchId=? AND action='link' ORDER BY rowNumber").all(batchId);
-  let updated = 0; let conflicts = 0;
+  let created = 0; let conflicts = 0;
+  const committedAt = new Date().toISOString();
   db.transaction(() => {
     for (const row of rows) {
-      const current = db.prepare("SELECT erpSkuId FROM sales_link_skus WHERE id=?").get(row.salesLinkSkuId);
-      if (!current) { conflicts += 1; continue; }
-      if (current.erpSkuId === row.erpSkuId) continue;
-      if (current.erpSkuId) { conflicts += 1; continue; }
-      updated += db.prepare("UPDATE sales_link_skus SET erpSkuId=? WHERE id=? AND erpSkuId IS NULL").run(row.erpSkuId, row.salesLinkSkuId).changes;
+      const platformSku = db.prepare("SELECT id FROM sales_link_skus WHERE id=?").get(row.salesLinkSkuId);
+      const erpSku = db.prepare("SELECT id FROM erp_skus WHERE id=?").get(row.erpSkuId);
+      if (!platformSku || !erpSku) { conflicts += 1; continue; }
+      const active = db.prepare("SELECT erpSkuId FROM sales_link_sku_erp_mappings WHERE salesLinkSkuId=? AND currentState='active'").all(row.salesLinkSkuId);
+      if (active.some((item) => item.erpSkuId !== row.erpSkuId)) { conflicts += 1; continue; }
+      if (active.some((item) => item.erpSkuId === row.erpSkuId)) continue;
+      created += db.prepare(`INSERT OR IGNORE INTO sales_link_sku_erp_mappings
+        (id,salesLinkSkuId,erpSkuId,mappingType,quantity,currentState,sourceType,sourceBatchId,createdAt,updatedAt)
+        VALUES (?,?,?,?,1,'active','platform_goods_excel',?,?,?)`).run(
+        `sales-link-sku-erp-map-${crypto.randomUUID()}`, row.salesLinkSkuId, row.erpSkuId, "single", batchId, committedAt, committedAt,
+      ).changes;
     }
   }).immediate();
   const previewExceptions = Number(batch.exceptionCount || 0);
   const status = previewExceptions || conflicts ? "partial" : "succeeded";
-  const completed = completeDataSyncBatch(batchId, { status, totalCount: Number(batch.totalCount || 0), updatedCount: updated, exceptionCount: previewExceptions + conflicts });
-  return { dataSyncBatch: completed, updated, conflicts, protected: { salesLinksCreated: 0, productsCreated: 0 } };
+  const completed = completeDataSyncBatch(batchId, { status, totalCount: Number(batch.totalCount || 0), createdCount: created, updatedCount: 0, exceptionCount: previewExceptions + conflicts });
+  return { dataSyncBatch: completed, created, updated: 0, conflicts, protected: { salesLinksCreated: 0, productsCreated: 0, legacySalesLinkSkuErpIdsUpdated: 0 } };
 }

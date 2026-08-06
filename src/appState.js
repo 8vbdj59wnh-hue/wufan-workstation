@@ -1260,6 +1260,24 @@ export async function confirmConnectionFoundationImport(batchId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/imports/${encodeURIComponent(batchId)}/confirm`, { method: "POST" }), "链接数据确认导入失败。");
 }
 
+export async function previewConnectionSalesFactImport(file) {
+  const form = new FormData(); form.append("file", file);
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-facts/preview`, { method: "POST", body: form }), "链接利润表预览失败。");
+}
+
+export async function confirmConnectionSalesFactImport(batchId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-facts/${encodeURIComponent(batchId)}/confirm`, { method: "POST" }), "链接利润表确认导入失败。");
+}
+
+export async function previewPlatformLinkShopMappingImport(file) {
+  const form = new FormData(); form.append("file", file);
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/shop-mappings/preview`, { method: "POST", body: form }), "店铺匹配预览失败。");
+}
+
+export async function confirmPlatformLinkShopMappingImport(batchId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/shop-mappings/${encodeURIComponent(batchId)}/confirm`, { method: "POST" }), "店铺匹配确认失败。");
+}
+
 export async function createConnectionFoundationTemplate(payload) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/templates`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "导入模板创建失败。");
 }

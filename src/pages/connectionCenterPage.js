@@ -1,1 +1,1 @@
-export { bindConnectionCenterPageEvents, renderConnectionCenterPage } from "../connectionCenterPage.js?v=20260803-connection-workbench1";
+export { bindConnectionCenterPageEvents, renderConnectionCenterPage } from "../connectionCenterPage.js?v=20260806-connection-v2-entry1";

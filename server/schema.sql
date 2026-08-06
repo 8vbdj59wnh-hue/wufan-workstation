@@ -1183,6 +1183,62 @@ CREATE INDEX IF NOT EXISTS idx_sales_link_sku_erp_mapping_erp_state
 CREATE INDEX IF NOT EXISTS idx_sales_link_sku_erp_mapping_batch
   ON sales_link_sku_erp_mappings(sourceBatchId);
 
+CREATE TABLE IF NOT EXISTS platform_link_shop_mappings (
+  id TEXT PRIMARY KEY,
+  platform TEXT NOT NULL,
+  platformGoodsId TEXT NOT NULL,
+  shopId TEXT NOT NULL,
+  currentState TEXT NOT NULL DEFAULT 'active',
+  sourceType TEXT NOT NULL DEFAULT 'excel_import',
+  sourceBatchId TEXT,
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  invalidatedAt TEXT,
+  FOREIGN KEY(shopId) REFERENCES sales_shops(id),
+  UNIQUE(platform,platformGoodsId),
+  CHECK(currentState IN ('active','inactive'))
+);
+CREATE INDEX IF NOT EXISTS idx_platform_link_shop_mappings_shop
+  ON platform_link_shop_mappings(shopId,currentState);
+
+CREATE TABLE IF NOT EXISTS platform_link_shop_mapping_import_batches (
+  id TEXT PRIMARY KEY,
+  fileName TEXT NOT NULL,
+  fileHash TEXT NOT NULL UNIQUE,
+  sheetName TEXT,
+  status TEXT NOT NULL,
+  totalRows INTEGER NOT NULL DEFAULT 0,
+  validRows INTEGER NOT NULL DEFAULT 0,
+  existingRows INTEGER NOT NULL DEFAULT 0,
+  errorRows INTEGER NOT NULL DEFAULT 0,
+  summaryJson TEXT NOT NULL DEFAULT '{}',
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  committedAt TEXT
+);
+
+CREATE TABLE IF NOT EXISTS platform_link_shop_mapping_import_rows (
+  id TEXT PRIMARY KEY,
+  batchId TEXT NOT NULL,
+  rowNumber INTEGER NOT NULL,
+  platform TEXT,
+  platformGoodsId TEXT,
+  systemShopText TEXT,
+  shopId TEXT,
+  status TEXT NOT NULL,
+  errorType TEXT,
+  message TEXT,
+  rawDataJson TEXT NOT NULL DEFAULT '{}',
+  createdAt TEXT NOT NULL,
+  FOREIGN KEY(batchId) REFERENCES platform_link_shop_mapping_import_batches(id) ON DELETE CASCADE,
+  FOREIGN KEY(shopId) REFERENCES sales_shops(id),
+  UNIQUE(batchId,rowNumber)
+);
+CREATE INDEX IF NOT EXISTS idx_platform_link_shop_mapping_rows_status
+  ON platform_link_shop_mapping_import_rows(batchId,status);
+
 CREATE TABLE IF NOT EXISTS wangdian_shop_mappings (
   id TEXT PRIMARY KEY,
   wangdianShopNo TEXT NOT NULL COLLATE NOCASE UNIQUE,

@@ -1,6 +1,8 @@
 export {
   commitConnectionImport,
   confirmConnectionFoundationImport,
+  confirmConnectionSalesFactImport,
+  confirmPlatformLinkShopMappingImport,
   confirmConnectionImportRow,
   createConnectionHealthRecord,
   createConnectionImprovementAction,
@@ -34,6 +36,8 @@ export {
   loadConnectionPeriodSnapshots,
   loadConnectionAssets,
   previewConnectionOwnerImport,
+  previewConnectionSalesFactImport,
+  previewPlatformLinkShopMappingImport,
   confirmConnectionOwnerImport,
   loadConnections,
   loadConnectionCoreDetail,

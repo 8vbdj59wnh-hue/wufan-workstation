@@ -180,8 +180,14 @@ function platformTemplateConfigs() {
   ];
 }
 
+const douyinBusinessMapping = {
+  "商品ID": "platformGoodsId", "商品名称": "title", "商品标题": "title", "日期": "periodStart", "统计日期": "periodStart",
+  "商品访客数": "visitorCount", "商品浏览量": "viewCount", "点击量": "clickCount", "收藏数": "favoriteCount",
+  "加购数": "cartCount", "支付买家数": "payBuyerCount", "支付件数": "payQuantity", "支付金额": "payAmount", "支付转化率": "conversionRate",
+};
+
 function findShop(database, platform, shopName, candidates = []) {
-  const platformNames = { tmall: ["tmall", "天猫"], taobao: ["taobao", "淘宝"], xiaohongshu: ["xiaohongshu", "小红书"], jd: ["jd", "京东"] }[normalized(platform)] || [text(platform)];
+  const platformNames = { tmall: ["tmall", "天猫"], taobao: ["taobao", "淘宝"], xiaohongshu: ["xiaohongshu", "小红书"], jd: ["jd", "京东"], douyin: ["douyin", "抖音", "抖店"] }[normalized(platform)] || [text(platform)];
   const names = [...new Set([shopName, ...candidates].map(text).filter(Boolean))];
   for (const name of names) {
     const rows = text(platform)
@@ -198,7 +204,15 @@ function findShop(database, platform, shopName, candidates = []) {
 export function ensurePlatformLinkOperationTemplates() {
   const database = getDatabase(); const createdAt = now(); const results = [];
   database.transaction(() => {
-    for (const config of platformTemplateConfigs()) {
+    const configs = platformTemplateConfigs();
+    for (const shop of database.prepare("SELECT * FROM sales_shops WHERE status='active' AND platform IN ('douyin','抖音','抖店') ORDER BY id").all()) {
+      configs.push({
+        name: `抖音-${shop.displayName || shop.shopName}链接经营模板`, platform: "douyin", shop: shop.displayName || shop.shopName,
+        shopLookup: [shop.id, shop.shopName, shop.displayName].filter(Boolean), mapping: douyinBusinessMapping,
+        rules: { headerRow: 1, dateRule: { type: "field", field: "统计日期" }, statusMap: { 在线: "active" } },
+      });
+    }
+    for (const config of configs) {
       let template = database.prepare("SELECT * FROM connection_import_templates WHERE name=? AND dataType='platform_link_operations'").get(config.name);
       if (!template) {
         const templateId = id("connection-import-template"); const versionId = id("connection-import-template-version"); const shop = findShop(database, config.platform, config.shop, config.shopLookup);
@@ -223,6 +237,55 @@ export function getConnectionImportDefinitions() { return typeDefinitions; }
 export function listConnectionImportTemplates() {
   ensurePlatformLinkOperationTemplates();
   return getDatabase().prepare(`SELECT t.*,v.version,v.fieldMappingsJson,v.requiredFieldsJson,v.fieldTypesJson,v.matchRulesJson,v.changeNote FROM connection_import_templates t LEFT JOIN connection_import_template_versions v ON v.id=t.currentVersionId ORDER BY CASE WHEN t.dataType='platform_link_operations' THEN 0 ELSE 1 END,t.updatedAt DESC,t.id DESC`).all().map(templateRow);
+}
+
+function filePlatformHint(fileName) {
+  const name = normalized(fileName);
+  if (name.includes("天猫") || name.includes("tmall")) return "tmall";
+  if (name.includes("淘宝") || name.includes("taobao")) return "taobao";
+  if (name.includes("小红书")) return "xiaohongshu";
+  if (name.includes("京东") || name.includes("jd")) return "jd";
+  if (name.includes("抖音") || name.includes("抖店") || name.includes("douyin")) return "douyin";
+  return "";
+}
+
+function detectPlatformLinkTemplate(database, buffer, fileName) {
+  ensurePlatformLinkOperationTemplates();
+  const hint = filePlatformHint(fileName);
+  const candidates = database.prepare(`SELECT v.*,t.name AS templateName,t.sourcePlatform,t.dataType,t.status AS templateStatus
+    FROM connection_import_templates t JOIN connection_import_template_versions v ON v.id=t.currentVersionId
+    WHERE t.dataType='platform_link_operations' AND t.status='active' AND v.status='active'`).all().map(templateRow);
+  const ranked = [];
+  for (const candidate of candidates) {
+    const rules = candidate.matchRules || {};
+    let workbook;
+    try { workbook = readWorkbook(buffer, rules); } catch { continue; }
+    if (rules.sheetName && workbook.sheetName !== rules.sheetName) continue;
+    if (rules.sheetNameContains && !workbook.sheetName.includes(rules.sheetNameContains)) continue;
+    if (rules.sheetNamePattern && !(new RegExp(rules.sheetNamePattern)).test(workbook.sheetName)) continue;
+    const mapping = candidate.fieldMappings || {};
+    const availableTargets = new Set(Object.entries(mapping).filter(([source]) => workbook.headers.includes(source)).map(([, target]) => target));
+    if (!availableTargets.has("platformGoodsId") || !availableTargets.has("title")) continue;
+    const dateRule = rules.dateRule || {};
+    if (dateRule.type !== "sheet_name" && dateRule.field && !workbook.headers.includes(dateRule.field)) continue;
+    const goodsHeader = Object.entries(mapping).find(([, target]) => target === "platformGoodsId")?.[0];
+    const goodsIds = [...new Set(workbook.rawRows.slice(0, 500).map((item) => text(item.raw[goodsHeader])).filter(Boolean))];
+    const fixed = rules.fixedFields || {};
+    let exactLinks = 0; let configuredMappings = 0;
+    if (fixed.shopId && goodsIds.length) {
+      const placeholders = goodsIds.map(() => "?").join(",");
+      exactLinks = Number(database.prepare(`SELECT COUNT(*) total FROM sales_links WHERE shopId=? AND platformGoodsId IN (${placeholders})`).get(fixed.shopId, ...goodsIds).total || 0);
+      configuredMappings = Number(database.prepare(`SELECT COUNT(*) total FROM platform_link_shop_mappings WHERE currentState='active' AND shopId=? AND platformGoodsId IN (${placeholders})`).get(fixed.shopId, ...goodsIds).total || 0);
+    }
+    const platform = normalized(candidate.sourcePlatform);
+    const filenameShopHint = text(fixed.shop) && normalized(fileName).includes(normalized(fixed.shop)) ? 1 : 0;
+    const score = availableTargets.size + exactLinks * 20 + configuredMappings * 30 + filenameShopHint * 12 + (hint && platform === hint ? 100 : 0);
+    ranked.push({ candidate, score, exactLinks, configuredMappings });
+  }
+  ranked.sort((left, right) => right.score - left.score || right.configuredMappings - left.configuredMappings || right.exactLinks - left.exactLinks);
+  if (!ranked.length) throw new Error("无法自动识别平台，请由管理员维护对应平台解析模板或导入店铺匹配表。");
+  if (ranked.length > 1 && ranked[0].score === ranked[1].score) throw new Error("文件同时匹配多个平台模板，无法安全确定平台和店铺，请先导入店铺匹配表。");
+  return ranked[0].candidate;
 }
 
 export function createConnectionImportTemplate(input, userId) {
@@ -345,13 +408,15 @@ function previewSummary(database, rows, importType) {
 export function previewConnectionDataImport({ buffer, fileName, importType, templateVersionId, userId, parserVersion = "" }) {
   if (!Buffer.isBuffer(buffer) || !buffer.length) throw new Error("请选择Excel文件。");
   const definition = typeDefinitions[text(importType)]; if (!definition) throw new Error("导入类型无效。");
-  if (definition.requiresTemplate && !text(templateVersionId)) throw new Error("请选择平台链接经营导入模板。");
   const database = getDatabase(); const sourceFileHash = crypto.createHash("sha256").update(buffer).digest("hex");
   const hash = parserVersion ? crypto.createHash("sha256").update(buffer).update(`\0${parserVersion}`).digest("hex") : sourceFileHash;
   const existing = database.prepare("SELECT * FROM connection_import_batches WHERE importType=? AND fileHash=? ORDER BY createdAt DESC").all(importType, hash)
     .find((item) => text(json(item.previewSummaryJson, {}).parserVersion) === text(parserVersion));
   if (existing) return { batch: existing, preview: json(existing.previewSummaryJson, {}), rows: listConnectionFoundationRows(existing.id), idempotent: true, blocked: existing.status === "blocked" };
-  const version = versionRow(database, templateVersionId); if (version && version.dataType !== importType) throw new Error("模板与导入类型不匹配。");
+  const version = text(templateVersionId) ? versionRow(database, templateVersionId)
+    : importType === "platform_link_operations" ? detectPlatformLinkTemplate(database, buffer, fileName) : null;
+  if (definition.requiresTemplate && !version) throw new Error("未识别到平台链接经营导入模板。");
+  if (version && version.dataType !== importType) throw new Error("模板与导入类型不匹配。");
   const matchRules = version?.matchRules || {}; const workbook = readWorkbook(buffer, matchRules); const mapping = version?.fieldMappings || defaultMapping(workbook.headers, definition.fields);
   const filtered = workbook.rawRows.filter((item) => rowMatchesFilters(item.raw, matchRules.rowFilters || []));
   const normalizedRows = filtered.map((item) => {
@@ -383,7 +448,7 @@ export function previewConnectionDataImport({ buffer, fileName, importType, temp
   const periodEnds = periods.map((item) => item.split("|")[1]).filter(Boolean).sort();
   const previewPeriodStart = parserVersion === "sales-fact-v2" ? periodStarts[0] || "" : periods.length === 1 ? periodStarts[0] : "";
   const previewPeriodEnd = parserVersion === "sales-fact-v2" ? periodEnds.at(-1) || "" : periods.length === 1 ? periodEnds[0] : "";
-  const preview = { parserVersion: text(parserVersion), sourceFileHash, templateName: version?.templateName || "自动字段映射", platform: text(matchRules.fixedFields?.platform), shopId: text(matchRules.fixedFields?.shopId), shop: text(matchRules.fixedFields?.shop), sheetName: workbook.sheetName, periodStart: previewPeriodStart, periodEnd: previewPeriodEnd, rawRows: workbook.rawRows.length, filteredRows: rows.length, ignoredSummaryRows: normalizedRows.length - rows.length, newLinks: counts.createLinks, updatedLinks: counts.updateLinks, operationFacts: counts.facts, errors: errorRows, duplicateGoodsIds: [...duplicateKeys] };
+  const preview = { parserVersion: text(parserVersion), sourceFileHash, templateName: version?.templateName || "自动字段映射", detectedAutomatically: importType === "platform_link_operations" && !text(templateVersionId), platform: text(matchRules.fixedFields?.platform), shopId: text(matchRules.fixedFields?.shopId), shop: text(matchRules.fixedFields?.shop), sheetName: workbook.sheetName, periodStart: previewPeriodStart, periodEnd: previewPeriodEnd, rawRows: workbook.rawRows.length, filteredRows: rows.length, ignoredSummaryRows: normalizedRows.length - rows.length, newLinks: counts.createLinks, updatedLinks: counts.updateLinks, operationFacts: counts.facts, errors: errorRows, duplicateGoodsIds: [...duplicateKeys] };
   const batchId = id("connection-import"); const createdAt = now(); const batchStatus = duplicateKeys.size && !(importType === "erp_sales" && parserVersion === "sales-fact-v2") ? "blocked" : "validated";
   database.transaction(() => {
     database.prepare(`INSERT INTO connection_import_batches (id,sourceType,externalShopId,fileName,fileHash,businessDate,periodStart,periodEnd,periodType,status,totalRows,matchedRows,pendingRows,errorRows,createdBy,createdAt,updatedAt,importType,templateVersionId,sourcePlatform,previewSummaryJson) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(batchId, importType, preview.shopId, text(fileName) || "链接数据.xlsx", hash, preview.periodEnd || createdAt.slice(0, 10), preview.periodStart || null, preview.periodEnd || null, text(matchRules.periodType) || null, batchStatus, rows.length, 0, validRows, errorRows, text(userId) || null, createdAt, createdAt, importType, version?.id ?? null, preview.platform, JSON.stringify(preview));
