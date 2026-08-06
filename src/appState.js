@@ -952,11 +952,9 @@ export async function commitSalesFactDataSync(batchId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/batches/${encodeURIComponent(batchId)}/sales-facts/commit`, { method: "POST" }), "真实销售导入提交失败。");
 }
 
-export async function previewPlatformGoodsExcelDataSync(taskId, { file, shopId, sourceShopName }) {
+export async function previewPlatformGoodsExcelDataSync(taskId, { file }) {
   const form = new FormData();
   form.append("file", file);
-  form.append("shopId", shopId || "");
-  form.append("sourceShopName", sourceShopName || "");
   return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/tasks/${encodeURIComponent(taskId)}/platform-goods-excel/preview`, { method: "POST", body: form }), "平台货品Excel预览失败。");
 }
 

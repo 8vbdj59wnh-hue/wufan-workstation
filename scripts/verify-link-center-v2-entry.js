@@ -39,9 +39,15 @@ try {
   }
   db.prepare(`INSERT INTO sales_link_skus (id,salesLinkId,platformSkuId,platformSkuCode,normalizedPlatformSkuCode,specificationName,normalizedSpecificationName,matchStatus,currentState,createdAt,updatedAt)
     VALUES ('link-sku-1','link-1','sku-1','ERP-001','erp-001','默认','默认','unmatched','active',?,?)`).run(timestamp, timestamp);
+  db.prepare(`INSERT INTO sales_link_skus (id,salesLinkId,platformSkuId,platformSkuCode,normalizedPlatformSkuCode,specificationName,normalizedSpecificationName,matchStatus,currentState,createdAt,updatedAt)
+    VALUES ('link-sku-taobao','link-taobao','sku-2','ERP-002','erp-002','默认','默认','unmatched','active',?,?)`).run(timestamp, timestamp);
   db.prepare(`INSERT INTO erp_goods (id,goodsCode,goodsName,currentState,createdAt,updatedAt) VALUES ('erp-goods-1','G-001','测试货品','active',?,?)`).run(timestamp, timestamp);
   db.prepare(`INSERT INTO erp_skus (id,merchantSkuCode,erpGoodsId,specificationName,erpStatus,firstSeenBatchId,lastSeenBatchId,currentState,createdAt,updatedAt)
     VALUES ('erp-sku-1','ERP-001','erp-goods-1','默认','active','seed','seed','active',?,?)`).run(timestamp, timestamp);
+  db.prepare(`INSERT INTO erp_skus (id,merchantSkuCode,erpGoodsId,specificationName,erpStatus,firstSeenBatchId,lastSeenBatchId,currentState,createdAt,updatedAt)
+    VALUES ('erp-sku-2','ERP-002','erp-goods-1','默认','active','seed','seed','active',?,?)`).run(timestamp, timestamp);
+  db.prepare(`INSERT INTO sales_link_sku_erp_mappings (id,salesLinkSkuId,erpSkuId,mappingType,quantity,currentState,sourceType,createdAt,updatedAt)
+    VALUES ('existing-point-mapping','link-sku-1','erp-sku-1','single',1,'active','legacy_migration',?,?)`).run(timestamp, timestamp);
 
   const protectedBefore = db.prepare(`SELECT
     (SELECT COUNT(*) FROM sales_links) links,
@@ -52,13 +58,22 @@ try {
     (SELECT COUNT(*) FROM connection_sku_sales_facts) facts,
     (SELECT erpSkuId FROM sales_link_skus WHERE id='link-sku-1') legacyErpSkuId`).get();
 
-  const relationFile = workbookBuffer([{ 店铺: "点意旗舰店", 货品ID: "1001", 规格ID: "sku-1", 平台规格编码: "ERP-001", 系统货品: "单品" }]);
-  const relationPreview = previewPlatformGoodsExcelDataSync({ taskId: "sync-task-platform-goods-excel", buffer: relationFile, fileName: "平台货品.xlsx", shopId: "shop-tmall", sourceShopName: "点意旗舰店", createdBy: "" });
-  assert(relationPreview.summary.linkable === 1, "平台货品V2预览未识别到安全关系。");
+  const relationFile = workbookBuffer([
+    { 店铺: "点意旗舰店-天猫-公司", 货品ID: "1001", 规格ID: "sku-1", 平台规格编码: "ERP-001", 系统货品: "单品" },
+    { 店铺: "Banran半然-淘宝", 货品ID: "2001", 规格ID: "sku-2", 平台规格编码: "ERP-002", 系统货品: "单品" },
+    { 店铺: "系统不存在-淘宝", 货品ID: "9999", 规格ID: "sku-9", 平台规格编码: "ERP-009", 系统货品: "单品" },
+  ]);
+  const relationPreview = previewPlatformGoodsExcelDataSync({ taskId: "sync-task-platform-goods-excel", buffer: relationFile, fileName: "平台货品.xlsx", createdBy: "" });
+  assert(relationPreview.summary.linkable === 1 && relationPreview.summary.alreadyLinked === 1, "平台货品全量预览未正确区分新增和已有关系。");
+  assert(relationPreview.summary.sourceShopCount === 3 && relationPreview.summary.matchedShopCount === 2, "平台货品全量预览店铺统计错误。");
+  assert(relationPreview.summary.exceptionTypes.missing_shop === 1, "不存在的店铺未进入异常中心。");
   const relationCommit = commitPlatformGoodsExcelDataSync(relationPreview.dataSyncBatch.id);
-  assert(relationCommit.created === 1, "平台货品V2关系未创建。");
+  assert(relationCommit.created === 1, "平台货品多店铺V2关系未创建或重复创建已有关系。");
   const mapping = db.prepare("SELECT * FROM sales_link_sku_erp_mappings WHERE salesLinkSkuId='link-sku-1' AND erpSkuId='erp-sku-1'").get();
-  assert(mapping?.mappingType === "single" && mapping.quantity === 1 && mapping.sourceType === "platform_goods_excel", "V2映射字段不符合要求。");
+  assert(mapping?.mappingType === "single" && mapping.quantity === 1 && mapping.sourceType === "legacy_migration", "已有点意关系被重复或覆盖。");
+  const importedMapping = db.prepare("SELECT * FROM sales_link_sku_erp_mappings WHERE salesLinkSkuId='link-sku-taobao' AND erpSkuId='erp-sku-2'").get();
+  assert(importedMapping?.mappingType === "single" && importedMapping.quantity === 1 && importedMapping.sourceType === "platform_goods_excel", "新店铺V2映射字段不符合要求。");
+  assert(db.prepare("SELECT COUNT(*) total FROM sales_link_sku_erp_mappings WHERE sourceType='platform_goods_excel'").get().total === 1, "多店铺映射数量错误。");
   assert(db.prepare("SELECT erpSkuId FROM sales_link_skus WHERE id='link-sku-1'").get().erpSkuId === protectedBefore.legacyErpSkuId, "旧erpSkuId字段被修改。");
 
   const shopFile = workbookBuffer([{ 平台: "天猫", 平台商品ID: "1001", 系统店铺: "shop-tmall" }]);
@@ -109,6 +124,9 @@ try {
   assert(db.pragma("foreign_key_check").length === 0, "SQLite foreign_key_check未通过。");
   console.log(JSON.stringify({
     platformGoodsV2MappingsCreated: relationCommit.created,
+    platformGoodsSourceShops: relationPreview.summary.sourceShopCount,
+    platformGoodsMatchedShops: relationPreview.summary.matchedShopCount,
+    platformGoodsMissingShopExceptions: relationPreview.summary.exceptionTypes.missing_shop,
     shopMappingsCreated: shopCommit.created,
     detectedPlatforms: [...supportedPlatforms].sort(),
     detectedShopId: platformPreview.preview.shopId,

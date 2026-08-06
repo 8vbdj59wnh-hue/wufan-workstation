@@ -5,7 +5,7 @@ import { assertCurrentDataSyncPreview, completeDataSyncBatch, createDataSyncBatc
 
 const TASK_CODE = "platform_goods_excel_import";
 const SOURCE_BATCH_TYPE = "platform_goods_excel_import";
-const PARSER_VERSION = "platform-goods-excel-v2-mapping";
+const PARSER_VERSION = "platform-goods-excel-v3-all-shops";
 const text = (value) => String(value ?? "").trim();
 
 function normalizeCell(value) {
@@ -55,15 +55,47 @@ function exception(row, exceptionType, message, extra = {}) {
   };
 }
 
-function analyzeRows(rows, { shopId, sourceShopName }) {
-  const db = getDatabase();
-  const shop = db.prepare("SELECT id,platform,shopName,displayName,status FROM sales_shops WHERE id=?").get(shopId);
-  if (!shop || shop.status !== "active") throw new Error("请选择有效的系统店铺。");
-  const filtered = rows.filter((row) => row.sourceShopName === sourceShopName);
-  if (!filtered.length) throw new Error(`文件中未找到店铺“${sourceShopName}”的数据。`);
+function parseSourceShopIdentity(sourceShopName) {
+  const raw = text(sourceShopName);
+  const suffixRules = [
+    { pattern: /-(天猫|淘宝|京东|小红书|抖店|视频号小店)(?:-公司)?$/u, platformGroup: 1 },
+    { pattern: /-淘宝C店$/u, platform: "淘宝" },
+  ];
+  for (const rule of suffixRules) {
+    const match = raw.match(rule.pattern);
+    if (!match) continue;
+    return { platform: rule.platform || match[rule.platformGroup], shopName: raw.slice(0, match.index).trim() };
+  }
+  if (raw.startsWith("小红书") && raw.length > 3) return { platform: "小红书", shopName: raw.slice(3).trim() };
+  return { platform: "", shopName: raw };
+}
 
-  const links = db.prepare("SELECT id,platformGoodsId FROM sales_links WHERE shopId=?").all(shopId);
-  const linkMap = mapUnique(links, "platformGoodsId");
+function analyzeRows(rows) {
+  const db = getDatabase();
+  const shops = db.prepare("SELECT id,platform,shopName,displayName,status FROM sales_shops WHERE status='active'").all();
+  const shopNames = new Map();
+  const shopIdentities = new Map();
+  for (const shop of shops) {
+    for (const name of new Set([text(shop.shopName), text(shop.displayName)].filter(Boolean))) {
+      const key = `${text(shop.platform)}\u0000${name}`;
+      const matches = shopIdentities.get(key) || [];
+      matches.push(shop);
+      shopIdentities.set(key, matches);
+    }
+    for (const name of new Set([text(shop.shopName), text(shop.displayName)].filter(Boolean))) {
+      const matches = shopNames.get(name) || [];
+      matches.push(shop);
+      shopNames.set(name, matches);
+    }
+  }
+  const links = db.prepare("SELECT id,shopId,platformGoodsId FROM sales_links WHERE currentState='active'").all();
+  const linkMap = new Map();
+  for (const link of links) {
+    const key = `${link.shopId}\u0000${text(link.platformGoodsId)}`;
+    const matches = linkMap.get(key) || [];
+    matches.push(link);
+    linkMap.set(key, matches);
+  }
   const linkIds = links.map((row) => row.id);
   const platformSkus = linkIds.length
     ? db.prepare(`SELECT id,salesLinkId,platformSkuId,platformSkuCode,erpSkuId FROM sales_link_skus WHERE salesLinkId IN (${linkIds.map(() => "?").join(",")})`).all(...linkIds)
@@ -75,20 +107,35 @@ function analyzeRows(rows, { shopId, sourceShopName }) {
     list.push(row); skuMap.set(key, list);
   }
   const erpMap = mapUnique(db.prepare("SELECT id,merchantSkuCode FROM erp_skus").all(), "merchantSkuCode");
+  const activeMappingMap = new Map();
+  for (const mapping of db.prepare("SELECT salesLinkSkuId,erpSkuId FROM sales_link_sku_erp_mappings WHERE currentState='active'").all()) {
+    const mappings = activeMappingMap.get(mapping.salesLinkSkuId) || [];
+    mappings.push(mapping);
+    activeMappingMap.set(mapping.salesLinkSkuId, mappings);
+  }
   const seenSkuIds = new Set();
   const evaluated = [];
 
-  for (const row of filtered) {
+  for (const row of rows) {
+    if (!row.sourceShopName) { evaluated.push(exception(row, "missing_shop_name", "店铺字段为空，无法匹配系统店铺。")); continue; }
+    const sourceShop = parseSourceShopIdentity(row.sourceShopName);
+    let matchedShops = sourceShop.platform
+      ? shopIdentities.get(`${sourceShop.platform}\u0000${sourceShop.shopName}`) || []
+      : shopNames.get(sourceShop.shopName) || [];
+    if (!matchedShops.length && sourceShop.shopName !== row.sourceShopName) matchedShops = shopNames.get(row.sourceShopName) || [];
+    if (!matchedShops.length) { evaluated.push(exception(row, "missing_shop", `店铺“${row.sourceShopName}”未匹配到系统店铺。`)); continue; }
+    if (matchedShops.length > 1) { evaluated.push(exception(row, "ambiguous_shop", `店铺“${row.sourceShopName}”匹配到多个系统店铺。`)); continue; }
+    const shop = matchedShops[0];
     if (!row.platformGoodsId) { evaluated.push(exception(row, "missing_platform_goods_id", "货品ID为空，无法匹配链接。")); continue; }
     if (!row.platformSkuId) { evaluated.push(exception(row, "missing_platform_sku_id", "规格ID为空，无法确定平台SKU身份。")); continue; }
     if (row.systemGoodsType === "组合装") { evaluated.push(exception(row, "bundle_sku", "组合装可能对应多个ERP SKU，已隔离。")); continue; }
     if (!row.systemGoodsType || row.systemGoodsType === "无") { evaluated.push(exception(row, "no_system_goods", "系统货品为空或为“无”，已隔离。")); continue; }
     if (!row.merchantSkuCode) { evaluated.push(exception(row, "missing_erp_sku_code", "平台规格编码为空，无法匹配ERP SKU。")); continue; }
-    const identity = `${row.platformGoodsId}\u0000${row.platformSkuId}`;
+    const identity = `${shop.id}\u0000${row.platformGoodsId}\u0000${row.platformSkuId}`;
     if (seenSkuIds.has(identity)) { evaluated.push(exception(row, "duplicate_platform_sku", "文件内平台SKU重复，已隔离。")); continue; }
     seenSkuIds.add(identity);
-    const matchedLinks = linkMap.get(row.platformGoodsId) || [];
-    if (!matchedLinks.length) { evaluated.push(exception(row, "missing_sales_link", "货品ID未匹配到目标店铺链接资产。")); continue; }
+    const matchedLinks = linkMap.get(`${shop.id}\u0000${row.platformGoodsId}`) || [];
+    if (!matchedLinks.length) { evaluated.push(exception(row, "missing_sales_link", "店铺和货品ID未匹配到链接资产。")); continue; }
     if (matchedLinks.length > 1) { evaluated.push(exception(row, "ambiguous_sales_link", "货品ID匹配到多个链接资产。")); continue; }
     const salesLink = matchedLinks[0];
     const matchedPlatformSkus = skuMap.get(`${salesLink.id}\u0000${row.platformSkuId}`) || [];
@@ -99,16 +146,16 @@ function analyzeRows(rows, { shopId, sourceShopName }) {
     if (matchedErpSkus.length > 1) { evaluated.push(exception(row, "ambiguous_erp_sku", "ERP SKU编码存在歧义。")); continue; }
     const platformSku = matchedPlatformSkus[0];
     const erpSku = matchedErpSkus[0];
-    const activeMappings = db.prepare("SELECT erpSkuId FROM sales_link_sku_erp_mappings WHERE salesLinkSkuId=? AND currentState='active'").all(platformSku.id);
+    const activeMappings = activeMappingMap.get(platformSku.id) || [];
     const exactMapping = activeMappings.some((item) => item.erpSkuId === erpSku.id);
     const conflictingMappings = activeMappings.filter((item) => item.erpSkuId !== erpSku.id);
     if (conflictingMappings.length) {
       evaluated.push(exception(row, "existing_erp_sku_conflict", "平台SKU已存在不同的V2 ERP SKU关系，本行已阻断。", { currentErpSkuIds: conflictingMappings.map((item) => item.erpSkuId), expectedErpSkuId: erpSku.id }));
       continue;
     }
-    evaluated.push({ ...row, salesLinkId: salesLink.id, salesLinkSkuId: platformSku.id, erpSkuId: erpSku.id, action: exactMapping ? "already_linked" : "link", exceptionType: null, message: exactMapping ? "V2关系已存在。" : "可补充V2 ERP SKU关系。" });
+    evaluated.push({ ...row, shopId: shop.id, platform: shop.platform, salesLinkId: salesLink.id, salesLinkSkuId: platformSku.id, erpSkuId: erpSku.id, action: exactMapping ? "already_linked" : "link", exceptionType: null, message: exactMapping ? "V2关系已存在。" : "可补充V2 ERP SKU关系。" });
   }
-  return { shop, filtered, evaluated };
+  return { evaluated };
 }
 
 function summaryFor(batch, rows) {
@@ -120,23 +167,25 @@ function summaryFor(batch, rows) {
     sourceRows: rows.length, totalPlatformSkus: rows.filter((row) => row.platformSkuId).length,
     linkable: count("link"), alreadyLinked: count("already_linked"), exceptionCount: exceptions.length,
     bundleCount: types.bundle_sku || 0, exceptionTypes: types,
+    sourceShopCount: new Set(rows.map((row) => text(row.sourceShopName)).filter(Boolean)).size,
+    matchedShopCount: new Set(rows.filter((row) => ["link", "already_linked"].includes(row.action)).map((row) => text(row.sourceShopName)).filter(Boolean)).size,
   };
 }
 
-export function previewPlatformGoodsExcelDataSync({ taskId, buffer, fileName, shopId, sourceShopName, createdBy = "" }) {
+export function previewPlatformGoodsExcelDataSync({ taskId, buffer, fileName, createdBy = "" }) {
   const task = getDataSyncTask(taskId);
   if (!task || task.taskCode !== TASK_CODE) throw new Error("平台货品关系导入任务不存在。");
-  if (!shopId) throw new Error("请选择系统店铺。");
-  if (!text(sourceShopName)) throw new Error("请填写Excel店铺名称。");
   const sourceFileHash = crypto.createHash("sha256").update(buffer || Buffer.alloc(0)).digest("hex");
   const fileHash = crypto.createHash("sha256").update(buffer || Buffer.alloc(0)).update(`\0${PARSER_VERSION}`).digest("hex");
   const existing = getDatabase().prepare("SELECT id FROM data_sync_batches WHERE taskId=? AND fileHash=? ORDER BY createdAt DESC LIMIT 1").get(taskId, fileHash);
   if (existing) return { ...readPlatformGoodsExcelDataSyncPreview(existing.id), idempotent: true };
 
   const parsed = parseWorkbook(buffer);
-  const analysis = analyzeRows(parsed.rows, { shopId, sourceShopName: text(sourceShopName) });
-  const dates = analysis.filtered.map((row) => row.sourceModifiedAt).filter(Boolean).sort();
-  const batch = createDataSyncBatch(taskId, { triggerMode: "manual", syncMode: "full", fileName, fileHash, periodStart: dates[0] || null, periodEnd: dates.at(-1) || null, scope: { shopId, sourceShopName: text(sourceShopName), sheetName: parsed.sheetName, parserVersion: PARSER_VERSION, sourceFileHash }, createdBy });
+  const analysis = analyzeRows(parsed.rows);
+  const dates = parsed.rows.map((row) => row.sourceModifiedAt).filter((value) => /^\d{4}-\d{2}-\d{2}/u.test(value)).sort();
+  const sourceShopNames = [...new Set(parsed.rows.map((row) => row.sourceShopName).filter(Boolean))].sort();
+  const scope = { shopMode: "excel_all", sourceShopNames, sheetName: parsed.sheetName, parserVersion: PARSER_VERSION, sourceFileHash };
+  const batch = createDataSyncBatch(taskId, { triggerMode: "manual", syncMode: "full", fileName, fileHash, periodStart: dates[0] || null, periodEnd: dates.at(-1) || null, scope, createdBy });
   const db = getDatabase();
   const insert = db.prepare(`INSERT INTO platform_goods_excel_import_rows (batchId,rowNumber,sourceShopName,platformGoodsId,platformSkuId,merchantSkuCode,systemGoodsType,salesLinkId,salesLinkSkuId,erpSkuId,action,exceptionType,message,rawDataJson) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   db.transaction(() => {
@@ -146,7 +195,7 @@ export function previewPlatformGoodsExcelDataSync({ taskId, buffer, fileName, sh
   const summary = summaryFor({ ...batch, periodStart: dates[0] || null, periodEnd: dates.at(-1) || null }, staged);
   const exceptions = staged.filter((row) => row.action === "exception").map((row) => ({ exceptionType: row.exceptionType, severity: "error", message: row.message, entityType: "platform_sku", entityId: row.platformSkuId, rawData: JSON.parse(row.rawDataJson || "{}") }));
   markDataSyncBatchPreviewReady(batch.id, { sourceBatchType: SOURCE_BATCH_TYPE, sourceBatchId: batch.id, summary: { total: summary.totalPlatformSkus, updated: summary.linkable, exceptionCount: summary.exceptionCount }, exceptions, message: "平台货品Excel关系预览已生成。" });
-  db.prepare("UPDATE data_sync_batches SET periodStart=?,periodEnd=?,scopeJson=? WHERE id=?").run(dates[0] || null, dates.at(-1) || null, JSON.stringify({ shopId, sourceShopName: text(sourceShopName), sheetName: parsed.sheetName, parserVersion: PARSER_VERSION, sourceFileHash }), batch.id);
+  db.prepare("UPDATE data_sync_batches SET periodStart=?,periodEnd=?,scopeJson=? WHERE id=?").run(dates[0] || null, dates.at(-1) || null, JSON.stringify(scope), batch.id);
   return readPlatformGoodsExcelDataSyncPreview(batch.id);
 }
 

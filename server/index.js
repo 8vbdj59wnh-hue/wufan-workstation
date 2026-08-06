@@ -1836,8 +1836,6 @@ app.post("/api/data-sync-center/tasks/:id/platform-goods-excel/preview", require
         taskId: request.params.id,
         buffer: request.file?.buffer,
         fileName: normalizeUploadedFileName(request.file?.originalname),
-        shopId: request.body?.shopId,
-        sourceShopName: request.body?.sourceShopName,
         createdBy: getUserPersonId(request.user),
       });
       response.status(result.idempotent ? 200 : 201).json({ success: true, ...result });
