@@ -429,16 +429,15 @@ function renderOwnerImport() {
   const statusText = { matched: "已匹配", unmatched: "未匹配", conflict: "冲突", ignored: "已忽略", success: "已更新" };
   return `<details class="connection-foundation-panel connection-owner-import" ${result ? "open" : ""}>
     <summary>批量匹配负责人</summary>
-    <p class="form-note">按“店铺 + 商品ID”精确匹配链接资产；不使用商品名称、SKU或货号。</p>
+    <p class="form-note">按“平台 + 商品ID”精确匹配链接，并使用店铺字段校验；支持一个文件覆盖多个平台和店铺。</p>
     <form data-connection-owner-import-form class="connection-foundation-import-form">
-      <label>店铺<select name="shopId" required><option value="">请选择店铺</option>${pageState.importShops.map((shop) => `<option value="${escapeHtml(shop.id)}">${escapeHtml(`${shop.platform} · ${shop.displayName || shop.shopName}`)}</option>`).join("")}</select></label>
       <label>负责人匹配Excel<input type="file" name="file" accept=".xls,.xlsx" required /></label>
       <button type="submit" class="secondary-button" ${pageState.ownerImport.loading ? "disabled" : ""}>${pageState.ownerImport.loading ? "正在解析…" : "生成匹配预览"}</button>
     </form>
-    ${result ? `<section class="connection-import-preview ${result.blocked ? "is-blocked" : ""}"><header><div><h3>负责人匹配预览</h3><p>${escapeHtml(`${preview.platform || ""} · ${preview.shop || ""}`)}</p></div><span class="status-pill">${result.blocked ? "已阻断" : result.batch?.status === "completed" ? "已完成" : "待确认"}</span></header>
-      <div class="connection-import-preview-grid"><span>总行数<strong>${preview.totalRows || 0}</strong></span><span>成功匹配<strong>${preview.matchedRows || 0}</strong></span><span>未匹配<strong>${preview.unmatchedRows || 0}</strong></span><span>冲突<strong>${preview.conflictRows || 0}</strong></span><span>空负责人<strong>${preview.ignoredRows || 0}</strong></span></div>
-      <div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>行</th><th>商品ID</th><th>链接标题</th><th>当前负责人</th><th>新负责人</th><th>状态</th><th>说明</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${row.rowNumber}</td><td>${escapeHtml(row.data?.platformGoodsId || "—")}</td><td>${escapeHtml(row.data?.linkTitle || "—")}</td><td>${escapeHtml(row.data?.currentOwnerName || "未分配")}</td><td>${escapeHtml(row.data?.newOwnerName || "—")}</td><td>${escapeHtml(statusText[row.status] || row.status)}</td><td>${escapeHtml(row.errorMessage || "—")}</td></tr>`).join("")}</tbody></table></div>
-      ${!result.blocked && result.batch?.status !== "completed" ? `<footer><button type="button" class="primary-button" data-confirm-owner-import="${escapeHtml(result.batch.id)}">确认批量更新</button></footer>` : ""}
+    ${result ? `<section class="connection-import-preview"><header><div><h3>负责人匹配预览</h3><p>全量跨店铺匹配</p></div><span class="status-pill">${result.batch?.status === "completed" ? "已完成" : "待确认"}</span></header>
+      <div class="connection-import-preview-grid"><span>总行数<strong>${preview.totalRows || 0}</strong></span><span>负责人<strong>${preview.ownerCount || 0}</strong></span><span>平台<strong>${preview.platformCount || 0}</strong></span><span>店铺<strong>${preview.shopCount || 0}</strong></span><span>可更新链接<strong>${preview.updatableLinks || 0}</strong></span><span>未匹配链接<strong>${preview.unmatchedLinks || 0}</strong></span><span>店铺冲突<strong>${preview.shopConflictRows || 0}</strong></span><span>重复关系<strong>${preview.duplicateRelations || 0}</strong></span></div>
+      <div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>行</th><th>平台</th><th>店铺</th><th>商品ID</th><th>链接标题</th><th>当前负责人</th><th>新负责人</th><th>状态</th><th>说明</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${row.rowNumber}</td><td>${escapeHtml(row.data?.platform || row.rawData?.平台 || "—")}</td><td>${escapeHtml(row.data?.shopName || row.rawData?.店铺 || "—")}</td><td>${escapeHtml(row.data?.platformGoodsId || "—")}</td><td>${escapeHtml(row.data?.linkTitle || "—")}</td><td>${escapeHtml(row.data?.currentOwnerName || "未分配")}</td><td>${escapeHtml(row.data?.newOwnerName || "—")}</td><td>${escapeHtml(statusText[row.status] || row.status)}</td><td>${escapeHtml(row.errorMessage || "—")}</td></tr>`).join("")}</tbody></table></div>
+      ${result.batch?.status !== "completed" ? `<footer><button type="button" class="primary-button" data-confirm-owner-import="${escapeHtml(result.batch.id)}">确认批量更新正常行</button></footer>` : ""}
     </section>` : ""}
   </details>`;
 }
@@ -935,7 +934,7 @@ export function bindConnectionCenterPageEvents(render) {
   root.querySelector("[data-connection-owner-import-form]")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const form = new FormData(event.currentTarget);
     pageState.ownerImport.loading = true; pageState.error = ""; render();
-    try { pageState.ownerImport.result = await previewConnectionOwnerImport(form.get("file"), form.get("shopId")); }
+    try { pageState.ownerImport.result = await previewConnectionOwnerImport(form.get("file")); }
     catch (error) { pageState.error = error.message; }
     pageState.ownerImport.loading = false; render();
   });

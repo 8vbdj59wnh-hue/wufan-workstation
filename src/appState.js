@@ -1134,8 +1134,8 @@ export async function loadConnectionAssets() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-assets`), "链接资产读取失败。");
 }
 
-export async function previewConnectionOwnerImport(file, shopId) {
-  const form = new FormData(); form.append("file", file); form.append("shopId", shopId);
+export async function previewConnectionOwnerImport(file) {
+  const form = new FormData(); form.append("file", file);
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-assets/owner-imports/preview`, { method: "POST", body: form }), "负责人匹配预览失败。");
 }
 

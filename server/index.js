@@ -2121,7 +2121,6 @@ app.post("/api/connection-assets/owner-imports/preview", requireLinkManage, (req
       const result = previewConnectionOwnerImport({
         buffer: request.file?.buffer,
         fileName: normalizeUploadedFileName(request.file?.originalname),
-        shopId: request.body?.shopId,
         userId: getUserPersonId(request.user),
       });
       response.status(result.idempotent ? 200 : 201).json({ success: true, ...result });
