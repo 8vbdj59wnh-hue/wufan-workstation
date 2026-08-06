@@ -1,6 +1,7 @@
 import {
   commitConnectionImport,
   confirmConnectionFoundationImport,
+  confirmConnectionFoundationBulkImport,
   confirmConnectionSalesFactImport,
   confirmPlatformLinkShopMappingImport,
   createConnectionHealthRecord,
@@ -30,6 +31,7 @@ import {
   removeConnectionBenchmark,
   loadConnectionPeriodSnapshots,
   loadConnectionAssets,
+  readConnectionFoundationBulkImport,
   previewConnectionOwnerImport,
   previewConnectionSalesFactImport,
   previewPlatformLinkShopMappingImport,
@@ -44,10 +46,11 @@ import {
   updateConnectionFollow,
   uploadConnectionImport,
   uploadConnectionFoundationImport,
+  uploadConnectionFoundationBulkImport,
   createConnectionFoundationTemplate,
   iterateConnectionFoundationTemplate,
   resolveAssetUrl,
-} from "./services/connectionCenterService.js?v=20260806-connection-v2-entry1";
+} from "./services/connectionCenterService.js?v=20260806-bulk-platform-import1";
 import { getCurrentUser, state } from "./appState.js";
 import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
 import { escapeHtml } from "./utils/html.js?v=20260802-module-boundary1";
@@ -91,7 +94,7 @@ const pageState = {
   currentImport: null,
   importLoading: false,
   importTab: "matched",
-  foundation: { definitions: {}, templates: [], batches: [], errors: [], loading: false, preview: null, salesPreview: null, shopMappingPreview: null },
+  foundation: { definitions: {}, templates: [], batches: [], errors: [], loading: false, preview: null, bulkPreview: null, salesPreview: null, shopMappingPreview: null },
   coreDetail: null,
   coreDetailLoading: false,
   ownerImport: { loading: false, result: null },
@@ -283,12 +286,16 @@ function renderDataFoundation() {
   const shopPreview = foundation.shopMappingPreview;
   const shopSummary = shopPreview?.summary || {};
   const shopPreviewPanel = shopPreview ? `<section class="connection-import-preview"><header><div><p class="eyebrow">SHOP MATCH PREVIEW</p><h3>店铺匹配预览</h3></div><span class="status-pill">待确认</span></header><div class="connection-import-preview-grid"><span>总行数<strong>${shopSummary.total || 0}</strong></span><span>可新增<strong>${shopSummary.valid || 0}</strong></span><span>已存在<strong>${shopSummary.existing || 0}</strong></span><span>异常<strong>${shopSummary.errors || 0}</strong></span></div><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>平台</th><th>商品ID</th><th>系统店铺</th><th>结果</th></tr></thead><tbody>${(shopPreview.rows || []).slice(0, 50).map((row) => `<tr><td>${escapeHtml(row.platform || "—")}</td><td>${escapeHtml(row.platformGoodsId || "—")}</td><td>${escapeHtml(row.systemShopText || "—")}</td><td>${escapeHtml(row.message || row.status)}</td></tr>`).join("")}</tbody></table></div><footer><small>只保存解析匹配配置，不修改链接身份和店铺字段。</small>${canImportBusinessData() && shopPreview.batch?.status === "preview_ready" ? `<button type="button" class="primary-button" data-confirm-shop-mapping-import="${escapeHtml(shopPreview.batch.id)}">确认导入店铺匹配</button>` : ""}</footer></section>` : "";
+  const bulkPreview = foundation.bulkPreview;
+  const bulkStatusText = { waiting: "排队中", running: "处理中", preview_ready: "待批量确认", preview_ready_with_errors: "待确认 · 有异常", completed: "已完成", completed_with_errors: "已完成 · 有异常", failed: "处理失败" };
+  const fileStatusText = { waiting: "等待", running: "解析中", preview_ready: "待确认", already_imported: "历史已导入", blocked: "已阻断", failed: "异常", completed: "已导入", completed_with_errors: "已导入 · 有异常" };
+  const bulkPreviewPanel = bulkPreview ? `<section class="connection-import-preview ${bulkPreview.batch?.failedCount ? "is-blocked" : ""}"><header><div><p class="eyebrow">BULK IMPORT PREVIEW</p><h3>平台链接数据批量预览</h3></div><span class="status-pill">${escapeHtml(bulkStatusText[bulkPreview.batch?.status] || bulkPreview.batch?.status)}</span></header><div class="connection-import-preview-grid"><span>文件总数<strong>${escapeHtml(bulkPreview.batch?.fileCount || 0)}</strong></span><span>已处理<strong>${escapeHtml(bulkPreview.batch?.processedCount || 0)}</strong></span><span>原始行数<strong>${escapeHtml(bulkPreview.summary?.rawRows || 0)}</strong></span><span>过滤后行数<strong>${escapeHtml(bulkPreview.summary?.filteredRows || 0)}</strong></span><span>新增链接<strong>${escapeHtml(bulkPreview.summary?.newLinks || 0)}</strong></span><span>更新链接<strong>${escapeHtml(bulkPreview.summary?.updatedLinks || 0)}</strong></span><span>经营事实<strong>${escapeHtml(bulkPreview.summary?.operationFacts || 0)}</strong></span><span>异常数量<strong>${escapeHtml(bulkPreview.summary?.errors || 0)}</strong></span></div><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>文件</th><th>平台</th><th>店铺</th><th>有效行</th><th>异常</th><th>状态</th></tr></thead><tbody>${(bulkPreview.files || []).map((file) => `<tr><td>${escapeHtml(file.fileName)}</td><td>${escapeHtml(file.platform || "识别中")}</td><td>${escapeHtml(file.shop || "—")}</td><td>${escapeHtml(file.summary?.filteredRows || 0)}</td><td>${escapeHtml(file.summary?.errors || 0)}</td><td>${escapeHtml(fileStatusText[file.status] || file.status)}${file.errorMessage ? `<small>${escapeHtml(file.errorMessage)}</small>` : ""}</td></tr>`).join("")}</tbody></table></div><footer><small>后台按文件顺序处理；确认前不创建链接或写入经营事实。</small>${canImportBusinessData() && ["preview_ready", "preview_ready_with_errors"].includes(bulkPreview.batch?.status) ? `<button type="button" class="primary-button" data-confirm-foundation-bulk-import="${escapeHtml(bulkPreview.batch.id)}">批量确认导入</button>` : ""}</footer></section>` : "";
   return `<section class="connection-foundation-page">
     <header class="connection-section-heading"><div><p class="eyebrow">BUSINESS DATA IMPORT</p><h2>业务数据导入</h2><p>业务人员直接上传文件；系统自动识别平台与解析规则，管理员在下方维护模板。</p></div></header>
     ${renderImportStatus(foundation.loading ? "parsed" : foundation.batches?.[0]?.status)}
     <div class="connection-import-type-grid"><article><strong>导入平台链接数据表</strong><span>自动识别淘宝、天猫、小红书、京东、抖音</span></article><article><strong>导入链接利润表</strong><span>复用真实销售V2导入，不复制业务逻辑</span></article><article><strong>导入店铺匹配表</strong><span>平台 + 商品ID + 系统店铺精确配置</span></article></div>
-    ${canImportBusinessData() ? `<div class="connection-business-import-grid"><form class="connection-foundation-import-form" data-foundation-import-form><input type="hidden" name="importType" value="platform_link_operations" /><label>平台链接数据表<input type="file" name="file" accept=".xls,.xlsx" required /></label><button type="submit" class="primary-button">自动识别并预览</button></form><form class="connection-foundation-import-form" data-sales-fact-import-form><label>链接利润表<input type="file" name="file" accept=".xls,.xlsx" required /></label><button type="submit" class="primary-button">上传利润表并预览</button></form><form class="connection-foundation-import-form" data-shop-mapping-import-form><label>店铺匹配表<input type="file" name="file" accept=".xls,.xlsx" required /></label><button type="submit" class="secondary-button">读取店铺匹配</button></form></div>` : ""}
-    ${previewPanel}
+    ${canImportBusinessData() ? `<div class="connection-business-import-grid"><form class="connection-foundation-import-form" data-foundation-bulk-import-form><label>平台链接数据表（可多选）<input type="file" name="files" accept=".xls,.xlsx" multiple required /></label><button type="submit" class="primary-button">批量上传并后台预览</button></form><form class="connection-foundation-import-form" data-sales-fact-import-form><label>链接利润表<input type="file" name="file" accept=".xls,.xlsx" required /></label><button type="submit" class="primary-button">上传利润表并预览</button></form><form class="connection-foundation-import-form" data-shop-mapping-import-form><label>店铺匹配表<input type="file" name="file" accept=".xls,.xlsx" required /></label><button type="submit" class="secondary-button">读取店铺匹配</button></form></div>` : ""}
+    ${bulkPreviewPanel}${previewPanel}
     ${salesPreviewPanel}${shopPreviewPanel}
     ${canManage() ? `<section class="connection-foundation-panel"><h3>管理员解析模板</h3><form data-foundation-template-form class="connection-foundation-template-form"><input name="name" placeholder="模板名称" required /><select name="dataType">${types.map(([key, definition]) => `<option value="${escapeHtml(key)}">${escapeHtml(definition.label)}</option>`).join("")}</select><input name="sourcePlatform" placeholder="来源平台" /><textarea name="fieldMappingsJson" placeholder='字段映射，例如 {"商品ID":"platformGoodsId"}' required></textarea><input name="changeNote" placeholder="版本说明" /><button type="submit" class="secondary-button">新增模板 V1</button></form><div class="connection-template-list">${foundation.templates.map((item) => `<article><div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(typeLabel(item.dataType))} · V${escapeHtml(item.version)} · ${escapeHtml(item.status)}</span></div><button type="button" class="text-button" data-iterate-foundation-template="${escapeHtml(item.id)}">迭代版本</button></article>`).join("") || "<p>暂无解析模板。</p>"}</div></section>` : ""}
     <section class="connection-foundation-panel"><h3>导入记录</h3><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>文件</th><th>类型</th><th>时间</th><th>成功</th><th>异常</th><th>状态</th></tr></thead><tbody>${foundation.batches.map((item) => `<tr><td>${escapeHtml(item.fileName)}</td><td>${escapeHtml(typeLabel(item.importType))}</td><td>${escapeHtml(item.createdAt)}</td><td>${escapeHtml(item.matchedRows)}</td><td>${escapeHtml(item.errorRows)}</td><td>${escapeHtml(item.status)}</td></tr>`).join("") || `<tr><td colspan="6">暂无导入记录</td></tr>`}</tbody></table></div></section>
@@ -837,9 +844,21 @@ async function loadImportBatches(render, openLatest = false) {
 
 async function loadDataFoundation(render) {
   pageState.foundation.loading = true; pageState.error = ""; render();
-  try { pageState.foundation = { ...(await loadConnectionDataFoundation()), loading: false, preview: pageState.foundation.preview ?? null, salesPreview: pageState.foundation.salesPreview ?? null, shopMappingPreview: pageState.foundation.shopMappingPreview ?? null }; }
+  try {
+    const loaded = await loadConnectionDataFoundation();
+    pageState.foundation = { ...loaded, loading: false, preview: pageState.foundation.preview ?? null, bulkPreview: loaded.bulkPreview ?? pageState.foundation.bulkPreview ?? null, salesPreview: pageState.foundation.salesPreview ?? null, shopMappingPreview: pageState.foundation.shopMappingPreview ?? null };
+    if (["waiting", "running"].includes(pageState.foundation.bulkPreview?.batch?.status)) window.setTimeout(() => void pollConnectionBulkPreview(pageState.foundation.bulkPreview.batch.id, render), 800);
+  }
   catch (error) { pageState.error = error.message; pageState.foundation.loading = false; }
   render();
+}
+
+async function pollConnectionBulkPreview(batchId, render) {
+  try {
+    const result = await readConnectionFoundationBulkImport(batchId);
+    pageState.foundation.bulkPreview = result; render();
+    if (["waiting", "running"].includes(result.batch?.status)) window.setTimeout(() => void pollConnectionBulkPreview(batchId, render), 800);
+  } catch (error) { pageState.error = error.message; pageState.foundation.loading = false; render(); }
 }
 
 export function bindConnectionCenterPageEvents(render) {
@@ -1057,13 +1076,12 @@ export function bindConnectionCenterPageEvents(render) {
     catch (error) { pageState.error = error.message; }
     pageState.importLoading = false; render();
   });
-  root.querySelector("[data-foundation-import-form]")?.addEventListener("submit", async (event) => {
-    event.preventDefault(); const form = new FormData(event.currentTarget); pageState.foundation.loading = true; pageState.error = ""; render();
+  root.querySelector("[data-foundation-bulk-import-form]")?.addEventListener("submit", async (event) => {
+    event.preventDefault(); const files = event.currentTarget.querySelector('input[name="files"]')?.files; pageState.foundation.loading = true; pageState.error = ""; render();
     try {
-      const result = await uploadConnectionFoundationImport(form.get("file"), { importType: form.get("importType") });
-      pageState.foundation.preview = result; pageState.foundation.loading = false;
-      if (result.idempotent && ["completed", "completed_with_errors"].includes(result.batch?.status)) window.alert("该文件已经完成导入，本次未重复写入。");
-      render();
+      const result = await uploadConnectionFoundationBulkImport(files); pageState.foundation.bulkPreview = result; pageState.foundation.loading = false; render();
+      if (result.idempotent && ["completed", "completed_with_errors"].includes(result.batch?.status)) window.alert("该组文件已经完成导入，本次未重复写入。");
+      else void pollConnectionBulkPreview(result.batch.id, render);
     } catch (error) { pageState.error = error.message; pageState.foundation.loading = false; render(); }
   });
   root.querySelector("[data-sales-fact-import-form]")?.addEventListener("submit", async (event) => {
@@ -1094,6 +1112,14 @@ export function bindConnectionCenterPageEvents(render) {
     pageState.foundation.loading = true; pageState.error = ""; render();
     try { const result = await confirmConnectionFoundationImport(event.currentTarget.dataset.confirmFoundationImport); pageState.foundation.preview = result; await loadDataFoundation(render); await loadConnectionAssetsPage(render); window.alert(`导入完成：新增链接 ${result.result?.createdLinks || 0}，更新链接 ${result.result?.updatedLinks || 0}，新增经营事实 ${result.result?.factsCreated || 0}。`); }
     catch (error) { pageState.error = error.message; pageState.foundation.loading = false; render(); }
+  });
+  root.querySelector("[data-confirm-foundation-bulk-import]")?.addEventListener("click", async (event) => {
+    pageState.foundation.loading = true; pageState.error = ""; render();
+    try {
+      const result = await confirmConnectionFoundationBulkImport(event.currentTarget.dataset.confirmFoundationBulkImport); pageState.foundation.bulkPreview = result;
+      await loadDataFoundation(render); await loadConnectionAssetsPage(render);
+      window.alert(`批量导入完成：新增链接 ${result.result?.createdLinks || 0}，更新链接 ${result.result?.updatedLinks || 0}，新增经营事实 ${result.result?.factsCreated || 0}。`);
+    } catch (error) { pageState.error = error.message; pageState.foundation.loading = false; render(); }
   });
   root.querySelector("[data-foundation-template-form]")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const form = new FormData(event.currentTarget);

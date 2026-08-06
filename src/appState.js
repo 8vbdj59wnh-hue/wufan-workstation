@@ -1241,19 +1241,36 @@ export async function loadConnectionImportBatches() {
 }
 
 export async function loadConnectionDataFoundation() {
-  const [definitions, templates, batches, errors] = await Promise.all([
+  const [definitions, templates, batches, errors, bulkBatches] = await Promise.all([
     readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/definitions`), "导入类型读取失败。"),
     readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/templates`), "导入模板读取失败。"),
     readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/batches`), "导入记录读取失败。"),
     readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/errors`), "导入异常读取失败。"),
+    readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/platform-links/bulk?limit=20`), "批量导入记录读取失败。"),
   ]);
-  return { definitions: definitions.definitions ?? {}, templates: templates.items ?? [], batches: batches.items ?? [], errors: errors.items ?? [] };
+  const latestBulk = bulkBatches.items?.[0];
+  const bulkPreview = latestBulk ? await readConnectionFoundationBulkImport(latestBulk.id) : null;
+  return { definitions: definitions.definitions ?? {}, templates: templates.items ?? [], batches: batches.items ?? [], errors: errors.items ?? [], bulkBatches: bulkBatches.items ?? [], bulkPreview };
 }
 
 export async function uploadConnectionFoundationImport(file, options = {}) {
   const form = new FormData(); form.append("file", file); form.append("importType", options.importType ?? "");
   form.append("templateVersionId", options.templateVersionId ?? "");
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/imports/preview`, { method: "POST", body: form }), "链接数据预览失败。");
+}
+
+export async function uploadConnectionFoundationBulkImport(files) {
+  const form = new FormData();
+  for (const file of Array.from(files || [])) form.append("files", file);
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/platform-links/bulk`, { method: "POST", body: form }), "平台链接批量上传失败。");
+}
+
+export async function readConnectionFoundationBulkImport(batchId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/platform-links/bulk/${encodeURIComponent(batchId)}`), "批量导入进度读取失败。");
+}
+
+export async function confirmConnectionFoundationBulkImport(batchId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/platform-links/bulk/${encodeURIComponent(batchId)}/confirm`, { method: "POST" }), "平台链接批量确认失败。");
 }
 
 export async function confirmConnectionFoundationImport(batchId) {

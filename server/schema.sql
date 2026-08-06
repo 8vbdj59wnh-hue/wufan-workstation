@@ -1625,6 +1625,48 @@ CREATE TABLE IF NOT EXISTS connection_import_rows (
 CREATE INDEX IF NOT EXISTS idx_connection_import_rows_batch_status
   ON connection_import_rows(batchId,status,rowNumber);
 
+CREATE TABLE IF NOT EXISTS connection_bulk_platform_import_batches (
+  id TEXT PRIMARY KEY,
+  batchHash TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL DEFAULT 'waiting',
+  fileCount INTEGER NOT NULL DEFAULT 0,
+  processedCount INTEGER NOT NULL DEFAULT 0,
+  completedCount INTEGER NOT NULL DEFAULT 0,
+  failedCount INTEGER NOT NULL DEFAULT 0,
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  completedAt TEXT,
+  FOREIGN KEY(createdBy) REFERENCES persons(id)
+);
+
+CREATE TABLE IF NOT EXISTS connection_bulk_platform_import_files (
+  id TEXT PRIMARY KEY,
+  bulkBatchId TEXT NOT NULL,
+  sequenceNo INTEGER NOT NULL,
+  fileName TEXT NOT NULL,
+  fileHash TEXT NOT NULL,
+  contentBlob BLOB,
+  status TEXT NOT NULL DEFAULT 'waiting',
+  foundationBatchId TEXT,
+  platform TEXT,
+  shopId TEXT,
+  shop TEXT,
+  summaryJson TEXT NOT NULL DEFAULT '{}',
+  idempotent INTEGER NOT NULL DEFAULT 0,
+  errorMessage TEXT,
+  startedAt TEXT,
+  completedAt TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(bulkBatchId) REFERENCES connection_bulk_platform_import_batches(id),
+  FOREIGN KEY(foundationBatchId) REFERENCES connection_import_batches(id),
+  UNIQUE(bulkBatchId,sequenceNo)
+);
+
+CREATE INDEX IF NOT EXISTS idx_connection_bulk_platform_files_queue
+  ON connection_bulk_platform_import_files(status,createdAt,sequenceNo);
+
 CREATE TABLE IF NOT EXISTS connection_sku_sales_facts (
   id TEXT PRIMARY KEY,
   batchId TEXT NOT NULL,

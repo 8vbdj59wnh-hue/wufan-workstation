@@ -93,6 +93,13 @@ import { commitSalesFactDataSync, previewSalesFactDataSync, readSalesFactDataSyn
 import { commitPlatformGoodsExcelDataSync, previewPlatformGoodsExcelDataSync, readPlatformGoodsExcelDataSyncPreview } from "./platformGoodsExcelDataSyncAdapter.js";
 import { confirmPlatformLinkShopMappings, listPlatformLinkShopMappings, previewPlatformLinkShopMappings } from "./platformLinkShopMappingImportService.js";
 import {
+  confirmConnectionBulkPlatformImport,
+  createConnectionBulkPlatformImport,
+  listConnectionBulkPlatformImports,
+  readConnectionBulkPlatformImport,
+  resumeConnectionBulkPlatformImports,
+} from "./connectionBulkPlatformImportService.js";
+import {
   createConnectionAction,
   createConnectionDataMapping,
   createConnectionProfile,
@@ -263,7 +270,7 @@ const uploadContentNoteWorkbook = multer({
 });
 const uploadConnectionWorkbook = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 30 * 1024 * 1024 },
+  limits: { fileSize: 30 * 1024 * 1024, files: 20 },
   fileFilter: (_request, file, callback) => {
     const ext = path.extname(file.originalname).toLowerCase();
     if (![".xlsx", ".xls"].includes(ext)) {
@@ -2352,6 +2359,31 @@ app.post("/api/connection-data-foundation/imports/preview", requireLinkImport, (
   });
 });
 
+app.get("/api/connection-data-foundation/platform-links/bulk", requireLinkView, (request, response) => {
+  try { response.json({ success: true, items: listConnectionBulkPlatformImports(request.query.limit) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "批量导入记录读取失败。" }); }
+});
+
+app.post("/api/connection-data-foundation/platform-links/bulk", requireLinkImport, (request, response) => {
+  uploadConnectionWorkbook.array("files", 20)(request, response, (error) => {
+    if (error) { response.status(400).json({ success: false, message: error.message || "平台链接批量文件上传失败。" }); return; }
+    try {
+      const result = createConnectionBulkPlatformImport({ files: request.files || [], createdBy: request.user?.id });
+      response.status(result.idempotent ? 200 : 202).json({ success: true, ...result });
+    } catch (uploadError) { response.status(400).json({ success: false, message: uploadError.message || "批量导入任务创建失败。" }); }
+  });
+});
+
+app.get("/api/connection-data-foundation/platform-links/bulk/:id", requireLinkView, (request, response) => {
+  try { response.json({ success: true, ...readConnectionBulkPlatformImport(request.params.id) }); }
+  catch (error) { response.status(404).json({ success: false, message: error.message || "批量导入批次不存在。" }); }
+});
+
+app.post("/api/connection-data-foundation/platform-links/bulk/:id/confirm", requireLinkImport, (request, response) => {
+  try { response.json({ success: true, ...confirmConnectionBulkPlatformImport(request.params.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "批量确认失败。" }); }
+});
+
 app.post("/api/connection-data-foundation/imports/:id/confirm", requireLinkImport, (request, response) => {
   try { response.json({ success: true, ...confirmConnectionDataImport(request.params.id) }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "链接数据确认导入失败。" }); }
@@ -3547,6 +3579,7 @@ const server = app.listen(port, host, () => {
 });
 
 resumePendingWangdianShopDiscoveryBatches();
+resumeConnectionBulkPlatformImports();
 
 const taskWaveCollectionTimer = setInterval(() => {
   try {

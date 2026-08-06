@@ -1,6 +1,7 @@
 export {
   commitConnectionImport,
   confirmConnectionFoundationImport,
+  confirmConnectionFoundationBulkImport,
   confirmConnectionSalesFactImport,
   confirmPlatformLinkShopMappingImport,
   confirmConnectionImportRow,
@@ -35,6 +36,7 @@ export {
   loadConnectionImprovementSummary,
   loadConnectionPeriodSnapshots,
   loadConnectionAssets,
+  readConnectionFoundationBulkImport,
   previewConnectionOwnerImport,
   previewConnectionSalesFactImport,
   previewPlatformLinkShopMappingImport,
@@ -50,6 +52,7 @@ export {
   updateConnectionImprovement,
   uploadConnectionImport,
   uploadConnectionFoundationImport,
+  uploadConnectionFoundationBulkImport,
   createConnectionFoundationTemplate,
   iterateConnectionFoundationTemplate,
   resolveAssetUrl,
