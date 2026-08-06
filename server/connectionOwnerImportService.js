@@ -3,7 +3,7 @@ import XLSX from "xlsx";
 import { getDatabase } from "./db.js";
 
 const IMPORT_TYPE = "connection_owner_assignments";
-const PARSER_VERSION = "connection-owner-v2-all-shops";
+const PARSER_VERSION = "connection-owner-v3-shop-platform-inference";
 const PREVIEW_TTL_MS = 24 * 60 * 60 * 1000;
 
 function text(value) { return String(value ?? "").trim(); }
@@ -20,6 +20,17 @@ function normalizePlatform(value) {
     douyin: "抖店", doudian: "抖店", "抖音": "抖店", "抖店": "抖店",
     wechat: "视频号小店", "视频号": "视频号小店", "视频号小店": "视频号小店",
   })[raw] || "";
+}
+
+function inferPlatformFromShop(value) {
+  const shop = text(value).replaceAll(" ", "");
+  if (shop.includes("小红书")) return "小红书";
+  if (shop.endsWith("-天猫") || shop.includes("-天猫-")) return "天猫";
+  if (shop.endsWith("-淘宝") || shop.includes("-淘宝C店")) return "淘宝";
+  if (shop.endsWith("-京东") || shop.includes("-京东-")) return "京东";
+  if (shop.includes("-抖店")) return "抖店";
+  if (shop.includes("-视频号小店")) return "视频号小店";
+  return "";
 }
 
 function sourceShopNames(value, platform) {
@@ -40,9 +51,9 @@ function readRows(buffer) {
   return rows.map((raw, index) => ({
     rowNumber: index + 2,
     raw,
-    platformRaw: text(raw["平台"] ?? raw.platform),
+    platformRaw: text(raw["平台"] ?? raw.platform) || inferPlatformFromShop(raw["店铺"] ?? raw.shop),
     shopName: text(raw["店铺"] ?? raw.shop),
-    platformGoodsId: text(raw["商品ID"] ?? raw.platformGoodsId),
+    platformGoodsId: text(raw["商品ID"] ?? raw["货品ID"] ?? raw.platformGoodsId),
     ownerName: text(raw["负责人"] ?? raw.owner),
     operationGroup: text(raw["运营组"] ?? raw.operationGroup),
     remark: text(raw["备注"] ?? raw.remark),
@@ -117,11 +128,11 @@ export function getCurrentConnectionOwnerImport(userId) {
   return batch ? batchResult(database, batch) : null;
 }
 
-export function previewConnectionOwnerImport({ buffer, fileName, userId }) {
+export function previewConnectionOwnerImport({ buffer, fileName, userId, replaceBatchId = "", preserveFileHash = "" }) {
   if (!Buffer.isBuffer(buffer) || !buffer.length) throw new Error("请选择负责人匹配Excel文件。");
   const database = getDatabase();
   const hash = crypto.createHash("sha256").update(buffer).update(`|${PARSER_VERSION}`).digest("hex");
-  const existing = database.prepare("SELECT * FROM connection_import_batches WHERE importType=? AND fileHash=? AND status<>'cancelled' ORDER BY createdAt DESC LIMIT 1").get(IMPORT_TYPE, hash);
+  const existing = replaceBatchId ? null : database.prepare("SELECT * FROM connection_import_batches WHERE importType=? AND fileHash=? AND status<>'cancelled' ORDER BY createdAt DESC LIMIT 1").get(IMPORT_TYPE, hash);
   if (existing) return batchResult(database, existing, true);
 
   const sourceRows = readRows(buffer);
@@ -202,7 +213,11 @@ export function previewConnectionOwnerImport({ buffer, fileName, userId }) {
   const ignored = rows.filter((row) => row.status === "ignored").length;
   const duplicateRelations = rows.filter((row) => ["duplicate_relation", "duplicate_owner_conflict"].includes(row.errorType)).length;
   const changes = changeSummary(rows);
-  const createdAt = now(); const batchId = id("connection-owner-import");
+  const replacedBatch = replaceBatchId ? database.prepare("SELECT * FROM connection_import_batches WHERE id=? AND importType=?").get(text(replaceBatchId), IMPORT_TYPE) : null;
+  if (replaceBatchId && !replacedBatch) throw new Error("负责人匹配批次不存在。");
+  if (replacedBatch?.createdBy && replacedBatch.createdBy !== text(userId)) throw new Error("无权重新校验其他用户创建的负责人匹配预览。");
+  if (replacedBatch && !["validated", "preview_ready"].includes(replacedBatch.status)) throw new Error("当前批次不能重新校验。");
+  const createdAt = replacedBatch?.createdAt || now(); const batchId = replacedBatch?.id || id("connection-owner-import");
   const expiresAt = new Date(new Date(createdAt).getTime() + PREVIEW_TTL_MS).toISOString();
   const preview = {
     totalRows: rows.length, matchedRows: matched, unmatchedRows: unmatched,
@@ -217,10 +232,15 @@ export function previewConnectionOwnerImport({ buffer, fileName, userId }) {
     ...changes, parserVersion: PARSER_VERSION, expiresAt,
   };
   database.transaction(() => {
-    database.prepare(`INSERT INTO connection_import_batches
+    if (replacedBatch) {
+      database.prepare("DELETE FROM connection_import_rows WHERE batchId=?").run(batchId);
+      database.prepare(`UPDATE connection_import_batches SET status='preview_ready',totalRows=?,matchedRows=?,pendingRows=0,errorRows=?,updatedAt=?,sourcePlatform=?,previewSummaryJson=? WHERE id=?`).run(
+        rows.length, matched, unmatched + conflicts + ignored, now(), "", JSON.stringify(preview), batchId,
+      );
+    } else database.prepare(`INSERT INTO connection_import_batches
       (id,sourceType,externalShopId,fileName,fileHash,businessDate,status,totalRows,matchedRows,pendingRows,errorRows,createdBy,createdAt,updatedAt,importType,sourcePlatform,previewSummaryJson)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-      batchId, IMPORT_TYPE, "", text(fileName) || "链接负责人匹配.xlsx", hash, createdAt.slice(0, 10), "preview_ready",
+      batchId, IMPORT_TYPE, "", text(fileName) || "链接负责人匹配.xlsx", preserveFileHash || hash, createdAt.slice(0, 10), "preview_ready",
       rows.length, matched, 0, unmatched + conflicts + ignored, text(userId) || null, createdAt, createdAt, IMPORT_TYPE, "", JSON.stringify(preview),
     );
     const insert = database.prepare(`INSERT INTO connection_import_rows
@@ -229,6 +249,18 @@ export function previewConnectionOwnerImport({ buffer, fileName, userId }) {
     for (const row of rows) insert.run(id("connection-owner-import-row"), batchId, row.rowNumber, `${normalizePlatform(row.platformRaw)}|${row.shopName}|${row.platformGoodsId}`, JSON.stringify(row.raw), JSON.stringify(row.data), row.status, row.errorType, row.errorMessage, createdAt);
   })();
   return batchResult(database, database.prepare("SELECT * FROM connection_import_batches WHERE id=?").get(batchId));
+}
+
+export function rebuildConnectionOwnerImportPreview(batchId, userId) {
+  const database = getDatabase();
+  const batch = database.prepare("SELECT * FROM connection_import_batches WHERE id=? AND importType=?").get(text(batchId), IMPORT_TYPE);
+  if (!batch) throw new Error("负责人匹配批次不存在。");
+  const rawRows = database.prepare("SELECT rawDataJson FROM connection_import_rows WHERE batchId=? ORDER BY rowNumber,id").all(batch.id).map((row) => json(row.rawDataJson));
+  if (!rawRows.length) throw new Error("当前批次没有可重新校验的原始数据。");
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rawRows), "负责人匹配");
+  const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+  return previewConnectionOwnerImport({ buffer, fileName: batch.fileName, userId, replaceBatchId: batch.id, preserveFileHash: batch.fileHash });
 }
 
 export function confirmConnectionOwnerImport(batchId, userId) {

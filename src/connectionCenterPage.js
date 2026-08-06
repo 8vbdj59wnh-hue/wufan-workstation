@@ -37,6 +37,7 @@ import {
   previewConnectionSalesFactImport,
   previewPlatformLinkShopMappingImport,
   confirmConnectionOwnerImport,
+  rebuildConnectionOwnerImportPreview,
   cancelConnectionOwnerImport,
   loadConnectionCoreDetail,
   loadMyConnectionWorkbench,
@@ -460,7 +461,7 @@ function renderOwnerImport() {
       <details><summary>查看异常（${exceptions.length}）</summary>${exceptions.length ? `<ul>${exceptions.map((row) => `<li>第${row.rowNumber}行：${escapeHtml(row.errorMessage || row.errorType || "未知异常")}</li>`).join("")}</ul>` : `<p class="form-note">无异常行。</p>`}</details>
       <section class="connection-owner-change-groups"><h4>负责人变更</h4>${changeGroups.length ? changeGroups.map((group) => `<details><summary><span>${escapeHtml(group.currentOwnerName)} <b>→</b> ${escapeHtml(group.newOwnerName)}</span><strong>${group.linkCount}条链接</strong></summary><ul>${(group.links || []).map((link) => `<li><strong>${escapeHtml(link.title || link.platformGoodsId || "未命名链接")}</strong><span>${escapeHtml(`${link.platform || "—"} · ${link.shop || "—"} · ${link.platformGoodsId || "—"}`)}</span></li>`).join("")}</ul></details>`).join("") : `<p class="form-note">本次没有负责人变更。</p>`}</section>
       <aside class="connection-owner-overwrite-note"><strong>本次将按导入文件覆盖更新负责人。</strong><p>导入后，符合匹配条件的链接负责人将更新为文件中的负责人，不会保留旧负责人。</p><small>不会修改：店铺、链接身份、平台SKU、ERP SKU、库存、销售数据。</small></aside>
-      ${!["completed", "partial", "cancelled"].includes(result.batch?.status) ? `<footer><button type="button" class="primary-button" data-confirm-owner-import="${escapeHtml(result.batch.id)}" ${canSubmit ? "" : "disabled"}>确认匹配负责人</button><button type="button" class="secondary-button" data-cancel-owner-import="${escapeHtml(result.batch.id)}">取消本次预览</button>${canSubmit ? "" : `<span class="form-note">${escapeHtml(result?.submission?.reason || "当前用户没有提交权限。")}</span>`}</footer>` : ""}
+      ${!["completed", "partial", "cancelled"].includes(result.batch?.status) ? `<footer><button type="button" class="primary-button" data-confirm-owner-import="${escapeHtml(result.batch.id)}" ${canSubmit ? "" : "disabled"}>确认匹配负责人</button>${!canSubmit && result.preview?.parserVersion !== "connection-owner-v3-shop-platform-inference" ? `<button type="button" class="secondary-button" data-rebuild-owner-import="${escapeHtml(result.batch.id)}">重新校验当前预览</button>` : ""}<button type="button" class="secondary-button" data-cancel-owner-import="${escapeHtml(result.batch.id)}">取消本次预览</button>${canSubmit ? "" : `<span class="form-note">${escapeHtml(result?.submission?.reason || "当前用户没有提交权限。")}</span>`}</footer>` : ""}
     </section>` : ""}
   </details>`;
 }
@@ -972,6 +973,11 @@ export function bindConnectionCenterPageEvents(render) {
       await Promise.all([loadConnectionAssetsPage(render), loadMyLinks(render)]);
     } catch (error) { pageState.error = error.message; }
     pageState.ownerImport.loading = false; render();
+  });
+  root.querySelector("[data-rebuild-owner-import]")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget; button.disabled = true;
+    try { pageState.ownerImport.result = await rebuildConnectionOwnerImportPreview(button.dataset.rebuildOwnerImport); render(); }
+    catch (error) { pageState.error = error.message; render(); }
   });
   root.querySelector("[data-view-owner-import-result]")?.addEventListener("click", () => { pageState.ownerImport.showCompletion = false; render(); });
   root.querySelector("[data-return-connection-center]")?.addEventListener("click", () => { pageState.section = "cockpit"; pageState.ownerImport.showCompletion = false; render(); });

@@ -42,6 +42,7 @@ export {
   previewConnectionSalesFactImport,
   previewPlatformLinkShopMappingImport,
   confirmConnectionOwnerImport,
+  rebuildConnectionOwnerImportPreview,
   cancelConnectionOwnerImport,
   loadConnections,
   loadConnectionCoreDetail,

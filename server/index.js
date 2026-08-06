@@ -158,7 +158,7 @@ import {
   previewConnectionDataImport,
 } from "./connectionDataFoundationService.js";
 import { getConnectionCoreDetail, listConnectionCoreProfiles } from "./connectionCorePageService.js";
-import { cancelConnectionOwnerImport, confirmConnectionOwnerImport, getCurrentConnectionOwnerImport, previewConnectionOwnerImport } from "./connectionOwnerImportService.js";
+import { cancelConnectionOwnerImport, confirmConnectionOwnerImport, getCurrentConnectionOwnerImport, previewConnectionOwnerImport, rebuildConnectionOwnerImportPreview } from "./connectionOwnerImportService.js";
 import { getConnectionBusinessCockpit } from "./connectionBusinessCockpitService.js";
 import {
   batchLinkProcessInstanceTemplates,
@@ -2138,6 +2138,11 @@ app.get("/api/connection-assets/owner-imports/current", requireLinkManage, (requ
 app.post("/api/connection-assets/owner-imports/:id/confirm", requireLinkManage, (request, response) => {
   try { response.json({ success: true, ...confirmConnectionOwnerImport(request.params.id, getUserPersonId(request.user)) }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "负责人批量更新失败。" }); }
+});
+
+app.post("/api/connection-assets/owner-imports/:id/rebuild-preview", requireLinkManage, (request, response) => {
+  try { response.json({ success: true, ...rebuildConnectionOwnerImportPreview(request.params.id, getUserPersonId(request.user)) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "负责人匹配预览重新校验失败。" }); }
 });
 
 app.post("/api/connection-assets/owner-imports/:id/cancel", requireLinkManage, (request, response) => {

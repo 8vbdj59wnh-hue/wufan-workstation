@@ -1148,6 +1148,10 @@ export async function confirmConnectionOwnerImport(batchId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-assets/owner-imports/${encodeURIComponent(batchId)}/confirm`, { method: "POST" }), "负责人批量更新失败。");
 }
 
+export async function rebuildConnectionOwnerImportPreview(batchId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-assets/owner-imports/${encodeURIComponent(batchId)}/rebuild-preview`, { method: "POST" }), "负责人匹配预览重新校验失败。");
+}
+
 export async function cancelConnectionOwnerImport(batchId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-assets/owner-imports/${encodeURIComponent(batchId)}/cancel`, { method: "POST" }), "负责人匹配预览取消失败。");
 }
