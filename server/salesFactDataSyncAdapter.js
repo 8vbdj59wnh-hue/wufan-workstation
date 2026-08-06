@@ -131,6 +131,16 @@ export function readSalesFactDataSyncPreview(batchId) {
   return responseFor(batch);
 }
 
+export function readCurrentSalesFactDataSyncPreview() {
+  const task = getDatabase().prepare("SELECT id FROM data_sync_tasks WHERE taskCode='sales_fact_excel_import' AND status='enabled'").get();
+  if (!task) return null;
+  const batches = getDatabase().prepare("SELECT * FROM data_sync_batches WHERE taskId=? ORDER BY CASE status WHEN 'preview_ready' THEN 0 ELSE 1 END,createdAt DESC LIMIT 20").all(task.id);
+  const batch = batches.find((item) => parseJson(item.scopeJson).parserVersion === SALES_FACT_PARSER_VERSION
+    && ["preview_ready", "superseded", "succeeded", "partial"].includes(item.status)
+    && item.sourceBatchType === "connection_sales_import");
+  return batch ? responseFor(batch) : null;
+}
+
 export function commitSalesFactDataSync(batchId) {
   const batch = assertCurrentDataSyncPreview(batchId);
   if (batch.sourceBatchType !== "connection_sales_import" || !batch.sourceBatchId) throw new Error("同步批次未关联真实销售导入预览。");

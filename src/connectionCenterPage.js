@@ -34,6 +34,7 @@ import {
   readConnectionFoundationBulkImport,
   previewConnectionOwnerImport,
   loadCurrentConnectionOwnerImport,
+  loadCurrentConnectionSalesFactImport,
   previewConnectionSalesFactImport,
   previewPlatformLinkShopMappingImport,
   confirmConnectionOwnerImport,
@@ -97,7 +98,7 @@ const pageState = {
   currentImport: null,
   importLoading: false,
   importTab: "matched",
-  foundation: { definitions: {}, templates: [], batches: [], errors: [], loading: false, preview: null, bulkPreview: null, salesPreview: null, shopMappingPreview: null },
+  foundation: { definitions: {}, templates: [], batches: [], errors: [], loading: false, preview: null, bulkPreview: null, salesPreview: null, salesLoading: false, salesError: "", salesMessage: "", salesFileName: "", salesFile: null, shopMappingPreview: null },
   coreDetail: null,
   coreDetailLoading: false,
   ownerImport: { loading: false, result: null, showCompletion: false },
@@ -292,7 +293,9 @@ function renderDataFoundation() {
   const previewPanel = preview ? `<section class="connection-import-preview ${preview.blocked ? "is-blocked" : ""}"><header><div><p class="eyebrow">IMPORT PREVIEW</p><h3>平台链接经营导入预览</h3></div><span class="status-pill">${preview.blocked ? "已阻断" : preview.batch?.status === "completed" || preview.batch?.status === "completed_with_errors" ? "已导入" : "待确认"}</span></header><div class="connection-import-preview-grid"><span>识别模板<strong>${escapeHtml(preview.preview?.templateName || "—")}</strong></span><span>平台<strong>${escapeHtml(preview.preview?.platform || "—")}</strong></span><span>店铺<strong>${escapeHtml(preview.preview?.shop || "—")}</strong></span><span>数据周期<strong>${escapeHtml(preview.preview?.periodStart && preview.preview?.periodEnd ? `${preview.preview.periodStart} 至 ${preview.preview.periodEnd}` : "多个周期 / 无法汇总")}</strong></span><span>原始行数<strong>${escapeHtml(preview.preview?.rawRows ?? 0)}</strong></span><span>过滤后行数<strong>${escapeHtml(preview.preview?.filteredRows ?? 0)}</strong></span><span>新增链接<strong>${escapeHtml(preview.preview?.newLinks ?? 0)}</strong></span><span>更新链接<strong>${escapeHtml(preview.preview?.updatedLinks ?? 0)}</strong></span><span>经营事实<strong>${escapeHtml(preview.preview?.operationFacts ?? 0)}</strong></span><span>异常数量<strong>${escapeHtml(preview.preview?.errors ?? 0)}</strong></span></div>${preview.preview?.duplicateGoodsIds?.length ? `<p class="form-error">过滤后商品ID重复：${escapeHtml(preview.preview.duplicateGoodsIds.join("、"))}</p>` : ""}<footer><small>确认前不会创建链接档案或写入经营事实。</small>${canImportBusinessData() && !preview.blocked && !["completed", "completed_with_errors"].includes(preview.batch?.status) ? `<button type="button" class="primary-button" data-confirm-foundation-import="${escapeHtml(preview.batch.id)}">确认导入</button>` : ""}</footer></section>` : "";
   const salesPreview = foundation.salesPreview;
   const salesSummary = salesPreview?.summary || {};
-  const salesPreviewPanel = salesPreview ? `<section class="connection-import-preview ${salesPreview.blocked ? "is-blocked" : ""}"><header><div><p class="eyebrow">SALES FACT PREVIEW</p><h3>链接利润表预览</h3></div><span class="status-pill">${salesPreview.blocked ? "无可写入数据" : "待确认"}</span></header><div class="connection-import-preview-grid"><span>文件<strong>${escapeHtml(salesSummary.fileName || "—")}</strong></span><span>总行数<strong>${salesSummary.total || 0}</strong></span><span>有效行<strong>${salesSummary.valid || 0}</strong></span><span>异常<strong>${salesSummary.exceptionCount || 0}</strong></span><span>周期开始<strong>${escapeHtml(salesSummary.periodStart || "—")}</strong></span><span>周期结束<strong>${escapeHtml(salesSummary.periodEnd || "—")}</strong></span></div><footer><small>复用统一真实销售导入任务；确认前不会写入销售事实。</small>${canImportBusinessData() && salesPreview.isCurrent && !salesPreview.blocked ? `<button type="button" class="primary-button" data-confirm-sales-fact-import="${escapeHtml(salesPreview.dataSyncBatch?.id)}">确认导入链接利润表</button>` : ""}</footer></section>` : "";
+  const salesBatchStatus = salesPreview?.dataSyncBatch?.status;
+  const salesStatusText = salesPreview?.blocked ? "无可写入数据" : salesPreview?.isCurrent ? "待确认" : ["succeeded", "partial"].includes(salesBatchStatus) ? "已导入" : "历史预览";
+  const salesPreviewPanel = salesPreview ? `<section class="connection-import-preview ${salesPreview.blocked ? "is-blocked" : ""}"><header><div><p class="eyebrow">SALES FACT PREVIEW</p><h3>链接利润表预览</h3></div><span class="status-pill">${salesStatusText}</span></header><div class="connection-import-preview-grid"><span>批次ID<strong>${escapeHtml(salesPreview.dataSyncBatch?.id || "—")}</strong></span><span>文件<strong>${escapeHtml(salesSummary.fileName || "—")}</strong></span><span>解析版本<strong>${escapeHtml(salesSummary.parserVersion || "—")}</strong></span><span>总行数<strong>${salesSummary.total || 0}</strong></span><span>有效候选<strong>${salesSummary.valid || 0}</strong></span><span>异常<strong>${salesSummary.exceptionCount || 0}</strong></span><span>周期开始<strong>${escapeHtml(salesSummary.periodStart || "—")}</strong></span><span>周期结束<strong>${escapeHtml(salesSummary.periodEnd || "—")}</strong></span></div>${salesPreview.idempotent ? `<p class="form-note">该文件已有 sales-fact-v2 批次，已展示已有结果，未重复创建。</p>` : ""}<footer><small>复用统一真实销售导入任务；确认前不会写入销售事实。</small>${canImportBusinessData() && salesPreview.isCurrent && !salesPreview.blocked ? `<button type="button" class="primary-button" data-confirm-sales-fact-import="${escapeHtml(salesPreview.dataSyncBatch?.id)}">确认导入链接利润表</button>` : ""}</footer></section>` : "";
   const shopPreview = foundation.shopMappingPreview;
   const shopSummary = shopPreview?.summary || {};
   const shopPreviewPanel = shopPreview ? `<section class="connection-import-preview"><header><div><p class="eyebrow">SHOP MATCH PREVIEW</p><h3>店铺匹配预览</h3></div><span class="status-pill">待确认</span></header><div class="connection-import-preview-grid"><span>总行数<strong>${shopSummary.total || 0}</strong></span><span>可新增<strong>${shopSummary.valid || 0}</strong></span><span>已存在<strong>${shopSummary.existing || 0}</strong></span><span>异常<strong>${shopSummary.errors || 0}</strong></span></div><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>平台</th><th>商品ID</th><th>系统店铺</th><th>结果</th></tr></thead><tbody>${(shopPreview.rows || []).slice(0, 50).map((row) => `<tr><td>${escapeHtml(row.platform || "—")}</td><td>${escapeHtml(row.platformGoodsId || "—")}</td><td>${escapeHtml(row.systemShopText || "—")}</td><td>${escapeHtml(row.message || row.status)}</td></tr>`).join("")}</tbody></table></div><footer><small>只保存解析匹配配置，不修改链接身份和店铺字段。</small>${canImportBusinessData() && shopPreview.batch?.status === "preview_ready" ? `<button type="button" class="primary-button" data-confirm-shop-mapping-import="${escapeHtml(shopPreview.batch.id)}">确认导入店铺匹配</button>` : ""}</footer></section>` : "";
@@ -304,7 +307,7 @@ function renderDataFoundation() {
     <header class="connection-section-heading"><div><p class="eyebrow">BUSINESS DATA IMPORT</p><h2>业务数据导入</h2><p>业务人员直接上传文件；系统自动识别平台与解析规则，管理员在下方维护模板。</p></div></header>
     ${renderImportStatus(foundation.loading ? "parsed" : foundation.batches?.[0]?.status)}
     <div class="connection-import-type-grid"><article><strong>导入平台链接数据表</strong><span>创建链接资产并写入平台表现</span></article><article><strong>导入平台货品表</strong><span>建立平台SKU与ERP SKU关系</span></article><article><strong>导入链接利润表</strong><span>写入真实销售、成本和利润事实</span></article><article><strong>导入负责人匹配表</strong><span>全量跨店铺更新链接负责人</span></article></div>
-    ${canImportBusinessData() ? `<div class="connection-business-import-grid"><form class="connection-foundation-import-form" data-foundation-bulk-import-form><label>平台链接数据表（可多选）<input type="file" name="files" accept=".xls,.xlsx" multiple required /></label><button type="submit" class="primary-button">批量上传并后台预览</button></form><form class="connection-foundation-import-form" data-sales-fact-import-form><label>链接利润表<input type="file" name="file" accept=".xls,.xlsx" required /></label><button type="submit" class="primary-button">上传利润表并预览</button></form><form class="connection-foundation-import-form" data-shop-mapping-import-form><label>店铺匹配表<input type="file" name="file" accept=".xls,.xlsx" required /></label><button type="submit" class="secondary-button">读取店铺匹配</button></form></div>` : ""}
+    ${canImportBusinessData() ? `<div class="connection-business-import-grid"><form class="connection-foundation-import-form" data-foundation-bulk-import-form><label>平台链接数据表（可多选）<input type="file" name="files" accept=".xls,.xlsx" multiple required /></label><button type="submit" class="primary-button">批量上传并后台预览</button></form><form class="connection-foundation-import-form" data-sales-fact-import-form novalidate><label>链接利润表<input type="file" name="file" accept=".xls,.xlsx" ${foundation.salesLoading ? "disabled" : ""} data-sales-fact-file /></label>${foundation.salesFileName ? `<small>已选择：${escapeHtml(foundation.salesFileName)}</small>` : ""}<button type="submit" class="primary-button" ${foundation.salesLoading ? "disabled aria-busy=\"true\"" : ""}>${foundation.salesLoading ? "正在上传并解析…" : "上传利润表并解析"}</button><div class="connection-import-feedback" aria-live="polite">${foundation.salesError ? `<span class="form-error">${escapeHtml(foundation.salesError)}</span>` : foundation.salesMessage ? `<span class="form-success">${escapeHtml(foundation.salesMessage)}</span>` : ""}</div></form><form class="connection-foundation-import-form" data-shop-mapping-import-form><label>店铺匹配表<input type="file" name="file" accept=".xls,.xlsx" required /></label><button type="submit" class="secondary-button">读取店铺匹配</button></form></div>` : ""}
     ${renderOwnerImport()}
     ${bulkPreviewPanel}${previewPanel}
     ${salesPreviewPanel}${shopPreviewPanel}
@@ -870,8 +873,8 @@ async function loadImportBatches(render, openLatest = false) {
 async function loadDataFoundation(render) {
   pageState.foundation.loading = true; pageState.error = ""; render();
   try {
-    const loaded = await loadConnectionDataFoundation();
-    pageState.foundation = { ...loaded, loading: false, preview: pageState.foundation.preview ?? null, bulkPreview: loaded.bulkPreview ?? pageState.foundation.bulkPreview ?? null, salesPreview: pageState.foundation.salesPreview ?? null, shopMappingPreview: pageState.foundation.shopMappingPreview ?? null };
+    const [loaded, currentSalesPreview] = await Promise.all([loadConnectionDataFoundation(), loadCurrentConnectionSalesFactImport()]);
+    pageState.foundation = { ...loaded, loading: false, preview: pageState.foundation.preview ?? null, bulkPreview: loaded.bulkPreview ?? pageState.foundation.bulkPreview ?? null, salesPreview: pageState.foundation.salesPreview ?? currentSalesPreview ?? null, salesLoading: pageState.foundation.salesLoading ?? false, salesError: pageState.foundation.salesError ?? "", salesMessage: pageState.foundation.salesMessage ?? "", salesFileName: pageState.foundation.salesFileName ?? "", salesFile: pageState.foundation.salesFile ?? null, shopMappingPreview: pageState.foundation.shopMappingPreview ?? null };
     if (["waiting", "running"].includes(pageState.foundation.bulkPreview?.batch?.status)) window.setTimeout(() => void pollConnectionBulkPreview(pageState.foundation.bulkPreview.batch.id, render), 800);
   }
   catch (error) { pageState.error = error.message; pageState.foundation.loading = false; }
@@ -1124,11 +1127,32 @@ export function bindConnectionCenterPageEvents(render) {
       else void pollConnectionBulkPreview(result.batch.id, render);
     } catch (error) { pageState.error = error.message; pageState.foundation.loading = false; render(); }
   });
+  root.querySelector("[data-sales-fact-file]")?.addEventListener("change", (event) => {
+    const file = event.currentTarget.files?.[0] || null;
+    pageState.foundation.salesFile = file;
+    pageState.foundation.salesFileName = file?.name || "";
+    pageState.foundation.salesError = "";
+    pageState.foundation.salesMessage = "";
+  });
   root.querySelector("[data-sales-fact-import-form]")?.addEventListener("submit", async (event) => {
-    event.preventDefault(); const form = new FormData(event.currentTarget); pageState.foundation.loading = true; pageState.error = ""; render();
-    try { pageState.foundation.salesPreview = await previewConnectionSalesFactImport(form.get("file")); }
-    catch (error) { pageState.error = error.message; }
-    pageState.foundation.loading = false; render();
+    event.preventDefault();
+    if (pageState.foundation.salesLoading) return;
+    const file = event.currentTarget.querySelector('input[name="file"]')?.files?.[0] || pageState.foundation.salesFile;
+    pageState.foundation.salesFile = file || null;
+    pageState.foundation.salesFileName = file?.name || "";
+    pageState.foundation.salesError = "";
+    pageState.foundation.salesMessage = "";
+    if (!file) { pageState.foundation.salesError = "请先选择链接利润表Excel文件。"; render(); return; }
+    pageState.foundation.salesLoading = true; pageState.error = ""; render();
+    try {
+      const result = await previewConnectionSalesFactImport(file);
+      pageState.foundation.salesPreview = result;
+      pageState.foundation.salesMessage = result.idempotent
+        ? `已找到该文件的 sales-fact-v2 批次（HTTP ${result.httpStatus}），现已展示已有结果。`
+        : `上传解析成功（HTTP ${result.httpStatus}），已进入待确认预览。`;
+    }
+    catch (error) { pageState.foundation.salesError = error.message || "链接利润表上传解析失败。"; }
+    finally { pageState.foundation.salesLoading = false; render(); }
   });
   root.querySelector("[data-confirm-sales-fact-import]")?.addEventListener("click", async (event) => {
     pageState.foundation.loading = true; pageState.error = ""; render();

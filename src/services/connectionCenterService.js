@@ -39,6 +39,7 @@ export {
   readConnectionFoundationBulkImport,
   previewConnectionOwnerImport,
   loadCurrentConnectionOwnerImport,
+  loadCurrentConnectionSalesFactImport,
   previewConnectionSalesFactImport,
   previewPlatformLinkShopMappingImport,
   confirmConnectionOwnerImport,

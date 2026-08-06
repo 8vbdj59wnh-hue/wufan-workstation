@@ -5363,6 +5363,21 @@ button.content-template-thumb {
   line-height: 1.5;
 }
 
+.connection-import-feedback {
+  min-height: 1.35rem;
+}
+
+.connection-import-feedback .form-error,
+.connection-import-feedback .form-success {
+  display: block;
+  margin: 0;
+}
+
+.connection-import-feedback .form-success {
+  color: #28724f;
+  font-size: 0.85rem;
+}
+
 .modal-actions {
   justify-content: flex-end;
   border-top: 1px solid #e5e7eb;

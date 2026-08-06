@@ -1289,8 +1289,16 @@ export async function confirmConnectionFoundationImport(batchId) {
 }
 
 export async function previewConnectionSalesFactImport(file) {
+  if (!(file instanceof File) || !file.size) throw new Error("请先选择链接利润表Excel文件。");
+  if (!/\.xlsx?$/i.test(file.name)) throw new Error("文件格式不支持，请选择 .xls 或 .xlsx 文件。");
   const form = new FormData(); form.append("file", file);
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-facts/preview`, { method: "POST", body: form }), "链接利润表预览失败。");
+  const response = await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-facts/preview`, { method: "POST", body: form });
+  return { ...await readApiJson(response, "链接利润表预览失败。"), httpStatus: response.status };
+}
+
+export async function loadCurrentConnectionSalesFactImport() {
+  const result = await readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-facts/current`), "最近利润表预览读取失败。");
+  return result.preview ?? null;
 }
 
 export async function confirmConnectionSalesFactImport(batchId) {

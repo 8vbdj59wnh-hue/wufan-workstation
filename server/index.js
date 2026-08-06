@@ -89,7 +89,7 @@ import {
   readInventoryDataSyncPreview,
   runDueInventorySyncTasks,
 } from "./inventoryDataSyncAdapter.js";
-import { commitSalesFactDataSync, previewSalesFactDataSync, readSalesFactDataSyncPreview } from "./salesFactDataSyncAdapter.js";
+import { commitSalesFactDataSync, previewSalesFactDataSync, readCurrentSalesFactDataSyncPreview, readSalesFactDataSyncPreview } from "./salesFactDataSyncAdapter.js";
 import { commitPlatformGoodsExcelDataSync, previewPlatformGoodsExcelDataSync, readPlatformGoodsExcelDataSyncPreview } from "./platformGoodsExcelDataSyncAdapter.js";
 import { confirmPlatformLinkShopMappings, listPlatformLinkShopMappings, previewPlatformLinkShopMappings } from "./platformLinkShopMappingImportService.js";
 import {
@@ -2409,8 +2409,16 @@ app.post("/api/connection-data-foundation/sales-facts/preview", requireLinkImpor
       if (!task) throw new Error("链接利润表导入任务未启用。");
       const result = previewSalesFactDataSync({ taskId: task.id, buffer: request.file?.buffer, fileName: normalizeUploadedFileName(request.file?.originalname), createdBy: getUserPersonId(request.user) });
       response.status(result.idempotent ? 200 : 201).json({ success: true, ...result });
-    } catch (uploadError) { response.status(400).json({ success: false, message: uploadError.message || "链接利润表预览失败。" }); }
+    } catch (uploadError) {
+      console.error("[sales-fact-preview]", uploadError);
+      response.status(400).json({ success: false, message: uploadError.message || "链接利润表预览失败。" });
+    }
   });
+});
+
+app.get("/api/connection-data-foundation/sales-facts/current", requireLinkImport, (request, response) => {
+  try { response.json({ success: true, preview: readCurrentSalesFactDataSyncPreview() }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "最近利润表预览读取失败。" }); }
 });
 
 app.get("/api/connection-data-foundation/sales-facts/:id", requireLinkImport, (request, response) => {
