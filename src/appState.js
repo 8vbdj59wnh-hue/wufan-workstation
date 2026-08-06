@@ -1139,8 +1139,17 @@ export async function previewConnectionOwnerImport(file) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-assets/owner-imports/preview`, { method: "POST", body: form }), "负责人匹配预览失败。");
 }
 
+export async function loadCurrentConnectionOwnerImport() {
+  const payload = await readApiJson(await authFetch(`${apiBaseUrl}/api/connection-assets/owner-imports/current`), "负责人匹配预览读取失败。");
+  return payload.result;
+}
+
 export async function confirmConnectionOwnerImport(batchId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-assets/owner-imports/${encodeURIComponent(batchId)}/confirm`, { method: "POST" }), "负责人批量更新失败。");
+}
+
+export async function cancelConnectionOwnerImport(batchId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-assets/owner-imports/${encodeURIComponent(batchId)}/cancel`, { method: "POST" }), "负责人匹配预览取消失败。");
 }
 
 export async function loadConnectionCoreDetail(connectionId) {

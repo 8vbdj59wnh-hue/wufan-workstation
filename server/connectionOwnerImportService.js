@@ -4,6 +4,7 @@ import { getDatabase } from "./db.js";
 
 const IMPORT_TYPE = "connection_owner_assignments";
 const PARSER_VERSION = "connection-owner-v2-all-shops";
+const PREVIEW_TTL_MS = 24 * 60 * 60 * 1000;
 
 function text(value) { return String(value ?? "").trim(); }
 function json(value, fallback = {}) { try { return JSON.parse(value || ""); } catch { return fallback; } }
@@ -48,20 +49,79 @@ function readRows(buffer) {
   })).filter((row) => Object.values(row.raw).some((value) => text(value)));
 }
 
+function previewExpiresAt(batch) {
+  const preview = json(batch.previewSummaryJson);
+  return preview.expiresAt || new Date(new Date(batch.createdAt).getTime() + PREVIEW_TTL_MS).toISOString();
+}
+
+function changeSummary(rows) {
+  const matched = rows.filter((row) => row.status === "matched");
+  const changed = matched.filter((row) => text(row.data?.currentOwnerId) !== text(row.data?.newOwnerId));
+  const groups = new Map();
+  for (const row of changed) {
+    const data = row.data || {};
+    const key = `${text(data.currentOwnerId)}\u0000${text(data.newOwnerId)}`;
+    const group = groups.get(key) || {
+      currentOwnerId: data.currentOwnerId || null,
+      currentOwnerName: data.currentOwnerName || "未分配",
+      newOwnerId: data.newOwnerId || null,
+      newOwnerName: data.newOwnerName || "—",
+      linkCount: 0,
+      links: [],
+    };
+    group.linkCount += 1;
+    group.links.push({
+      connectionId: data.connectionId,
+      salesLinkId: data.salesLinkId,
+      title: data.linkTitle,
+      platform: data.platform,
+      shop: data.shopName,
+      platformGoodsId: data.platformGoodsId,
+    });
+    groups.set(key, group);
+  }
+  return { changeRows: changed.length, unchangedRows: matched.length - changed.length, ownerChangeGroups: [...groups.values()] };
+}
+
+function submissionState(database, batch) {
+  const preview = json(batch.previewSummaryJson);
+  const ready = ["validated", "preview_ready"].includes(batch.status);
+  const latest = database.prepare(`SELECT id FROM connection_import_batches
+    WHERE importType=? AND createdBy IS ? AND status IN ('validated','preview_ready')
+    ORDER BY createdAt DESC,id DESC LIMIT 1`).get(IMPORT_TYPE, batch.createdBy || null);
+  let reason = "";
+  if (["completed", "partial"].includes(batch.status)) reason = "批次已经提交。";
+  else if (batch.status === "cancelled") reason = "本次预览已取消。";
+  else if (!ready) reason = "批次不是待确认状态。";
+  else if (latest?.id !== batch.id) reason = "批次不是当前有效预览。";
+  else if (Date.now() > new Date(previewExpiresAt(batch)).getTime()) reason = "预览已经过期，请重新生成。";
+  else if (Number(preview.updatableLinks || batch.matchedRows || 0) <= 0) reason = "没有可更新链接。";
+  return { canSubmit: !reason, reason, expiresAt: previewExpiresAt(batch), isCurrentPreview: latest?.id === batch.id };
+}
+
 function batchResult(database, batch, idempotent = false) {
   const rows = database.prepare("SELECT * FROM connection_import_rows WHERE batchId=? ORDER BY rowNumber,id").all(batch.id).map((row) => ({
     ...row,
     rawData: json(row.rawDataJson),
     data: json(row.normalizedDataJson),
   }));
-  return { batch, preview: json(batch.previewSummaryJson), rows, idempotent, blocked: batch.status === "blocked" };
+  const preview = { ...json(batch.previewSummaryJson), ...changeSummary(rows) };
+  preview.updatableLinks = preview.changeRows;
+  return { batch, preview, rows, submission: submissionState(database, batch), idempotent, blocked: batch.status === "blocked" };
+}
+
+export function getCurrentConnectionOwnerImport(userId) {
+  const database = getDatabase();
+  const batch = database.prepare(`SELECT * FROM connection_import_batches
+    WHERE importType=? AND createdBy IS ? ORDER BY createdAt DESC,id DESC LIMIT 1`).get(IMPORT_TYPE, text(userId) || null);
+  return batch ? batchResult(database, batch) : null;
 }
 
 export function previewConnectionOwnerImport({ buffer, fileName, userId }) {
   if (!Buffer.isBuffer(buffer) || !buffer.length) throw new Error("请选择负责人匹配Excel文件。");
   const database = getDatabase();
   const hash = crypto.createHash("sha256").update(buffer).update(`|${PARSER_VERSION}`).digest("hex");
-  const existing = database.prepare("SELECT * FROM connection_import_batches WHERE importType=? AND fileHash=? ORDER BY createdAt DESC LIMIT 1").get(IMPORT_TYPE, hash);
+  const existing = database.prepare("SELECT * FROM connection_import_batches WHERE importType=? AND fileHash=? AND status<>'cancelled' ORDER BY createdAt DESC LIMIT 1").get(IMPORT_TYPE, hash);
   if (existing) return batchResult(database, existing, true);
 
   const sourceRows = readRows(buffer);
@@ -141,24 +201,26 @@ export function previewConnectionOwnerImport({ buffer, fileName, userId }) {
   const conflicts = rows.filter((row) => row.status === "conflict").length;
   const ignored = rows.filter((row) => row.status === "ignored").length;
   const duplicateRelations = rows.filter((row) => ["duplicate_relation", "duplicate_owner_conflict"].includes(row.errorType)).length;
+  const changes = changeSummary(rows);
   const createdAt = now(); const batchId = id("connection-owner-import");
+  const expiresAt = new Date(new Date(createdAt).getTime() + PREVIEW_TTL_MS).toISOString();
   const preview = {
     totalRows: rows.length, matchedRows: matched, unmatchedRows: unmatched,
     conflictRows: conflicts, ignoredRows: ignored,
     ownerCount: new Set(rows.map((row) => row.ownerName).filter(Boolean)).size,
     platformCount: new Set(rows.map((row) => normalizePlatform(row.platformRaw)).filter(Boolean)).size,
     shopCount: new Set(rows.map((row) => row.shopName).filter(Boolean)).size,
-    updatableLinks: matched,
+    updatableLinks: changes.changeRows,
     unmatchedLinks: rows.filter((row) => ["goods_not_found", "profile_not_found"].includes(row.errorType)).length,
     shopConflictRows: rows.filter((row) => ["missing_shop", "shop_not_found", "shop_conflict", "shop_link_conflict", "platform_mismatch"].includes(row.errorType)).length,
     duplicateRelations,
-    parserVersion: PARSER_VERSION,
+    ...changes, parserVersion: PARSER_VERSION, expiresAt,
   };
   database.transaction(() => {
     database.prepare(`INSERT INTO connection_import_batches
       (id,sourceType,externalShopId,fileName,fileHash,businessDate,status,totalRows,matchedRows,pendingRows,errorRows,createdBy,createdAt,updatedAt,importType,sourcePlatform,previewSummaryJson)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-      batchId, IMPORT_TYPE, "", text(fileName) || "链接负责人匹配.xlsx", hash, createdAt.slice(0, 10), "validated",
+      batchId, IMPORT_TYPE, "", text(fileName) || "链接负责人匹配.xlsx", hash, createdAt.slice(0, 10), "preview_ready",
       rows.length, matched, 0, unmatched + conflicts + ignored, text(userId) || null, createdAt, createdAt, IMPORT_TYPE, "", JSON.stringify(preview),
     );
     const insert = database.prepare(`INSERT INTO connection_import_rows
@@ -169,12 +231,14 @@ export function previewConnectionOwnerImport({ buffer, fileName, userId }) {
   return batchResult(database, database.prepare("SELECT * FROM connection_import_batches WHERE id=?").get(batchId));
 }
 
-export function confirmConnectionOwnerImport(batchId) {
+export function confirmConnectionOwnerImport(batchId, userId) {
   const database = getDatabase();
   const batch = database.prepare("SELECT * FROM connection_import_batches WHERE id=? AND importType=?").get(text(batchId), IMPORT_TYPE);
   if (!batch) throw new Error("负责人匹配批次不存在。");
-  if (batch.status === "completed") return { ...batchResult(database, batch, true), result: json(batch.previewSummaryJson).result || { updated: 0, unchanged: 0 } };
-  if (batch.status !== "validated") throw new Error("批次存在负责人或商品ID冲突，不能确认更新。");
+  if (batch.createdBy && batch.createdBy !== text(userId)) throw new Error("无权提交其他用户创建的负责人匹配预览。");
+  if (["completed", "partial"].includes(batch.status)) return { ...batchResult(database, batch, true), result: json(batch.previewSummaryJson).result || { updated: 0, unchanged: 0 } };
+  const submission = submissionState(database, batch);
+  if (!submission.canSubmit) throw new Error(submission.reason);
   const rows = database.prepare("SELECT * FROM connection_import_rows WHERE batchId=? AND status='matched' ORDER BY rowNumber").all(batch.id);
   let updated = 0; let unchanged = 0;
   database.transaction(() => {
@@ -182,14 +246,25 @@ export function confirmConnectionOwnerImport(batchId) {
       const data = json(row.normalizedDataJson);
       const profile = database.prepare("SELECT id,ownerId FROM connection_profiles WHERE id=? AND salesLinkId=?").get(data.connectionId, data.salesLinkId);
       const owner = database.prepare("SELECT id FROM persons WHERE id=? AND status='active'").get(data.newOwnerId);
-      if (!profile || !owner) throw new Error(`第${row.rowNumber}行的链接或负责人已变化，请重新生成预览。`);
+      if (!profile || !owner || text(profile.ownerId) !== text(data.currentOwnerId)) throw new Error(`第${row.rowNumber}行的链接、负责人或现有数据已变化，请重新生成预览。`);
       if (profile.ownerId === owner.id) unchanged += 1;
       else { database.prepare("UPDATE connection_profiles SET ownerId=?,updatedAt=? WHERE id=?").run(owner.id, now(), profile.id); updated += 1; }
       database.prepare("UPDATE connection_import_rows SET status='success' WHERE id=?").run(row.id);
     }
     const completedAt = now(); const preview = { ...json(batch.previewSummaryJson), result: { updated, unchanged } };
-    database.prepare("UPDATE connection_import_batches SET status='completed',completedAt=?,updatedAt=?,previewSummaryJson=? WHERE id=?").run(completedAt, completedAt, JSON.stringify(preview), batch.id);
+    const finalStatus = Number(batch.errorRows || 0) > 0 ? "partial" : "completed";
+    database.prepare("UPDATE connection_import_batches SET status=?,completedAt=?,updatedAt=?,previewSummaryJson=? WHERE id=?").run(finalStatus, completedAt, completedAt, JSON.stringify(preview), batch.id);
   })();
   const completed = database.prepare("SELECT * FROM connection_import_batches WHERE id=?").get(batch.id);
   return { ...batchResult(database, completed), result: { updated, unchanged } };
+}
+
+export function cancelConnectionOwnerImport(batchId, userId) {
+  const database = getDatabase();
+  const batch = database.prepare("SELECT * FROM connection_import_batches WHERE id=? AND importType=?").get(text(batchId), IMPORT_TYPE);
+  if (!batch) throw new Error("负责人匹配批次不存在。");
+  if (batch.createdBy && batch.createdBy !== text(userId)) throw new Error("无权取消其他用户创建的预览。");
+  if (["completed", "partial"].includes(batch.status)) throw new Error("已提交批次不能取消。");
+  if (batch.status !== "cancelled") database.prepare("UPDATE connection_import_batches SET status='cancelled',updatedAt=? WHERE id=?").run(now(), batch.id);
+  return batchResult(database, database.prepare("SELECT * FROM connection_import_batches WHERE id=?").get(batch.id));
 }

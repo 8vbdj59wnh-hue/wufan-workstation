@@ -158,7 +158,7 @@ import {
   previewConnectionDataImport,
 } from "./connectionDataFoundationService.js";
 import { getConnectionCoreDetail, listConnectionCoreProfiles } from "./connectionCorePageService.js";
-import { confirmConnectionOwnerImport, previewConnectionOwnerImport } from "./connectionOwnerImportService.js";
+import { cancelConnectionOwnerImport, confirmConnectionOwnerImport, getCurrentConnectionOwnerImport, previewConnectionOwnerImport } from "./connectionOwnerImportService.js";
 import { getConnectionBusinessCockpit } from "./connectionBusinessCockpitService.js";
 import {
   batchLinkProcessInstanceTemplates,
@@ -2130,9 +2130,19 @@ app.post("/api/connection-assets/owner-imports/preview", requireLinkManage, (req
   });
 });
 
+app.get("/api/connection-assets/owner-imports/current", requireLinkManage, (request, response) => {
+  try { response.json({ success: true, result: getCurrentConnectionOwnerImport(getUserPersonId(request.user)) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "负责人匹配预览读取失败。" }); }
+});
+
 app.post("/api/connection-assets/owner-imports/:id/confirm", requireLinkManage, (request, response) => {
-  try { response.json({ success: true, ...confirmConnectionOwnerImport(request.params.id) }); }
+  try { response.json({ success: true, ...confirmConnectionOwnerImport(request.params.id, getUserPersonId(request.user)) }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "负责人批量更新失败。" }); }
+});
+
+app.post("/api/connection-assets/owner-imports/:id/cancel", requireLinkManage, (request, response) => {
+  try { response.json({ success: true, ...cancelConnectionOwnerImport(request.params.id, getUserPersonId(request.user)) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "负责人匹配预览取消失败。" }); }
 });
 
 app.get("/api/connections/:id/core-detail", requireLinkView, requireConnectionAccess, (request, response) => {

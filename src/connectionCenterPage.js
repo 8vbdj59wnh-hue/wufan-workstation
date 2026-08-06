@@ -33,9 +33,11 @@ import {
   loadConnectionAssets,
   readConnectionFoundationBulkImport,
   previewConnectionOwnerImport,
+  loadCurrentConnectionOwnerImport,
   previewConnectionSalesFactImport,
   previewPlatformLinkShopMappingImport,
   confirmConnectionOwnerImport,
+  cancelConnectionOwnerImport,
   loadConnectionCoreDetail,
   loadMyConnectionWorkbench,
   removeConnectionAction,
@@ -97,7 +99,7 @@ const pageState = {
   foundation: { definitions: {}, templates: [], batches: [], errors: [], loading: false, preview: null, bulkPreview: null, salesPreview: null, shopMappingPreview: null },
   coreDetail: null,
   coreDetailLoading: false,
-  ownerImport: { loading: false, result: null },
+  ownerImport: { loading: false, result: null, showCompletion: false },
   salesPeriodType: "month",
   error: "",
 };
@@ -151,6 +153,11 @@ loadListConfig();
 
 function canManage() {
   return hasPermission(getCurrentUser(), "links.manage") || hasPermission(getCurrentUser(), "products.edit");
+}
+
+function isAdmin() {
+  const user = getCurrentUser();
+  return ["admin", "system_admin"].includes(user?.role) || user?.authRole === "admin";
 }
 
 function canImportBusinessData() {
@@ -259,7 +266,8 @@ function renderSectionNavigation() {
     <button type="button" class="${pageState.section === "my-links" ? "active" : ""}" data-connection-section="my-links">我的链接</button>
     <button type="button" class="${pageState.section === "connections" ? "active" : ""}" data-connection-section="connections">链接资产</button>
     ${canViewHealth() ? `<button type="button" class="${pageState.section === "hospital" ? "active" : ""}" data-connection-section="hospital">链接医院</button>` : ""}
-    <button type="button" class="${pageState.section === "data-center" ? "active" : ""}" data-connection-section="data-center">数据中心</button>
+    ${canImportBusinessData() ? `<button type="button" class="${pageState.section === "data-import" ? "active" : ""}" data-connection-section="data-import">数据导入</button>` : ""}
+    ${isAdmin() ? `<button type="button" class="${pageState.section === "data-center" ? "active" : ""}" data-connection-section="data-center">数据中心</button>` : ""}
   </nav>`;
 }
 
@@ -272,7 +280,8 @@ function renderConnectionDataCenter() {
     : pageState.dataCenterTab === "mappings" ? renderMappingPage()
       : pageState.dataCenterTab === "pending-connections" ? renderPendingConnections()
         : renderDataFoundation();
-  return `<section class="connection-data-center"><header class="connection-section-heading"><div><p class="eyebrow">DATA GOVERNANCE</p><h2>数据中心</h2><p>统一管理数据导入、导入模板、字段映射、导入记录和异常处理。</p></div></header><nav class="connection-data-center-nav" aria-label="链接数据中心功能">${tabs.map(([id, label]) => `<button type="button" class="${pageState.dataCenterTab === id ? "active" : ""}" data-connection-data-tab="${id}">${label}</button>`).join("")}</nav>${content}</section>`;
+  if (!isAdmin()) return `<div class="empty-state"><strong>无权访问数据中心</strong><p>数据中心仅作为管理员后台。</p></div>`;
+  return `<section class="connection-data-center"><header class="connection-section-heading"><div><p class="eyebrow">ADMIN DATA CENTER</p><h2>数据中心</h2><p>管理员统一查看后台批次、日志、异常、模板和调度。</p></div><button type="button" class="primary-button" data-open-admin-data-center>进入管理员数据中心</button></header><div class="connection-import-type-grid"><article><strong>导入批次</strong><span>查看每次导入和同步执行</span></article><article><strong>同步日志</strong><span>追踪API请求与执行过程</span></article><article><strong>异常中心</strong><span>统一处理隔离异常</span></article><article><strong>模板管理</strong><span>维护管理员解析规则</span></article><article><strong>字段映射</strong><span>查看和维护数据映射</span></article><article><strong>自动调度</strong><span>管理API同步任务</span></article></div><nav class="connection-data-center-nav" aria-label="链接数据中心功能">${tabs.filter(([id]) => id !== "data-foundation").map(([id, label]) => `<button type="button" class="${pageState.dataCenterTab === id ? "active" : ""}" data-connection-data-tab="${id}">${label}</button>`).join("")}</nav>${pageState.dataCenterTab === "mappings" ? content : ""}</section>`;
 }
 
 function renderDataFoundation() {
@@ -293,8 +302,9 @@ function renderDataFoundation() {
   return `<section class="connection-foundation-page">
     <header class="connection-section-heading"><div><p class="eyebrow">BUSINESS DATA IMPORT</p><h2>业务数据导入</h2><p>业务人员直接上传文件；系统自动识别平台与解析规则，管理员在下方维护模板。</p></div></header>
     ${renderImportStatus(foundation.loading ? "parsed" : foundation.batches?.[0]?.status)}
-    <div class="connection-import-type-grid"><article><strong>导入平台链接数据表</strong><span>自动识别淘宝、天猫、小红书、京东、抖音</span></article><article><strong>导入链接利润表</strong><span>复用真实销售V2导入，不复制业务逻辑</span></article><article><strong>导入店铺匹配表</strong><span>平台 + 商品ID + 系统店铺精确配置</span></article></div>
+    <div class="connection-import-type-grid"><article><strong>导入平台链接数据表</strong><span>创建链接资产并写入平台表现</span></article><article><strong>导入平台货品表</strong><span>建立平台SKU与ERP SKU关系</span></article><article><strong>导入链接利润表</strong><span>写入真实销售、成本和利润事实</span></article><article><strong>导入负责人匹配表</strong><span>全量跨店铺更新链接负责人</span></article></div>
     ${canImportBusinessData() ? `<div class="connection-business-import-grid"><form class="connection-foundation-import-form" data-foundation-bulk-import-form><label>平台链接数据表（可多选）<input type="file" name="files" accept=".xls,.xlsx" multiple required /></label><button type="submit" class="primary-button">批量上传并后台预览</button></form><form class="connection-foundation-import-form" data-sales-fact-import-form><label>链接利润表<input type="file" name="file" accept=".xls,.xlsx" required /></label><button type="submit" class="primary-button">上传利润表并预览</button></form><form class="connection-foundation-import-form" data-shop-mapping-import-form><label>店铺匹配表<input type="file" name="file" accept=".xls,.xlsx" required /></label><button type="submit" class="secondary-button">读取店铺匹配</button></form></div>` : ""}
+    ${renderOwnerImport()}
     ${bulkPreviewPanel}${previewPanel}
     ${salesPreviewPanel}${shopPreviewPanel}
     ${canManage() ? `<section class="connection-foundation-panel"><h3>管理员解析模板</h3><form data-foundation-template-form class="connection-foundation-template-form"><input name="name" placeholder="模板名称" required /><select name="dataType">${types.map(([key, definition]) => `<option value="${escapeHtml(key)}">${escapeHtml(definition.label)}</option>`).join("")}</select><input name="sourcePlatform" placeholder="来源平台" /><textarea name="fieldMappingsJson" placeholder='字段映射，例如 {"商品ID":"platformGoodsId"}' required></textarea><input name="changeNote" placeholder="版本说明" /><button type="submit" class="secondary-button">新增模板 V1</button></form><div class="connection-template-list">${foundation.templates.map((item) => `<article><div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(typeLabel(item.dataType))} · V${escapeHtml(item.version)} · ${escapeHtml(item.status)}</span></div><button type="button" class="text-button" data-iterate-foundation-template="${escapeHtml(item.id)}">迭代版本</button></article>`).join("") || "<p>暂无解析模板。</p>"}</div></section>` : ""}
@@ -420,13 +430,22 @@ function renderGrowthOverview() {
 }
 
 function renderConnectionAssets() {
-  return `<section class="connection-assets"><header class="connection-section-heading"><div><p class="eyebrow">LINK ASSETS</p><h2>链接资产</h2><p>统一查看、筛选和管理公司的销售链接档案。</p></div></header>${renderOwnerImport()}${renderGrowthOverview()}${renderToolbar()}${renderList()}</section>`;
+  return `<section class="connection-assets"><header class="connection-section-heading"><div><p class="eyebrow">LINK ASSETS</p><h2>链接资产</h2><p>统一查看、筛选和管理公司的销售链接档案。</p></div></header>${renderGrowthOverview()}${renderToolbar()}${renderList()}</section>`;
 }
 
 function renderOwnerImport() {
   if (!canManage()) return "";
   const result = pageState.ownerImport.result; const preview = result?.preview ?? {}; const rows = result?.rows ?? [];
   const statusText = { matched: "已匹配", unmatched: "未匹配", conflict: "冲突", ignored: "已忽略", success: "已更新" };
+  const batchStatus = { validated: "待确认", preview_ready: "待确认", completed: "已完成", partial: "部分完成", cancelled: "已取消" };
+  const exceptions = rows.filter((row) => row.status !== "matched" && row.status !== "success");
+  const skipped = Number(preview.unchangedRows || 0) + Number(preview.unmatchedRows || 0) + Number(preview.conflictRows || 0) + Number(preview.ignoredRows || 0);
+  const changeGroups = preview.ownerChangeGroups || [];
+  const canSubmit = canManage() && result?.submission?.canSubmit && !pageState.ownerImport.loading;
+  if (result && pageState.ownerImport.showCompletion && ["completed", "partial"].includes(result.batch?.status)) {
+    const exceptionCount = Number(preview.unmatchedRows || 0) + Number(preview.conflictRows || 0) + Number(preview.ignoredRows || 0);
+    return `<section class="connection-owner-completion"><span class="connection-owner-completion-mark">✓</span><h2>负责人匹配完成</h2>${result.batch.status === "partial" ? `<p class="connection-owner-partial-note">部分数据已成功更新。异常数据未更新，可进入异常中心处理。</p>` : `<p>本次负责人匹配已全部完成。</p>`}<div class="connection-owner-change-summary"><span>新增负责人<strong>0</strong></span><span>负责人变更<strong>${result.result?.updated || 0}</strong></span><span>保持不变<strong>${result.result?.unchanged || 0}</strong></span><span>异常<strong>${exceptionCount}</strong></span></div><footer><button type="button" class="secondary-button" data-view-owner-import-result>查看本次详情</button><button type="button" class="secondary-button" data-return-connection-center>返回链接经营中心</button><button type="button" class="primary-button" data-continue-owner-import>继续导入负责人表</button></footer></section>`;
+  }
   return `<details class="connection-foundation-panel connection-owner-import" ${result ? "open" : ""}>
     <summary>批量匹配负责人</summary>
     <p class="form-note">按“平台 + 商品ID”精确匹配链接，并使用店铺字段校验；支持一个文件覆盖多个平台和店铺。</p>
@@ -434,10 +453,14 @@ function renderOwnerImport() {
       <label>负责人匹配Excel<input type="file" name="file" accept=".xls,.xlsx" required /></label>
       <button type="submit" class="secondary-button" ${pageState.ownerImport.loading ? "disabled" : ""}>${pageState.ownerImport.loading ? "正在解析…" : "生成匹配预览"}</button>
     </form>
-    ${result ? `<section class="connection-import-preview"><header><div><h3>负责人匹配预览</h3><p>全量跨店铺匹配</p></div><span class="status-pill">${result.batch?.status === "completed" ? "已完成" : "待确认"}</span></header>
-      <div class="connection-import-preview-grid"><span>总行数<strong>${preview.totalRows || 0}</strong></span><span>负责人<strong>${preview.ownerCount || 0}</strong></span><span>平台<strong>${preview.platformCount || 0}</strong></span><span>店铺<strong>${preview.shopCount || 0}</strong></span><span>可更新链接<strong>${preview.updatableLinks || 0}</strong></span><span>未匹配链接<strong>${preview.unmatchedLinks || 0}</strong></span><span>店铺冲突<strong>${preview.shopConflictRows || 0}</strong></span><span>重复关系<strong>${preview.duplicateRelations || 0}</strong></span></div>
-      <div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>行</th><th>平台</th><th>店铺</th><th>商品ID</th><th>链接标题</th><th>当前负责人</th><th>新负责人</th><th>状态</th><th>说明</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${row.rowNumber}</td><td>${escapeHtml(row.data?.platform || row.rawData?.平台 || "—")}</td><td>${escapeHtml(row.data?.shopName || row.rawData?.店铺 || "—")}</td><td>${escapeHtml(row.data?.platformGoodsId || "—")}</td><td>${escapeHtml(row.data?.linkTitle || "—")}</td><td>${escapeHtml(row.data?.currentOwnerName || "未分配")}</td><td>${escapeHtml(row.data?.newOwnerName || "—")}</td><td>${escapeHtml(statusText[row.status] || row.status)}</td><td>${escapeHtml(row.errorMessage || "—")}</td></tr>`).join("")}</tbody></table></div>
-      ${result.batch?.status !== "completed" ? `<footer><button type="button" class="primary-button" data-confirm-owner-import="${escapeHtml(result.batch.id)}">确认批量更新正常行</button></footer>` : ""}
+    ${result ? `<section class="connection-import-preview"><header><div><h3>本次负责人匹配</h3><p>${escapeHtml(result.batch?.fileName || "负责人匹配表")}</p></div><span class="status-pill">${batchStatus[result.batch?.status] || result.batch?.status}</span></header>
+      <div class="connection-owner-change-summary"><span>文件总行数<strong>${preview.totalRows || 0}</strong></span><span>可更新链接<strong>${preview.updatableLinks || 0}</strong></span><span>负责人变更<strong>${preview.changeRows || 0}</strong></span><span>保持不变<strong>${preview.unchangedRows || 0}</strong></span><span>异常<strong>${Number(preview.unmatchedRows || 0) + Number(preview.conflictRows || 0) + Number(preview.ignoredRows || 0)}</strong></span></div>
+      <div class="connection-import-preview-grid"><span>可更新链接<strong>${preview.updatableLinks || 0}</strong></span><span>涉及负责人<strong>${preview.ownerCount || 0}</strong></span><span>涉及平台<strong>${preview.platformCount || 0}</strong></span><span>涉及店铺<strong>${preview.shopCount || 0}</strong></span><span>异常行<strong>${Number(preview.unmatchedRows || 0) + Number(preview.conflictRows || 0)}</strong></span><span>不会更新<strong>${skipped}</strong></span></div>
+      <details open><summary>查看匹配明细（${rows.length}）</summary><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>行</th><th>平台</th><th>店铺</th><th>商品ID</th><th>链接标题</th><th>当前负责人</th><th>新负责人</th><th>状态</th><th>说明</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${row.rowNumber}</td><td>${escapeHtml(row.data?.platform || row.rawData?.平台 || "—")}</td><td>${escapeHtml(row.data?.shopName || row.rawData?.店铺 || "—")}</td><td>${escapeHtml(row.data?.platformGoodsId || "—")}</td><td>${escapeHtml(row.data?.linkTitle || "—")}</td><td>${escapeHtml(row.data?.currentOwnerName || "未分配")}</td><td>${escapeHtml(row.data?.newOwnerName || "—")}</td><td>${escapeHtml(statusText[row.status] || row.status)}</td><td>${escapeHtml(row.errorMessage || "—")}</td></tr>`).join("")}</tbody></table></div></details>
+      <details><summary>查看异常（${exceptions.length}）</summary>${exceptions.length ? `<ul>${exceptions.map((row) => `<li>第${row.rowNumber}行：${escapeHtml(row.errorMessage || row.errorType || "未知异常")}</li>`).join("")}</ul>` : `<p class="form-note">无异常行。</p>`}</details>
+      <section class="connection-owner-change-groups"><h4>负责人变更</h4>${changeGroups.length ? changeGroups.map((group) => `<details><summary><span>${escapeHtml(group.currentOwnerName)} <b>→</b> ${escapeHtml(group.newOwnerName)}</span><strong>${group.linkCount}条链接</strong></summary><ul>${(group.links || []).map((link) => `<li><strong>${escapeHtml(link.title || link.platformGoodsId || "未命名链接")}</strong><span>${escapeHtml(`${link.platform || "—"} · ${link.shop || "—"} · ${link.platformGoodsId || "—"}`)}</span></li>`).join("")}</ul></details>`).join("") : `<p class="form-note">本次没有负责人变更。</p>`}</section>
+      <aside class="connection-owner-overwrite-note"><strong>本次将按导入文件覆盖更新负责人。</strong><p>导入后，符合匹配条件的链接负责人将更新为文件中的负责人，不会保留旧负责人。</p><small>不会修改：店铺、链接身份、平台SKU、ERP SKU、库存、销售数据。</small></aside>
+      ${!["completed", "partial", "cancelled"].includes(result.batch?.status) ? `<footer><button type="button" class="primary-button" data-confirm-owner-import="${escapeHtml(result.batch.id)}" ${canSubmit ? "" : "disabled"}>确认匹配负责人</button><button type="button" class="secondary-button" data-cancel-owner-import="${escapeHtml(result.batch.id)}">取消本次预览</button>${canSubmit ? "" : `<span class="form-note">${escapeHtml(result?.submission?.reason || "当前用户没有提交权限。")}</span>`}</footer>` : ""}
     </section>` : ""}
   </details>`;
 }
@@ -738,7 +761,7 @@ function renderImprovementModal() {
 }
 
 export function renderConnectionCenterPage() {
-  const pageContent = pageState.section === "cockpit" ? renderBusinessCockpit() : pageState.section === "hospital" ? renderConnectionHospital() : pageState.section === "my-links" ? renderMyLinksWorkbench() : pageState.section === "data-center" ? renderConnectionDataCenter() : renderConnectionAssets();
+  const pageContent = pageState.section === "cockpit" ? renderBusinessCockpit() : pageState.section === "hospital" ? renderConnectionHospital() : pageState.section === "my-links" ? renderMyLinksWorkbench() : pageState.section === "data-import" ? renderDataFoundation() : pageState.section === "data-center" ? renderConnectionDataCenter() : renderConnectionAssets();
   return `<section class="connection-center-page">${pageState.error ? `<div class="form-error">${escapeHtml(pageState.error)}</div>` : ""}${pageState.loading ? `<div class="empty-state">正在读取连接…</div>` : pageState.selectedId ? renderDetail() : `${renderSectionNavigation()}${pageContent}`}${renderMappingModal()}${renderImprovementModal()}${renderBenchmarkModal()}${renderDiagnosisModal()}</section>`;
 }
 
@@ -771,10 +794,11 @@ function applyConnectionAssetData(connections, rankings, managementOverview) {
 async function loadConnectionAssetsPage(render) {
   pageState.error = "";
   try {
-    const [connections, rankings, managementOverview] = await Promise.all([
-      loadConnectionAssets(), loadConnectionGrowthRankings(), loadConnectionManagementOverview(),
+    const [connections, rankings, managementOverview, ownerImport] = await Promise.all([
+      loadConnectionAssets(), loadConnectionGrowthRankings(), loadConnectionManagementOverview(), canManage() ? loadCurrentConnectionOwnerImport() : Promise.resolve(null),
     ]);
     applyConnectionAssetData(connections, rankings, managementOverview);
+    if (ownerImport) pageState.ownerImport.result = ownerImport;
   } catch (error) {
     pageState.error = error.message;
   }
@@ -784,7 +808,7 @@ async function loadConnectionAssetsPage(render) {
 async function loadPage(render) {
   pageState.loading = true; pageState.error = ""; render();
   try {
-    const [connections, rankings, managementOverview, cockpit, healthAttention, improvementSummary, importShops, hospital, myWorkbench] = await Promise.all([loadConnectionAssets(), loadConnectionGrowthRankings(), loadConnectionManagementOverview(), loadConnectionBusinessCockpit(), canViewHealth() ? loadAttentionConnectionHealthRecords() : Promise.resolve({ items: [], counts: {} }), loadConnectionImprovementSummary(), loadConnectionImportShops(), canViewHealth() ? loadConnectionHospital() : Promise.resolve({ zones: { diagnosis: [], treatment: [], observation: [] }, counts: {}, admittedConnectionIds: [] }), loadMyConnectionWorkbench("all")]);
+    const [connections, rankings, managementOverview, cockpit, healthAttention, improvementSummary, importShops, hospital, myWorkbench, ownerImport] = await Promise.all([loadConnectionAssets(), loadConnectionGrowthRankings(), loadConnectionManagementOverview(), loadConnectionBusinessCockpit(), canViewHealth() ? loadAttentionConnectionHealthRecords() : Promise.resolve({ items: [], counts: {} }), loadConnectionImprovementSummary(), loadConnectionImportShops(), canViewHealth() ? loadConnectionHospital() : Promise.resolve({ zones: { diagnosis: [], treatment: [], observation: [] }, counts: {}, admittedConnectionIds: [] }), loadMyConnectionWorkbench("all"), canManage() ? loadCurrentConnectionOwnerImport() : Promise.resolve(null)]);
     applyConnectionAssetData(connections, rankings, managementOverview);
     pageState.cockpit = { ...pageState.cockpit, ...cockpit };
     pageState.healthAttention = healthAttention;
@@ -792,6 +816,7 @@ async function loadPage(render) {
     pageState.hospital = { ...pageState.hospital, ...hospital };
     pageState.myWorkbench = { ...pageState.myWorkbench, ...myWorkbench, filter: "all", loading: false };
     pageState.importShops = importShops.items ?? [];
+    pageState.ownerImport.result = ownerImport;
     pageState.loaded = true;
     pageState.loadedUserId = String(getCurrentUser()?.personId ?? getCurrentUser()?.id ?? "");
   } catch (error) { pageState.error = error.message; }
@@ -870,7 +895,7 @@ export function bindConnectionCenterPageEvents(render) {
     pageState.myWorkbench = { items: [], summary: { total: 0, better: 0, risk: 0, followed: 0 }, filter: "all", isAdmin: false, loading: false };
     pageState.selectedId = "";
     pageState.coreDetail = null;
-    pageState.ownerImport = { loading: false, result: null };
+    pageState.ownerImport = { loading: false, result: null, showCompletion: false };
   }
   if (!pageState.loaded && !pageState.loading) void loadPage(render);
   const routeHash = window.location.hash.replace(/^#/, ""); const hasDetailRoute = routeHash.startsWith("connectionCenter/");
@@ -882,7 +907,7 @@ export function bindConnectionCenterPageEvents(render) {
     if (pageState.section === "connections") void loadConnectionAssetsPage(render);
     if (pageState.section === "my-links") void loadMyLinks(render);
     if (pageState.section === "hospital") void loadHospital(render);
-    if (pageState.section === "data-center") void loadDataFoundation(render);
+    if (pageState.section === "data-import") void loadDataFoundation(render);
   }));
   root.querySelectorAll("[data-connection-data-tab]").forEach((button) => button.addEventListener("click", () => {
     pageState.dataCenterTab = button.dataset.connectionDataTab; render();
@@ -930,7 +955,7 @@ export function bindConnectionCenterPageEvents(render) {
     catch (error) { pageState.error = error.message; render(); }
   }));
   root.querySelectorAll("[data-open-pending-connections]").forEach((button) => button.addEventListener("click", () => { pageState.section = "data-center"; pageState.dataCenterTab = "pending-connections"; pageState.selectedId = ""; void loadPendingConnections(render); }));
-  root.querySelector("[data-open-business-import]")?.addEventListener("click", () => { pageState.section = "data-center"; pageState.dataCenterTab = "imports"; pageState.selectedId = ""; void loadImportBatches(render, true); });
+  root.querySelector("[data-open-business-import]")?.addEventListener("click", () => { pageState.section = "data-import"; pageState.selectedId = ""; void loadDataFoundation(render); });
   root.querySelector("[data-connection-owner-import-form]")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const form = new FormData(event.currentTarget);
     pageState.ownerImport.loading = true; pageState.error = ""; render();
@@ -943,9 +968,19 @@ export function bindConnectionCenterPageEvents(render) {
     try {
       const result = await confirmConnectionOwnerImport(event.currentTarget.dataset.confirmOwnerImport);
       pageState.ownerImport.result = result;
+      pageState.ownerImport.showCompletion = true;
       await Promise.all([loadConnectionAssetsPage(render), loadMyLinks(render)]);
-      window.alert(`负责人更新完成：更新 ${result.result?.updated || 0} 条，原负责人未变化 ${result.result?.unchanged || 0} 条。`);
     } catch (error) { pageState.error = error.message; }
+    pageState.ownerImport.loading = false; render();
+  });
+  root.querySelector("[data-view-owner-import-result]")?.addEventListener("click", () => { pageState.ownerImport.showCompletion = false; render(); });
+  root.querySelector("[data-return-connection-center]")?.addEventListener("click", () => { pageState.section = "cockpit"; pageState.ownerImport.showCompletion = false; render(); });
+  root.querySelector("[data-continue-owner-import]")?.addEventListener("click", () => { pageState.ownerImport = { loading: false, result: null, showCompletion: false }; render(); });
+  root.querySelector("[data-open-admin-data-center]")?.addEventListener("click", () => { window.location.hash = "dataCenter"; });
+  root.querySelector("[data-cancel-owner-import]")?.addEventListener("click", async (event) => {
+    pageState.ownerImport.loading = true; pageState.error = ""; render();
+    try { pageState.ownerImport.result = await cancelConnectionOwnerImport(event.currentTarget.dataset.cancelOwnerImport); }
+    catch (error) { pageState.error = error.message; }
     pageState.ownerImport.loading = false; render();
   });
   root.querySelectorAll("[data-connection-view]").forEach((button) => button.addEventListener("click", () => { pageState.view = button.dataset.connectionView; render(); }));

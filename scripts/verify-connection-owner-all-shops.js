@@ -6,7 +6,7 @@ import XLSX from "xlsx";
 const databasePath = path.join(os.tmpdir(), `wufan-owner-all-shops-${process.pid}-${Date.now()}.db`);
 process.env.WUFAN_DB_PATH = databasePath;
 const { closeDatabase, getDatabase, initializeDatabase } = await import("../server/db.js");
-const { previewConnectionOwnerImport, confirmConnectionOwnerImport } = await import("../server/connectionOwnerImportService.js");
+const { previewConnectionOwnerImport, confirmConnectionOwnerImport, getCurrentConnectionOwnerImport } = await import("../server/connectionOwnerImportService.js");
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 
 try {
@@ -52,19 +52,29 @@ try {
     (SELECT COUNT(*) FROM sales_link_skus) linkSkus,(SELECT COUNT(*) FROM sales_link_sku_erp_mappings) mappings,
     (SELECT COUNT(*) FROM connection_sku_sales_facts) salesFacts`).get();
   const preview = previewConnectionOwnerImport({ buffer, fileName: "负责人匹配.xlsx", userId: people[0].id });
-  assert(preview.batch.status === "validated" && !preview.blocked, "单行异常错误阻断了正常行确认。");
+  assert(preview.batch.status === "preview_ready" && preview.submission.canSubmit && !preview.blocked, "单行异常错误阻断了正常行确认。");
   assert(preview.preview.totalRows === 9 && preview.preview.ownerCount === 2, "总行数或负责人数统计错误。");
   assert(preview.preview.platformCount === 3 && preview.preview.shopCount === 4, "平台或店铺统计错误。");
   assert(preview.preview.updatableLinks === 4 && preview.preview.unmatchedLinks === 1, "可更新或未匹配链接统计错误。");
+  assert(preview.preview.changeRows === 4 && preview.preview.unchangedRows === 0, "负责人变更或保持不变统计错误。");
+  assert(preview.preview.ownerChangeGroups.length === 2 && preview.preview.ownerChangeGroups.reduce((sum, group) => sum + group.linkCount, 0) === 4, "负责人变更分组错误。");
   assert(preview.preview.shopConflictRows === 2 && preview.preview.duplicateRelations === 1, "店铺冲突或重复关系统计错误。");
-  const committed = confirmConnectionOwnerImport(preview.batch.id);
+  const restored = getCurrentConnectionOwnerImport(people[0].id);
+  assert(restored?.batch.id === preview.batch.id && restored.submission.canSubmit, "刷新后未恢复当前待确认预览。");
+  let denied = false;
+  try { confirmConnectionOwnerImport(preview.batch.id, people[1].id); } catch (error) { denied = error.message.includes("无权"); }
+  assert(denied, "其他用户可以提交非本人预览。");
+  const committed = confirmConnectionOwnerImport(preview.batch.id, people[0].id);
   assert(committed.result.updated === 4 && committed.result.unchanged === 0, "跨店铺负责人更新数量错误。");
+  assert(committed.batch.status === "partial", "存在隔离异常时批次未标记为partial。");
   const assignments = db.prepare(`SELECT sl.id,cp.ownerId FROM sales_links sl JOIN connection_profiles cp ON cp.salesLinkId=sl.id
     WHERE sl.id LIKE 'owner-link-%' ORDER BY sl.id`).all();
   assert(assignments[0].ownerId === people[0].id && assignments[1].ownerId === people[0].id, "陈启甜未覆盖多个店铺。");
   assert(assignments[2].ownerId === people[1].id && assignments[3].ownerId === people[1].id, "张小薇未覆盖多个店铺。");
   const repeated = previewConnectionOwnerImport({ buffer, fileName: "负责人匹配.xlsx", userId: people[0].id });
-  assert(repeated.idempotent && repeated.batch.id === preview.batch.id && repeated.batch.status === "completed", "重复导入未返回原批次。");
+  assert(repeated.idempotent && repeated.batch.id === preview.batch.id && repeated.batch.status === "partial", "重复导入未返回原批次。");
+  const repeatedCommit = confirmConnectionOwnerImport(preview.batch.id, people[0].id);
+  assert(repeatedCommit.idempotent && repeatedCommit.result.updated === 4, "重复点击未幂等返回原提交结果。");
   const protectedAfter = db.prepare(`SELECT (SELECT COUNT(*) FROM sales_links) links,(SELECT COUNT(*) FROM sales_shops) shops,
     (SELECT COUNT(*) FROM sales_link_skus) linkSkus,(SELECT COUNT(*) FROM sales_link_sku_erp_mappings) mappings,
     (SELECT COUNT(*) FROM connection_sku_sales_facts) salesFacts`).get();
