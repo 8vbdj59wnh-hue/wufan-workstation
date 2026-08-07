@@ -95,6 +95,7 @@ export const state = {
   templateAssetVersions: [],
   products: [],
   actionProducts: [],
+  taskProductContexts: [],
   productImportBatches: [],
   erpGoods: [],
   productErpMappings: [],
@@ -208,6 +209,7 @@ export function getDataSnapshot() {
     standardWorkForms: state.standardWorkForms,
     products: state.products,
     actionProducts: state.actionProducts,
+    taskProductContexts: state.taskProductContexts,
     productImportBatches: state.productImportBatches,
     erpGoods: state.erpGoods,
     productErpMappings: state.productErpMappings,
@@ -254,6 +256,7 @@ export function applyDataSnapshot(data) {
   replaceArray(state.standardWorkForms, data.standardWorkForms ?? initialStandardWorkForms);
   replaceArray(state.products, data.products ?? []);
   replaceArray(state.actionProducts, data.actionProducts ?? []);
+  replaceArray(state.taskProductContexts, data.taskProductContexts ?? []);
   replaceArray(state.productImportBatches, data.productImportBatches ?? []);
   replaceArray(state.erpGoods, data.erpGoods ?? []);
   replaceArray(state.productErpMappings, data.productErpMappings ?? []);

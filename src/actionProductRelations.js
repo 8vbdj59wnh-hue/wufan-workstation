@@ -12,8 +12,11 @@ let indexedActionProducts = null;
 let indexedProducts = null;
 let indexedActionProductCount = -1;
 let indexedProductCount = -1;
+let indexedTaskProductContexts = null;
+let indexedTaskProductContextCount = -1;
 let productIdsByActionId = new Map();
 let productsById = new Map();
+let taskProductsByContextId = new Map();
 
 function ensureProductRelationIndexes() {
   if (indexedActionProducts !== state.actionProducts || indexedActionProductCount !== state.actionProducts.length) {
@@ -37,6 +40,27 @@ function ensureProductRelationIndexes() {
     indexedProductCount = state.products.length;
     productsById = new Map(state.products.map((product) => [product.id, product]));
   }
+  if (indexedTaskProductContexts !== state.taskProductContexts || indexedTaskProductContextCount !== state.taskProductContexts.length) {
+    indexedTaskProductContexts = state.taskProductContexts;
+    indexedTaskProductContextCount = state.taskProductContexts.length;
+    taskProductsByContextId = new Map();
+    for (const context of state.taskProductContexts ?? []) {
+      const rows = taskProductsByContextId.get(context.contextId) ?? [];
+      rows.push({
+        id: context.productId || "",
+        erpSkuId: context.erpSkuId || "",
+        name: context.productName || context.erpSkuName || context.erpGoodsName || context.erpSkuCode || "ERP SKU",
+        skuCode: context.productSkuCode || context.erpSkuCode || "",
+        erpSkuCode: context.erpSkuCode || "",
+        mainImage: context.productImage || context.erpSkuImage || "",
+        productImage: context.productImage || "",
+        erpSkuImage: context.erpSkuImage || "",
+        status: context.productStatus || context.erpStatus || "",
+        hasProductProfile: Boolean(context.productId),
+      });
+      taskProductsByContextId.set(context.contextId, rows);
+    }
+  }
 }
 
 export function getActionProductIds(actionId) {
@@ -46,7 +70,8 @@ export function getActionProductIds(actionId) {
 
 export function getActionProducts(actionId) {
   ensureProductRelationIndexes();
-  return getActionProductIds(actionId).map((productId) => productsById.get(productId)).filter(Boolean);
+  const products = getActionProductIds(actionId).map((productId) => productsById.get(productId)).filter(Boolean);
+  return products.length > 0 ? products : [...(taskProductsByContextId.get(actionId) ?? [])];
 }
 
 export function getPrimaryActionProduct(actionId) {
@@ -77,6 +102,11 @@ function renderProductThumb(product) {
   return product.mainImage
     ? `<img src="${escapeHtml(resolveAssetUrl(product.mainImage))}" alt="${escapeHtml(product.name)}" />`
     : `<span class="product-image-placeholder">无图</span>`;
+}
+
+export function getTaskContextProducts(contextId) {
+  ensureProductRelationIndexes();
+  return [...(taskProductsByContextId.get(contextId) ?? [])];
 }
 
 function relationSkuCodes(productId) {

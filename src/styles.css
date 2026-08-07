@@ -4471,6 +4471,27 @@ button.content-template-thumb {
   overflow: hidden;
 }
 
+.task-detail-hero {
+  width: min(100%, 420px);
+  margin: 0 0 16px;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.task-detail-hero img,
+.task-detail-hero .task-cover-placeholder {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  object-fit: cover;
+  color: #94a3b8;
+}
+
 .goal-detail {
   overflow: hidden;
 }

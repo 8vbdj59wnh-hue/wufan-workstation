@@ -96,6 +96,7 @@ import {
   collectActionProductIds,
   getActionProductImageUrls,
   getActionProducts,
+  getTaskContextProducts,
   renderActionProductSelector,
   renderLinkedActionProducts,
 } from "./actionProductRelations.js?v=20260803-action-product-manual-link1";
@@ -3619,8 +3620,6 @@ function renderActionSummary(task, context) {
     `;
   }
 
-  const linkedProducts = getActionProducts(instance.id);
-
   return `
     <div class="detail-block">
       <div class="section-heading with-actions">
@@ -3634,22 +3633,35 @@ function renderActionSummary(task, context) {
         formFields: getSortedFormFields(taskTemplate),
         customFields,
       })}
-      ${
-        linkedProducts.length === 0
-          ? ""
-          : `
-            <div class="task-action-product-reference">
-              <h4>关联产品</h4>
-              ${renderLinkedActionProducts(instance.id)}
-            </div>
-          `
-      }
       <div class="task-action-template-reference">
         <h4>关联模板</h4>
         ${renderActionLinkedTemplates(instance, { compact: true })}
       </div>
     </div>
   `;
+}
+
+function getTaskDetailProducts(task, context) {
+  const contextId = context.instance?.id || task.id;
+  const contextual = getTaskContextProducts(contextId);
+  return contextual.length > 0 ? contextual : (context.instance ? getActionProducts(context.instance.id) : []);
+}
+
+function renderTaskDetailProduct(task, context) {
+  const products = getTaskDetailProducts(task, context);
+  if (products.length === 0) return "";
+  return `<div class="detail-block task-detail-products"><h3>关联产品</h3><div class="linked-action-products">${products.map((product) => {
+    const image = product.productImage || product.erpSkuImage || product.mainImage || "";
+    const href = product.erpSkuId ? `#products/sku/${encodeURIComponent(product.erpSkuId)}` : (product.id ? `#products/${encodeURIComponent(product.id)}` : "");
+    const body = `${image ? `<img loading="lazy" src="${escapeHtml(resolveAssetUrl(image))}" alt="${escapeHtml(product.name)}" onerror="this.replaceWith(Object.assign(document.createElement('span'), { className: 'product-image-placeholder', textContent: '无图' }))" />` : `<span class="product-image-placeholder">无图</span>`}<span><strong>${escapeHtml(product.name)}</strong><small>SKU编码：${escapeHtml(product.skuCode || "—")}</small><small>ERP SKU编码：${escapeHtml(product.erpSkuCode || product.skuCode || "—")}</small><small>产品状态：${escapeHtml(product.status || "未设置")}</small>${product.hasProductProfile === false ? `<small>未建立产品档案</small>` : ""}</span>`;
+    return href ? `<a class="linked-action-product" href="${href}">${body}</a>` : `<div class="linked-action-product">${body}</div>`;
+  }).join("")}</div></div>`;
+}
+
+function renderTaskDetailHero(task, context) {
+  const product = getTaskDetailProducts(task, context)[0] ?? null;
+  const image = product?.productImage || product?.erpSkuImage || product?.mainImage || getTaskCoverImage(task) || context.instance?.coverImageUrl || "";
+  return `<div class="task-detail-hero">${image ? `<img loading="lazy" src="${escapeHtml(resolveAssetUrl(image))}" alt="${escapeHtml(product?.name || task.name)}" onerror="this.replaceWith(Object.assign(document.createElement('span'), { className: 'task-cover-placeholder', textContent: '无图' }))" />` : `<span class="task-cover-placeholder">无图</span>`}</div>`;
 }
 
 function renderCurrentTaskSection(task) {
@@ -4170,7 +4182,9 @@ function renderTaskDetail() {
           ${canRestoreTask(selectedTask) ? renderActionButton("恢复为待处理", "restore-task", selectedTask.id) : ""}
         </div>
       </div>
+      ${renderTaskDetailHero(selectedTask, actionContext)}
       ${renderActionSummary(selectedTask, actionContext)}
+      ${renderTaskDetailProduct(selectedTask, actionContext)}
       ${renderCurrentTaskSection(selectedTask)}
       ${renderPreviousTaskFilesBlock(selectedTask)}
       ${renderTaskSubmitResultDetail(selectedTask)}

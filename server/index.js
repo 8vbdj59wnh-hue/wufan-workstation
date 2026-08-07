@@ -1134,9 +1134,12 @@ function filterDataByScope(data, user) {
         erpImportBatches: [],
         platformSkuManualBindings: [],
       };
+  const productsWereLoaded = Object.hasOwn(data, "products");
   const visibleProductIds = new Set(products.map((product) => product.id));
   if (dataScope === "all") {
-    const actionProducts = (data.actionProducts ?? []).filter((item) => visibleProductIds.has(item.productId));
+    const actionProducts = productsWereLoaded
+      ? (data.actionProducts ?? []).filter((item) => visibleProductIds.has(item.productId))
+      : (data.actionProducts ?? []);
     return { ...data, stores, publishingAccounts, permissionTemplates, products, actionProducts, productImportBatches, ...productV2Data };
   }
 
@@ -1144,8 +1147,8 @@ function filterDataByScope(data, user) {
   const scopedWorkPlans = filterByScope(data.workPlans ?? [], user);
   const scopedProcessInstances = filterByScope(data.processInstances ?? [], user);
   const scopedProcessInstanceIds = new Set(scopedProcessInstances.map((instance) => instance.id));
-  const scopedActionProducts = (data.actionProducts ?? []).filter(
-    (item) => scopedProcessInstanceIds.has(item.actionId) && visibleProductIds.has(item.productId),
+  const scopedActionProducts = (data.actionProducts ?? []).filter((item) =>
+    scopedProcessInstanceIds.has(item.actionId) && (!productsWereLoaded || visibleProductIds.has(item.productId))
   );
   const scopedGoals = filterByScope(data.goals ?? [], user);
   const scopedContentSchedules = filterByScope(data.contentSchedules ?? [], user);
@@ -1174,6 +1177,61 @@ function filterDataByScope(data, user) {
     weeklyReports: scopedWeeklyReports,
     weeklyReportProblems: scopedWeeklyReportProblems,
   };
+}
+
+function readTaskProductContexts(snapshot) {
+  const database = getDatabase();
+  const actionIds = [...new Set((snapshot.actionProducts ?? []).map((item) => String(item.actionId ?? "").trim()).filter(Boolean))];
+  const directRefs = [];
+  const collectDirectRefs = (item, contextId) => {
+    const fields = item?.customFields ?? {};
+    const erpSkuIds = [item?.erpSkuId, fields.erpSkuId, ...(Array.isArray(fields.erpSkuIds) ? fields.erpSkuIds : [])];
+    for (const erpSkuId of erpSkuIds.map((value) => String(value ?? "").trim()).filter(Boolean)) directRefs.push({ contextId, erpSkuId });
+  };
+  for (const instance of snapshot.processInstances ?? []) collectDirectRefs(instance, instance.id);
+  for (const task of snapshot.tasks ?? []) collectDirectRefs(task, task.processInstanceId || task.id);
+
+  const rows = [];
+  if (actionIds.length > 0) {
+    const placeholders = actionIds.map(() => "?").join(",");
+    rows.push(...database.prepare(`
+      SELECT a.actionId contextId,a.actionId,a.productId,m.erpSkuId,
+        p.name productName,p.skuCode productSkuCode,p.mainImage productImage,p.status productStatus,
+        s.merchantSkuCode erpSkuCode,s.specificationName erpSkuName,s.mainImage erpSkuImage,s.erpStatus,
+        g.goodsName erpGoodsName
+      FROM action_products a
+      LEFT JOIN products p ON p.id=a.productId
+      LEFT JOIN product_erp_mappings m ON m.productId=a.productId AND m.currentState='active'
+      LEFT JOIN erp_skus s ON s.id=m.erpSkuId
+      LEFT JOIN erp_goods g ON g.id=s.erpGoodsId
+      WHERE a.actionId IN (${placeholders})
+      ORDER BY a.createdAt,a.id,m.createdAt,m.id
+    `).all(...actionIds));
+  }
+  const uniqueDirectIds = [...new Set(directRefs.map((item) => item.erpSkuId))];
+  if (uniqueDirectIds.length > 0) {
+    const placeholders = uniqueDirectIds.map(() => "?").join(",");
+    const skuById = new Map(database.prepare(`
+      SELECT s.id erpSkuId,s.merchantSkuCode erpSkuCode,s.specificationName erpSkuName,s.mainImage erpSkuImage,s.erpStatus,
+        g.goodsName erpGoodsName,m.productId,p.name productName,p.skuCode productSkuCode,p.mainImage productImage,p.status productStatus
+      FROM erp_skus s
+      LEFT JOIN erp_goods g ON g.id=s.erpGoodsId
+      LEFT JOIN product_erp_mappings m ON m.erpSkuId=s.id AND m.currentState='active'
+      LEFT JOIN products p ON p.id=m.productId
+      WHERE s.id IN (${placeholders})
+    `).all(...uniqueDirectIds).map((row) => [row.erpSkuId, row]));
+    for (const reference of directRefs) {
+      const sku = skuById.get(reference.erpSkuId);
+      if (sku) rows.push({ contextId: reference.contextId, actionId: reference.contextId, ...sku });
+    }
+  }
+  const seen = new Set();
+  return rows.filter((row) => {
+    const key = `${row.contextId}|${row.productId || ""}|${row.erpSkuId || ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function rejectLegacyContentScheduleWrite(resource, response) {
@@ -1276,7 +1334,9 @@ app.get("/api/bootstrap", (request, response) => {
     if (!(moduleName in moduleResources)) { response.status(400).json({ success: false, message: "该模块尚未接入轻量启动。" }); return; }
     const keys = [...new Set([...common, ...moduleResources[moduleName]])];
     const snapshot = Object.fromEntries(keys.map((key) => [key, readResource(key)]));
-    response.json(filterDataByScope(snapshot, request.user));
+    const scoped = filterDataByScope(snapshot, request.user);
+    if (["tasks", "task-list", "scheduleBoard"].includes(moduleName)) scoped.taskProductContexts = readTaskProductContexts(scoped);
+    response.json(scoped);
   } catch (error) { response.status(400).json({ success: false, message: error.message || "轻量启动数据读取失败。" }); }
 });
 
