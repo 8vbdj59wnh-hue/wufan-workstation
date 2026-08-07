@@ -20,7 +20,7 @@ import {
   validatePublicFormFields,
 } from "./workFormEditor.js?v=20260722-public-form-editor1";
 import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
-import { bindActionProductSelectors, collectActionProductIds, getActionProductIds, renderActionProductSelector, renderLinkedActionProducts } from "./actionProductRelations.js?v=20260803-action-product-manual-link1";
+import { bindActionProductSelectors, collectActionProductIds, getActionProductIds, getActionProducts, renderActionProductSelector, renderLinkedActionProducts } from "./actionProductRelations.js?v=20260807-key-action-product-context1";
 import { hasPermission } from "./permissions.js?v=20260725-product-center1";
 import { getActionDeadlinePresentation } from "./data/actionDeadline.js?v=20260802-action-countdown1";
 import {
@@ -746,6 +746,8 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
   const actionOwnerName = findName(people, actionOwner.userId, "未设置");
   const businessStatus = selectProcessInstanceBusinessStatus(instance.id, state);
   const deadline = getActionDeadlinePresentation(instance);
+  const primaryProduct = getActionProducts(instance.id)[0] ?? null;
+  const primaryProductImage = primaryProduct?.productImage || primaryProduct?.erpSkuImage || primaryProduct?.mainImage || instance.coverImageUrl || "";
 
   return `
     <section class="settings-section process-detail launched-process-detail" data-launched-process-detail="${instance.id}">
@@ -758,6 +760,9 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
         <div><span>行动负责人</span><strong>${escapeHtml(actionOwnerName)}</strong></div>
         <div><span>截止时间</span><strong>${escapeHtml(formatBusinessDateTime(instance.dueDate, "未设置"))}</strong></div>
         <div class="key-action-detail-countdown ${deadline.overdue ? "is-overdue" : ""}"><span>时间状态</span><strong data-action-deadline-id="${escapeHtml(instance.id)}">${escapeHtml(deadline.label)}</strong></div>
+      </div>
+      <div class="key-action-detail-hero">
+        ${primaryProductImage ? `<img loading="lazy" src="${escapeHtml(resolveAssetUrl(primaryProductImage))}" alt="${escapeHtml(primaryProduct?.name || instance.displayTitle || instance.name)}" onerror="this.replaceWith(Object.assign(document.createElement('span'), { className: 'task-cover-placeholder', textContent: '无图' }))" />` : `<span class="task-cover-placeholder">无图</span>`}
       </div>
       <form id="launched-process-form-${instance.id}" class="launched-process-form">
         <div class="form-error" hidden></div>

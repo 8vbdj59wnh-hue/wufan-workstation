@@ -133,8 +133,8 @@ function renderSelectedProducts(products, actionId = "") {
       (product) => `
         <div class="action-product-selected-item">
           ${renderProductThumb(product)}
-          <span><strong>${escapeHtml(product.name)}</strong><small>产品编码：${escapeHtml(product.skuCode)}</small><small>SKU：${escapeHtml(relationSkuCodes(product.id).join("、") || product.skuCode)}</small><small>关联时间：${escapeHtml(formatRelationTime(relationCreatedAt(actionId, product.id)))}</small></span>
-          <button class="icon-button" type="button" data-action="remove-action-product" data-product-id="${escapeHtml(product.id)}" aria-label="移除${escapeHtml(product.name)}">×</button>
+          <span><strong>${escapeHtml(product.name)}</strong><small>产品编码：${escapeHtml(product.skuCode)}</small><small>ERP SKU：${escapeHtml(product.erpSkuCode || relationSkuCodes(product.id).join("、") || product.skuCode)}</small><small>关联时间：${escapeHtml(formatRelationTime(relationCreatedAt(actionId, product.id)))}</small>${product.hasProductProfile === false ? `<small>未建立产品档案</small>` : ""}</span>
+          ${product.id ? `<button class="icon-button" type="button" data-action="remove-action-product" data-product-id="${escapeHtml(product.id)}" aria-label="移除${escapeHtml(product.name)}">×</button>` : ""}
         </div>
       `,
     )
@@ -143,12 +143,18 @@ function renderSelectedProducts(products, actionId = "") {
 
 export function renderActionProductSelector(selectedIds = [], { label = "关联产品", actionId = "" } = {}) {
   const selected = new Set(selectedIds);
-  const selectedProducts = state.products.filter((product) => selected.has(product.id));
+  const selectedProducts = getActionProducts(actionId).filter((product) => product.id === "" || selected.has(product.id));
   const products = state.products.filter((product) => product.status !== "已归档" || selected.has(product.id))
     .sort((left, right) => String(left.skuCode ?? "").localeCompare(String(right.skuCode ?? ""), "zh-CN", { numeric: true }));
+  const availableProductIds = new Set(products.map((product) => product.id));
+  const preservedSelectedInputs = selectedIds
+    .filter((productId) => !availableProductIds.has(productId))
+    .map((productId) => `<input type="checkbox" name="actionProductId" value="${escapeHtml(productId)}" checked hidden data-preserved-action-product />`)
+    .join("");
   return `
     <div class="action-product-selector" data-action-product-selector data-action-id="${escapeHtml(actionId)}">
       <span class="field-label">${escapeHtml(label)}</span>
+      ${preservedSelectedInputs}
       <div class="action-product-selected" data-action-product-selected>${renderSelectedProducts(selectedProducts, actionId)}</div>
       <div class="action-product-quick-link">
         <strong>手动关联</strong>
@@ -179,7 +185,11 @@ export function renderActionProductSelector(selectedIds = [], { label = "关联�
 
 function refreshSelected(selector) {
   const selectedIds = collectActionProductIds(selector);
-  const selectedProducts = state.products.filter((product) => selectedIds.includes(product.id));
+  const contextProducts = getTaskContextProducts(selector.dataset.actionId);
+  const contextByProductId = new Map(contextProducts.filter((product) => product.id).map((product) => [product.id, product]));
+  const selectedProducts = selectedIds
+    .map((productId) => state.products.find((product) => product.id === productId) ?? contextByProductId.get(productId))
+    .filter(Boolean);
   const host = selector.querySelector("[data-action-product-selected]");
   if (host !== null) host.innerHTML = renderSelectedProducts(selectedProducts, selector.dataset.actionId);
   selector.querySelectorAll(".action-product-option").forEach((option) => {
@@ -295,12 +305,13 @@ export function renderLinkedActionProducts(actionId, { compact = false } = {}) {
   if (products.length === 0) return `<p class="form-note">未关联产品</p>`;
   return `
     <div class="linked-action-products ${compact ? "is-compact" : ""}">
-      ${products.map((product) => `
-        <a class="linked-action-product" href="#products/${encodeURIComponent(product.id)}">
+      ${products.map((product) => {
+        const href = product.erpSkuId ? `#products/sku/${encodeURIComponent(product.erpSkuId)}` : (product.id ? `#products/${encodeURIComponent(product.id)}` : "");
+        const content = `
           ${renderProductThumb(product)}
-          <span><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(product.skuCode)}</small>${compact ? "" : `<small>关联时间：${escapeHtml(formatRelationTime(relationCreatedAt(actionId, product.id)))}</small>`}</span>
-        </a>
-      `).join("")}
+          <span><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(product.skuCode)}</small>${product.hasProductProfile === false ? `<small>未建立产品档案</small>` : ""}${compact ? "" : `<small>关联时间：${escapeHtml(formatRelationTime(relationCreatedAt(actionId, product.id)))}</small>`}</span>`;
+        return href ? `<a class="linked-action-product" href="${href}">${content}</a>` : `<div class="linked-action-product">${content}</div>`;
+      }).join("")}
     </div>
   `;
 }

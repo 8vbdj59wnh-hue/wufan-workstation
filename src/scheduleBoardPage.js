@@ -17,7 +17,7 @@ import {
   renderActionTemplatePicker,
   renderLaunchedProcessDetail,
   updateActionTemplatePickerSelection,
-} from "./processInstanceDetail.js?v=20260803-action-product-manual-link1";
+} from "./processInstanceDetail.js?v=20260807-key-action-product-context1";
 import { formatBusinessDateTime } from "./businessTime.js?v=20260705-state-singleton1";
 import { rerenderPreservingInputFocus } from "./inputFocus.js?v=20260723-input-focus1";
 import {
@@ -35,7 +35,7 @@ import { getActionDeadlinePresentation } from "./data/actionDeadline.js?v=202608
 import {
   getActionDisplayImages,
   getActionProducts,
-} from "./actionProductRelations.js?v=20260803-action-product-manual-link1";
+} from "./actionProductRelations.js?v=20260807-key-action-product-context1";
 import {
   getCurrentExecutor as selectCurrentExecutor,
   getCurrentProcessTask as selectCurrentProcessTask,
