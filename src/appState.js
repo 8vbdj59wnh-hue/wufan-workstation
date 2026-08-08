@@ -1061,8 +1061,9 @@ export async function loadProductCenterV2Metadata() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-center-v2/metadata`), "ERP SKU筛选摘要读取失败。");
 }
 
-export async function loadProductCenterV2SkuDetail(erpSkuId) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-center-v2/skus/${encodeURIComponent(erpSkuId)}`), "ERP SKU详情读取失败。");
+export async function loadProductCenterV2SkuDetail(erpSkuId, scope = "") {
+  const query = scope ? `?scope=${encodeURIComponent(scope)}` : "";
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-center-v2/skus/${encodeURIComponent(erpSkuId)}${query}`), "ERP SKU详情读取失败。");
 }
 
 export async function createProductProfileForErpSku(erpSkuId) {

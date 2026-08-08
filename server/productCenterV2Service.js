@@ -194,25 +194,46 @@ export function listProductCenterV2Skus(options = {}) {
   return { rows: hydrated, pagination: { total, limit, offset }, summary: { total: Number(profileCounts.total || 0), profiled: Number(profileCounts.profiled || 0), unprofiled: Number(profileCounts.unprofiled || 0) } };
 }
 
-export function getProductCenterV2SkuDetail(erpSkuId) {
+export function getProductCenterV2SkuDetail(erpSkuId, { scope = "full" } = {}) {
   const database = getDatabase();
   const sku = database.prepare(`SELECT s.*,g.goodsCode,g.goodsName,g.shortName,g.brand erpBrand,g.category erpCategory,g.productType,
-      m.id mappingId,m.productId,m.currentState mappingState,p.name productName,p.mainImage productImage,p.brand,p.category,p.ownerId,p.status lifecycleStatus,p.remark
+      m.id mappingId,m.productId,m.currentState mappingState,p.name productName,p.mainImage productImage,p.galleryImages,p.brand,p.category,p.ownerId,p.status lifecycleStatus,p.remark
     FROM erp_skus s JOIN erp_goods g ON g.id=s.erpGoodsId
     LEFT JOIN product_erp_mappings m ON m.erpSkuId=s.id AND m.currentState='active'
     LEFT JOIN products p ON p.id=m.productId WHERE s.id=?`).get(text(erpSkuId));
   if (!sku) throw new Error("ERP SKU不存在。");
+  if (scope === "links") {
+    const links = database.prepare(`SELECT m.id mappingId,m.mappingType,m.quantity,x.id salesLinkSkuId,x.platformSkuId,x.platformSkuCode,x.specificationName platformSpecification,
+        l.id salesLinkId,l.platformGoodsId,l.title,s.platform,s.displayName shopName,c.id connectionId
+      FROM sales_link_sku_erp_mappings m JOIN sales_link_skus x ON x.id=m.salesLinkSkuId
+      JOIN sales_links l ON l.id=x.salesLinkId JOIN sales_shops s ON s.id=l.shopId
+      LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
+      WHERE m.erpSkuId=? AND m.currentState='active' ORDER BY s.platform,s.displayName,l.title`).all(sku.id);
+    return { links };
+  }
+  if (scope === "inventory") {
+    return { inventoryRecords: database.prepare(`SELECT * FROM erp_sku_inventory_daily_summaries WHERE erpSkuId=? ORDER BY businessDate DESC,updatedAt DESC LIMIT 120`).all(sku.id) };
+  }
+  if (scope === "sales") {
+    return { salesTrend: database.prepare(`SELECT periodStart,periodEnd,SUM(COALESCE(shippedQuantity,0)) quantity,
+        SUM(COALESCE(salesAmount,0)) salesAmount,SUM(COALESCE(costAmount,0)) costAmount,SUM(COALESCE(profitAmount,0)) profitAmount
+      FROM connection_sku_sales_facts WHERE erpSkuId=? GROUP BY periodStart,periodEnd ORDER BY periodEnd DESC LIMIT 90`).all(sku.id) };
+  }
+  if (scope === "operations") {
+    return { operations: sku.productId ? database.prepare("SELECT * FROM product_lifecycle_events WHERE productId=? ORDER BY changedAt DESC LIMIT 100").all(sku.productId) : [] };
+  }
   const inventory = database.prepare(`SELECT * FROM erp_sku_inventory_daily_summaries WHERE erpSkuId=? ORDER BY businessDate DESC,updatedAt DESC LIMIT 1`).get(sku.id) ?? null;
+  const sales = database.prepare(`SELECT COUNT(*) factCount,MIN(periodStart) firstPeriod,MAX(periodEnd) lastPeriod,
+      SUM(COALESCE(shippedQuantity,0)) quantity,SUM(COALESCE(salesAmount,0)) salesAmount,
+      SUM(COALESCE(costAmount,0)) costAmount,SUM(COALESCE(profitAmount,0)) profitAmount
+    FROM connection_sku_sales_facts WHERE erpSkuId=?`).get(sku.id);
+  if (scope === "summary") return { sku, inventory, sales };
   const links = database.prepare(`SELECT m.id mappingId,m.mappingType,m.quantity,x.id salesLinkSkuId,x.platformSkuId,x.platformSkuCode,x.specificationName platformSpecification,
       l.id salesLinkId,l.platformGoodsId,l.title,s.platform,s.displayName shopName,c.id connectionId
     FROM sales_link_sku_erp_mappings m JOIN sales_link_skus x ON x.id=m.salesLinkSkuId
     JOIN sales_links l ON l.id=x.salesLinkId JOIN sales_shops s ON s.id=l.shopId
     LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
     WHERE m.erpSkuId=? AND m.currentState='active' ORDER BY s.platform,s.displayName,l.title`).all(sku.id);
-  const sales = database.prepare(`SELECT COUNT(*) factCount,MIN(periodStart) firstPeriod,MAX(periodEnd) lastPeriod,
-      SUM(COALESCE(shippedQuantity,0)) quantity,SUM(COALESCE(salesAmount,0)) salesAmount,
-      SUM(COALESCE(costAmount,0)) costAmount,SUM(COALESCE(profitAmount,0)) profitAmount
-    FROM connection_sku_sales_facts WHERE erpSkuId=?`).get(sku.id);
   const salesTrend = database.prepare(`SELECT periodStart,periodEnd,SUM(COALESCE(shippedQuantity,0)) quantity,
       SUM(COALESCE(salesAmount,0)) salesAmount,SUM(COALESCE(costAmount,0)) costAmount,SUM(COALESCE(profitAmount,0)) profitAmount
     FROM connection_sku_sales_facts WHERE erpSkuId=? GROUP BY periodStart,periodEnd ORDER BY periodEnd DESC LIMIT 90`).all(sku.id);

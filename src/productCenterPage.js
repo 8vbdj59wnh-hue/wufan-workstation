@@ -45,6 +45,8 @@ import { getProcessInstanceBusinessStatus, getProcessInstanceOwner } from "./dat
 import { canAccessModule, hasPermission } from "./permissions.js?v=20260725-product-center1";
 import { normalizeProductSkuCode } from "./data/productSku.js?v=20260728-product-sku1";
 import { escapeHtml } from "./utils/html.js?v=20260802-module-boundary1";
+import { renderUiModule } from "./uiModuleRegistry.js";
+import "./uiModules/productWorkspaceModules.js";
 
 const productStatuses = ["开发中", "上架", "成长期", "成熟期", "风险期", "淘汰", "待上架", "在售", "停售", "清仓", "已归档"];
 let filters = { query: "", brand: "", category: "", status: "", erpStatus: "", platform: "", stockStatus: "" };
@@ -78,6 +80,7 @@ let productSkuV2State = { loading: false, loaded: false, rows: [], detail: null,
 let productSkuV2RequestId = 0;
 let productSkuV2SearchTimer = 0;
 let productSkuV2MetadataLoading = false;
+let productWorkspaceState = { activeTab: "overview", sections: {} };
 
 function getRouteProductId() {
   const match = window.location.hash.replace(/^#/, "").match(/^products\/(?!sku\/)(.+)$/);
@@ -474,25 +477,41 @@ function renderProductV2BusinessSort() {
 function renderProductSkuV2Detail() {
   const detail = productSkuV2State.detail;
   if (productSkuV2State.loading || !detail) return `<section class="product-center-page"><button class="text-button" data-action="back-products">← 返回产品中心</button>${productSkuV2State.error ? `<div class="form-error">${escapeHtml(productSkuV2State.error)}</div>` : `<div class="empty-state">正在读取SKU详情…</div>`}</section>`;
-  const { sku, inventory, links, sales } = detail;
+  const { sku, inventory, sales } = detail;
   const listRow = productSkuV2State.rows.find((item) => item.erpSkuId === sku.id);
-  return `<section class="product-center-page product-detail-page product-sku-v2-detail">
+  const section = (scope) => productWorkspaceState.sections[scope] ?? { loading: false, loaded: false, rows: [], error: "" };
+  const galleryImages = (() => { try { return JSON.parse(sku.galleryImages || "[]"); } catch { return []; } })();
+  const moduleContext = { sku, inventory, sales, ownerName: findName(state.people, sku.ownerId), resolveUrl: resolveAssetUrl, formatMoney, formatMetric };
+  const tabs = [["overview", "概览"], ["sku", "SKU管理"], ["inventory", "库存记录"], ["sales", "销售记录"], ["operations", "操作记录"]];
+  const activeTab = productWorkspaceState.activeTab;
+  let tabContent = "";
+  if (activeTab === "overview") tabContent = `<div class="product-workspace-grid">
+    <div>${renderUiModule("product_gallery", { ...moduleContext, images: galleryImages })}${renderUiModule("product_links", { state: section("links") })}</div>
+    ${renderUiModule("product_business_data", moduleContext)}
+  </div>`;
+  if (activeTab === "sku") tabContent = `<section class="product-workspace-panel">${renderInfoGroup("SKU与ERP关系", [["SKU编码",sku.merchantSkuCode],["规格",sku.specificationName],["条码",sku.barcode],["单位",sku.unit],["ERP状态",sku.erpStatus],["ERP货品",`${sku.goodsCode || "—"} · ${sku.goodsName || "—"}`],["档案映射",sku.mappingState]])}</section>`;
+  if (activeTab === "inventory") tabContent = renderProductWorkspaceRecords("inventory", section("inventory"));
+  if (activeTab === "sales") tabContent = renderProductWorkspaceRecords("sales", section("sales"));
+  if (activeTab === "operations") tabContent = renderProductWorkspaceRecords("operations", section("operations"));
+  return `<section class="product-center-page product-detail-page product-sku-v2-detail product-workspace">
     <button class="text-button product-detail-back" type="button" data-action="back-products">← 返回产品中心</button>
     ${productSkuV2State.error ? `<div class="form-error">${escapeHtml(productSkuV2State.error)}</div>` : ""}
-    <header class="product-detail-hero"><div class="product-detail-identity">${businessZoneBadge(listRow?.businessZone)}<h1>${escapeHtml(sku.productName || sku.goodsName || sku.merchantSkuCode)}</h1><p>${sku.productId ? "已建立产品档案" : "未建立产品档案"}</p></div>
-      ${!sku.productId && hasPermission(getCurrentUser(), "products.create") ? `<button class="primary-button" type="button" data-action="create-product-v2-profile" data-erp-sku-id="${escapeHtml(sku.id)}">创建产品档案</button>` : sku.productId ? `<a class="primary-button" href="#products/${encodeURIComponent(sku.productId)}">进入经营档案</a>` : ""}</header>
-    <div class="product-basic-layout">
-      ${renderInfoGroup("经营表现", [["销量",sales?.quantity],["销售额",formatMoney(sales?.salesAmount)],["利润",formatMoney(sales?.profitAmount)],["最近周期",sales?.lastPeriod]])}
-      ${renderInfoGroup("库存", [["当前库存",inventory?.stockNum],["可发库存",inventory?.availableSendStock],["库存金额",formatMoney(inventory?.inventoryCostAmount)],["30日销量",inventory?.salesMonth]])}
-      ${renderInfoGroup("产品档案", [["档案状态",sku.productId ? "已建档" : "未建档"],["产品名称",sku.productName],["品牌",sku.brand],["类目",sku.category],["负责人",findName(state.people,sku.ownerId)],["生命周期",sku.lifecycleStatus]])}
-    </div>
-    <section class="product-detail-band"><h2>销售链接</h2><div class="table-wrap"><table class="data-table"><thead><tr><th>平台</th><th>店铺</th><th>链接</th></tr></thead><tbody>${links.length ? links.map((item)=>`<tr><td>${escapeHtml(item.platform)}</td><td>${escapeHtml(item.shopName)}</td><td>${item.connectionId?`<a class="text-button" href="#connectionCenter/${encodeURIComponent(item.connectionId)}">${escapeHtml(item.title||"查看链接")}</a>`:escapeHtml(item.title||"—")}</td></tr>`).join(""):`<tr><td colspan="3" class="empty-cell">暂无销售链接</td></tr>`}</tbody></table></div></section>
-    <details class="product-detail-band product-source-details"><summary><strong>更多信息</strong></summary>
-      ${renderInfoGroup("SKU与ERP关系", [["SKU编码",sku.merchantSkuCode],["规格",sku.specificationName],["条码",sku.barcode],["单位",sku.unit],["ERP状态",sku.erpStatus],["ERP货品",`${sku.goodsCode || "—"} · ${sku.goodsName || "—"}`],["映射状态",sku.mappingState],["库存日期",inventory?.businessDate],["成本价",formatMoney(inventory?.costPrice)],["销售事实数量",sales?.factCount],["销售成本",formatMoney(sales?.costAmount)],["最近同步",sku.sourceUpdatedAt]])}
-      <div class="table-wrap"><table class="data-table"><thead><tr><th>平台商品ID</th><th>平台SKU</th><th>关系类型</th></tr></thead><tbody>${links.length ? links.map((item)=>`<tr><td>${escapeHtml(item.platformGoodsId || "—")}</td><td>${escapeHtml(item.platformSkuId || item.platformSkuCode || "—")}</td><td>${escapeHtml(item.mappingType || "—")}</td></tr>`).join(""):`<tr><td colspan="3" class="empty-cell">暂无平台关系信息</td></tr>`}</tbody></table></div>
-      <div class="row-actions"><button type="button" class="text-button" data-action="open-product-v2-import">查看同步与导入记录</button></div>
-    </details>
+    <div class="product-workspace-top">${businessZoneBadge(listRow?.businessZone)}${renderUiModule("product_basic_info", moduleContext)}<div class="product-workspace-actions">${!sku.productId && hasPermission(getCurrentUser(), "products.create") ? `<button class="primary-button" type="button" data-action="create-product-v2-profile" data-erp-sku-id="${escapeHtml(sku.id)}">创建产品档案</button>` : sku.productId ? `<a class="secondary-button" href="#products/${encodeURIComponent(sku.productId)}">查看经营档案</a>` : ""}</div></div>
+    <nav class="product-workspace-tabs" aria-label="Product Workspace">${tabs.map(([key,label])=>`<button type="button" data-action="product-workspace-tab" data-tab="${key}" class="${activeTab===key?"is-active":""}">${label}</button>`).join("")}</nav>
+    <div class="product-workspace-content">${tabContent}</div>
   </section>`;
+}
+
+function renderProductWorkspaceRecords(scope, section) {
+  const labels = { inventory: "库存记录", sales: "销售记录", operations: "操作记录" };
+  if (section.loading) return `<div class="empty-state">正在读取${labels[scope]}…</div>`;
+  if (section.error) return `<div class="form-error">${escapeHtml(section.error)}</div>`;
+  if (!section.loaded) return `<section class="product-workspace-panel"><button class="secondary-button" type="button" data-action="load-product-workspace-section" data-scope="${scope}">加载${labels[scope]}</button></section>`;
+  const rows = section.rows || [];
+  if (!rows.length) return `<div class="empty-state">暂无${labels[scope]}</div>`;
+  if (scope === "inventory") return `<div class="table-wrap"><table class="data-table"><thead><tr><th>日期</th><th>库存</th><th>可发</th><th>库存金额</th><th>30日销量</th></tr></thead><tbody>${rows.map((row)=>`<tr><td>${escapeHtml(row.businessDate||"—")}</td><td>${formatMetric(row.stockNum)}</td><td>${formatMetric(row.availableSendStock)}</td><td>${formatMoney(row.inventoryCostAmount)}</td><td>${formatMetric(row.salesMonth)}</td></tr>`).join("")}</tbody></table></div>`;
+  if (scope === "sales") return `<div class="table-wrap"><table class="data-table"><thead><tr><th>周期</th><th>销量</th><th>销售额</th><th>成本</th><th>利润</th></tr></thead><tbody>${rows.map((row)=>`<tr><td>${escapeHtml(row.periodStart||"—")} – ${escapeHtml(row.periodEnd||"—")}</td><td>${formatMetric(row.quantity)}</td><td>${formatMoney(row.salesAmount)}</td><td>${formatMoney(row.costAmount)}</td><td>${formatMoney(row.profitAmount)}</td></tr>`).join("")}</tbody></table></div>`;
+  return `<div class="product-workspace-timeline">${rows.map((row)=>`<article><strong>${escapeHtml(row.fromStatus||"未设置")} → ${escapeHtml(row.toStatus||"未设置")}</strong><p>${escapeHtml(row.reason||"无补充说明")}</p><small>${formatDateTime(row.changedAt)}</small></article>`).join("")}</div>`;
 }
 
 function renderProductSubmoduleTabs() {
@@ -1534,9 +1553,26 @@ async function refreshProductSkuV2List(rerender) {
 
 async function refreshProductSkuV2Detail(erpSkuId, rerender) {
   if (!erpSkuId || productSkuV2State.loading || productSkuV2State.detailId === erpSkuId) return;
+  productWorkspaceState = { activeTab: "overview", sections: {} };
   productSkuV2State = { ...productSkuV2State, loading: true, detail: null, detailId: "", error: "" }; rerender();
-  try { const result = await loadProductCenterV2SkuDetail(erpSkuId); productSkuV2State = { ...productSkuV2State, loading: false, detail: result.detail, detailId: erpSkuId, error: "" }; }
+  try { const result = await loadProductCenterV2SkuDetail(erpSkuId, "summary"); productSkuV2State = { ...productSkuV2State, loading: false, detail: result.detail, detailId: erpSkuId, error: "" }; }
   catch (error) { productSkuV2State = { ...productSkuV2State, loading: false, detail: null, detailId: erpSkuId, error: error.message || "ERP SKU详情读取失败。" }; }
+  rerender();
+}
+
+async function loadProductWorkspaceSection(scope, rerender) {
+  const erpSkuId = getRouteErpSkuId();
+  const current = productWorkspaceState.sections[scope];
+  if (!erpSkuId || current?.loading || current?.loaded) return;
+  productWorkspaceState = { ...productWorkspaceState, sections: { ...productWorkspaceState.sections, [scope]: { loading: true, loaded: false, rows: [], error: "" } } };
+  rerender();
+  try {
+    const result = await loadProductCenterV2SkuDetail(erpSkuId, scope);
+    const field = { links: "links", inventory: "inventoryRecords", sales: "salesTrend", operations: "operations" }[scope];
+    productWorkspaceState = { ...productWorkspaceState, sections: { ...productWorkspaceState.sections, [scope]: { loading: false, loaded: true, rows: result.detail?.[field] || [], error: "" } } };
+  } catch (error) {
+    productWorkspaceState = { ...productWorkspaceState, sections: { ...productWorkspaceState.sections, [scope]: { loading: false, loaded: false, rows: [], error: error.message || "数据读取失败。" } } };
+  }
   rerender();
 }
 
@@ -1827,6 +1863,17 @@ export function bindProductCenterPageEvents(rerender) {
     const action = button.dataset.action;
     if (action === "view-product-v2-sku") {
       window.location.hash = `products/sku/${encodeURIComponent(button.dataset.erpSkuId)}`;
+      return;
+    }
+    if (action === "product-workspace-tab") {
+      const tab = button.dataset.tab || "overview";
+      productWorkspaceState = { ...productWorkspaceState, activeTab: tab };
+      rerender();
+      if (["inventory", "sales", "operations"].includes(tab)) void loadProductWorkspaceSection(tab, rerender);
+      return;
+    }
+    if (action === "load-product-workspace-section") {
+      void loadProductWorkspaceSection(button.dataset.scope, rerender);
       return;
     }
     if (action === "product-v2-page") {

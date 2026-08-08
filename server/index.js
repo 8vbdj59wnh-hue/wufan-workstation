@@ -2117,7 +2117,7 @@ app.get("/api/product-center-v2/metadata", requirePermission("products.view"), (
 });
 
 app.get("/api/product-center-v2/skus/:id", requirePermission("products.view"), (request, response) => {
-  try { response.json({ success: true, detail: getProductCenterV2SkuDetail(request.params.id) }); }
+  try { response.json({ success: true, detail: getProductCenterV2SkuDetail(request.params.id, { scope: request.query.scope }) }); }
   catch (error) { response.status(404).json({ success: false, message: error.message || "ERP SKU详情读取失败。" }); }
 });
 
