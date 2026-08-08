@@ -1201,8 +1201,9 @@ export async function loadConnectionCoreDetail(connectionId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/core-detail`), "链接经营详情读取失败。");
 }
 
-export async function loadMyConnectionWorkbench(filter = "all", page = 1, pageSize = 50) {
+export async function loadMyConnectionWorkbench(filter = "all", page = 1, pageSize = 50, keyword = "") {
   const query = new URLSearchParams({ filter, page, pageSize });
+  if (String(keyword).trim()) query.set("keyword", String(keyword).trim());
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections-workbench/mine?${query}`), "我的链接读取失败。");
 }
 

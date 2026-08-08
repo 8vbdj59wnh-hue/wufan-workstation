@@ -792,7 +792,7 @@ async function loadMyLinks(render, filter = pageState.myWorkbench.filter) {
   const page = filterChanged ? 1 : pageState.myWorkbench.pagination?.page || 1;
   pageState.myWorkbench.loading = true; pageState.myWorkbench.filter = filter; pageState.myWorkbench.pagination.page = page; pageState.error = ""; render();
   try {
-    const result = await loadMyConnectionWorkbench(filter, page, 50);
+    const result = await loadMyConnectionWorkbench(filter, page, 50, filter === "all" ? pageState.myWorkbench.search : "");
     const serverPaged = Boolean(result.pagination);
     const pagination = result.pagination || { page: 1, pageSize: 50, total: result.items?.length || 0, totalPages: Math.max(1, Math.ceil((result.items?.length || 0) / 50)) };
     pageState.myWorkbench = { ...pageState.myWorkbench, ...result, filter, pagination, serverPaged, loading: false, loaded: true };
@@ -1009,7 +1009,8 @@ export function bindConnectionCenterPageEvents(render) {
   });
   root.querySelectorAll("[data-my-link-filter]").forEach((button) => button.addEventListener("click", () => { void loadMyLinks(render, button.dataset.myLinkFilter); }));
   root.querySelector("[data-my-link-search]")?.addEventListener("submit", (event) => {
-    event.preventDefault(); pageState.myWorkbench.search = String(new FormData(event.currentTarget).get("search") || ""); pageState.myWorkbench.pagination.page = 1; render();
+    event.preventDefault(); pageState.myWorkbench.search = String(new FormData(event.currentTarget).get("search") || ""); pageState.myWorkbench.pagination.page = 1;
+    if (pageState.myWorkbench.filter === "all") void loadMyLinks(render, "all"); else render();
   });
   root.querySelectorAll("[data-my-link-page]").forEach((button) => button.addEventListener("click", () => {
     pageState.myWorkbench.pagination.page = Math.max(1, Number(button.dataset.myLinkPage || 1));
