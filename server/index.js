@@ -2275,7 +2275,8 @@ app.get("/api/connections-workbench/mine", requireLinkView, (request, response) 
   try {
     if (request.query.page && String(request.query.filter ?? "all") === "all") {
       const page = listConnectionCoreProfilesPage(request.query, getUserPersonId(request.user), isAdminUser(request.user));
-      response.json({ success: true, ...page, isAdmin: isAdminUser(request.user), summary: { total: page.pagination.total, better: 0, risk: 0, followed: 0 } });
+      const workbench = getMyConnectionWorkbench(getUserPersonId(request.user), isAdminUser(request.user), "all");
+      response.json({ success: true, ...page, isAdmin: workbench.isAdmin, summary: workbench.summary });
       return;
     }
     response.json({ success: true, ...getMyConnectionWorkbench(getUserPersonId(request.user), isAdminUser(request.user), String(request.query.filter ?? "all")) });

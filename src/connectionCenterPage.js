@@ -44,6 +44,7 @@ import {
   loadConnectionCoreDetail,
   loadMyConnectionWorkbench,
   loadLinkSalesRanking,
+  loadLinkDataStatus,
   removeConnectionAction,
   ignoreConnectionImportRow,
   updateConnectionDataMapping,
@@ -61,7 +62,11 @@ import { getCurrentUser, state } from "./appState.js";
 import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
 import { escapeHtml } from "./utils/html.js?v=20260802-module-boundary1";
 import { renderUiModule } from "./uiModuleRegistry.js";
-import "./uiModules/linkSalesRanking.js";
+import "./uiModules/linkSalesRanking.js?v=20260809-my-link-workspace1";
+import "./uiModules/linkDataStatus.js?v=20260809-my-link-workspace1";
+import "./uiModules/myLinkSummary.js?v=20260809-my-link-workspace1";
+import "./uiModules/linkHospitalTodo.js?v=20260809-my-link-workspace1";
+import "./uiModules/linkList.js?v=20260809-my-link-workspace1";
 
 const pageState = {
   loaded: false,
@@ -93,7 +98,8 @@ const pageState = {
   improvementSummary: { total: 0, effective: 0, observing: 0, failed: 0 },
   section: "cockpit",
   dataCenterTab: "data-foundation",
-  myWorkbench: { items: [], summary: { total: 0, better: 0, risk: 0, followed: 0 }, pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 }, filter: "all", isAdmin: false, loading: false },
+  myWorkbench: { items: [], summary: { total: 0, better: 0, risk: 0, followed: 0 }, pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 }, serverPaged: true, filter: "all", search: "", isAdmin: false, loading: false, loaded: false },
+  linkDataStatus: { data: null, loading: false, loaded: false, error: "" },
   salesRanking: { scope: "mine", range: { preset: "7d" }, items: [], summary: {}, loading: false, error: "" },
   hospital: { zones: { diagnosis: [], treatment: [], observation: [] }, counts: { diagnosis: 0, treatment: 0, observation: 0 }, stage: "diagnosis", loading: false },
   diagnosisModalId: "",
@@ -356,16 +362,29 @@ function trendDetails(item) {
 
 function renderMyLinksWorkbench() {
   const workbench = pageState.myWorkbench; const summary = workbench.summary ?? {};
-  const tabs = [["all", "全部"], ["better", "变好"], ["worse", "变差"], ["followed", "我的关注"]];
   const stageText = { diagnosis: "待诊断", treatment: "治疗中", observation: "观察中" };
   const issues = ["diagnosis", "treatment", "observation"].flatMap((stage) => (pageState.hospital.zones?.[stage] ?? []).map((item) => ({ ...item, stage })));
-  const issueList = issues.length ? `<div class="connection-workbench-issues">${issues.slice(0, 6).map((item) => `<button type="button" data-workbench-hospital="${item.stage}"><span><strong>${escapeHtml(item.connectionName)}</strong><small>${escapeHtml(item.problemTitle || "经营异常")} · ${escapeHtml(item.ownerName || "未分配")}</small></span><em>${escapeHtml(stageText[item.stage])}</em><b>${item.taskCount ? `${item.completedTaskCount}/${item.taskCount}` : "待处理"}</b></button>`).join("")}</div>` : `<div class="empty-state compact">当前没有已确认的待处理事项</div>`;
-  return `<section class="my-links-workbench"><header><div><h2>我的链接</h2></div></header>
-    <h3 class="my-links-section-title">今日概览</h3><div class="my-links-summary"><button type="button" data-my-link-filter="all"><span>我的链接</span><strong>${summary.total || 0}</strong></button><div><span>昨日销售额</span><strong>${summary.yesterdaySalesAmount == null ? "暂无数据" : coreMoney(summary.yesterdaySalesAmount)}</strong></div><div title="当前系统尚无已确认的唯一提成计算能力"><span>昨日提成</span><strong>待规则确认</strong></div><button type="button" data-my-link-filter="worse"><span>风险链接</span><strong>${summary.risk || 0}</strong></button><button type="button" data-workbench-hospital="diagnosis"><span>诊断中</span><strong>${pageState.hospital.counts?.diagnosis || 0}</strong></button><button type="button" data-workbench-hospital="treatment"><span>治疗中</span><strong>${pageState.hospital.counts?.treatment || 0}</strong></button></div>
-    <section class="connection-workbench-block is-priority"><header><div><h3>今日待处理事项</h3><p>待诊断 ${pageState.hospital.counts?.diagnosis || 0} · 治疗中 ${pageState.hospital.counts?.treatment || 0} · 观察中 ${pageState.hospital.counts?.observation || 0}</p></div><button type="button" class="text-button" data-workbench-go="hospital">进入链接医院 →</button></header>${issueList}</section>
-    ${renderUiModule("link_sales_ranking", { state: pageState.salesRanking, canViewCompany: isAdmin() })}
-    <nav class="segmented-control my-links-filters" aria-label="我的链接筛选">${tabs.map(([id, label]) => `<button type="button" class="${workbench.filter === id ? "active" : ""}" data-my-link-filter="${id}">${label}</button>`).join("")}</nav>
-    ${workbench.loading ? `<div class="empty-state">正在读取我的链接…</div>` : workbench.items.length ? `<div class="my-links-grid">${workbench.items.map((item) => { const trend = trendLabel(item); const anomalies = connectionAnomalies(item); return `<article class="my-link-card"><button type="button" class="my-link-main" data-open-connection="${escapeHtml(item.id)}">${imageHtml(item)}<span class="my-link-content"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(`${item.platform} · ${shopName(item)}`)}</small><span class="my-link-metrics"><em>销售 <b>${coreMoney(item.erpSales?.salesAmount)}</b></em><em>利润 <b>${coreMoney(item.erpSales?.profitAmount)}</b></em><em>增长 <b>${growthText(item.salesGrowth)}</b></em><em>健康 <b>${escapeHtml(healthText(item.healthStatus))}${item.healthScore == null ? "" : ` ${item.healthScore}分`}</b></em></span><span class="my-link-trend is-${trend.className}">${trend.text}</span></span></button><button type="button" class="my-link-follow ${item.followed ? "is-followed" : ""}" data-toggle-connection-follow="${escapeHtml(item.id)}" data-followed="${item.followed ? "true" : "false"}" aria-label="${item.followed ? "取消关注" : "关注链接"}">${item.followed ? "★ 已关注" : "☆ 关注"}</button>${anomalies.length ? `<div class="connection-anomaly-reminder"><span>⚠ ${escapeHtml(anomalies.map((problem) => problem.title).join("、"))}</span>${canJoinDiagnosis(item) ? `<button type="button" data-join-diagnosis="${escapeHtml(item.id)}">加入诊断</button>` : `<small>${(pageState.hospital.admittedConnectionIds ?? []).includes(item.id) ? "已加入诊断区" : "异常提醒"}</small>`}</div>` : ""}</article>`; }).join("")}</div>${workbench.filter === "all" ? `<nav class="pagination"><button type="button" data-my-links-page="${(workbench.pagination?.page || 1) - 1}" ${(workbench.pagination?.page || 1) <= 1 ? "disabled" : ""}>上一页</button><span>第 ${workbench.pagination?.page || 1} / ${workbench.pagination?.totalPages || 1} 页</span><button type="button" data-my-links-page="${(workbench.pagination?.page || 1) + 1}" ${(workbench.pagination?.page || 1) >= (workbench.pagination?.totalPages || 1) ? "disabled" : ""}>下一页</button></nav>` : ""}` : `<div class="empty-state"><strong>暂无符合条件的链接</strong></div>`}
+  const search = workbench.search.trim();
+  const filteredItems = workbench.items.filter((item) => matchesConnectionAssetSearch(item, search));
+  const page = workbench.pagination?.page || 1;
+  const totalPages = workbench.serverPaged ? (workbench.pagination?.totalPages || 1) : Math.max(1, Math.ceil(filteredItems.length / 50));
+  const visibleItems = workbench.serverPaged ? filteredItems : filteredItems.slice((page - 1) * 50, page * 50);
+  const issueCountByConnection = new Map();
+  issues.forEach((item) => issueCountByConnection.set(item.connectionId, Number(issueCountByConnection.get(item.connectionId) || 0) + 1));
+  const listItems = visibleItems.map((item) => { const trend = trendLabel(item); const anomalies = connectionAnomalies(item); const issueCount = issueCountByConnection.get(item.id) || anomalies.length;
+    return { id: item.id, imageHtml: imageHtml(item), name: item.name, goodsId: item.platformGoodsId, channel: `${item.platform} · ${shopName(item)}`,
+      yesterdaySales: item.yesterdaySalesAmount == null ? "暂无数据" : coreMoney(item.yesterdaySalesAmount), growth: growthText(item.salesGrowth), trendClass: trend.className,
+      health: item.healthScore == null ? healthText(item.healthStatus) : `${item.healthScore}分`, status: trend.text, issueText: issueCount ? `${issueCount} 项` : "无",
+      followed: item.followed, canJoinDiagnosis: canJoinDiagnosis(item) }; });
+  const pendingIssues = Object.values(pageState.hospital.counts || {}).reduce((total, value) => total + Number(value || 0), 0);
+  return `<section class="my-links-workbench"><header><div><p class="eyebrow">MY LINK WORKSPACE</p><h2>我的链接</h2><p>关注销售贡献、经营风险与今天需要处理的问题。</p></div></header>
+    ${renderUiModule("link_data_status", { state: pageState.linkDataStatus })}
+    ${renderUiModule("my_link_summary", { summary: { ...summary, pendingIssues }, money: coreMoney })}
+    <div class="my-link-workspace-columns">
+      ${renderUiModule("link_sales_ranking", { state: pageState.salesRanking, canViewCompany: false, workbenchItems: workbench.items })}
+      ${renderUiModule("link_hospital_todo", { items: issues.map((item) => ({ ...item, stageLabel: stageText[item.stage] })), counts: pageState.hospital.counts })}
+    </div>
+    ${renderUiModule("link_list", { items: listItems, total: search ? filteredItems.length : (workbench.pagination?.total || filteredItems.length), page, totalPages, search, filter: workbench.filter, loading: workbench.loading })}
   </section>`;
 }
 
@@ -769,9 +788,23 @@ async function loadHospital(render) {
 }
 
 async function loadMyLinks(render, filter = pageState.myWorkbench.filter) {
-  pageState.myWorkbench.loading = true; pageState.myWorkbench.filter = filter; pageState.error = ""; render();
-  try { const page = filter === pageState.myWorkbench.filter ? pageState.myWorkbench.pagination?.page || 1 : 1; const result = await loadMyConnectionWorkbench(filter, page, 50); pageState.myWorkbench = { ...pageState.myWorkbench, ...result, filter, pagination: result.pagination || pageState.myWorkbench.pagination, loading: false }; }
+  const filterChanged = filter !== pageState.myWorkbench.filter;
+  const page = filterChanged ? 1 : pageState.myWorkbench.pagination?.page || 1;
+  pageState.myWorkbench.loading = true; pageState.myWorkbench.filter = filter; pageState.myWorkbench.pagination.page = page; pageState.error = ""; render();
+  try {
+    const result = await loadMyConnectionWorkbench(filter, page, 50);
+    const serverPaged = Boolean(result.pagination);
+    const pagination = result.pagination || { page: 1, pageSize: 50, total: result.items?.length || 0, totalPages: Math.max(1, Math.ceil((result.items?.length || 0) / 50)) };
+    pageState.myWorkbench = { ...pageState.myWorkbench, ...result, filter, pagination, serverPaged, loading: false, loaded: true };
+  }
   catch (error) { pageState.error = error.message; pageState.myWorkbench.loading = false; }
+  render();
+}
+
+async function loadMyLinkDataStatus(render) {
+  pageState.linkDataStatus = { ...pageState.linkDataStatus, loading: true, error: "" }; render();
+  try { pageState.linkDataStatus = { data: await loadLinkDataStatus(), loading: false, loaded: true, error: "" }; }
+  catch (error) { pageState.linkDataStatus = { ...pageState.linkDataStatus, loading: false, loaded: true, error: error.message }; }
   render();
 }
 
@@ -911,7 +944,8 @@ export function bindConnectionCenterPageEvents(render) {
   if (pageState.loaded && pageState.loadedUserId !== currentUserId) {
     pageState.loaded = false;
     pageState.items = [];
-    pageState.myWorkbench = { items: [], summary: { total: 0, better: 0, risk: 0, followed: 0 }, filter: "all", isAdmin: false, loading: false };
+    pageState.myWorkbench = { items: [], summary: { total: 0, better: 0, risk: 0, followed: 0 }, filter: "all", search: "", page: 1, pageSize: 20, isAdmin: false, loading: false, loaded: false };
+    pageState.linkDataStatus = { data: null, loading: false, loaded: false, error: "" };
     pageState.selectedId = "";
     pageState.coreDetail = null;
     pageState.ownerImport = { loading: false, result: null, showCompletion: false };
@@ -925,7 +959,7 @@ export function bindConnectionCenterPageEvents(render) {
     pageState.section = button.dataset.connectionSection; pageState.selectedId = ""; render();
     if (pageState.section === "connections") void loadConnectionAssetsPage(render);
     if (pageState.section === "connections") void loadSalesRanking(render, { scope: isAdmin() ? "company" : "mine" });
-    if (pageState.section === "my-links") { void loadMyLinks(render); void loadSalesRanking(render, { scope: "mine" }); }
+    if (pageState.section === "my-links") { if (!pageState.myWorkbench.loaded) void loadMyLinks(render); void loadSalesRanking(render, { scope: "mine" }); if (!pageState.linkDataStatus.loaded) void loadMyLinkDataStatus(render); }
     if (pageState.section === "hospital") void loadHospital(render);
     if (pageState.section === "data-import") void loadDataFoundation(render);
   }));
@@ -942,11 +976,11 @@ export function bindConnectionCenterPageEvents(render) {
   }));
   root.querySelectorAll("[data-workbench-go]").forEach((button) => button.addEventListener("click", () => {
     pageState.section = button.dataset.workbenchGo; pageState.selectedId = ""; render();
-    if (pageState.section === "my-links") void loadMyLinks(render, "all");
+    if (pageState.section === "my-links") { if (!pageState.myWorkbench.loaded) void loadMyLinks(render, "all"); void loadSalesRanking(render, { scope: "mine" }); if (!pageState.linkDataStatus.loaded) void loadMyLinkDataStatus(render); }
     if (pageState.section === "hospital") void loadHospital(render);
   }));
   root.querySelectorAll("[data-workbench-my-filter]").forEach((button) => button.addEventListener("click", () => {
-    pageState.section = "my-links"; pageState.selectedId = ""; void loadMyLinks(render, button.dataset.workbenchMyFilter);
+    pageState.section = "my-links"; pageState.selectedId = ""; void loadMyLinks(render, button.dataset.workbenchMyFilter); void loadSalesRanking(render, { scope: "mine" }); if (!pageState.linkDataStatus.loaded) void loadMyLinkDataStatus(render);
   }));
   root.querySelectorAll("[data-workbench-hospital]").forEach((button) => button.addEventListener("click", () => {
     pageState.section = "hospital"; pageState.hospital.stage = button.dataset.workbenchHospital; pageState.selectedId = ""; void loadHospital(render);
@@ -974,8 +1008,12 @@ export function bindConnectionCenterPageEvents(render) {
     catch (error) { pageState.error = error.message; render(); }
   });
   root.querySelectorAll("[data-my-link-filter]").forEach((button) => button.addEventListener("click", () => { void loadMyLinks(render, button.dataset.myLinkFilter); }));
-  root.querySelectorAll("[data-my-links-page]").forEach((button) => button.addEventListener("click", () => {
-    pageState.myWorkbench.pagination.page = Number(button.dataset.myLinksPage); void loadMyLinks(render, "all");
+  root.querySelector("[data-my-link-search]")?.addEventListener("submit", (event) => {
+    event.preventDefault(); pageState.myWorkbench.search = String(new FormData(event.currentTarget).get("search") || ""); pageState.myWorkbench.pagination.page = 1; render();
+  });
+  root.querySelectorAll("[data-my-link-page]").forEach((button) => button.addEventListener("click", () => {
+    pageState.myWorkbench.pagination.page = Math.max(1, Number(button.dataset.myLinkPage || 1));
+    if (pageState.myWorkbench.serverPaged) void loadMyLinks(render, pageState.myWorkbench.filter); else render();
   }));
   root.querySelectorAll("[data-toggle-connection-follow]").forEach((button) => button.addEventListener("click", async () => {
     try { await updateConnectionFollow(button.dataset.toggleConnectionFollow, button.dataset.followed !== "true"); await loadMyLinks(render); }

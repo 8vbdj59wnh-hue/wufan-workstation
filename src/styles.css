@@ -10676,10 +10676,75 @@ button.content-template-thumb {
 .link-sales-ranking-module li button { display: grid; gap: 2px; padding: 0; border: 0; background: transparent; text-align: left; cursor: pointer; }
 .link-sales-ranking-module li small { color: #667085; }
 .link-sales-ranking-module li em { color: #101828; font-style: normal; font-weight: 700; }
+.link-sales-ranking-module li { grid-template-columns: 28px minmax(0, 1fr) auto auto; }
+.link-sales-ranking-module li > span { display: flex; gap: 6px; }
+.link-sales-ranking-module li > span small { padding: 3px 6px; border-radius: 999px; background: #fff; white-space: nowrap; }
+
+.my-links-workbench > header p { margin: 4px 0 0; color: var(--link-muted); }
+.link-data-status-module { display: grid; grid-template-columns: minmax(190px, .7fr) minmax(0, 1.5fr); gap: 18px; align-items: center; padding: 15px 18px; border: 1px solid #dbeae4; border-radius: var(--link-radius); background: linear-gradient(135deg, #f5fbf8, #fff); }
+.link-data-status-module > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.link-data-status-module > header div { display: grid; gap: 3px; }
+.link-data-status-module > header span, .link-data-status-module dt { color: var(--link-muted); font-size: 11px; }
+.link-data-status-module > header strong { color: #173f34; font-size: 17px; }
+.link-data-status-module > header em { padding: 4px 8px; border-radius: 999px; background: #fff1f3; color: #c01048; font-size: 11px; font-style: normal; white-space: nowrap; }
+.link-data-status-module > header em.is-ok { background: #ecfdf3; color: #027a48; }
+.link-data-status-module dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.link-data-status-module dl div { display: grid; gap: 3px; padding: 8px 10px; border-left: 1px solid #e4e7ec; }
+.link-data-status-module dd { margin: 0; color: #344054; font-size: 13px; font-weight: 650; }
+
+.my-link-summary-module { display: grid; gap: 10px; }
+.my-link-summary-module > header { display: flex; align-items: baseline; gap: 10px; }
+.my-link-summary-module > header span { color: #173f34; font-weight: 700; }
+.my-link-summary-module > header small { color: var(--link-muted); }
+.my-link-summary-module > div { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+.my-link-summary-module article, .my-link-summary-module button { display: grid; gap: 7px; min-height: 94px; padding: 15px; border: 1px solid var(--link-border); border-radius: 14px; background: #fff; color: var(--link-muted); text-align: left; box-shadow: 0 2px 8px rgb(16 24 40 / 4%); }
+.my-link-summary-module button { cursor: pointer; }
+.my-link-summary-module button:hover { border-color: #9cc7b6; background: #f7fbf9; }
+.my-link-summary-module strong { color: #173f34; font-size: 22px; }
+.my-link-workspace-columns { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(320px, .85fr); gap: 14px; align-items: start; }
+.my-link-workspace-columns .link-sales-ranking-module { margin: 0; }
+
+.link-hospital-todo-module { display: grid; gap: 12px; padding: 18px; border: 1px solid #f1d59b; border-radius: var(--link-radius); background: #fffcf5; }
+.link-hospital-todo-module > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.link-hospital-todo-module > header > div { display: grid; gap: 3px; }
+.link-hospital-todo-module > header span { color: #7a4f00; font-weight: 700; }
+.link-hospital-todo-module > header small { color: #8b6b31; }
+.link-hospital-todo-module > div:not(.empty-state) { display: grid; gap: 7px; }
+.link-hospital-todo-module > div > button { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 10px; border: 1px solid #f1e2be; border-radius: 10px; background: #fff; color: inherit; text-align: left; cursor: pointer; }
+.link-hospital-todo-module button span { display: grid; gap: 2px; min-width: 0; }
+.link-hospital-todo-module button strong, .link-hospital-todo-module button small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-hospital-todo-module button small { color: var(--link-muted); }
+.link-hospital-todo-module button em { padding: 4px 7px; border-radius: 999px; background: #fff4d6; color: #935f00; font-size: 11px; font-style: normal; }
+.link-hospital-todo-module button b { color: #667085; font-size: 11px; }
+
+.my-link-list-module { display: grid; gap: 12px; padding: 18px; border: 1px solid var(--link-border); border-radius: var(--link-radius); background: #fff; }
+.my-link-list-module > header { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.my-link-list-module > header > div { display: grid; gap: 3px; }
+.my-link-list-module > header span { color: #173f34; font-weight: 700; }
+.my-link-list-module > header small { color: var(--link-muted); }
+.my-link-list-module form { display: flex; gap: 8px; width: min(420px, 100%); }
+.my-link-list-module form input { min-width: 0; flex: 1; border: 1px solid #d0d5dd; border-radius: 9px; }
+.my-link-table-wrap { overflow-x: auto; }
+.my-link-list-module table { width: 100%; border-collapse: collapse; }
+.my-link-list-module th, .my-link-list-module td { padding: 10px; border-bottom: 1px solid #edf0f2; color: #475467; font-size: 12px; text-align: left; white-space: nowrap; }
+.my-link-list-module th { background: #f8fafc; color: #667085; font-weight: 600; }
+.my-link-list-identity { display: grid; grid-template-columns: 46px minmax(180px, 1fr); gap: 9px; align-items: center; max-width: 330px; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.my-link-list-identity .connection-cover { width: 46px; height: 46px; border-radius: 9px; object-fit: cover; }
+.my-link-list-identity span { display: grid; gap: 3px; min-width: 0; }
+.my-link-list-identity strong, .my-link-list-identity small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.my-link-list-identity small { color: var(--link-muted); }
+.my-link-list-module > footer { display: flex; align-items: center; justify-content: space-between; color: var(--link-muted); font-size: 12px; }
+.my-link-list-module > footer div { display: flex; gap: 8px; }
+.my-link-list-actions { display: flex; justify-content: flex-end; gap: 6px; }
 @media (max-width: 760px) {
   .connection-card-grid { grid-template-columns: 1fr; }
   .connection-card { min-height: 420px; }
   .connection-import-status { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cockpit-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .connection-v3-card-metrics { grid-template-columns: 1fr 1fr 1fr; }
+  .link-data-status-module, .my-link-workspace-columns { grid-template-columns: 1fr; }
+  .my-link-summary-module > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .my-link-list-module > header { align-items: stretch; flex-direction: column; }
+  .link-sales-ranking-module li { grid-template-columns: 24px minmax(0, 1fr) auto; }
+  .link-sales-ranking-module li > span { display: none; }
 }
