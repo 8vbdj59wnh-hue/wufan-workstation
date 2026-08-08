@@ -3290,6 +3290,7 @@ function renderTaskCard(task) {
           <h3>${escapeHtml(task.name)}</h3>
           ${task.taskType === "review" ? `<span class="task-type-badge">审核</span>` : ""}
         </div>
+        <button class="copyable-code task-card-business-code" type="button" data-copy-task-code="${escapeAttribute(task.businessCode ?? "")}" ${task.businessCode ? "" : "disabled"} title="${task.businessCode ? "点击复制任务编码" : "任务编码缺失"}">${escapeHtml(task.businessCode || "未编号")}</button>
         <p class="task-card-action-title">${escapeHtml(actionName)}</p>
         <div class="task-card-status-row">
           ${renderTaskStatus(task)}
@@ -5860,6 +5861,33 @@ export function bindTasksPageEvents(rerender) {
   const clearanceImportInput = document.querySelector("[data-clearance-file='import']");
 
   if (tasksPage === null) return;
+  tasksPage.querySelectorAll("[data-copy-task-code]").forEach((button) => button.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const code = button.dataset.copyTaskCode ?? "";
+    if (code === "") return;
+    const originalText = button.textContent;
+    try {
+      if (navigator.clipboard?.writeText !== undefined) await navigator.clipboard.writeText(code);
+      else {
+        const textarea = document.createElement("textarea");
+        textarea.value = code;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.append(textarea);
+        textarea.select();
+        const copied = document.execCommand("copy");
+        textarea.remove();
+        if (!copied) throw new Error("copy command failed");
+      }
+      button.textContent = "已复制";
+      window.setTimeout(() => { if (button.isConnected) button.textContent = originalText; }, 1200);
+    } catch (error) {
+      console.error("任务编码复制失败", error);
+      button.textContent = "复制失败";
+      window.setTimeout(() => { if (button.isConnected) button.textContent = originalText; }, 1200);
+    }
+  }));
   if (taskWaveClockTimer !== null) {
     window.clearInterval(taskWaveClockTimer);
     taskWaveClockTimer = null;
