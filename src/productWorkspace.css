@@ -33,6 +33,22 @@
 .product-workspace-timeline article { padding: 18px; border-radius: 16px; background: #f7f7f5; }
 .product-workspace-timeline p { margin: 8px 0; color: #555; }
 .product-workspace-timeline small { color: #777; }
+.product-marketing-actions { display: flex; gap: 8px; align-items: center; }
+.product-marketing-reading { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.product-marketing-reading article { min-height: 112px; padding: 20px; border-radius: 16px; background: #f7f7f5; }
+.product-marketing-reading article.is-wide { grid-column: 1 / -1; }
+.product-marketing-reading small { color: #777; }
+.product-marketing-reading p { margin: 12px 0 0; line-height: 1.75; white-space: pre-wrap; }
+.product-marketing-reading ol { margin: 12px 0 0; padding-left: 22px; line-height: 1.85; }
+.product-marketing-tags { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+.product-marketing-tags span { padding: 7px 10px; border-radius: 999px; background: #fff; color: #444; font-size: 13px; }
+.product-marketing-form { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.product-marketing-form label { display: grid; gap: 9px; color: #444; font-weight: 600; }
+.product-marketing-form label.is-wide, .product-marketing-form footer { grid-column: 1 / -1; }
+.product-marketing-form textarea { width: 100%; resize: vertical; border: 1px solid #dededb; border-radius: 14px; padding: 14px 16px; background: #fafaf8; color: #222; font: inherit; font-weight: 400; line-height: 1.6; }
+.product-marketing-form textarea:focus { outline: 2px solid rgba(50, 90, 220, .18); border-color: #7d92d8; }
+.product-marketing-form label small { color: #777; font-weight: 400; }
+.product-marketing-form footer { display: flex; justify-content: flex-end; gap: 10px; }
 @media (max-width: 900px) {
   .product-workspace-grid { grid-template-columns: 1fr; }
   .product-workspace-basic { grid-template-columns: 112px minmax(0, 1fr); }
@@ -46,4 +62,6 @@
   .product-workspace-top > .business-zone-badge { position: static; margin-bottom: 12px; }
   .product-workspace-metrics { grid-template-columns: 1fr 1fr; }
   .product-workspace-gallery { grid-template-columns: repeat(2, 1fr); }
+  .product-marketing-reading, .product-marketing-form { grid-template-columns: 1fr; }
+  .product-marketing-reading article.is-wide, .product-marketing-form label.is-wide, .product-marketing-form footer { grid-column: auto; }
 }

@@ -39,6 +39,9 @@ import {
   loadProductCenterV2Metadata,
   loadProductCenterV2SkuDetail,
   createProductProfileForErpSku,
+  loadProductMarketingAsset,
+  saveProductMarketingAsset,
+  exportProductMarketingAsset,
 } from "./services/productCenterService.js?v=20260802-module-boundary1";
 import { getCurrentUser, state } from "./stores/appStore.js?v=20260802-module-boundary1";
 import { getProcessInstanceBusinessStatus, getProcessInstanceOwner } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
@@ -47,6 +50,7 @@ import { normalizeProductSkuCode } from "./data/productSku.js?v=20260728-product
 import { escapeHtml } from "./utils/html.js?v=20260802-module-boundary1";
 import { renderUiModule } from "./uiModuleRegistry.js";
 import "./uiModules/productWorkspaceModules.js";
+import "./uiModules/productMarketingAsset.js";
 
 const productStatuses = ["开发中", "上架", "成长期", "成熟期", "风险期", "淘汰", "待上架", "在售", "停售", "清仓", "已归档"];
 let filters = { query: "", brand: "", category: "", status: "", erpStatus: "", platform: "", stockStatus: "" };
@@ -80,7 +84,7 @@ let productSkuV2State = { loading: false, loaded: false, rows: [], detail: null,
 let productSkuV2RequestId = 0;
 let productSkuV2SearchTimer = 0;
 let productSkuV2MetadataLoading = false;
-let productWorkspaceState = { activeTab: "overview", sections: {} };
+let productWorkspaceState = { activeTab: "overview", sections: {}, marketingMode: "read", marketingNotice: "" };
 
 function getRouteProductId() {
   const match = window.location.hash.replace(/^#/, "").match(/^products\/(?!sku\/)(.+)$/);
@@ -482,7 +486,7 @@ function renderProductSkuV2Detail() {
   const section = (scope) => productWorkspaceState.sections[scope] ?? { loading: false, loaded: false, rows: [], error: "" };
   const galleryImages = (() => { try { return JSON.parse(sku.galleryImages || "[]"); } catch { return []; } })();
   const moduleContext = { sku, inventory, sales, ownerName: findName(state.people, sku.ownerId), resolveUrl: resolveAssetUrl, formatMoney, formatMetric };
-  const tabs = [["overview", "概览"], ["sku", "SKU管理"], ["inventory", "库存记录"], ["sales", "销售记录"], ["operations", "操作记录"]];
+  const tabs = [["overview", "概览"], ["marketing", "营销资产"], ["sku", "SKU管理"], ["inventory", "库存记录"], ["sales", "销售记录"], ["operations", "操作记录"]];
   const activeTab = productWorkspaceState.activeTab;
   let tabContent = "";
   if (activeTab === "overview") tabContent = `<div class="product-workspace-grid">
@@ -490,6 +494,15 @@ function renderProductSkuV2Detail() {
     ${renderUiModule("product_business_data", moduleContext)}
   </div>`;
   if (activeTab === "sku") tabContent = `<section class="product-workspace-panel">${renderInfoGroup("SKU与ERP关系", [["SKU编码",sku.merchantSkuCode],["规格",sku.specificationName],["条码",sku.barcode],["单位",sku.unit],["ERP状态",sku.erpStatus],["ERP货品",`${sku.goodsCode || "—"} · ${sku.goodsName || "—"}`],["档案映射",sku.mappingState]])}</section>`;
+  if (activeTab === "marketing") {
+    const marketing = section("marketing");
+    tabContent = !sku.productId
+      ? `<section class="product-workspace-panel"><div class="empty-state">需先建立产品档案，才能维护产品营销资产。</div></section>`
+      : marketing.loading ? `<div class="empty-state">正在读取产品营销资产…</div>`
+      : marketing.error ? `<div class="form-error">${escapeHtml(marketing.error)}</div>`
+      : marketing.loaded ? renderUiModule("product_marketing_asset", { asset: marketing.asset, mode: productWorkspaceState.marketingMode, notice: productWorkspaceState.marketingNotice, canEdit: hasPermission(getCurrentUser(), "products.edit") })
+      : `<section class="product-workspace-panel"><button class="secondary-button" type="button" data-action="load-product-marketing">加载营销资产</button></section>`;
+  }
   if (activeTab === "inventory") tabContent = renderProductWorkspaceRecords("inventory", section("inventory"));
   if (activeTab === "sales") tabContent = renderProductWorkspaceRecords("sales", section("sales"));
   if (activeTab === "operations") tabContent = renderProductWorkspaceRecords("operations", section("operations"));
@@ -1553,7 +1566,7 @@ async function refreshProductSkuV2List(rerender) {
 
 async function refreshProductSkuV2Detail(erpSkuId, rerender) {
   if (!erpSkuId || productSkuV2State.loading || productSkuV2State.detailId === erpSkuId) return;
-  productWorkspaceState = { activeTab: "overview", sections: {} };
+  productWorkspaceState = { activeTab: "overview", sections: {}, marketingMode: "read", marketingNotice: "" };
   productSkuV2State = { ...productSkuV2State, loading: true, detail: null, detailId: "", error: "" }; rerender();
   try { const result = await loadProductCenterV2SkuDetail(erpSkuId, "summary"); productSkuV2State = { ...productSkuV2State, loading: false, detail: result.detail, detailId: erpSkuId, error: "" }; }
   catch (error) { productSkuV2State = { ...productSkuV2State, loading: false, detail: null, detailId: erpSkuId, error: error.message || "ERP SKU详情读取失败。" }; }
@@ -1572,6 +1585,41 @@ async function loadProductWorkspaceSection(scope, rerender) {
     productWorkspaceState = { ...productWorkspaceState, sections: { ...productWorkspaceState.sections, [scope]: { loading: false, loaded: true, rows: result.detail?.[field] || [], error: "" } } };
   } catch (error) {
     productWorkspaceState = { ...productWorkspaceState, sections: { ...productWorkspaceState.sections, [scope]: { loading: false, loaded: false, rows: [], error: error.message || "数据读取失败。" } } };
+  }
+  rerender();
+}
+
+async function loadProductMarketingSection(rerender) {
+  const productId = productSkuV2State.detail?.sku?.productId;
+  const current = productWorkspaceState.sections.marketing;
+  if (!productId || current?.loading || current?.loaded) return;
+  productWorkspaceState = { ...productWorkspaceState, sections: { ...productWorkspaceState.sections, marketing: { loading: true, loaded: false, asset: null, error: "" } } };
+  rerender();
+  try {
+    const result = await loadProductMarketingAsset(productId);
+    productWorkspaceState = { ...productWorkspaceState, sections: { ...productWorkspaceState.sections, marketing: { loading: false, loaded: true, asset: result.asset || null, error: "" } } };
+  } catch (error) {
+    productWorkspaceState = { ...productWorkspaceState, sections: { ...productWorkspaceState.sections, marketing: { loading: false, loaded: false, asset: null, error: error.message || "产品营销资产读取失败。" } } };
+  }
+  rerender();
+}
+
+function splitMarketingLines(value) {
+  return String(value || "").split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+}
+
+async function submitProductMarketing(form, rerender) {
+  const productId = productSkuV2State.detail?.sku?.productId;
+  if (!productId) return;
+  const data = new FormData(form);
+  const payload = { positioning: data.get("positioning"), targetAudience: data.get("targetAudience"), productStory: data.get("productStory"),
+    usageScenarios: splitMarketingLines(data.get("usageScenarios")), keywords: splitMarketingLines(data.get("keywords")),
+    sellingPoints: splitMarketingLines(data.get("sellingPoints")).map((text, index) => ({ text, sortOrder: index + 1 })) };
+  try {
+    const result = await saveProductMarketingAsset(productId, payload);
+    productWorkspaceState = { ...productWorkspaceState, marketingMode: "read", marketingNotice: "产品营销信息已保存。", sections: { ...productWorkspaceState.sections, marketing: { loading: false, loaded: true, asset: result.asset, error: "" } } };
+  } catch (error) {
+    productWorkspaceState = { ...productWorkspaceState, sections: { ...productWorkspaceState.sections, marketing: { ...productWorkspaceState.sections.marketing, error: error.message || "产品营销资产保存失败。" } } };
   }
   rerender();
 }
@@ -1867,10 +1915,25 @@ export function bindProductCenterPageEvents(rerender) {
     }
     if (action === "product-workspace-tab") {
       const tab = button.dataset.tab || "overview";
-      productWorkspaceState = { ...productWorkspaceState, activeTab: tab };
+      productWorkspaceState = { ...productWorkspaceState, activeTab: tab, marketingNotice: "" };
       rerender();
       if (["inventory", "sales", "operations"].includes(tab)) void loadProductWorkspaceSection(tab, rerender);
+      if (tab === "marketing") void loadProductMarketingSection(rerender);
       return;
+    }
+    if (action === "load-product-marketing") { void loadProductMarketingSection(rerender); return; }
+    if (action === "edit-product-marketing") { productWorkspaceState = { ...productWorkspaceState, marketingMode: "edit", marketingNotice: "" }; rerender(); return; }
+    if (action === "cancel-product-marketing") { productWorkspaceState = { ...productWorkspaceState, marketingMode: "read", marketingNotice: "" }; rerender(); return; }
+    if (action === "copy-product-marketing") {
+      const productId = productSkuV2State.detail?.sku?.productId;
+      if (!productId) return;
+      try {
+        const result = await exportProductMarketingAsset(productId);
+        if (!navigator.clipboard?.writeText) throw new Error("当前浏览器不支持复制。");
+        await navigator.clipboard.writeText(result.export.text);
+        productWorkspaceState = { ...productWorkspaceState, marketingNotice: "产品 AI 资料已复制。" };
+      } catch (error) { productWorkspaceState = { ...productWorkspaceState, marketingNotice: error.message || "AI资料复制失败。" }; }
+      rerender(); return;
     }
     if (action === "load-product-workspace-section") {
       void loadProductWorkspaceSection(button.dataset.scope, rerender);
@@ -2295,6 +2358,7 @@ export function bindProductCenterPageEvents(rerender) {
       }
     }
   });
+  document.querySelector("[data-product-marketing-form]")?.addEventListener("submit", (event) => { event.preventDefault(); void submitProductMarketing(event.currentTarget, rerender); });
   document.querySelector("#product-form")?.addEventListener("submit", (event) => { event.preventDefault(); saveProduct(event.currentTarget, rerender); });
   document.querySelector("#product-sku-change-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();

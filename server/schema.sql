@@ -594,6 +594,27 @@ CREATE TABLE IF NOT EXISTS products (
   updatedAt TEXT
 );
 
+CREATE TABLE IF NOT EXISTS product_marketing_assets (
+  id TEXT PRIMARY KEY,
+  productId TEXT NOT NULL UNIQUE,
+  positioning TEXT,
+  targetAudience TEXT,
+  usageScenariosJson TEXT NOT NULL DEFAULT '[]',
+  sellingPointsJson TEXT NOT NULL DEFAULT '[]',
+  productStory TEXT,
+  keywordsJson TEXT NOT NULL DEFAULT '[]',
+  createdBy TEXT,
+  updatedBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(productId) REFERENCES products(id),
+  FOREIGN KEY(createdBy) REFERENCES persons(id),
+  FOREIGN KEY(updatedBy) REFERENCES persons(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_marketing_assets_product
+  ON product_marketing_assets(productId);
+
 CREATE TABLE IF NOT EXISTS action_products (
   id TEXT PRIMARY KEY,
   actionId TEXT NOT NULL,

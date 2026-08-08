@@ -235,6 +235,7 @@ import {
   getProductCenterV2SkuDetail,
   listProductCenterV2Skus,
 } from "./productCenterV2Service.js";
+import { exportProductMarketingAsset, getProductMarketingAsset, saveProductMarketingAsset } from "./productMarketingAssetService.js";
 import {
   bootstrapTemplateVersions,
   changeTemplateVersionStatus,
@@ -2132,6 +2133,21 @@ app.post("/api/product-center-v2/skus/:id/product-profile", requirePermission("p
 app.get("/api/product-management/products/:id", requirePermission("products.view"), (request, response) => {
   try { response.json({ success: true, detail: getProductV2Detail(request.params.id), lifecycleStatuses: productLifecycleStatuses }); }
   catch (error) { response.status(404).json({ success: false, message: error.message || "产品经营详情读取失败。" }); }
+});
+
+app.get("/api/product-management/products/:id/marketing-asset", requirePermission("products.view"), (request, response) => {
+  try { response.json({ success: true, ...getProductMarketingAsset(request.params.id) }); }
+  catch (error) { response.status(404).json({ success: false, message: error.message || "产品营销资产读取失败。" }); }
+});
+
+app.put("/api/product-management/products/:id/marketing-asset", requirePermission("products.edit"), (request, response) => {
+  try { response.json({ success: true, asset: saveProductMarketingAsset(request.params.id, request.body, request.user.id) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "产品营销资产保存失败。" }); }
+});
+
+app.get("/api/product-management/products/:id/marketing-asset/export", requirePermission("products.view"), (request, response) => {
+  try { response.json({ success: true, export: exportProductMarketingAsset(request.params.id) }); }
+  catch (error) { response.status(404).json({ success: false, message: error.message || "AI资料导出失败。" }); }
 });
 
 app.post("/api/product-management/products/:id/lifecycle", requirePermission("products.edit"), (request, response) => {

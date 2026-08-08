@@ -1070,6 +1070,18 @@ export async function createProductProfileForErpSku(erpSkuId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-center-v2/skus/${encodeURIComponent(erpSkuId)}/product-profile`, { method: "POST" }), "产品档案创建失败。");
 }
 
+export async function loadProductMarketingAsset(productId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}/marketing-asset`), "产品营销资产读取失败。");
+}
+
+export async function saveProductMarketingAsset(productId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}/marketing-asset`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "产品营销资产保存失败。");
+}
+
+export async function exportProductMarketingAsset(productId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}/marketing-asset/export`), "AI资料导出失败。");
+}
+
 export async function loadProductManagementDetail(productId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}`), "产品经营详情读取失败。");
 }
