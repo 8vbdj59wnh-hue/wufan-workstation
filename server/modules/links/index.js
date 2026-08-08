@@ -44,6 +44,7 @@ export {
 } from "../../connectionImprovementService.js";
 export { getConnectionHospital, joinConnectionDiagnosis } from "../../connectionHospitalService.js";
 export { getLinkSalesRanking, resolveLinkSalesRankingRange } from "../../linkSalesRankingService.js";
+export { getLinkDataStatus } from "../../linkDataStatusService.js";
 export {
   listConnectionBenchmarkTargets,
   listConnectionBenchmarkCandidates,

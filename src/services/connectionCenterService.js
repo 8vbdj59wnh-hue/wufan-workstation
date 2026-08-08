@@ -50,6 +50,7 @@ export {
   loadConnectionCoreDetail,
   loadMyConnectionWorkbench,
   loadLinkSalesRanking,
+  loadLinkDataStatus,
   updateConnectionFollow,
   removeConnectionAction,
   ignoreConnectionImportRow,

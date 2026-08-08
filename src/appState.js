@@ -1211,6 +1211,10 @@ export async function loadLinkSalesRanking(filters = {}) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/link-sales-ranking?${query}`), "链接销售额排行读取失败。");
 }
 
+export async function loadLinkDataStatus() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/link-data-status`), "链接数据更新状态读取失败。");
+}
+
 export async function updateConnectionFollow(connectionId, followed) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections-workbench/${encodeURIComponent(connectionId)}/follow`, {
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ followed }),

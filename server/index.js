@@ -142,6 +142,7 @@ import {
   getConnectionHospital,
   joinConnectionDiagnosis,
   getLinkSalesRanking,
+  getLinkDataStatus,
   listConnectionBenchmarkTargets,
   listConnectionBenchmarkCandidates,
   createConnectionBenchmarkTarget,
@@ -2288,6 +2289,14 @@ app.get("/api/link-sales-ranking", requireLinkView, (request, response) => {
     response.json({ success: true, ...getLinkSalesRanking(request.query, getUserPersonId(request.user), isAdminUser(request.user)) });
   } catch (error) {
     response.status(error.statusCode || 400).json({ success: false, message: error.message || "链接销售额排行读取失败。" });
+  }
+});
+
+app.get("/api/link-data-status", requireLinkView, (request, response) => {
+  try {
+    response.json({ success: true, ...getLinkDataStatus({ includeDetails: isAdminUser(request.user) }) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "链接数据更新状态读取失败。" });
   }
 });
 
