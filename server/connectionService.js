@@ -89,6 +89,12 @@ export function getMyConnectionWorkbench(userId, isAdmin = false, filter = "all"
   const analyses = new Map(listConnectionGrowthAnalyses().map((item) => [item.connectionId, item]));
   const v3Metrics = readConnectionV3MetricsMap(profiles.map((item) => item.salesLinkId));
   const followedIds = new Set(getDatabase().prepare("SELECT connectionId FROM connection_follows WHERE userId=?").all(personId).map((item) => item.connectionId));
+  const yesterday = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" })
+    .format(new Date(Date.now() - 86400000));
+  const yesterdaySales = getDatabase().prepare(`SELECT SUM(COALESCE(f.salesAmount,0)) amount,COUNT(*) factCount
+    FROM connection_sku_sales_facts f JOIN connection_profiles c ON c.salesLinkId=f.salesLinkId
+    WHERE substr(f.periodStart,1,10)=? AND substr(f.periodEnd,1,10)=? ${isAdmin ? "" : "AND c.ownerId=?"}`)
+    .get(...(isAdmin ? [yesterday, yesterday] : [yesterday, yesterday, personId]));
   const allItems = profiles.map((profile) => {
     const analysis = analyses.get(profile.id) ?? {};
     const v3 = v3Metrics.get(profile.salesLinkId);
@@ -115,6 +121,10 @@ export function getMyConnectionWorkbench(userId, isAdmin = false, filter = "all"
     better: allItems.reduce((count, item) => count + (item.trend === "better" ? 1 : 0), 0),
     risk: allItems.reduce((count, item) => count + (item.trend === "worse" ? 1 : 0), 0),
     followed: profiles.filter((item) => followedIds.has(item.id)).length,
+    yesterdaySalesAmount: Number(yesterdaySales?.factCount || 0) ? Number(yesterdaySales.amount || 0) : null,
+    yesterdayDataDate: yesterday,
+    yesterdayCommissionAmount: null,
+    commissionAvailable: false,
   } };
 }
 

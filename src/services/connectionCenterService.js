@@ -49,6 +49,7 @@ export {
   loadConnections,
   loadConnectionCoreDetail,
   loadMyConnectionWorkbench,
+  loadLinkSalesRanking,
   updateConnectionFollow,
   removeConnectionAction,
   ignoreConnectionImportRow,

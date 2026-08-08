@@ -10662,6 +10662,20 @@ button.content-template-thumb {
 @media (max-width: 1180px) {
   .cockpit-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
+
+.my-links-summary > div { display: grid; gap: 6px; min-height: 104px; padding: 15px; border: 1px solid #e1e8e5; border-radius: var(--link-radius, 14px); background: #fff; color: #475467; box-shadow: 0 2px 8px rgb(16 24 40 / 4%); }
+.link-sales-ranking-module { display: grid; gap: 14px; margin: 16px 0 22px; padding: 18px; border: 1px solid var(--link-border, #eaecf0); border-radius: 14px; background: #fff; }
+.link-sales-ranking-module > header { display: flex; align-items: end; justify-content: space-between; gap: 12px; }
+.link-sales-ranking-module > header span, .link-sales-ranking-module > header small { color: #667085; font-size: 12px; }
+.link-sales-ranking-module h3 { margin: 3px 0 0; }
+.link-sales-ranking-module form { display: flex; flex-wrap: wrap; gap: 8px; }
+.link-sales-ranking-module form select, .link-sales-ranking-module form input { min-height: 36px; border: 1px solid #d0d5dd; border-radius: 8px; background: #fff; }
+.link-sales-ranking-module ol { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.link-sales-ranking-module li { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 10px; background: #f8fafc; }
+.link-sales-ranking-module li > b { color: #667085; text-align: center; }
+.link-sales-ranking-module li button { display: grid; gap: 2px; padding: 0; border: 0; background: transparent; text-align: left; cursor: pointer; }
+.link-sales-ranking-module li small { color: #667085; }
+.link-sales-ranking-module li em { color: #101828; font-style: normal; font-weight: 700; }
 @media (max-width: 760px) {
   .connection-card-grid { grid-template-columns: 1fr; }
   .connection-card { min-height: 420px; }

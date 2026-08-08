@@ -1206,6 +1206,11 @@ export async function loadMyConnectionWorkbench(filter = "all", page = 1, pageSi
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections-workbench/mine?${query}`), "我的链接读取失败。");
 }
 
+export async function loadLinkSalesRanking(filters = {}) {
+  const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== "" && value !== undefined));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/link-sales-ranking?${query}`), "链接销售额排行读取失败。");
+}
+
 export async function updateConnectionFollow(connectionId, followed) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections-workbench/${encodeURIComponent(connectionId)}/follow`, {
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ followed }),
