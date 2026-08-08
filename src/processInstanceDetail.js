@@ -589,7 +589,7 @@ function renderStepTaskCard(instance, group, editable) {
     <article class="process-step-card">
       <header class="process-step-card-header">
         <div class="process-step-number">${escapeHtml(formatProcessStepLabel(group.stepIndex + 1))}</div>
-        <div class="process-step-title"><h4>${escapeHtml(stepName)}</h4><p>${tasks.length} 项任务 · ${completed} 项完成</p></div>
+        <div class="process-step-title"><h4>${escapeHtml(stepName)}</h4></div>
         <span class="status-pill">${escapeHtml(getStepGroupStatus(tasks))}</span>
       </header>
       <div class="process-step-progress" aria-label="步骤完成进度 ${percent}%"><span style="width:${percent}%"></span></div>
@@ -598,7 +598,6 @@ function renderStepTaskCard(instance, group, editable) {
         <div><span>当前执行人</span>${renderPersonIdentity(executorId)}</div>
         <div><span>开始时间</span><strong>${escapeHtml(formatBusinessMinuteDateTime(startAt))}</strong></div>
         <div><span>截止时间</span><strong>${escapeHtml(formatBusinessMinuteDateTime(dueAt))}</strong></div>
-        <div><span>完成进度</span><strong>${completed}/${tasks.length}</strong></div>
       </div>
       <div class="process-step-task-list">
         ${group.tasks.map((task) => {
@@ -625,7 +624,7 @@ function renderStandardStepTasks(instance, tasks, editable) {
   return `
     <section class="detail-block process-step-priority-block">
       <div class="section-heading with-actions compact-heading">
-        <div><h3>标准步骤任务</h3><p class="form-note">先看当前执行步骤、责任人和任务进度，再处理关键行动信息。</p></div>
+        <div><h3>标准步骤任务</h3></div>
         <strong class="process-overall-progress">总进度 ${progress.completed}/${progress.total}</strong>
       </div>
       ${groups.length === 0 ? `<div class="empty-detail">当前关键行动尚未生成标准步骤任务</div>` : `<div class="process-step-card-list">${groups.map((group) => renderStepTaskCard(instance, group, editable)).join("")}</div>`}
@@ -752,14 +751,13 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
   return `
     <section class="settings-section process-detail launched-process-detail" data-launched-process-detail="${instance.id}">
       <div class="section-heading with-actions">
-        <h2>已发起关键行动详情：${escapeHtml(instance.displayTitle ?? instance.name)}</h2>
+        <h2>${escapeHtml(instance.displayTitle ?? instance.name)}</h2>
         ${editable ? `<button class="primary-button" type="submit" form="launched-process-form-${instance.id}">保存修改</button>` : `<span class="muted-action">只读</span>`}
       </div>
       <div class="key-action-detail-summary">
         <div><span>当前状态</span><strong>${escapeHtml(businessStatus.label)}</strong></div>
         <div><span>行动负责人</span><strong>${escapeHtml(actionOwnerName)}</strong></div>
-        <div><span>截止时间</span><strong>${escapeHtml(formatBusinessDateTime(instance.dueDate, "未设置"))}</strong></div>
-        <div class="key-action-detail-countdown ${deadline.overdue ? "is-overdue" : ""}"><span>时间状态</span><strong data-action-deadline-id="${escapeHtml(instance.id)}">${escapeHtml(deadline.label)}</strong></div>
+        <div class="key-action-detail-countdown ${deadline.overdue ? "is-overdue" : ""}"><span>截止提醒</span><strong data-action-deadline-id="${escapeHtml(instance.id)}">${escapeHtml(formatBusinessDateTime(instance.dueDate, "未设置"))} · ${escapeHtml(deadline.label)}</strong></div>
       </div>
       <div class="key-action-detail-hero">
         ${primaryProductImage ? `<img loading="lazy" src="${escapeHtml(resolveAssetUrl(primaryProductImage))}" alt="${escapeHtml(primaryProduct?.name || instance.displayTitle || instance.name)}" onerror="this.replaceWith(Object.assign(document.createElement('span'), { className: 'task-cover-placeholder', textContent: '无图' }))" />` : `<span class="task-cover-placeholder">无图</span>`}
@@ -788,16 +786,8 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
             </label>
           </div>
           <div class="detail-grid">
-            ${renderDetailField("关键行动编号", escapeHtml(instance.businessCode ?? "未编号"))}
-            ${renderDetailField("关键行动", escapeHtml(taskTemplate?.name ?? "未关联关键行动"))}
-            ${renderDetailField("关键行动标准流程", `${escapeHtml(template?.name ?? "未设置")} v${instance.templateVersion}`)}
+            ${renderDetailField("执行标准", escapeHtml(template?.name ?? taskTemplate?.name ?? "未设置"))}
             ${renderDetailField("价值链分类", escapeHtml(state.categories.find((category) => category.id === taskTemplate?.categoryId)?.name ?? "未设置"))}
-            ${renderDetailField("行动负责人", actionOwnerName)}
-            ${renderDetailField("发起人", findName(people, instance.initiatorId, "未设置"))}
-            ${renderDetailField("状态", businessStatus.label)}
-            ${renderDetailField("步骤进度", getProgress(instance.id))}
-            ${renderDetailField("创建时间", escapeHtml(instance.createdAt ?? instance.startedAt ?? "未记录"))}
-            ${renderDetailField("发起时间", escapeHtml(instance.startedAt ?? "未记录"))}
             ${
               instance.status === ProcessInstanceStatus.Canceled
                 ? `
@@ -815,7 +805,6 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
         <div class="detail-block">
           <h3>关键行动表单</h3>
           ${renderCustomFields(instance, editable)}
-          <p class="form-note">该信息在发起关键行动时填写，同一关键行动下所有任务共享。</p>
         </div>
         <div class="detail-block">
           <h3>关联产品</h3>
@@ -823,8 +812,8 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
         </div>
         <div class="detail-block action-linked-template-section">
           <div class="section-heading with-actions compact-heading">
-            <h3>关联模板</h3>
-            ${editable ? `<button class="secondary-button" type="button" data-action="open-action-template-picker">关联模板</button>` : ""}
+            <h3>视觉模板</h3>
+            ${editable ? `<button class="secondary-button" type="button" data-action="open-action-template-picker">关联视觉模板</button>` : ""}
           </div>
           <input type="hidden" name="${linkedActionTemplateIdsKey}" value="${escapeHtml(JSON.stringify(getLinkedActionTemplateIds(instance)))}" />
           <div data-action-linked-template-list-host>

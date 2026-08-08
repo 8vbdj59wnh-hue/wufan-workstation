@@ -403,16 +403,16 @@ function renderProductSkuV2List() {
   const { rows, summary, pagination, facets } = productSkuV2State;
   const totalPages = Math.max(1, Math.ceil(Number(pagination.total || 0) / productSkuV2State.pageSize));
   return `<section class="product-center-page product-sku-v2-page">
-    <div class="section-heading with-actions"><div><h1>产品中心</h1><p>以ERP SKU为唯一身份，产品档案承载经营管理属性</p></div></div>
+    <div class="section-heading with-actions"><div><h1>产品中心</h1><p>查看每个 SKU 的经营表现与库存状态</p></div><details class="product-more-filters"><summary>更多</summary><div><button type="button" class="text-button" data-action="open-product-v2-import">数据同步</button></div></details></div>
     ${productSkuV2State.error ? `<div class="form-error">${escapeHtml(productSkuV2State.error)}</div>` : ""}
     ${productSkuV2State.notice ? `<div class="form-success">${escapeHtml(productSkuV2State.notice)}</div>` : ""}
     <section class="stats-grid product-sku-v2-stats">
-      <article><span>全部ERP SKU</span><strong>${summary.total ?? 0}</strong></article>
+      <article><span>SKU总数</span><strong>${summary.total ?? 0}</strong></article>
       <article><span>已建档</span><strong>${summary.profiled ?? 0}</strong></article>
       <article><span>未建档</span><strong>${summary.unprofiled ?? 0}</strong></article>
     </section>
     <section class="product-business-zones" aria-label="产品经营分区">
-      <header><div><h2>产品经营分区</h2><p>基于 ERP SKU 的销售、库存、生命周期动态识别。</p></div><small>新品周期 ${summary.businessZoneRules?.newProductCycleDays ?? 30} 天 · 爆款阈值前 ${summary.businessZoneRules?.hitTopPercent ?? 20}%</small></header>
+      <header><div><h2>产品经营分区</h2></div></header>
       <div class="product-business-zone-tabs">
         <button type="button" data-action="set-product-v2-zone" data-product-zone="all" class="${productSkuV2State.businessZone === "all" ? "is-active" : ""}"><span>全部SKU</span><strong>${summary.total ?? 0}</strong><small>查看完整SKU池</small></button>
         ${Object.entries(productBusinessZoneMeta).map(([zone, meta]) => `<button type="button" data-action="set-product-v2-zone" data-product-zone="${zone}" class="${productSkuV2State.businessZone === zone ? "is-active" : ""}"><span>${meta.icon} ${meta.label}</span><strong>${summary.businessZones?.[zone] ?? 0}</strong><small>${meta.description}</small></button>`).join("")}
@@ -425,17 +425,17 @@ function renderProductSkuV2List() {
       <select name="profileStatus"><option value="all">全部SKU</option><option value="profiled" ${productSkuV2State.profileStatus === "profiled" ? "selected" : ""}>已建档</option><option value="unprofiled" ${productSkuV2State.profileStatus === "unprofiled" ? "selected" : ""}>未建档</option></select>
       <details class="product-more-filters" ${productSkuV2State.erpStatus || productSkuV2State.lifecycleStatus || productSkuV2State.platform || productSkuV2State.stockStatus ? "open" : ""}>
         <summary>更多筛选</summary><div>
-          <input name="erpStatus" value="${escapeHtml(productSkuV2State.erpStatus)}" placeholder="ERP状态" />
           <select name="lifecycleStatus">${renderFilterOptions(facets.lifecycleStatuses ?? [], productSkuV2State.lifecycleStatus, "全部生命周期")}</select>
           <select name="platform">${renderFilterOptions(facets.platforms ?? [], productSkuV2State.platform, "全部销售平台")}</select>
           <select name="stockStatus"><option value="">全部库存</option><option value="available" ${productSkuV2State.stockStatus === "available" ? "selected" : ""}>有库存</option><option value="low" ${productSkuV2State.stockStatus === "low" ? "selected" : ""}>低库存</option><option value="empty" ${productSkuV2State.stockStatus === "empty" ? "selected" : ""}>无库存</option></select>
+          <details><summary>技术筛选</summary><input name="erpStatus" value="${escapeHtml(productSkuV2State.erpStatus)}" placeholder="ERP状态" /></details>
         </div>
       </details>
       <button class="primary-button" type="submit">查询</button>
       <button class="text-button" type="button" data-action="clear-product-v2-filter">清空</button>
     </form>
     <div class="product-list-toolbar"><span>当前筛选 ${pagination.total || 0} 个SKU</span>${renderProductV2BusinessSort()}</div>
-    ${productSkuV2State.loading ? `<div class="empty-state">正在读取ERP SKU…</div>` : renderProductSkuV2Cards(rows)}
+    ${productSkuV2State.loading ? `<div class="empty-state">正在读取产品数据…</div>` : renderProductSkuV2Cards(rows)}
     <nav class="product-pagination"><span>第 ${productSkuV2State.page}/${totalPages} 页 · 共 ${pagination.total || 0} 个SKU</span><div>
       <button class="secondary-button" type="button" data-action="product-v2-page" data-page="${productSkuV2State.page - 1}" ${productSkuV2State.page <= 1 ? "disabled" : ""}>上一页</button>
       <button class="secondary-button" type="button" data-action="product-v2-page" data-page="${productSkuV2State.page + 1}" ${productSkuV2State.page >= totalPages ? "disabled" : ""}>下一页</button>
@@ -444,7 +444,7 @@ function renderProductSkuV2List() {
 }
 
 function renderProductSkuV2Cards(rows) {
-  if (!rows.length) return `<div class="product-card-empty">没有符合条件的ERP SKU</div>`;
+  if (!rows.length) return `<div class="product-card-empty">没有符合条件的 SKU</div>`;
   return `<div class="product-card-grid product-sku-v2-card-grid">${rows.map((item) => {
     const product = item.productId ? state.products.find((entry) => entry.id === item.productId) : null;
     const title = item.productName || item.goodsName || item.specificationName || item.merchantSkuCode;
@@ -452,18 +452,13 @@ function renderProductSkuV2Cards(rows) {
     return `<article class="product-archive-card ${item.productId ? "is-profiled" : "is-unprofiled"}" data-action="view-product-v2-sku" data-erp-sku-id="${escapeHtml(item.erpSkuId)}" role="button" tabindex="0" aria-label="查看SKU：${escapeHtml(title)}">
       <div class="product-archive-card-media">${renderImage(imageSource, "product-card-image")}</div>
       <div class="product-archive-card-body">
-        <div class="product-archive-card-heading"><h3 title="${escapeHtml(title)}">${escapeHtml(title)}</h3><span class="status-badge">${item.productId ? "已建档" : "未建立产品档案"}</span></div>
-        <div class="product-v2-card-tags">${businessZoneBadge(item.businessZone)}${item.displayBrand ? `<span>${escapeHtml(item.displayBrand)}</span>` : ""}${item.displayCategory ? `<span>${escapeHtml(item.displayCategory)}</span>` : ""}</div>
-        <div class="product-card-identities"><span>SKU <strong>${escapeHtml(item.merchantSkuCode || "—")}</strong></span><span>ERP <strong>${escapeHtml(item.erpStatus || "未设置")}</strong></span></div>
+        <div class="product-archive-card-heading"><h3 title="${escapeHtml(title)}">${escapeHtml(title)}</h3>${businessZoneBadge(item.businessZone)}</div>
         <div class="product-card-metrics">
-          <div><strong>${formatMetric(item.stockNum)}</strong><span>当前库存</span></div>
-          <div><strong>${formatMetric(item.availableSendStock)}</strong><span>可发库存</span></div>
-          <div><strong>${formatMoney(item.costPrice)}</strong><span>成本</span></div>
-          <div><strong>${Number(item.linkCount || 0)}</strong><span>销售链接</span></div>
-          <div><strong>${escapeHtml(findName(state.people, item.ownerId))}</strong><span>负责人</span></div>
-          <div><strong>${escapeHtml(item.lifecycleStatus || "—")}</strong><span>生命周期</span></div>
+          <div><strong>${formatMoney(item.salesAmount)}</strong><span>销售表现</span></div>
+          <div><strong>${formatMoney(item.profitAmount)}</strong><span>利润</span></div>
+          <div><strong>${formatMetric(item.stockNum)}</strong><span>${Number(item.stockNum || 0) <= 0 ? "库存风险" : "当前库存"}</span></div>
         </div>
-        <small class="product-card-listed-at">${item.productId ? "产品经营档案已建立" : "未建立产品档案，可补充负责人、生命周期等经营属性"}</small>
+        ${!item.productId ? `<small class="product-card-listed-at">未建立产品档案</small>` : ""}
         ${!item.productId && hasPermission(getCurrentUser(), "products.create") ? `<button class="primary-button compact-button" type="button" data-action="create-product-v2-profile" data-erp-sku-id="${escapeHtml(item.erpSkuId)}">创建产品档案</button>` : ""}
         ${product ? `<div class="product-card-more"><button class="icon-button" type="button" data-action="toggle-product-menu" data-product-id="${escapeHtml(product.id)}" aria-label="产品操作">•••</button><div class="product-card-menu" data-product-menu="${escapeHtml(product.id)}" hidden>${renderProductActions(product)}</div></div>` : ""}
       </div>
@@ -480,18 +475,23 @@ function renderProductSkuV2Detail() {
   const detail = productSkuV2State.detail;
   if (productSkuV2State.loading || !detail) return `<section class="product-center-page"><button class="text-button" data-action="back-products">← 返回产品中心</button>${productSkuV2State.error ? `<div class="form-error">${escapeHtml(productSkuV2State.error)}</div>` : `<div class="empty-state">正在读取SKU详情…</div>`}</section>`;
   const { sku, inventory, links, sales } = detail;
+  const listRow = productSkuV2State.rows.find((item) => item.erpSkuId === sku.id);
   return `<section class="product-center-page product-detail-page product-sku-v2-detail">
     <button class="text-button product-detail-back" type="button" data-action="back-products">← 返回产品中心</button>
     ${productSkuV2State.error ? `<div class="form-error">${escapeHtml(productSkuV2State.error)}</div>` : ""}
-    <header class="product-detail-hero"><div class="product-detail-identity"><span class="status-badge">${escapeHtml(sku.erpStatus || sku.currentState)}</span><h1>${escapeHtml(sku.productName || sku.goodsName || sku.merchantSkuCode)}</h1><p>SKU：${escapeHtml(sku.merchantSkuCode)}</p><p>ERP货品：${escapeHtml(sku.goodsCode || "—")}</p></div>
+    <header class="product-detail-hero"><div class="product-detail-identity">${businessZoneBadge(listRow?.businessZone)}<h1>${escapeHtml(sku.productName || sku.goodsName || sku.merchantSkuCode)}</h1><p>${sku.productId ? "已建立产品档案" : "未建立产品档案"}</p></div>
       ${!sku.productId && hasPermission(getCurrentUser(), "products.create") ? `<button class="primary-button" type="button" data-action="create-product-v2-profile" data-erp-sku-id="${escapeHtml(sku.id)}">创建产品档案</button>` : sku.productId ? `<a class="primary-button" href="#products/${encodeURIComponent(sku.productId)}">进入经营档案</a>` : ""}</header>
     <div class="product-basic-layout">
-      ${renderInfoGroup("SKU基础信息", [["SKU编码",sku.merchantSkuCode],["规格",sku.specificationName],["条码",sku.barcode],["单位",sku.unit],["ERP状态",sku.erpStatus],["ERP货品",`${sku.goodsCode || "—"} · ${sku.goodsName || "—"}`]])}
-      ${renderInfoGroup("库存供应（旺店通）", [["库存日期",inventory?.businessDate],["当前库存",inventory?.stockNum],["可发库存",inventory?.availableSendStock],["成本价",inventory?.costPrice],["库存金额",inventory?.inventoryCostAmount],["30日销量",inventory?.salesMonth]])}
-      ${renderInfoGroup("销售利润", [["事实行数",sales?.factCount],["销量",sales?.quantity],["销售额",sales?.salesAmount],["成本",sales?.costAmount],["利润",sales?.profitAmount],["最近周期",sales?.lastPeriod]])}
+      ${renderInfoGroup("经营表现", [["销量",sales?.quantity],["销售额",formatMoney(sales?.salesAmount)],["利润",formatMoney(sales?.profitAmount)],["最近周期",sales?.lastPeriod]])}
+      ${renderInfoGroup("库存", [["当前库存",inventory?.stockNum],["可发库存",inventory?.availableSendStock],["库存金额",formatMoney(inventory?.inventoryCostAmount)],["30日销量",inventory?.salesMonth]])}
       ${renderInfoGroup("产品档案", [["档案状态",sku.productId ? "已建档" : "未建档"],["产品名称",sku.productName],["品牌",sku.brand],["类目",sku.category],["负责人",findName(state.people,sku.ownerId)],["生命周期",sku.lifecycleStatus]])}
     </div>
-    <section class="product-detail-band"><h2>链接关系</h2><div class="table-wrap"><table class="data-table"><thead><tr><th>平台</th><th>店铺</th><th>商品ID</th><th>链接</th><th>平台SKU</th><th>关系类型</th></tr></thead><tbody>${links.length ? links.map((item)=>`<tr><td>${escapeHtml(item.platform)}</td><td>${escapeHtml(item.shopName)}</td><td>${escapeHtml(item.platformGoodsId)}</td><td>${item.connectionId?`<a class="text-button" href="#connectionCenter/${encodeURIComponent(item.connectionId)}">${escapeHtml(item.title||"查看链接")}</a>`:escapeHtml(item.title||"—")}</td><td>${escapeHtml(item.platformSkuId||item.platformSkuCode||"—")}</td><td>${escapeHtml(item.mappingType)}</td></tr>`).join(""):`<tr><td colspan="6" class="empty-cell">暂无链接关系</td></tr>`}</tbody></table></div></section>
+    <section class="product-detail-band"><h2>销售链接</h2><div class="table-wrap"><table class="data-table"><thead><tr><th>平台</th><th>店铺</th><th>链接</th></tr></thead><tbody>${links.length ? links.map((item)=>`<tr><td>${escapeHtml(item.platform)}</td><td>${escapeHtml(item.shopName)}</td><td>${item.connectionId?`<a class="text-button" href="#connectionCenter/${encodeURIComponent(item.connectionId)}">${escapeHtml(item.title||"查看链接")}</a>`:escapeHtml(item.title||"—")}</td></tr>`).join(""):`<tr><td colspan="3" class="empty-cell">暂无销售链接</td></tr>`}</tbody></table></div></section>
+    <details class="product-detail-band product-source-details"><summary><strong>更多信息</strong></summary>
+      ${renderInfoGroup("SKU与ERP关系", [["SKU编码",sku.merchantSkuCode],["规格",sku.specificationName],["条码",sku.barcode],["单位",sku.unit],["ERP状态",sku.erpStatus],["ERP货品",`${sku.goodsCode || "—"} · ${sku.goodsName || "—"}`],["映射状态",sku.mappingState],["库存日期",inventory?.businessDate],["成本价",formatMoney(inventory?.costPrice)],["销售事实数量",sales?.factCount],["销售成本",formatMoney(sales?.costAmount)],["最近同步",sku.sourceUpdatedAt]])}
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>平台商品ID</th><th>平台SKU</th><th>关系类型</th></tr></thead><tbody>${links.length ? links.map((item)=>`<tr><td>${escapeHtml(item.platformGoodsId || "—")}</td><td>${escapeHtml(item.platformSkuId || item.platformSkuCode || "—")}</td><td>${escapeHtml(item.mappingType || "—")}</td></tr>`).join(""):`<tr><td colspan="3" class="empty-cell">暂无平台关系信息</td></tr>`}</tbody></table></div>
+      <div class="row-actions"><button type="button" class="text-button" data-action="open-product-v2-import">查看同步与导入记录</button></div>
+    </details>
   </section>`;
 }
 
@@ -499,7 +499,6 @@ function renderProductSubmoduleTabs() {
   return `<nav class="product-submodule-tabs" aria-label="产品中心子模块">
     <button type="button" data-action="product-submodule" data-submodule="products" class="${productSubmodule === "products" ? "is-active" : ""}">产品列表</button>
     <button type="button" data-action="product-submodule" data-submodule="pending-skus" class="${productSubmodule === "pending-skus" ? "is-active" : ""}">待建立SKU</button>
-    <button type="button" data-action="open-product-v2-import">ERP同步</button>
   </nav>`;
 }
 
@@ -818,8 +817,6 @@ function renderProductDetail(product) {
         <div class="product-detail-identity">
           <div><span class="status-badge">${escapeHtml(product.status || "—")}</span><span>${escapeHtml(product.brand || "未设置品牌")}</span></div>
           <h1>${escapeHtml(product.name)}</h1>
-          <p>SKU：${escapeHtml(product.skuCode || "—")}</p>
-          <p>ERP：${escapeHtml(erp.goods?.goodsCode || "—")}</p>
           <p>${escapeHtml(product.category || "未设置分类")}</p>
         </div>
         ${hasPermission(getCurrentUser(), "products.edit") ? `<button class="primary-button" type="button" data-action="edit-product" data-product-id="${product.id}">编辑产品</button>` : ""}
@@ -830,7 +827,7 @@ function renderProductDetail(product) {
           ["business", "经营分析"],
           ["lifecycle", "生命周期"],
           ["improvements", "改善记录"],
-          ["erp", "ERP与库存"],
+          ["erp", "更多信息"],
           ["sales", "销售链接"],
           ["actions", "关键行动"],
           ["templates", "关联模板"],
@@ -886,10 +883,10 @@ function renderProductBusinessTab(product) {
   const analysis = detail.analysis; const latestHealth = detail.healthRecords?.[0];
   return `<div class="product-business-analysis"><div class="product-business-metrics">
     <article><span>近30天销量</span><strong>${formatMetric(analysis.sales.sales30d)}</strong><small>增长 ${formatPercent(analysis.sales.growth)}</small></article>
-    <article><span>产品收入</span><strong>${formatMoney(analysis.finance.revenue)}</strong><small>来源：财务事实</small></article>
+    <article><span>产品收入</span><strong>${formatMoney(analysis.finance.revenue)}</strong><small>近30天</small></article>
     <article><span>净利润</span><strong>${formatMoney(analysis.finance.netProfit)}</strong><small>利润率 ${formatPercent(analysis.finance.profitMargin)}</small></article>
     <article><span>实际库存</span><strong>${formatMetric(analysis.inventory.actualStock)}</strong><small>${escapeHtml(analysis.inventory.risk)}</small></article>
-    <article><span>库存周转</span><strong>${formatPercent(analysis.inventory.turnover)}</strong><small>销量 /（库存+销量）</small></article>
+    <article><span>库存周转</span><strong>${formatPercent(analysis.inventory.turnover)}</strong><small>库存效率</small></article>
     <article><span>健康状态</span><strong>${latestHealth?.healthScore ?? "—"}分</strong><small>${escapeHtml(healthLabel(latestHealth?.healthStatus))}</small></article>
   </div>${hasPermission(getCurrentUser(), "products.edit") ? `<button class="primary-button" type="button" data-action="evaluate-product-health" data-product-id="${escapeHtml(product.id)}">生成经营体检</button>` : ""}
   <section class="product-problem-list"><h2>经营问题</h2>${detail.issues?.length ? detail.issues.map((issue) => `<article><span class="status-badge">${escapeHtml(issue.severity)}</span><strong>${escapeHtml(issue.title)}</strong><small>${escapeHtml(issue.status)}</small></article>`).join("") : `<p>暂未生成经营问题</p>`}</section></div>`;
@@ -908,7 +905,7 @@ function renderProductImprovementsTab(product) {
 }
 
 function renderProductErpTab({ mapping, goods, stock }) {
-  if (mapping === null) return `<div class="product-detail-empty"><strong>尚未关联 ERP 规格</strong><p>可通过“导入ERP数据”建立关联。</p></div>`;
+  if (mapping === null) return `<div class="product-detail-empty"><strong>暂无更多信息</strong></div>`;
   return `<div class="product-erp-layout">
     ${renderInfoGroup("ERP货品信息", [
       ["ERP货品编码", goods?.goodsCode], ["ERP货品名称", goods?.goodsName], ["货品简称", goods?.shortName],

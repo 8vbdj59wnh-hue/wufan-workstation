@@ -879,7 +879,6 @@ function renderPendingProcessCard(row) {
   const canStart = canStartProcessExecution(row);
   const title = getProcessCardTitle(row);
   const displayImages = getProcessImageUrls(row);
-  const initiatorName = findName(state.people, row.processInstance.initiatorId ?? "", "未设置");
   const ownerName = getActionOwnerName(row);
   const description = String(row.processInstance.description ?? "").trim();
   const dueDate = formatBusinessDateTime(row.processInstance.dueDate, "未设置");
@@ -917,7 +916,6 @@ function renderPendingProcessCard(row) {
           <span>负责人：${escapeHtml(ownerName)}</span>
           <span>状态：${escapeHtml(row.statusLabel)}</span>
           <span>截止：${escapeHtml(dueDate)}</span>
-          <span>发起人：${escapeHtml(initiatorName)}</span>
         </div>
         ${
           canStart
@@ -1201,7 +1199,6 @@ function getActionOverviewStatusClass(status) {
 function renderActionOverviewCard(row) {
   if (row.processInstance === null) return "";
   const title = getProcessCardTitle(row);
-  const actionCode = String(row.processInstance.businessCode ?? "").trim();
   const displayImages = getProcessImageUrls(row);
   const businessStatus = selectProcessInstanceBusinessStatus(row.processInstance.id, state);
   const progress = selectProcessProgress(row.processInstance.id, state);
@@ -1224,31 +1221,18 @@ function renderActionOverviewCard(row) {
       </div>
       <div class="schedule-action-overview-body">
         <h3 title="${escapeAttribute(title)}">${escapeHtml(title)}</h3>
-        <div class="schedule-action-overview-code">
-          <span>行动编码</span>
-          ${
-            actionCode === ""
-              ? `<strong>—</strong>`
-              : `<button type="button" data-schedule-copy-action-code="${escapeAttribute(actionCode)}" title="点击复制完整行动编码">${escapeHtml(actionCode)}</button>`
-          }
-          <em data-schedule-action-code-feedback aria-live="polite"></em>
-        </div>
         <div class="schedule-action-overview-meta">
           <span class="schedule-action-overview-status ${getActionOverviewStatusClass(businessStatus.status)}">${escapeHtml(businessStatus.label)}</span>
           ${renderActionOverviewOwner(row)}
         </div>
         <div class="schedule-action-overview-deadline ${deadline.overdue ? "is-overdue" : ""}">
-          <span>截止 ${escapeHtml(formatBusinessDateTime(row.processInstance.dueDate, "未设置"))}</span>
-          <strong data-action-deadline-id="${escapeAttribute(row.processInstance.id)}">${escapeHtml(deadline.label)}</strong>
+          <strong data-action-deadline-id="${escapeAttribute(row.processInstance.id)}">截止 ${escapeHtml(formatBusinessDateTime(row.processInstance.dueDate, "未设置"))} · ${escapeHtml(deadline.label)}</strong>
         </div>
         <div class="schedule-action-overview-progress">
           <div>
             <span>进度</span>
             <strong>${progress.completed}/${progress.total}</strong>
           </div>
-          <span class="schedule-action-overview-progress-track" aria-label="完成进度 ${progress.percentage}%">
-            <span style="width: ${progress.percentage}%"></span>
-          </span>
         </div>
       </div>
     </article>
@@ -1320,24 +1304,20 @@ function renderLaunchedActionList(rows) {
               <th>序号</th>
               <th>选择</th>
               <th>产品图</th>
-              <th class="schedule-action-code-column">行动编码</th>
               <th>关键行动名</th>
-              <th>发起人</th>
               <th>行动负责人</th>
               <th>当前步骤</th>
-              <th>截止时间</th>
-              <th>剩余时间</th>
+              <th>截止提醒</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody>
             ${
               sortedRows.length === 0
-                ? `<tr><td colspan="11">暂无匹配的关键行动</td></tr>`
+                ? `<tr><td colspan="8">暂无匹配的关键行动</td></tr>`
                 : sortedRows
                     .map((row, index) => {
                       const instanceId = row.processInstance?.id ?? "";
-                      const actionCode = String(row.processInstance?.businessCode ?? "").trim();
                       const processDueDate = getListProcessDueDate(row);
                       const canEdit = canEditLaunchedProcessInstance(row.processInstance, getCurrentUser());
                       const checked = canEdit && selectedLaunchedProcessIds.has(instanceId) ? "checked" : "";
@@ -1346,22 +1326,10 @@ function renderLaunchedActionList(rows) {
                           <td>${index + 1}</td>
                           <td><input type="checkbox" data-schedule-list-select="${escapeAttribute(instanceId)}" ${checked} ${canEdit ? "" : "disabled"} aria-label="选择${escapeAttribute(getProcessCardTitle(row))}" title="${canEdit ? "选择关键行动" : "无编辑权限"}" /></td>
                           <td>${renderThumbnail(row)}</td>
-                          <td class="schedule-action-code-column">
-                            <span class="schedule-list-action-code">
-                              ${
-                                actionCode === ""
-                                  ? `<strong>—</strong>`
-                                  : `<button type="button" data-schedule-copy-action-code="${escapeAttribute(actionCode)}" title="点击复制完整行动编码">${escapeHtml(actionCode)}</button>`
-                              }
-                              <em data-schedule-action-code-feedback aria-live="polite"></em>
-                            </span>
-                          </td>
                           <td><strong>${renderCellText(getProcessCardTitle(row))}</strong></td>
-                          <td>${renderCellText(getActionInitiatorName(row))}</td>
                           <td>${renderCellText(getActionOwnerName(row))}</td>
                           <td>${renderCellText(row.currentTaskName)}</td>
-                          <td>${renderCellText(formatBusinessDateTime(processDueDate, ""))}</td>
-                          <td><span class="schedule-action-list-deadline ${getActionDeadlinePresentation(row.processInstance).overdue ? "is-overdue" : ""}" data-action-deadline-id="${escapeAttribute(instanceId)}">${escapeHtml(getActionDeadlinePresentation(row.processInstance).label)}</span></td>
+                          <td><span class="schedule-action-list-deadline ${getActionDeadlinePresentation(row.processInstance).overdue ? "is-overdue" : ""}" data-action-deadline-id="${escapeAttribute(instanceId)}">${renderCellText(formatBusinessDateTime(processDueDate, ""))} · ${escapeHtml(getActionDeadlinePresentation(row.processInstance).label)}</span></td>
                           <td>
                             <span class="row-actions">
                               <button class="text-button" type="button" data-schedule-list-action="view" data-schedule-process-id="${escapeAttribute(instanceId)}">查看</button>
@@ -1377,7 +1345,6 @@ function renderLaunchedActionList(rows) {
           </tbody>
         </table>
       </div>
-      <p class="form-note">列表只展示关键行动；查看和编辑均复用现有关键行动详情能力。</p>
     </section>
   `;
 }

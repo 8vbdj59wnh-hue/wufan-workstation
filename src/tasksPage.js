@@ -1606,11 +1606,7 @@ function renderTaskRow(task, index) {
       </td>
       <td class="task-executor-column">${findName(people, getTaskExecutorId(task), "未指定")}</td>
       <td class="task-date-column">${formatBusinessMinuteDateTime(task.dueDate)}</td>
-      <td class="task-date-column">${getTaskProjectDueDateText(task)}</td>
       <td class="task-status-column">${renderTaskStatus(task)}</td>
-      <td class="task-overdue-column">${renderOverdue(task)}</td>
-      <td class="task-department-column">${findName(departments, task.departmentId, "未设置")}</td>
-      <td class="task-owner-column">${findName(people, task.ownerId, "未设置")}</td>
       <td class="task-actions-column">
         <span class="row-actions">
           ${renderActionButton("查看任务详情", "view-task", task.id)}
@@ -3178,19 +3174,15 @@ function renderTaskTable() {
               <th class="task-belonging-column">归属事项</th>
               <th class="task-name-column">任务名</th>
               <th class="task-executor-column">执行人</th>
-              <th class="task-date-column">任务截止时间</th>
-              <th class="task-date-column">项目截止时间</th>
+              <th class="task-date-column">截止时间</th>
               <th class="task-status-column">状态</th>
-              <th class="task-overdue-column">是否逾期</th>
-              <th class="task-department-column">负责部门</th>
-              <th class="task-owner-column">负责人</th>
               <th class="task-actions-column">操作</th>
             </tr>
           </thead>
           <tbody>
             ${
               tableRows.length === 0
-                ? `<tr><td colspan="12">暂无匹配的任务</td></tr>`
+                ? `<tr><td colspan="8">暂无匹配的任务</td></tr>`
                 : tableRows.map((row, index) => renderTaskRow(row.task, index)).join("")
             }
           </tbody>
@@ -3672,13 +3664,12 @@ function renderCurrentTaskSection(task) {
     <div class="detail-block current-task-block">
       <h3>本次任务</h3>
       <div class="detail-grid">
-        ${renderDetailField("任务编号", escapeHtml(task.businessCode ?? "未编号"))}
-        ${renderDetailField("任务名称", escapeHtml(task.name))}
         ${renderDetailField("执行人", findName(people, getTaskExecutorId(task), "未指定"))}
-        ${renderDetailField("剩余时间", escapeHtml(remaining.label))}
+        ${renderDetailField("截止时间", escapeHtml(formatBusinessMinuteDateTime(task.dueDate, "未设置")))}
         ${renderDetailField("状态", getTaskBusinessStatus(task).label)}
+        ${renderDetailField("进度提醒", escapeHtml(remaining.label))}
       </div>
-      <p>任务说明：${escapeHtml(task.description || "未填写")}</p>
+      ${String(task.description ?? "").trim() ? `<p>任务说明：${escapeHtml(task.description)}</p>` : ""}
       <p>完成标准：${escapeHtml(task.completionStandard || "未填写")}</p>
       ${
         task.reviewStandard === undefined || task.reviewStandard === null || task.reviewStandard === ""
@@ -3759,17 +3750,18 @@ function renderTaskSubmitResultDetail(task) {
   const requirement = getTaskSubmitRequirement(task);
   const formRows = includesSubmitPart(requirement.submitType, "form")
     ? getSubmitFields(task)
-        .map((field) => renderDetailField(field.label, escapeHtml(getSubmitFieldValue(requirement.submitFormData, field) || "未填写")))
+        .map((field) => [field, getSubmitFieldValue(requirement.submitFormData, field)])
+        .filter(([, value]) => String(value ?? "").trim() !== "")
+        .map(([field, value]) => renderDetailField(field.label, escapeHtml(value)))
         .join("")
     : "";
-  const fileRows = includesSubmitPart(requirement.submitType, "file")
-    ? renderAttachmentPreviewList(requirement.submitFiles, "未上传")
-    : "不需要";
   const linkRows = includesSubmitPart(requirement.submitType, "link")
-    ? requirement.submitLinks.map((link) => `<a href="${escapeHtml(link)}" target="_blank" rel="noreferrer">${escapeHtml(link)}</a>`).join("、") || "未填写"
-    : "不需要";
+    ? requirement.submitLinks.filter(Boolean).map((link) => `<a href="${escapeHtml(link)}" target="_blank" rel="noreferrer">${escapeHtml(link)}</a>`).join("、")
+    : "";
   const editable = task.status !== TaskStatus.Done && task.status !== TaskStatus.Canceled;
-  const resultAttachments = task.resultAttachments ?? [];
+  const resultAttachments = getTaskSubmittedFiles(task);
+  const resultText = String(task.resultText ?? "").trim();
+  const hasSubmission = formRows !== "" || linkRows !== "" || resultAttachments.length > 0 || resultText !== "" || Boolean(task.submittedAt);
 
   return `
     <div class="detail-block">
@@ -3784,23 +3776,17 @@ function renderTaskSubmitResultDetail(task) {
       ${
         requirement.submitType === SubmitType.None
           ? `<p>本步骤无需单独填写提交表单。</p>`
-          : `<p>提交类型：${submitTypeNames[requirement.submitType] ?? "填写表单"}</p>
-             <p>提交说明：${escapeHtml(requirement.submitDescription ?? "")}</p>`
+          : ""
       }
-      ${formRows === "" ? "" : `<div class="detail-grid">${formRows}</div>`}
-      <div class="submit-file-preview">
-        <p>上传文件：</p>
-        ${fileRows}
-      </div>
-      <p>提交链接：${linkRows}</p>
-      <p>提交时间：${task.submittedAt ?? "未提交"}</p>
-      <p>提交人：${findName(people, task.submittedBy, "未记录")}</p>
-      <p>结果说明：${escapeHtml(task.resultText ?? "暂无")}</p>
-      <div class="submit-file-preview">
-        <p>结果附件：</p>
-        ${renderAttachmentPreviewList(resultAttachments, "暂无结果附件")}
-      </div>
-      <p>完成时间：${task.completedAt ?? "未完成"}</p>
+      ${hasSubmission ? `${formRows === "" ? "" : `<div class="detail-grid">${formRows}</div>`}
+        ${linkRows === "" ? "" : `<p>提交链接：${linkRows}</p>`}
+        ${resultText === "" ? "" : `<p>结果说明：${escapeHtml(resultText)}</p>`}
+        ${resultAttachments.length === 0 ? "" : `<div class="submit-file-preview"><p>附件：</p>${renderAttachmentPreviewList(resultAttachments)}</div>`}
+        <div class="detail-grid">
+          ${task.submittedAt ? renderDetailField("提交时间", escapeHtml(task.submittedAt)) : ""}
+          ${task.submittedBy ? renderDetailField("提交人", findName(people, task.submittedBy, "未记录")) : ""}
+          ${task.completedAt ? renderDetailField("完成时间", escapeHtml(task.completedAt)) : ""}
+        </div>` : `<p class="form-note">尚未提交结果。</p>`}
     </div>
   `;
 }
@@ -4097,13 +4083,11 @@ function renderReviewTaskDetail(task) {
     <section class="settings-section task-detail review-task-detail">
       <div class="section-heading with-actions task-action-heading">
         <div>
-          <h2>审核任务</h2>
-          <p class="form-note">${escapeHtml(task.name)}</p>
+          <h2>${escapeHtml(task.name)}</h2>
         </div>
         ${renderTaskStatus(task)}
       </div>
       <div class="detail-grid">
-        ${renderDetailField("审核事项", escapeHtml(task.name))}
         ${renderDetailField("所属关键行动", escapeHtml(instance?.displayTitle ?? instance?.name ?? "未设置"))}
         ${renderDetailField("提交人", escapeHtml(findName(people, targetTask?.submittedBy, "未记录")))}
         ${renderDetailField("提交时间", escapeHtml(targetTask?.submittedAt ?? "未提交"))}
@@ -4173,8 +4157,7 @@ function renderTaskDetail() {
     <section class="settings-section task-detail">
       <div class="section-heading with-actions task-action-heading">
         <div>
-          <h2>任务详情</h2>
-          <p class="form-note">${escapeHtml(selectedTask.name)}</p>
+          <h2>${escapeHtml(selectedTask.name)}</h2>
         </div>
         <div class="section-actions">
           ${canEditTask(selectedTask) ? renderActionButton("编辑", "edit-task", selectedTask.id) : ""}
