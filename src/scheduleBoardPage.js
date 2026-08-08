@@ -880,6 +880,7 @@ function renderPendingProcessCard(row) {
   const title = getProcessCardTitle(row);
   const displayImages = getProcessImageUrls(row);
   const ownerName = getActionOwnerName(row);
+  const actionCode = String(row.processInstance.businessCode ?? "").trim();
   const description = String(row.processInstance.description ?? "").trim();
   const dueDate = formatBusinessDateTime(row.processInstance.dueDate, "未设置");
   return `
@@ -909,6 +910,15 @@ function renderPendingProcessCard(row) {
       <div class="schedule-pending-card-body">
         <div class="schedule-pending-action-copy">
           <strong title="${escapeAttribute(title)}">${escapeHtml(title)}</strong>
+          <div class="schedule-action-overview-code">
+            <span>行动编码</span>
+            ${
+              actionCode === ""
+                ? `<strong>—</strong>`
+                : `<button type="button" data-schedule-copy-action-code="${escapeAttribute(actionCode)}" title="点击复制完整行动编码">${escapeHtml(actionCode)}</button>`
+            }
+            <em data-schedule-action-code-feedback aria-live="polite"></em>
+          </div>
           ${description === "" ? "" : `<p>${escapeHtml(description)}</p>`}
         </div>
         ${renderPendingVisualTemplates(row.processInstance)}
@@ -1199,6 +1209,7 @@ function getActionOverviewStatusClass(status) {
 function renderActionOverviewCard(row) {
   if (row.processInstance === null) return "";
   const title = getProcessCardTitle(row);
+  const actionCode = String(row.processInstance.businessCode ?? "").trim();
   const displayImages = getProcessImageUrls(row);
   const businessStatus = selectProcessInstanceBusinessStatus(row.processInstance.id, state);
   const progress = selectProcessProgress(row.processInstance.id, state);
@@ -1221,6 +1232,15 @@ function renderActionOverviewCard(row) {
       </div>
       <div class="schedule-action-overview-body">
         <h3 title="${escapeAttribute(title)}">${escapeHtml(title)}</h3>
+        <div class="schedule-action-overview-code">
+          <span>行动编码</span>
+          ${
+            actionCode === ""
+              ? `<strong>—</strong>`
+              : `<button type="button" data-schedule-copy-action-code="${escapeAttribute(actionCode)}" title="点击复制完整行动编码">${escapeHtml(actionCode)}</button>`
+          }
+          <em data-schedule-action-code-feedback aria-live="polite"></em>
+        </div>
         <div class="schedule-action-overview-meta">
           <span class="schedule-action-overview-status ${getActionOverviewStatusClass(businessStatus.status)}">${escapeHtml(businessStatus.label)}</span>
           ${renderActionOverviewOwner(row)}
