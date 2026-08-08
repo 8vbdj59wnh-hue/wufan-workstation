@@ -22,6 +22,35 @@ registerUiModule({
 });
 
 registerUiModule({
+  moduleKey: "product_ai_tools",
+  name: "ProductAITools",
+  domain: "product",
+  description: "复用现有产品 AI 资料导出能力的工作台入口。",
+  render: ({ productId, notice = "" }) => `<section class="product-workspace-panel product-workspace-ai-tools"><header><div><span>AI 工具</span><h2>产品资料输出</h2></div></header>
+    ${notice ? `<div class="form-success">${escapeHtml(notice)}</div>` : ""}
+    <p>将产品基础信息与已维护的营销资产整理为稳定的结构化文本。</p>
+    <div class="product-workspace-inline-actions"><button class="primary-button" type="button" data-action="copy-product-marketing" ${productId ? "" : "disabled"}>复制 AI 资料</button><button class="secondary-button" type="button" disabled title="当前仅提供素材包清单，尚未生成 ZIP 文件">导出 AI 素材包（暂未开放）</button></div>
+  </section>`,
+  configSchema: {},
+  dependencies: ["ProductMarketingManage"],
+});
+
+registerUiModule({
+  moduleKey: "product_lifecycle_strategy",
+  name: "ProductLifecycleStrategy",
+  domain: "product",
+  description: "展示现有产品生命周期和负责人信息，不生成新的策略数据。",
+  render: ({ sku, ownerName }) => `<section class="product-workspace-panel product-workspace-strategy"><header><div><span>经营管理</span><h2>生命周期与策略</h2></div></header><dl>
+    <div><dt>当前生命周期</dt><dd>${escapeHtml(sku.productId ? value(sku.lifecycleStatus) : "未维护")}</dd></div>
+    <div><dt>当前策略</dt><dd>未维护</dd></div>
+    <div><dt>下一步动作</dt><dd>未维护</dd></div>
+    <div><dt>负责人</dt><dd>${escapeHtml(sku.productId ? value(ownerName) : "未维护")}</dd></div>
+  </dl></section>`,
+  configSchema: {},
+  dependencies: ["Product"],
+});
+
+registerUiModule({
   moduleKey: "product_business_data",
   name: "ProductBusinessData",
   domain: "product",

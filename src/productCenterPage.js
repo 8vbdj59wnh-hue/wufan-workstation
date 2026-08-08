@@ -49,8 +49,8 @@ import { canAccessModule, hasPermission } from "./permissions.js?v=20260725-prod
 import { normalizeProductSkuCode } from "./data/productSku.js?v=20260728-product-sku1";
 import { escapeHtml } from "./utils/html.js?v=20260802-module-boundary1";
 import { renderUiModule } from "./uiModuleRegistry.js";
-import "./uiModules/productWorkspaceModules.js";
-import "./uiModules/productMarketingAsset.js";
+import "./uiModules/productWorkspaceModules.js?v=20260809-product-workspace-ui1";
+import "./uiModules/productMarketingAsset.js?v=20260809-product-workspace-ui1";
 
 const productStatuses = ["开发中", "上架", "成长期", "成熟期", "风险期", "淘汰", "待上架", "在售", "停售", "清仓", "已归档"];
 let filters = { query: "", brand: "", category: "", status: "", erpStatus: "", platform: "", stockStatus: "" };
@@ -488,19 +488,29 @@ function renderProductSkuV2Detail() {
   const moduleContext = { sku, inventory, sales, ownerName: findName(state.people, sku.ownerId), resolveUrl: resolveAssetUrl, formatMoney, formatMetric };
   const tabs = [["overview", "概览"], ["marketing", "营销资产"], ["sku", "SKU管理"], ["inventory", "库存记录"], ["sales", "销售记录"], ["operations", "操作记录"]];
   const activeTab = productWorkspaceState.activeTab;
+  const marketing = section("marketing");
+  const canEditMarketing = hasPermission(getCurrentUser(), "products.edit");
+  const marketingSummary = !sku.productId
+    ? `<section class="product-workspace-panel product-marketing-summary"><header><div><span>产品知识资产</span><h2>产品营销资产</h2></div></header><div class="empty-state compact">需先建立产品档案，才能维护产品营销资产。</div></section>`
+    : marketing.loading ? `<section class="product-workspace-panel"><div class="empty-state compact">正在读取产品营销资产…</div></section>`
+    : marketing.error ? `<section class="product-workspace-panel"><div class="form-error">${escapeHtml(marketing.error)}</div><button class="secondary-button" type="button" data-action="load-product-marketing">重新加载</button></section>`
+    : marketing.loaded ? renderUiModule("product_marketing_asset", { asset: marketing.asset, mode: "summary", notice: productWorkspaceState.marketingNotice, canEdit: canEditMarketing })
+    : `<section class="product-workspace-panel"><button class="secondary-button" type="button" data-action="load-product-marketing">加载营销资产</button></section>`;
   let tabContent = "";
-  if (activeTab === "overview") tabContent = `<div class="product-workspace-grid">
-    <div>${renderUiModule("product_gallery", { ...moduleContext, images: galleryImages })}${renderUiModule("product_links", { state: section("links") })}</div>
-    ${renderUiModule("product_business_data", moduleContext)}
+  if (activeTab === "overview") tabContent = `<div class="product-workspace-overview">
+    ${marketingSummary}
+    <div class="product-workspace-grid">
+      <div>${renderUiModule("product_gallery", { ...moduleContext, images: galleryImages })}${renderUiModule("product_links", { state: section("links") })}</div>
+      <div>${renderUiModule("product_ai_tools", { productId: sku.productId, notice: productWorkspaceState.marketingNotice })}${renderUiModule("product_lifecycle_strategy", moduleContext)}</div>
+    </div>
   </div>`;
   if (activeTab === "sku") tabContent = `<section class="product-workspace-panel">${renderInfoGroup("SKU与ERP关系", [["SKU编码",sku.merchantSkuCode],["规格",sku.specificationName],["条码",sku.barcode],["单位",sku.unit],["ERP状态",sku.erpStatus],["ERP货品",`${sku.goodsCode || "—"} · ${sku.goodsName || "—"}`],["档案映射",sku.mappingState]])}</section>`;
   if (activeTab === "marketing") {
-    const marketing = section("marketing");
     tabContent = !sku.productId
       ? `<section class="product-workspace-panel"><div class="empty-state">需先建立产品档案，才能维护产品营销资产。</div></section>`
       : marketing.loading ? `<div class="empty-state">正在读取产品营销资产…</div>`
       : marketing.error ? `<div class="form-error">${escapeHtml(marketing.error)}</div>`
-      : marketing.loaded ? renderUiModule("product_marketing_asset", { asset: marketing.asset, mode: productWorkspaceState.marketingMode, notice: productWorkspaceState.marketingNotice, canEdit: hasPermission(getCurrentUser(), "products.edit") })
+      : marketing.loaded ? renderUiModule("product_marketing_asset", { asset: marketing.asset, mode: productWorkspaceState.marketingMode, notice: productWorkspaceState.marketingNotice, canEdit: canEditMarketing })
       : `<section class="product-workspace-panel"><button class="secondary-button" type="button" data-action="load-product-marketing">加载营销资产</button></section>`;
   }
   if (activeTab === "inventory") tabContent = renderProductWorkspaceRecords("inventory", section("inventory"));
@@ -509,7 +519,7 @@ function renderProductSkuV2Detail() {
   return `<section class="product-center-page product-detail-page product-sku-v2-detail product-workspace">
     <button class="text-button product-detail-back" type="button" data-action="back-products">← 返回产品中心</button>
     ${productSkuV2State.error ? `<div class="form-error">${escapeHtml(productSkuV2State.error)}</div>` : ""}
-    <div class="product-workspace-top">${businessZoneBadge(listRow?.businessZone)}${renderUiModule("product_basic_info", moduleContext)}<div class="product-workspace-actions">${!sku.productId && hasPermission(getCurrentUser(), "products.create") ? `<button class="primary-button" type="button" data-action="create-product-v2-profile" data-erp-sku-id="${escapeHtml(sku.id)}">创建产品档案</button>` : sku.productId ? `<a class="secondary-button" href="#products/${encodeURIComponent(sku.productId)}">查看经营档案</a>` : ""}</div></div>
+    <div class="product-workspace-top">${businessZoneBadge(listRow?.businessZone)}<div class="product-workspace-hero">${renderUiModule("product_basic_info", moduleContext)}${renderUiModule("product_business_data", moduleContext)}</div><div class="product-workspace-actions">${!sku.productId && hasPermission(getCurrentUser(), "products.create") ? `<button class="primary-button" type="button" data-action="create-product-v2-profile" data-erp-sku-id="${escapeHtml(sku.id)}">创建产品档案</button>` : sku.productId ? `<a class="secondary-button" href="#products/${encodeURIComponent(sku.productId)}">查看经营档案</a>` : ""}</div></div>
     <nav class="product-workspace-tabs" aria-label="Product Workspace">${tabs.map(([key,label])=>`<button type="button" data-action="product-workspace-tab" data-tab="${key}" class="${activeTab===key?"is-active":""}">${label}</button>`).join("")}</nav>
     <div class="product-workspace-content">${tabContent}</div>
   </section>`;
@@ -1571,6 +1581,7 @@ async function refreshProductSkuV2Detail(erpSkuId, rerender) {
   try { const result = await loadProductCenterV2SkuDetail(erpSkuId, "summary"); productSkuV2State = { ...productSkuV2State, loading: false, detail: result.detail, detailId: erpSkuId, error: "" }; }
   catch (error) { productSkuV2State = { ...productSkuV2State, loading: false, detail: null, detailId: erpSkuId, error: error.message || "ERP SKU详情读取失败。" }; }
   rerender();
+  if (productSkuV2State.detail?.sku?.productId) void loadProductMarketingSection(rerender);
 }
 
 async function loadProductWorkspaceSection(scope, rerender) {
@@ -1921,8 +1932,12 @@ export function bindProductCenterPageEvents(rerender) {
       if (tab === "marketing") void loadProductMarketingSection(rerender);
       return;
     }
+    if (action === "view-product-marketing") {
+      productWorkspaceState = { ...productWorkspaceState, activeTab: "marketing", marketingMode: "read", marketingNotice: "" };
+      rerender(); void loadProductMarketingSection(rerender); return;
+    }
     if (action === "load-product-marketing") { void loadProductMarketingSection(rerender); return; }
-    if (action === "edit-product-marketing") { productWorkspaceState = { ...productWorkspaceState, marketingMode: "edit", marketingNotice: "" }; rerender(); return; }
+    if (action === "edit-product-marketing") { productWorkspaceState = { ...productWorkspaceState, activeTab: "marketing", marketingMode: "edit", marketingNotice: "" }; rerender(); return; }
     if (action === "cancel-product-marketing") { productWorkspaceState = { ...productWorkspaceState, marketingMode: "read", marketingNotice: "" }; rerender(); return; }
     if (action === "copy-product-marketing") {
       const productId = productSkuV2State.detail?.sku?.productId;

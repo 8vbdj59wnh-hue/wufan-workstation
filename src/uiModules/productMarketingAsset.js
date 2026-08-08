@@ -4,6 +4,20 @@ import { escapeHtml } from "../utils/html.js?v=20260802-module-boundary1";
 const display = (value) => String(value ?? "").trim() || "未维护";
 const lines = (values) => (values?.length ? values : ["未维护"]).map((value) => `<span>${escapeHtml(typeof value === "string" ? value : value.text)}</span>`).join("");
 
+function renderSummary({ asset, canEdit, notice }) {
+  return `<section class="product-workspace-panel product-marketing-asset product-marketing-summary"><header><div><span>产品知识资产</span><h2>产品营销资产</h2></div><div class="product-marketing-actions">${canEdit ? `<button class="secondary-button" type="button" data-action="edit-product-marketing">编辑</button>` : ""}<button class="text-button" type="button" data-action="view-product-marketing">查看完整营销资产</button></div></header>
+    ${notice ? `<div class="form-success">${escapeHtml(notice)}</div>` : ""}
+    <div class="product-marketing-summary-grid">
+      <article><small>产品定位</small><p>${escapeHtml(display(asset?.positioning))}</p></article>
+      <article><small>目标人群</small><p>${escapeHtml(display(asset?.targetAudience))}</p></article>
+      <article><small>使用场景</small><div class="product-marketing-tags">${lines(asset?.usageScenarios)}</div></article>
+      <article><small>关键词</small><div class="product-marketing-tags">${lines(asset?.keywords)}</div></article>
+      <article class="is-wide"><small>核心卖点</small><ol>${asset?.sellingPoints?.length ? asset.sellingPoints.map((point) => `<li>${escapeHtml(point.text)}</li>`).join("") : `<li>未维护</li>`}</ol></article>
+      <article class="is-wide"><small>产品故事</small><p>${escapeHtml(display(asset?.productStory))}</p></article>
+    </div>
+  </section>`;
+}
+
 function renderRead({ asset, canEdit, notice }) {
   return `<section class="product-workspace-panel product-marketing-asset"><header><div><span>产品知识资产</span><h2>产品营销信息</h2></div><div class="product-marketing-actions">${canEdit ? `<button class="secondary-button" type="button" data-action="edit-product-marketing">编辑</button>` : ""}<button class="primary-button" type="button" data-action="copy-product-marketing"> 复制 AI 资料</button></div></header>
     ${notice ? `<div class="form-success">${escapeHtml(notice)}</div>` : ""}
@@ -32,7 +46,7 @@ registerUiModule({
   name: "ProductMarketingAsset",
   domain: "product",
   description: "产品定位、人群、场景、卖点、故事和关键词的标准阅读/编辑模块。",
-  render: (context) => context.mode === "edit" ? renderEdit(context) : renderRead(context),
-  configSchema: { mode: ["read", "edit"] },
+  render: (context) => context.mode === "edit" ? renderEdit(context) : context.mode === "summary" ? renderSummary(context) : renderRead(context),
+  configSchema: { mode: ["summary", "read", "edit"] },
   dependencies: ["Product", "ProductMarketingAsset", "ProductMarketingManage"],
 });
