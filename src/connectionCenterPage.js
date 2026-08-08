@@ -67,6 +67,7 @@ import "./uiModules/linkDataStatus.js?v=20260809-my-link-workspace1";
 import "./uiModules/myLinkSummary.js?v=20260809-my-link-workspace1";
 import "./uiModules/linkHospitalTodo.js?v=20260809-my-link-workspace1";
 import "./uiModules/linkList.js?v=20260809-my-link-workspace1";
+import "./uiModules/linkWorkspaceModules.js?v=20260809-link-workspace1";
 
 const pageState = {
   loaded: false,
@@ -84,7 +85,8 @@ const pageState = {
   listFilters: { search: "", platform: "", shopId: "", productCode: "", ownerId: "", healthStatus: "", status: "", salesStatus: "", profitStatus: "", productRelation: "", skuCount: "" },
   visibleColumns: ["image", "name", "platform", "shop", "erpSales", "erpProfit", "health", "owner", "status"],
   fieldSettingsOpen: false,
-  detailTab: "basic",
+  detailTab: "business",
+  detailLoaded: new Set(),
   actions: [],
   periodSnapshots: [],
   growthAnalysis: null,
@@ -282,9 +284,9 @@ function renderSectionNavigation() {
   return `<nav class="connection-section-nav" aria-label="连接中心页面">
     <button type="button" class="${pageState.section === "cockpit" ? "active" : ""}" data-connection-section="cockpit">经营驾驶舱</button>
     <button type="button" class="${pageState.section === "my-links" ? "active" : ""}" data-connection-section="my-links">我的链接</button>
-    <button type="button" class="${pageState.section === "connections" ? "active" : ""}" data-connection-section="connections">链接资产</button>
+    <button type="button" class="${pageState.section === "connections" ? "active" : ""}" data-connection-section="connections">全部链接</button>
     ${canViewHealth() ? `<button type="button" class="${pageState.section === "hospital" ? "active" : ""}" data-connection-section="hospital">链接医院</button>` : ""}
-    ${canImportBusinessData() ? `<button type="button" class="${pageState.section === "data-import" ? "active" : ""}" data-connection-section="data-import">数据导入</button>` : ""}
+    <button type="button" class="${pageState.section === "data-import" ? "active" : ""}" data-connection-section="data-import">数据更新</button>
     ${isAdmin() ? `<button type="button" class="${pageState.section === "data-center" ? "active" : ""}" data-connection-section="data-center">数据中心</button>` : ""}
   </nav>`;
 }
@@ -300,6 +302,10 @@ function renderConnectionDataCenter() {
         : renderDataFoundation();
   if (!isAdmin()) return `<div class="empty-state"><strong>无权访问数据中心</strong><p>数据中心仅作为管理员后台。</p></div>`;
   return `<section class="connection-data-center"><header class="connection-section-heading"><div><p class="eyebrow">ADMIN DATA CENTER</p><h2>数据中心</h2><p>管理员统一查看后台批次、日志、异常、模板和调度。</p></div><button type="button" class="primary-button" data-open-admin-data-center>进入管理员数据中心</button></header><div class="connection-import-type-grid"><article><strong>导入批次</strong><span>查看每次导入和同步执行</span></article><article><strong>同步日志</strong><span>追踪API请求与执行过程</span></article><article><strong>异常中心</strong><span>统一处理隔离异常</span></article><article><strong>模板管理</strong><span>维护管理员解析规则</span></article><article><strong>字段映射</strong><span>查看和维护数据映射</span></article><article><strong>自动调度</strong><span>管理API同步任务</span></article></div><nav class="connection-data-center-nav" aria-label="链接数据中心功能">${tabs.filter(([id]) => id !== "data-foundation").map(([id, label]) => `<button type="button" class="${pageState.dataCenterTab === id ? "active" : ""}" data-connection-data-tab="${id}">${label}</button>`).join("")}</nav>${pageState.dataCenterTab === "mappings" ? content : ""}</section>`;
+}
+
+function renderDataUpdateWorkspace() {
+  return `<section class="link-data-update-workspace"><header class="connection-section-heading"><div><p class="eyebrow">LINK DATA UPDATE</p><h2>数据更新</h2><p>查看经营数据是否正常，并继续使用现有导入流程更新数据。</p></div>${isAdmin() ? `<button type="button" class="secondary-button" data-workbench-go="data-center">查看技术详情</button>` : ""}</header>${renderUiModule("link_data_status", { state: pageState.linkDataStatus })}${canImportBusinessData() ? renderDataFoundation() : `<div class="empty-state compact"><strong>数据由管理员统一更新</strong><p>当前账号可查看最新数据状态；如有异常，请联系数据管理员处理。</p></div>`}</section>`;
 }
 
 function renderDataFoundation() {
@@ -345,7 +351,9 @@ function renderConnectionHospital() {
       : stage === "treatment" && canImprove() ? `<button type="button" class="primary-button" data-hospital-transition="${escapeHtml(item.improvementId)}" data-next-status="observing">治疗完成，进入观察</button>`
       : stage === "observation" && canImprove() ? `<div class="hospital-observation-actions"><button type="button" class="primary-button" data-hospital-transition="${escapeHtml(item.improvementId)}" data-next-status="effective">数据恢复</button><button type="button" class="secondary-button" data-hospital-transition="${escapeHtml(item.improvementId)}" data-next-status="failed">未恢复</button></div>` : "";
     return `<article class="connection-hospital-card is-${stage}"><header><button type="button" data-open-connection="${escapeHtml(item.connectionId)}"><strong>${escapeHtml(item.connectionName)}</strong><small>${escapeHtml(`${item.platform} · ${item.shopName}`)}</small></button><span class="status-pill hospital-stage-pill is-${stage}">${escapeHtml(meta[stage][0])}</span></header><div class="hospital-problem"><strong>${escapeHtml(item.problemTitle)}</strong><span>健康 ${item.healthScore == null ? "—" : `${item.healthScore}分`} · 负责人 ${escapeHtml(item.ownerName || "未分配")}</span></div><div class="hospital-metrics"><span>销售 ${coreMoney(item.erpSales?.salesAmount)}</span><span>利润 ${coreMoney(item.erpSales?.profitAmount)}</span><span>销售变化 ${hospitalMetric(item.salesGrowth)}</span><span>流量 ${hospitalMetric(item.visitorGrowth)}</span><span>转化 ${hospitalMetric(item.conversionChange, true)}</span></div>${stage !== "diagnosis" ? `<div class="hospital-treatment"><span>改善方案：${escapeHtml(item.treatmentPlan)}</span><span>任务进度：${escapeHtml(taskProgress)}</span>${stage === "observation" ? `<span>${item.recoveryStatus === "recovered" ? "经营数据已恢复" : "等待新周期验证"}</span>` : ""}</div>` : item.diagnosisEntry?.notes ? `<div class="hospital-treatment"><span>诊断备注：${escapeHtml(item.diagnosisEntry.notes)}</span></div>` : ""}<footer>${operation}<button type="button" class="text-button" data-open-connection="${escapeHtml(item.connectionId)}">查看链接详情</button></footer></article>`; };
-  return `<section class="connection-hospital"><header><div><h2>链接医院</h2></div></header><div class="connection-hospital-zones">${Object.entries(meta).map(([id, [label]]) => `<button type="button" class="${stage === id ? "is-active" : ""}" data-hospital-stage="${id}"><span>${label}</span><strong>${hospital.counts?.[id] || 0}</strong></button>`).join("")}</div>${hospital.loading ? `<div class="empty-state">正在读取链接健康状态…</div>` : items.length ? `<div class="connection-hospital-grid">${items.map(card).join("")}</div>` : `<div class="empty-state"><strong>${escapeHtml(meta[stage][0])}暂无链接</strong></div>`}</section>`;
+  const overviewHtml = `<header><div><p class="eyebrow">LINK HOSPITAL WORKSPACE</p><h2>链接医院</h2><p>沿用现有健康、诊断和改善规则，集中处理经营问题。</p></div></header><div class="connection-hospital-zones">${Object.entries(meta).map(([id, [label]]) => `<button type="button" class="${stage === id ? "is-active" : ""}" data-hospital-stage="${id}"><span>${label}</span><strong>${hospital.counts?.[id] || 0}</strong></button>`).join("")}</div>`;
+  const listHtml = hospital.loading ? `<div class="empty-state">正在读取链接健康状态…</div>` : items.length ? `<div class="connection-hospital-grid">${items.map(card).join("")}</div>` : `<div class="empty-state"><strong>${escapeHtml(meta[stage][0])}暂无链接</strong></div>`;
+  return `<section class="connection-hospital">${renderUiModule("link_hospital_overview", { overviewHtml, listHtml })}</section>`;
 }
 
 function trendLabel(item) {
@@ -463,7 +471,13 @@ function renderGrowthOverview() {
 }
 
 function renderConnectionAssets() {
-  return `<section class="connection-assets"><header class="connection-section-heading"><div><p class="eyebrow">LINK ASSETS</p><h2>链接资产</h2><p>统一查看、筛选和管理公司的销售链接档案。</p></div></header>${renderUiModule("link_sales_ranking", { state: pageState.salesRanking, canViewCompany: isAdmin() })}${renderGrowthOverview()}${renderToolbar()}${renderList()}</section>`;
+  return `<section class="connection-assets company-links-workspace"><header class="connection-section-heading"><div><p class="eyebrow">ALL LINK WORKSPACE</p><h2>全部链接</h2><p>在当前权限范围内查看公司经营概览与链接资产。</p></div></header>
+    ${renderUiModule("link_data_status", { state: pageState.linkDataStatus })}
+    ${renderGrowthOverview()}
+    ${renderUiModule("link_sales_ranking", { state: pageState.salesRanking, canViewCompany: isAdmin(), workbenchItems: pageState.items })}
+    ${renderUiModule("link_filter", { content: renderToolbar() })}
+    ${renderUiModule("link_list", { title: "全部链接", total: pageState.pagination.total || pageState.items.length, bodyHtml: renderList() })}
+  </section>`;
 }
 
 function renderOwnerImport() {
@@ -649,29 +663,28 @@ function renderDetail() {
   const item = pageState.items.find((candidate) => candidate.id === pageState.selectedId)
     ?? pageState.myWorkbench.items.find((candidate) => candidate.id === pageState.selectedId);
   if (!item) return "";
-  const tabs = [["basic", "概况"], ["overview", "经营概览"], ["platform", "平台表现"], ["erp-sales", "ERP真实销售"], ["sku-sales", "SKU销售分析"], ["products", "产品关联"], ["inventory", "库存供应"], ...(canViewHealth() ? [["health", "健康状态"]] : []), ["hospital", "链接医院"], ["improvements", "改善记录"], ["actions", "经营动作"], ["trend", "经营趋势"], ["benchmarks", `链接对标${pageState.benchmarks.items.length ? ` ${pageState.benchmarks.items.length}` : ""}`]];
-  let body = `<div class="connection-overview"><dl><div><dt>平台</dt><dd>${escapeHtml(item.platform)}</dd></div><div><dt>店铺</dt><dd>${escapeHtml(shopName(item))}</dd></div><div><dt>商品ID</dt><dd>${escapeHtml(item.platformGoodsId || "—")}</dd></div><div><dt>负责人</dt><dd>${escapeHtml(personName(item.ownerId))}</dd></div><div><dt>状态</dt><dd>${escapeHtml(statusText(item.status))}</dd></div></dl><section class="connection-operating-metrics"><div><span>最近周期销售额</span><strong>${item.latestPayAmount == null ? "—" : `¥${Number(item.latestPayAmount).toLocaleString("zh-CN")}`}</strong></div><div><span>销售增长</span><strong>${growthText(item.salesGrowth)}</strong></div><div><span>同期净利润</span><strong>${item.currentFinance == null ? "—" : `¥${Number(item.currentFinance.netProfit || 0).toLocaleString("zh-CN")}`}</strong></div><div><span>利润变化</span><strong>${growthText(item.profitGrowth)}</strong></div><div><span>健康状态</span><strong>${escapeHtml(healthText(item.healthStatus || "no_data"))}</strong></div></section>${canManage() ? `<form class="connection-action-form" data-connection-profile-form><label>连接名称<input name="name" value="${escapeHtml(item.name)}" required maxlength="120" /></label><label>负责人<select name="ownerId"><option value="">未设置</option>${(state.people ?? []).filter((person) => person.status === "active").map((person) => `<option value="${escapeHtml(person.id)}" ${item.ownerId === person.id ? "selected" : ""}>${escapeHtml(person.name)}</option>`).join("")}</select></label><button type="submit" class="secondary-button">保存档案</button></form>` : ""}<section><h3>关联产品</h3>${item.products?.length ? item.products.map((product) => `<a href="#products/${encodeURIComponent(product.id)}" data-product-id="${escapeHtml(product.id)}">${escapeHtml(product.name || product.skuCode)}</a>`).join("、") : "未关联产品"}</section></div>`;
-  body = body.replace("<div><dt>负责人</dt>", `<div><dt>档案来源</dt><dd>${escapeHtml(originText(item.originSource))}</dd></div><div><dt>识别时间</dt><dd>${escapeHtml(item.identifiedAt || item.createdAt || "—")}</dd></div><div><dt>负责人</dt>`);
+  const tabs = [["business", "经营概览"], ["diagnosis", "问题诊断"], ["sales", "销售分析"], ["inventory", "商品库存"], ["advanced", "高级信息"]];
+  let body = "";
   if (pageState.coreDetailLoading) body = `<div class="empty-state">正在读取链接经营详情…</div>`;
-  else if (pageState.detailTab === "basic") body = renderCoreBasic(item, pageState.coreDetail);
-  else if (pageState.detailTab === "overview") body = renderCoreOperatingOverview(item, pageState.coreDetail);
-  else if (pageState.detailTab === "platform") body = renderCorePlatform(pageState.coreDetail);
-  else if (pageState.detailTab === "erp-sales") body = renderErpSales(pageState.coreDetail);
-  else if (pageState.detailTab === "sku-sales") body = renderSkuSales(pageState.coreDetail);
-  else if (pageState.detailTab === "products") body = renderCoreProducts(pageState.coreDetail);
-  else if (pageState.detailTab === "inventory") body = renderInventory(pageState.coreDetail);
-  if (pageState.detailTab === "actions") body = renderActions(item);
-  if (pageState.detailTab === "health") body = renderHealthReport();
-  if (pageState.detailTab === "hospital") body = renderConnectionHospitalDetail(item);
-  if (pageState.detailTab === "improvements") body = renderImprovements();
-  if (pageState.detailTab === "trend") {
-    const analysis = pageState.growthAnalysis;
-    const growthCard = analysis?.comparable ? `<section class="connection-growth-card"><div><span>健康分</span><strong>${analysis.healthScore}</strong><em>${escapeHtml(healthText(analysis.healthStatus))}</em></div><dl><div><dt>销售</dt><dd>${growthText(analysis.salesGrowth)}</dd></div><div><dt>访客</dt><dd>${growthText(analysis.visitorGrowth)}</dd></div><div><dt>转化</dt><dd>${growthText(analysis.conversionChange, { points: true })}</dd></div><div><dt>客单价</dt><dd>${growthText(analysis.customerValueChange)}</dd></div><div><dt>净利润</dt><dd>${growthText(analysis.profitGrowth)}</dd></div></dl></section>` : `<div class="empty-state compact"><strong>${escapeHtml(healthText(analysis?.healthStatus || "no_data"))}</strong><p>需要至少两个经营周期才能计算成长幅度和健康评分。</p></div>`;
-    const comparison = analysis?.currentPeriod ? `<div class="connection-table-wrap"><table class="connection-table connection-period-table"><thead><tr><th>周期</th><th>销售额</th><th>访客/浏览</th><th>加购</th><th>转化率</th><th>客单价</th><th>净利润</th></tr></thead><tbody>${[["当前周期", analysis.currentPeriod, analysis.currentFinance], ["上一周期", analysis.previousPeriod, analysis.previousFinance]].filter(([, period]) => period).map(([label, period, finance]) => `<tr><td><strong>${label}</strong><small>${escapeHtml(`${period.periodStart} 至 ${period.periodEnd}`)}</small></td><td>¥${Number(period.payAmount || 0).toLocaleString("zh-CN")}</td><td>${Number(period.visitorCount || 0).toLocaleString("zh-CN")} / ${Number(period.viewCount || 0).toLocaleString("zh-CN")}</td><td>${Number(period.cartCount || 0).toLocaleString("zh-CN")}</td><td>${period.conversionRate == null ? "—" : `${(Number(period.conversionRate) * 100).toFixed(2)}%`}</td><td>${period.customerValue == null ? "—" : `¥${Number(period.customerValue).toFixed(2)}`}</td><td>${finance == null ? "—" : `¥${Number(finance.netProfit || 0).toLocaleString("zh-CN")}`}</td></tr>`).join("")}</tbody></table></div>` : "";
-    body = `<div class="connection-growth-detail">${growthCard}${comparison}</div>`;
-  }
-  if (pageState.detailTab === "benchmarks") body = renderBenchmarkPanel(item);
-  return `<section class="connection-detail"><button type="button" class="text-button" data-action="back-connections">← 返回链接资产</button><header>${imageHtml(item)}<div><p class="eyebrow">${escapeHtml(item.platform)} · ${escapeHtml(shopName(item))}</p><h2>${escapeHtml(item.name)}</h2><p>${escapeHtml(productNames(item))}</p></div></header>${renderConnectionOperationBar(item)}<nav class="connection-tabs">${tabs.map(([id, label]) => `<button type="button" class="${pageState.detailTab === id ? "active" : ""}" data-connection-tab="${id}">${label}</button>`).join("")}</nav>${body}</section>`;
+  else if (pageState.detailTab === "business") body = renderUiModule("link_business_summary", {
+    metricsHtml: renderCoreOperatingOverview(item, pageState.coreDetail),
+    trendHtml: renderCorePlatform(pageState.coreDetail),
+    healthHtml: `<section class="connection-v3-panel"><h3>健康状态</h3><div class="connection-v3-metrics"><div><span>健康分</span><strong>${item.healthScore == null ? "—" : Number(item.healthScore)}</strong></div><div><span>经营状态</span><strong>${escapeHtml(healthText(item.healthStatus || "no_data"))}</strong></div><div><span>销售趋势</span><strong>${growthText(item.salesGrowth)}</strong></div><div><span>利润趋势</span><strong>${growthText(item.profitGrowth)}</strong></div></div></section>`,
+    productHtml: renderCoreProducts(pageState.coreDetail),
+  });
+  else if (pageState.detailTab === "diagnosis") body = renderUiModule("link_hospital_overview", {
+    overviewHtml: canViewHealth() ? renderHealthReport() : "",
+    listHtml: renderConnectionHospitalDetail(item),
+    actionsHtml: `${renderImprovements()}${renderActions(item)}`,
+  });
+  else if (pageState.detailTab === "sales") body = renderUiModule("link_sales_analysis", {
+    platformHtml: renderCorePlatform(pageState.coreDetail), erpHtml: renderErpSales(pageState.coreDetail), skuHtml: renderSkuSales(pageState.coreDetail),
+    trendHtml: pageState.growthAnalysis ? renderCoreOperatingOverview(item, pageState.coreDetail) : `<div class="empty-state compact">正在按需读取经营趋势…</div>`,
+  });
+  else if (pageState.detailTab === "inventory") body = renderUiModule("link_inventory_summary", { productsHtml: renderCoreProducts(pageState.coreDetail), inventoryHtml: renderInventory(pageState.coreDetail) });
+  else body = `<div class="link-workspace-stack">${renderCoreBasic(item, pageState.coreDetail)}${renderBenchmarkPanel(item)}</div>`;
+  const header = renderUiModule("link_detail_header", { item, imageHtml: imageHtml(item), channel: `${item.platform} · ${shopName(item)}`, productSummary: productNames(item), operationHtml: renderConnectionOperationBar(item) });
+  return `<section class="connection-detail link-detail-workspace">${header}<nav class="connection-tabs link-workspace-tabs">${tabs.map(([id, label]) => `<button type="button" class="${pageState.detailTab === id ? "active" : ""}" data-connection-tab="${id}">${label}</button>`).join("")}</nav>${body}</section>`;
 }
 
 function benchmarkMoney(value) { return value === null || value === undefined ? "—" : `¥${Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 2 })}`; }
@@ -777,7 +790,7 @@ function renderImprovementModal() {
 }
 
 export function renderConnectionCenterPage() {
-  const pageContent = pageState.section === "cockpit" ? renderBusinessCockpit() : pageState.section === "hospital" ? renderConnectionHospital() : pageState.section === "my-links" ? renderMyLinksWorkbench() : pageState.section === "data-import" ? renderDataFoundation() : pageState.section === "data-center" ? renderConnectionDataCenter() : renderConnectionAssets();
+  const pageContent = pageState.section === "cockpit" ? renderBusinessCockpit() : pageState.section === "hospital" ? renderConnectionHospital() : pageState.section === "my-links" ? renderMyLinksWorkbench() : pageState.section === "data-import" ? renderDataUpdateWorkspace() : pageState.section === "data-center" ? renderConnectionDataCenter() : renderConnectionAssets();
   return `<section class="connection-center-page">${pageState.error ? `<div class="form-error">${escapeHtml(pageState.error)}</div>` : ""}${pageState.loading ? `<div class="empty-state">正在读取连接…</div>` : pageState.selectedId ? renderDetail() : `${renderSectionNavigation()}${pageContent}`}${renderMappingModal()}${renderImprovementModal()}${renderBenchmarkModal()}${renderDiagnosisModal()}</section>`;
 }
 
@@ -876,7 +889,7 @@ async function loadPage(render) {
 
 async function openConnection(id, render) {
   if (window.location.hash !== `#connectionCenter/${encodeURIComponent(id)}`) window.history.replaceState(null, "", `#connectionCenter/${encodeURIComponent(id)}`);
-  pageState.selectedId = id; pageState.detailTab = "basic"; pageState.coreDetail = null; pageState.coreDetailLoading = true; pageState.actions = []; pageState.periodSnapshots = []; pageState.growthAnalysis = null; pageState.healthRecords = []; pageState.healthModalId = ""; pageState.improvements = []; pageState.benchmarks = { items: [], candidates: [], comparison: null, comparisonId: "", loading: false }; render();
+  pageState.selectedId = id; pageState.detailTab = "business"; pageState.detailLoaded = new Set(["business"]); pageState.coreDetail = null; pageState.coreDetailLoading = true; pageState.actions = []; pageState.periodSnapshots = []; pageState.growthAnalysis = null; pageState.healthRecords = []; pageState.healthModalId = ""; pageState.improvements = []; pageState.benchmarks = { items: [], candidates: [], comparison: null, comparisonId: "", loading: false }; render();
   try { pageState.coreDetail = await loadConnectionCoreDetail(id); pageState.error = ""; }
   catch (error) { pageState.error = error.message; }
   pageState.coreDetailLoading = false; render();
@@ -960,9 +973,10 @@ export function bindConnectionCenterPageEvents(render) {
     pageState.section = button.dataset.connectionSection; pageState.selectedId = ""; render();
     if (pageState.section === "connections") void loadConnectionAssetsPage(render);
     if (pageState.section === "connections") void loadSalesRanking(render, { scope: isAdmin() ? "company" : "mine" });
+    if (["connections", "data-import"].includes(pageState.section) && !pageState.linkDataStatus.loaded) void loadMyLinkDataStatus(render);
     if (pageState.section === "my-links") { if (!pageState.myWorkbench.loaded) void loadMyLinks(render); void loadSalesRanking(render, { scope: "mine" }); if (!pageState.linkDataStatus.loaded) void loadMyLinkDataStatus(render); }
     if (pageState.section === "hospital") void loadHospital(render);
-    if (pageState.section === "data-import") void loadDataFoundation(render);
+    if (pageState.section === "data-import" && canImportBusinessData()) void loadDataFoundation(render);
   }));
   root.querySelector("[data-link-ranking-filter]")?.addEventListener("submit", (event) => {
     event.preventDefault(); const data = new FormData(event.currentTarget); const preset = String(data.get("preset") || "7d");
@@ -1113,11 +1127,16 @@ export function bindConnectionCenterPageEvents(render) {
   });
   root.querySelectorAll("[data-connection-tab]").forEach((button) => button.addEventListener("click", async () => {
     pageState.detailTab = button.dataset.connectionTab; render();
-    if (pageState.detailTab === "actions") { try { pageState.actions = (await loadConnectionActions(pageState.selectedId)).items ?? []; render(); } catch (error) { pageState.error = error.message; render(); } }
-    if (pageState.detailTab === "trend") { try { const [snapshots, analysis] = await Promise.all([loadConnectionPeriodSnapshots(pageState.selectedId), loadConnectionGrowthAnalysis(pageState.selectedId)]); pageState.periodSnapshots = snapshots.items ?? []; pageState.growthAnalysis = analysis.item; render(); } catch (error) { pageState.error = error.message; render(); } }
-    if (pageState.detailTab === "health") { try { const [records, analysis] = await Promise.all([loadConnectionHealthRecords(pageState.selectedId), loadConnectionGrowthAnalysis(pageState.selectedId)]); pageState.healthRecords = records.items ?? []; pageState.growthAnalysis = analysis.item; render(); } catch (error) { pageState.error = error.message; render(); } }
-    if (pageState.detailTab === "improvements") { try { pageState.improvements = (await loadConnectionImprovements({ connectionId: pageState.selectedId })).items ?? []; render(); } catch (error) { pageState.error = error.message; render(); } }
-    if (pageState.detailTab === "benchmarks") await loadBenchmarks(render);
+    if (pageState.detailLoaded.has(pageState.detailTab)) return;
+    try {
+      if (pageState.detailTab === "diagnosis") {
+        const [actions, improvements, records, analysis, hospital] = await Promise.all([loadConnectionActions(pageState.selectedId), loadConnectionImprovements({ connectionId: pageState.selectedId }), canViewHealth() ? loadConnectionHealthRecords(pageState.selectedId) : Promise.resolve({ items: [] }), loadConnectionGrowthAnalysis(pageState.selectedId), loadConnectionHospital()]);
+        pageState.actions = actions.items ?? []; pageState.improvements = improvements.items ?? []; pageState.healthRecords = records.items ?? []; pageState.growthAnalysis = analysis.item; pageState.hospital = { ...pageState.hospital, ...hospital, loading: false };
+      }
+      if (pageState.detailTab === "sales") { const [snapshots, analysis] = await Promise.all([loadConnectionPeriodSnapshots(pageState.selectedId), loadConnectionGrowthAnalysis(pageState.selectedId)]); pageState.periodSnapshots = snapshots.items ?? []; pageState.growthAnalysis = analysis.item; }
+      if (pageState.detailTab === "advanced") await loadBenchmarks(() => {});
+      pageState.detailLoaded.add(pageState.detailTab); pageState.error = ""; render();
+    } catch (error) { pageState.error = error.message; render(); }
   }));
   root.querySelectorAll("[data-sales-period-type]").forEach((button) => button.addEventListener("click", () => { pageState.salesPeriodType = button.dataset.salesPeriodType; render(); }));
   root.querySelectorAll("[data-cockpit-period]").forEach((button) => button.addEventListener("click", () => { pageState.cockpit.periodType = button.dataset.cockpitPeriod; render(); }));
