@@ -10881,3 +10881,39 @@ button.content-template-thumb {
   .link-sales-distribution-chart { grid-template-columns: 48px minmax(0, 1fr); }
   .distribution-range-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+.publish-time-mode-panel {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  padding: 14px 16px;
+  margin: 12px 0;
+  border-radius: 12px;
+  background: var(--surface-subtle, #f7f8fa);
+}
+
+.publish-time-mode-panel label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+}
+
+.publish-time-mode-title {
+  font-weight: 650;
+}
+
+.publish-time-deadline-preview {
+  flex-basis: 100%;
+  display: flex;
+  gap: 10px;
+  color: var(--text-secondary, #5f6673);
+}
+
+.publish-time-deadline-preview[hidden] {
+  display: none;
+}
+
+.template-custom-fields label[hidden] {
+  display: none;
+}

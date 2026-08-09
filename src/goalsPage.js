@@ -54,6 +54,7 @@ import {
   formatBusinessDateTime,
   renderBusinessHourOptions,
 } from "./businessTime.js?v=20260705-state-singleton1";
+import { normalizePublishTimeFields, PublishTimeMode } from "./data/contentPublishTime.js";
 import {
   collectPublicFormFields,
   handlePublicFormImageUpload,
@@ -391,7 +392,20 @@ function buildLaunchAssignments(templateId, taskTemplate, initiatorId) {
 
 function renderCustomFieldsForm(template) {
   const fields = getSortedFormFields(template);
-  return renderPublicFormEditor({ fields, customFields: {}, title: "本次关键行动信息" });
+  const editor = renderPublicFormEditor({ fields, customFields: {}, title: "本次关键行动信息" });
+  if (!isContentNoteTemplate(template)) return editor;
+  return `
+    <div class="publish-time-mode-panel" data-publish-time-mode-panel>
+      <span class="publish-time-mode-title">发布时间</span>
+      <label><input type="radio" name="publishTimeMode" value="custom" checked /> 自定义时间</label>
+      <label><input type="radio" name="publishTimeMode" value="deadline" /> 同截止时间</label>
+      <div class="publish-time-deadline-preview" data-publish-time-deadline-preview hidden>
+        <strong>跟随截止时间</strong>
+        <span data-publish-time-deadline-value>请先设置截止时间</span>
+      </div>
+    </div>
+    ${editor}
+  `;
 }
 
 function getFileExt(filename = "") {
@@ -1349,14 +1363,19 @@ function buildGoalTaskDraft(form, goalId) {
   const valueModuleId = inferValueModuleIdForTemplate(template);
   const linkedTemplateId = getFormValue(form, "linkedTemplateId");
   const collectedCustomFields = template === null ? {} : collectCustomFields(form, template);
+  const dueDateResult = collectBusinessDateTime(form, "dueDate");
+  const publishTimeMode = template?.id === publishContentNoteTemplateId
+    ? getFormValue(form, "publishTimeMode") || PublishTimeMode.Custom
+    : PublishTimeMode.Custom;
+  const publishFields = template?.id === publishContentNoteTemplateId
+    ? normalizePublishTimeFields(collectedCustomFields, publishTimeMode)
+    : collectedCustomFields;
   const customFields = withValueModuleCustomFields(
     template?.id === publishContentNoteTemplateId && linkedTemplateId !== ""
-      ? { ...collectedCustomFields, [linkedActionTemplateIdsKey]: [linkedTemplateId] }
-      : collectedCustomFields,
+      ? { ...publishFields, [linkedActionTemplateIdsKey]: [linkedTemplateId] }
+      : publishFields,
     valueModuleId,
   );
-
-  const dueDateResult = collectBusinessDateTime(form, "dueDate");
   return {
     goalId,
     departmentId,
@@ -1366,6 +1385,7 @@ function buildGoalTaskDraft(form, goalId) {
     template,
     customFields,
     linkedTemplateId,
+    publishTimeMode,
     title: getFormValue(form, "title") || null,
     dueDate: dueDateResult.value,
     dueDateError: dueDateResult.error,
@@ -1383,8 +1403,12 @@ function validateGoalTaskDraft(draft) {
     if (!canAccessTemplateCenter(getCurrentUser())) return "你没有模板中心查看权限，无法发起发布内容笔记。";
     const linkedTemplate = getPublishContentNoteTemplates().find((template) => template.id === draft.linkedTemplateId);
     if (linkedTemplate === undefined) return "必须选择一个有效的发布内容笔记模板。";
+    if (draft.publishTimeMode === PublishTimeMode.Deadline && !draft.dueDate) return "选择同截止时间时必须设置截止时间。";
   }
-  const customError = validateCustomFields(draft.customFields, draft.template);
+  const validationFields = draft.publishTimeMode === PublishTimeMode.Deadline
+    ? getSortedFormFields(draft.template).filter((field) => field.key !== "publishDate")
+    : getSortedFormFields(draft.template);
+  const customError = validatePublicFormFields(draft.customFields, validationFields);
   if (customError !== "") return customError;
   if (draft.dueDateError !== "") return draft.dueDateError;
 
@@ -2087,10 +2111,26 @@ export function bindGoalsPageEvents(rerender) {
         ? `发布内容笔记｜${product.name}｜${template.name}`
         : "";
     };
+    const updatePublishTimeMode = () => {
+      const mode = getFormValue(goalTaskForm, "publishTimeMode") || PublishTimeMode.Custom;
+      const publishInput = goalTaskForm.querySelector('[name="custom__publishDateDate"]');
+      const publishHour = goalTaskForm.querySelector('[name="custom__publishDateHour"]');
+      const publishLabel = publishInput?.closest("label");
+      const deadlinePreview = goalTaskForm.querySelector("[data-publish-time-deadline-preview]");
+      const deadlineValue = goalTaskForm.querySelector("[data-publish-time-deadline-value]");
+      const deadlineResult = collectBusinessDateTime(goalTaskForm, "dueDate");
+      const followsDeadline = mode === PublishTimeMode.Deadline;
+      if (publishLabel !== null && publishLabel !== undefined) publishLabel.hidden = followsDeadline;
+      if (publishHour !== null) publishHour.disabled = followsDeadline;
+      if (publishInput !== null) publishInput.disabled = followsDeadline;
+      if (deadlinePreview !== null) deadlinePreview.hidden = !followsDeadline;
+      if (deadlineValue !== null) deadlineValue.textContent = deadlineResult.value ? formatBusinessDateTime(deadlineResult.value) : "请先设置截止时间";
+    };
     goalTaskForm.addEventListener("submit", (event) => handleGoalSubmit(event, rerender));
     goalTaskForm.addEventListener("input", (event) => {
       if (event.target.name?.startsWith("custom__")) updatePublicFormImagePreview(event.target);
       if (event.target.matches("[data-goal-action-title]")) event.target.dataset.autoTitle = "false";
+      if (event.target.name === "dueDateDate") updatePublishTimeMode();
     });
     goalTaskForm.addEventListener("change", (event) => {
       if (event.target.matches("[data-goal-work-value-module-select]")) {
@@ -2110,6 +2150,7 @@ export function bindGoalsPageEvents(rerender) {
       if (event.target.name === "actionProductId" || event.target.name === "linkedTemplateId") {
         updateSuggestedContentNoteTitle();
       }
+      if (["publishTimeMode", "dueDateDate", "dueDateHour"].includes(event.target.name)) updatePublishTimeMode();
     });
     goalTaskForm.addEventListener("click", (event) => {
       if (event.target.closest("[data-action='clear-goal-linked-template']") !== null) {
@@ -2123,6 +2164,7 @@ export function bindGoalsPageEvents(rerender) {
         window.requestAnimationFrame(updateSuggestedContentNoteTitle);
       }
     });
+    updatePublishTimeMode();
   }
   bindLaunchedProcessDetailEvents(goalsPage, rerender, {
     onTaskSelect: (taskId) => {

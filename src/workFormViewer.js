@@ -3,7 +3,7 @@ import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-publ
 import { getActionImageUrls } from "./data/taskUtils.js?v=20260705-state-singleton1";
 import { renderActionImageGrid } from "./actionImages.js";
 
-const hiddenSystemFieldKeys = new Set(["standardWorkAttachments", "productImages"]);
+const hiddenSystemFieldKeys = new Set(["standardWorkAttachments", "productImages", "publishTimeMode"]);
 
 function escapeHtml(value) {
   return String(value ?? "")

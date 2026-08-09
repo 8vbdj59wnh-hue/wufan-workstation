@@ -23,6 +23,7 @@ import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-publ
 import { bindActionProductSelectors, collectActionProductIds, getActionProductIds, getActionProducts, renderActionProductSelector, renderLinkedActionProducts } from "./actionProductRelations.js?v=20260807-key-action-product-context1";
 import { hasPermission } from "./permissions.js?v=20260725-product-center1";
 import { getActionDeadlinePresentation } from "./data/actionDeadline.js?v=20260802-action-countdown1";
+import { normalizePublishTimeFields, normalizePublishTimeMode, PublishTimeMode } from "./data/contentPublishTime.js";
 import {
   collectBusinessDateTime,
   collectBusinessMinuteDateTime,
@@ -109,6 +110,11 @@ function getStandardWorkFormFields(standardWorkId, fallbackFields = []) {
 function getInstanceFormFields(instance) {
   const taskTemplate = getTaskTemplate(instance);
   return getStandardWorkFormFields(taskTemplate?.id ?? instance.standardWorkId ?? instance.taskTemplateId, taskTemplate?.formFields ?? []);
+}
+
+function isContentNoteInstance(instance) {
+  const template = getTaskTemplate(instance);
+  return template?.id === "task-template-publish-content-note" || template?.name === "发布内容笔记";
 }
 
 function getInstanceTasks(instanceId) {
@@ -497,19 +503,59 @@ function renderEditableStandardWorkAttachments(instance, editable, { embedded = 
 
 function renderCustomFields(instance, editable) {
   const formFields = getInstanceFormFields(instance);
+  const isContentNote = isContentNoteInstance(instance);
+  const mode = normalizePublishTimeMode(instance.customFields?.publishTimeMode);
 
   if (!editable) {
-    return renderWorkFormViewer({
-      formFields,
+    const visibleFields = isContentNote && mode === PublishTimeMode.Deadline
+      ? formFields.filter((field) => field.key !== "publishDate")
+      : formFields;
+    const publishMode = isContentNote && mode === PublishTimeMode.Deadline
+      ? `<div class="work-form-viewer"><div class="work-form-row"><span>发布时间</span><strong>跟随截止时间</strong></div></div>`
+      : "";
+    return `${publishMode}${renderWorkFormViewer({
+      formFields: visibleFields,
       customFields: instance.customFields ?? {},
-    });
+    })}`;
   }
 
-  return renderPublicFormEditor({
+  const editor = renderPublicFormEditor({
     fields: formFields,
     customFields: instance.customFields ?? {},
     title: "",
   }) || `<p>暂无关键行动公共信息</p>`;
+  if (!isContentNote) return editor;
+  return `
+    <div class="publish-time-mode-panel" data-publish-time-mode-panel>
+      <span class="publish-time-mode-title">发布时间</span>
+      <label><input type="radio" name="publishTimeMode" value="custom" ${mode === PublishTimeMode.Custom ? "checked" : ""} /> 自定义时间</label>
+      <label><input type="radio" name="publishTimeMode" value="deadline" ${mode === PublishTimeMode.Deadline ? "checked" : ""} /> 同截止时间</label>
+      <div class="publish-time-deadline-preview" data-publish-time-deadline-preview ${mode === PublishTimeMode.Deadline ? "" : "hidden"}>
+        <strong>跟随截止时间</strong>
+        <span data-publish-time-deadline-value>${escapeHtml(formatBusinessDateTime(instance.dueDate, "请先设置截止时间"))}</span>
+      </div>
+    </div>
+    ${editor}
+  `;
+}
+
+function updatePublishTimeModeUi(form) {
+  if (form?.elements.publishTimeMode === undefined) return;
+  const mode = form.elements.publishTimeMode.value || PublishTimeMode.Custom;
+  const followsDeadline = mode === PublishTimeMode.Deadline;
+  const publishDateInput = form.querySelector('[name="custom__publishDateDate"]');
+  const publishHourInput = form.querySelector('[name="custom__publishDateHour"]');
+  const field = publishDateInput?.closest("label");
+  if (field !== null && field !== undefined) field.hidden = followsDeadline;
+  if (publishDateInput !== null) publishDateInput.disabled = followsDeadline;
+  if (publishHourInput !== null) publishHourInput.disabled = followsDeadline;
+  const preview = form.querySelector("[data-publish-time-deadline-preview]");
+  if (preview !== null) preview.hidden = !followsDeadline;
+  const deadlineValue = form.querySelector("[data-publish-time-deadline-value]");
+  if (deadlineValue !== null) {
+    const result = collectBusinessDateTime(form, "instanceDueDate");
+    deadlineValue.textContent = result.value ? formatBusinessDateTime(result.value) : "请先设置截止时间";
+  }
 }
 
 function renderPersonIdentity(personId, fallback = "未设置") {
@@ -1158,6 +1204,10 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
   const form = detail.querySelector(".launched-process-form");
   if (form === null) return;
   bindActionProductSelectors(form);
+  updatePublishTimeModeUi(form);
+  form.addEventListener("change", (event) => {
+    if (["publishTimeMode", "instanceDueDateDate", "instanceDueDateHour"].includes(event.target.name)) updatePublishTimeModeUi(form);
+  });
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -1182,10 +1232,22 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
     const now = getNow();
     const oldGoalId = instance.goalId;
     const formFields = getInstanceFormFields(instance);
-    const customFields = { ...(instance.customFields ?? {}), ...collectPublicFormFields(form, formFields) };
+    const collectedFields = { ...(instance.customFields ?? {}), ...collectPublicFormFields(form, formFields) };
+    const publishTimeMode = isContentNoteInstance(instance)
+      ? form.elements.publishTimeMode?.value || PublishTimeMode.Custom
+      : normalizePublishTimeMode(collectedFields.publishTimeMode);
+    const customFields = isContentNoteInstance(instance)
+      ? normalizePublishTimeFields(collectedFields, publishTimeMode)
+      : collectedFields;
     customFields[linkedActionTemplateIdsKey] = getSelectedActionTemplateIds(form);
-    const customError = validatePublicFormFields(customFields, formFields);
+    const validationFields = publishTimeMode === PublishTimeMode.Deadline
+      ? formFields.filter((field) => field.key !== "publishDate")
+      : formFields;
+    const customError = validatePublicFormFields(customFields, validationFields);
     if (customError !== "") return showFormError(form, customError);
+    if (publishTimeMode === PublishTimeMode.Deadline && !instanceDueDateResult.value) {
+      return showFormError(form, "选择同截止时间时必须设置截止时间。");
+    }
     try {
       const existingAttachments = collectExistingStandardWorkAttachments(form);
       const uploadedAttachments = await uploadSelectedStandardWorkAttachments(form, instanceId);

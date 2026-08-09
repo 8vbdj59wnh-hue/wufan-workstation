@@ -21,6 +21,7 @@ import {
   getBusinessHourPart,
   renderBusinessHourOptions,
 } from "./businessTime.js?v=20260705-state-singleton1";
+import { getEffectivePublishTime, normalizePublishTimeMode, PublishTimeMode } from "./data/contentPublishTime.js";
 import { canLaunchActionTemplate, hasPermission } from "./permissions.js?v=20260724-action-launch-permissions1";
 import { rerenderPreservingInputFocus } from "./inputFocus.js?v=20260723-input-focus1";
 import { normalizeProductSkuCode, splitProductSkuCodes } from "./data/productSku.js?v=20260728-product-sku1";
@@ -754,7 +755,8 @@ function normalizeContentNoteFields(instance, workPlan) {
   const titleField = getContentTitleField();
   const copyField = findContentFormField(["contentText", "copywriting"], ["内容文案", "文案"]);
   return {
-    publishDate: getAliasedField(fields, ["publishDate"], instance.dueDate ?? workPlan?.dueDate ?? ""),
+    publishTimeMode: normalizePublishTimeMode(fields.publishTimeMode),
+    publishDate: getEffectivePublishTime(fields, instance.dueDate ?? workPlan?.dueDate ?? "") || getAliasedField(fields, ["publishDate"], instance.dueDate ?? workPlan?.dueDate ?? ""),
     account: getAliasedField(fields, ["account"]),
     contentType: normalizeContentType(getAliasedField(fields, ["contentType"])),
     contentPurpose: normalizeContentPurpose(getAliasedField(fields, ["purpose", "contentPurpose"])),
@@ -874,7 +876,7 @@ function renderScheduleTable() {
         <table class="data-table content-schedule-table">
           <thead>
             <tr>
-              <th>发布日期</th>
+              <th>发布时间</th>
               <th>发布账号</th>
               <th>笔记形式</th>
               <th>目的</th>
@@ -897,7 +899,7 @@ function renderScheduleTable() {
                     .map(
                       (schedule, index) => `
                         <tr class="${schedule.id === selectedScheduleId ? "is-selected" : ""}" data-schedule-row-id="${schedule.id}">
-                          <td>${formatBusinessDateTime(schedule.publishDate, "-")}</td>
+                          <td>${schedule.publishTimeMode === PublishTimeMode.Deadline ? "跟随截止时间" : formatBusinessDateTime(schedule.publishDate, "-")}</td>
                           <td>${escapeHtml(schedule.account)}</td>
                           <td>${escapeHtml(normalizeContentType(schedule.contentType))}</td>
                           <td>${escapeHtml(normalizeContentPurpose(schedule.contentPurpose))}</td>
@@ -1057,7 +1059,7 @@ function renderScheduleDetail() {
         </div>
         <div class="detail-grid">
           ${renderDetailField("标题", escapeHtml(schedule.title))}
-          ${renderDetailField("发布日期", formatBusinessDateTime(schedule.publishDate, "未填写"))}
+          ${renderDetailField("发布时间", schedule.publishTimeMode === PublishTimeMode.Deadline ? "跟随截止时间" : formatBusinessDateTime(schedule.publishDate, "未填写"))}
           ${renderDetailField("发布账号", escapeHtml(schedule.account))}
           ${renderDetailField("内容类型", escapeHtml(normalizeContentType(schedule.contentType)))}
           ${renderDetailField("内容目的", escapeHtml(normalizeContentPurpose(schedule.contentPurpose)))}
