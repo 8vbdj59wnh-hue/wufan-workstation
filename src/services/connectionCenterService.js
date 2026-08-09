@@ -52,6 +52,7 @@ export {
   loadLinkSalesRanking,
   loadLinkSalesDistribution,
   loadLinkDataTable,
+  loadLinkBusinessTable,
   loadLinkDataStatus,
   updateConnectionFollow,
   removeConnectionAction,

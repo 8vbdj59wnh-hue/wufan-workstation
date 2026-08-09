@@ -46,6 +46,7 @@ import {
   loadLinkSalesRanking,
   loadLinkSalesDistribution,
   loadLinkDataTable,
+  loadLinkBusinessTable,
   loadLinkDataStatus,
   removeConnectionAction,
   ignoreConnectionImportRow,
@@ -75,6 +76,9 @@ import "./uiModules/linkImage.js?v=20260809-link-data-table1";
 import "./uiModules/linkColumnSetting.js?v=20260809-link-data-table1";
 import "./uiModules/linkDataToolbar.js?v=20260809-link-data-table1";
 import { LINK_DATA_COLUMNS, DEFAULT_MINE_LINK_FIELDS } from "./uiModules/linkDataTable.js?v=20260809-link-data-table1";
+import "./uiModules/linkIndicatorSetting.js?v=20260809-link-business-table1";
+import "./uiModules/linkBusinessToolbar.js?v=20260809-link-business-table1";
+import { LINK_BUSINESS_COLUMN_GROUPS, LINK_BUSINESS_COLUMNS, DEFAULT_LINK_BUSINESS_FIELDS } from "./uiModules/linkBusinessTable.js?v=20260809-link-business-table1";
 
 const pageState = {
   loaded: false,
@@ -112,6 +116,10 @@ const pageState = {
     filters: { keyword: "", platform: "", shopId: "", archiveStatus: "" }, sort: { field: "default", direction: "desc" },
     visibleFields: [...DEFAULT_MINE_LINK_FIELDS], fieldOrder: LINK_DATA_COLUMNS.map((item) => item.key), filterOptions: { platforms: [], shops: [] },
     dataSource: {}, columnSettingOpen: false, loading: false, loaded: false },
+  businessTable: { items: [], pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 }, range: { preset: "7d", startDate: "", endDate: "" },
+    filters: { keyword: "", platform: "", shopId: "", ownerId: "", minSales: "", maxSales: "", minProfit: "", maxProfit: "", growthStatus: "", healthStatus: "", hospitalStatus: "", expanded: false },
+    sort: { field: "salesAmount", direction: "desc" }, visibleFields: [...DEFAULT_LINK_BUSINESS_FIELDS],
+    fieldOrder: LINK_BUSINESS_COLUMNS.map((item) => item.key), filterOptions: { platforms: [], shops: [], owners: [] }, dataSources: {}, indicatorOpen: false, loading: false, loaded: false },
   linkDataStatus: { data: null, loading: false, loaded: false, error: "" },
   salesRanking: { scope: "mine", range: { preset: "7d" }, items: [], summary: {}, loading: false, error: "" },
   salesDistribution: { scope: "company", range: { preset: "7d" }, items: [], summary: {}, selectedGroup: 0, selectedRange: null, drillTable: null, loading: false, loaded: false, error: "" },
@@ -138,6 +146,7 @@ let connectionSearchTimer = 0;
 
 const listConfigKey = "connection-center-list-config-v2";
 const myLinkTableConfigKey = "my-link-data-table-config-v1";
+const linkBusinessTableConfigKey = "link-business-table-config-v1";
 const listColumns = [
   { key: "image", label: "图片", sortable: false },
   { key: "name", label: "连接名称", sortable: true },
@@ -183,6 +192,32 @@ function saveListConfig() {
 }
 
 loadListConfig();
+
+function loadLinkBusinessTableConfig() {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(linkBusinessTableConfigKey) || "null");
+    if (!saved || typeof saved !== "object") return;
+    const valid = new Set(LINK_BUSINESS_COLUMNS.map((item) => item.key));
+    if (Array.isArray(saved.fieldOrder)) {
+      const order = saved.fieldOrder.filter((key) => valid.has(key));
+      pageState.businessTable.fieldOrder = [...order, ...LINK_BUSINESS_COLUMNS.map((item) => item.key).filter((key) => !order.includes(key))];
+    }
+    if (Array.isArray(saved.visibleFields)) {
+      const fields = saved.visibleFields.filter((key) => valid.has(key));
+      if (fields.length) pageState.businessTable.visibleFields = fields;
+    }
+  } catch {
+    // Invalid local UI preferences fall back to the documented defaults.
+  }
+}
+
+function saveLinkBusinessTableConfig() {
+  window.localStorage.setItem(linkBusinessTableConfigKey, JSON.stringify({
+    fieldOrder: pageState.businessTable.fieldOrder, visibleFields: pageState.businessTable.visibleFields,
+  }));
+}
+
+loadLinkBusinessTableConfig();
 
 function loadMyLinkTableConfig() {
   try {
@@ -506,12 +541,20 @@ function renderGrowthOverview() {
 }
 
 function renderConnectionAssets() {
+  const table = pageState.businessTable;
+  const orderedFields = table.fieldOrder.filter((key) => table.visibleFields.includes(key));
+  const indicatorHtml = renderUiModule("link_indicator_setting", { groups: LINK_BUSINESS_COLUMN_GROUPS,
+    visibleFields: table.visibleFields, open: table.indicatorOpen });
+  const toolbarHtml = renderUiModule("link_business_toolbar", { range: table.range, filters: table.filters,
+    options: table.filterOptions, indicatorHtml, dataSources: table.dataSources });
+  const tableHtml = renderUiModule("link_business_table", { items: table.items.map((item) => ({ ...item,
+    imageUrl: item.mainImage ? resolveAssetUrl(item.mainImage) : "" })), pagination: table.pagination,
+    fields: orderedFields, sort: table.sort, loading: table.loading });
   return `<section class="connection-assets company-links-workspace"><header class="connection-section-heading"><div><p class="eyebrow">ALL LINK WORKSPACE</p><h2>全部链接</h2><p>在当前权限范围内查看公司经营概览与链接资产。</p></div></header>
     ${renderUiModule("link_data_status", { state: pageState.linkDataStatus })}
     ${renderGrowthOverview()}
     ${renderUiModule("link_sales_ranking", { state: pageState.salesRanking, canViewCompany: isAdmin(), workbenchItems: pageState.items })}
-    ${renderUiModule("link_filter", { content: renderToolbar() })}
-    ${renderUiModule("link_list", { title: "全部链接", total: pageState.pagination.total || pageState.items.length, bodyHtml: renderList() })}
+    <section class="link-business-analysis"><header><div><span>链接经营分析</span><h3>全部链接经营数据表</h3><p>ERP销售与平台经营指标分开呈现；所有排序、筛选和分页均在服务端完成。</p></div></header>${toolbarHtml}${tableHtml}</section>
   </section>`;
 }
 
@@ -945,6 +988,28 @@ async function loadConnectionAssetsPage(render) {
   render();
 }
 
+async function loadLinkBusinessTablePage(render) {
+  const table = pageState.businessTable;
+  pageState.businessTable = { ...table, loading: true }; pageState.error = ""; render();
+  try {
+    const result = await loadLinkBusinessTable({ scope: isAdmin() ? "company" : "mine", page: table.pagination.page,
+      pageSize: table.pagination.pageSize, preset: table.range.preset, startDate: table.range.startDate, endDate: table.range.endDate,
+      keyword: table.filters.keyword, platform: table.filters.platform, shopId: table.filters.shopId, ownerId: table.filters.ownerId,
+      minSales: table.filters.minSales, maxSales: table.filters.maxSales, minProfit: table.filters.minProfit, maxProfit: table.filters.maxProfit,
+      growthStatus: table.filters.growthStatus, healthStatus: table.filters.healthStatus, hospitalStatus: table.filters.hospitalStatus,
+      sortField: table.sort.field, sortDirection: table.sort.direction, fields: table.visibleFields.join(",") });
+    pageState.businessTable = { ...pageState.businessTable, ...result, loaded: true, loading: false,
+      range: { ...pageState.businessTable.range, ...result.range }, pagination: result.pagination || pageState.businessTable.pagination,
+      sort: result.sort || pageState.businessTable.sort };
+    if (!pageState.assetMetaLoaded) {
+      const [rankings, managementOverview] = await Promise.all([loadConnectionGrowthRankings(), loadConnectionManagementOverview()]);
+      pageState.growthRankings = rankings; pageState.managementOverview = managementOverview; pageState.assetMetaLoaded = true;
+    }
+    pageState.loadedSections.add("connections");
+  } catch (error) { pageState.error = error.message; pageState.businessTable.loading = false; }
+  render();
+}
+
 async function loadPage(render) {
   pageState.loading = true; pageState.error = ""; render();
   try {
@@ -1033,6 +1098,7 @@ export function bindConnectionCenterPageEvents(render) {
     pageState.items = [];
     pageState.myWorkbench = { items: [], summary: { total: 0, better: 0, risk: 0, followed: 0 }, filter: "all", search: "", page: 1, pageSize: 20, isAdmin: false, loading: false, loaded: false };
     pageState.myLinkTable = { ...pageState.myLinkTable, items: [], pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 }, loading: false, loaded: false };
+    pageState.businessTable = { ...pageState.businessTable, items: [], pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 }, loading: false, loaded: false };
     pageState.linkDataStatus = { data: null, loading: false, loaded: false, error: "" };
     pageState.salesDistribution = { scope: isAdmin() ? "company" : "mine", range: { preset: "7d" }, items: [], summary: {}, selectedGroup: 0, selectedRange: null, drillTable: null, loading: false, loaded: false, error: "" };
     pageState.selectedId = "";
@@ -1046,7 +1112,7 @@ export function bindConnectionCenterPageEvents(render) {
   if (pageState.loaded && !hasDetailRoute && pageState.selectedId) { pageState.selectedId = ""; pageState.coreDetail = null; render(); return; }
   root.querySelectorAll("[data-connection-section]").forEach((button) => button.addEventListener("click", () => {
     pageState.section = button.dataset.connectionSection; pageState.selectedId = ""; render();
-    if (pageState.section === "connections") void loadConnectionAssetsPage(render);
+    if (pageState.section === "connections") void loadLinkBusinessTablePage(render);
     if (pageState.section === "connections") void loadSalesRanking(render, { scope: isAdmin() ? "company" : "mine" });
     if (["connections", "data-import"].includes(pageState.section) && !pageState.linkDataStatus.loaded) void loadMyLinkDataStatus(render);
     if (pageState.section === "my-links") { if (!pageState.myWorkbench.loaded) void loadMyLinks(render); void loadSalesRanking(render, { scope: "mine" }); if (!pageState.linkDataStatus.loaded) void loadMyLinkDataStatus(render); }
@@ -1071,6 +1137,47 @@ export function bindConnectionCenterPageEvents(render) {
     const ids = String(element.dataset.distributionLinkIds || "").split(",").filter(Boolean);
     void loadDistributionRangeTable(render, start, end, ids);
   }));
+  root.querySelector("[data-link-business-toolbar]")?.addEventListener("submit", (event) => {
+    event.preventDefault(); const data = Object.fromEntries(new FormData(event.currentTarget));
+    pageState.businessTable.range = { preset: String(data.preset || "7d"), startDate: String(data.startDate || ""), endDate: String(data.endDate || "") };
+    pageState.businessTable.filters = { ...pageState.businessTable.filters, keyword: String(data.keyword || ""), platform: String(data.platform || ""),
+      shopId: String(data.shopId || ""), ownerId: String(data.ownerId || ""), minSales: String(data.minSales || ""), maxSales: String(data.maxSales || ""),
+      minProfit: String(data.minProfit || ""), maxProfit: String(data.maxProfit || ""), growthStatus: String(data.growthStatus || ""),
+      healthStatus: String(data.healthStatus || ""), hospitalStatus: String(data.hospitalStatus || "") };
+    pageState.businessTable.pagination.page = 1; void loadLinkBusinessTablePage(render);
+  });
+  root.querySelectorAll("[data-business-preset]").forEach((button) => button.addEventListener("click", () => {
+    const preset = button.dataset.businessPreset; pageState.businessTable.range = { ...pageState.businessTable.range, preset };
+    if (preset === "custom") render(); else { pageState.businessTable.pagination.page = 1; void loadLinkBusinessTablePage(render); }
+  }));
+  root.querySelectorAll("[data-link-business-sort]").forEach((button) => button.addEventListener("click", () => {
+    const field = button.dataset.linkBusinessSort; pageState.businessTable.sort = pageState.businessTable.sort.field === field
+      ? { field, direction: pageState.businessTable.sort.direction === "asc" ? "desc" : "asc" } : { field, direction: "desc" };
+    pageState.businessTable.pagination.page = 1; void loadLinkBusinessTablePage(render);
+  }));
+  root.querySelectorAll("[data-link-business-page]").forEach((button) => button.addEventListener("click", () => {
+    const page = Number(button.dataset.linkBusinessPage); if (page < 1 || page > pageState.businessTable.pagination.totalPages) return;
+    pageState.businessTable.pagination.page = page; void loadLinkBusinessTablePage(render);
+  }));
+  root.querySelector("[data-toggle-link-indicators]")?.addEventListener("click", () => { pageState.businessTable.indicatorOpen = true; render(); });
+  root.querySelectorAll("[data-close-link-indicators]").forEach((element) => element.addEventListener("click", () => { pageState.businessTable.indicatorOpen = false; render(); }));
+  root.querySelectorAll("[data-link-business-field]").forEach((checkbox) => checkbox.addEventListener("change", () => {
+    const selected = [...root.querySelectorAll("[data-link-business-field]:checked")].map((item) => item.value);
+    if (!selected.length) { checkbox.checked = true; return; }
+    pageState.businessTable.visibleFields = pageState.businessTable.fieldOrder.filter((key) => selected.includes(key));
+  }));
+  root.querySelector("[data-reset-link-business-fields]")?.addEventListener("click", () => {
+    pageState.businessTable.visibleFields = [...DEFAULT_LINK_BUSINESS_FIELDS]; pageState.businessTable.fieldOrder = LINK_BUSINESS_COLUMNS.map((item) => item.key); render();
+  });
+  root.querySelector("[data-save-link-business-fields]")?.addEventListener("click", () => {
+    const selected = [...root.querySelectorAll("[data-link-business-field]:checked")].map((item) => item.value);
+    if (selected.length) pageState.businessTable.visibleFields = pageState.businessTable.fieldOrder.filter((key) => selected.includes(key));
+    saveLinkBusinessTableConfig(); pageState.businessTable.indicatorOpen = false; void loadLinkBusinessTablePage(render);
+  });
+  root.querySelector("[data-clear-link-business-filters]")?.addEventListener("click", () => {
+    pageState.businessTable.filters = { keyword: "", platform: "", shopId: "", ownerId: "", minSales: "", maxSales: "", minProfit: "", maxProfit: "", growthStatus: "", healthStatus: "", hospitalStatus: "", expanded: false };
+    pageState.businessTable.pagination.page = 1; void loadLinkBusinessTablePage(render);
+  });
   root.querySelector("[data-distribution-back]")?.addEventListener("click", (event) => {
     pageState.salesDistribution = { ...pageState.salesDistribution, selectedGroup: event.currentTarget.dataset.distributionBack === "all" ? 0 : pageState.salesDistribution.selectedGroup,
       selectedRange: null, drillTable: null }; render();

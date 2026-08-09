@@ -162,6 +162,7 @@ import {
 } from "./connectionDataFoundationService.js";
 import { getConnectionCoreDetail, listConnectionCoreProfiles, listConnectionCoreProfilesPage } from "./connectionCorePageService.js";
 import { queryLinkDataTable } from "./linkDataTableService.js";
+import { queryLinkBusinessTable } from "./linkBusinessTableService.js";
 import { getLinkSalesDistribution } from "./linkSalesDistributionService.js";
 import { cancelConnectionOwnerImport, confirmConnectionOwnerImport, getCurrentConnectionOwnerImport, listConnectionOwnerImportRows, previewConnectionOwnerImport, rebuildConnectionOwnerImportPreview } from "./connectionOwnerImportService.js";
 import { getConnectionBusinessCockpit } from "./connectionBusinessCockpitService.js";
@@ -2308,6 +2309,14 @@ app.get("/api/link-data-table", requireLinkView, (request, response) => {
     response.json({ success: true, ...queryLinkDataTable(request.query, getUserPersonId(request.user), isAdminUser(request.user)) });
   } catch (error) {
     response.status(error.statusCode || 400).json({ success: false, message: error.message || "链接经营数据读取失败。" });
+  }
+});
+
+app.get("/api/link-business-table", requireLinkView, (request, response) => {
+  try {
+    response.json({ success: true, ...queryLinkBusinessTable(request.query, getUserPersonId(request.user), isAdminUser(request.user)) });
+  } catch (error) {
+    response.status(error.statusCode || 400).json({ success: false, message: error.message || "链接经营分析读取失败。" });
   }
 });
 
