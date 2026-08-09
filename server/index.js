@@ -162,6 +162,7 @@ import {
 } from "./connectionDataFoundationService.js";
 import { getConnectionCoreDetail, listConnectionCoreProfiles, listConnectionCoreProfilesPage } from "./connectionCorePageService.js";
 import { queryLinkDataTable } from "./linkDataTableService.js";
+import { getLinkSalesDistribution } from "./linkSalesDistributionService.js";
 import { cancelConnectionOwnerImport, confirmConnectionOwnerImport, getCurrentConnectionOwnerImport, listConnectionOwnerImportRows, previewConnectionOwnerImport, rebuildConnectionOwnerImportPreview } from "./connectionOwnerImportService.js";
 import { getConnectionBusinessCockpit } from "./connectionBusinessCockpitService.js";
 import {
@@ -2291,6 +2292,14 @@ app.get("/api/link-sales-ranking", requireLinkView, (request, response) => {
     response.json({ success: true, ...getLinkSalesRanking(request.query, getUserPersonId(request.user), isAdminUser(request.user)) });
   } catch (error) {
     response.status(error.statusCode || 400).json({ success: false, message: error.message || "链接销售额排行读取失败。" });
+  }
+});
+
+app.get("/api/link-sales-distribution", requireLinkView, (request, response) => {
+  try {
+    response.json({ success: true, ...getLinkSalesDistribution(request.query, getUserPersonId(request.user), isAdminUser(request.user)) });
+  } catch (error) {
+    response.status(error.statusCode || 400).json({ success: false, message: error.message || "链接销售额分布读取失败。" });
   }
 });
 

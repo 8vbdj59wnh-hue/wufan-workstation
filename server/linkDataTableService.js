@@ -35,8 +35,9 @@ function normalizeInput(raw = {}) {
   const sortField = sortColumns[text(raw.sortField)] ? text(raw.sortField) : "default";
   const sortDirection = text(raw.sortDirection).toLowerCase() === "asc" ? "ASC" : "DESC";
   const requestedFields = text(raw.fields).split(",").map(text).filter((field) => allowedFields.has(field));
+  const connectionIds = [...new Set(text(raw.connectionIds).split(",").map(text).filter(Boolean))].slice(0, 100);
   return { ...raw, scope, page, pageSize, offset: (page - 1) * pageSize, sortField, sortDirection,
-    fields: requestedFields.length ? requestedFields : [...allowedFields] };
+    fields: requestedFields.length ? requestedFields : [...allowedFields], connectionIds };
 }
 
 export function queryLinkDataTable(raw = {}, userId = "", isAdmin = false) {
@@ -59,6 +60,10 @@ export function queryLinkDataTable(raw = {}, userId = "", isAdmin = false) {
   if (text(options.platform)) { where.push("sh.platform=@platform"); params.platform = text(options.platform); }
   if (text(options.shopId)) { where.push("sh.id=@shopId"); params.shopId = text(options.shopId); }
   if (text(options.archiveStatus)) { where.push("c.status=@archiveStatus"); params.archiveStatus = text(options.archiveStatus); }
+  if (options.connectionIds.length) {
+    const placeholders = options.connectionIds.map((id, index) => { params[`connectionId${index}`] = id; return `@connectionId${index}`; });
+    where.push(`c.id IN (${placeholders.join(",")})`);
+  }
   const whereSql = where.join(" AND ");
   const salesAggregate = `
     SELECT salesLinkId,

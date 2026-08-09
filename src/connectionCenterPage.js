@@ -44,6 +44,7 @@ import {
   loadConnectionCoreDetail,
   loadMyConnectionWorkbench,
   loadLinkSalesRanking,
+  loadLinkSalesDistribution,
   loadLinkDataTable,
   loadLinkDataStatus,
   removeConnectionAction,
@@ -64,6 +65,7 @@ import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
 import { escapeHtml } from "./utils/html.js?v=20260802-module-boundary1";
 import { renderUiModule } from "./uiModuleRegistry.js";
 import "./uiModules/linkSalesRanking.js?v=20260809-my-link-workspace1";
+import "./uiModules/linkSalesDistribution.js?v=20260809-link-sales-distribution1";
 import "./uiModules/linkDataStatus.js?v=20260809-my-link-workspace1";
 import "./uiModules/myLinkSummary.js?v=20260809-my-link-workspace1";
 import "./uiModules/linkHospitalTodo.js?v=20260809-my-link-workspace1";
@@ -112,6 +114,7 @@ const pageState = {
     dataSource: {}, columnSettingOpen: false, loading: false, loaded: false },
   linkDataStatus: { data: null, loading: false, loaded: false, error: "" },
   salesRanking: { scope: "mine", range: { preset: "7d" }, items: [], summary: {}, loading: false, error: "" },
+  salesDistribution: { scope: "company", range: { preset: "7d" }, items: [], summary: {}, selectedGroup: 0, selectedRange: null, drillTable: null, loading: false, loaded: false, error: "" },
   hospital: { zones: { diagnosis: [], treatment: [], observation: [] }, counts: { diagnosis: 0, treatment: 0, observation: 0 }, stage: "diagnosis", loading: false },
   diagnosisModalId: "",
   benchmarks: { items: [], candidates: [], comparison: null, comparisonId: "", loading: false },
@@ -552,6 +555,7 @@ function renderBusinessCockpit() {
   const linkCard=(item,extra="")=>`<button type="button" class="connection-cockpit-link" data-open-connection="${escapeHtml(item.id)}">${imageHtml(item)}<span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(`${item.platform} · ${item.shopName}`)}</small><em>销售 ${coreMoney(item.erpSales?.salesAmount)} · 利润 ${coreMoney(item.erpSales?.profitAmount)} · 利润率 ${corePercent(item.erpSales?.profitMargin)}</em><i>${escapeHtml(healthText(item.healthStatus))} · ${escapeHtml(extra||growthText(item.salesGrowth))}</i></span></button>`;
   const trendRows=[...(cockpit.trends?.erp??[]).map((item)=>({...item,visitorCount:null,source:"ERP"})),...(cockpit.trends?.platform??[]).map((item)=>({...item,salesAmount:null,profitAmount:null,source:"平台"}))].filter((item)=>item.periodType===cockpit.periodType).sort((a,b)=>String(a.periodEnd).localeCompare(String(b.periodEnd))||a.source.localeCompare(b.source));
   return `<section class="connection-business-cockpit"><header><div><h2>经营链接驾驶舱</h2><p>${cockpit.scope?.isAdmin?"全部经营链接":"当前权限范围内的经营链接"}</p></div></header>
+    ${renderUiModule("link_sales_distribution", { state: pageState.salesDistribution, canViewCompany: isAdmin() })}
     <section class="cockpit-summary"><div><span>链接数量</span><strong>${summary.connectionCount||0}</strong><small>正常经营 ${summary.normalCount||0}</small></div><div><span>销售额</span><strong>${coreMoney(summary.salesAmount)}</strong><small>同期 ${growthText(summary.salesGrowth)}</small></div><div><span>利润</span><strong>${coreMoney(summary.profitAmount)}</strong><small>利润率 ${corePercent(summary.profitMargin)}</small></div><div class="is-risk"><span>风险链接</span><strong>${summary.riskCount||0}</strong><small>需要管理关注</small></div><div class="is-diagnosis"><span>诊断中</span><strong>${summary.diagnosisCount||0}</strong><small>等待定位问题</small></div><div class="is-treatment"><span>治疗中</span><strong>${summary.treatmentCount||0}</strong><small>正在推进改善</small></div></section>
     <section class="cockpit-health"><header><h3>健康状态</h3><span>高利润链接 ${summary.highProfitCount||0} · 利润风险 ${summary.profitRiskCount||0}</span></header><div><span>健康 <b>${health.healthy||0}</b><em>${healthRate(health.healthy)}</em></span><span>关注 <b>${health.attention||0}</b><em>${healthRate(health.attention)}</em></span><span>异常 <b>${health.risk||0}</b><em>${healthRate(health.risk)}</em></span><span>待积累数据 <b>${health.noData||0}</b><em>${healthRate(health.noData)}</em></span></div></section>
     <div class="cockpit-two-columns"><section class="cockpit-panel"><header><h3>核心链接</h3><span>按ERP销售额、利润排序</span></header>${cockpit.coreLinks?.length?cockpit.coreLinks.map((item)=>linkCard(item,`销量 ${coreNumber(item.erpSales?.shippedQuantity)}`)).join(""):`<div class="empty-state compact">暂无ERP销售事实</div>`}</section><section class="cockpit-panel is-risk"><header><h3>风险链接</h3><button type="button" class="text-button" data-workbench-hospital="diagnosis">进入链接医院 →</button></header>${cockpit.riskLinks?.length?cockpit.riskLinks.map((item)=>linkCard(item,`${item.anomalyTypes?.join("、")||"健康异常"} · ${cockpitStageText(item.operationStage)}`)).join(""):`<div class="empty-state compact">当前没有风险链接</div>`}</section></div>
@@ -873,6 +877,37 @@ async function loadSalesRanking(render, filters = {}) {
   render();
 }
 
+async function loadSalesDistribution(render, filters = {}) {
+  pageState.salesDistribution = { ...pageState.salesDistribution, ...filters, selectedGroup: 0, selectedRange: null, drillTable: null, loading: true, error: "" }; render();
+  try {
+    const result = await loadLinkSalesDistribution({
+      scope: pageState.salesDistribution.scope,
+      preset: pageState.salesDistribution.range?.preset || "7d",
+      startDate: pageState.salesDistribution.range?.startDate || "",
+      endDate: pageState.salesDistribution.range?.endDate || "",
+    });
+    pageState.salesDistribution = { ...pageState.salesDistribution, ...result, loaded: true, loading: false, error: "" };
+  } catch (error) { pageState.salesDistribution = { ...pageState.salesDistribution, loaded: true, loading: false, error: error.message }; }
+  render();
+}
+
+async function loadDistributionRangeTable(render, start, end, ids = []) {
+  const distribution = pageState.salesDistribution;
+  const connectionIds = ids.length ? ids : distribution.items.filter((item) => item.rank >= start && item.rank <= end).map((item) => item.linkId);
+  pageState.salesDistribution = { ...distribution, selectedRange: { start, end }, drillTable: { loading: true, items: [], pagination: {} } }; render();
+  try {
+    const result = await loadLinkDataTable({ scope: distribution.scope, preset: distribution.range?.preset || "7d",
+      startDate: distribution.range?.startDate || "", endDate: distribution.range?.endDate || "", page: 1, pageSize: 20,
+      sortField: "selectedSales", sortDirection: "desc", connectionIds: connectionIds.join(","),
+      fields: "image,name,platform,shop,owner,selectedSales,growthStatus,healthStatus,hospitalStatus" });
+    pageState.salesDistribution = { ...pageState.salesDistribution, drillTable: { ...result,
+      items: (result.items || []).map((item) => ({ ...item, imageUrl: item.mainImage ? resolveAssetUrl(item.mainImage) : "" })),
+      fields: ["image", "name", "platform", "shop", "owner", "selectedSales", "growthStatus", "healthStatus", "hospitalStatus"],
+      columns: LINK_DATA_COLUMNS, sort: { field: "selectedSales", direction: "desc" }, loading: false, showOwner: distribution.scope === "company" } };
+  } catch (error) { pageState.salesDistribution = { ...pageState.salesDistribution, drillTable: null, error: error.message }; }
+  render();
+}
+
 function applyConnectionAssetData(connections, rankings, managementOverview) {
   const analysisByConnection = new Map((rankings.listMetrics ?? []).map((item) => [item.connectionId, item]));
   pageState.items = (connections.items ?? []).map((item) => {
@@ -913,10 +948,11 @@ async function loadConnectionAssetsPage(render) {
 async function loadPage(render) {
   pageState.loading = true; pageState.error = ""; render();
   try {
-    const [cockpit, healthAttention, improvementSummary] = await Promise.all([loadConnectionBusinessCockpit(), canViewHealth() ? loadAttentionConnectionHealthRecords() : Promise.resolve({ items: [], counts: {} }), loadConnectionImprovementSummary()]);
+    const [cockpit, healthAttention, improvementSummary, distribution] = await Promise.all([loadConnectionBusinessCockpit(), canViewHealth() ? loadAttentionConnectionHealthRecords() : Promise.resolve({ items: [], counts: {} }), loadConnectionImprovementSummary(), loadLinkSalesDistribution({ scope: isAdmin() ? "company" : "mine", preset: "7d" })]);
     pageState.cockpit = { ...pageState.cockpit, ...cockpit };
     pageState.healthAttention = healthAttention;
     pageState.improvementSummary = improvementSummary.summary;
+    pageState.salesDistribution = { ...pageState.salesDistribution, ...distribution, loaded: true, loading: false, error: "" };
     pageState.loadedSections.add("cockpit");
     pageState.loaded = true;
     pageState.loadedUserId = String(getCurrentUser()?.personId ?? getCurrentUser()?.id ?? "");
@@ -998,6 +1034,7 @@ export function bindConnectionCenterPageEvents(render) {
     pageState.myWorkbench = { items: [], summary: { total: 0, better: 0, risk: 0, followed: 0 }, filter: "all", search: "", page: 1, pageSize: 20, isAdmin: false, loading: false, loaded: false };
     pageState.myLinkTable = { ...pageState.myLinkTable, items: [], pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 }, loading: false, loaded: false };
     pageState.linkDataStatus = { data: null, loading: false, loaded: false, error: "" };
+    pageState.salesDistribution = { scope: isAdmin() ? "company" : "mine", range: { preset: "7d" }, items: [], summary: {}, selectedGroup: 0, selectedRange: null, drillTable: null, loading: false, loaded: false, error: "" };
     pageState.selectedId = "";
     pageState.coreDetail = null;
     pageState.ownerImport = { loading: false, result: null, showCompletion: false };
@@ -1019,6 +1056,24 @@ export function bindConnectionCenterPageEvents(render) {
   root.querySelector("[data-link-ranking-filter]")?.addEventListener("submit", (event) => {
     event.preventDefault(); const data = new FormData(event.currentTarget); const preset = String(data.get("preset") || "7d");
     void loadSalesRanking(render, { scope: String(data.get("scope") || "mine"), range: { preset, startDate: String(data.get("startDate") || ""), endDate: String(data.get("endDate") || "") } });
+  });
+  root.querySelector("[data-link-distribution-filter]")?.addEventListener("submit", (event) => {
+    event.preventDefault(); const data = new FormData(event.currentTarget); const preset = String(data.get("preset") || "7d");
+    void loadSalesDistribution(render, { scope: String(data.get("scope") || "mine"), range: { preset,
+      startDate: String(data.get("startDate") || ""), endDate: String(data.get("endDate") || "") } });
+  });
+  root.querySelectorAll("[data-distribution-group]").forEach((element) => element.addEventListener("click", () => {
+    pageState.salesDistribution = { ...pageState.salesDistribution, selectedGroup: Number(element.dataset.distributionGroup), selectedRange: null, drillTable: null }; render();
+  }));
+  root.querySelectorAll("[data-distribution-range]").forEach((element) => element.addEventListener("click", () => {
+    const [start, end] = String(element.dataset.distributionRange || "").split("-").map(Number);
+    if (!start || !end) return;
+    const ids = String(element.dataset.distributionLinkIds || "").split(",").filter(Boolean);
+    void loadDistributionRangeTable(render, start, end, ids);
+  }));
+  root.querySelector("[data-distribution-back]")?.addEventListener("click", (event) => {
+    pageState.salesDistribution = { ...pageState.salesDistribution, selectedGroup: event.currentTarget.dataset.distributionBack === "all" ? 0 : pageState.salesDistribution.selectedGroup,
+      selectedRange: null, drillTable: null }; render();
   });
   root.querySelectorAll("[data-connection-data-tab]").forEach((button) => button.addEventListener("click", () => {
     pageState.dataCenterTab = button.dataset.connectionDataTab; render();
