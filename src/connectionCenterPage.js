@@ -741,7 +741,8 @@ function renderConnectionHospitalDetail(item) {
 function renderDetail() {
   const item = pageState.items.find((candidate) => candidate.id === pageState.selectedId)
     ?? pageState.myWorkbench.items.find((candidate) => candidate.id === pageState.selectedId)
-    ?? pageState.myLinkTable.items.find((candidate) => candidate.id === pageState.selectedId);
+    ?? pageState.myLinkTable.items.find((candidate) => candidate.id === pageState.selectedId)
+    ?? pageState.businessTable.items.find((candidate) => candidate.id === pageState.selectedId);
   if (!item) return "";
   const tabs = [["business", "经营概览"], ["diagnosis", "问题诊断"], ["sales", "销售分析"], ["inventory", "商品库存"], ["advanced", "高级信息"]];
   let body = "";
