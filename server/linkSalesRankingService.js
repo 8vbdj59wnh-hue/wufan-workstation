@@ -31,6 +31,16 @@ export function resolveLinkSalesRankingRange(input = {}) {
   return { preset, startDate, endDate };
 }
 
+export function resolveLinkSalesDateRanges(input = {}) {
+  const selected = resolveLinkSalesRankingRange(input);
+  return {
+    yesterday: defaultRange(1),
+    sevenDays: defaultRange(7),
+    thirtyDays: defaultRange(30),
+    selected,
+  };
+}
+
 export function getLinkSalesRanking(input = {}, userId = "", isAdmin = false) {
   const scope = text(input.scope || "mine");
   if (!allowedScopes.has(scope)) throw new Error("销售排行范围无效。");

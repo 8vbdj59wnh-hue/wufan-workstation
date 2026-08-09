@@ -105,19 +105,24 @@ function analyze(profile, snapshotRows, financeRows = []) {
     conversionChange, customerValueChange, healthScore, healthStatus: healthStatus(healthScore) };
 }
 
-export function listConnectionGrowthAnalyses() {
+function listConnectionGrowthAnalysesForIds(connectionIds = null) {
   const database = getDatabase();
+  const ids = connectionIds === null ? null : [...new Set(connectionIds.map(text).filter(Boolean))];
+  if (ids !== null && !ids.length) return [];
+  const profileWhere = ids === null ? "" : `WHERE c.id IN (${ids.map(() => "?").join(",")})`;
   const profiles = database.prepare(`
     SELECT c.id AS connectionId,c.salesLinkId,c.name,c.ownerId,c.status,s.platform,s.displayName AS shopDisplayName,s.shopName,
            COALESCE(p.name,'未分配') AS ownerName
     FROM connection_profiles c JOIN sales_links l ON l.id=c.salesLinkId JOIN sales_shops s ON s.id=l.shopId
-    LEFT JOIN persons p ON p.id=c.ownerId
-  `).all();
+    LEFT JOIN persons p ON p.id=c.ownerId ${profileWhere}
+  `).all(...(ids ?? []));
   if (!profiles.length) return [];
+  const salesLinkIds = profiles.map((item) => item.salesLinkId);
+  const salesLinkMarks = salesLinkIds.map(() => "?").join(",");
   const snapshots = database.prepare(`
     SELECT id,salesLinkId,periodStart,periodEnd,periodType,visitorCount,viewCount,cartCount,orderBuyerCount,payBuyerCount,conversionRate,payAmount,payQuantity
-    FROM connection_period_snapshots ORDER BY periodEnd DESC,periodStart DESC,createdAt DESC
-  `).all();
+    FROM connection_period_snapshots WHERE salesLinkId IN (${salesLinkMarks}) ORDER BY periodEnd DESC,periodStart DESC,createdAt DESC
+  `).all(...salesLinkIds);
   const bySalesLink = new Map();
   for (const row of snapshots) {
     const rows = bySalesLink.get(row.salesLinkId) ?? [];
@@ -125,7 +130,7 @@ export function listConnectionGrowthAnalyses() {
     bySalesLink.set(row.salesLinkId, rows);
   }
   const financeRows = database.prepare(`SELECT salesLinkId,businessDate,entryType,amount FROM finance_entries
-    WHERE salesLinkId IS NOT NULL AND status IN ('confirmed','approved')`).all();
+    WHERE salesLinkId IN (${salesLinkMarks}) AND status IN ('confirmed','approved')`).all(...salesLinkIds);
   const financeBySalesLink = new Map();
   for (const row of financeRows) {
     const rows = financeBySalesLink.get(row.salesLinkId) ?? [];
@@ -133,6 +138,14 @@ export function listConnectionGrowthAnalyses() {
     financeBySalesLink.set(row.salesLinkId, rows);
   }
   return profiles.map((profile) => analyze(profile, bySalesLink.get(profile.salesLinkId) ?? [], financeBySalesLink.get(profile.salesLinkId) ?? []));
+}
+
+export function listConnectionGrowthAnalyses() {
+  return listConnectionGrowthAnalysesForIds(null);
+}
+
+export function listConnectionGrowthAnalysesByConnectionIds(connectionIds = []) {
+  return listConnectionGrowthAnalysesForIds(connectionIds);
 }
 
 export function getConnectionGrowthAnalysis(connectionId) {

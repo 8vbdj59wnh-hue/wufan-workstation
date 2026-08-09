@@ -69,7 +69,7 @@ export function listConnectionProfiles() {
   return enrichConnectionRows(rows);
 }
 
-function changeDirection(analysis) {
+export function resolveConnectionGrowthDirection(analysis) {
   const changes = [analysis.salesGrowth, analysis.visitorGrowth, analysis.conversionChange, analysis.profitGrowth]
     .filter((item) => item !== null && item !== undefined).map(Number);
   const severeDecline = Number(analysis.salesGrowth) <= -0.2 || Number(analysis.visitorGrowth) <= -0.2
@@ -101,7 +101,7 @@ export function getMyConnectionWorkbench(userId, isAdmin = false, filter = "all"
     const combined = { ...analysis,
       salesGrowth: v3.salesGrowth ?? analysis.salesGrowth,
       profitGrowth: v3.profitGrowth ?? analysis.profitGrowth };
-    const trend = changeDirection(combined);
+    const trend = resolveConnectionGrowthDirection(combined);
     const followed = followedIds.has(profile.id);
     const riskPriority = trend === "worse"
       ? (Number(combined.salesGrowth) <= -0.2 || Number(analysis.visitorGrowth) <= -0.2 || Number(combined.profitGrowth) <= -0.2 ? 0 : 1)

@@ -1212,6 +1212,11 @@ export async function loadLinkSalesRanking(filters = {}) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/link-sales-ranking?${query}`), "链接销售额排行读取失败。");
 }
 
+export async function loadLinkDataTable(filters = {}) {
+  const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== "" && value !== undefined));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/link-data-table?${query}`), "链接经营数据读取失败。");
+}
+
 export async function loadLinkDataStatus() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/link-data-status`), "链接数据更新状态读取失败。");
 }

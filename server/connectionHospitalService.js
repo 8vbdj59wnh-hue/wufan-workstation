@@ -28,6 +28,30 @@ function analysisProblems(analysis) {
   return problems;
 }
 
+function resolveHospitalStage(improvement, diagnosisEntry) {
+  if (!improvement && diagnosisEntry) return "diagnosis";
+  if (["planned", "failed"].includes(improvement?.status)) return "diagnosis";
+  if (improvement?.status === "executing") return "treatment";
+  if (improvement?.status === "observing") return "observation";
+  return "none";
+}
+
+export function getConnectionHospitalStages(connectionIds = []) {
+  const ids = [...new Set(connectionIds.map((item) => String(item ?? "").trim()).filter(Boolean))];
+  if (!ids.length) return new Map();
+  const marks = ids.map(() => "?").join(",");
+  const database = getDatabase();
+  const entries = database.prepare(`SELECT connectionId FROM connection_diagnosis_entries
+    WHERE status='active' AND connectionId IN (${marks})`).all(...ids);
+  const entryIds = new Set(entries.map((item) => item.connectionId));
+  const improvements = database.prepare(`SELECT connectionId,status,updatedAt,createdAt FROM connection_improvements
+    WHERE connectionId IN (${marks}) AND status NOT IN ('effective','closed')
+    ORDER BY updatedAt DESC,createdAt DESC`).all(...ids);
+  const latestImprovement = new Map();
+  for (const item of improvements) if (!latestImprovement.has(item.connectionId)) latestImprovement.set(item.connectionId, item);
+  return new Map(ids.map((id) => [id, resolveHospitalStage(latestImprovement.get(id), entryIds.has(id) ? { connectionId: id } : null)]));
+}
+
 export function joinConnectionDiagnosis(connectionId, input = {}, userId, isAdmin = false) {
   const id = String(connectionId ?? "").trim(); const database = getDatabase();
   const analysis = listConnectionGrowthAnalyses().find((item) => item.connectionId === id);
@@ -85,9 +109,8 @@ export function getConnectionHospital(userId = "", isAdmin = true) {
     const entryProblems = diagnosisEntry ? parseJson(diagnosisEntry.anomalyReasonsJson) : [];
     const problems = entryProblems.length ? entryProblems : healthProblems.length ? healthProblems : analysisProblems(operatingAnalysis);
     if (!diagnosisEntry && !improvement) continue;
-    const stage = (!improvement && diagnosisEntry) || ["planned", "failed"].includes(improvement?.status) ? "diagnosis"
-      : improvement.status === "executing" ? "treatment" : improvement.status === "observing" ? "observation" : null;
-    if (!stage) continue;
+    const stage = resolveHospitalStage(improvement, diagnosisEntry);
+    if (stage === "none") continue;
     const suggestions = health ? parseJson(health.suggestionsJson) : [];
     result[stage].push({
       connectionId: analysis.connectionId, connectionName: analysis.name, ownerId: analysis.ownerId, ownerName: analysis.ownerName,

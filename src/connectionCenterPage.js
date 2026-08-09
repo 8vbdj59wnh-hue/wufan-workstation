@@ -44,6 +44,7 @@ import {
   loadConnectionCoreDetail,
   loadMyConnectionWorkbench,
   loadLinkSalesRanking,
+  loadLinkDataTable,
   loadLinkDataStatus,
   removeConnectionAction,
   ignoreConnectionImportRow,
@@ -68,6 +69,10 @@ import "./uiModules/myLinkSummary.js?v=20260809-my-link-workspace1";
 import "./uiModules/linkHospitalTodo.js?v=20260809-my-link-workspace1";
 import "./uiModules/linkList.js?v=20260809-my-link-workspace1";
 import "./uiModules/linkWorkspaceModules.js?v=20260809-link-workspace1";
+import "./uiModules/linkImage.js?v=20260809-link-data-table1";
+import "./uiModules/linkColumnSetting.js?v=20260809-link-data-table1";
+import "./uiModules/linkDataToolbar.js?v=20260809-link-data-table1";
+import { LINK_DATA_COLUMNS, DEFAULT_MINE_LINK_FIELDS } from "./uiModules/linkDataTable.js?v=20260809-link-data-table1";
 
 const pageState = {
   loaded: false,
@@ -101,6 +106,10 @@ const pageState = {
   section: "cockpit",
   dataCenterTab: "data-foundation",
   myWorkbench: { items: [], summary: { total: 0, better: 0, risk: 0, followed: 0 }, pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 }, serverPaged: true, filter: "all", search: "", isAdmin: false, loading: false, loaded: false },
+  myLinkTable: { items: [], pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 }, range: { preset: "7d", startDate: "", endDate: "" },
+    filters: { keyword: "", platform: "", shopId: "", archiveStatus: "" }, sort: { field: "default", direction: "desc" },
+    visibleFields: [...DEFAULT_MINE_LINK_FIELDS], fieldOrder: LINK_DATA_COLUMNS.map((item) => item.key), filterOptions: { platforms: [], shops: [] },
+    dataSource: {}, columnSettingOpen: false, loading: false, loaded: false },
   linkDataStatus: { data: null, loading: false, loaded: false, error: "" },
   salesRanking: { scope: "mine", range: { preset: "7d" }, items: [], summary: {}, loading: false, error: "" },
   hospital: { zones: { diagnosis: [], treatment: [], observation: [] }, counts: { diagnosis: 0, treatment: 0, observation: 0 }, stage: "diagnosis", loading: false },
@@ -125,6 +134,7 @@ let connectionListRequestId = 0;
 let connectionSearchTimer = 0;
 
 const listConfigKey = "connection-center-list-config-v2";
+const myLinkTableConfigKey = "my-link-data-table-config-v1";
 const listColumns = [
   { key: "image", label: "图片", sortable: false },
   { key: "name", label: "连接名称", sortable: true },
@@ -170,6 +180,33 @@ function saveListConfig() {
 }
 
 loadListConfig();
+
+function loadMyLinkTableConfig() {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(myLinkTableConfigKey) || "null");
+    if (!saved || typeof saved !== "object") return;
+    const valid = new Set(LINK_DATA_COLUMNS.map((item) => item.key));
+    if (Array.isArray(saved.fieldOrder)) {
+      const order = saved.fieldOrder.filter((key) => valid.has(key));
+      pageState.myLinkTable.fieldOrder = [...order, ...LINK_DATA_COLUMNS.map((item) => item.key).filter((key) => !order.includes(key))];
+    }
+    if (Array.isArray(saved.visibleFields)) {
+      const fields = saved.visibleFields.filter((key) => valid.has(key));
+      if (fields.length) pageState.myLinkTable.visibleFields = fields;
+    }
+  } catch {
+    // Invalid browser preferences fall back to the safe operating defaults.
+  }
+}
+
+function saveMyLinkTableConfig() {
+  window.localStorage.setItem(myLinkTableConfigKey, JSON.stringify({
+    fieldOrder: pageState.myLinkTable.fieldOrder,
+    visibleFields: pageState.myLinkTable.visibleFields,
+  }));
+}
+
+loadMyLinkTableConfig();
 
 function canManage() {
   return hasPermission(getCurrentUser(), "links.manage") || hasPermission(getCurrentUser(), "products.edit");
@@ -372,18 +409,10 @@ function renderMyLinksWorkbench() {
   const workbench = pageState.myWorkbench; const summary = workbench.summary ?? {};
   const stageText = { diagnosis: "待诊断", treatment: "治疗中", observation: "观察中" };
   const issues = ["diagnosis", "treatment", "observation"].flatMap((stage) => (pageState.hospital.zones?.[stage] ?? []).map((item) => ({ ...item, stage })));
-  const search = workbench.search.trim();
-  const filteredItems = workbench.items.filter((item) => matchesConnectionAssetSearch(item, search));
-  const page = workbench.pagination?.page || 1;
-  const totalPages = workbench.serverPaged ? (workbench.pagination?.totalPages || 1) : Math.max(1, Math.ceil(filteredItems.length / 50));
-  const visibleItems = workbench.serverPaged ? filteredItems : filteredItems.slice((page - 1) * 50, page * 50);
-  const issueCountByConnection = new Map();
-  issues.forEach((item) => issueCountByConnection.set(item.connectionId, Number(issueCountByConnection.get(item.connectionId) || 0) + 1));
-  const listItems = visibleItems.map((item) => { const trend = trendLabel(item); const anomalies = connectionAnomalies(item); const issueCount = issueCountByConnection.get(item.id) || anomalies.length;
-    return { id: item.id, imageHtml: imageHtml(item), name: item.name, goodsId: item.platformGoodsId, channel: `${item.platform} · ${shopName(item)}`,
-      yesterdaySales: item.yesterdaySalesAmount == null ? "暂无数据" : coreMoney(item.yesterdaySalesAmount), growth: growthText(item.salesGrowth), trendClass: trend.className,
-      health: item.healthScore == null ? healthText(item.healthStatus) : `${item.healthScore}分`, status: trend.text, issueText: issueCount ? `${issueCount} 项` : "无",
-      followed: item.followed, canJoinDiagnosis: canJoinDiagnosis(item) }; });
+  const table = pageState.myLinkTable;
+  const orderedColumns = table.fieldOrder.map((key) => LINK_DATA_COLUMNS.find((item) => item.key === key)).filter(Boolean);
+  const visibleFields = table.fieldOrder.filter((key) => table.visibleFields.includes(key));
+  const columnSetting = renderUiModule("link_column_setting", { columns: orderedColumns, visibleFields: table.visibleFields, open: table.columnSettingOpen });
   const pendingIssues = Object.values(pageState.hospital.counts || {}).reduce((total, value) => total + Number(value || 0), 0);
   return `<section class="my-links-workbench"><header><div><p class="eyebrow">MY LINK WORKSPACE</p><h2>我的链接</h2><p>关注销售贡献、经营风险与今天需要处理的问题。</p></div></header>
     ${renderUiModule("link_data_status", { state: pageState.linkDataStatus })}
@@ -392,7 +421,10 @@ function renderMyLinksWorkbench() {
       ${renderUiModule("link_sales_ranking", { state: pageState.salesRanking, canViewCompany: false, workbenchItems: workbench.items })}
       ${renderUiModule("link_hospital_todo", { items: issues.map((item) => ({ ...item, stageLabel: stageText[item.stage] })), counts: pageState.hospital.counts })}
     </div>
-    ${renderUiModule("link_list", { items: listItems, total: search ? filteredItems.length : (workbench.pagination?.total || filteredItems.length), page, totalPages, search, filter: workbench.filter, loading: workbench.loading })}
+    ${renderUiModule("link_data_toolbar", { keyword: table.filters.keyword, range: table.range, filters: table.filters,
+      platforms: table.filterOptions.platforms, shops: table.filterOptions.shops, columnSettingHtml: columnSetting, dataSource: table.dataSource })}
+    ${renderUiModule("link_data_table", { items: table.items.map((item) => ({ ...item, imageUrl: item.mainImage ? resolveAssetUrl(item.mainImage) : "" })),
+      pagination: table.pagination, fields: visibleFields, columns: orderedColumns, sort: table.sort, loading: table.loading, showOwner: false })}
   </section>`;
 }
 
@@ -661,7 +693,8 @@ function renderConnectionHospitalDetail(item) {
 
 function renderDetail() {
   const item = pageState.items.find((candidate) => candidate.id === pageState.selectedId)
-    ?? pageState.myWorkbench.items.find((candidate) => candidate.id === pageState.selectedId);
+    ?? pageState.myWorkbench.items.find((candidate) => candidate.id === pageState.selectedId)
+    ?? pageState.myLinkTable.items.find((candidate) => candidate.id === pageState.selectedId);
   if (!item) return "";
   const tabs = [["business", "经营概览"], ["diagnosis", "问题诊断"], ["sales", "销售分析"], ["inventory", "商品库存"], ["advanced", "高级信息"]];
   let body = "";
@@ -719,7 +752,8 @@ function renderBenchmarkModal() {
 function renderDiagnosisModal() {
   if (!pageState.diagnosisModalId) return "";
   const item = pageState.items.find((candidate) => candidate.id === pageState.diagnosisModalId)
-    ?? pageState.myWorkbench.items.find((candidate) => candidate.id === pageState.diagnosisModalId);
+    ?? pageState.myWorkbench.items.find((candidate) => candidate.id === pageState.diagnosisModalId)
+    ?? pageState.myLinkTable.items.find((candidate) => candidate.id === pageState.diagnosisModalId);
   if (!item) return "";
   const problems = connectionAnomalies(item);
   return `<div class="modal-backdrop" data-close-diagnosis-modal><section class="modal-panel connection-modal" role="dialog" aria-modal="true" aria-label="加入诊断区" data-diagnosis-modal><header><div><p class="eyebrow">人工确认经营异常</p><h2>加入诊断区</h2></div><button type="button" class="icon-button" data-close-diagnosis-modal aria-label="关闭">×</button></header><div class="diagnosis-confirm-summary"><strong>${escapeHtml(item.name)}</strong>${problems.map((problem) => `<span><b>${escapeHtml(problem.title)}</b>${escapeHtml(problem.value)}</span>`).join("")}</div><form data-diagnosis-confirm-form><label>诊断备注<textarea name="notes" rows="4" placeholder="说明为什么需要进入诊断，以及建议优先检查的方向"></textarea></label><p class="form-note">确认后只加入诊断区，不会自动创建关键行动或任务。</p><footer><button type="button" class="secondary-button" data-close-diagnosis-modal>取消</button><button type="submit" class="primary-button">确认加入诊断</button></footer></form></section></div>`;
@@ -802,16 +836,19 @@ async function loadHospital(render) {
 }
 
 async function loadMyLinks(render, filter = pageState.myWorkbench.filter) {
-  const filterChanged = filter !== pageState.myWorkbench.filter;
-  const page = filterChanged ? 1 : pageState.myWorkbench.pagination?.page || 1;
-  pageState.myWorkbench.loading = true; pageState.myWorkbench.filter = filter; pageState.myWorkbench.pagination.page = page; pageState.error = ""; render();
+  pageState.myWorkbench.loading = !pageState.myWorkbench.loaded; pageState.myLinkTable.loading = true; pageState.error = ""; render();
   try {
-    const result = await loadMyConnectionWorkbench(filter, page, 50, filter === "all" ? pageState.myWorkbench.search : "");
-    const serverPaged = Boolean(result.pagination);
-    const pagination = result.pagination || { page: 1, pageSize: 50, total: result.items?.length || 0, totalPages: Math.max(1, Math.ceil((result.items?.length || 0) / 50)) };
-    pageState.myWorkbench = { ...pageState.myWorkbench, ...result, filter, pagination, serverPaged, loading: false, loaded: true };
+    const table = pageState.myLinkTable;
+    const summaryPromise = pageState.myWorkbench.loaded ? Promise.resolve(null) : loadMyConnectionWorkbench("all", 1, 20, "");
+    const [summaryResult, tableResult] = await Promise.all([summaryPromise, loadLinkDataTable({ scope: "mine", page: table.pagination.page,
+      pageSize: table.pagination.pageSize, preset: table.range.preset, startDate: table.range.startDate, endDate: table.range.endDate,
+      keyword: table.filters.keyword, platform: table.filters.platform, shopId: table.filters.shopId, archiveStatus: table.filters.archiveStatus,
+      sortField: table.sort.field, sortDirection: table.sort.direction, fields: table.visibleFields.join(",") })]);
+    if (summaryResult) pageState.myWorkbench = { ...pageState.myWorkbench, ...summaryResult, loading: false, loaded: true };
+    pageState.myLinkTable = { ...pageState.myLinkTable, ...tableResult, loading: false, loaded: true,
+      range: { ...pageState.myLinkTable.range, ...tableResult.range }, pagination: tableResult.pagination || pageState.myLinkTable.pagination };
   }
-  catch (error) { pageState.error = error.message; pageState.myWorkbench.loading = false; }
+  catch (error) { pageState.error = error.message; pageState.myWorkbench.loading = false; pageState.myLinkTable.loading = false; }
   render();
 }
 
@@ -959,6 +996,7 @@ export function bindConnectionCenterPageEvents(render) {
     pageState.loaded = false;
     pageState.items = [];
     pageState.myWorkbench = { items: [], summary: { total: 0, better: 0, risk: 0, followed: 0 }, filter: "all", search: "", page: 1, pageSize: 20, isAdmin: false, loading: false, loaded: false };
+    pageState.myLinkTable = { ...pageState.myLinkTable, items: [], pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 }, loading: false, loaded: false };
     pageState.linkDataStatus = { data: null, loading: false, loaded: false, error: "" };
     pageState.selectedId = "";
     pageState.coreDetail = null;
@@ -1023,6 +1061,49 @@ export function bindConnectionCenterPageEvents(render) {
     catch (error) { pageState.error = error.message; render(); }
   });
   root.querySelectorAll("[data-my-link-filter]").forEach((button) => button.addEventListener("click", () => { void loadMyLinks(render, button.dataset.myLinkFilter); }));
+  root.querySelector("[data-link-data-toolbar]")?.addEventListener("submit", (event) => {
+    event.preventDefault(); const values = Object.fromEntries(new FormData(event.currentTarget));
+    pageState.myLinkTable.filters = { keyword: String(values.keyword || ""), platform: String(values.platform || ""),
+      shopId: String(values.shopId || ""), archiveStatus: String(values.archiveStatus || "") };
+    pageState.myLinkTable.range = { preset: String(values.preset || "7d"), startDate: String(values.startDate || ""), endDate: String(values.endDate || "") };
+    if (pageState.myLinkTable.range.preset === "custom" && !pageState.myLinkTable.visibleFields.includes("selectedSales")) pageState.myLinkTable.visibleFields.push("selectedSales");
+    pageState.myLinkTable.pagination.page = 1; void loadMyLinks(render);
+  });
+  root.querySelector('[data-link-data-toolbar] [name="preset"]')?.addEventListener("change", (event) => {
+    pageState.myLinkTable.range.preset = event.currentTarget.value; render();
+  });
+  root.querySelector("[data-clear-link-data-filters]")?.addEventListener("click", () => {
+    pageState.myLinkTable.filters = { keyword: "", platform: "", shopId: "", archiveStatus: "" };
+    pageState.myLinkTable.range = { preset: "7d", startDate: "", endDate: "" };
+    pageState.myLinkTable.pagination.page = 1; void loadMyLinks(render);
+  });
+  root.querySelectorAll("[data-link-table-sort]").forEach((button) => button.addEventListener("click", () => {
+    const field = button.dataset.linkTableSort; const current = pageState.myLinkTable.sort;
+    pageState.myLinkTable.sort = { field, direction: current.field === field && current.direction === "desc" ? "asc" : "desc" };
+    pageState.myLinkTable.pagination.page = 1; void loadMyLinks(render);
+  }));
+  root.querySelectorAll("[data-link-table-page]").forEach((button) => button.addEventListener("click", () => {
+    const page = Number(button.dataset.linkTablePage); if (page < 1 || page > pageState.myLinkTable.pagination.totalPages) return;
+    pageState.myLinkTable.pagination.page = page; void loadMyLinks(render);
+  }));
+  root.querySelectorAll("[data-link-table-field]").forEach((checkbox) => checkbox.addEventListener("change", () => {
+    const selected = [...root.querySelectorAll("[data-link-table-field]:checked")].map((item) => item.value);
+    if (!selected.length) { checkbox.checked = true; return; }
+    pageState.myLinkTable.visibleFields = selected; pageState.myLinkTable.columnSettingOpen = true; render();
+  }));
+  root.querySelectorAll("[data-move-link-field]").forEach((button) => button.addEventListener("click", () => {
+    const key = button.dataset.moveLinkField; const order = [...pageState.myLinkTable.fieldOrder]; const index = order.indexOf(key);
+    const next = button.dataset.direction === "up" ? index - 1 : index + 1;
+    if (index < 0 || next < 0 || next >= order.length) return;
+    [order[index], order[next]] = [order[next], order[index]]; pageState.myLinkTable.fieldOrder = order; pageState.myLinkTable.columnSettingOpen = true; render();
+  }));
+  root.querySelector(".link-column-setting-module")?.addEventListener("toggle", (event) => { pageState.myLinkTable.columnSettingOpen = event.currentTarget.open; });
+  root.querySelector("[data-save-link-fields]")?.addEventListener("click", () => { saveMyLinkTableConfig(); pageState.myLinkTable.columnSettingOpen = false; render(); });
+  root.querySelector("[data-reset-link-fields]")?.addEventListener("click", () => {
+    pageState.myLinkTable.visibleFields = [...DEFAULT_MINE_LINK_FIELDS]; pageState.myLinkTable.fieldOrder = LINK_DATA_COLUMNS.map((item) => item.key);
+    pageState.myLinkTable.columnSettingOpen = false; saveMyLinkTableConfig(); render();
+  });
+  root.querySelectorAll("[data-link-image]").forEach((image) => image.addEventListener("error", () => image.closest(".link-image-module")?.classList.add("is-error"), { once: true }));
   root.querySelector("[data-my-link-search]")?.addEventListener("submit", (event) => {
     event.preventDefault(); pageState.myWorkbench.search = String(new FormData(event.currentTarget).get("search") || ""); pageState.myWorkbench.pagination.page = 1;
     if (pageState.myWorkbench.filter === "all") void loadMyLinks(render, "all"); else render();
