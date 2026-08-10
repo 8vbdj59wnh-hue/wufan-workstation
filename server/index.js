@@ -94,7 +94,7 @@ import { commitSalesFactDataSync, previewSalesFactDataSync, readCurrentSalesFact
 import { commitSalesDailyFacts, previewSalesDailyFacts, readCurrentSalesDailyFactPreview, readSalesDailyFactPreview, recalculateSalesDailyFactPreview } from "./salesDailyFactPreviewService.js";
 import { confirmSalesRelationCandidate, confirmSalesRelationCandidates, querySalesRelationCandidates, readSalesRelationCandidate } from "./salesRelationCandidateService.js";
 import { confirmComboReviewGroup, generatePendingComboGroups, queryComboReviewAnomalyDates, queryComboReviewGroups, queryComboReviewSourceRows, readComboReviewGroup, saveComboReviewDraft, searchComboReviewErpSkus } from "./salesComboReviewService.js";
-import { confirmErpSkuUsageGovernance, queryErpSkuUsageGovernance, readErpSkuUsageGovernance } from "./erpSkuUsageGovernanceService.js";
+import { confirmErpSkuProductUsages, confirmErpSkuUsageGovernance, queryErpSkuProductUsageCandidates, queryErpSkuUsageGovernance, readErpSkuUsageGovernance } from "./erpSkuUsageGovernanceService.js";
 import { getConnectionDailySalesPerformance } from "./connectionDailySalesService.js";
 import { getProductDailySalesPerformance } from "./productDailySalesService.js";
 import { commitPlatformGoodsExcelDataSync, previewPlatformGoodsExcelDataSync, readPlatformGoodsExcelDataSyncPreview } from "./platformGoodsExcelDataSyncAdapter.js";
@@ -2661,6 +2661,16 @@ app.post("/api/connection-data-foundation/sales-daily/:id/confirm", requireLinkI
 app.get("/api/connection-data-foundation/erp-sku-usages", requireLinkManage, (request, response) => {
   try { response.json({ success: true, ...queryErpSkuUsageGovernance(request.query) }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "ERP SKU用途治理列表读取失败。" }); }
+});
+
+app.get("/api/connection-data-foundation/erp-sku-usage-candidates", requireLinkManage, (request, response) => {
+  try { response.json({ success: true, ...queryErpSkuProductUsageCandidates(request.query) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "ERP SKU商品用途候选读取失败。" }); }
+});
+
+app.post("/api/connection-data-foundation/erp-sku-usages/confirm-batch", requireLinkManage, (request, response) => {
+  try { response.json({ success: true, result: confirmErpSkuProductUsages(request.body, { reviewedBy: getUserPersonId(request.user) }) }); }
+  catch (error) { response.status(/不存在/.test(error.message || "") ? 404 : /冲突/.test(error.message || "") ? 409 : 400).json({ success: false, message: error.message || "ERP SKU商品用途批量确认失败。" }); }
 });
 
 app.get("/api/connection-data-foundation/erp-sku-usages/:id", requireLinkManage, (request, response) => {

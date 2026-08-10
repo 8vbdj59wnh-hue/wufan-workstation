@@ -1,5 +1,6 @@
 import { getDatabase } from "./db.js";
 import { confirmErpSkuBusinessUsage } from "./capabilities/resolveErpSkuBusinessUsage.js";
+import { queryErpSkuUsageCandidates } from "./capabilities/queryErpSkuUsageCandidates.js";
 
 const clean = (value) => String(value ?? "").trim();
 const parseJson = (value, fallback = {}) => { try { return JSON.parse(value || ""); } catch { return fallback; } };
@@ -194,4 +195,33 @@ export function confirmErpSkuUsageGovernance(erpSkuId, input = {}, context = {})
     decisionNote: input.decisionNote,
     reviewedBy: context.reviewedBy,
   }, { database: context.database || getDatabase() });
+}
+
+export function queryErpSkuProductUsageCandidates(options = {}, context = {}) {
+  return queryErpSkuUsageCandidates(options, { database: context.database || getDatabase() });
+}
+
+export function confirmErpSkuProductUsages(input = {}, context = {}) {
+  const database = context.database || getDatabase();
+  const reviewedBy = clean(context.reviewedBy);
+  const erpSkuIds = [...new Set((Array.isArray(input.erpSkuIds) ? input.erpSkuIds : []).map(clean).filter(Boolean))];
+  if (!erpSkuIds.length) throw new Error("请选择需要确认的ERP SKU。");
+  if (erpSkuIds.length > 100) throw new Error("单次最多确认100个ERP SKU。");
+  const decisionNote = clean(input.decisionNote);
+  if (!decisionNote) throw new Error("批量人工确认必须填写说明。");
+  const results = [];
+  for (const erpSkuId of erpSkuIds) {
+    try {
+      const result = confirmErpSkuBusinessUsage({ erpSkuId, usageType: "product", reviewedBy, decisionNote }, { database });
+      results.push({ erpSkuId, success: true, idempotent: result.idempotent, usageId: result.usage.id });
+    } catch (error) {
+      results.push({ erpSkuId, success: false, reason: error.message || "确认失败" });
+    }
+  }
+  return {
+    requestedCount: erpSkuIds.length,
+    successCount: results.filter((item) => item.success).length,
+    failedCount: results.filter((item) => !item.success).length,
+    results,
+  };
 }
