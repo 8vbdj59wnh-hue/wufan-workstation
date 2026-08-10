@@ -1392,6 +1392,308 @@ function migrateConnectionSkuSalesFactsV2() {
   `);
 }
 
+export function migrateConnectionSkuSalesDailyFactsV1() {
+  getDatabase().exec(`
+    CREATE TABLE IF NOT EXISTS connection_sku_sales_daily_facts (
+      id TEXT PRIMARY KEY,
+      salesLinkId TEXT NOT NULL,
+      salesLinkSkuId TEXT NOT NULL,
+      erpSkuId TEXT NOT NULL,
+      saleDate TEXT NOT NULL,
+      quantity REAL,
+      salesAmount REAL,
+      costAmount REAL,
+      profitAmount REAL,
+      incomeAmount REAL,
+      refundAmount REAL,
+      returnAmount REAL,
+      postageIncomeAmount REAL,
+      goodsCostAmount REAL,
+      returnCostAmount REAL,
+      postageCostAmount REAL,
+      otherAdjustmentAmount REAL,
+      feeAmount REAL,
+      receivedAmount REAL,
+      factType TEXT NOT NULL DEFAULT 'normal',
+      sourceBatchId TEXT NOT NULL,
+      sourceRowNumber INTEGER NOT NULL,
+      rawDataJson TEXT NOT NULL DEFAULT '{}',
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      FOREIGN KEY(salesLinkId) REFERENCES sales_links(id),
+      FOREIGN KEY(salesLinkSkuId) REFERENCES sales_link_skus(id),
+      FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),
+      FOREIGN KEY(sourceBatchId) REFERENCES connection_import_batches(id),
+      UNIQUE(salesLinkSkuId,erpSkuId,saleDate),
+      CHECK(factType IN ('normal','combo_component')),
+      CHECK(length(saleDate)=10 AND saleDate GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+      CHECK(sourceRowNumber > 0)
+    );
+    CREATE INDEX IF NOT EXISTS idx_connection_sku_sales_daily_link_date
+      ON connection_sku_sales_daily_facts(salesLinkId,saleDate);
+    CREATE INDEX IF NOT EXISTS idx_connection_sku_sales_daily_erp_date
+      ON connection_sku_sales_daily_facts(erpSkuId,saleDate);
+    CREATE INDEX IF NOT EXISTS idx_connection_sku_sales_daily_date
+      ON connection_sku_sales_daily_facts(saleDate);
+    CREATE INDEX IF NOT EXISTS idx_connection_sku_sales_daily_batch
+      ON connection_sku_sales_daily_facts(sourceBatchId);
+  `);
+}
+
+export function migrateSalesRelationCandidatesV1() {
+  getDatabase().exec(`
+    CREATE TABLE IF NOT EXISTS sales_link_sku_erp_mapping_candidates (
+      id TEXT PRIMARY KEY,
+      salesLinkSkuId TEXT NOT NULL,
+      erpSkuId TEXT NOT NULL,
+      candidateType TEXT NOT NULL,
+      suggestedQuantity REAL NOT NULL DEFAULT 1,
+      sourceType TEXT NOT NULL,
+      sourceBatchId TEXT NOT NULL,
+      sourceFileHash TEXT NOT NULL,
+      sourceRowNumber INTEGER NOT NULL,
+      evidenceJson TEXT NOT NULL DEFAULT '{}',
+      affectedRowCount INTEGER NOT NULL DEFAULT 0,
+      affectedDateStart TEXT,
+      affectedDateEnd TEXT,
+      salesAmount REAL,
+      profitAmount REAL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      reviewedBy TEXT,
+      reviewedAt TEXT,
+      decisionNote TEXT,
+      mappingId TEXT,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      FOREIGN KEY(salesLinkSkuId) REFERENCES sales_link_skus(id),
+      FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),
+      FOREIGN KEY(sourceBatchId) REFERENCES connection_import_batches(id),
+      FOREIGN KEY(reviewedBy) REFERENCES persons(id),
+      FOREIGN KEY(mappingId) REFERENCES sales_link_sku_erp_mappings(id),
+      UNIQUE(salesLinkSkuId,erpSkuId,sourceBatchId),
+      CHECK(candidateType IN ('single','combo')),
+      CHECK(status IN ('pending','approved','rejected','superseded','conflict')),
+      CHECK(suggestedQuantity > 0),
+      CHECK(sourceRowNumber > 0),
+      CHECK(affectedRowCount > 0)
+    );
+    CREATE INDEX IF NOT EXISTS idx_sales_relation_candidates_status_type
+      ON sales_link_sku_erp_mapping_candidates(status,candidateType,createdAt DESC);
+    CREATE INDEX IF NOT EXISTS idx_sales_relation_candidates_batch
+      ON sales_link_sku_erp_mapping_candidates(sourceBatchId,status);
+    CREATE INDEX IF NOT EXISTS idx_sales_relation_candidates_link_sku
+      ON sales_link_sku_erp_mapping_candidates(salesLinkSkuId,status);
+    CREATE INDEX IF NOT EXISTS idx_sales_relation_candidates_erp_sku
+      ON sales_link_sku_erp_mapping_candidates(erpSkuId,status);
+  `);
+}
+
+export function migrateSalesLinkSkuComboGroupsV1() {
+  const database = getDatabase();
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS sales_link_sku_combo_groups (
+      id TEXT PRIMARY KEY,
+      salesLinkSkuId TEXT NOT NULL,
+      groupCode TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL DEFAULT 'pending',
+      sourceType TEXT NOT NULL,
+      sourceBatchId TEXT,
+      sourceFileHash TEXT,
+      sourceCandidateIdsJson TEXT NOT NULL DEFAULT '[]',
+      reviewedBy TEXT,
+      reviewedAt TEXT,
+      reviewNote TEXT,
+      approvedAt TEXT,
+      invalidatedAt TEXT,
+      replacedGroupId TEXT,
+      createdBy TEXT,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      FOREIGN KEY(salesLinkSkuId) REFERENCES sales_link_skus(id),
+      FOREIGN KEY(sourceBatchId) REFERENCES connection_import_batches(id),
+      FOREIGN KEY(reviewedBy) REFERENCES persons(id),
+      FOREIGN KEY(replacedGroupId) REFERENCES sales_link_sku_combo_groups(id),
+      FOREIGN KEY(createdBy) REFERENCES persons(id),
+      CHECK(status IN ('pending','approved','rejected','inactive','conflict')),
+      CHECK(status <> 'approved' OR (reviewedBy IS NOT NULL AND reviewedAt IS NOT NULL AND approvedAt IS NOT NULL))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_link_sku_combo_groups_one_approved
+      ON sales_link_sku_combo_groups(salesLinkSkuId) WHERE status='approved';
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_link_sku_combo_groups_batch_sku
+      ON sales_link_sku_combo_groups(sourceBatchId,salesLinkSkuId) WHERE sourceBatchId IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_sales_link_sku_combo_groups_status_updated
+      ON sales_link_sku_combo_groups(status,updatedAt DESC);
+    CREATE INDEX IF NOT EXISTS idx_sales_link_sku_combo_groups_batch
+      ON sales_link_sku_combo_groups(sourceBatchId,status);
+
+    CREATE TABLE IF NOT EXISTS sales_link_sku_combo_group_components (
+      id TEXT PRIMARY KEY,
+      comboGroupId TEXT NOT NULL,
+      erpSkuId TEXT NOT NULL,
+      quantity REAL,
+      quantitySource TEXT,
+      sourceType TEXT NOT NULL DEFAULT 'sales_daily_preview',
+      sortOrder INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'included',
+      sourceCandidateId TEXT,
+      decisionNote TEXT,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      FOREIGN KEY(comboGroupId) REFERENCES sales_link_sku_combo_groups(id),
+      FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),
+      FOREIGN KEY(sourceCandidateId) REFERENCES sales_link_sku_erp_mapping_candidates(id),
+      UNIQUE(comboGroupId,erpSkuId),
+      CHECK(quantity IS NULL OR quantity > 0),
+      CHECK(quantitySource IS NULL OR quantitySource='manual_confirmation'),
+      CHECK(status IN ('included','excluded'))
+    );
+  `);
+  const componentColumns = database.prepare("PRAGMA table_info(sales_link_sku_combo_group_components)").all();
+  const quantityColumn = componentColumns.find((column) => column.name === "quantity");
+  const requiresComponentV11 = quantityColumn?.notnull === 1 || !componentColumns.some((column) => column.name === "quantitySource");
+  if (requiresComponentV11) {
+    database.pragma("foreign_keys = OFF");
+    try {
+      database.transaction(() => {
+        database.exec("DROP TRIGGER IF EXISTS trg_combo_component_approved_insert");
+        database.exec("DROP TRIGGER IF EXISTS trg_combo_component_approved_update");
+        database.exec("DROP TABLE IF EXISTS sales_link_sku_combo_group_components_v11");
+        database.exec(`
+          CREATE TABLE sales_link_sku_combo_group_components_v11 (
+            id TEXT PRIMARY KEY,
+            comboGroupId TEXT NOT NULL,
+            erpSkuId TEXT NOT NULL,
+            quantity REAL,
+            quantitySource TEXT,
+            sourceType TEXT NOT NULL DEFAULT 'sales_daily_preview',
+            sortOrder INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'included',
+            sourceCandidateId TEXT,
+            decisionNote TEXT,
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL,
+            FOREIGN KEY(comboGroupId) REFERENCES sales_link_sku_combo_groups(id),
+            FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),
+            FOREIGN KEY(sourceCandidateId) REFERENCES sales_link_sku_erp_mapping_candidates(id),
+            UNIQUE(comboGroupId,erpSkuId),
+            CHECK(quantity IS NULL OR quantity > 0),
+            CHECK(quantitySource IS NULL OR quantitySource='manual_confirmation'),
+            CHECK(status IN ('included','excluded'))
+          );
+          INSERT INTO sales_link_sku_combo_group_components_v11
+            (id,comboGroupId,erpSkuId,quantity,quantitySource,sourceType,sortOrder,status,sourceCandidateId,decisionNote,createdAt,updatedAt)
+          SELECT id,comboGroupId,erpSkuId,quantity,NULL,'sales_daily_preview',sortOrder,status,sourceCandidateId,decisionNote,createdAt,updatedAt
+          FROM sales_link_sku_combo_group_components;
+          DROP TABLE sales_link_sku_combo_group_components;
+          ALTER TABLE sales_link_sku_combo_group_components_v11 RENAME TO sales_link_sku_combo_group_components;
+        `);
+      })();
+    } finally {
+      database.pragma("foreign_keys = ON");
+    }
+  }
+  ensureColumn("sales_link_sku_combo_group_components", "sourceType", "TEXT NOT NULL DEFAULT 'sales_daily_preview'");
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_sales_link_sku_combo_components_group_order
+      ON sales_link_sku_combo_group_components(comboGroupId,status,sortOrder,id);
+    CREATE INDEX IF NOT EXISTS idx_sales_link_sku_combo_components_erp
+      ON sales_link_sku_combo_group_components(erpSkuId,status);
+    CREATE TRIGGER IF NOT EXISTS trg_combo_component_approved_insert
+      BEFORE INSERT ON sales_link_sku_combo_group_components
+      WHEN NEW.status='included'
+        AND EXISTS (SELECT 1 FROM sales_link_sku_combo_groups g WHERE g.id=NEW.comboGroupId AND g.status='approved')
+        AND (NEW.quantity IS NULL OR COALESCE(NEW.quantitySource,'')<>'manual_confirmation')
+      BEGIN
+        SELECT RAISE(ABORT,'approved combo group requires manually confirmed component quantity');
+      END;
+    CREATE TRIGGER IF NOT EXISTS trg_combo_component_approved_update
+      BEFORE UPDATE ON sales_link_sku_combo_group_components
+      WHEN NEW.status='included'
+        AND EXISTS (SELECT 1 FROM sales_link_sku_combo_groups g WHERE g.id=NEW.comboGroupId AND g.status='approved')
+        AND (NEW.quantity IS NULL OR COALESCE(NEW.quantitySource,'')<>'manual_confirmation')
+      BEGIN
+        SELECT RAISE(ABORT,'approved combo group requires manually confirmed component quantity');
+      END;
+    CREATE TRIGGER IF NOT EXISTS trg_combo_group_approval_insert
+      BEFORE INSERT ON sales_link_sku_combo_groups
+      WHEN NEW.status='approved'
+        AND (
+          NOT EXISTS (SELECT 1 FROM sales_link_sku_combo_group_components c WHERE c.comboGroupId=NEW.id AND c.status='included')
+          OR EXISTS (SELECT 1 FROM sales_link_sku_combo_group_components c WHERE c.comboGroupId=NEW.id AND c.status='included' AND (c.quantity IS NULL OR COALESCE(c.quantitySource,'')<>'manual_confirmation'))
+        )
+      BEGIN
+        SELECT RAISE(ABORT,'combo group cannot be approved before all included quantities are manually confirmed');
+      END;
+    CREATE TRIGGER IF NOT EXISTS trg_combo_group_approval_update
+      BEFORE UPDATE OF status ON sales_link_sku_combo_groups
+      WHEN NEW.status='approved'
+        AND (
+          NOT EXISTS (SELECT 1 FROM sales_link_sku_combo_group_components c WHERE c.comboGroupId=NEW.id AND c.status='included')
+          OR EXISTS (SELECT 1 FROM sales_link_sku_combo_group_components c WHERE c.comboGroupId=NEW.id AND c.status='included' AND (c.quantity IS NULL OR COALESCE(c.quantitySource,'')<>'manual_confirmation'))
+        )
+      BEGIN
+        SELECT RAISE(ABORT,'combo group cannot be approved before all included quantities are manually confirmed');
+      END;
+  `);
+  ensureColumn("sales_link_sku_erp_mappings", "comboGroupId", "TEXT REFERENCES sales_link_sku_combo_groups(id)");
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_sales_link_sku_erp_mapping_combo_group
+      ON sales_link_sku_erp_mappings(comboGroupId) WHERE comboGroupId IS NOT NULL;
+  `);
+}
+
+export function migrateErpSkuBusinessUsagesV1() {
+  const database = getDatabase();
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS erp_sku_business_usages (
+      id TEXT PRIMARY KEY,
+      erpSkuId TEXT NOT NULL,
+      usageType TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'proposed',
+      sourceType TEXT NOT NULL,
+      reviewedBy TEXT,
+      reviewedAt TEXT,
+      decisionNote TEXT,
+      supersedesUsageId TEXT,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),
+      FOREIGN KEY(reviewedBy) REFERENCES persons(id),
+      FOREIGN KEY(supersedesUsageId) REFERENCES erp_sku_business_usages(id),
+      CHECK(usageType IN ('product','accounting_auxiliary','shipping_adjustment','other_adjustment')),
+      CHECK(status IN ('proposed','active','inactive','superseded','conflict')),
+      CHECK(sourceType IN ('manual_confirmation','system_suggestion','system_migration','erp_import')),
+      CHECK(status <> 'active' OR (reviewedBy IS NOT NULL AND reviewedAt IS NOT NULL))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_erp_sku_business_usages_one_active
+      ON erp_sku_business_usages(erpSkuId) WHERE status='active';
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_erp_sku_business_usages_open_suggestion
+      ON erp_sku_business_usages(erpSkuId,usageType,sourceType) WHERE status='proposed';
+    CREATE INDEX IF NOT EXISTS idx_erp_sku_business_usages_status_updated
+      ON erp_sku_business_usages(status,updatedAt DESC);
+    CREATE TRIGGER IF NOT EXISTS trg_erp_sku_usage_supersedes_insert
+      BEFORE INSERT ON erp_sku_business_usages
+      WHEN NEW.supersedesUsageId IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM erp_sku_business_usages previous
+          WHERE previous.id=NEW.supersedesUsageId AND previous.erpSkuId=NEW.erpSkuId
+        )
+      BEGIN
+        SELECT RAISE(ABORT,'superseded ERP SKU usage must belong to the same ERP SKU');
+      END;
+    CREATE TRIGGER IF NOT EXISTS trg_erp_sku_usage_supersedes_update
+      BEFORE UPDATE OF supersedesUsageId,erpSkuId ON erp_sku_business_usages
+      WHEN NEW.supersedesUsageId IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM erp_sku_business_usages previous
+          WHERE previous.id=NEW.supersedesUsageId AND previous.erpSkuId=NEW.erpSkuId
+        )
+      BEGIN
+        SELECT RAISE(ABORT,'superseded ERP SKU usage must belong to the same ERP SKU');
+      END;
+  `);
+}
+
 function backfillConnectionProfileOrigins() {
   const database = getDatabase();
   database.exec(`
@@ -1983,6 +2285,10 @@ function runLightweightMigrations() {
   migrateProductErpMappingsV2();
   migrateSalesLinkSkuErpRelationsV2();
   migrateConnectionSkuSalesFactsV2();
+  migrateConnectionSkuSalesDailyFactsV1();
+  migrateSalesRelationCandidatesV1();
+  migrateSalesLinkSkuComboGroupsV1();
+  migrateErpSkuBusinessUsagesV1();
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS platform_link_shop_mappings (
       id TEXT PRIMARY KEY,

@@ -1086,6 +1086,14 @@ export async function loadProductManagementDetail(productId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}`), "产品经营详情读取失败。");
 }
 
+export async function loadProductDailySales(productId, range = {}) {
+  const query = new URLSearchParams();
+  if (range.startDate) query.set("startDate", range.startDate);
+  if (range.endDate) query.set("endDate", range.endDate);
+  const suffix = query.toString() ? `?${query}` : "";
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}/daily-sales${suffix}`), "产品销售日报读取失败。");
+}
+
 export async function changeProductLifecycle(productId, payload) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}/lifecycle`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
@@ -1199,6 +1207,14 @@ export async function cancelConnectionOwnerImport(batchId) {
 
 export async function loadConnectionCoreDetail(connectionId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/core-detail`), "链接经营详情读取失败。");
+}
+
+export async function loadConnectionDailySales(connectionId, range = {}) {
+  const query = new URLSearchParams();
+  if (range.startDate) query.set("startDate", range.startDate);
+  if (range.endDate) query.set("endDate", range.endDate);
+  const suffix = query.toString() ? `?${query}` : "";
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/daily-sales${suffix}`), "链接销售日报读取失败。");
 }
 
 export async function loadMyConnectionWorkbench(filter = "all", page = 1, pageSize = 50, keyword = "") {
@@ -1369,6 +1385,111 @@ export async function loadCurrentConnectionSalesFactImport() {
 
 export async function confirmConnectionSalesFactImport(batchId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-facts/${encodeURIComponent(batchId)}/confirm`, { method: "POST" }), "链接利润表确认导入失败。");
+}
+
+export async function previewConnectionSalesDailyImport(file) {
+  if (!(file instanceof File) || !file.size) throw new Error("请先选择销售日报Excel文件。");
+  if (!/\.xlsx?$/i.test(file.name)) throw new Error("文件格式不支持，请选择 .xls 或 .xlsx 文件。");
+  const form = new FormData(); form.append("file", file);
+  const response = await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-daily/preview`, { method: "POST", body: form });
+  return { ...await readApiJson(response, "销售日报预览失败。"), httpStatus: response.status };
+}
+
+export async function loadCurrentConnectionSalesDailyImport() {
+  const result = await readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-daily/current?category=ready&pageSize=50`), "最近销售日报预览读取失败。");
+  return result.preview ?? null;
+}
+
+export async function loadConnectionSalesDailyPreview(batchId, options = {}) {
+  const query = new URLSearchParams();
+  if (options.category) query.set("category", options.category);
+  if (options.page) query.set("page", String(options.page));
+  if (options.pageSize) query.set("pageSize", String(options.pageSize));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-daily/${encodeURIComponent(batchId)}?${query}`), "销售日报预览明细读取失败。");
+}
+
+export async function recalculateConnectionSalesDailyPreview(batchId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-daily/${encodeURIComponent(batchId)}/recalculate`, { method: "POST" }), "销售日报预览重新计算失败。");
+}
+
+export async function confirmConnectionSalesDailyFacts(batchId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-daily/${encodeURIComponent(batchId)}/confirm`, { method: "POST" }), "销售日报事实写入失败。");
+}
+
+export async function loadErpSkuUsageGovernance(options = {}) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(options)) if (value !== undefined && value !== null && String(value) !== "") query.set(key, String(value));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/erp-sku-usages?${query}`), "ERP SKU用途治理列表读取失败。");
+}
+
+export async function loadErpSkuUsageGovernanceDetail(erpSkuId, options = {}) {
+  const query = new URLSearchParams();
+  if (options.page) query.set("page", String(options.page));
+  if (options.pageSize) query.set("pageSize", String(options.pageSize));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/erp-sku-usages/${encodeURIComponent(erpSkuId)}?${query}`), "ERP SKU用途治理详情读取失败。");
+}
+
+export async function confirmErpSkuUsage(erpSkuId, input) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/erp-sku-usages/${encodeURIComponent(erpSkuId)}/confirm`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
+  }), "ERP SKU用途确认失败。");
+}
+
+export async function loadSalesRelationCandidates(options = {}) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(options)) if (value !== undefined && value !== null && String(value) !== "") query.set(key, String(value));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-relation-candidates?${query}`), "销售关系候选读取失败。");
+}
+
+export async function loadSalesRelationCandidateDetail(candidateId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-relation-candidates/${encodeURIComponent(candidateId)}`), "销售关系候选详情读取失败。");
+}
+
+export async function confirmSalesRelationCandidate(candidateId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-relation-candidates/${encodeURIComponent(candidateId)}/confirm`, { method: "POST" }), "销售单品关系确认失败。");
+}
+
+export async function confirmSalesRelationCandidateBatch(candidateIds) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-relation-candidates/confirm-batch`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ candidateIds }) }), "销售单品关系批量确认失败。");
+}
+
+export async function generatePendingComboReviews(sourceBatchId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/combo-reviews/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sourceBatchId }) }), "Combo审核草稿生成失败。");
+}
+
+export async function loadComboReviews(options = {}) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(options)) if (value !== undefined && value !== null && String(value) !== "") query.set(key, String(value));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/combo-reviews?${query}`), "Combo审核列表读取失败。");
+}
+
+export async function loadComboReviewDetail(groupId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/combo-reviews/${encodeURIComponent(groupId)}`), "Combo审核详情读取失败。");
+}
+
+export async function searchComboReviewErpSkus(keyword) {
+  const query = new URLSearchParams({ keyword: String(keyword || "") });
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/combo-reviews/erp-skus/search?${query}`), "ERP SKU搜索失败。");
+}
+
+export async function saveComboReviewDraft(groupId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/combo-reviews/${encodeURIComponent(groupId)}/draft`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "Combo审核草稿保存失败。");
+}
+
+export async function confirmComboReviewGroup(groupId, reviewNote = "") {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/combo-reviews/${encodeURIComponent(groupId)}/confirm`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reviewNote }) }), "Combo整组确认失败。");
+}
+
+export async function loadComboReviewAnomalyDates(groupId, options = {}) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(options)) if (value !== undefined && value !== null && String(value) !== "") query.set(key, String(value));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/combo-reviews/${encodeURIComponent(groupId)}/anomaly-dates?${query}`), "Combo异常日期读取失败。");
+}
+
+export async function loadComboReviewSourceRows(groupId, options = {}) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(options)) if (value !== undefined && value !== null && String(value) !== "") query.set(key, String(value));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/combo-reviews/${encodeURIComponent(groupId)}/source-rows?${query}`), "Combo来源记录读取失败。");
 }
 
 export async function previewPlatformLinkShopMappingImport(file) {

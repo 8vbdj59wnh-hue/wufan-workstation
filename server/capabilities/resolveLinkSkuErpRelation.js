@@ -1,0 +1,360 @@
+import { getDatabase } from "../db.js";
+
+const CAPABILITY = "ResolveLinkSkuErpRelation";
+const CONTRACT_VERSION = "1.0";
+
+function clean(value) {
+  return String(value ?? "").trim();
+}
+
+function conflict(code, message, details = {}) {
+  return { code, severity: "blocking", message, ...details };
+}
+
+function baseResult(salesLinkSkuId = null) {
+  return {
+    capability: CAPABILITY,
+    contractVersion: CONTRACT_VERSION,
+    salesLinkSkuId,
+    salesLinkId: null,
+    relationStatus: "missing",
+    relationshipShape: null,
+    isComplete: false,
+    isUsable: false,
+    mappings: [],
+    combo: null,
+    relationSources: [],
+    relationshipEvidence: [],
+    governance: {
+      hasPendingCandidate: false,
+      pendingCandidateCount: 0,
+      pendingCandidateTypes: [],
+      hasPendingComboGroup: false,
+      pendingComboGroupCount: 0,
+      requiresReview: false,
+    },
+    conflicts: [],
+    warnings: [],
+  };
+}
+
+function shapeFor(mappings) {
+  if (!mappings.length) return null;
+  if (mappings.length > 1) return "multi_component";
+  return Number(mappings[0].quantity) === 1 ? "single_unit" : "single_multi_quantity";
+}
+
+function mappingOutput(row) {
+  return {
+    mappingId: row.mappingId,
+    erpSkuId: row.erpSkuId,
+    quantity: row.quantity,
+    mappingType: row.mappingType,
+    sourceType: row.sourceType,
+    sourceBatchId: row.sourceBatchId ?? null,
+    currentState: row.currentState,
+    comboGroupId: row.comboGroupId ?? null,
+  };
+}
+
+function readGovernance(candidates, pendingGroups) {
+  const pendingCandidateCount = candidates.reduce((total, row) => total + Number(row.count || 0), 0);
+  return {
+    hasPendingCandidate: pendingCandidateCount > 0,
+    pendingCandidateCount,
+    pendingCandidateTypes: candidates.map((row) => row.candidateType),
+    hasPendingComboGroup: pendingGroups.length > 0,
+    pendingComboGroupCount: pendingGroups.length,
+    requiresReview: pendingCandidateCount > 0 || pendingGroups.length > 0,
+  };
+}
+
+function appendBy(map, key, value) {
+  if (!map.has(key)) map.set(key, []);
+  map.get(key).push(value);
+}
+
+function placeholders(values) {
+  return values.map(() => "?").join(",");
+}
+
+function loadRelationData(database, salesLinkSkuIds, onQuery = null) {
+  const queryAll = (sql, params = []) => {
+    onQuery?.(sql, params);
+    return database.prepare(sql).all(...params);
+  };
+  const empty = {
+    linkSkusById: new Map(), mappingsBySkuId: new Map(), groupsById: new Map(),
+    groupsBySkuId: new Map(), componentsByGroupId: new Map(), candidatesBySkuId: new Map(),
+  };
+  if (!salesLinkSkuIds.length) return empty;
+
+  const idsSql = placeholders(salesLinkSkuIds);
+  const linkSkus = queryAll(`SELECT id,salesLinkId FROM sales_link_skus WHERE id IN (${idsSql})`, salesLinkSkuIds);
+  const mappings = queryAll(`
+    SELECT id mappingId,salesLinkSkuId,erpSkuId,quantity,mappingType,sourceType,sourceBatchId,currentState,comboGroupId
+    FROM sales_link_sku_erp_mappings
+    WHERE salesLinkSkuId IN (${idsSql}) AND currentState='active'
+  `, salesLinkSkuIds);
+
+  const erpSkuIds = [...new Set(mappings.map((row) => clean(row.erpSkuId)).filter(Boolean))];
+  const erpSkus = erpSkuIds.length
+    ? queryAll(`SELECT id,currentState FROM erp_skus WHERE id IN (${placeholders(erpSkuIds)})`, erpSkuIds)
+    : [];
+  const erpSkusById = new Map(erpSkus.map((row) => [row.id, row]));
+  const enrichedMappings = mappings.map((row) => ({
+    ...row,
+    existingErpSkuId: erpSkusById.get(row.erpSkuId)?.id ?? null,
+    erpSkuCurrentState: erpSkusById.get(row.erpSkuId)?.currentState ?? null,
+  }));
+
+  const mappingGroupIds = [...new Set(mappings.map((row) => clean(row.comboGroupId)).filter(Boolean))];
+  const groupConditions = [`salesLinkSkuId IN (${idsSql})`];
+  const groupParams = [...salesLinkSkuIds];
+  if (mappingGroupIds.length) {
+    groupConditions.push(`id IN (${placeholders(mappingGroupIds)})`);
+    groupParams.push(...mappingGroupIds);
+  }
+  const groups = queryAll(`SELECT * FROM sales_link_sku_combo_groups WHERE ${groupConditions.join(" OR ")}`, groupParams);
+  const groupIds = [...new Set(groups.map((row) => row.id))];
+  const components = groupIds.length
+    ? queryAll(`SELECT * FROM sales_link_sku_combo_group_components WHERE comboGroupId IN (${placeholders(groupIds)})`, groupIds)
+    : [];
+  const candidates = queryAll(`
+    SELECT salesLinkSkuId,candidateType,COUNT(*) count
+    FROM sales_link_sku_erp_mapping_candidates
+    WHERE salesLinkSkuId IN (${idsSql}) AND status='pending'
+    GROUP BY salesLinkSkuId,candidateType
+  `, salesLinkSkuIds);
+
+  const loaded = {
+    linkSkusById: new Map(linkSkus.map((row) => [row.id, row])),
+    mappingsBySkuId: new Map(), groupsById: new Map(groups.map((row) => [row.id, row])),
+    groupsBySkuId: new Map(), componentsByGroupId: new Map(), candidatesBySkuId: new Map(),
+  };
+  for (const row of enrichedMappings) appendBy(loaded.mappingsBySkuId, row.salesLinkSkuId, row);
+  for (const row of groups) appendBy(loaded.groupsBySkuId, row.salesLinkSkuId, row);
+  for (const row of components) appendBy(loaded.componentsByGroupId, row.comboGroupId, row);
+  for (const row of candidates) appendBy(loaded.candidatesBySkuId, row.salesLinkSkuId, row);
+  for (const rows of loaded.groupsBySkuId.values()) rows.sort((a, b) => clean(a.approvedAt).localeCompare(clean(b.approvedAt)) || a.id.localeCompare(b.id));
+  for (const rows of loaded.componentsByGroupId.values()) rows.sort((a, b) => Number(a.sortOrder) - Number(b.sortOrder) || a.erpSkuId.localeCompare(b.erpSkuId) || a.id.localeCompare(b.id));
+  for (const rows of loaded.candidatesBySkuId.values()) rows.sort((a, b) => a.candidateType.localeCompare(b.candidateType));
+  const componentSortOrder = new Map();
+  for (const [groupId, rows] of loaded.componentsByGroupId) {
+    for (const row of rows) componentSortOrder.set(`${groupId}|${row.erpSkuId}`, Number(row.sortOrder));
+  }
+  for (const rows of loaded.mappingsBySkuId.values()) rows.sort((a, b) => {
+    const aOrder = componentSortOrder.get(`${a.comboGroupId}|${a.erpSkuId}`) ?? Number.MAX_SAFE_INTEGER;
+    const bOrder = componentSortOrder.get(`${b.comboGroupId}|${b.erpSkuId}`) ?? Number.MAX_SAFE_INTEGER;
+    return aOrder - bOrder || a.erpSkuId.localeCompare(b.erpSkuId) || a.mappingId.localeCompare(b.mappingId);
+  });
+  return loaded;
+}
+
+function evidenceFor(mappings, groupsById) {
+  const grouped = new Map();
+  for (const mapping of mappings) {
+    const key = [mapping.sourceType, mapping.sourceBatchId || "", mapping.comboGroupId || ""].join("|");
+    if (!grouped.has(key)) {
+      const group = mapping.comboGroupId ? groupsById.get(mapping.comboGroupId) : null;
+      grouped.set(key, {
+        sourceType: mapping.sourceType,
+        sourceBatchId: mapping.sourceBatchId ?? null,
+        mappingIds: [],
+        comboGroupId: mapping.comboGroupId ?? null,
+        reviewedBy: group?.reviewedBy ?? null,
+        reviewedAt: group?.reviewedAt ?? null,
+      });
+    }
+    grouped.get(key).mappingIds.push(mapping.mappingId);
+  }
+  return [...grouped.values()].map((item) => ({ ...item, mappingIds: item.mappingIds.sort() }));
+}
+
+function compareComboSet(mappings, components) {
+  const included = components.filter((item) => item.status === "included");
+  if (included.length !== mappings.length) return false;
+  const mappingByErpSkuId = new Map(mappings.map((item) => [item.erpSkuId, item]));
+  return included.every((component) => {
+    const mapping = mappingByErpSkuId.get(component.erpSkuId);
+    return mapping
+      && Number(mapping.quantity) === Number(component.quantity)
+      && component.quantity !== null
+      && component.quantitySource === "manual_confirmation";
+  });
+}
+
+function resolveLoadedRelation(salesLinkSkuId, loaded) {
+  const result = baseResult(salesLinkSkuId || null);
+  const linkSku = loaded.linkSkusById.get(salesLinkSkuId);
+  if (!linkSku) return { ...result, relationStatus: "not_found" };
+
+  result.salesLinkId = linkSku.salesLinkId;
+  const groupsForSku = loaded.groupsBySkuId.get(salesLinkSkuId) || [];
+  result.governance = readGovernance(
+    loaded.candidatesBySkuId.get(salesLinkSkuId) || [],
+    groupsForSku.filter((group) => group.status === "pending"),
+  );
+
+  const rows = loaded.mappingsBySkuId.get(salesLinkSkuId) || [];
+  result.mappings = rows.map(mappingOutput);
+  result.relationshipShape = shapeFor(rows);
+  result.relationSources = [...new Set(rows.map((row) => row.sourceType).filter(Boolean))].sort();
+
+  if (!rows.length) {
+    result.relationStatus = result.governance.requiresReview ? "pending" : "missing";
+    return result;
+  }
+
+  const erpCounts = new Map();
+  for (const row of rows) erpCounts.set(row.erpSkuId, (erpCounts.get(row.erpSkuId) || 0) + 1);
+  const duplicates = [...erpCounts].filter(([, count]) => count > 1).map(([erpSkuId]) => erpSkuId);
+  if (duplicates.length) result.conflicts.push(conflict(
+    "duplicate_active_erp_mapping",
+    "同一链接SKU与ERP SKU存在重复active关系。",
+    { erpSkuIds: duplicates },
+  ));
+
+  const missingErpSkuIds = rows.filter((row) => !row.existingErpSkuId).map((row) => row.erpSkuId);
+  if (missingErpSkuIds.length) result.conflicts.push(conflict(
+    "erp_sku_missing",
+    "正式关系引用的ERP SKU不存在。",
+    { erpSkuIds: [...new Set(missingErpSkuIds)] },
+  ));
+
+  const invalidMappingIds = rows
+    .filter((row) => row.quantity === null || !Number.isFinite(Number(row.quantity)) || Number(row.quantity) <= 0)
+    .map((row) => row.mappingId);
+  if (invalidMappingIds.length) {
+    result.relationshipShape = "unknown";
+    result.conflicts.push(conflict(
+      "invalid_quantity",
+      "正式关系存在无效组件数量。",
+      { mappingIds: invalidMappingIds },
+    ));
+  }
+
+  const inactiveErpSkuIds = rows
+    .filter((row) => row.existingErpSkuId && row.erpSkuCurrentState !== "active")
+    .map((row) => row.erpSkuId);
+  if (inactiveErpSkuIds.length) result.conflicts.push(conflict(
+    "erp_sku_inactive",
+    "正式关系引用的ERP SKU当前不可用。",
+    { erpSkuIds: [...new Set(inactiveErpSkuIds)] },
+  ));
+
+  const approvedGroups = groupsForSku.filter((group) => group.status === "approved");
+  if (approvedGroups.length > 1) result.conflicts.push(conflict(
+    "multiple_approved_combo_groups",
+    "同一链接SKU存在多个approved Combo Group。",
+    { comboGroupIds: approvedGroups.map((group) => group.id) },
+  ));
+
+  const mappingGroupIds = [...new Set(rows.map((row) => clean(row.comboGroupId)).filter(Boolean))];
+  const relevantGroupIds = [...new Set([...mappingGroupIds, ...approvedGroups.map((group) => group.id)])];
+  const groups = relevantGroupIds.map((id) => loaded.groupsById.get(id)).filter(Boolean);
+  const groupsById = new Map(groups.map((group) => [group.id, group]));
+  const componentsByGroupId = new Map();
+  for (const groupId of relevantGroupIds) componentsByGroupId.set(groupId, loaded.componentsByGroupId.get(groupId) || []);
+
+  if (rows.length === 1) {
+    const row = rows[0];
+    if (row.mappingType === "combo" || mappingGroupIds.length || approvedGroups.length) {
+      result.conflicts.push(conflict(
+        "single_combo_active_conflict",
+        "单组件active关系与Combo关系定义同时存在。",
+        { mappingIds: [row.mappingId], comboGroupIds: relevantGroupIds },
+      ));
+    }
+  } else {
+    const hasSingle = rows.some((row) => row.mappingType === "single");
+    const hasCombo = rows.some((row) => row.mappingType === "combo");
+    if (hasSingle && hasCombo) result.conflicts.push(conflict(
+      "single_combo_active_conflict",
+      "同一链接SKU同时存在active single与combo关系。",
+      { mappingIds: rows.map((row) => row.mappingId) },
+    ));
+    if (hasSingle || !hasCombo) result.conflicts.push(conflict(
+      "mapping_type_shape_mismatch",
+      "多ERP组件关系的mappingType与实际关系形态不一致。",
+      { mappingIds: rows.map((row) => row.mappingId) },
+    ));
+
+    if (mappingGroupIds.length !== 1) result.conflicts.push(conflict(
+      "combo_group_incomplete",
+      "多组件关系没有统一指向一个Combo Group。",
+      { comboGroupIds: mappingGroupIds },
+    ));
+    const groupId = mappingGroupIds.length === 1 ? mappingGroupIds[0] : null;
+    const group = groupId ? groupsById.get(groupId) : null;
+    if (groupId && (!group || group.salesLinkSkuId !== salesLinkSkuId || group.status !== "approved")) {
+      result.conflicts.push(conflict(
+        "combo_group_incomplete",
+        "多组件关系缺少当前链接SKU的approved Combo Group。",
+        { comboGroupId: groupId },
+      ));
+    } else if (group && group.status === "approved" && !compareComboSet(rows, componentsByGroupId.get(groupId) || [])) {
+      result.conflicts.push(conflict(
+        "combo_group_mismatch",
+        "Combo Group组件集合或quantity与active mappings不一致。",
+        { comboGroupId: groupId },
+      ));
+    }
+
+    if (result.relationSources.length > 1 && (!group || group.status !== "approved")) {
+      result.conflicts.push(conflict(
+        "relation_source_conflict",
+        "多组件active关系来自多个来源，且没有统一approved Combo Group证明完整关系。",
+        { relationSources: result.relationSources },
+      ));
+    }
+  }
+
+  const primaryGroupId = mappingGroupIds.length === 1 ? mappingGroupIds[0] : null;
+  const primaryGroup = primaryGroupId ? groupsById.get(primaryGroupId) : null;
+  result.combo = primaryGroup ? {
+    comboGroupId: primaryGroup.id,
+    status: primaryGroup.status,
+    componentCount: (componentsByGroupId.get(primaryGroup.id) || []).filter((item) => item.status === "included").length,
+    isConsistent: rows.length > 1 && primaryGroup.status === "approved" && compareComboSet(rows, componentsByGroupId.get(primaryGroup.id) || []),
+  } : null;
+  result.relationshipEvidence = evidenceFor(rows, groupsById);
+
+  if (result.governance.requiresReview) {
+    result.warnings.push({
+      code: "pending_governance_exists",
+      severity: "warning",
+      message: "当前正式关系之外仍存在待审核关系证据。",
+    });
+  }
+
+  if (result.conflicts.length) {
+    result.relationStatus = "conflict";
+    return result;
+  }
+  result.relationStatus = "active_complete";
+  result.isComplete = true;
+  result.isUsable = true;
+  return result;
+}
+
+export function resolveLinkSkuErpRelation(input = {}, options = {}) {
+  const salesLinkSkuId = clean(input?.salesLinkSkuId);
+  if (!salesLinkSkuId) return { ...baseResult(null), relationStatus: "invalid_input" };
+  const database = options.database || getDatabase();
+  const loaded = loadRelationData(database, [salesLinkSkuId], options.onQuery);
+  return resolveLoadedRelation(salesLinkSkuId, loaded);
+}
+
+export function resolveLinkSkuErpRelations(input = {}, options = {}) {
+  const requested = Array.isArray(input?.salesLinkSkuIds) ? input.salesLinkSkuIds : [];
+  const salesLinkSkuIds = [...new Set(requested.map(clean).filter(Boolean))];
+  const response = { capability: "ResolveLinkSkuErpRelations", contractVersion: CONTRACT_VERSION, results: {} };
+  if (!salesLinkSkuIds.length) return response;
+  const database = options.database || getDatabase();
+  const loaded = loadRelationData(database, salesLinkSkuIds, options.onQuery);
+  for (const salesLinkSkuId of salesLinkSkuIds) response.results[salesLinkSkuId] = resolveLoadedRelation(salesLinkSkuId, loaded);
+  return response;
+}
+
+export default resolveLinkSkuErpRelation;

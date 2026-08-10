@@ -39,6 +39,7 @@ export {
   saveProductMarketingAsset,
   exportProductMarketingAsset,
   loadProductManagementDetail,
+  loadProductDailySales,
   changeProductLifecycle,
   evaluateProductManagementHealth,
   createProductImprovementAction,

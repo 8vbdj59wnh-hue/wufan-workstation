@@ -32,6 +32,7 @@ import {
   markPlatformSku,
   loadProductManagementOverview,
   loadProductManagementDetail,
+  loadProductDailySales,
   changeProductLifecycle,
   evaluateProductManagementHealth,
   createProductImprovementAction,
@@ -51,6 +52,7 @@ import { escapeHtml } from "./utils/html.js?v=20260802-module-boundary1";
 import { renderUiModule } from "./uiModuleRegistry.js";
 import "./uiModules/productWorkspaceModules.js?v=20260809-product-workspace-ui1";
 import "./uiModules/productMarketingAsset.js?v=20260809-product-workspace-ui1";
+import "./uiModules/productDailySales.js?v=20260811-product-daily-sales1";
 
 const productStatuses = ["开发中", "上架", "成长期", "成熟期", "风险期", "淘汰", "待上架", "在售", "停售", "清仓", "已归档"];
 let filters = { query: "", brand: "", category: "", status: "", erpStatus: "", platform: "", stockStatus: "" };
@@ -84,7 +86,7 @@ let productSkuV2State = { loading: false, loaded: false, rows: [], detail: null,
 let productSkuV2RequestId = 0;
 let productSkuV2SearchTimer = 0;
 let productSkuV2MetadataLoading = false;
-let productWorkspaceState = { activeTab: "overview", sections: {}, marketingMode: "read", marketingNotice: "" };
+let productWorkspaceState = { activeTab: "overview", sections: {}, marketingMode: "read", marketingNotice: "", dailySales: { data: null, loading: false, loaded: false, rangePreset: "30d", error: "" } };
 
 function getRouteProductId() {
   const match = window.location.hash.replace(/^#/, "").match(/^products\/(?!sku\/)(.+)$/);
@@ -498,6 +500,7 @@ function renderProductSkuV2Detail() {
     : `<section class="product-workspace-panel"><button class="secondary-button" type="button" data-action="load-product-marketing">加载营销资产</button></section>`;
   let tabContent = "";
   if (activeTab === "overview") tabContent = `<div class="product-workspace-overview">
+    ${sku.productId ? renderUiModule("product_daily_sales", { state: productWorkspaceState.dailySales }) : `<section class="product-workspace-panel"><div class="empty-state compact">需先建立产品档案，才能查看产品维度销售表现；ERP SKU日报事实保持原归属。</div></section>`}
     ${marketingSummary}
     <div class="product-workspace-grid">
       <div>${renderUiModule("product_gallery", { ...moduleContext, images: galleryImages })}${renderUiModule("product_links", { state: section("links") })}</div>
@@ -1576,12 +1579,24 @@ async function refreshProductSkuV2List(rerender) {
 
 async function refreshProductSkuV2Detail(erpSkuId, rerender) {
   if (!erpSkuId || productSkuV2State.loading || productSkuV2State.detailId === erpSkuId) return;
-  productWorkspaceState = { activeTab: "overview", sections: {}, marketingMode: "read", marketingNotice: "" };
+  productWorkspaceState = { activeTab: "overview", sections: {}, marketingMode: "read", marketingNotice: "", dailySales: { data: null, loading: false, loaded: false, rangePreset: "30d", error: "" } };
   productSkuV2State = { ...productSkuV2State, loading: true, detail: null, detailId: "", error: "" }; rerender();
   try { const result = await loadProductCenterV2SkuDetail(erpSkuId, "summary"); productSkuV2State = { ...productSkuV2State, loading: false, detail: result.detail, detailId: erpSkuId, error: "" }; }
   catch (error) { productSkuV2State = { ...productSkuV2State, loading: false, detail: null, detailId: erpSkuId, error: error.message || "ERP SKU详情读取失败。" }; }
   rerender();
-  if (productSkuV2State.detail?.sku?.productId) void loadProductMarketingSection(rerender);
+  if (productSkuV2State.detail?.sku?.productId) { void loadProductMarketingSection(rerender); void loadProductDailySalesSection(rerender); }
+}
+
+async function loadProductDailySalesSection(rerender, rangePreset = productWorkspaceState.dailySales.rangePreset) {
+  const productId = productSkuV2State.detail?.sku?.productId;
+  if (!productId || productWorkspaceState.dailySales.loading) return;
+  const end = new Date(); const start = new Date(end); start.setDate(start.getDate() - (rangePreset === "7d" ? 6 : 29));
+  productWorkspaceState = { ...productWorkspaceState, dailySales: { ...productWorkspaceState.dailySales, loading: true, rangePreset, error: "" } }; rerender();
+  try {
+    const data = await loadProductDailySales(productId, { startDate: start.toISOString().slice(0, 10), endDate: end.toISOString().slice(0, 10) });
+    productWorkspaceState = { ...productWorkspaceState, dailySales: { data, loading: false, loaded: true, rangePreset, error: "" } };
+  } catch (error) { productWorkspaceState = { ...productWorkspaceState, dailySales: { ...productWorkspaceState.dailySales, loading: false, error: error.message || "产品销售日报读取失败。" } }; }
+  rerender();
 }
 
 async function loadProductWorkspaceSection(scope, rerender) {
@@ -1932,6 +1947,7 @@ export function bindProductCenterPageEvents(rerender) {
       if (tab === "marketing") void loadProductMarketingSection(rerender);
       return;
     }
+    if (action === "product-daily-sales-range") { void loadProductDailySalesSection(rerender, button.dataset.range); return; }
     if (action === "view-product-marketing") {
       productWorkspaceState = { ...productWorkspaceState, activeTab: "marketing", marketingMode: "read", marketingNotice: "" };
       rerender(); void loadProductMarketingSection(rerender); return;

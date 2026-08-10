@@ -37,11 +37,32 @@ import {
   loadConnectionOwnerImportRows,
   loadCurrentConnectionSalesFactImport,
   previewConnectionSalesFactImport,
+  previewConnectionSalesDailyImport,
+  loadCurrentConnectionSalesDailyImport,
+  loadConnectionSalesDailyPreview,
+  recalculateConnectionSalesDailyPreview,
+  confirmConnectionSalesDailyFacts,
+  loadErpSkuUsageGovernance,
+  loadErpSkuUsageGovernanceDetail,
+  confirmErpSkuUsage,
+  loadSalesRelationCandidates,
+  loadSalesRelationCandidateDetail,
+  confirmSalesRelationCandidate,
+  confirmSalesRelationCandidateBatch,
+  generatePendingComboReviews,
+  loadComboReviews,
+  loadComboReviewDetail,
+  searchComboReviewErpSkus,
+  saveComboReviewDraft,
+  confirmComboReviewGroup,
+  loadComboReviewAnomalyDates,
+  loadComboReviewSourceRows,
   previewPlatformLinkShopMappingImport,
   confirmConnectionOwnerImport,
   rebuildConnectionOwnerImportPreview,
   cancelConnectionOwnerImport,
   loadConnectionCoreDetail,
+  loadConnectionDailySales,
   loadMyConnectionWorkbench,
   loadLinkSalesRanking,
   loadLinkSalesDistribution,
@@ -72,6 +93,7 @@ import "./uiModules/myLinkSummary.js?v=20260809-my-link-workspace1";
 import "./uiModules/linkHospitalTodo.js?v=20260809-my-link-workspace1";
 import "./uiModules/linkList.js?v=20260809-my-link-workspace1";
 import "./uiModules/linkWorkspaceModules.js?v=20260809-link-workspace1";
+import "./uiModules/linkDailySales.js?v=20260811-daily-sales1";
 import "./uiModules/linkImage.js?v=20260809-link-data-table1";
 import "./uiModules/linkColumnSetting.js?v=20260809-link-data-table1";
 import "./uiModules/linkDataToolbar.js?v=20260809-link-data-table1";
@@ -134,9 +156,13 @@ const pageState = {
   currentImport: null,
   importLoading: false,
   importTab: "matched",
-  foundation: { definitions: {}, templates: [], batches: [], errors: [], loading: false, preview: null, bulkPreview: null, salesPreview: null, salesLoading: false, salesError: "", salesMessage: "", salesFileName: "", salesFile: null, shopMappingPreview: null },
+  foundation: { definitions: {}, templates: [], batches: [], errors: [], loading: false, preview: null, bulkPreview: null, salesPreview: null, salesLoading: false, salesError: "", salesMessage: "", salesFileName: "", salesFile: null, dailyPreview: null, dailyLoading: false, dailyCommitting: false, dailyError: "", dailyMessage: "", dailyFileName: "", dailyFile: null, dailyCategory: "ready", shopMappingPreview: null },
+  relationCandidates: { items: [], summary: {}, pagination: {}, filterOptions: {}, candidateType: "", loading: false, confirming: false, selected: null, selectedIds: [] },
+  comboReviews: { items: [], summary: {}, pagination: {}, filterOptions: {}, filters: { shopId: "", platform: "", componentCount: "", stability: "", sourceBatchId: "" }, loading: false, generating: false, selected: null, anomalies: { items: [], pagination: {} }, sourceRows: { items: [], pagination: {} }, editing: false, draft: null, erpSearch: { keyword: "", items: [], loading: false }, saving: false, confirming: false },
+  erpUsageGovernance: { items: [], summary: {}, pagination: {}, filters: { keyword: "", status: "unconfirmed", suggestedUsage: "", priority: "" }, selected: null, loading: false, confirming: false },
   coreDetail: null,
   coreDetailLoading: false,
+  dailySales: { data: null, loading: false, loaded: false, rangePreset: "30d", error: "" },
   ownerImport: { loading: false, result: null, showCompletion: false, detailKind: "", detailRows: [], detailPagination: null },
   salesPeriodType: "month",
   error: "",
@@ -362,6 +388,7 @@ function renderSectionNavigation() {
     <button type="button" class="${pageState.section === "connections" ? "active" : ""}" data-connection-section="connections">全部链接</button>
     ${canViewHealth() ? `<button type="button" class="${pageState.section === "hospital" ? "active" : ""}" data-connection-section="hospital">链接医院</button>` : ""}
     <button type="button" class="${pageState.section === "data-import" ? "active" : ""}" data-connection-section="data-import">数据更新</button>
+    ${canManage() ? `<button type="button" class="${pageState.section === "erp-usage-governance" ? "active" : ""}" data-connection-section="erp-usage-governance">ERP SKU用途治理</button>` : ""}
     ${isAdmin() ? `<button type="button" class="${pageState.section === "data-center" ? "active" : ""}" data-connection-section="data-center">数据中心</button>` : ""}
   </nav>`;
 }
@@ -383,6 +410,21 @@ function renderDataUpdateWorkspace() {
   return `<section class="link-data-update-workspace"><header class="connection-section-heading"><div><p class="eyebrow">LINK DATA UPDATE</p><h2>数据更新</h2><p>查看经营数据是否正常，并继续使用现有导入流程更新数据。</p></div>${isAdmin() ? `<button type="button" class="secondary-button" data-workbench-go="data-center">查看技术详情</button>` : ""}</header>${renderUiModule("link_data_status", { state: pageState.linkDataStatus })}${canImportBusinessData() ? renderDataFoundation() : `<div class="empty-state compact"><strong>数据由管理员统一更新</strong><p>当前账号可查看最新数据状态；如有异常，请联系数据管理员处理。</p></div>`}</section>`;
 }
 
+const erpUsageLabels = { product: "商品", accounting_auxiliary: "辅助核算", shipping_adjustment: "邮费调整", other_adjustment: "其他调整" };
+const erpUsageStatusLabels = { proposed: "未确认", active: "已确认", inactive: "已停用", superseded: "已替代", conflict: "冲突" };
+const usageMoney = (value) => Number(value || 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+function renderErpUsageGovernance() {
+  const model = pageState.erpUsageGovernance;
+  const summary = model.summary || {}; const filters = model.filters || {}; const selected = model.selected;
+  const stats = `<div class="connection-import-preview-grid"><span>待确认ERP SKU<strong>${summary.pendingCount || 0}</strong></span><span>影响销售额<strong>¥${usageMoney(summary.pendingSalesAmount)}</strong></span><span>影响利润<strong>¥${usageMoney(summary.pendingProfitAmount)}</strong></span><span>已确认<strong>${summary.confirmedCount || 0}</strong></span><span>身份待处理编码<strong>${summary.identityIssueCount || 0}</strong></span></div>`;
+  const filtersHtml = `<form class="connection-filter-row" data-erp-usage-filters><input name="keyword" value="${escapeHtml(filters.keyword || "")}" placeholder="搜索ERP SKU编码或名称" /><select name="status"><option value="">全部状态</option><option value="unconfirmed" ${filters.status === "unconfirmed" ? "selected" : ""}>未确认</option><option value="confirmed" ${filters.status === "confirmed" ? "selected" : ""}>已确认</option><option value="conflict" ${filters.status === "conflict" ? "selected" : ""}>冲突</option></select><select name="suggestedUsage"><option value="">全部建议用途</option>${Object.entries(erpUsageLabels).map(([value, label]) => `<option value="${value}" ${filters.suggestedUsage === value ? "selected" : ""}>${label}</option>`).join("")}</select><select name="priority"><option value="">全部优先级</option>${["P0", "P1", "P2"].map((value) => `<option value="${value}" ${filters.priority === value ? "selected" : ""}>${value}</option>`).join("")}</select><button type="submit" class="secondary-button">筛选</button><button type="button" class="text-button" data-reset-erp-usage-filters>清除</button></form>`;
+  const table = `<div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>ERP SKU</th><th>建议用途</th><th>当前用途</th><th>状态</th><th>影响行数</th><th>链接SKU</th><th>销售额</th><th>利润</th><th>日期范围</th><th></th></tr></thead><tbody>${(model.items || []).map((item) => `<tr><td><strong>${escapeHtml(item.merchantSkuCode)}</strong><small>${escapeHtml(item.name || "—")} · ${escapeHtml(item.specification || "—")}</small></td><td>${escapeHtml(erpUsageLabels[item.suggestedUsage] || "暂无建议")}<small>${escapeHtml(item.priority)}</small></td><td>${escapeHtml(erpUsageLabels[item.currentUsage] || "未确认")}</td><td>${escapeHtml(erpUsageStatusLabels[item.status] || item.status)}</td><td>${item.impact.rowCount}</td><td>${item.impact.salesLinkSkuCount}</td><td>¥${usageMoney(item.impact.salesAmount)}</td><td>¥${usageMoney(item.impact.profitAmount)}</td><td>${escapeHtml(item.impact.dateStart && item.impact.dateEnd ? `${item.impact.dateStart} 至 ${item.impact.dateEnd}` : "—")}</td><td><button type="button" class="text-button" data-view-erp-usage="${escapeHtml(item.erpSkuId)}">查看</button></td></tr>`).join("") || `<tr><td colspan="10">暂无符合条件的ERP SKU</td></tr>`}</tbody></table></div>`;
+  const pagination = `<footer><small>治理对象按ERP SKU聚合，销售明细仅作为证据。</small><div><button type="button" class="text-button" data-erp-usage-page="${Math.max(1, Number(model.pagination?.page || 1) - 1)}" ${Number(model.pagination?.page || 1) <= 1 ? "disabled" : ""}>上一页</button><span>${model.pagination?.page || 1} / ${model.pagination?.totalPages || 1}</span><button type="button" class="text-button" data-erp-usage-page="${Number(model.pagination?.page || 1) + 1}" ${Number(model.pagination?.page || 1) >= Number(model.pagination?.totalPages || 1) ? "disabled" : ""}>下一页</button></div></footer>`;
+  const detail = selected ? `<article class="connection-import-preview"><header><div><h3>${escapeHtml(selected.item.merchantSkuCode)} · ${escapeHtml(selected.item.name)}</h3><p>ERP SKU用途治理只定义该编码在经营分析中的用途。</p></div><button type="button" class="text-button" data-close-erp-usage>关闭</button></header><div class="connection-import-preview-grid"><span>规格<strong>${escapeHtml(selected.item.specification || "—")}</strong></span><span>ERP状态<strong>${escapeHtml(selected.item.erpStatus || "—")}</strong></span><span>建议用途<strong>${escapeHtml(erpUsageLabels[selected.item.suggestedUsage] || "暂无建议")}</strong></span><span>当前用途<strong>${escapeHtml(erpUsageLabels[selected.item.currentUsage] || "未确认")}</strong></span><span>影响行数<strong>${selected.item.impact.rowCount}</strong></span><span>影响链接SKU<strong>${selected.item.impact.salesLinkSkuCount}</strong></span></div><h4>用途建议</h4><p>${escapeHtml(selected.item.suggestionEvidence || "当前没有人工确认前的用途建议；请结合销售证据判断。")}</p><p class="form-note">建议只是审核证据，不会自动成为正式用途。</p><h4>销售明细证据</h4><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>日期</th><th>链接</th><th>链接SKU</th><th>数量</th><th>销售额</th><th>利润</th></tr></thead><tbody>${(selected.salesRows || []).map((row) => `<tr><td>${escapeHtml(row.saleDate || "—")}</td><td>${escapeHtml(row.linkName || "—")}</td><td>${escapeHtml(row.salesLinkSkuId || "—")}</td><td>${escapeHtml(row.quantity ?? "—")}</td><td>¥${usageMoney(row.salesAmount)}</td><td>¥${usageMoney(row.profitAmount)}</td></tr>`).join("") || `<tr><td colspan="6">暂无销售证据</td></tr>`}</tbody></table></div>${canManage() ? `<form class="connection-foundation-import-form" data-confirm-erp-usage><label>确认用途<select name="usageType" required>${Object.entries(erpUsageLabels).map(([value, label]) => `<option value="${value}" ${selected.item.currentUsage === value ? "selected" : ""}>${label}</option>`).join("")}</select></label><label>确认说明<textarea name="decisionNote" rows="3" required placeholder="说明人工判断依据"></textarea></label><button type="submit" class="primary-button" ${model.confirming ? "disabled" : ""}>${model.confirming ? "正在确认…" : "确认用途"}</button><small>只写用途审计记录，不创建关系、不修改ERP SKU、不写日报事实。</small></form>` : ""}<h4>审计记录</h4><div class="connection-template-list">${(selected.usageHistory || []).map((row) => `<article><div><strong>${escapeHtml(erpUsageLabels[row.usageType] || row.usageType)} · ${escapeHtml(erpUsageStatusLabels[row.status] || row.status)}</strong><span>${escapeHtml(row.sourceType)} · ${escapeHtml(row.reviewedByName || "未审核")} · ${escapeHtml(row.reviewedAt || row.createdAt || "—")}</span><small>${escapeHtml(row.decisionNote || "无说明")}</small></div></article>`).join("") || `<p>暂无审计记录</p>`}</div></article>` : "";
+  return `<section class="connection-foundation-page"><header class="connection-section-heading"><div><p class="eyebrow">ERP SKU BUSINESS USAGE</p><h2>ERP SKU用途治理</h2><p>按ERP SKU确认经营用途；销售明细只作为判断证据。</p></div></header>${stats}${filtersHtml}${model.loading ? `<div class="empty-state">正在读取ERP SKU用途…</div>` : table}${pagination}${detail}</section>`;
+}
+
 function renderDataFoundation() {
   const foundation = pageState.foundation; const types = Object.entries(foundation.definitions);
   const typeLabel = (key) => foundation.definitions[key]?.label || key;
@@ -393,6 +435,45 @@ function renderDataFoundation() {
   const salesBatchStatus = salesPreview?.dataSyncBatch?.status;
   const salesStatusText = salesPreview?.blocked ? "无可写入数据" : salesPreview?.isCurrent ? "待确认" : ["succeeded", "partial"].includes(salesBatchStatus) ? "已导入" : "历史预览";
   const salesPreviewPanel = salesPreview ? `<section class="connection-import-preview ${salesPreview.blocked ? "is-blocked" : ""}"><header><div><p class="eyebrow">SALES FACT PREVIEW</p><h3>链接利润表预览</h3></div><span class="status-pill">${salesStatusText}</span></header><div class="connection-import-preview-grid"><span>批次ID<strong>${escapeHtml(salesPreview.dataSyncBatch?.id || "—")}</strong></span><span>文件<strong>${escapeHtml(salesSummary.fileName || "—")}</strong></span><span>解析版本<strong>${escapeHtml(salesSummary.parserVersion || "—")}</strong></span><span>总行数<strong>${salesSummary.total || 0}</strong></span><span>有效候选<strong>${salesSummary.valid || 0}</strong></span><span>异常<strong>${salesSummary.exceptionCount || 0}</strong></span><span>周期开始<strong>${escapeHtml(salesSummary.periodStart || "—")}</strong></span><span>周期结束<strong>${escapeHtml(salesSummary.periodEnd || "—")}</strong></span></div>${salesPreview.idempotent ? `<p class="form-note">该文件已有 sales-fact-v2 批次，已展示已有结果，未重复创建。</p>` : ""}<footer><small>复用统一真实销售导入任务；确认前不会写入销售事实。</small>${canImportBusinessData() && salesPreview.isCurrent && !salesPreview.blocked ? `<button type="button" class="primary-button" data-confirm-sales-fact-import="${escapeHtml(salesPreview.dataSyncBatch?.id)}">确认导入链接利润表</button>` : ""}</footer></section>` : "";
+  const dailyPreview = foundation.dailyPreview;
+  const dailySummary = dailyPreview?.summary || {};
+  const dailyCategory = foundation.dailyCategory || "ready";
+  const dailyRows = dailyPreview?.rows || [];
+  const dailyCategoryLabels = { ready: "可导入日报", pending_relation: "待确认销售关系", error: "异常" };
+  const dailyCoverage = (value) => value === null || value === undefined ? "暂无数据" : `${(Number(value) * 100).toFixed(2)}%`;
+  const factCommit = dailySummary.factCommit;
+  const dailyPreviewPanel = dailyPreview ? `<section class="connection-import-preview ${dailySummary.errorRows ? "is-blocked" : ""}"><header><div><p class="eyebrow">DAILY SALES PREVIEW</p><h3>销售日报导入预览</h3></div><span class="status-pill">Revision ${dailySummary.previewRevision || 1}</span></header><div class="connection-import-preview-grid"><span>文件<strong>${escapeHtml(dailySummary.fileName || "—")}</strong></span><span>日期范围<strong>${escapeHtml(dailySummary.dateStart && dailySummary.dateEnd ? `${dailySummary.dateStart} 至 ${dailySummary.dateEnd}` : "—")}</strong></span><span>总行数<strong>${dailySummary.totalRows || 0}</strong></span><span>可导入日报<strong>${dailySummary.readyRows || 0}</strong></span><span>待确认关系<strong>${dailySummary.pendingRelationRows || 0}</strong></span><span>异常<strong>${dailySummary.errorRows || 0}</strong></span><span>销售额覆盖率<strong>${dailyCoverage(dailySummary.salesAmountCoverage)}</strong></span><span>利润覆盖率<strong>${dailyCoverage(dailySummary.profitAmountCoverage)}</strong></span></div>${dailySummary.changes ? `<p class="form-note">本次重算：新增可导入 ${Number(dailySummary.changes.readyRows || 0)} 条，减少待确认 ${Math.max(0, -Number(dailySummary.changes.pendingRelationRows || 0))} 条，异常变化 ${Number(dailySummary.changes.errorRows || 0)} 条。</p>` : ""}${dailySummary.relationRecalculationRequired ? `<p class="form-note">销售关系已更新，此预览需要人工重新计算；不会自动写入日报事实。</p>` : ""}${factCommit ? `<div class="connection-import-preview-grid"><span>新增事实<strong>${factCommit.insertedCount || 0}</strong></span><span>幂等跳过<strong>${factCommit.skippedCount || 0}</strong></span><span>待确认更新<strong>${factCommit.updatePendingCount || 0}</strong></span><span>未写入<strong>${factCommit.blockedCount || 0}</strong></span><span>写入销售额<strong>¥${usageMoney(factCommit.insertedSalesAmount)}</strong></span><span>写入利润<strong>¥${usageMoney(factCommit.insertedProfitAmount)}</strong></span></div>` : ""}<nav class="connection-data-center-nav" aria-label="销售日报预览分类">${Object.entries(dailyCategoryLabels).map(([key, label]) => `<button type="button" class="${dailyCategory === key ? "active" : ""}" data-daily-preview-category="${key}">${label}</button>`).join("")}</nav><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>行号</th><th>店铺</th><th>货品ID</th><th>平台规格ID</th><th>商家编码</th><th>日期</th><th>销售额</th><th>利润</th><th>结果</th></tr></thead><tbody>${dailyRows.map((row) => { const item = row.normalized || {}; return `<tr><td>${escapeHtml(row.rowNumber)}</td><td>${escapeHtml(item.shopName || "—")}</td><td>${escapeHtml(item.platformGoodsId || "—")}</td><td>${escapeHtml(item.platformSkuId || "—")}</td><td>${escapeHtml(item.merchantSkuCode || "—")}</td><td>${escapeHtml(item.saleDate || "—")}</td><td>${item.salesAmount === null || item.salesAmount === undefined ? "暂无数据" : escapeHtml(Number(item.salesAmount).toFixed(2))}</td><td>${item.profitAmount === null || item.profitAmount === undefined ? "暂无数据" : escapeHtml(Number(item.profitAmount).toFixed(2))}</td><td>${escapeHtml(row.errorMessage || dailyCategoryLabels[row.category] || row.category)}</td></tr>`; }).join("") || `<tr><td colspan="9">当前分类暂无数据</td></tr>`}</tbody></table></div><footer><small>${factCommit ? `事实写入已确认于 ${escapeHtml(factCommit.confirmedAt)}` : "确认时会重新执行分类、用途与关系校验。"}</small>${!factCommit && canImportBusinessData() ? `<button type="button" class="primary-button" data-confirm-sales-daily-facts="${escapeHtml(dailyPreview.batch?.id)}" ${foundation.dailyCommitting ? "disabled" : ""}>${foundation.dailyCommitting ? "正在写入…" : "确认写入日报事实"}</button>` : ""}${canImportBusinessData() && !factCommit && (dailySummary.relationRecalculationRequired || Number(dailySummary.previewRevision || 1) > 1) ? `<button type="button" class="secondary-button" data-recalculate-sales-daily-preview="${escapeHtml(dailyPreview.batch?.id)}" ${foundation.dailyLoading ? "disabled" : ""}>${foundation.dailyLoading ? "正在重新计算…" : "重新计算预览"}</button>` : ""}</footer></section>` : "";
+  const candidates = pageState.relationCandidates;
+  const candidateSummary = candidates.summary || {};
+  const selectedCandidate = candidates.selected;
+  const selectedCandidateIds = candidates.selectedIds || [];
+  const candidatePanel = dailyPreview ? `<section class="connection-foundation-panel">
+    <header class="connection-section-heading"><div><p class="eyebrow">SALES RELATION REVIEW</p><h3>待确认销售关系</h3><p>仅single候选可由具备链接管理权限的用户人工确认；组合候选保持只读。</p></div></header>
+    <div class="connection-import-preview-grid"><span>候选关系<strong>${candidateSummary.total || 0}</strong></span><span>单品候选<strong>${candidateSummary.single || 0}</strong></span><span>组合审核候选<strong>${candidateSummary.combo || 0}</strong></span><span>影响日报行<strong>${candidateSummary.affectedRows || 0}</strong></span><span>影响销售额<strong>${Number(candidateSummary.salesAmount || 0).toLocaleString("zh-CN", { maximumFractionDigits: 2 })}</strong></span><span>影响利润<strong>${Number(candidateSummary.profitAmount || 0).toLocaleString("zh-CN", { maximumFractionDigits: 2 })}</strong></span></div>
+    <nav class="connection-data-center-nav" aria-label="销售关系候选类型"><button type="button" class="${!candidates.candidateType ? "active" : ""}" data-relation-candidate-type="">全部</button><button type="button" class="${candidates.candidateType === "single" ? "active" : ""}" data-relation-candidate-type="single">单品</button><button type="button" class="${candidates.candidateType === "combo" ? "active" : ""}" data-relation-candidate-type="combo">组合审核</button>${canManage() && selectedCandidateIds.length ? `<button type="button" class="primary-button" data-confirm-relation-candidate-batch ${candidates.confirming ? "disabled" : ""}>确认所选单品关系（${selectedCandidateIds.length}）</button>` : ""}</nav>
+    <div class="connection-table-wrap"><table class="connection-table"><thead><tr>${canManage() ? "<th>选择</th>" : ""}<th>店铺</th><th>链接</th><th>平台SKU</th><th>ERP SKU</th><th>类型</th><th>影响行数</th><th>日期范围</th><th>销售金额</th><th>状态</th><th></th></tr></thead><tbody>${(candidates.items || []).map((item) => `<tr>${canManage() ? `<td>${item.candidateType === "single" && item.status === "pending" ? `<input type="checkbox" data-select-relation-candidate="${escapeHtml(item.id)}" ${selectedCandidateIds.includes(item.id) ? "checked" : ""} aria-label="选择单品关系候选" />` : "—"}</td>` : ""}<td>${escapeHtml(item.shop?.name || "—")}<small>${escapeHtml(item.shop?.platform || "")}</small></td><td>${escapeHtml(item.link?.title || item.link?.platformGoodsId || "—")}</td><td>${escapeHtml(item.platformSku?.specificationName || item.platformSku?.platformSkuId || "—")}</td><td>${escapeHtml(item.erpSku?.merchantSkuCode || "—")}<small>${escapeHtml(item.erpSku?.specificationName || "")}</small></td><td>${item.candidateType === "combo" ? "组合审核" : "单品"}</td><td>${escapeHtml(item.affectedRowCount)}</td><td>${escapeHtml(`${item.affectedDateStart || "—"} 至 ${item.affectedDateEnd || "—"}`)}</td><td>${Number(item.salesAmount || 0).toLocaleString("zh-CN", { maximumFractionDigits: 2 })}</td><td>${item.status === "pending" ? "待确认" : escapeHtml(item.status)}</td><td><button type="button" class="text-button" data-view-relation-candidate="${escapeHtml(item.id)}">查看证据</button></td></tr>`).join("") || `<tr><td colspan="${canManage() ? 11 : 10}">当前没有待确认候选</td></tr>`}</tbody></table></div>
+    ${selectedCandidate ? `<article class="connection-import-preview"><header><div><h3>匹配证据</h3><p>${escapeHtml(selectedCandidate.item?.link?.title || "销售关系候选")}</p></div><button type="button" class="text-button" data-close-relation-candidate>关闭</button></header><div class="connection-import-preview-grid"><span>原始店铺<strong>${escapeHtml(selectedCandidate.item?.evidence?.shop?.sourceName || "—")}</strong></span><span>系统店铺<strong>${escapeHtml(selectedCandidate.item?.evidence?.shop?.systemName || "—")}</strong></span><span>平台货品ID<strong>${escapeHtml(selectedCandidate.item?.evidence?.link?.platformGoodsId || "—")}</strong></span><span>平台规格ID<strong>${escapeHtml(selectedCandidate.item?.evidence?.platformSku?.platformSkuId || "—")}</strong></span><span>商家编码<strong>${escapeHtml(selectedCandidate.item?.evidence?.erpSku?.merchantSkuCode || "—")}</strong></span><span>来源文件<strong>${escapeHtml(selectedCandidate.item?.source?.fileName || "—")}</strong></span></div><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>行号</th><th>日期</th><th>销量</th><th>销售额</th><th>利润</th></tr></thead><tbody>${(selectedCandidate.sourceRows || []).map((row) => `<tr><td>${escapeHtml(row.rowNumber)}</td><td>${escapeHtml(row.normalized?.saleDate || "—")}</td><td>${escapeHtml(row.normalized?.quantity ?? "—")}</td><td>${escapeHtml(row.normalized?.salesAmount ?? "—")}</td><td>${escapeHtml(row.normalized?.profitAmount ?? "—")}</td></tr>`).join("")}</tbody></table></div><footer><small>确认只会创建single active V2映射，不修改旧字段或销售事实。</small>${canManage() && selectedCandidate.item?.candidateType === "single" && selectedCandidate.item?.status === "pending" ? `<button type="button" class="primary-button" data-confirm-relation-candidate="${escapeHtml(selectedCandidate.item.id)}" ${candidates.confirming ? "disabled" : ""}>确认单品关系</button>` : ""}</footer></article>` : ""}
+    <footer><small>组合候选不提供确认入口；所有确认操作均由服务端再次校验权限和当前关系。</small></footer>
+  </section>` : "";
+  const comboReviews = pageState.comboReviews;
+  const comboSummary = comboReviews.summary || {};
+  const comboFilters = comboReviews.filters || {};
+  const comboStabilityLabel = { stable: "稳定", changing: "存在变化", insufficient: "证据不足" };
+  const comboSelected = comboReviews.selected;
+  const comboPagination = comboReviews.pagination || {};
+  const comboDraft = comboReviews.draft;
+  const comboIncluded = (comboSelected?.components || []).filter((component) => component.status === "included");
+  const comboReadyToConfirm = comboIncluded.length >= 2 && comboIncluded.every((component) => component.quantity !== null && Number(component.quantity) > 0 && component.quantitySource === "manual_confirmation");
+  const comboEditor = comboSelected && canManage() && comboSelected.item?.status === "pending" ? `${comboReviews.editing ? `<article class="connection-import-preview"><header><div><h3>编辑Combo审核草稿</h3><p>数量只能由人工填写；留空表示待确认。保存后仍为待审核。</p></div><button type="button" class="text-button" data-cancel-combo-draft>取消</button></header><div class="connection-template-list">${(comboDraft?.components || []).map((component, index) => `<article><div><strong>${escapeHtml(component.erpSku?.specificationName || component.erpSku?.merchantSkuCode || "ERP SKU")}</strong><span>商家编码：${escapeHtml(component.erpSku?.merchantSkuCode || "—")} · ${component.sourceType === "manual_added" ? "人工添加" : "系统发现"}</span></div><label>组件数量<input type="number" min="0.000001" step="any" value="${component.quantity ?? ""}" placeholder="待人工确认" data-combo-draft-quantity="${index}" /></label><label><input type="checkbox" data-combo-draft-included="${index}" ${component.status === "included" ? "checked" : ""} />保留组件</label></article>`).join("")}</div><form class="connection-filter-row" data-combo-erp-search><input name="keyword" value="${escapeHtml(comboReviews.erpSearch?.keyword || "")}" placeholder="搜索商家编码或ERP SKU名称" /><button type="submit" class="secondary-button">搜索ERP SKU</button></form>${(comboReviews.erpSearch?.items || []).length ? `<div class="connection-template-list">${comboReviews.erpSearch.items.map((item) => `<article><div><strong>${escapeHtml(item.specificationName || item.merchantSkuCode)}</strong><span>${escapeHtml(item.merchantSkuCode)}</span></div><button type="button" class="text-button" data-add-combo-erp-sku="${escapeHtml(item.id)}">添加</button></article>`).join("")}</div>` : ""}<label class="field-stack"><span>审核备注</span><textarea rows="4" data-combo-review-note placeholder="记录本次草稿调整说明">${escapeHtml(comboDraft?.reviewNote || "")}</textarea></label><footer><small>保存草稿不会批准Combo、不会生成正式映射、不会写入销售日报事实。</small><button type="button" class="primary-button" data-save-combo-draft ${comboReviews.saving ? "disabled" : ""}>${comboReviews.saving ? "正在保存…" : "保存草稿"}</button></footer></article>` : `<div class="connection-section-actions"><button type="button" class="secondary-button" data-edit-combo-draft>编辑草稿</button><button type="button" class="primary-button" data-confirm-combo-group ${!comboReadyToConfirm || comboReviews.confirming ? "disabled" : ""}>${comboReviews.confirming ? "正在确认…" : "确认整组关系"}</button>${!comboReadyToConfirm ? "<small>所有保留组件填写人工确认数量后方可确认。</small>" : ""}</div>`}` : "";
+  const comboPanel = dailyPreview ? `<section class="connection-foundation-panel">
+    <header class="connection-section-heading"><div><p class="eyebrow">COMBO REVIEW</p><h3>Combo审核</h3><p>系统只整理平台SKU与候选ERP组件证据，正式组件数量由后续人工审核定义。</p></div>${canImportBusinessData() ? `<button type="button" class="secondary-button" data-generate-combo-reviews ${comboReviews.generating ? "disabled" : ""}>${comboReviews.generating ? "正在整理…" : "整理Combo审核草稿"}</button>` : ""}</header>
+    <div class="connection-import-preview-grid"><span>待审核Combo<strong>${comboSummary.pendingGroups || 0}</strong></span><span>平台SKU<strong>${comboSummary.platformSkuCount || 0}</strong></span><span>影响日报行<strong>${comboSummary.affectedRowCount || 0}</strong></span><span>影响销售额<strong>${Number(comboSummary.salesAmount || 0).toLocaleString("zh-CN", { maximumFractionDigits: 2 })}</strong></span><span>影响利润<strong>${Number(comboSummary.profitAmount || 0).toLocaleString("zh-CN", { maximumFractionDigits: 2 })}</strong></span></div>
+    <form class="connection-filter-row" data-combo-review-filters><select name="shopId"><option value="">全部店铺</option>${(comboReviews.filterOptions?.shops || []).map((item) => `<option value="${escapeHtml(item.id)}" ${comboFilters.shopId === item.id ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}</select><select name="platform"><option value="">全部平台</option>${(comboReviews.filterOptions?.platforms || []).map((item) => `<option value="${escapeHtml(item)}" ${comboFilters.platform === item ? "selected" : ""}>${escapeHtml(item)}</option>`).join("")}</select><select name="componentCount"><option value="">全部组件数</option>${(comboReviews.filterOptions?.componentCounts || []).map((item) => `<option value="${item}" ${String(comboFilters.componentCount) === String(item) ? "selected" : ""}>${item}个组件</option>`).join("")}</select><select name="stability"><option value="">全部稳定性</option>${Object.entries(comboStabilityLabel).map(([key, label]) => `<option value="${key}" ${comboFilters.stability === key ? "selected" : ""}>${label}</option>`).join("")}</select><select name="sourceBatchId"><option value="">全部来源批次</option>${(comboReviews.filterOptions?.sourceBatches || []).map((item) => `<option value="${escapeHtml(item.id)}" ${comboFilters.sourceBatchId === item.id ? "selected" : ""}>${escapeHtml(item.fileName || "销售日报")}</option>`).join("")}</select><button type="submit" class="secondary-button">筛选</button><button type="button" class="text-button" data-reset-combo-review-filters>清除</button></form>
+    <div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>店铺</th><th>平台SKU</th><th>链接</th><th>候选组件</th><th>日期范围</th><th>销售额</th><th>利润</th><th>稳定性</th><th>状态</th><th></th></tr></thead><tbody>${(comboReviews.items || []).map((item) => `<tr><td>${escapeHtml(item.shop?.name || "—")}<small>${escapeHtml(item.shop?.platform || "")}</small></td><td>${escapeHtml(item.platformSku?.specificationName || item.platformSku?.platformSkuId || "—")}</td><td>${escapeHtml(item.link?.title || "—")}</td><td>${item.componentCount}</td><td>${escapeHtml(`${item.affectedDateStart || "—"} 至 ${item.affectedDateEnd || "—"}`)}</td><td>${Number(item.salesAmount || 0).toLocaleString("zh-CN", { maximumFractionDigits: 2 })}</td><td>${Number(item.profitAmount || 0).toLocaleString("zh-CN", { maximumFractionDigits: 2 })}</td><td>${escapeHtml(comboStabilityLabel[item.stability] || "证据不足")}</td><td>${escapeHtml(item.statusLabel || "待审核")}</td><td><button type="button" class="text-button" data-view-combo-review="${escapeHtml(item.id)}">查看证据</button></td></tr>`).join("") || `<tr><td colspan="10">暂无Combo审核草稿</td></tr>`}</tbody></table></div>
+    <footer><small>列表按平台SKU服务端分页；不会返回全部候选原始记录。</small><div><button type="button" class="text-button" data-combo-review-page="${Math.max(1, Number(comboPagination.page || 1) - 1)}" ${Number(comboPagination.page || 1) <= 1 ? "disabled" : ""}>上一页</button><span>${comboPagination.page || 1} / ${comboPagination.totalPages || 1}</span><button type="button" class="text-button" data-combo-review-page="${Number(comboPagination.page || 1) + 1}" ${Number(comboPagination.page || 1) >= Number(comboPagination.totalPages || 1) ? "disabled" : ""}>下一页</button></div></footer>
+    ${comboSelected ? `<article class="connection-import-preview"><header><div><h3>${escapeHtml(comboSelected.item?.platformSku?.specificationName || comboSelected.item?.link?.title || "Combo审核证据")}</h3><p>${escapeHtml(comboSelected.item?.shop?.name || "—")} · ${escapeHtml(comboSelected.item?.link?.title || "—")}</p></div><button type="button" class="text-button" data-close-combo-review>关闭</button></header><div class="connection-import-preview-grid"><span>平台货品ID<strong>${escapeHtml(comboSelected.item?.link?.platformGoodsId || "—")}</strong></span><span>平台规格ID<strong>${escapeHtml(comboSelected.item?.platformSku?.platformSkuId || "—")}</strong></span><span>总销售日期<strong>${comboSelected.item?.stabilityEvidence?.totalSalesDates || 0}</strong></span><span>多组件日期<strong>${comboSelected.item?.stabilityEvidence?.multiComponentDates || 0}</strong></span><span>单组件异常日期<strong>${comboSelected.item?.stabilityEvidence?.singleComponentDates || 0}</strong></span><span>组件集合变化日期<strong>${comboSelected.item?.stabilityEvidence?.componentSetChangeDates || 0}</strong></span></div><h4>候选ERP组件</h4><p class="form-note">${escapeHtml(comboSelected.notice || "销售日报组件数量仅供审核参考，不等于正式组合数量。")}</p><div class="connection-template-list">${(comboSelected.components || []).map((component) => `<article><div><strong>${escapeHtml(component.erpSku?.specificationName || component.erpSku?.merchantSkuCode || "ERP SKU")}</strong><span>商家编码：${escapeHtml(component.erpSku?.merchantSkuCode || "—")} · ${escapeHtml(component.quantityLabel)} · 出现${component.evidence?.occurrenceDays || 0}天/${component.evidence?.occurrenceCount || 0}次 · 日报数量范围 ${component.evidence?.dailyQuantityMin ?? "—"}～${component.evidence?.dailyQuantityMax ?? "—"}</span></div><span>${escapeHtml(component.statusLabel)}</span></article>`).join("")}</div><h4>异常日期</h4><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>日期</th><th>当天ERP组件与日报数量</th><th>销售额</th><th>利润</th></tr></thead><tbody>${(comboReviews.anomalies?.items || []).map((item) => `<tr><td>${escapeHtml(item.date)}</td><td>${item.components.map((component) => `${escapeHtml(component.merchantSkuCode || "—")} × ${escapeHtml(component.quantity ?? "—")}`).join("<br>")}</td><td>${Number(item.salesAmount || 0).toFixed(2)}</td><td>${Number(item.profitAmount || 0).toFixed(2)}</td></tr>`).join("") || `<tr><td colspan="4">未发现异常日期</td></tr>`}</tbody></table></div><h4>来源销售记录</h4><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>行号</th><th>日期</th><th>商家编码</th><th>日报数量</th><th>销售额</th><th>利润</th></tr></thead><tbody>${(comboReviews.sourceRows?.items || []).map((row) => `<tr><td>${row.rowNumber}</td><td>${escapeHtml(row.saleDate || "—")}</td><td>${escapeHtml(row.merchantSkuCode || "—")}</td><td>${escapeHtml(row.quantity ?? "—")}</td><td>${row.salesAmount === null ? "暂无数据" : Number(row.salesAmount).toFixed(2)}</td><td>${row.profitAmount === null ? "暂无数据" : Number(row.profitAmount).toFixed(2)}</td></tr>`).join("")}</tbody></table></div><footer><small>当前仅保存审核草稿；不会批准或生成正式关系。</small></footer></article><div class="connection-pagination"><span>异常日期 ${comboReviews.anomalies?.pagination?.page || 1}/${comboReviews.anomalies?.pagination?.totalPages || 1}</span><button type="button" class="text-button" data-combo-anomaly-page="${Math.max(1, Number(comboReviews.anomalies?.pagination?.page || 1) - 1)}" ${Number(comboReviews.anomalies?.pagination?.page || 1) <= 1 ? "disabled" : ""}>异常上一页</button><button type="button" class="text-button" data-combo-anomaly-page="${Number(comboReviews.anomalies?.pagination?.page || 1) + 1}" ${Number(comboReviews.anomalies?.pagination?.page || 1) >= Number(comboReviews.anomalies?.pagination?.totalPages || 1) ? "disabled" : ""}>异常下一页</button><span>来源记录 ${comboReviews.sourceRows?.pagination?.page || 1}/${comboReviews.sourceRows?.pagination?.totalPages || 1}</span><button type="button" class="text-button" data-combo-source-page="${Math.max(1, Number(comboReviews.sourceRows?.pagination?.page || 1) - 1)}" ${Number(comboReviews.sourceRows?.pagination?.page || 1) <= 1 ? "disabled" : ""}>记录上一页</button><button type="button" class="text-button" data-combo-source-page="${Number(comboReviews.sourceRows?.pagination?.page || 1) + 1}" ${Number(comboReviews.sourceRows?.pagination?.page || 1) >= Number(comboReviews.sourceRows?.pagination?.totalPages || 1) ? "disabled" : ""}>记录下一页</button></div>` : ""}
+    ${comboEditor}
+  </section>` : "";
   const shopPreview = foundation.shopMappingPreview;
   const shopSummary = shopPreview?.summary || {};
   const shopPreviewPanel = shopPreview ? `<section class="connection-import-preview"><header><div><p class="eyebrow">SHOP MATCH PREVIEW</p><h3>店铺匹配预览</h3></div><span class="status-pill">待确认</span></header><div class="connection-import-preview-grid"><span>总行数<strong>${shopSummary.total || 0}</strong></span><span>可新增<strong>${shopSummary.valid || 0}</strong></span><span>已存在<strong>${shopSummary.existing || 0}</strong></span><span>异常<strong>${shopSummary.errors || 0}</strong></span></div><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>平台</th><th>商品ID</th><th>系统店铺</th><th>结果</th></tr></thead><tbody>${(shopPreview.rows || []).slice(0, 50).map((row) => `<tr><td>${escapeHtml(row.platform || "—")}</td><td>${escapeHtml(row.platformGoodsId || "—")}</td><td>${escapeHtml(row.systemShopText || "—")}</td><td>${escapeHtml(row.message || row.status)}</td></tr>`).join("")}</tbody></table></div><footer><small>只保存解析匹配配置，不修改链接身份和店铺字段。</small>${canImportBusinessData() && shopPreview.batch?.status === "preview_ready" ? `<button type="button" class="primary-button" data-confirm-shop-mapping-import="${escapeHtml(shopPreview.batch.id)}">确认导入店铺匹配</button>` : ""}</footer></section>` : "";
@@ -404,10 +485,10 @@ function renderDataFoundation() {
     <header class="connection-section-heading"><div><p class="eyebrow">BUSINESS DATA IMPORT</p><h2>业务数据导入</h2><p>业务人员直接上传文件；系统自动识别平台与解析规则，管理员在下方维护模板。</p></div></header>
     ${renderImportStatus(foundation.loading ? "parsed" : foundation.batches?.[0]?.status)}
     <div class="connection-import-type-grid"><article><strong>导入平台链接数据表</strong><span>创建链接资产并写入平台表现</span></article><article><strong>导入平台货品表</strong><span>建立平台SKU与ERP SKU关系</span></article><article><strong>导入链接利润表</strong><span>写入真实销售、成本和利润事实</span></article><article><strong>导入负责人匹配表</strong><span>全量跨店铺更新链接负责人</span></article></div>
-    ${canImportBusinessData() ? `<div class="connection-business-import-grid"><form class="connection-foundation-import-form" data-foundation-bulk-import-form><label>平台链接数据表（可多选）<input type="file" name="files" accept=".xls,.xlsx" multiple required /></label><button type="submit" class="primary-button">批量上传并后台预览</button></form><form class="connection-foundation-import-form" data-sales-fact-import-form novalidate><label>链接利润表<input type="file" name="file" accept=".xls,.xlsx" ${foundation.salesLoading ? "disabled" : ""} data-sales-fact-file /></label>${foundation.salesFileName ? `<small>已选择：${escapeHtml(foundation.salesFileName)}</small>` : ""}<button type="submit" class="primary-button" ${foundation.salesLoading ? "disabled aria-busy=\"true\"" : ""}>${foundation.salesLoading ? "正在上传并解析…" : "上传利润表并解析"}</button><div class="connection-import-feedback" aria-live="polite">${foundation.salesError ? `<span class="form-error">${escapeHtml(foundation.salesError)}</span>` : foundation.salesMessage ? `<span class="form-success">${escapeHtml(foundation.salesMessage)}</span>` : ""}</div></form><form class="connection-foundation-import-form" data-shop-mapping-import-form><label>店铺匹配表<input type="file" name="file" accept=".xls,.xlsx" required /></label><button type="submit" class="secondary-button">读取店铺匹配</button></form></div>` : ""}
+    ${canImportBusinessData() ? `<div class="connection-business-import-grid"><form class="connection-foundation-import-form" data-foundation-bulk-import-form><label>平台链接数据表（可多选）<input type="file" name="files" accept=".xls,.xlsx" multiple required /></label><button type="submit" class="primary-button">批量上传并后台预览</button></form><form class="connection-foundation-import-form" data-sales-fact-import-form novalidate><label>链接利润表<input type="file" name="file" accept=".xls,.xlsx" ${foundation.salesLoading ? "disabled" : ""} data-sales-fact-file /></label>${foundation.salesFileName ? `<small>已选择：${escapeHtml(foundation.salesFileName)}</small>` : ""}<button type="submit" class="primary-button" ${foundation.salesLoading ? "disabled aria-busy=\"true\"" : ""}>${foundation.salesLoading ? "正在上传并解析…" : "上传利润表并解析"}</button><div class="connection-import-feedback" aria-live="polite">${foundation.salesError ? `<span class="form-error">${escapeHtml(foundation.salesError)}</span>` : foundation.salesMessage ? `<span class="form-success">${escapeHtml(foundation.salesMessage)}</span>` : ""}</div></form><form class="connection-foundation-import-form" data-sales-daily-import-form novalidate><label>销售日报利润表<input type="file" name="file" accept=".xls,.xlsx" ${foundation.dailyLoading ? "disabled" : ""} data-sales-daily-file /></label>${foundation.dailyFileName ? `<small>已选择：${escapeHtml(foundation.dailyFileName)}</small>` : ""}<button type="submit" class="secondary-button" ${foundation.dailyLoading ? "disabled aria-busy=\"true\"" : ""}>${foundation.dailyLoading ? "正在生成日报预览…" : "生成销售日报预览"}</button><div class="connection-import-feedback" aria-live="polite">${foundation.dailyError ? `<span class="form-error">${escapeHtml(foundation.dailyError)}</span>` : foundation.dailyMessage ? `<span class="form-success">${escapeHtml(foundation.dailyMessage)}</span>` : ""}</div></form><form class="connection-foundation-import-form" data-shop-mapping-import-form><label>店铺匹配表<input type="file" name="file" accept=".xls,.xlsx" required /></label><button type="submit" class="secondary-button">读取店铺匹配</button></form></div>` : ""}
     ${renderOwnerImport()}
     ${bulkPreviewPanel}${previewPanel}
-    ${salesPreviewPanel}${shopPreviewPanel}
+    ${salesPreviewPanel}${dailyPreviewPanel}${candidatePanel}${comboPanel}${shopPreviewPanel}
     ${canManage() ? `<section class="connection-foundation-panel"><h3>管理员解析模板</h3><form data-foundation-template-form class="connection-foundation-template-form"><input name="name" placeholder="模板名称" required /><select name="dataType">${types.map(([key, definition]) => `<option value="${escapeHtml(key)}">${escapeHtml(definition.label)}</option>`).join("")}</select><input name="sourcePlatform" placeholder="来源平台" /><textarea name="fieldMappingsJson" placeholder='字段映射，例如 {"商品ID":"platformGoodsId"}' required></textarea><input name="changeNote" placeholder="版本说明" /><button type="submit" class="secondary-button">新增模板 V1</button></form><div class="connection-template-list">${foundation.templates.map((item) => `<article><div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(typeLabel(item.dataType))} · V${escapeHtml(item.version)} · ${escapeHtml(item.status)}</span></div><button type="button" class="text-button" data-iterate-foundation-template="${escapeHtml(item.id)}">迭代版本</button></article>`).join("") || "<p>暂无解析模板。</p>"}</div></section>` : ""}
     <section class="connection-foundation-panel"><h3>导入记录</h3><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>文件</th><th>类型</th><th>时间</th><th>成功</th><th>异常</th><th>状态</th></tr></thead><tbody>${foundation.batches.map((item) => `<tr><td>${escapeHtml(item.fileName)}</td><td>${escapeHtml(typeLabel(item.importType))}</td><td>${escapeHtml(item.createdAt)}</td><td>${escapeHtml(item.matchedRows)}</td><td>${escapeHtml(item.errorRows)}</td><td>${escapeHtml(item.status)}</td></tr>`).join("") || `<tr><td colspan="6">暂无导入记录</td></tr>`}</tbody></table></div></section>
     <section class="connection-foundation-panel"><h3>异常列表</h3><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>文件</th><th>行号</th><th>外部标识</th><th>异常类型</th><th>说明</th></tr></thead><tbody>${foundation.errors.map((item) => `<tr><td>${escapeHtml(item.fileName)}</td><td>${escapeHtml(item.rowNumber)}</td><td>${escapeHtml(item.externalKey || "—")}</td><td>${escapeHtml(item.errorType)}</td><td>${escapeHtml(item.errorMessage)}</td></tr>`).join("") || `<tr><td colspan="5">暂无导入异常</td></tr>`}</tbody></table></div></section>
@@ -759,7 +840,7 @@ function renderDetail() {
     actionsHtml: `${renderImprovements()}${renderActions(item)}`,
   });
   else if (pageState.detailTab === "sales") body = renderUiModule("link_sales_analysis", {
-    platformHtml: renderCorePlatform(pageState.coreDetail), erpHtml: renderErpSales(pageState.coreDetail), skuHtml: renderSkuSales(pageState.coreDetail),
+    platformHtml: renderUiModule("link_daily_sales", { data: pageState.dailySales.data, loading: pageState.dailySales.loading, rangePreset: pageState.dailySales.rangePreset }), erpHtml: `${renderCorePlatform(pageState.coreDetail)}${renderErpSales(pageState.coreDetail)}`, skuHtml: renderSkuSales(pageState.coreDetail),
     trendHtml: pageState.growthAnalysis ? renderCoreOperatingOverview(item, pageState.coreDetail) : `<div class="empty-state compact">正在按需读取经营趋势…</div>`,
   });
   else if (pageState.detailTab === "inventory") body = renderUiModule("link_inventory_summary", { productsHtml: renderCoreProducts(pageState.coreDetail), inventoryHtml: renderInventory(pageState.coreDetail) });
@@ -872,7 +953,7 @@ function renderImprovementModal() {
 }
 
 export function renderConnectionCenterPage() {
-  const pageContent = pageState.section === "cockpit" ? renderBusinessCockpit() : pageState.section === "hospital" ? renderConnectionHospital() : pageState.section === "my-links" ? renderMyLinksWorkbench() : pageState.section === "data-import" ? renderDataUpdateWorkspace() : pageState.section === "data-center" ? renderConnectionDataCenter() : renderConnectionAssets();
+  const pageContent = pageState.section === "cockpit" ? renderBusinessCockpit() : pageState.section === "hospital" ? renderConnectionHospital() : pageState.section === "my-links" ? renderMyLinksWorkbench() : pageState.section === "data-import" ? renderDataUpdateWorkspace() : pageState.section === "erp-usage-governance" ? renderErpUsageGovernance() : pageState.section === "data-center" ? renderConnectionDataCenter() : renderConnectionAssets();
   return `<section class="connection-center-page">${pageState.error ? `<div class="form-error">${escapeHtml(pageState.error)}</div>` : ""}${pageState.loading ? `<div class="empty-state">正在读取连接…</div>` : pageState.selectedId ? renderDetail() : `${renderSectionNavigation()}${pageContent}`}${renderMappingModal()}${renderImprovementModal()}${renderBenchmarkModal()}${renderDiagnosisModal()}</section>`;
 }
 
@@ -1028,10 +1109,22 @@ async function loadPage(render) {
 
 async function openConnection(id, render) {
   if (window.location.hash !== `#connectionCenter/${encodeURIComponent(id)}`) window.history.replaceState(null, "", `#connectionCenter/${encodeURIComponent(id)}`);
-  pageState.selectedId = id; pageState.detailTab = "business"; pageState.detailLoaded = new Set(["business"]); pageState.coreDetail = null; pageState.coreDetailLoading = true; pageState.actions = []; pageState.periodSnapshots = []; pageState.growthAnalysis = null; pageState.healthRecords = []; pageState.healthModalId = ""; pageState.improvements = []; pageState.benchmarks = { items: [], candidates: [], comparison: null, comparisonId: "", loading: false }; render();
+  pageState.selectedId = id; pageState.detailTab = "business"; pageState.detailLoaded = new Set(["business"]); pageState.coreDetail = null; pageState.coreDetailLoading = true; pageState.dailySales = { data: null, loading: false, loaded: false, rangePreset: "30d", error: "" }; pageState.actions = []; pageState.periodSnapshots = []; pageState.growthAnalysis = null; pageState.healthRecords = []; pageState.healthModalId = ""; pageState.improvements = []; pageState.benchmarks = { items: [], candidates: [], comparison: null, comparisonId: "", loading: false }; render();
   try { pageState.coreDetail = await loadConnectionCoreDetail(id); pageState.error = ""; }
   catch (error) { pageState.error = error.message; }
   pageState.coreDetailLoading = false; render();
+}
+
+async function loadDailySales(render, rangePreset = pageState.dailySales.rangePreset) {
+  const end = new Date();
+  const start = new Date(end);
+  start.setDate(start.getDate() - (rangePreset === "7d" ? 6 : 29));
+  pageState.dailySales = { ...pageState.dailySales, loading: true, rangePreset, error: "" }; render();
+  try {
+    const data = await loadConnectionDailySales(pageState.selectedId, { startDate: start.toISOString().slice(0, 10), endDate: end.toISOString().slice(0, 10) });
+    pageState.dailySales = { data, loading: false, loaded: true, rangePreset, error: "" };
+  } catch (error) { pageState.dailySales = { ...pageState.dailySales, loading: false, error: error.message || "销售日报读取失败。" }; }
+  render();
 }
 
 async function loadBenchmarks(render) {
@@ -1072,14 +1165,37 @@ async function loadImportBatches(render, openLatest = false) {
 async function loadDataFoundation(render) {
   pageState.foundation.loading = true; pageState.error = ""; render();
   try {
-    const [loaded, currentSalesPreview, ownerImport] = await Promise.all([loadConnectionDataFoundation(), loadCurrentConnectionSalesFactImport(), canManage() ? loadCurrentConnectionOwnerImport() : Promise.resolve(null)]);
-    pageState.foundation = { ...loaded, loading: false, preview: pageState.foundation.preview ?? null, bulkPreview: loaded.bulkPreview ?? pageState.foundation.bulkPreview ?? null, salesPreview: pageState.foundation.salesPreview ?? currentSalesPreview ?? null, salesLoading: pageState.foundation.salesLoading ?? false, salesError: pageState.foundation.salesError ?? "", salesMessage: pageState.foundation.salesMessage ?? "", salesFileName: pageState.foundation.salesFileName ?? "", salesFile: pageState.foundation.salesFile ?? null, shopMappingPreview: pageState.foundation.shopMappingPreview ?? null };
+    const [loaded, currentSalesPreview, currentDailyPreview, ownerImport] = await Promise.all([loadConnectionDataFoundation(), loadCurrentConnectionSalesFactImport(), loadCurrentConnectionSalesDailyImport(), canManage() ? loadCurrentConnectionOwnerImport() : Promise.resolve(null)]);
+    pageState.foundation = { ...loaded, loading: false, preview: pageState.foundation.preview ?? null, bulkPreview: loaded.bulkPreview ?? pageState.foundation.bulkPreview ?? null, salesPreview: pageState.foundation.salesPreview ?? currentSalesPreview ?? null, salesLoading: pageState.foundation.salesLoading ?? false, salesError: pageState.foundation.salesError ?? "", salesMessage: pageState.foundation.salesMessage ?? "", salesFileName: pageState.foundation.salesFileName ?? "", salesFile: pageState.foundation.salesFile ?? null, dailyPreview: pageState.foundation.dailyPreview ?? currentDailyPreview ?? null, dailyLoading: pageState.foundation.dailyLoading ?? false, dailyCommitting: pageState.foundation.dailyCommitting ?? false, dailyError: pageState.foundation.dailyError ?? "", dailyMessage: pageState.foundation.dailyMessage ?? "", dailyFileName: pageState.foundation.dailyFileName ?? "", dailyFile: pageState.foundation.dailyFile ?? null, dailyCategory: pageState.foundation.dailyCategory ?? "ready", shopMappingPreview: pageState.foundation.shopMappingPreview ?? null };
+    const dailyBatchId = pageState.foundation.dailyPreview?.batch?.id;
+    if (dailyBatchId) {
+      pageState.relationCandidates = { ...pageState.relationCandidates, ...await loadSalesRelationCandidates({ sourceBatchId: dailyBatchId, status: "pending", candidateType: pageState.relationCandidates.candidateType, page: 1, pageSize: 50 }), selected: pageState.relationCandidates.selected, loading: false };
+      pageState.comboReviews = { ...pageState.comboReviews, ...await loadComboReviews({ sourceBatchId: dailyBatchId, status: "pending", page: 1, pageSize: 20 }), filters: { ...pageState.comboReviews.filters, sourceBatchId: dailyBatchId }, loading: false };
+    }
     pageState.ownerImport.result = ownerImport;
     pageState.loadedSections.add("data-import");
     if (["waiting", "running"].includes(pageState.foundation.bulkPreview?.batch?.status)) window.setTimeout(() => void pollConnectionBulkPreview(pageState.foundation.bulkPreview.batch.id, render), 800);
   }
   catch (error) { pageState.error = error.message; pageState.foundation.loading = false; }
   render();
+}
+
+async function loadErpUsageGovernancePage(render, overrides = {}) {
+  const model = pageState.erpUsageGovernance;
+  model.loading = true; pageState.error = ""; render();
+  try {
+    const filters = { ...model.filters, ...overrides };
+    const result = await loadErpSkuUsageGovernance({ ...filters, page: overrides.page || model.pagination.page || 1, pageSize: 30 });
+    pageState.erpUsageGovernance = { ...model, ...result, filters, loading: false, selected: model.selected };
+  } catch (error) { pageState.error = error.message; model.loading = false; }
+  render();
+}
+
+async function openErpUsageGovernance(erpSkuId, render, page = 1) {
+  pageState.erpUsageGovernance.loading = true; pageState.error = ""; render();
+  try { pageState.erpUsageGovernance.selected = await loadErpSkuUsageGovernanceDetail(erpSkuId, { page, pageSize: 30 }); }
+  catch (error) { pageState.error = error.message; }
+  pageState.erpUsageGovernance.loading = false; render();
 }
 
 async function pollConnectionBulkPreview(batchId, render) {
@@ -1119,7 +1235,29 @@ export function bindConnectionCenterPageEvents(render) {
     if (pageState.section === "my-links") { if (!pageState.myWorkbench.loaded) void loadMyLinks(render); void loadSalesRanking(render, { scope: "mine" }); if (!pageState.linkDataStatus.loaded) void loadMyLinkDataStatus(render); }
     if (pageState.section === "hospital") void loadHospital(render);
     if (pageState.section === "data-import" && canImportBusinessData()) void loadDataFoundation(render);
+    if (pageState.section === "erp-usage-governance" && canManage()) void loadErpUsageGovernancePage(render, { page: 1 });
   }));
+  root.querySelector("[data-erp-usage-filters]")?.addEventListener("submit", (event) => {
+    event.preventDefault(); const data = Object.fromEntries(new FormData(event.currentTarget));
+    void loadErpUsageGovernancePage(render, { ...data, page: 1 });
+  });
+  root.querySelector("[data-reset-erp-usage-filters]")?.addEventListener("click", () => {
+    pageState.erpUsageGovernance.filters = { keyword: "", status: "unconfirmed", suggestedUsage: "", priority: "" };
+    void loadErpUsageGovernancePage(render, { page: 1 });
+  });
+  root.querySelectorAll("[data-erp-usage-page]").forEach((button) => button.addEventListener("click", () => void loadErpUsageGovernancePage(render, { page: Number(button.dataset.erpUsagePage) })));
+  root.querySelectorAll("[data-view-erp-usage]").forEach((button) => button.addEventListener("click", () => void openErpUsageGovernance(button.dataset.viewErpUsage, render)));
+  root.querySelector("[data-close-erp-usage]")?.addEventListener("click", () => { pageState.erpUsageGovernance.selected = null; render(); });
+  root.querySelector("[data-confirm-erp-usage]")?.addEventListener("submit", async (event) => {
+    event.preventDefault(); const selected = pageState.erpUsageGovernance.selected; if (!selected) return;
+    const input = Object.fromEntries(new FormData(event.currentTarget)); pageState.erpUsageGovernance.confirming = true; pageState.error = ""; render();
+    try {
+      await confirmErpSkuUsage(selected.item.erpSkuId, input);
+      await loadErpUsageGovernancePage(render);
+      await openErpUsageGovernance(selected.item.erpSkuId, render);
+    } catch (error) { pageState.error = error.message; }
+    pageState.erpUsageGovernance.confirming = false; render();
+  });
   root.querySelector("[data-link-ranking-filter]")?.addEventListener("submit", (event) => {
     event.preventDefault(); const data = new FormData(event.currentTarget); const preset = String(data.get("preset") || "7d");
     void loadSalesRanking(render, { scope: String(data.get("scope") || "mine"), range: { preset, startDate: String(data.get("startDate") || ""), endDate: String(data.get("endDate") || "") } });
@@ -1377,12 +1515,13 @@ export function bindConnectionCenterPageEvents(render) {
         const [actions, improvements, records, analysis, hospital] = await Promise.all([loadConnectionActions(pageState.selectedId), loadConnectionImprovements({ connectionId: pageState.selectedId }), canViewHealth() ? loadConnectionHealthRecords(pageState.selectedId) : Promise.resolve({ items: [] }), loadConnectionGrowthAnalysis(pageState.selectedId), loadConnectionHospital()]);
         pageState.actions = actions.items ?? []; pageState.improvements = improvements.items ?? []; pageState.healthRecords = records.items ?? []; pageState.growthAnalysis = analysis.item; pageState.hospital = { ...pageState.hospital, ...hospital, loading: false };
       }
-      if (pageState.detailTab === "sales") { const [snapshots, analysis] = await Promise.all([loadConnectionPeriodSnapshots(pageState.selectedId), loadConnectionGrowthAnalysis(pageState.selectedId)]); pageState.periodSnapshots = snapshots.items ?? []; pageState.growthAnalysis = analysis.item; }
+      if (pageState.detailTab === "sales") { const [snapshots, analysis] = await Promise.all([loadConnectionPeriodSnapshots(pageState.selectedId), loadConnectionGrowthAnalysis(pageState.selectedId), loadDailySales(() => {})]); pageState.periodSnapshots = snapshots.items ?? []; pageState.growthAnalysis = analysis.item; }
       if (pageState.detailTab === "advanced") await loadBenchmarks(() => {});
       pageState.detailLoaded.add(pageState.detailTab); pageState.error = ""; render();
     } catch (error) { pageState.error = error.message; render(); }
   }));
   root.querySelectorAll("[data-sales-period-type]").forEach((button) => button.addEventListener("click", () => { pageState.salesPeriodType = button.dataset.salesPeriodType; render(); }));
+  root.querySelectorAll("[data-daily-sales-range]").forEach((button) => button.addEventListener("click", () => void loadDailySales(render, button.dataset.dailySalesRange)));
   root.querySelectorAll("[data-cockpit-period]").forEach((button) => button.addEventListener("click", () => { pageState.cockpit.periodType = button.dataset.cockpitPeriod; render(); }));
   root.querySelector("[data-benchmark-settings]")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const payload = Object.fromEntries(new FormData(event.currentTarget));
@@ -1501,6 +1640,199 @@ export function bindConnectionCenterPageEvents(render) {
     try { pageState.foundation.salesPreview = await confirmConnectionSalesFactImport(event.currentTarget.dataset.confirmSalesFactImport); await loadDataFoundation(render); }
     catch (error) { pageState.error = error.message; }
     pageState.foundation.loading = false; render();
+  });
+  root.querySelector("[data-sales-daily-file]")?.addEventListener("change", (event) => {
+    const file = event.currentTarget.files?.[0] || null;
+    pageState.foundation.dailyFile = file;
+    pageState.foundation.dailyFileName = file?.name || "";
+    pageState.foundation.dailyError = "";
+    pageState.foundation.dailyMessage = "";
+  });
+  root.querySelector("[data-sales-daily-import-form]")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (pageState.foundation.dailyLoading) return;
+    const file = event.currentTarget.querySelector('input[name="file"]')?.files?.[0] || pageState.foundation.dailyFile;
+    if (!file) { pageState.foundation.dailyError = "请先选择销售日报Excel文件。"; render(); return; }
+    pageState.foundation.dailyFile = file; pageState.foundation.dailyFileName = file.name; pageState.foundation.dailyLoading = true; pageState.foundation.dailyError = ""; pageState.foundation.dailyMessage = ""; render();
+    try {
+      const result = await previewConnectionSalesDailyImport(file);
+      pageState.foundation.dailyCategory = "ready";
+      pageState.foundation.dailyPreview = await loadConnectionSalesDailyPreview(result.batch.id, { category: "ready", page: 1, pageSize: 50 });
+      pageState.relationCandidates = { ...pageState.relationCandidates, ...await loadSalesRelationCandidates({ sourceBatchId: result.batch.id, status: "pending", page: 1, pageSize: 50 }), candidateType: "", selected: null, selectedIds: [], loading: false };
+      pageState.foundation.dailyMessage = result.idempotent ? "已展示该文件已有的日报预览，未重复创建批次。" : "销售日报解析与身份匹配预览已生成。";
+    } catch (error) { pageState.foundation.dailyError = error.message || "销售日报预览失败。"; }
+    finally { pageState.foundation.dailyLoading = false; render(); }
+  });
+  root.querySelectorAll("[data-daily-preview-category]").forEach((button) => button.addEventListener("click", async () => {
+    const batchId = pageState.foundation.dailyPreview?.batch?.id;
+    if (!batchId) return;
+    pageState.foundation.dailyCategory = button.dataset.dailyPreviewCategory; pageState.foundation.dailyLoading = true; render();
+    try { pageState.foundation.dailyPreview = await loadConnectionSalesDailyPreview(batchId, { category: pageState.foundation.dailyCategory, page: 1, pageSize: 50 }); }
+    catch (error) { pageState.foundation.dailyError = error.message || "日报预览明细读取失败。"; }
+    finally { pageState.foundation.dailyLoading = false; render(); }
+  }));
+  root.querySelector("[data-recalculate-sales-daily-preview]")?.addEventListener("click", async (event) => {
+    if (pageState.foundation.dailyLoading || !window.confirm("确认基于原始预览行创建新的预览revision？")) return;
+    pageState.foundation.dailyLoading = true; pageState.foundation.dailyError = ""; pageState.foundation.dailyMessage = ""; render();
+    try {
+      const result = await recalculateConnectionSalesDailyPreview(event.currentTarget.dataset.recalculateSalesDailyPreview);
+      pageState.foundation.dailyCategory = "ready";
+      pageState.foundation.dailyPreview = await loadConnectionSalesDailyPreview(result.batch.id, { category: "ready", page: 1, pageSize: 50 });
+      pageState.relationCandidates = { ...pageState.relationCandidates, ...await loadSalesRelationCandidates({ sourceBatchId: result.batch.id, status: "pending", page: 1, pageSize: 50 }), candidateType: "", selected: null, selectedIds: [], loading: false };
+      pageState.foundation.dailyMessage = `预览已重新计算为 Revision ${result.summary?.previewRevision || "—"}。`;
+    } catch (error) { pageState.foundation.dailyError = error.message || "销售日报预览重新计算失败。"; }
+    finally { pageState.foundation.dailyLoading = false; render(); }
+  });
+  root.querySelector("[data-confirm-sales-daily-facts]")?.addEventListener("click", async (event) => {
+    if (pageState.foundation.dailyCommitting || !window.confirm("确认重新校验并写入满足条件的销售日报事实？未确认用途、缺失关系和冲突数据不会写入。")) return;
+    const batchId = event.currentTarget.dataset.confirmSalesDailyFacts;
+    pageState.foundation.dailyCommitting = true; pageState.foundation.dailyError = ""; pageState.foundation.dailyMessage = ""; render();
+    try {
+      const result = await confirmConnectionSalesDailyFacts(batchId);
+      pageState.foundation.dailyPreview = await loadConnectionSalesDailyPreview(batchId, { category: pageState.foundation.dailyCategory, page: 1, pageSize: 50 });
+      pageState.foundation.dailyMessage = `日报事实写入完成：新增 ${result.result.insertedCount} 条，跳过 ${result.result.skippedCount} 条，待确认更新 ${result.result.updatePendingCount} 条。`;
+    } catch (error) { pageState.foundation.dailyError = error.message || "销售日报事实写入失败。"; }
+    finally { pageState.foundation.dailyCommitting = false; render(); }
+  });
+  root.querySelectorAll("[data-relation-candidate-type]").forEach((button) => button.addEventListener("click", async () => {
+    const batchId = pageState.foundation.dailyPreview?.batch?.id; if (!batchId) return;
+    pageState.relationCandidates.candidateType = button.dataset.relationCandidateType || ""; pageState.relationCandidates.loading = true; render();
+    try { pageState.relationCandidates = { ...pageState.relationCandidates, ...await loadSalesRelationCandidates({ sourceBatchId: batchId, status: "pending", candidateType: pageState.relationCandidates.candidateType, page: 1, pageSize: 50 }), selected: null, selectedIds: [], loading: false }; }
+    catch (error) { pageState.foundation.dailyError = error.message || "销售关系候选读取失败。"; pageState.relationCandidates.loading = false; }
+    render();
+  }));
+  root.querySelectorAll("[data-view-relation-candidate]").forEach((button) => button.addEventListener("click", async () => {
+    pageState.relationCandidates.loading = true; render();
+    try { pageState.relationCandidates.selected = await loadSalesRelationCandidateDetail(button.dataset.viewRelationCandidate); }
+    catch (error) { pageState.foundation.dailyError = error.message || "销售关系候选详情读取失败。"; }
+    pageState.relationCandidates.loading = false; render();
+  }));
+  root.querySelector("[data-close-relation-candidate]")?.addEventListener("click", () => { pageState.relationCandidates.selected = null; render(); });
+  const reloadComboReviews = async (page = 1) => {
+    const batchId = pageState.foundation.dailyPreview?.batch?.id; if (!batchId) return;
+    const filters = { ...pageState.comboReviews.filters };
+    pageState.comboReviews = { ...pageState.comboReviews, ...await loadComboReviews({ ...filters, status: "pending", page, pageSize: 20 }), filters, loading: false };
+  };
+  root.querySelector("[data-generate-combo-reviews]")?.addEventListener("click", async () => {
+    const batchId = pageState.foundation.dailyPreview?.batch?.id; if (!batchId || pageState.comboReviews.generating) return;
+    pageState.comboReviews.generating = true; pageState.foundation.dailyError = ""; render();
+    try { await generatePendingComboReviews(batchId); await reloadComboReviews(1); }
+    catch (error) { pageState.foundation.dailyError = error.message || "Combo审核草稿生成失败。"; }
+    pageState.comboReviews.generating = false; render();
+  });
+  root.querySelector("[data-combo-review-filters]")?.addEventListener("submit", async (event) => {
+    event.preventDefault(); const values = new FormData(event.currentTarget);
+    pageState.comboReviews.filters = { ...pageState.comboReviews.filters, shopId: String(values.get("shopId") || ""), platform: String(values.get("platform") || ""), componentCount: String(values.get("componentCount") || ""), stability: String(values.get("stability") || ""), sourceBatchId: String(values.get("sourceBatchId") || "") };
+    pageState.comboReviews.loading = true; render();
+    try { await reloadComboReviews(1); } catch (error) { pageState.foundation.dailyError = error.message || "Combo审核筛选失败。"; pageState.comboReviews.loading = false; render(); }
+  });
+  root.querySelector("[data-reset-combo-review-filters]")?.addEventListener("click", async () => {
+    pageState.comboReviews.filters = { shopId: "", platform: "", componentCount: "", stability: "", sourceBatchId: "" };
+    pageState.comboReviews.loading = true; render();
+    try { await reloadComboReviews(1); } catch (error) { pageState.foundation.dailyError = error.message || "Combo审核列表读取失败。"; pageState.comboReviews.loading = false; render(); }
+  });
+  root.querySelectorAll("[data-combo-review-page]").forEach((button) => button.addEventListener("click", async () => {
+    pageState.comboReviews.loading = true; render();
+    try { await reloadComboReviews(Number(button.dataset.comboReviewPage || 1)); } catch (error) { pageState.foundation.dailyError = error.message || "Combo审核分页读取失败。"; pageState.comboReviews.loading = false; render(); }
+  }));
+  root.querySelectorAll("[data-view-combo-review]").forEach((button) => button.addEventListener("click", async () => {
+    pageState.comboReviews.loading = true; render();
+    try {
+      const groupId = button.dataset.viewComboReview;
+      const [selected, anomalies, sourceRows] = await Promise.all([loadComboReviewDetail(groupId), loadComboReviewAnomalyDates(groupId, { page: 1, pageSize: 10 }), loadComboReviewSourceRows(groupId, { page: 1, pageSize: 20 })]);
+      pageState.comboReviews = { ...pageState.comboReviews, selected, anomalies, sourceRows, loading: false, editing: false, draft: null, erpSearch: { keyword: "", items: [], loading: false } };
+    } catch (error) { pageState.foundation.dailyError = error.message || "Combo审核证据读取失败。"; pageState.comboReviews.loading = false; }
+    render();
+  }));
+  root.querySelectorAll("[data-combo-anomaly-page]").forEach((button) => button.addEventListener("click", async () => {
+    const groupId = pageState.comboReviews.selected?.item?.id; if (!groupId) return;
+    try { pageState.comboReviews.anomalies = await loadComboReviewAnomalyDates(groupId, { page: Number(button.dataset.comboAnomalyPage || 1), pageSize: 10 }); }
+    catch (error) { pageState.foundation.dailyError = error.message || "Combo异常日期分页读取失败。"; }
+    render();
+  }));
+  root.querySelectorAll("[data-combo-source-page]").forEach((button) => button.addEventListener("click", async () => {
+    const groupId = pageState.comboReviews.selected?.item?.id; if (!groupId) return;
+    try { pageState.comboReviews.sourceRows = await loadComboReviewSourceRows(groupId, { page: Number(button.dataset.comboSourcePage || 1), pageSize: 20 }); }
+    catch (error) { pageState.foundation.dailyError = error.message || "Combo来源记录分页读取失败。"; }
+    render();
+  }));
+  root.querySelector("[data-edit-combo-draft]")?.addEventListener("click", () => {
+    const selected = pageState.comboReviews.selected;
+    pageState.comboReviews.editing = true;
+    pageState.comboReviews.draft = { reviewNote: selected?.item?.reviewNote || "", components: (selected?.components || []).map((component) => ({ erpSku: { ...component.erpSku }, erpSkuId: component.erpSku?.id, quantity: component.quantity, status: component.status, sourceType: component.sourceType, decisionNote: "" })) };
+    render();
+  });
+  root.querySelector("[data-cancel-combo-draft]")?.addEventListener("click", () => { pageState.comboReviews.editing = false; pageState.comboReviews.draft = null; pageState.comboReviews.erpSearch = { keyword: "", items: [], loading: false }; render(); });
+  root.querySelectorAll("[data-combo-draft-quantity]").forEach((input) => input.addEventListener("input", () => {
+    const component = pageState.comboReviews.draft?.components?.[Number(input.dataset.comboDraftQuantity)]; if (component) component.quantity = input.value;
+  }));
+  root.querySelectorAll("[data-combo-draft-included]").forEach((input) => input.addEventListener("change", () => {
+    const component = pageState.comboReviews.draft?.components?.[Number(input.dataset.comboDraftIncluded)]; if (component) component.status = input.checked ? "included" : "excluded";
+  }));
+  root.querySelector("[data-combo-erp-search]")?.addEventListener("submit", async (event) => {
+    event.preventDefault(); const keyword = String(new FormData(event.currentTarget).get("keyword") || "").trim();
+    pageState.comboReviews.erpSearch = { keyword, items: [], loading: true }; render();
+    try { const result = await searchComboReviewErpSkus(keyword); pageState.comboReviews.erpSearch = { keyword, items: result.items || [], loading: false }; }
+    catch (error) { pageState.foundation.dailyError = error.message || "ERP SKU搜索失败。"; pageState.comboReviews.erpSearch.loading = false; }
+    render();
+  });
+  root.querySelectorAll("[data-add-combo-erp-sku]").forEach((button) => button.addEventListener("click", () => {
+    const item = (pageState.comboReviews.erpSearch?.items || []).find((entry) => entry.id === button.dataset.addComboErpSku); const components = pageState.comboReviews.draft?.components || [];
+    if (!item || components.some((component) => component.erpSkuId === item.id)) return;
+    components.push({ erpSku: { ...item }, erpSkuId: item.id, quantity: null, status: "included", sourceType: "manual_added", decisionNote: "" }); render();
+  }));
+  root.querySelector("[data-save-combo-draft]")?.addEventListener("click", async () => {
+    const groupId = pageState.comboReviews.selected?.item?.id; const draft = pageState.comboReviews.draft; if (!groupId || !draft || pageState.comboReviews.saving) return;
+    draft.reviewNote = String(root.querySelector("[data-combo-review-note]")?.value || ""); pageState.comboReviews.saving = true; pageState.foundation.dailyError = ""; render();
+    try {
+      await saveComboReviewDraft(groupId, { reviewNote: draft.reviewNote, components: draft.components.map((component) => ({ erpSkuId: component.erpSkuId, quantity: component.quantity, status: component.status, decisionNote: component.decisionNote })) });
+      pageState.comboReviews.selected = await loadComboReviewDetail(groupId); pageState.comboReviews.editing = false; pageState.comboReviews.draft = null; pageState.comboReviews.erpSearch = { keyword: "", items: [], loading: false }; await reloadComboReviews(Number(pageState.comboReviews.pagination?.page || 1));
+    } catch (error) { pageState.foundation.dailyError = error.message || "Combo审核草稿保存失败。"; }
+    pageState.comboReviews.saving = false; render();
+  });
+  root.querySelector("[data-confirm-combo-group]")?.addEventListener("click", async () => {
+    const groupId = pageState.comboReviews.selected?.item?.id; if (!groupId || pageState.comboReviews.confirming) return;
+    if (!globalThis.confirm("确认后将整组生成正式V2 Combo关系。此操作不会写入销售日报事实，是否继续？")) return;
+    pageState.comboReviews.confirming = true; pageState.foundation.dailyError = ""; render();
+    try {
+      await confirmComboReviewGroup(groupId, pageState.comboReviews.selected?.item?.reviewNote || "");
+      pageState.comboReviews.selected = await loadComboReviewDetail(groupId); await reloadComboReviews(1);
+      pageState.foundation.dailyMessage = "Combo整组关系已确认，销售日报预览需要重新计算。";
+    } catch (error) { pageState.foundation.dailyError = error.message || "Combo整组确认失败。"; }
+    pageState.comboReviews.confirming = false; render();
+  });
+  root.querySelector("[data-close-combo-review]")?.addEventListener("click", () => { pageState.comboReviews.selected = null; pageState.comboReviews.anomalies = { items: [], pagination: {} }; pageState.comboReviews.sourceRows = { items: [], pagination: {} }; pageState.comboReviews.editing = false; pageState.comboReviews.draft = null; render(); });
+  root.querySelectorAll("[data-select-relation-candidate]").forEach((input) => input.addEventListener("change", () => {
+    const selected = new Set(pageState.relationCandidates.selectedIds || []);
+    if (input.checked) selected.add(input.dataset.selectRelationCandidate); else selected.delete(input.dataset.selectRelationCandidate);
+    pageState.relationCandidates.selectedIds = [...selected]; render();
+  }));
+  const reloadRelationCandidates = async () => {
+    const batchId = pageState.foundation.dailyPreview?.batch?.id; if (!batchId) return;
+    const [candidateResult, previewResult] = await Promise.all([
+      loadSalesRelationCandidates({ sourceBatchId: batchId, status: "pending", candidateType: pageState.relationCandidates.candidateType, page: 1, pageSize: 50 }),
+      loadConnectionSalesDailyPreview(batchId, { category: pageState.foundation.dailyCategory, page: 1, pageSize: 50 }),
+    ]);
+    pageState.relationCandidates = { ...pageState.relationCandidates, ...candidateResult, selected: null, selectedIds: [], confirming: false };
+    pageState.foundation.dailyPreview = previewResult;
+  };
+  root.querySelector("[data-confirm-relation-candidate]")?.addEventListener("click", async (event) => {
+    if (pageState.relationCandidates.confirming || !window.confirm("确认创建这条single平台SKU—ERP SKU关系？")) return;
+    pageState.relationCandidates.confirming = true; pageState.foundation.dailyError = ""; render();
+    try { await confirmSalesRelationCandidate(event.currentTarget.dataset.confirmRelationCandidate); await reloadRelationCandidates(); window.alert("单品关系已确认，日报预览已标记为需要重新计算。"); }
+    catch (error) {
+      pageState.foundation.dailyError = error.message || "单品关系确认失败。";
+      try { await reloadRelationCandidates(); } catch { pageState.relationCandidates.confirming = false; }
+    }
+    render();
+  });
+  root.querySelector("[data-confirm-relation-candidate-batch]")?.addEventListener("click", async () => {
+    const ids = pageState.relationCandidates.selectedIds || [];
+    if (!ids.length || pageState.relationCandidates.confirming || !window.confirm(`确认创建所选 ${ids.length} 条single关系？`)) return;
+    pageState.relationCandidates.confirming = true; pageState.foundation.dailyError = ""; render();
+    try { const result = await confirmSalesRelationCandidateBatch(ids); await reloadRelationCandidates(); window.alert(`批量确认完成：新建 ${result.summary?.created || 0} 条，冲突 ${result.summary?.conflicts || 0} 条。`); }
+    catch (error) { pageState.foundation.dailyError = error.message || "单品关系批量确认失败。"; pageState.relationCandidates.confirming = false; }
+    render();
   });
   root.querySelector("[data-shop-mapping-import-form]")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const form = new FormData(event.currentTarget); pageState.foundation.loading = true; pageState.error = ""; render();

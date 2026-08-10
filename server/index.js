@@ -91,6 +91,12 @@ import {
   runDueInventorySyncTasks,
 } from "./inventoryDataSyncAdapter.js";
 import { commitSalesFactDataSync, previewSalesFactDataSync, readCurrentSalesFactDataSyncPreview, readSalesFactDataSyncPreview } from "./salesFactDataSyncAdapter.js";
+import { commitSalesDailyFacts, previewSalesDailyFacts, readCurrentSalesDailyFactPreview, readSalesDailyFactPreview, recalculateSalesDailyFactPreview } from "./salesDailyFactPreviewService.js";
+import { confirmSalesRelationCandidate, confirmSalesRelationCandidates, querySalesRelationCandidates, readSalesRelationCandidate } from "./salesRelationCandidateService.js";
+import { confirmComboReviewGroup, generatePendingComboGroups, queryComboReviewAnomalyDates, queryComboReviewGroups, queryComboReviewSourceRows, readComboReviewGroup, saveComboReviewDraft, searchComboReviewErpSkus } from "./salesComboReviewService.js";
+import { confirmErpSkuUsageGovernance, queryErpSkuUsageGovernance, readErpSkuUsageGovernance } from "./erpSkuUsageGovernanceService.js";
+import { getConnectionDailySalesPerformance } from "./connectionDailySalesService.js";
+import { getProductDailySalesPerformance } from "./productDailySalesService.js";
 import { commitPlatformGoodsExcelDataSync, previewPlatformGoodsExcelDataSync, readPlatformGoodsExcelDataSyncPreview } from "./platformGoodsExcelDataSyncAdapter.js";
 import { confirmPlatformLinkShopMappings, listPlatformLinkShopMappings, previewPlatformLinkShopMappings } from "./platformLinkShopMappingImportService.js";
 import {
@@ -2140,6 +2146,11 @@ app.get("/api/product-management/products/:id", requirePermission("products.view
   catch (error) { response.status(404).json({ success: false, message: error.message || "产品经营详情读取失败。" }); }
 });
 
+app.get("/api/product-management/products/:id/daily-sales", requirePermission("products.view"), (request, response) => {
+  try { response.json({ success: true, ...getProductDailySalesPerformance({ productId: request.params.id, startDate: request.query.startDate, endDate: request.query.endDate }) }); }
+  catch (error) { response.status(/不存在/.test(error.message || "") ? 404 : 400).json({ success: false, message: error.message || "产品销售日报读取失败。" }); }
+});
+
 app.get("/api/product-management/products/:id/marketing-asset", requirePermission("products.view"), (request, response) => {
   try { response.json({ success: true, ...getProductMarketingAsset(request.params.id) }); }
   catch (error) { response.status(404).json({ success: false, message: error.message || "产品营销资产读取失败。" }); }
@@ -2272,6 +2283,18 @@ app.post("/api/connection-assets/owner-imports/:id/cancel", requireLinkManage, (
 app.get("/api/connections/:id/core-detail", requireLinkView, requireConnectionAccess, (request, response) => {
   try { response.json({ success: true, ...getConnectionCoreDetail(request.params.id, getUserPersonId(request.user), isAdminUser(request.user)) }); }
   catch (error) { response.status(error.message?.includes("只能查看") ? 403 : 404).json({ success: false, message: error.message || "链接经营详情读取失败。" }); }
+});
+
+app.get("/api/connections/:id/daily-sales", requireLinkView, requireConnectionAccess, (request, response) => {
+  try {
+    response.json({ success: true, ...getConnectionDailySalesPerformance({
+      connectionId: request.params.id,
+      startDate: request.query.startDate,
+      endDate: request.query.endDate,
+    }) });
+  } catch (error) {
+    response.status(/不存在/.test(error.message || "") ? 404 : 400).json({ success: false, message: error.message || "链接销售日报读取失败。" });
+  }
 });
 
 app.get("/api/connections-workbench/mine", requireLinkView, (request, response) => {
@@ -2594,6 +2617,122 @@ app.get("/api/connection-data-foundation/sales-facts/:id", requireLinkImport, (r
 app.post("/api/connection-data-foundation/sales-facts/:id/confirm", requireLinkImport, (request, response) => {
   try { response.json({ success: true, ...commitSalesFactDataSync(request.params.id) }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "链接利润表确认导入失败。" }); }
+});
+
+app.post("/api/connection-data-foundation/sales-daily/preview", requireLinkImport, (request, response) => {
+  uploadConnectionWorkbook.single("file")(request, response, (error) => {
+    if (error) { response.status(400).json({ success: false, message: error.message || "销售日报上传失败。" }); return; }
+    try {
+      const result = previewSalesDailyFacts({ buffer: request.file?.buffer, fileName: normalizeUploadedFileName(request.file?.originalname), createdBy: getUserPersonId(request.user) });
+      response.status(result.idempotent ? 200 : 201).json({ success: true, ...result });
+    } catch (uploadError) {
+      console.error("[sales-daily-preview]", uploadError);
+      response.status(400).json({ success: false, message: uploadError.message || "销售日报预览失败。" });
+    }
+  });
+});
+
+app.get("/api/connection-data-foundation/sales-daily/current", requireLinkImport, (request, response) => {
+  try { response.json({ success: true, preview: readCurrentSalesDailyFactPreview(request.query) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "最近销售日报预览读取失败。" }); }
+});
+
+app.get("/api/connection-data-foundation/sales-daily/:id", requireLinkImport, (request, response) => {
+  try { response.json({ success: true, ...readSalesDailyFactPreview(request.params.id, request.query) }); }
+  catch (error) { response.status(404).json({ success: false, message: error.message || "销售日报预览读取失败。" }); }
+});
+
+app.post("/api/connection-data-foundation/sales-daily/:id/recalculate", requireLinkImport, (request, response) => {
+  try { response.status(201).json({ success: true, ...recalculateSalesDailyFactPreview(request.params.id, { createdBy: getUserPersonId(request.user) }) }); }
+  catch (error) {
+    const status = error.code === "preview_not_found" ? 404 : error.code === "no_approved_relation" ? 409 : 400;
+    response.status(status).json({ success: false, message: error.message || "销售日报预览重新计算失败。" });
+  }
+});
+
+app.post("/api/connection-data-foundation/sales-daily/:id/confirm", requireLinkImport, (request, response) => {
+  try { response.json({ success: true, ...commitSalesDailyFacts(request.params.id, { confirmedBy: getUserPersonId(request.user) }) }); }
+  catch (error) {
+    const status = error.code === "preview_not_found" ? 404 : error.code === "preview_not_ready" ? 409 : 400;
+    response.status(status).json({ success: false, message: error.message || "销售日报事实写入失败。" });
+  }
+});
+
+app.get("/api/connection-data-foundation/erp-sku-usages", requireLinkManage, (request, response) => {
+  try { response.json({ success: true, ...queryErpSkuUsageGovernance(request.query) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "ERP SKU用途治理列表读取失败。" }); }
+});
+
+app.get("/api/connection-data-foundation/erp-sku-usages/:id", requireLinkManage, (request, response) => {
+  try { response.json({ success: true, ...readErpSkuUsageGovernance(request.params.id, request.query) }); }
+  catch (error) { response.status(/不存在/.test(error.message || "") ? 404 : 400).json({ success: false, message: error.message || "ERP SKU用途治理详情读取失败。" }); }
+});
+
+app.post("/api/connection-data-foundation/erp-sku-usages/:id/confirm", requireLinkManage, (request, response) => {
+  try { response.json({ success: true, result: confirmErpSkuUsageGovernance(request.params.id, request.body, { reviewedBy: getUserPersonId(request.user) }) }); }
+  catch (error) { response.status(/不存在/.test(error.message || "") ? 404 : /冲突/.test(error.message || "") ? 409 : 400).json({ success: false, message: error.message || "ERP SKU用途确认失败。" }); }
+});
+
+app.get("/api/connection-data-foundation/sales-relation-candidates", requireLinkImport, (request, response) => {
+  try { response.json({ success: true, ...querySalesRelationCandidates(request.query) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "销售关系候选读取失败。" }); }
+});
+
+app.get("/api/connection-data-foundation/sales-relation-candidates/:id", requireLinkImport, (request, response) => {
+  try { response.json({ success: true, ...readSalesRelationCandidate(request.params.id) }); }
+  catch (error) { response.status(404).json({ success: false, message: error.message || "销售关系候选详情读取失败。" }); }
+});
+
+app.post("/api/connection-data-foundation/combo-reviews/generate", requireLinkImport, (request, response) => {
+  try { response.json({ success: true, result: generatePendingComboGroups(request.body?.sourceBatchId, { createdBy: request.auth?.person?.id }) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "Combo审核草稿生成失败。" }); }
+});
+
+app.get("/api/connection-data-foundation/combo-reviews", requireLinkImport, (request, response) => {
+  try { response.json({ success: true, ...queryComboReviewGroups(request.query) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "Combo审核列表读取失败。" }); }
+});
+
+app.get("/api/connection-data-foundation/combo-reviews/erp-skus/search", requireLinkManage, (request, response) => {
+  try { response.json({ success: true, items: searchComboReviewErpSkus(request.query.keyword, request.query) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "ERP SKU搜索失败。" }); }
+});
+
+app.put("/api/connection-data-foundation/combo-reviews/:id/draft", requireLinkManage, (request, response) => {
+  try { response.json({ success: true, result: saveComboReviewDraft(request.params.id, request.body, { reviewedBy: getUserPersonId(request.user) }) }); }
+  catch (error) { response.status(/不存在/.test(error.message || "") ? 404 : /只有待审核/.test(error.message || "") ? 409 : 400).json({ success: false, message: error.message || "Combo审核草稿保存失败。" }); }
+});
+
+app.post("/api/connection-data-foundation/combo-reviews/:id/confirm", requireLinkManage, (request, response) => {
+  try { response.json({ success: true, result: confirmComboReviewGroup(request.params.id, { reviewedBy: getUserPersonId(request.user), reviewNote: request.body?.reviewNote }) }); }
+  catch (error) { response.status(error.code === "group_not_found" ? 404 : error.code === "group_not_pending" || /conflict/.test(error.code || "") ? 409 : 400).json({ success: false, code: error.code || "combo_confirmation_failed", message: error.message || "Combo整组确认失败。" }); }
+});
+
+app.get("/api/connection-data-foundation/combo-reviews/:id/anomaly-dates", requireLinkImport, (request, response) => {
+  try { response.json({ success: true, ...queryComboReviewAnomalyDates(request.params.id, request.query) }); }
+  catch (error) { response.status(404).json({ success: false, message: error.message || "Combo异常日期读取失败。" }); }
+});
+
+app.get("/api/connection-data-foundation/combo-reviews/:id/source-rows", requireLinkImport, (request, response) => {
+  try { response.json({ success: true, ...queryComboReviewSourceRows(request.params.id, request.query) }); }
+  catch (error) { response.status(404).json({ success: false, message: error.message || "Combo来源记录读取失败。" }); }
+});
+
+app.get("/api/connection-data-foundation/combo-reviews/:id", requireLinkImport, (request, response) => {
+  try { response.json({ success: true, ...readComboReviewGroup(request.params.id) }); }
+  catch (error) { response.status(404).json({ success: false, message: error.message || "Combo审核详情读取失败。" }); }
+});
+
+app.post("/api/connection-data-foundation/sales-relation-candidates/confirm-batch", requireLinkManage, (request, response) => {
+  try { response.json({ success: true, ...confirmSalesRelationCandidates(request.body?.candidateIds, { reviewedBy: getUserPersonId(request.user) }) }); }
+  catch (error) { response.status(error.code === "combo_not_allowed" ? 400 : 409).json({ success: false, message: error.message || "销售单品关系批量确认失败。" }); }
+});
+
+app.post("/api/connection-data-foundation/sales-relation-candidates/:id/confirm", requireLinkManage, (request, response) => {
+  try {
+    const result = confirmSalesRelationCandidate(request.params.id, { reviewedBy: getUserPersonId(request.user) });
+    response.status(result.result?.outcome === "conflict" ? 409 : 200).json({ success: result.result?.outcome !== "conflict", ...result });
+  } catch (error) { response.status(error.code === "combo_not_allowed" ? 400 : 409).json({ success: false, message: error.message || "销售单品关系确认失败。" }); }
 });
 
 app.get("/api/connection-data-foundation/shop-mappings", requireLinkView, (request, response) => {

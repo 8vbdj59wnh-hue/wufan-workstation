@@ -1,0 +1,35 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+const root = fs.mkdtempSync(path.join(os.tmpdir(), "wufan-annotation-data-")); const databasePath = path.join(root, "isolated.db");
+fs.copyFileSync(process.env.WUFAN_SOURCE_DB || "/private/tmp/wufan-combo-design-analysis.db", databasePath); process.env.WUFAN_DB_PATH = databasePath;
+const { closeDatabase, getDatabase, initializeDatabase } = await import("../server/db.js");
+const { evaluateSalesDailyFactCoverage } = await import("../server/salesDailyFactPreviewService.js");
+const problemLabels = { missing_field: "必填字段缺失", missing_shop: "店铺未匹配", ambiguous_shop: "店铺匹配不唯一", missing_link: "链接未匹配", ambiguous_link: "链接匹配不唯一", missing_platform_sku: "平台SKU未匹配", ambiguous_platform_sku: "平台SKU匹配不唯一", missing_erp_sku: "ERP SKU未匹配", ambiguous_erp_sku: "ERP SKU匹配不唯一", invalid_number: "数值格式异常", duplicate_file_identity: "文件内身份重复", duplicate_daily_fact: "日报事实重复", relation_conflict: "关系冲突" };
+try {
+  initializeDatabase({ reset: false }); const db = getDatabase();
+  const batch = db.prepare("SELECT * FROM connection_import_batches WHERE importType='erp_sales_daily_preview' ORDER BY createdAt DESC LIMIT 1").get(); const summary = JSON.parse(batch.previewSummaryJson || "{}");
+  const evaluation = evaluateSalesDailyFactCoverage(batch.id); const headers = summary.headers || Object.keys(evaluation.rows[0]?.raw || {}); if (headers.length !== 25) throw new Error(`原始字段数量不是25，实际为${headers.length}`);
+  const annotated = evaluation.rows.map((row) => ({
+    sourceRowNumber: row.rowNumber, original: headers.map((header) => row.raw?.[header] ?? null), status: row.category.toUpperCase(),
+    problemType: row.category === "ready" ? "无问题" : row.category === "pending_relation" ? "缺少V2关系" : row.category === "combo_pending" ? "Combo关系待确认" : problemLabels[row.errorType] || "其他异常",
+    problemDescription: row.category === "ready" ? "身份及active V2关系匹配完成。" : row.category === "pending_relation" ? "平台SKU与ERP SKU均已精确匹配，但缺少active V2关系，需要人工确认。" : row.category === "combo_pending" ? "同一平台SKU涉及多个ERP SKU候选，需要按整组人工确认组件及数量。" : row.message || "身份或数据校验异常。",
+    systemShop: row.identity.systemShop, salesLinkId: row.identity.salesLinkId, salesLinkSkuId: row.identity.salesLinkSkuId, erpSkuId: row.identity.erpSkuId,
+    relationStatus: row.category === "ready" ? `ACTIVE_${String(row.identity.mappingType || "single").toUpperCase()}` : row.category === "relation_conflict" ? "CONFLICT" : row.category === "error" ? "NOT_APPLICABLE" : "MISSING_ACTIVE_MAPPING",
+    salesAmount: Number(row.normalized.salesAmount || 0), profitAmount: Number(row.normalized.profitAmount || 0), normalized: row.normalized,
+  }));
+  const summaryMap = new Map(); for (const row of annotated) { const key = row.problemType; const item = summaryMap.get(key) || { problemType: key, count: 0, salesAmount: 0, profitAmount: 0 }; item.count += 1; item.salesAmount += row.salesAmount; item.profitAmount += row.profitAmount; summaryMap.set(key, item); }
+  const byKey = new Map(); for (const row of annotated.filter((item) => item.status === "PENDING_RELATION" || item.status === "COMBO_PENDING")) { const key = `${row.salesLinkSkuId}|${row.erpSkuId}`; const items = byKey.get(key) || []; items.push(row); byKey.set(key, items); }
+  const enrich = db.prepare(`SELECT sku.id salesLinkSkuId,sku.platformSkuId,sku.specificationName platformSkuName,e.id erpSkuId,e.merchantSkuCode,e.specificationName erpSkuName,
+    l.id salesLinkId,l.title linkTitle,l.platformGoodsId,sh.displayName,sh.shopName,sh.platform FROM sales_link_skus sku JOIN sales_links l ON l.id=sku.salesLinkId JOIN sales_shops sh ON sh.id=l.shopId CROSS JOIN erp_skus e WHERE sku.id=? AND e.id=?`);
+  const pendingRelations = evaluation.candidates.filter((item) => item.candidateType === "single").map((candidate) => { const items = byKey.get(`${candidate.salesLinkSkuId}|${candidate.erpSkuId}`) || []; const info = enrich.get(candidate.salesLinkSkuId, candidate.erpSkuId); return { platformSku: info?.platformSkuName || info?.platformSkuId, platformSkuId: info?.platformSkuId, erpSku: info?.erpSkuName || info?.merchantSkuCode, merchantSkuCode: info?.merchantSkuCode, shop: info?.displayName || info?.shopName, link: info?.linkTitle, salesAmount: items.reduce((sum, item) => sum + item.salesAmount, 0), profitAmount: items.reduce((sum, item) => sum + item.profitAmount, 0), affectedDates: [...new Set(items.map((item) => item.normalized.saleDate))].sort(), sourceRows: items.map((item) => item.sourceRowNumber).sort((a, b) => a - b) }; });
+  const comboGroups = new Map(); for (const candidate of evaluation.candidates.filter((item) => item.candidateType === "combo")) { const items = byKey.get(`${candidate.salesLinkSkuId}|${candidate.erpSkuId}`) || []; const group = comboGroups.get(candidate.salesLinkSkuId) || { salesLinkSkuId: candidate.salesLinkSkuId, candidates: [], rows: [] }; group.candidates.push({ candidate, items }); group.rows.push(...items); comboGroups.set(candidate.salesLinkSkuId, group); }
+  const comboPending = [...comboGroups.values()].map((group) => {
+    const uniqueRows = [...new Map(group.rows.map((item) => [item.sourceRowNumber, item])).values()]; const dates = [...new Set(uniqueRows.map((item) => item.normalized.saleDate))].sort(); const signatures = new Set(dates.map((date) => [...new Set(uniqueRows.filter((item) => item.normalized.saleDate === date).map((item) => item.erpSkuId))].sort().join("|")));
+    const first = group.candidates[0]; const firstInfo = enrich.get(group.salesLinkSkuId, first.candidate.erpSkuId); const components = group.candidates.map(({ candidate, items }) => { const info = enrich.get(group.salesLinkSkuId, candidate.erpSkuId); return `${info?.merchantSkuCode || candidate.erpSkuId} ${info?.erpSkuName || ""}`.trim(); });
+    return { platformSku: firstInfo?.platformSkuName || firstInfo?.platformSkuId, platformSkuId: firstInfo?.platformSkuId, shop: firstInfo?.displayName || firstInfo?.shopName, link: firstInfo?.linkTitle, components, affectedDates: dates, salesAmount: uniqueRows.reduce((sum, item) => sum + item.salesAmount, 0), profitAmount: uniqueRows.reduce((sum, item) => sum + item.profitAmount, 0), stability: dates.length < 2 ? "证据不足" : signatures.size === 1 && [...signatures][0].split("|").filter(Boolean).length > 1 ? "稳定" : "存在变化", sourceRows: uniqueRows.map((item) => item.sourceRowNumber).sort((a, b) => a - b) };
+  });
+  const output = { headers, annotated, summary: [...summaryMap.values()].sort((a, b) => b.count - a.count), pendingRelations, comboPending, metadata: { sourceFile: batch.fileName, sourceFileHash: summary.sourceFileHash, dateStart: summary.dateStart, dateEnd: summary.dateEnd, totalRows: evaluation.rows.length } };
+  fs.writeFileSync("/private/tmp/sales-daily-annotation-data.json", JSON.stringify(output)); console.log(JSON.stringify({ headers: headers.length, rows: annotated.length, summary: output.summary.length, pendingRelations: pendingRelations.length, comboPending: comboPending.length, metadata: output.metadata }, null, 2));
+} finally { closeDatabase(); fs.rmSync(root, { recursive: true, force: true }); }
