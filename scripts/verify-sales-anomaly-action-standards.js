@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
+import fs from "node:fs";
 
 const databasePath = path.join(os.tmpdir(), `sales-anomaly-action-standards-${process.pid}.db`);
 process.env.WUFAN_DB_PATH = databasePath;
 const { initializeDatabase, getDatabase, createResource, launchWorkPlanWithProcess, closeDatabase } = await import("../server/db.js");
 const { listSalesAnomalyActionStandardDefinitions } = await import("../server/capabilities/salesAnomalyActionStandards.js");
-initializeDatabase({ reset: true }); initializeDatabase();
+const source = process.env.SOURCE_DB || "/private/tmp/phase6-3-production.db";
+if (fs.existsSync(source)) fs.copyFileSync(source, databasePath);
+initializeDatabase({ reset: !fs.existsSync(source) }); initializeDatabase();
 const db = getDatabase();
 const definitions = listSalesAnomalyActionStandardDefinitions();
 assert.equal(definitions.length, 4);
