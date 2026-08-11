@@ -91,11 +91,11 @@ export function queryLinkBusinessTable(raw = {}, userId = "", isAdmin = false) {
   const rows = database.prepare(`
     WITH fact_aggregate AS (
       SELECT salesLinkId,SUM(salesAmount) salesAmount,COUNT(salesAmount) salesCount,
-        SUM(shippedQuantity) quantity,COUNT(shippedQuantity) quantityCount,
+        SUM(quantity) quantity,COUNT(quantity) quantityCount,
         SUM(costAmount) costAmount,COUNT(costAmount) costCount,
         SUM(profitAmount) profitAmount,COUNT(profitAmount) profitCount
-      FROM connection_sku_sales_facts
-      WHERE substr(periodStart,1,10)>=@startDate AND substr(periodEnd,1,10)<=@endDate GROUP BY salesLinkId
+      FROM connection_sku_sales_daily_facts
+      WHERE saleDate BETWEEN @startDate AND @endDate GROUP BY salesLinkId
     ), platform_aggregate AS (
       SELECT salesLinkId,SUM(payQuantity) payQuantity,COUNT(payQuantity) payQuantityCount,
         SUM(payBuyerCount) payBuyerCount,COUNT(payBuyerCount) payBuyerCountRows,
@@ -156,7 +156,7 @@ export function queryLinkBusinessTable(raw = {}, userId = "", isAdmin = false) {
   const owners = database.prepare(`SELECT DISTINCT p.id,p.name FROM connection_profiles c JOIN persons p ON p.id=c.ownerId
     ${options.scope === "mine" ? "WHERE c.ownerId=@scopeOwnerId" : ""} ORDER BY p.name,p.id`).all(params);
   const sources = {
-    erp: database.prepare("SELECT MIN(substr(periodStart,1,10)) minDate,MAX(substr(periodEnd,1,10)) maxDate FROM connection_sku_sales_facts").get(),
+    erp: database.prepare("SELECT MIN(saleDate) minDate,MAX(saleDate) maxDate FROM connection_sku_sales_daily_facts").get(),
     platform: database.prepare("SELECT MIN(substr(periodStart,1,10)) minDate,MAX(substr(periodEnd,1,10)) maxDate FROM connection_period_snapshots").get(),
   };
   return { scope: options.scope, range: ranges.selected, fields: options.fields, items,

@@ -93,11 +93,19 @@ import {
 import { commitSalesFactDataSync, previewSalesFactDataSync, readCurrentSalesFactDataSyncPreview, readSalesFactDataSyncPreview } from "./salesFactDataSyncAdapter.js";
 import { commitSalesDailyFacts, previewSalesDailyFacts, readCurrentSalesDailyFactPreview, readSalesDailyFactPreview, recalculateSalesDailyFactPreview } from "./salesDailyFactPreviewService.js";
 import { confirmSalesRelationCandidate, confirmSalesRelationCandidates, querySalesRelationCandidates, readSalesRelationCandidate } from "./salesRelationCandidateService.js";
+import { querySalesRelationGovernance } from "./salesRelationGovernanceService.js";
+import {
+  listProductStructureApplicationBatches,
+  queryProductStructureApplicationQueue,
+  readProductStructureApplicationPreview,
+  reviewProductStructureApplicationItem,
+} from "./productStructureApplicationApprovalService.js";
 import { confirmComboReviewGroup, generatePendingComboGroups, queryComboReviewAnomalyDates, queryComboReviewGroups, queryComboReviewSourceRows, readComboReviewGroup, saveComboReviewDraft, searchComboReviewErpSkus } from "./salesComboReviewService.js";
 import { confirmErpSkuProductUsages, confirmErpSkuUsageGovernance, queryErpSkuProductUsageCandidates, queryErpSkuUsageGovernance, readErpSkuUsageGovernance } from "./erpSkuUsageGovernanceService.js";
 import { getConnectionDailySalesPerformance } from "./connectionDailySalesService.js";
 import { getProductDailySalesPerformance } from "./productDailySalesService.js";
 import { querySalesDailyDataQuality } from "./salesDailyDataQualityService.js";
+import { querySalesDataQualityAnomalies, submitSalesDataQualityAnomalyDecision } from "./salesDataQualityAnomalyGovernanceService.js";
 import { getSalesBusinessDashboard } from "./salesBusinessDashboardService.js";
 import { queryBusinessAnomalies } from "./capabilities/queryBusinessAnomalies.js";
 import { queryBusinessImprovementResult } from "./capabilities/queryBusinessImprovementResult.js";
@@ -2837,6 +2845,41 @@ app.post("/api/connection-data-foundation/erp-sku-usages/:id/confirm", requireLi
 app.get("/api/connection-data-foundation/sales-relation-candidates", requireLinkImport, (request, response) => {
   try { response.json({ success: true, ...querySalesRelationCandidates(request.query) }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "销售关系候选读取失败。" }); }
+});
+
+app.get("/api/connection-data-foundation/sales-relation-governance", requireLinkImport, (request, response) => {
+  try { response.json({ success: true, ...querySalesRelationGovernance(request.query) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "销售关系治理工作台读取失败。" }); }
+});
+
+app.get("/api/connection-data-foundation/sales-data-quality-anomalies", requireLinkImport, (request, response) => {
+  try { response.json({ success: true, ...querySalesDataQualityAnomalies(request.query) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "销售数据异常队列读取失败。" }); }
+});
+
+app.post("/api/connection-data-foundation/sales-data-quality-anomalies/:id/decision", requireLinkManage, (request, response) => {
+  try { response.json({ success: true, result: submitSalesDataQualityAnomalyDecision(request.params.id, request.body, { reviewedBy: getUserPersonId(request.user) }) }); }
+  catch (error) { response.status(/不存在/.test(error.message || "") ? 404 : /不允许|变化/.test(error.message || "") ? 409 : 400).json({ success: false, message: error.message || "销售数据异常处理失败。" }); }
+});
+
+app.get("/api/connection-data-foundation/product-structure-applications", requireLinkManage, (request, response) => {
+  try { response.json({ success: true, items: listProductStructureApplicationBatches() }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "货品结构应用批次读取失败。" }); }
+});
+
+app.get("/api/connection-data-foundation/product-structure-applications/:batchId/items", requireLinkManage, (request, response) => {
+  try { response.json({ success: true, ...queryProductStructureApplicationQueue(request.params.batchId, request.query) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "货品结构审批队列读取失败。" }); }
+});
+
+app.get("/api/connection-data-foundation/product-structure-application-items/:id", requireLinkManage, (request, response) => {
+  try { response.json({ success: true, preview: readProductStructureApplicationPreview(request.params.id) }); }
+  catch (error) { response.status(/不存在/.test(error.message || "") ? 404 : 400).json({ success: false, message: error.message || "货品结构应用预览读取失败。" }); }
+});
+
+app.post("/api/connection-data-foundation/product-structure-application-items/:id/review", requireLinkManage, (request, response) => {
+  try { response.json({ success: true, result: reviewProductStructureApplicationItem(request.params.id, { ...request.body, reviewedBy: getUserPersonId(request.user) }) }); }
+  catch (error) { response.status(/不存在/.test(error.message || "") ? 404 : /状态|分类/.test(error.message || "") ? 409 : 400).json({ success: false, message: error.message || "货品结构应用审批失败。" }); }
 });
 
 app.get("/api/connection-data-foundation/sales-relation-candidates/:id", requireLinkImport, (request, response) => {

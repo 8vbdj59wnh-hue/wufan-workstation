@@ -4,6 +4,7 @@ import path from "node:path";
 import { getDatabase, uploadsDir } from "./db.js";
 import { queryWangdianPlatformGoods } from "./wangdianClient.js";
 import { clearDataSyncCheckpoint, runWangdianPagedWindows } from "./dataSyncPagedExecution.js";
+import { ensureSingleLinkSkuErpMapping, inspectSingleLinkSkuErpMapping } from "./linkSkuErpMappingService.js";
 
 const stagingRoot = path.join(uploadsDir, "wangdian-platform-goods-sync");
 const restrictedPlatforms = new Set(["淘宝", "天猫", "taobao", "tmall"]);
@@ -278,6 +279,7 @@ function analyzeRows(logId, rows, scope = {}) {
     if ((shopScope.size && !shopScope.has(mapping.shopId)) || (platformScope.size && !platformScope.has(lower(mapping.platform)))) return;
     if (restrictedPlatforms.has(mapping.platform)) { reject("platform_restricted", "淘系平台货品接口返回范围受限，本行不作为链接关系来源。"); return; }
     if (!goodsId || !specId) { reject("invalid_data", "平台商品ID或平台SKU ID缺失。"); return; }
+    if (Number(source.match_target_type) === 2) { reject("bundle_sku", "旺店通返回组合货品，已进入人工关系治理，不自动生成single关系。"); return; }
     const identity = `${mapping.shopId}|${goodsId}|${specId}`;
     if (seen.has(identity)) { reject("duplicate_platform_sku", "同一店铺、商品和平台SKU在响应中重复。"); return; }
     seen.add(identity);
@@ -290,6 +292,13 @@ function analyzeRows(logId, rows, scope = {}) {
     const erpSku = erpSkus[0];
     const productMapping = database.prepare("SELECT * FROM product_erp_mappings WHERE lower(merchantSkuCode)=lower(?) AND currentState='active'").get(merchantNo) ?? null;
     const existingSku = database.prepare("SELECT id FROM sales_link_skus WHERE salesLinkId=? AND platformSkuId=?").get(link.id, specId);
+    if (existingSku) {
+      const relation = inspectSingleLinkSkuErpMapping(database, existingSku.id, erpSku.id);
+      if (!["missing", "active_exact"].includes(relation.status)) {
+        reject("existing_erp_sku_conflict", relation.reason);
+        return;
+      }
+    }
     valid.push({ source, mapping, link, erpSku, productMapping, plannedAction: existingSku ? "update" : "create" });
   });
   return { valid, exceptions, canCommit: !unknownShop };
@@ -315,7 +324,7 @@ export async function previewWangdianPlatformGoodsSync({ dataSyncBatchId, import
     const insert = database.prepare(`INSERT INTO wangdian_platform_goods_sync_exceptions (id,syncLogId,rowNumber,exceptionType,shopNo,platformGoodsId,platformSkuId,merchantNo,message,rawDataJson,createdAt) VALUES (@id,@syncLogId,@rowNumber,@exceptionType,@shopNo,@platformGoodsId,@platformSkuId,@merchantNo,@message,@rawDataJson,@createdAt)`);
     database.transaction(() => analysis.exceptions.forEach((item) => insert.run(item)))();
     fs.mkdirSync(stagingRoot, { recursive: true });
-    fs.writeFileSync(path.join(stagingRoot, `${id}.json`), JSON.stringify(analysis.valid.map(({ source, mapping, link, erpSku, productMapping }) => ({ source, shopId: mapping.shopId, salesLinkId: link.id, erpSkuId: erpSku.id, productId: productMapping?.productId ?? null }))));
+    fs.writeFileSync(path.join(stagingRoot, `${id}.json`), JSON.stringify(analysis.valid.map(({ source, mapping, link, erpSku, productMapping }) => ({ source, shopId: mapping.shopId, salesLinkId: link.id, erpSkuId: erpSku.id, hasProductMapping: Boolean(productMapping?.productId) }))));
     const projectedCreated = analysis.valid.filter((item) => item.plannedAction === "create").length;
     const projectedUpdated = analysis.valid.length - projectedCreated;
     database.prepare(`UPDATE wangdian_platform_goods_sync_logs SET status='previewed',pageCount=?,sourceRowCount=?,matchedCount=?,exceptionCount=?,createdCount=?,updatedCount=?,completedAt=? WHERE id=?`).run(pages, rows.length, analysis.valid.length, analysis.exceptions.length, projectedCreated, projectedUpdated, new Date().toISOString(), id);
@@ -340,19 +349,47 @@ export function commitWangdianPlatformGoodsSync(logId) {
   const now = new Date().toISOString();
   let created = 0;
   let updated = 0;
+  let mappingCreated = 0;
   database.transaction(() => {
     for (const row of rows) {
       const source = row.source;
       const current = database.prepare("SELECT * FROM sales_link_skus WHERE salesLinkId=? AND platformSkuId=?").get(row.salesLinkId, text(source.spec_id));
       const id = current?.id ?? stableId("sales-link-sku", `${row.salesLinkId}|${text(source.spec_id)}`);
-      const manual = current?.matchMethod === "manual" || current?.matchStatus === "matched_manual";
-      const productId = manual ? current.productId : row.productId;
-      database.prepare(`INSERT INTO sales_link_skus (id,salesLinkId,productId,erpSkuId,platformSkuId,platformSkuCode,normalizedPlatformSkuCode,specificationName,normalizedSpecificationName,price,platformStock,occupiedStock,systemGoodsType,syncEnabled,lastSyncedStock,lastSyncedAt,stopSyncReason,matchStatus,matchMethod,matchReason,lastSeenBatchId,currentState,missingAt,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET erpSkuId=excluded.erpSkuId,platformSkuCode=excluded.platformSkuCode,normalizedPlatformSkuCode=excluded.normalizedPlatformSkuCode,specificationName=excluded.specificationName,normalizedSpecificationName=excluded.normalizedSpecificationName,price=excluded.price,platformStock=excluded.platformStock,occupiedStock=excluded.occupiedStock,productId=CASE WHEN sales_link_skus.matchMethod='manual' OR sales_link_skus.matchStatus='matched_manual' THEN sales_link_skus.productId ELSE excluded.productId END,matchStatus=CASE WHEN sales_link_skus.matchMethod='manual' OR sales_link_skus.matchStatus='matched_manual' THEN sales_link_skus.matchStatus ELSE excluded.matchStatus END,matchMethod=CASE WHEN sales_link_skus.matchMethod='manual' OR sales_link_skus.matchStatus='matched_manual' THEN sales_link_skus.matchMethod ELSE excluded.matchMethod END,matchReason=CASE WHEN sales_link_skus.matchMethod='manual' OR sales_link_skus.matchStatus='matched_manual' THEN sales_link_skus.matchReason ELSE excluded.matchReason END,lastSeenBatchId=excluded.lastSeenBatchId,currentState='active',missingAt=NULL,updatedAt=excluded.updatedAt`).run(
-        id, row.salesLinkId, productId, row.erpSkuId, text(source.spec_id), text(source.spec_outer_id), lower(source.spec_outer_id), text(source.spec_name), lower(source.spec_name), Number(source.price) || null, Number(source.stock_num) || null, Number(source.hold_stock) || null, Number(source.match_target_type) === 2 ? "combination" : "single", null, null, null, productId ? "matched_auto" : "erp_linked", "wangdian_merchant_no", productId ? "旺店通merchant_no精确关联ERP SKU及产品映射" : "旺店通merchant_no精确关联ERP SKU，产品映射待建立", logId, "active", null, current?.createdAt ?? now, now,
-      );
+      const skuRow = {
+        id,
+        salesLinkId: row.salesLinkId,
+        platformSkuId: text(source.spec_id),
+        platformSkuCode: text(source.spec_outer_id),
+        normalizedPlatformSkuCode: lower(source.spec_outer_id),
+        specificationName: text(source.spec_name),
+        normalizedSpecificationName: lower(source.spec_name),
+        price: Number(source.price) || null,
+        platformStock: Number(source.stock_num) || null,
+        occupiedStock: Number(source.hold_stock) || null,
+        systemGoodsType: "single",
+        matchStatus: row.hasProductMapping ? "matched_auto" : "erp_linked",
+        matchMethod: "wangdian_merchant_no",
+        matchReason: row.hasProductMapping ? "旺店通merchant_no精确建立V2 ERP SKU关系，ERP SKU已有产品映射" : "旺店通merchant_no精确建立V2 ERP SKU关系，产品映射待建立",
+        lastSeenBatchId: logId,
+        createdAt: current?.createdAt ?? now,
+        updatedAt: now,
+      };
+      database.prepare(`INSERT INTO sales_link_skus
+        (id,salesLinkId,platformSkuId,platformSkuCode,normalizedPlatformSkuCode,specificationName,normalizedSpecificationName,price,platformStock,occupiedStock,systemGoodsType,syncEnabled,lastSyncedStock,lastSyncedAt,stopSyncReason,matchStatus,matchMethod,matchReason,lastSeenBatchId,currentState,missingAt,createdAt,updatedAt)
+        VALUES (@id,@salesLinkId,@platformSkuId,@platformSkuCode,@normalizedPlatformSkuCode,@specificationName,@normalizedSpecificationName,@price,@platformStock,@occupiedStock,@systemGoodsType,0,NULL,NULL,NULL,@matchStatus,@matchMethod,@matchReason,@lastSeenBatchId,'active',NULL,@createdAt,@updatedAt)
+        ON CONFLICT(id) DO UPDATE SET platformSkuCode=excluded.platformSkuCode,normalizedPlatformSkuCode=excluded.normalizedPlatformSkuCode,
+          specificationName=excluded.specificationName,normalizedSpecificationName=excluded.normalizedSpecificationName,price=excluded.price,
+          platformStock=excluded.platformStock,occupiedStock=excluded.occupiedStock,systemGoodsType=excluded.systemGoodsType,
+          matchStatus=CASE WHEN sales_link_skus.matchMethod='manual' OR sales_link_skus.matchStatus='matched_manual' THEN sales_link_skus.matchStatus ELSE excluded.matchStatus END,
+          matchMethod=CASE WHEN sales_link_skus.matchMethod='manual' OR sales_link_skus.matchStatus='matched_manual' THEN sales_link_skus.matchMethod ELSE excluded.matchMethod END,
+          matchReason=CASE WHEN sales_link_skus.matchMethod='manual' OR sales_link_skus.matchStatus='matched_manual' THEN sales_link_skus.matchReason ELSE excluded.matchReason END,
+          lastSeenBatchId=excluded.lastSeenBatchId,currentState='active',missingAt=NULL,updatedAt=excluded.updatedAt`).run(skuRow);
+      const relation = ensureSingleLinkSkuErpMapping(database, { salesLinkSkuId: id, erpSkuId: row.erpSkuId, sourceType: "wangdian_platform_goods", sourceBatchId: logId, timestamp: now });
+      if (relation.outcome === "governance_pending") throw new Error(relation.reason);
+      if (relation.outcome === "created") mappingCreated += 1;
       if (current) updated += 1; else created += 1;
     }
     database.prepare(`UPDATE wangdian_platform_goods_sync_logs SET status='completed',createdCount=?,updatedCount=?,completedAt=? WHERE id=?`).run(created, updated, now, logId);
   })();
-  return { ...readWangdianPlatformGoodsSync(logId), idempotent: false };
+  return { ...readWangdianPlatformGoodsSync(logId), mappingCreated, idempotent: false };
 }

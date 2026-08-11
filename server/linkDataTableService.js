@@ -67,17 +67,17 @@ export function queryLinkDataTable(raw = {}, userId = "", isAdmin = false) {
   const whereSql = where.join(" AND ");
   const salesAggregate = `
     SELECT salesLinkId,
-      SUM(CASE WHEN substr(periodStart,1,10)>=@yesterdayStart AND substr(periodEnd,1,10)<=@yesterdayEnd THEN COALESCE(salesAmount,0) END) yesterdaySales,
-      COUNT(CASE WHEN substr(periodStart,1,10)>=@yesterdayStart AND substr(periodEnd,1,10)<=@yesterdayEnd THEN 1 END) yesterdayCount,
-      SUM(CASE WHEN substr(periodStart,1,10)>=@sevenStart AND substr(periodEnd,1,10)<=@sevenEnd THEN COALESCE(salesAmount,0) END) sales7d,
-      COUNT(CASE WHEN substr(periodStart,1,10)>=@sevenStart AND substr(periodEnd,1,10)<=@sevenEnd THEN 1 END) count7d,
-      SUM(CASE WHEN substr(periodStart,1,10)>=@thirtyStart AND substr(periodEnd,1,10)<=@thirtyEnd THEN COALESCE(salesAmount,0) END) sales30d,
-      COUNT(CASE WHEN substr(periodStart,1,10)>=@thirtyStart AND substr(periodEnd,1,10)<=@thirtyEnd THEN 1 END) count30d,
-      SUM(CASE WHEN substr(periodStart,1,10)>=@selectedStart AND substr(periodEnd,1,10)<=@selectedEnd THEN COALESCE(salesAmount,0) END) selectedSales,
-      COUNT(CASE WHEN substr(periodStart,1,10)>=@selectedStart AND substr(periodEnd,1,10)<=@selectedEnd THEN 1 END) selectedCount
-    FROM connection_sku_sales_facts
-    WHERE substr(periodStart,1,10)>=MIN(@thirtyStart,@selectedStart,@yesterdayStart)
-      AND substr(periodEnd,1,10)<=MAX(@thirtyEnd,@selectedEnd,@yesterdayEnd)
+      SUM(CASE WHEN saleDate BETWEEN @yesterdayStart AND @yesterdayEnd THEN COALESCE(salesAmount,0) END) yesterdaySales,
+      COUNT(CASE WHEN saleDate BETWEEN @yesterdayStart AND @yesterdayEnd THEN 1 END) yesterdayCount,
+      SUM(CASE WHEN saleDate BETWEEN @sevenStart AND @sevenEnd THEN COALESCE(salesAmount,0) END) sales7d,
+      COUNT(CASE WHEN saleDate BETWEEN @sevenStart AND @sevenEnd THEN 1 END) count7d,
+      SUM(CASE WHEN saleDate BETWEEN @thirtyStart AND @thirtyEnd THEN COALESCE(salesAmount,0) END) sales30d,
+      COUNT(CASE WHEN saleDate BETWEEN @thirtyStart AND @thirtyEnd THEN 1 END) count30d,
+      SUM(CASE WHEN saleDate BETWEEN @selectedStart AND @selectedEnd THEN COALESCE(salesAmount,0) END) selectedSales,
+      COUNT(CASE WHEN saleDate BETWEEN @selectedStart AND @selectedEnd THEN 1 END) selectedCount
+    FROM connection_sku_sales_daily_facts
+    WHERE saleDate>=MIN(@thirtyStart,@selectedStart,@yesterdayStart)
+      AND saleDate<=MAX(@thirtyEnd,@selectedEnd,@yesterdayEnd)
     GROUP BY salesLinkId`;
   const database = getDatabase();
   const total = Number(database.prepare(`SELECT COUNT(*) count FROM connection_profiles c
@@ -111,15 +111,15 @@ export function queryLinkDataTable(raw = {}, userId = "", isAdmin = false) {
       hospitalStatus: hospital.get(row.id) || "none", archiveStatus: row.archiveStatus,
     };
   });
-  const sourceDate = database.prepare(`SELECT MIN(substr(periodStart,1,10)) minDate,MAX(substr(periodEnd,1,10)) maxDate
-    FROM connection_sku_sales_facts`).get();
+  const sourceDate = database.prepare(`SELECT MIN(saleDate) minDate,MAX(saleDate) maxDate
+    FROM connection_sku_sales_daily_facts`).get();
   const optionWhere = options.scope === "mine" ? "WHERE c.ownerId=@ownerId" : "";
   const filterRows = database.prepare(`SELECT DISTINCT sh.id shopId,sh.platform,COALESCE(sh.displayName,sh.shopName) shopName
     FROM connection_profiles c JOIN sales_links l ON l.id=c.salesLinkId JOIN sales_shops sh ON sh.id=l.shopId
     ${optionWhere} ORDER BY sh.platform,shopName,sh.id`).all(params);
   return { scope: options.scope, range: ranges.selected, ranges, fields: options.fields, items,
     pagination: { page: options.page, pageSize: options.pageSize, total, totalPages: Math.max(1, Math.ceil(total / options.pageSize)) },
-    dataSource: { type: "connection_sku_sales_facts", minDate: sourceDate?.minDate ?? null, maxDate: sourceDate?.maxDate ?? null,
+    dataSource: { type: "connection_sku_sales_daily_facts", minDate: sourceDate?.minDate ?? null, maxDate: sourceDate?.maxDate ?? null,
       noData: !sourceDate?.maxDate },
     filterOptions: { platforms: [...new Set(filterRows.map((item) => item.platform).filter(Boolean))],
       shops: filterRows.map((item) => ({ id: item.shopId, name: item.shopName, platform: item.platform })) },

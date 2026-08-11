@@ -19,8 +19,8 @@ export function getLinkSalesDistribution(input = {}, userId = "", isAdmin = fals
   const rows = getDatabase().prepare(`
     WITH selected_sales AS (
       SELECT salesLinkId,SUM(COALESCE(salesAmount,0)) salesAmount,COUNT(id) factCount
-      FROM connection_sku_sales_facts
-      WHERE substr(periodStart,1,10)>=@startDate AND substr(periodEnd,1,10)<=@endDate
+      FROM connection_sku_sales_daily_facts
+      WHERE saleDate BETWEEN @startDate AND @endDate
       GROUP BY salesLinkId
     )
     SELECT c.id linkId,c.name linkName,c.mainImage,selected_sales.salesAmount,

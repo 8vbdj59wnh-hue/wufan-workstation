@@ -40,10 +40,10 @@ function baseCtes() {
       WHERE m.currentState='active'
       GROUP BY m.erpSkuId
     ), sales_rollup AS (
-      SELECT erpSkuId,SUM(COALESCE(shippedQuantity,0)) quantity,SUM(COALESCE(salesAmount,0)) salesAmount,
+      SELECT erpSkuId,SUM(COALESCE(quantity,0)) quantity,SUM(COALESCE(salesAmount,0)) salesAmount,
         SUM(COALESCE(costAmount,0)) costAmount,SUM(COALESCE(profitAmount,0)) profitAmount,
-        MIN(periodStart) firstPeriod,MAX(periodEnd) lastPeriod
-      FROM connection_sku_sales_facts WHERE erpSkuId IS NOT NULL GROUP BY erpSkuId
+        MIN(saleDate) firstPeriod,MAX(saleDate) lastPeriod
+      FROM connection_sku_sales_daily_facts WHERE erpSkuId IS NOT NULL GROUP BY erpSkuId
     )`;
 }
 
@@ -128,7 +128,7 @@ function productListMetadata(database) {
     FROM erp_skus s LEFT JOIN product_erp_mappings m ON m.erpSkuId=s.id AND m.currentState='active'
     LEFT JOIN products p ON p.id=m.productId
     LEFT JOIN erp_sku_inventory_daily_summaries i ON i.erpSkuId=s.id
-    LEFT JOIN (SELECT erpSkuId,SUM(shippedQuantity) quantity,SUM(salesAmount) salesAmount,MIN(periodStart) firstPeriod FROM connection_sku_sales_facts WHERE erpSkuId IS NOT NULL GROUP BY erpSkuId) f ON f.erpSkuId=s.id
+    LEFT JOIN (SELECT erpSkuId,SUM(quantity) quantity,SUM(salesAmount) salesAmount,MIN(saleDate) firstPeriod FROM connection_sku_sales_daily_facts WHERE erpSkuId IS NOT NULL GROUP BY erpSkuId) f ON f.erpSkuId=s.id
     WHERE s.currentState='active'`).all().map((row) => ({ ...row, salesMetric: Number(row.quantity || 0) > 0 ? Number(row.quantity) : Number(row.salesMonth || 0) }));
   const zones = classifyBusinessZones(rows);
   const summary = database.prepare(`SELECT COUNT(*) total,SUM(p.id IS NOT NULL) profiled,SUM(p.id IS NULL) unprofiled
@@ -170,7 +170,7 @@ export function listProductCenterV2Skus(options = {}) {
   const bindParams = { ...params }; const zoneIds = bindParams.zoneIds || []; delete bindParams.zoneIds; const positional = [...zoneIds];
   const whereSql = conditions.join(" AND ");
   const total = Number(database.prepare(`SELECT COUNT(*) count ${from} WHERE ${whereSql}`).get(...positional, bindParams)?.count || 0);
-  const salesSort = `COALESCE((SELECT SUM(fx.shippedQuantity) FROM connection_sku_sales_facts fx WHERE fx.erpSkuId=s.id),(SELECT ix.salesMonth FROM erp_sku_inventory_daily_summaries ix WHERE ix.erpSkuId=s.id ORDER BY ix.businessDate DESC LIMIT 1),0)`;
+  const salesSort = `COALESCE((SELECT SUM(fx.quantity) FROM connection_sku_sales_daily_facts fx WHERE fx.erpSkuId=s.id),(SELECT ix.salesMonth FROM erp_sku_inventory_daily_summaries ix WHERE ix.erpSkuId=s.id ORDER BY ix.businessDate DESC LIMIT 1),0)`;
   const capitalSort = `(SELECT ix.inventoryCostAmount FROM erp_sku_inventory_daily_summaries ix WHERE ix.erpSkuId=s.id ORDER BY ix.businessDate DESC,ix.updatedAt DESC LIMIT 1)`;
   const sortExpressions = { "updated-desc": "s.updatedAt DESC", "updated-asc": "s.updatedAt ASC", "created-desc": "s.createdAt DESC", "sales-desc": `${salesSort} DESC`, "sales-asc": `${salesSort} ASC`, "stock-desc": `${inventoryExpression} DESC`, "stock-asc": `${inventoryExpression} ASC`, "capital-desc": `${capitalSort} DESC`, "capital-asc": `${capitalSort} ASC` };
   const order = sortExpressions[text(options.sort)] || sortExpressions["updated-desc"];
@@ -186,10 +186,10 @@ export function listProductCenterV2Skus(options = {}) {
       (SELECT COUNT(DISTINCT lx.salesLinkId) FROM sales_link_sku_erp_mappings lm JOIN sales_link_skus lx ON lx.id=lm.salesLinkSkuId WHERE lm.erpSkuId=s.id AND lm.currentState='active') linkCount,
       (SELECT COUNT(*) FROM sales_link_sku_erp_mappings lm WHERE lm.erpSkuId=s.id AND lm.currentState='active') platformSkuCount,
       (SELECT json_group_array(DISTINCT sh.platform) FROM sales_link_sku_erp_mappings lm JOIN sales_link_skus lx ON lx.id=lm.salesLinkSkuId JOIN sales_links ll ON ll.id=lx.salesLinkId JOIN sales_shops sh ON sh.id=ll.shopId WHERE lm.erpSkuId=s.id AND lm.currentState='active') platformsJson,
-      COALESCE((SELECT SUM(f.shippedQuantity) FROM connection_sku_sales_facts f WHERE f.erpSkuId=s.id),0) quantity,
-      COALESCE((SELECT SUM(f.salesAmount) FROM connection_sku_sales_facts f WHERE f.erpSkuId=s.id),0) salesAmount,
-      COALESCE((SELECT SUM(f.profitAmount) FROM connection_sku_sales_facts f WHERE f.erpSkuId=s.id),0) profitAmount,
-      COALESCE((SELECT SUM(f.shippedQuantity) FROM connection_sku_sales_facts f WHERE f.erpSkuId=s.id),(SELECT i.salesMonth FROM erp_sku_inventory_daily_summaries i WHERE i.erpSkuId=s.id ORDER BY i.businessDate DESC LIMIT 1),0) salesMetric
+      COALESCE((SELECT SUM(f.quantity) FROM connection_sku_sales_daily_facts f WHERE f.erpSkuId=s.id),0) quantity,
+      COALESCE((SELECT SUM(f.salesAmount) FROM connection_sku_sales_daily_facts f WHERE f.erpSkuId=s.id),0) salesAmount,
+      COALESCE((SELECT SUM(f.profitAmount) FROM connection_sku_sales_daily_facts f WHERE f.erpSkuId=s.id),0) profitAmount,
+      COALESCE((SELECT SUM(f.quantity) FROM connection_sku_sales_daily_facts f WHERE f.erpSkuId=s.id),(SELECT i.salesMonth FROM erp_sku_inventory_daily_summaries i WHERE i.erpSkuId=s.id ORDER BY i.businessDate DESC LIMIT 1),0) salesMetric
     FROM candidates q JOIN erp_skus s ON s.id=q.id JOIN erp_goods g ON g.id=s.erpGoodsId
     LEFT JOIN product_erp_mappings m ON m.erpSkuId=s.id AND m.currentState='active' LEFT JOIN products p ON p.id=m.productId
     ORDER BY ${order},s.id`).all(...positional, { ...bindParams, limit, offset });
@@ -219,18 +219,18 @@ export function getProductCenterV2SkuDetail(erpSkuId, { scope = "full" } = {}) {
     return { inventoryRecords: database.prepare(`SELECT * FROM erp_sku_inventory_daily_summaries WHERE erpSkuId=? ORDER BY businessDate DESC,updatedAt DESC LIMIT 120`).all(sku.id) };
   }
   if (scope === "sales") {
-    return { salesTrend: database.prepare(`SELECT periodStart,periodEnd,SUM(COALESCE(shippedQuantity,0)) quantity,
+    return { salesTrend: database.prepare(`SELECT saleDate periodStart,saleDate periodEnd,SUM(COALESCE(quantity,0)) quantity,
         SUM(COALESCE(salesAmount,0)) salesAmount,SUM(COALESCE(costAmount,0)) costAmount,SUM(COALESCE(profitAmount,0)) profitAmount
-      FROM connection_sku_sales_facts WHERE erpSkuId=? GROUP BY periodStart,periodEnd ORDER BY periodEnd DESC LIMIT 90`).all(sku.id) };
+      FROM connection_sku_sales_daily_facts WHERE erpSkuId=? GROUP BY saleDate ORDER BY saleDate DESC LIMIT 90`).all(sku.id) };
   }
   if (scope === "operations") {
     return { operations: sku.productId ? database.prepare("SELECT * FROM product_lifecycle_events WHERE productId=? ORDER BY changedAt DESC LIMIT 100").all(sku.productId) : [] };
   }
   const inventory = database.prepare(`SELECT * FROM erp_sku_inventory_daily_summaries WHERE erpSkuId=? ORDER BY businessDate DESC,updatedAt DESC LIMIT 1`).get(sku.id) ?? null;
-  const sales = database.prepare(`SELECT COUNT(*) factCount,MIN(periodStart) firstPeriod,MAX(periodEnd) lastPeriod,
-      SUM(COALESCE(shippedQuantity,0)) quantity,SUM(COALESCE(salesAmount,0)) salesAmount,
+  const sales = database.prepare(`SELECT COUNT(*) factCount,MIN(saleDate) firstPeriod,MAX(saleDate) lastPeriod,
+      SUM(COALESCE(quantity,0)) quantity,SUM(COALESCE(salesAmount,0)) salesAmount,
       SUM(COALESCE(costAmount,0)) costAmount,SUM(COALESCE(profitAmount,0)) profitAmount
-    FROM connection_sku_sales_facts WHERE erpSkuId=?`).get(sku.id);
+    FROM connection_sku_sales_daily_facts WHERE erpSkuId=?`).get(sku.id);
   if (scope === "summary") return { sku, inventory, sales };
   const links = database.prepare(`SELECT m.id mappingId,m.mappingType,m.quantity,x.id salesLinkSkuId,x.platformSkuId,x.platformSkuCode,x.specificationName platformSpecification,
       l.id salesLinkId,l.platformGoodsId,l.title,s.platform,s.displayName shopName,c.id connectionId
@@ -238,9 +238,9 @@ export function getProductCenterV2SkuDetail(erpSkuId, { scope = "full" } = {}) {
     JOIN sales_links l ON l.id=x.salesLinkId JOIN sales_shops s ON s.id=l.shopId
     LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
     WHERE m.erpSkuId=? AND m.currentState='active' ORDER BY s.platform,s.displayName,l.title`).all(sku.id);
-  const salesTrend = database.prepare(`SELECT periodStart,periodEnd,SUM(COALESCE(shippedQuantity,0)) quantity,
+  const salesTrend = database.prepare(`SELECT saleDate periodStart,saleDate periodEnd,SUM(COALESCE(quantity,0)) quantity,
       SUM(COALESCE(salesAmount,0)) salesAmount,SUM(COALESCE(costAmount,0)) costAmount,SUM(COALESCE(profitAmount,0)) profitAmount
-    FROM connection_sku_sales_facts WHERE erpSkuId=? GROUP BY periodStart,periodEnd ORDER BY periodEnd DESC LIMIT 90`).all(sku.id);
+    FROM connection_sku_sales_daily_facts WHERE erpSkuId=? GROUP BY saleDate ORDER BY saleDate DESC LIMIT 90`).all(sku.id);
   return { sku, inventory, links, sales, salesTrend };
 }
 

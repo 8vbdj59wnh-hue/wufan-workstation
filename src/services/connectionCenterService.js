@@ -52,6 +52,7 @@ export {
   loadErpSkuUsageGovernanceDetail,
   confirmErpSkuUsage,
   loadSalesRelationCandidates,
+  loadSalesRelationGovernance,
   loadSalesRelationCandidateDetail,
   confirmSalesRelationCandidate,
   confirmSalesRelationCandidateBatch,

@@ -9,6 +9,7 @@ import { reconcileErpSyncRun } from "./erpReconciliation.js";
 import { queryWangdianGoods } from "./wangdianClient.js";
 import { adaptWangdianGoodsResponse, canonicalGoodsRecordsToStaging } from "./wangdianGoodsAdapter.js";
 import { clearDataSyncCheckpoint, runWangdianPagedWindows } from "./dataSyncPagedExecution.js";
+import { deactivateOwnedSingleLinkSkuErpMapping, ensureSingleLinkSkuErpMapping, resolveUniqueProductErpSku } from "./linkSkuErpMappingService.js";
 
 const stagingRoot = path.join(uploadsDir, "product-v2-imports");
 const goodsInfoRequiredHeaders = ["货品编号", "商家编码", "货品名称"];
@@ -733,23 +734,41 @@ function findPlatformProduct(record) {
   const platformSkuCode = value(record["平台规格编码"]);
   const platformGoodsCode = value(record["平台货品编号"]);
   const systemGoodsType = value(record["系统货品"]);
-  if (systemGoodsType === "组合装") return { product: null, status: "combination", method: null, reason: "组合装不自动绑定" };
-  const exact = platformSkuCode
-    ? database.prepare("SELECT id, skuCode, name FROM products WHERE lower(skuCode)=lower(?)").get(platformSkuCode)
-    : null;
-  if (exact) return { product: exact, status: "matched_auto", method: "sku_code", reason: "平台规格编码精确匹配" };
+  if (systemGoodsType === "组合装") return { product: null, erpSku: null, status: "combination", method: null, reason: "组合装进入人工V2关系治理" };
+  const exact = platformSkuCode ? database.prepare(`
+    SELECT e.id erpSkuId,e.merchantSkuCode,p.id productId,p.skuCode,p.name
+    FROM erp_skus e
+    LEFT JOIN product_erp_mappings m ON m.erpSkuId=e.id AND m.currentState='active'
+    LEFT JOIN products p ON p.id=m.productId
+    WHERE lower(e.merchantSkuCode)=lower(?) AND e.currentState='active'
+  `).all(platformSkuCode) : [];
+  if (exact.length === 1) return {
+    product: exact[0].productId ? { id: exact[0].productId, skuCode: exact[0].skuCode, name: exact[0].name } : null,
+    erpSku: { id: exact[0].erpSkuId, merchantSkuCode: exact[0].merchantSkuCode },
+    status: "matched_auto",
+    method: "erp_sku_code",
+    reason: "平台规格编码精确匹配ERP SKU并建立V2关系",
+  };
+  if (exact.length > 1) return { product: null, erpSku: null, status: "ambiguous", method: null, reason: `平台规格编码匹配到${exact.length}个ERP SKU` };
   if (platformGoodsCode) {
     const candidates = database.prepare(`
-      SELECT p.id, p.skuCode, p.name
+      SELECT e.id erpSkuId,e.merchantSkuCode,p.id productId,p.skuCode,p.name
       FROM erp_goods g
-      JOIN product_erp_mappings m ON m.erpGoodsId=g.id
-      JOIN products p ON p.id=m.productId
-      WHERE lower(g.goodsCode)=lower(?)
+      JOIN erp_skus e ON e.erpGoodsId=g.id AND e.currentState='active'
+      LEFT JOIN product_erp_mappings m ON m.erpSkuId=e.id AND m.currentState='active'
+      LEFT JOIN products p ON p.id=m.productId
+      WHERE lower(g.goodsCode)=lower(?) AND g.currentState='active'
     `).all(platformGoodsCode);
-    if (candidates.length === 1) return { product: candidates[0], status: "matched_auto", method: "goods_single_sku", reason: "货品下仅一个系统规格" };
-    if (candidates.length > 1) return { product: null, status: "ambiguous", method: null, reason: `货品下有${candidates.length}个规格` };
+    if (candidates.length === 1) return {
+      product: candidates[0].productId ? { id: candidates[0].productId, skuCode: candidates[0].skuCode, name: candidates[0].name } : null,
+      erpSku: { id: candidates[0].erpSkuId, merchantSkuCode: candidates[0].merchantSkuCode },
+      status: "matched_auto",
+      method: "goods_single_erp_sku",
+      reason: "货品下仅一个ERP SKU并建立V2关系",
+    };
+    if (candidates.length > 1) return { product: null, erpSku: null, status: "ambiguous", method: null, reason: `货品下有${candidates.length}个ERP SKU，进入人工治理` };
   }
-  return { product: null, status: "unmatched", method: null, reason: "编码无法匹配现有产品" };
+  return { product: null, erpSku: null, status: "unmatched", method: null, reason: "编码无法匹配现有ERP SKU，进入人工治理" };
 }
 
 function platformValidation(staging, submittedMappings = {}) {
@@ -801,6 +820,7 @@ function platformValidation(staging, submittedMappings = {}) {
       matchMethod: match.method,
       matchReason: match.reason,
       product: match.product,
+      erpSku: match.erpSku,
       errors,
     });
   }
@@ -1538,7 +1558,7 @@ function commitPlatform(batch, staging, shopMappings) {
   const now = new Date().toISOString();
   const stats = {
     created: 0, updated: 0, unchanged: 0, matched: 0, matchedAuto: 0, matchedManual: 0,
-    unmatched: 0, ambiguous: 0, combination: 0, errors: 0, shops: 0, links: 0, skus: 0,
+    unmatched: 0, ambiguous: 0, combination: 0, relationPending: 0, mappingsCreated: 0, errors: 0, shops: 0, links: 0, skus: 0,
   };
   const mappingByRaw = new Map(validation.shopMappings.map((item) => [item.rawName, item]));
   const grouped = new Map();
@@ -1599,31 +1619,36 @@ function commitPlatform(batch, staging, shopMappings) {
                 AND normalizedPlatformSkuCode=? AND normalizedSpecificationName=?
             `).get(linkId, lower(row.platformSkuCode), lower(row.specificationName));
         const skuId = sku?.id ?? id("sales-link-sku", `${linkId}|${row.platformSkuId || `${lower(row.platformSkuCode)}|${lower(row.specificationName)}`}`);
-        const manual = database.prepare("SELECT * FROM platform_sku_manual_bindings WHERE salesLinkSkuId=?").get(skuId);
-        const productId = manual?.productId ?? row.product?.id ?? null;
-        const matchStatus = manual ? "matched_manual" : row.matchStatus;
-        const matchMethod = manual ? "manual" : row.matchMethod;
+        const matchStatus = row.matchStatus;
+        const matchMethod = row.matchMethod;
         database.prepare(`
           INSERT INTO sales_link_skus (
-            id,salesLinkId,productId,platformSkuId,platformSkuCode,normalizedPlatformSkuCode,specificationName,
+            id,salesLinkId,platformSkuId,platformSkuCode,normalizedPlatformSkuCode,specificationName,
             normalizedSpecificationName,price,platformStock,occupiedStock,systemGoodsType,syncEnabled,lastSyncedStock,
             lastSyncedAt,stopSyncReason,matchStatus,matchMethod,matchReason,lastSeenBatchId,createdAt,updatedAt,
             currentState,missingAt
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-          ON CONFLICT(id) DO UPDATE SET productId=excluded.productId,platformSkuCode=excluded.platformSkuCode,
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          ON CONFLICT(id) DO UPDATE SET platformSkuCode=excluded.platformSkuCode,
             normalizedPlatformSkuCode=excluded.normalizedPlatformSkuCode,specificationName=excluded.specificationName,
             normalizedSpecificationName=excluded.normalizedSpecificationName,price=excluded.price,platformStock=excluded.platformStock,
             occupiedStock=excluded.occupiedStock,systemGoodsType=excluded.systemGoodsType,syncEnabled=excluded.syncEnabled,
             lastSyncedStock=excluded.lastSyncedStock,lastSyncedAt=excluded.lastSyncedAt,stopSyncReason=excluded.stopSyncReason,
-            matchStatus=excluded.matchStatus,matchMethod=excluded.matchMethod,matchReason=excluded.matchReason,
+            matchStatus=CASE WHEN sales_link_skus.matchMethod='manual' OR sales_link_skus.matchStatus='matched_manual' THEN sales_link_skus.matchStatus ELSE excluded.matchStatus END,
+            matchMethod=CASE WHEN sales_link_skus.matchMethod='manual' OR sales_link_skus.matchStatus='matched_manual' THEN sales_link_skus.matchMethod ELSE excluded.matchMethod END,
+            matchReason=CASE WHEN sales_link_skus.matchMethod='manual' OR sales_link_skus.matchStatus='matched_manual' THEN sales_link_skus.matchReason ELSE excluded.matchReason END,
             lastSeenBatchId=excluded.lastSeenBatchId,currentState='active',missingAt=NULL,updatedAt=excluded.updatedAt
         `).run(
-          skuId, linkId, productId, row.platformSkuId || null, row.platformSkuCode || null, lower(row.platformSkuCode),
+          skuId, linkId, row.platformSkuId || null, row.platformSkuCode || null, lower(row.platformSkuCode),
           row.specificationName || null, lower(row.specificationName), numberValue(source["价格"]), numberValue(source["平台库存"]),
           numberValue(source["占用库存"]), row.systemGoodsType || null, value(source["是否需要同步"]) === "是" ? 1 : 0,
           numberValue(source["最后同步库存"]), value(source["最后同步时间"]) || null, value(source["停止同步原因"]) || null,
           matchStatus, matchMethod, row.matchReason, batch.id, sku?.createdAt ?? now, now, "active", null,
         );
+        if (row.erpSku?.id) {
+          const relation = ensureSingleLinkSkuErpMapping(database, { salesLinkSkuId: skuId, erpSkuId: row.erpSku.id, sourceType: "erp_platform_goods", sourceBatchId: batch.id, timestamp: now });
+          if (relation.outcome === "created") stats.mappingsCreated += 1;
+          if (relation.outcome === "governance_pending") stats.relationPending += 1;
+        }
         stats.skus += 1;
         if (matchStatus.startsWith("matched")) {
           stats.matched += 1;
@@ -1732,16 +1757,31 @@ export function updatePlatformSkuManualBinding(salesLinkSkuId, productId, create
   if (!sku) throw new Error("平台SKU不存在。");
   const product = database.prepare("SELECT id FROM products WHERE id=?").get(productId);
   if (!product) throw new Error("系统产品不存在。");
+  const resolution = resolveUniqueProductErpSku(database, product.id);
+  if (resolution.status === "missing") throw new Error("该产品没有唯一可用的ERP SKU，已阻止旧productId绑定，请先在V2关系治理中补齐ERP关系。");
+  if (resolution.status === "multiple") throw new Error("该产品对应多个ERP SKU，无法自动判断组成关系，已进入人工V2关系治理。");
   const now = new Date().toISOString();
   const bindingId = id("platform-sku-binding", salesLinkSkuId);
+  const existingBinding = database.prepare("SELECT * FROM platform_sku_manual_bindings WHERE salesLinkSkuId=?").get(salesLinkSkuId);
   const transaction = database.transaction(() => {
+    if (existingBinding && existingBinding.productId !== productId) {
+      deactivateOwnedSingleLinkSkuErpMapping(database, { salesLinkSkuId, sourceType: "manual_product_binding", sourceBatchId: existingBinding.id, timestamp: now });
+    }
+    const relation = ensureSingleLinkSkuErpMapping(database, {
+      salesLinkSkuId,
+      erpSkuId: resolution.erpSku.erpSkuId,
+      sourceType: "manual_product_binding",
+      sourceBatchId: bindingId,
+      timestamp: now,
+    });
+    if (relation.outcome === "governance_pending") throw new Error(relation.reason);
     database.prepare(`
       INSERT INTO platform_sku_manual_bindings (id,salesLinkSkuId,productId,createdBy,createdAt,updatedAt)
       VALUES (?,?,?,?,?,?)
       ON CONFLICT(salesLinkSkuId) DO UPDATE SET productId=excluded.productId,createdBy=excluded.createdBy,updatedAt=excluded.updatedAt
     `).run(bindingId, salesLinkSkuId, productId, createdBy, now, now);
-    database.prepare("UPDATE sales_link_skus SET productId=?,matchStatus='matched_manual',matchMethod='manual',matchReason='人工绑定',updatedAt=? WHERE id=?")
-      .run(productId, now, salesLinkSkuId);
+    database.prepare("UPDATE sales_link_skus SET matchStatus='matched_manual',matchMethod='manual',matchReason='人工确认V2 ERP SKU关系',updatedAt=? WHERE id=?")
+      .run(now, salesLinkSkuId);
   });
   transaction();
   return database.prepare("SELECT * FROM platform_sku_manual_bindings WHERE salesLinkSkuId=?").get(salesLinkSkuId);
@@ -1749,9 +1789,11 @@ export function updatePlatformSkuManualBinding(salesLinkSkuId, productId, create
 
 export function removePlatformSkuManualBinding(salesLinkSkuId) {
   const database = getDatabase();
+  const binding = database.prepare("SELECT * FROM platform_sku_manual_bindings WHERE salesLinkSkuId=?").get(salesLinkSkuId);
   const transaction = database.transaction(() => {
+    if (binding) deactivateOwnedSingleLinkSkuErpMapping(database, { salesLinkSkuId, sourceType: "manual_product_binding", sourceBatchId: binding.id });
     database.prepare("DELETE FROM platform_sku_manual_bindings WHERE salesLinkSkuId=?").run(salesLinkSkuId);
-    database.prepare("UPDATE sales_link_skus SET productId=NULL,matchStatus='unmatched',matchMethod=NULL,matchReason='人工绑定已取消',updatedAt=? WHERE id=?")
+    database.prepare("UPDATE sales_link_skus SET matchStatus='unmatched',matchMethod=NULL,matchReason='人工V2关系已取消',updatedAt=? WHERE id=?")
       .run(new Date().toISOString(), salesLinkSkuId);
   });
   transaction();
@@ -1759,6 +1801,6 @@ export function removePlatformSkuManualBinding(salesLinkSkuId) {
 
 export function markPlatformSku(salesLinkSkuId, status) {
   if (!["combination", "ignored"].includes(status)) throw new Error("标记状态无效。");
-  getDatabase().prepare("UPDATE sales_link_skus SET productId=NULL,matchStatus=?,matchMethod='manual',matchReason=?,updatedAt=? WHERE id=?")
+  getDatabase().prepare("UPDATE sales_link_skus SET matchStatus=?,matchMethod='manual',matchReason=?,updatedAt=? WHERE id=?")
     .run(status, status === "combination" ? "人工标记组合装" : "人工忽略", new Date().toISOString(), salesLinkSkuId);
 }

@@ -193,7 +193,7 @@ export function completeDataSyncBatch(batchId, result = {}) {
 
 export function resolveDataSyncException(exceptionId, { note = "", resolvedBy = "" } = {}) {
   const db = getDatabase();
-  const result = db.prepare("UPDATE data_sync_exceptions SET status='resolved',resolutionNote=?,resolvedAt=?,resolvedBy=? WHERE id=? AND status='open'").run(note || null, now(), resolvedBy || null, exceptionId);
+  const result = db.prepare("UPDATE data_sync_exceptions SET status='resolved',resolutionNote=?,resolvedReason=?,resolvedAt=?,resolvedBy=? WHERE id=? AND status='open'").run(note || null, note || null, now(), resolvedBy || null, exceptionId);
   if (!result.changes) throw new Error("异常不存在或已处理。");
   return db.prepare("SELECT * FROM data_sync_exceptions WHERE id=?").get(exceptionId);
 }

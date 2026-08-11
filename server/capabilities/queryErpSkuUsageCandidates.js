@@ -43,7 +43,7 @@ export function queryErpSkuUsageCandidates(input = {}, options = {}) {
   const productMappings = new Set(database.prepare(`SELECT DISTINCT erpSkuId FROM product_erp_mappings
     WHERE currentState='active' AND erpSkuId IN (${idsSql})`).all(...erpSkuIds).map((row) => row.erpSkuId));
   const salesFacts = new Set([
-    ...database.prepare(`SELECT DISTINCT erpSkuId FROM connection_sku_sales_facts WHERE erpSkuId IN (${idsSql})`).all(...erpSkuIds).map((row) => row.erpSkuId),
+    ...database.prepare(`SELECT DISTINCT erpSkuId FROM connection_sku_sales_daily_facts WHERE erpSkuId IN (${idsSql})`).all(...erpSkuIds).map((row) => row.erpSkuId),
     ...database.prepare(`SELECT DISTINCT erpSkuId FROM connection_sku_sales_daily_facts WHERE erpSkuId IN (${idsSql})`).all(...erpSkuIds).map((row) => row.erpSkuId),
   ]);
   const usageRows = database.prepare(`SELECT * FROM erp_sku_business_usages WHERE erpSkuId IN (${idsSql}) ORDER BY erpSkuId,updatedAt DESC,id`).all(...erpSkuIds);

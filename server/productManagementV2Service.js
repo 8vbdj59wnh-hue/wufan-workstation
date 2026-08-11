@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createResource, getDatabase } from "./db.js";
+import { resolveLinkSkuErpRelations } from "./capabilities/resolveLinkSkuErpRelation.js";
 
 export const productLifecycleStatuses = ["开发中", "上架", "成长期", "成熟期", "风险期", "淘汰"];
 export const productBusinessZones = ["new", "hit", "active", "clearance"];
@@ -71,14 +72,40 @@ function financeMetrics(database, productId) {
   return { revenue, refunds, cost, expense, grossProfit, netProfit, profitMargin: revenue ? netProfit / revenue : null };
 }
 
+function resolveProductSalesLinkIds(database, productId) {
+  const erpSkuIds = database.prepare(`
+    SELECT DISTINCT erpSkuId
+    FROM product_erp_mappings
+    WHERE productId=? AND currentState='active' AND erpSkuId IS NOT NULL
+    ORDER BY erpSkuId
+  `).all(productId).map((row) => row.erpSkuId);
+  if (!erpSkuIds.length) return [];
+  const erpSkuIdSet = new Set(erpSkuIds);
+  const salesLinkSkuIds = database.prepare(`
+    SELECT DISTINCT salesLinkSkuId
+    FROM sales_link_sku_erp_mappings
+    WHERE currentState='active' AND erpSkuId IN (${erpSkuIds.map(() => "?").join(",")})
+    ORDER BY salesLinkSkuId
+  `).all(...erpSkuIds).map((row) => row.salesLinkSkuId);
+  const salesLinkIds = new Set();
+  for (let offset = 0; offset < salesLinkSkuIds.length; offset += 500) {
+    const relations = resolveLinkSkuErpRelations({ salesLinkSkuIds: salesLinkSkuIds.slice(offset, offset + 500) }, { database }).results;
+    for (const relation of Object.values(relations)) {
+      if (relation.isUsable && relation.mappings.some((mapping) => erpSkuIdSet.has(mapping.erpSkuId))) salesLinkIds.add(relation.salesLinkId);
+    }
+  }
+  return [...salesLinkIds].sort();
+}
+
 function connectionMetrics(database, productId) {
-  const periods = database.prepare(`
+  const salesLinkIds = resolveProductSalesLinkIds(database, productId);
+  const periods = salesLinkIds.length ? database.prepare(`
     SELECT s.periodStart,s.periodEnd,SUM(s.payAmount) payAmount,SUM(s.visitorCount) visitorCount,
       CASE WHEN SUM(s.visitorCount)>0 THEN SUM(s.conversionRate*s.visitorCount)/SUM(s.visitorCount) ELSE NULL END conversionRate
     FROM connection_period_snapshots s
-    WHERE s.salesLinkId IN (SELECT DISTINCT salesLinkId FROM sales_link_skus WHERE productId=? AND matchStatus IN ('matched','matched_auto','matched_manual'))
+    WHERE s.salesLinkId IN (${salesLinkIds.map(() => "?").join(",")})
     GROUP BY s.periodStart,s.periodEnd ORDER BY s.periodEnd DESC,s.periodStart DESC LIMIT 2
-  `).all(productId);
+  `).all(...salesLinkIds) : [];
   const current = periods[0] ?? null; const previous = periods[1] ?? null;
   return { current, previous, salesAmountGrowth: ratio(number(current?.payAmount), number(previous?.payAmount)),
     visitorGrowth: ratio(number(current?.visitorCount), number(previous?.visitorCount)),

@@ -60,16 +60,16 @@ export function getLinkSalesRanking(input = {}, userId = "", isAdmin = false) {
       p.name AS ownerName,l.platformGoodsId,l.canonicalUrl,
       s.platform,s.id AS shopId,COALESCE(s.displayName,s.shopName) AS shopName,
       SUM(COALESCE(f.salesAmount,0)) AS salesAmount,
-      SUM(COALESCE(f.shippedQuantity,0)) AS quantity,
+      SUM(COALESCE(f.quantity,0)) AS quantity,
       COUNT(DISTINCT f.id) AS factCount,
-      MIN(substr(f.periodStart,1,10)) AS firstDataDate,
-      MAX(substr(f.periodEnd,1,10)) AS lastDataDate
+      MIN(f.saleDate) AS firstDataDate,
+      MAX(f.saleDate) AS lastDataDate
     FROM connection_profiles c
     JOIN sales_links l ON l.id=c.salesLinkId
     JOIN sales_shops s ON s.id=l.shopId
     LEFT JOIN persons p ON p.id=c.ownerId
-    JOIN connection_sku_sales_facts f ON f.salesLinkId=c.salesLinkId
-    WHERE substr(f.periodStart,1,10)>=? AND substr(f.periodEnd,1,10)<=?
+    JOIN connection_sku_sales_daily_facts f ON f.salesLinkId=c.salesLinkId
+    WHERE f.saleDate BETWEEN ? AND ?
       ${ownerWhere}
     GROUP BY c.id,c.salesLinkId,c.name,c.mainImage,c.ownerId,p.name,l.platformGoodsId,l.canonicalUrl,s.platform,s.id,s.displayName,s.shopName
     ORDER BY salesAmount DESC,c.id ASC

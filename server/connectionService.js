@@ -92,8 +92,8 @@ export function getMyConnectionWorkbench(userId, isAdmin = false, filter = "all"
   const yesterday = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" })
     .format(new Date(Date.now() - 86400000));
   const yesterdaySales = getDatabase().prepare(`SELECT SUM(COALESCE(f.salesAmount,0)) amount,COUNT(*) factCount
-    FROM connection_sku_sales_facts f JOIN connection_profiles c ON c.salesLinkId=f.salesLinkId
-    WHERE substr(f.periodStart,1,10)=? AND substr(f.periodEnd,1,10)=? ${isAdmin ? "" : "AND c.ownerId=?"}`)
+    FROM connection_sku_sales_daily_facts f JOIN connection_profiles c ON c.salesLinkId=f.salesLinkId
+    WHERE f.saleDate BETWEEN ? AND ? ${isAdmin ? "" : "AND c.ownerId=?"}`)
     .get(...(isAdmin ? [yesterday, yesterday] : [yesterday, yesterday, personId]));
   const allItems = profiles.map((profile) => {
     const analysis = analyses.get(profile.id) ?? {};

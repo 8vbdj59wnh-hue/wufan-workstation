@@ -98,7 +98,7 @@ function analyzeRows(rows) {
   }
   const linkIds = links.map((row) => row.id);
   const platformSkus = linkIds.length
-    ? db.prepare(`SELECT id,salesLinkId,platformSkuId,platformSkuCode,erpSkuId FROM sales_link_skus WHERE salesLinkId IN (${linkIds.map(() => "?").join(",")})`).all(...linkIds)
+    ? db.prepare(`SELECT id,salesLinkId,platformSkuId,platformSkuCode FROM sales_link_skus WHERE salesLinkId IN (${linkIds.map(() => "?").join(",")})`).all(...linkIds)
     : [];
   const skuMap = new Map();
   for (const row of platformSkus) {

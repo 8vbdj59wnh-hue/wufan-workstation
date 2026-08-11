@@ -21,11 +21,11 @@ export function readConnectionV3MetricsMap(salesLinkIds) {
   if (!ids.length) return new Map();
   const placeholders = ids.map(() => "?").join(",");
   const rows = database.prepare(`
-    SELECT salesLinkId,periodStart,periodEnd,MAX(createdAt) updatedAt,SUM(COALESCE(shippedQuantity,0)) shippedQuantity,
+    SELECT salesLinkId,saleDate periodStart,saleDate periodEnd,MAX(createdAt) updatedAt,SUM(COALESCE(quantity,0)) shippedQuantity,
       SUM(COALESCE(salesAmount,0)) salesAmount,SUM(COALESCE(costAmount,0)) costAmount,SUM(COALESCE(profitAmount,0)) profitAmount
-    FROM connection_sku_sales_facts
-    WHERE salesLinkId IN (${placeholders}) GROUP BY salesLinkId,periodStart,periodEnd
-    ORDER BY salesLinkId,periodEnd DESC,periodStart DESC
+    FROM connection_sku_sales_daily_facts
+    WHERE salesLinkId IN (${placeholders}) GROUP BY salesLinkId,saleDate
+    ORDER BY salesLinkId,saleDate DESC
   `).all(...ids);
   const periodsByLink = new Map();
   for (const row of rows) { const periods = periodsByLink.get(row.salesLinkId) ?? []; if (periods.length < 2) periods.push({ ...row, profitMargin: Number(row.salesAmount) ? Number(row.profitAmount || 0) / Number(row.salesAmount) : null }); periodsByLink.set(row.salesLinkId, periods); }

@@ -1533,6 +1533,24 @@ export async function loadSalesRelationCandidates(options = {}) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-relation-candidates?${query}`), "销售关系候选读取失败。");
 }
 
+export async function loadSalesRelationGovernance(options = {}) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(options)) if (value !== undefined && value !== null && String(value) !== "") query.set(key, String(value));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-relation-governance?${query}`), "销售关系治理工作台读取失败。");
+}
+
+export async function loadSalesDataQualityAnomalies(options = {}) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(options)) if (value !== undefined && value !== null && String(value) !== "") query.set(key, String(value));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-data-quality-anomalies?${query}`), "销售数据异常队列读取失败。");
+}
+
+export async function submitSalesDataQualityAnomalyDecision(anomalyId, input) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-data-quality-anomalies/${encodeURIComponent(anomalyId)}/decision`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
+  }), "销售数据异常处理失败。");
+}
+
 export async function loadSalesRelationCandidateDetail(candidateId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-relation-candidates/${encodeURIComponent(candidateId)}`), "销售关系候选详情读取失败。");
 }

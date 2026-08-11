@@ -10384,6 +10384,14 @@ button.content-template-thumb {
 .product-zone-badge.is-new { background: #eef4ff; color: #315aa8; }.product-zone-badge.is-hit { background: #fff1e8; color: #b54708; }.product-zone-badge.is-active { background: #ecfdf3; color: #027a48; }.product-zone-badge.is-clearance { background: #fff1f3; color: #c01048; }
 .my-links-workbench { display: grid; gap: 16px; }.my-links-workbench > header h2, .my-links-workbench > header p { margin: 0; }.my-links-workbench > header > div > p:last-child { margin-top: 5px; color: #667085; }
 .company-links-workspace, .link-data-update-workspace, .link-workspace-stack, .link-hospital-overview-module { display: grid; gap: 16px; }
+.sales-relation-governance { display: grid; gap: 16px; }
+.relation-governance-type-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.relation-governance-type-grid button { display: grid; gap: 5px; padding: 14px; border: 1px solid #e4e7ec; border-radius: 13px; background: #fff; color: #475467; text-align: left; cursor: pointer; }
+.relation-governance-type-grid button:hover,.relation-governance-type-grid button.is-active { border-color: #258a68; background: #eef9f4; }
+.relation-governance-type-grid strong { color: #173f34; font-size: 24px; }.relation-governance-type-grid small { color: #667085; }
+.relation-governance-detail { margin-top: 4px; }.sales-relation-governance .connection-table td > small { display: block; margin-top: 3px; color: #667085; }
+@media (max-width: 820px) { .relation-governance-type-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .relation-governance-type-grid { grid-template-columns: 1fr; } }
 .link-filter-module, .link-detail-header-module, .link-workspace-module { display: grid; gap: 14px; }
 .link-filter-module > header, .company-link-list-module > header { display: flex; justify-content: space-between; align-items: center; }
 .link-filter-module > header div, .company-link-list-module > header div { display: grid; gap: 3px; }

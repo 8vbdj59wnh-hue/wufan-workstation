@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import XLSX from "xlsx";
 import { getDatabase } from "./db.js";
+import { ensureSingleLinkSkuErpMapping, inspectSingleLinkSkuErpMapping, resolveUniqueProductErpSku } from "./linkSkuErpMappingService.js";
 
 export const connectionImportTypes = [
   "platform_link_operations",
@@ -392,9 +393,25 @@ function applyRow(database, importType, row, batchId, raw) {
     return { link, sku, erpSku, factCreated: !existing, factUpdated: Boolean(existing) };
   }
   if (importType === "erp_product_relations") {
-    const link = requireLink(database, row); const product = database.prepare("SELECT * FROM products WHERE LOWER(skuCode)=LOWER(?)").get(text(row.skuCode)); if (!product) throw Object.assign(new Error("SKU不存在对应产品。"), { type: "missing_sku" }); let sku = findLinkSku(database, link.id, row.skuCode);
-    if (!sku) database.prepare(`INSERT INTO sales_link_skus (id,salesLinkId,productId,platformSkuId,platformSkuCode,normalizedPlatformSkuCode,specificationName,normalizedSpecificationName,syncEnabled,matchStatus,matchMethod,matchReason,currentState,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,0,'matched_manual','sku','ERP产品关系导入','active',?,?)`).run(id("sales-link-sku"), link.id, product.id, text(row.platformSkuId) || null, text(row.skuCode), normalized(row.skuCode), text(row.specificationName), normalized(row.specificationName), createdAt, createdAt);
-    else database.prepare("UPDATE sales_link_skus SET productId=?,matchStatus='matched_manual',matchMethod='sku',matchReason='ERP产品关系导入',updatedAt=? WHERE id=?").run(product.id, createdAt, sku.id); return { link, product };
+    const link = requireLink(database, row);
+    const product = database.prepare("SELECT * FROM products WHERE LOWER(skuCode)=LOWER(?)").get(text(row.skuCode));
+    if (!product) throw Object.assign(new Error("SKU不存在对应产品。"), { type: "missing_sku" });
+    const resolution = resolveUniqueProductErpSku(database, product.id);
+    if (resolution.status !== "ready") throw Object.assign(new Error("产品无法唯一确定ERP SKU，已进入V2关系治理。"), { type: "erp_relation_governance_pending" });
+    let sku = findLinkSku(database, link.id, row.skuCode);
+    if (!sku) {
+      const skuId = id("sales-link-sku");
+      database.prepare(`INSERT INTO sales_link_skus
+        (id,salesLinkId,platformSkuId,platformSkuCode,normalizedPlatformSkuCode,specificationName,normalizedSpecificationName,syncEnabled,matchStatus,matchMethod,matchReason,currentState,createdAt,updatedAt)
+        VALUES (?,?,?,?,?,?,?,0,'erp_linked','v2_erp_mapping','ERP产品关系导入已建立V2关系','active',?,?)`).run(
+        skuId, link.id, text(row.platformSkuId) || null, text(row.skuCode), normalized(row.skuCode), text(row.specificationName), normalized(row.specificationName), createdAt, createdAt,
+      );
+      sku = database.prepare("SELECT * FROM sales_link_skus WHERE id=?").get(skuId);
+    }
+    const relation = ensureSingleLinkSkuErpMapping(database, { salesLinkSkuId: sku.id, erpSkuId: resolution.erpSku.erpSkuId, sourceType: "erp_product_relations", sourceBatchId: batchId, timestamp: createdAt });
+    if (relation.outcome === "governance_pending") throw Object.assign(new Error(relation.reason), { type: "erp_relation_governance_pending" });
+    database.prepare("UPDATE sales_link_skus SET matchStatus='erp_linked',matchMethod='v2_erp_mapping',matchReason='ERP产品关系导入已建立V2关系',updatedAt=? WHERE id=?").run(createdAt, sku.id);
+    return { link, product, sku, mapping: relation.mapping };
   }
   if (importType === "erp_inventory") {
     const skus = database.prepare("SELECT * FROM sales_link_skus WHERE LOWER(COALESCE(normalizedPlatformSkuCode,platformSkuCode,''))=LOWER(?)").all(text(row.skuCode)); if (!skus.length) throw Object.assign(new Error("SKU不存在。"), { type: "missing_sku" });
@@ -442,6 +459,29 @@ export function previewConnectionDataImport({ buffer, fileName, importType, temp
     const invalidNumbers = Object.entries(mapping).filter(([source, target]) => numericFields.has(target) && text(item.raw[source]) !== "" && item.data[target] === null).map(([, target]) => target);
     if (missing.length) Object.assign(item, { status: "error", errorType: missing.some((field) => dateFields.has(field)) ? "missing_period" : "missing_field", errorMessage: `缺少必填字段：${missing.join("、")}` });
     else if (invalidNumbers.length) Object.assign(item, { status: "error", errorType: "invalid_format", errorMessage: `数值格式错误：${invalidNumbers.join("、")}` });
+    else if (importType === "erp_product_relations") {
+      const product = database.prepare("SELECT id FROM products WHERE LOWER(skuCode)=LOWER(?)").get(text(item.data.skuCode));
+      if (!product) Object.assign(item, { status: "error", errorType: "missing_sku", errorMessage: "SKU不存在对应产品。" });
+      else {
+        const resolution = resolveUniqueProductErpSku(database, product.id);
+        let governanceReason = resolution.status === "missing" ? "产品没有active ERP SKU映射，无法建立V2关系。" : resolution.status === "multiple" ? "产品对应多个ERP SKU，无法自动确定single关系。" : "";
+        if (!governanceReason) {
+          const link = findLink(database, item.data);
+          const sku = link ? findLinkSku(database, link.id, item.data.skuCode) : null;
+          if (sku) {
+            const inspection = inspectSingleLinkSkuErpMapping(database, sku.id, resolution.erpSku.erpSkuId);
+            if (!["missing", "active_exact"].includes(inspection.status)) governanceReason = inspection.reason;
+          }
+        }
+        if (governanceReason) Object.assign(item, {
+          status: "pending_relation",
+          errorType: "erp_relation_governance_pending",
+          errorMessage: governanceReason,
+          governanceCandidates: resolution.candidates,
+          governanceProductId: product.id,
+        });
+      }
+    }
   }
   const duplicateKey = (data) => importType === "erp_sales"
     ? [data.shop, data.platformGoodsId, data.platformSkuId, data.skuCode, data.periodStart, data.periodEnd].map(text).join("|")
@@ -449,18 +489,30 @@ export function previewConnectionDataImport({ buffer, fileName, importType, temp
   const duplicateKeys = new Set(); const seen = new Set();
   for (const item of rows.filter((row) => row.status === "validated")) { const key = duplicateKey(item.data); if (seen.has(key)) duplicateKeys.add(key); seen.add(key); }
   for (const item of rows.filter((row) => duplicateKeys.has(duplicateKey(row.data)))) Object.assign(item, { status: "error", errorType: "duplicate_identity", errorMessage: importType === "erp_sales" ? "同一平台SKU、ERP SKU及周期存在重复销售数据，已隔离。" : "过滤后同一商品ID存在重复，已阻断本批次确认。" });
-  const counts = previewSummary(database, rows, importType); const errorRows = rows.filter((item) => item.status === "error").length; const validRows = rows.length - errorRows;
+  const counts = previewSummary(database, rows, importType); const errorRows = rows.filter((item) => item.status === "error").length; const governanceRows = rows.filter((item) => item.status === "pending_relation").length; const validRows = rows.filter((item) => item.status === "validated").length;
   const periods = [...new Set(rows.filter((item) => item.status === "validated").map((item) => `${item.data.periodStart}|${item.data.periodEnd}`))];
   const periodStarts = periods.map((item) => item.split("|")[0]).filter(Boolean).sort();
   const periodEnds = periods.map((item) => item.split("|")[1]).filter(Boolean).sort();
   const previewPeriodStart = isSalesFactParser ? periodStarts[0] || "" : periods.length === 1 ? periodStarts[0] : "";
   const previewPeriodEnd = isSalesFactParser ? periodEnds.at(-1) || "" : periods.length === 1 ? periodEnds[0] : "";
-  const preview = { parserVersion: text(parserVersion), sourceFileHash, templateName: version?.templateName || "自动字段映射", detectedAutomatically: importType === "platform_link_operations" && !text(templateVersionId), platform: text(matchRules.fixedFields?.platform), shopId: text(matchRules.fixedFields?.shopId), shop: text(matchRules.fixedFields?.shop), sheetName: workbook.sheetName, periodStart: previewPeriodStart, periodEnd: previewPeriodEnd, rawRows: workbook.rawRows.length, filteredRows: rows.length, ignoredSummaryRows: normalizedRows.length - rows.length, newLinks: counts.createLinks, updatedLinks: counts.updateLinks, operationFacts: counts.facts, errors: errorRows, duplicateGoodsIds: [...duplicateKeys] };
+  const preview = { parserVersion: text(parserVersion), sourceFileHash, templateName: version?.templateName || "自动字段映射", detectedAutomatically: importType === "platform_link_operations" && !text(templateVersionId), platform: text(matchRules.fixedFields?.platform), shopId: text(matchRules.fixedFields?.shopId), shop: text(matchRules.fixedFields?.shop), sheetName: workbook.sheetName, periodStart: previewPeriodStart, periodEnd: previewPeriodEnd, rawRows: workbook.rawRows.length, filteredRows: rows.length, ignoredSummaryRows: normalizedRows.length - rows.length, newLinks: counts.createLinks, updatedLinks: counts.updateLinks, operationFacts: counts.facts, errors: errorRows, governancePending: governanceRows, duplicateGoodsIds: [...duplicateKeys] };
   const batchId = id("connection-import"); const createdAt = now(); const batchStatus = duplicateKeys.size && !isSalesFactParser ? "blocked" : "validated";
   database.transaction(() => {
-    database.prepare(`INSERT INTO connection_import_batches (id,sourceType,externalShopId,fileName,fileHash,businessDate,periodStart,periodEnd,periodType,status,totalRows,matchedRows,pendingRows,errorRows,createdBy,createdAt,updatedAt,importType,templateVersionId,sourcePlatform,previewSummaryJson) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(batchId, importType, preview.shopId, text(fileName) || "链接数据.xlsx", hash, preview.periodEnd || createdAt.slice(0, 10), preview.periodStart || null, preview.periodEnd || null, text(matchRules.periodType) || null, batchStatus, rows.length, 0, validRows, errorRows, text(userId) || null, createdAt, createdAt, importType, version?.id ?? null, preview.platform, JSON.stringify(preview));
+    database.prepare(`INSERT INTO connection_import_batches (id,sourceType,externalShopId,fileName,fileHash,businessDate,periodStart,periodEnd,periodType,status,totalRows,matchedRows,pendingRows,errorRows,createdBy,createdAt,updatedAt,importType,templateVersionId,sourcePlatform,previewSummaryJson) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(batchId, importType, preview.shopId, text(fileName) || "链接数据.xlsx", hash, preview.periodEnd || createdAt.slice(0, 10), preview.periodStart || null, preview.periodEnd || null, text(matchRules.periodType) || null, batchStatus, rows.length, 0, validRows + governanceRows, errorRows, text(userId) || null, createdAt, createdAt, importType, version?.id ?? null, preview.platform, JSON.stringify(preview));
     const insert = database.prepare(`INSERT INTO connection_import_rows (id,batchId,rowNumber,externalKey,rawDataJson,normalizedDataJson,status,errorType,errorMessage,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?)`);
     for (const item of rows) insert.run(id("connection-import-row"), batchId, item.rowNumber, text(item.data.platformGoodsId || item.data.skuCode), JSON.stringify(item.raw), JSON.stringify(item.data), item.status, item.errorType, item.errorMessage, createdAt);
+    const insertCandidate = database.prepare(`INSERT OR IGNORE INTO sales_link_sku_erp_mapping_candidates
+      (id,salesLinkSkuId,erpSkuId,candidateType,suggestedQuantity,sourceType,sourceBatchId,sourceFileHash,sourceRowNumber,evidenceJson,affectedRowCount,status,createdAt,updatedAt)
+      VALUES (?,?,?,'single',1,'erp_product_relations',?,?,?,?,1,'pending',?,?)`);
+    for (const item of rows.filter((row) => row.status === "pending_relation" && row.governanceCandidates?.length)) {
+      const link = findLink(database, item.data);
+      const sku = link ? findLinkSku(database, link.id, item.data.skuCode) : null;
+      if (!sku) continue;
+      for (const candidate of item.governanceCandidates) insertCandidate.run(
+        id("sales-relation-candidate"), sku.id, candidate.erpSkuId, batchId, sourceFileHash, item.rowNumber,
+        JSON.stringify({ reason: item.errorMessage, productId: item.governanceProductId, source: { fileName, rowNumber: item.rowNumber } }), createdAt, createdAt,
+      );
+    }
   })();
   return { batch: readConnectionFoundationBatch(batchId), preview, rows: listConnectionFoundationRows(batchId), idempotent: false, blocked: batchStatus === "blocked" };
 }
@@ -469,12 +521,12 @@ export function confirmConnectionDataImport(batchId) {
   const database = getDatabase(); const batch = readConnectionFoundationBatch(batchId);
   if (batch.status === "completed" || batch.status === "completed_with_errors") return { batch, idempotent: true, preview: json(batch.previewSummaryJson, {}) };
   if (batch.status !== "validated") throw new Error(batch.status === "blocked" ? "批次存在重复商品ID，不能确认导入。" : "当前批次不能确认导入。");
-  const rows = listConnectionFoundationRows(batch.id).filter((row) => row.status === "validated"); let createdLinks = 0; let updatedLinks = 0; let factsCreated = 0; let factsUpdated = 0;
+  const allRows = listConnectionFoundationRows(batch.id); const rows = allRows.filter((row) => row.status === "validated"); const governancePending = allRows.filter((row) => row.status === "pending_relation").length; let createdLinks = 0; let updatedLinks = 0; let factsCreated = 0; let factsUpdated = 0;
   database.transaction(() => {
     for (const item of rows) { const result = applyRow(database, batch.importType, json(item.normalizedDataJson, {}), batch.id, json(item.rawDataJson, {})); if (result.created) createdLinks += 1; else if (result.link) updatedLinks += 1; if (result.factCreated) factsCreated += 1; if (result.factUpdated) factsUpdated += 1; database.prepare("UPDATE connection_import_rows SET status='success' WHERE id=?").run(item.id); }
-    const completedAt = now(); database.prepare("UPDATE connection_import_batches SET status=?,matchedRows=?,pendingRows=0,completedAt=?,updatedAt=? WHERE id=?").run(batch.errorRows ? "completed_with_errors" : "completed", rows.length, completedAt, completedAt, batch.id);
+    const completedAt = now(); database.prepare("UPDATE connection_import_batches SET status=?,matchedRows=?,pendingRows=?,completedAt=?,updatedAt=? WHERE id=?").run(batch.errorRows || governancePending ? "completed_with_errors" : "completed", rows.length, governancePending, completedAt, completedAt, batch.id);
   })();
-  return { batch: readConnectionFoundationBatch(batch.id), preview: json(batch.previewSummaryJson, {}), result: { createdLinks, updatedLinks, factsCreated, factsUpdated }, idempotent: false };
+  return { batch: readConnectionFoundationBatch(batch.id), preview: json(batch.previewSummaryJson, {}), result: { createdLinks, updatedLinks, factsCreated, factsUpdated, governancePending }, idempotent: false };
 }
 
 // Backward-compatible internal entry point; callers should prefer preview + confirm.

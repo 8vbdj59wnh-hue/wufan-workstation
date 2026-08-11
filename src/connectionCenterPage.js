@@ -47,6 +47,9 @@ import {
   loadErpSkuUsageGovernanceDetail,
   confirmErpSkuUsage,
   loadSalesRelationCandidates,
+  loadSalesRelationGovernance,
+  loadSalesDataQualityAnomalies,
+  submitSalesDataQualityAnomalyDecision,
   loadSalesRelationCandidateDetail,
   confirmSalesRelationCandidate,
   confirmSalesRelationCandidateBatch,
@@ -158,6 +161,8 @@ const pageState = {
   importTab: "matched",
   foundation: { definitions: {}, templates: [], batches: [], errors: [], loading: false, preview: null, bulkPreview: null, salesPreview: null, salesLoading: false, salesError: "", salesMessage: "", salesFileName: "", salesFile: null, dailyPreview: null, dailyLoading: false, dailyCommitting: false, dailyError: "", dailyMessage: "", dailyFileName: "", dailyFile: null, dailyCategory: "ready", shopMappingPreview: null },
   relationCandidates: { items: [], summary: {}, pagination: {}, filterOptions: {}, candidateType: "", loading: false, confirming: false, selected: null, selectedIds: [] },
+  relationGovernance: { items: [], summary: { byType: {} }, pagination: {}, filterOptions: {}, filters: { governanceType: "", shopId: "", keyword: "", minSales: "", maxSales: "", status: "pending" }, selected: null, loading: false, loaded: false },
+  salesDataQualityGovernance: { items: [], summary: { byType: {} }, pagination: {}, filters: { anomalyType: "", keyword: "" }, selected: null, loading: false, saving: false, loaded: false },
   comboReviews: { items: [], summary: {}, pagination: {}, filterOptions: {}, filters: { shopId: "", platform: "", componentCount: "", stability: "", sourceBatchId: "" }, loading: false, generating: false, selected: null, anomalies: { items: [], pagination: {} }, sourceRows: { items: [], pagination: {} }, editing: false, draft: null, erpSearch: { keyword: "", items: [], loading: false }, saving: false, confirming: false },
   erpUsageGovernance: { items: [], summary: {}, pagination: {}, filters: { keyword: "", status: "unconfirmed", suggestedUsage: "", priority: "" }, selected: null, loading: false, confirming: false },
   coreDetail: null,
@@ -387,7 +392,7 @@ function renderSectionNavigation() {
     <button type="button" class="${pageState.section === "my-links" ? "active" : ""}" data-connection-section="my-links">我的链接</button>
     <button type="button" class="${pageState.section === "connections" ? "active" : ""}" data-connection-section="connections">全部链接</button>
     ${canViewHealth() ? `<button type="button" class="${pageState.section === "hospital" ? "active" : ""}" data-connection-section="hospital">链接医院</button>` : ""}
-    <button type="button" class="${pageState.section === "data-import" ? "active" : ""}" data-connection-section="data-import">数据更新</button>
+    <button type="button" class="${["data-import", "sales-relation-governance", "sales-data-quality-governance"].includes(pageState.section) ? "active" : ""}" data-connection-section="data-import">数据更新</button>
     ${canManage() ? `<button type="button" class="${pageState.section === "erp-usage-governance" ? "active" : ""}" data-connection-section="erp-usage-governance">ERP SKU用途治理</button>` : ""}
     ${isAdmin() ? `<button type="button" class="${pageState.section === "data-center" ? "active" : ""}" data-connection-section="data-center">数据中心</button>` : ""}
   </nav>`;
@@ -407,7 +412,29 @@ function renderConnectionDataCenter() {
 }
 
 function renderDataUpdateWorkspace() {
-  return `<section class="link-data-update-workspace"><header class="connection-section-heading"><div><p class="eyebrow">LINK DATA UPDATE</p><h2>数据更新</h2><p>查看经营数据是否正常，并继续使用现有导入流程更新数据。</p></div>${isAdmin() ? `<button type="button" class="secondary-button" data-workbench-go="data-center">查看技术详情</button>` : ""}</header>${renderUiModule("link_data_status", { state: pageState.linkDataStatus })}${renderUiModule("sales_daily_data_quality", { state: pageState.salesDailyQuality })}${canImportBusinessData() ? renderDataFoundation() : `<div class="empty-state compact"><strong>数据由管理员统一更新</strong><p>当前账号可查看最新数据状态；如有异常，请联系数据管理员处理。</p></div>`}</section>`;
+  return `<section class="link-data-update-workspace"><header class="connection-section-heading"><div><p class="eyebrow">LINK DATA UPDATE</p><h2>数据更新</h2><p>查看经营数据是否正常，并继续使用现有导入流程更新数据。</p></div><div class="connection-section-actions">${canImportBusinessData() ? `<button type="button" class="secondary-button" data-workbench-go="sales-data-quality-governance">销售异常治理</button><button type="button" class="secondary-button" data-workbench-go="sales-relation-governance">销售关系治理</button>` : ""}${isAdmin() ? `<button type="button" class="secondary-button" data-workbench-go="data-center">查看技术详情</button>` : ""}</div></header>${renderUiModule("link_data_status", { state: pageState.linkDataStatus })}${renderUiModule("sales_daily_data_quality", { state: pageState.salesDailyQuality })}${canImportBusinessData() ? renderDataFoundation() : `<div class="empty-state compact"><strong>数据由管理员统一更新</strong><p>当前账号可查看最新数据状态；如有异常，请联系数据管理员处理。</p></div>`}</section>`;
+}
+
+const anomalyLabels = { identity_error: "身份异常", missing_relation: "缺失关系", relation_conflict: "关系冲突", incomplete_structure: "结构不完整" };
+const anomalyActionLabels = { add: "新增关系申请", replace: "替换关系申请", ignore: "忽略并留痕" };
+function renderSalesDataQualityGovernance() {
+  const model = pageState.salesDataQualityGovernance; const summary = model.summary || {}; const filters = model.filters || {};
+  const cards = Object.entries(anomalyLabels).map(([key, label]) => `<button type="button" data-quality-anomaly-type="${key}" class="${filters.anomalyType === key ? "is-active" : ""}"><span>${label}</span><strong>${summary.byType?.[key]?.count || 0}</strong><small>¥${usageMoney(summary.byType?.[key]?.salesAmount)}</small></button>`).join("");
+  const rows = (model.items || []).map((item) => `<tr><td>${escapeHtml(anomalyLabels[item.anomalyType] || item.anomalyType)}<small>${escapeHtml(item.reason?.label || "—")}</small></td><td>${escapeHtml(item.saleDate || "—")}</td><td>${escapeHtml(item.shop?.name || item.shop?.sourceName || "—")}</td><td>${escapeHtml(item.link?.name || item.link?.platformGoodsId || "—")}<small>${escapeHtml(item.salesLinkSku?.platformSkuId || "—")}</small></td><td>${escapeHtml(item.erpSku?.merchantSkuCode || "—")}</td><td>¥${usageMoney(item.salesAmount)}<small>利润 ¥${usageMoney(item.profitAmount)}</small></td><td><button type="button" class="text-button" data-open-quality-anomaly="${escapeHtml(item.id)}">查看处理</button></td></tr>`).join("");
+  const selected = model.selected;
+  const detail = selected ? `<article class="connection-import-preview"><header><div><h3>${escapeHtml(anomalyLabels[selected.anomalyType] || selected.anomalyType)}</h3><p>${escapeHtml(selected.reason?.message || "—")}</p></div><button type="button" class="text-button" data-close-quality-anomaly>关闭</button></header><div class="connection-import-preview-grid"><span>销售日期<strong>${escapeHtml(selected.saleDate || "—")}</strong></span><span>店铺<strong>${escapeHtml(selected.shop?.name || selected.shop?.sourceName || "—")}</strong></span><span>链接<strong>${escapeHtml(selected.link?.name || selected.link?.platformGoodsId || "—")}</strong></span><span>链接SKU<strong>${escapeHtml(selected.salesLinkSku?.platformSkuId || "—")}</strong></span><span>ERP SKU<strong>${escapeHtml(selected.erpSku?.merchantSkuCode || "—")}</strong></span><span>影响金额<strong>¥${usageMoney(selected.salesAmount)}</strong></span></div><h4>关系差异</h4><p>当前组件：${escapeHtml((selected.componentDiff?.currentComponents || []).join("、") || "无")}<br />销售出现额外ERP：${escapeHtml((selected.componentDiff?.salesExtra || []).join("、") || "无")}</p>${canManage() ? `<form data-quality-anomaly-decision><label>处理方式<select name="action">${selected.availableActions.map((action) => `<option value="${action}">${escapeHtml(anomalyActionLabels[action])}</option>`).join("")}</select></label><label>处理说明<textarea name="decisionNote" required rows="3"></textarea></label><button type="submit" class="primary-button" ${model.saving ? "disabled" : ""}>提交治理草稿</button><small>新增/替换只进入货品结构审批；不直接修改mapping。忽略会保留审核快照。</small></form>` : ""}</article>` : "";
+  return `<section class="connection-foundation-page"><header class="connection-section-heading"><div><p class="eyebrow">SALES DATA QUALITY GOVERNANCE</p><h2>销售数据异常治理</h2><p>解释真实异常，并将修复路由到正式关系审批。</p></div><button type="button" class="secondary-button" data-workbench-go="data-import">返回数据更新</button></header><div class="connection-import-preview-grid"><span>异常总数<strong>${summary.total || 0}</strong></span><span>影响销售额<strong>¥${usageMoney(summary.salesAmount)}</strong></span><span>影响利润<strong>¥${usageMoney(summary.profitAmount)}</strong></span></div><div class="relation-governance-type-grid"><button type="button" data-quality-anomaly-type="" class="${!filters.anomalyType ? "is-active" : ""}"><span>全部</span><strong>${summary.total || 0}</strong></button>${cards}</div><form class="connection-filter-row" data-quality-anomaly-filters><input name="keyword" value="${escapeHtml(filters.keyword || "")}" placeholder="搜索店铺、链接、SKU或ERP编码" /><button type="submit" class="secondary-button">筛选</button></form>${model.loading ? `<div class="empty-state">正在分析异常…</div>` : `<div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>异常</th><th>日期</th><th>店铺</th><th>链接 / SKU</th><th>ERP SKU</th><th>影响</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="7">暂无异常</td></tr>`}</tbody></table></div><footer><small>每页 ${model.pagination?.pageSize || 30} 条，服务端分页。</small><div><button type="button" class="text-button" data-quality-anomaly-page="${Math.max(1, Number(model.pagination?.page || 1) - 1)}" ${Number(model.pagination?.page || 1) <= 1 ? "disabled" : ""}>上一页</button><span>${model.pagination?.page || 1} / ${model.pagination?.totalPages || 1}</span><button type="button" class="text-button" data-quality-anomaly-page="${Number(model.pagination?.page || 1) + 1}" ${Number(model.pagination?.page || 1) >= Number(model.pagination?.totalPages || 1) ? "disabled" : ""}>下一页</button></div></footer>`}${detail}</section>`;
+}
+
+const relationGovernanceLabels = { single: "单关系确认", single_quantity: "单组件数量确认", combo: "Combo审核" };
+const relationGovernanceStatusLabels = { pending: "待治理", approved: "已确认", rejected: "已拒绝", superseded: "已替代", conflict: "冲突" };
+
+function renderSalesRelationGovernance() {
+  const model = pageState.relationGovernance; const summary = model.summary || {}; const filters = model.filters || {}; const selected = model.selected;
+  const typeStats = Object.entries(relationGovernanceLabels).map(([key, label]) => { const value = summary.byType?.[key] || {}; return `<button type="button" data-governance-type="${key}" class="${filters.governanceType === key ? "is-active" : ""}"><span>${label}</span><strong>${value.count || 0}</strong><small>¥${usageMoney(value.salesAmount)} · 利润 ¥${usageMoney(value.profitAmount)}</small></button>`; }).join("");
+  const rows = (model.items || []).map((item) => `<tr><td><strong>${escapeHtml(item.platformSkuName || item.platformSkuId || "—")}</strong><small>${escapeHtml(item.linkName || "—")}</small></td><td>${escapeHtml(item.shop?.name || "—")}<small>${escapeHtml(item.shop?.platform || "")}</small></td><td>${item.erpSkus.map((erp) => `<strong>${escapeHtml(erp.merchantSkuCode || "—")}</strong><small>${escapeHtml(erp.specificationName || "")}</small>`).join("")}</td><td>${escapeHtml(relationGovernanceLabels[item.governanceType] || item.governanceType)}</td><td>${item.salesEvidence?.affectedRows || 0}<small>${escapeHtml(item.salesEvidence?.dateStart && item.salesEvidence?.dateEnd ? `${item.salesEvidence.dateStart} 至 ${item.salesEvidence.dateEnd}` : "—")}</small></td><td>¥${usageMoney(item.salesAmount)}<small>利润 ¥${usageMoney(item.profitAmount)}</small></td><td>${escapeHtml(relationGovernanceStatusLabels[item.status] || item.status)}</td><td><button type="button" class="text-button" data-open-relation-governance="${escapeHtml(item.id)}">${escapeHtml(relationGovernanceLabels[item.governanceType] || "审核")}</button></td></tr>`).join("");
+  const detail = selected ? `<article class="connection-import-preview relation-governance-detail"><header><div><h3>${escapeHtml(selected.platformSkuName || selected.linkName || "销售关系证据")}</h3><p>${escapeHtml(relationGovernanceLabels[selected.governanceType])} · ${escapeHtml(selected.shop?.name || "—")}</p></div><button type="button" class="text-button" data-close-relation-governance>关闭</button></header><div class="connection-import-preview-grid"><span>链接<strong>${escapeHtml(selected.linkName || "—")}</strong></span><span>平台货品ID<strong>${escapeHtml(selected.platformGoodsId || "—")}</strong></span><span>平台规格ID<strong>${escapeHtml(selected.platformSkuId || "—")}</strong></span><span>影响行数<strong>${selected.salesEvidence?.affectedRows || 0}</strong></span><span>影响销售额<strong>¥${usageMoney(selected.salesAmount)}</strong></span><span>影响利润<strong>¥${usageMoney(selected.profitAmount)}</strong></span></div><h4>候选ERP SKU</h4><div class="connection-template-list">${selected.erpSkus.map((erp) => `<article><div><strong>${escapeHtml(erp.merchantSkuCode || "—")}</strong><span>${escapeHtml(erp.specificationName || "—")}</span></div></article>`).join("")}</div>${selected.governanceType === "single_quantity" ? `<p class="form-note">观察到的日报数量：${escapeHtml((selected.salesEvidence?.observedQuantities || []).join("、") || "—")}。该数量仅为销售证据，正式关系quantity必须由人工确认，系统不会自动推导。</p>` : ""}<footer><small>此工作台只组织证据和审核入口，不会自动创建mapping、修改ERP用途或写入日报事实。</small>${selected.governanceType === "single_quantity" ? `<span class="status-pill">数量人工确认入口</span>` : `<button type="button" class="secondary-button" data-enter-relation-review>${selected.governanceType === "combo" ? "进入Combo审核" : "进入单关系确认"}</button>`}</footer></article>` : "";
+  return `<section class="connection-foundation-page sales-relation-governance"><header class="connection-section-heading"><div><p class="eyebrow">SALES RELATION GOVERNANCE</p><h2>销售关系治理</h2><p>统一处理单关系、单组件数量和Combo关系；系统只整理精确匹配证据。</p></div><button type="button" class="secondary-button" data-workbench-go="data-import">返回数据更新</button></header><div class="connection-import-preview-grid"><span>待治理链接SKU<strong>${summary.pendingLinkSkuCount || 0}</strong></span><span>影响销售额<strong>¥${usageMoney(summary.salesAmount)}</strong></span><span>影响利润<strong>¥${usageMoney(summary.profitAmount)}</strong></span></div><div class="relation-governance-type-grid"><button type="button" data-governance-type="" class="${!filters.governanceType ? "is-active" : ""}"><span>全部</span><strong>${summary.pendingLinkSkuCount || 0}</strong><small>统一治理入口</small></button>${typeStats}</div><form class="connection-filter-row" data-relation-governance-filters><input name="keyword" value="${escapeHtml(filters.keyword || "")}" placeholder="搜索链接、链接SKU或货品ID" /><select name="shopId"><option value="">全部店铺</option>${(model.filterOptions?.shops || []).map((item) => `<option value="${escapeHtml(item.id)}" ${filters.shopId === item.id ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}</select><input type="number" name="minSales" min="0" step="0.01" value="${escapeHtml(filters.minSales || "")}" placeholder="最低销售额" /><input type="number" name="maxSales" min="0" step="0.01" value="${escapeHtml(filters.maxSales || "")}" placeholder="最高销售额" /><select name="status"><option value="pending" ${filters.status === "pending" ? "selected" : ""}>待治理</option><option value="conflict" ${filters.status === "conflict" ? "selected" : ""}>冲突</option><option value="approved" ${filters.status === "approved" ? "selected" : ""}>已确认</option></select><button type="submit" class="secondary-button">筛选</button><button type="button" class="text-button" data-reset-relation-governance>清除</button></form>${model.loading ? `<div class="empty-state">正在读取销售关系治理数据…</div>` : `<div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>链接SKU</th><th>店铺</th><th>候选ERP</th><th>治理类型</th><th>销售证据</th><th>影响金额</th><th>状态</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="8">暂无符合条件的待治理关系</td></tr>`}</tbody></table></div>`}<footer><small>候选只来自销售日报精确身份匹配结果，不使用名称或模糊匹配。</small><div><button type="button" class="text-button" data-relation-governance-page="${Math.max(1, Number(model.pagination?.page || 1) - 1)}" ${Number(model.pagination?.page || 1) <= 1 ? "disabled" : ""}>上一页</button><span>${model.pagination?.page || 1} / ${model.pagination?.totalPages || 1}</span><button type="button" class="text-button" data-relation-governance-page="${Number(model.pagination?.page || 1) + 1}" ${Number(model.pagination?.page || 1) >= Number(model.pagination?.totalPages || 1) ? "disabled" : ""}>下一页</button></div></footer>${detail}</section>`;
 }
 
 const erpUsageLabels = { product: "商品", accounting_auxiliary: "辅助核算", shipping_adjustment: "邮费调整", other_adjustment: "其他调整" };
@@ -794,7 +821,7 @@ function renderErpSales(core) {
   const rows = (core?.erpTrend ?? []).filter((item) => item.periodType === pageState.salesPeriodType);
   return `<section class="connection-v3-panel"><header><div><h3>ERP真实销售趋势</h3><p>按已导入周期展示发货、销售与利润，不与平台表现混用。</p></div><div class="segmented-control">${[["day","日"],["week","周"],["month","月"]].map(([id,label]) => `<button type="button" data-sales-period-type="${id}" class="${pageState.salesPeriodType===id?"active":""}">${label}</button>`).join("")}</div></header>${rows.length ? `<div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>周期</th><th>发货销量</th><th>销售金额</th><th>成本</th><th>利润</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${escapeHtml(`${row.periodStart} ~ ${row.periodEnd}`)}</td><td>${coreNumber(row.shippedQuantity)}</td><td>${coreMoney(row.salesAmount)}</td><td>${coreMoney(row.costAmount)}</td><td>${coreMoney(row.profitAmount)}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state">暂无${({day:"日",week:"周",month:"月"})[pageState.salesPeriodType]}粒度ERP销售数据</div>`}</section>`;
 }
-function renderSkuSales(core) { const rows=core?.skuSales??[]; return `<section class="connection-v3-panel"><h3>SKU销售分析</h3>${rows.length?`<div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>SKU编码</th><th>SKU名称</th><th>销量</th><th>销售额</th><th>销售占比</th></tr></thead><tbody>${rows.map((row)=>`<tr><td><strong>${escapeHtml(row.skuCode)}</strong></td><td>${escapeHtml(row.skuName)}</td><td>${coreNumber(row.shippedQuantity)}</td><td>${coreMoney(row.salesAmount)}</td><td>${corePercent(row.salesShare)}</td></tr>`).join("")}</tbody></table></div>`:`<div class="empty-state">暂无SKU真实销售数据</div>`}</section>`; }
+function renderSkuSales(core) { const rows=core?.skuSales??[]; return `<section class="connection-v3-panel"><h3>SKU销售分析</h3>${rows.length?`<div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>SKU编码</th><th>SKU名称</th><th>ERP组成</th><th>所属产品</th><th>销量</th><th>销售额</th><th>销售占比</th></tr></thead><tbody>${rows.map((row)=>{const erp=(row.erpRelations??[]).map((item)=>`${item.merchantSkuCode||item.erpSkuId}${Number(item.quantity||1)!==1?` ×${coreNumber(item.quantity)}`:""}`).join("、");const products=(row.products??[]).map((item)=>`${item.skuCode||""}${item.name?` · ${item.name}`:""}`).join("、");return `<tr><td><strong>${escapeHtml(row.skuCode)}</strong></td><td>${escapeHtml(row.skuName)}</td><td>${escapeHtml(erp||(row.relationStatus==="pending"?"关系待治理":row.relationStatus==="conflict"?"关系冲突":"未建立V2关系"))}</td><td>${escapeHtml(products||"未关联产品")}</td><td>${coreNumber(row.shippedQuantity)}</td><td>${coreMoney(row.salesAmount)}</td><td>${corePercent(row.salesShare)}</td></tr>`;}).join("")}</tbody></table></div>`:`<div class="empty-state">暂无SKU真实销售数据</div>`}</section>`; }
 function renderCoreProducts(core) { const rows=core?.products??[]; return `<section class="connection-v3-panel"><h3>关联产品</h3>${rows.length?`<div class="connection-v3-product-grid">${rows.map((product)=>`<a href="#products/${encodeURIComponent(product.id)}">${product.mainImage?`<img src="${escapeHtml(resolveAssetUrl(product.mainImage))}" alt="" />`:`<span class="connection-cover-empty">无图</span>`}<strong>${escapeHtml(product.name)}</strong><span>产品编码 ${escapeHtml(product.skuCode)}</span><small>${product.skuCount} 个关联SKU</small></a>`).join("")}</div>`:`<div class="empty-state">当前链接未关联产品</div>`}</section>`; }
 function renderInventory(core) { const rows=core?.inventory??[]; const risk={out:"缺货",low:"库存偏低",high:"库存偏高",normal:"正常"}; return `<section class="connection-v3-panel"><h3>库存供应</h3>${rows.length?`<div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>SKU</th><th>产品</th><th>当前库存</th><th>可售库存</th><th>销售速度</th><th>库存天数</th><th>风险</th></tr></thead><tbody>${rows.map((row)=>`<tr><td><strong>${escapeHtml(row.skuCode)}</strong><small>${escapeHtml(row.specificationName||"")}</small></td><td>${escapeHtml(row.productName||"未关联产品")}</td><td>${coreNumber(row.currentStock)}</td><td>${coreNumber(row.availableStock)}</td><td>${coreNumber(row.salesVelocity)}</td><td>${row.stockDays==null?"—":`${Number(row.stockDays).toFixed(1)}天`}</td><td><span class="status-pill stock-${row.stockRisk}">${risk[row.stockRisk]}</span></td></tr>`).join("")}</tbody></table></div>`:`<div class="empty-state">暂无关联SKU库存事实</div>`}</section>`; }
 
@@ -956,7 +983,7 @@ function renderImprovementModal() {
 }
 
 export function renderConnectionCenterPage() {
-  const pageContent = pageState.section === "cockpit" ? renderBusinessCockpit() : pageState.section === "hospital" ? renderConnectionHospital() : pageState.section === "my-links" ? renderMyLinksWorkbench() : pageState.section === "data-import" ? renderDataUpdateWorkspace() : pageState.section === "erp-usage-governance" ? renderErpUsageGovernance() : pageState.section === "data-center" ? renderConnectionDataCenter() : renderConnectionAssets();
+  const pageContent = pageState.section === "cockpit" ? renderBusinessCockpit() : pageState.section === "hospital" ? renderConnectionHospital() : pageState.section === "my-links" ? renderMyLinksWorkbench() : pageState.section === "data-import" ? renderDataUpdateWorkspace() : pageState.section === "sales-relation-governance" ? renderSalesRelationGovernance() : pageState.section === "sales-data-quality-governance" ? renderSalesDataQualityGovernance() : pageState.section === "erp-usage-governance" ? renderErpUsageGovernance() : pageState.section === "data-center" ? renderConnectionDataCenter() : renderConnectionAssets();
   return `<section class="connection-center-page">${pageState.error ? `<div class="form-error">${escapeHtml(pageState.error)}</div>` : ""}${pageState.loading ? `<div class="empty-state">正在读取连接…</div>` : pageState.selectedId ? renderDetail() : `${renderSectionNavigation()}${pageContent}`}${renderMappingModal()}${renderImprovementModal()}${renderBenchmarkModal()}${renderDiagnosisModal()}</section>`;
 }
 
@@ -1193,6 +1220,28 @@ async function loadErpUsageGovernancePage(render, overrides = {}) {
   render();
 }
 
+async function loadSalesRelationGovernancePage(render, overrides = {}) {
+  const model = pageState.relationGovernance;
+  pageState.relationGovernance = { ...model, loading: true }; pageState.error = ""; render();
+  try {
+    const filters = { ...model.filters, ...overrides };
+    const result = await loadSalesRelationGovernance({ ...filters, page: overrides.page || model.pagination.page || 1, pageSize: 30 });
+    pageState.relationGovernance = { ...model, ...result, filters, selected: model.selected, loading: false, loaded: true };
+  } catch (error) { pageState.error = error.message; pageState.relationGovernance.loading = false; }
+  render();
+}
+
+async function loadSalesDataQualityGovernancePage(render, overrides = {}) {
+  const model = pageState.salesDataQualityGovernance;
+  pageState.salesDataQualityGovernance = { ...model, loading: true }; pageState.error = ""; render();
+  try {
+    const filters = { ...model.filters, ...overrides };
+    const result = await loadSalesDataQualityAnomalies({ ...filters, page: overrides.page || model.pagination.page || 1, pageSize: 30 });
+    pageState.salesDataQualityGovernance = { ...model, ...result, filters, selected: model.selected, loading: false, loaded: true };
+  } catch (error) { pageState.error = error.message; pageState.salesDataQualityGovernance.loading = false; }
+  render();
+}
+
 async function openErpUsageGovernance(erpSkuId, render, page = 1) {
   pageState.erpUsageGovernance.loading = true; pageState.error = ""; render();
   try { pageState.erpUsageGovernance.selected = await loadErpSkuUsageGovernanceDetail(erpSkuId, { page, pageSize: 30 }); }
@@ -1238,8 +1287,59 @@ export function bindConnectionCenterPageEvents(render) {
     if (pageState.section === "my-links") { if (!pageState.myWorkbench.loaded) void loadMyLinks(render); if (!pageState.linkDataStatus.loaded) void loadMyLinkDataStatus(render); }
     if (pageState.section === "hospital") void loadHospital(render);
     if (pageState.section === "data-import") { if (!pageState.salesDailyQuality.loaded) void loadSalesDailyQualityPanel(render); if (canImportBusinessData()) void loadDataFoundation(render); }
+    if (pageState.section === "sales-relation-governance" && canImportBusinessData()) void loadSalesRelationGovernancePage(render, { page: 1 });
+    if (pageState.section === "sales-data-quality-governance" && canImportBusinessData()) void loadSalesDataQualityGovernancePage(render, { page: 1 });
     if (pageState.section === "erp-usage-governance" && canManage()) void loadErpUsageGovernancePage(render, { page: 1 });
   }));
+  root.querySelector("[data-relation-governance-filters]")?.addEventListener("submit", (event) => {
+    event.preventDefault(); void loadSalesRelationGovernancePage(render, { ...Object.fromEntries(new FormData(event.currentTarget)), page: 1 });
+  });
+  root.querySelector("[data-reset-relation-governance]")?.addEventListener("click", () => {
+    pageState.relationGovernance.filters = { governanceType: "", shopId: "", keyword: "", minSales: "", maxSales: "", status: "pending" };
+    void loadSalesRelationGovernancePage(render, { page: 1 });
+  });
+  root.querySelectorAll("[data-governance-type]").forEach((button) => button.addEventListener("click", () => {
+    void loadSalesRelationGovernancePage(render, { governanceType: button.dataset.governanceType || "", page: 1 });
+  }));
+  root.querySelectorAll("[data-relation-governance-page]").forEach((button) => button.addEventListener("click", () => {
+    void loadSalesRelationGovernancePage(render, { page: Number(button.dataset.relationGovernancePage || 1) });
+  }));
+  root.querySelectorAll("[data-open-relation-governance]").forEach((button) => button.addEventListener("click", () => {
+    pageState.relationGovernance.selected = pageState.relationGovernance.items.find((item) => item.id === button.dataset.openRelationGovernance) || null; render();
+  }));
+  root.querySelector("[data-close-relation-governance]")?.addEventListener("click", () => { pageState.relationGovernance.selected = null; render(); });
+  root.querySelector("[data-quality-anomaly-filters]")?.addEventListener("submit", (event) => {
+    event.preventDefault(); void loadSalesDataQualityGovernancePage(render, { ...Object.fromEntries(new FormData(event.currentTarget)), page: 1 });
+  });
+  root.querySelectorAll("[data-quality-anomaly-type]").forEach((button) => button.addEventListener("click", () => void loadSalesDataQualityGovernancePage(render, { anomalyType: button.dataset.qualityAnomalyType || "", page: 1 })));
+  root.querySelectorAll("[data-quality-anomaly-page]").forEach((button) => button.addEventListener("click", () => void loadSalesDataQualityGovernancePage(render, { page: Number(button.dataset.qualityAnomalyPage || 1) })));
+  root.querySelectorAll("[data-open-quality-anomaly]").forEach((button) => button.addEventListener("click", () => {
+    pageState.salesDataQualityGovernance.selected = pageState.salesDataQualityGovernance.items.find((item) => item.id === button.dataset.openQualityAnomaly) || null; render();
+  }));
+  root.querySelector("[data-close-quality-anomaly]")?.addEventListener("click", () => { pageState.salesDataQualityGovernance.selected = null; render(); });
+  root.querySelector("[data-quality-anomaly-decision]")?.addEventListener("submit", async (event) => {
+    event.preventDefault(); const selected = pageState.salesDataQualityGovernance.selected; if (!selected) return;
+    pageState.salesDataQualityGovernance.saving = true; pageState.error = ""; render();
+    try {
+      await submitSalesDataQualityAnomalyDecision(selected.id, Object.fromEntries(new FormData(event.currentTarget)));
+      pageState.salesDataQualityGovernance.selected = null;
+      await loadSalesDataQualityGovernancePage(render, { page: pageState.salesDataQualityGovernance.pagination.page || 1 });
+    } catch (error) { pageState.error = error.message; pageState.salesDataQualityGovernance.saving = false; render(); }
+  });
+  root.querySelector("[data-enter-relation-review]")?.addEventListener("click", async () => {
+    const selected = pageState.relationGovernance.selected; if (!selected) return;
+    pageState.section = "data-import"; pageState.selectedId = ""; render();
+    await loadDataFoundation(render);
+    try {
+      if (selected.governanceType === "single") pageState.relationCandidates.selected = await loadSalesRelationCandidateDetail(selected.reviewTarget.id);
+      if (selected.governanceType === "combo" && selected.reviewTarget?.id) {
+        pageState.comboReviews.selected = await loadComboReviewDetail(selected.reviewTarget.id);
+        pageState.comboReviews.anomalies = await loadComboReviewAnomalyDates(selected.reviewTarget.id, { page: 1, pageSize: 10 });
+        pageState.comboReviews.sourceRows = await loadComboReviewSourceRows(selected.reviewTarget.id, { page: 1, pageSize: 20 });
+      }
+    } catch (error) { pageState.error = error.message; }
+    render();
+  });
   root.querySelector("[data-erp-usage-filters]")?.addEventListener("submit", (event) => {
     event.preventDefault(); const data = Object.fromEntries(new FormData(event.currentTarget));
     void loadErpUsageGovernancePage(render, { ...data, page: 1 });
@@ -1331,6 +1431,9 @@ export function bindConnectionCenterPageEvents(render) {
     pageState.section = button.dataset.workbenchGo; pageState.selectedId = ""; render();
     if (pageState.section === "my-links") { if (!pageState.myWorkbench.loaded) void loadMyLinks(render, "all"); if (!pageState.linkDataStatus.loaded) void loadMyLinkDataStatus(render); }
     if (pageState.section === "hospital") void loadHospital(render);
+    if (pageState.section === "sales-relation-governance" && canImportBusinessData()) void loadSalesRelationGovernancePage(render, { page: 1 });
+    if (pageState.section === "sales-data-quality-governance" && canImportBusinessData()) void loadSalesDataQualityGovernancePage(render, { page: 1 });
+    if (pageState.section === "data-import" && canImportBusinessData()) void loadDataFoundation(render);
   }));
   root.querySelectorAll("[data-workbench-my-filter]").forEach((button) => button.addEventListener("click", () => {
     pageState.section = "my-links"; pageState.selectedId = ""; void loadMyLinks(render, button.dataset.workbenchMyFilter); if (!pageState.linkDataStatus.loaded) void loadMyLinkDataStatus(render);
