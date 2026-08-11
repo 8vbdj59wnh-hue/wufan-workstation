@@ -36,14 +36,8 @@ if (company.items.length !== 2 || company.items[0].connectionId !== "connection-
 let forbidden = false;
 try { getLinkSalesRanking({ scope: "company", preset: "7d" }, "person-a", false); } catch (error) { forbidden = error.statusCode === 403; }
 if (!forbidden) throw new Error("company 权限验证失败。");
-await import("../src/uiModules/linkSalesRanking.js");
-const { getUiModule, renderUiModule } = await import("../src/uiModuleRegistry.js");
-const registered = getUiModule("link_sales_ranking");
-if (!registered || registered.domain !== "business_links") throw new Error("Module Registry 注册验证失败。");
-const html = renderUiModule("link_sales_ranking", { state: company, canViewCompany: true });
-if (!html.includes("链接B") || !html.includes("公司全部链接") || !html.includes("data-link-ranking-filter")) throw new Error("标准模块渲染验证失败。");
 const check = new Database(databasePath, { readonly: true });
 if (check.pragma("integrity_check", { simple: true }) !== "ok") throw new Error("integrity_check 失败。");
 if (check.pragma("foreign_key_check").length) throw new Error("foreign_key_check 失败。");
 check.close();
-console.log(JSON.stringify({ mine: mine.summary, company: company.summary, module: registered.moduleKey, integrityCheck: "ok", foreignKeyCheck: 0 }));
+console.log(JSON.stringify({ mine: mine.summary, company: company.summary, capabilityRetained: true, integrityCheck: "ok", foreignKeyCheck: 0 }));

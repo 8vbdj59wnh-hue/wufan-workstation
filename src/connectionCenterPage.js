@@ -65,7 +65,6 @@ import {
   loadConnectionCoreDetail,
   loadConnectionDailySales,
   loadMyConnectionWorkbench,
-  loadLinkSalesRanking,
   loadLinkSalesDistribution,
   loadLinkDataTable,
   loadLinkBusinessTable,
@@ -87,7 +86,6 @@ import { getCurrentUser, state } from "./appState.js";
 import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
 import { escapeHtml } from "./utils/html.js?v=20260802-module-boundary1";
 import { renderUiModule } from "./uiModuleRegistry.js";
-import "./uiModules/linkSalesRanking.js?v=20260809-my-link-workspace1";
 import "./uiModules/linkSalesDistribution.js?v=20260809-link-sales-distribution1";
 import "./uiModules/linkDataStatus.js?v=20260809-my-link-workspace1";
 import "./uiModules/salesDailyDataQuality.js?v=20260811-sales-daily-quality1";
@@ -146,7 +144,6 @@ const pageState = {
     fieldOrder: LINK_BUSINESS_COLUMNS.map((item) => item.key), filterOptions: { platforms: [], shops: [], owners: [] }, dataSources: {}, indicatorOpen: false, loading: false, loaded: false },
   linkDataStatus: { data: null, loading: false, loaded: false, error: "" },
   salesDailyQuality: { data: null, loading: false, loaded: false, error: "" },
-  salesRanking: { scope: "mine", range: { preset: "7d" }, items: [], summary: {}, loading: false, error: "" },
   salesDistribution: { scope: "company", range: { preset: "7d" }, items: [], summary: {}, selectedGroup: 0, selectedRange: null, drillTable: null, loading: false, loaded: false, error: "" },
   hospital: { zones: { diagnosis: [], treatment: [], observation: [] }, counts: { diagnosis: 0, treatment: 0, observation: 0 }, stage: "diagnosis", loading: false },
   diagnosisModalId: "",
@@ -539,10 +536,7 @@ function renderMyLinksWorkbench() {
   return `<section class="my-links-workbench"><header><div><p class="eyebrow">MY LINK WORKSPACE</p><h2>我的链接</h2><p>关注销售贡献、经营风险与今天需要处理的问题。</p></div></header>
     ${renderUiModule("link_data_status", { state: pageState.linkDataStatus })}
     ${renderUiModule("my_link_summary", { summary: { ...summary, pendingIssues }, money: coreMoney })}
-    <div class="my-link-workspace-columns">
-      ${renderUiModule("link_sales_ranking", { state: pageState.salesRanking, canViewCompany: false, workbenchItems: workbench.items })}
-      ${renderUiModule("link_hospital_todo", { items: issues.map((item) => ({ ...item, stageLabel: stageText[item.stage] })), counts: pageState.hospital.counts })}
-    </div>
+    ${renderUiModule("link_hospital_todo", { items: issues.map((item) => ({ ...item, stageLabel: stageText[item.stage] })), counts: pageState.hospital.counts })}
     ${renderUiModule("link_data_toolbar", { keyword: table.filters.keyword, range: table.range, filters: table.filters,
       platforms: table.filterOptions.platforms, shops: table.filterOptions.shops, columnSettingHtml: columnSetting, dataSource: table.dataSource })}
     ${renderUiModule("link_data_table", { items: table.items.map((item) => ({ ...item, imageUrl: item.mainImage ? resolveAssetUrl(item.mainImage) : "" })),
@@ -637,7 +631,6 @@ function renderConnectionAssets() {
   return `<section class="connection-assets company-links-workspace"><header class="connection-section-heading"><div><p class="eyebrow">ALL LINK WORKSPACE</p><h2>全部链接</h2><p>在当前权限范围内查看公司经营概览与链接资产。</p></div></header>
     ${renderUiModule("link_data_status", { state: pageState.linkDataStatus })}
     ${renderGrowthOverview()}
-    ${renderUiModule("link_sales_ranking", { state: pageState.salesRanking, canViewCompany: isAdmin(), workbenchItems: pageState.items })}
     <section class="link-business-analysis"><header><div><span>链接经营分析</span><h3>全部链接经营数据表</h3><p>ERP销售与平台经营指标分开呈现；所有排序、筛选和分页均在服务端完成。</p></div></header>${toolbarHtml}${tableHtml}</section>
   </section>`;
 }
@@ -1005,20 +998,6 @@ async function loadSalesDailyQualityPanel(render) {
   render();
 }
 
-async function loadSalesRanking(render, filters = {}) {
-  pageState.salesRanking = { ...pageState.salesRanking, ...filters, loading: true, error: "" }; render();
-  try {
-    const result = await loadLinkSalesRanking({
-      scope: pageState.salesRanking.scope,
-      preset: pageState.salesRanking.range?.preset || "7d",
-      startDate: pageState.salesRanking.range?.startDate || "",
-      endDate: pageState.salesRanking.range?.endDate || "",
-    });
-    pageState.salesRanking = { ...pageState.salesRanking, ...result, loading: false, error: "" };
-  } catch (error) { pageState.salesRanking = { ...pageState.salesRanking, loading: false, error: error.message }; }
-  render();
-}
-
 async function loadSalesDistribution(render, filters = {}) {
   pageState.salesDistribution = { ...pageState.salesDistribution, ...filters, selectedGroup: 0, selectedRange: null, drillTable: null, loading: true, error: "" }; render();
   try {
@@ -1255,9 +1234,8 @@ export function bindConnectionCenterPageEvents(render) {
     pageState.section = button.dataset.connectionSection; pageState.selectedId = ""; render();
     if (pageState.section === "cockpit") void loadBusinessCockpitPage(render);
     if (pageState.section === "connections") void loadLinkBusinessTablePage(render);
-    if (pageState.section === "connections") void loadSalesRanking(render, { scope: isAdmin() ? "company" : "mine" });
     if (["connections", "data-import"].includes(pageState.section) && !pageState.linkDataStatus.loaded) void loadMyLinkDataStatus(render);
-    if (pageState.section === "my-links") { if (!pageState.myWorkbench.loaded) void loadMyLinks(render); void loadSalesRanking(render, { scope: "mine" }); if (!pageState.linkDataStatus.loaded) void loadMyLinkDataStatus(render); }
+    if (pageState.section === "my-links") { if (!pageState.myWorkbench.loaded) void loadMyLinks(render); if (!pageState.linkDataStatus.loaded) void loadMyLinkDataStatus(render); }
     if (pageState.section === "hospital") void loadHospital(render);
     if (pageState.section === "data-import") { if (!pageState.salesDailyQuality.loaded) void loadSalesDailyQualityPanel(render); if (canImportBusinessData()) void loadDataFoundation(render); }
     if (pageState.section === "erp-usage-governance" && canManage()) void loadErpUsageGovernancePage(render, { page: 1 });
@@ -1282,10 +1260,6 @@ export function bindConnectionCenterPageEvents(render) {
       await openErpUsageGovernance(selected.item.erpSkuId, render);
     } catch (error) { pageState.error = error.message; }
     pageState.erpUsageGovernance.confirming = false; render();
-  });
-  root.querySelector("[data-link-ranking-filter]")?.addEventListener("submit", (event) => {
-    event.preventDefault(); const data = new FormData(event.currentTarget); const preset = String(data.get("preset") || "7d");
-    void loadSalesRanking(render, { scope: String(data.get("scope") || "mine"), range: { preset, startDate: String(data.get("startDate") || ""), endDate: String(data.get("endDate") || "") } });
   });
   root.querySelector("[data-link-distribution-filter]")?.addEventListener("submit", (event) => {
     event.preventDefault(); const data = new FormData(event.currentTarget); const preset = String(data.get("preset") || "7d");
@@ -1355,11 +1329,11 @@ export function bindConnectionCenterPageEvents(render) {
   }));
   root.querySelectorAll("[data-workbench-go]").forEach((button) => button.addEventListener("click", () => {
     pageState.section = button.dataset.workbenchGo; pageState.selectedId = ""; render();
-    if (pageState.section === "my-links") { if (!pageState.myWorkbench.loaded) void loadMyLinks(render, "all"); void loadSalesRanking(render, { scope: "mine" }); if (!pageState.linkDataStatus.loaded) void loadMyLinkDataStatus(render); }
+    if (pageState.section === "my-links") { if (!pageState.myWorkbench.loaded) void loadMyLinks(render, "all"); if (!pageState.linkDataStatus.loaded) void loadMyLinkDataStatus(render); }
     if (pageState.section === "hospital") void loadHospital(render);
   }));
   root.querySelectorAll("[data-workbench-my-filter]").forEach((button) => button.addEventListener("click", () => {
-    pageState.section = "my-links"; pageState.selectedId = ""; void loadMyLinks(render, button.dataset.workbenchMyFilter); void loadSalesRanking(render, { scope: "mine" }); if (!pageState.linkDataStatus.loaded) void loadMyLinkDataStatus(render);
+    pageState.section = "my-links"; pageState.selectedId = ""; void loadMyLinks(render, button.dataset.workbenchMyFilter); if (!pageState.linkDataStatus.loaded) void loadMyLinkDataStatus(render);
   }));
   root.querySelectorAll("[data-workbench-hospital]").forEach((button) => button.addEventListener("click", () => {
     pageState.section = "hospital"; pageState.hospital.stage = button.dataset.workbenchHospital; pageState.selectedId = ""; void loadHospital(render);
