@@ -1,4 +1,5 @@
-import { loadBusinessAnomalies, loadOperationDashboard, loadSalesBusinessDashboard } from "./appState.js";
+import { getCurrentUser, loadBusinessAnomalies, loadOperationDashboard, loadSalesBusinessDashboard } from "./appState.js";
+import { hasPermission } from "./permissions.js";
 import { renderUiModule } from "./uiModuleRegistry.js";
 import "./uiModules/salesBusinessDashboard.js?v=20260811-sales-business-dashboard1";
 import "./uiModules/businessAnomalies.js?v=20260811-business-anomalies1";
@@ -13,6 +14,7 @@ let salesPreset = "30d";
 let anomalies = null;
 let anomaliesLoading = false;
 let anomaliesError = "";
+let selectedAnomalyKey = "";
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[character]);
@@ -61,7 +63,7 @@ export function renderOperationDashboardPage() {
   return `<section class="operation-dashboard">
     <div class="operation-hero"><div><p class="eyebrow">经营管理基础 V2.0</p><h1>经营驾驶舱</h1><p>统一查看经营事实、风险和改善执行。所有指标来自现有正式快照，不补造利润或缺失数据。</p></div><button class="secondary-button" data-action="refresh-operation-dashboard">刷新数据</button></div>
     ${renderUiModule("sales_business_dashboard", { state: { loading: salesDashboardLoading, error: salesDashboardError, data: salesDashboard } })}
-    ${renderUiModule("business_anomalies", { state: { loading: anomaliesLoading, error: anomaliesError, data: anomalies } })}
+    ${renderUiModule("business_anomalies", { state: { loading: anomaliesLoading, error: anomaliesError, data: anomalies, selectedKey: selectedAnomalyKey, canLaunch: hasPermission(getCurrentUser(), "workPlans.launch") } })}
     <div class="operation-metric-grid">
       <article><span>产品近30天销量</span><strong>${number(products.sales30d)}</strong><em class="${products.salesGrowth < 0 ? "is-risk" : ""}">${percent(products.salesGrowth)}</em><small>业务日期 ${escapeHtml(products.latestBusinessDate || "—")}</small></article>
       <article><span>库存资金占用</span><strong>${money(products.capitalOccupation)}</strong><em>${number(products.actualStock)} 件实际库存</em><small>成本完整率 ${percent(products.capitalCoverage)}</small></article>
@@ -112,6 +114,15 @@ export function bindOperationDashboardPageEvents(rerender) {
   if (!dashboard && !loading) refresh(rerender);
   if (!salesDashboard && !salesDashboardLoading) refreshSales(rerender);
   if (!anomalies && !anomaliesLoading) refreshAnomalies(rerender);
+  document.querySelectorAll("[data-anomaly-select]").forEach((button) => button.addEventListener("click", () => { selectedAnomalyKey = button.dataset.anomalySelect; rerender(); }));
+  document.querySelectorAll("[data-launch-anomaly-action]").forEach((button) => button.addEventListener("click", () => {
+    if (!hasPermission(getCurrentUser(), "workPlans.launch")) return;
+    const item = anomalies?.items?.find((entry) => [entry.anomalyType, entry.objectType, entry.objectId].join("|") === button.dataset.launchAnomalyAction);
+    if (!item || !["salesLink", "product"].includes(item.objectType)) return;
+    const sourceContext = { source: "sales_anomaly", objectType: item.objectType, objectId: item.objectId, salesLinkId: item.objectType === "salesLink" ? item.objectId : null, productId: item.objectType === "product" ? item.objectId : null, anomalySnapshot: { anomalyType: item.anomalyType, metric: item.anomalyType === "profit_drop" ? "profitAmount" : "salesAmount", severity: item.severity, currentPeriod: item.currentPeriod, comparePeriod: item.comparePeriod, currentValue: item.currentValue, compareValue: item.compareValue, changeRate: item.changeRate, trendSummary: item.trendSummary || null } };
+    window.sessionStorage.setItem("goalTaskPrefill", JSON.stringify({ title: "发起关键行动", launchImmediately: false, actionTitle: `处理${item.objectName || "经营对象"}${item.anomalyType === "profit_drop" ? "利润下降" : item.anomalyType === "sales_gap" ? "销售断档" : "销售下降"}`, description: "来源：销售经营异常。请人工分析原因并明确行动方案。", sourceContext }));
+    window.location.hash = "goals";
+  }));
   document.querySelectorAll("[data-anomaly-object]").forEach((button) => button.addEventListener("click", () => {
     if (button.dataset.anomalyObject === "product") window.location.hash = `products/${button.dataset.anomalyId}`;
     else if (button.dataset.anomalyObject === "salesLink") window.location.hash = `connectionCenter/${encodeURIComponent(button.dataset.anomalyId)}`;

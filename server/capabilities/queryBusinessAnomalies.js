@@ -16,7 +16,7 @@ export function queryBusinessAnomalies(input={},options={}){
     if(!["salesLink","product"].includes(objectType))throw new Error("经营异常对象类型无效。");
     const comparison=queryDailySalesSummaryComparison({dimension:objectType,currentStart,currentEnd,compareStart,compareEnd},{database});
     for(const row of comparison.items){
-      const common={objectType,objectId:row.targetId,objectName:row.targetName,currentPeriod:comparison.currentPeriod,comparePeriod:comparison.comparePeriod};
+      const common={objectType,objectId:row.targetId,objectName:row.targetName,currentPeriod:comparison.currentPeriod,comparePeriod:comparison.comparePeriod,trendSummary:{currentSalesAmount:row.currentSalesAmount,compareSalesAmount:row.compareSalesAmount,currentProfitAmount:row.currentProfitAmount,compareProfitAmount:row.compareProfitAmount}};
       if(row.currentDataCount>0&&row.compareDataCount>0){
         const salesChange=ratio(row.currentSalesAmount,row.compareSalesAmount);if(salesChange!==null&&salesChange<=-threshold)items.push({...common,anomalyType:"sales_drop",severity:severity(Math.abs(salesChange)),currentValue:row.currentSalesAmount,compareValue:row.compareSalesAmount,changeRate:salesChange});
         const profitChange=ratio(row.currentProfitAmount,row.compareProfitAmount);if(profitChange!==null&&profitChange<=-threshold)items.push({...common,anomalyType:"profit_drop",severity:severity(Math.abs(profitChange)),currentValue:row.currentProfitAmount,compareValue:row.compareProfitAmount,changeRate:profitChange});

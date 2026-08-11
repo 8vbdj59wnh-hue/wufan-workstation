@@ -1287,7 +1287,7 @@ function renderGoalTaskModal() {
             </label>
             <label>
               <span>本次关键行动标题</span>
-              <input name="title" placeholder="可留空，系统会根据填写信息生成" autocomplete="off" data-goal-action-title data-auto-title="true" />
+              <input name="title" value="${escapeHtml(modalState.actionTitle ?? "")}" placeholder="可留空，系统会根据填写信息生成" autocomplete="off" data-goal-action-title data-auto-title="${modalState.actionTitle ? "false" : "true"}" />
             </label>
             <label>
               <span>截止时间日期</span>
@@ -1298,14 +1298,15 @@ function renderGoalTaskModal() {
               <select name="dueDateHour">${renderBusinessHourOptions("", "请选择小时")}</select>
             </label>
           </div>
+          ${modalState.sourceContext?.source === "sales_anomaly" ? `<section class="goal-anomaly-source"><strong>来源：销售经营异常</strong><span>${escapeHtml(modalState.sourceContext.objectType)} · ${escapeHtml(modalState.sourceContext.objectId)}</span><small>${escapeHtml(modalState.sourceContext.anomalySnapshot?.anomalyType || "—")} · 当前值 ${escapeHtml(modalState.sourceContext.anomalySnapshot?.currentValue ?? "暂无数据")} · 对比值 ${escapeHtml(modalState.sourceContext.anomalySnapshot?.compareValue ?? "暂无数据")}</small><small>异常快照只用于追溯，不自动判断原因或生成任务。</small></section>` : ""}
           ${renderTaskTemplateLockedInfo(selectedTemplate)}
           ${renderCustomFieldsForm(selectedTemplate)}
-          ${renderActionProductSelector()}
+          ${renderActionProductSelector(modalState.sourceContext?.productId ? [modalState.sourceContext.productId] : [])}
           ${isPublishContentNote ? renderContentNoteTemplateSelector(modalState.linkedTemplateId ?? "") : ""}
           ${renderStandardWorkAttachmentsField()}
           <label>
             <span>补充说明</span>
-            <textarea name="description" rows="3"></textarea>
+            <textarea name="description" rows="3">${escapeHtml(modalState.description ?? "")}</textarea>
           </label>
           <div class="modal-actions">
             <button class="secondary-button" type="button" data-action="close-goal-modal">取消</button>
@@ -1662,11 +1663,14 @@ async function saveGoalTask(form, rerender) {
   const coverImageUrl = getPrimaryImageUrl({ customFields: draft.customFields }) || null;
   const now = getNow();
   const workPlanId = createId("work-plan");
+  const sourceFields = modalState.sourceContext?.source === "sales_anomaly"
+    ? { ...draft.customFields, source: "sales_anomaly", salesLinkId: modalState.sourceContext.salesLinkId ?? null, productId: modalState.sourceContext.productId ?? null, anomalySnapshot: modalState.sourceContext.anomalySnapshot }
+    : draft.customFields;
   const customFields =
     uploadedAttachments.length === 0
-      ? draft.customFields
+      ? sourceFields
       : {
-          ...draft.customFields,
+          ...sourceFields,
           [standardWorkAttachmentsKey]: uploadedAttachments.map((attachment) => ({
             originalName: attachment.originalName,
             filePath: attachment.filePath ?? attachment.url,
@@ -2186,16 +2190,20 @@ function consumeGoalTaskPrefill() {
     return;
   }
   const template = getTaskTemplate(prefill?.taskTemplateId ?? "");
+  const isSalesAnomaly = prefill?.sourceContext?.source === "sales_anomaly";
   const goal = getGoal(prefill?.goalId ?? selectedGoalId) ?? getActiveGoals()[0] ?? null;
-  if (template === null || goal === null || isInactiveGoal(goal)) return;
+  if ((!isSalesAnomaly && template === null) || goal === null || isInactiveGoal(goal)) return;
   selectedGoalId = goal.id;
   modalState = {
     kind: "goalTask",
     goalId: goal.id,
-    categoryId: prefill.categoryId ?? template.categoryId ?? "",
-    taskTemplateId: template.id,
+    categoryId: prefill.categoryId ?? template?.categoryId ?? "",
+    taskTemplateId: template?.id ?? "",
     title: prefill.title ?? "发起关键行动",
     launchImmediately: prefill.launchImmediately === true,
+    actionTitle: prefill.actionTitle ?? "",
+    description: prefill.description ?? "",
+    sourceContext: isSalesAnomaly ? prefill.sourceContext : null,
     error: "",
   };
 }
