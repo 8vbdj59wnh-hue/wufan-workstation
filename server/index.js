@@ -100,6 +100,7 @@ import { getProductDailySalesPerformance } from "./productDailySalesService.js";
 import { querySalesDailyDataQuality } from "./salesDailyDataQualityService.js";
 import { getSalesBusinessDashboard } from "./salesBusinessDashboardService.js";
 import { queryBusinessAnomalies } from "./capabilities/queryBusinessAnomalies.js";
+import { queryBusinessImprovementResult } from "./capabilities/queryBusinessImprovementResult.js";
 import { commitPlatformGoodsExcelDataSync, previewPlatformGoodsExcelDataSync, readPlatformGoodsExcelDataSyncPreview } from "./platformGoodsExcelDataSyncAdapter.js";
 import { confirmPlatformLinkShopMappings, listPlatformLinkShopMappings, previewPlatformLinkShopMappings } from "./platformLinkShopMappingImportService.js";
 import {
@@ -1975,6 +1976,11 @@ app.get("/api/sales-business-dashboard", requirePermission("dataCenter.view"), (
 app.get("/api/business-anomalies", requirePermission("dataCenter.view"), (request, response) => {
   try { response.json({ success: true, anomalies: queryBusinessAnomalies(request.query) }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "经营异常读取失败。" }); }
+});
+
+app.get("/api/business-improvement-result/:keyActionId", requirePermission("processes.viewInstances"), (request, response) => {
+  try { response.json({ success: true, result: queryBusinessImprovementResult({ keyActionId: request.params.keyActionId }) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "经营改善结果读取失败。" }); }
 });
 
 app.get("/api/finance/statement", requirePermission("finance.view"), (request, response) => {

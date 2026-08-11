@@ -132,6 +132,8 @@ export function queryDailySalesSummaryComparison(input = {}, options = {}) {
       SUM(CASE WHEN f.saleDate BETWEEN ? AND ? THEN 1 ELSE 0 END) currentDataCount,
       SUM(CASE WHEN f.saleDate BETWEEN ? AND ? THEN 1 ELSE 0 END) compareDataCount,
       MAX(CASE WHEN f.saleDate BETWEEN ? AND ? THEN f.saleDate END) currentDataEnd,
+      SUM(CASE WHEN f.saleDate BETWEEN ? AND ? THEN f.quantity END) currentQuantity,
+      SUM(CASE WHEN f.saleDate BETWEEN ? AND ? THEN f.quantity END) compareQuantity,
       SUM(CASE WHEN f.saleDate BETWEEN ? AND ? THEN f.salesAmount END) currentSalesAmount,
       SUM(CASE WHEN f.saleDate BETWEEN ? AND ? THEN f.salesAmount END) compareSalesAmount,
       SUM(CASE WHEN f.saleDate BETWEEN ? AND ? THEN f.profitAmount END) currentProfitAmount,
@@ -140,11 +142,11 @@ export function queryDailySalesSummaryComparison(input = {}, options = {}) {
     WHERE f.saleDate BETWEEN ? AND ? GROUP BY ${definition.identity},${definition.name},${definition.code}
     ORDER BY ${definition.identity}`).all(
       currentStart,currentEnd,compareStart,compareEnd,currentStart,currentEnd,currentStart,currentEnd,compareStart,compareEnd,
-      currentStart,currentEnd,compareStart,compareEnd,compareStart,currentEnd,
+      currentStart,currentEnd,compareStart,compareEnd,currentStart,currentEnd,compareStart,compareEnd,compareStart,currentEnd,
     );
   return { capability:"QueryDailySalesSummary",contractVersion:"1.0",mode:"comparison",dimension,currentPeriod:{startDate:currentStart,endDate:currentEnd},comparePeriod:{startDate:compareStart,endDate:compareEnd},items:rows.map((row)=>({
     targetId:row.targetId,targetName:row.targetName,targetCode:row.targetCode||null,currentDataCount:Number(row.currentDataCount||0),compareDataCount:Number(row.compareDataCount||0),currentDataEnd:row.currentDataEnd||null,
-    currentSalesAmount:row.currentSalesAmount===null?null:Number(row.currentSalesAmount),compareSalesAmount:row.compareSalesAmount===null?null:Number(row.compareSalesAmount),currentProfitAmount:row.currentProfitAmount===null?null:Number(row.currentProfitAmount),compareProfitAmount:row.compareProfitAmount===null?null:Number(row.compareProfitAmount),
+    currentQuantity:row.currentQuantity===null?null:Number(row.currentQuantity),compareQuantity:row.compareQuantity===null?null:Number(row.compareQuantity),currentSalesAmount:row.currentSalesAmount===null?null:Number(row.currentSalesAmount),compareSalesAmount:row.compareSalesAmount===null?null:Number(row.compareSalesAmount),currentProfitAmount:row.currentProfitAmount===null?null:Number(row.currentProfitAmount),compareProfitAmount:row.compareProfitAmount===null?null:Number(row.compareProfitAmount),
   })),source:SOURCE };
 }
 

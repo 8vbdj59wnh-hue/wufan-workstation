@@ -1,4 +1,6 @@
-import { formatProcessStepLabel, getCurrentUser, getLatestStandardWorkFormFields, getNow, getProcessNodeStepOrder, loadTemplates, resolveAssetUrl, state, updateActionProducts, updatePersistentResource, updateProcessTaskExecutor, uploadStandardWorkAttachment } from "./appState.js";
+import { formatProcessStepLabel, getCurrentUser, getLatestStandardWorkFormFields, getNow, getProcessNodeStepOrder, loadBusinessImprovementResult, loadTemplates, resolveAssetUrl, state, updateActionProducts, updatePersistentResource, updateProcessTaskExecutor, uploadStandardWorkAttachment } from "./appState.js";
+import { renderUiModule } from "./uiModuleRegistry.js";
+import "./uiModules/businessImprovementResult.js?v=20260811-business-improvement-result1";
 import {
   GoalStatus,
   ProcessInstanceStatus,
@@ -45,6 +47,7 @@ const spreadsheetAttachmentExts = new Set([".xlsx", ".xls", ".csv"]);
 const maxStandardWorkAttachmentSize = 20 * 1024 * 1024;
 const executorEditableTaskStatuses = new Set([TaskStatus.Waiting, TaskStatus.Todo, TaskStatus.Doing]);
 let taskExecutorPickerState = null;
+const improvementResultState = new Map();
 
 function getSelectableGoals(selectedGoalId = "") {
   return goals.filter((goal) => goal.status !== GoalStatus.Inactive || goal.id === selectedGoalId);
@@ -848,7 +851,7 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
             <textarea name="description" rows="3" ${editable ? "" : "disabled"}>${escapeHtml(instance.description ?? "")}</textarea>
           </label>
         </div>
-        ${instance.customFields?.source === "sales_anomaly" ? `<div class="detail-block action-anomaly-source"><h3>销售异常来源</h3><div class="detail-grid">${renderDetailField("关联对象", escapeHtml(instance.customFields.productId || instance.customFields.salesLinkId || "未记录"))}${renderDetailField("异常类型", escapeHtml(instance.customFields.anomalySnapshot?.anomalyType || "未记录"))}${renderDetailField("当前周期", escapeHtml(`${instance.customFields.anomalySnapshot?.currentPeriod?.startDate || "—"} 至 ${instance.customFields.anomalySnapshot?.currentPeriod?.endDate || "—"}`))}${renderDetailField("对比周期", escapeHtml(`${instance.customFields.anomalySnapshot?.comparePeriod?.startDate || "—"} 至 ${instance.customFields.anomalySnapshot?.comparePeriod?.endDate || "—"}`))}${renderDetailField("当前值", escapeHtml(instance.customFields.anomalySnapshot?.currentValue ?? "暂无数据"))}${renderDetailField("对比值", escapeHtml(instance.customFields.anomalySnapshot?.compareValue ?? "暂无数据"))}</div><p class="form-note">来源快照用于追溯，不代表系统已经判断原因或给出改善方案。</p></div>` : ""}
+        ${instance.customFields?.source === "sales_anomaly" ? `${renderUiModule("business_improvement_result", { state: improvementResultState.get(instance.id) || { loading: true } })}<div class="detail-block action-anomaly-source"><h3>销售异常来源</h3><div class="detail-grid">${renderDetailField("关联对象", escapeHtml(instance.customFields.productId || instance.customFields.salesLinkId || "未记录"))}${renderDetailField("异常类型", escapeHtml(instance.customFields.anomalySnapshot?.anomalyType || "未记录"))}${renderDetailField("当前周期", escapeHtml(`${instance.customFields.anomalySnapshot?.currentPeriod?.startDate || "—"} 至 ${instance.customFields.anomalySnapshot?.currentPeriod?.endDate || "—"}`))}${renderDetailField("对比周期", escapeHtml(`${instance.customFields.anomalySnapshot?.comparePeriod?.startDate || "—"} 至 ${instance.customFields.anomalySnapshot?.comparePeriod?.endDate || "—"}`))}${renderDetailField("当前值", escapeHtml(instance.customFields.anomalySnapshot?.currentValue ?? "暂无数据"))}${renderDetailField("对比值", escapeHtml(instance.customFields.anomalySnapshot?.compareValue ?? "暂无数据"))}</div><p class="form-note">来源快照用于追溯，不代表系统已经判断原因或给出改善方案。</p></div>` : ""}
         <div class="detail-block">
           <h3>关键行动表单</h3>
           ${renderCustomFields(instance, editable)}
@@ -1074,6 +1077,11 @@ export function bindActionLinkedTemplatePreviewEvents(root) {
 
 export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
   const detail = root.querySelector("[data-launched-process-detail]");
+  const detailInstance = detail ? getInstance(detail.dataset.launchedProcessDetail) : null;
+  if (detailInstance?.customFields?.source === "sales_anomaly" && !improvementResultState.has(detailInstance.id)) {
+    improvementResultState.set(detailInstance.id, { loading: true });
+    loadBusinessImprovementResult(detailInstance.id).then((response) => { improvementResultState.set(detailInstance.id, { data: response.result, loading: false }); rerender(); }).catch((error) => { improvementResultState.set(detailInstance.id, { error: error.message || "经营改善结果读取失败。", loading: false }); rerender(); });
+  }
   if (detail === null) return;
   bindActionLinkedTemplatePreviewEvents(detail);
 

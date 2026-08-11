@@ -1664,7 +1664,7 @@ async function saveGoalTask(form, rerender) {
   const now = getNow();
   const workPlanId = createId("work-plan");
   const sourceFields = modalState.sourceContext?.source === "sales_anomaly"
-    ? { ...draft.customFields, source: "sales_anomaly", salesLinkId: modalState.sourceContext.salesLinkId ?? null, productId: modalState.sourceContext.productId ?? null, anomalySnapshot: modalState.sourceContext.anomalySnapshot }
+    ? { ...draft.customFields, source: "sales_anomaly", salesLinkId: modalState.sourceContext.salesLinkId ?? null, productId: modalState.sourceContext.productId ?? null, anomalySnapshot: modalState.sourceContext.anomalySnapshot, baselineSnapshot: modalState.sourceContext.baselineSnapshot }
     : draft.customFields;
   const customFields =
     uploadedAttachments.length === 0
