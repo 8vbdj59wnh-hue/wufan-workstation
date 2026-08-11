@@ -53,6 +53,8 @@ export {
   confirmErpSkuUsage,
   loadSalesRelationCandidates,
   loadSalesRelationGovernance,
+  loadSalesDataQualityAnomalies,
+  submitSalesDataQualityAnomalyDecision,
   loadSalesRelationCandidateDetail,
   confirmSalesRelationCandidate,
   confirmSalesRelationCandidateBatch,
