@@ -1400,6 +1400,10 @@ export async function loadCurrentConnectionSalesDailyImport() {
   return result.preview ?? null;
 }
 
+export async function loadSalesDailyDataQuality() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-daily-quality`), "销售日报数据质量读取失败。");
+}
+
 export async function loadConnectionSalesDailyPreview(batchId, options = {}) {
   const query = new URLSearchParams();
   if (options.category) query.set("category", options.category);

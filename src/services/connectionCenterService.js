@@ -44,6 +44,7 @@ export {
   previewConnectionSalesFactImport,
   previewConnectionSalesDailyImport,
   loadCurrentConnectionSalesDailyImport,
+  loadSalesDailyDataQuality,
   loadConnectionSalesDailyPreview,
   recalculateConnectionSalesDailyPreview,
   confirmConnectionSalesDailyFacts,

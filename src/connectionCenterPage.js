@@ -39,6 +39,7 @@ import {
   previewConnectionSalesFactImport,
   previewConnectionSalesDailyImport,
   loadCurrentConnectionSalesDailyImport,
+  loadSalesDailyDataQuality,
   loadConnectionSalesDailyPreview,
   recalculateConnectionSalesDailyPreview,
   confirmConnectionSalesDailyFacts,
@@ -89,6 +90,7 @@ import { renderUiModule } from "./uiModuleRegistry.js";
 import "./uiModules/linkSalesRanking.js?v=20260809-my-link-workspace1";
 import "./uiModules/linkSalesDistribution.js?v=20260809-link-sales-distribution1";
 import "./uiModules/linkDataStatus.js?v=20260809-my-link-workspace1";
+import "./uiModules/salesDailyDataQuality.js?v=20260811-sales-daily-quality1";
 import "./uiModules/myLinkSummary.js?v=20260809-my-link-workspace1";
 import "./uiModules/linkHospitalTodo.js?v=20260809-my-link-workspace1";
 import "./uiModules/linkList.js?v=20260809-my-link-workspace1";
@@ -143,6 +145,7 @@ const pageState = {
     sort: { field: "salesAmount", direction: "desc" }, visibleFields: [...DEFAULT_LINK_BUSINESS_FIELDS],
     fieldOrder: LINK_BUSINESS_COLUMNS.map((item) => item.key), filterOptions: { platforms: [], shops: [], owners: [] }, dataSources: {}, indicatorOpen: false, loading: false, loaded: false },
   linkDataStatus: { data: null, loading: false, loaded: false, error: "" },
+  salesDailyQuality: { data: null, loading: false, loaded: false, error: "" },
   salesRanking: { scope: "mine", range: { preset: "7d" }, items: [], summary: {}, loading: false, error: "" },
   salesDistribution: { scope: "company", range: { preset: "7d" }, items: [], summary: {}, selectedGroup: 0, selectedRange: null, drillTable: null, loading: false, loaded: false, error: "" },
   hospital: { zones: { diagnosis: [], treatment: [], observation: [] }, counts: { diagnosis: 0, treatment: 0, observation: 0 }, stage: "diagnosis", loading: false },
@@ -407,7 +410,7 @@ function renderConnectionDataCenter() {
 }
 
 function renderDataUpdateWorkspace() {
-  return `<section class="link-data-update-workspace"><header class="connection-section-heading"><div><p class="eyebrow">LINK DATA UPDATE</p><h2>数据更新</h2><p>查看经营数据是否正常，并继续使用现有导入流程更新数据。</p></div>${isAdmin() ? `<button type="button" class="secondary-button" data-workbench-go="data-center">查看技术详情</button>` : ""}</header>${renderUiModule("link_data_status", { state: pageState.linkDataStatus })}${canImportBusinessData() ? renderDataFoundation() : `<div class="empty-state compact"><strong>数据由管理员统一更新</strong><p>当前账号可查看最新数据状态；如有异常，请联系数据管理员处理。</p></div>`}</section>`;
+  return `<section class="link-data-update-workspace"><header class="connection-section-heading"><div><p class="eyebrow">LINK DATA UPDATE</p><h2>数据更新</h2><p>查看经营数据是否正常，并继续使用现有导入流程更新数据。</p></div>${isAdmin() ? `<button type="button" class="secondary-button" data-workbench-go="data-center">查看技术详情</button>` : ""}</header>${renderUiModule("link_data_status", { state: pageState.linkDataStatus })}${renderUiModule("sales_daily_data_quality", { state: pageState.salesDailyQuality })}${canImportBusinessData() ? renderDataFoundation() : `<div class="empty-state compact"><strong>数据由管理员统一更新</strong><p>当前账号可查看最新数据状态；如有异常，请联系数据管理员处理。</p></div>`}</section>`;
 }
 
 const erpUsageLabels = { product: "商品", accounting_auxiliary: "辅助核算", shipping_adjustment: "邮费调整", other_adjustment: "其他调整" };
@@ -988,6 +991,13 @@ async function loadMyLinkDataStatus(render) {
   render();
 }
 
+async function loadSalesDailyQualityPanel(render) {
+  pageState.salesDailyQuality = { ...pageState.salesDailyQuality, loading: true, error: "" }; render();
+  try { pageState.salesDailyQuality = { data: await loadSalesDailyDataQuality(), loading: false, loaded: true, error: "" }; }
+  catch (error) { pageState.salesDailyQuality = { ...pageState.salesDailyQuality, loading: false, loaded: true, error: error.message }; }
+  render();
+}
+
 async function loadSalesRanking(render, filters = {}) {
   pageState.salesRanking = { ...pageState.salesRanking, ...filters, loading: true, error: "" }; render();
   try {
@@ -1217,6 +1227,7 @@ export function bindConnectionCenterPageEvents(render) {
     pageState.myLinkTable = { ...pageState.myLinkTable, items: [], pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 }, loading: false, loaded: false };
     pageState.businessTable = { ...pageState.businessTable, items: [], pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 }, loading: false, loaded: false };
     pageState.linkDataStatus = { data: null, loading: false, loaded: false, error: "" };
+    pageState.salesDailyQuality = { data: null, loading: false, loaded: false, error: "" };
     pageState.salesDistribution = { scope: isAdmin() ? "company" : "mine", range: { preset: "7d" }, items: [], summary: {}, selectedGroup: 0, selectedRange: null, drillTable: null, loading: false, loaded: false, error: "" };
     pageState.selectedId = "";
     pageState.coreDetail = null;
@@ -1234,7 +1245,7 @@ export function bindConnectionCenterPageEvents(render) {
     if (["connections", "data-import"].includes(pageState.section) && !pageState.linkDataStatus.loaded) void loadMyLinkDataStatus(render);
     if (pageState.section === "my-links") { if (!pageState.myWorkbench.loaded) void loadMyLinks(render); void loadSalesRanking(render, { scope: "mine" }); if (!pageState.linkDataStatus.loaded) void loadMyLinkDataStatus(render); }
     if (pageState.section === "hospital") void loadHospital(render);
-    if (pageState.section === "data-import" && canImportBusinessData()) void loadDataFoundation(render);
+    if (pageState.section === "data-import") { if (!pageState.salesDailyQuality.loaded) void loadSalesDailyQualityPanel(render); if (canImportBusinessData()) void loadDataFoundation(render); }
     if (pageState.section === "erp-usage-governance" && canManage()) void loadErpUsageGovernancePage(render, { page: 1 });
   }));
   root.querySelector("[data-erp-usage-filters]")?.addEventListener("submit", (event) => {

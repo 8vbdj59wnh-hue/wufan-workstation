@@ -97,6 +97,7 @@ import { confirmComboReviewGroup, generatePendingComboGroups, queryComboReviewAn
 import { confirmErpSkuProductUsages, confirmErpSkuUsageGovernance, queryErpSkuProductUsageCandidates, queryErpSkuUsageGovernance, readErpSkuUsageGovernance } from "./erpSkuUsageGovernanceService.js";
 import { getConnectionDailySalesPerformance } from "./connectionDailySalesService.js";
 import { getProductDailySalesPerformance } from "./productDailySalesService.js";
+import { querySalesDailyDataQuality } from "./salesDailyDataQualityService.js";
 import { commitPlatformGoodsExcelDataSync, previewPlatformGoodsExcelDataSync, readPlatformGoodsExcelDataSyncPreview } from "./platformGoodsExcelDataSyncAdapter.js";
 import { confirmPlatformLinkShopMappings, listPlatformLinkShopMappings, previewPlatformLinkShopMappings } from "./platformLinkShopMappingImportService.js";
 import {
@@ -2635,6 +2636,11 @@ app.post("/api/connection-data-foundation/sales-daily/preview", requireLinkImpor
 app.get("/api/connection-data-foundation/sales-daily/current", requireLinkImport, (request, response) => {
   try { response.json({ success: true, preview: readCurrentSalesDailyFactPreview(request.query) }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "最近销售日报预览读取失败。" }); }
+});
+
+app.get("/api/connection-data-foundation/sales-daily-quality", requireLinkView, (request, response) => {
+  try { response.json({ success: true, ...querySalesDailyDataQuality() }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "销售日报数据质量读取失败。" }); }
 });
 
 app.get("/api/connection-data-foundation/sales-daily/:id", requireLinkImport, (request, response) => {
