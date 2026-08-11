@@ -253,6 +253,7 @@
 
 .connection-business-cockpit { display: grid; gap: 16px; }
 .connection-business-cockpit > header h2, .connection-business-cockpit > header p { margin: 0; }
+.connection-business-cockpit .cockpit-data-note { margin-top: 5px; color: #667085; font-size: 12px; line-height: 1.5; }
 .cockpit-summary { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 10px; }
 .cockpit-summary > div { display: grid; gap: 5px; padding: 15px; border: 1px solid #dce9e4; border-radius: 14px; background: linear-gradient(145deg,#f4fbf8,#fff); }
 .cockpit-summary span, .cockpit-summary small { color: #667085; font-size: 12px; }.cockpit-summary strong { color: #173f34; font-size: 23px; }
@@ -10640,6 +10641,7 @@ button.content-template-thumb {
 
 .cockpit-summary { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
 .cockpit-summary > div { min-height: 118px; padding: 16px; border: 1px solid var(--link-border); border-radius: var(--link-radius); background: linear-gradient(145deg, #fff, #f7fbf9); box-shadow: 0 2px 8px rgb(16 24 40 / 4%); }
+.cockpit-summary > div.is-sales small { line-height: 1.35; white-space: normal; }
 .cockpit-summary > div.is-risk { background: linear-gradient(145deg, #fff, #fff5f6); }
 .cockpit-summary > div.is-diagnosis { background: linear-gradient(145deg, #fff, #fff8e7); }
 .cockpit-summary > div.is-treatment { background: linear-gradient(145deg, #fff, #eef6ff); }

@@ -383,7 +383,13 @@ function applyRow(database, importType, row, batchId, raw) {
     if (!erpSku) throw Object.assign(new Error("ERP SKU编码不存在。"), { type: "missing_erp_sku" });
     const mapping = database.prepare("SELECT * FROM sales_link_sku_erp_mappings WHERE salesLinkSkuId=? AND erpSkuId=? AND currentState='active'").get(sku.id, erpSku.id);
     if (!mapping) throw Object.assign(new Error("平台SKU与ERP SKU关系不存在。"), { type: "missing_erp_mapping" });
-    database.prepare(`INSERT OR IGNORE INTO connection_sku_sales_facts (id,batchId,salesLinkId,salesLinkSkuId,erpSkuId,platformGoodsId,skuCode,periodStart,periodEnd,shippedQuantity,salesAmount,costAmount,profitAmount,rawDataJson,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id("connection-sku-sales"), batchId, link.id, sku.id, erpSku.id, text(row.platformGoodsId), text(row.skuCode), text(row.periodStart), text(row.periodEnd), row.shippedQuantity, row.salesAmount, row.costAmount, row.profitAmount, JSON.stringify(raw), createdAt); return { link, sku, erpSku };
+    const existing = database.prepare("SELECT id FROM connection_sku_sales_facts WHERE salesLinkSkuId=? AND erpSkuId=? AND periodStart=? AND periodEnd=?").get(sku.id, erpSku.id, text(row.periodStart), text(row.periodEnd));
+    database.prepare(`INSERT INTO connection_sku_sales_facts (id,batchId,salesLinkId,salesLinkSkuId,erpSkuId,platformGoodsId,skuCode,periodStart,periodEnd,shippedQuantity,salesAmount,costAmount,profitAmount,rawDataJson,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(salesLinkSkuId,erpSkuId,periodStart,periodEnd) WHERE erpSkuId IS NOT NULL DO UPDATE SET
+        batchId=excluded.batchId,salesLinkId=excluded.salesLinkId,platformGoodsId=excluded.platformGoodsId,skuCode=excluded.skuCode,
+        shippedQuantity=excluded.shippedQuantity,salesAmount=excluded.salesAmount,costAmount=excluded.costAmount,profitAmount=excluded.profitAmount,
+        rawDataJson=excluded.rawDataJson,createdAt=excluded.createdAt`).run(id("connection-sku-sales"), batchId, link.id, sku.id, erpSku.id, text(row.platformGoodsId), text(row.skuCode), text(row.periodStart), text(row.periodEnd), row.shippedQuantity, row.salesAmount, row.costAmount, row.profitAmount, JSON.stringify(raw), createdAt);
+    return { link, sku, erpSku, factCreated: !existing, factUpdated: Boolean(existing) };
   }
   if (importType === "erp_product_relations") {
     const link = requireLink(database, row); const product = database.prepare("SELECT * FROM products WHERE LOWER(skuCode)=LOWER(?)").get(text(row.skuCode)); if (!product) throw Object.assign(new Error("SKU不存在对应产品。"), { type: "missing_sku" }); let sku = findLinkSku(database, link.id, row.skuCode);
@@ -419,16 +425,17 @@ export function previewConnectionDataImport({ buffer, fileName, importType, temp
   if (version && version.dataType !== importType) throw new Error("模板与导入类型不匹配。");
   const matchRules = version?.matchRules || {}; const workbook = readWorkbook(buffer, matchRules); const mapping = version?.fieldMappings || defaultMapping(workbook.headers, definition.fields);
   const filtered = workbook.rawRows.filter((item) => rowMatchesFilters(item.raw, matchRules.rowFilters || []));
+  const isSalesFactParser = importType === "erp_sales" && text(parserVersion).startsWith("sales-fact-v2");
   const normalizedRows = filtered.map((item) => {
     const data = normalizeRow(item.raw, mapping, matchRules, workbook.sheetName);
-    if (importType === "erp_sales" && parserVersion === "sales-fact-v2") {
+    if (isSalesFactParser) {
       const businessDate = item.raw["日期"] ?? data.periodStart ?? data.periodEnd;
       data.periodStart = salesFactV2Period(businessDate);
       data.periodEnd = salesFactV2Period(businessDate, true);
     }
     return { ...item, data, status: "validated", errorType: null, errorMessage: null };
   });
-  const rows = normalizedRows.filter((item) => !(importType === "erp_sales" && parserVersion === "sales-fact-v2"
+  const rows = normalizedRows.filter((item) => !(isSalesFactParser
     && (/^合计[:：]?$/.test(text(item.data.shop)) || normalized(item.data.platformGoodsId) === "na")));
   for (const item of rows) {
     const missing = definition.required.filter((field) => text(item.data[field]) === "");
@@ -446,10 +453,10 @@ export function previewConnectionDataImport({ buffer, fileName, importType, temp
   const periods = [...new Set(rows.filter((item) => item.status === "validated").map((item) => `${item.data.periodStart}|${item.data.periodEnd}`))];
   const periodStarts = periods.map((item) => item.split("|")[0]).filter(Boolean).sort();
   const periodEnds = periods.map((item) => item.split("|")[1]).filter(Boolean).sort();
-  const previewPeriodStart = parserVersion === "sales-fact-v2" ? periodStarts[0] || "" : periods.length === 1 ? periodStarts[0] : "";
-  const previewPeriodEnd = parserVersion === "sales-fact-v2" ? periodEnds.at(-1) || "" : periods.length === 1 ? periodEnds[0] : "";
+  const previewPeriodStart = isSalesFactParser ? periodStarts[0] || "" : periods.length === 1 ? periodStarts[0] : "";
+  const previewPeriodEnd = isSalesFactParser ? periodEnds.at(-1) || "" : periods.length === 1 ? periodEnds[0] : "";
   const preview = { parserVersion: text(parserVersion), sourceFileHash, templateName: version?.templateName || "自动字段映射", detectedAutomatically: importType === "platform_link_operations" && !text(templateVersionId), platform: text(matchRules.fixedFields?.platform), shopId: text(matchRules.fixedFields?.shopId), shop: text(matchRules.fixedFields?.shop), sheetName: workbook.sheetName, periodStart: previewPeriodStart, periodEnd: previewPeriodEnd, rawRows: workbook.rawRows.length, filteredRows: rows.length, ignoredSummaryRows: normalizedRows.length - rows.length, newLinks: counts.createLinks, updatedLinks: counts.updateLinks, operationFacts: counts.facts, errors: errorRows, duplicateGoodsIds: [...duplicateKeys] };
-  const batchId = id("connection-import"); const createdAt = now(); const batchStatus = duplicateKeys.size && !(importType === "erp_sales" && parserVersion === "sales-fact-v2") ? "blocked" : "validated";
+  const batchId = id("connection-import"); const createdAt = now(); const batchStatus = duplicateKeys.size && !isSalesFactParser ? "blocked" : "validated";
   database.transaction(() => {
     database.prepare(`INSERT INTO connection_import_batches (id,sourceType,externalShopId,fileName,fileHash,businessDate,periodStart,periodEnd,periodType,status,totalRows,matchedRows,pendingRows,errorRows,createdBy,createdAt,updatedAt,importType,templateVersionId,sourcePlatform,previewSummaryJson) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(batchId, importType, preview.shopId, text(fileName) || "链接数据.xlsx", hash, preview.periodEnd || createdAt.slice(0, 10), preview.periodStart || null, preview.periodEnd || null, text(matchRules.periodType) || null, batchStatus, rows.length, 0, validRows, errorRows, text(userId) || null, createdAt, createdAt, importType, version?.id ?? null, preview.platform, JSON.stringify(preview));
     const insert = database.prepare(`INSERT INTO connection_import_rows (id,batchId,rowNumber,externalKey,rawDataJson,normalizedDataJson,status,errorType,errorMessage,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?)`);
@@ -462,12 +469,12 @@ export function confirmConnectionDataImport(batchId) {
   const database = getDatabase(); const batch = readConnectionFoundationBatch(batchId);
   if (batch.status === "completed" || batch.status === "completed_with_errors") return { batch, idempotent: true, preview: json(batch.previewSummaryJson, {}) };
   if (batch.status !== "validated") throw new Error(batch.status === "blocked" ? "批次存在重复商品ID，不能确认导入。" : "当前批次不能确认导入。");
-  const rows = listConnectionFoundationRows(batch.id).filter((row) => row.status === "validated"); let createdLinks = 0; let updatedLinks = 0; let factsCreated = 0;
+  const rows = listConnectionFoundationRows(batch.id).filter((row) => row.status === "validated"); let createdLinks = 0; let updatedLinks = 0; let factsCreated = 0; let factsUpdated = 0;
   database.transaction(() => {
-    for (const item of rows) { const result = applyRow(database, batch.importType, json(item.normalizedDataJson, {}), batch.id, json(item.rawDataJson, {})); if (result.created) createdLinks += 1; else if (result.link) updatedLinks += 1; if (result.factCreated) factsCreated += 1; database.prepare("UPDATE connection_import_rows SET status='success' WHERE id=?").run(item.id); }
+    for (const item of rows) { const result = applyRow(database, batch.importType, json(item.normalizedDataJson, {}), batch.id, json(item.rawDataJson, {})); if (result.created) createdLinks += 1; else if (result.link) updatedLinks += 1; if (result.factCreated) factsCreated += 1; if (result.factUpdated) factsUpdated += 1; database.prepare("UPDATE connection_import_rows SET status='success' WHERE id=?").run(item.id); }
     const completedAt = now(); database.prepare("UPDATE connection_import_batches SET status=?,matchedRows=?,pendingRows=0,completedAt=?,updatedAt=? WHERE id=?").run(batch.errorRows ? "completed_with_errors" : "completed", rows.length, completedAt, completedAt, batch.id);
   })();
-  return { batch: readConnectionFoundationBatch(batch.id), preview: json(batch.previewSummaryJson, {}), result: { createdLinks, updatedLinks, factsCreated }, idempotent: false };
+  return { batch: readConnectionFoundationBatch(batch.id), preview: json(batch.previewSummaryJson, {}), result: { createdLinks, updatedLinks, factsCreated, factsUpdated }, idempotent: false };
 }
 
 // Backward-compatible internal entry point; callers should prefer preview + confirm.

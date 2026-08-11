@@ -35,7 +35,7 @@ const task = center.getDataSyncTask("sync-task-real-sales");
 const before = { facts: db.prepare("SELECT COUNT(*) total FROM connection_sku_sales_facts").get().total, links: db.prepare("SELECT COUNT(*) total FROM sales_links").get().total, products: db.prepare("SELECT COUNT(*) total FROM products").get().total };
 const preview = adapter.previewSalesFactDataSync({ taskId: task.id, buffer, fileName: "链接利润报表.xlsx" });
 assert.equal(preview.dataSyncBatch.status, "preview_ready");
-assert.equal(preview.summary.parserVersion, "sales-fact-v2");
+assert.equal(preview.summary.parserVersion, "sales-fact-v2-upsert");
 assert.equal(preview.summary.total, 2);
 assert.equal(preview.summary.valid, 1);
 assert.equal(preview.summary.exceptionCount, 1);
@@ -60,10 +60,26 @@ assert.deepEqual([fact.shippedQuantity, fact.salesAmount, fact.costAmount, fact.
 assert.equal(db.prepare("SELECT COUNT(*) total FROM sales_links").get().total, before.links);
 assert.equal(db.prepare("SELECT COUNT(*) total FROM products").get().total, before.products);
 
+const updatedWorkbook = XLSX.utils.book_new();
+XLSX.utils.book_append_sheet(updatedWorkbook, XLSX.utils.json_to_sheet([
+  { 店铺: "点意旗舰店-天猫-公司", 平台货品ID: "G-100", 平台规格ID: "PS-100", 商家编码: "SKU-100", 日期: "2026-08-01", 销量: 4, 销售额: 450, 成本: 240, 利润: 210 },
+]), "真实销售");
+const updatedBuffer = XLSX.write(updatedWorkbook, { type: "buffer", bookType: "xlsx" });
+const updatedPreview = adapter.previewSalesFactDataSync({ taskId: task.id, buffer: updatedBuffer, fileName: "链接利润报表修正版.xlsx" });
+assert.equal(updatedPreview.summary.valid, 1);
+assert.equal(updatedPreview.summary.exceptionCount, 0);
+const updatedCommit = adapter.commitSalesFactDataSync(updatedPreview.dataSyncBatch.id);
+assert.equal(updatedCommit.result.factsCreated, 0);
+assert.equal(updatedCommit.result.factsUpdated, 1);
+assert.equal(updatedCommit.result.factsAffected, 1);
+const updatedFact = db.prepare("SELECT * FROM connection_sku_sales_facts WHERE salesLinkSkuId='link-sku-test'").get();
+assert.equal(db.prepare("SELECT COUNT(*) total FROM connection_sku_sales_facts WHERE salesLinkSkuId='link-sku-test'").get().total, 1);
+assert.deepEqual([updatedFact.shippedQuantity, updatedFact.salesAmount, updatedFact.costAmount, updatedFact.profitAmount], [4, 450, 240, 210]);
+
 databaseModule.closeDatabase();
 databaseModule.initializeDatabase();
 assert.equal(databaseModule.getDatabase().pragma("integrity_check", { simple: true }), "ok");
 assert.deepEqual(databaseModule.getDatabase().pragma("foreign_key_check"), []);
 databaseModule.closeDatabase();
 fs.rmSync(root, { recursive: true, force: true });
-console.log(JSON.stringify({ parserVersion: "sales-fact-v2", exactPlatformSkuId: true, exactErpMapping: true, totalRowFiltered: true, comboIsolated: true, erpSkuIdWritten: true, fileVersionIsolation: true, noAutoLinkOrProduct: true, integrityCheck: "ok", foreignKeyCheck: 0 }, null, 2));
+console.log(JSON.stringify({ parserVersion: "sales-fact-v2-upsert", exactPlatformSkuId: true, exactErpMapping: true, totalRowFiltered: true, comboIsolated: true, erpSkuIdWritten: true, samePeriodUpdate: true, fileVersionIsolation: true, noAutoLinkOrProduct: true, integrityCheck: "ok", foreignKeyCheck: 0 }, null, 2));

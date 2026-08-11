@@ -18,7 +18,7 @@ import {
 
 const digest = (buffer) => crypto.createHash("sha256").update(buffer).digest("hex");
 const parseJson = (raw) => { try { return JSON.parse(raw || "{}"); } catch { return {}; } };
-const SALES_FACT_PARSER_VERSION = "sales-fact-v2";
+const SALES_FACT_PARSER_VERSION = "sales-fact-v2-upsert";
 const platformAliases = { tmall: ["tmall", "天猫"], "天猫": ["tmall", "天猫"], taobao: ["taobao", "淘宝"], "淘宝": ["taobao", "淘宝"], jd: ["jd", "京东"], "京东": ["jd", "京东"], xiaohongshu: ["xiaohongshu", "小红书"], "小红书": ["xiaohongshu", "小红书"] };
 
 function findShop(db, platform, shopName) {
@@ -71,7 +71,6 @@ function unifiedExceptions(sourceBatchId) {
     else if (String(sku.systemGoodsType || "").includes("组合")) exception = { exceptionType: "combo_goods", message: "组合商品需人工维护多ERP SKU关系，本次预览已隔离。" };
     else if (!erpSku) exception = { exceptionType: "missing_erp_sku", message: "ERP SKU编码未精确匹配到ERP主数据。" };
     else if (!mapping) exception = { exceptionType: "missing_erp_mapping", message: "平台SKU与ERP SKU的有效关系不存在。" };
-    else if (db.prepare("SELECT id FROM connection_sku_sales_facts WHERE salesLinkSkuId=? AND erpSkuId=? AND periodStart=? AND periodEnd=?").get(sku.id, erpSku.id, data.periodStart, data.periodEnd)) exception = { exceptionType: "duplicate_data", message: "同一平台SKU、ERP SKU及周期的销售事实已存在。" };
     if (exception) {
       db.prepare("UPDATE connection_import_rows SET status='error',errorType=?,errorMessage=? WHERE id=?").run(exception.exceptionType, exception.message, row.id);
       errors.push({ ...exception, severity: "error", entityType: "sales_import_row", entityId: String(row.rowNumber), rawData: { rowNumber: row.rowNumber, normalized: data } });
@@ -145,7 +144,7 @@ export function commitSalesFactDataSync(batchId) {
   const batch = assertCurrentDataSyncPreview(batchId);
   if (batch.sourceBatchType !== "connection_sales_import" || !batch.sourceBatchId) throw new Error("同步批次未关联真实销售导入预览。");
   const parserVersion = parseJson(batch.scopeJson).parserVersion;
-  const blocking = getDatabase().prepare("SELECT COUNT(*) total FROM data_sync_exceptions WHERE batchId=? AND status='open' AND exceptionType IN ('missing_link','missing_sku','missing_platform_sku','missing_erp_sku','missing_erp_mapping','combo_goods','duplicate_data')").get(batch.id).total;
+  const blocking = getDatabase().prepare("SELECT COUNT(*) total FROM data_sync_exceptions WHERE batchId=? AND status='open' AND exceptionType IN ('missing_link','missing_sku','missing_platform_sku','missing_erp_sku','missing_erp_mapping','combo_goods')").get(batch.id).total;
   if (parserVersion !== SALES_FACT_PARSER_VERSION && blocking) throw new Error(`当前预览存在 ${blocking} 条链接、SKU或重复事实异常，不能确认写入。`);
   try {
     const result = confirmConnectionDataImport(batch.sourceBatchId);
@@ -153,7 +152,7 @@ export function commitSalesFactDataSync(batchId) {
     const factCount = Number(getDatabase().prepare("SELECT COUNT(*) total FROM connection_sku_sales_facts WHERE batchId=?").get(batch.sourceBatchId).total || 0);
     const status = Number(sourceBatch.errorRows || 0) ? "partial" : "succeeded";
     const dataSyncBatch = completeDataSyncBatch(batch.id, { status, totalCount: sourceBatch.totalRows, createdCount: factCount, exceptionCount: sourceBatch.errorRows, exceptions: [] });
-    return { dataSyncBatch, importBatch: sourceBatch, result: { ...result.result, factsCreated: factCount }, summary: summarize(sourceBatch) };
+    return { dataSyncBatch, importBatch: sourceBatch, result: { ...result.result, factsAffected: factCount }, summary: summarize(sourceBatch) };
   } catch (error) {
     completeDataSyncBatch(batch.id, { status: "failed", errorMessage: error.message, exceptions: [{ exceptionType: "commit_error", message: error.message }] });
     throw error;

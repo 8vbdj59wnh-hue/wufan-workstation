@@ -21,7 +21,7 @@ export function readConnectionV3MetricsMap(salesLinkIds) {
   if (!ids.length) return new Map();
   const placeholders = ids.map(() => "?").join(",");
   const rows = database.prepare(`
-    SELECT salesLinkId,periodStart,periodEnd,SUM(COALESCE(shippedQuantity,0)) shippedQuantity,
+    SELECT salesLinkId,periodStart,periodEnd,MAX(createdAt) updatedAt,SUM(COALESCE(shippedQuantity,0)) shippedQuantity,
       SUM(COALESCE(salesAmount,0)) salesAmount,SUM(COALESCE(costAmount,0)) costAmount,SUM(COALESCE(profitAmount,0)) profitAmount
     FROM connection_sku_sales_facts
     WHERE salesLinkId IN (${placeholders}) GROUP BY salesLinkId,periodStart,periodEnd
