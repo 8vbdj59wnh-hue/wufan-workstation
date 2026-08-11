@@ -1005,6 +1005,11 @@ export async function loadSalesBusinessDashboard(preset = "30d") {
   return readApiJson(response, "销售经营驾驶舱读取失败。");
 }
 
+export async function loadBusinessAnomalies() {
+  const response = await authFetch(`${apiBaseUrl}/api/business-anomalies`);
+  return readApiJson(response, "经营异常读取失败。");
+}
+
 export async function loadFinanceStatement(params = {}) {
   const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value));
   return readApiJson(await authFetch(`${apiBaseUrl}/api/finance/statement${query.size ? `?${query}` : ""}`), "利润表读取失败。");

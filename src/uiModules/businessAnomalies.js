@@ -1,0 +1,12 @@
+import { registerUiModule } from "../uiModuleRegistry.js";
+import { escapeHtml } from "../utils/html.js?v=20260802-module-boundary1";
+const labels={sales_drop:"销售额下降",profit_drop:"利润下降",sales_gap:"销售断档",data_quality_issue:"数据质量问题"};const severityLabels={high:"高风险",medium:"需关注",low:"低风险"};
+const money=(value)=>value===null||value===undefined?"暂无数据":`¥${Number(value).toLocaleString("zh-CN",{maximumFractionDigits:2})}`;
+const change=(value)=>value===null||value===undefined?"—":`${(Number(value)*100).toFixed(1)}%`;
+export function renderBusinessAnomalies({state={}}={}){
+ if(state.loading)return `<section class="business-anomalies"><div class="empty-state compact">正在发现经营异常…</div></section>`;
+ if(state.error)return `<section class="business-anomalies"><div class="empty-state compact"><strong>异常分析暂不可用</strong><p>${escapeHtml(state.error)}</p></div></section>`;
+ const data=state.data;if(!data?.hasData)return `<section class="business-anomalies"><div class="empty-state compact">暂无可分析的销售日报事实</div></section>`;
+ return `<section class="business-anomalies" data-module-key="business_anomalies"><header><div><p class="eyebrow">BUSINESS ANOMALIES V1</p><h2>经营异常</h2><p>系统只标记变化与断档，不判断业务原因</p></div><div class="business-anomaly-summary"><span>高风险<strong>${data.summary.high}</strong></span><span>需关注<strong>${data.summary.medium}</strong></span><span>全部<strong>${data.summary.total}</strong></span></div></header><div class="business-anomaly-list">${data.items.length?data.items.map((item)=>`<button type="button" class="is-${escapeHtml(item.severity)}" data-anomaly-object="${escapeHtml(item.objectType)}" data-anomaly-id="${escapeHtml(item.objectId)}"><span class="status-pill">${escapeHtml(severityLabels[item.severity])}</span><div><strong>${escapeHtml(item.objectName||"未命名对象")}</strong><small>${escapeHtml(labels[item.anomalyType]||item.anomalyType)} · ${escapeHtml(item.objectType)}</small></div><div><strong>${item.anomalyType==="sales_gap"?`连续${item.gapDays}天无事实`:money(item.currentValue)}</strong><small>对比 ${money(item.compareValue)} · ${change(item.changeRate)}</small></div></button>`).join(""):`<div class="empty-state compact">当前规则下未发现异常</div>`}</div></section>`;
+}
+registerUiModule({moduleKey:"business_anomalies",name:"BusinessAnomalies",domain:"dashboard",description:"发现销售下降、利润下降、销售断档与数据质量异常。",dependencies:["QueryDailySalesSummary","QuerySalesDailyDataQuality"],configSchema:{},render:renderBusinessAnomalies});

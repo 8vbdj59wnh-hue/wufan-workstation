@@ -122,6 +122,32 @@ export function queryDailySalesSummaryRanking(input = {}, options = {}) {
   };
 }
 
+
+export function queryDailySalesSummaryComparison(input = {}, options = {}) {
+  const dimension = clean(input.dimension); const currentStart = validDate(input.currentStart); const currentEnd = validDate(input.currentEnd);
+  const compareStart = validDate(input.compareStart); const compareEnd = validDate(input.compareEnd);
+  if (!currentStart || !currentEnd || !compareStart || !compareEnd || compareStart > compareEnd || currentStart > currentEnd) throw new Error("销售日报对比日期范围无效。");
+  const definition = rankingDefinition(dimension); const database = options.database || getDatabase();
+  const rows = database.prepare(`SELECT ${definition.identity} targetId,${definition.name} targetName,${definition.code} targetCode,
+      SUM(CASE WHEN f.saleDate BETWEEN ? AND ? THEN 1 ELSE 0 END) currentDataCount,
+      SUM(CASE WHEN f.saleDate BETWEEN ? AND ? THEN 1 ELSE 0 END) compareDataCount,
+      MAX(CASE WHEN f.saleDate BETWEEN ? AND ? THEN f.saleDate END) currentDataEnd,
+      SUM(CASE WHEN f.saleDate BETWEEN ? AND ? THEN f.salesAmount END) currentSalesAmount,
+      SUM(CASE WHEN f.saleDate BETWEEN ? AND ? THEN f.salesAmount END) compareSalesAmount,
+      SUM(CASE WHEN f.saleDate BETWEEN ? AND ? THEN f.profitAmount END) currentProfitAmount,
+      SUM(CASE WHEN f.saleDate BETWEEN ? AND ? THEN f.profitAmount END) compareProfitAmount
+    FROM connection_sku_sales_daily_facts f ${definition.joins}
+    WHERE f.saleDate BETWEEN ? AND ? GROUP BY ${definition.identity},${definition.name},${definition.code}
+    ORDER BY ${definition.identity}`).all(
+      currentStart,currentEnd,compareStart,compareEnd,currentStart,currentEnd,currentStart,currentEnd,compareStart,compareEnd,
+      currentStart,currentEnd,compareStart,compareEnd,compareStart,currentEnd,
+    );
+  return { capability:"QueryDailySalesSummary",contractVersion:"1.0",mode:"comparison",dimension,currentPeriod:{startDate:currentStart,endDate:currentEnd},comparePeriod:{startDate:compareStart,endDate:compareEnd},items:rows.map((row)=>({
+    targetId:row.targetId,targetName:row.targetName,targetCode:row.targetCode||null,currentDataCount:Number(row.currentDataCount||0),compareDataCount:Number(row.compareDataCount||0),currentDataEnd:row.currentDataEnd||null,
+    currentSalesAmount:row.currentSalesAmount===null?null:Number(row.currentSalesAmount),compareSalesAmount:row.compareSalesAmount===null?null:Number(row.compareSalesAmount),currentProfitAmount:row.currentProfitAmount===null?null:Number(row.currentProfitAmount),compareProfitAmount:row.compareProfitAmount===null?null:Number(row.compareProfitAmount),
+  })),source:SOURCE };
+}
+
 export function queryDailySalesTrend(input = {}, options = {}) {
   const request = normalizeInput(input); const database = options.database || getDatabase(); const definition = queryDefinition(request.dimension);
   const rows = database.prepare(`SELECT f.saleDate date,COUNT(*) dataCount,SUM(f.quantity) quantity,SUM(f.salesAmount) salesAmount,

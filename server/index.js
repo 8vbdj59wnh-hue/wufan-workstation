@@ -99,6 +99,7 @@ import { getConnectionDailySalesPerformance } from "./connectionDailySalesServic
 import { getProductDailySalesPerformance } from "./productDailySalesService.js";
 import { querySalesDailyDataQuality } from "./salesDailyDataQualityService.js";
 import { getSalesBusinessDashboard } from "./salesBusinessDashboardService.js";
+import { queryBusinessAnomalies } from "./capabilities/queryBusinessAnomalies.js";
 import { commitPlatformGoodsExcelDataSync, previewPlatformGoodsExcelDataSync, readPlatformGoodsExcelDataSyncPreview } from "./platformGoodsExcelDataSyncAdapter.js";
 import { confirmPlatformLinkShopMappings, listPlatformLinkShopMappings, previewPlatformLinkShopMappings } from "./platformLinkShopMappingImportService.js";
 import {
@@ -1969,6 +1970,11 @@ app.get("/api/operation-dashboard", requirePermission("dataCenter.view"), (_requ
 app.get("/api/sales-business-dashboard", requirePermission("dataCenter.view"), (request, response) => {
   try { response.json({ success: true, dashboard: getSalesBusinessDashboard(request.query) }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "销售经营驾驶舱读取失败。" }); }
+});
+
+app.get("/api/business-anomalies", requirePermission("dataCenter.view"), (request, response) => {
+  try { response.json({ success: true, anomalies: queryBusinessAnomalies(request.query) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "经营异常读取失败。" }); }
 });
 
 app.get("/api/finance/statement", requirePermission("finance.view"), (request, response) => {
