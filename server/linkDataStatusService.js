@@ -36,7 +36,7 @@ export function getLinkDataStatus({ includeDetails = false } = {}) {
   const latestBatch = batches[0] ?? null;
   const latestSuccessfulBatch = batches.find((batch) => successfulStatuses.has(batch.status)) ?? null;
   const activeBatch = batches.find((batch) => activeStatuses.has(batch.status)) ?? null;
-  const salesDataDate = database.prepare("SELECT MAX(substr(periodEnd,1,10)) value FROM connection_sku_sales_facts").get()?.value ?? null;
+  const salesDataDate = database.prepare("SELECT MAX(saleDate) value FROM connection_sku_sales_daily_facts").get()?.value ?? null;
   const platformDataDate = database.prepare("SELECT MAX(substr(periodEnd,1,10)) value FROM connection_period_snapshots").get()?.value ?? null;
   const latestDataDate = maxText([salesDataDate, platformDataDate, latestSuccessfulBatch?.dataDate]);
   const openUnifiedExceptions = Number(database.prepare(`SELECT COUNT(*) count FROM data_sync_exceptions e
