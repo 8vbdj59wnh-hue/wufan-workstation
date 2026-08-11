@@ -2227,7 +2227,9 @@ CREATE TABLE IF NOT EXISTS product_improvements (
   status TEXT NOT NULL DEFAULT 'planned',
   beforeMetricsJson TEXT NOT NULL DEFAULT '{}',
   afterMetricsJson TEXT NOT NULL DEFAULT '{}',
+  improvementMeasures TEXT,
   resultSummary TEXT,
+  completedAt TEXT,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
   FOREIGN KEY(productId) REFERENCES products(id),
@@ -2238,6 +2240,77 @@ CREATE TABLE IF NOT EXISTS product_improvements (
 
 CREATE INDEX IF NOT EXISTS idx_product_improvements_product_status
   ON product_improvements(productId, status, updatedAt DESC);
+
+CREATE TABLE IF NOT EXISTS product_strategy_versions (
+  id TEXT PRIMARY KEY,
+  productId TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'current',
+  effectiveAt TEXT NOT NULL,
+  endedAt TEXT,
+  changedBy TEXT,
+  contentJson TEXT NOT NULL DEFAULT '{}',
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  UNIQUE(productId, version),
+  FOREIGN KEY(productId) REFERENCES products(id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_product_strategy_current
+  ON product_strategy_versions(productId) WHERE status='current';
+CREATE INDEX IF NOT EXISTS idx_product_strategy_history
+  ON product_strategy_versions(productId, version DESC);
+
+CREATE TABLE IF NOT EXISTS product_strategy_action_links (
+  id TEXT PRIMARY KEY,
+  strategyVersionId TEXT NOT NULL,
+  strategyItemId TEXT NOT NULL,
+  actionId TEXT NOT NULL,
+  createdAt TEXT NOT NULL,
+  UNIQUE(strategyVersionId, strategyItemId, actionId),
+  FOREIGN KEY(strategyVersionId) REFERENCES product_strategy_versions(id),
+  FOREIGN KEY(actionId) REFERENCES process_instances(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_strategy_action_version
+  ON product_strategy_action_links(strategyVersionId);
+CREATE INDEX IF NOT EXISTS idx_product_strategy_action_action
+  ON product_strategy_action_links(actionId);
+
+CREATE TABLE IF NOT EXISTS product_insights (
+  id TEXT PRIMARY KEY,
+  productId TEXT NOT NULL,
+  insightType TEXT NOT NULL,
+  content TEXT NOT NULL,
+  source TEXT NOT NULL,
+  importance INTEGER,
+  description TEXT,
+  frequencyText TEXT,
+  note TEXT,
+  impactLevel TEXT,
+  handlingStatus TEXT,
+  opportunityType TEXT,
+  priority TEXT,
+  status TEXT,
+  relatedStrategyVersionId TEXT,
+  relatedImprovementId TEXT,
+  relatedActionId TEXT,
+  providerId TEXT NOT NULL DEFAULT 'manual',
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(productId) REFERENCES products(id),
+  FOREIGN KEY(relatedStrategyVersionId) REFERENCES product_strategy_versions(id),
+  FOREIGN KEY(relatedImprovementId) REFERENCES product_improvements(id),
+  FOREIGN KEY(relatedActionId) REFERENCES process_instances(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_insights_product_type
+  ON product_insights(productId, insightType, updatedAt DESC);
+CREATE INDEX IF NOT EXISTS idx_product_insights_improvement
+  ON product_insights(relatedImprovementId) WHERE relatedImprovementId IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_product_insights_action
+  ON product_insights(relatedActionId) WHERE relatedActionId IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS suppliers (
   id TEXT PRIMARY KEY,

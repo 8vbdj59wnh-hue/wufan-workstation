@@ -237,13 +237,26 @@ import {
 } from "./financeService.js";
 import {
   changeProductLifecycle,
+  createProductHealthAction,
   createProductImprovementAction,
   evaluateProductHealth,
+  getProductImprovementCenter,
   getProductV2Detail,
   getProductV2Overview,
   getProductBusinessAnalysis,
   productLifecycleStatuses,
+  recordProductImprovementResult,
 } from "./productManagementV2Service.js";
+import { getProductBusinessReadModel, getProductHealthAnalysis } from "./productBusinessReadModel.js";
+import { attachProductDiagnosisSummaries, getProductBusinessDiagnosis } from "./productBusinessDiagnosisService.js";
+import { getProductInsightCenter, importProductInsights, updateProductInsight } from "./productInsightService.js";
+import {
+  addProductStrategyStep,
+  createProductStrategyAction,
+  getProductStrategy,
+  saveProductStrategySection,
+  updateProductStrategyStep,
+} from "./productStrategyService.js";
 import {
   createProductProfileForErpSku,
   getProductCenterV2Metadata,
@@ -2160,6 +2173,21 @@ app.post("/api/product-center-v2/skus/:id/product-profile", requirePermission("p
   }
 });
 
+app.get("/api/product-management/business-dashboard", requirePermission("products.view"), (request, response) => {
+  try {
+    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
+    const readModel = getProductBusinessReadModel(request.query, {
+      includeInventoryCost: hasPermission(request.user, "finance.view"),
+      visibleProductIds: (scoped.products ?? []).map((product) => product.id),
+    });
+    response.json({
+      success: true,
+      readModel: attachProductDiagnosisSummaries(readModel),
+    });
+  }
+  catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "产品经营看板读取失败。" }); }
+});
+
 app.get("/api/product-management/products/:id", requirePermission("products.view"), (request, response) => {
   try { response.json({ success: true, detail: getProductV2Detail(request.params.id), lifecycleStatuses: productLifecycleStatuses }); }
   catch (error) { response.status(404).json({ success: false, message: error.message || "产品经营详情读取失败。" }); }
@@ -2185,6 +2213,37 @@ app.get("/api/product-management/products/:id/marketing-asset/export", requirePe
   catch (error) { response.status(404).json({ success: false, message: error.message || "AI资料导出失败。" }); }
 });
 
+app.get("/api/product-management/products/:id/health-analysis", requirePermission("products.view"), (request, response) => {
+  try {
+    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
+    response.json({ success: true, analysis: getProductHealthAnalysis(request.params.id, {
+      includeInventoryCost: hasPermission(request.user, "finance.view"),
+      visibleProductIds: (scoped.products ?? []).map((product) => product.id),
+    }) });
+  }
+  catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "产品健康分析读取失败。" }); }
+});
+
+app.get("/api/product-management/products/:id/business-diagnosis", requirePermission("products.view"), (request, response) => {
+  try {
+    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
+    response.json({ success: true, diagnosis: getProductBusinessDiagnosis(request.params.id, {
+      includeInventoryCost: hasPermission(request.user, "finance.view"),
+      visibleProductIds: (scoped.products ?? []).map((product) => product.id),
+    }) });
+  } catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "产品经营诊断读取失败。" }); }
+});
+
+app.get("/api/product-management/products/:id/improvement-center", requirePermission("products.view"), (request, response) => {
+  try {
+    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
+    const options = { includeInventoryCost: false, visibleProductIds: (scoped.products ?? []).map((product) => product.id) };
+    const healthAnalysis = getProductHealthAnalysis(request.params.id, options);
+    response.json({ success: true, center: getProductImprovementCenter(request.params.id, healthAnalysis) });
+  }
+  catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "产品经营改善读取失败。" }); }
+});
+
 app.post("/api/product-management/products/:id/lifecycle", requirePermission("products.edit"), (request, response) => {
   try { response.json({ success: true, event: changeProductLifecycle(request.params.id, request.body, request.user.id) }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "产品生命周期更新失败。" }); }
@@ -2195,9 +2254,77 @@ app.post("/api/product-management/products/:id/evaluate", requirePermission("pro
   catch (error) { response.status(400).json({ success: false, message: error.message || "产品经营评价失败。" }); }
 });
 
+app.post("/api/product-management/products/:id/health-action", requirePermission("products.edit"), (request, response) => {
+  try {
+    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
+    const analysis = getProductHealthAnalysis(request.params.id, { includeInventoryCost: false, visibleProductIds: (scoped.products ?? []).map((product) => product.id) });
+    if (!analysis.recommendations.some((item) => item.code === String(request.body?.recommendationCode ?? "").trim())) throw new Error("该改善建议已不适用，请刷新健康分析。");
+    response.status(201).json({ success: true, ...createProductHealthAction(request.params.id, request.body, request.user.id, analysis) });
+  }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "产品健康改善行动创建失败。" }); }
+});
+
 app.post("/api/product-management/issues/:id/improvement-action", requirePermission("products.edit"), (request, response) => {
   try { response.status(201).json({ success: true, ...createProductImprovementAction(request.params.id, request.body, request.user.id) }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "产品改善行动创建失败。" }); }
+});
+
+app.put("/api/product-management/improvements/:id/result", requirePermission("products.edit"), (request, response) => {
+  try {
+    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
+    response.json({ success: true, improvement: recordProductImprovementResult(request.params.id, request.body, { visibleProductIds: (scoped.products ?? []).map((product) => product.id) }) });
+  }
+  catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "产品改善结果保存失败。" }); }
+});
+
+function requireScopedProduct(request, productId) {
+  const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
+  if (!(scoped.products ?? []).some((product) => product.id === productId)) { const error = new Error("无权操作该产品。"); error.statusCode = 403; throw error; }
+  return scoped;
+}
+
+app.get("/api/product-management/products/:id/user-insights", requirePermission("products.view"), (request, response) => {
+  try {
+    const scoped = requireScopedProduct(request, request.params.id);
+    response.json({ success: true, center: getProductInsightCenter(request.params.id, { visibleProductIds: (scoped.products ?? []).map((product) => product.id) }) });
+  } catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "用户洞察读取失败。" }); }
+});
+
+app.post("/api/product-management/products/:id/user-insights", requirePermission("products.edit"), (request, response) => {
+  try { requireScopedProduct(request, request.params.id); response.status(201).json({ success: true, items: importProductInsights(request.params.id, request.body?.items ?? request.body, request.user.id) }); }
+  catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "用户洞察保存失败。" }); }
+});
+
+app.put("/api/product-management/products/:id/user-insights/:insightId", requirePermission("products.edit"), (request, response) => {
+  try { requireScopedProduct(request, request.params.id); response.json({ success: true, item: updateProductInsight(request.params.id, request.params.insightId, request.body, request.user.id) }); }
+  catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "用户洞察更新失败。" }); }
+});
+
+app.get("/api/product-management/products/:id/strategy", requirePermission("products.view"), (request, response) => {
+  try {
+    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
+    response.json({ success: true, strategy: getProductStrategy(request.params.id, { visibleProductIds: (scoped.products ?? []).map((product) => product.id) }) });
+  } catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "产品战略读取失败。" }); }
+});
+
+app.put("/api/product-management/products/:id/strategy/:section", requirePermission("products.edit"), (request, response) => {
+  try { requireScopedProduct(request, request.params.id); response.json({ success: true, current: saveProductStrategySection(request.params.id, request.params.section, request.body, request.user.id) }); }
+  catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "产品战略保存失败。" }); }
+});
+
+app.post("/api/product-management/products/:id/strategy/next-steps", requirePermission("products.edit"), (request, response) => {
+  try { requireScopedProduct(request, request.params.id); response.status(201).json({ success: true, current: addProductStrategyStep(request.params.id, request.body, request.user.id) }); }
+  catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "下一步策略新增失败。" }); }
+});
+
+app.put("/api/product-management/products/:id/strategy/next-steps/:itemId", requirePermission("products.edit"), (request, response) => {
+  try { requireScopedProduct(request, request.params.id); response.json({ success: true, current: updateProductStrategyStep(request.params.id, request.params.itemId, request.body, request.user.id) }); }
+  catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "下一步策略更新失败。" }); }
+});
+
+app.post("/api/product-management/products/:id/strategy/next-steps/:itemId/action", requirePermission("products.edit"), (request, response) => {
+  try { requireScopedProduct(request, request.params.id); response.status(201).json({ success: true, ...createProductStrategyAction(request.params.id, request.params.itemId, request.body, request.user.id) }); }
+  catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "战略关键行动创建失败。" }); }
 });
 
 app.get("/api/data-center/trends", requirePermission("dataCenter.view"), (request, response) => {

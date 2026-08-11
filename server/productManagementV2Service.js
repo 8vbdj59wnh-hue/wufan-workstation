@@ -196,5 +196,147 @@ export function createProductImprovementAction(issueId, input, userId) {
   return database.transaction(() => { const timestamp=now(); const instance=createResource("process-instances",{id:`process-instance-${crypto.randomUUID()}`,templateId:template.defaultProcessTemplateId,taskTemplateId:template.id,templateVersion:template.version,name:title,displayTitle:title,goalId:goal.id,initiatorId:text(userId),description:`来源：产品经营问题；产品：${issue.productName}；问题：${issue.title}`,status:"draft",customFields:{source:"product_health",productId:issue.productId,productIssueId:issue.id,healthRecordId:issue.healthRecordId},createdAt:timestamp,updatedAt:timestamp});
     const id=`product-improvement-${crypto.randomUUID()}`; const health=database.prepare("SELECT metricsJson FROM product_health_records WHERE id=?").get(issue.healthRecordId);
     database.prepare(`INSERT INTO product_improvements (id,productId,issueId,actionId,title,status,beforeMetricsJson,afterMetricsJson,createdAt,updatedAt) VALUES (?,?,?,?,?,'planned',?,'{}',?,?)`).run(id,issue.productId,issue.id,instance.id,title,health?.metricsJson||"{}",timestamp,timestamp);
-    database.prepare("UPDATE product_issues SET status='improving',updatedAt=? WHERE id=?").run(timestamp,issue.id); return { instance, improvement: database.prepare("SELECT * FROM product_improvements WHERE id=?").get(id) }; })();
+    const actionProduct=createResource("action-products",{id:`action-product-${crypto.randomUUID()}`,actionId:instance.id,productId:issue.productId,createdAt:timestamp});
+    database.prepare("UPDATE product_issues SET status='improving',updatedAt=? WHERE id=?").run(timestamp,issue.id); return { instance, actionProduct, improvement: database.prepare("SELECT * FROM product_improvements WHERE id=?").get(id) }; })();
+}
+
+export const productIssueTypeCatalog = Object.freeze([
+  { code: "traffic_insufficient", category: "销售问题", label: "流量不足" },
+  { code: "click_rate_low", category: "销售问题", label: "点击率低" },
+  { code: "conversion_rate_low", category: "销售问题", label: "转化率低" },
+  { code: "sales_decline", category: "销售问题", label: "销售下降" },
+  { code: "sales_link_performance", category: "销售问题", label: "销售链接表现" },
+  { code: "inventory_backlog", category: "库存问题", label: "库存积压" },
+  { code: "stockout_risk", category: "库存问题", label: "缺货风险" },
+  { code: "gross_margin_insufficient", category: "利润问题", label: "毛利不足" },
+  { code: "cost_high", category: "利润问题", label: "成本过高" },
+  { code: "customer_feedback", category: "产品问题", label: "用户反馈问题" },
+  { code: "competitiveness_insufficient", category: "产品问题", label: "竞争力不足" },
+  { code: "image_insufficient", category: "内容问题", label: "图片不足" },
+  { code: "selling_point_insufficient", category: "内容问题", label: "卖点不足" },
+  { code: "detail_page_issue", category: "内容问题", label: "详情页问题" },
+]);
+
+const productIssueTypeByCode = new Map(productIssueTypeCatalog.map((item) => [item.code, item]));
+const productHealthRecommendations = Object.freeze({
+  sales_decline: { title: "优化产品详情页转化", problemTitle: "销售趋势下降", issueType: "sales_decline", issue: "销售连续两个周期下降", improvementGoal: "恢复产品销售表现", suggestedDirection: "优化详情页与转化路径", dimension: "sales" },
+  inventory_backlog: { title: "制定库存消化方案", problemTitle: "库存风险", issueType: "inventory_backlog", issue: "库存覆盖周期偏高或长期无动销", improvementGoal: "恢复库存健康周转", suggestedDirection: "制定库存消化方案", dimension: "inventory" },
+  inventory_stockout: { title: "制定补货保障方案", problemTitle: "缺货风险", issueType: "stockout_risk", issue: "当前库存不足，存在缺货风险", improvementGoal: "保障产品持续供货", suggestedDirection: "制定补货与供应保障方案", dimension: "inventory" },
+  profit_low: { title: "优化产品成本结构", problemTitle: "毛利不足", issueType: "gross_margin_insufficient", issue: "现有利润事实显示毛利率偏低", improvementGoal: "提升产品盈利能力", suggestedDirection: "优化成本与定价结构", dimension: "profit" },
+  link_optimization: { title: "优化关联销售链接表现", problemTitle: "链接表现需优化", issueType: "sales_link_performance", issue: "关联销售链接贡献或转化表现需优化", improvementGoal: "提升销售链接转化表现", suggestedDirection: "优化图片、卖点与详情页", dimension: "links" },
+});
+
+function parseImprovement(row) {
+  return row ? { ...row, detail: parseJson(row.detailJson, {}), beforeMetrics: parseJson(row.beforeMetricsJson, {}), afterMetrics: parseJson(row.afterMetricsJson, {}) } : null;
+}
+
+function healthIssueView(recommendation, analysis, persistedIssues = []) {
+  const profile = productHealthRecommendations[recommendation.code];
+  if (!profile) return null;
+  const type = productIssueTypeByCode.get(profile.issueType);
+  const persisted = persistedIssues.find((item) => item.issueType === profile.issueType && item.status !== "closed");
+  const severity = analysis?.dimensions?.[profile.dimension]?.severity ?? "attention";
+  return { id: persisted?.id ?? null, recommendationCode: recommendation.code, issueType: profile.issueType,
+    issueTypeLabel: type?.label ?? profile.problemTitle, category: type?.category ?? "其他问题", title: profile.problemTitle,
+    severity, status: persisted?.status ?? "identified", reason: recommendation.reason || profile.issue,
+    problemDescription: recommendation.reason || profile.issue, improvementGoal: profile.improvementGoal, suggestedDirection: profile.suggestedDirection };
+}
+
+export function getProductImprovementCenter(productId, healthAnalysis) {
+  const database = getDatabase();
+  const product = database.prepare("SELECT id,name FROM products WHERE id=?").get(text(productId));
+  if (!product) throw new Error("产品不存在。");
+  const persistedIssues = database.prepare("SELECT * FROM product_issues WHERE productId=? ORDER BY updatedAt DESC").all(product.id).map((row) => ({ ...row, detail: parseJson(row.detailJson, {}) }));
+  const rows = database.prepare(`SELECT i.*,q.issueType,q.title issueTitle,q.detailJson,p.name actionName,p.displayTitle,p.status actionStatus,
+      p.startedAt,p.createdAt actionCreatedAt,p.completedAt actionCompletedAt,t.ownerId,owner.name ownerName,
+      (SELECT COUNT(*) FROM tasks task WHERE task.processInstanceId=p.id) taskCount,
+      (SELECT COUNT(*) FROM tasks task WHERE task.processInstanceId=p.id AND task.status IN ('done','completed')) doneTaskCount
+    FROM product_improvements i JOIN product_issues q ON q.id=i.issueId JOIN process_instances p ON p.id=i.actionId
+    LEFT JOIN task_templates t ON t.id=p.taskTemplateId LEFT JOIN persons owner ON owner.id=t.ownerId
+    WHERE i.productId=? ORDER BY i.updatedAt DESC,i.createdAt DESC`).all(product.id);
+  const improvements = rows.map((row) => {
+    const item = parseImprovement(row); const type = productIssueTypeByCode.get(item.issueType);
+    return { ...item, issueTypeLabel: type?.label ?? item.issueTitle, issueCategory: type?.category ?? "其他问题",
+      actionName: item.displayTitle || item.actionName, ownerName: item.ownerName || "未设置", startAt: item.startedAt || item.actionCreatedAt,
+      completedAt: item.completedAt || item.actionCompletedAt || null, canRecordResult: ["done", "completed"].includes(item.actionStatus) };
+  });
+  return { product: { id: product.id, name: product.name }, issueTypes: productIssueTypeCatalog,
+    currentIssues: (healthAnalysis?.recommendations ?? []).map((item) => healthIssueView(item, healthAnalysis, persistedIssues)).filter(Boolean),
+    improvements, readOnlyFacts: true };
+}
+
+export function createProductHealthAction(productId, input, userId, healthAnalysis = null) {
+  const database = getDatabase();
+  const product = database.prepare("SELECT id,name FROM products WHERE id=?").get(text(productId));
+  if (!product) throw new Error("产品不存在。");
+  const recommendationCode = text(input?.recommendationCode);
+  const recommendation = productHealthRecommendations[recommendationCode];
+  if (!recommendation) throw new Error("改善行动类型无效。");
+  const goal = database.prepare("SELECT id,status FROM goals WHERE id=?").get(text(input?.goalId));
+  if (!goal || goal.status !== "active") throw new Error("请选择有效目标。");
+  const template = database.prepare(`SELECT t.id,t.name,t.defaultProcessTemplateId,p.version
+    FROM task_templates t JOIN process_templates p ON p.id=t.defaultProcessTemplateId
+    WHERE t.id=? AND t.status='active'`).get(text(input?.taskTemplateId));
+  if (!template) throw new Error("请选择已绑定标准流程的启用关键行动。");
+  const title = text(input?.title) || `${recommendation.title}：${product.name}`;
+  return database.transaction(() => {
+    const timestamp = now();
+    let issue = database.prepare("SELECT * FROM product_issues WHERE productId=? AND issueType=? AND status<>'closed' ORDER BY updatedAt DESC LIMIT 1").get(product.id, recommendation.issueType);
+    const matchedRecommendation = healthAnalysis?.recommendations?.find((item) => item.code === recommendationCode);
+    const problemDescription = matchedRecommendation?.reason || recommendation.issue;
+    const issueType = productIssueTypeByCode.get(recommendation.issueType);
+    if (!issue) {
+      const healthRecordId = `product-health-improvement-${crypto.randomUUID()}`;
+      database.prepare(`INSERT INTO product_health_records (id,productId,snapshotKey,healthScore,healthStatus,metricsJson,problemsJson,suggestionsJson,createdAt,updatedAt)
+        VALUES (?,?,?,NULL,?,?,?,?,?,?)`).run(healthRecordId, product.id, `improvement:${crypto.randomUUID()}`, healthAnalysis?.overall?.code || "no_data",
+        JSON.stringify(healthAnalysis || {}), JSON.stringify([{ issueType: recommendation.issueType, problemDescription }]), JSON.stringify([{ title: recommendation.title }]), timestamp, timestamp);
+      const issueId = `product-issue-${crypto.randomUUID()}`;
+      const detail = { standardIssueType: recommendation.issueType, category: issueType?.category, problemDescription,
+        improvementGoal: recommendation.improvementGoal, suggestedDirection: recommendation.suggestedDirection,
+        sourceRecommendationCode: recommendationCode, evidence: healthAnalysis?.dimensions?.[recommendation.dimension]?.evidence ?? {} };
+      database.prepare(`INSERT INTO product_issues (id,productId,healthRecordId,issueType,title,severity,detailJson,status,createdAt,updatedAt)
+        VALUES (?,?,?,?,?,?,?,'open',?,?)`).run(issueId, product.id, healthRecordId, recommendation.issueType, recommendation.problemTitle,
+        healthAnalysis?.dimensions?.[recommendation.dimension]?.severity === "risk" ? "high" : "medium", JSON.stringify(detail), timestamp, timestamp);
+      issue = database.prepare("SELECT * FROM product_issues WHERE id=?").get(issueId);
+    }
+    const instance = createResource("process-instances", {
+      id: `process-instance-${crypto.randomUUID()}`, templateId: template.defaultProcessTemplateId, taskTemplateId: template.id,
+      templateVersion: template.version, name: title, displayTitle: title, goalId: goal.id, initiatorId: text(userId),
+      description: `来源：产品健康分析；产品：${product.name}；问题：${problemDescription}；改善目标：${recommendation.improvementGoal}；建议方向：${recommendation.suggestedDirection}。`, status: "draft",
+      customFields: { source: "product_health_analysis", productId: product.id, productIssueId: issue.id, problemType: recommendation.issueType,
+        problemTypeLabel: issueType?.label, problemDescription, improvementGoal: recommendation.improvementGoal,
+        suggestedDirection: recommendation.suggestedDirection, recommendationCode }, createdAt: timestamp, updatedAt: timestamp,
+    });
+    const actionProduct = createResource("action-products", { id: `action-product-${crypto.randomUUID()}`, actionId: instance.id, productId: product.id, createdAt: timestamp });
+    const improvementId = `product-improvement-${crypto.randomUUID()}`;
+    const beforeMetrics = { summary: problemDescription, healthStatus: healthAnalysis?.overall ?? null,
+      dimension: healthAnalysis?.dimensions?.[recommendation.dimension] ?? null, capturedAt: timestamp };
+    database.prepare(`INSERT INTO product_improvements (id,productId,issueId,actionId,title,status,beforeMetricsJson,afterMetricsJson,createdAt,updatedAt)
+      VALUES (?,?,?,?,?,'planned',?,'{}',?,?)`).run(improvementId, product.id, issue.id, instance.id, title, JSON.stringify(beforeMetrics), timestamp, timestamp);
+    database.prepare("UPDATE product_issues SET status='improving',updatedAt=? WHERE id=?").run(timestamp, issue.id);
+    const savedIssue = database.prepare("SELECT * FROM product_issues WHERE id=?").get(issue.id);
+    return { instance, actionProduct, issue: { ...savedIssue, detail: parseJson(savedIssue.detailJson, {}) }, improvement: parseImprovement(database.prepare("SELECT * FROM product_improvements WHERE id=?").get(improvementId)) };
+  })();
+}
+
+export function recordProductImprovementResult(improvementId, input, { visibleProductIds = null } = {}) {
+  const database = getDatabase();
+  const current = database.prepare(`SELECT i.*,p.status actionStatus,p.completedAt actionCompletedAt FROM product_improvements i
+    JOIN process_instances p ON p.id=i.actionId WHERE i.id=?`).get(text(improvementId));
+  if (!current) throw new Error("产品改善记录不存在。");
+  if (visibleProductIds && !new Set(visibleProductIds).has(current.productId)) {
+    const error = new Error("无权修改该产品的改善记录。"); error.statusCode = 403; throw error;
+  }
+  if (!["done", "completed"].includes(current.actionStatus)) throw new Error("关键行动完成后才能记录改善结果。");
+  const improvementMeasures = text(input?.improvementMeasures);
+  const resultSummary = text(input?.resultSummary);
+  const completedAt = text(input?.completedAt) || current.actionCompletedAt;
+  if (!improvementMeasures) throw new Error("请填写改善措施。");
+  if (!resultSummary) throw new Error("请填写改善后结果。");
+  if (!completedAt || Number.isNaN(Date.parse(completedAt.length === 10 ? `${completedAt}T00:00:00+08:00` : completedAt))) throw new Error("请填写有效完成时间。");
+  const timestamp = now();
+  const afterMetrics = { ...(input?.afterMetrics && typeof input.afterMetrics === "object" ? input.afterMetrics : {}), summary: resultSummary };
+  database.prepare(`UPDATE product_improvements SET status='result_recorded',improvementMeasures=?,afterMetricsJson=?,resultSummary=?,completedAt=?,updatedAt=? WHERE id=?`)
+    .run(improvementMeasures, JSON.stringify(afterMetrics), resultSummary, completedAt, timestamp, current.id);
+  return parseImprovement(database.prepare("SELECT * FROM product_improvements WHERE id=?").get(current.id));
 }

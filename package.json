@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "node scripts/static-server.js",
+    "check:product-business": "node --check server/productBusinessReadModel.js && node --check server/productManagementV2Service.js && node --check server/productStrategyService.js && node --check server/productBusinessDiagnosisService.js && node --check server/productInsightService.js && node --check server/inventorySupplyQueryService.js && node --check src/productCenterPage.js && node --check src/appState.js && node --check src/services/productCenterService.js && node --check server/index.js",
+    "test:product-business": "node --test tests/productBusinessReadModel.test.js",
     "dev": "echo \"请分别运行 npm run dev:server 和 npm run dev:client\"",
     "dev:client": "node scripts/static-server.js",
     "dev:server": "node server/index.js",

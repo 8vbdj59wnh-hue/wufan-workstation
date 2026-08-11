@@ -31,6 +31,13 @@ import {
   validateProductV2Import,
   markPlatformSku,
   loadProductManagementOverview,
+  loadProductBusinessDashboard,
+  loadProductHealthAnalysis,
+  loadProductBusinessDiagnosis,
+  loadProductInsightCenter,
+  createProductInsight,
+  updateProductInsight,
+  loadProductImprovementCenter,
   loadProductManagementDetail,
   loadProductDailySales,
   changeProductLifecycle,
@@ -43,6 +50,13 @@ import {
   loadProductMarketingAsset,
   saveProductMarketingAsset,
   exportProductMarketingAsset,
+  createProductHealthAction,
+  recordProductImprovementResult,
+  loadProductStrategy,
+  saveProductStrategySection,
+  addProductStrategyStep,
+  updateProductStrategyStep,
+  createProductStrategyAction,
 } from "./services/productCenterService.js?v=20260802-module-boundary1";
 import { getCurrentUser, state } from "./stores/appStore.js?v=20260802-module-boundary1";
 import { getProcessInstanceBusinessStatus, getProcessInstanceOwner } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
@@ -87,6 +101,18 @@ let productSkuV2RequestId = 0;
 let productSkuV2SearchTimer = 0;
 let productSkuV2MetadataLoading = false;
 let productWorkspaceState = { activeTab: "overview", sections: {}, marketingMode: "read", marketingNotice: "", dailySales: { data: null, loading: false, loaded: false, rangePreset: "30d", error: "" } };
+let productBusinessDashboardState = { readModel: null, loading: false, error: "" };
+let productBusinessFilters = { query: "", brand: "", category: "", lifecycle: "", status: "", healthStatus: "", inventoryStatus: "", ownerId: "", range: "30d", periodStart: "", periodEnd: "", sortBy: "updatedAt", sortDirection: "desc", page: 1, pageSize: 30 };
+let productBusinessVisibleMetrics = new Set(["sales", "structure", "inventory", "profit", "health", "diagnosis"]);
+
+const productBusinessMetricGroups = [
+  { key: "sales", label: "销售表现", count: 3 },
+  { key: "structure", label: "产品结构", count: 2 },
+  { key: "inventory", label: "库存经营", count: 3 },
+  { key: "profit", label: "利润表现", count: 3 },
+  { key: "health", label: "产品健康", count: 1 },
+  { key: "diagnosis", label: "经营诊断", count: 1 },
+];
 
 function getRouteProductId() {
   const match = window.location.hash.replace(/^#/, "").match(/^products\/(?!sku\/)(.+)$/);
@@ -346,7 +372,116 @@ function renderProductCards(products, index) {
   </div>`;
 }
 
+function renderProductWorkspaceTabs() {
+  return `<nav class="product-workspace-tabs" aria-label="产品中心视图">
+    <button type="button" data-action="product-workspace-view" data-view="library" class="${productSubmodule !== "business-dashboard" ? "is-active" : ""}">产品库</button>
+    <button type="button" data-action="product-workspace-view" data-view="business-dashboard" class="${productSubmodule === "business-dashboard" ? "is-active" : ""}">产品经营看板</button>
+  </nav>`;
+}
+
+function businessMetricEnabled(key) { return productBusinessVisibleMetrics.has(key); }
+function businessValue(value) { return value === null || value === undefined ? `<span class="business-no-data">暂无数据</span>` : Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 2 }); }
+function businessMoney(value) { return value === null || value === undefined ? `<span class="business-no-data">暂无数据</span>` : `¥${Number(value).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
+function businessPercent(value) { return value === null || value === undefined ? `<span class="business-no-data">暂无数据</span>` : `${(Number(value) * 100).toFixed(1)}%`; }
+function businessStatus(label, code, kind = "status") { return `<span class="product-business-pill ${kind}-${escapeHtml(code || "no_data")}">${escapeHtml(label || "暂无数据")}</span>`; }
+function businessTrend(trend) { const text = trend?.rate === null || trend?.rate === undefined ? trend?.label || "暂无对比" : `${trend.label} ${Math.abs(Number(trend.rate) * 100).toFixed(1)}%`; return businessStatus(text, trend?.code, "trend"); }
+
+function businessSortHeader(key, label) {
+  const active = productBusinessFilters.sortBy === key;
+  const arrow = active ? (productBusinessFilters.sortDirection === "asc" ? "↑" : "↓") : "↕";
+  return `<button type="button" class="business-sort-button ${active ? "is-active" : ""}" data-action="product-business-sort" data-sort-by="${key}">${label}<span>${arrow}</span></button>`;
+}
+
+function renderBusinessSelect(values, selected, emptyLabel, readValue = (value) => value, readLabel = (value) => value) {
+  return `<option value="">${emptyLabel}</option>${(values ?? []).map((value) => `<option value="${escapeHtml(readValue(value))}" ${readValue(value) === selected ? "selected" : ""}>${escapeHtml(readLabel(value))}</option>`).join("")}`;
+}
+
+function renderProductBusinessFilters(readModel) {
+  const options = readModel?.options ?? {};
+  const custom = productBusinessFilters.range === "custom";
+  const healthLabels = { healthy: "健康", attention: "关注", risk: "风险", no_data: "暂无数据" };
+  const inventoryLabels = { healthy: "健康", attention: "关注", backlog: "积压风险", stockout: "缺货风险", no_data: "暂无数据" };
+  return `<form class="product-business-filters" data-product-business-filter>
+    <div class="product-business-filter-main">
+      <input type="search" name="query" value="${escapeHtml(productBusinessFilters.query)}" placeholder="搜索产品名称 / SKU / 产品编码" />
+      <select name="brand">${renderBusinessSelect(options.brands, productBusinessFilters.brand, "全部品牌")}</select>
+      <select name="category">${renderBusinessSelect(options.categories, productBusinessFilters.category, "全部分类")}</select>
+      <select name="lifecycle">${renderBusinessSelect(options.lifecycleStatuses, productBusinessFilters.lifecycle, "全部生命周期")}</select>
+      <select name="status">${renderBusinessSelect(options.statuses, productBusinessFilters.status, "全部产品状态")}</select>
+      <select name="healthStatus">${renderBusinessSelect(options.healthStatuses, productBusinessFilters.healthStatus, "全部健康状态", (value) => value, (value) => healthLabels[value] || value)}</select>
+      <select name="inventoryStatus">${renderBusinessSelect(options.inventoryStatuses, productBusinessFilters.inventoryStatus, "全部库存状态", (value) => value, (value) => inventoryLabels[value] || value)}</select>
+      <select name="ownerId">${renderBusinessSelect(options.owners, productBusinessFilters.ownerId, "全部负责人", (value) => value.id, (value) => value.name)}</select>
+    </div>
+    <div class="product-business-period">
+      <span>销售周期</span>
+      ${[["yesterday", "昨日"], ["7d", "7日"], ["30d", "30日"], ["custom", "自定义"]].map(([value, label]) => `<button type="button" data-action="product-business-range" data-range="${value}" class="${productBusinessFilters.range === value ? "is-active" : ""}">${label}</button>`).join("")}
+      <label class="${custom ? "" : "is-hidden"}">开始<input type="date" name="periodStart" value="${escapeHtml(productBusinessFilters.periodStart)}" ${custom ? "required" : "disabled"} /></label>
+      <label class="${custom ? "" : "is-hidden"}">结束<input type="date" name="periodEnd" value="${escapeHtml(productBusinessFilters.periodEnd)}" ${custom ? "required" : "disabled"} /></label>
+      <button class="primary-button compact-button" type="submit">应用筛选</button>
+      <button class="text-button" type="button" data-action="clear-product-business-filters">清空</button>
+    </div>
+  </form>`;
+}
+
+function renderProductBusinessMetricSettings() {
+  return `<details class="product-business-metric-settings"><summary>指标设置</summary><div>${productBusinessMetricGroups.map((group) => `<label><input type="checkbox" data-product-business-metric="${group.key}" ${businessMetricEnabled(group.key) ? "checked" : ""} />${group.label}</label>`).join("")}</div></details>`;
+}
+
+function renderProductBusinessTable(readModel) {
+  const groups = productBusinessMetricGroups.filter((group) => businessMetricEnabled(group.key));
+  const totalColumns = 9 + groups.reduce((total, group) => total + group.count, 0);
+  const rows = readModel?.items ?? [];
+  return `<div class="product-business-table-wrap"><table class="product-business-table">
+    <thead><tr class="product-business-groups"><th colspan="5">产品信息</th><th colspan="2">生命周期</th>${groups.map((group) => `<th colspan="${group.count}">${group.label}</th>`).join("")}<th colspan="2">经营动作</th></tr>
+    <tr><th>图片</th><th>${businessSortHeader("name", "产品")}</th><th>品牌</th><th>分类</th><th>负责人</th><th>生命周期</th><th>产品状态</th>
+      ${businessMetricEnabled("sales") ? `<th>${businessSortHeader("salesAmount", "销售额")}</th><th>${businessSortHeader("salesQuantity", "销量")}</th><th>${businessSortHeader("salesTrend", "销售趋势")}</th>` : ""}
+      ${businessMetricEnabled("structure") ? `<th>${businessSortHeader("skuCount", "SKU数量")}</th><th>${businessSortHeader("salesLinkCount", "销售链接")}</th>` : ""}
+      ${businessMetricEnabled("inventory") ? `<th>${businessSortHeader("inventoryQuantity", "库存数量")}</th><th>${businessSortHeader("inventoryAmount", "库存金额")}</th><th>库存状态</th>` : ""}
+      ${businessMetricEnabled("profit") ? `<th>${businessSortHeader("grossMargin", "毛利率")}</th><th>${businessSortHeader("grossProfit", "毛利润")}</th><th>盈利状态</th>` : ""}
+      ${businessMetricEnabled("health") ? `<th>${businessSortHeader("healthStatus", "健康摘要")}</th>` : ""}
+      ${businessMetricEnabled("diagnosis") ? `<th>经营状态</th>` : ""}
+      <th>${businessSortHeader("pendingCount", "待处理事项")}</th><th>详情</th></tr></thead>
+    <tbody>${rows.length ? rows.map((item) => `<tr>
+      <td><button type="button" class="product-business-product-button is-image" data-action="view-product" data-direct-product-detail data-product-id="${escapeHtml(item.id)}">${renderImage({ mainImage: item.image, name: item.name }, "product-business-image")}</button></td>
+      <td><button type="button" class="product-business-product-button" data-action="view-product" data-direct-product-detail data-product-id="${escapeHtml(item.id)}"><strong>${escapeHtml(item.name)}</strong><small>SKU ${escapeHtml(item.sku || "—")}</small><small>产品编码 ${escapeHtml(item.productCode || "—")}</small></button></td>
+      <td>${escapeHtml(item.brand || "—")}</td><td>${escapeHtml(item.category || "—")}</td><td>${escapeHtml(item.ownerName || "未分配")}</td>
+      <td>${businessStatus(item.lifecycle, item.lifecycle, "lifecycle")}</td><td>${businessStatus(item.status, "product")}</td>
+      ${businessMetricEnabled("sales") ? `<td>${businessMoney(item.sales.amount)}</td><td>${businessValue(item.sales.quantity)}</td><td>${businessTrend(item.sales.trend)}</td>` : ""}
+      ${businessMetricEnabled("structure") ? `<td>${businessValue(item.structure.skuCount)}</td><td>${businessValue(item.structure.salesLinkCount)}</td>` : ""}
+      ${businessMetricEnabled("inventory") ? `<td>${businessValue(item.inventory.quantity)}</td><td>${businessMoney(item.inventory.amount)}</td><td>${businessStatus(item.inventory.status.label, item.inventory.status.code, "inventory")}</td>` : ""}
+      ${businessMetricEnabled("profit") ? `<td>${businessPercent(item.profit.grossMargin)}</td><td>${businessMoney(item.profit.grossProfit)}</td><td>${businessStatus(item.profit.status.label, item.profit.status.code, "profit")}</td>` : ""}
+      ${businessMetricEnabled("health") ? `<td><button type="button" class="product-health-summary-button" data-action="open-product-health" data-product-id="${escapeHtml(item.id)}"><span>${escapeHtml(item.healthAnalysis?.overall?.emoji || "⚪")}</span>${businessStatus(item.healthAnalysis?.overall?.label, item.healthAnalysis?.overall?.code, "health")}<small>查看原因</small></button></td>` : ""}
+      ${businessMetricEnabled("diagnosis") ? `<td><button type="button" class="product-health-summary-button product-diagnosis-summary-button" data-action="open-product-diagnosis" data-product-id="${escapeHtml(item.id)}"><span>${escapeHtml(item.diagnosis?.status?.emoji || "⚪")}</span>${businessStatus(item.diagnosis?.status?.label, item.diagnosis?.status?.code, "diagnosis")}<small>查看诊断</small></button></td>` : ""}
+      <td>${item.actions.pendingCount ? `<div class="product-business-actions"><strong>${item.actions.pendingCount}</strong><small>改善 ${item.actions.improvementCount} · 行动 ${item.actions.actionCount} · 任务 ${item.actions.taskCount}</small></div>` : `<span class="business-no-data">暂无行动</span>`}</td>
+      <td><button type="button" class="text-button" data-action="view-product" data-direct-product-detail data-product-id="${escapeHtml(item.id)}">产品档案 →</button></td>
+    </tr>`).join("") : `<tr><td colspan="${totalColumns}" class="empty-cell">当前筛选条件下暂无产品</td></tr>`}</tbody>
+  </table></div>`;
+}
+
+function renderProductBusinessPagination(readModel) {
+  const pagination = readModel?.pagination;
+  if (!pagination || pagination.pages <= 1) return "";
+  return `<nav class="product-pagination" aria-label="产品经营看板分页"><span>第 ${pagination.page}/${pagination.pages} 页 · 共 ${pagination.total} 个产品</span><div><button class="secondary-button" type="button" data-action="product-business-page" data-page="${pagination.page - 1}" ${pagination.page <= 1 ? "disabled" : ""}>上一页</button><button class="secondary-button" type="button" data-action="product-business-page" data-page="${pagination.page + 1}" ${pagination.page >= pagination.pages ? "disabled" : ""}>下一页</button></div></nav>`;
+}
+
+function renderProductBusinessDashboard() {
+  const readModel = productBusinessDashboardState.readModel;
+  const summary = readModel?.summary;
+  return `<section class="product-center-page product-business-dashboard">
+    <div class="section-heading with-actions"><div><h1>产品中心</h1><p>产品主数据与经营分析</p></div></div>
+    ${renderProductWorkspaceTabs()}
+    <section class="product-business-hero"><div><p class="eyebrow">产品经营分析</p><h2>全部产品经营数据表</h2><p>展示产品销售、库存、利润、生命周期及健康状态，帮助判断产品经营质量。</p></div>${readModel?.period ? `<small>销售数据周期 ${escapeHtml(readModel.period.periodStart)} 至 ${escapeHtml(readModel.period.periodEnd)}</small>` : ""}</section>
+    ${productBusinessDashboardState.error ? `<div class="form-error">${escapeHtml(productBusinessDashboardState.error)}</div>` : ""}
+    ${summary ? `<section class="product-business-summary"><article><span>产品总数</span><strong>${businessValue(summary.totalProducts)}</strong><small>与产品库同源</small></article><article><span>筛选结果</span><strong>${businessValue(summary.filteredProducts)}</strong><small>当前筛选范围</small></article><article><span>周期销售额</span><strong>${businessMoney(summary.salesAmount)}</strong><small>复用销售事实</small></article><article><span>周期销量</span><strong>${businessValue(summary.salesQuantity)}</strong><small>复用销售事实</small></article><article><span>库存数量</span><strong>${businessValue(summary.inventoryQuantity)}</strong><small>库存模块最新口径</small></article><article><span>风险产品</span><strong>${businessValue(summary.riskProducts)}</strong><small>健康或库存风险</small></article></section>` : ""}
+    ${renderProductBusinessFilters(readModel)}
+    <div class="product-business-toolbar"><span>${productBusinessDashboardState.loading ? "正在读取产品经营数据…" : `共 ${summary?.filteredProducts ?? 0} 个产品`}</span>${renderProductBusinessMetricSettings()}</div>
+    ${productBusinessDashboardState.loading && !readModel ? `<div class="empty-state">正在读取销售、库存与经营数据…</div>` : renderProductBusinessTable(readModel)}
+    ${renderProductBusinessPagination(readModel)}
+  </section>`;
+}
+
 function renderProductList() {
+  if (productSubmodule === "business-dashboard") return renderProductBusinessDashboard();
   if (productSubmodule === "pending-skus") return renderPendingSkuPage();
   return renderProductSkuV2List();
   /* Legacy product-card view remains available to existing product detail flows. */
@@ -366,6 +501,7 @@ function renderProductList() {
           ${canCreate ? `<button class="secondary-button" type="button" data-action="open-product-v2-import">导入ERP数据</button><button class="primary-button" type="button" data-action="new-product">新增产品</button>` : ""}
         </div>
       </div>
+      ${renderProductWorkspaceTabs()}
       ${renderProductSubmoduleTabs()}
       ${productManagementState.error ? `<div class="form-error">${escapeHtml(productManagementState.error)}</div>` : ""}
       ${productManagementState.notice ? `<div class="form-success">${escapeHtml(productManagementState.notice)}</div>` : ""}
@@ -555,6 +691,7 @@ function renderPendingSkuPage() {
     <div class="section-heading with-actions">
       <div><h1>产品中心</h1><p>识别ERP已发现、尚未建立产品档案的SKU</p></div>
     </div>
+    ${renderProductWorkspaceTabs()}
     ${renderProductSubmoduleTabs()}
     <form class="filter-bar pending-sku-filter-bar" data-pending-sku-search>
       <input type="search" name="query" value="${escapeHtml(pendingSkuState.query)}" placeholder="搜索SKU、货品名称或ERP货品编码" />
@@ -869,7 +1006,12 @@ function renderProductDetail(product) {
       <nav class="product-detail-tabs" aria-label="产品详情">
         ${[
           ["basic", "基本信息"],
+          ["strategy", "产品战略"],
           ["business", "经营分析"],
+          ["health-analysis", "产品健康分析"],
+          ["business-diagnosis", "经营诊断"],
+          ["user-insights", "用户洞察"],
+          ["business-improvement", "经营改善"],
           ["lifecycle", "生命周期"],
           ["improvements", "改善记录"],
           ["erp", "更多信息"],
@@ -893,7 +1035,12 @@ function renderInfoGroup(title, fields) {
 
 function renderProductDetailTab(product, archive, erp) {
   if (productDetailTab === "business") return renderProductBusinessTab(product);
+  if (productDetailTab === "health-analysis") return renderProductHealthAnalysisTab(product);
+  if (productDetailTab === "business-improvement") return renderProductBusinessImprovementTab(product);
   if (productDetailTab === "lifecycle") return renderProductLifecycleTab(product);
+  if (productDetailTab === "strategy") return renderProductStrategyTab(product);
+  if (productDetailTab === "business-diagnosis") return renderProductBusinessDiagnosisTab(product);
+  if (productDetailTab === "user-insights") return renderProductInsightTab(product);
   if (productDetailTab === "improvements") return renderProductImprovementsTab(product);
   if (productDetailTab === "erp") return renderProductErpTab(erp);
   if (productDetailTab === "sales") return renderProductSalesLinks(product.id);
@@ -932,9 +1079,170 @@ function renderProductBusinessTab(product) {
     <article><span>净利润</span><strong>${formatMoney(analysis.finance.netProfit)}</strong><small>利润率 ${formatPercent(analysis.finance.profitMargin)}</small></article>
     <article><span>实际库存</span><strong>${formatMetric(analysis.inventory.actualStock)}</strong><small>${escapeHtml(analysis.inventory.risk)}</small></article>
     <article><span>库存周转</span><strong>${formatPercent(analysis.inventory.turnover)}</strong><small>库存效率</small></article>
-    <article><span>健康状态</span><strong>${latestHealth?.healthScore ?? "—"}分</strong><small>${escapeHtml(healthLabel(latestHealth?.healthStatus))}</small></article>
+    <article><span>健康状态</span><strong>${escapeHtml(detail.healthAnalysis?.overall?.label || healthLabel(latestHealth?.healthStatus))}</strong><small>详细原因请查看“产品健康分析”</small></article>
   </div>${hasPermission(getCurrentUser(), "products.edit") ? `<button class="primary-button" type="button" data-action="evaluate-product-health" data-product-id="${escapeHtml(product.id)}">生成经营体检</button>` : ""}
   <section class="product-problem-list"><h2>经营问题</h2>${detail.issues?.length ? detail.issues.map((issue) => `<article><span class="status-badge">${escapeHtml(issue.severity)}</span><strong>${escapeHtml(issue.title)}</strong><small>${escapeHtml(issue.status)}</small></article>`).join("") : `<p>暂未生成经营问题</p>`}</section></div>`;
+}
+
+function renderProductHealthRecommendation(product, recommendation, issue, activeGoals, actionTemplates, canCreate) {
+  return `<article><div><strong>${escapeHtml(recommendation.title)}</strong><p>${escapeHtml(recommendation.reason)}</p></div>
+    ${issue ? `<dl class="product-health-action-context"><div><dt>产品</dt><dd>${escapeHtml(product.name)}</dd></div><div><dt>问题类型</dt><dd>${escapeHtml(issue.category)} · ${escapeHtml(issue.issueTypeLabel)}</dd></div><div><dt>问题描述</dt><dd>${escapeHtml(issue.problemDescription)}</dd></div><div><dt>改善目标</dt><dd>${escapeHtml(issue.improvementGoal)}</dd></div><div><dt>建议方向</dt><dd>${escapeHtml(issue.suggestedDirection)}</dd></div></dl>` : ""}
+    ${canCreate ? `<form data-product-health-action-form data-product-id="${escapeHtml(product.id)}" data-recommendation-code="${escapeHtml(recommendation.code)}"><input type="hidden" name="title" value="${escapeHtml(recommendation.title)}：${escapeHtml(product.name)}" /><select name="goalId" required><option value="">选择目标</option>${activeGoals.map((goal) => `<option value="${escapeHtml(goal.id)}">${escapeHtml(goal.name)}</option>`).join("")}</select><select name="taskTemplateId" required><option value="">选择行动标准</option>${actionTemplates.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join("")}</select><button class="primary-button" type="submit" ${!activeGoals.length || !actionTemplates.length ? "disabled" : ""}>确认并创建改善行动</button><small>创建后进入关键行动，可继续关联多个产品；本步不生成任务。</small></form>` : ""}</article>`;
+}
+
+function renderProductHealthAnalysisTab(product) {
+  const detail = getProductManagementDetail(product.id);
+  const analysis = detail?.healthAnalysis;
+  if (!analysis) return `<div class="product-detail-empty">${productManagementState.loadingProductId === product.id ? "正在读取产品健康分析…" : "暂无健康分析数据"}</div>`;
+  const dimensionMeta = [
+    ["sales", "销售趋势", "近30天销售变化"],
+    ["inventory", "库存状态", "当前库存覆盖周期"],
+    ["profit", "利润状态", "毛利率、利润贡献"],
+    ["links", "链接表现", "关联销售链接整体表现"],
+    ["lifecycle", "生命周期", "产品阶段判断"],
+  ];
+  const activeGoals = state.goals.filter((item) => item.status === "active");
+  const actionTemplates = state.taskTemplates.filter((item) => item.status === "active" && item.defaultProcessTemplateId
+    && state.processTemplates.some((process) => process.id === item.defaultProcessTemplateId));
+  const canCreate = hasPermission(getCurrentUser(), "products.edit");
+  const center = detail?.improvementCenter;
+  return `<div class="product-health-analysis">
+    <header class="product-health-overall"><div><p class="eyebrow">产品健康</p><h2>综合状态：${escapeHtml(analysis.overall?.emoji || "⚪")} ${escapeHtml(analysis.overall?.label || "暂无数据")}</h2><p>基于现有销售、库存、利润、链接与生命周期数据的可解释规则分析。</p></div><span class="product-health-readonly">只读分析 · 不覆盖人工判断</span></header>
+    <section class="product-health-dimensions">${dimensionMeta.map(([key, title, caption]) => { const dimension = analysis.dimensions?.[key] ?? { code: "no_data", label: "暂无数据", explanation: "暂无数据" }; return `<article class="product-health-dimension severity-${escapeHtml(dimension.severity || "no_data")}"><div><span>${escapeHtml(title)}</span>${businessStatus(dimension.label, dimension.code, `health-dimension`)}</div><strong>${escapeHtml(caption)}</strong><p>${escapeHtml(dimension.explanation || "暂无数据")}</p></article>`; }).join("")}</section>
+    <section class="product-health-recommendations"><header><div><h2>改善建议</h2><p>选择目标和行动标准后创建关键行动草稿；不直接生成任务。</p></div></header>
+      ${analysis.recommendations?.length ? analysis.recommendations.map((recommendation) => renderProductHealthRecommendation(product, recommendation, center?.currentIssues?.find((item) => item.recommendationCode === recommendation.code), activeGoals, actionTemplates, canCreate)).join("") : `<div class="product-detail-empty">当前未发现需要创建改善行动的问题。</div>`}
+      ${canCreate && analysis.recommendations?.length && (!activeGoals.length || !actionTemplates.length) ? `<p class="product-health-action-hint">需先准备一个进行中的目标，并启用已绑定标准流程的关键行动。</p>` : ""}
+    </section>
+  </div>`;
+}
+
+function productImprovementActionStatus(status) {
+  return ({ draft: "草稿", running: "执行中", done: "已完成", completed: "已完成", stopped: "已终止", canceled: "已取消", cancelled: "已取消" })[status] || status || "待执行";
+}
+
+function renderProductBusinessImprovementTab(product) {
+  const detail = getProductManagementDetail(product.id);
+  const center = detail?.improvementCenter;
+  if (!center) return `<div class="product-detail-empty">${productManagementState.loadingProductId === product.id ? "正在读取经营改善…" : "暂无经营改善数据"}</div>`;
+  const canEdit = hasPermission(getCurrentUser(), "products.edit");
+  const resultItems = center.improvements.filter((item) => item.resultSummary);
+  const issueGroups = [...new Map(center.issueTypes.map((item) => [item.category, center.issueTypes.filter((type) => type.category === item.category)])).entries()];
+  return `<div class="product-business-improvement">
+    <section class="product-improvement-current"><header><div><p class="eyebrow">产品 → 健康分析 → 经营问题</p><h2>当前经营问题</h2><p>仅展示当前健康分析发现；不自动关闭问题，不覆盖人工判断。</p></div></header>
+      <div class="product-improvement-issues">${center.currentIssues.length ? center.currentIssues.map((issue) => `<article class="severity-${escapeHtml(issue.severity)}"><div><span>${issue.severity === "risk" ? "🔴" : "🟡"}</span><strong>${escapeHtml(issue.title)}</strong>${businessStatus(issue.status === "improving" ? "改善中" : "待改善", issue.status, "improvement")}</div><dl><div><dt>标准问题</dt><dd>${escapeHtml(issue.category)} · ${escapeHtml(issue.issueTypeLabel)}</dd></div><div><dt>原因</dt><dd>${escapeHtml(issue.reason)}</dd></div><div><dt>改善目标</dt><dd>${escapeHtml(issue.improvementGoal)}</dd></div><div><dt>建议方向</dt><dd>${escapeHtml(issue.suggestedDirection)}</dd></div></dl>${canEdit ? `<button class="primary-button" type="button" data-action="open-product-health" data-product-id="${escapeHtml(product.id)}">创建改善行动</button>` : ""}</article>`).join("") : `<div class="product-detail-empty">当前健康分析未发现待改善问题。</div>`}</div>
+      <details class="product-issue-type-catalog"><summary>查看标准产品经营问题类型</summary><div>${issueGroups.map(([category, items]) => `<section><strong>${escapeHtml(category)}</strong><p>${items.map((item) => escapeHtml(item.label)).join(" · ")}</p></section>`).join("")}</div></details>
+    </section>
+    <section class="product-improvement-actions"><header><div><h2>改善行动列表</h2><p>复用关键行动和任务执行链路，不创建第二套任务系统。</p></div></header>
+      ${center.improvements.length ? `<div class="connection-table-wrap"><table class="connection-table product-improvement-table"><thead><tr><th>改善事项</th><th>问题类型</th><th>关联关键行动</th><th>负责人</th><th>状态</th><th>开始时间</th><th>完成时间</th><th>结果</th></tr></thead><tbody>${center.improvements.map((item) => `<tr><td><strong>${escapeHtml(item.title)}</strong><small>任务进度 ${item.doneTaskCount}/${item.taskCount}</small></td><td>${escapeHtml(item.issueCategory)} · ${escapeHtml(item.issueTypeLabel)}</td><td><a class="text-button" href="#schedule-board">${escapeHtml(item.actionName || item.actionId)} →</a></td><td>${escapeHtml(item.ownerName)}</td><td>${businessStatus(productImprovementActionStatus(item.actionStatus), item.actionStatus, "improvement-action")}</td><td>${formatDateTime(item.startAt)}</td><td>${item.completedAt ? formatDateTime(item.completedAt) : "—"}</td><td>${item.resultSummary ? escapeHtml(item.resultSummary) : item.canRecordResult ? "待记录" : "执行中"}</td></tr>`).join("")}</tbody></table></div>` : `<div class="product-detail-empty">暂无关联改善行动。</div>`}
+    </section>
+    <section class="product-improvement-results"><header><div><h2>改善结果</h2><p>关键行动完成后由用户手工记录；不自动完成行动或关闭问题。</p></div></header>
+      ${center.improvements.filter((item) => item.canRecordResult && !item.resultSummary).map((item) => canEdit ? `<form class="product-improvement-result-form" data-product-improvement-result-form data-improvement-id="${escapeHtml(item.id)}"><div><strong>${escapeHtml(item.title)}</strong><p>改善前状态：${escapeHtml(item.beforeMetrics?.summary || item.issueTitle || "暂无数据")}</p></div><label>改善措施<textarea name="improvementMeasures" rows="3" required placeholder="例如：重新制作详情页"></textarea></label><label>改善后结果<textarea name="resultSummary" rows="3" required placeholder="例如：转化率 5.2% → 7.1%"></textarea></label><label>完成时间<input type="date" name="completedAt" value="${escapeHtml(String(item.actionCompletedAt || item.completedAt || "").slice(0, 10))}" required /></label><button class="primary-button" type="submit">记录改善结果</button></form>` : "").join("")}
+      ${resultItems.length ? `<div class="product-improvement-result-list">${resultItems.map((item) => `<article><div><strong>${escapeHtml(item.title)}</strong><span>${formatDateTime(item.completedAt)}</span></div><dl><div><dt>问题</dt><dd>${escapeHtml(item.issueTypeLabel)}</dd></div><div><dt>改善前状态</dt><dd>${escapeHtml(item.beforeMetrics?.summary || "暂无数据")}</dd></div><div><dt>改善措施</dt><dd>${escapeHtml(item.improvementMeasures || "暂无数据")}</dd></div><div><dt>改善后结果</dt><dd>${escapeHtml(item.resultSummary)}</dd></div></dl></article>`).join("")}</div>` : center.improvements.some((item) => item.canRecordResult) ? "" : `<div class="product-detail-empty">暂无已完成关键行动的改善结果。</div>`}
+    </section>
+  </div>`;
+}
+
+function strategyPersonOptions(selectedId = "") {
+  return `<option value="">未设置</option>${state.people.map((person) => `<option value="${escapeHtml(person.id)}" ${person.id === selectedId ? "selected" : ""}>${escapeHtml(person.name)}</option>`).join("")}`;
+}
+
+function strategyOptionList(values, selected = "", emptyLabel = "未设置") {
+  return `<option value="">${emptyLabel}</option>${values.map((value) => `<option value="${escapeHtml(value)}" ${value === selected ? "selected" : ""}>${escapeHtml(value)}</option>`).join("")}`;
+}
+
+function renderStrategyHistoryVersion(version) {
+  const content = version.content; const management = content.management;
+  return `<details><summary><strong>V${version.version}</strong><span>生效 ${formatDateTime(version.effectiveAt)} · 结束 ${version.endedAt ? formatDateTime(version.endedAt) : "—"} · ${escapeHtml(version.changedByName || "未知修改人")}</span></summary>
+    <div class="product-strategy-history-content"><p><b>产品定位：</b>${escapeHtml(content.positioning.positioning || "未设置")} · ${escapeHtml(content.positioning.productRole || "未设置角色")}</p>
+    <p><b>竞争策略：</b>${escapeHtml(content.competition.description || content.competition.differentiation || "未设置")}</p>
+    <p><b>策略周期：</b>${escapeHtml(management.periodLabel || management.periodType || "未设置")}</p>
+    <p><b>当前经营策略：</b>${escapeHtml(management.currentStrategy || "未设置")}</p>
+    <p><b>下一步策略：</b>${content.nextStrategies.length ? content.nextStrategies.map((item) => escapeHtml(item.content)).join(" · ") : "未设置"}</p></div></details>`;
+}
+
+function renderProductStrategyTab(product) {
+  const strategy = getProductManagementDetail(product.id)?.strategy;
+  if (!strategy) return `<div class="product-detail-empty">${productManagementState.loadingProductId === product.id ? "正在读取产品战略…" : "暂无产品战略数据"}</div>`;
+  const current = strategy.current; const content = current?.content ?? { positioning: {}, competition: {}, goals: {}, management: {}, nextStrategies: [] };
+  const { positioning, competition, goals, management, nextStrategies } = content;
+  const canEdit = hasPermission(getCurrentUser(), "products.edit");
+  const activeGoals = state.goals.filter((item) => item.status === "active");
+  const actionTemplates = state.taskTemplates.filter((item) => item.status === "active" && item.defaultProcessTemplateId
+    && state.processTemplates.some((process) => process.id === item.defaultProcessTemplateId));
+  const ownerName = (id) => state.people.find((person) => person.id === id)?.name || "未设置";
+  return `<div class="product-strategy-panel">
+    <header class="product-strategy-heading"><div><p class="eyebrow">POSITION → COMPETE → TARGET → STRATEGY → ACTION</p><h2>产品战略</h2><p>由管理者人工制定，系统不自动生成、改写或覆盖。</p></div>${current ? `<span class="product-strategy-version">V${current.version} · ${formatDateTime(current.effectiveAt)}</span>` : `<span class="product-strategy-version">尚未建立</span>`}</header>
+    <aside class="product-strategy-boundary"><div><strong>产品战略</strong><span>接下来准备怎么经营这个产品？</span></div><div><strong>经营改善</strong><span>当前发现了什么问题，准备怎么解决？</span></div></aside>
+    <div class="product-strategy-grid">
+      <form class="product-strategy-card" data-product-strategy-section="positioning" data-product-id="${escapeHtml(product.id)}"><header><h3>产品定位</h3><span>经营角色与生命周期独立</span></header><label>目标用户<textarea name="targetUsers" rows="2">${escapeHtml(positioning.targetUsers || "")}</textarea></label><label>核心使用场景<textarea name="coreScenarios" rows="2">${escapeHtml(positioning.coreScenarios || "")}</textarea></label><label>产品定位<textarea name="positioning" rows="3">${escapeHtml(positioning.positioning || "")}</textarea></label><label>价格定位<input name="pricePositioning" value="${escapeHtml(positioning.pricePositioning || "")}" /></label><label>产品角色<select name="productRole">${strategyOptionList(strategy.options.roles, positioning.productRole)}</select><small>当前生命周期：${escapeHtml(product.status || "未设置")}</small></label>${canEdit ? `<button class="primary-button" type="submit">保存产品定位</button>` : ""}</form>
+      <form class="product-strategy-card" data-product-strategy-section="competition" data-product-id="${escapeHtml(product.id)}"><header><h3>竞争策略</h3><span>第一版使用人工文字记录</span></header><label>主要竞争对象<textarea name="mainCompetitors" rows="2">${escapeHtml(competition.mainCompetitors || "")}</textarea></label><label>核心竞争优势<textarea name="strengths" rows="2">${escapeHtml(competition.strengths || "")}</textarea></label><label>核心竞争短板<textarea name="weaknesses" rows="2">${escapeHtml(competition.weaknesses || "")}</textarea></label><label>价格策略<input name="priceStrategy" value="${escapeHtml(competition.priceStrategy || "")}" /></label><label>差异化方向<textarea name="differentiation" rows="2">${escapeHtml(competition.differentiation || "")}</textarea></label><label>竞争策略说明<textarea name="description" rows="3">${escapeHtml(competition.description || "")}</textarea></label>${canEdit ? `<button class="primary-button" type="submit">保存竞争策略</button>` : ""}</form>
+      <form class="product-strategy-card" data-product-strategy-section="goals" data-product-id="${escapeHtml(product.id)}"><header><h3>经营目标</h3><span>所有目标可留空，不根据历史数据自动生成</span></header><label>目标销售额<input type="number" min="0" step="0.01" name="targetSalesAmount" value="${escapeHtml(goals.targetSalesAmount ?? "")}" /></label><label>目标销量<input type="number" min="0" step="1" name="targetSalesQuantity" value="${escapeHtml(goals.targetSalesQuantity ?? "")}" /></label><label>目标毛利率（%）<input type="number" min="0" max="100" step="0.1" name="targetGrossMargin" value="${escapeHtml(goals.targetGrossMargin ?? "")}" /></label><label>目标库存状态<input name="targetInventoryStatus" value="${escapeHtml(goals.targetInventoryStatus || "")}" placeholder="例如：健康" /></label><label>目标生命周期状态<select name="targetLifecycleStatus">${strategyOptionList(productStatuses, goals.targetLifecycleStatus)}</select><small>仅作目标记录，不会修改当前生命周期。</small></label>${canEdit ? `<button class="primary-button" type="submit">保存经营目标</button>` : ""}</form>
+      <form class="product-strategy-card" data-product-strategy-section="management" data-product-id="${escapeHtml(product.id)}"><header><h3>当前经营策略</h3><span>记录管理者已确定的经营方向</span></header><label>负责人<select name="ownerId">${strategyPersonOptions(management.ownerId)}</select></label><label>周期类型<select name="periodType">${strategyOptionList(strategy.options.periodTypes, management.periodType)}</select></label><label>策略周期<input name="periodLabel" value="${escapeHtml(management.periodLabel || "")}" placeholder="例如：2026 Q3" /></label><div class="product-strategy-period"><label>开始日期<input type="date" name="periodStart" value="${escapeHtml(management.periodStart || "")}" /></label><label>结束日期<input type="date" name="periodEnd" value="${escapeHtml(management.periodEnd || "")}" /></label></div><label>当前策略<textarea name="currentStrategy" rows="7" placeholder="例如：继续扩大主销颜色库存…">${escapeHtml(management.currentStrategy || "")}</textarea></label><label>备注<textarea name="notes" rows="3">${escapeHtml(management.notes || "")}</textarea></label>${canEdit ? `<button class="primary-button" type="submit">保存当前策略</button>` : ""}</form>
+    </div>
+    <section class="product-strategy-next"><header><div><h3>下一步策略</h3><p>策略不是任务；只有经人工确认后才可创建关键行动草稿。</p></div></header>
+      ${canEdit ? `<form class="product-strategy-step-create" data-product-strategy-step-create data-product-id="${escapeHtml(product.id)}"><label>策略内容<input name="content" required placeholder="例如：优化主图" /></label><label>优先级<select name="priority">${strategyOptionList(strategy.options.priorities, "中", "")}</select></label><label>负责人<select name="ownerId">${strategyPersonOptions(management.ownerId)}</select></label><label>计划时间<input type="date" name="plannedAt" /></label><button class="primary-button" type="submit">新增策略</button></form>` : ""}
+      <div class="product-strategy-step-list">${nextStrategies.length ? nextStrategies.map((item) => `<article><form data-product-strategy-step-update data-product-id="${escapeHtml(product.id)}" data-item-id="${escapeHtml(item.id)}"><label>策略内容<input name="content" value="${escapeHtml(item.content)}" required /></label><label>优先级<select name="priority">${strategyOptionList(strategy.options.priorities, item.priority, "")}</select></label><label>状态<select name="status">${strategyOptionList(strategy.options.statuses, item.status, "")}</select></label><label>负责人<select name="ownerId">${strategyPersonOptions(item.ownerId)}</select></label><label>计划时间<input type="date" name="plannedAt" value="${escapeHtml(item.plannedAt || "")}" /></label>${canEdit ? `<button class="secondary-button" type="submit">保存</button>` : ""}</form>
+        <footer><span>${escapeHtml(item.priority)}优先级 · ${escapeHtml(item.status)} · ${escapeHtml(ownerName(item.ownerId))}</span>${item.action ? `<a class="text-button" href="#schedule-board">关键行动：${escapeHtml(item.action.displayTitle || item.action.actionName)} →</a>` : canEdit ? `<form class="product-strategy-action-create" data-product-strategy-action-form data-product-id="${escapeHtml(product.id)}" data-item-id="${escapeHtml(item.id)}"><input type="hidden" name="title" value="${escapeHtml(item.content)}：${escapeHtml(product.name)}" /><div><strong>创建关键行动草稿</strong><small>自动带入产品、策略内容、周期与负责人；不生成任务。</small></div><select name="goalId" required><option value="">选择目标</option>${activeGoals.map((goal) => `<option value="${escapeHtml(goal.id)}">${escapeHtml(goal.name)}</option>`).join("")}</select><select name="taskTemplateId" required><option value="">选择行动标准</option>${actionTemplates.map((template) => `<option value="${escapeHtml(template.id)}">${escapeHtml(template.name)}</option>`).join("")}</select><button class="primary-button" type="submit" ${!activeGoals.length || !actionTemplates.length ? "disabled" : ""}>创建关键行动</button></form>` : ""}</footer></article>`).join("") : `<div class="product-detail-empty">暂无下一步策略。</div>`}</div>
+    </section>
+    <section class="product-strategy-history"><header><h3>战略历史</h3><p>每次保存都会产生新版本，旧版本不会被覆盖。</p></header>${strategy.history.length ? strategy.history.map(renderStrategyHistoryVersion).join("") : `<div class="product-detail-empty">暂无历史版本。</div>`}</section>
+  </div>`;
+}
+
+function renderProductBusinessDiagnosisTab(product) {
+  const diagnosis = getProductManagementDetail(product.id)?.businessDiagnosis;
+  if (!diagnosis) return `<div class="product-detail-empty">${productManagementState.loadingProductId === product.id ? "正在组合销售、库存、健康、战略与改善数据…" : "暂无经营诊断数据"}</div>`;
+  const noData = diagnosis.status.code === "no_data";
+  const sourceLabel = (source) => ({
+    "ProductHealthAnalysis.sales": "销售健康规则", "ProductHealthAnalysis.inventory": "库存健康规则",
+    "ProductHealthAnalysis.profit": "利润健康规则", "ProductHealthAnalysis.links": "链接表现规则",
+    "ProductBusinessReadModel.sales": "现有销售事实", "ProductBusinessReadModel.profit": "现有利润事实",
+    "ProductBusinessReadModel.inventory": "现有库存数据", "ProductBusinessReadModel.links": "现有销售链接数据",
+    "ProductStrategy + ProductBusinessReadModel.sales": "当前战略 + 销售事实", RuleProductDiagnosisProvider: "明确诊断规则",
+  })[source] || source;
+  return `<div class="product-business-diagnosis">
+    <header class="product-diagnosis-overall diagnosis-${escapeHtml(diagnosis.status.code)}"><div><p class="eyebrow">产品经营状态</p><h2>${escapeHtml(diagnosis.status.emoji)} ${escapeHtml(diagnosis.status.label)}</h2><p>规则版本 ${escapeHtml(diagnosis.provider.version)} · 只读分析</p></div><span>诊断 ≠ 决策</span></header>
+    <section class="product-diagnosis-reasons"><header><h3>主要原因</h3><p>仅展示可以追溯到现有数据的判断。</p></header>${diagnosis.primaryReasons.length ? `<div>${diagnosis.primaryReasons.map((item) => `<article><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.explanation)}</p><small>依据：${escapeHtml(sourceLabel(item.source))}</small></article>`).join("")}</div>` : `<div class="product-diagnosis-no-data">暂无足够经营数据。</div>`}</section>
+    <div class="product-diagnosis-columns">
+      <section class="product-diagnosis-advantages"><header><h3>产品优势</h3><p>没有数据依据时不做推断。</p></header>${diagnosis.advantages.length ? `<ul>${diagnosis.advantages.map((item) => `<li><span>✓</span><div><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.explanation)}</p><small>${escapeHtml(sourceLabel(item.source))}</small></div></li>`).join("")}</ul>` : `<div class="product-diagnosis-no-data">暂无足够数据。</div>`}</section>
+      <section class="product-diagnosis-risks"><header><h3>当前风险</h3><p>来自产品健康、经营数据和战略匹配规则。</p></header>${diagnosis.risks.length ? `<ul>${diagnosis.risks.map((item) => `<li><span>⚠</span><div><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.explanation)}</p><small>${escapeHtml(sourceLabel(item.source))} · ${escapeHtml(item.response?.label || "待管理者确认")}</small></div></li>`).join("")}</ul>` : `<div class="product-diagnosis-no-data">${noData ? "暂无足够数据。" : "当前未触发已定义风险规则。"}</div>`}</section>
+    </div>
+    <section class="product-diagnosis-focus"><header><h3>建议关注方向</h3><p>以下是经营提示，不是执行建议，也不会自动创建行动。</p></header>${diagnosis.focusDirections.length ? `<ol>${diagnosis.focusDirections.map((item) => `<li><div><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.explanation)}</p></div></li>`).join("")}</ol>` : `<div class="product-diagnosis-no-data">暂无足够数据形成关注方向。</div>`}</section>
+    <footer class="product-diagnosis-boundary"><span>数据源：ProductBusinessReadModel · ProductHealthAnalysis · ProductStrategy · ProductImprovement</span><strong>不修改战略、健康状态、生命周期，不生成任务或关键行动。</strong></footer>
+  </div>`;
+}
+
+function productInsightMeta(item) {
+  return `<small>来源：${escapeHtml(item.source)} · ${escapeHtml(item.createdByName || "未知录入人")} · ${formatDateTime(item.createdAt)}</small>`;
+}
+
+function renderProductInsightTab(product) {
+  const center = getProductManagementDetail(product.id)?.insightCenter;
+  if (!center) return `<div class="product-detail-empty">${productManagementState.loadingProductId === product.id ? "正在读取用户洞察…" : "暂无用户洞察数据"}</div>`;
+  const canEdit = hasPermission(getCurrentUser(), "products.edit"); const groups = center.groups;
+  const improvementOptions = `<option value="">不关联</option>${center.relations.improvements.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.title)} · ${escapeHtml(item.actionName || item.actionId)}</option>`).join("")}`;
+  const strategyOptions = `<option value="">不关联</option>${center.relations.strategies.map((item) => `<option value="${escapeHtml(item.id)}">V${item.version} · ${item.status === "current" ? "当前战略" : "历史战略"}</option>`).join("")}`;
+  const actionOptions = `<option value="">不关联</option>${center.relations.actions.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)} · ${escapeHtml(productImprovementActionStatus(item.status))}</option>`).join("")}`;
+  const sourceInput = `<label>来源<input name="source" required placeholder="例如：淘宝评价分析" /></label>`;
+  return `<div class="product-insight-center">
+    <header class="product-insight-heading"><div><p class="eyebrow">UNDERSTAND USERS → IMPROVE PRODUCTS → GUIDE NEW PRODUCTS</p><h2>用户洞察与产品机会</h2><p>当前为人工录入分析结果；洞察只提供决策依据，不自动改写产品、营销或战略资料。</p></div><span>${escapeHtml(center.provider.id)} · AI Ready</span></header>
+    <section class="product-insight-section insight-attention"><header><div><h3>用户关注点</h3><p>消费者购买这个产品时最关注什么？</p></div></header>
+      ${canEdit ? `<form class="product-insight-create" data-product-insight-form data-product-id="${escapeHtml(product.id)}"><input type="hidden" name="insightType" value="attention" /><label>关注主题<input name="content" required placeholder="例如：设计感" /></label><label>重要程度<select name="importance">${center.options.importanceLevels.map((level) => `<option value="${level}">${"★".repeat(level)}${"☆".repeat(5 - level)}</option>`).join("")}</select></label><label>说明<textarea name="description" rows="2" placeholder="用户为什么关注"></textarea></label>${sourceInput}<button class="primary-button" type="submit">新增关注点</button></form>` : ""}
+      <div class="product-insight-card-grid">${groups.attention.length ? groups.attention.map((item) => `<article><div><strong>${escapeHtml(item.content)}</strong><span class="product-insight-stars">${"★".repeat(item.importance)}${"☆".repeat(5-item.importance)}</span></div><p>${escapeHtml(item.description || "未填写说明")}</p>${productInsightMeta(item)}</article>`).join("") : `<div class="product-detail-empty">暂无用户关注点。</div>`}</div>
+    </section>
+    <section class="product-insight-section insight-satisfaction"><header><div><h3>用户满意点</h3><p>用户为什么喜欢这个产品？</p></div><span>可作为营销卖点参考，不自动覆盖营销资料</span></header>
+      ${canEdit ? `<form class="product-insight-create" data-product-insight-form data-product-id="${escapeHtml(product.id)}"><input type="hidden" name="insightType" value="satisfaction" /><label>满意点<input name="content" required placeholder="例如：高级感强" /></label><label>占比 / 频次<input name="frequencyText" placeholder="例如：32% 或 18次" /></label>${sourceInput}<label>备注<textarea name="note" rows="2"></textarea></label><button class="primary-button" type="submit">新增满意点</button></form>` : ""}
+      <div class="product-insight-list">${groups.satisfaction.length ? groups.satisfaction.map((item) => `<article><span>✓</span><div><strong>${escapeHtml(item.content)}</strong>${item.frequencyText ? `<em>${escapeHtml(item.frequencyText)}</em>` : ""}<p>${escapeHtml(item.note || "可作为产品卖点表达的人工参考。")}</p>${productInsightMeta(item)}</div></article>`).join("") : `<div class="product-detail-empty">暂无用户满意点。</div>`}</div>
+    </section>
+    <section class="product-insight-section insight-dissatisfaction"><header><div><h3>用户不满意点</h3><p>产品哪里没有满足用户？</p></div><span>可关联现有改善行动，不直接生成任务</span></header>
+      ${canEdit ? `<form class="product-insight-create is-wide" data-product-insight-form data-product-id="${escapeHtml(product.id)}"><input type="hidden" name="insightType" value="dissatisfaction" /><label>问题描述<input name="content" required placeholder="例如：尺寸偏小" /></label><label>影响程度<select name="impactLevel">${strategyOptionList(center.options.impactLevels, "中", "")}</select></label><label>处理状态<select name="handlingStatus">${strategyOptionList(center.options.handlingStatuses, "待处理", "")}</select></label><label>关联改善行动<select name="relatedImprovementId">${improvementOptions}</select></label>${sourceInput}<label>备注<input name="note" /></label><button class="primary-button" type="submit">新增不满意点</button></form>` : ""}
+      <div class="product-insight-problem-list">${groups.dissatisfaction.length ? groups.dissatisfaction.map((item) => `<article><div><span class="insight-impact-${escapeHtml(item.impactLevel)}">${escapeHtml(item.impactLevel)}影响</span><strong>${escapeHtml(item.content)}</strong></div><p>${escapeHtml(item.note || "未填写备注")}</p>${item.relatedImprovementId ? `<a class="text-button" href="#schedule-board">改善行动：${escapeHtml(item.improvementTitle || item.actionName || item.relatedImprovementId)}</a>` : `<small>暂未关联改善行动</small>`}${productInsightMeta(item)}${canEdit ? `<form data-product-insight-update data-product-id="${escapeHtml(product.id)}" data-insight-id="${escapeHtml(item.id)}"><select name="handlingStatus">${strategyOptionList(center.options.handlingStatuses, item.handlingStatus, "")}</select><button class="secondary-button" type="submit">更新状态</button></form>` : ""}</article>`).join("") : `<div class="product-detail-empty">暂无用户不满点。</div>`}</div>
+    </section>
+    <section class="product-insight-section insight-opportunity"><header><div><h3>产品机会</h3><p>根据用户反馈记录产品方向，由管理者决定是否进入战略与行动。</p></div></header>
+      ${canEdit ? `<form class="product-insight-create is-opportunity" data-product-insight-form data-product-id="${escapeHtml(product.id)}"><input type="hidden" name="insightType" value="opportunity" /><label>机会描述<input name="content" required placeholder="例如：增加大尺寸版本" /></label><label>机会类型<select name="opportunityType">${strategyOptionList(center.options.opportunityTypes, "其他", "")}</select></label><label>优先级<select name="priority">${strategyOptionList(center.options.opportunityPriorities, "中", "")}</select></label><label>状态<select name="status">${strategyOptionList(center.options.opportunityStatuses, "待评估", "")}</select></label><label>关联战略<select name="relatedStrategyVersionId">${strategyOptions}</select></label><label>关联关键行动<select name="relatedActionId">${actionOptions}</select></label>${sourceInput}<label>备注<input name="note" /></label><button class="primary-button" type="submit">新增产品机会</button></form>` : ""}
+      <div class="product-opportunity-list">${groups.opportunity.length ? groups.opportunity.map((item) => `<article><header><div><span>${escapeHtml(item.opportunityType)}</span><strong>${escapeHtml(item.content)}</strong></div>${businessStatus(item.status, item.status, "opportunity")}</header><dl><div><dt>优先级</dt><dd>${escapeHtml(item.priority)}</dd></div><div><dt>关联战略</dt><dd>${item.strategyVersion ? `V${item.strategyVersion}` : "未关联"}</dd></div><div><dt>关联行动</dt><dd>${escapeHtml(item.actionName || "未关联")}</dd></div></dl><p>${escapeHtml(item.note || "未填写备注")}</p>${productInsightMeta(item)}${canEdit ? `<form data-product-insight-update data-product-id="${escapeHtml(product.id)}" data-insight-id="${escapeHtml(item.id)}"><select name="status">${strategyOptionList(center.options.opportunityStatuses, item.status, "")}</select><button class="secondary-button" type="submit">更新状态</button></form>` : ""}</article>`).join("") : `<div class="product-detail-empty">暂无产品机会。</div>`}</div>
+    </section>
+    <footer class="product-insight-boundary"><strong>标准路径</strong><span>用户反馈 → 产品机会 → 产品战略调整 → 关键行动 → 任务执行</span><small>本模块只记录洞察和关联，不跳过战略与行动决策。</small></footer>
+  </div>`;
 }
 
 function renderProductLifecycleTab(product) {
@@ -1756,11 +2064,86 @@ async function refreshProductManagementOverview(rerender) {
   rerender();
 }
 
+async function refreshProductBusinessDashboard(rerender) {
+  if (productBusinessDashboardState.loading) return;
+  productBusinessDashboardState = { ...productBusinessDashboardState, loading: true, error: "" };
+  rerender();
+  try {
+    const result = await loadProductBusinessDashboard(productBusinessFilters);
+    productBusinessDashboardState = { readModel: result.readModel, loading: false, error: "" };
+    if (result.readModel?.pagination) productBusinessFilters.page = result.readModel.pagination.page;
+  } catch (error) {
+    productBusinessDashboardState = { ...productBusinessDashboardState, loading: false, error: error.message || "产品经营看板读取失败。" };
+  }
+  rerender();
+}
+
 async function refreshProductManagementDetail(productId, rerender) {
   if (!productId || productManagementState.loadingProductId === productId) return;
   productManagementState = { ...productManagementState, loadingProductId: productId, error: "" }; rerender();
-  try { const result = await loadProductManagementDetail(productId); const details = new Map(productManagementState.details); details.set(productId, { ...result.detail, lifecycleStatuses: result.lifecycleStatuses }); productManagementState = { ...productManagementState, details, loadingProductId: "", error: "" }; }
+  try { const result = await loadProductManagementDetail(productId); const details = new Map(productManagementState.details); details.set(productId, { ...(details.get(productId) ?? {}), ...result.detail, lifecycleStatuses: result.lifecycleStatuses }); productManagementState = { ...productManagementState, details, loadingProductId: "", error: "" }; }
   catch (error) { productManagementState = { ...productManagementState, loadingProductId: "", error: error.message || "产品经营详情读取失败。" }; }
+  rerender();
+}
+
+async function refreshProductHealthAnalysis(productId, rerender) {
+  if (!productId || productManagementState.loadingProductId === productId) return;
+  productManagementState = { ...productManagementState, loadingProductId: productId, error: "" }; rerender();
+  try {
+    const [result, improvementResult] = await Promise.all([loadProductHealthAnalysis(productId), loadProductImprovementCenter(productId)]);
+    const details = new Map(productManagementState.details);
+    details.set(productId, { ...(details.get(productId) ?? {}), healthAnalysis: result.analysis, improvementCenter: improvementResult.center });
+    productManagementState = { ...productManagementState, details, loadingProductId: "", error: "" };
+  } catch (error) {
+    productManagementState = { ...productManagementState, loadingProductId: "", error: error.message || "产品健康分析读取失败。" };
+  }
+  rerender();
+}
+
+async function refreshProductImprovementCenter(productId, rerender) {
+  if (!productId || productManagementState.loadingProductId === productId) return;
+  productManagementState = { ...productManagementState, loadingProductId: productId, error: "" }; rerender();
+  try {
+    const result = await loadProductImprovementCenter(productId);
+    const details = new Map(productManagementState.details);
+    details.set(productId, { ...(details.get(productId) ?? {}), improvementCenter: result.center });
+    productManagementState = { ...productManagementState, details, loadingProductId: "", error: "" };
+  } catch (error) {
+    productManagementState = { ...productManagementState, loadingProductId: "", error: error.message || "产品经营改善读取失败。" };
+  }
+  rerender();
+}
+
+async function refreshProductStrategy(productId, rerender) {
+  if (!productId || productManagementState.loadingProductId === productId) return;
+  productManagementState = { ...productManagementState, loadingProductId: productId, error: "" }; rerender();
+  try {
+    const result = await loadProductStrategy(productId); const details = new Map(productManagementState.details);
+    details.set(productId, { ...(details.get(productId) ?? {}), strategy: result.strategy });
+    productManagementState = { ...productManagementState, details, loadingProductId: "", error: "" };
+  } catch (error) { productManagementState = { ...productManagementState, loadingProductId: "", error: error.message || "产品战略读取失败。" }; }
+  rerender();
+}
+
+async function refreshProductBusinessDiagnosis(productId, rerender) {
+  if (!productId || productManagementState.loadingProductId === productId) return;
+  productManagementState = { ...productManagementState, loadingProductId: productId, error: "" }; rerender();
+  try {
+    const result = await loadProductBusinessDiagnosis(productId); const details = new Map(productManagementState.details);
+    details.set(productId, { ...(details.get(productId) ?? {}), businessDiagnosis: result.diagnosis });
+    productManagementState = { ...productManagementState, details, loadingProductId: "", error: "" };
+  } catch (error) { productManagementState = { ...productManagementState, loadingProductId: "", error: error.message || "产品经营诊断读取失败。" }; }
+  rerender();
+}
+
+async function refreshProductInsightCenter(productId, rerender) {
+  if (!productId || productManagementState.loadingProductId === productId) return;
+  productManagementState = { ...productManagementState, loadingProductId: productId, error: "" }; rerender();
+  try {
+    const result = await loadProductInsightCenter(productId); const details = new Map(productManagementState.details);
+    details.set(productId, { ...(details.get(productId) ?? {}), insightCenter: result.center });
+    productManagementState = { ...productManagementState, details, loadingProductId: "", error: "" };
+  } catch (error) { productManagementState = { ...productManagementState, loadingProductId: "", error: error.message || "用户洞察读取失败。" }; }
   rerender();
 }
 
@@ -1834,6 +2217,12 @@ export function bindProductCenterPageEvents(rerender) {
   if (!routeProductId && !routeErpSkuId && productSubmodule === "products" && !productSkuV2State.loaded && !productSkuV2State.loading) void refreshProductSkuV2List(rerender);
   if (routeErpSkuId && productSkuV2State.detailId !== routeErpSkuId && !productSkuV2State.loading) void refreshProductSkuV2Detail(routeErpSkuId, rerender);
   if (routeProductId && ["business", "lifecycle", "improvements"].includes(productDetailTab) && !getProductManagementDetail(routeProductId) && productManagementState.loadingProductId !== routeProductId) void refreshProductManagementDetail(routeProductId, rerender);
+  if (!routeProductId && productSubmodule === "business-dashboard" && !productBusinessDashboardState.readModel && !productBusinessDashboardState.loading) void refreshProductBusinessDashboard(rerender);
+  if (routeProductId && productDetailTab === "health-analysis" && (!getProductManagementDetail(routeProductId)?.healthAnalysis || !getProductManagementDetail(routeProductId)?.improvementCenter) && productManagementState.loadingProductId !== routeProductId) void refreshProductHealthAnalysis(routeProductId, rerender);
+  if (routeProductId && productDetailTab === "business-improvement" && !getProductManagementDetail(routeProductId)?.improvementCenter && productManagementState.loadingProductId !== routeProductId) void refreshProductImprovementCenter(routeProductId, rerender);
+  if (routeProductId && productDetailTab === "strategy" && !getProductManagementDetail(routeProductId)?.strategy && productManagementState.loadingProductId !== routeProductId) void refreshProductStrategy(routeProductId, rerender);
+  if (routeProductId && productDetailTab === "business-diagnosis" && !getProductManagementDetail(routeProductId)?.businessDiagnosis && productManagementState.loadingProductId !== routeProductId) void refreshProductBusinessDiagnosis(routeProductId, rerender);
+  if (routeProductId && productDetailTab === "user-insights" && !getProductManagementDetail(routeProductId)?.insightCenter && productManagementState.loadingProductId !== routeProductId) void refreshProductInsightCenter(routeProductId, rerender);
   if (routeProductId && productDetailTab === "sales" && productSalesState.productId !== routeProductId && !productSalesState.loading) {
     void refreshProductSalesLinks(routeProductId, rerender);
   }
@@ -1846,6 +2235,24 @@ export function bindProductCenterPageEvents(rerender) {
   if (!routeProductId && productSubmodule === "pending-skus" && !pendingSkuState.loaded && !pendingSkuState.loading) {
     void refreshPendingErpSkus(rerender);
   }
+  document.querySelector("[data-product-business-filter]")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    productBusinessFilters = {
+      ...productBusinessFilters,
+      query: form.elements.query.value.trim(), brand: form.elements.brand.value, category: form.elements.category.value,
+      lifecycle: form.elements.lifecycle.value, status: form.elements.status.value, healthStatus: form.elements.healthStatus.value,
+      inventoryStatus: form.elements.inventoryStatus.value, ownerId: form.elements.ownerId.value,
+      periodStart: form.elements.periodStart.value, periodEnd: form.elements.periodEnd.value, page: 1,
+    };
+    void refreshProductBusinessDashboard(rerender);
+  });
+  document.querySelectorAll("[data-product-business-metric]").forEach((checkbox) => checkbox.addEventListener("change", (event) => {
+    const metric = event.currentTarget.dataset.productBusinessMetric;
+    if (event.currentTarget.checked) productBusinessVisibleMetrics.add(metric);
+    else productBusinessVisibleMetrics.delete(metric);
+    rerender();
+  }));
   document.querySelector("[data-pending-sku-search]")?.addEventListener("submit", (event) => {
     event.preventDefault();
     void refreshPendingErpSkus(rerender, event.currentTarget.elements.query.value.trim());
@@ -1925,8 +2332,94 @@ export function bindProductCenterPageEvents(rerender) {
   });
   document.querySelectorAll("[data-product-improvement-form]").forEach((form)=>form.addEventListener("submit",async(event)=>{
     event.preventDefault(); const payload=Object.fromEntries(new FormData(form));
-    try { const result=await createProductImprovementAction(form.dataset.issueId,payload); if(result.instance) state.processInstances=[result.instance,...state.processInstances.filter((item)=>item.id!==result.instance.id)]; const details=new Map(productManagementState.details); details.delete(routeProductId); productManagementState={...productManagementState,details,notice:"改善行动草稿已创建。"}; await refreshProductManagementDetail(routeProductId,rerender); }
+    try { const result=await createProductImprovementAction(form.dataset.issueId,payload); if(result.instance) state.processInstances=[result.instance,...state.processInstances.filter((item)=>item.id!==result.instance.id)]; if(result.actionProduct) state.actionProducts=[result.actionProduct,...state.actionProducts.filter((item)=>item.id!==result.actionProduct.id)]; const details=new Map(productManagementState.details); details.delete(routeProductId); productManagementState={...productManagementState,details,notice:"改善行动草稿已创建。"}; await refreshProductManagementDetail(routeProductId,rerender); }
     catch(error){productManagementState={...productManagementState,error:error.message||"改善行动创建失败。"};rerender();}
+  }));
+  document.querySelectorAll("[data-product-health-action-form]").forEach((form) => form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const payload = Object.fromEntries(new FormData(form));
+    payload.recommendationCode = form.dataset.recommendationCode;
+    try {
+      const result = await createProductHealthAction(form.dataset.productId, payload);
+      if (result.instance) state.processInstances = [result.instance, ...state.processInstances.filter((item) => item.id !== result.instance.id)];
+      if (result.actionProduct) state.actionProducts = [result.actionProduct, ...state.actionProducts.filter((item) => item.id !== result.actionProduct.id)];
+      const details = new Map(productManagementState.details); const current = { ...(details.get(form.dataset.productId) ?? {}) }; delete current.businessDiagnosis; delete current.insightCenter; details.set(form.dataset.productId, current);
+      productManagementState = { ...productManagementState, details, notice: "改善行动草稿已创建，正在进入关键行动。", error: "" };
+      window.location.hash = "schedule-board";
+    } catch (error) {
+      productManagementState = { ...productManagementState, error: error.message || "产品健康改善行动创建失败。" };
+      rerender();
+    }
+  }));
+  document.querySelectorAll("[data-product-improvement-result-form]").forEach((form) => form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const payload = Object.fromEntries(new FormData(form));
+    try {
+      await recordProductImprovementResult(form.dataset.improvementId, payload);
+      const details = new Map(productManagementState.details);
+      const { improvementCenter: _staleImprovementCenter, ...current } = details.get(routeProductId) ?? {};
+      details.set(routeProductId, current);
+      productManagementState = { ...productManagementState, details, notice: "改善结果已记录，问题和关键行动状态未自动更改。", error: "" };
+      await refreshProductImprovementCenter(routeProductId, rerender);
+    } catch (error) {
+      productManagementState = { ...productManagementState, error: error.message || "产品改善结果保存失败。" }; rerender();
+    }
+  }));
+  document.querySelectorAll("[data-product-strategy-section]").forEach((form) => form.addEventListener("submit", async (event) => {
+    event.preventDefault(); const payload = Object.fromEntries(new FormData(form));
+    try {
+      await saveProductStrategySection(form.dataset.productId, form.dataset.productStrategySection, payload);
+      const details = new Map(productManagementState.details); const current = { ...(details.get(form.dataset.productId) ?? {}) }; delete current.strategy; delete current.businessDiagnosis; delete current.insightCenter; details.set(form.dataset.productId, current);
+      productManagementState = { ...productManagementState, details, notice: "产品战略已保存，上一版已转入历史。", error: "" };
+      await refreshProductStrategy(form.dataset.productId, rerender);
+    } catch (error) { productManagementState = { ...productManagementState, error: error.message || "产品战略保存失败。" }; rerender(); }
+  }));
+  document.querySelectorAll("[data-product-strategy-step-create]").forEach((form) => form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await addProductStrategyStep(form.dataset.productId, Object.fromEntries(new FormData(form)));
+      const details = new Map(productManagementState.details); const current = { ...(details.get(form.dataset.productId) ?? {}) }; delete current.strategy; delete current.businessDiagnosis; delete current.insightCenter; details.set(form.dataset.productId, current);
+      productManagementState = { ...productManagementState, details, notice: "下一步策略已新增，未生成任务。", error: "" };
+      await refreshProductStrategy(form.dataset.productId, rerender);
+    } catch (error) { productManagementState = { ...productManagementState, error: error.message || "下一步策略新增失败。" }; rerender(); }
+  }));
+  document.querySelectorAll("[data-product-strategy-step-update]").forEach((form) => form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await updateProductStrategyStep(form.dataset.productId, form.dataset.itemId, Object.fromEntries(new FormData(form)));
+      const details = new Map(productManagementState.details); const current = { ...(details.get(form.dataset.productId) ?? {}) }; delete current.strategy; delete current.businessDiagnosis; delete current.insightCenter; details.set(form.dataset.productId, current);
+      productManagementState = { ...productManagementState, details, notice: "策略状态已保存，不会自动变更任务或产品状态。", error: "" };
+      await refreshProductStrategy(form.dataset.productId, rerender);
+    } catch (error) { productManagementState = { ...productManagementState, error: error.message || "下一步策略保存失败。" }; rerender(); }
+  }));
+  document.querySelectorAll("[data-product-strategy-action-form]").forEach((form) => form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      const result = await createProductStrategyAction(form.dataset.productId, form.dataset.itemId, Object.fromEntries(new FormData(form)));
+      if (result.instance) state.processInstances = [result.instance, ...state.processInstances.filter((item) => item.id !== result.instance.id)];
+      if (result.actionProduct) state.actionProducts = [result.actionProduct, ...state.actionProducts.filter((item) => item.id !== result.actionProduct.id)];
+      const details = new Map(productManagementState.details); const current = { ...(details.get(form.dataset.productId) ?? {}) }; delete current.businessDiagnosis; delete current.insightCenter; details.set(form.dataset.productId, current);
+      productManagementState = { ...productManagementState, details, notice: "关键行动草稿已创建，未生成任务。", error: "" };
+      window.location.hash = "schedule-board";
+    } catch (error) { productManagementState = { ...productManagementState, error: error.message || "战略关键行动创建失败。" }; rerender(); }
+  }));
+  document.querySelectorAll("[data-product-insight-form]").forEach((form) => form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await createProductInsight(form.dataset.productId, Object.fromEntries(new FormData(form)));
+      const details = new Map(productManagementState.details); const current = { ...(details.get(form.dataset.productId) ?? {}) }; delete current.insightCenter; details.set(form.dataset.productId, current);
+      productManagementState = { ...productManagementState, details, notice: "用户洞察已保存，未修改产品或自动生成任务。", error: "" };
+      await refreshProductInsightCenter(form.dataset.productId, rerender);
+    } catch (error) { productManagementState = { ...productManagementState, error: error.message || "用户洞察保存失败。" }; rerender(); }
+  }));
+  document.querySelectorAll("[data-product-insight-update]").forEach((form) => form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await updateProductInsight(form.dataset.productId, form.dataset.insightId, Object.fromEntries(new FormData(form)));
+      const details = new Map(productManagementState.details); const current = { ...(details.get(form.dataset.productId) ?? {}) }; delete current.insightCenter; details.set(form.dataset.productId, current);
+      productManagementState = { ...productManagementState, details, notice: "用户洞察状态已更新。", error: "" };
+      await refreshProductInsightCenter(form.dataset.productId, rerender);
+    } catch (error) { productManagementState = { ...productManagementState, error: error.message || "用户洞察更新失败。" }; rerender(); }
   }));
   const page = document.querySelector(".product-center-page");
   page?.addEventListener("keydown", (event) => {
@@ -2006,6 +2499,42 @@ export function bindProductCenterPageEvents(rerender) {
         if (getRouteErpSkuId()) await refreshProductSkuV2Detail(erpSkuId, rerender); else await refreshProductSkuV2List(rerender);
       } catch (error) { productSkuV2State = { ...productSkuV2State, error: error.message || "产品档案创建失败。" }; rerender(); }
       return;
+    }
+    if (action === "product-workspace-view") {
+      productSubmodule = button.dataset.view === "business-dashboard" ? "business-dashboard" : "products";
+      if (productSubmodule === "business-dashboard") void refreshProductBusinessDashboard(rerender);
+      else rerender();
+    }
+    if (action === "product-business-range") {
+      productBusinessFilters = { ...productBusinessFilters, range: button.dataset.range, page: 1 };
+      if (button.dataset.range === "custom") rerender();
+      else void refreshProductBusinessDashboard(rerender);
+    }
+    if (action === "product-business-sort") {
+      const sortBy = button.dataset.sortBy;
+      const sortDirection = productBusinessFilters.sortBy === sortBy && productBusinessFilters.sortDirection === "desc" ? "asc" : "desc";
+      productBusinessFilters = { ...productBusinessFilters, sortBy, sortDirection, page: 1 };
+      void refreshProductBusinessDashboard(rerender);
+    }
+    if (action === "product-business-page") {
+      productBusinessFilters = { ...productBusinessFilters, page: Math.max(1, Number(button.dataset.page) || 1) };
+      void refreshProductBusinessDashboard(rerender);
+    }
+    if (action === "open-product-health") {
+      productDetailId = button.dataset.productId;
+      productDetailTab = "health-analysis";
+      window.location.hash = `products/${encodeURIComponent(button.dataset.productId)}`;
+      rerender();
+    }
+    if (action === "open-product-diagnosis") {
+      productDetailId = button.dataset.productId;
+      productDetailTab = "business-diagnosis";
+      window.location.hash = `products/${encodeURIComponent(button.dataset.productId)}`;
+      rerender();
+    }
+    if (action === "clear-product-business-filters") {
+      productBusinessFilters = { ...productBusinessFilters, query: "", brand: "", category: "", lifecycle: "", status: "", healthStatus: "", inventoryStatus: "", ownerId: "", range: "30d", periodStart: "", periodEnd: "", page: 1 };
+      void refreshProductBusinessDashboard(rerender);
     }
     if (action === "product-submodule") {
       productSubmodule = button.dataset.submodule === "pending-skus" ? "pending-skus" : "products";

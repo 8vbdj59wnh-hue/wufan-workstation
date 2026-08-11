@@ -2676,6 +2676,8 @@ function runLightweightMigrations() {
   ensureColumn("connection_profiles", "identifiedAt", "TEXT");
   ensureColumn("sales_links", "originSource", "TEXT NOT NULL DEFAULT 'legacy_unknown'");
   ensureColumn("sales_links", "enrichmentStatus", "TEXT NOT NULL DEFAULT 'complete'");
+  ensureColumn("product_improvements", "improvementMeasures", "TEXT");
+  ensureColumn("product_improvements", "completedAt", "TEXT");
   backfillConnectionProfileOrigins();
   migrateLegacyConnectionBenchmarks();
   backfillBusinessIdentifiers();

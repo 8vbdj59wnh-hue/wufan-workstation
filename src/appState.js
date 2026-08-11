@@ -1097,6 +1097,11 @@ export async function exportProductMarketingAsset(productId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}/marketing-asset/export`), "AI资料导出失败。");
 }
 
+export async function loadProductBusinessDashboard(params = {}) {
+  const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== "" && value !== undefined && value !== null));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/business-dashboard${query.size ? `?${query}` : ""}`), "产品经营看板读取失败。");
+}
+
 export async function loadProductManagementDetail(productId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}`), "产品经营详情读取失败。");
 }
@@ -1107,6 +1112,34 @@ export async function loadProductDailySales(productId, range = {}) {
   if (range.endDate) query.set("endDate", range.endDate);
   const suffix = query.toString() ? `?${query}` : "";
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}/daily-sales${suffix}`), "产品销售日报读取失败。");
+}
+
+export async function loadProductHealthAnalysis(productId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}/health-analysis`), "产品健康分析读取失败。");
+}
+
+export async function loadProductBusinessDiagnosis(productId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}/business-diagnosis`), "产品经营诊断读取失败。");
+}
+
+export async function loadProductInsightCenter(productId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}/user-insights`), "用户洞察读取失败。");
+}
+
+export async function createProductInsight(productId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}/user-insights`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  }), "用户洞察保存失败。");
+}
+
+export async function updateProductInsight(productId, insightId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}/user-insights/${encodeURIComponent(insightId)}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  }), "用户洞察更新失败。");
+}
+
+export async function loadProductImprovementCenter(productId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}/improvement-center`), "产品经营改善读取失败。");
 }
 
 export async function changeProductLifecycle(productId, payload) {
@@ -1123,6 +1156,46 @@ export async function createProductImprovementAction(issueId, payload) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/issues/${encodeURIComponent(issueId)}/improvement-action`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
   }), "产品改善行动创建失败。");
+}
+
+export async function createProductHealthAction(productId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}/health-action`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  }), "产品健康改善行动创建失败。");
+}
+
+export async function recordProductImprovementResult(improvementId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/improvements/${encodeURIComponent(improvementId)}/result`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  }), "产品改善结果保存失败。");
+}
+
+export async function loadProductStrategy(productId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}/strategy`), "产品战略读取失败。");
+}
+
+export async function saveProductStrategySection(productId, section, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}/strategy/${encodeURIComponent(section)}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  }), "产品战略保存失败。");
+}
+
+export async function addProductStrategyStep(productId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}/strategy/next-steps`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  }), "下一步策略新增失败。");
+}
+
+export async function updateProductStrategyStep(productId, itemId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}/strategy/next-steps/${encodeURIComponent(itemId)}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  }), "下一步策略更新失败。");
+}
+
+export async function createProductStrategyAction(productId, itemId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}/strategy/next-steps/${encodeURIComponent(itemId)}/action`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  }), "战略关键行动创建失败。");
 }
 
 export async function loadSupplyChainOverview() {
