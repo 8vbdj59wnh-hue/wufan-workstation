@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { ensureSalesAnomalyActionStandards } from "./capabilities/salesAnomalyActionStandards.js";
+import { migrateProductStructureSchema } from "./productStructureSchema.js";
 import { hashPassword } from "./security.js";
 import { createEmptyPermissions, mergePermissionSources, normalizePermissions, serializePermissions } from "../src/permissions.js";
 import {
@@ -1295,7 +1296,6 @@ function migrateProductErpMappingsV2() {
 
 function migrateSalesLinkSkuErpRelationsV2() {
   const database = getDatabase();
-  const migratedAt = new Date().toISOString();
   database.exec(`
     CREATE TABLE IF NOT EXISTS sales_link_sku_erp_mappings (
       id TEXT PRIMARY KEY,
@@ -1323,15 +1323,6 @@ function migrateSalesLinkSkuErpRelationsV2() {
     CREATE INDEX IF NOT EXISTS idx_sales_link_sku_erp_mapping_batch
       ON sales_link_sku_erp_mappings(sourceBatchId);
   `);
-  database.prepare(`
-    INSERT OR IGNORE INTO sales_link_sku_erp_mappings
-      (id,salesLinkSkuId,erpSkuId,mappingType,quantity,currentState,sourceType,sourceBatchId,createdAt,updatedAt)
-    SELECT 'sales-link-sku-erp-map-' || lower(hex(randomblob(16))),s.id,s.erpSkuId,'single',1,'active','legacy_migration',s.lastSeenBatchId,
-      COALESCE(NULLIF(s.updatedAt,''),NULLIF(s.createdAt,''),?),COALESCE(NULLIF(s.updatedAt,''),NULLIF(s.createdAt,''),?)
-    FROM sales_link_skus s
-    JOIN erp_skus e ON e.id=s.erpSkuId
-    WHERE s.erpSkuId IS NOT NULL AND s.erpSkuId<>'' AND COALESCE(s.systemGoodsType,'') NOT LIKE '%组合%'
-  `).run(migratedAt, migratedAt);
 }
 
 function migrateConnectionSkuSalesFactsV2() {
@@ -2289,6 +2280,7 @@ function runLightweightMigrations() {
   migrateConnectionSkuSalesDailyFactsV1();
   migrateSalesRelationCandidatesV1();
   migrateSalesLinkSkuComboGroupsV1();
+  migrateProductStructureSchema(getDatabase());
   migrateErpSkuBusinessUsagesV1();
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS platform_link_shop_mappings (

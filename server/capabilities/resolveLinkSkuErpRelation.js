@@ -23,6 +23,7 @@ function baseResult(salesLinkSkuId = null) {
     isUsable: false,
     mappings: [],
     combo: null,
+    productStructure: null,
     relationSources: [],
     relationshipEvidence: [],
     governance: {
@@ -54,6 +55,7 @@ function mappingOutput(row) {
     sourceBatchId: row.sourceBatchId ?? null,
     currentState: row.currentState,
     comboGroupId: row.comboGroupId ?? null,
+    productStructureId: row.productStructureId ?? null,
   };
 }
 
@@ -86,13 +88,14 @@ function loadRelationData(database, salesLinkSkuIds, onQuery = null) {
   const empty = {
     linkSkusById: new Map(), mappingsBySkuId: new Map(), groupsById: new Map(),
     groupsBySkuId: new Map(), componentsByGroupId: new Map(), candidatesBySkuId: new Map(),
+    structuresById: new Map(), structuresBySkuId: new Map(), structureComponentsById: new Map(),
   };
   if (!salesLinkSkuIds.length) return empty;
 
   const idsSql = placeholders(salesLinkSkuIds);
   const linkSkus = queryAll(`SELECT id,salesLinkId FROM sales_link_skus WHERE id IN (${idsSql})`, salesLinkSkuIds);
   const mappings = queryAll(`
-    SELECT id mappingId,salesLinkSkuId,erpSkuId,quantity,mappingType,sourceType,sourceBatchId,currentState,comboGroupId
+    SELECT id mappingId,salesLinkSkuId,erpSkuId,quantity,mappingType,sourceType,sourceBatchId,currentState,comboGroupId,productStructureId
     FROM sales_link_sku_erp_mappings
     WHERE salesLinkSkuId IN (${idsSql}) AND currentState='active'
   `, salesLinkSkuIds);
@@ -120,6 +123,18 @@ function loadRelationData(database, salesLinkSkuIds, onQuery = null) {
   const components = groupIds.length
     ? queryAll(`SELECT * FROM sales_link_sku_combo_group_components WHERE comboGroupId IN (${placeholders(groupIds)})`, groupIds)
     : [];
+  const mappingStructureIds = [...new Set(mappings.map((row) => clean(row.productStructureId)).filter(Boolean))];
+  const structureConditions = [`salesLinkSkuId IN (${idsSql}) AND status='active'`];
+  const structureParams = [...salesLinkSkuIds];
+  if (mappingStructureIds.length) {
+    structureConditions.push(`id IN (${placeholders(mappingStructureIds)})`);
+    structureParams.push(...mappingStructureIds);
+  }
+  const structures = queryAll(`SELECT * FROM sales_link_sku_product_structures WHERE ${structureConditions.join(" OR ")}`, structureParams);
+  const structureIds = [...new Set(structures.map((row) => row.id))];
+  const structureComponents = structureIds.length
+    ? queryAll(`SELECT * FROM sales_link_sku_product_structure_components WHERE productStructureId IN (${placeholders(structureIds)})`, structureIds)
+    : [];
   const candidates = queryAll(`
     SELECT salesLinkSkuId,candidateType,COUNT(*) count
     FROM sales_link_sku_erp_mapping_candidates
@@ -131,44 +146,62 @@ function loadRelationData(database, salesLinkSkuIds, onQuery = null) {
     linkSkusById: new Map(linkSkus.map((row) => [row.id, row])),
     mappingsBySkuId: new Map(), groupsById: new Map(groups.map((row) => [row.id, row])),
     groupsBySkuId: new Map(), componentsByGroupId: new Map(), candidatesBySkuId: new Map(),
+    structuresById: new Map(structures.map((row) => [row.id, row])), structuresBySkuId: new Map(), structureComponentsById: new Map(),
   };
   for (const row of enrichedMappings) appendBy(loaded.mappingsBySkuId, row.salesLinkSkuId, row);
   for (const row of groups) appendBy(loaded.groupsBySkuId, row.salesLinkSkuId, row);
   for (const row of components) appendBy(loaded.componentsByGroupId, row.comboGroupId, row);
+  for (const row of structures) appendBy(loaded.structuresBySkuId, row.salesLinkSkuId, row);
+  for (const row of structureComponents) appendBy(loaded.structureComponentsById, row.productStructureId, row);
   for (const row of candidates) appendBy(loaded.candidatesBySkuId, row.salesLinkSkuId, row);
   for (const rows of loaded.groupsBySkuId.values()) rows.sort((a, b) => clean(a.approvedAt).localeCompare(clean(b.approvedAt)) || a.id.localeCompare(b.id));
   for (const rows of loaded.componentsByGroupId.values()) rows.sort((a, b) => Number(a.sortOrder) - Number(b.sortOrder) || a.erpSkuId.localeCompare(b.erpSkuId) || a.id.localeCompare(b.id));
+  for (const rows of loaded.structureComponentsById.values()) rows.sort((a, b) => Number(a.sortOrder) - Number(b.sortOrder) || a.erpSkuId.localeCompare(b.erpSkuId) || a.id.localeCompare(b.id));
   for (const rows of loaded.candidatesBySkuId.values()) rows.sort((a, b) => a.candidateType.localeCompare(b.candidateType));
   const componentSortOrder = new Map();
   for (const [groupId, rows] of loaded.componentsByGroupId) {
     for (const row of rows) componentSortOrder.set(`${groupId}|${row.erpSkuId}`, Number(row.sortOrder));
   }
+  for (const [structureId, rows] of loaded.structureComponentsById) {
+    for (const row of rows) componentSortOrder.set(`${structureId}|${row.erpSkuId}`, Number(row.sortOrder));
+  }
   for (const rows of loaded.mappingsBySkuId.values()) rows.sort((a, b) => {
-    const aOrder = componentSortOrder.get(`${a.comboGroupId}|${a.erpSkuId}`) ?? Number.MAX_SAFE_INTEGER;
-    const bOrder = componentSortOrder.get(`${b.comboGroupId}|${b.erpSkuId}`) ?? Number.MAX_SAFE_INTEGER;
+    const aOrder = componentSortOrder.get(`${a.productStructureId || a.comboGroupId}|${a.erpSkuId}`) ?? Number.MAX_SAFE_INTEGER;
+    const bOrder = componentSortOrder.get(`${b.productStructureId || b.comboGroupId}|${b.erpSkuId}`) ?? Number.MAX_SAFE_INTEGER;
     return aOrder - bOrder || a.erpSkuId.localeCompare(b.erpSkuId) || a.mappingId.localeCompare(b.mappingId);
   });
   return loaded;
 }
 
-function evidenceFor(mappings, groupsById) {
+function evidenceFor(mappings, groupsById, structuresById) {
   const grouped = new Map();
   for (const mapping of mappings) {
-    const key = [mapping.sourceType, mapping.sourceBatchId || "", mapping.comboGroupId || ""].join("|");
+    const key = [mapping.sourceType, mapping.sourceBatchId || "", mapping.comboGroupId || "", mapping.productStructureId || ""].join("|");
     if (!grouped.has(key)) {
       const group = mapping.comboGroupId ? groupsById.get(mapping.comboGroupId) : null;
+      const structure = mapping.productStructureId ? structuresById.get(mapping.productStructureId) : null;
       grouped.set(key, {
         sourceType: mapping.sourceType,
         sourceBatchId: mapping.sourceBatchId ?? null,
         mappingIds: [],
         comboGroupId: mapping.comboGroupId ?? null,
-        reviewedBy: group?.reviewedBy ?? null,
-        reviewedAt: group?.reviewedAt ?? null,
+        productStructureId: mapping.productStructureId ?? null,
+        reviewedBy: structure?.reviewedBy ?? group?.reviewedBy ?? null,
+        reviewedAt: structure?.reviewedAt ?? group?.reviewedAt ?? null,
       });
     }
     grouped.get(key).mappingIds.push(mapping.mappingId);
   }
   return [...grouped.values()].map((item) => ({ ...item, mappingIds: item.mappingIds.sort() }));
+}
+
+function compareProductStructureSet(mappings, components) {
+  if (components.length !== mappings.length) return false;
+  const mappingByErpSkuId = new Map(mappings.map((item) => [item.erpSkuId, item]));
+  return components.every((component) => {
+    const mapping = mappingByErpSkuId.get(component.erpSkuId);
+    return mapping && Number(mapping.quantity) === Number(component.quantity) && Number(component.quantity) > 0;
+  });
 }
 
 function compareComboSet(mappings, components) {
@@ -251,13 +284,37 @@ function resolveLoadedRelation(salesLinkSkuId, loaded) {
   ));
 
   const mappingGroupIds = [...new Set(rows.map((row) => clean(row.comboGroupId)).filter(Boolean))];
+  const activeStructures = loaded.structuresBySkuId.get(salesLinkSkuId) || [];
+  const mappingStructureIds = [...new Set(rows.map((row) => clean(row.productStructureId)).filter(Boolean))];
+  if (activeStructures.length > 1) result.conflicts.push(conflict(
+    "multiple_active_product_structures",
+    "同一链接SKU存在多个active Product Structure。",
+    { productStructureIds: activeStructures.map((structure) => structure.id) },
+  ));
+  let validProductStructure = null;
+  if (mappingStructureIds.length || activeStructures.length) {
+    if (mappingStructureIds.length !== 1 || rows.some((row) => row.productStructureId !== mappingStructureIds[0])) {
+      result.conflicts.push(conflict("product_structure_incomplete", "active mappings没有整组关联同一个Product Structure。", { productStructureIds: mappingStructureIds }));
+    } else {
+      const structure = loaded.structuresById.get(mappingStructureIds[0]);
+      const structureComponents = loaded.structureComponentsById.get(mappingStructureIds[0]) || [];
+      if (!structure || structure.salesLinkSkuId !== salesLinkSkuId || structure.status !== "active") {
+        result.conflicts.push(conflict("product_structure_incomplete", "mapping关联的Product Structure不存在、未激活或不属于当前链接SKU。", { productStructureId: mappingStructureIds[0] }));
+      } else if (!compareProductStructureSet(rows, structureComponents)) {
+        result.conflicts.push(conflict("product_structure_mismatch", "Product Structure组件集合或quantity与active mappings不一致。", { productStructureId: structure.id }));
+      } else {
+        validProductStructure = structure;
+        result.productStructure = { productStructureId: structure.id, status: structure.status, structureHash: structure.structureHash, componentCount: structureComponents.length, isConsistent: true };
+      }
+    }
+  }
   const relevantGroupIds = [...new Set([...mappingGroupIds, ...approvedGroups.map((group) => group.id)])];
   const groups = relevantGroupIds.map((id) => loaded.groupsById.get(id)).filter(Boolean);
   const groupsById = new Map(groups.map((group) => [group.id, group]));
   const componentsByGroupId = new Map();
   for (const groupId of relevantGroupIds) componentsByGroupId.set(groupId, loaded.componentsByGroupId.get(groupId) || []);
 
-  if (rows.length === 1) {
+  if (!validProductStructure && rows.length === 1) {
     const row = rows[0];
     if (row.mappingType === "combo" || mappingGroupIds.length || approvedGroups.length) {
       result.conflicts.push(conflict(
@@ -266,7 +323,7 @@ function resolveLoadedRelation(salesLinkSkuId, loaded) {
         { mappingIds: [row.mappingId], comboGroupIds: relevantGroupIds },
       ));
     }
-  } else {
+  } else if (!validProductStructure) {
     const hasSingle = rows.some((row) => row.mappingType === "single");
     const hasCombo = rows.some((row) => row.mappingType === "combo");
     if (hasSingle && hasCombo) result.conflicts.push(conflict(
@@ -318,7 +375,7 @@ function resolveLoadedRelation(salesLinkSkuId, loaded) {
     componentCount: (componentsByGroupId.get(primaryGroup.id) || []).filter((item) => item.status === "included").length,
     isConsistent: rows.length > 1 && primaryGroup.status === "approved" && compareComboSet(rows, componentsByGroupId.get(primaryGroup.id) || []),
   } : null;
-  result.relationshipEvidence = evidenceFor(rows, groupsById);
+  result.relationshipEvidence = evidenceFor(rows, groupsById, loaded.structuresById);
 
   if (result.governance.requiresReview) {
     result.warnings.push({
