@@ -91,7 +91,7 @@ let productSalesState = { productId: "", loading: false, loaded: false, rows: []
 let productSalesSummaryState = { loading: false, loaded: false, rows: [], error: "" };
 let unmatchedSkuState = { loading: false, loaded: false, rows: [], total: 0, query: "", error: "" };
 let platformProductLinkState = { skuId: "", query: "", selectedProductId: "", error: "" };
-let productSubmodule = "products";
+let productSubmodule = "business-dashboard";
 let pendingSkuState = { loading: false, loaded: false, rows: [], query: "", error: "", notice: "" };
 let selectedPendingSkuIds = new Set();
 let platformPreviewRequestId = 0;
@@ -373,9 +373,12 @@ function renderProductCards(products, index) {
 }
 
 function renderProductWorkspaceTabs() {
+  const isProductDetail = Boolean(getRouteProductId());
+  const skuManagementActive = Boolean(getRouteErpSkuId())
+    || (!isProductDetail && ["sku-management", "pending-skus"].includes(productSubmodule));
   return `<nav class="product-workspace-tabs" aria-label="产品中心视图">
-    <button type="button" data-action="product-workspace-view" data-view="library" class="${productSubmodule !== "business-dashboard" ? "is-active" : ""}">产品库</button>
-    <button type="button" data-action="product-workspace-view" data-view="business-dashboard" class="${productSubmodule === "business-dashboard" ? "is-active" : ""}">产品经营看板</button>
+    <button type="button" data-action="product-workspace-view" data-view="business-dashboard" class="${skuManagementActive ? "" : "is-active"}">产品经营</button>
+    <button type="button" data-action="product-workspace-view" data-view="sku-management" class="${skuManagementActive ? "is-active" : ""}">SKU管理</button>
   </nav>`;
 }
 
@@ -481,67 +484,9 @@ function renderProductBusinessDashboard() {
 }
 
 function renderProductList() {
-  if (productSubmodule === "business-dashboard") return renderProductBusinessDashboard();
   if (productSubmodule === "pending-skus") return renderPendingSkuPage();
-  return renderProductSkuV2List();
-  /* Legacy product-card view remains available to existing product detail flows. */
-  // eslint-disable-next-line no-unreachable
-  const index = buildProductUiIndex();
-  const products = getSortedProducts(getFilteredProducts(index), index);
-  const totalPages = Math.max(1, Math.ceil(products.length / productPageSize));
-  productPage = Math.min(productPage, totalPages);
-  const visibleProducts = products.slice((productPage - 1) * productPageSize, productPage * productPageSize);
-  const canCreate = hasPermission(getCurrentUser(), "products.create");
-  return `
-    <section class="product-center-page">
-      <div class="section-heading with-actions">
-        <div><h1>产品中心</h1><p>以 SKU 为单位维护唯一产品主数据</p></div>
-        <div class="heading-actions">
-          ${canAccessModule(getCurrentUser(), "dataCenter") ? `<button class="secondary-button" type="button" data-action="open-product-analysis">经营分析</button>` : ""}
-          ${canCreate ? `<button class="secondary-button" type="button" data-action="open-product-v2-import">导入ERP数据</button><button class="primary-button" type="button" data-action="new-product">新增产品</button>` : ""}
-        </div>
-      </div>
-      ${renderProductWorkspaceTabs()}
-      ${renderProductSubmoduleTabs()}
-      ${productManagementState.error ? `<div class="form-error">${escapeHtml(productManagementState.error)}</div>` : ""}
-      ${productManagementState.notice ? `<div class="form-success">${escapeHtml(productManagementState.notice)}</div>` : ""}
-      ${renderProductManagementOverview()}
-      ${renderProductBusinessZones(index)}
-      <form class="filter-bar product-filter-bar" data-product-filter-form>
-        <input type="search" name="query" value="${escapeHtml(filters.query)}" placeholder="搜索产品名称或SKU" />
-        <select name="brand">${renderFilterOptions(uniqueValues("brand"), filters.brand, "全部品牌")}</select>
-        <select name="category">${renderFilterOptions(uniqueValues("category"), filters.category, "全部分类")}</select>
-        <details class="product-more-filters" ${filters.status || filters.erpStatus || filters.platform || filters.stockStatus ? "open" : ""}>
-          <summary>更多筛选</summary>
-          <div>
-            <select name="status">${renderFilterOptions(productStatuses, filters.status, "全部状态")}</select>
-            <select name="erpStatus"><option value="">全部ERP状态</option><option value="linked" ${filters.erpStatus === "linked" ? "selected" : ""}>已关联ERP</option><option value="unlinked" ${filters.erpStatus === "unlinked" ? "selected" : ""}>未关联ERP</option></select>
-            <select name="platform">${renderFilterOptions([...new Set((state.salesShops ?? []).map((item) => item.platform).filter(Boolean))].sort(), filters.platform, "全部销售平台")}</select>
-            <select name="stockStatus"><option value="">全部库存</option><option value="available" ${filters.stockStatus === "available" ? "selected" : ""}>有库存</option><option value="low" ${filters.stockStatus === "low" ? "selected" : ""}>低库存</option><option value="empty" ${filters.stockStatus === "empty" ? "selected" : ""}>无库存</option></select>
-          </div>
-        </details>
-        <button class="secondary-button" type="submit">筛选</button>
-        <button class="text-button" type="button" data-action="clear-product-filters">清空</button>
-      </form>
-      <div class="product-list-toolbar">
-        <span>共 ${products.length} 个 SKU</span>
-        <div class="product-list-toolbar-actions">
-          ${renderProductBusinessSort()}
-          <div class="product-view-switch" aria-label="产品展示方式">
-            <button type="button" data-action="set-product-view" data-view-mode="list" class="${productViewMode === "list" ? "is-active" : ""}">列表</button>
-            <button type="button" data-action="set-product-view" data-view-mode="card" class="${productViewMode === "card" ? "is-active" : ""}">卡片</button>
-          </div>
-        </div>
-      </div>
-      ${productViewMode === "card" ? renderProductCards(visibleProducts, index) : renderProductTable(visibleProducts, index)}
-      ${renderProductPagination(products.length, totalPages)}
-      ${renderProductImportRecords()}
-      ${renderUnmatchedPlatformSkus()}
-      ${renderProductModal()}
-      ${renderProductSkuChangeModal()}
-      ${renderProductV2ImportModal()}
-    </section>
-  `;
+  if (productSubmodule === "sku-management") return renderProductSkuV2List();
+  return renderProductBusinessDashboard();
 }
 
 function renderProductSkuV2List() {
@@ -549,6 +494,8 @@ function renderProductSkuV2List() {
   const totalPages = Math.max(1, Math.ceil(Number(pagination.total || 0) / productSkuV2State.pageSize));
   return `<section class="product-center-page product-sku-v2-page">
     <div class="section-heading with-actions"><div><h1>产品中心</h1><p>查看每个 SKU 的经营表现与库存状态</p></div><details class="product-more-filters"><summary>更多</summary><div><button type="button" class="text-button" data-action="open-product-v2-import">数据同步</button></div></details></div>
+    ${renderProductWorkspaceTabs()}
+    ${renderProductSubmoduleTabs()}
     ${productSkuV2State.error ? `<div class="form-error">${escapeHtml(productSkuV2State.error)}</div>` : ""}
     ${productSkuV2State.notice ? `<div class="form-success">${escapeHtml(productSkuV2State.notice)}</div>` : ""}
     <section class="stats-grid product-sku-v2-stats">
@@ -618,7 +565,7 @@ function renderProductV2BusinessSort() {
 
 function renderProductSkuV2Detail() {
   const detail = productSkuV2State.detail;
-  if (productSkuV2State.loading || !detail) return `<section class="product-center-page"><button class="text-button" data-action="back-products">← 返回产品中心</button>${productSkuV2State.error ? `<div class="form-error">${escapeHtml(productSkuV2State.error)}</div>` : `<div class="empty-state">正在读取SKU详情…</div>`}</section>`;
+  if (productSkuV2State.loading || !detail) return `<section class="product-center-page"><button class="text-button" data-action="back-products">← 返回SKU管理</button>${renderProductWorkspaceTabs()}${productSkuV2State.error ? `<div class="form-error">${escapeHtml(productSkuV2State.error)}</div>` : `<div class="empty-state">正在读取SKU详情…</div>`}</section>`;
   const { sku, inventory, sales } = detail;
   const listRow = productSkuV2State.rows.find((item) => item.erpSkuId === sku.id);
   const section = (scope) => productWorkspaceState.sections[scope] ?? { loading: false, loaded: false, rows: [], error: "" };
@@ -656,9 +603,10 @@ function renderProductSkuV2Detail() {
   if (activeTab === "sales") tabContent = renderProductWorkspaceRecords("sales", section("sales"));
   if (activeTab === "operations") tabContent = renderProductWorkspaceRecords("operations", section("operations"));
   return `<section class="product-center-page product-detail-page product-sku-v2-detail product-workspace">
-    <button class="text-button product-detail-back" type="button" data-action="back-products">← 返回产品中心</button>
+    <button class="text-button product-detail-back" type="button" data-action="back-products">← 返回SKU管理</button>
+    ${renderProductWorkspaceTabs()}
     ${productSkuV2State.error ? `<div class="form-error">${escapeHtml(productSkuV2State.error)}</div>` : ""}
-    <div class="product-workspace-top">${businessZoneBadge(listRow?.businessZone)}<div class="product-workspace-hero">${renderUiModule("product_basic_info", moduleContext)}${renderUiModule("product_business_data", moduleContext)}</div><div class="product-workspace-actions">${!sku.productId && hasPermission(getCurrentUser(), "products.create") ? `<button class="primary-button" type="button" data-action="create-product-v2-profile" data-erp-sku-id="${escapeHtml(sku.id)}">创建产品档案</button>` : sku.productId ? `<a class="secondary-button" href="#products/${encodeURIComponent(sku.productId)}">查看经营档案</a>` : ""}</div></div>
+    <div class="product-workspace-top">${businessZoneBadge(listRow?.businessZone)}<div class="product-workspace-hero">${renderUiModule("product_basic_info", moduleContext)}${renderUiModule("product_business_data", moduleContext)}</div><div class="product-workspace-actions">${!sku.productId && hasPermission(getCurrentUser(), "products.create") ? `<button class="primary-button" type="button" data-action="create-product-v2-profile" data-erp-sku-id="${escapeHtml(sku.id)}">创建产品档案</button>` : sku.productId ? `<a class="secondary-button" href="#products/${encodeURIComponent(sku.productId)}">查看关联产品档案 →</a>` : ""}</div></div>
     <nav class="product-workspace-tabs" aria-label="Product Workspace">${tabs.map(([key,label])=>`<button type="button" data-action="product-workspace-tab" data-tab="${key}" class="${activeTab===key?"is-active":""}">${label}</button>`).join("")}</nav>
     <div class="product-workspace-content">${tabContent}</div>
   </section>`;
@@ -678,7 +626,7 @@ function renderProductWorkspaceRecords(scope, section) {
 
 function renderProductSubmoduleTabs() {
   return `<nav class="product-submodule-tabs" aria-label="产品中心子模块">
-    <button type="button" data-action="product-submodule" data-submodule="products" class="${productSubmodule === "products" ? "is-active" : ""}">产品列表</button>
+    <button type="button" data-action="product-submodule" data-submodule="sku-management" class="${productSubmodule === "sku-management" ? "is-active" : ""}">SKU列表</button>
     <button type="button" data-action="product-submodule" data-submodule="pending-skus" class="${productSubmodule === "pending-skus" ? "is-active" : ""}">待建立SKU</button>
   </nav>`;
 }
@@ -994,6 +942,7 @@ function renderProductDetail(product) {
       ${productManagementState.error ? `<div class="form-error">${escapeHtml(productManagementState.error)}</div>` : ""}
       ${productManagementState.notice ? `<div class="form-success">${escapeHtml(productManagementState.notice)}</div>` : ""}
       <button class="text-button product-detail-back" type="button" data-action="back-products">← 返回产品列表</button>
+      ${renderProductWorkspaceTabs()}
       <header class="product-detail-hero">
         <div class="product-detail-media">${renderImage(product, "product-detail-main-image")}</div>
         <div class="product-detail-identity">
@@ -2214,10 +2163,10 @@ async function refreshPlatformPreview(rerender, { page = 1, filters = importStat
 export function bindProductCenterPageEvents(rerender) {
   const routeErpSkuId = getRouteErpSkuId();
   const routeProductId = getRouteProductId();
-  if (!routeProductId && !routeErpSkuId && productSubmodule === "products" && !productSkuV2State.loaded && !productSkuV2State.loading) void refreshProductSkuV2List(rerender);
+  if (!routeProductId && !routeErpSkuId && productSubmodule === "sku-management" && !productSkuV2State.loaded && !productSkuV2State.loading) void refreshProductSkuV2List(rerender);
   if (routeErpSkuId && productSkuV2State.detailId !== routeErpSkuId && !productSkuV2State.loading) void refreshProductSkuV2Detail(routeErpSkuId, rerender);
   if (routeProductId && ["business", "lifecycle", "improvements"].includes(productDetailTab) && !getProductManagementDetail(routeProductId) && productManagementState.loadingProductId !== routeProductId) void refreshProductManagementDetail(routeProductId, rerender);
-  if (!routeProductId && productSubmodule === "business-dashboard" && !productBusinessDashboardState.readModel && !productBusinessDashboardState.loading) void refreshProductBusinessDashboard(rerender);
+  if (!routeProductId && !routeErpSkuId && productSubmodule === "business-dashboard" && !productBusinessDashboardState.readModel && !productBusinessDashboardState.loading) void refreshProductBusinessDashboard(rerender);
   if (routeProductId && productDetailTab === "health-analysis" && (!getProductManagementDetail(routeProductId)?.healthAnalysis || !getProductManagementDetail(routeProductId)?.improvementCenter) && productManagementState.loadingProductId !== routeProductId) void refreshProductHealthAnalysis(routeProductId, rerender);
   if (routeProductId && productDetailTab === "business-improvement" && !getProductManagementDetail(routeProductId)?.improvementCenter && productManagementState.loadingProductId !== routeProductId) void refreshProductImprovementCenter(routeProductId, rerender);
   if (routeProductId && productDetailTab === "strategy" && !getProductManagementDetail(routeProductId)?.strategy && productManagementState.loadingProductId !== routeProductId) void refreshProductStrategy(routeProductId, rerender);
@@ -2226,10 +2175,10 @@ export function bindProductCenterPageEvents(rerender) {
   if (routeProductId && productDetailTab === "sales" && productSalesState.productId !== routeProductId && !productSalesState.loading) {
     void refreshProductSalesLinks(routeProductId, rerender);
   }
-  if (!routeProductId && !routeErpSkuId && productSubmodule === "products" && !unmatchedSkuState.loaded && !unmatchedSkuState.loading) {
+  if (!routeProductId && !routeErpSkuId && productSubmodule === "sku-management" && !unmatchedSkuState.loaded && !unmatchedSkuState.loading) {
     void refreshUnmatchedPlatformSkus(rerender);
   }
-  if (!routeProductId && !routeErpSkuId && productSubmodule === "products" && !productSalesSummaryState.loaded && !productSalesSummaryState.loading) {
+  if (!routeProductId && !routeErpSkuId && productSubmodule === "sku-management" && !productSalesSummaryState.loaded && !productSalesSummaryState.loading) {
     void refreshProductSalesSummaries(rerender);
   }
   if (!routeProductId && productSubmodule === "pending-skus" && !pendingSkuState.loaded && !pendingSkuState.loading) {
@@ -2433,6 +2382,7 @@ export function bindProductCenterPageEvents(rerender) {
     if (button === null) return;
     const action = button.dataset.action;
     if (action === "view-product-v2-sku") {
+      productSubmodule = "sku-management";
       window.location.hash = `products/sku/${encodeURIComponent(button.dataset.erpSkuId)}`;
       return;
     }
@@ -2501,9 +2451,12 @@ export function bindProductCenterPageEvents(rerender) {
       return;
     }
     if (action === "product-workspace-view") {
-      productSubmodule = button.dataset.view === "business-dashboard" ? "business-dashboard" : "products";
+      productSubmodule = button.dataset.view === "sku-management" ? "sku-management" : "business-dashboard";
+      if (getRouteProductId() || getRouteErpSkuId()) window.location.hash = "products";
       if (productSubmodule === "business-dashboard") void refreshProductBusinessDashboard(rerender);
+      else if (!productSkuV2State.loaded && !productSkuV2State.loading) void refreshProductSkuV2List(rerender);
       else rerender();
+      return;
     }
     if (action === "product-business-range") {
       productBusinessFilters = { ...productBusinessFilters, range: button.dataset.range, page: 1 };
@@ -2537,8 +2490,9 @@ export function bindProductCenterPageEvents(rerender) {
       void refreshProductBusinessDashboard(rerender);
     }
     if (action === "product-submodule") {
-      productSubmodule = button.dataset.submodule === "pending-skus" ? "pending-skus" : "products";
+      productSubmodule = button.dataset.submodule === "pending-skus" ? "pending-skus" : "sku-management";
       rerender();
+      return;
     }
     if (action === "clear-pending-sku-search") {
       pendingSkuState = { ...pendingSkuState, query: "", loaded: false, error: "", notice: "" };
@@ -2907,8 +2861,14 @@ export function bindProductCenterPageEvents(rerender) {
     }
     if (action === "mark-platform-combination") { await markPlatformSku(button.dataset.skuId, "combination"); await refreshUnmatchedPlatformSkus(rerender); }
     if (action === "ignore-platform-sku") { await markPlatformSku(button.dataset.skuId, "ignored"); await refreshUnmatchedPlatformSkus(rerender); }
-    if (action === "view-product") window.location.hash = `products/${encodeURIComponent(button.dataset.productId)}`;
-    if (action === "back-products") window.location.hash = "products";
+    if (action === "view-product") {
+      productSubmodule = "business-dashboard";
+      window.location.hash = `products/${encodeURIComponent(button.dataset.productId)}`;
+    }
+    if (action === "back-products") {
+      productSubmodule = getRouteErpSkuId() ? "sku-management" : "business-dashboard";
+      window.location.hash = "products";
+    }
     if (action === "archive-product") {
       const product = state.products.find((item) => item.id === button.dataset.productId);
       if (product && window.confirm(`确认归档 SKU ${product.skuCode}？历史关联不会删除。`)) {

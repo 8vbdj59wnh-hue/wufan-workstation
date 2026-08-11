@@ -4,6 +4,25 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+test("产品中心默认进入产品经营并保留SKU管理与产品档案入口", () => {
+  const source = fs.readFileSync(new URL("../src/productCenterPage.js", import.meta.url), "utf8");
+  const listRenderer = source.slice(source.indexOf("function renderProductList()"), source.indexOf("function renderProductSkuV2List()"));
+  const skuRenderer = source.slice(source.indexOf("function renderProductSkuV2List()"), source.indexOf("function renderProductSkuV2Cards("));
+  const detailRenderer = source.slice(source.indexOf("function renderProductDetail(product)"), source.indexOf("function renderInfoGroup("));
+
+  assert.match(source, /let productSubmodule = "business-dashboard";/);
+  assert.match(source, /data-view="business-dashboard"[^>]*>产品经营<\/button>/);
+  assert.match(source, /data-view="sku-management"[^>]*>SKU管理<\/button>/);
+  assert.match(listRenderer, /productSubmodule === "sku-management"\) return renderProductSkuV2List\(\);/);
+  assert.match(listRenderer, /return renderProductBusinessDashboard\(\);/);
+  assert.match(skuRenderer, /renderProductWorkspaceTabs\(\)/);
+  assert.match(skuRenderer, /renderProductSubmoduleTabs\(\)/);
+  assert.match(source, /查看关联产品档案 →/);
+  assert.match(detailRenderer, /\["strategy", "产品战略"\]/);
+  assert.match(detailRenderer, /\["business-diagnosis", "经营诊断"\]/);
+  assert.match(detailRenderer, /\["user-insights", "用户洞察"\]/);
+});
+
 test("产品经营读取层复用销售、库存、SKU、健康与行动事实", async () => {
   const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "product-business-read-model-"));
   process.env.WUFAN_DB_PATH = path.join(tempDirectory, "workstation.db");
