@@ -112,7 +112,22 @@ export function classifySalesDetailLine(line = {}, context = {}) {
       relationshipShape: relation.relationshipShape || null,
       mappingId: relationMapping.mappingId || null,
     },
-    warnings: ["ERP_USAGE_NOT_EXPLICITLY_CONFIRMED"],
+    warnings: ["ERP_USAGE_DEFAULTED_TO_PRODUCT"],
+  });
+
+  // An existing ERP SKU is treated as a product by default. Business-usage
+  // governance is an exclusion list here: only an explicitly confirmed
+  // non-product usage may divert a row before relation resolution. The formal
+  // link-SKU relation remains mandatory downstream before a fact is eligible.
+  if (usage?.warnings?.some((warning) => warning?.code === "ERP_USAGE_NOT_CLASSIFIED")) return output("product_sale", {
+    isFactEligible: false,
+    reasonCodes: ["ERP_USAGE_DEFAULT_PRODUCT"],
+    evidence: {
+      ...evidence,
+      erpSkuBusinessUsage: usage,
+      relationStatus: relation?.relationStatus || null,
+    },
+    warnings: ["ERP_USAGE_DEFAULTED_TO_PRODUCT", "AWAITING_RELATION_RESOLUTION"],
   });
 
   return output("unknown", {

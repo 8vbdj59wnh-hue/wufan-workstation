@@ -94,7 +94,7 @@ const readyClassification = classifySalesDetailLine(readyLine, { relation });
 assert.equal(readyClassification.classification, "product_sale");
 assert.equal(readyClassification.relationRequired, true);
 assert.equal(readyClassification.isFactEligible, true);
-assert.deepEqual(readyClassification.warnings, ["ERP_USAGE_NOT_EXPLICITLY_CONFIRMED"]);
+assert.deepEqual(readyClassification.warnings, ["ERP_USAGE_DEFAULTED_TO_PRODUCT"]);
 
 const protectedAfter = {
   mappings: count("sales_link_sku_erp_mappings"),

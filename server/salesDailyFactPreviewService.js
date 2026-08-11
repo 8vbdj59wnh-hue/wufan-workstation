@@ -550,6 +550,24 @@ function dailyFactFromClassified(item, batchId, createdAt) {
   };
 }
 
+const EXPLICIT_NON_PRODUCT_USAGE_TYPES = new Set([
+  "accounting_auxiliary",
+  "shipping_adjustment",
+  "other_adjustment",
+]);
+
+export function isSalesDailyFactEligible(item = {}) {
+  const result = item.result || {};
+  const usage = result.usage || null;
+  const usageBlocked = usage?.conflicts?.length
+    || usage?.warnings?.some((warning) => warning?.code === "ERP_SKU_NOT_FOUND")
+    || (usage?.isConfirmed === true && usage?.isUsable === true && EXPLICIT_NON_PRODUCT_USAGE_TYPES.has(usage.usageType));
+  return result.category === "ready"
+    && result.businessClassification === "product_sale"
+    && !usageBlocked
+    && result.mapping?.erpSkuId === result.erpSku?.id;
+}
+
 export function commitSalesDailyFacts(batchId, { confirmedBy = "", database = getDatabase(), failAfterInserts = null } = {}) {
   const id = text(batchId); const reviewer = text(confirmedBy);
   const batch = database.prepare("SELECT * FROM connection_import_batches WHERE id=? AND importType=?").get(id, IMPORT_TYPE);
@@ -567,13 +585,10 @@ export function commitSalesDailyFacts(batchId, { confirmedBy = "", database = ge
   }), { cache, ignoreExistingDailyFacts: true });
   const createdAt = now(); const blockedCounts = {}; const eligible = [];
   for (const item of classified) {
-    const usage = item.result.usage;
-    const allowed = item.result.category === "ready" && item.result.businessClassification === "product_sale"
-      && usage?.isConfirmed === true && usage?.isUsable === true
-      && item.result.mapping?.erpSkuId === item.result.erpSku?.id;
+    const allowed = isSalesDailyFactEligible(item);
     if (allowed) eligible.push(dailyFactFromClassified(item, id, createdAt));
     else {
-      const reason = item.result.category === "ready" && (!usage?.isConfirmed || !usage?.isUsable) ? "unknown" : item.result.category;
+      const reason = item.result.category;
       blockedCounts[reason] = (blockedCounts[reason] || 0) + 1;
     }
   }
