@@ -45,13 +45,17 @@ try {
   db.pragma("foreign_keys = ON");
   db.pragma("busy_timeout = 30000");
   const before = baseline(db);
-  assert(before.structures === 0 && before.activeMappings === 20819 && before.dailyFacts === 3668 && before.erpUsages === 86, "生产基线已漂移，停止应用。");
   const reviewer = db.prepare("SELECT id FROM persons WHERE status='active' ORDER BY CASE WHEN authRole='admin' THEN 0 ELSE 1 END,id LIMIT 1").get();
   assert(reviewer?.id, "生产环境缺少有效审核人。");
   const timestamp = new Date().toISOString();
   const batchCode = "PHASE-7-7E-PRODUCTION";
   const batchId = `product-structure-application-${stableId(batchCode)}`;
-  assert(!db.prepare("SELECT 1 FROM product_structure_application_batches WHERE batchCode=?").get(batchCode), "生产应用批次已存在；请使用幂等验证，不得重新建批次。");
+  const existingBatch = db.prepare("SELECT id FROM product_structure_application_batches WHERE batchCode=?").get(batchCode);
+  if (existingBatch) {
+    assert(existingBatch.id === batchId && before.activeStructures === 10938 && before.activeMappings === 43302, "同批次生产状态不符合幂等基线，停止执行。");
+  } else {
+    assert(before.structures === 0 && before.activeMappings === 20819 && before.dailyFacts === 3668 && before.erpUsages === 86, "生产基线已漂移，停止应用。");
+  }
 
   const insertPreparation = db.transaction(() => {
     db.prepare(`INSERT INTO product_structure_application_batches
@@ -76,16 +80,18 @@ try {
       insertItem.run(`product-structure-application-item-${stableId(batchId, item.salesLinkSkuId)}`, batchId, structureId, item.salesLinkSkuId, item.classification, ready ? "approved" : "blocked", item.relationshipShape, JSON.stringify(["product_master_data_integration"]), "[]", JSON.stringify(components), JSON.stringify({ added: components, removed: [], quantityChanged: [], unchangedCount: 0 }), Number(item.impactSalesAmount || 0), Number(item.impactProfitAmount || 0), ready ? reviewer.id : null, ready ? timestamp : null, ready ? "Phase 7-7E生产应用批准" : "Phase 7-7D缺组件继续阻断", timestamp, timestamp);
     }
   });
-  insertPreparation();
+  if (!existingBatch) insertPreparation();
 
   const outcomes = { applied: 0, idempotent: 0, structure_upgrade: 0, conflict: 0, incomplete: 11, failed: 0, rolledBack: 0 };
   let addedMappings = 0;
   const applyOne = db.transaction((item) => {
-    const structure = db.prepare("SELECT * FROM sales_link_sku_product_structures WHERE salesLinkSkuId=? AND status='pending_review'").get(item.salesLinkSkuId);
+    const structure = db.prepare(`SELECT s.* FROM product_structure_application_items i
+      JOIN sales_link_sku_product_structures s ON s.id=i.productStructureId
+      WHERE i.applicationBatchId=? AND i.salesLinkSkuId=?`).get(batchId, item.salesLinkSkuId);
     const target = db.prepare("SELECT erpSkuId,quantity FROM sales_link_sku_product_structure_components WHERE productStructureId=? ORDER BY sortOrder,id").all(structure.id);
     const live = db.prepare("SELECT * FROM sales_link_sku_erp_mappings WHERE salesLinkSkuId=? AND currentState='active' ORDER BY erpSkuId,id").all(item.salesLinkSkuId);
     if (live.length) {
-      if (equal(live, target) && live.every((mapping) => mapping.productStructureId === structure.id)) return { outcome: "idempotent", added: 0 };
+      if (structure.status === "active" && equal(live, target) && live.every((mapping) => mapping.productStructureId === structure.id)) return { outcome: "idempotent", added: 0 };
       const liveSet = new Set(canonical(live).map((mapping) => `${mapping.erpSkuId}:${mapping.quantity}`));
       const targetSet = new Set(canonical(target).map((mapping) => `${mapping.erpSkuId}:${mapping.quantity}`));
       if ([...liveSet].every((key) => targetSet.has(key))) return { outcome: "structure_upgrade", added: 0 };
@@ -120,7 +126,9 @@ try {
     }
   }
 
-  assert(outcomes.applied === 10938 && outcomes.idempotent === 0 && outcomes.structure_upgrade === 0 && outcomes.conflict === 0 && outcomes.failed === 0, `生产应用结果不符合冻结范围：${JSON.stringify(outcomes)}`);
+  const expectedApplied = existingBatch ? 0 : 10938;
+  const expectedIdempotent = existingBatch ? 10938 : 0;
+  assert(outcomes.applied === expectedApplied && outcomes.idempotent === expectedIdempotent && outcomes.structure_upgrade === 0 && outcomes.conflict === 0 && outcomes.failed === 0, `生产应用结果不符合冻结范围：${JSON.stringify(outcomes)}`);
   const appliedIds = readyItems.map((item) => item.salesLinkSkuId);
   const resolved = resolveLinkSkuErpRelations({ salesLinkSkuIds: appliedIds }, { database: db }).results;
   const resolverFailures = appliedIds.filter((id) => resolved[id]?.relationStatus !== "active_complete" || !resolved[id]?.isUsable || !resolved[id]?.productStructure?.isConsistent);
