@@ -120,10 +120,14 @@ assert.ok(Math.abs(first.result.insertedProfitAmount - first.result.eligibleProf
 if (comboGroupId) assert.ok(database.prepare("SELECT 1 FROM connection_sku_sales_daily_facts WHERE factType='combo_component' LIMIT 1").get(), "完整Combo应写入组件事实");
 
 const repeated = commitSalesDailyFacts(batch.id, { confirmedBy: reviewer.id, database });
-assert.equal(repeated.result.idempotent, true); assert.equal(count("connection_sku_sales_daily_facts"), first.result.insertedCount);
+assert.equal(repeated.result.idempotent, true);
+assert.equal(repeated.result.insertedCount, 0, "重复提交必须返回本次实际新增0");
+assert.equal(repeated.result.skippedCount, first.result.insertedCount, "重复提交必须返回本次实际跳过数量");
+assert.equal(repeated.result.updatePendingCount, 0);
+assert.equal(count("connection_sku_sales_daily_facts"), first.result.insertedCount);
 const skipBatchId = clonePreview(batch, "skip");
 const skipped = commitSalesDailyFacts(skipBatchId, { confirmedBy: reviewer.id, database });
-assert.equal(skipped.result.insertedCount, 0); assert.equal(skipped.result.skippedCount, first.result.insertedCount);
+assert.equal(skipped.result.insertedCount, 0); assert.equal(skipped.result.skippedCount, first.result.insertedCount); assert.equal(skipped.result.idempotent, true);
 
 const altered = database.prepare("SELECT id,salesAmount FROM connection_sku_sales_daily_facts ORDER BY id LIMIT 1").get();
 database.prepare("UPDATE connection_sku_sales_daily_facts SET salesAmount=? WHERE id=?").run(Number(altered.salesAmount || 0) + 1, altered.id);

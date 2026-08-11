@@ -555,8 +555,8 @@ export function commitSalesDailyFacts(batchId, { confirmedBy = "", database = ge
   const batch = database.prepare("SELECT * FROM connection_import_batches WHERE id=? AND importType=?").get(id, IMPORT_TYPE);
   if (!batch) throw Object.assign(new Error("销售日报预览不存在。"), { code: "preview_not_found" });
   const previousSummary = parseJson(batch.previewSummaryJson);
-  if (previousSummary.factCommit?.confirmedAt) return { batch, result: { ...previousSummary.factCommit, idempotent: true } };
-  if (batch.status !== "preview_ready") throw Object.assign(new Error("当前销售日报预览不可确认写入。"), { code: "preview_not_ready" });
+  const previouslyCommitted = Boolean(previousSummary.factCommit?.confirmedAt);
+  if (!previouslyCommitted && batch.status !== "preview_ready") throw Object.assign(new Error("当前销售日报预览不可确认写入。"), { code: "preview_not_ready" });
   if (!reviewer || !database.prepare("SELECT 1 FROM persons WHERE id=?").get(reviewer)) throw Object.assign(new Error("确认人不存在。"), { code: "reviewer_not_found" });
   const storedRows = database.prepare("SELECT rowNumber,rawDataJson FROM connection_import_rows WHERE batchId=? ORDER BY rowNumber").all(id);
   if (!storedRows.length) throw new Error("销售日报预览没有可确认的原始明细。");
@@ -600,6 +600,19 @@ export function commitSalesDailyFacts(batchId, { confirmedBy = "", database = ge
     updatePending, confirmedBy: reviewer, confirmedAt: createdAt, parserVersion: PARSER_VERSION,
     sourceFileHash: previousSummary.sourceFileHash || batch.fileHash, sourceFileName: batch.fileName,
   };
+  if (previouslyCommitted) {
+    const repeatedResult = {
+      ...result,
+      insertedCount: 0,
+      insertedSalesAmount: 0,
+      insertedProfitAmount: 0,
+      skippedCount: skips.length,
+      skippedSalesAmount: sum(skips.map((item) => item.fact), "salesAmount"),
+      skippedProfitAmount: sum(skips.map((item) => item.fact), "profitAmount"),
+      idempotent: inserts.length === 0 && updatePending.length === 0,
+    };
+    return { batch, result: repeatedResult };
+  }
   database.transaction(() => {
     const insert = database.prepare(`INSERT INTO connection_sku_sales_daily_facts
       (id,salesLinkId,salesLinkSkuId,erpSkuId,saleDate,quantity,salesAmount,costAmount,profitAmount,incomeAmount,refundAmount,returnAmount,postageIncomeAmount,goodsCostAmount,returnCostAmount,postageCostAmount,otherAdjustmentAmount,feeAmount,receivedAmount,factType,sourceBatchId,sourceRowNumber,rawDataJson,createdAt,updatedAt)
@@ -613,7 +626,10 @@ export function commitSalesDailyFacts(batchId, { confirmedBy = "", database = ge
     database.prepare("UPDATE connection_import_batches SET status=?,matchedRows=?,pendingRows=?,errorRows=?,completedAt=?,updatedAt=?,previewSummaryJson=? WHERE id=?")
       .run(finalStatus, result.insertedCount + result.skippedCount, result.pendingCount + result.updatePendingCount, result.errorCount, createdAt, createdAt, JSON.stringify(summary), id);
   })();
-  return { batch: database.prepare("SELECT * FROM connection_import_batches WHERE id=?").get(id), result: { ...result, idempotent: false } };
+  return {
+    batch: database.prepare("SELECT * FROM connection_import_batches WHERE id=?").get(id),
+    result: { ...result, idempotent: inserts.length === 0 && updatePending.length === 0 && skips.length > 0 && skips.length === eligible.length },
+  };
 }
 
 export { IMPORT_TYPE as SALES_DAILY_PREVIEW_IMPORT_TYPE, PARSER_VERSION as SALES_DAILY_PREVIEW_PARSER_VERSION };
