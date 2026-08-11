@@ -3,6 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
+import { ensureSalesAnomalyActionStandards } from "./capabilities/salesAnomalyActionStandards.js";
 import { hashPassword } from "./security.js";
 import { createEmptyPermissions, mergePermissionSources, normalizePermissions, serializePermissions } from "../src/permissions.js";
 import {
@@ -2839,6 +2840,7 @@ export function initializeDatabase({ reset = false } = {}) {
   ensureDefaultTemplateTags();
   ensureDefaultPublishingAccounts();
   ensureDefaultAdmin();
+  ensureSalesAnomalyActionStandards(database);
 }
 
 export function readResource(resourceKey) {

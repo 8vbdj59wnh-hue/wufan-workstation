@@ -1,12 +1,12 @@
 import { getDatabase } from "../db.js";
 import { queryDailySalesSummaryComparison } from "./queryDailySales.js";
 import { querySalesDailyDataQuality } from "../salesDailyDataQualityService.js";
+import { getSalesAnomalyActionStandardDefinition } from "./salesAnomalyActionStandards.js";
 
 const addDays=(date,amount)=>{const value=new Date(`${date}T00:00:00Z`);value.setUTCDate(value.getUTCDate()+amount);return value.toISOString().slice(0,10);};
 const ratio=(current,compare)=>compare>0?(current-compare)/compare:null;
 const severity=(decline)=>decline>=.5?"high":decline>=.3?"medium":"low";
-const recommendations={sales_drop:{key:"link_sales_recovery_analysis",name:"链接销售恢复分析行动"},profit_drop:{key:"link_profit_improvement",name:"链接利润改善行动"},sales_gap:{key:"link_sales_recovery_investigation",name:"链接销售恢复排查行动"},data_quality_issue:{key:"business_data_governance",name:"经营数据治理行动"}};
-const withRecommendation=(item)=>({...item,recommendedActionTemplate:{...recommendations[item.anomalyType],matchMode:"exact_name",taskTemplateId:null}});
+const withRecommendation=(item,database)=>{const definition=getSalesAnomalyActionStandardDefinition(item.anomalyType);const standard=definition?database.prepare("SELECT id,name,description,completionStandard,defaultProcessTemplateId FROM task_templates WHERE (id=? OR name=?) AND status='active' ORDER BY CASE WHEN id=? THEN 0 ELSE 1 END,id LIMIT 1").get(definition.id,definition.name,definition.id):null;const process=standard?.defaultProcessTemplateId?database.prepare("SELECT id,name,purpose,overallStandard FROM process_templates WHERE id=? AND status='active'").get(standard.defaultProcessTemplateId):null;return{...item,recommendedActionStandard:standard?{actionStandardId:standard.id,name:standard.name,target:standard.completionStandard||standard.description,processTemplateId:process?.id||null,processName:process?.name||null,processDescription:process?.purpose||process?.overallStandard||null}:null,recommendedActionTemplate:standard?{key:definition.id,name:standard.name,matchMode:"action_standard_id",taskTemplateId:standard.id}:null};};
 
 export function queryBusinessAnomalies(input={},options={}){
   const database=options.database||getDatabase();const threshold=Math.min(.95,Math.max(.1,Number(input.dropThreshold??.3)));const gapDays=Math.min(30,Math.max(1,Number(input.gapDays??3)));
@@ -29,7 +29,7 @@ export function queryBusinessAnomalies(input={},options={}){
   }
   if(quality.health.status!=="healthy")items.push({anomalyType:"data_quality_issue",objectType:"dataQuality",objectId:quality.batch.id,objectName:"销售日报数据质量",severity:quality.health.status==="error"?"high":"medium",currentPeriod:{startDate:quality.batch.dateStart,endDate:quality.batch.dateEnd},comparePeriod:null,currentValue:quality.health.exceptionCount,compareValue:null,changeRate:null});
   const order={high:0,medium:1,low:2};items.sort((a,b)=>order[a.severity]-order[b.severity]||String(a.objectName).localeCompare(String(b.objectName),"zh-CN")||a.anomalyType.localeCompare(b.anomalyType));
-  const recommendedItems=items.map(withRecommendation);const filtered=input.anomalyType?recommendedItems.filter((item)=>item.anomalyType===input.anomalyType):recommendedItems;const summary={high:0,medium:0,low:0,total:filtered.length};for(const item of filtered)summary[item.severity]+=1;
+  const recommendedItems=items.map((item)=>withRecommendation(item,database));const filtered=input.anomalyType?recommendedItems.filter((item)=>item.anomalyType===input.anomalyType):recommendedItems;const summary={high:0,medium:0,low:0,total:filtered.length};for(const item of filtered)summary[item.severity]+=1;
   return{capability:"QueryBusinessAnomalies",contractVersion:"1.0",hasData:true,rules:{dropThreshold:threshold,gapDays},periods:{current:{startDate:currentStart,endDate:currentEnd},compare:{startDate:compareStart,endDate:compareEnd}},summary,items:filtered,sourceCapabilities:["QueryDailySalesSummary","QuerySalesDailyDataQuality"]};
 }
 export default queryBusinessAnomalies;

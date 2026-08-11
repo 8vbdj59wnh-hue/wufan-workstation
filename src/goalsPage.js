@@ -1298,7 +1298,7 @@ function renderGoalTaskModal() {
               <select name="dueDateHour">${renderBusinessHourOptions("", "请选择小时")}</select>
             </label>
           </div>
-          ${modalState.sourceContext?.source === "sales_anomaly" ? `<section class="goal-anomaly-source"><strong>来源：销售经营异常</strong><span>${escapeHtml(modalState.sourceContext.objectType)} · ${escapeHtml(modalState.sourceContext.objectId)}</span><small>${escapeHtml(modalState.sourceContext.anomalySnapshot?.anomalyType || "—")} · 当前值 ${escapeHtml(modalState.sourceContext.anomalySnapshot?.currentValue ?? "暂无数据")} · 对比值 ${escapeHtml(modalState.sourceContext.anomalySnapshot?.compareValue ?? "暂无数据")}</small><small>推荐行动：${escapeHtml(modalState.recommendedActionTemplate?.name || "请手动选择")}</small><small>异常快照只用于追溯，不自动判断原因或生成任务。</small></section>` : ""}
+          ${modalState.sourceContext?.source === "sales_anomaly" ? `<section class="goal-anomaly-source"><strong>来源：销售经营异常</strong><span>${escapeHtml(modalState.sourceContext.objectType)} · ${escapeHtml(modalState.sourceContext.objectId)}</span><small>${escapeHtml(modalState.sourceContext.anomalySnapshot?.anomalyType || "—")} · 当前值 ${escapeHtml(modalState.sourceContext.anomalySnapshot?.currentValue ?? "暂无数据")} · 对比值 ${escapeHtml(modalState.sourceContext.anomalySnapshot?.compareValue ?? "暂无数据")}</small><small>行动标准：${escapeHtml(modalState.recommendedActionStandard?.name || "未配置")}</small><small>标准目标：${escapeHtml(modalState.recommendedActionStandard?.target || "未维护")}</small><small>流程说明：${escapeHtml(modalState.recommendedActionStandard?.processDescription || "未维护")}</small><small>异常快照只用于追溯，保存时不会自动生成任务。</small></section>` : ""}
           ${renderTaskTemplateLockedInfo(selectedTemplate)}
           ${renderCustomFieldsForm(selectedTemplate)}
           ${renderActionProductSelector(modalState.sourceContext?.productId ? [modalState.sourceContext.productId] : [])}
@@ -1664,7 +1664,7 @@ async function saveGoalTask(form, rerender) {
   const now = getNow();
   const workPlanId = createId("work-plan");
   const sourceFields = modalState.sourceContext?.source === "sales_anomaly"
-    ? { ...draft.customFields, source: "sales_anomaly", sourceType: "sales_anomaly", salesLinkId: modalState.sourceContext.salesLinkId ?? null, productId: modalState.sourceContext.productId ?? null, anomalySnapshot: modalState.sourceContext.anomalySnapshot, baselineSnapshot: modalState.sourceContext.baselineSnapshot, recommendedActionTemplate: modalState.recommendedActionTemplate ?? modalState.sourceContext.recommendedActionTemplate }
+    ? { ...draft.customFields, source: "sales_anomaly", sourceType: "sales_anomaly", actionStandardId: draft.template.id, salesLinkId: modalState.sourceContext.salesLinkId ?? null, productId: modalState.sourceContext.productId ?? null, anomalySnapshot: modalState.sourceContext.anomalySnapshot, baselineSnapshot: modalState.sourceContext.baselineSnapshot, recommendedActionStandard: modalState.recommendedActionStandard ?? modalState.sourceContext.recommendedActionStandard, recommendedActionTemplate: modalState.recommendedActionTemplate ?? modalState.sourceContext.recommendedActionTemplate }
     : draft.customFields;
   const customFields =
     uploadedAttachments.length === 0
@@ -2190,7 +2190,7 @@ function consumeGoalTaskPrefill() {
     return;
   }
   const requestedTemplate = getTaskTemplate(prefill?.taskTemplateId ?? "");
-  const recommendedTemplate = state.taskTemplates.find((item) => item.status === TaskTemplateStatus.Active && item.name === prefill?.recommendedActionTemplate?.name && item.defaultProcessTemplateId) ?? null;
+  const recommendedTemplate = state.taskTemplates.find((item) => item.status === TaskTemplateStatus.Active && item.id === (prefill?.recommendedActionStandard?.actionStandardId ?? prefill?.sourceContext?.recommendedActionStandard?.actionStandardId) && item.defaultProcessTemplateId) ?? state.taskTemplates.find((item) => item.status === TaskTemplateStatus.Active && item.name === prefill?.recommendedActionTemplate?.name && item.defaultProcessTemplateId) ?? null;
   const template = requestedTemplate ?? recommendedTemplate;
   const isSalesAnomaly = prefill?.sourceContext?.source === "sales_anomaly";
   const goal = getGoal(prefill?.goalId ?? selectedGoalId) ?? getActiveGoals()[0] ?? null;
@@ -2207,6 +2207,7 @@ function consumeGoalTaskPrefill() {
     description: prefill.description ?? "",
     sourceContext: isSalesAnomaly ? prefill.sourceContext : null,
     recommendedActionTemplate: isSalesAnomaly ? prefill.recommendedActionTemplate ?? prefill.sourceContext?.recommendedActionTemplate ?? null : null,
+    recommendedActionStandard: isSalesAnomaly ? prefill.recommendedActionStandard ?? prefill.sourceContext?.recommendedActionStandard ?? null : null,
     error: "",
   };
 }
