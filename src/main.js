@@ -182,6 +182,9 @@ let loadedDataModuleId = "";
 let notificationPanelOpen = false;
 let sidebarMode = "fixed";
 let sidebarDrawerOpen = false;
+let plannedModulesExpanded = modules.some(
+  (module) => module.id === activeModuleId && module.status === "planned",
+);
 
 function getActiveModule() {
   return modules.find((module) => module.id === activeModuleId) ?? modules[0];
@@ -332,6 +335,9 @@ function renderSidebarMenuIcon() {
 
 function renderSidebar() {
   const modeButtonLabel = sidebarMode === "fixed" ? "切换为抽屉侧栏" : "恢复固定侧栏";
+  const accessibleModules = getAccessibleModules();
+  const readyModules = accessibleModules.filter((module) => module.status !== "planned");
+  const plannedModules = accessibleModules.filter((module) => module.status === "planned");
   return `
     <aside class="sidebar" aria-label="主导航侧栏">
       <div class="sidebar-topbar">
@@ -349,7 +355,7 @@ function renderSidebar() {
         </button>
       </div>
       <nav class="nav" aria-label="主导航">
-        ${getAccessibleModules()
+        ${readyModules
           .map(
             (module) => `
               <button
@@ -362,6 +368,43 @@ function renderSidebar() {
             `,
           )
           .join("")}
+        ${
+          plannedModules.length > 0
+            ? `
+              <div class="nav-planned-group ${plannedModulesExpanded ? "is-expanded" : ""}">
+                <button
+                  class="nav-group-toggle"
+                  type="button"
+                  data-action="toggle-planned-modules"
+                  aria-expanded="${plannedModulesExpanded}"
+                  aria-controls="planned-module-list"
+                >
+                  <span>待开发</span>
+                  <span class="nav-group-meta">
+                    <span class="nav-group-count">${plannedModules.length}</span>
+                    <span class="nav-group-chevron" aria-hidden="true"></span>
+                  </span>
+                </button>
+                <div id="planned-module-list" class="nav-planned-items" ${plannedModulesExpanded ? "" : "hidden"}>
+                  ${plannedModules
+                    .map(
+                      (module) => `
+                        <button
+                          class="nav-item is-planned ${module.id === activeModuleId ? "is-active" : ""}"
+                          type="button"
+                          data-module-id="${module.id}"
+                        >
+                          <span class="nav-item-label">${module.name}</span>
+                          <span class="nav-item-status">待开发</span>
+                        </button>
+                      `,
+                    )
+                    .join("")}
+                </div>
+              </div>
+            `
+            : ""
+        }
       </nav>
       ${renderSidebarStatus()}
     </aside>
@@ -636,6 +679,11 @@ function render({ navigation = false } = {}) {
 
   document.querySelector('[data-action="close-sidebar-drawer"]')?.addEventListener("click", () => {
     sidebarDrawerOpen = false;
+    render();
+  });
+
+  document.querySelector('[data-action="toggle-planned-modules"]')?.addEventListener("click", () => {
+    plannedModulesExpanded = !plannedModulesExpanded;
     render();
   });
 

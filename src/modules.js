@@ -26,22 +26,27 @@ export const modules = [
   {
     id: "customerCenter",
     name: "客户中心",
+    status: "planned",
   },
   {
     id: "supplyChainCenter",
     name: "供应链中心",
+    status: "planned",
   },
   {
     id: "financeCenter",
     name: "财务中心",
+    status: "planned",
   },
   {
     id: "dataCenter",
     name: "经营数据中心",
+    status: "planned",
   },
   {
     id: "aiOperationAssistant",
     name: "AI经营助手",
+    status: "planned",
   },
   {
     id: "templateCenter",
