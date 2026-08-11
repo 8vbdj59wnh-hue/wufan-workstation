@@ -1067,8 +1067,8 @@ export async function loadProductManagementOverview() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/overview`), "产品经营概览读取失败。");
 }
 
-export async function loadProductCenterV2Skus({ search = "", profileStatus = "all", erpStatus = "", brand = "", category = "", lifecycleStatus = "", platform = "", stockStatus = "", businessZone = "all", sort = "updated-desc", limit = 50, offset = 0 } = {}) {
-  const query = new URLSearchParams({ search, profileStatus, erpStatus, brand, category, lifecycleStatus, platform, stockStatus, businessZone, sort, limit: String(limit), offset: String(offset) });
+export async function loadProductCenterV2Skus({ search = "", includeUnarchived = false, profileStatus = "all", erpStatus = "", brand = "", category = "", lifecycleStatus = "", platform = "", stockStatus = "", businessZone = "all", sort = "updated-desc", limit = 50, offset = 0 } = {}) {
+  const query = new URLSearchParams({ search, includeUnarchived: String(includeUnarchived === true), profileStatus, erpStatus, brand, category, lifecycleStatus, platform, stockStatus, businessZone, sort, limit: String(limit), offset: String(offset) });
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-center-v2/skus?${query}`), "ERP SKU列表读取失败。");
 }
 

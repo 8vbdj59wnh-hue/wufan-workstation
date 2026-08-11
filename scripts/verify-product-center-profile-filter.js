@@ -1,0 +1,30 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+const source = process.env.SOURCE_DB || "/private/tmp/phase6-3-production.db";
+assert.ok(fs.existsSync(source), "缺少隔离验证源数据库。");
+const databasePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "product-profile-filter-")), "isolated.db");
+fs.copyFileSync(source, databasePath); process.env.WUFAN_DB_PATH = databasePath;
+const { listProductCenterV2Skus } = await import("../server/productCenterV2Service.js");
+const { getDatabase, closeDatabase } = await import("../server/db.js");
+
+const defaultResult = listProductCenterV2Skus({ limit: 50, offset: 0 });
+const allResult = listProductCenterV2Skus({ includeUnarchived: true, limit: 50, offset: 0 });
+assert.ok(defaultResult.rows.every((row) => row.productId && row.profileStatus === "profiled"));
+assert.ok(allResult.pagination.total >= defaultResult.pagination.total);
+const unprofiled = allResult.rows.find((row) => !row.productId) || listProductCenterV2Skus({ includeUnarchived: true, profileStatus: "unprofiled", limit: 20 }).rows[0];
+assert.ok(unprofiled, "隔离数据中没有未建档SKU，无法验证开关。");
+const closedSearch = listProductCenterV2Skus({ search: unprofiled.merchantSkuCode, limit: 50 });
+const openSearch = listProductCenterV2Skus({ search: unprofiled.merchantSkuCode, includeUnarchived: true, limit: 50 });
+assert.equal(closedSearch.rows.some((row) => row.erpSkuId === unprofiled.erpSkuId), false);
+assert.equal(openSearch.rows.some((row) => row.erpSkuId === unprofiled.erpSkuId), true);
+const secondPage = listProductCenterV2Skus({ includeUnarchived: true, limit: 20, offset: 20 });
+assert.equal(secondPage.pagination.total, allResult.pagination.total);
+const sortResults = ["updated-desc", "sales-desc", "stock-desc", "capital-desc", "created-desc"].map((sort) => ({ sort, total: listProductCenterV2Skus({ sort, limit: 20 }).pagination.total }));
+assert.ok(sortResults.every((item) => item.total === defaultResult.pagination.total));
+const lifecycle = defaultResult.rows.find((row) => row.lifecycleStatus)?.lifecycleStatus;
+if (lifecycle) assert.ok(listProductCenterV2Skus({ lifecycleStatus: lifecycle, limit: 20 }).rows.every((row) => row.lifecycleStatus === lifecycle && row.productId));
+const db = getDatabase(); assert.equal(db.pragma("integrity_check", { simple: true }), "ok"); assert.equal(db.pragma("foreign_key_check").length, 0);
+console.log(JSON.stringify({ success: true, databasePath, defaultTotal: defaultResult.pagination.total, allTotal: allResult.pagination.total, unprofiledKeyword: unprofiled.merchantSkuCode, closedSearchTotal: closedSearch.pagination.total, openSearchTotal: openSearch.pagination.total, secondPageRows: secondPage.rows.length, sortResults, lifecycle: lifecycle || null }, null, 2)); closeDatabase();

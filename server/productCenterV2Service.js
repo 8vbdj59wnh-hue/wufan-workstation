@@ -7,16 +7,18 @@ const newProductCycleDays = 30;
 const businessZones = ["new", "hit", "active", "clearance"];
 const explicitNewStatuses = new Set(["新品", "开发中", "待上架", "上架"]);
 const clearanceStatuses = new Set(["风险期", "淘汰", "清仓", "停售"]);
+const includeUnarchived = (value) => value === true || text(value).toLowerCase() === "true" || text(value) === "1";
 
-function whereClause({ search = "", profileStatus = "all", erpStatus = "" } = {}) {
+function whereClause({ search = "", profileStatus = "all", includeUnarchived: includeUnarchivedValue = false, erpStatus = "" } = {}) {
   const conditions = ["s.currentState='active'"];
   const params = {};
   if (text(search)) {
     params.search = `%${text(search)}%`;
     conditions.push("(s.merchantSkuCode LIKE @search OR COALESCE(s.specificationName,'') LIKE @search OR COALESCE(g.goodsName,'') LIKE @search OR COALESCE(g.goodsCode,'') LIKE @search OR COALESCE(p.name,'') LIKE @search)");
   }
-  if (profileStatus === "profiled") conditions.push("p.id IS NOT NULL");
-  if (profileStatus === "unprofiled") conditions.push("p.id IS NULL");
+  if (!includeUnarchived(includeUnarchivedValue)) conditions.push("p.id IS NOT NULL");
+  else if (profileStatus === "profiled") conditions.push("p.id IS NOT NULL");
+  else if (profileStatus === "unprofiled") conditions.push("p.id IS NULL");
   if (text(erpStatus)) { params.erpStatus = text(erpStatus); conditions.push("COALESCE(s.erpStatus,'')=@erpStatus"); }
   return { sql: conditions.join(" AND "), params };
 }
@@ -89,6 +91,7 @@ function filterRows(rows, options) {
       || (options.stockStatus === "low" && stock > 0 && stock <= 10)
       || (options.stockStatus === "empty" && stock <= 0);
     return matchesSearch
+      && (includeUnarchived(options.includeUnarchived) || row.profileStatus === "profiled")
       && (!text(options.profileStatus) || options.profileStatus === "all" || row.profileStatus === options.profileStatus)
       && (!text(options.erpStatus) || text(row.erpStatus) === text(options.erpStatus))
       && (!text(options.brand) || row.displayBrand === options.brand)
@@ -150,8 +153,9 @@ export function listProductCenterV2Skus(options = {}) {
   const database = getDatabase(); const limit = Math.min(200, Math.max(20, number(options.limit, 50))); const offset = Math.max(0, number(options.offset, 0));
   const metadata = text(options.businessZone) && options.businessZone !== "all" ? productListMetadata(database) : null; const conditions = ["s.currentState='active'"]; const params = {};
   if (text(options.search)) { conditions.push("(s.merchantSkuCode LIKE @search OR COALESCE(s.specificationName,'') LIKE @search OR COALESCE(g.goodsName,'') LIKE @search OR COALESCE(g.goodsCode,'') LIKE @search OR COALESCE(p.name,'') LIKE @search)"); params.search = `%${text(options.search)}%`; }
-  if (options.profileStatus === "profiled") conditions.push("p.id IS NOT NULL");
-  if (options.profileStatus === "unprofiled") conditions.push("p.id IS NULL");
+  if (!includeUnarchived(options.includeUnarchived)) conditions.push("p.id IS NOT NULL");
+  else if (options.profileStatus === "profiled") conditions.push("p.id IS NOT NULL");
+  else if (options.profileStatus === "unprofiled") conditions.push("p.id IS NULL");
   for (const [key, expression] of [["erpStatus", "s.erpStatus"], ["brand", "COALESCE(NULLIF(p.brand,''),g.brand)"], ["category", "COALESCE(NULLIF(p.category,''),g.category)"], ["lifecycleStatus", "p.status"], ["ownerId", "p.ownerId"]]) if (text(options[key])) { conditions.push(`${expression}=@${key}`); params[key] = text(options[key]); }
   if (text(options.platform)) { conditions.push(`EXISTS (SELECT 1 FROM sales_link_sku_erp_mappings lm JOIN sales_link_skus lx ON lx.id=lm.salesLinkSkuId JOIN sales_links ll ON ll.id=lx.salesLinkId JOIN sales_shops ls ON ls.id=ll.shopId WHERE lm.erpSkuId=s.id AND lm.currentState='active' AND ls.platform=@platform)`); params.platform = text(options.platform); }
   const inventoryExpression = `(SELECT COALESCE(i.stockNum,0) FROM erp_sku_inventory_daily_summaries i WHERE i.erpSkuId=s.id ORDER BY i.businessDate DESC,i.updatedAt DESC LIMIT 1)`;

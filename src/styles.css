@@ -6511,6 +6511,7 @@ button.content-template-thumb {
 }
 
 .product-list-toolbar-actions,
+.product-unarchived-toggle,
 .product-business-sort {
   display: flex;
   align-items: center;
@@ -6521,6 +6522,19 @@ button.content-template-thumb {
   flex-wrap: wrap;
   gap: 4px;
 }
+
+.product-unarchived-toggle {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid #dbe3ed;
+  border-radius: 8px;
+  background: #fff;
+  color: #475569;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.product-unarchived-toggle input { margin: 0; }
 
 .product-business-sort span {
   color: #64748b;

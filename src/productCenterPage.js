@@ -82,7 +82,7 @@ let pendingSkuState = { loading: false, loaded: false, rows: [], query: "", erro
 let selectedPendingSkuIds = new Set();
 let platformPreviewRequestId = 0;
 let productManagementState = { overview: null, details: new Map(), loadingOverview: false, loadingProductId: "", error: "", notice: "" };
-let productSkuV2State = { loading: false, loaded: false, rows: [], detail: null, detailId: "", search: "", profileStatus: "all", erpStatus: "", brand: "", category: "", lifecycleStatus: "", platform: "", stockStatus: "", businessZone: "all", sort: "updated-desc", facets: { brands: [], categories: [], lifecycleStatuses: [], platforms: [] }, page: 1, pageSize: 50, pagination: { total: 0 }, summary: { total: 0, profiled: 0, unprofiled: 0, businessZones: {} }, error: "", notice: "" };
+let productSkuV2State = { loading: false, loaded: false, rows: [], detail: null, detailId: "", search: "", includeUnarchived: false, profileStatus: "all", erpStatus: "", brand: "", category: "", lifecycleStatus: "", platform: "", stockStatus: "", businessZone: "all", sort: "updated-desc", facets: { brands: [], categories: [], lifecycleStatuses: [], platforms: [] }, page: 1, pageSize: 50, pagination: { total: 0 }, summary: { total: 0, profiled: 0, unprofiled: 0, businessZones: {} }, error: "", notice: "" };
 let productSkuV2RequestId = 0;
 let productSkuV2SearchTimer = 0;
 let productSkuV2MetadataLoading = false;
@@ -431,7 +431,7 @@ function renderProductSkuV2List() {
       <input type="search" name="search" value="${escapeHtml(productSkuV2State.search)}" placeholder="搜索SKU编码、货品名称、规格" />
       <select name="brand">${renderFilterOptions(facets.brands ?? [], productSkuV2State.brand, "全部品牌")}</select>
       <select name="category">${renderFilterOptions(facets.categories ?? [], productSkuV2State.category, "全部分类")}</select>
-      <select name="profileStatus"><option value="all">全部SKU</option><option value="profiled" ${productSkuV2State.profileStatus === "profiled" ? "selected" : ""}>已建档</option><option value="unprofiled" ${productSkuV2State.profileStatus === "unprofiled" ? "selected" : ""}>未建档</option></select>
+      <label class="product-unarchived-toggle"><input type="checkbox" name="includeUnarchived" ${productSkuV2State.includeUnarchived ? "checked" : ""} /><span>显示未建档产品</span></label>
       <details class="product-more-filters" ${productSkuV2State.erpStatus || productSkuV2State.lifecycleStatus || productSkuV2State.platform || productSkuV2State.stockStatus ? "open" : ""}>
         <summary>更多筛选</summary><div>
           <select name="lifecycleStatus">${renderFilterOptions(facets.lifecycleStatuses ?? [], productSkuV2State.lifecycleStatus, "全部生命周期")}</select>
@@ -1562,7 +1562,7 @@ async function refreshProductSkuV2List(rerender) {
   const requestId = ++productSkuV2RequestId;
   productSkuV2State = { ...productSkuV2State, loading: true, error: "" }; rerender();
   try {
-    const result = await loadProductCenterV2Skus({ search: productSkuV2State.search, profileStatus: productSkuV2State.profileStatus,
+    const result = await loadProductCenterV2Skus({ search: productSkuV2State.search, includeUnarchived: productSkuV2State.includeUnarchived, profileStatus: "all",
       erpStatus: productSkuV2State.erpStatus, brand: productSkuV2State.brand, category: productSkuV2State.category,
       lifecycleStatus: productSkuV2State.lifecycleStatus, platform: productSkuV2State.platform, stockStatus: productSkuV2State.stockStatus,
       businessZone: productSkuV2State.businessZone, sort: productSkuV2State.sort,
@@ -1904,7 +1904,7 @@ export function bindProductCenterPageEvents(rerender) {
   });
   document.querySelector("[data-product-v2-filter]")?.addEventListener("submit", (event) => {
     event.preventDefault(); const form = event.currentTarget;
-    productSkuV2State = { ...productSkuV2State, search: form.elements.search.value.trim(), profileStatus: form.elements.profileStatus.value,
+    productSkuV2State = { ...productSkuV2State, search: form.elements.search.value.trim(), includeUnarchived: form.elements.includeUnarchived.checked, profileStatus: "all",
       erpStatus: form.elements.erpStatus.value.trim(), brand: form.elements.brand.value, category: form.elements.category.value,
       lifecycleStatus: form.elements.lifecycleStatus.value, platform: form.elements.platform.value, stockStatus: form.elements.stockStatus.value,
       page: 1, loaded: false, notice: "" };
@@ -1913,6 +1913,10 @@ export function bindProductCenterPageEvents(rerender) {
   document.querySelector('[data-product-v2-filter] input[name="search"]')?.addEventListener("input", (event) => {
     window.clearTimeout(productSkuV2SearchTimer); const value = event.currentTarget.value;
     productSkuV2SearchTimer = window.setTimeout(() => { productSkuV2State = { ...productSkuV2State, search: value.trim(), page: 1, loaded: false }; void refreshProductSkuV2List(rerender); }, 280);
+  });
+  document.querySelector('[data-product-v2-filter] input[name="includeUnarchived"]')?.addEventListener("change", (event) => {
+    productSkuV2State = { ...productSkuV2State, includeUnarchived: event.currentTarget.checked, profileStatus: "all", page: 1, loaded: false, notice: "" };
+    void refreshProductSkuV2List(rerender);
   });
   document.querySelector("[data-product-lifecycle-form]")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const form=event.currentTarget; const productId=form.dataset.productId;
@@ -1976,7 +1980,7 @@ export function bindProductCenterPageEvents(rerender) {
       return;
     }
     if (action === "clear-product-v2-filter") {
-      productSkuV2State = { ...productSkuV2State, search: "", profileStatus: "all", erpStatus: "", brand: "", category: "", lifecycleStatus: "", platform: "", stockStatus: "", businessZone: "all", sort: "updated-desc", page: 1, loaded: false, notice: "" };
+      productSkuV2State = { ...productSkuV2State, search: "", includeUnarchived: false, profileStatus: "all", erpStatus: "", brand: "", category: "", lifecycleStatus: "", platform: "", stockStatus: "", businessZone: "all", sort: "updated-desc", page: 1, loaded: false, notice: "" };
       void refreshProductSkuV2List(rerender);
       return;
     }
