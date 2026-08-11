@@ -1000,6 +1000,11 @@ export async function loadOperationDashboard() {
   return readApiJson(response, "经营驾驶舱读取失败。");
 }
 
+export async function loadSalesBusinessDashboard(preset = "30d") {
+  const response = await authFetch(`${apiBaseUrl}/api/sales-business-dashboard?preset=${encodeURIComponent(preset)}`);
+  return readApiJson(response, "销售经营驾驶舱读取失败。");
+}
+
 export async function loadFinanceStatement(params = {}) {
   const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value));
   return readApiJson(await authFetch(`${apiBaseUrl}/api/finance/statement${query.size ? `?${query}` : ""}`), "利润表读取失败。");

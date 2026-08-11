@@ -1,7 +1,7 @@
 import { getDatabase } from "../db.js";
 
 const SOURCE = "daily_fact_v1";
-const DIMENSIONS = new Set(["salesLink", "salesLinkSku", "erpSku", "product"]);
+const DIMENSIONS = new Set(["company", "salesLink", "salesLinkSku", "erpSku", "product"]);
 const clean = (value) => String(value ?? "").trim();
 
 function validDate(value) {
@@ -17,7 +17,7 @@ function normalizeInput(input = {}) {
   const startDate = validDate(input.startDate);
   const endDate = validDate(input.endDate);
   if (!DIMENSIONS.has(dimension)) throw new Error("销售日报查询维度无效。");
-  if (!targetId) throw new Error("targetId不能为空。");
+  if (dimension !== "company" && !targetId) throw new Error("targetId不能为空。");
   if (!startDate || !endDate || startDate > endDate) throw new Error("销售日报查询日期范围无效。");
   return { dimension, targetId, startDate, endDate };
 }
@@ -29,6 +29,7 @@ function dateList(startDate, endDate) {
 }
 
 function queryDefinition(dimension) {
+  if (dimension === "company") return { joins: "", predicate: "1=1", params: () => [] };
   if (dimension === "salesLink") return { joins: "", predicate: "f.salesLinkId=?", params: (targetId) => [targetId] };
   if (dimension === "salesLinkSku") return { joins: "", predicate: "f.salesLinkSkuId=?", params: (targetId) => [targetId] };
   if (dimension === "erpSku") return { joins: "", predicate: "f.erpSkuId=?", params: (targetId) => [targetId] };
@@ -37,6 +38,18 @@ function queryDefinition(dimension) {
     predicate: "p.id=?",
     params: (targetId) => [targetId],
   };
+}
+
+function rankingDefinition(dimension) {
+  if (dimension === "product") return {
+    identity: "pem.productId", name: "p.name", code: "p.skuCode",
+    joins: "JOIN product_erp_mappings pem ON pem.erpSkuId=f.erpSkuId AND pem.currentState='active' JOIN products p ON p.id=pem.productId",
+  };
+  if (dimension === "salesLink") return {
+    identity: "f.salesLinkId", name: "COALESCE(NULLIF(l.title,''),l.platformGoodsId,'未命名链接')", code: "l.platformGoodsId",
+    joins: "JOIN sales_links l ON l.id=f.salesLinkId",
+  };
+  throw new Error("销售日报排行仅支持product或salesLink维度。");
 }
 
 function statusFor(rows, startDate, endDate) {
@@ -83,6 +96,29 @@ export function queryDailySalesSummary(input = {}, options = {}) {
     hasData, dataStart: row?.dataStart || null, dataEnd: row?.dataEnd || null, source: SOURCE,
     coverage: { requestedDays, dataDays: Number(row?.dataDays || 0), ratio: requestedDays ? Number(row?.dataDays || 0) / requestedDays : null },
     salesLinkBreakdown,
+  };
+}
+
+export function queryDailySalesSummaryRanking(input = {}, options = {}) {
+  const dimension = clean(input.dimension); const startDate = validDate(input.startDate); const endDate = validDate(input.endDate);
+  const limit = Math.min(100, Math.max(1, Number(input.limit || 10)));
+  if (!startDate || !endDate || startDate > endDate) throw new Error("销售日报查询日期范围无效。");
+  const definition = rankingDefinition(dimension); const database = options.database || getDatabase();
+  const rows = database.prepare(`SELECT ${definition.identity} targetId,${definition.name} targetName,${definition.code} targetCode,
+      COUNT(*) dataCount,COUNT(DISTINCT f.saleDate) dataDays,MIN(f.saleDate) dataStart,MAX(f.saleDate) dataEnd,
+      SUM(f.quantity) quantity,SUM(f.salesAmount) salesAmount,SUM(f.costAmount) costAmount,SUM(f.profitAmount) profitAmount
+    FROM connection_sku_sales_daily_facts f ${definition.joins}
+    WHERE f.saleDate BETWEEN ? AND ? GROUP BY ${definition.identity},${definition.name},${definition.code}
+    ORDER BY salesAmount DESC,${definition.identity} LIMIT ?`).all(startDate, endDate, limit);
+  return {
+    capability: "QueryDailySalesSummary", contractVersion: "1.0", mode: "ranking", dimension, startDate, endDate,
+    items: rows.map((row, index) => ({
+      rank: index + 1, targetId: row.targetId, targetName: row.targetName, targetCode: row.targetCode || null,
+      quantity: metricValue(row, "quantity"), salesAmount: metricValue(row, "salesAmount"), costAmount: metricValue(row, "costAmount"),
+      profitAmount: metricValue(row, "profitAmount"), profitMargin: Number(row.salesAmount || 0) ? Number(row.profitAmount || 0) / Number(row.salesAmount) : null,
+      dataCount: Number(row.dataCount || 0), dataDays: Number(row.dataDays || 0), dataStart: row.dataStart, dataEnd: row.dataEnd,
+    })),
+    hasData: rows.length > 0, source: SOURCE,
   };
 }
 

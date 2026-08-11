@@ -1,8 +1,14 @@
-import { loadOperationDashboard } from "./appState.js";
+import { loadOperationDashboard, loadSalesBusinessDashboard } from "./appState.js";
+import { renderUiModule } from "./uiModuleRegistry.js";
+import "./uiModules/salesBusinessDashboard.js?v=20260811-sales-business-dashboard1";
 
 let loading = false;
 let error = "";
 let dashboard = null;
+let salesDashboard = null;
+let salesDashboardLoading = false;
+let salesDashboardError = "";
+let salesPreset = "30d";
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[character]);
@@ -50,6 +56,7 @@ export function renderOperationDashboardPage() {
   const improvements = dashboard.improvements.summary || dashboard.improvements;
   return `<section class="operation-dashboard">
     <div class="operation-hero"><div><p class="eyebrow">经营管理基础 V2.0</p><h1>经营驾驶舱</h1><p>统一查看经营事实、风险和改善执行。所有指标来自现有正式快照，不补造利润或缺失数据。</p></div><button class="secondary-button" data-action="refresh-operation-dashboard">刷新数据</button></div>
+    ${renderUiModule("sales_business_dashboard", { state: { loading: salesDashboardLoading, error: salesDashboardError, data: salesDashboard } })}
     <div class="operation-metric-grid">
       <article><span>产品近30天销量</span><strong>${number(products.sales30d)}</strong><em class="${products.salesGrowth < 0 ? "is-risk" : ""}">${percent(products.salesGrowth)}</em><small>业务日期 ${escapeHtml(products.latestBusinessDate || "—")}</small></article>
       <article><span>库存资金占用</span><strong>${money(products.capitalOccupation)}</strong><em>${number(products.actualStock)} 件实际库存</em><small>成本完整率 ${percent(products.capitalCoverage)}</small></article>
@@ -82,8 +89,18 @@ async function refresh(rerender) {
   loading = false; rerender();
 }
 
+async function refreshSales(rerender, preset = salesPreset) {
+  salesPreset = preset; salesDashboardLoading = true; salesDashboardError = ""; rerender();
+  try { salesDashboard = (await loadSalesBusinessDashboard(preset)).dashboard; }
+  catch (caught) { salesDashboardError = caught.message || "销售经营驾驶舱读取失败。"; }
+  salesDashboardLoading = false; rerender();
+}
+
 export function bindOperationDashboardPageEvents(rerender) {
   if (!dashboard && !loading) refresh(rerender);
+  if (!salesDashboard && !salesDashboardLoading) refreshSales(rerender);
+  document.querySelectorAll("[data-sales-dashboard-target]").forEach((button) => button.addEventListener("click", () => { window.location.hash = button.dataset.salesDashboardTarget; }));
+  document.querySelectorAll("[data-sales-range]").forEach((button) => button.addEventListener("click", () => refreshSales(rerender, button.dataset.salesRange)));
   document.querySelectorAll("[data-operation-target]").forEach((button) => button.addEventListener("click", () => { window.location.hash = button.dataset.operationTarget; }));
   document.querySelector("[data-action='refresh-operation-dashboard']")?.addEventListener("click", () => refresh(rerender));
 }
