@@ -15,7 +15,7 @@ import {
   updateProcessTemplateNodeStatus,
   updatePersistentResource,
 } from "./appState.js";
-import { canLaunchActionTemplate, hasPermission } from "./permissions.js?v=20260724-action-launch-permissions1";
+import { canLaunchActionTemplate, hasPermission } from "./permissions.js";
 import {
   CategoryType,
   GoalStatus,
@@ -38,14 +38,14 @@ import {
   submitTypeNames,
   taskStatusNames,
   valueModuleList,
-} from "./data/modelOptions.js?v=20260705-state-singleton1";
-import { isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
-import { getProcessInstanceBusinessStatus as selectProcessInstanceBusinessStatus } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260803-action-product-manual-link1";
-import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260802-template-center-v22";
-import { bindActionProductSelectors, collectActionProductIds, renderActionProductSelector } from "./actionProductRelations.js?v=20260803-action-product-manual-link1";
-import { bindStandardWorkLibraryEvents, openTaskTemplateLaunchModal, renderStandardWorkLibraryPage } from "./actionStandardsPage.js?v=20260803-action-product-manual-link1";
-import { selectTask } from "./tasksPage.js?v=20260724-action-template-link1";
+} from "./data/modelOptions.js";
+import { isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js";
+import { getProcessInstanceBusinessStatus as selectProcessInstanceBusinessStatus } from "./data/processInstanceSelectors.js";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js";
+import { getMethodologyLinkByNodeId } from "./methodologiesPage.js";
+import { bindActionProductSelectors, collectActionProductIds, renderActionProductSelector } from "./actionProductRelations.js";
+import { bindStandardWorkLibraryEvents, openTaskTemplateLaunchModal, renderStandardWorkLibraryPage } from "./actionStandardsPage.js";
+import { invokeModuleAction } from "./moduleActions.js";
 
 const today = "2026-06-24";
 let selectedTemplateId = state.processTemplates[0]?.id ?? null;
@@ -1333,7 +1333,7 @@ export function bindProcessesPageEvents(rerender) {
         stopProcess(actionButton.dataset.instanceId);
       }
       if (action === "select-process-task") {
-        selectTask(actionButton.dataset.taskId);
+        await invokeModuleAction("tasks", "selectTask", actionButton.dataset.taskId);
         window.alert("已选中该任务，请切换到任务查看详情。");
       }
       rerender();
@@ -1385,8 +1385,8 @@ export function bindProcessesPageEvents(rerender) {
   if (nodeForm !== null) nodeForm.addEventListener("submit", async (event) => { event.preventDefault(); await saveNode(event.target, rerender); });
   if (startForm !== null) startForm.addEventListener("submit", (event) => { event.preventDefault(); submitStart(event.target, rerender); });
   bindLaunchedProcessDetailEvents(page, rerender, {
-    onTaskSelect: (taskId) => {
-      selectTask(taskId);
+    onTaskSelect: async (taskId) => {
+      await invokeModuleAction("tasks", "selectTask", taskId);
       window.alert("已选中该任务，请切换到任务查看详情。");
     },
   });

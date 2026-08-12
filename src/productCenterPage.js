@@ -57,16 +57,16 @@ import {
   addProductStrategyStep,
   updateProductStrategyStep,
   createProductStrategyAction,
-} from "./services/productCenterService.js?v=20260802-module-boundary1";
-import { getCurrentUser, state } from "./stores/appStore.js?v=20260802-module-boundary1";
-import { getProcessInstanceBusinessStatus, getProcessInstanceOwner } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
-import { canAccessModule, hasPermission } from "./permissions.js?v=20260725-product-center1";
-import { normalizeProductSkuCode } from "./data/productSku.js?v=20260728-product-sku1";
-import { escapeHtml } from "./utils/html.js?v=20260802-module-boundary1";
+} from "./services/productCenterService.js";
+import { getCurrentUser, state } from "./stores/appStore.js";
+import { getProcessInstanceBusinessStatus, getProcessInstanceOwner } from "./data/processInstanceSelectors.js";
+import { canAccessModule, hasPermission } from "./permissions.js";
+import { normalizeProductSkuCode } from "./data/productSku.js";
+import { escapeHtml } from "./utils/html.js";
 import { renderUiModule } from "./uiModuleRegistry.js";
-import "./uiModules/productWorkspaceModules.js?v=20260809-product-workspace-ui1";
-import "./uiModules/productMarketingAsset.js?v=20260809-product-workspace-ui1";
-import "./uiModules/productDailySales.js?v=20260811-product-daily-sales1";
+import "./uiModules/productWorkspaceModules.js";
+import "./uiModules/productMarketingAsset.js";
+import "./uiModules/productDailySales.js";
 
 const productStatuses = ["开发中", "上架", "成长期", "成熟期", "风险期", "淘汰", "待上架", "在售", "停售", "清仓", "已归档"];
 let filters = { query: "", brand: "", category: "", status: "", erpStatus: "", platform: "", stockStatus: "" };

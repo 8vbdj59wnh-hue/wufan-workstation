@@ -8,9 +8,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
 } from "./appState.js";
-import { rerenderPreservingInputFocus } from "./inputFocus.js?v=20260723-input-focus1";
-import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
-import { getValueModuleName, inferValueModuleIdFromText, isValueModuleId } from "./data/modelOptions.js?v=20260705-state-singleton1";
+import { rerenderPreservingInputFocus } from "./inputFocus.js";
+import { hasPermission } from "./permissions.js";
+import { getValueModuleName, inferValueModuleIdFromText, isValueModuleId } from "./data/modelOptions.js";
 
 const demoMethodology = {
   id: "methodology-xhs-image-guide",

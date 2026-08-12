@@ -1,8 +1,8 @@
 import { getCurrentUser, loadBusinessAnomalies, loadOperationDashboard, loadSalesBusinessDashboard } from "./appState.js";
 import { hasPermission } from "./permissions.js";
 import { renderUiModule } from "./uiModuleRegistry.js";
-import "./uiModules/salesBusinessDashboard.js?v=20260811-sales-business-dashboard1";
-import "./uiModules/businessAnomalies.js?v=20260811-business-anomalies1";
+import "./uiModules/salesBusinessDashboard.js";
+import "./uiModules/businessAnomalies.js";
 
 let loading = false;
 let error = "";

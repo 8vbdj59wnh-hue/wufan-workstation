@@ -1,5 +1,5 @@
 import { registerUiModule, renderUiModule } from "../uiModuleRegistry.js";
-import { escapeHtml } from "../utils/html.js?v=20260802-module-boundary1";
+import { escapeHtml } from "../utils/html.js";
 
 const money = (value) => value == null ? "暂无数据" : Number(value).toLocaleString("zh-CN", { style: "currency", currency: "CNY", maximumFractionDigits: 2 });
 const percent = (value) => value == null ? "暂无数据" : `${(Number(value) * 100).toFixed(2)}%`;

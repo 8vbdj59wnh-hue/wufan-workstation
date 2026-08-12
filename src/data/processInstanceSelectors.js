@@ -1,5 +1,5 @@
 import { ProcessInstanceStatus, TaskSource, TaskStatus } from "./modelOptions.js";
-import { hasTaskOverdueRecord, isCanceledStatus, isDoneStatus, isTaskOverdue } from "./taskUtils.js?v=20260705-state-singleton1";
+import { hasTaskOverdueRecord, isCanceledStatus, isDoneStatus, isTaskOverdue } from "./taskUtils.js";
 
 const currentTaskStatusRank = {
   [TaskStatus.Doing]: 1,

@@ -1,5 +1,5 @@
 import { registerUiModule, renderUiModule } from "../uiModuleRegistry.js";
-import { escapeHtml } from "../utils/html.js?v=20260802-module-boundary1";
+import { escapeHtml } from "../utils/html.js";
 
 export const LINK_DATA_COLUMNS = [
   { key: "image", label: "主图" }, { key: "name", label: "链接名称", sortable: true },

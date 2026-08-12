@@ -1,5 +1,5 @@
 import { registerUiModule } from "../uiModuleRegistry.js";
-import { escapeHtml } from "../utils/html.js?v=20260802-module-boundary1";
+import { escapeHtml } from "../utils/html.js";
 
 export function renderProductImage({ src = "", fallbackSrc = "", alt = "产品图片", className = "product-list-image", resolveUrl = (value) => value } = {}) {
   const source = src || fallbackSrc;

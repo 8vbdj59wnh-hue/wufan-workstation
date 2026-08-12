@@ -1,5 +1,5 @@
 import { registerUiModule } from "../uiModuleRegistry.js";
-import { escapeHtml } from "../utils/html.js?v=20260802-module-boundary1";
+import { escapeHtml } from "../utils/html.js";
 
 const money = (value) => Number(value || 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const percent = (value) => value === null || value === undefined ? "暂无数据" : `${(Number(value) * 100).toFixed(1)}%`;

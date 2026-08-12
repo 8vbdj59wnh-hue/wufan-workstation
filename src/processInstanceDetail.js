@@ -1,6 +1,6 @@
 import { formatProcessStepLabel, getCurrentUser, getLatestStandardWorkFormFields, getNow, getProcessNodeStepOrder, loadBusinessImprovementResult, loadTemplates, resolveAssetUrl, state, updateActionProducts, updatePersistentResource, updateProcessTaskExecutor, uploadStandardWorkAttachment } from "./appState.js";
 import { renderUiModule } from "./uiModuleRegistry.js";
-import "./uiModules/businessImprovementResult.js?v=20260811-business-improvement-result1";
+import "./uiModules/businessImprovementResult.js";
 import {
   GoalStatus,
   ProcessInstanceStatus,
@@ -10,9 +10,9 @@ import {
   getProcessInstanceBusinessStatus as selectProcessInstanceBusinessStatus,
   getProcessInstanceOwner,
   getProcessProgress as selectProcessProgress,
-} from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
-import { getTaskBusinessStatus } from "./data/taskSelectors.js?v=20260723-task-business-status2";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260705-state-singleton1";
+} from "./data/processInstanceSelectors.js";
+import { getTaskBusinessStatus } from "./data/taskSelectors.js";
+import { renderWorkFormViewer } from "./workFormViewer.js";
 import {
   collectPublicFormFields,
   handlePublicFormImageUpload,
@@ -20,11 +20,11 @@ import {
   renderPublicFormEditor,
   updatePublicFormImagePreview,
   validatePublicFormFields,
-} from "./workFormEditor.js?v=20260722-public-form-editor1";
-import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
-import { bindActionProductSelectors, collectActionProductIds, getActionProductIds, getActionProducts, renderActionProductSelector, renderLinkedActionProducts } from "./actionProductRelations.js?v=20260807-key-action-product-context1";
-import { hasPermission } from "./permissions.js?v=20260725-product-center1";
-import { getActionDeadlinePresentation } from "./data/actionDeadline.js?v=20260802-action-countdown1";
+} from "./workFormEditor.js";
+import { normalizePublicFormFields } from "./publicFormFields.js";
+import { bindActionProductSelectors, collectActionProductIds, getActionProductIds, getActionProducts, renderActionProductSelector, renderLinkedActionProducts } from "./actionProductRelations.js";
+import { hasPermission } from "./permissions.js";
+import { getActionDeadlinePresentation } from "./data/actionDeadline.js";
 import { normalizePublishTimeFields, normalizePublishTimeMode, PublishTimeMode } from "./data/contentPublishTime.js";
 import {
   collectBusinessDateTime,
@@ -36,7 +36,7 @@ import {
   getBusinessMinutePart,
   renderBusinessHourOptions,
   renderBusinessMinuteOptions,
-} from "./businessTime.js?v=20260705-state-singleton1";
+} from "./businessTime.js";
 
 const goals = state.goals;
 const people = state.people;

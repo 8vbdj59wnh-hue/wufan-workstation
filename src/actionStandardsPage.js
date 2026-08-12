@@ -17,7 +17,7 @@ import {
   uploadImageFile,
   uploadStandardWorkAttachment,
 } from "./appState.js";
-import { canLaunchActionTemplate, hasPermission } from "./permissions.js?v=20260724-action-launch-permissions1";
+import { canLaunchActionTemplate, hasPermission } from "./permissions.js";
 import {
   CategoryType,
   ProcessAccepterRule,
@@ -32,7 +32,7 @@ import {
   taskTemplateStatusNames,
   ValueModule,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260705-state-singleton1";
+import { getPrimaryImageUrl } from "./data/taskUtils.js";
 import {
   collectProductImageField,
   handleProductImagesUpload,
@@ -50,13 +50,13 @@ import {
   isBusinessDueDateField,
   renderBusinessHourOptions,
   renderBusinessMinuteOptions,
-} from "./businessTime.js?v=20260705-state-singleton1";
-import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
-import { bindActionProductSelectors, collectActionProductIds, renderActionProductSelector } from "./actionProductRelations.js?v=20260803-action-product-manual-link1";
+} from "./businessTime.js";
+import { normalizePublicFormFields } from "./publicFormFields.js";
+import { bindActionProductSelectors, collectActionProductIds, renderActionProductSelector } from "./actionProductRelations.js";
 import {
   getPublishingAccountFieldOptions,
   isPublishingAccountField,
-} from "./publishingAccountOptions.js?v=20260728-publishing-account-options1";
+} from "./publishingAccountOptions.js";
 
 const categories = state.categories;
 const departments = state.departments;

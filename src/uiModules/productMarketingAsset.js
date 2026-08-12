@@ -1,5 +1,5 @@
 import { registerUiModule } from "../uiModuleRegistry.js";
-import { escapeHtml } from "../utils/html.js?v=20260802-module-boundary1";
+import { escapeHtml } from "../utils/html.js";
 
 const display = (value) => String(value ?? "").trim() || "未维护";
 const lines = (values) => (values?.length ? values : ["未维护"]).map((value) => `<span>${escapeHtml(typeof value === "string" ? value : value.text)}</span>`).join("");

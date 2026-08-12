@@ -15,7 +15,7 @@ import {
   canLaunchAnyActionTemplate,
   canAccessTemplateCenter,
   hasPermission,
-} from "./permissions.js?v=20260724-action-launch-permissions1";
+} from "./permissions.js";
 import {
   CategoryType,
   GoalLevel,
@@ -39,21 +39,21 @@ import {
   isValueModuleId,
   ValueModule,
 } from "./data/modelOptions.js";
-import { getPrimaryImageUrl, isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
+import { getPrimaryImageUrl, isTaskOverdue } from "./data/taskUtils.js";
 import {
   getCurrentExecutor as selectCurrentExecutor,
   getCurrentProcessTask as selectCurrentProcessTask,
   getProcessInstanceBusinessStatus as selectProcessInstanceBusinessStatus,
   getProcessProgress as selectProcessProgress,
   isProcessInstanceOverdue as selectProcessInstanceOverdue,
-} from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
-import { bindActionLinkedTemplatePreviewEvents, bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260803-action-product-manual-link1";
-import { selectTask } from "./tasksPage.js?v=20260724-action-template-link1";
+} from "./data/processInstanceSelectors.js";
+import { bindActionLinkedTemplatePreviewEvents, bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js";
+import { invokeModuleAction } from "./moduleActions.js";
 import {
   collectBusinessDateTime,
   formatBusinessDateTime,
   renderBusinessHourOptions,
-} from "./businessTime.js?v=20260705-state-singleton1";
+} from "./businessTime.js";
 import { normalizePublishTimeFields, PublishTimeMode } from "./data/contentPublishTime.js";
 import {
   collectPublicFormFields,
@@ -62,9 +62,9 @@ import {
   renderPublicFormEditor,
   updatePublicFormImagePreview,
   validatePublicFormFields,
-} from "./workFormEditor.js?v=20260722-public-form-editor1";
-import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
-import { bindActionProductSelectors, collectActionProductIds, renderActionProductSelector } from "./actionProductRelations.js?v=20260803-action-product-manual-link1";
+} from "./workFormEditor.js";
+import { normalizePublicFormFields } from "./publicFormFields.js";
+import { bindActionProductSelectors, collectActionProductIds, renderActionProductSelector } from "./actionProductRelations.js";
 
 const departments = state.departments;
 const categories = state.categories;
@@ -2171,8 +2171,8 @@ export function bindGoalsPageEvents(rerender) {
     updatePublishTimeMode();
   }
   bindLaunchedProcessDetailEvents(goalsPage, rerender, {
-    onTaskSelect: (taskId) => {
-      selectTask(taskId);
+    onTaskSelect: async (taskId) => {
+      await invokeModuleAction("tasks", "selectTask", taskId);
       window.alert("已选中该任务，请切换到任务查看详情。");
     },
   });

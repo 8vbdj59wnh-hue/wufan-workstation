@@ -9,8 +9,8 @@ import {
   normalizePermissions,
   permissionCount,
   permissionGroups,
-} from "./permissions.js?v=20260725-custom-permission-templates1";
-import { rerenderPreservingInputFocus } from "./inputFocus.js?v=20260723-input-focus1";
+} from "./permissions.js";
+import { rerenderPreservingInputFocus } from "./inputFocus.js";
 import {
   CategoryType,
   PersonRole,

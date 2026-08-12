@@ -12,9 +12,9 @@ import {
   uploadGenericFile,
   uploadImageFile,
 } from "./appState.js";
-import { bindStandardWorkLibraryEvents, renderStandardWorkLibraryPage } from "./actionStandardsPage.js?v=20260803-action-product-manual-link1";
-import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js?v=20260802-template-version1";
-import { bindSettingsPageEvents, renderFormDesignSection } from "./settingsPage.js?v=20260802-template-center-form1";
+import { bindStandardWorkLibraryEvents, renderStandardWorkLibraryPage } from "./actionStandardsPage.js";
+import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js";
+import { bindSettingsPageEvents, renderFormDesignSection } from "./settingsPage.js";
 
 const materialTypeNames = {
   image: "图片",

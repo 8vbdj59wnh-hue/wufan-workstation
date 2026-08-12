@@ -84,26 +84,26 @@ import {
   createConnectionFoundationTemplate,
   iterateConnectionFoundationTemplate,
   resolveAssetUrl,
-} from "./services/connectionCenterService.js?v=20260806-bulk-platform-import1";
+} from "./services/connectionCenterService.js";
 import { getCurrentUser, state } from "./appState.js";
-import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
-import { escapeHtml } from "./utils/html.js?v=20260802-module-boundary1";
+import { hasPermission } from "./permissions.js";
+import { escapeHtml } from "./utils/html.js";
 import { renderUiModule } from "./uiModuleRegistry.js";
-import "./uiModules/linkSalesDistribution.js?v=20260809-link-sales-distribution1";
-import "./uiModules/linkDataStatus.js?v=20260809-my-link-workspace1";
-import "./uiModules/salesDailyDataQuality.js?v=20260811-sales-daily-quality1";
-import "./uiModules/myLinkSummary.js?v=20260809-my-link-workspace1";
-import "./uiModules/linkHospitalTodo.js?v=20260809-my-link-workspace1";
-import "./uiModules/linkList.js?v=20260809-my-link-workspace1";
-import "./uiModules/linkWorkspaceModules.js?v=20260809-link-workspace1";
-import "./uiModules/linkDailySales.js?v=20260811-daily-sales1";
-import "./uiModules/linkImage.js?v=20260809-link-data-table1";
-import "./uiModules/linkColumnSetting.js?v=20260809-link-data-table1";
-import "./uiModules/linkDataToolbar.js?v=20260809-link-data-table1";
-import { LINK_DATA_COLUMNS, DEFAULT_MINE_LINK_FIELDS } from "./uiModules/linkDataTable.js?v=20260809-link-data-table1";
-import "./uiModules/linkIndicatorSetting.js?v=20260809-link-business-table1";
-import "./uiModules/linkBusinessToolbar.js?v=20260809-link-business-table1";
-import { LINK_BUSINESS_COLUMN_GROUPS, LINK_BUSINESS_COLUMNS, DEFAULT_LINK_BUSINESS_FIELDS } from "./uiModules/linkBusinessTable.js?v=20260809-link-business-table1";
+import "./uiModules/linkSalesDistribution.js";
+import "./uiModules/linkDataStatus.js";
+import "./uiModules/salesDailyDataQuality.js";
+import "./uiModules/myLinkSummary.js";
+import "./uiModules/linkHospitalTodo.js";
+import "./uiModules/linkList.js";
+import "./uiModules/linkWorkspaceModules.js";
+import "./uiModules/linkDailySales.js";
+import "./uiModules/linkImage.js";
+import "./uiModules/linkColumnSetting.js";
+import "./uiModules/linkDataToolbar.js";
+import { LINK_DATA_COLUMNS, DEFAULT_MINE_LINK_FIELDS } from "./uiModules/linkDataTable.js";
+import "./uiModules/linkIndicatorSetting.js";
+import "./uiModules/linkBusinessToolbar.js";
+import { LINK_BUSINESS_COLUMN_GROUPS, LINK_BUSINESS_COLUMNS, DEFAULT_LINK_BUSINESS_FIELDS } from "./uiModules/linkBusinessTable.js";
 
 const pageState = {
   loaded: false,

@@ -3,7 +3,7 @@ import {
   getCurrentUser, loadSupplier, loadSuppliers, loadSupplyChainOverview, saveSupplyEvaluation,
   saveSupplierProfile, updateSupplyPurchase, updateSupplyQualityIssue,
 } from "./appState.js";
-import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
+import { hasPermission } from "./permissions.js";
 
 let activeTab = "overview";
 let loading = false;

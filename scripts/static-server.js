@@ -10,7 +10,7 @@ const host = process.env.HOST ?? "0.0.0.0";
 
 const app = express();
 
-function setNoCacheHeaders(response) {
+function setHtmlNoCacheHeaders(response) {
   response.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
   response.setHeader("Pragma", "no-cache");
   response.setHeader("Expires", "0");
@@ -19,9 +19,13 @@ function setNoCacheHeaders(response) {
 
 app.use(
   express.static(projectRoot, {
-    etag: false,
-    lastModified: false,
-    setHeaders: setNoCacheHeaders,
+    etag: true,
+    lastModified: true,
+    maxAge: 0,
+    setHeaders(response, filePath) {
+      if (filePath.endsWith(".html")) setHtmlNoCacheHeaders(response);
+      else response.setHeader("Cache-Control", "public, max-age=0, must-revalidate");
+    },
   }),
 );
 
@@ -30,7 +34,7 @@ app.use((request, response, next) => {
     next();
     return;
   }
-  setNoCacheHeaders(response);
+  setHtmlNoCacheHeaders(response);
   response.sendFile(path.join(projectRoot, "index.html"));
 });
 

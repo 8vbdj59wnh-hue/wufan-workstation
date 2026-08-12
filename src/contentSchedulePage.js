@@ -20,11 +20,11 @@ import {
   getBusinessDatePart,
   getBusinessHourPart,
   renderBusinessHourOptions,
-} from "./businessTime.js?v=20260705-state-singleton1";
+} from "./businessTime.js";
 import { getEffectivePublishTime, normalizePublishTimeMode, PublishTimeMode } from "./data/contentPublishTime.js";
-import { canLaunchActionTemplate, hasPermission } from "./permissions.js?v=20260724-action-launch-permissions1";
-import { rerenderPreservingInputFocus } from "./inputFocus.js?v=20260723-input-focus1";
-import { normalizeProductSkuCode, splitProductSkuCodes } from "./data/productSku.js?v=20260728-product-sku1";
+import { canLaunchActionTemplate, hasPermission } from "./permissions.js";
+import { rerenderPreservingInputFocus } from "./inputFocus.js";
+import { normalizeProductSkuCode, splitProductSkuCodes } from "./data/productSku.js";
 import {
   CategoryType,
   ContentScheduleStatus,
@@ -49,17 +49,17 @@ import {
   getProcessInstanceBusinessStatus as selectProcessInstanceBusinessStatus,
   getProcessProgress as selectProcessProgress,
   isProcessInstanceOverdue as selectProcessInstanceOverdue,
-} from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
-import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
+} from "./data/processInstanceSelectors.js";
+import { normalizePublicFormFields } from "./publicFormFields.js";
 import {
   getPublishingAccountNames,
   isPublishingAccountField,
-} from "./publishingAccountOptions.js?v=20260728-publishing-account-options1";
+} from "./publishingAccountOptions.js";
 import {
   bindLaunchedProcessDetailEvents,
   canEditLaunchedProcessInstance,
   renderLaunchedProcessDetail,
-} from "./processInstanceDetail.js?v=20260803-action-product-manual-link1";
+} from "./processInstanceDetail.js";
 
 const defaultDepartmentId = "dept-marketing";
 const defaultOwnerId = "person-005";

@@ -1,5 +1,5 @@
 import { registerUiModule, renderUiModule } from "../uiModuleRegistry.js";
-import { escapeHtml } from "../utils/html.js?v=20260802-module-boundary1";
+import { escapeHtml } from "../utils/html.js";
 
 export const LINK_BUSINESS_COLUMN_GROUPS = [
   { key: "link", label: "链接信息", columns: [

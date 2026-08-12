@@ -1,5 +1,5 @@
 import { resolveAssetUrl, state } from "./appState.js";
-import { getProcessInstanceBusinessStatus } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
+import { getProcessInstanceBusinessStatus } from "./data/processInstanceSelectors.js";
 
 let previewProductId = "";
 

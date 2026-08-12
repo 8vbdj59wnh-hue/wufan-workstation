@@ -1,5 +1,5 @@
 import { registerUiModule } from "../uiModuleRegistry.js";
-import { escapeHtml } from "../utils/html.js?v=20260802-module-boundary1";
+import { escapeHtml } from "../utils/html.js";
 const labels={sales_drop:"销售额下降",profit_drop:"利润下降",sales_gap:"销售断档",data_quality_issue:"数据质量问题"};const severityLabels={high:"高风险",medium:"需关注",low:"低风险"};
 const money=(value)=>value===null||value===undefined?"暂无数据":`¥${Number(value).toLocaleString("zh-CN",{maximumFractionDigits:2})}`;
 const change=(value)=>value===null||value===undefined?"—":`${(Number(value)*100).toFixed(1)}%`;

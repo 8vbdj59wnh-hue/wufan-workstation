@@ -8,7 +8,7 @@ import {
   state,
   updatePersistentResource,
 } from "./appState.js";
-import { selectTask } from "./tasksPage.js?v=20260724-action-template-link1";
+import { invokeModuleAction } from "./moduleActions.js";
 import {
   bindActionLinkedTemplatePreviewEvents,
   bindLaunchedProcessDetailEvents,
@@ -17,9 +17,9 @@ import {
   renderActionTemplatePicker,
   renderLaunchedProcessDetail,
   updateActionTemplatePickerSelection,
-} from "./processInstanceDetail.js?v=20260807-key-action-product-context1";
-import { formatBusinessDateTime } from "./businessTime.js?v=20260705-state-singleton1";
-import { rerenderPreservingInputFocus } from "./inputFocus.js?v=20260723-input-focus1";
+} from "./processInstanceDetail.js";
+import { formatBusinessDateTime } from "./businessTime.js";
+import { rerenderPreservingInputFocus } from "./inputFocus.js";
 import {
   ProcessInstanceStatus,
   TaskStatus,
@@ -28,14 +28,14 @@ import {
   inferValueModuleIdFromText,
   isValueModuleId,
   valueModuleList,
-} from "./data/modelOptions.js?v=20260705-state-singleton1";
-import { getActionImageUrls, getPrimaryImageUrl } from "./data/taskUtils.js?v=20260705-state-singleton1";
+} from "./data/modelOptions.js";
+import { getActionImageUrls, getPrimaryImageUrl } from "./data/taskUtils.js";
 import { renderActionImageGrid } from "./actionImages.js";
-import { getActionDeadlinePresentation } from "./data/actionDeadline.js?v=20260802-action-countdown1";
+import { getActionDeadlinePresentation } from "./data/actionDeadline.js";
 import {
   getActionDisplayImages,
   getActionProducts,
-} from "./actionProductRelations.js?v=20260807-key-action-product-context1";
+} from "./actionProductRelations.js";
 import {
   getCurrentExecutor as selectCurrentExecutor,
   getCurrentProcessTask as selectCurrentProcessTask,
@@ -43,12 +43,12 @@ import {
   getProcessInstanceOwner as selectProcessInstanceOwner,
   getProcessProgress as selectProcessProgress,
   isProcessInstanceOverdue as selectProcessInstanceOverdue,
-} from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
+} from "./data/processInstanceSelectors.js";
 import {
   bindContentNoteBatchEvents,
   renderContentNoteBatchModal,
   renderContentNoteBatchTools,
-} from "./contentSchedulePage.js?v=20260728-content-note-batch1";
+} from "./contentSchedulePage.js";
 
 const dayMs = 24 * 60 * 60 * 1000;
 const boardDayCount = 30;
@@ -1644,7 +1644,7 @@ export function bindScheduleBoardPageEvents(rerender) {
       if (button.dataset.scheduleListAction === "tasks") {
         const row = findRowByProcessInstanceId(processInstanceId);
         const task = row?.currentTask ?? row?.tasks?.[0] ?? null;
-        if (task !== null) selectTask(task.id);
+        if (task !== null) await invokeModuleAction("tasks", "selectTask", task.id);
         window.location.hash = "task-list";
         return;
       }
@@ -1823,9 +1823,9 @@ export function bindScheduleBoardPageEvents(rerender) {
   const modal = document.querySelector(".schedule-process-modal");
   if (modal !== null) {
     bindLaunchedProcessDetailEvents(modal, rerenderScheduleBoard, {
-      onTaskSelect: (taskId) => {
+      onTaskSelect: async (taskId) => {
         selectedProcessInstanceId = null;
-        selectTask(taskId);
+        await invokeModuleAction("tasks", "selectTask", taskId);
         window.location.hash = "task-list";
       },
       onSaved: () => {

@@ -5,12 +5,12 @@ import {
   getBusinessHourPart,
   isBusinessDueDateField,
   renderBusinessHourOptions,
-} from "./businessTime.js?v=20260705-state-singleton1";
-import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
+} from "./businessTime.js";
+import { normalizePublicFormFields } from "./publicFormFields.js";
 import {
   getPublishingAccountFieldOptions,
   isPublishingAccountField,
-} from "./publishingAccountOptions.js?v=20260728-publishing-account-options1";
+} from "./publishingAccountOptions.js";
 import {
   collectProductImageField,
   handleProductImagesUpload,

@@ -1,5 +1,5 @@
 import { registerUiModule } from "../uiModuleRegistry.js";
-import { escapeHtml } from "../utils/html.js?v=20260802-module-boundary1";
+import { escapeHtml } from "../utils/html.js";
 
 export function renderMyLinkSummary({ summary = {}, money = (value) => value } = {}) {
   const cards = [

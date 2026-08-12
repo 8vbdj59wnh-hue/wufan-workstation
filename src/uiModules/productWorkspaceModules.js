@@ -1,6 +1,6 @@
 import { registerUiModule } from "../uiModuleRegistry.js";
 import { renderProductImage } from "./productImage.js";
-import { escapeHtml } from "../utils/html.js?v=20260802-module-boundary1";
+import { escapeHtml } from "../utils/html.js";
 
 const value = (input) => input === null || input === undefined || input === "" ? "—" : input;
 

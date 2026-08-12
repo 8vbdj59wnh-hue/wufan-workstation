@@ -23,9 +23,9 @@ import {
   issuesRequirements as initialIssuesRequirements,
   standardWorkForms as initialStandardWorkForms,
   workPlans as initialWorkPlans,
-} from "./data/mockData.js?v=20260705-state-singleton1";
-import { formatBusinessDateTime } from "./businessTime.js?v=20260705-state-singleton1";
-import { isTaskExecutionStarted } from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
+} from "./data/mockData.js";
+import { formatBusinessDateTime } from "./businessTime.js";
+import { isTaskExecutionStarted } from "./data/processInstanceSelectors.js";
 import {
   CategoryType,
   PersonRole,
@@ -44,8 +44,8 @@ import {
   WorkPlanStatus,
   getValueModuleName,
   inferValueModuleIdFromText,
-} from "./data/modelOptions.js?v=20260705-state-singleton1";
-import { getPrimaryImageUrl } from "./data/taskUtils.js?v=20260705-state-singleton1";
+} from "./data/modelOptions.js";
+import { getPrimaryImageUrl } from "./data/taskUtils.js";
 
 const apiPort = "3001";
 const apiBaseUrl = `${window.location.protocol}//${window.location.hostname}:${apiPort}`;

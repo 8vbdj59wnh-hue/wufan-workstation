@@ -8,7 +8,7 @@ import {
   state,
   updatePersistentResource,
 } from "./appState.js";
-import { getDataScope, hasPermission } from "./permissions.js?v=20260705-state-singleton1";
+import { getDataScope, hasPermission } from "./permissions.js";
 import {
   ProcessInstanceStatus,
   TaskStatus,
@@ -17,13 +17,13 @@ import {
   processInstanceStatusNames,
   taskStatusNames,
 } from "./data/modelOptions.js";
-import { hasTaskOverdueRecord, isCanceledStatus, isDoneStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
+import { hasTaskOverdueRecord, isCanceledStatus, isDoneStatus, isTaskOverdue } from "./data/taskUtils.js";
 import {
   getCurrentExecutor as selectCurrentExecutor,
   getCurrentProcessTask as selectCurrentProcessTask,
   getProcessInstanceOwner as selectProcessInstanceOwner,
   isTaskExecutionStarted,
-} from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
+} from "./data/processInstanceSelectors.js";
 import {
   getPeriodWorkResultSummary,
   getProcessInstanceByWorkPlan as getStatsProcessInstanceByWorkPlan,
@@ -32,9 +32,9 @@ import {
   getWorkResultSummary,
   isWorkPlanRelatedToPerson as isStatsWorkPlanRelatedToPerson,
   UnassignedDepartmentId,
-} from "./data/workResultStats.js?v=20260717-work-results-dashboard1";
-import { formatBusinessDateTime } from "./businessTime.js?v=20260705-state-singleton1";
-import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260803-action-product-manual-link1";
+} from "./data/workResultStats.js";
+import { formatBusinessDateTime } from "./businessTime.js";
+import { bindLaunchedProcessDetailEvents, renderLaunchedProcessDetail } from "./processInstanceDetail.js";
 
 const today = new Date().toISOString().slice(0, 10);
 let activeAssessmentTab = "stats";

@@ -1,6 +1,6 @@
 import { resolveAssetUrl, state } from "./appState.js";
-import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
-import { getActionImageUrls } from "./data/taskUtils.js?v=20260705-state-singleton1";
+import { normalizePublicFormFields } from "./publicFormFields.js";
+import { getActionImageUrls } from "./data/taskUtils.js";
 import { renderActionImageGrid } from "./actionImages.js";
 
 const hiddenSystemFieldKeys = new Set(["standardWorkAttachments", "productImages", "publishTimeMode"]);

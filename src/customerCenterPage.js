@@ -1,5 +1,5 @@
 import { addCustomerConsumption,addCustomerFollowup,addCustomerTag,getCurrentUser,loadCustomer,loadCustomerOverview,loadCustomers,saveCustomerProfile } from "./appState.js";
-import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
+import { hasPermission } from "./permissions.js";
 let tab="overview",loading=false,error="",overview=null,customers=[],selected=null,detailTab="profile",filters={search:"",businessType:"",lifecycleStatus:""};
 const h=(v)=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"})[c]),n=(v)=>Number(v||0).toLocaleString("zh-CN"),money=(v)=>`¥${Number(v||0).toLocaleString("zh-CN",{maximumFractionDigits:2})}`;
 const canManage=()=>hasPermission(getCurrentUser(),"customers.manage"),canMaintain=()=>hasPermission(getCurrentUser(),"customers.maintain")||canManage();

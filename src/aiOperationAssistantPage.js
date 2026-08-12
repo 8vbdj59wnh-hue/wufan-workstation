@@ -1,5 +1,5 @@
 import { confirmAiAnalysis,createAiAnalysis,createAiAnalysisAction,getCurrentUser,loadAiAnalyses,state } from "./appState.js";
-import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
+import { hasPermission } from "./permissions.js";
 let loading=false,loaded=false,error="",items=[],selected=null;
 const h=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"})[c]),type=v=>({company:"公司经营",product:"产品经营",connection:"连接经营",finance:"财务经营",supply:"供应链",customer:"客户经营"})[v]||v,status=v=>({draft:"待确认",confirmed:"已确认",action_created:"已转行动"})[v]||v;
 const can=k=>["admin","system_admin"].includes(getCurrentUser()?.role??getCurrentUser()?.authRole)||hasPermission(getCurrentUser(),`aiAssistant.${k}`),vals=f=>Object.fromEntries(new FormData(f));

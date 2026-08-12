@@ -1,7 +1,7 @@
-import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260802-today-overview1";
-import { bindOperationDashboardPageEvents, renderOperationDashboardPage } from "./operationDashboardPage.js?v=20260802-operation-foundation1";
+import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js";
+import { bindOperationDashboardPageEvents, renderOperationDashboardPage } from "./operationDashboardPage.js";
 import { ensureDashboardManagementLoaded, getCurrentUser } from "./appState.js";
-import { hasPermission } from "./permissions.js?v=20260705-state-singleton1";
+import { hasPermission } from "./permissions.js";
 
 function currentView() {
   const hash = window.location.hash.replace(/^#/, "");

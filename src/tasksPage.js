@@ -34,14 +34,14 @@ import {
   uploadGenericFile,
   uploadImageFile,
   uploadStandardWorkAttachment,
-} from "./services/taskCenterService.js?v=20260802-module-boundary1";
-import { getCurrentUser, state } from "./stores/appStore.js?v=20260802-module-boundary1";
-import { rerenderPreservingInputFocus } from "./inputFocus.js?v=20260723-input-focus1";
+} from "./services/taskCenterService.js";
+import { getCurrentUser, state } from "./stores/appStore.js";
+import { rerenderPreservingInputFocus } from "./inputFocus.js";
 import {
   canLaunchActionTemplate,
   canLaunchAnyActionTemplate,
   hasPermission,
-} from "./permissions.js?v=20260724-action-launch-permissions1";
+} from "./permissions.js";
 import {
   CategoryType,
   GoalStatus,
@@ -63,7 +63,7 @@ import {
   isValueModuleId,
   ValueModule,
 } from "./data/modelOptions.js";
-import { getActionImageUrls, getPrimaryImageUrl, hasTaskOverdueRecord, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js?v=20260705-state-singleton1";
+import { getActionImageUrls, getPrimaryImageUrl, hasTaskOverdueRecord, isCanceledStatus, isDoneStatus, isHiddenByDefaultStatus, isTaskOverdue } from "./data/taskUtils.js";
 import {
   getCurrentExecutor as selectCurrentExecutor,
   getCurrentProcessTask as selectCurrentProcessTask,
@@ -72,8 +72,8 @@ import {
   isTaskExecutionStarted,
   isProcessInstanceOverdue as selectProcessInstanceOverdue,
   sortProcessInstanceTasks,
-} from "./data/processInstanceSelectors.js?v=20260722-progress-selectors1";
-import { getTaskBusinessStatus } from "./data/taskSelectors.js?v=20260723-task-business-status2";
+} from "./data/processInstanceSelectors.js";
+import { getTaskBusinessStatus } from "./data/taskSelectors.js";
 import {
   collectProductImageField,
   handleProductImagesUpload,
@@ -83,14 +83,14 @@ import {
   renderProductImageEditor,
   validateProductImages,
 } from "./actionImages.js";
-import { bindActionLinkedTemplatePreviewEvents, bindLaunchedProcessDetailEvents, renderActionLinkedTemplates, renderLaunchedProcessDetail } from "./processInstanceDetail.js?v=20260803-action-product-manual-link1";
-import { getMethodologyLinkByNodeId } from "./methodologiesPage.js?v=20260802-template-center-v22";
-import { renderWorkFormViewer } from "./workFormViewer.js?v=20260705-state-singleton1";
-import { normalizePublicFormFields } from "./publicFormFields.js?v=20260722-public-form-key-normalize1";
+import { bindActionLinkedTemplatePreviewEvents, bindLaunchedProcessDetailEvents, renderActionLinkedTemplates, renderLaunchedProcessDetail } from "./processInstanceDetail.js";
+import { getMethodologyLinkByNodeId } from "./methodologiesPage.js";
+import { renderWorkFormViewer } from "./workFormViewer.js";
+import { normalizePublicFormFields } from "./publicFormFields.js";
 import {
   getPublishingAccountFieldOptions,
   isPublishingAccountField,
-} from "./publishingAccountOptions.js?v=20260728-publishing-account-options1";
+} from "./publishingAccountOptions.js";
 import {
   bindActionProductSelectors,
   collectActionProductIds,
@@ -99,7 +99,7 @@ import {
   getTaskContextProducts,
   renderActionProductSelector,
   renderLinkedActionProducts,
-} from "./actionProductRelations.js?v=20260803-action-product-manual-link1";
+} from "./actionProductRelations.js";
 import {
   collectBusinessDateTime,
   collectBusinessMinuteDateTime,
@@ -111,7 +111,7 @@ import {
   isBusinessDueDateField,
   renderBusinessHourOptions,
   renderBusinessMinuteOptions,
-} from "./businessTime.js?v=20260705-state-singleton1";
+} from "./businessTime.js";
 
 function getTodayDateInShanghai() {
   return new Intl.DateTimeFormat("en-CA", {

@@ -1,5 +1,5 @@
 import { registerUiModule } from "../uiModuleRegistry.js";
-import { escapeHtml } from "../utils/html.js?v=20260802-module-boundary1";
+import { escapeHtml } from "../utils/html.js";
 
 function register(moduleKey, name, description, dependencies, render, configSchema = {}) {
   registerUiModule({ moduleKey, name, domain: "business_links", description, render, configSchema, dependencies });

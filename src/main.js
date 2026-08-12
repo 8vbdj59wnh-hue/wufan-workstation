@@ -1,23 +1,20 @@
-import { modules } from "./modules.js?v=20260705-state-singleton1";
-import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js?v=20260803-action-product-manual-link1";
-import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js?v=20260803-action-product-manual-link1";
-import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js?v=20260705-state-singleton1";
-import { bindTasksPageEvents, renderTasksPage, selectTask } from "./pages/tasksPage.js?v=20260803-action-product-manual-link1";
-import { bindScheduleBoardPageEvents, renderScheduleBoardPage } from "./scheduleBoardPage.js?v=20260807-key-action-product-context1";
-import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js?v=20260803-action-product-manual-link1";
-import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js?v=20260802-template-version1";
-import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js?v=20260803-action-product-manual-link1";
-import { bindProductCenterPageEvents, renderProductCenterPage } from "./pages/productCenterPage.js?v=20260809-product-workspace-ui1";
-import { bindDataCenterPageEvents, renderDataCenterPage } from "./dataCenterPage.js?v=20260729-data-center-v5";
-import { bindConnectionCenterPageEvents, renderConnectionCenterPage } from "./pages/connectionCenterPage.js?v=20260809-link-data-table1";
-import { bindOperationDashboardPageEvents, renderOperationDashboardPage } from "./operationDashboardPage.js?v=20260802-operation-foundation1";
-import { bindFinanceCenterPageEvents, renderFinanceCenterPage } from "./financeCenterPage.js?v=20260802-finance-center1";
-import { bindSupplyChainCenterPageEvents, renderSupplyChainCenterPage } from "./pages/supplyChainCenterPage.js?v=20260802-supply-chain1";
-import { bindCustomerCenterPageEvents, renderCustomerCenterPage } from "./pages/customerCenterPage.js?v=20260802-customer-center1";
-import { bindAiOperationAssistantPageEvents, renderAiOperationAssistantPage } from "./pages/aiOperationAssistantPage.js?v=20260802-ai-operation2";
-import { bindDashboardPageEvents, renderDashboardPage } from "./dashboardPage.js?v=20260802-today-overview1";
-import { bindProductPreviewEvents, closeProductPreview, openProductPreview, renderProductPreviewModal } from "./productPreview.js?v=20260725-product-preview1";
-import { attachThumbnailHoverPreview } from "./thumbnailPreview.js?v=20260723-task-card-static1";
+import { modules } from "./modules.js";
+import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js";
+import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js";
+import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js";
+import { bindScheduleBoardPageEvents, renderScheduleBoardPage } from "./scheduleBoardPage.js";
+import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js";
+import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js";
+import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js";
+import { bindDataCenterPageEvents, renderDataCenterPage } from "./dataCenterPage.js";
+import { bindOperationDashboardPageEvents, renderOperationDashboardPage } from "./operationDashboardPage.js";
+import { bindFinanceCenterPageEvents, renderFinanceCenterPage } from "./financeCenterPage.js";
+import { bindSupplyChainCenterPageEvents, renderSupplyChainCenterPage } from "./pages/supplyChainCenterPage.js";
+import { bindCustomerCenterPageEvents, renderCustomerCenterPage } from "./pages/customerCenterPage.js";
+import { bindAiOperationAssistantPageEvents, renderAiOperationAssistantPage } from "./pages/aiOperationAssistantPage.js";
+import { bindDashboardPageEvents, renderDashboardPage } from "./dashboardPage.js";
+import { bindProductPreviewEvents, closeProductPreview, openProductPreview, renderProductPreviewModal } from "./productPreview.js";
+import { attachThumbnailHoverPreview } from "./thumbnailPreview.js";
 import {
   flushPersistentSave,
   ensureTaskWavesLoaded,
@@ -37,7 +34,16 @@ import {
   uploadImageFile,
   validateCurrentSession,
 } from "./appState.js";
-import { canAccessModule, getFirstAccessibleModule } from "./permissions.js?v=20260705-state-singleton1";
+import { canAccessModule, getFirstAccessibleModule } from "./permissions.js";
+import {
+  beginRouteNavigation,
+  getLoadedRouteModule,
+  getRouteModuleStatus,
+  isNavigationCurrent,
+  loadRouteModule,
+  retryRouteModule,
+} from "./moduleLoader.js";
+import { invokeModuleAction } from "./moduleActions.js";
 
 const app = document.querySelector("#app");
 
@@ -185,6 +191,20 @@ let sidebarDrawerOpen = false;
 let plannedModulesExpanded = modules.some(
   (module) => module.id === activeModuleId && module.status === "planned",
 );
+
+async function prepareRouteModule(moduleId, { showLoading = false } = {}) {
+  const revision = beginRouteNavigation(moduleId);
+  if (!["tasks", "connectionCenter", "products"].includes(moduleId)) return { revision, loaded: true };
+  try {
+    const modulePromise = loadRouteModule(moduleId, { navigationRevision: revision });
+    if (showLoading && getLoadedRouteModule(moduleId) === null) render({ navigation: true });
+    await modulePromise;
+    return { revision, loaded: true };
+  } catch (error) {
+    if (error?.code !== "route_module_stale_navigation") console.error("路由模块加载失败", error);
+    return { revision, loaded: false };
+  }
+}
 
 function getActiveModule() {
   return modules.find((module) => module.id === activeModuleId) ?? modules[0];
@@ -432,8 +452,44 @@ function renderPage() {
     content = renderDashboardPage();
   }
 
-  if (activeModule.id === "tasks") {
-    content = renderTasksPage();
+  if (canAccessActiveModule && activeModule.id === "tasks") {
+    const taskModule = getLoadedRouteModule("tasks");
+    const taskModuleStatus = getRouteModuleStatus("tasks");
+    if (taskModule !== null) {
+      content = taskModule.render();
+    } else if (taskModuleStatus.status === "error") {
+      content = `
+        <section class="placeholder route-module-error" role="alert">
+          <h2>任务中心加载失败</h2>
+          <p>该页面模块没有成功加载，你可以重新加载或返回驾驶舱。</p>
+          <div class="button-row">
+            <button class="primary-button" type="button" data-action="retry-route-module" data-module-id="tasks">重新加载</button>
+            <button class="secondary-button" type="button" data-action="return-dashboard">返回驾驶舱</button>
+          </div>
+        </section>`;
+    } else {
+      content = `<section class="placeholder route-module-loading" aria-live="polite" aria-busy="true"><h2>正在加载任务中心…</h2><p>首次打开可能需要几秒。</p></section>`;
+    }
+  }
+
+  if (canAccessActiveModule && activeModule.id === "connectionCenter") {
+    const connectionModule = getLoadedRouteModule("connectionCenter");
+    const connectionModuleStatus = getRouteModuleStatus("connectionCenter");
+    if (connectionModule !== null) {
+      content = connectionModule.render();
+    } else if (connectionModuleStatus.status === "error") {
+      content = `
+        <section class="placeholder route-module-error" role="alert">
+          <h2>链接中心加载失败</h2>
+          <p>该页面模块没有成功加载，其他工作站模块不受影响。</p>
+          <div class="button-row">
+            <button class="primary-button" type="button" data-action="retry-route-module" data-module-id="connectionCenter">重新加载</button>
+            <button class="secondary-button" type="button" data-action="return-dashboard">返回驾驶舱</button>
+          </div>
+        </section>`;
+    } else {
+      content = `<section class="placeholder route-module-loading" aria-live="polite" aria-busy="true"><h2>正在加载链接中心…</h2><p>首次打开可能需要几秒。</p></section>`;
+    }
   }
 
   if (activeModule.id === "scheduleBoard") {
@@ -454,8 +510,24 @@ function renderPage() {
     content = renderTemplateCenterPage();
   }
 
-  if (activeModule.id === "products") {
-    content = renderProductCenterPage();
+  if (canAccessActiveModule && activeModule.id === "products") {
+    const productModule = getLoadedRouteModule("products");
+    const productModuleStatus = getRouteModuleStatus("products");
+    if (productModule !== null) {
+      content = productModule.render();
+    } else if (productModuleStatus.status === "error") {
+      content = `
+        <section class="placeholder route-module-error" role="alert">
+          <h2>产品中心加载失败</h2>
+          <p>该页面模块没有成功加载，其他工作站模块不受影响。</p>
+          <div class="button-row">
+            <button class="primary-button" type="button" data-action="retry-route-module" data-module-id="products">重新加载</button>
+            <button class="secondary-button" type="button" data-action="return-dashboard">返回驾驶舱</button>
+          </div>
+        </section>`;
+    } else {
+      content = `<section class="placeholder route-module-loading" aria-live="polite" aria-busy="true"><h2>正在加载产品中心…</h2><p>首次打开可能需要几秒。</p></section>`;
+    }
   }
 
   if (canAccessActiveModule && activeModule.id === "dataCenter") {
@@ -468,10 +540,6 @@ function renderPage() {
 
   if (canAccessActiveModule && activeModule.id === "financeCenter") {
     content = renderFinanceCenterPage();
-  }
-
-  if (canAccessActiveModule && activeModule.id === "connectionCenter") {
-    content = renderConnectionCenterPage();
   }
 
   if (canAccessActiveModule && activeModule.id === "supplyChainCenter") {
@@ -574,7 +642,11 @@ function renderLoginPage() {
     renderAuthenticatedStartup();
     const firstAccessibleModule = getFirstAccessibleModule(getCurrentUser(), modules);
     window.location.hash = firstAccessibleModule?.id ?? "goals";
-    await loadPersistentData({ includeTaskWaves: firstAccessibleModule?.id === "tasks" });
+    const firstModuleId = firstAccessibleModule?.id ?? "goals";
+    await Promise.all([
+      loadPersistentData({ includeTaskWaves: firstModuleId === "tasks" }),
+      prepareRouteModule(firstModuleId),
+    ]);
     loadedDataModuleId = getModuleIdFromHash();
     window.clearTimeout(loadingNoticeTimer);
     render();
@@ -708,6 +780,22 @@ function render({ navigation = false } = {}) {
 
   bindUserAvatarUpload();
 
+  document.querySelector('[data-action="retry-route-module"]')?.addEventListener("click", async (event) => {
+    const moduleId = event.currentTarget.dataset.moduleId;
+    if (!["tasks", "connectionCenter", "products"].includes(moduleId)) return;
+    const retryPromise = retryRouteModule(moduleId);
+    render();
+    try {
+      await retryPromise;
+    } catch (error) {
+      console.error("路由模块重新加载失败", error);
+    }
+    if (getModuleIdFromHash() === moduleId) render();
+  });
+  document.querySelector('[data-action="return-dashboard"]')?.addEventListener("click", () => {
+    window.location.hash = "dashboard";
+  });
+
   document.querySelector('[data-action="toggle-notifications"]')?.addEventListener("click", () => {
     notificationPanelOpen = !notificationPanelOpen;
     render();
@@ -723,7 +811,16 @@ function render({ navigation = false } = {}) {
       const notificationId = item.dataset.notificationId;
       const taskId = item.dataset.taskId;
       if (notificationId) await markNotificationRead(notificationId);
-      if (taskId) selectTask(taskId);
+      if (taskId) {
+        try {
+          await invokeModuleAction("tasks", "selectTask", taskId);
+        } catch (error) {
+          console.error("任务中心模块加载失败", error);
+          window.location.hash = "task-list";
+          render();
+          return;
+        }
+      }
       notificationPanelOpen = false;
       window.location.hash = "task-list";
       render();
@@ -739,7 +836,7 @@ function render({ navigation = false } = {}) {
   }
 
   if (activeModuleId === "tasks") {
-    bindTasksPageEvents(render);
+    getLoadedRouteModule("tasks")?.bind(render);
   }
 
   if (activeModuleId === "scheduleBoard") {
@@ -759,7 +856,7 @@ function render({ navigation = false } = {}) {
   }
 
   if (activeModuleId === "products") {
-    bindProductCenterPageEvents(render);
+    getLoadedRouteModule("products")?.bind(render);
   }
 
   if (activeModuleId === "dataCenter") {
@@ -775,7 +872,7 @@ function render({ navigation = false } = {}) {
   }
 
   if (activeModuleId === "connectionCenter") {
-    bindConnectionCenterPageEvents(render);
+    getLoadedRouteModule("connectionCenter")?.bind(render);
   }
 
   if (activeModuleId === "supplyChainCenter") {
@@ -856,14 +953,15 @@ window.addEventListener("unhandledrejection", (event) => {
 });
 window.addEventListener("hashchange", async () => {
   const nextModuleId = getModuleIdFromHash();
-  if (nextModuleId !== loadedDataModuleId) {
+  const { revision } = await prepareRouteModule(nextModuleId, { showLoading: true });
+  if (nextModuleId !== loadedDataModuleId && isNavigationCurrent(revision, nextModuleId)) {
     await loadPersistentData({ includeTaskWaves: nextModuleId === "tasks" }).catch((error) => console.error("模块数据按需加载失败", error));
     loadedDataModuleId = nextModuleId;
   }
-  if (getModuleIdFromHash() === "tasks") {
+  if (isNavigationCurrent(revision, nextModuleId) && getModuleIdFromHash() === "tasks") {
     await ensureTaskWavesLoaded().catch((error) => console.error("任务波次按需加载失败", error));
   }
-  render({ navigation: true });
+  if (isNavigationCurrent(revision, nextModuleId)) render({ navigation: true });
 });
 window.addEventListener("pagehide", flushPersistentSave);
 window.addEventListener("beforeunload", flushPersistentSave);
@@ -905,7 +1003,8 @@ try {
     renderLoginPage();
   } else {
     renderAuthenticatedStartup();
-    await loadPersistentData(); loadedDataModuleId = getModuleIdFromHash();
+    const startupModuleId = getModuleIdFromHash();
+    await Promise.all([loadPersistentData(), prepareRouteModule(startupModuleId)]); loadedDataModuleId = startupModuleId;
     window.clearTimeout(loadingNoticeTimer);
     render();
     void syncTaskNotificationsForCurrentUser().catch((error) => console.error("任务提醒同步失败", error));

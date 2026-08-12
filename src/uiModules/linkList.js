@@ -1,5 +1,5 @@
 import { registerUiModule } from "../uiModuleRegistry.js";
-import { escapeHtml } from "../utils/html.js?v=20260802-module-boundary1";
+import { escapeHtml } from "../utils/html.js";
 
 export function renderLinkList({ items = [], total = 0, page = 1, totalPages = 1, search = "", filter = "all", loading = false, title = "我的链接", bodyHtml = "" } = {}) {
   if (bodyHtml) return `<section class="my-link-list-module company-link-list-module" data-module-key="link_list"><header><div><span>${escapeHtml(title)}</span><small>共 ${Number(total)} 条</small></div></header>${bodyHtml}</section>`;
