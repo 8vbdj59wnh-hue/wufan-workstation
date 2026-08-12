@@ -271,6 +271,7 @@ import {
   getProductCenterV2SkuDetail,
   listProductCenterV2Skus,
 } from "./productCenterV2Service.js";
+import { getSalesObjectComboSkuDetail, listSalesObjectComboSkus } from "./salesObjectComboSkuReadService.js";
 import { exportProductMarketingAsset, getProductMarketingAsset, saveProductMarketingAsset } from "./productMarketingAssetService.js";
 import {
   bootstrapTemplateVersions,
@@ -2166,6 +2167,16 @@ app.get("/api/product-center-v2/skus", requirePermission("products.view"), (requ
 app.get("/api/product-center-v2/metadata", requirePermission("products.view"), (request, response) => {
   try { response.json({ success: true, ...getProductCenterV2Metadata() }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "ERP SKU筛选摘要读取失败。" }); }
+});
+
+app.get("/api/product-center-v2/combo-skus", requirePermission("products.view"), (request, response) => {
+  try { response.json({ success: true, ...listSalesObjectComboSkus(request.query) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "组合SKU列表读取失败。" }); }
+});
+
+app.get("/api/product-center-v2/combo-skus/:id", requirePermission("products.view"), (request, response) => {
+  try { response.json({ success: true, detail: getSalesObjectComboSkuDetail(request.params.id) }); }
+  catch (error) { response.status(error.code === "sales_object_bundle_not_found" ? 404 : 400).json({ success: false, message: error.message || "组合SKU详情读取失败。" }); }
 });
 
 app.get("/api/product-center-v2/skus/:id", requirePermission("products.view"), (request, response) => {

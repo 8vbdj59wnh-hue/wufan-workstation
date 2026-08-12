@@ -1076,6 +1076,15 @@ export async function loadProductCenterV2Metadata() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-center-v2/metadata`), "ERP SKU筛选摘要读取失败。");
 }
 
+export async function loadProductComboSkus({ search = "", limit = 20, offset = 0 } = {}) {
+  const query = new URLSearchParams({ search, limit: String(limit), offset: String(offset) });
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-center-v2/combo-skus?${query}`), "组合SKU列表读取失败。");
+}
+
+export async function loadProductComboSkuDetail(salesObjectId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-center-v2/combo-skus/${encodeURIComponent(salesObjectId)}`), "组合SKU详情读取失败。");
+}
+
 export async function loadProductCenterV2SkuDetail(erpSkuId, scope = "") {
   const query = scope ? `?scope=${encodeURIComponent(scope)}` : "";
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-center-v2/skus/${encodeURIComponent(erpSkuId)}${query}`), "ERP SKU详情读取失败。");

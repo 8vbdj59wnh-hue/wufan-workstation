@@ -46,6 +46,8 @@ import {
   loadProductCenterV2Skus,
   loadProductCenterV2Metadata,
   loadProductCenterV2SkuDetail,
+  loadProductComboSkus,
+  loadProductComboSkuDetail,
   createProductProfileForErpSku,
   loadProductMarketingAsset,
   saveProductMarketingAsset,
@@ -93,6 +95,7 @@ let unmatchedSkuState = { loading: false, loaded: false, rows: [], total: 0, que
 let platformProductLinkState = { skuId: "", query: "", selectedProductId: "", error: "" };
 let productSubmodule = "business-dashboard";
 let pendingSkuState = { loading: false, loaded: false, rows: [], query: "", error: "", notice: "" };
+let comboSkuState = { loading: false, loaded: false, rows: [], detail: null, search: "", page: 1, pageSize: 20, pagination: { total: 0 }, error: "" };
 let selectedPendingSkuIds = new Set();
 let platformPreviewRequestId = 0;
 let productManagementState = { overview: null, details: new Map(), loadingOverview: false, loadingProductId: "", error: "", notice: "" };
@@ -485,6 +488,7 @@ function renderProductBusinessDashboard() {
 
 function renderProductList() {
   if (productSubmodule === "pending-skus") return renderPendingSkuPage();
+  if (productSubmodule === "combo-skus") return comboSkuState.detail ? renderComboSkuDetail() : renderComboSkuList();
   if (productSubmodule === "sku-management") return renderProductSkuV2List();
   return renderProductBusinessDashboard();
 }
@@ -628,7 +632,24 @@ function renderProductSubmoduleTabs() {
   return `<nav class="product-submodule-tabs" aria-label="产品中心子模块">
     <button type="button" data-action="product-submodule" data-submodule="sku-management" class="${productSubmodule === "sku-management" ? "is-active" : ""}">SKU列表</button>
     <button type="button" data-action="product-submodule" data-submodule="pending-skus" class="${productSubmodule === "pending-skus" ? "is-active" : ""}">待建立SKU</button>
+    <button type="button" data-action="product-submodule" data-submodule="combo-skus" class="${productSubmodule === "combo-skus" ? "is-active" : ""}">组合SKU管理</button>
   </nav>`;
+}
+
+function renderComboSkuList() {
+  const total = Number(comboSkuState.pagination.total || 0); const totalPages = Math.max(1, Math.ceil(total / comboSkuState.pageSize));
+  return `<section class="product-center-page"><div class="section-heading"><div><h1>组合SKU管理</h1><p>只读查看 Sales Object 组合销售对象、组成商品与销售链接</p></div></div>${renderProductWorkspaceTabs()}${renderProductSubmoduleTabs()}
+    <form class="filter-bar" data-combo-sku-search><input type="search" name="search" value="${escapeHtml(comboSkuState.search)}" placeholder="搜索组合编码或名称"/><button class="secondary-button" type="submit">搜索</button></form>
+    ${comboSkuState.error ? `<div class="form-error">${escapeHtml(comboSkuState.error)}</div>` : ""}${comboSkuState.loading ? `<div class="empty-state">正在读取组合SKU…</div>` : !comboSkuState.rows.length ? `<div class="empty-state">暂无组合SKU</div>` : `<div class="table-wrap"><table class="data-table"><thead><tr><th>Sales Object编码</th><th>名称</th><th>类型</th><th>组成数量</th><th>关联链接</th><th>关联产品</th><th>状态</th><th>更新时间</th></tr></thead><tbody>${comboSkuState.rows.map((row) => `<tr data-action="view-combo-sku" data-sales-object-id="${escapeHtml(row.salesObjectId)}" tabindex="0" role="button"><td><strong>${escapeHtml(row.objectCode)}</strong></td><td>${escapeHtml(row.name || row.objectCode)}</td><td>bundle</td><td>${formatMetric(row.componentCount)}</td><td>${formatMetric(row.linkedSalesLinkCount)}</td><td>${formatMetric(row.linkedProductCount)}</td><td>${escapeHtml(row.status)}</td><td>${formatDateTime(row.updatedAt)}</td></tr>`).join("")}</tbody></table></div>`}
+    <nav class="pagination"><span>共 ${total} 个 · 第 ${comboSkuState.page}/${totalPages} 页</span><div><button class="secondary-button" type="button" data-action="combo-sku-page" data-page="${comboSkuState.page - 1}" ${comboSkuState.page <= 1 ? "disabled" : ""}>上一页</button><button class="secondary-button" type="button" data-action="combo-sku-page" data-page="${comboSkuState.page + 1}" ${comboSkuState.page >= totalPages ? "disabled" : ""}>下一页</button></div></nav></section>`;
+}
+
+function renderComboSkuDetail() {
+  const detail = comboSkuState.detail; if (!detail) return `<div class="empty-state">正在读取组合SKU详情…</div>`; const summary = detail.salesPerformance?.summary || {};
+  return `<section class="product-center-page product-detail-page"><button class="text-button" type="button" data-action="back-combo-skus">← 返回组合SKU管理</button><div class="section-heading"><div><span>Sales Object · ${escapeHtml(detail.salesObject.objectType)}</span><h1>${escapeHtml(detail.salesObject.name || detail.salesObject.objectCode)}</h1><p>${escapeHtml(detail.salesObject.objectCode)} · 结构版本 V${formatMetric(detail.structure.version)}</p></div></div>
+    <section class="product-workspace-panel"><header><h2>组成</h2></header><div class="table-wrap"><table class="data-table"><thead><tr><th>ERP SKU</th><th>货品</th><th>Product</th><th>数量</th></tr></thead><tbody>${detail.components.map((row) => `<tr><td>${escapeHtml(row.merchantSkuCode)}</td><td>${escapeHtml(row.goodsName || row.specificationName || "—")}</td><td>${escapeHtml(row.productName || "未建档")}</td><td>${formatMetric(row.quantity)}</td></tr>`).join("")}</tbody></table></div></section>
+    <section class="product-workspace-panel"><header><h2>销售表现</h2><small>销售额仅按原始销售行计一次，不向组件复制</small></header><div class="product-card-metrics"><div><strong>${formatMoney(summary.salesAmount)}</strong><span>销售额</span></div><div><strong>${formatMoney(summary.profitAmount)}</strong><span>利润</span></div><div><strong>${formatMetric(summary.quantity)}</strong><span>销量</span></div><div><strong>${formatMetric(summary.dataCount)}</strong><span>事实来源行</span></div></div></section>
+    <section class="product-workspace-panel"><header><h2>关联链接</h2></header>${detail.links.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>店铺</th><th>链接</th><th>链接SKU</th><th>解析状态</th></tr></thead><tbody>${detail.links.map((row) => `<tr><td>${escapeHtml(row.shopName)}</td><td>${escapeHtml(row.linkName || row.platformGoodsId || "—")}</td><td>${escapeHtml(row.specificationName || row.platformSkuCode || row.platformSkuId || "—")}</td><td>${escapeHtml(row.relation?.status || "—")}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state compact">暂无关联链接</div>`}</section></section>`;
 }
 
 function renderPendingSkuPage() {
@@ -1834,6 +1855,18 @@ async function refreshProductSkuV2List(rerender) {
   rerender();
 }
 
+async function refreshComboSkuList(rerender) {
+  comboSkuState = { ...comboSkuState, loading: true, error: "" }; rerender();
+  try { const result = await loadProductComboSkus({ search: comboSkuState.search, limit: comboSkuState.pageSize, offset: (comboSkuState.page - 1) * comboSkuState.pageSize }); comboSkuState = { ...comboSkuState, loading: false, loaded: true, rows: result.items || [], pagination: result.pagination || { total: 0 }, error: "" }; }
+  catch (error) { comboSkuState = { ...comboSkuState, loading: false, loaded: true, rows: [], error: error.message || "组合SKU列表读取失败。" }; } rerender();
+}
+
+async function refreshComboSkuDetail(salesObjectId, rerender) {
+  comboSkuState = { ...comboSkuState, loading: true, detail: null, error: "" }; rerender();
+  try { const result = await loadProductComboSkuDetail(salesObjectId); comboSkuState = { ...comboSkuState, loading: false, detail: result.detail, error: "" }; }
+  catch (error) { comboSkuState = { ...comboSkuState, loading: false, detail: null, error: error.message || "组合SKU详情读取失败。" }; } rerender();
+}
+
 async function refreshProductSkuV2Detail(erpSkuId, rerender) {
   if (!erpSkuId || productSkuV2State.loading || productSkuV2State.detailId === erpSkuId) return;
   productWorkspaceState = { activeTab: "overview", sections: {}, marketingMode: "read", marketingNotice: "", dailySales: { data: null, loading: false, loaded: false, rangePreset: "30d", error: "" } };
@@ -2184,6 +2217,8 @@ export function bindProductCenterPageEvents(rerender) {
   if (!routeProductId && productSubmodule === "pending-skus" && !pendingSkuState.loaded && !pendingSkuState.loading) {
     void refreshPendingErpSkus(rerender);
   }
+  if (!routeProductId && !routeErpSkuId && productSubmodule === "combo-skus" && !comboSkuState.loaded && !comboSkuState.loading && !comboSkuState.detail) void refreshComboSkuList(rerender);
+  document.querySelector("[data-combo-sku-search]")?.addEventListener("submit", (event) => { event.preventDefault(); comboSkuState = { ...comboSkuState, search: event.currentTarget.elements.search.value.trim(), page: 1, loaded: false, detail: null }; void refreshComboSkuList(rerender); });
   document.querySelector("[data-product-business-filter]")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -2490,10 +2525,13 @@ export function bindProductCenterPageEvents(rerender) {
       void refreshProductBusinessDashboard(rerender);
     }
     if (action === "product-submodule") {
-      productSubmodule = button.dataset.submodule === "pending-skus" ? "pending-skus" : "sku-management";
+      productSubmodule = ["pending-skus", "combo-skus"].includes(button.dataset.submodule) ? button.dataset.submodule : "sku-management";
       rerender();
       return;
     }
+    if (action === "combo-sku-page") { comboSkuState = { ...comboSkuState, page: Math.max(1, Number(button.dataset.page) || 1), loaded: false, detail: null }; void refreshComboSkuList(rerender); return; }
+    if (action === "view-combo-sku") { void refreshComboSkuDetail(button.dataset.salesObjectId, rerender); return; }
+    if (action === "back-combo-skus") { comboSkuState = { ...comboSkuState, detail: null, error: "" }; rerender(); return; }
     if (action === "clear-pending-sku-search") {
       pendingSkuState = { ...pendingSkuState, query: "", loaded: false, error: "", notice: "" };
       rerender();
