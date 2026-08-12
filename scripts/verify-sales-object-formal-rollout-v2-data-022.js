@@ -18,7 +18,7 @@ const { getConnectionDailySalesPerformance } = await import("../server/connectio
 const { getConnectionBusinessCockpit } = await import("../server/connectionBusinessCockpitService.js");
 const { getProductCenterV2SkuDetail, listProductCenterV2Skus } = await import("../server/productCenterV2Service.js");
 const { getProductBusinessAnalysis } = await import("../server/productManagementV2Service.js");
-const { listSalesObjectComboSkus } = await import("../server/salesObjectComboSkuReadService.js");
+const { getSalesObjectComboSkuDetail, listSalesObjectComboSkus } = await import("../server/salesObjectComboSkuReadService.js");
 
 try {
   initializeDatabase({ reset: false }); const database = getDatabase(); database.pragma("foreign_keys=ON");
@@ -32,7 +32,8 @@ try {
   const productId = database.prepare("SELECT productId FROM product_erp_mappings WHERE erpSkuId=? AND currentState='active'").get(erpSku.erpSkuId).productId;
   const product = getProductBusinessAnalysis(productId); assert(product.product.id === productId);
   const skuList = listProductCenterV2Skus({ limit: 20, includeUnarchived: true }); assert(skuList.rows.length > 0);
-  const combo = listSalesObjectComboSkus({ limit: 100 }, { database }); assert(combo.items.every((row) => row.relation.resolverSource === "sales_object" && row.relation.isUsable));
+  const combo = listSalesObjectComboSkus({ limit: 100 }, { database }); assert.equal(combo.source, "sales_object_v1"); assert.equal(new Set(combo.items.map((row) => row.salesObjectId)).size, combo.items.length);
+  const comboDetail = getSalesObjectComboSkuDetail(combo.items[0].salesObjectId, { database }); assert(comboDetail.links.every((row) => row.relation?.salesObject?.id === comboDetail.salesObject.id && row.relation.isUsable));
   const cockpit = getConnectionBusinessCockpit("", true); const after = snapshot(); assert.deepEqual(after, before);
   const facts = before.facts;
   const result = { success: true, sourceHash, switched: { linkDetail: { connectionId: connection.id, skuSales: detail.skuSales.length, products: detail.products.length }, linkDailySales: { skuRows: daily.bySku.items.length, salesAmount: daily.summary.salesAmount, profitAmount: daily.summary.profitAmount }, productAssociations: { erpSkuId: erpSku.erpSkuId, links: skuLinks.length }, productWorkspace: { productId, analysisLoaded: true }, skuManagement: { rows: skuList.rows.length }, comboSkuManagement: { rows: combo.items.length }, businessCockpit: { connections: cockpit.summary.connectionCount } }, metrics: { facts: facts.count, salesAmount: facts.sales, profitAmount: facts.profit, unchanged: true }, productCoverage: database.prepare("SELECT COUNT(DISTINCT c.erpSkuId) total,COUNT(DISTINCT pm.erpSkuId) covered FROM sales_object_structure_components c LEFT JOIN product_erp_mappings pm ON pm.erpSkuId=c.erpSkuId AND pm.currentState='active'").get(), legacy: { mappings: before.mappings, structures: before.structures, unchanged: true }, integrityCheck: database.pragma("integrity_check", { simple: true }), foreignKeyCheckErrors: database.pragma("foreign_key_check").length };
