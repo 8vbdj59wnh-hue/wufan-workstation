@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { createResource, getDatabase } from "./db.js";
-import { resolveLinkSkuErpRelations } from "./capabilities/resolveLinkSkuErpRelation.js";
+import { resolveErpSkuSalesObjectLinks } from "./capabilities/resolveLinkSkuRelationRead.js";
 
 export const productLifecycleStatuses = ["开发中", "上架", "成长期", "成熟期", "风险期", "淘汰"];
 export const productBusinessZones = ["new", "hit", "active", "clearance"];
@@ -80,20 +80,9 @@ function resolveProductSalesLinkIds(database, productId) {
     ORDER BY erpSkuId
   `).all(productId).map((row) => row.erpSkuId);
   if (!erpSkuIds.length) return [];
-  const erpSkuIdSet = new Set(erpSkuIds);
-  const salesLinkSkuIds = database.prepare(`
-    SELECT DISTINCT salesLinkSkuId
-    FROM sales_link_sku_erp_mappings
-    WHERE currentState='active' AND erpSkuId IN (${erpSkuIds.map(() => "?").join(",")})
-    ORDER BY salesLinkSkuId
-  `).all(...erpSkuIds).map((row) => row.salesLinkSkuId);
   const salesLinkIds = new Set();
-  for (let offset = 0; offset < salesLinkSkuIds.length; offset += 500) {
-    const relations = resolveLinkSkuErpRelations({ salesLinkSkuIds: salesLinkSkuIds.slice(offset, offset + 500) }, { database }).results;
-    for (const relation of Object.values(relations)) {
-      if (relation.isUsable && relation.mappings.some((mapping) => erpSkuIdSet.has(mapping.erpSkuId))) salesLinkIds.add(relation.salesLinkId);
-    }
-  }
+  const reverse = resolveErpSkuSalesObjectLinks({ erpSkuIds }, { database, scope: "productWorkspace" }).results;
+  for (const relations of Object.values(reverse)) for (const relation of relations) if (relation.salesLinkId) salesLinkIds.add(relation.salesLinkId);
   return [...salesLinkIds].sort();
 }
 

@@ -1,7 +1,7 @@
 import { getDatabase } from "./db.js";
 import { listConnectionProfiles, readConnectionProfile } from "./connectionService.js";
 import { readConnectionV3Metrics, readConnectionV3MetricsMap } from "./connectionV3MetricsService.js";
-import { resolveLinkSkuErpRelations } from "./capabilities/resolveLinkSkuErpRelation.js";
+import { FORMAL_SALES_OBJECT_RESOLVER_SCOPES, resolveLinkSkuRelationsForRead } from "./capabilities/resolveLinkSkuRelationRead.js";
 
 function text(value) { return String(value ?? "").trim(); }
 function parseJson(value, fallback = {}) { try { return JSON.parse(value || ""); } catch { return fallback; } }
@@ -16,7 +16,7 @@ function readSkuRelationExplanations(database, salesLinkSkuIds) {
   const ids = [...new Set(salesLinkSkuIds.filter(Boolean))];
   const relations = {};
   for (let offset = 0; offset < ids.length; offset += 500) {
-    Object.assign(relations, resolveLinkSkuErpRelations({ salesLinkSkuIds: ids.slice(offset, offset + 500) }, { database }).results);
+    Object.assign(relations, resolveLinkSkuRelationsForRead({ salesLinkSkuIds: ids.slice(offset, offset + 500) }, { database, scope: "linkDetail", salesObjectResolverEnabled: true, enabledScopes: FORMAL_SALES_OBJECT_RESOLVER_SCOPES }).results);
   }
   const erpSkuIds = [...new Set(Object.values(relations).flatMap((relation) => relation.mappings.map((mapping) => mapping.erpSkuId)))];
   const erpRows = erpSkuIds.length ? database.prepare(`
@@ -62,15 +62,30 @@ function latestSalesSummary(database, salesLinkId) {
 function readRelationCounts(database, salesLinkIds) {
   const ids = [...new Set(salesLinkIds.filter(Boolean))];
   if (!ids.length) return new Map();
-  const marks = ids.map(() => "?").join(",");
-  return new Map(database.prepare(`
-    SELECT x.salesLinkId,COUNT(DISTINCT x.id) skuCount,COUNT(DISTINCT pm.productId) productCount
-    FROM sales_link_skus x
-    LEFT JOIN sales_link_sku_erp_mappings m ON m.salesLinkSkuId=x.id AND m.currentState='active'
-    LEFT JOIN product_erp_mappings pm ON pm.erpSkuId=m.erpSkuId AND pm.currentState='active'
-    WHERE x.salesLinkId IN (${marks}) AND COALESCE(x.currentState,'active')='active'
-    GROUP BY x.salesLinkId
-  `).all(...ids).map((row) => [row.salesLinkId, row]));
+  const marks = ids.map(() => "?").join(","); const skus = database.prepare(`SELECT id,salesLinkId FROM sales_link_skus WHERE salesLinkId IN (${marks}) AND COALESCE(currentState,'active')='active'`).all(...ids);
+  const explanations = readSkuRelationExplanations(database, skus.map((row) => row.id)); const result = new Map(ids.map((id) => [id, { salesLinkId: id, skuCount: 0, productCount: 0, products: new Set() }]));
+  for (const sku of skus) { const row = result.get(sku.salesLinkId); row.skuCount += 1; for (const product of explanations.get(sku.id)?.products || []) row.products.add(product.id); }
+  return new Map([...result].map(([id, row]) => [id, { salesLinkId: id, skuCount: row.skuCount, productCount: row.products.size }]));
+}
+
+function relationFilterLinkIds(database, options) {
+  if (![options.productCode, options.productRelation, options.category, options.lifecycle].some((value) => text(value))) return null;
+  const skus = database.prepare("SELECT id,salesLinkId FROM sales_link_skus WHERE COALESCE(currentState,'active')='active'").all();
+  const explanations = readSkuRelationExplanations(database, skus.map((row) => row.id));
+  const erpIds = [...new Set([...explanations.values()].flatMap((row) => row.erpRelations.map((item) => item.erpSkuId)))];
+  const erps = erpIds.length ? database.prepare(`SELECT e.id,e.merchantSkuCode,p.category,p.status lifecycle FROM erp_skus e LEFT JOIN product_erp_mappings pm ON pm.erpSkuId=e.id AND pm.currentState='active' LEFT JOIN products p ON p.id=pm.productId WHERE e.id IN (${erpIds.map(() => "?").join(",")})`).all(...erpIds) : [];
+  const erpById = new Map(erps.map((row) => [row.id, row])); const matched = new Set();
+  for (const sku of skus) {
+    const relation = explanations.get(sku.id); const components = relation?.erpRelations || [];
+    const linked = Boolean(relation?.isUsable && components.length);
+    if (options.productRelation === "linked" && !linked) continue;
+    if (options.productRelation === "unlinked" && linked) continue;
+    if (text(options.productCode) && !components.some((row) => text(erpById.get(row.erpSkuId)?.merchantSkuCode).includes(text(options.productCode)))) continue;
+    if (text(options.category) && !components.some((row) => erpById.get(row.erpSkuId)?.category === text(options.category))) continue;
+    if (text(options.lifecycle) && !components.some((row) => erpById.get(row.erpSkuId)?.lifecycle === text(options.lifecycle))) continue;
+    matched.add(sku.salesLinkId);
+  }
+  return [...matched];
 }
 
 const connectionSortColumns = {
@@ -93,6 +108,11 @@ export function listConnectionCoreProfilesPage(rawOptions = {}, userId = "", isA
   const options = listOptions(rawOptions);
   const where = ["1=1"];
   const params = {};
+  const relationLinkIds = relationFilterLinkIds(database, options);
+  if (relationLinkIds !== null) {
+    if (!relationLinkIds.length) where.push("0");
+    else { const keys = relationLinkIds.map((id, index) => { params[`relationLinkId${index}`] = id; return `@relationLinkId${index}`; }); where.push(`l.id IN (${keys.join(",")})`); }
+  }
   if (!isAdmin) { where.push("c.ownerId=@scopeOwnerId"); params.scopeOwnerId = text(userId); }
   if (text(options.keyword)) { where.push("(c.name LIKE @keyword OR l.title LIKE @keyword OR l.platformGoodsId LIKE @keyword OR l.platformGoodsCode LIKE @keyword)"); params.keyword = `%${text(options.keyword)}%`; }
   for (const [key, column] of [["platform", "sh.platform"], ["shopId", "l.shopId"], ["ownerId", "c.ownerId"], ["status", "c.status"]]) {
@@ -100,21 +120,15 @@ export function listConnectionCoreProfilesPage(rawOptions = {}, userId = "", isA
   }
   if (options.ownerId === "assigned") where.push("c.ownerId IS NOT NULL AND c.ownerId<>''");
   if (options.ownerId === "unassigned") where.push("(c.ownerId IS NULL OR c.ownerId='')");
-  if (text(options.productCode)) { where.push("EXISTS (SELECT 1 FROM sales_link_skus sx JOIN sales_link_sku_erp_mappings mx ON mx.salesLinkSkuId=sx.id AND mx.currentState='active' JOIN erp_skus es ON es.id=mx.erpSkuId WHERE sx.salesLinkId=l.id AND es.merchantSkuCode LIKE @productCode)"); params.productCode = `%${text(options.productCode)}%`; }
   if (options.salesStatus === "selling") where.push("EXISTS (SELECT 1 FROM connection_sku_sales_daily_facts sf WHERE sf.salesLinkId=l.id AND COALESCE(sf.quantity,0)>0)");
   if (options.salesStatus === "stopped") where.push("NOT EXISTS (SELECT 1 FROM connection_sku_sales_daily_facts sf WHERE sf.salesLinkId=l.id AND COALESCE(sf.quantity,0)>0)");
   if (options.profitStatus === "profit") where.push("COALESCE((SELECT SUM(sf.profitAmount) FROM connection_sku_sales_daily_facts sf WHERE sf.salesLinkId=l.id),0)>=0");
   if (options.profitStatus === "loss") where.push("COALESCE((SELECT SUM(sf.profitAmount) FROM connection_sku_sales_daily_facts sf WHERE sf.salesLinkId=l.id),0)<0");
   if (options.profitStatus === "unknown") where.push("NOT EXISTS (SELECT 1 FROM connection_sku_sales_daily_facts sf WHERE sf.salesLinkId=l.id)");
-  const relationExists = "EXISTS (SELECT 1 FROM sales_link_skus sx JOIN sales_link_sku_erp_mappings mx ON mx.salesLinkSkuId=sx.id AND mx.currentState='active' WHERE sx.salesLinkId=l.id)";
-  if (options.productRelation === "linked") where.push(relationExists);
-  if (options.productRelation === "unlinked") where.push(`NOT ${relationExists}`);
   const skuCount = "(SELECT COUNT(*) FROM sales_link_skus sx WHERE sx.salesLinkId=l.id AND COALESCE(sx.currentState,'active')='active')";
   if (options.skuCount === "none") where.push(`${skuCount}=0`);
   if (options.skuCount === "single") where.push(`${skuCount}=1`);
   if (options.skuCount === "multiple") where.push(`${skuCount}>1`);
-  if (text(options.category)) { where.push("EXISTS (SELECT 1 FROM sales_link_skus sx JOIN sales_link_sku_erp_mappings mx ON mx.salesLinkSkuId=sx.id AND mx.currentState='active' JOIN product_erp_mappings pm ON pm.erpSkuId=mx.erpSkuId AND pm.currentState='active' JOIN products px ON px.id=pm.productId WHERE sx.salesLinkId=l.id AND px.category=@category)"); params.category = text(options.category); }
-  if (text(options.lifecycle)) { where.push("EXISTS (SELECT 1 FROM sales_link_skus sx JOIN sales_link_sku_erp_mappings mx ON mx.salesLinkSkuId=sx.id AND mx.currentState='active' JOIN product_erp_mappings pm ON pm.erpSkuId=mx.erpSkuId AND pm.currentState='active' JOIN products px ON px.id=pm.productId WHERE sx.salesLinkId=l.id AND px.status=@lifecycle)"); params.lifecycle = text(options.lifecycle); }
   const whereSql = where.join(" AND ");
   const total = Number(database.prepare(`SELECT COUNT(*) count FROM connection_profiles c JOIN sales_links l ON l.id=c.salesLinkId JOIN sales_shops sh ON sh.id=l.shopId WHERE ${whereSql}`).get(params)?.count || 0);
   const sortField = connectionSortColumns[text(options.sortField)] || connectionSortColumns.default;

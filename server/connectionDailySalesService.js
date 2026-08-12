@@ -1,6 +1,6 @@
 import { getDatabase } from "./db.js";
 import { queryDailySalesBySku, queryDailySalesSummary, queryDailySalesTrend } from "./capabilities/queryDailySales.js";
-import { resolveLinkSkuErpRelations } from "./capabilities/resolveLinkSkuErpRelation.js";
+import { FORMAL_SALES_OBJECT_RESOLVER_SCOPES, resolveLinkSkuRelationsForRead } from "./capabilities/resolveLinkSkuRelationRead.js";
 
 const clean = (value) => String(value ?? "").trim();
 
@@ -43,7 +43,7 @@ export function getConnectionDailySalesPerformance(input = {}, options = {}) {
   const trend = queryDailySalesTrend({ dimension: "salesLink", targetId: connection.salesLinkId, ...range }, capabilityOptions);
   const bySku = queryDailySalesBySku({ salesLinkId: connection.salesLinkId, ...range }, capabilityOptions);
   const salesLinkSkuIds = bySku.items.map((item) => item.salesLinkSkuId);
-  const relations = resolveLinkSkuErpRelations({ salesLinkSkuIds }, { database }).results;
+  const relations = resolveLinkSkuRelationsForRead({ salesLinkSkuIds }, { database, scope: "linkDetail", salesObjectResolverEnabled: true, enabledScopes: FORMAL_SALES_OBJECT_RESOLVER_SCOPES }).results;
   const erpSkuIds = [...new Set(Object.values(relations).flatMap((relation) => relation.mappings.map((mapping) => mapping.erpSkuId)))];
   const identities = identityMaps(database, salesLinkSkuIds, erpSkuIds);
   const skuItems = bySku.items.map((item) => {

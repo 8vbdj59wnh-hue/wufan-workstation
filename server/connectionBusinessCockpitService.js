@@ -1,7 +1,7 @@
 import { getDatabase } from "./db.js";
 import { listConnectionGrowthAnalyses } from "./connectionGrowthService.js";
 import { readConnectionV3MetricsMap } from "./connectionV3MetricsService.js";
-import { resolveLinkSkuErpRelations } from "./capabilities/resolveLinkSkuErpRelation.js";
+import { FORMAL_SALES_OBJECT_RESOLVER_SCOPES, resolveLinkSkuRelationsForRead } from "./capabilities/resolveLinkSkuRelationRead.js";
 
 function text(value) { return String(value ?? "").trim(); }
 function ratio(current, previous) { return previous ? (current - previous) / previous : null; }
@@ -10,7 +10,7 @@ function periodType(start, end) { const days = Math.round((Date.parse(end) - Dat
 function resolveRelationMap(database, salesLinkSkuIds) {
   const results = {};
   for (let offset = 0; offset < salesLinkSkuIds.length; offset += 500) {
-    Object.assign(results, resolveLinkSkuErpRelations({ salesLinkSkuIds: salesLinkSkuIds.slice(offset, offset + 500) }, { database }).results);
+    Object.assign(results, resolveLinkSkuRelationsForRead({ salesLinkSkuIds: salesLinkSkuIds.slice(offset, offset + 500) }, { database, scope: "productWorkspace", salesObjectResolverEnabled: true, enabledScopes: FORMAL_SALES_OBJECT_RESOLVER_SCOPES }).results);
   }
   return results;
 }
