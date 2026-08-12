@@ -1736,6 +1736,165 @@ export function migrateSalesLinkSkuProductStructuresV1() {
   `);
 }
 
+export function migrateSalesObjectsV1() {
+  getDatabase().exec(`
+    CREATE TABLE IF NOT EXISTS sales_objects (
+      id TEXT PRIMARY KEY,
+      objectCode TEXT NOT NULL,
+      normalizedObjectCode TEXT NOT NULL UNIQUE,
+      objectType TEXT NOT NULL,
+      source TEXT NOT NULL,
+      sourceType TEXT NOT NULL,
+      sourceCode TEXT NOT NULL,
+      sourceBatchId TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      blockedReason TEXT,
+      firstSeenAt TEXT NOT NULL,
+      lastSeenAt TEXT NOT NULL,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      CHECK(objectType IN ('single','bundle')),
+      CHECK(status IN ('active','inactive','blocked','superseded'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_sales_objects_status_type
+      ON sales_objects(status,objectType,updatedAt DESC);
+    CREATE INDEX IF NOT EXISTS idx_sales_objects_source_code
+      ON sales_objects(source,normalizedObjectCode);
+
+    CREATE TABLE IF NOT EXISTS sales_link_sku_sales_object_relations (
+      id TEXT PRIMARY KEY,
+      linkSkuId TEXT NOT NULL,
+      salesObjectId TEXT NOT NULL,
+      effectiveFrom TEXT NOT NULL,
+      effectiveTo TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      sourceType TEXT NOT NULL,
+      sourceBatchId TEXT,
+      sourceReferenceJson TEXT NOT NULL DEFAULT '{}',
+      reviewedBy TEXT,
+      reviewedAt TEXT,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      FOREIGN KEY(linkSkuId) REFERENCES sales_link_skus(id),
+      FOREIGN KEY(salesObjectId) REFERENCES sales_objects(id),
+      FOREIGN KEY(reviewedBy) REFERENCES persons(id),
+      CHECK(status IN ('active','inactive','superseded','conflict')),
+      CHECK((status='active' AND effectiveTo IS NULL) OR status<>'active')
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_link_sku_sales_object_one_active
+      ON sales_link_sku_sales_object_relations(linkSkuId) WHERE status='active';
+    CREATE INDEX IF NOT EXISTS idx_sales_link_sku_sales_object_object
+      ON sales_link_sku_sales_object_relations(salesObjectId,status);
+
+    CREATE TABLE IF NOT EXISTS sales_object_structures (
+      id TEXT PRIMARY KEY,
+      salesObjectId TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      structureHash TEXT NOT NULL,
+      effectiveFrom TEXT NOT NULL,
+      effectiveTo TEXT,
+      status TEXT NOT NULL DEFAULT 'draft',
+      sourceType TEXT NOT NULL,
+      sourceBatchId TEXT,
+      sourceReferenceJson TEXT NOT NULL DEFAULT '{}',
+      supersedesStructureId TEXT,
+      reviewedBy TEXT,
+      reviewedAt TEXT,
+      activatedAt TEXT,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      FOREIGN KEY(salesObjectId) REFERENCES sales_objects(id),
+      FOREIGN KEY(supersedesStructureId) REFERENCES sales_object_structures(id),
+      FOREIGN KEY(reviewedBy) REFERENCES persons(id),
+      UNIQUE(id,salesObjectId),
+      UNIQUE(salesObjectId,version),
+      UNIQUE(salesObjectId,structureHash),
+      CHECK(version>0),
+      CHECK(status IN ('draft','pending_review','active','superseded','blocked')),
+      CHECK((status='active' AND effectiveTo IS NULL AND reviewedBy IS NOT NULL AND reviewedAt IS NOT NULL AND activatedAt IS NOT NULL) OR status<>'active')
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_object_structures_one_active
+      ON sales_object_structures(salesObjectId) WHERE status='active';
+    CREATE INDEX IF NOT EXISTS idx_sales_object_structures_status
+      ON sales_object_structures(status,updatedAt DESC);
+
+    CREATE TABLE IF NOT EXISTS sales_object_structure_components (
+      id TEXT PRIMARY KEY,
+      structureId TEXT NOT NULL,
+      salesObjectId TEXT NOT NULL,
+      erpSkuId TEXT NOT NULL,
+      quantity REAL NOT NULL,
+      sortOrder INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'active',
+      sourceType TEXT NOT NULL,
+      sourceReferenceJson TEXT NOT NULL DEFAULT '{}',
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      FOREIGN KEY(structureId,salesObjectId) REFERENCES sales_object_structures(id,salesObjectId),
+      FOREIGN KEY(salesObjectId) REFERENCES sales_objects(id),
+      FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),
+      UNIQUE(structureId,erpSkuId),
+      CHECK(quantity>0),
+      CHECK(status IN ('active','invalid'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_sales_object_components_object
+      ON sales_object_structure_components(salesObjectId,status);
+    CREATE INDEX IF NOT EXISTS idx_sales_object_components_erp
+      ON sales_object_structure_components(erpSkuId,status);
+
+    CREATE TRIGGER IF NOT EXISTS trg_sales_object_structure_activate_components
+      BEFORE UPDATE OF status ON sales_object_structures
+      WHEN NEW.status='active' AND NOT EXISTS (
+        SELECT 1 FROM sales_object_structure_components c
+        WHERE c.structureId=NEW.id AND c.salesObjectId=NEW.salesObjectId AND c.status='active'
+      )
+      BEGIN
+        SELECT RAISE(ABORT,'sales object structure cannot be active without components');
+      END;
+    CREATE TRIGGER IF NOT EXISTS trg_sales_object_structure_insert_active
+      BEFORE INSERT ON sales_object_structures
+      WHEN NEW.status='active'
+      BEGIN
+        SELECT RAISE(ABORT,'sales object structure must be created before activation');
+      END;
+    CREATE TRIGGER IF NOT EXISTS trg_sales_object_structure_single_shape
+      BEFORE UPDATE OF status ON sales_object_structures
+      WHEN NEW.status='active'
+        AND (SELECT objectType FROM sales_objects WHERE id=NEW.salesObjectId)='single'
+        AND (SELECT COUNT(*) FROM sales_object_structure_components c WHERE c.structureId=NEW.id AND c.status='active')<>1
+      BEGIN
+        SELECT RAISE(ABORT,'single sales object requires exactly one component');
+      END;
+    CREATE TRIGGER IF NOT EXISTS trg_sales_object_structure_single_quantity
+      BEFORE UPDATE OF status ON sales_object_structures
+      WHEN NEW.status='active'
+        AND (SELECT objectType FROM sales_objects WHERE id=NEW.salesObjectId)='single'
+        AND EXISTS (SELECT 1 FROM sales_object_structure_components c WHERE c.structureId=NEW.id AND c.status='active' AND c.quantity<>1)
+      BEGIN
+        SELECT RAISE(ABORT,'single sales object component quantity must equal one');
+      END;
+    CREATE TRIGGER IF NOT EXISTS trg_sales_object_component_protect_active_structure_insert
+      BEFORE INSERT ON sales_object_structure_components
+      WHEN (SELECT status FROM sales_object_structures WHERE id=NEW.structureId)='active'
+      BEGIN
+        SELECT RAISE(ABORT,'active sales object structure components are immutable');
+      END;
+    CREATE TRIGGER IF NOT EXISTS trg_sales_object_component_protect_active_structure_update
+      BEFORE UPDATE ON sales_object_structure_components
+      WHEN (SELECT status FROM sales_object_structures WHERE id=OLD.structureId)='active'
+        OR (SELECT status FROM sales_object_structures WHERE id=NEW.structureId)='active'
+      BEGIN
+        SELECT RAISE(ABORT,'active sales object structure components are immutable');
+      END;
+    CREATE TRIGGER IF NOT EXISTS trg_sales_object_component_protect_active_structure_delete
+      BEFORE DELETE ON sales_object_structure_components
+      WHEN (SELECT status FROM sales_object_structures WHERE id=OLD.structureId)='active'
+      BEGIN
+        SELECT RAISE(ABORT,'active sales object structure components are immutable');
+      END;
+  `);
+}
+
 export function migrateSalesDailyAnomalyGovernanceV1() {
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS sales_daily_anomaly_governance_decisions (
@@ -2486,6 +2645,9 @@ function runLightweightMigrations() {
   migrateSalesRelationCandidatesV1();
   migrateSalesLinkSkuComboGroupsV1();
   migrateProductStructureSchema(getDatabase());
+  migrateSalesLinkSkuProductStructuresV1();
+  migrateSalesObjectsV1();
+  migrateProductStructureApplicationApprovalsV1();
   migrateSalesDailyAnomalyGovernanceV1();
   migrateErpSkuBusinessUsagesV1();
   getDatabase().exec(`
