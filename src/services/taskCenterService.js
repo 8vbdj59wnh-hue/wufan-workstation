@@ -17,6 +17,8 @@ export {
   launchRectificationWorkForSource,
   loadTaskWaveDetail,
   loadTaskWaveRegenerationPreview,
+  loadTaskCenterTaskDetail,
+  loadTaskCenterTasks,
   loadTaskWaves,
   loadTemplates,
   normalizeSubmitRequirement,

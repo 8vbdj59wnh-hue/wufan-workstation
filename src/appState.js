@@ -296,7 +296,7 @@ export async function loadPersistentData({ includeTaskWaves = null } = {}) {
     const bootstrapModule = bootstrapModuleAliases[route] ?? (route || "dashboard");
     const shouldLoadTaskWaves =
       includeTaskWaves ??
-      ["tasks", "task-list", "task-waves", "clearance", "process-progress"].includes(route);
+      route === "task-waves";
     const [response, waveResponse] = await Promise.all([
       authFetch(lightweightModules.has(route) ? `${apiBaseUrl}/api/bootstrap?module=${encodeURIComponent(bootstrapModule)}` : `${apiBaseUrl}/api/data`),
       shouldLoadTaskWaves ? authFetch(`${apiBaseUrl}/api/task-waves`) : Promise.resolve(null),
@@ -354,6 +354,42 @@ export async function loadTaskWaves() {
   replaceArray(state.taskWaves, Array.isArray(data) ? data : []);
   taskWavesLoaded = true;
   return state.taskWaves;
+}
+
+export async function loadTaskCenterTasks({ page = 1, pageSize = 50, view = "today", keyword = "", filters = {}, sort = "remaining" } = {}) {
+  const query = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize),
+    view,
+    keyword,
+    filters: JSON.stringify(filters),
+    sort,
+  });
+  const response = await authFetch(`${apiBaseUrl}/api/task-center/tasks?${query}`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success !== true) throw new Error(data.message ?? data.error ?? "任务列表读取失败。");
+  replaceArray(state.tasks, data.items ?? []);
+  replaceArray(state.processInstances, data.context?.processInstances ?? []);
+  replaceArray(state.workPlans, data.context?.workPlans ?? []);
+  replaceArray(state.taskWaves, data.context?.taskWaves ?? []);
+  return data;
+}
+
+export async function loadTaskCenterTaskDetail(taskId) {
+  const response = await authFetch(`${apiBaseUrl}/api/task-center/tasks/${encodeURIComponent(taskId)}/detail`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success !== true) throw new Error(data.message ?? data.error ?? "任务详情读取失败。");
+  const contextTasks = data.context?.processTasks ?? [];
+  const taskIndex = new Map(state.tasks.map((item) => [item.id, item]));
+  for (const task of contextTasks) taskIndex.set(task.id, task);
+  taskIndex.set(data.task.id, data.task);
+  replaceArray(state.tasks, [...taskIndex.values()]);
+  const mergeById = (target, incoming) => replaceArray(target, [...new Map([...target, ...incoming].map((item) => [item.id, item])).values()]);
+  mergeById(state.processInstances, data.context?.processInstances ?? []);
+  mergeById(state.workPlans, data.context?.workPlans ?? []);
+  mergeById(state.taskProductContexts, data.context?.taskProductContexts ?? []);
+  mergeById(state.taskWaves, data.context?.taskWaves ?? []);
+  return data.task;
 }
 
 export async function ensureTaskWavesLoaded() {

@@ -644,7 +644,7 @@ function renderLoginPage() {
     window.location.hash = firstAccessibleModule?.id ?? "goals";
     const firstModuleId = firstAccessibleModule?.id ?? "goals";
     await Promise.all([
-      loadPersistentData({ includeTaskWaves: firstModuleId === "tasks" }),
+      loadPersistentData(),
       prepareRouteModule(firstModuleId),
     ]);
     loadedDataModuleId = getModuleIdFromHash();
@@ -955,10 +955,10 @@ window.addEventListener("hashchange", async () => {
   const nextModuleId = getModuleIdFromHash();
   const { revision } = await prepareRouteModule(nextModuleId, { showLoading: true });
   if (nextModuleId !== loadedDataModuleId && isNavigationCurrent(revision, nextModuleId)) {
-    await loadPersistentData({ includeTaskWaves: nextModuleId === "tasks" }).catch((error) => console.error("模块数据按需加载失败", error));
+    await loadPersistentData().catch((error) => console.error("模块数据按需加载失败", error));
     loadedDataModuleId = nextModuleId;
   }
-  if (isNavigationCurrent(revision, nextModuleId) && getModuleIdFromHash() === "tasks") {
+  if (isNavigationCurrent(revision, nextModuleId) && window.location.hash.replace(/^#/, "") === "task-waves") {
     await ensureTaskWavesLoaded().catch((error) => console.error("任务波次按需加载失败", error));
   }
   if (isNavigationCurrent(revision, nextModuleId)) render({ navigation: true });

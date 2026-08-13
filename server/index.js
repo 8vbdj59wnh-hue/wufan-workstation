@@ -1358,26 +1358,197 @@ app.get("/api/data", (request, response) => {
 app.get("/api/bootstrap", (request, response) => {
   try {
     const moduleName = String(request.query.module ?? "dashboard");
-    const common = ["companies", "departments", "positions", "people", "permissionTemplates", "categories", "stores", "publishingAccounts", "notifications",
+    const defaultCommon = ["companies", "departments", "positions", "people", "permissionTemplates", "categories", "stores", "publishingAccounts", "notifications",
       "taskTemplates", "processTemplates", "processTemplateNodes", "templates", "templateTagCategories", "templateTags", "issuesRequirements", "standardWorkForms"];
+    const taskCommon = ["companies", "departments", "positions", "people", "permissionTemplates", "categories", "stores", "publishingAccounts",
+      "taskTemplates", "processTemplates", "processTemplateNodes", "standardWorkForms"];
     const moduleResources = {
       dashboard: [],
       dashboardManagement: ["goals", "tasks", "taskTemplates", "processInstances", "workPlans", "weeklyReports", "weeklyReportProblems"],
       products: [],
       connectionCenter: ["goals", "taskTemplates", "processTemplates", "processTemplateNodes"],
-      tasks: ["goals", "tasks", "taskTemplates", "processTemplates", "processTemplateNodes", "processInstances", "workPlans", "contentSchedules", "actionProducts"],
-      "task-list": ["goals", "tasks", "taskTemplates", "processTemplates", "processTemplateNodes", "processInstances", "workPlans", "contentSchedules", "actionProducts"],
+      tasks: ["goals"],
+      "task-list": ["goals"],
       scheduleBoard: ["goals", "tasks", "taskTemplates", "processTemplates", "processTemplateNodes", "processInstances", "workPlans", "contentSchedules", "actionProducts"],
       financeCenter: [],
       dataCenter: [],
     };
     if (!(moduleName in moduleResources)) { response.status(400).json({ success: false, message: "该模块尚未接入轻量启动。" }); return; }
+    const common = ["tasks", "task-list"].includes(moduleName) ? taskCommon : defaultCommon;
     const keys = [...new Set([...common, ...moduleResources[moduleName]])];
     const snapshot = Object.fromEntries(keys.map((key) => [key, readResource(key)]));
     const scoped = filterDataByScope(snapshot, request.user);
-    if (["tasks", "task-list", "scheduleBoard"].includes(moduleName)) scoped.taskProductContexts = readTaskProductContexts(scoped);
+    if (moduleName === "scheduleBoard") scoped.taskProductContexts = readTaskProductContexts(scoped);
     response.json(scoped);
   } catch (error) { response.status(400).json({ success: false, message: error.message || "轻量启动数据读取失败。" }); }
+});
+
+function normalizeTaskListPage(value, fallback, maximum = Number.POSITIVE_INFINITY) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, maximum) : fallback;
+}
+
+function parseTaskListFilters(value) {
+  if (value === undefined || value === null || value === "") return {};
+  if (typeof value === "object") return value;
+  try { return JSON.parse(String(value)); } catch { return {}; }
+}
+
+function isTaskListDone(task) {
+  return ["done", "completed"].includes(String(task?.status ?? ""));
+}
+
+function isTaskListCanceled(task) {
+  return ["canceled", "cancelled"].includes(String(task?.status ?? ""));
+}
+
+function isTaskListOverdue(task, today = new Date().toISOString().slice(0, 10)) {
+  const dueDate = String(task?.dueDate ?? "").slice(0, 10);
+  return dueDate !== "" && dueDate < today && !isTaskListDone(task) && !isTaskListCanceled(task);
+}
+
+function createTaskListSummary(task) {
+  const customFields = task.customFields ?? {};
+  return {
+    id: task.id,
+    taskId: task.id,
+    businessCode: task.businessCode,
+    taskType: task.taskType,
+    name: task.name,
+    status: task.status,
+    source: task.source,
+    executorId: task.executorId,
+    ownerId: task.ownerId,
+    departmentId: task.departmentId,
+    initiatorId: task.initiatorId,
+    accepterId: task.accepterId,
+    reviewerId: task.reviewerId,
+    startDate: task.startDate,
+    readyAt: task.readyAt,
+    dueDate: task.dueDate,
+    completedAt: task.completedAt,
+    goalId: task.goalId,
+    categoryId: task.categoryId,
+    taskTemplateId: task.taskTemplateId,
+    templateId: task.templateId,
+    processInstanceId: task.processInstanceId,
+    processNodeId: task.processNodeId,
+    reviewTargetTaskId: task.reviewTargetTaskId,
+    reviewStatus: task.reviewStatus,
+    displayTitle: task.displayTitle,
+    coverImageUrl: task.coverImageUrl,
+    customFields: {
+      linkedObjectType: customFields.linkedObjectType,
+      linkedObjectId: customFields.linkedObjectId,
+      linkedObjectName: customFields.linkedObjectName,
+      actionCode: customFields.actionCode,
+      assessmentOverdueRecordedAt: customFields.assessmentOverdueRecordedAt,
+      assessmentOverdueDueDate: customFields.assessmentOverdueDueDate,
+    },
+    listVisibilityConfirmed: true,
+    listOverdue: isTaskListOverdue(task),
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+  };
+}
+
+app.get("/api/task-center/tasks", (request, response) => {
+  if (!hasPermission(request.user, "tasks.view")) {
+    rejectUnauthorizedTask(response, "你没有权限查看任务列表。");
+    return;
+  }
+  try {
+    const startedAt = performance.now();
+    const page = normalizeTaskListPage(request.query.page, 1);
+    const pageSize = normalizeTaskListPage(request.query.pageSize, 50, 100);
+    const view = ["today", "mine", "overdue", "all"].includes(String(request.query.view)) ? String(request.query.view) : "today";
+    const keyword = String(request.query.keyword ?? "").trim().toLowerCase();
+    const filters = parseTaskListFilters(request.query.filters);
+    const sort = String(request.query.sort ?? "remaining");
+    const data = {
+      tasks: readResource("tasks"),
+      processInstances: readResource("processInstances"),
+      processTemplateNodes: readResource("processTemplateNodes"),
+      taskTemplates: readResource("taskTemplates"),
+    };
+    const actorId = String(request.user?.personId ?? request.user?.id ?? "");
+    const today = new Date().toISOString().slice(0, 10);
+    let items = filterTasksByScope(data.tasks, request.user, data).filter((task) => task.source !== "clearance");
+    items = items.filter((task) => {
+      if (view === "mine" && (task.executorId !== actorId || isTaskListDone(task) || isTaskListCanceled(task))) return false;
+      if (view === "overdue" && !isTaskListOverdue(task, today)) return false;
+      if (view === "today") {
+        const date = String(task.dueDate ?? task.startDate ?? "").slice(0, 10);
+        if ((date !== today && task.status !== "doing") || isTaskListDone(task) || isTaskListCanceled(task)) return false;
+      }
+      if (!filters.showDone && isTaskListDone(task)) return false;
+      if (!filters.showCanceled && isTaskListCanceled(task)) return false;
+      if (filters.status && task.status !== filters.status) return false;
+      if (filters.departmentId && task.departmentId !== filters.departmentId) return false;
+      if (filters.ownerId && task.ownerId !== filters.ownerId) return false;
+      if (filters.executorId && task.executorId !== filters.executorId) return false;
+      if (filters.overdue === "yes" && !isTaskListOverdue(task, today)) return false;
+      if (filters.overdue === "no" && isTaskListOverdue(task, today)) return false;
+      if (keyword !== "") {
+        const template = data.taskTemplates.find((item) => item.id === task.taskTemplateId);
+        const haystack = [task.name, task.businessCode, task.customFields?.actionCode, template?.businessCode].join(" ").toLowerCase();
+        if (!haystack.includes(keyword)) return false;
+      }
+      return true;
+    });
+    items.sort((left, right) => {
+      if (sort === "name") return String(left.name ?? "").localeCompare(String(right.name ?? ""), "zh-Hans-CN");
+      const leftDue = String(left.dueDate ?? "9999-12-31");
+      const rightDue = String(right.dueDate ?? "9999-12-31");
+      return leftDue.localeCompare(rightDue) || String(left.id).localeCompare(String(right.id));
+    });
+    const total = items.length;
+    const pageItems = items.slice((page - 1) * pageSize, page * pageSize);
+    const processInstanceIds = new Set(pageItems.map((item) => item.processInstanceId).filter(Boolean));
+    const workPlans = readResource("workPlans").filter((item) => processInstanceIds.has(item.processInstanceId));
+    const processInstances = data.processInstances.filter((item) => processInstanceIds.has(item.id));
+    const waveItems = readTaskWavesForTaskIds(pageItems.map((item) => item.id));
+    const elapsed = performance.now() - startedAt;
+    response.set("Server-Timing", `task-list;dur=${elapsed.toFixed(1)}`);
+    response.json({
+      success: true,
+      page,
+      pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+      items: pageItems.map(createTaskListSummary),
+      context: { processInstances, workPlans, taskWaves: waveItems },
+    });
+  } catch (error) {
+    console.error("任务中心分页读取失败", error);
+    response.status(400).json({ success: false, message: error.message || "任务列表读取失败。" });
+  }
+});
+
+app.get("/api/task-center/tasks/:id/detail", (request, response) => {
+  if (!hasPermission(request.user, "tasks.viewDetail")) {
+    rejectUnauthorizedTask(response, "你没有权限查看任务详情。");
+    return;
+  }
+  try {
+    const authorization = readTaskAuthorizationResolver([request.params.id]).get(request.params.id);
+    if (authorization === null) { response.status(404).json({ success: false, message: "未找到任务。" }); return; }
+    if (!canViewTask(request.user, authorization)) { rejectUnauthorizedTask(response, "你没有权限查看该任务。"); return; }
+    const task = readRouteResourceItem("tasks", request.params.id);
+    const processTasks = task.processInstanceId
+      ? readResource("tasks").filter((item) => item.processInstanceId === task.processInstanceId)
+      : [task];
+    const processInstances = task.processInstanceId
+      ? readResource("processInstances").filter((item) => item.id === task.processInstanceId)
+      : [];
+    const workPlans = task.processInstanceId
+      ? readResource("workPlans").filter((item) => item.processInstanceId === task.processInstanceId || item.id === processInstances[0]?.workPlanId)
+      : [];
+    const contextSnapshot = { tasks: processTasks, processInstances, workPlans, actionProducts: readResource("actionProducts") };
+    response.json({ success: true, task, context: { processTasks, processInstances, workPlans, taskProductContexts: readTaskProductContexts(contextSnapshot), taskWaves: readTaskWavesForTaskIds([task.id]) } });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "任务详情读取失败。" });
+  }
 });
 
 app.post("/api/data", requirePermission("settings.managePermissions"), (request, response) => {
@@ -3632,7 +3803,7 @@ app.post("/api/tasks/batch-status", (request, response) => {
       return;
     }
     const result = batchUpdateTaskStatus(request.body ?? {});
-    response.json({ success: true, result, data: filterDataByScope(readAllData(), request.user) });
+    response.json({ success: true, result });
   } catch (error) {
     console.error("批量任务状态保存失败", error);
     response.status(400).json({ success: false, message: error.message || "批量任务状态保存失败，请检查本地数据库服务。" });

@@ -17,6 +17,8 @@ import {
   launchRectificationWorkForSource,
   loadTaskWaveDetail,
   loadTaskWaveRegenerationPreview,
+  loadTaskCenterTaskDetail,
+  loadTaskCenterTasks,
   loadTaskWaves,
   loadTemplates,
   normalizeSubmitRequirement,
@@ -178,6 +180,14 @@ let modalState = null;
 let activeTaskTab = "task-list";
 let taskListView = "mine";
 let taskDisplayView = "card";
+let taskListPage = 1;
+let taskListPageSize = 50;
+let taskListResult = { total: 0, totalPages: 1 };
+let taskListLoaded = false;
+let taskListLoading = false;
+let taskListError = "";
+let taskListRequestRevision = 0;
+let taskWaveListLoading = false;
 let visualTemplatesLoaded = state.templates.length > 0;
 let visualTemplatesLoading = false;
 let selectedTaskWaveId = null;
@@ -1431,7 +1441,51 @@ function matchesTaskListView(task) {
 }
 
 function isTaskVisibleInExecutionStage(task) {
+  if (task.listVisibilityConfirmed === true) return true;
   return isTaskExecutionStarted(task, state);
+}
+
+async function refreshTaskCenterList(rerender, { resetPage = false } = {}) {
+  if (resetPage) taskListPage = 1;
+  const revision = ++taskListRequestRevision;
+  taskListLoading = true;
+  taskListError = "";
+  rerender();
+  try {
+    const result = await loadTaskCenterTasks({
+      page: taskListPage,
+      pageSize: taskListPageSize,
+      view: taskListView,
+      keyword: filters.keyword,
+      filters,
+      sort: taskSort,
+    });
+    if (revision !== taskListRequestRevision) return;
+    taskListResult = result;
+    taskListLoaded = true;
+    selectedTaskId = null;
+  } catch (error) {
+    if (revision !== taskListRequestRevision) return;
+    taskListError = error.message || "任务列表读取失败。";
+  } finally {
+    if (revision === taskListRequestRevision) {
+      taskListLoading = false;
+      rerender();
+    }
+  }
+}
+
+async function openTaskDetailOnDemand(taskId, rerender, context = {}) {
+  openTaskDetail(taskId, context);
+  modalState = { ...modalState, loading: true };
+  rerender();
+  try {
+    await loadTaskCenterTaskDetail(taskId);
+    modalState = { ...modalState, loading: false, error: "" };
+  } catch (error) {
+    modalState = { ...modalState, loading: false, error: error.message || "任务详情读取失败。" };
+  }
+  rerender();
 }
 
 function getFilteredTasks() {
@@ -1555,10 +1609,14 @@ function getTaskActionDeadline(task) {
 }
 
 function getTaskWaveForTask(taskId) {
+  const task = state.tasks.find((item) => item.id === taskId);
+  if (task?.listWave) return task.listWave;
   return state.taskWaves.find((wave) => wave.taskIds?.includes(taskId)) ?? null;
 }
 
 function getActiveTaskWave(taskId) {
+  const task = state.tasks.find((item) => item.id === taskId);
+  if (task?.listWave && ["waiting_collect", "waiting", "doing", "pending_acceptance"].includes(task.listWave.status)) return task.listWave;
   return state.taskWaves.find(
     (wave) => ["waiting_collect", "waiting", "doing", "pending_acceptance"].includes(wave.status) && wave.taskIds?.includes(taskId),
   ) ?? null;
@@ -1581,6 +1639,7 @@ function getTaskWaveExecutionTiming(wave, referenceAt = getNow()) {
 }
 
 function isTaskExecutionOverdue(task) {
+  if (typeof task.listOverdue === "boolean") return task.listOverdue;
   const wave = getTaskWaveForTask(task.id);
   const waveTiming = getTaskWaveExecutionTiming(wave);
   if (waveTiming !== null) return waveTiming.overdue;
@@ -3107,6 +3166,25 @@ function renderTaskListViewSwitch() {
   `;
 }
 
+function renderTaskListLoadState() {
+  if (taskListLoading && !taskListLoaded) return `<section class="settings-section"><div class="empty-detail">正在加载任务列表…</div></section>`;
+  if (taskListError !== "") return `<section class="settings-section"><div class="empty-detail">${escapeHtml(taskListError)} <button class="text-button" type="button" data-action="retry-task-list">重试</button></div></section>`;
+  return "";
+}
+
+function renderTaskListPagination() {
+  if (!taskListLoaded || taskListResult.total === 0) return "";
+  return `
+    <div class="pagination-bar task-list-pagination" aria-label="任务列表分页">
+      <span>共 ${taskListResult.total} 项，第 ${taskListPage}/${taskListResult.totalPages} 页</span>
+      <div class="row-actions">
+        <button class="secondary-button" type="button" data-action="task-page-prev" ${taskListPage <= 1 ? "disabled" : ""}>上一页</button>
+        <button class="secondary-button" type="button" data-action="task-page-next" ${taskListPage >= taskListResult.totalPages ? "disabled" : ""}>下一页</button>
+      </div>
+    </div>
+  `;
+}
+
 function renderActionButton(label, action, taskId, variant = "") {
   return `
     <button class="text-button ${variant}" type="button" data-action="${action}" data-task-id="${taskId}">
@@ -4204,7 +4282,7 @@ function renderTaskDetailModal() {
           <button class="icon-button" type="button" data-action="close-task-modal" aria-label="关闭">×</button>
         </div>
         <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${modalState.error}</div>
-        ${renderTaskDetail()}
+        ${modalState.loading ? `<div class="empty-detail">正在加载任务详情…</div>` : renderTaskDetail()}
         ${renderTaskLinkedTemplatePreviewModal()}
       </div>
     </div>
@@ -5177,7 +5255,7 @@ async function bulkUpdateTaskStatus(status, rerender) {
   }
 
   selectedTaskIds = new Set();
-  rerender();
+  await refreshTaskCenterList(rerender);
 }
 
 async function cancelTask(taskId, rerender) {
@@ -5202,7 +5280,7 @@ async function cancelTask(taskId, rerender) {
     return;
   }
   state.tasks = state.tasks.map((item) => (item.id === taskId ? updatedTask : item));
-  rerender();
+  await refreshTaskCenterList(rerender);
 }
 
 async function restoreCanceledTask(taskId, rerender) {
@@ -5228,7 +5306,7 @@ async function restoreCanceledTask(taskId, rerender) {
     return;
   }
   state.tasks = state.tasks.map((item) => (item.id === taskId ? restoredTask : item));
-  rerender();
+  await refreshTaskCenterList(rerender);
 }
 
 async function relaunchProcessAsWorkPlan(instanceId, rerender) {
@@ -5861,6 +5939,16 @@ export function bindTasksPageEvents(rerender) {
   const clearanceImportInput = document.querySelector("[data-clearance-file='import']");
 
   if (tasksPage === null) return;
+  if (activeTaskTab === "task-list" && !taskListLoaded && !taskListLoading) {
+    void refreshTaskCenterList(rerender);
+  }
+  if (activeTaskTab === "task-waves" && state.taskWaves.length === 0 && !taskWaveListLoading) {
+    taskWaveListLoading = true;
+    loadTaskWaves().catch((error) => { taskWaveError = error.message || "任务波次读取失败。"; }).finally(() => {
+      taskWaveListLoading = false;
+      rerender();
+    });
+  }
   tasksPage.querySelectorAll("[data-copy-task-code]").forEach((button) => button.addEventListener("click", async (event) => {
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -5955,9 +6043,7 @@ export function bindTasksPageEvents(rerender) {
   document.querySelectorAll("[data-task-list-view]").forEach((button) => {
     button.addEventListener("click", () => {
       taskListView = button.dataset.taskListView;
-      const firstRow = getTaskTableRows()[0];
-      selectedTaskId = firstRow?.task.id ?? null;
-      rerender();
+      void refreshTaskCenterList(rerender, { resetPage: true });
     });
   });
 
@@ -6070,9 +6156,7 @@ export function bindTasksPageEvents(rerender) {
 
   document.querySelector("[data-task-sort]")?.addEventListener("change", (event) => {
     taskSort = event.target.value === "name" ? "name" : "remaining";
-    const firstRow = getTaskTableRows()[0];
-    selectedTaskId = firstRow?.task.id ?? null;
-    rerender();
+    void refreshTaskCenterList(rerender, { resetPage: true });
   });
 
   if (activeTaskTab === "clearance") {
@@ -6252,19 +6336,19 @@ export function bindTasksPageEvents(rerender) {
   filterForm.addEventListener("input", (event) => {
     const keywordInput = event.target.closest('input[name="keyword"]');
     updateFilters(filterForm);
-    const firstRow = getTaskTableRows()[0];
-    selectedTaskId = firstRow?.task.id ?? null;
-    if (keywordInput !== null) {
-      rerenderPreservingInputFocus(rerender, keywordInput, '.task-list-filters input[name="keyword"]');
-      return;
-    }
-    rerender();
+    if (keywordInput !== null) keywordInput.dataset.pendingTaskSearch = "true";
   });
   filterForm.addEventListener("change", () => {
     updateFilters(filterForm);
-    const firstRow = getTaskTableRows()[0];
-    selectedTaskId = firstRow?.task.id ?? null;
-    rerender();
+    void refreshTaskCenterList(rerender, { resetPage: true });
+  });
+  filterForm.addEventListener("submit", (event) => { event.preventDefault(); void refreshTaskCenterList(rerender, { resetPage: true }); });
+  const keywordInput = filterForm.querySelector('input[name="keyword"]');
+  keywordInput?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    updateFilters(filterForm);
+    void refreshTaskCenterList(rerender, { resetPage: true });
   });
   tasksPage.addEventListener("change", (event) => {
     const selectAll = event.target.closest("[data-task-select-all]");
@@ -6345,6 +6429,9 @@ export function bindTasksPageEvents(rerender) {
         bulkUpdateTaskStatus(actionButton.dataset.status, rerender);
         return;
       }
+      if (action === "retry-task-list") { void refreshTaskCenterList(rerender); return; }
+      if (action === "task-page-prev") { taskListPage = Math.max(1, taskListPage - 1); void refreshTaskCenterList(rerender); return; }
+      if (action === "task-page-next") { taskListPage = Math.min(taskListResult.totalPages, taskListPage + 1); void refreshTaskCenterList(rerender); return; }
       if (action === "bulk-complete") {
         bulkUpdateTaskStatus(TaskStatus.Done, rerender);
         return;
@@ -6363,6 +6450,7 @@ export function bindTasksPageEvents(rerender) {
         rerender();
         return;
       }
+      if (action === "view-task") { await openTaskDetailOnDemand(actionButton.dataset.taskId, rerender); return; }
       handleTaskAction(action, actionButton.dataset.taskId, rerender, actionButton);
       return;
     }
@@ -6374,12 +6462,11 @@ export function bindTasksPageEvents(rerender) {
     if (row === null) return;
 
     if (row.matches("[data-task-card]")) {
-      await handleTaskAction("view-task", row.dataset.rowTaskId, rerender);
+      await openTaskDetailOnDemand(row.dataset.rowTaskId, rerender);
       return;
     }
 
-    selectedTaskId = row.dataset.rowTaskId;
-    rerender();
+    await openTaskDetailOnDemand(row.dataset.rowTaskId, rerender);
   });
 
 }
@@ -6795,8 +6882,9 @@ export function renderTasksPage() {
             : `
               ${renderTaskListViewSwitch()}
               ${renderFilters()}
-              ${taskDisplayView === "card" ? renderTaskCardGrid() : renderTaskTable()}
-              ${renderTaskDetail()}
+              ${renderTaskListLoadState()}
+              ${taskListLoaded ? (taskDisplayView === "card" ? renderTaskCardGrid() : renderTaskTable()) : ""}
+              ${renderTaskListPagination()}
               ${renderTaskDetailModal()}
               ${renderLaunchedProcessDetailModal()}
               ${renderTaskModal()}
