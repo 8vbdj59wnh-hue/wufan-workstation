@@ -110,6 +110,9 @@ const slotBaseHeight = 50;
 const slotLabelHeight = 23;
 const slotCardHeight = 29;
 const slotCardGap = 3;
+const schedulePreviewCloseDelay = 300;
+let schedulePreviewCloseTimer = null;
+let schedulePreviewAnchor = null;
 
 function captureScheduleInnerScroll() {
   const pendingList = document.querySelector(".schedule-pending-list");
@@ -174,7 +177,7 @@ async function copyActionCode(copyTarget) {
       if (!copied) throw new Error("copy command failed");
     }
     const feedback = copyTarget
-      .closest(".schedule-action-overview-code, .schedule-list-action-code")
+      .closest(".schedule-action-overview-code, .schedule-list-action-code, .schedule-hover-preview-code")
       ?.querySelector("[data-schedule-action-code-feedback]");
     if (feedback === null || feedback === undefined) return;
     feedback.textContent = "已复制";
@@ -843,6 +846,7 @@ function renderProcessBlock(row) {
   const primaryProduct = linkedProducts[0] ?? null;
   const valueModuleClass = getValueModuleCardClass(row.valueModuleId);
   const progressText = getProcessCurrentProgressText(row.tasks);
+  const actionCode = String(row.processInstance.businessCode ?? "").trim();
   return `
     <article
       class="schedule-process-block ${getProcessStatusClass(row)} ${valueModuleClass} ${savingWorkPlanIds.has(row.workPlan.id) ? "is-saving" : ""}"
@@ -858,6 +862,7 @@ function renderProcessBlock(row) {
       data-schedule-preview-product-code="${escapeAttribute(primaryProduct?.skuCode ?? "")}"
       data-schedule-preview-product-count="${linkedProducts.length}"
       data-schedule-preview-progress="${escapeAttribute(progressText)}"
+      data-schedule-preview-action-code="${escapeAttribute(actionCode)}"
       draggable="${canDrag ? "true" : "false"}"
       title="${escapeAttribute(title)}"
       aria-label="${escapeAttribute(title)}"
@@ -943,8 +948,31 @@ function getPreviewElement() {
   preview = document.createElement("div");
   preview.className = "schedule-hover-preview";
   preview.setAttribute("aria-hidden", "true");
+  preview.addEventListener("pointerenter", cancelSchedulePreviewClose);
+  preview.addEventListener("pointerleave", scheduleSchedulePreviewClose);
+  preview.addEventListener("click", (event) => {
+    const copyTarget = event.target.closest("[data-schedule-copy-action-code]");
+    if (copyTarget === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void copyActionCode(copyTarget);
+  });
   document.body.appendChild(preview);
   return preview;
+}
+
+function cancelSchedulePreviewClose() {
+  window.clearTimeout(schedulePreviewCloseTimer);
+  schedulePreviewCloseTimer = null;
+}
+
+function scheduleSchedulePreviewClose() {
+  cancelSchedulePreviewClose();
+  schedulePreviewCloseTimer = window.setTimeout(() => {
+    const preview = document.querySelector(".schedule-hover-preview");
+    if (schedulePreviewAnchor?.matches(":hover") || preview?.matches(":hover")) return;
+    hideSchedulePreview();
+  }, schedulePreviewCloseDelay);
 }
 
 function positionSchedulePreview(preview, anchor) {
@@ -967,30 +995,35 @@ function positionSchedulePreview(preview, anchor) {
 
 function showSchedulePreview(button) {
   if (draggedSourceId !== null) return;
+  cancelSchedulePreviewClose();
+  schedulePreviewAnchor = button;
   const preview = getPreviewElement();
   let imageUrls = [];
   try {
     imageUrls = JSON.parse(button.dataset.schedulePreviewImages ?? "[]");
+    imageUrls = Array.isArray(imageUrls) ? imageUrls.filter((url) => String(url ?? "").trim() !== "") : [];
   } catch {
     imageUrls = [];
   }
   const usesLinkedProducts = button.dataset.schedulePreviewUsesProducts === "true";
   const title = button.dataset.schedulePreviewTitle ?? "";
   const progressText = button.dataset.schedulePreviewProgress ?? "暂无进度";
+  const actionCode = button.dataset.schedulePreviewActionCode ?? "";
   const productName = button.dataset.schedulePreviewProductName ?? "";
   const productCode = button.dataset.schedulePreviewProductCode ?? "";
   const productCount = Number(button.dataset.schedulePreviewProductCount ?? 0);
   preview.classList.remove("is-hidden");
+  preview.setAttribute("aria-hidden", "false");
   preview.innerHTML = `
-    <div class="schedule-hover-preview-media">
+    ${imageUrls.length === 0 ? "" : `<div class="schedule-hover-preview-media">
       ${renderActionImageGrid(imageUrls, {
         className: "schedule-hover-preview-image-grid",
         alt: title,
-        placeholder: "无预览图",
         preserveEmptySlots: usesLinkedProducts,
       })}
-    </div>
+    </div>`}
     <strong class="schedule-hover-preview-title">${escapeHtml(title)}</strong>
+    ${actionCode === "" ? "" : `<div class="schedule-hover-preview-code"><span>行动编码</span><button type="button" data-schedule-copy-action-code="${escapeAttribute(actionCode)}" title="点击复制行动编码">${escapeHtml(actionCode)}</button><em data-schedule-action-code-feedback aria-live="polite"></em></div>`}
     ${
       productCount > 0
         ? `<div class="schedule-hover-preview-product">
@@ -1006,8 +1039,13 @@ function showSchedulePreview(button) {
 }
 
 function hideSchedulePreview() {
+  cancelSchedulePreviewClose();
+  schedulePreviewAnchor = null;
   const preview = document.querySelector(".schedule-hover-preview");
-  if (preview !== null) preview.classList.add("is-hidden");
+  if (preview !== null) {
+    preview.classList.add("is-hidden");
+    preview.setAttribute("aria-hidden", "true");
+  }
 }
 
 function getSlotMinHeight(cardCount) {
@@ -1728,10 +1766,8 @@ export function bindScheduleBoardPageEvents(rerender) {
       showSchedulePreview(button);
     };
 
-    button.addEventListener("mouseenter", showPreview);
     button.addEventListener("pointerenter", showPreview);
-    button.addEventListener("mouseleave", hideSchedulePreview);
-    button.addEventListener("pointerleave", hideSchedulePreview);
+    button.addEventListener("pointerleave", scheduleSchedulePreviewClose);
 
     button.addEventListener("dragstart", (event) => {
       const processInstanceId = button.dataset.scheduleProcessId ?? "";
