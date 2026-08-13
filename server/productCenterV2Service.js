@@ -98,7 +98,7 @@ function sortRows(rows, sort = "updated-desc") {
 let productListMetadataCache = null;
 
 function salesObjectLinkContext(database, erpSkuIds) {
-  const reverse = resolveErpSkuSalesObjectLinks({ erpSkuIds }, { database, scope: "productAssociations" }).results;
+  const reverse = resolveErpSkuSalesObjectLinks({ erpSkuIds }, { database, scope: "productAssociations", salesObjectOnly: true }).results;
   const linkSkuIds = [...new Set(Object.values(reverse).flatMap((relations) => relations.map((relation) => relation.salesLinkSkuId)))];
   const identities = linkSkuIds.length ? database.prepare(`SELECT x.id salesLinkSkuId,x.salesLinkId,x.platformSkuId,x.platformSkuCode,x.specificationName platformSpecification,
       l.platformGoodsId,l.title,sh.platform,sh.displayName shopName,c.id connectionId
@@ -126,7 +126,12 @@ function productListMetadata(database) {
     brands: distinct(`SELECT DISTINCT COALESCE(NULLIF(p.brand,''),g.brand) value FROM erp_skus s JOIN erp_goods g ON g.id=s.erpGoodsId LEFT JOIN product_erp_mappings m ON m.erpSkuId=s.id AND m.currentState='active' LEFT JOIN products p ON p.id=m.productId WHERE s.currentState='active' ORDER BY value`),
     categories: distinct(`SELECT DISTINCT COALESCE(NULLIF(p.category,''),g.category) value FROM erp_skus s JOIN erp_goods g ON g.id=s.erpGoodsId LEFT JOIN product_erp_mappings m ON m.erpSkuId=s.id AND m.currentState='active' LEFT JOIN products p ON p.id=m.productId WHERE s.currentState='active' ORDER BY value`),
     lifecycleStatuses: distinct(`SELECT DISTINCT p.status value FROM erp_skus s LEFT JOIN product_erp_mappings m ON m.erpSkuId=s.id AND m.currentState='active' LEFT JOIN products p ON p.id=m.productId WHERE s.currentState='active' ORDER BY value`),
-    platforms: [...new Set([...salesObjectLinkContext(database, rows.map((row) => row.erpSkuId)).values()].flat().map((row) => row.platform).filter(Boolean))].sort(),
+    platforms: distinct(`SELECT DISTINCT sh.platform value FROM sales_link_sku_sales_object_relations r
+      JOIN sales_link_skus x ON x.id=r.linkSkuId JOIN sales_links l ON l.id=x.salesLinkId JOIN sales_shops sh ON sh.id=l.shopId
+      WHERE r.status='active' ORDER BY sh.platform`),
+    shops: database.prepare(`SELECT DISTINCT sh.id,sh.displayName,sh.platform FROM sales_link_sku_sales_object_relations r
+      JOIN sales_link_skus x ON x.id=r.linkSkuId JOIN sales_links l ON l.id=x.salesLinkId JOIN sales_shops sh ON sh.id=l.shopId
+      WHERE r.status='active' ORDER BY sh.platform,sh.displayName`).all(),
   };
   const value = { summary: { total: Number(summary.total || 0), profiled: Number(summary.profiled || 0), unprofiled: Number(summary.unprofiled || 0), businessZones: zones.counts, businessZoneRules: zones.rules }, zoneById: new Map(zones.items.map((row) => [row.erpSkuId, row.businessZone])), facets };
   productListMetadataCache = { expiresAt: Date.now() + 30_000, value }; return value;
@@ -139,15 +144,20 @@ export function getProductCenterV2Metadata() {
 
 export function listProductCenterV2Skus(options = {}) {
   const database = getDatabase(); const limit = Math.min(200, Math.max(20, number(options.limit, 50))); const offset = Math.max(0, number(options.offset, 0));
-  const allErpSkuIds = database.prepare("SELECT id FROM erp_skus WHERE currentState='active' ORDER BY id").all().map((row) => row.id);
-  const relationContext = salesObjectLinkContext(database, allErpSkuIds);
   const metadata = text(options.businessZone) && options.businessZone !== "all" ? productListMetadata(database) : null; const conditions = ["s.currentState='active'"]; const params = {};
   if (text(options.search)) { conditions.push("(s.merchantSkuCode LIKE @search OR COALESCE(s.specificationName,'') LIKE @search OR COALESCE(g.goodsName,'') LIKE @search OR COALESCE(g.goodsCode,'') LIKE @search OR COALESCE(p.name,'') LIKE @search)"); params.search = `%${text(options.search)}%`; }
   if (!includeUnarchived(options.includeUnarchived)) conditions.push("p.id IS NOT NULL");
   else if (options.profileStatus === "profiled") conditions.push("p.id IS NOT NULL");
   else if (options.profileStatus === "unprofiled") conditions.push("p.id IS NULL");
   for (const [key, expression] of [["erpStatus", "s.erpStatus"], ["brand", "COALESCE(NULLIF(p.brand,''),g.brand)"], ["category", "COALESCE(NULLIF(p.category,''),g.category)"], ["lifecycleStatus", "p.status"], ["ownerId", "p.ownerId"]]) if (text(options[key])) { conditions.push(`${expression}=@${key}`); params[key] = text(options[key]); }
-  if (text(options.platform)) { const ids = allErpSkuIds.filter((id) => relationContext.get(id)?.some((row) => row.platform === text(options.platform))); if (!ids.length) conditions.push("0"); else { conditions.push(`s.id IN (${ids.map(() => "?").join(",")})`); params.platformIds = ids; } }
+  if (text(options.platform)) {
+    conditions.push(`EXISTS (SELECT 1 FROM sales_object_structure_components pc
+      JOIN sales_object_structures ps ON ps.id=pc.structureId AND ps.status='active'
+      JOIN sales_link_sku_sales_object_relations pr ON pr.salesObjectId=ps.salesObjectId AND pr.status='active'
+      JOIN sales_link_skus px ON px.id=pr.linkSkuId JOIN sales_links pl ON pl.id=px.salesLinkId JOIN sales_shops psh ON psh.id=pl.shopId
+      WHERE pc.status='active' AND pc.erpSkuId=s.id AND psh.platform=@platform)`);
+    params.platform = text(options.platform);
+  }
   const inventoryExpression = `(SELECT COALESCE(i.stockNum,0) FROM erp_sku_inventory_daily_summaries i WHERE i.erpSkuId=s.id ORDER BY i.businessDate DESC,i.updatedAt DESC LIMIT 1)`;
   if (options.stockStatus === "available") conditions.push(`${inventoryExpression}>10`);
   if (options.stockStatus === "low") conditions.push(`${inventoryExpression}>0 AND ${inventoryExpression}<=10`);
@@ -157,7 +167,7 @@ export function listProductCenterV2Skus(options = {}) {
     if (!ids.length) conditions.push("0"); else { conditions.push(`s.id IN (${ids.map(() => "?").join(",")})`); params.zoneIds = ids; }
   }
   const from = `FROM erp_skus s JOIN erp_goods g ON g.id=s.erpGoodsId LEFT JOIN product_erp_mappings m ON m.erpSkuId=s.id AND m.currentState='active' LEFT JOIN products p ON p.id=m.productId`;
-  const bindParams = { ...params }; const zoneIds = bindParams.zoneIds || []; const platformIds = bindParams.platformIds || []; delete bindParams.zoneIds; delete bindParams.platformIds; const positional = [...platformIds, ...zoneIds];
+  const bindParams = { ...params }; const zoneIds = bindParams.zoneIds || []; delete bindParams.zoneIds; const positional = [...zoneIds];
   const whereSql = conditions.join(" AND ");
   const total = Number(database.prepare(`SELECT COUNT(*) count ${from} WHERE ${whereSql}`).get(...positional, bindParams)?.count || 0);
   const salesSort = `COALESCE((SELECT SUM(fx.quantity) FROM connection_sku_sales_daily_facts fx WHERE fx.erpSkuId=s.id),(SELECT ix.salesMonth FROM erp_sku_inventory_daily_summaries ix WHERE ix.erpSkuId=s.id ORDER BY ix.businessDate DESC LIMIT 1),0)`;
@@ -180,6 +190,7 @@ export function listProductCenterV2Skus(options = {}) {
     FROM candidates q JOIN erp_skus s ON s.id=q.id JOIN erp_goods g ON g.id=s.erpGoodsId
     LEFT JOIN product_erp_mappings m ON m.erpSkuId=s.id AND m.currentState='active' LEFT JOIN products p ON p.id=m.productId
     ORDER BY ${order},s.id`).all(...positional, { ...bindParams, limit, offset });
+  const relationContext = salesObjectLinkContext(database, rows.map((row) => row.erpSkuId));
   const hydrated = rows.map((row) => { const links = relationContext.get(row.erpSkuId) || []; return { ...row, linkCount: new Set(links.map((item) => item.salesLinkId)).size, platformSkuCount: links.length, displayBrand: text(row.brand) || text(row.erpBrand), displayCategory: text(row.category) || text(row.erpCategory), platforms: [...new Set(links.map((item) => item.platform).filter(Boolean))], businessZone: metadata?.zoneById.get(row.erpSkuId) || "" }; });
   const profileCounts = database.prepare(`SELECT COUNT(*) total,SUM(p.id IS NOT NULL) profiled,SUM(p.id IS NULL) unprofiled ${from} WHERE s.currentState='active'`).get();
   return { rows: hydrated, pagination: { total, limit, offset }, summary: { total: Number(profileCounts.total || 0), profiled: Number(profileCounts.profiled || 0), unprofiled: Number(profileCounts.unprofiled || 0) } };

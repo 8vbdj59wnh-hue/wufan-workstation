@@ -99,11 +99,20 @@ export function resolveErpSkuSalesObjectLinks(input = {}, options = {}) {
     WHERE c.status='active' AND c.erpSkuId IN (${marks}) ORDER BY c.erpSkuId,r.linkSkuId`).all(...erpSkuIds);
   const read = { results: {}, differences: [] }; const linkSkuIds = [...new Set(candidates.map((row) => row.linkSkuId))];
   for (let offset = 0; offset < linkSkuIds.length; offset += 500) {
-    const batch = resolveLinkSkuRelationsForRead({ salesLinkSkuIds: linkSkuIds.slice(offset, offset + 500) }, {
-      ...options, database, scope: clean(options.scope) || "productAssociations",
-      salesObjectResolverEnabled: options.salesObjectResolverEnabled ?? true,
-      enabledScopes: options.enabledScopes || FORMAL_SALES_OBJECT_RESOLVER_SCOPES,
-    });
+    const batchIds = linkSkuIds.slice(offset, offset + 500);
+    const batch = options.salesObjectOnly
+      ? (() => {
+          const resolved = resolveLinkSkuSalesObjects({ salesLinkSkuIds: batchIds }, { database, onQuery: options.onNewQuery }).results;
+          return {
+            results: Object.fromEntries(batchIds.map((id) => [id, asLegacyContract(resolved[id], undefined)])),
+            differences: [],
+          };
+        })()
+      : resolveLinkSkuRelationsForRead({ salesLinkSkuIds: batchIds }, {
+          ...options, database, scope: clean(options.scope) || "productAssociations",
+          salesObjectResolverEnabled: options.salesObjectResolverEnabled ?? true,
+          enabledScopes: options.enabledScopes || FORMAL_SALES_OBJECT_RESOLVER_SCOPES,
+        });
     Object.assign(read.results, batch.results); read.differences.push(...batch.differences);
   }
   for (const candidate of candidates) {
