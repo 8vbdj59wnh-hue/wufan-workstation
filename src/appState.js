@@ -274,8 +274,26 @@ export function applyDataSnapshot(data) {
 export async function loadPersistentData({ includeTaskWaves = null } = {}) {
   try {
     const route = window.location.hash.replace(/^#/, "").split("/")[0];
-    const lightweightModules = new Set(["", "dashboard", "dashboard-management", "products", "connectionCenter", "tasks", "task-list", "scheduleBoard"]);
-    const bootstrapModule = route === "dashboard-management" ? "dashboardManagement" : (route || "dashboard");
+    const lightweightModules = new Set([
+      "",
+      "dashboard",
+      "dashboard-management",
+      "products",
+      "connectionCenter",
+      "tasks",
+      "task-list",
+      "scheduleBoard",
+      "financeCenter",
+      "finance-center",
+      "dataCenter",
+      "data-center",
+    ]);
+    const bootstrapModuleAliases = {
+      "dashboard-management": "dashboardManagement",
+      "finance-center": "financeCenter",
+      "data-center": "dataCenter",
+    };
+    const bootstrapModule = bootstrapModuleAliases[route] ?? (route || "dashboard");
     const shouldLoadTaskWaves =
       includeTaskWaves ??
       ["tasks", "task-list", "task-waves", "clearance", "process-progress"].includes(route);

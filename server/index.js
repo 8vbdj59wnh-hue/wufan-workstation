@@ -1368,6 +1368,8 @@ app.get("/api/bootstrap", (request, response) => {
       tasks: ["goals", "tasks", "taskTemplates", "processTemplates", "processTemplateNodes", "processInstances", "workPlans", "contentSchedules", "actionProducts"],
       "task-list": ["goals", "tasks", "taskTemplates", "processTemplates", "processTemplateNodes", "processInstances", "workPlans", "contentSchedules", "actionProducts"],
       scheduleBoard: ["goals", "tasks", "taskTemplates", "processTemplates", "processTemplateNodes", "processInstances", "workPlans", "contentSchedules", "actionProducts"],
+      financeCenter: [],
+      dataCenter: [],
     };
     if (!(moduleName in moduleResources)) { response.status(400).json({ success: false, message: "该模块尚未接入轻量启动。" }); return; }
     const keys = [...new Set([...common, ...moduleResources[moduleName]])];
