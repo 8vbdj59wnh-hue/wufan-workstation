@@ -95,7 +95,7 @@ let unmatchedSkuState = { loading: false, loaded: false, rows: [], total: 0, que
 let platformProductLinkState = { skuId: "", query: "", selectedProductId: "", error: "" };
 let productSubmodule = "business-dashboard";
 let pendingSkuState = { loading: false, loaded: false, rows: [], query: "", error: "", notice: "" };
-let comboSkuState = { loading: false, loaded: false, rows: [], detail: null, search: "", page: 1, pageSize: 20, pagination: { total: 0 }, error: "" };
+let comboSkuState = { loading: false, loaded: false, rows: [], detail: null, search: "", viewMode: "card", page: 1, pageSize: 20, pagination: { total: 0 }, error: "" };
 let selectedPendingSkuIds = new Set();
 let platformPreviewRequestId = 0;
 let productManagementState = { overview: null, details: new Map(), loadingOverview: false, loadingProductId: "", error: "", notice: "" };
@@ -640,8 +640,27 @@ function renderComboSkuList() {
   const total = Number(comboSkuState.pagination.total || 0); const totalPages = Math.max(1, Math.ceil(total / comboSkuState.pageSize));
   return `<section class="product-center-page"><div class="section-heading"><div><h1>组合SKU管理</h1><p>只读查看 Sales Object 组合销售对象、组成商品与销售链接</p></div></div>${renderProductWorkspaceTabs()}${renderProductSubmoduleTabs()}
     <form class="filter-bar" data-combo-sku-search><input type="search" name="search" value="${escapeHtml(comboSkuState.search)}" placeholder="搜索组合编码或名称"/><button class="secondary-button" type="submit">搜索</button></form>
-    ${comboSkuState.error ? `<div class="form-error">${escapeHtml(comboSkuState.error)}</div>` : ""}${comboSkuState.loading ? `<div class="empty-state">正在读取组合SKU…</div>` : !comboSkuState.rows.length ? `<div class="empty-state">暂无组合SKU</div>` : `<div class="table-wrap"><table class="data-table"><thead><tr><th>Sales Object编码</th><th>名称</th><th>类型</th><th>组成数量</th><th>关联链接</th><th>关联产品</th><th>状态</th><th>更新时间</th></tr></thead><tbody>${comboSkuState.rows.map((row) => `<tr data-action="view-combo-sku" data-sales-object-id="${escapeHtml(row.salesObjectId)}" tabindex="0" role="button"><td><strong>${escapeHtml(row.objectCode)}</strong></td><td>${escapeHtml(row.name || row.objectCode)}</td><td>bundle</td><td>${formatMetric(row.componentCount)}</td><td>${formatMetric(row.linkedSalesLinkCount)}</td><td>${formatMetric(row.linkedProductCount)}</td><td>${escapeHtml(row.status)}</td><td>${formatDateTime(row.updatedAt)}</td></tr>`).join("")}</tbody></table></div>`}
+    <div class="product-list-toolbar"><span>当前筛选 ${total} 个组合SKU</span><div class="product-view-switch" aria-label="组合SKU视图"><button type="button" data-action="combo-sku-view" data-view="card" class="${comboSkuState.viewMode === "card" ? "is-active" : ""}">卡片</button><button type="button" data-action="combo-sku-view" data-view="table" class="${comboSkuState.viewMode === "table" ? "is-active" : ""}">列表</button></div></div>
+    ${comboSkuState.error ? `<div class="form-error">${escapeHtml(comboSkuState.error)}</div>` : ""}${comboSkuState.loading ? `<div class="empty-state">正在读取组合SKU…</div>` : !comboSkuState.rows.length ? `<div class="empty-state">暂无组合SKU</div>` : comboSkuState.viewMode === "card" ? renderComboSkuCards(comboSkuState.rows) : renderComboSkuTable(comboSkuState.rows)}
     <nav class="pagination"><span>共 ${total} 个 · 第 ${comboSkuState.page}/${totalPages} 页</span><div><button class="secondary-button" type="button" data-action="combo-sku-page" data-page="${comboSkuState.page - 1}" ${comboSkuState.page <= 1 ? "disabled" : ""}>上一页</button><button class="secondary-button" type="button" data-action="combo-sku-page" data-page="${comboSkuState.page + 1}" ${comboSkuState.page >= totalPages ? "disabled" : ""}>下一页</button></div></nav></section>`;
+}
+
+function renderComboSkuTable(rows) {
+  return `<div class="table-wrap"><table class="data-table"><thead><tr><th>Sales Object编码</th><th>名称</th><th>组成数量</th><th>关联链接</th><th>组合销售额</th><th>状态</th><th>更新时间</th></tr></thead><tbody>${rows.map((row) => `<tr data-action="view-combo-sku" data-sales-object-id="${escapeHtml(row.salesObjectId)}" tabindex="0" role="button"><td><strong>${escapeHtml(row.objectCode)}</strong></td><td>${escapeHtml(row.name || row.objectCode)}</td><td>${formatMetric(row.componentCount)}</td><td>${formatMetric(row.linkedSalesLinkCount)}</td><td>${formatMoney(row.salesAmount)}</td><td>${escapeHtml(row.status)}</td><td>${formatDateTime(row.updatedAt)}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
+function renderComboSkuCards(rows) {
+  return `<div class="product-card-grid combo-sku-card-grid">${rows.map((row) => {
+    const products = (row.componentProducts || []).slice(0, 9);
+    const layout = Number(row.componentCount || 0) <= 1 ? "is-single" : Number(row.componentCount || 0) <= 4 ? "is-four" : "is-nine";
+    return `<article class="product-archive-card combo-sku-card" data-action="view-combo-sku" data-sales-object-id="${escapeHtml(row.salesObjectId)}" role="button" tabindex="0" aria-label="查看组合SKU：${escapeHtml(row.name || row.objectCode)}">
+      <div class="product-archive-card-media combo-product-collage ${layout}">${products.length ? products.map((product) => renderImage({ mainImage: product.mainImage, name: product.productName || row.name || row.objectCode }, "combo-product-image")).join("") : renderImage({ name: row.name || row.objectCode }, "combo-product-image")}</div>
+      <div class="product-archive-card-body"><div class="product-archive-card-heading"><h3 title="${escapeHtml(row.name || row.objectCode)}">${escapeHtml(row.name || row.objectCode)}</h3><span class="status-badge">bundle</span></div>
+        <div class="product-card-identities"><span>组合编码 <strong>${escapeHtml(row.objectCode)}</strong></span></div>
+        <div class="product-card-metrics"><div><strong>${formatMetric(row.componentCount)}</strong><span>组成商品</span></div><div><strong>${formatMetric(row.linkedSalesLinkCount)}</strong><span>关联链接</span></div><div><strong>${formatMoney(row.salesAmount)}</strong><span>组合销售额</span></div></div>
+        <small class="product-card-listed-at">更新时间 ${formatDateTime(row.updatedAt)}</small>
+      </div></article>`;
+  }).join("")}</div>`;
 }
 
 function renderComboSkuDetail() {
@@ -2530,6 +2549,7 @@ export function bindProductCenterPageEvents(rerender) {
       return;
     }
     if (action === "combo-sku-page") { comboSkuState = { ...comboSkuState, page: Math.max(1, Number(button.dataset.page) || 1), loaded: false, detail: null }; void refreshComboSkuList(rerender); return; }
+    if (action === "combo-sku-view") { comboSkuState = { ...comboSkuState, viewMode: button.dataset.view === "table" ? "table" : "card" }; rerender(); return; }
     if (action === "view-combo-sku") { void refreshComboSkuDetail(button.dataset.salesObjectId, rerender); return; }
     if (action === "back-combo-skus") { comboSkuState = { ...comboSkuState, detail: null, error: "" }; rerender(); return; }
     if (action === "clear-pending-sku-search") {

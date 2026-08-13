@@ -9,6 +9,43 @@ function objectNameSql(alias = "o") {
     WHERE lower(trim(e.merchantSkuCode))=${alias}.normalizedObjectCode LIMIT 1),${alias}.objectCode)`;
 }
 
+function loadBundleCardData(database, rows) {
+  if (!rows.length) return new Map();
+  const ids = rows.map((row) => row.salesObjectId);
+  const placeholders = ids.map(() => "?").join(",");
+  const products = database.prepare(`SELECT o.id salesObjectId,c.sortOrder,c.erpSkuId,
+      p.id productId,p.name productName,p.mainImage
+    FROM sales_objects o
+    JOIN sales_object_structures s ON s.salesObjectId=o.id AND s.status='active'
+    JOIN sales_object_structure_components c ON c.structureId=s.id AND c.status='active'
+    LEFT JOIN product_erp_mappings pm ON pm.erpSkuId=c.erpSkuId AND pm.currentState='active'
+    LEFT JOIN products p ON p.id=pm.productId
+    WHERE o.id IN (${placeholders})
+    ORDER BY o.id,c.sortOrder,c.id`).all(...ids);
+  const sales = database.prepare(`WITH source_facts AS (
+      SELECT r.salesObjectId,f.salesAmount,ROW_NUMBER() OVER (
+        PARTITION BY r.salesObjectId,f.salesLinkSkuId,f.saleDate,
+          COALESCE(NULLIF(f.sourceBatchId,''),f.id),COALESCE(f.sourceRowNumber,f.id)
+        ORDER BY f.id) sourceRank
+      FROM sales_link_sku_sales_object_relations r
+      JOIN connection_sku_sales_daily_facts f ON f.salesLinkSkuId=r.linkSkuId
+      WHERE r.status='active' AND r.salesObjectId IN (${placeholders})
+    ) SELECT salesObjectId,COALESCE(SUM(salesAmount),0) salesAmount
+      FROM source_facts WHERE sourceRank=1 GROUP BY salesObjectId`).all(...ids);
+  const cards = new Map(ids.map((id) => [id, { componentProducts: [], salesAmount: 0 }]));
+  for (const row of products) {
+    const card = cards.get(row.salesObjectId);
+    if (card && card.componentProducts.length < 9) card.componentProducts.push({
+      erpSkuId: row.erpSkuId,
+      productId: row.productId || null,
+      productName: row.productName || "",
+      mainImage: row.mainImage || "",
+    });
+  }
+  for (const row of sales) cards.get(row.salesObjectId).salesAmount = number(row.salesAmount);
+  return cards;
+}
+
 export function listSalesObjectComboSkus(input = {}, options = {}) {
   const database = options.database || getDatabase();
   const limit = Math.min(100, Math.max(1, Number(input.limit) || 20));
@@ -30,10 +67,19 @@ export function listSalesObjectComboSkus(input = {}, options = {}) {
     LEFT JOIN product_erp_mappings pm ON pm.erpSkuId=c.erpSkuId AND pm.currentState='active'
     WHERE ${where}
     GROUP BY o.id,s.id ORDER BY o.updatedAt DESC,o.objectCode LIMIT @limit OFFSET @offset`).all(params);
+  const cardData = loadBundleCardData(database, rows);
   return {
     capability: "QuerySalesObjectBundles", contractVersion: "1.0", source: "sales_object_v1",
     pagination: { total, limit, offset },
-    items: rows.map((row) => ({ ...row, componentCount: number(row.componentCount), linkedLinkSkuCount: number(row.linkedLinkSkuCount), linkedSalesLinkCount: number(row.linkedSalesLinkCount), linkedProductCount: number(row.linkedProductCount) })),
+    items: rows.map((row) => ({
+      ...row,
+      componentCount: number(row.componentCount),
+      linkedLinkSkuCount: number(row.linkedLinkSkuCount),
+      linkedSalesLinkCount: number(row.linkedSalesLinkCount),
+      linkedProductCount: number(row.linkedProductCount),
+      salesAmount: cardData.get(row.salesObjectId)?.salesAmount || 0,
+      componentProducts: cardData.get(row.salesObjectId)?.componentProducts || [],
+    })),
   };
 }
 
