@@ -177,6 +177,7 @@ export const permissionGroups = [
       { key: "viewStores", label: "查看店铺管理" },
       { key: "editStores", label: "编辑店铺管理" },
       { key: "editCategories", label: "编辑分类设置" },
+      { key: "viewDataAssetMap", label: "查看数据资产地图" },
     ],
   },
 ];

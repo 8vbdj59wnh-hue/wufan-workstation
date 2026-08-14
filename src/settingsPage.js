@@ -11,6 +11,7 @@ import {
   permissionGroups,
 } from "./permissions.js";
 import { rerenderPreservingInputFocus } from "./inputFocus.js";
+import { bindDataAssetMapEvents, renderDataAssetMap } from "./dataAssetMapPage.js";
 import {
   CategoryType,
   PersonRole,
@@ -3389,6 +3390,7 @@ function reorderFormDesignerField(draggedId, targetId) {
 }
 
 export function bindSettingsPageEvents(rerender) {
+  if (window.location.hash.replace(/^#/, "") === "settings/data-asset-map") bindDataAssetMapEvents(rerender);
   const settingsPage = document.querySelector(".settings-page");
   const form = document.querySelector(".modal-form");
   const companySloganForm = document.querySelector("[data-company-slogan-form]");
@@ -3822,6 +3824,15 @@ function getSettingsSubmodules() {
       description: "维护“发布内容笔记”可选择的发布账号。",
       canView: () => canCurrentUser("settings.editStandardWorkForms"),
       render: renderPublishingAccountSection,
+    },
+    {
+      id: "data-asset-map",
+      title: "数据资产地图",
+      group: "数据管理",
+      icon: "图",
+      description: "查看数据来源、业务对象、关系链与唯一真相源。",
+      canView: () => canCurrentUser("settings.viewDataAssetMap"),
+      render: renderDataAssetMap,
     },
     {
       id: "form-design",

@@ -130,7 +130,7 @@ function setAuthToken(token) {
   window.localStorage.setItem(authTokenKey, token);
 }
 
-async function authFetch(url, options = {}) {
+export async function authFetch(url, options = {}) {
   const headers = new Headers(options.headers ?? {});
   const token = getAuthToken();
   if (token !== "") headers.set("Authorization", `Bearer ${token}`);

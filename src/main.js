@@ -151,6 +151,7 @@ const moduleHashMap = {
   "settings/template-tags": "settings",
   "issues-requirements": "settings",
   "settings/issues-requirements": "settings",
+  "settings/data-asset-map": "settings",
 };
 
 if (["content-schedule", "contentSchedule", "contentSchedules"].includes(window.location.hash.replace(/^#/, ""))) {

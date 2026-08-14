@@ -72,6 +72,14 @@ import {
   setDataSyncTaskStatus,
 } from "./dataSyncCenterService.js";
 import {
+  queryDataAssetMapOverview,
+  queryDataAssetObjects,
+  queryDataAssetSources,
+  readDataAssetObject,
+  readDataAssetRelationGraph,
+  readDataAssetSource,
+} from "./dataAssetMapService.js";
+import {
   commitErpGoodsDataSync,
   previewErpGoodsDataSync,
   readErpGoodsDataSyncPreview,
@@ -1955,6 +1963,39 @@ app.get("/api/data-center/summary", requirePermission("dataCenter.view"), (_requ
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "数据中心概览读取失败。" });
   }
+});
+
+app.get("/api/data-asset-map/overview", requirePermission("settings.viewDataAssetMap"), (_request, response) => {
+  const startedAt = performance.now();
+  const payload = queryDataAssetMapOverview();
+  response.set("Server-Timing", `data-asset-map;dur=${(performance.now() - startedAt).toFixed(1)}`);
+  response.json(payload);
+});
+
+app.get("/api/data-asset-map/sources", requirePermission("settings.viewDataAssetMap"), (request, response) => {
+  response.json(queryDataAssetSources(request.query));
+});
+
+app.get("/api/data-asset-map/sources/:id", requirePermission("settings.viewDataAssetMap"), (request, response) => {
+  const payload = readDataAssetSource(request.params.id);
+  if (!payload) return response.status(404).json({ message: "数据源不存在。" });
+  response.json(payload);
+});
+
+app.get("/api/data-asset-map/objects", requirePermission("settings.viewDataAssetMap"), (request, response) => {
+  response.json(queryDataAssetObjects(request.query));
+});
+
+app.get("/api/data-asset-map/objects/:id", requirePermission("settings.viewDataAssetMap"), (request, response) => {
+  const payload = readDataAssetObject(request.params.id);
+  if (!payload) return response.status(404).json({ message: "业务对象不存在。" });
+  response.json(payload);
+});
+
+app.get("/api/data-asset-map/graphs/:id", requirePermission("settings.viewDataAssetMap"), (request, response) => {
+  const payload = readDataAssetRelationGraph(request.params.id);
+  if (!payload) return response.status(404).json({ message: "关系地图不存在。" });
+  response.json(payload);
 });
 
 app.get("/api/data-sync-center", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
