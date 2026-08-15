@@ -4,6 +4,7 @@ import {
   completeDataSyncBatch,
   createDataSyncBatch,
   getDataSyncBatch,
+  getLatestDataSyncWatermark,
   getDataSyncTask,
   listDueDataSyncTasks,
   markDataSyncBatchPreviewReady,
@@ -19,8 +20,9 @@ function requestRange(task, syncMode, requestStart, requestEnd) {
     if (!requestStart) throw new Error("全量同步必须提供开始时间。");
     return { requestStart, requestEnd: end };
   }
-  if (!task.lastSuccessAt) throw new Error("ERP货品尚无成功同步时间，请先完成一次全量同步。");
-  return { requestStart: requestStart || task.lastSuccessAt, requestEnd: end };
+  const watermark = task.lastSuccessAt || getLatestDataSyncWatermark(task.id);
+  if (!watermark) throw new Error("ERP货品尚无可用同步水位，请先完成一次全量同步。");
+  return { requestStart: requestStart || watermark, requestEnd: end };
 }
 
 export async function previewErpGoodsDataSync({ taskId, resumeBatchId = "", syncMode = "", requestStart = null, requestEnd = null, triggerMode = "manual", createdBy = "", queryGoods } = {}) {
@@ -74,6 +76,7 @@ export async function previewErpGoodsDataSync({ taskId, resumeBatchId = "", sync
     };
   } catch (error) {
     interruptDataSyncBatch(batch.id, error);
+    error.dataSyncBatchId = batch.id;
     throw error;
   }
 }
@@ -91,6 +94,7 @@ export function commitErpGoodsDataSync(batchId) {
       createdCount: summary.created,
       updatedCount: summary.updated,
       invalidatedCount: summary.missingGoods || 0,
+      exceptionCount: summary.skipped || 0,
       exceptions: [],
     });
     return { ...result, dataSyncBatch };
@@ -117,7 +121,17 @@ export async function runDueErpGoodsSyncTasks({ createdBy = "system-scheduler", 
       const preview = await previewErpGoodsDataSync({ taskId: task.id, syncMode: "incremental", triggerMode: "automatic", createdBy, ...(queryGoods ? { queryGoods } : {}) });
       results.push({ taskId: task.id, success: true, result: commitErpGoodsDataSync(preview.dataSyncBatch.id) });
     } catch (error) {
-      results.push({ taskId: task.id, success: false, error: error.message });
+      let failedBatchId = error.dataSyncBatchId || null;
+      if (!failedBatchId) {
+        try {
+          const failedBatch = createDataSyncBatch(task.id, {
+            triggerMode: "automatic", syncMode: "incremental", requestStart: task.lastSuccessAt || null,
+            requestEnd: new Date().toISOString(), createdBy,
+          });
+          failedBatchId = completeDataSyncBatch(failedBatch.id, { status: "failed", errorMessage: error.message }).id;
+        } catch { /* 任务状态变化时保留原始失败结果 */ }
+      }
+      results.push({ taskId: task.id, batchId: failedBatchId, success: false, error: error.message });
     } finally {
       advanceDataSyncTaskSchedule(task.id, new Date());
     }

@@ -15,7 +15,7 @@ function displayDay(value) {
 }
 
 function renderMatrixCell(cell = {}) {
-  const symbol = ({ completed: "✓", partial: "◐", missing: "✕" })[cell.status] || "—";
+  const symbol = ({ completed: "✓", no_change: "✓", partial: "◐", pending_review: "◷", updating: "↻", failed: "✕", missing: "✕" })[cell.status] || "—";
   const coverage = cell.status === "partial" && cell.expectedShopCount
     ? `<small>${Number(cell.completedShopCount || 0)}/${Number(cell.expectedShopCount)} 家店铺</small>` : "";
   return `<span class="daily-source-status is-${escapeHtml(cell.status || "missing")}" title="${escapeHtml(cell.detail || "")}"><b>${symbol}</b><span>${escapeHtml(cell.label || "未完成")}</span>${coverage}</span>`;
@@ -29,7 +29,7 @@ function renderDailySourceMatrix(data = {}) {
   const rows = (matrix.rows || []).map((row) => `<tr><td><strong>${escapeHtml(displayDay(row.date))}</strong></td>${(matrix.columns || []).map((column) => `<td>${renderMatrixCell(row.sources?.[column.key])}</td>`).join("")}</tr>`).join("");
   return `<section class="link-daily-source-matrix">
     <header><div><span>每日数据更新</span><strong>${escapeHtml(matrix.startDate || "—")} 至 ${escapeHtml(matrix.endDate || "—")}</strong><small>今天不计入检查；店铺筛选仅影响具有店铺归属的前两类数据。</small></div><label><span>店铺</span><select data-link-data-status-shop ${data.loading ? "disabled" : ""}><option value="">全部店铺</option>${options}</select></label></header>
-    <div class="daily-source-legend"><span class="is-completed">✓ 已完成</span><span class="is-partial">◐ 部分未完成</span><span class="is-missing">✕ 未完成</span></div>
+    <div class="daily-source-legend"><span class="is-completed">✓ 已完成 / 无变化</span><span class="is-partial">◐ 部分未完成 / 待确认</span><span class="is-missing">✕ 未执行 / 同步失败</span></div>
     <div class="link-daily-source-table"><table><thead><tr><th>日期</th>${headers}</tr></thead><tbody>${rows || `<tr><td colspan="${Number(matrix.columns?.length || 0) + 1}">暂无可检查日期</td></tr>`}</tbody></table></div>
   </section>`;
 }

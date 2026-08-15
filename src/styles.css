@@ -10932,9 +10932,10 @@ button.content-template-thumb {
 .daily-source-status { display: inline-grid; grid-template-columns: auto auto; align-items: center; gap: 2px 6px; padding: 5px 8px; border-radius: 8px; white-space: nowrap; }
 .daily-source-status b { font-size: 14px; }
 .daily-source-status small { grid-column: 2; font-size: 10px; opacity: .78; }
-.daily-source-status.is-completed { background: #ecfdf3; color: #027a48; }
-.daily-source-status.is-partial { background: #fffaeb; color: #b54708; }
-.daily-source-status.is-missing { background: #fff1f3; color: #c01048; }
+.daily-source-status.is-completed, .daily-source-status.is-no_change { background: #ecfdf3; color: #027a48; }
+.daily-source-status.is-partial, .daily-source-status.is-pending_review { background: #fffaeb; color: #b54708; }
+.daily-source-status.is-updating { background: #eff8ff; color: #175cd3; }
+.daily-source-status.is-missing, .daily-source-status.is-failed { background: #fff1f3; color: #c01048; }
 
 .my-link-summary-module { display: grid; gap: 10px; }
 .my-link-summary-module > header { display: flex; align-items: baseline; gap: 10px; }

@@ -16,6 +16,12 @@ assert.equal(task.status, "paused");
 center.setDataSyncTaskStatus(task.id, "enabled");
 const productsBefore = db.prepare("SELECT COUNT(*) total FROM products").get().total;
 
+db.prepare("UPDATE data_sync_tasks SET nextRunAt='2000-01-01T00:00:00.000Z' WHERE id=?").run(task.id);
+const missingWatermarkRun = await adapter.runDueErpGoodsSyncTasks({ queryGoods: async () => payload(1, "BLOCKED") });
+assert.equal(missingWatermarkRun[0].success, false);
+assert.match(missingWatermarkRun[0].error, /同步水位/u);
+assert.equal(db.prepare("SELECT status FROM data_sync_batches WHERE id=?").get(missingWatermarkRun[0].batchId)?.status, "failed", "调度前置失败必须留下可见批次");
+
 function payload(count, suffix, updatedName = "") {
   return { status: 0, data: { total_count: count, goods_list: Array.from({ length: count }, (_, index) => ({
     goods_id: index + 1,
@@ -31,17 +37,17 @@ const previewV1 = await adapter.previewErpGoodsDataSync({
   taskId: task.id, syncMode: "full", requestStart: "2026-08-01 00:00:00", requestEnd: "2026-08-02 00:00:00", createdBy: "person-admin",
   queryGoods: async () => payload(5, "V1"),
 });
-assert.equal(previewV1.summary.previewVersion, 1);
+assert.equal(previewV1.summary.previewVersion, 2);
 assert.equal(previewV1.dataSyncBatch.status, "preview_ready");
 
 const previewV2 = await adapter.previewErpGoodsDataSync({
   taskId: task.id, syncMode: "full", requestStart: "2026-01-01 00:00:00", requestEnd: "2026-08-04 00:00:00", createdBy: "person-admin",
   queryGoods: async () => payload(10, "V2"),
 });
-assert.equal(previewV2.summary.previewVersion, 2);
-assert.equal(adapter.readErpGoodsDataSyncPreview(previewV2.dataSyncBatch.id).summary.previewVersion, 2);
+assert.equal(previewV2.summary.previewVersion, 3);
+assert.equal(adapter.readErpGoodsDataSyncPreview(previewV2.dataSyncBatch.id).summary.previewVersion, 3);
 assert.equal(adapter.readErpGoodsDataSyncPreview(previewV1.dataSyncBatch.id).isCurrent, false);
-assert.equal(db.prepare("SELECT COUNT(*) total FROM data_sync_batches WHERE taskId=?").get(task.id).total, 2);
+assert.equal(db.prepare("SELECT COUNT(*) total FROM data_sync_batches WHERE taskId=?").get(task.id).total, 3);
 assert.equal(db.prepare("SELECT COUNT(*) total FROM erp_import_batches WHERE dataSource='wangdian_api'").get().total, 2);
 assert.equal(db.prepare("SELECT COUNT(*) total FROM erp_sync_runs").get().total, 0, "新入口不得创建旧ERP同步任务");
 assert.throws(() => adapter.commitErpGoodsDataSync(previewV1.dataSyncBatch.id), /最新有效预览/u);
@@ -51,13 +57,16 @@ assert.equal(fullCommit.dataSyncBatch.status, "succeeded");
 assert.equal(db.prepare("SELECT COUNT(*) total FROM erp_goods").get().total, 10);
 assert.equal(db.prepare("SELECT COUNT(*) total FROM erp_skus").get().total, 10);
 assert.equal(db.prepare("SELECT COUNT(*) total FROM products").get().total, productsBefore);
+db.prepare("UPDATE data_sync_tasks SET lastSuccessAt=NULL WHERE id=?").run(task.id);
+const recoveredWatermark = center.getLatestDataSyncWatermark(task.id);
+assert.equal(recoveredWatermark, "2026-08-04 00:00:00", "历史已完成批次应可恢复增量水位");
 
 let incrementalRequest = null;
 const incremental = await adapter.previewErpGoodsDataSync({
   taskId: task.id, syncMode: "incremental", requestEnd: "2026-08-05 00:00:00", createdBy: "person-admin",
   queryGoods: async ({ params }) => { incrementalRequest = params; return payload(1, "V2", "增量更新货品"); },
 });
-assert.ok(new Date(incrementalRequest.start_time).getTime() < new Date(center.getDataSyncTask(task.id).lastSuccessAt).getTime(), "增量同步应从上次成功时间安全回看");
+assert.ok(new Date(incrementalRequest.start_time).getTime() < new Date(recoveredWatermark).getTime(), "增量同步应从恢复的历史水位安全回看");
 adapter.commitErpGoodsDataSync(incremental.dataSyncBatch.id);
 assert.equal(db.prepare("SELECT goodsName FROM erp_goods WHERE goodsCode='G-V2-1'").get().goodsName, "增量更新货品");
 
@@ -65,7 +74,7 @@ db.prepare("UPDATE data_sync_tasks SET nextRunAt='2000-01-01T00:00:00.000Z' WHER
 assert.equal(center.listDueDataSyncTasks("2026-08-05T00:00:00.000Z").some((item) => item.id === task.id), true);
 const scheduled = await adapter.runDueErpGoodsSyncTasks({ queryGoods: async () => payload(1, "V2", "自动增量货品") });
 assert.equal(scheduled[0].success, true);
-assert.equal(db.prepare("SELECT COUNT(*) total FROM data_sync_batches WHERE triggerMode='automatic'").get().total, 1);
+assert.equal(db.prepare("SELECT COUNT(*) total FROM data_sync_batches WHERE triggerMode='automatic'").get().total, 2);
 assert.ok(new Date(center.getDataSyncTask(task.id).nextRunAt).getTime() > Date.now());
 
 assert.ok(db.prepare("SELECT COUNT(*) total FROM data_sync_logs").get().total >= 9);

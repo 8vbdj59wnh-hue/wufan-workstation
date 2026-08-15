@@ -64,6 +64,13 @@ export function getDataSyncBatch(batchId) {
   return decodeBatch(getDatabase().prepare("SELECT * FROM data_sync_batches WHERE id=?").get(batchId));
 }
 
+export function getLatestDataSyncWatermark(taskId) {
+  return getDatabase().prepare(`SELECT COALESCE(NULLIF(requestEnd,''),completedAt) value
+    FROM data_sync_batches WHERE taskId=? AND status IN ('succeeded','partial')
+      AND COALESCE(NULLIF(requestEnd,''),completedAt) IS NOT NULL
+    ORDER BY COALESCE(completedAt,createdAt) DESC,id DESC LIMIT 1`).get(taskId)?.value ?? null;
+}
+
 export function createManualDataSyncBatch(taskId, { syncMode = "", requestStart = null, requestEnd = null, createdBy = "" } = {}) {
   return createDataSyncBatch(taskId, { triggerMode: "manual", syncMode, requestStart, requestEnd, createdBy });
 }
@@ -186,7 +193,10 @@ export function completeDataSyncBatch(batchId, result = {}) {
     db.prepare("INSERT INTO data_sync_logs (id,batchId,level,eventType,message,detailJson,createdAt) VALUES (?,?,?,?,?,?,?)").run(
       `data-sync-log-${crypto.randomUUID()}`, batchId, status === "failed" ? "error" : "info", "batch_completed", status === "succeeded" ? "同步批次执行成功。" : status === "partial" ? "同步批次部分成功。" : "同步批次执行失败。", JSON.stringify(result), completedAt,
     );
-    if (status === "succeeded") db.prepare("UPDATE data_sync_tasks SET lastSuccessAt=?,updatedAt=? WHERE id=?").run(completedAt, completedAt, batch.taskId);
+    if (["succeeded", "partial"].includes(status)) {
+      const watermark = batch.requestEnd || completedAt;
+      db.prepare("UPDATE data_sync_tasks SET lastSuccessAt=?,updatedAt=? WHERE id=?").run(watermark, completedAt, batch.taskId);
+    }
     return decodeBatch(db.prepare("SELECT * FROM data_sync_batches WHERE id=?").get(batchId));
   }).immediate();
 }

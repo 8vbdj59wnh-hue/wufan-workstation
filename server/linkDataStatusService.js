@@ -25,7 +25,7 @@ function dateRange(startDate, endDate) {
 }
 
 function matrixCell(status, detail, extra = {}) {
-  return { status, label: ({ completed: "已完成", partial: "部分未完成", missing: "未完成" })[status], detail, ...extra };
+  return { status, label: ({ completed: "已完成", no_change: "无变化", partial: "部分未完成", pending_review: "待确认", updating: "更新中", failed: "同步失败", missing: "未执行" })[status], detail, ...extra };
 }
 
 function getDailySourceMatrix(database, requestedShopId = "") {
@@ -49,7 +49,10 @@ function getDailySourceMatrix(database, requestedShopId = "") {
       COALESCE(completedAt,startedAt) updatedAt FROM wangdian_inventory_sync_batches
     WHERE status<>'superseded' ORDER BY updatedAt DESC,id DESC`).all();
   const goodsAttempts = database.prepare(`SELECT b.id,substr(COALESCE(b.requestEnd,b.completedAt,b.createdAt),1,10) date,
-      b.status,b.exceptionCount,COALESCE(b.completedAt,b.startedAt,b.createdAt) updatedAt
+      b.status,CASE WHEN b.status='partial' AND b.exceptionCount=0 THEN
+        (SELECT COUNT(*) FROM data_sync_exceptions e WHERE e.batchId=b.id AND e.severity='error') ELSE b.exceptionCount END exceptionCount,
+      b.totalCount,b.createdCount,b.updatedCount,b.invalidatedCount,b.errorMessage,
+      COALESCE(b.completedAt,b.startedAt,b.createdAt) updatedAt
     FROM data_sync_batches b JOIN data_sync_tasks t ON t.id=b.taskId
     WHERE t.taskCode='erp_goods' AND b.status<>'superseded' ORDER BY updatedAt DESC,b.id DESC`).all();
 
@@ -83,26 +86,34 @@ function getDailySourceMatrix(database, requestedShopId = "") {
     return matrixCell("missing", selectedShopId ? `${expectedShops[0].name}未形成${sourceName}` : `0/${expectedShops.length} 家店铺已完成`, { completedShopCount: 0, expectedShopCount: expectedShops.length });
   }
 
-  function globalCell(attempts, date, sourceName) {
+  function globalCell(attempts, date, sourceName, { distinguishOutcome = false } = {}) {
     const attempt = attempts.find((item) => validDate(item.date) === date) || null;
-    if (!attempt) return matrixCell("missing", `${sourceName}当日无成功更新记录`, { scope: "global" });
+    if (!attempt) return matrixCell("missing", `${sourceName}当日无同步记录`, { scope: "global" });
     const exceptionCount = Number(attempt.exceptionCount || 0);
-    if (matrixCompletedStatuses.has(attempt.status) && exceptionCount === 0) return matrixCell("completed", `${sourceName}已完成（企业级数据源）`, { scope: "global", batchId: attempt.id, batchStatus: attempt.status });
-    if (matrixPartialStatuses.has(attempt.status) || (matrixCompletedStatuses.has(attempt.status) && exceptionCount > 0) || activeStatuses.has(attempt.status)) {
-      const reason = exceptionCount > 0 ? `，${exceptionCount} 项未完成` : "";
-      return matrixCell("partial", `${sourceName}已执行${reason}`, { scope: "global", batchId: attempt.id, batchStatus: attempt.status });
+    const batch = { scope: "global", batchId: attempt.id, batchStatus: attempt.status };
+    if (attempt.status === "preview_ready") return matrixCell("pending_review", `${sourceName}已读取，等待确认写入`, batch);
+    if (["failed", "interrupted"].includes(attempt.status)) return matrixCell("failed", attempt.errorMessage || `${sourceName}同步失败`, batch);
+    if (activeStatuses.has(attempt.status)) return matrixCell("updating", `${sourceName}正在更新`, batch);
+    if (matrixCompletedStatuses.has(attempt.status) && exceptionCount === 0) {
+      const changedCount = Number(attempt.createdCount || 0) + Number(attempt.updatedCount || 0) + Number(attempt.invalidatedCount || 0);
+      if (distinguishOutcome && changedCount === 0) return matrixCell("no_change", `${sourceName}已完成，当日无新增或变更`, batch);
+      return matrixCell("completed", `${sourceName}已完成（企业级数据源）`, batch);
     }
-    return matrixCell("missing", `${sourceName}更新未完成（${attempt.status}）`, { scope: "global", batchId: attempt.id, batchStatus: attempt.status });
+    if (matrixPartialStatuses.has(attempt.status) || (matrixCompletedStatuses.has(attempt.status) && exceptionCount > 0)) {
+      const reason = exceptionCount > 0 ? `，${exceptionCount} 项未完成` : "";
+      return matrixCell("partial", `${sourceName}已执行${reason}`, batch);
+    }
+    return matrixCell("missing", `${sourceName}更新未完成（${attempt.status}）`, batch);
   }
 
   const rows = dates.map((date) => ({ date, sources: {
     platformLinks: shopScopedCell(platformCoverage.get(date), "平台链接数据"),
     linkProfit: shopScopedCell(profitCoverage.get(date), "链接利润数据"),
     wangdianInventory: globalCell(inventoryAttempts, date, "旺店通库存查询 API"),
-    wangdianGoods: globalCell(goodsAttempts, date, "旺店通商品档案 API"),
+    wangdianGoods: globalCell(goodsAttempts, date, "旺店通商品档案 API", { distinguishOutcome: true }),
   } })).reverse();
-  const counts = { completed: 0, partial: 0, missing: 0 };
-  for (const row of rows) for (const cell of Object.values(row.sources)) counts[cell.status] += 1;
+  const counts = { completed: 0, no_change: 0, partial: 0, pending_review: 0, updating: 0, failed: 0, missing: 0 };
+  for (const row of rows) for (const cell of Object.values(row.sources)) counts[cell.status] = Number(counts[cell.status] || 0) + 1;
   return {
     startDate, endDate: yesterday, selectedShopId, selectedShopName: selectedShopId ? shopById.get(selectedShopId)?.name : "全部店铺",
     shopOptions: shops, columns: [
