@@ -157,7 +157,7 @@ const pageState = {
     filters: { keyword: "", platform: "", shopId: "", ownerId: "", minSales: "", maxSales: "", minProfit: "", maxProfit: "", growthStatus: "", healthStatus: "", hospitalStatus: "", expanded: false },
     sort: { field: "salesAmount", direction: "desc" }, visibleFields: [...DEFAULT_LINK_BUSINESS_FIELDS],
     fieldOrder: LINK_BUSINESS_COLUMNS.map((item) => item.key), filterOptions: { platforms: [], shops: [], owners: [] }, dataSources: {}, indicatorOpen: false, loading: false, loaded: false },
-  linkDataStatus: { data: null, loading: false, loaded: false, error: "" },
+  linkDataStatus: { data: null, shopId: "", loading: false, loaded: false, error: "" },
   salesDailyQuality: { data: null, loading: false, loaded: false, error: "" },
   salesDistribution: { scope: "company", range: { preset: "7d" }, items: [], summary: {}, selectedGroup: 0, selectedRange: null, drillTable: null, loading: false, loaded: false, error: "" },
   hospital: { zones: { diagnosis: [], treatment: [], observation: [] }, counts: { diagnosis: 0, treatment: 0, observation: 0 }, stage: "diagnosis", loading: false, loaded: false },
@@ -1060,9 +1060,9 @@ async function loadMyLinks(render, filter = pageState.myWorkbench.filter) {
   render();
 }
 
-async function loadMyLinkDataStatus(render) {
-  pageState.linkDataStatus = { ...pageState.linkDataStatus, loading: true, error: "" }; render();
-  try { pageState.linkDataStatus = { data: await loadLinkDataStatus(), loading: false, loaded: true, error: "" }; }
+async function loadMyLinkDataStatus(render, shopId = pageState.linkDataStatus.shopId || "") {
+  pageState.linkDataStatus = { ...pageState.linkDataStatus, shopId, loading: true, error: "" }; render();
+  try { pageState.linkDataStatus = { data: await loadLinkDataStatus({ shopId }), shopId, loading: false, loaded: true, error: "" }; }
   catch (error) { pageState.linkDataStatus = { ...pageState.linkDataStatus, loading: false, loaded: true, error: error.message }; }
   render();
 }
@@ -1314,7 +1314,7 @@ export function bindConnectionCenterPageEvents(render) {
     pageState.myWorkbench = { items: [], summary: { total: 0, better: 0, risk: 0, followed: 0 }, filter: "all", search: "", page: 1, pageSize: 20, isAdmin: false, loading: false, loaded: false };
     pageState.myLinkTable = { ...pageState.myLinkTable, items: [], pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 }, loading: false, loaded: false };
     pageState.businessTable = { ...pageState.businessTable, items: [], pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 }, loading: false, loaded: false };
-    pageState.linkDataStatus = { data: null, loading: false, loaded: false, error: "" };
+    pageState.linkDataStatus = { data: null, shopId: "", loading: false, loaded: false, error: "" };
     pageState.salesDailyQuality = { data: null, loading: false, loaded: false, error: "" };
     pageState.salesDistribution = { scope: isAdmin() ? "company" : "mine", range: { preset: "7d" }, items: [], summary: {}, selectedGroup: 0, selectedRange: null, drillTable: null, loading: false, loaded: false, error: "" };
     pageState.selectedId = "";
@@ -1333,6 +1333,9 @@ export function bindConnectionCenterPageEvents(render) {
   root.querySelectorAll("[data-connection-section]").forEach((button) => button.addEventListener("click", () => {
     const section = selectConnectionSection(button.dataset.connectionSection); render(); ensureConnectionSectionLoaded(section, render);
   }));
+  root.querySelector("[data-link-data-status-shop]")?.addEventListener("change", (event) => {
+    void loadMyLinkDataStatus(render, event.currentTarget.value || "");
+  });
   root.querySelector("[data-relation-governance-filters]")?.addEventListener("submit", (event) => {
     event.preventDefault(); void loadSalesRelationGovernancePage(render, { ...Object.fromEntries(new FormData(event.currentTarget)), page: 1 });
   });

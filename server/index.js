@@ -2724,7 +2724,7 @@ app.get("/api/link-business-table", requireLinkView, (request, response) => {
 
 app.get("/api/link-data-status", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, ...getLinkDataStatus({ includeDetails: isAdminUser(request.user) }) });
+    response.json({ success: true, ...getLinkDataStatus({ includeDetails: isAdminUser(request.user), shopId: request.query.shopId || "" }) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "链接数据更新状态读取失败。" });
   }

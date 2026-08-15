@@ -4,6 +4,8 @@ const linkTaskCodes = ["platform_operations", "sales_fact_excel_import", "platfo
 const successfulStatuses = new Set(["completed", "partial", "completed_with_errors", "completed_with_exceptions"]);
 const activeStatuses = new Set(["waiting", "queued", "running"]);
 const dailyHistoryLimit = 120;
+const matrixCompletedStatuses = new Set(["completed", "succeeded"]);
+const matrixPartialStatuses = new Set(["partial", "preview_ready", "completed_with_errors", "completed_with_exceptions"]);
 
 function maxText(values) { return values.filter(Boolean).sort().at(-1) ?? null; }
 function minText(values) { return values.filter(Boolean).sort().at(0) ?? null; }
@@ -20,6 +22,96 @@ function dateRange(startDate, endDate) {
   const result = [];
   for (let date = startDate; date <= endDate; date = addDays(date, 1)) result.push(date);
   return result;
+}
+
+function matrixCell(status, detail, extra = {}) {
+  return { status, label: ({ completed: "已完成", partial: "部分未完成", missing: "未完成" })[status], detail, ...extra };
+}
+
+function getDailySourceMatrix(database, requestedShopId = "") {
+  const shops = database.prepare(`SELECT s.id,s.platform,COALESCE(NULLIF(s.displayName,''),s.shopName) name
+    FROM sales_shops s WHERE s.status='active' AND EXISTS (SELECT 1 FROM sales_links l WHERE l.shopId=s.id)
+    ORDER BY s.platform,name,s.id`).all();
+  const shopById = new Map(shops.map((item) => [item.id, item]));
+  const selectedShopId = shopById.has(String(requestedShopId || "")) ? String(requestedShopId) : "";
+  const expectedShops = selectedShopId ? [shopById.get(selectedShopId)] : shops;
+  const expectedShopIds = new Set(expectedShops.map((item) => item.id));
+
+  const platformRows = database.prepare(`SELECT l.shopId,substr(p.periodStart,1,10) startDate,substr(p.periodEnd,1,10) endDate,
+      COUNT(*) rowCount,COUNT(DISTINCT p.salesLinkId) linkCount
+    FROM connection_period_snapshots p JOIN sales_links l ON l.id=p.salesLinkId
+    GROUP BY l.shopId,substr(p.periodStart,1,10),substr(p.periodEnd,1,10)`).all();
+  const profitRows = database.prepare(`SELECT l.shopId,f.saleDate date,COUNT(*) rowCount,COUNT(DISTINCT f.salesLinkId) linkCount,
+      COUNT(DISTINCT f.salesLinkSkuId) skuCount,MAX(f.updatedAt) updatedAt
+    FROM connection_sku_sales_daily_facts f JOIN sales_links l ON l.id=f.salesLinkId
+    GROUP BY l.shopId,f.saleDate`).all();
+  const inventoryAttempts = database.prepare(`SELECT id,businessDate date,status,exceptionCount,
+      COALESCE(completedAt,startedAt) updatedAt FROM wangdian_inventory_sync_batches
+    WHERE status<>'superseded' ORDER BY updatedAt DESC,id DESC`).all();
+  const goodsAttempts = database.prepare(`SELECT b.id,substr(COALESCE(b.requestEnd,b.completedAt,b.createdAt),1,10) date,
+      b.status,b.exceptionCount,COALESCE(b.completedAt,b.startedAt,b.createdAt) updatedAt
+    FROM data_sync_batches b JOIN data_sync_tasks t ON t.id=b.taskId
+    WHERE t.taskCode='erp_goods' AND b.status<>'superseded' ORDER BY updatedAt DESC,b.id DESC`).all();
+
+  const yesterday = addDays(shanghaiToday(), -1);
+  const knownStartDate = minText([
+    ...platformRows.map((item) => validDate(item.startDate)),
+    ...profitRows.map((item) => validDate(item.date)),
+    ...inventoryAttempts.map((item) => validDate(item.date)),
+    ...goodsAttempts.map((item) => validDate(item.date)),
+  ]);
+  const startDate = maxText([knownStartDate || addDays(yesterday, -29), addDays(yesterday, -(dailyHistoryLimit - 1))]);
+  const dates = startDate <= yesterday ? dateRange(startDate, yesterday) : [];
+  const platformCoverage = new Map(dates.map((date) => [date, new Set()]));
+  for (const item of platformRows) {
+    const rangeStart = maxText([validDate(item.startDate), startDate]);
+    const rangeEnd = minText([validDate(item.endDate), yesterday]);
+    if (!rangeStart || !rangeEnd || rangeStart > rangeEnd || !expectedShopIds.has(item.shopId)) continue;
+    for (const date of dateRange(rangeStart, rangeEnd)) platformCoverage.get(date)?.add(item.shopId);
+  }
+  const profitCoverage = new Map(dates.map((date) => [date, new Set()]));
+  for (const item of profitRows) if (expectedShopIds.has(item.shopId)) profitCoverage.get(validDate(item.date))?.add(item.shopId);
+
+  function shopScopedCell(coveredIds, sourceName) {
+    const covered = expectedShops.filter((shop) => coveredIds?.has(shop.id));
+    const missing = expectedShops.filter((shop) => !coveredIds?.has(shop.id));
+    if (!expectedShops.length) return matrixCell("missing", `暂无可检查的店铺，${sourceName}无法判定`, { completedShopCount: 0, expectedShopCount: 0 });
+    if (covered.length === expectedShops.length) return matrixCell("completed", selectedShopId ? `${expectedShops[0].name}已形成${sourceName}` : `${covered.length}/${expectedShops.length} 家店铺已完成`, { completedShopCount: covered.length, expectedShopCount: expectedShops.length });
+    const missingNames = missing.slice(0, 5).map((shop) => `${shop.name}（${shop.platform}）`).join("、");
+    const suffix = missing.length > 5 ? `等 ${missing.length} 家店铺` : missingNames;
+    if (covered.length) return matrixCell("partial", `${covered.length}/${expectedShops.length} 家店铺已完成；未完成：${suffix}`, { completedShopCount: covered.length, expectedShopCount: expectedShops.length });
+    return matrixCell("missing", selectedShopId ? `${expectedShops[0].name}未形成${sourceName}` : `0/${expectedShops.length} 家店铺已完成`, { completedShopCount: 0, expectedShopCount: expectedShops.length });
+  }
+
+  function globalCell(attempts, date, sourceName) {
+    const attempt = attempts.find((item) => validDate(item.date) === date) || null;
+    if (!attempt) return matrixCell("missing", `${sourceName}当日无成功更新记录`, { scope: "global" });
+    const exceptionCount = Number(attempt.exceptionCount || 0);
+    if (matrixCompletedStatuses.has(attempt.status) && exceptionCount === 0) return matrixCell("completed", `${sourceName}已完成（企业级数据源）`, { scope: "global", batchId: attempt.id, batchStatus: attempt.status });
+    if (matrixPartialStatuses.has(attempt.status) || (matrixCompletedStatuses.has(attempt.status) && exceptionCount > 0) || activeStatuses.has(attempt.status)) {
+      const reason = exceptionCount > 0 ? `，${exceptionCount} 项未完成` : "";
+      return matrixCell("partial", `${sourceName}已执行${reason}`, { scope: "global", batchId: attempt.id, batchStatus: attempt.status });
+    }
+    return matrixCell("missing", `${sourceName}更新未完成（${attempt.status}）`, { scope: "global", batchId: attempt.id, batchStatus: attempt.status });
+  }
+
+  const rows = dates.map((date) => ({ date, sources: {
+    platformLinks: shopScopedCell(platformCoverage.get(date), "平台链接数据"),
+    linkProfit: shopScopedCell(profitCoverage.get(date), "链接利润数据"),
+    wangdianInventory: globalCell(inventoryAttempts, date, "旺店通库存查询 API"),
+    wangdianGoods: globalCell(goodsAttempts, date, "旺店通商品档案 API"),
+  } })).reverse();
+  const counts = { completed: 0, partial: 0, missing: 0 };
+  for (const row of rows) for (const cell of Object.values(row.sources)) counts[cell.status] += 1;
+  return {
+    startDate, endDate: yesterday, selectedShopId, selectedShopName: selectedShopId ? shopById.get(selectedShopId)?.name : "全部店铺",
+    shopOptions: shops, columns: [
+      { key: "platformLinks", label: "平台链接数据表", scope: "shop" },
+      { key: "linkProfit", label: "链接利润表", scope: "shop" },
+      { key: "wangdianInventory", label: "旺店通库存查询 API", scope: "global" },
+      { key: "wangdianGoods", label: "旺店通商品档案 API", scope: "global" },
+    ], counts, rows,
+  };
 }
 
 function getSalesDailyCompleteness(database) {
@@ -90,7 +182,7 @@ function normalizeLegacyBatch(row) {
   };
 }
 
-export function getLinkDataStatus({ includeDetails = false } = {}) {
+export function getLinkDataStatus({ includeDetails = false, shopId = "" } = {}) {
   const database = getDatabase();
   const taskPlaceholders = linkTaskCodes.map(() => "?").join(",");
   const unifiedRows = database.prepare(`SELECT b.*,t.taskCode,t.name taskName FROM data_sync_batches b
@@ -124,6 +216,7 @@ export function getLinkDataStatus({ includeDetails = false } = {}) {
     hasExceptions: exceptionCount > 0,
     exceptionCount,
     dailyCompleteness: getSalesDailyCompleteness(database),
+    dailySourceMatrix: getDailySourceMatrix(database, shopId),
   };
   if (includeDetails) result.details = {
     latestBatch,
