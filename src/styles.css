@@ -10896,6 +10896,7 @@ button.content-template-thumb {
 .distribution-range-actions small { color: #667085; }
 
 .my-links-workbench > header p { margin: 4px 0 0; color: var(--link-muted); }
+.link-data-status-stack { display: grid; gap: 12px; }
 .link-data-status-module { display: grid; grid-template-columns: minmax(190px, .7fr) minmax(0, 1.5fr); gap: 18px; align-items: center; padding: 15px 18px; border: 1px solid #dbeae4; border-radius: var(--link-radius); background: linear-gradient(135deg, #f5fbf8, #fff); }
 .link-data-status-module > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .link-data-status-module > header div { display: grid; gap: 3px; }
@@ -10906,6 +10907,30 @@ button.content-template-thumb {
 .link-data-status-module dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; }
 .link-data-status-module dl div { display: grid; gap: 3px; padding: 8px 10px; border-left: 1px solid #e4e7ec; }
 .link-data-status-module dd { margin: 0; color: #344054; font-size: 13px; font-weight: 650; }
+.link-daily-completeness { display: grid; gap: 14px; padding: 17px 18px; border: 1px solid #e4e7ec; border-radius: var(--link-radius); background: #fff; }
+.link-daily-completeness > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.link-daily-completeness > header > div { display: grid; gap: 3px; }
+.link-daily-completeness > header span { color: #344054; font-size: 13px; font-weight: 700; }
+.link-daily-completeness > header strong { color: #173f34; font-size: 16px; }
+.link-daily-completeness > header small { color: #667085; font-size: 11px; }
+.link-daily-completeness > header em { padding: 5px 9px; border-radius: 999px; font-size: 11px; font-style: normal; white-space: nowrap; }
+.link-daily-completeness > header em.is-warning { background: #fff1f3; color: #c01048; }
+.link-daily-completeness > header em.is-ok { background: #ecfdf3; color: #027a48; }
+.link-daily-completeness > dl { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.link-daily-completeness > dl > div { display: grid; gap: 4px; padding: 10px 11px; border-radius: 9px; background: #f8fafc; }
+.link-daily-completeness dt { color: #667085; font-size: 11px; }
+.link-daily-completeness dd { margin: 0; color: #344054; font-size: 14px; font-weight: 700; }
+.link-daily-missing-table { max-height: 330px; overflow: auto; border: 1px solid #eaecf0; border-radius: 10px; }
+.link-daily-missing-table table { width: 100%; border-collapse: collapse; }
+.link-daily-missing-table th, .link-daily-missing-table td { padding: 9px 11px; border-bottom: 1px solid #eaecf0; color: #475467; font-size: 12px; text-align: left; vertical-align: middle; }
+.link-daily-missing-table th { position: sticky; top: 0; z-index: 1; background: #f8fafc; color: #667085; font-weight: 600; }
+.link-daily-missing-table tr:last-child td { border-bottom: 0; }
+.daily-data-status { display: inline-flex; padding: 4px 8px; border-radius: 999px; font-size: 11px; white-space: nowrap; }
+.daily-data-status.is-not_imported, .daily-data-status.is-update_failed { background: #fff1f3; color: #c01048; }
+.daily-data-status.is-imported_no_data, .daily-data-status.is-pending { background: #fffaeb; color: #b54708; }
+.daily-data-status.is-updating { background: #eff8ff; color: #175cd3; }
+.link-daily-complete-empty { display: grid; justify-items: center; gap: 4px; padding: 22px; border-radius: 10px; background: #f0fdf4; color: #027a48; }
+.link-daily-complete-empty span { color: #5b7f70; font-size: 12px; }
 
 .my-link-summary-module { display: grid; gap: 10px; }
 .my-link-summary-module > header { display: flex; align-items: baseline; gap: 10px; }
@@ -11074,6 +11099,8 @@ button.content-template-thumb {
   .cockpit-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .connection-v3-card-metrics { grid-template-columns: 1fr 1fr 1fr; }
   .link-data-status-module { grid-template-columns: 1fr; }
+  .link-daily-completeness > dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .link-daily-completeness > header { align-items: stretch; flex-direction: column; }
   .my-link-summary-module > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .my-link-list-module > header { align-items: stretch; flex-direction: column; }
   .link-sales-distribution-chart { grid-template-columns: 48px minmax(0, 1fr); }
