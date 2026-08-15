@@ -3,7 +3,7 @@ import { performance } from "node:perf_hooks";
 
 if (!process.env.WUFAN_DB_PATH) throw new Error("请通过 WUFAN_DB_PATH 指定隔离数据库。");
 
-const [{ LINK_BUSINESS_FIELDS, queryLinkBusinessTable }, { getDatabase }, { LINK_BUSINESS_COLUMNS }] = await Promise.all([
+const [{ LINK_BUSINESS_FIELDS, queryLinkBusinessTable }, { getDatabase }, { LINK_BUSINESS_COLUMNS, renderLinkBusinessTable }] = await Promise.all([
   import("../server/linkBusinessTableService.js"), import("../server/db.js"), import("../src/uiModules/linkBusinessTable.js"),
 ]);
 
@@ -16,6 +16,12 @@ const platformImportFields = ["url", "category", "platformStatus", "periodStart"
   "structuredDetailConversionRate", "structuredDetailTransactionShare"];
 assert.ok(platformImportFields.every((field) => LINK_BUSINESS_FIELDS.has(field)));
 assert.ok(LINK_BUSINESS_COLUMNS.every((column) => LINK_BUSINESS_FIELDS.has(column.key)));
+const alignmentHtml = renderLinkBusinessTable({ fields: ["name", "salesAmount", "growthStatus"], items: [{ id: "alignment-sample",
+  name: "对齐测试", platformMetrics: {}, erp: {} }], pagination: { page: 1, totalPages: 1, total: 1 } });
+for (const [field, alignment] of [["name", "left"], ["salesAmount", "right"], ["growthStatus", "center"], ["actions", "center"]]) {
+  assert.match(alignmentHtml, new RegExp(`<th data-field="${field}" data-align="${alignment}"`));
+  assert.match(alignmentHtml, new RegExp(`<td data-field="${field}" data-align="${alignment}"`));
+}
 
 const database = getDatabase();
 const before = {

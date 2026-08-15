@@ -74,6 +74,14 @@ export const LINK_BUSINESS_COLUMN_GROUPS = [
 export const LINK_BUSINESS_COLUMNS = LINK_BUSINESS_COLUMN_GROUPS.flatMap((group) => group.columns.map((column) => ({ ...column, group: group.key })));
 export const DEFAULT_LINK_BUSINESS_FIELDS = ["image", "name", "platform", "shop", "salesAmount", "quantity", "profitAmount", "profitMargin", "growthStatus", "healthStatus", "archiveStatus"];
 
+const LEFT_ALIGNED_FIELDS = new Set(["name", "platform", "shop", "goodsId", "url", "category", "platformStatus", "productType", "productStatus", "productTags", "owner"]);
+const CENTER_ALIGNED_FIELDS = new Set(["image", "statisticsDate", "periodStart", "periodEnd", "growthStatus", "healthStatus", "hospitalStatus", "archiveStatus"]);
+function fieldAlignment(field) {
+  if (LEFT_ALIGNED_FIELDS.has(field)) return "left";
+  if (CENTER_ALIGNED_FIELDS.has(field) || field === "actions") return "center";
+  return "right";
+}
+
 const statusNames = { better: "增长", stable: "稳定", worse: "下滑", no_data: "暂无数据", insufficient_data: "数据不足",
   growing: "健康", attention: "需关注", risk: "风险", healthy: "健康", diagnosis: "待诊断", treatment: "改善中",
   observation: "观察中", none: "无问题", active: "正常", paused: "暂停", archived: "归档" };
@@ -127,9 +135,9 @@ export function renderLinkBusinessTable({ items = [], pagination = {}, fields = 
     hospitalStatus: status(item.hospitalStatus, "hospital"), archiveStatus: status(item.archiveStatus, "archive"),
   })[key] ?? "—";
   const headers = visible.map((key) => { const column = definitions.get(key); const active = sort.field === key;
-    return `<th>${column.sortable ? `<button type="button" data-link-business-sort="${escapeHtml(key)}">${escapeHtml(column.label)}${active ? (sort.direction === "asc" ? " ↑" : " ↓") : " ↕"}</button>` : escapeHtml(column.label)}</th>`; }).join("");
+    return `<th data-field="${escapeHtml(key)}" data-align="${fieldAlignment(key)}">${column.sortable ? `<button type="button" data-link-business-sort="${escapeHtml(key)}">${escapeHtml(column.label)}${active ? (sort.direction === "asc" ? " ↑" : " ↓") : " ↕"}</button>` : escapeHtml(column.label)}</th>`; }).join("");
   return `<section class="link-business-table-module" data-module-key="link_business_table">
-    ${loading ? `<div class="empty-state">正在汇总链接经营数据…</div>` : items.length ? `<div class="link-business-table-scroll"><table><thead><tr>${headers}<th>操作</th></tr></thead><tbody>${items.map((item) => `<tr>${visible.map((key) => `<td data-field="${escapeHtml(key)}">${cell(item, key)}</td>`).join("")}<td><button type="button" class="text-button" data-open-connection="${escapeHtml(item.id)}">查看详情</button></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><strong>暂无符合条件的经营链接</strong><p>可调整时间、指标或筛选条件。</p></div>`}
+    ${loading ? `<div class="empty-state">正在汇总链接经营数据…</div>` : items.length ? `<div class="link-business-table-scroll"><table><thead><tr>${headers}<th data-field="actions" data-align="center">操作</th></tr></thead><tbody>${items.map((item) => `<tr>${visible.map((key) => `<td data-field="${escapeHtml(key)}" data-align="${fieldAlignment(key)}">${cell(item, key)}</td>`).join("")}<td data-field="actions" data-align="center"><button type="button" class="text-button" data-open-connection="${escapeHtml(item.id)}">查看详情</button></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><strong>暂无符合条件的经营链接</strong><p>可调整时间、指标或筛选条件。</p></div>`}
     <footer><span>第 ${Number(pagination.page || 1)} / ${Number(pagination.totalPages || 1)} 页 · 共 ${Number(pagination.total || 0)} 条</span><div><button type="button" class="secondary-button" data-link-business-page="${Number(pagination.page || 1) - 1}" ${(pagination.page || 1) <= 1 ? "disabled" : ""}>上一页</button><button type="button" class="secondary-button" data-link-business-page="${Number(pagination.page || 1) + 1}" ${(pagination.page || 1) >= (pagination.totalPages || 1) ? "disabled" : ""}>下一页</button></div></footer>
   </section>`;
 }
