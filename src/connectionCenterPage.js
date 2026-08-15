@@ -633,16 +633,10 @@ function renderToolbar() {
   </div></div>`;
 }
 
-function renderGrowthOverview() {
-  const top = pageState.growthRankings.topGrowth ?? [];
-  const risks = pageState.growthRankings.risks ?? [];
-  const cards = (items, emptyText) => items.length ? items.map((item) => `<button type="button" class="connection-growth-row" data-open-connection="${escapeHtml(item.connectionId)}"><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.platform)} · ${escapeHtml(item.shopDisplayName || item.shopName || "未命名店铺")}</small></span><em>${item.healthScore ?? "—"}分</em><b>${growthText(item.salesGrowth)}</b></button>`).join("") : `<div class="empty-state compact">${escapeHtml(emptyText)}</div>`;
-  const counts = pageState.healthAttention.counts ?? {};
-  const improvements = pageState.improvementSummary;
-  const summary = pageState.managementOverview.summary ?? {};
+function renderOwnerContribution() {
   const owners = pageState.managementOverview.owners ?? [];
   const money = (value) => `¥${Number(value || 0).toLocaleString("zh-CN", { maximumFractionDigits: 2 })}`;
-  return `<section class="connection-management-summary"><div><span>经营连接</span><strong>${summary.connectionCount || 0}</strong><small>经营中 ${summary.activeCount || 0}</small></div><div><span>最近周期销售额</span><strong>${money(summary.salesAmount)}</strong></div><div><span>同期已确认净利润</span><strong>${money(summary.netProfit)}</strong></div><div><span>平均销售增长</span><strong>${growthText(summary.averageGrowth)}</strong></div><div><span>风险连接</span><strong>${summary.riskCount || 0}</strong></div></section><section class="connection-health-summary"><div><span>风险体检</span><strong>${counts.risk || 0}</strong></div><div><span>关注体检</span><strong>${counts.attention || 0}</strong></div><div><span>流量问题</span><strong>${counts.traffic || 0}</strong></div><div><span>转化问题</span><strong>${counts.conversion || 0}</strong></div><div><span>销售下降</span><strong>${counts.sales || 0}</strong></div><div><span>利润下降</span><strong>${counts.profit || 0}</strong></div></section><section class="connection-improvement-summary"><strong>改善项目</strong><span>全部 ${improvements.total || 0}</span><span>有效 ${improvements.effective || 0}</span><span>观察 ${improvements.observing || 0}</span><span>失败 ${improvements.failed || 0}</span></section><section class="connection-growth-overview"><article><header><strong>TOP10 成长连接</strong><span>按最新两期销售增长</span></header>${cards(top, "至少积累两个经营周期后显示排行")}</article><article><header><strong>需要关注</strong><span>健康分低于60</span></header>${cards(risks, "当前没有风险连接")}</article></section><section class="connection-owner-contribution"><header><div><strong>负责人经营贡献</strong><span>按最近经营周期销售额排序</span></div></header>${owners.length ? `<div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>负责人</th><th>连接数</th><th>销售额</th><th>净利润</th><th>平均增长</th><th>风险连接</th><th>有效改善</th></tr></thead><tbody>${owners.slice(0, 20).map((owner) => `<tr><td><strong>${escapeHtml(owner.ownerName)}</strong></td><td>${owner.connectionCount}</td><td>${money(owner.salesAmount)}</td><td>${money(owner.netProfit)}</td><td>${growthText(owner.averageGrowth)}</td><td>${owner.riskCount}</td><td>${owner.effectiveImprovements}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state compact">暂无负责人经营数据</div>`}</section>`;
+  return `<section class="connection-owner-contribution"><header><div><strong>负责人经营贡献</strong><span>按最近经营周期销售额排序</span></div></header>${owners.length ? `<div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>负责人</th><th>连接数</th><th>销售额</th><th>净利润</th><th>平均增长</th><th>风险连接</th><th>有效改善</th></tr></thead><tbody>${owners.slice(0, 20).map((owner) => `<tr><td><strong>${escapeHtml(owner.ownerName)}</strong></td><td>${owner.connectionCount}</td><td>${money(owner.salesAmount)}</td><td>${money(owner.netProfit)}</td><td>${growthText(owner.averageGrowth)}</td><td>${owner.riskCount}</td><td>${owner.effectiveImprovements}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state compact">暂无负责人经营数据</div>`}</section>`;
 }
 
 function renderConnectionAssets() {
@@ -655,10 +649,9 @@ function renderConnectionAssets() {
   const tableHtml = renderUiModule("link_business_table", { items: table.items.map((item) => ({ ...item,
     imageUrl: item.mainImage ? resolveAssetUrl(item.mainImage) : "" })), pagination: table.pagination,
     fields: orderedFields, sort: table.sort, loading: table.loading });
-  return `<section class="connection-assets company-links-workspace"><header class="connection-section-heading"><div><p class="eyebrow">ALL LINK WORKSPACE</p><h2>全部链接</h2><p>在当前权限范围内查看公司经营概览与链接资产。</p></div></header>
+  return `<section class="connection-assets company-links-workspace">
     ${renderUiModule("link_data_status", { state: pageState.linkDataStatus })}
-    ${renderGrowthOverview()}
-    <section class="link-business-analysis"><header><div><span>链接经营分析</span><h3>全部链接经营数据表</h3><p>ERP销售与平台经营指标分开呈现；所有排序、筛选和分页均在服务端完成。</p></div></header>${toolbarHtml}${tableHtml}</section>
+    <section class="link-business-analysis"><header><div><h3>全部链接经营数据表</h3></div></header>${toolbarHtml}${tableHtml}</section>
   </section>`;
 }
 
@@ -708,10 +701,11 @@ function renderBusinessCockpit() {
   const linkCard=(item,extra="")=>`<button type="button" class="connection-cockpit-link" data-open-connection="${escapeHtml(item.id)}">${imageHtml(item)}<span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(`${item.platform} · ${item.shopName}`)}</small><em>销售 ${coreMoney(item.erpSales?.salesAmount)} · 利润 ${coreMoney(item.erpSales?.profitAmount)} · 利润率 ${corePercent(item.erpSales?.profitMargin)}</em><i>${escapeHtml(healthText(item.healthStatus))} · ${escapeHtml(extra||growthText(item.salesGrowth))}</i></span></button>`;
   const trendRows=[...(cockpit.trends?.erp??[]).map((item)=>({...item,visitorCount:null,source:"ERP"})),...(cockpit.trends?.platform??[]).map((item)=>({...item,salesAmount:null,profitAmount:null,source:"平台"}))].filter((item)=>item.periodType===cockpit.periodType).sort((a,b)=>String(a.periodEnd).localeCompare(String(b.periodEnd))||a.source.localeCompare(b.source));
   const salesPeriodText = cockpitSalesPeriodText(summary);
-  return `<section class="connection-business-cockpit"><header><div><h2>经营链接驾驶舱</h2><p>${cockpit.scope?.isAdmin?"全部经营链接":"当前权限范围内的经营链接"}</p><p class="cockpit-data-note">销售额口径：当前范围内，每条链接最新已导入 ERP 经营周期的销售金额合计。</p></div></header>
+  return `<section class="connection-business-cockpit"><header><div><h2>经营链接驾驶舱</h2></div></header>
     ${renderUiModule("link_sales_distribution", { state: pageState.salesDistribution, canViewCompany: isAdmin() })}
     <section class="cockpit-summary"><div><span>链接数量</span><strong>${summary.connectionCount||0}</strong><small>正常经营 ${summary.normalCount||0}</small></div><div class="is-sales"><span>ERP销售额</span><strong>${coreMoney(summary.salesAmount)}</strong><small>${escapeHtml(salesPeriodText)}</small><small>较各链接上一周期 ${growthText(summary.salesGrowth)}</small></div><div><span>利润</span><strong>${coreMoney(summary.profitAmount)}</strong><small>利润率 ${corePercent(summary.profitMargin)}</small></div><div class="is-risk"><span>风险链接</span><strong>${summary.riskCount||0}</strong><small>需要管理关注</small></div><div class="is-diagnosis"><span>诊断中</span><strong>${summary.diagnosisCount||0}</strong><small>等待定位问题</small></div><div class="is-treatment"><span>治疗中</span><strong>${summary.treatmentCount||0}</strong><small>正在推进改善</small></div></section>
     <section class="cockpit-health"><header><h3>健康状态</h3><span>高利润链接 ${summary.highProfitCount||0} · 利润风险 ${summary.profitRiskCount||0}</span></header><div><span>健康 <b>${health.healthy||0}</b><em>${healthRate(health.healthy)}</em></span><span>关注 <b>${health.attention||0}</b><em>${healthRate(health.attention)}</em></span><span>异常 <b>${health.risk||0}</b><em>${healthRate(health.risk)}</em></span><span>待积累数据 <b>${health.noData||0}</b><em>${healthRate(health.noData)}</em></span></div></section>
+    ${renderOwnerContribution()}
     <div class="cockpit-two-columns"><section class="cockpit-panel"><header><h3>核心链接</h3><span>按ERP销售额、利润排序</span></header>${cockpit.coreLinks?.length?cockpit.coreLinks.map((item)=>linkCard(item,`销量 ${coreNumber(item.erpSales?.shippedQuantity)}`)).join(""):`<div class="empty-state compact">暂无ERP销售事实</div>`}</section><section class="cockpit-panel is-risk"><header><h3>风险链接</h3><button type="button" class="text-button" data-workbench-hospital="diagnosis">进入链接医院 →</button></header>${cockpit.riskLinks?.length?cockpit.riskLinks.map((item)=>linkCard(item,`${item.anomalyTypes?.join("、")||"健康异常"} · ${cockpitStageText(item.operationStage)}`)).join(""):`<div class="empty-state compact">当前没有风险链接</div>`}</section></div>
     <section class="cockpit-panel"><header><h3>增长链接</h3></header><div class="cockpit-growth-grid">${cockpit.growthLinks?.length?cockpit.growthLinks.map((item)=>linkCard(item,`最快增长 ${growthText(item.growthMetric)}`)).join(""):`<div class="empty-state compact">尚无可比较的增长链接</div>`}</div></section>
     <section class="cockpit-panel"><header><h3>平台渠道分析</h3><span>ERP销售和利润按平台汇总</span></header><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>平台</th><th>链接数</th><th>销售额</th><th>利润</th><th>利润率</th><th>健康率</th></tr></thead><tbody>${cockpit.platforms?.map((item)=>`<tr><td><strong>${escapeHtml(item.platform)}</strong></td><td>${item.connectionCount}</td><td>${coreMoney(item.salesAmount)}</td><td>${coreMoney(item.profitAmount)}</td><td>${corePercent(item.profitMargin)}</td><td>${corePercent(item.healthyRate)}</td></tr>`).join("")||`<tr><td colspan="6">暂无平台经营事实</td></tr>`}</tbody></table></div></section>
@@ -1106,17 +1100,16 @@ async function loadLinkBusinessTablePage(render) {
     pageState.businessTable = { ...pageState.businessTable, ...result, loaded: true, loading: false,
       range: { ...pageState.businessTable.range, ...result.range }, pagination: result.pagination || pageState.businessTable.pagination,
       sort: result.sort || pageState.businessTable.sort };
-    if (!pageState.assetMetaLoaded) {
-      const [rankings, managementOverview] = await Promise.all([loadConnectionGrowthRankings(), loadConnectionManagementOverview()]);
-      pageState.growthRankings = rankings; pageState.managementOverview = managementOverview; pageState.assetMetaLoaded = true;
-    }
     pageState.loadedSections.add("connections");
   } catch (error) { pageState.error = error.message; pageState.businessTable.loading = false; }
   render();
 }
 
 async function loadBusinessCockpitPage(render) {
-  try { pageState.cockpit = { ...pageState.cockpit, ...await loadConnectionBusinessCockpit() }; pageState.error = ""; }
+  try {
+    const [cockpit, managementOverview] = await Promise.all([loadConnectionBusinessCockpit(), loadConnectionManagementOverview()]);
+    pageState.cockpit = { ...pageState.cockpit, ...cockpit }; pageState.managementOverview = managementOverview; pageState.error = "";
+  }
   catch (error) { pageState.error = error.message; }
   render();
 }
@@ -1124,10 +1117,9 @@ async function loadBusinessCockpitPage(render) {
 async function loadPage(render) {
   pageState.loading = true; pageState.error = ""; render();
   try {
-    const [cockpit, healthAttention, improvementSummary, distribution] = await Promise.all([loadConnectionBusinessCockpit(), canViewHealth() ? loadAttentionConnectionHealthRecords() : Promise.resolve({ items: [], counts: {} }), loadConnectionImprovementSummary(), loadLinkSalesDistribution({ scope: isAdmin() ? "company" : "mine", preset: "7d" })]);
+    const [cockpit, managementOverview, distribution] = await Promise.all([loadConnectionBusinessCockpit(), loadConnectionManagementOverview(), loadLinkSalesDistribution({ scope: isAdmin() ? "company" : "mine", preset: "7d" })]);
     pageState.cockpit = { ...pageState.cockpit, ...cockpit };
-    pageState.healthAttention = healthAttention;
-    pageState.improvementSummary = improvementSummary.summary;
+    pageState.managementOverview = managementOverview;
     pageState.salesDistribution = { ...pageState.salesDistribution, ...distribution, loaded: true, loading: false, error: "" };
     pageState.loadedSections.add("cockpit");
     pageState.loaded = true;

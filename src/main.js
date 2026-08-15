@@ -576,7 +576,7 @@ function renderPage() {
               `
               : ""
           }
-          <h1>${activeModule.name}</h1>
+          ${activeModule.id === "connectionCenter" ? "" : `<h1>${activeModule.name}</h1>`}
         </div>
         <div class="user-menu">
           ${renderNotificationButton()}
@@ -926,7 +926,7 @@ function renderAuthenticatedStartup() {
       ${renderSidebar()}
       <main class="page">
         <header class="page-header">
-          <div class="page-header-title"><h1>${getActiveModule().name}</h1></div>
+          <div class="page-header-title">${getActiveModule().id === "connectionCenter" ? "" : `<h1>${getActiveModule().name}</h1>`}</div>
           <div class="user-menu">${renderUserProfile(currentUser)}</div>
         </header>
         <section class="startup-page-loading" aria-live="polite" aria-busy="true">
