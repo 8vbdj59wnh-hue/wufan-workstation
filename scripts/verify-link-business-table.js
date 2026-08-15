@@ -8,7 +8,7 @@ const [{ LINK_BUSINESS_FIELDS, queryLinkBusinessTable }, { getDatabase }, busine
   import("../src/uiModules/linkIndicatorSetting.js"),
 ]);
 const { LINK_BUSINESS_COLUMN_GROUPS, LINK_BUSINESS_COLUMNS, renderLinkBusinessTable } = businessTableModule;
-const { moveVisibleLinkBusinessField, renderLinkIndicatorSetting } = indicatorSettingModule;
+const { reorderVisibleLinkBusinessField, renderLinkIndicatorSetting } = indicatorSettingModule;
 
 const platformImportFields = ["url", "category", "platformStatus", "periodStart", "periodEnd", "statisticsDate", "productType",
   "productStatus", "productTags", "payAmount", "payQuantity", "payBuyerCount", "refundAmount", "viewCount", "visitorCount",
@@ -25,14 +25,17 @@ for (const [field, alignment] of [["name", "left"], ["salesAmount", "right"], ["
   assert.match(alignmentHtml, new RegExp(`<th data-field="${field}" data-align="${alignment}"`));
   assert.match(alignmentHtml, new RegExp(`<td data-field="${field}" data-align="${alignment}"`));
 }
-const movedFields = moveVisibleLinkBusinessField(["name", "platform", "salesAmount"], ["name", "salesAmount"], "salesAmount", "up");
+const movedFields = reorderVisibleLinkBusinessField(["name", "platform", "salesAmount"], ["name", "salesAmount"], "salesAmount", "name", "before");
 assert.deepEqual(movedFields.visibleFields, ["salesAmount", "name"]);
 assert.deepEqual(movedFields.fieldOrder, ["salesAmount", "platform", "name"]);
+const movedAfter = reorderVisibleLinkBusinessField(movedFields.fieldOrder, movedFields.visibleFields, "salesAmount", "name", "after");
+assert.deepEqual(movedAfter.visibleFields, ["name", "salesAmount"]);
 const indicatorHtml = renderLinkIndicatorSetting({ groups: LINK_BUSINESS_COLUMN_GROUPS, fieldOrder: movedFields.fieldOrder,
   visibleFields: movedFields.visibleFields, open: true });
 assert.ok(indicatorHtml.indexOf('data-selected-link-business-field="salesAmount"')
   < indicatorHtml.indexOf('data-selected-link-business-field="name"'));
-assert.match(indicatorHtml, /data-move-link-business-field="salesAmount" data-direction="up"[^>]*disabled/);
+assert.match(indicatorHtml, /draggable="true" data-selected-link-business-field="salesAmount"/);
+assert.doesNotMatch(indicatorHtml, /data-move-link-business-field/);
 
 const database = getDatabase();
 const before = {

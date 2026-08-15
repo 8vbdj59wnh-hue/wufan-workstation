@@ -11005,12 +11005,15 @@ button.content-template-thumb {
 .link-indicator-selected > header strong { color: #344054; font-size: 13px; }
 .link-indicator-selected > header small, .link-indicator-selected > header > span { color: #667085; font-size: 11px; }
 .link-indicator-selected ol { display: grid; gap: 6px; max-height: 210px; margin: 0; padding: 0; overflow: auto; list-style: none; }
-.link-indicator-selected li { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 36px; padding: 4px 7px; border: 1px solid #e4e7ec; border-radius: 8px; background: #fff; }
+.link-indicator-selected li { position: relative; display: grid; grid-template-columns: 18px 24px minmax(0, 1fr); align-items: center; gap: 8px; min-height: 38px; padding: 4px 9px; border: 1px solid #e4e7ec; border-radius: 8px; background: #fff; cursor: grab; }
+.link-indicator-selected li:active { cursor: grabbing; }
+.link-indicator-selected li > i { color: #98a2b3; font-style: normal; font-size: 14px; letter-spacing: -3px; }
 .link-indicator-selected li > b { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: #eef4ff; color: #2f6fed; font-size: 11px; }
 .link-indicator-selected li > span { overflow: hidden; color: #344054; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.link-indicator-selected li > div { display: flex; gap: 4px; }
-.link-indicator-selected .icon-button { width: 28px; min-width: 28px; height: 28px; min-height: 28px; border: 1px solid #d0d5dd; border-radius: 7px; background: #fff; color: #475467; }
-.link-indicator-selected .icon-button:disabled { opacity: .35; cursor: not-allowed; }
+.link-indicator-selected li.is-dragging { opacity: .4; }
+.link-indicator-selected li.is-drop-before::before, .link-indicator-selected li.is-drop-after::after { position: absolute; right: 2px; left: 2px; height: 2px; border-radius: 999px; background: #2f6fed; content: ""; }
+.link-indicator-selected li.is-drop-before::before { top: -5px; }
+.link-indicator-selected li.is-drop-after::after { bottom: -5px; }
 .link-indicator-groups { overflow: auto; padding: 10px 24px 24px; }
 .link-indicator-groups section { display: grid; gap: 10px; padding: 17px 0; border-bottom: 1px solid #edf0f2; }
 .link-indicator-groups section > div:first-child { display: grid; gap: 3px; }

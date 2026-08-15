@@ -101,7 +101,7 @@ import "./uiModules/linkImage.js";
 import "./uiModules/linkColumnSetting.js";
 import "./uiModules/linkDataToolbar.js";
 import { LINK_DATA_COLUMNS, DEFAULT_MINE_LINK_FIELDS } from "./uiModules/linkDataTable.js";
-import { moveVisibleLinkBusinessField } from "./uiModules/linkIndicatorSetting.js";
+import { reorderVisibleLinkBusinessField } from "./uiModules/linkIndicatorSetting.js";
 import "./uiModules/linkBusinessToolbar.js";
 import { LINK_BUSINESS_COLUMN_GROUPS, LINK_BUSINESS_COLUMNS, DEFAULT_LINK_BUSINESS_FIELDS } from "./uiModules/linkBusinessTable.js";
 
@@ -1397,11 +1397,33 @@ export function bindConnectionCenterPageEvents(render) {
     pageState.businessTable.visibleFields = pageState.businessTable.fieldOrder.filter((key) => selected.includes(key));
     render();
   }));
-  root.querySelectorAll("[data-move-link-business-field]").forEach((button) => button.addEventListener("click", () => {
-    const next = moveVisibleLinkBusinessField(pageState.businessTable.fieldOrder, pageState.businessTable.visibleFields,
-      button.dataset.moveLinkBusinessField, button.dataset.direction);
-    pageState.businessTable.fieldOrder = next.fieldOrder; pageState.businessTable.visibleFields = next.visibleFields; render();
-  }));
+  const selectedFieldRows = [...root.querySelectorAll("[data-selected-link-business-field]")];
+  let draggedLinkBusinessField = "";
+  const clearLinkBusinessDropState = () => selectedFieldRows.forEach((item) => {
+    item.classList.remove("is-dragging", "is-drop-before", "is-drop-after"); delete item.dataset.dropPosition;
+  });
+  selectedFieldRows.forEach((item) => {
+    item.addEventListener("dragstart", (event) => {
+      draggedLinkBusinessField = item.dataset.selectedLinkBusinessField || ""; item.classList.add("is-dragging");
+      event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", draggedLinkBusinessField);
+    });
+    item.addEventListener("dragover", (event) => {
+      if (!draggedLinkBusinessField || draggedLinkBusinessField === item.dataset.selectedLinkBusinessField) return;
+      event.preventDefault(); event.dataTransfer.dropEffect = "move";
+      selectedFieldRows.forEach((row) => row.classList.remove("is-drop-before", "is-drop-after"));
+      const bounds = item.getBoundingClientRect(); const position = event.clientY >= bounds.top + bounds.height / 2 ? "after" : "before";
+      item.dataset.dropPosition = position; item.classList.add(position === "after" ? "is-drop-after" : "is-drop-before");
+    });
+    item.addEventListener("drop", (event) => {
+      event.preventDefault();
+      const sourceField = draggedLinkBusinessField || event.dataTransfer.getData("text/plain");
+      const next = reorderVisibleLinkBusinessField(pageState.businessTable.fieldOrder, pageState.businessTable.visibleFields,
+        sourceField, item.dataset.selectedLinkBusinessField, item.dataset.dropPosition || "before");
+      clearLinkBusinessDropState(); draggedLinkBusinessField = "";
+      pageState.businessTable.fieldOrder = next.fieldOrder; pageState.businessTable.visibleFields = next.visibleFields; render();
+    });
+    item.addEventListener("dragend", () => { clearLinkBusinessDropState(); draggedLinkBusinessField = ""; });
+  });
   root.querySelector("[data-reset-link-business-fields]")?.addEventListener("click", () => {
     pageState.businessTable.visibleFields = [...DEFAULT_LINK_BUSINESS_FIELDS]; pageState.businessTable.fieldOrder = LINK_BUSINESS_COLUMNS.map((item) => item.key); render();
   });
