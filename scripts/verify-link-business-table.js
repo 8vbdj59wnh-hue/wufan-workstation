@@ -3,9 +3,12 @@ import { performance } from "node:perf_hooks";
 
 if (!process.env.WUFAN_DB_PATH) throw new Error("请通过 WUFAN_DB_PATH 指定隔离数据库。");
 
-const [{ LINK_BUSINESS_FIELDS, queryLinkBusinessTable }, { getDatabase }, { LINK_BUSINESS_COLUMNS, renderLinkBusinessTable }] = await Promise.all([
+const [{ LINK_BUSINESS_FIELDS, queryLinkBusinessTable }, { getDatabase }, businessTableModule, indicatorSettingModule] = await Promise.all([
   import("../server/linkBusinessTableService.js"), import("../server/db.js"), import("../src/uiModules/linkBusinessTable.js"),
+  import("../src/uiModules/linkIndicatorSetting.js"),
 ]);
+const { LINK_BUSINESS_COLUMN_GROUPS, LINK_BUSINESS_COLUMNS, renderLinkBusinessTable } = businessTableModule;
+const { moveVisibleLinkBusinessField, renderLinkIndicatorSetting } = indicatorSettingModule;
 
 const platformImportFields = ["url", "category", "platformStatus", "periodStart", "periodEnd", "statisticsDate", "productType",
   "productStatus", "productTags", "payAmount", "payQuantity", "payBuyerCount", "refundAmount", "viewCount", "visitorCount",
@@ -22,6 +25,14 @@ for (const [field, alignment] of [["name", "left"], ["salesAmount", "right"], ["
   assert.match(alignmentHtml, new RegExp(`<th data-field="${field}" data-align="${alignment}"`));
   assert.match(alignmentHtml, new RegExp(`<td data-field="${field}" data-align="${alignment}"`));
 }
+const movedFields = moveVisibleLinkBusinessField(["name", "platform", "salesAmount"], ["name", "salesAmount"], "salesAmount", "up");
+assert.deepEqual(movedFields.visibleFields, ["salesAmount", "name"]);
+assert.deepEqual(movedFields.fieldOrder, ["salesAmount", "platform", "name"]);
+const indicatorHtml = renderLinkIndicatorSetting({ groups: LINK_BUSINESS_COLUMN_GROUPS, fieldOrder: movedFields.fieldOrder,
+  visibleFields: movedFields.visibleFields, open: true });
+assert.ok(indicatorHtml.indexOf('data-selected-link-business-field="salesAmount"')
+  < indicatorHtml.indexOf('data-selected-link-business-field="name"'));
+assert.match(indicatorHtml, /data-move-link-business-field="salesAmount" data-direction="up"[^>]*disabled/);
 
 const database = getDatabase();
 const before = {

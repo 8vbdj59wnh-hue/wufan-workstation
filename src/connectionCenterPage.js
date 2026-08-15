@@ -101,7 +101,7 @@ import "./uiModules/linkImage.js";
 import "./uiModules/linkColumnSetting.js";
 import "./uiModules/linkDataToolbar.js";
 import { LINK_DATA_COLUMNS, DEFAULT_MINE_LINK_FIELDS } from "./uiModules/linkDataTable.js";
-import "./uiModules/linkIndicatorSetting.js";
+import { moveVisibleLinkBusinessField } from "./uiModules/linkIndicatorSetting.js";
 import "./uiModules/linkBusinessToolbar.js";
 import { LINK_BUSINESS_COLUMN_GROUPS, LINK_BUSINESS_COLUMNS, DEFAULT_LINK_BUSINESS_FIELDS } from "./uiModules/linkBusinessTable.js";
 
@@ -643,7 +643,7 @@ function renderConnectionAssets() {
   const table = pageState.businessTable;
   const orderedFields = table.fieldOrder.filter((key) => table.visibleFields.includes(key));
   const indicatorHtml = renderUiModule("link_indicator_setting", { groups: LINK_BUSINESS_COLUMN_GROUPS,
-    visibleFields: table.visibleFields, open: table.indicatorOpen });
+    visibleFields: table.visibleFields, fieldOrder: table.fieldOrder, open: table.indicatorOpen });
   const toolbarHtml = renderUiModule("link_business_toolbar", { range: table.range, filters: table.filters,
     options: table.filterOptions, indicatorHtml, dataSources: table.dataSources });
   const tableHtml = renderUiModule("link_business_table", { items: table.items.map((item) => ({ ...item,
@@ -1395,6 +1395,12 @@ export function bindConnectionCenterPageEvents(render) {
     const selected = [...root.querySelectorAll("[data-link-business-field]:checked")].map((item) => item.value);
     if (!selected.length) { checkbox.checked = true; return; }
     pageState.businessTable.visibleFields = pageState.businessTable.fieldOrder.filter((key) => selected.includes(key));
+    render();
+  }));
+  root.querySelectorAll("[data-move-link-business-field]").forEach((button) => button.addEventListener("click", () => {
+    const next = moveVisibleLinkBusinessField(pageState.businessTable.fieldOrder, pageState.businessTable.visibleFields,
+      button.dataset.moveLinkBusinessField, button.dataset.direction);
+    pageState.businessTable.fieldOrder = next.fieldOrder; pageState.businessTable.visibleFields = next.visibleFields; render();
   }));
   root.querySelector("[data-reset-link-business-fields]")?.addEventListener("click", () => {
     pageState.businessTable.visibleFields = [...DEFAULT_LINK_BUSINESS_FIELDS]; pageState.businessTable.fieldOrder = LINK_BUSINESS_COLUMNS.map((item) => item.key); render();
