@@ -1,9 +1,12 @@
 node_modules/
+/node_modules
 /data/
 /uploads/
 /backups/
 /backup/
 /logs/
+*.db
+*.sqlite
 .DS_Store
 .env
 .env.*
