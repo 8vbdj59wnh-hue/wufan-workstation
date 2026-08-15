@@ -3,9 +3,19 @@ import { performance } from "node:perf_hooks";
 
 if (!process.env.WUFAN_DB_PATH) throw new Error("请通过 WUFAN_DB_PATH 指定隔离数据库。");
 
-const [{ queryLinkBusinessTable }, { getDatabase }] = await Promise.all([
-  import("../server/linkBusinessTableService.js"), import("../server/db.js"),
+const [{ LINK_BUSINESS_FIELDS, queryLinkBusinessTable }, { getDatabase }, { LINK_BUSINESS_COLUMNS }] = await Promise.all([
+  import("../server/linkBusinessTableService.js"), import("../server/db.js"), import("../src/uiModules/linkBusinessTable.js"),
 ]);
+
+const platformImportFields = ["url", "category", "platformStatus", "periodStart", "periodEnd", "statisticsDate", "productType",
+  "productStatus", "productTags", "payAmount", "payQuantity", "payBuyerCount", "refundAmount", "viewCount", "visitorCount",
+  "clickCount", "averageStayDuration", "bounceRate", "favoriteCount", "cartCount", "cartBuyerCount", "orderBuyerCount",
+  "orderQuantity", "orderAmount", "orderConversionRate", "conversionRate", "payNewBuyerCount", "payOldBuyerCount",
+  "oldBuyerPayAmount", "juHuaSuanPayAmount", "visitorValue", "competitionScore", "annualPayAmount", "monthlyPayAmount",
+  "monthlyPayQuantity", "searchPayConversionRate", "searchVisitorCount", "searchPayBuyerCount",
+  "structuredDetailConversionRate", "structuredDetailTransactionShare"];
+assert.ok(platformImportFields.every((field) => LINK_BUSINESS_FIELDS.has(field)));
+assert.ok(LINK_BUSINESS_COLUMNS.every((column) => LINK_BUSINESS_FIELDS.has(column.key)));
 
 const database = getDatabase();
 const before = {
@@ -35,6 +45,17 @@ const platform = queryLinkBusinessTable({ scope: "company", preset: "30d", page:
   sortField: "conversionRate", sortDirection: "desc" }, "admin", true);
 assert.ok(platform.items.length > 0);
 assert.ok(Array.isArray(platform.filterOptions.platforms));
+assert.ok(platform.items.every((item) => platformImportFields.filter((field) => !["url", "category", "platformStatus", "periodStart", "periodEnd"].includes(field))
+  .every((field) => Object.hasOwn(item.platformMetrics, field))));
+
+const rawPlatform = queryLinkBusinessTable({ scope: "company", preset: "custom", startDate: "2026-06-02", endDate: "2026-07-01",
+  page: 1, pageSize: 20, sortField: "orderAmount", sortDirection: "desc" }, "admin", true);
+const rawPlatformItem = rawPlatform.items.find((item) => item.platformMetrics.orderAmount.hasData);
+assert.ok(rawPlatformItem);
+assert.ok(rawPlatformItem.platformMetrics.statisticsDate);
+assert.ok(rawPlatformItem.platformMetrics.productType);
+for (const field of ["averageStayDuration", "bounceRate", "orderQuantity", "orderAmount", "orderConversionRate", "visitorValue",
+  "searchPayConversionRate", "searchVisitorCount", "searchPayBuyerCount"]) assert.equal(rawPlatformItem.platformMetrics[field].hasData, true);
 
 const owner = database.prepare("SELECT ownerId FROM connection_profiles WHERE ownerId IS NOT NULL AND ownerId<>'' LIMIT 1").get()?.ownerId;
 if (owner) {
@@ -43,7 +64,9 @@ if (owner) {
 }
 assert.throws(() => queryLinkBusinessTable({ ...base, scope: "company" }, owner || "user", false), (error) => error.statusCode === 403);
 
-for (const field of ["profitAmount", "profitMargin", "quantity", "conversionRate", "growthStatus", "healthStatus"]) {
+for (const field of ["profitAmount", "profitMargin", "quantity", "payAmount", "refundAmount", "clickCount", "averageStayDuration",
+  "bounceRate", "orderBuyerCount", "orderQuantity", "orderAmount", "orderConversionRate", "conversionRate", "visitorValue",
+  "competitionScore", "searchPayConversionRate", "searchVisitorCount", "periodStart", "periodEnd", "growthStatus", "healthStatus"]) {
   const sorted = queryLinkBusinessTable({ ...base, sortField: field, sortDirection: "desc", pageSize: 20 }, "admin", true);
   assert.equal(sorted.sort.field, field);
   assert.ok(sorted.items.length <= 20);
@@ -60,4 +83,4 @@ assert.equal(database.pragma("integrity_check", { simple: true }), "ok");
 assert.deepEqual(database.pragma("foreign_key_check"), []);
 
 console.log(JSON.stringify({ ok: true, elapsedMs: Number(elapsedMs.toFixed(2)), pagination: sales.pagination,
-  sourceDates: sales.dataSources, counts: before, mineChecked: Boolean(owner) }, null, 2));
+  sourceDates: sales.dataSources, counts: before, mineChecked: Boolean(owner), businessFieldCount: LINK_BUSINESS_FIELDS.size }, null, 2));
