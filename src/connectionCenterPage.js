@@ -88,6 +88,7 @@ import {
 import { getCurrentUser, state } from "./appState.js";
 import { hasPermission } from "./permissions.js";
 import { escapeHtml } from "./utils/html.js";
+import { CONNECTION_CENTER_SECTIONS, connectionCenterSectionHash, parseConnectionCenterRoute } from "./utils/connectionCenterRoute.js";
 import { renderUiModule } from "./uiModuleRegistry.js";
 import "./uiModules/linkSalesDistribution.js";
 import "./uiModules/linkDataStatus.js";
@@ -104,6 +105,17 @@ import { LINK_DATA_COLUMNS, DEFAULT_MINE_LINK_FIELDS } from "./uiModules/linkDat
 import { reorderVisibleLinkBusinessField } from "./uiModules/linkIndicatorSetting.js";
 import "./uiModules/linkBusinessToolbar.js";
 import { LINK_BUSINESS_COLUMN_GROUPS, LINK_BUSINESS_COLUMNS, DEFAULT_LINK_BUSINESS_FIELDS } from "./uiModules/linkBusinessTable.js";
+
+const connectionSectionStorageKey = "connection-center-section-v1";
+
+function initialConnectionSection() {
+  const routeSection = typeof window === "undefined" ? "" : parseConnectionCenterRoute(window.location.hash).section;
+  if (routeSection) return routeSection;
+  try {
+    const saved = window.localStorage.getItem(connectionSectionStorageKey) || "";
+    return CONNECTION_CENTER_SECTIONS.has(saved) ? saved : "cockpit";
+  } catch { return "cockpit"; }
+}
 
 const pageState = {
   loaded: false,
@@ -134,7 +146,7 @@ const pageState = {
   healthModalId: "",
   improvements: [],
   improvementSummary: { total: 0, effective: 0, observing: 0, failed: 0 },
-  section: "cockpit",
+  section: initialConnectionSection(),
   dataCenterTab: "data-foundation",
   myWorkbench: { items: [], summary: { total: 0, better: 0, risk: 0, followed: 0 }, pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 }, serverPaged: true, filter: "all", search: "", isAdmin: false, loading: false, loaded: false },
   myLinkTable: { items: [], pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 }, range: { preset: "7d", startDate: "", endDate: "" },
@@ -148,7 +160,7 @@ const pageState = {
   linkDataStatus: { data: null, loading: false, loaded: false, error: "" },
   salesDailyQuality: { data: null, loading: false, loaded: false, error: "" },
   salesDistribution: { scope: "company", range: { preset: "7d" }, items: [], summary: {}, selectedGroup: 0, selectedRange: null, drillTable: null, loading: false, loaded: false, error: "" },
-  hospital: { zones: { diagnosis: [], treatment: [], observation: [] }, counts: { diagnosis: 0, treatment: 0, observation: 0 }, stage: "diagnosis", loading: false },
+  hospital: { zones: { diagnosis: [], treatment: [], observation: [] }, counts: { diagnosis: 0, treatment: 0, observation: 0 }, stage: "diagnosis", loading: false, loaded: false },
   diagnosisModalId: "",
   benchmarks: { items: [], candidates: [], comparison: null, comparisonId: "", loading: false },
   mappings: [],
@@ -300,6 +312,48 @@ function canImprove() {
 
 function canViewHealth() {
   return hasPermission(getCurrentUser(), "links.health") || hasPermission(getCurrentUser(), "products.view");
+}
+
+function canOpenConnectionSection(section) {
+  if (section === "hospital") return canViewHealth();
+  if (["sales-relation-governance", "sales-data-quality-governance"].includes(section)) return canImportBusinessData();
+  if (section === "erp-usage-governance") return canManage();
+  if (section === "data-center") return isAdmin();
+  return CONNECTION_CENTER_SECTIONS.has(section);
+}
+
+function selectConnectionSection(section, { updateRoute = true } = {}) {
+  const normalized = canOpenConnectionSection(section) ? section : "cockpit";
+  pageState.section = normalized; pageState.selectedId = ""; pageState.coreDetail = null;
+  try { window.localStorage.setItem(connectionSectionStorageKey, normalized); } catch { /* Browser preferences are optional. */ }
+  if (updateRoute) {
+    const nextHash = connectionCenterSectionHash(normalized);
+    if (window.location.hash !== nextHash) window.history.replaceState(null, "", nextHash);
+  }
+  return normalized;
+}
+
+function ensureConnectionSectionLoaded(section, render) {
+  if (section === "cockpit" && !pageState.loadedSections.has("cockpit")) void loadBusinessCockpitPage(render);
+  if (section === "connections") {
+    if (!pageState.businessTable.loaded && !pageState.businessTable.loading) void loadLinkBusinessTablePage(render);
+    if (!pageState.linkDataStatus.loaded && !pageState.linkDataStatus.loading) void loadMyLinkDataStatus(render);
+  }
+  if (section === "my-links") {
+    if (!pageState.myLinkTable.loaded && !pageState.myLinkTable.loading) void loadMyLinks(render);
+    if (!pageState.linkDataStatus.loaded && !pageState.linkDataStatus.loading) void loadMyLinkDataStatus(render);
+  }
+  if (section === "hospital" && !pageState.hospital.loaded && !pageState.hospital.loading) void loadHospital(render);
+  if (section === "data-import") {
+    if (!pageState.salesDailyQuality.loaded && !pageState.salesDailyQuality.loading) void loadSalesDailyQualityPanel(render);
+    if (canImportBusinessData() && !pageState.loadedSections.has("data-import") && !pageState.foundation.loading) void loadDataFoundation(render);
+  }
+  if (section === "sales-relation-governance" && canImportBusinessData()
+    && !pageState.relationGovernance.loaded && !pageState.relationGovernance.loading) void loadSalesRelationGovernancePage(render, { page: 1 });
+  if (section === "sales-data-quality-governance" && canImportBusinessData()
+    && !pageState.salesDataQualityGovernance.loaded && !pageState.salesDataQualityGovernance.loading) void loadSalesDataQualityGovernancePage(render, { page: 1 });
+  if (section === "erp-usage-governance" && canManage()
+    && !pageState.erpUsageGovernance.loaded && !pageState.erpUsageGovernance.loading) void loadErpUsageGovernancePage(render, { page: 1 });
 }
 
 function connectionAnomalies(item) {
@@ -983,7 +1037,7 @@ export function renderConnectionCenterPage() {
 
 async function loadHospital(render) {
   pageState.hospital.loading = true; pageState.error = ""; render();
-  try { const result = await loadConnectionHospital(); pageState.hospital = { ...pageState.hospital, ...result, loading: false }; }
+  try { const result = await loadConnectionHospital(); pageState.hospital = { ...pageState.hospital, ...result, loading: false, loaded: true }; }
   catch (error) { pageState.error = error.message; pageState.hospital.loading = false; }
   render();
 }
@@ -1207,7 +1261,7 @@ async function loadErpUsageGovernancePage(render, overrides = {}) {
   try {
     const filters = { ...model.filters, ...overrides };
     const result = await loadErpSkuUsageGovernance({ ...filters, page: overrides.page || model.pagination.page || 1, pageSize: 30 });
-    pageState.erpUsageGovernance = { ...model, ...result, filters, loading: false, selected: model.selected };
+    pageState.erpUsageGovernance = { ...model, ...result, filters, loading: false, loaded: true, selected: model.selected };
   } catch (error) { pageState.error = error.message; model.loading = false; }
   render();
 }
@@ -1267,21 +1321,16 @@ export function bindConnectionCenterPageEvents(render) {
     pageState.ownerImport = { loading: false, result: null, showCompletion: false };
   }
   if (!pageState.loaded && !pageState.loading) void loadPage(render);
-  const routeHash = window.location.hash.replace(/^#/, ""); const hasDetailRoute = routeHash.startsWith("connectionCenter/");
-  const routeConnectionId = hasDetailRoute ? decodeURIComponent(routeHash.slice("connectionCenter/".length)) : "";
-  if (pageState.loaded && hasDetailRoute && pageState.selectedId !== routeConnectionId) void openConnection(routeConnectionId, render);
-  if (pageState.loaded && !hasDetailRoute && pageState.selectedId) { pageState.selectedId = ""; pageState.coreDetail = null; render(); return; }
+  const route = parseConnectionCenterRoute(window.location.hash); const hasDetailRoute = Boolean(route.detailId);
+  if (pageState.loaded && hasDetailRoute && pageState.selectedId !== route.detailId) void openConnection(route.detailId, render);
+  if (!hasDetailRoute) {
+    const previousSection = pageState.section; const hadDetail = Boolean(pageState.selectedId);
+    const selectedSection = selectConnectionSection(route.section || pageState.section, { updateRoute: true });
+    if (previousSection !== selectedSection || hadDetail) { render(); return; }
+    if (pageState.loaded) ensureConnectionSectionLoaded(selectedSection, render);
+  }
   root.querySelectorAll("[data-connection-section]").forEach((button) => button.addEventListener("click", () => {
-    pageState.section = button.dataset.connectionSection; pageState.selectedId = ""; render();
-    if (pageState.section === "cockpit") void loadBusinessCockpitPage(render);
-    if (pageState.section === "connections") void loadLinkBusinessTablePage(render);
-    if (["connections", "data-import"].includes(pageState.section) && !pageState.linkDataStatus.loaded) void loadMyLinkDataStatus(render);
-    if (pageState.section === "my-links") { if (!pageState.myWorkbench.loaded) void loadMyLinks(render); if (!pageState.linkDataStatus.loaded) void loadMyLinkDataStatus(render); }
-    if (pageState.section === "hospital") void loadHospital(render);
-    if (pageState.section === "data-import") { if (!pageState.salesDailyQuality.loaded) void loadSalesDailyQualityPanel(render); if (canImportBusinessData()) void loadDataFoundation(render); }
-    if (pageState.section === "sales-relation-governance" && canImportBusinessData()) void loadSalesRelationGovernancePage(render, { page: 1 });
-    if (pageState.section === "sales-data-quality-governance" && canImportBusinessData()) void loadSalesDataQualityGovernancePage(render, { page: 1 });
-    if (pageState.section === "erp-usage-governance" && canManage()) void loadErpUsageGovernancePage(render, { page: 1 });
+    const section = selectConnectionSection(button.dataset.connectionSection); render(); ensureConnectionSectionLoaded(section, render);
   }));
   root.querySelector("[data-relation-governance-filters]")?.addEventListener("submit", (event) => {
     event.preventDefault(); void loadSalesRelationGovernancePage(render, { ...Object.fromEntries(new FormData(event.currentTarget)), page: 1 });
@@ -1320,7 +1369,7 @@ export function bindConnectionCenterPageEvents(render) {
   });
   root.querySelector("[data-enter-relation-review]")?.addEventListener("click", async () => {
     const selected = pageState.relationGovernance.selected; if (!selected) return;
-    pageState.section = "data-import"; pageState.selectedId = ""; render();
+    selectConnectionSection("data-import"); render();
     await loadDataFoundation(render);
     try {
       if (selected.governanceType === "single") pageState.relationCandidates.selected = await loadSalesRelationCandidateDetail(selected.reviewTarget.id);
@@ -1448,18 +1497,13 @@ export function bindConnectionCenterPageEvents(render) {
     if (pageState.dataCenterTab === "data-foundation") void loadDataFoundation(render);
   }));
   root.querySelectorAll("[data-workbench-go]").forEach((button) => button.addEventListener("click", () => {
-    pageState.section = button.dataset.workbenchGo; pageState.selectedId = ""; render();
-    if (pageState.section === "my-links") { if (!pageState.myWorkbench.loaded) void loadMyLinks(render, "all"); if (!pageState.linkDataStatus.loaded) void loadMyLinkDataStatus(render); }
-    if (pageState.section === "hospital") void loadHospital(render);
-    if (pageState.section === "sales-relation-governance" && canImportBusinessData()) void loadSalesRelationGovernancePage(render, { page: 1 });
-    if (pageState.section === "sales-data-quality-governance" && canImportBusinessData()) void loadSalesDataQualityGovernancePage(render, { page: 1 });
-    if (pageState.section === "data-import" && canImportBusinessData()) void loadDataFoundation(render);
+    const section = selectConnectionSection(button.dataset.workbenchGo); render(); ensureConnectionSectionLoaded(section, render);
   }));
   root.querySelectorAll("[data-workbench-my-filter]").forEach((button) => button.addEventListener("click", () => {
-    pageState.section = "my-links"; pageState.selectedId = ""; void loadMyLinks(render, button.dataset.workbenchMyFilter); if (!pageState.linkDataStatus.loaded) void loadMyLinkDataStatus(render);
+    selectConnectionSection("my-links"); void loadMyLinks(render, button.dataset.workbenchMyFilter); if (!pageState.linkDataStatus.loaded) void loadMyLinkDataStatus(render);
   }));
   root.querySelectorAll("[data-workbench-hospital]").forEach((button) => button.addEventListener("click", () => {
-    pageState.section = "hospital"; pageState.hospital.stage = button.dataset.workbenchHospital; pageState.selectedId = ""; void loadHospital(render);
+    selectConnectionSection("hospital"); pageState.hospital.stage = button.dataset.workbenchHospital; void loadHospital(render);
   }));
   root.querySelectorAll("[data-hospital-stage]").forEach((button) => button.addEventListener("click", () => { pageState.hospital.stage = button.dataset.hospitalStage; render(); }));
   root.querySelectorAll("[data-hospital-diagnose]").forEach((button) => button.addEventListener("click", () => {
@@ -1480,7 +1524,7 @@ export function bindConnectionCenterPageEvents(render) {
   root.querySelector("[data-diagnosis-confirm-form]")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const connectionId = pageState.diagnosisModalId;
     try { await joinConnectionDiagnosis(connectionId, Object.fromEntries(new FormData(event.currentTarget))); pageState.diagnosisModalId = ""; await loadHospital(render);
-      pageState.section = "hospital"; pageState.hospital.stage = "diagnosis"; pageState.selectedId = ""; render(); }
+      selectConnectionSection("hospital"); pageState.hospital.stage = "diagnosis"; render(); }
     catch (error) { pageState.error = error.message; render(); }
   });
   root.querySelectorAll("[data-my-link-filter]").forEach((button) => button.addEventListener("click", () => { void loadMyLinks(render, button.dataset.myLinkFilter); }));
@@ -1539,8 +1583,8 @@ export function bindConnectionCenterPageEvents(render) {
     try { await updateConnectionFollow(button.dataset.toggleConnectionFollow, button.dataset.followed !== "true"); await loadMyLinks(render); }
     catch (error) { pageState.error = error.message; render(); }
   }));
-  root.querySelectorAll("[data-open-pending-connections]").forEach((button) => button.addEventListener("click", () => { pageState.section = "data-center"; pageState.dataCenterTab = "pending-connections"; pageState.selectedId = ""; void loadPendingConnections(render); }));
-  root.querySelector("[data-open-business-import]")?.addEventListener("click", () => { pageState.section = "data-import"; pageState.selectedId = ""; void loadDataFoundation(render); });
+  root.querySelectorAll("[data-open-pending-connections]").forEach((button) => button.addEventListener("click", () => { selectConnectionSection("data-center"); pageState.dataCenterTab = "pending-connections"; void loadPendingConnections(render); }));
+  root.querySelector("[data-open-business-import]")?.addEventListener("click", () => { selectConnectionSection("data-import"); void loadDataFoundation(render); });
   root.querySelector("[data-connection-owner-import-form]")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const form = new FormData(event.currentTarget);
     pageState.ownerImport.loading = true; pageState.error = ""; render();
@@ -1572,7 +1616,7 @@ export function bindConnectionCenterPageEvents(render) {
     catch (error) { pageState.error = error.message; render(); }
   });
   root.querySelector("[data-view-owner-import-result]")?.addEventListener("click", () => { pageState.ownerImport.showCompletion = false; render(); });
-  root.querySelector("[data-return-connection-center]")?.addEventListener("click", () => { pageState.section = "cockpit"; pageState.ownerImport.showCompletion = false; render(); });
+  root.querySelector("[data-return-connection-center]")?.addEventListener("click", () => { selectConnectionSection("cockpit"); pageState.ownerImport.showCompletion = false; render(); });
   root.querySelector("[data-continue-owner-import]")?.addEventListener("click", () => { pageState.ownerImport = { loading: false, result: null, showCompletion: false }; render(); });
   root.querySelector("[data-open-admin-data-center]")?.addEventListener("click", () => { window.location.hash = "dataCenter"; });
   root.querySelector("[data-cancel-owner-import]")?.addEventListener("click", async (event) => {
@@ -1620,7 +1664,7 @@ export function bindConnectionCenterPageEvents(render) {
     element.addEventListener("click", open);
     element.addEventListener("keydown", (event) => { if (["Enter", " "].includes(event.key)) open(); });
   });
-  root.querySelector('[data-action="back-connections"]')?.addEventListener("click", () => { pageState.selectedId = ""; window.location.hash = "connectionCenter"; render(); });
+  root.querySelector('[data-action="back-connections"]')?.addEventListener("click", () => { selectConnectionSection("connections"); render(); });
   root.querySelector("[data-connection-profile-form]")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
@@ -1708,7 +1752,7 @@ export function bindConnectionCenterPageEvents(render) {
     try { const result = await updateConnectionDataMapping(button.dataset.ignoreMapping, { matchStatus: "ignored" }); pageState.mappings = pageState.mappings.map((item) => item.id === result.item.id ? result.item : item).filter((item) => pageState.mappingFilters.matchStatus !== "pending" || item.matchStatus === "pending"); render(); }
     catch (error) { pageState.error = error.message; render(); }
   }));
-  root.querySelectorAll("[data-view-mapping-connection]").forEach((button) => button.addEventListener("click", () => { pageState.section = "connections"; void openConnection(button.dataset.viewMappingConnection, render); }));
+  root.querySelectorAll("[data-view-mapping-connection]").forEach((button) => button.addEventListener("click", () => { selectConnectionSection("connections"); void openConnection(button.dataset.viewMappingConnection, render); }));
   root.querySelectorAll('[data-action="close-mapping-modal"]').forEach((element) => element.addEventListener("click", (event) => { if (event.target.closest("[data-mapping-modal]") && !event.target.matches('[data-action="close-mapping-modal"]')) return; pageState.mappingModalId = ""; render(); }));
   root.querySelector("[data-confirm-mapping-form]")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const form = new FormData(event.currentTarget);

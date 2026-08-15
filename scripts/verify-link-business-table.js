@@ -3,12 +3,13 @@ import { performance } from "node:perf_hooks";
 
 if (!process.env.WUFAN_DB_PATH) throw new Error("请通过 WUFAN_DB_PATH 指定隔离数据库。");
 
-const [{ LINK_BUSINESS_FIELDS, queryLinkBusinessTable }, { getDatabase }, businessTableModule, indicatorSettingModule] = await Promise.all([
+const [{ LINK_BUSINESS_FIELDS, queryLinkBusinessTable }, { getDatabase }, businessTableModule, indicatorSettingModule, routeModule] = await Promise.all([
   import("../server/linkBusinessTableService.js"), import("../server/db.js"), import("../src/uiModules/linkBusinessTable.js"),
-  import("../src/uiModules/linkIndicatorSetting.js"),
+  import("../src/uiModules/linkIndicatorSetting.js"), import("../src/utils/connectionCenterRoute.js"),
 ]);
 const { LINK_BUSINESS_COLUMN_GROUPS, LINK_BUSINESS_COLUMNS, renderLinkBusinessTable } = businessTableModule;
 const { reorderVisibleLinkBusinessField, renderLinkIndicatorSetting } = indicatorSettingModule;
+const { connectionCenterSectionHash, parseConnectionCenterRoute } = routeModule;
 
 const platformImportFields = ["url", "category", "platformStatus", "periodStart", "periodEnd", "statisticsDate", "productType",
   "productStatus", "productTags", "payAmount", "payQuantity", "payBuyerCount", "refundAmount", "viewCount", "visitorCount",
@@ -36,6 +37,10 @@ assert.ok(indicatorHtml.indexOf('data-selected-link-business-field="salesAmount"
   < indicatorHtml.indexOf('data-selected-link-business-field="name"'));
 assert.match(indicatorHtml, /draggable="true" data-selected-link-business-field="salesAmount"/);
 assert.doesNotMatch(indicatorHtml, /data-move-link-business-field/);
+assert.deepEqual(parseConnectionCenterRoute("#connectionCenter/connections"), { section: "connections", detailId: "" });
+assert.deepEqual(parseConnectionCenterRoute("#connectionCenter/data_update"), { section: "data-import", detailId: "" });
+assert.deepEqual(parseConnectionCenterRoute("#connectionCenter/link%2Fdetail"), { section: "", detailId: "link/detail" });
+assert.equal(connectionCenterSectionHash("sales-data-quality-governance"), "#connectionCenter/sales-data-quality-governance");
 
 const database = getDatabase();
 const before = {
