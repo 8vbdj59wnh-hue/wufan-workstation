@@ -10450,6 +10450,13 @@ button.content-template-thumb {
 .product-zone-badge.is-new { background: #eef4ff; color: #315aa8; }.product-zone-badge.is-hit { background: #fff1e8; color: #b54708; }.product-zone-badge.is-active { background: #ecfdf3; color: #027a48; }.product-zone-badge.is-clearance { background: #fff1f3; color: #c01048; }
 .my-links-workbench { display: grid; gap: 16px; }.my-links-workbench > header h2, .my-links-workbench > header p { margin: 0; }.my-links-workbench > header > div > p:last-child { margin-top: 5px; color: #667085; }
 .company-links-workspace, .link-data-update-workspace, .link-workspace-stack, .link-hospital-overview-module { display: grid; gap: 16px; }
+.sales-daily-quality > footer { align-items: flex-start; flex-wrap: wrap; }
+.sales-daily-governance-entry { margin-left: auto; }
+.sales-daily-governance-entry summary { display: inline-flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid #f0c36a; border-radius: 9px; background: #fffbeb; color: #92400e; font-size: 12px; font-weight: 700; cursor: pointer; list-style: none; }
+.sales-daily-governance-entry summary::-webkit-details-marker { display: none; }
+.sales-daily-governance-entry summary strong { min-width: 22px; padding: 2px 6px; border-radius: 999px; background: #fef3c7; color: #92400e; text-align: center; }
+.sales-daily-governance-entry > div { display: flex; justify-content: flex-end; gap: 8px; padding-top: 8px; }
+.sales-daily-governance-entry .text-button { white-space: nowrap; }
 .sales-relation-governance { display: grid; gap: 16px; }
 .relation-governance-type-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .relation-governance-type-grid button { display: grid; gap: 5px; padding: 14px; border: 1px solid #e4e7ec; border-radius: 13px; background: #fff; color: #475467; text-align: left; cursor: pointer; }
