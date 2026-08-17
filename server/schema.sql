@@ -1595,8 +1595,7 @@ CREATE TRIGGER IF NOT EXISTS trg_connection_goal_templates_no_delete
     SELECT RAISE(ABORT, '目标模板不可直接删除，请停用或创建新版本');
   END;
 
-DROP TRIGGER IF EXISTS trg_connection_goal_template_metrics_weight_limit_insert;
-CREATE TRIGGER trg_connection_goal_template_metrics_weight_limit_insert
+CREATE TRIGGER IF NOT EXISTS trg_connection_goal_template_metrics_weight_limit_insert
   BEFORE INSERT ON connection_goal_template_metrics
   WHEN NOT EXISTS (
     SELECT 1 FROM connection_goal_template_metrics
