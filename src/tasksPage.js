@@ -1498,7 +1498,11 @@ function getFilteredTasks() {
   const templateCodeSearch = identifierTarget === null
     ? buildTemplateBusinessCodeSearchIndex(keyword)
     : null;
-  return state.tasks
+  const pageTaskIds = new Set((taskListResult.items ?? []).map((task) => task.id));
+  const listTasks = taskListLoaded
+    ? state.tasks.filter((task) => pageTaskIds.has(task.id))
+    : state.tasks;
+  return listTasks
     .filter((task) => !isClearanceTask(task))
     .filter((task) => templateCodeSearch !== null || isTaskVisibleInExecutionStage(task))
     .filter((task) => identifierTarget !== null || templateCodeSearch !== null || matchesTaskListView(task))

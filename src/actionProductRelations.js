@@ -14,6 +14,7 @@ let indexedActionProductCount = -1;
 let indexedProductCount = -1;
 let indexedTaskProductContexts = null;
 let indexedTaskProductContextCount = -1;
+let indexedTaskProductContextSignature = "";
 let productIdsByActionId = new Map();
 let productsById = new Map();
 let taskProductsByContextId = new Map();
@@ -40,9 +41,17 @@ function ensureProductRelationIndexes() {
     indexedProductCount = state.products.length;
     productsById = new Map(state.products.map((product) => [product.id, product]));
   }
-  if (indexedTaskProductContexts !== state.taskProductContexts || indexedTaskProductContextCount !== state.taskProductContexts.length) {
+  const taskProductContextSignature = (state.taskProductContexts ?? [])
+    .map((item) => [item.contextId, item.productId, item.erpSkuId, item.productImage, item.erpSkuImage].join("|"))
+    .join("\n");
+  if (
+    indexedTaskProductContexts !== state.taskProductContexts
+    || indexedTaskProductContextCount !== state.taskProductContexts.length
+    || indexedTaskProductContextSignature !== taskProductContextSignature
+  ) {
     indexedTaskProductContexts = state.taskProductContexts;
     indexedTaskProductContextCount = state.taskProductContexts.length;
+    indexedTaskProductContextSignature = taskProductContextSignature;
     taskProductsByContextId = new Map();
     for (const context of state.taskProductContexts ?? []) {
       const rows = taskProductsByContextId.get(context.contextId) ?? [];

@@ -386,10 +386,16 @@ export async function loadTaskCenterTaskDetail(taskId) {
   taskIndex.set(data.task.id, data.task);
   replaceArray(state.tasks, [...taskIndex.values()]);
   const mergeById = (target, incoming) => replaceArray(target, [...new Map([...target, ...incoming].map((item) => [item.id, item])).values()]);
+  const mergeTaskProductContexts = (target, incoming) => replaceArray(target, [...new Map(
+    [...target, ...incoming].map((item) => [
+      `${item.contextId || ""}|${item.productId || ""}|${item.erpSkuId || ""}`,
+      item,
+    ]),
+  ).values()]);
   mergeById(state.processInstances, data.context?.processInstances ?? []);
   mergeById(state.workPlans, data.context?.workPlans ?? []);
   mergeById(state.templates, data.context?.templates ?? []);
-  mergeById(state.taskProductContexts, data.context?.taskProductContexts ?? []);
+  mergeTaskProductContexts(state.taskProductContexts, data.context?.taskProductContexts ?? []);
   mergeById(state.taskWaves, data.context?.taskWaves ?? []);
   return data.task;
 }
