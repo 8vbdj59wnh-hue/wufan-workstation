@@ -467,7 +467,11 @@ function getTaskCustomFields(task) {
 
 function getTaskCoverImage(task) {
   const instance = getTaskProcessInstance(task);
-  return getPrimaryImageUrl(task, instance);
+  const directImage = getPrimaryImageUrl(task, instance);
+  if (directImage !== "") return directImage;
+  const contextId = instance?.id || task.id;
+  const product = getTaskContextProducts(contextId)[0];
+  return product?.productImage || product?.erpSkuImage || product?.mainImage || "";
 }
 
 function getSortedFormFields(template) {

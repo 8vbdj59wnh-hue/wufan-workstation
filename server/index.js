@@ -1527,6 +1527,13 @@ app.get("/api/task-center/tasks", (request, response) => {
     const processInstanceIds = new Set(pageItems.map((item) => item.processInstanceId).filter(Boolean));
     const workPlans = readResource("workPlans").filter((item) => processInstanceIds.has(item.processInstanceId));
     const processInstances = data.processInstances.filter((item) => processInstanceIds.has(item.id));
+    const actionProducts = readResource("actionProducts").filter((item) => processInstanceIds.has(item.actionId));
+    const taskProductContexts = readTaskProductContexts({
+      tasks: pageItems,
+      processInstances,
+      workPlans,
+      actionProducts,
+    });
     const waveItems = readTaskWavesForTaskIds(pageItems.map((item) => item.id));
     const elapsed = performance.now() - startedAt;
     response.set("Server-Timing", `task-list;dur=${elapsed.toFixed(1)}`);
@@ -1537,7 +1544,7 @@ app.get("/api/task-center/tasks", (request, response) => {
       total,
       totalPages: Math.max(1, Math.ceil(total / pageSize)),
       items: pageItems.map(createTaskListSummary),
-      context: { processInstances, workPlans, taskWaves: waveItems },
+      context: { processInstances, workPlans, taskProductContexts, taskWaves: waveItems },
     });
   } catch (error) {
     console.error("任务中心分页读取失败", error);
@@ -1564,8 +1571,15 @@ app.get("/api/task-center/tasks/:id/detail", (request, response) => {
     const workPlans = task.processInstanceId
       ? readResource("workPlans").filter((item) => item.processInstanceId === task.processInstanceId || item.id === processInstances[0]?.workPlanId)
       : [];
-    const contextSnapshot = { tasks: processTasks, processInstances, workPlans, actionProducts: readResource("actionProducts") };
-    response.json({ success: true, task, context: { processTasks, processInstances, workPlans, taskProductContexts: readTaskProductContexts(contextSnapshot), taskWaves: readTaskWavesForTaskIds([task.id]) } });
+    const processInstanceIds = new Set(processInstances.map((item) => item.id));
+    const actionProducts = readResource("actionProducts").filter((item) => processInstanceIds.has(item.actionId));
+    const contextSnapshot = { tasks: processTasks, processInstances, workPlans, actionProducts };
+    const linkedTemplateIds = new Set([...processInstances, ...workPlans].flatMap((item) => {
+      const ids = item?.customFields?.linkedTemplateIds;
+      return Array.isArray(ids) ? ids : [];
+    }));
+    const templates = readResource("templates").filter((item) => linkedTemplateIds.has(item.id));
+    response.json({ success: true, task, context: { processTasks, processInstances, workPlans, templates, taskProductContexts: readTaskProductContexts(contextSnapshot), taskWaves: readTaskWavesForTaskIds([task.id]) } });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "任务详情读取失败。" });
   }
