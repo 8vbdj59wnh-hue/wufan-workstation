@@ -1368,6 +1368,108 @@ export async function loadConnectionCoreDetail(connectionId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/core-detail`), "链接经营详情读取失败。");
 }
 
+export async function loadConnectionBusinessPositioning(connectionId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/business-positioning`), "链接经营定位读取失败。");
+}
+
+export async function updateConnectionBusinessPositioning(connectionId, input) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/business-positioning`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }), "链接经营定位修改失败。");
+}
+
+export async function loadConnectionBusinessGoals(connectionId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/business-goals`), "链接经营目标读取失败。");
+}
+
+export async function loadConnectionBusinessGoalEvaluation(connectionId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/business-goal-evaluation`), "经营目标评价读取失败。");
+}
+
+export async function loadConnectionGoalWorkbench(filters = {}) {
+  const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== "" && value !== null && value !== undefined));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-goal-workbench?${query}`), "链接经营管理工作台读取失败。");
+}
+
+export async function loadConnectionGoalHealthSummary() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-goal-health-summary`), "链接经营健康度读取失败。");
+}
+
+export async function loadConnectionGoalPilotBatches(filters = {}) {
+  const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== "" && value !== null && value !== undefined));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-goal-pilots?${query}`), "经营试点批次读取失败。");
+}
+
+export async function createConnectionGoalPilotBatch(input) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-goal-pilots`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
+  }), "经营试点批次创建失败。");
+}
+
+export async function updateConnectionGoalPilotBatch(batchId, input) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-goal-pilots/${encodeURIComponent(batchId)}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
+  }), "经营试点批次推进失败。");
+}
+
+export async function loadConnectionGoalPilotCandidates(batchId, filters = {}) {
+  const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== "" && value !== null && value !== undefined));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-goal-pilots/${encodeURIComponent(batchId)}/candidates?${query}`), "试点候选链接读取失败。");
+}
+
+export async function addConnectionGoalPilotLinks(batchId, connectionIds) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-goal-pilots/${encodeURIComponent(batchId)}/links`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ connectionIds }),
+  }), "试点候选链接加入失败。");
+}
+
+export async function loadConnectionGoalPilotMembers(batchId, filters = {}) {
+  const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== "" && value !== null && value !== undefined));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-goal-pilots/${encodeURIComponent(batchId)}/links?${query}`), "试点链接读取失败。");
+}
+
+export async function excludeConnectionGoalPilotMember(batchId, memberId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-goal-pilots/${encodeURIComponent(batchId)}/links/${encodeURIComponent(memberId)}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "excluded" }),
+  }), "试点链接排除失败。");
+}
+
+async function postConnectionGoalPilotMember(batchId, memberId, action, input = {}) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-goal-pilots/${encodeURIComponent(batchId)}/links/${encodeURIComponent(memberId)}/${action}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
+  }), "试点链接操作失败。");
+}
+
+export function confirmConnectionGoalPilotPositioning(batchId, memberId, input) { return postConnectionGoalPilotMember(batchId, memberId, "positioning", input); }
+export function createConnectionGoalPilotSuggestion(batchId, memberId) { return postConnectionGoalPilotMember(batchId, memberId, "suggestion"); }
+export function confirmConnectionGoalPilotTarget(batchId, memberId, input) { return postConnectionGoalPilotMember(batchId, memberId, "confirm", input); }
+
+async function postConnectionGoalWorkbench(path, input) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-goal-workbench/${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }), "链接经营管理批量操作失败。");
+}
+
+export function batchSetConnectionGoalPositioning(input) { return postConnectionGoalWorkbench("positioning", input); }
+export function batchGenerateConnectionGoalSuggestions(input) { return postConnectionGoalWorkbench("suggestions", input); }
+export function batchConfirmConnectionGoals(input) { return postConnectionGoalWorkbench("confirm", input); }
+
+export async function createConnectionBusinessGoalSuggestion(connectionId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/business-goals/suggest`, { method: "POST" }), "经营目标建议生成失败。");
+}
+
+export async function confirmConnectionBusinessGoal(connectionId, planId, input) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/business-goals/${encodeURIComponent(planId)}/confirm`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }), "经营目标确认失败。");
+}
+
 export async function loadConnectionDailySales(connectionId, range = {}) {
   const query = new URLSearchParams();
   if (range.startDate) query.set("startDate", range.startDate);

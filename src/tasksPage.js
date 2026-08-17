@@ -1309,6 +1309,13 @@ function matchesTaskStatusFilter(task, selectedStatus) {
   return getTaskBusinessStatus(task).status === selectedStatus;
 }
 
+function matchesTaskSourceFilter(task, selectedSource) {
+  if (selectedSource === "") return true;
+  if (selectedSource === TaskSource.Process) return task.source === TaskSource.Process;
+  if (selectedSource === TaskSource.Direct) return task.source !== TaskSource.Process;
+  return task.source === selectedSource;
+}
+
 function getLinkedTemplateIds(item) {
   const linkedTemplateIds = item?.customFields?.linkedTemplateIds;
   return Array.isArray(linkedTemplateIds)
@@ -1396,7 +1403,7 @@ function matchesFilters(task, identifierTarget = null, isTemplateCodeSearch = fa
     filters.keyword !== "" &&
     !searchableText.includes(filters.keyword.toLowerCase())
   ) return false;
-  if (filters.source !== "" && task.source !== filters.source) return false;
+  if (!matchesTaskSourceFilter(task, filters.source)) return false;
   if (filters.departmentId !== "" && task.departmentId !== filters.departmentId) return false;
   if (filters.ownerId !== "" && task.ownerId !== filters.ownerId) return false;
   if (filters.executorId !== "" && getTaskExecutorId(task) !== filters.executorId) return false;
@@ -1427,14 +1434,20 @@ function isTaskOverdueForView(task) {
 function matchesTaskListView(task) {
   if (taskListView === "all") return true;
 
+  const shouldShowDone = filters.showDone || filters.status === TaskStatus.Done;
+  const shouldShowCanceled = filters.showCanceled || filters.status === TaskStatus.Canceled;
+  if (isDoneStatus(task.status) && !shouldShowDone) return false;
+  if (isCanceledStatus(task.status) && !shouldShowCanceled) return false;
+
   if (taskListView === "today") {
-    return isUnfinishedTask(task) && (isTaskDueToday(task) || isTaskInProgressToday(task));
+    const terminalDate = getBusinessDatePart(task.completedAt ?? task.updatedAt);
+    return isTaskDueToday(task) || isTaskInProgressToday(task) || terminalDate === today;
   }
 
   if (taskListView === "mine") {
     const currentUser = getCurrentUser();
     const currentPersonId = currentUser?.personId ?? currentUser?.id ?? "";
-    return currentPersonId !== "" && isUnfinishedTask(task) && getTaskExecutorId(task) === currentPersonId;
+    return currentPersonId !== "" && getTaskExecutorId(task) === currentPersonId;
   }
 
   if (taskListView === "overdue") {
@@ -1502,6 +1515,7 @@ function getFilteredTasks() {
   const listTasks = taskListLoaded
     ? state.tasks.filter((task) => pageTaskIds.has(task.id))
     : state.tasks;
+  if (taskListLoaded) return listTasks.filter((task) => !isClearanceTask(task));
   return listTasks
     .filter((task) => !isClearanceTask(task))
     .filter((task) => templateCodeSearch !== null || isTaskVisibleInExecutionStage(task))
@@ -3066,8 +3080,16 @@ function canRestoreTask(task) {
 }
 
 function renderFilters() {
-  filters = { ...filters, source: "", goalId: "", categoryId: "" };
-  if (taskListView === "overdue" && filters.overdue !== "") filters = { ...filters, overdue: "" };
+  filters = { ...filters, goalId: "", categoryId: "" };
+  if (taskListView === "overdue") {
+    filters = {
+      ...filters,
+      overdue: "",
+      status: [TaskStatus.Done, TaskStatus.Canceled].includes(filters.status) ? "" : filters.status,
+      showDone: false,
+      showCanceled: false,
+    };
+  }
   const peopleFilters = `
     <label>
       <span>负责部门</span>
@@ -3122,6 +3144,7 @@ function renderFilters() {
         <select name="status">
           <option value="">全部状态</option>
           ${taskStatusFilterOptions
+            .filter((option) => taskListView !== "overdue" || ![TaskStatus.Done, TaskStatus.Canceled].includes(option.value))
             .map(
               (option) => `
                 <option value="${option.value}" ${filters.status === option.value ? "selected" : ""}>
@@ -3132,9 +3155,17 @@ function renderFilters() {
             .join("")}
         </select>
       </label>
+      <label>
+        <span>任务类型</span>
+        <select name="source">
+          <option value="">全部类型</option>
+          <option value="${TaskSource.Direct}" ${filters.source === TaskSource.Direct ? "selected" : ""}>普通任务</option>
+          <option value="${TaskSource.Process}" ${filters.source === TaskSource.Process ? "selected" : ""}>改善行动任务</option>
+        </select>
+      </label>
       ${taskListView === "overdue" ? "" : overdueFilter}
       ${peopleFilters}
-      ${filterOptions}
+      ${taskListView === "overdue" ? "" : filterOptions}
     </form>
   `;
 }

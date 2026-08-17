@@ -126,6 +126,7 @@ import {
   readConnectionBulkPlatformImport,
   resumeConnectionBulkPlatformImports,
 } from "./connectionBulkPlatformImportService.js";
+import { normalizeUploadedFileName } from "./uploadFileName.js";
 import {
   createConnectionAction,
   createConnectionDataMapping,
@@ -187,6 +188,28 @@ import {
   previewConnectionDataImport,
 } from "./connectionDataFoundationService.js";
 import { getConnectionCoreDetail, listConnectionCoreProfiles, listConnectionCoreProfilesPage } from "./connectionCorePageService.js";
+import { readConnectionGoalFoundation, setConnectionBusinessPositioning } from "./connectionGoalFoundationService.js";
+import { confirmConnectionGoalPlan, createConnectionGoalSuggestion, readConnectionGoalPlans } from "./connectionGoalPlanService.js";
+import { evaluateConnectionGoal } from "./connectionGoalEvaluationService.js";
+import {
+  batchConfirmConnectionGoals,
+  batchGenerateConnectionGoalSuggestions,
+  batchSetConnectionPositioning,
+  readConnectionGoalWorkbench,
+} from "./connectionGoalWorkbenchService.js";
+import { readConnectionGoalCockpitSummary } from "./connectionGoalCockpitService.js";
+import {
+  addConnectionGoalPilotLinks,
+  confirmConnectionGoalPilotPositioning,
+  confirmConnectionGoalPilotTarget,
+  createConnectionGoalPilotBatch,
+  createConnectionGoalPilotSuggestion,
+  readConnectionGoalPilotBatches,
+  readConnectionGoalPilotCandidates,
+  readConnectionGoalPilotMembers,
+  updateConnectionGoalPilotBatch,
+  updateConnectionGoalPilotMember,
+} from "./connectionGoalPilotService.js";
 import { queryLinkDataTable } from "./linkDataTableService.js";
 import { queryLinkBusinessTable } from "./linkBusinessTableService.js";
 import { getLinkSalesDistribution } from "./linkSalesDistributionService.js";
@@ -347,13 +370,6 @@ fs.mkdirSync(imageUploadsDir, { recursive: true });
 fs.mkdirSync(fileUploadsDir, { recursive: true });
 fs.mkdirSync(standardWorkAttachmentsDir, { recursive: true });
 fs.mkdirSync(productImportUploadsDir, { recursive: true });
-
-function normalizeUploadedFileName(name = "") {
-  const decoded = Buffer.from(name, "latin1").toString("utf8");
-  const originalHasCjk = /[\u3400-\u9fff]/.test(name);
-  const decodedHasCjk = /[\u3400-\u9fff]/.test(decoded);
-  return !originalHasCjk && decodedHasCjk ? decoded : name;
-}
 
 const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 const imageStorage = multer.diskStorage({
@@ -1410,9 +1426,47 @@ function isTaskListCanceled(task) {
   return ["canceled", "cancelled"].includes(String(task?.status ?? ""));
 }
 
-function isTaskListOverdue(task, today = new Date().toISOString().slice(0, 10)) {
-  const dueDate = String(task?.dueDate ?? "").slice(0, 10);
+function isTaskListOverdue(task, today = getTaskListBusinessDate()) {
+  const dueDate = getTaskListDatePart(task?.dueDate);
   return dueDate !== "" && dueDate < today && !isTaskListDone(task) && !isTaskListCanceled(task);
+}
+
+function getTaskListDatePart(value) {
+  const normalizedValue = String(value ?? "").trim();
+  if (normalizedValue === "") return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalizedValue)) return normalizedValue;
+  const parsed = new Date(normalizedValue);
+  if (Number.isNaN(parsed.getTime())) return normalizedValue.slice(0, 10);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(parsed);
+}
+
+function getTaskListBusinessDate() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function matchesTaskListSourceFilter(task, source) {
+  const normalizedSource = String(source ?? "").trim();
+  if (normalizedSource === "") return true;
+  if (normalizedSource === "process") return task.source === "process";
+  if (["direct", "normal", "manual"].includes(normalizedSource)) return task.source !== "process";
+  return task.source === normalizedSource;
+}
+
+function getLinkedTaskTemplateIds(item) {
+  const linkedTemplateIds = item?.customFields?.linkedTemplateIds;
+  return Array.isArray(linkedTemplateIds)
+    ? linkedTemplateIds.map((id) => String(id ?? "").trim()).filter(Boolean)
+    : [];
 }
 
 function createTaskListSummary(task) {
@@ -1478,9 +1532,15 @@ app.get("/api/task-center/tasks", (request, response) => {
       processInstances: readResource("processInstances"),
       processTemplateNodes: readResource("processTemplateNodes"),
       taskTemplates: readResource("taskTemplates"),
+      goals: keyword === "" ? [] : readResource("goals"),
+      departments: keyword === "" ? [] : readResource("departments"),
+      people: keyword === "" ? [] : readResource("people"),
     };
     const taskTemplateById = new Map(data.taskTemplates.map((item) => [item.id, item]));
     const processInstanceById = new Map(data.processInstances.map((item) => [item.id, item]));
+    const goalById = new Map(data.goals.map((item) => [item.id, item]));
+    const departmentById = new Map(data.departments.map((item) => [item.id, item]));
+    const personById = new Map(data.people.map((item) => [item.id, item]));
     const isClearanceTask = (task) => {
       if (task.source === "clearance") return true;
       const instance = processInstanceById.get(task.processInstanceId);
@@ -1492,27 +1552,87 @@ app.get("/api/task-center/tasks", (request, response) => {
         .some((value) => String(value).includes("库存清仓"));
     };
     const actorId = String(request.user?.personId ?? request.user?.id ?? "");
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getTaskListBusinessDate();
+    const matchedTaskId = keyword === "" ? null : data.tasks.find(
+      (task) => String(task.businessCode ?? "").trim().toLowerCase() === keyword,
+    )?.id ?? null;
+    const matchedProcessInstanceId = keyword === "" ? null : data.processInstances.find(
+      (instance) => String(instance.businessCode ?? "").trim().toLowerCase() === keyword,
+    )?.id ?? null;
+    let searchWorkPlans = null;
+    const matchedVisualTemplateIds = new Set();
+    const matchedVisualTemplateProcessInstanceIds = new Set();
+    if (keyword.startsWith("mb-")) {
+      readResource("templates").forEach((template) => {
+        if (String(template.businessCode ?? "").trim().toLowerCase().includes(keyword)) matchedVisualTemplateIds.add(template.id);
+      });
+      if (matchedVisualTemplateIds.size > 0) {
+        searchWorkPlans = readResource("workPlans");
+        const workPlanByProcessInstanceId = new Map(
+          searchWorkPlans
+            .filter((workPlan) => String(workPlan.processInstanceId ?? "").trim() !== "")
+            .map((workPlan) => [workPlan.processInstanceId, workPlan]),
+        );
+        data.processInstances.forEach((instance) => {
+          const linkedTemplateIds = new Set([
+            ...getLinkedTaskTemplateIds(instance),
+            ...getLinkedTaskTemplateIds(workPlanByProcessInstanceId.get(instance.id)),
+          ]);
+          if ([...linkedTemplateIds].some((templateId) => matchedVisualTemplateIds.has(templateId))) {
+            matchedVisualTemplateProcessInstanceIds.add(instance.id);
+          }
+        });
+      }
+    }
     let items = filterTasksByScope(data.tasks, request.user, data).filter((task) => !isClearanceTask(task));
     items = items.filter((task) => {
-      if (view === "mine" && (task.executorId !== actorId || isTaskListDone(task) || isTaskListCanceled(task))) return false;
-      if (view === "overdue" && !isTaskListOverdue(task, today)) return false;
-      if (view === "today") {
-        const date = String(task.dueDate ?? task.startDate ?? "").slice(0, 10);
-        if ((date !== today && task.status !== "doing") || isTaskListDone(task) || isTaskListCanceled(task)) return false;
+      const identifierMatch = (matchedTaskId !== null && task.id === matchedTaskId)
+        || (matchedProcessInstanceId !== null && task.processInstanceId === matchedProcessInstanceId);
+      const templateCodeMatch = matchedVisualTemplateProcessInstanceIds.has(task.processInstanceId);
+      const specialSearchMatch = identifierMatch || templateCodeMatch;
+      const showDone = specialSearchMatch || filters.showDone || filters.status === "done";
+      const showCanceled = specialSearchMatch || filters.showCanceled || filters.status === "canceled";
+      if (!specialSearchMatch) {
+        if (view === "mine" && task.executorId !== actorId) return false;
+        if (view === "overdue" && !isTaskListOverdue(task, today)) return false;
+        if (view === "today") {
+          const date = getTaskListDatePart(task.dueDate ?? task.startDate);
+          const terminalDate = getTaskListDatePart(task.completedAt ?? task.updatedAt);
+          if (date !== today && task.status !== "doing" && terminalDate !== today) return false;
+        }
       }
-      if (!filters.showDone && isTaskListDone(task)) return false;
-      if (!filters.showCanceled && isTaskListCanceled(task)) return false;
+      if (!showDone && isTaskListDone(task)) return false;
+      if (!showCanceled && isTaskListCanceled(task)) return false;
       if (filters.status && task.status !== filters.status) return false;
+      if (!matchesTaskListSourceFilter(task, filters.source)) return false;
       if (filters.departmentId && task.departmentId !== filters.departmentId) return false;
       if (filters.ownerId && task.ownerId !== filters.ownerId) return false;
       if (filters.executorId && task.executorId !== filters.executorId) return false;
       if (filters.overdue === "yes" && !isTaskListOverdue(task, today)) return false;
       if (filters.overdue === "no" && isTaskListOverdue(task, today)) return false;
       if (keyword !== "") {
-        const template = data.taskTemplates.find((item) => item.id === task.taskTemplateId);
-        const haystack = [task.name, task.businessCode, task.customFields?.actionCode, template?.businessCode].join(" ").toLowerCase();
-        if (!haystack.includes(keyword)) return false;
+        const instance = processInstanceById.get(task.processInstanceId);
+        const template = taskTemplateById.get(task.taskTemplateId ?? instance?.taskTemplateId);
+        const goal = goalById.get(task.goalId);
+        const department = departmentById.get(task.departmentId);
+        const owner = personById.get(task.ownerId);
+        const executor = personById.get(task.executorId);
+        const haystack = [
+          task.name,
+          task.businessCode,
+          task.customFields?.actionCode,
+          instance?.businessCode,
+          instance?.displayTitle,
+          instance?.name,
+          template?.businessCode,
+          template?.name,
+          goal?.businessCode,
+          goal?.name,
+          department?.name,
+          owner?.name,
+          executor?.name,
+        ].join(" ").toLowerCase();
+        if (!templateCodeMatch && !haystack.includes(keyword)) return false;
       }
       return true;
     });
@@ -1525,7 +1645,7 @@ app.get("/api/task-center/tasks", (request, response) => {
     const total = items.length;
     const pageItems = items.slice((page - 1) * pageSize, page * pageSize);
     const processInstanceIds = new Set(pageItems.map((item) => item.processInstanceId).filter(Boolean));
-    const workPlans = readResource("workPlans").filter((item) => processInstanceIds.has(item.processInstanceId));
+    const workPlans = (searchWorkPlans ?? readResource("workPlans")).filter((item) => processInstanceIds.has(item.processInstanceId));
     const processInstances = data.processInstances.filter((item) => processInstanceIds.has(item.id));
     const actionProducts = readResource("actionProducts").filter((item) => processInstanceIds.has(item.actionId));
     const taskProductContexts = readTaskProductContexts({
@@ -2688,6 +2808,190 @@ app.post("/api/connection-assets/owner-imports/:id/cancel", requireLinkManage, (
 app.get("/api/connections/:id/core-detail", requireLinkView, requireConnectionAccess, (request, response) => {
   try { response.json({ success: true, ...getConnectionCoreDetail(request.params.id, getUserPersonId(request.user), isAdminUser(request.user)) }); }
   catch (error) { response.status(error.message?.includes("只能查看") ? 403 : 404).json({ success: false, message: error.message || "链接经营详情读取失败。" }); }
+});
+
+app.get("/api/connections/:id/business-positioning", requireLinkView, requireConnectionAccess, (request, response) => {
+  try {
+    response.json({ success: true, ...readConnectionGoalFoundation(request.params.id, {
+      userId: getUserPersonId(request.user),
+      isAdmin: isAdminUser(request.user),
+    }) });
+  } catch (error) {
+    response.status(error.statusCode || 400).json({ success: false, message: error.message || "链接经营定位读取失败。" });
+  }
+});
+
+app.put("/api/connections/:id/business-positioning", requireLinkView, requireConnectionAccess, (request, response) => {
+  try {
+    response.json({ success: true, ...setConnectionBusinessPositioning(request.params.id, request.body, {
+      userId: getUserPersonId(request.user),
+      isAdmin: isAdminUser(request.user),
+    }) });
+  } catch (error) {
+    response.status(error.statusCode || (/不存在/.test(error.message || "") ? 404 : 400))
+      .json({ success: false, message: error.message || "链接经营定位修改失败。" });
+  }
+});
+
+app.get("/api/connections/:id/business-goals", requireLinkView, requireConnectionAccess, (request, response) => {
+  try {
+    response.json({ success: true, ...readConnectionGoalPlans(request.params.id, {
+      userId: getUserPersonId(request.user),
+      isAdmin: isAdminUser(request.user),
+    }) });
+  } catch (error) {
+    response.status(error.statusCode || 400).json({ success: false, message: error.message || "链接经营目标读取失败。" });
+  }
+});
+
+app.post("/api/connections/:id/business-goals/suggest", requireLinkView, requireConnectionAccess, (request, response) => {
+  try {
+    response.json({ success: true, ...createConnectionGoalSuggestion(request.params.id, {
+      userId: getUserPersonId(request.user),
+      isAdmin: isAdminUser(request.user),
+    }) });
+  } catch (error) {
+    response.status(error.statusCode || 400).json({ success: false, message: error.message || "经营目标建议生成失败。" });
+  }
+});
+
+app.post("/api/connections/:id/business-goals/:planId/confirm", requireLinkView, requireConnectionAccess, (request, response) => {
+  try {
+    response.json({ success: true, ...confirmConnectionGoalPlan(request.params.id, request.params.planId, request.body, {
+      userId: getUserPersonId(request.user),
+      isAdmin: isAdminUser(request.user),
+    }) });
+  } catch (error) {
+    response.status(error.statusCode || 400).json({ success: false, message: error.message || "经营目标确认失败。" });
+  }
+});
+
+app.get("/api/connections/:id/business-goal-evaluation", requireLinkView, requireConnectionAccess, (request, response) => {
+  try {
+    response.json({ success: true, ...evaluateConnectionGoal(request.params.id) });
+  } catch (error) {
+    response.status(error.statusCode || 400).json({ success: false, message: error.message || "经营目标评价失败。" });
+  }
+});
+
+app.get("/api/connection-goal-workbench", requireLinkView, (request, response) => {
+  try {
+    response.json({ success: true, ...readConnectionGoalWorkbench(request.query, {
+      userId: getUserPersonId(request.user), isAdmin: isAdminUser(request.user),
+    }) });
+  } catch (error) {
+    response.status(error.statusCode || 400).json({ success: false, message: error.message || "链接经营管理工作台读取失败。" });
+  }
+});
+
+app.get("/api/connection-goal-health-summary", requireLinkView, (request, response) => {
+  try {
+    response.json({ success: true, ...readConnectionGoalCockpitSummary({
+      userId: getUserPersonId(request.user), isAdmin: isAdminUser(request.user),
+    }) });
+  } catch (error) {
+    response.status(error.statusCode || 400).json({ success: false, message: error.message || "链接经营健康度读取失败。" });
+  }
+});
+
+app.post("/api/connection-goal-workbench/positioning", requireLinkView, (request, response) => {
+  try {
+    response.json({ success: true, ...batchSetConnectionPositioning(request.body, {
+      userId: getUserPersonId(request.user), isAdmin: isAdminUser(request.user),
+    }) });
+  } catch (error) {
+    response.status(error.statusCode || 400).json({ success: false, message: error.message || "批量设置定位失败。" });
+  }
+});
+
+app.post("/api/connection-goal-workbench/suggestions", requireLinkView, (request, response) => {
+  try {
+    response.json({ success: true, ...batchGenerateConnectionGoalSuggestions(request.body, {
+      userId: getUserPersonId(request.user), isAdmin: isAdminUser(request.user),
+    }) });
+  } catch (error) {
+    response.status(error.statusCode || 400).json({ success: false, message: error.message || "批量生成目标建议失败。" });
+  }
+});
+
+app.post("/api/connection-goal-workbench/confirm", requireLinkView, (request, response) => {
+  try {
+    response.json({ success: true, ...batchConfirmConnectionGoals(request.body, {
+      userId: getUserPersonId(request.user), isAdmin: isAdminUser(request.user),
+    }) });
+  } catch (error) {
+    response.status(error.statusCode || 400).json({ success: false, message: error.message || "批量确认目标失败。" });
+  }
+});
+
+app.get("/api/connection-goal-pilots", requireLinkView, (request, response) => {
+  try { response.json({ success: true, ...readConnectionGoalPilotBatches(request.query, {
+    userId: getUserPersonId(request.user), isAdmin: isAdminUser(request.user),
+  }) }); }
+  catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "经营试点批次读取失败。" }); }
+});
+
+app.post("/api/connection-goal-pilots", requireLinkView, (request, response) => {
+  try { response.json({ success: true, ...createConnectionGoalPilotBatch(request.body, {
+    userId: getUserPersonId(request.user), isAdmin: isAdminUser(request.user),
+  }) }); }
+  catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "经营试点批次创建失败。" }); }
+});
+
+app.patch("/api/connection-goal-pilots/:batchId", requireLinkView, (request, response) => {
+  try { response.json({ success: true, ...updateConnectionGoalPilotBatch(request.params.batchId, request.body, {
+    userId: getUserPersonId(request.user), isAdmin: isAdminUser(request.user),
+  }) }); }
+  catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "经营试点批次推进失败。" }); }
+});
+
+app.get("/api/connection-goal-pilots/:batchId/candidates", requireLinkView, (request, response) => {
+  try { response.json({ success: true, ...readConnectionGoalPilotCandidates({ ...request.query, batchId: request.params.batchId }, {
+    userId: getUserPersonId(request.user), isAdmin: isAdminUser(request.user),
+  }) }); }
+  catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "试点候选链接读取失败。" }); }
+});
+
+app.post("/api/connection-goal-pilots/:batchId/links", requireLinkView, (request, response) => {
+  try { response.json({ success: true, ...addConnectionGoalPilotLinks(request.params.batchId, request.body, {
+    userId: getUserPersonId(request.user), isAdmin: isAdminUser(request.user),
+  }) }); }
+  catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "试点候选链接加入失败。" }); }
+});
+
+app.get("/api/connection-goal-pilots/:batchId/links", requireLinkView, (request, response) => {
+  try { response.json({ success: true, ...readConnectionGoalPilotMembers(request.params.batchId, request.query, {
+    userId: getUserPersonId(request.user), isAdmin: isAdminUser(request.user),
+  }) }); }
+  catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "试点链接读取失败。" }); }
+});
+
+app.patch("/api/connection-goal-pilots/:batchId/links/:memberId", requireLinkView, (request, response) => {
+  try { response.json({ success: true, ...updateConnectionGoalPilotMember(request.params.batchId, request.params.memberId, request.body, {
+    userId: getUserPersonId(request.user), isAdmin: isAdminUser(request.user),
+  }) }); }
+  catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "试点链接状态修改失败。" }); }
+});
+
+app.post("/api/connection-goal-pilots/:batchId/links/:memberId/positioning", requireLinkView, (request, response) => {
+  try { response.json({ success: true, ...confirmConnectionGoalPilotPositioning(request.params.batchId, request.params.memberId, request.body, {
+    userId: getUserPersonId(request.user), isAdmin: isAdminUser(request.user),
+  }) }); }
+  catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "试点链接定位确认失败。" }); }
+});
+
+app.post("/api/connection-goal-pilots/:batchId/links/:memberId/suggestion", requireLinkView, (request, response) => {
+  try { response.json({ success: true, ...createConnectionGoalPilotSuggestion(request.params.batchId, request.params.memberId, {
+    userId: getUserPersonId(request.user), isAdmin: isAdminUser(request.user),
+  }) }); }
+  catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "试点目标建议生成失败。" }); }
+});
+
+app.post("/api/connection-goal-pilots/:batchId/links/:memberId/confirm", requireLinkView, (request, response) => {
+  try { response.json({ success: true, ...confirmConnectionGoalPilotTarget(request.params.batchId, request.params.memberId, request.body, {
+    userId: getUserPersonId(request.user), isAdmin: isAdminUser(request.user),
+  }) }); }
+  catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "试点目标确认失败。" }); }
 });
 
 app.get("/api/connections/:id/daily-sales", requireLinkView, requireConnectionAccess, (request, response) => {

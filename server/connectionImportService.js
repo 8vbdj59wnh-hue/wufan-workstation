@@ -4,6 +4,7 @@ import path from "node:path";
 import XLSX from "xlsx";
 import { getDatabase, uploadsDir } from "./db.js";
 import { createConnectionDataMapping, ensureBusinessAdvisorConnection } from "./connectionService.js";
+import { normalizeUploadedFileName } from "./uploadFileName.js";
 
 const importStatuses = new Set(["draft", "parsed", "validated", "completed", "failed"]);
 const stagingDir = path.resolve(process.env.CONNECTION_IMPORT_DIR || path.join(uploadsDir, "connection-imports"));
@@ -124,13 +125,13 @@ export function matchBusinessAdvisorRows(rows, shopId = "") {
 
 function batchRow(row) {
   if (!row) throw new Error("经营数据导入批次不存在。");
-  return row;
+  return { ...row, fileName: normalizeUploadedFileName(row.fileName) };
 }
 
 export function listConnectionImportBatches(sourceType = "business_advisor") {
   return getDatabase().prepare(`
     SELECT * FROM connection_import_batches WHERE sourceType=? ORDER BY createdAt DESC,id DESC LIMIT 30
-  `).all(text(sourceType));
+  `).all(text(sourceType)).map(batchRow);
 }
 
 export function readConnectionImportBatch(id) {

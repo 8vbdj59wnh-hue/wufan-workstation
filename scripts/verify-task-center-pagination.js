@@ -40,6 +40,21 @@ try {
   }
   const ordered = samples.map((item) => item.milliseconds).sort((left, right) => left - right);
   const latest = samples.at(-1);
+  const directTasks = await measure(`http://127.0.0.1:${port}/api/task-center/tasks?page=1&pageSize=100&view=all&filters=${encodeURIComponent(JSON.stringify({ source: "direct", showDone: true, showCanceled: true }))}`);
+  const improvementTasks = await measure(`http://127.0.0.1:${port}/api/task-center/tasks?page=1&pageSize=100&view=all&filters=${encodeURIComponent(JSON.stringify({ source: "process", showDone: true, showCanceled: true }))}`);
+  if (directTasks.data.items.some((item) => item.source === "process")) throw new Error("普通任务类型筛选返回了改善行动任务。");
+  if (improvementTasks.data.items.some((item) => item.source !== "process")) throw new Error("改善行动任务类型筛选返回了普通任务。");
+  const doneTasks = await measure(`http://127.0.0.1:${port}/api/task-center/tasks?page=1&pageSize=100&view=all&filters=${encodeURIComponent(JSON.stringify({ status: "done" }))}`);
+  const canceledTasks = await measure(`http://127.0.0.1:${port}/api/task-center/tasks?page=1&pageSize=100&view=all&filters=${encodeURIComponent(JSON.stringify({ status: "canceled" }))}`);
+  if (doneTasks.data.items.some((item) => item.status !== "done")) throw new Error("已完成状态筛选返回了其他状态。");
+  if (canceledTasks.data.items.some((item) => item.status !== "canceled")) throw new Error("已取消状态筛选返回了其他状态。");
+  if (doneTasks.data.total === 0) throw new Error("已完成状态筛选没有返回实际存在的已完成任务。");
+  const searchableAction = improvementTasks.data.context?.processInstances?.find((item) => item.businessCode);
+  if (searchableAction) {
+    const actionSearch = await measure(`http://127.0.0.1:${port}/api/task-center/tasks?page=1&pageSize=100&view=today&keyword=${encodeURIComponent(searchableAction.businessCode)}&filters=%7B%7D`);
+    if (actionSearch.data.total === 0) throw new Error("使用行动编码搜索没有返回任务。");
+    if (actionSearch.data.items.some((item) => item.processInstanceId !== searchableAction.id)) throw new Error("行动编码搜索返回了其他行动的任务。");
+  }
   const totalBytes = bootstrap.bytes + latest.bytes;
   const result = {
     bootstrapBytes: bootstrap.bytes,
@@ -48,6 +63,10 @@ try {
     firstLoadMegabytes: Number((totalBytes / 1_000_000).toFixed(3)),
     totalTasks: latest.data.total,
     returnedTasks: latest.data.items.length,
+    directTaskCount: directTasks.data.total,
+    improvementTaskCount: improvementTasks.data.total,
+    doneTaskCount: doneTasks.data.total,
+    canceledTaskCount: canceledTasks.data.total,
     p50Milliseconds: Number(ordered[Math.floor(ordered.length * 0.5)].toFixed(1)),
     p95Milliseconds: Number(ordered[Math.min(ordered.length - 1, Math.ceil(ordered.length * 0.95) - 1)].toFixed(1)),
   };

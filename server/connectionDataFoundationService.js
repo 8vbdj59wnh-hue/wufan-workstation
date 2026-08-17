@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import XLSX from "xlsx";
 import { getDatabase } from "./db.js";
 import { ensureSingleLinkSkuErpMapping, inspectSingleLinkSkuErpMapping, resolveUniqueProductErpSku } from "./linkSkuErpMappingService.js";
+import { normalizeUploadedFileName } from "./uploadFileName.js";
 
 export const connectionImportTypes = [
   "platform_link_operations",
@@ -533,6 +534,6 @@ export function confirmConnectionDataImport(batchId) {
 export function importConnectionData(input) { const preview = previewConnectionDataImport(input); if (preview.idempotent) return preview; return confirmConnectionDataImport(preview.batch.id); }
 
 export function listConnectionFoundationRows(batchId) { return getDatabase().prepare("SELECT * FROM connection_import_rows WHERE batchId=? ORDER BY rowNumber").all(text(batchId)); }
-export function listConnectionFoundationBatches() { return getDatabase().prepare("SELECT * FROM connection_import_batches WHERE importType IS NOT NULL ORDER BY createdAt DESC,id DESC LIMIT 100").all(); }
-export function readConnectionFoundationBatch(batchId) { const row = getDatabase().prepare("SELECT * FROM connection_import_batches WHERE id=? AND importType IS NOT NULL").get(text(batchId)); if (!row) throw new Error("导入记录不存在。"); return row; }
-export function listConnectionImportErrors(batchId = "") { return getDatabase().prepare(`SELECT r.*,b.importType,b.fileName FROM connection_import_rows r JOIN connection_import_batches b ON b.id=r.batchId WHERE r.status='error' AND (?='' OR r.batchId=?) ORDER BY r.createdAt DESC,r.rowNumber LIMIT 500`).all(text(batchId), text(batchId)); }
+export function listConnectionFoundationBatches() { return getDatabase().prepare("SELECT * FROM connection_import_batches WHERE importType IS NOT NULL ORDER BY createdAt DESC,id DESC LIMIT 100").all().map((row) => ({ ...row, fileName: normalizeUploadedFileName(row.fileName) })); }
+export function readConnectionFoundationBatch(batchId) { const row = getDatabase().prepare("SELECT * FROM connection_import_batches WHERE id=? AND importType IS NOT NULL").get(text(batchId)); if (!row) throw new Error("导入记录不存在。"); return { ...row, fileName: normalizeUploadedFileName(row.fileName) }; }
+export function listConnectionImportErrors(batchId = "") { return getDatabase().prepare(`SELECT r.*,b.importType,b.fileName FROM connection_import_rows r JOIN connection_import_batches b ON b.id=r.batchId WHERE r.status='error' AND (?='' OR r.batchId=?) ORDER BY r.createdAt DESC,r.rowNumber LIMIT 500`).all(text(batchId), text(batchId)).map((row) => ({ ...row, fileName: normalizeUploadedFileName(row.fileName) })); }

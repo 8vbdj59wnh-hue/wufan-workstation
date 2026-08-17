@@ -43,9 +43,6 @@ import {
   loadConnectionSalesDailyPreview,
   recalculateConnectionSalesDailyPreview,
   confirmConnectionSalesDailyFacts,
-  loadErpSkuUsageGovernance,
-  loadErpSkuUsageGovernanceDetail,
-  confirmErpSkuUsage,
   loadSalesRelationCandidates,
   loadSalesRelationGovernance,
   loadSalesDataQualityAnomalies,
@@ -66,6 +63,14 @@ import {
   rebuildConnectionOwnerImportPreview,
   cancelConnectionOwnerImport,
   loadConnectionCoreDetail,
+  loadConnectionBusinessPositioning,
+  loadConnectionBusinessGoals,
+  loadConnectionBusinessGoalEvaluation,
+  loadConnectionGoalWorkbench,
+  loadConnectionGoalHealthSummary,
+  loadConnectionGoalPilotBatches,
+  loadConnectionGoalPilotCandidates,
+  loadConnectionGoalPilotMembers,
   loadConnectionDailySales,
   loadMyConnectionWorkbench,
   loadLinkSalesDistribution,
@@ -76,6 +81,19 @@ import {
   ignoreConnectionImportRow,
   updateConnectionDataMapping,
   updateConnection,
+  updateConnectionBusinessPositioning,
+  createConnectionBusinessGoalSuggestion,
+  confirmConnectionBusinessGoal,
+  batchSetConnectionGoalPositioning,
+  batchGenerateConnectionGoalSuggestions,
+  batchConfirmConnectionGoals,
+  createConnectionGoalPilotBatch,
+  updateConnectionGoalPilotBatch,
+  addConnectionGoalPilotLinks,
+  excludeConnectionGoalPilotMember,
+  confirmConnectionGoalPilotPositioning,
+  createConnectionGoalPilotSuggestion,
+  confirmConnectionGoalPilotTarget,
   updateConnectionImprovement,
   updateConnectionFollow,
   uploadConnectionImport,
@@ -109,7 +127,9 @@ import { LINK_BUSINESS_COLUMN_GROUPS, LINK_BUSINESS_COLUMNS, DEFAULT_LINK_BUSINE
 const connectionSectionStorageKey = "connection-center-section-v1";
 
 function initialConnectionSection() {
-  const routeSection = typeof window === "undefined" ? "" : parseConnectionCenterRoute(window.location.hash).section;
+  const route = typeof window === "undefined" ? {} : parseConnectionCenterRoute(window.location.hash);
+  if (route.redirectHash) window.location.hash = route.redirectHash;
+  const routeSection = route.section || "";
   if (routeSection) return routeSection;
   try {
     const saved = window.localStorage.getItem(connectionSectionStorageKey) || "";
@@ -127,6 +147,7 @@ const pageState = {
   loadedSections: new Set(),
   importShops: [],
   selectedId: "",
+  detailReturnSection: "connections",
   view: "list",
   sort: "default",
   columnSort: { key: "", direction: "asc" },
@@ -141,6 +162,7 @@ const pageState = {
   growthRankings: { topGrowth: [], risks: [] },
   managementOverview: { summary: {}, owners: [] },
   cockpit: { summary: {}, health: {}, coreLinks: [], riskLinks: [], growthLinks: [], platforms: [], productChannels: [], trends: { erp: [], platform: [] }, periodType: "month" },
+  goalHealth: { totalLinks: 0, positionedLinks: 0, unpositionedLinks: 0, activeGoalLinks: 0, pendingGoalLinks: 0, evaluatedLinks: 0, pendingEvaluationLinks: 0, gradeSummary: {}, positioningSummary: [], evaluationPeriod: {} },
   healthRecords: [],
   healthAttention: { items: [], counts: { risk: 0, attention: 0, traffic: 0, conversion: 0, sales: 0 } },
   healthModalId: "",
@@ -157,6 +179,14 @@ const pageState = {
     filters: { keyword: "", platform: "", shopId: "", ownerId: "", minSales: "", maxSales: "", minProfit: "", maxProfit: "", growthStatus: "", healthStatus: "", hospitalStatus: "", expanded: false },
     sort: { field: "salesAmount", direction: "desc" }, visibleFields: [...DEFAULT_LINK_BUSINESS_FIELDS],
     fieldOrder: LINK_BUSINESS_COLUMNS.map((item) => item.key), filterOptions: { platforms: [], shops: [], owners: [] }, dataSources: {}, indicatorOpen: false, loading: false, loaded: false },
+  goalWorkbench: { summary: {}, items: [], pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 },
+    filters: { keyword: "", positioning: "", goalStatus: "", evaluationStatus: "", ownerId: "" }, filterOptions: { owners: [] },
+    period: {}, selectedIds: new Set(), loading: false, loaded: false, operating: false },
+  goalManagementTab: "workbench",
+  goalPilot: { batches: [], batchPagination: { page: 1, pageSize: 20, total: 0, totalPages: 1 }, selectedBatchId: "", batch: null,
+    members: [], memberPagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 }, memberFilters: { keyword: "", status: "" },
+    candidates: [], candidatePagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 }, candidateFilters: { keyword: "", ownerId: "", stableOnly: "", sort: "sales" },
+    filterOptions: { owners: [] }, candidateSelectedIds: new Set(), showCandidates: false, loading: false, loaded: false, operating: false },
   linkDataStatus: { data: null, shopId: "", loading: false, loaded: false, error: "" },
   salesDailyQuality: { data: null, loading: false, loaded: false, error: "" },
   salesDistribution: { scope: "company", range: { preset: "7d" }, items: [], summary: {}, selectedGroup: 0, selectedRange: null, drillTable: null, loading: false, loaded: false, error: "" },
@@ -176,7 +206,6 @@ const pageState = {
   relationGovernance: { items: [], summary: { byType: {} }, pagination: {}, filterOptions: {}, filters: { governanceType: "", shopId: "", keyword: "", minSales: "", maxSales: "", status: "pending" }, selected: null, loading: false, loaded: false },
   salesDataQualityGovernance: { items: [], summary: { byType: {} }, pagination: {}, filters: { anomalyType: "", keyword: "" }, selected: null, loading: false, saving: false, loaded: false },
   comboReviews: { items: [], summary: {}, pagination: {}, filterOptions: {}, filters: { shopId: "", platform: "", componentCount: "", stability: "", sourceBatchId: "" }, loading: false, generating: false, selected: null, anomalies: { items: [], pagination: {} }, sourceRows: { items: [], pagination: {} }, editing: false, draft: null, erpSearch: { keyword: "", items: [], loading: false }, saving: false, confirming: false },
-  erpUsageGovernance: { items: [], summary: {}, pagination: {}, filters: { keyword: "", status: "unconfirmed", suggestedUsage: "", priority: "" }, selected: null, loading: false, confirming: false },
   coreDetail: null,
   coreDetailLoading: false,
   dailySales: { data: null, loading: false, loaded: false, rangePreset: "30d", error: "" },
@@ -317,8 +346,6 @@ function canViewHealth() {
 function canOpenConnectionSection(section) {
   if (section === "hospital") return canViewHealth();
   if (["sales-relation-governance", "sales-data-quality-governance"].includes(section)) return canImportBusinessData();
-  if (section === "erp-usage-governance") return canManage();
-  if (section === "data-center") return isAdmin();
   return CONNECTION_CENTER_SECTIONS.has(section);
 }
 
@@ -339,6 +366,10 @@ function ensureConnectionSectionLoaded(section, render) {
     if (!pageState.businessTable.loaded && !pageState.businessTable.loading) void loadLinkBusinessTablePage(render);
     if (!pageState.linkDataStatus.loaded && !pageState.linkDataStatus.loading) void loadMyLinkDataStatus(render);
   }
+  if (section === "goal-management") {
+    if (pageState.goalManagementTab === "pilots" && !pageState.goalPilot.loaded && !pageState.goalPilot.loading) void loadGoalPilotPage(render);
+    if (pageState.goalManagementTab !== "pilots" && !pageState.goalWorkbench.loaded && !pageState.goalWorkbench.loading) void loadGoalWorkbenchPage(render);
+  }
   if (section === "my-links") {
     if (!pageState.myLinkTable.loaded && !pageState.myLinkTable.loading) void loadMyLinks(render);
     if (!pageState.linkDataStatus.loaded && !pageState.linkDataStatus.loading) void loadMyLinkDataStatus(render);
@@ -353,8 +384,6 @@ function ensureConnectionSectionLoaded(section, render) {
     && !pageState.relationGovernance.loaded && !pageState.relationGovernance.loading) void loadSalesRelationGovernancePage(render, { page: 1 });
   if (section === "sales-data-quality-governance" && canImportBusinessData()
     && !pageState.salesDataQualityGovernance.loaded && !pageState.salesDataQualityGovernance.loading) void loadSalesDataQualityGovernancePage(render, { page: 1 });
-  if (section === "erp-usage-governance" && canManage()
-    && !pageState.erpUsageGovernance.loaded && !pageState.erpUsageGovernance.loading) void loadErpUsageGovernancePage(render, { page: 1 });
 }
 
 function connectionAnomalies(item) {
@@ -446,28 +475,70 @@ function renderSectionNavigation() {
     <button type="button" class="${pageState.section === "cockpit" ? "active" : ""}" data-connection-section="cockpit">经营驾驶舱</button>
     <button type="button" class="${pageState.section === "my-links" ? "active" : ""}" data-connection-section="my-links">我的链接</button>
     <button type="button" class="${pageState.section === "connections" ? "active" : ""}" data-connection-section="connections">全部链接</button>
+    <button type="button" class="${pageState.section === "goal-management" ? "active" : ""}" data-connection-section="goal-management">链接经营管理</button>
     ${canViewHealth() ? `<button type="button" class="${pageState.section === "hospital" ? "active" : ""}" data-connection-section="hospital">链接医院</button>` : ""}
     <button type="button" class="${["data-import", "sales-relation-governance", "sales-data-quality-governance"].includes(pageState.section) ? "active" : ""}" data-connection-section="data-import">数据更新</button>
-    ${canManage() ? `<button type="button" class="${pageState.section === "erp-usage-governance" ? "active" : ""}" data-connection-section="erp-usage-governance">ERP SKU用途治理</button>` : ""}
-    ${isAdmin() ? `<button type="button" class="${pageState.section === "data-center" ? "active" : ""}" data-connection-section="data-center">数据中心</button>` : ""}
   </nav>`;
 }
 
-function renderConnectionDataCenter() {
-  const tabs = [
-    ["data-foundation", "数据导入"],
-    ["mappings", "字段映射"],
-  ];
-  const content = pageState.dataCenterTab === "imports" ? renderImportPage()
-    : pageState.dataCenterTab === "mappings" ? renderMappingPage()
-      : pageState.dataCenterTab === "pending-connections" ? renderPendingConnections()
-        : renderDataFoundation();
-  if (!isAdmin()) return `<div class="empty-state"><strong>无权访问数据中心</strong><p>数据中心仅作为管理员后台。</p></div>`;
-  return `<section class="connection-data-center"><header class="connection-section-heading"><div><p class="eyebrow">ADMIN DATA CENTER</p><h2>数据中心</h2><p>管理员统一查看后台批次、日志、异常、模板和调度。</p></div><button type="button" class="primary-button" data-open-admin-data-center>进入管理员数据中心</button></header><div class="connection-import-type-grid"><article><strong>导入批次</strong><span>查看每次导入和同步执行</span></article><article><strong>同步日志</strong><span>追踪API请求与执行过程</span></article><article><strong>异常中心</strong><span>统一处理隔离异常</span></article><article><strong>模板管理</strong><span>维护管理员解析规则</span></article><article><strong>字段映射</strong><span>查看和维护数据映射</span></article><article><strong>自动调度</strong><span>管理API同步任务</span></article></div><nav class="connection-data-center-nav" aria-label="链接数据中心功能">${tabs.filter(([id]) => id !== "data-foundation").map(([id, label]) => `<button type="button" class="${pageState.dataCenterTab === id ? "active" : ""}" data-connection-data-tab="${id}">${label}</button>`).join("")}</nav>${pageState.dataCenterTab === "mappings" ? content : ""}</section>`;
+function renderDataUpdateWorkspace() {
+  return `<section class="link-data-update-workspace">${canImportBusinessData() ? renderDataFoundation() : ""}${renderUiModule("link_data_status", { state: pageState.linkDataStatus, showDailyCompleteness: true })}${renderUiModule("sales_daily_data_quality", { state: pageState.salesDailyQuality, showGovernanceEntry: canImportBusinessData() })}${canImportBusinessData() ? "" : `<div class="empty-state compact"><strong>数据由管理员统一更新</strong><p>当前账号可查看最新数据状态；如有异常，请联系数据管理员处理。</p></div>`}</section>`;
 }
 
-function renderDataUpdateWorkspace() {
-  return `<section class="link-data-update-workspace"><header class="connection-section-heading"><div><p class="eyebrow">LINK DATA UPDATE</p><h2>数据更新</h2><p>查看经营数据是否正常，并继续使用现有导入流程更新数据。</p></div></header>${canImportBusinessData() ? renderDataFoundation() : ""}${renderUiModule("link_data_status", { state: pageState.linkDataStatus, showDailyCompleteness: true })}${renderUiModule("sales_daily_data_quality", { state: pageState.salesDailyQuality, showGovernanceEntry: canImportBusinessData() })}${canImportBusinessData() ? "" : `<div class="empty-state compact"><strong>数据由管理员统一更新</strong><p>当前账号可查看最新数据状态；如有异常，请联系数据管理员处理。</p></div>`}</section>`;
+const goalPositioningLabels = { sales_growth: "引流爆款", balanced_sales: "优质动销款", long_tail: "长尾动销款", profit_contribution: "高毛利款" };
+function renderGoalWorkbench() {
+  const model = pageState.goalWorkbench; const summary = model.summary || {}; const filters = model.filters; const selectedCount = model.selectedIds.size;
+  const percentage = (value) => Number(summary.total) ? `${(Number(value || 0) / Number(summary.total) * 100).toFixed(1)}%` : "0%";
+  const rows = model.items.map((item) => {
+    const evaluationText = item.evaluationStatus === "evaluated" ? goalGradeText(item.grade) : "待评价";
+    return `<tr><td><input type="checkbox" data-goal-workbench-select="${escapeHtml(item.id)}" ${model.selectedIds.has(item.id) ? "checked" : ""} aria-label="选择${escapeHtml(item.name)}" /></td><td><button type="button" class="text-button connection-goal-link" data-open-connection="${escapeHtml(item.id)}" data-return-section="goal-management">${escapeHtml(item.name || item.title || "未命名链接")}</button><small>${escapeHtml(item.platformGoodsId || "—")}</small></td><td>${escapeHtml(item.platform || "—")}</td><td>${escapeHtml(item.shopDisplayName || item.shopName || "—")}</td><td>${escapeHtml(item.ownerName || "未设置")}</td><td>${escapeHtml(goalPositioningLabels[item.positioningType] || "未设置")}</td><td>${item.goalStatus === "set" ? `<span class="status-pill status-active">已设置</span>` : `<span class="status-pill">待设置</span>`}</td><td>${escapeHtml(evaluationText)}</td><td>${coreMoney(item.salesAmount)}</td><td>${coreMoney(item.profitAmount)}</td><td>${item.grade ? `<span class="status-pill goal-grade-${escapeHtml(item.grade)}">${escapeHtml(goalGradeText(item.grade))}</span>` : "—"}</td></tr>`;
+  }).join("");
+  const owners = model.filterOptions.owners || [];
+  const pageIds = model.items.filter((item) => item.canManage).map((item) => item.id);
+  const allSelected = pageIds.length > 0 && pageIds.every((id) => model.selectedIds.has(id));
+  return `<section class="connection-goal-workbench"><div class="connection-management-summary connection-goal-coverage"><article><span>链接总数</span><strong>${summary.total || 0}</strong><small>当前权限范围</small></article><article><span>经营定位</span><strong>${summary.positioned || 0}</strong><small>未设置 ${summary.unpositioned || 0} · 覆盖 ${percentage(summary.positioned)}</small></article><article><span>经营目标</span><strong>${summary.goalSet || 0}</strong><small>待设置 ${summary.goalPending || 0} · 覆盖 ${percentage(summary.goalSet)}</small></article><article><span>目标评价</span><strong>${summary.evaluated || 0}</strong><small>待评价 ${summary.evaluationPending || 0} · 覆盖 ${percentage(summary.evaluated)}</small></article></div>
+    <form class="connection-goal-workbench-filters" data-goal-workbench-filters><input name="keyword" value="${escapeHtml(filters.keyword)}" placeholder="搜索链接名称或商品ID" /><select name="positioning"><option value="">全部定位</option>${Object.entries(goalPositioningLabels).map(([value, label]) => `<option value="${value}" ${filters.positioning === value ? "selected" : ""}>${label}</option>`).join("")}<option value="unset" ${filters.positioning === "unset" ? "selected" : ""}>未设置</option></select><select name="goalStatus"><option value="">全部目标状态</option><option value="set" ${filters.goalStatus === "set" ? "selected" : ""}>已设置</option><option value="pending" ${filters.goalStatus === "pending" ? "selected" : ""}>待设置</option></select><select name="evaluationStatus"><option value="">全部评价状态</option>${[["excellent","优秀"],["good","良好"],["on_target","达标"],["underperforming","不达标"],["pending","待评价"]].map(([value,label]) => `<option value="${value}" ${filters.evaluationStatus === value ? "selected" : ""}>${label}</option>`).join("")}</select><select name="ownerId"><option value="">全部负责人</option>${owners.map((owner) => `<option value="${escapeHtml(owner.id)}" ${filters.ownerId === owner.id ? "selected" : ""}>${escapeHtml(owner.name || owner.id)}</option>`).join("")}</select><button type="submit" class="secondary-button">筛选</button></form>
+    <div class="connection-goal-batch-bar"><strong>已选 ${selectedCount} 个链接</strong><form data-goal-workbench-positioning><select name="positioningType" required><option value="">批量设置定位</option>${Object.entries(goalPositioningLabels).map(([value,label]) => `<option value="${value}">${label}</option>`).join("")}</select><input name="decisionReason" required maxlength="500" placeholder="填写批量设置原因" /><button type="submit" class="secondary-button" ${!selectedCount || model.operating ? "disabled" : ""}>应用定位</button></form><button type="button" class="secondary-button" data-goal-workbench-suggest ${!selectedCount || model.operating ? "disabled" : ""}>生成目标建议</button><button type="button" class="primary-button" data-goal-workbench-confirm ${!selectedCount || model.operating ? "disabled" : ""}>确认系统建议</button></div>
+    <small class="form-note">近30天经营数据周期：${model.period.startDate ? escapeHtml(`${model.period.startDate} 至 ${model.period.endDate}`) : "暂无销售事实"}。批量建议不会自动生效。</small>
+    ${model.loading ? `<div class="empty-state">正在读取链接经营覆盖情况…</div>` : `<div class="connection-table-wrap"><table class="connection-table"><thead><tr><th><input type="checkbox" data-goal-workbench-select-all ${allSelected ? "checked" : ""} aria-label="选择本页" /></th><th>链接名称</th><th>平台</th><th>店铺</th><th>负责人</th><th>经营定位</th><th>目标状态</th><th>评价状态</th><th>近30天销售额</th><th>近30天利润</th><th>经营评级</th></tr></thead><tbody>${rows || `<tr><td colspan="11">暂无符合条件的链接</td></tr>`}</tbody></table></div><footer class="connection-goal-workbench-footer"><small>共 ${model.pagination.total || 0} 条，每页 ${model.pagination.pageSize || 50} 条，服务端分页</small><div><button type="button" class="text-button" data-goal-workbench-page="${Math.max(1, model.pagination.page - 1)}" ${model.pagination.page <= 1 ? "disabled" : ""}>上一页</button><span>${model.pagination.page} / ${model.pagination.totalPages}</span><button type="button" class="text-button" data-goal-workbench-page="${model.pagination.page + 1}" ${model.pagination.page >= model.pagination.totalPages ? "disabled" : ""}>下一页</button></div></footer>`}
+  </section>`;
+}
+
+const goalPilotBatchStatusLabels = { draft: "候选选择", positioning: "定位确认", target_confirm: "目标确认", evaluation: "进入评价", completed: "已完成" };
+const goalPilotLinkStatusLabels = { selected: "已选择", positioning_pending: "待确认定位", target_pending: "待确认目标", active: "目标已生效", excluded: "已排除" };
+
+function renderGoalPilotMemberAction(item, batch) {
+  if (!item.canManage || item.status === "excluded") return "—";
+  if (!item.positioningType) return batch.status === "positioning" ? `<form class="goal-pilot-inline-form" data-goal-pilot-positioning data-member-id="${escapeHtml(item.id)}"><select name="positioningType" required><option value="">选择定位</option>${Object.entries(goalPositioningLabels).map(([value,label]) => `<option value="${value}">${label}</option>`).join("")}</select><input name="decisionReason" required maxlength="500" placeholder="确认原因" /><button type="submit" class="secondary-button">确认定位</button></form>` : `<small>等待进入定位确认阶段</small>`;
+  if (!item.goalPlanId) return batch.status === "target_confirm" ? `<button type="button" class="secondary-button" data-goal-pilot-suggestion="${escapeHtml(item.id)}">生成目标建议</button>` : `<small>定位已确认，等待目标确认阶段</small>`;
+  if (item.goalStatus !== "active") return batch.status === "target_confirm" ? `<form class="goal-pilot-inline-form goal-pilot-target-form" data-goal-pilot-target data-member-id="${escapeHtml(item.id)}" data-plan-id="${escapeHtml(item.goalPlanId)}"><label>销售<input type="number" name="salesAmount" min="0" step="0.01" required value="${item.salesSuggested ?? ""}" /></label><label>利润<input type="number" name="profitAmount" step="0.01" required value="${item.profitSuggested ?? ""}" /></label><input name="approvalReason" maxlength="500" placeholder="调整时填写原因" /><button type="submit" class="primary-button">确认目标</button></form>` : `<small>等待进入目标确认阶段</small>`;
+  return `<span class="status-pill status-active">已进入目标管理</span>${batch.status === "evaluation" ? `<small>等待现有评价流程计算</small>` : ""}`;
+}
+
+function renderGoalPilot() {
+  const model = pageState.goalPilot; const batch = model.batch; const progress = batch?.progress || {};
+  const batchOptions = model.batches.map((item) => `<option value="${escapeHtml(item.id)}" ${model.selectedBatchId === item.id ? "selected" : ""}>${escapeHtml(item.name)} · ${escapeHtml(goalPilotBatchStatusLabels[item.status] || item.status)}</option>`).join("");
+  const nextStatus = batch ? ({ draft: "positioning", positioning: "target_confirm", target_confirm: "evaluation", evaluation: "completed" })[batch.status] : "";
+  const memberRows = model.members.map((item) => `<tr><td><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.platformGoodsId || "—")} · ${escapeHtml(item.shopName || "—")}</small></td><td>${escapeHtml(item.ownerName || "—")}</td><td>${coreMoney(item.salesAmount)}<small>利润 ${coreMoney(item.profitAmount)} · 活跃 ${item.activeDays || 0}天</small></td><td>${item.tags.map((tag) => `<span class="status-pill">${escapeHtml(tag)}</span>`).join(" ")}</td><td>${escapeHtml(item.positioningName || "待确认")}</td><td>${escapeHtml(goalPilotLinkStatusLabels[item.status] || item.status)}${item.goalPlanId ? `<small>${escapeHtml(item.targetBasis)} · ${item.targetConfidence === "high" ? "高置信度" : item.targetConfidence === "low" ? "低置信度" : "需人工设置"}</small>` : ""}</td><td>${renderGoalPilotMemberAction(item, batch)}${model.permissions?.canAdjustScope && item.status !== "excluded" ? `<button type="button" class="text-button danger" data-goal-pilot-exclude="${escapeHtml(item.id)}">排除</button>` : ""}</td></tr>`).join("");
+  const candidateRows = model.candidates.map((item) => `<tr><td><input type="checkbox" data-goal-pilot-candidate="${escapeHtml(item.id)}" ${model.candidateSelectedIds.has(item.id) ? "checked" : ""} /></td><td><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.platformGoodsId || "—")} · ${escapeHtml(item.shopName || "—")}</small></td><td>${escapeHtml(item.ownerName || "—")}</td><td>${coreMoney(item.salesAmount)}</td><td>${coreMoney(item.profitAmount)}</td><td>${item.activeDays || 0}天</td><td>${item.tags.map((tag) => `<span class="status-pill">${escapeHtml(tag)}</span>`).join(" ")}</td></tr>`).join("");
+  return `<section class="connection-goal-pilot">
+    <div class="goal-pilot-toolbar"><select data-goal-pilot-batch-select><option value="">选择试点批次</option>${batchOptions}</select>${model.permissions?.canCreateBatch ? `<form data-goal-pilot-create><input name="name" required maxlength="120" placeholder="例如：2026年8月链接经营试点" /><input name="description" maxlength="1000" placeholder="试点说明（可选）" /><button type="submit" class="primary-button">创建批次</button></form>` : ""}</div>
+    ${!batch ? `<div class="empty-state"><strong>还没有可查看的经营试点</strong><p>管理员创建批次后，再从有负责人、有近30天销售数据的链接中选择候选。</p></div>` : `
+      <header class="goal-pilot-header"><div><h3>${escapeHtml(batch.name)}</h3><p>${escapeHtml(batch.description || "首批核心链接经营目标初始化")}</p></div><span class="status-pill status-active">${escapeHtml(goalPilotBatchStatusLabels[batch.status] || batch.status)}</span>${model.permissions?.canAdjustScope && nextStatus ? `<button type="button" class="secondary-button" data-goal-pilot-advance="${nextStatus}">推进到${escapeHtml(goalPilotBatchStatusLabels[nextStatus])}</button>` : ""}</header>
+      <div class="connection-management-summary goal-pilot-progress"><article><span>总链接</span><strong>${Math.max(0, Number(progress.totalLinks || 0) - Number(progress.excludedLinks || 0))}</strong><small>已排除 ${progress.excludedLinks || 0}</small></article><article><span>已定位</span><strong>${progress.positionedLinks || 0}</strong></article><article><span>已生成目标</span><strong>${progress.generatedGoalLinks || 0}</strong></article><article><span>已确认目标</span><strong>${progress.confirmedGoalLinks || 0}</strong></article><article><span>进入评价</span><strong>${progress.evaluationLinks || 0}</strong></article></div>
+      <div class="goal-pilot-list-tools"><form data-goal-pilot-member-filter><input name="keyword" value="${escapeHtml(model.memberFilters.keyword)}" placeholder="搜索试点链接" /><select name="status"><option value="">全部状态</option>${Object.entries(goalPilotLinkStatusLabels).map(([value,label]) => `<option value="${value}" ${model.memberFilters.status === value ? "selected" : ""}>${label}</option>`).join("")}</select><button class="secondary-button">筛选</button></form>${model.permissions?.canAdjustScope && ["draft","positioning"].includes(batch.status) ? `<button type="button" class="secondary-button" data-goal-pilot-toggle-candidates>${model.showCandidates ? "收起候选" : "添加候选链接"}</button>` : ""}</div>
+      ${model.showCandidates ? `<section class="goal-pilot-candidates"><form data-goal-pilot-candidate-filter><input name="keyword" value="${escapeHtml(model.candidateFilters.keyword)}" placeholder="搜索候选链接" /><select name="ownerId"><option value="">全部负责人</option>${(model.filterOptions.owners || []).map((owner) => `<option value="${escapeHtml(owner.id)}" ${model.candidateFilters.ownerId === owner.id ? "selected" : ""}>${escapeHtml(owner.name)}</option>`).join("")}</select><select name="stableOnly"><option value="">全部稳定性</option><option value="true" ${model.candidateFilters.stableOnly === "true" ? "selected" : ""}>近30天至少20天有销售</option></select><select name="sort"><option value="sales" ${model.candidateFilters.sort === "sales" ? "selected" : ""}>销售额优先</option><option value="profit" ${model.candidateFilters.sort === "profit" ? "selected" : ""}>利润贡献优先</option><option value="stability" ${model.candidateFilters.sort === "stability" ? "selected" : ""}>稳定性优先</option></select><button class="secondary-button">筛选</button></form><div class="goal-pilot-selection"><strong>已选 ${model.candidateSelectedIds.size} 个</strong><button type="button" class="primary-button" data-goal-pilot-add-candidates ${!model.candidateSelectedIds.size ? "disabled" : ""}>加入当前批次</button><small>候选只要求有负责人和近30天销售数据；标签不会自动生成经营定位。</small></div><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th></th><th>链接</th><th>负责人</th><th>近30天销售额</th><th>利润贡献</th><th>销售活跃</th><th>辅助标签</th></tr></thead><tbody>${candidateRows || `<tr><td colspan="7">暂无符合条件的候选链接</td></tr>`}</tbody></table></div>${renderGoalPilotPager("candidate", model.candidatePagination)}</section>` : ""}
+      <div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>链接</th><th>负责人</th><th>近30天经营</th><th>辅助标签</th><th>当前定位</th><th>目标状态</th><th>操作</th></tr></thead><tbody>${memberRows || `<tr><td colspan="7">当前批次还没有链接</td></tr>`}</tbody></table></div>${renderGoalPilotPager("member", model.memberPagination)}
+    `}
+  </section>`;
+}
+
+function renderGoalPilotPager(kind, pagination = {}) {
+  return `<footer class="connection-goal-workbench-footer"><small>共 ${pagination.total || 0} 条，每页 ${pagination.pageSize || 50} 条，服务端分页</small><div><button type="button" class="text-button" data-goal-pilot-${kind}-page="${Math.max(1, Number(pagination.page || 1) - 1)}" ${Number(pagination.page || 1) <= 1 ? "disabled" : ""}>上一页</button><span>${pagination.page || 1} / ${pagination.totalPages || 1}</span><button type="button" class="text-button" data-goal-pilot-${kind}-page="${Number(pagination.page || 1) + 1}" ${Number(pagination.page || 1) >= Number(pagination.totalPages || 1) ? "disabled" : ""}>下一页</button></div></footer>`;
+}
+
+function renderGoalManagement() {
+  return `<section class="goal-management-shell"><nav class="goal-management-tabs"><button type="button" class="${pageState.goalManagementTab === "workbench" ? "active" : ""}" data-goal-management-tab="workbench">经营管理</button><button type="button" class="${pageState.goalManagementTab === "pilots" ? "active" : ""}" data-goal-management-tab="pilots">经营试点</button></nav>${pageState.goalManagementTab === "pilots" ? renderGoalPilot() : renderGoalWorkbench()}</section>`;
 }
 
 const anomalyLabels = { identity_error: "身份异常", missing_relation: "缺失关系", relation_conflict: "关系冲突", incomplete_structure: "结构不完整" };
@@ -492,20 +563,7 @@ function renderSalesRelationGovernance() {
   return `<section class="connection-foundation-page sales-relation-governance"><header class="connection-section-heading"><div><p class="eyebrow">SALES RELATION GOVERNANCE</p><h2>销售关系治理</h2><p>统一处理单关系、单组件数量和Combo关系；系统只整理精确匹配证据。</p></div><button type="button" class="secondary-button" data-workbench-go="data-import">返回数据更新</button></header><div class="connection-import-preview-grid"><span>待治理链接SKU<strong>${summary.pendingLinkSkuCount || 0}</strong></span><span>影响销售额<strong>¥${usageMoney(summary.salesAmount)}</strong></span><span>影响利润<strong>¥${usageMoney(summary.profitAmount)}</strong></span></div><div class="relation-governance-type-grid"><button type="button" data-governance-type="" class="${!filters.governanceType ? "is-active" : ""}"><span>全部</span><strong>${summary.pendingLinkSkuCount || 0}</strong><small>统一治理入口</small></button>${typeStats}</div><form class="connection-filter-row" data-relation-governance-filters><input name="keyword" value="${escapeHtml(filters.keyword || "")}" placeholder="搜索链接、链接SKU或货品ID" /><select name="shopId"><option value="">全部店铺</option>${(model.filterOptions?.shops || []).map((item) => `<option value="${escapeHtml(item.id)}" ${filters.shopId === item.id ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}</select><input type="number" name="minSales" min="0" step="0.01" value="${escapeHtml(filters.minSales || "")}" placeholder="最低销售额" /><input type="number" name="maxSales" min="0" step="0.01" value="${escapeHtml(filters.maxSales || "")}" placeholder="最高销售额" /><select name="status"><option value="pending" ${filters.status === "pending" ? "selected" : ""}>待治理</option><option value="conflict" ${filters.status === "conflict" ? "selected" : ""}>冲突</option><option value="approved" ${filters.status === "approved" ? "selected" : ""}>已确认</option></select><button type="submit" class="secondary-button">筛选</button><button type="button" class="text-button" data-reset-relation-governance>清除</button></form>${model.loading ? `<div class="empty-state">正在读取销售关系治理数据…</div>` : `<div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>链接SKU</th><th>店铺</th><th>候选ERP</th><th>治理类型</th><th>销售证据</th><th>影响金额</th><th>状态</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="8">暂无符合条件的待治理关系</td></tr>`}</tbody></table></div>`}<footer><small>候选只来自销售日报精确身份匹配结果，不使用名称或模糊匹配。</small><div><button type="button" class="text-button" data-relation-governance-page="${Math.max(1, Number(model.pagination?.page || 1) - 1)}" ${Number(model.pagination?.page || 1) <= 1 ? "disabled" : ""}>上一页</button><span>${model.pagination?.page || 1} / ${model.pagination?.totalPages || 1}</span><button type="button" class="text-button" data-relation-governance-page="${Number(model.pagination?.page || 1) + 1}" ${Number(model.pagination?.page || 1) >= Number(model.pagination?.totalPages || 1) ? "disabled" : ""}>下一页</button></div></footer>${detail}</section>`;
 }
 
-const erpUsageLabels = { product: "商品", accounting_auxiliary: "辅助核算", shipping_adjustment: "邮费调整", other_adjustment: "其他调整" };
-const erpUsageStatusLabels = { proposed: "未确认", active: "已确认", inactive: "已停用", superseded: "已替代", conflict: "冲突" };
 const usageMoney = (value) => Number(value || 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-function renderErpUsageGovernance() {
-  const model = pageState.erpUsageGovernance;
-  const summary = model.summary || {}; const filters = model.filters || {}; const selected = model.selected;
-  const stats = `<div class="connection-import-preview-grid"><span>待确认ERP SKU<strong>${summary.pendingCount || 0}</strong></span><span>影响销售额<strong>¥${usageMoney(summary.pendingSalesAmount)}</strong></span><span>影响利润<strong>¥${usageMoney(summary.pendingProfitAmount)}</strong></span><span>已确认<strong>${summary.confirmedCount || 0}</strong></span><span>身份待处理编码<strong>${summary.identityIssueCount || 0}</strong></span></div>`;
-  const filtersHtml = `<form class="connection-filter-row" data-erp-usage-filters><input name="keyword" value="${escapeHtml(filters.keyword || "")}" placeholder="搜索ERP SKU编码或名称" /><select name="status"><option value="">全部状态</option><option value="unconfirmed" ${filters.status === "unconfirmed" ? "selected" : ""}>未确认</option><option value="confirmed" ${filters.status === "confirmed" ? "selected" : ""}>已确认</option><option value="conflict" ${filters.status === "conflict" ? "selected" : ""}>冲突</option></select><select name="suggestedUsage"><option value="">全部建议用途</option>${Object.entries(erpUsageLabels).map(([value, label]) => `<option value="${value}" ${filters.suggestedUsage === value ? "selected" : ""}>${label}</option>`).join("")}</select><select name="priority"><option value="">全部优先级</option>${["P0", "P1", "P2"].map((value) => `<option value="${value}" ${filters.priority === value ? "selected" : ""}>${value}</option>`).join("")}</select><button type="submit" class="secondary-button">筛选</button><button type="button" class="text-button" data-reset-erp-usage-filters>清除</button></form>`;
-  const table = `<div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>ERP SKU</th><th>建议用途</th><th>当前用途</th><th>状态</th><th>影响行数</th><th>链接SKU</th><th>销售额</th><th>利润</th><th>日期范围</th><th></th></tr></thead><tbody>${(model.items || []).map((item) => `<tr><td><strong>${escapeHtml(item.merchantSkuCode)}</strong><small>${escapeHtml(item.name || "—")} · ${escapeHtml(item.specification || "—")}</small></td><td>${escapeHtml(erpUsageLabels[item.suggestedUsage] || "暂无建议")}<small>${escapeHtml(item.priority)}</small></td><td>${escapeHtml(erpUsageLabels[item.currentUsage] || "未确认")}</td><td>${escapeHtml(erpUsageStatusLabels[item.status] || item.status)}</td><td>${item.impact.rowCount}</td><td>${item.impact.salesLinkSkuCount}</td><td>¥${usageMoney(item.impact.salesAmount)}</td><td>¥${usageMoney(item.impact.profitAmount)}</td><td>${escapeHtml(item.impact.dateStart && item.impact.dateEnd ? `${item.impact.dateStart} 至 ${item.impact.dateEnd}` : "—")}</td><td><button type="button" class="text-button" data-view-erp-usage="${escapeHtml(item.erpSkuId)}">查看</button></td></tr>`).join("") || `<tr><td colspan="10">暂无符合条件的ERP SKU</td></tr>`}</tbody></table></div>`;
-  const pagination = `<footer><small>治理对象按ERP SKU聚合，销售明细仅作为证据。</small><div><button type="button" class="text-button" data-erp-usage-page="${Math.max(1, Number(model.pagination?.page || 1) - 1)}" ${Number(model.pagination?.page || 1) <= 1 ? "disabled" : ""}>上一页</button><span>${model.pagination?.page || 1} / ${model.pagination?.totalPages || 1}</span><button type="button" class="text-button" data-erp-usage-page="${Number(model.pagination?.page || 1) + 1}" ${Number(model.pagination?.page || 1) >= Number(model.pagination?.totalPages || 1) ? "disabled" : ""}>下一页</button></div></footer>`;
-  const detail = selected ? `<article class="connection-import-preview"><header><div><h3>${escapeHtml(selected.item.merchantSkuCode)} · ${escapeHtml(selected.item.name)}</h3><p>ERP SKU用途治理只定义该编码在经营分析中的用途。</p></div><button type="button" class="text-button" data-close-erp-usage>关闭</button></header><div class="connection-import-preview-grid"><span>规格<strong>${escapeHtml(selected.item.specification || "—")}</strong></span><span>ERP状态<strong>${escapeHtml(selected.item.erpStatus || "—")}</strong></span><span>建议用途<strong>${escapeHtml(erpUsageLabels[selected.item.suggestedUsage] || "暂无建议")}</strong></span><span>当前用途<strong>${escapeHtml(erpUsageLabels[selected.item.currentUsage] || "未确认")}</strong></span><span>影响行数<strong>${selected.item.impact.rowCount}</strong></span><span>影响链接SKU<strong>${selected.item.impact.salesLinkSkuCount}</strong></span></div><h4>用途建议</h4><p>${escapeHtml(selected.item.suggestionEvidence || "当前没有人工确认前的用途建议；请结合销售证据判断。")}</p><p class="form-note">建议只是审核证据，不会自动成为正式用途。</p><h4>销售明细证据</h4><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>日期</th><th>链接</th><th>链接SKU</th><th>数量</th><th>销售额</th><th>利润</th></tr></thead><tbody>${(selected.salesRows || []).map((row) => `<tr><td>${escapeHtml(row.saleDate || "—")}</td><td>${escapeHtml(row.linkName || "—")}</td><td>${escapeHtml(row.salesLinkSkuId || "—")}</td><td>${escapeHtml(row.quantity ?? "—")}</td><td>¥${usageMoney(row.salesAmount)}</td><td>¥${usageMoney(row.profitAmount)}</td></tr>`).join("") || `<tr><td colspan="6">暂无销售证据</td></tr>`}</tbody></table></div>${canManage() ? `<form class="connection-foundation-import-form" data-confirm-erp-usage><label>确认用途<select name="usageType" required>${Object.entries(erpUsageLabels).map(([value, label]) => `<option value="${value}" ${selected.item.currentUsage === value ? "selected" : ""}>${label}</option>`).join("")}</select></label><label>确认说明<textarea name="decisionNote" rows="3" required placeholder="说明人工判断依据"></textarea></label><button type="submit" class="primary-button" ${model.confirming ? "disabled" : ""}>${model.confirming ? "正在确认…" : "确认用途"}</button><small>只写用途审计记录，不创建关系、不修改ERP SKU、不写日报事实。</small></form>` : ""}<h4>审计记录</h4><div class="connection-template-list">${(selected.usageHistory || []).map((row) => `<article><div><strong>${escapeHtml(erpUsageLabels[row.usageType] || row.usageType)} · ${escapeHtml(erpUsageStatusLabels[row.status] || row.status)}</strong><span>${escapeHtml(row.sourceType)} · ${escapeHtml(row.reviewedByName || "未审核")} · ${escapeHtml(row.reviewedAt || row.createdAt || "—")}</span><small>${escapeHtml(row.decisionNote || "无说明")}</small></div></article>`).join("") || `<p>暂无审计记录</p>`}</div></article>` : "";
-  return `<section class="connection-foundation-page"><header class="connection-section-heading"><div><p class="eyebrow">ERP SKU BUSINESS USAGE</p><h2>ERP SKU用途治理</h2><p>按ERP SKU确认经营用途；销售明细只作为判断证据。</p></div></header>${stats}${filtersHtml}${model.loading ? `<div class="empty-state">正在读取ERP SKU用途…</div>` : table}${pagination}${detail}</section>`;
-}
 
 function renderDataFoundation() {
   const foundation = pageState.foundation; const types = Object.entries(foundation.definitions);
@@ -564,16 +622,16 @@ function renderDataFoundation() {
   const fileStatusText = { waiting: "等待", running: "解析中", preview_ready: "待确认", already_imported: "历史已导入", blocked: "已阻断", failed: "异常", completed: "已导入", completed_with_errors: "已导入 · 有异常" };
   const bulkPreviewPanel = bulkPreview ? `<section class="connection-import-preview ${bulkPreview.batch?.failedCount ? "is-blocked" : ""}"><header><div><p class="eyebrow">BULK IMPORT PREVIEW</p><h3>平台链接数据批量预览</h3></div><span class="status-pill">${escapeHtml(bulkStatusText[bulkPreview.batch?.status] || bulkPreview.batch?.status)}</span></header><div class="connection-import-preview-grid"><span>文件总数<strong>${escapeHtml(bulkPreview.batch?.fileCount || 0)}</strong></span><span>已处理<strong>${escapeHtml(bulkPreview.batch?.processedCount || 0)}</strong></span><span>原始行数<strong>${escapeHtml(bulkPreview.summary?.rawRows || 0)}</strong></span><span>过滤后行数<strong>${escapeHtml(bulkPreview.summary?.filteredRows || 0)}</strong></span><span>新增链接<strong>${escapeHtml(bulkPreview.summary?.newLinks || 0)}</strong></span><span>更新链接<strong>${escapeHtml(bulkPreview.summary?.updatedLinks || 0)}</strong></span><span>经营事实<strong>${escapeHtml(bulkPreview.summary?.operationFacts || 0)}</strong></span><span>异常数量<strong>${escapeHtml(bulkPreview.summary?.errors || 0)}</strong></span></div><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>文件</th><th>平台</th><th>店铺</th><th>有效行</th><th>异常</th><th>状态</th></tr></thead><tbody>${(bulkPreview.files || []).map((file) => `<tr><td>${escapeHtml(file.fileName)}</td><td>${escapeHtml(file.platform || "识别中")}</td><td>${escapeHtml(file.shop || "—")}</td><td>${escapeHtml(file.summary?.filteredRows || 0)}</td><td>${escapeHtml(file.summary?.errors || 0)}</td><td>${escapeHtml(fileStatusText[file.status] || file.status)}${file.errorMessage ? `<small>${escapeHtml(file.errorMessage)}</small>` : ""}</td></tr>`).join("")}</tbody></table></div><footer><small>后台按文件顺序处理；确认前不创建链接或写入经营事实。</small>${canImportBusinessData() && ["preview_ready", "preview_ready_with_errors"].includes(bulkPreview.batch?.status) ? `<button type="button" class="primary-button" data-confirm-foundation-bulk-import="${escapeHtml(bulkPreview.batch.id)}">批量确认导入</button>` : ""}</footer></section>` : "";
   return `<section class="connection-foundation-page">
-    <header class="connection-section-heading"><div><p class="eyebrow">BUSINESS DATA IMPORT</p><h2>业务数据导入</h2><p>业务人员直接上传文件；系统自动识别平台与解析规则，管理员在下方维护模板。</p></div></header>
-    ${renderImportStatus(foundation.loading ? "parsed" : foundation.batches?.[0]?.status)}
-    <div class="connection-import-type-grid"><article><strong>导入平台链接数据表</strong><span>创建链接资产并写入平台表现</span></article><article><strong>导入平台货品表</strong><span>建立平台SKU与ERP SKU关系</span></article><article><strong>导入链接利润表</strong><span>写入真实销售、成本和利润事实</span></article><article><strong>导入负责人匹配表</strong><span>全量跨店铺更新链接负责人</span></article></div>
-    ${canImportBusinessData() ? `<div class="connection-business-import-grid"><form class="connection-foundation-import-form" data-foundation-bulk-import-form><label>平台链接数据表（可多选）<input type="file" name="files" accept=".xls,.xlsx" multiple required /></label><button type="submit" class="primary-button">批量上传并后台预览</button></form><form class="connection-foundation-import-form" data-sales-fact-import-form novalidate><label>链接利润表<input type="file" name="file" accept=".xls,.xlsx" ${foundation.salesLoading ? "disabled" : ""} data-sales-fact-file /></label>${foundation.salesFileName ? `<small>已选择：${escapeHtml(foundation.salesFileName)}</small>` : ""}<button type="submit" class="primary-button" ${foundation.salesLoading ? "disabled aria-busy=\"true\"" : ""}>${foundation.salesLoading ? "正在上传并解析…" : "上传利润表并解析"}</button><div class="connection-import-feedback" aria-live="polite">${foundation.salesError ? `<span class="form-error">${escapeHtml(foundation.salesError)}</span>` : foundation.salesMessage ? `<span class="form-success">${escapeHtml(foundation.salesMessage)}</span>` : ""}</div></form><form class="connection-foundation-import-form" data-sales-daily-import-form novalidate><label>销售日报利润表<input type="file" name="file" accept=".xls,.xlsx" ${foundation.dailyLoading ? "disabled" : ""} data-sales-daily-file /></label>${foundation.dailyFileName ? `<small>已选择：${escapeHtml(foundation.dailyFileName)}</small>` : ""}<button type="submit" class="secondary-button" ${foundation.dailyLoading ? "disabled aria-busy=\"true\"" : ""}>${foundation.dailyLoading ? "正在生成日报预览…" : "生成销售日报预览"}</button><div class="connection-import-feedback" aria-live="polite">${foundation.dailyError ? `<span class="form-error">${escapeHtml(foundation.dailyError)}</span>` : foundation.dailyMessage ? `<span class="form-success">${escapeHtml(foundation.dailyMessage)}</span>` : ""}</div></form><form class="connection-foundation-import-form" data-shop-mapping-import-form><label>店铺匹配表<input type="file" name="file" accept=".xls,.xlsx" required /></label><button type="submit" class="secondary-button">读取店铺匹配</button></form></div>` : ""}
+    <header class="connection-section-heading"><div><h2>业务数据导入</h2></div></header>
+    ${canImportBusinessData() ? `<div class="connection-business-import-grid"><form class="connection-foundation-import-form" data-foundation-bulk-import-form><label>平台链接数据表（可多选）<input type="file" name="files" accept=".xls,.xlsx" multiple required /></label><button type="submit" class="primary-button">批量上传并后台预览</button></form><form class="connection-foundation-import-form" data-sales-fact-import-form novalidate><label>链接利润表<input type="file" name="file" accept=".xls,.xlsx" ${foundation.salesLoading ? "disabled" : ""} data-sales-fact-file /></label>${foundation.salesFileName ? `<small>已选择：${escapeHtml(foundation.salesFileName)}</small>` : ""}<button type="submit" class="primary-button" ${foundation.salesLoading ? "disabled aria-busy=\"true\"" : ""}>${foundation.salesLoading ? "正在上传并解析…" : "上传利润表并解析"}</button><div class="connection-import-feedback" aria-live="polite">${foundation.salesError ? `<span class="form-error">${escapeHtml(foundation.salesError)}</span>` : foundation.salesMessage ? `<span class="form-success">${escapeHtml(foundation.salesMessage)}</span>` : ""}</div></form><form class="connection-foundation-import-form" data-sales-daily-import-form novalidate><label>销售日报利润表<input type="file" name="file" accept=".xls,.xlsx" ${foundation.dailyLoading ? "disabled" : ""} data-sales-daily-file /></label>${foundation.dailyFileName ? `<small>已选择：${escapeHtml(foundation.dailyFileName)}</small>` : ""}<button type="submit" class="secondary-button" ${foundation.dailyLoading ? "disabled aria-busy=\"true\"" : ""}>${foundation.dailyLoading ? "正在生成日报预览…" : "生成销售日报预览"}</button><div class="connection-import-feedback" aria-live="polite">${foundation.dailyError ? `<span class="form-error">${escapeHtml(foundation.dailyError)}</span>` : foundation.dailyMessage ? `<span class="form-success">${escapeHtml(foundation.dailyMessage)}</span>` : ""}</div></form><form class="connection-foundation-import-form" data-shop-mapping-import-form><label>店铺匹配表<input type="file" name="file" accept=".xls,.xlsx" required /></label><button type="submit" class="secondary-button">读取店铺匹配</button></form>${renderOwnerImportUploader()}</div>` : ""}
     ${renderOwnerImport()}
-    ${bulkPreviewPanel}${previewPanel}
-    ${salesPreviewPanel}${dailyPreviewPanel}${candidatePanel}${comboPanel}${shopPreviewPanel}
-    ${canManage() ? `<section class="connection-foundation-panel"><h3>管理员解析模板</h3><form data-foundation-template-form class="connection-foundation-template-form"><input name="name" placeholder="模板名称" required /><select name="dataType">${types.map(([key, definition]) => `<option value="${escapeHtml(key)}">${escapeHtml(definition.label)}</option>`).join("")}</select><input name="sourcePlatform" placeholder="来源平台" /><textarea name="fieldMappingsJson" placeholder='字段映射，例如 {"商品ID":"platformGoodsId"}' required></textarea><input name="changeNote" placeholder="版本说明" /><button type="submit" class="secondary-button">新增模板 V1</button></form><div class="connection-template-list">${foundation.templates.map((item) => `<article><div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(typeLabel(item.dataType))} · V${escapeHtml(item.version)} · ${escapeHtml(item.status)}</span></div><button type="button" class="text-button" data-iterate-foundation-template="${escapeHtml(item.id)}">迭代版本</button></article>`).join("") || "<p>暂无解析模板。</p>"}</div></section>` : ""}
-    <section class="connection-foundation-panel"><h3>导入记录</h3><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>文件</th><th>类型</th><th>时间</th><th>成功</th><th>异常</th><th>状态</th></tr></thead><tbody>${foundation.batches.map((item) => `<tr><td>${escapeHtml(item.fileName)}</td><td>${escapeHtml(typeLabel(item.importType))}</td><td>${escapeHtml(item.createdAt)}</td><td>${escapeHtml(item.matchedRows)}</td><td>${escapeHtml(item.errorRows)}</td><td>${escapeHtml(item.status)}</td></tr>`).join("") || `<tr><td colspan="6">暂无导入记录</td></tr>`}</tbody></table></div></section>
-    <section class="connection-foundation-panel"><h3>异常列表</h3><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>文件</th><th>行号</th><th>外部标识</th><th>异常类型</th><th>说明</th></tr></thead><tbody>${foundation.errors.map((item) => `<tr><td>${escapeHtml(item.fileName)}</td><td>${escapeHtml(item.rowNumber)}</td><td>${escapeHtml(item.externalKey || "—")}</td><td>${escapeHtml(item.errorType)}</td><td>${escapeHtml(item.errorMessage)}</td></tr>`).join("") || `<tr><td colspan="5">暂无导入异常</td></tr>`}</tbody></table></div></section>
+    ${bulkPreviewPanel ? `<details class="connection-preview-fold" ${["waiting", "running", "preview_ready", "preview_ready_with_errors", "failed"].includes(bulkPreview.batch?.status) ? "open" : ""}><summary><strong>平台链接数据导入</strong><span>${escapeHtml(bulkStatusText[bulkPreview.batch?.status] || bulkPreview.batch?.status)} · ${escapeHtml(bulkPreview.batch?.fileCount || 0)} 个文件</span></summary>${bulkPreviewPanel}</details>` : ""}
+    ${salesPreviewPanel ? `<details class="connection-preview-fold" ${salesPreview.isCurrent || salesPreview.blocked ? "open" : ""}><summary><strong>链接利润表导入</strong><span>${escapeHtml(salesStatusText)} · ${escapeHtml(salesSummary.fileName || "—")}</span></summary>${salesPreviewPanel}</details>` : ""}
+    ${dailyPreviewPanel ? `<details class="connection-preview-fold" ${!factCommit || dailySummary.relationRecalculationRequired ? "open" : ""}><summary><strong>销售日报导入</strong><span>${escapeHtml(dailySummary.dateStart && dailySummary.dateEnd ? `${dailySummary.dateStart} 至 ${dailySummary.dateEnd}` : dailySummary.fileName || "—")} · 待确认 ${dailySummary.pendingRelationRows || 0} · 异常 ${dailySummary.errorRows || 0}</span></summary>${dailyPreviewPanel}</details>` : ""}
+    ${shopPreviewPanel}
+    ${canManage() ? `<details class="connection-foundation-panel connection-collapsible-panel"><summary><strong>管理员解析模板</strong><span>${foundation.templates.length} 个模板</span></summary><form data-foundation-template-form class="connection-foundation-template-form"><input name="name" placeholder="模板名称" required /><select name="dataType">${types.map(([key, definition]) => `<option value="${escapeHtml(key)}">${escapeHtml(definition.label)}</option>`).join("")}</select><input name="sourcePlatform" placeholder="来源平台" /><textarea name="fieldMappingsJson" placeholder='字段映射，例如 {"商品ID":"platformGoodsId"}' required></textarea><input name="changeNote" placeholder="版本说明" /><button type="submit" class="secondary-button">新增模板 V1</button></form><div class="connection-template-list">${foundation.templates.map((item) => `<article><div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(typeLabel(item.dataType))} · V${escapeHtml(item.version)} · ${escapeHtml(item.status)}</span></div><button type="button" class="text-button" data-iterate-foundation-template="${escapeHtml(item.id)}">迭代版本</button></article>`).join("") || "<p>暂无解析模板。</p>"}</div></details>` : ""}
+    <details class="connection-foundation-panel connection-collapsible-panel"><summary><strong>导入记录</strong><span>最近 ${Math.min(foundation.batches.length, 10)} 条</span></summary><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>文件</th><th>类型</th><th>时间</th><th>成功</th><th>异常</th><th>状态</th></tr></thead><tbody>${foundation.batches.slice(0, 10).map((item) => `<tr><td>${escapeHtml(item.fileName)}</td><td>${escapeHtml(typeLabel(item.importType))}</td><td>${escapeHtml(item.createdAt)}</td><td>${escapeHtml(item.matchedRows)}</td><td>${escapeHtml(item.errorRows)}</td><td>${escapeHtml(item.status)}</td></tr>`).join("") || `<tr><td colspan="6">暂无导入记录</td></tr>`}</tbody></table></div></details>
+    ${foundation.errors.length ? `<details class="connection-foundation-panel connection-collapsible-panel"><summary><strong>导入异常明细</strong><span>${foundation.errors.length} 条</span></summary><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>文件</th><th>行号</th><th>外部标识</th><th>异常类型</th><th>说明</th></tr></thead><tbody>${foundation.errors.slice(0, 50).map((item) => `<tr><td>${escapeHtml(item.fileName)}</td><td>${escapeHtml(item.rowNumber)}</td><td>${escapeHtml(item.externalKey || "—")}</td><td>${escapeHtml(item.errorType)}</td><td>${escapeHtml(item.errorMessage)}</td></tr>`).join("")}</tbody></table></div><small>仅展示最近 50 条，完整记录请在数据中心查看。</small></details>` : ""}
   </section>`;
 }
 
@@ -710,6 +768,14 @@ function renderConnectionAssets() {
   </section>`;
 }
 
+function renderOwnerImportUploader() {
+  if (!canManage()) return "";
+  return `<form data-connection-owner-import-form class="connection-foundation-import-form">
+    <label>负责人匹配表<input type="file" name="file" accept=".xls,.xlsx" required /></label>
+    <button type="submit" class="secondary-button" ${pageState.ownerImport.loading ? "disabled" : ""}>${pageState.ownerImport.loading ? "正在解析…" : "生成匹配预览"}</button>
+  </form>`;
+}
+
 function renderOwnerImport() {
   if (!canManage()) return "";
   const result = pageState.ownerImport.result; const preview = result?.preview ?? {}; const rows = pageState.ownerImport.detailRows ?? [];
@@ -723,13 +789,9 @@ function renderOwnerImport() {
     const exceptionCount = Number(preview.unmatchedRows || 0) + Number(preview.conflictRows || 0) + Number(preview.ignoredRows || 0);
     return `<section class="connection-owner-completion"><span class="connection-owner-completion-mark">✓</span><h2>负责人匹配完成</h2>${result.batch.status === "partial" ? `<p class="connection-owner-partial-note">部分数据已成功更新。异常数据未更新，可进入异常中心处理。</p>` : `<p>本次负责人匹配已全部完成。</p>`}<div class="connection-owner-change-summary"><span>新增负责人<strong>0</strong></span><span>负责人变更<strong>${result.result?.updated || 0}</strong></span><span>保持不变<strong>${result.result?.unchanged || 0}</strong></span><span>异常<strong>${exceptionCount}</strong></span></div><footer><button type="button" class="secondary-button" data-view-owner-import-result>查看本次详情</button><button type="button" class="secondary-button" data-return-connection-center>返回链接经营中心</button><button type="button" class="primary-button" data-continue-owner-import>继续导入负责人表</button></footer></section>`;
   }
+  if (!result) return "";
   return `<details class="connection-foundation-panel connection-owner-import" ${result ? "open" : ""}>
-    <summary>批量匹配负责人</summary>
-    <p class="form-note">按“平台 + 商品ID”精确匹配链接，并使用店铺字段校验；支持一个文件覆盖多个平台和店铺。</p>
-    <form data-connection-owner-import-form class="connection-foundation-import-form">
-      <label>负责人匹配Excel<input type="file" name="file" accept=".xls,.xlsx" required /></label>
-      <button type="submit" class="secondary-button" ${pageState.ownerImport.loading ? "disabled" : ""}>${pageState.ownerImport.loading ? "正在解析…" : "生成匹配预览"}</button>
-    </form>
+    <summary>负责人匹配结果</summary>
     ${result ? `<section class="connection-import-preview"><header><div><h3>本次负责人匹配</h3><p>${escapeHtml(result.batch?.fileName || "负责人匹配表")}</p></div><span class="status-pill">${batchStatus[result.batch?.status] || result.batch?.status}</span></header>
       <div class="connection-owner-change-summary"><span>文件总行数<strong>${preview.totalRows || 0}</strong></span><span>可更新链接<strong>${preview.updatableLinks || 0}</strong></span><span>负责人变更<strong>${preview.changeRows || 0}</strong></span><span>保持不变<strong>${preview.unchangedRows || 0}</strong></span><span>异常<strong>${Number(preview.unmatchedRows || 0) + Number(preview.conflictRows || 0) + Number(preview.ignoredRows || 0)}</strong></span></div>
       <div class="connection-import-preview-grid"><span>可更新链接<strong>${preview.updatableLinks || 0}</strong></span><span>涉及负责人<strong>${preview.ownerCount || 0}</strong></span><span>涉及平台<strong>${preview.platformCount || 0}</strong></span><span>涉及店铺<strong>${preview.shopCount || 0}</strong></span><span>异常行<strong>${Number(preview.unmatchedRows || 0) + Number(preview.conflictRows || 0)}</strong></span><span>不会更新<strong>${skipped}</strong></span></div>
@@ -749,6 +811,16 @@ function cockpitSalesPeriodText(summary) {
   const range = start === end ? start : `${start} 至 ${end}`;
   return summary.salesPeriodAligned ? `统计周期 ${range}` : `各链接最新周期 ${range}（共 ${summary.salesPeriodCount || 0} 个周期）`;
 }
+function renderGoalHealthCockpit() {
+  const model = pageState.goalHealth || {}; const grades = model.gradeSummary || {}; const period = model.evaluationPeriod || {};
+  const periodText = period.periodEnd ? `滚动30天 · 数据截止 ${period.periodEnd}${Number(period.periodCount || 0) > 1 ? ` · ${period.periodCount}个评价周期` : ""}` : "滚动30天 · 暂无已完成评价";
+  const gradeItems = [["excellent","优秀"],["good","良好"],["on_target","达标"],["underperforming","不达标"]];
+  return `<section class="cockpit-panel connection-goal-health-cockpit"><header><div><h3>链接经营健康度</h3><span>${escapeHtml(periodText)}</span></div><button type="button" class="text-button" data-goal-health-drill="all">进入链接经营管理 →</button></header>
+    <div class="connection-goal-health-coverage"><article><span>管理覆盖</span><strong>${model.totalLinks || 0}</strong><small>已设置定位 ${model.positionedLinks || 0} · 未设置 ${model.unpositionedLinks || 0}</small></article><article><span>目标覆盖</span><strong>${model.activeGoalLinks || 0}</strong><small>待设置 ${model.pendingGoalLinks || 0}</small><button type="button" class="text-button" data-goal-health-drill="goal-pending">查看待设置目标</button></article><article><span>评价覆盖</span><strong>${model.evaluatedLinks || 0}</strong><small>待评价 ${model.pendingEvaluationLinks || 0}</small></article></div>
+    <div class="connection-goal-grade-summary"><div><strong>评级分布</strong><small>仅统计已评价链接 ${model.evaluatedLinks || 0} 条</small></div>${gradeItems.map(([code,label]) => `<button type="button" data-goal-health-drill="grade" data-evaluation-status="${code}" class="goal-grade-${code}"><span>${label}</span><strong>${grades[code] || 0}</strong></button>`).join("")}</div>
+    <div class="connection-goal-positioning-summary">${(model.positioningSummary || []).map((item) => `<article><header><strong>${escapeHtml(item.positioningName)}</strong><small>${item.totalLinks || 0} 条 · 已评价 ${item.evaluatedLinks || 0}</small></header><div>${gradeItems.map(([code,label]) => code === "underperforming" ? `<button type="button" data-goal-health-drill="grade" data-positioning="${escapeHtml(item.positioningType)}" data-evaluation-status="${code}"><span>${label}</span><b>${item[code] || 0}</b></button>` : `<span><em>${label}</em><b>${item[code] || 0}</b></span>`).join("")}</div></article>`).join("")}</div>
+  </section>`;
+}
 function renderBusinessCockpit() {
   const cockpit=pageState.cockpit; const summary=cockpit.summary??{}; const health=cockpit.health??{};
   const totalHealth=Number(health.healthy||0)+Number(health.attention||0)+Number(health.risk||0)+Number(health.noData||0);
@@ -760,6 +832,7 @@ function renderBusinessCockpit() {
     ${renderUiModule("link_sales_distribution", { state: pageState.salesDistribution, canViewCompany: isAdmin() })}
     <section class="cockpit-summary"><div><span>链接数量</span><strong>${summary.connectionCount||0}</strong><small>正常经营 ${summary.normalCount||0}</small></div><div class="is-sales"><span>ERP销售额</span><strong>${coreMoney(summary.salesAmount)}</strong><small>${escapeHtml(salesPeriodText)}</small><small>较各链接上一周期 ${growthText(summary.salesGrowth)}</small></div><div><span>利润</span><strong>${coreMoney(summary.profitAmount)}</strong><small>利润率 ${corePercent(summary.profitMargin)}</small></div><div class="is-risk"><span>风险链接</span><strong>${summary.riskCount||0}</strong><small>需要管理关注</small></div><div class="is-diagnosis"><span>诊断中</span><strong>${summary.diagnosisCount||0}</strong><small>等待定位问题</small></div><div class="is-treatment"><span>治疗中</span><strong>${summary.treatmentCount||0}</strong><small>正在推进改善</small></div></section>
     <section class="cockpit-health"><header><h3>健康状态</h3><span>高利润链接 ${summary.highProfitCount||0} · 利润风险 ${summary.profitRiskCount||0}</span></header><div><span>健康 <b>${health.healthy||0}</b><em>${healthRate(health.healthy)}</em></span><span>关注 <b>${health.attention||0}</b><em>${healthRate(health.attention)}</em></span><span>异常 <b>${health.risk||0}</b><em>${healthRate(health.risk)}</em></span><span>待积累数据 <b>${health.noData||0}</b><em>${healthRate(health.noData)}</em></span></div></section>
+    ${renderGoalHealthCockpit()}
     ${renderOwnerContribution()}
     <div class="cockpit-two-columns"><section class="cockpit-panel"><header><h3>核心链接</h3><span>按ERP销售额、利润排序</span></header>${cockpit.coreLinks?.length?cockpit.coreLinks.map((item)=>linkCard(item,`销量 ${coreNumber(item.erpSales?.shippedQuantity)}`)).join(""):`<div class="empty-state compact">暂无ERP销售事实</div>`}</section><section class="cockpit-panel is-risk"><header><h3>风险链接</h3><button type="button" class="text-button" data-workbench-hospital="diagnosis">进入链接医院 →</button></header>${cockpit.riskLinks?.length?cockpit.riskLinks.map((item)=>linkCard(item,`${item.anomalyTypes?.join("、")||"健康异常"} · ${cockpitStageText(item.operationStage)}`)).join(""):`<div class="empty-state compact">当前没有风险链接</div>`}</section></div>
     <section class="cockpit-panel"><header><h3>增长链接</h3></header><div class="cockpit-growth-grid">${cockpit.growthLinks?.length?cockpit.growthLinks.map((item)=>linkCard(item,`最快增长 ${growthText(item.growthMetric)}`)).join(""):`<div class="empty-state compact">尚无可比较的增长链接</div>`}</div></section>
@@ -862,6 +935,54 @@ function renderCoreOperatingOverview(item, core) {
   const sales = core?.salesOverview ?? item.erpSales ?? {};
   return `<section class="connection-v3-panel"><h3>经营概览</h3><p>核心经营指标来自 ERP 真实销售事实。</p><div class="connection-v3-metrics"><div><span>发货销量</span><strong>${coreNumber(sales.shippedQuantity)}</strong></div><div><span>销售金额</span><strong>${coreMoney(sales.salesAmount)}</strong></div><div><span>成本</span><strong>${coreMoney(sales.costAmount)}</strong></div><div><span>利润</span><strong>${coreMoney(sales.profitAmount)}</strong></div><div><span>利润率</span><strong>${corePercent(sales.profitMargin)}</strong></div></div><small>${sales.periodStart ? escapeHtml(`${sales.periodStart} 至 ${sales.periodEnd}`) : "暂无ERP销售周期"}</small></section>`;
 }
+
+function renderConnectionBusinessPositioning(core) {
+  const model = core?.businessPositioning;
+  if (!model) return `<section class="connection-v3-panel"><h3>经营定位</h3><div class="empty-state compact">正在读取经营定位…</div></section>`;
+  const current = model.current;
+  const template = model.currentTemplate;
+  const metrics = template?.metrics ?? [];
+  const history = model.history ?? [];
+  const metricText = metrics.map((metric) => `${metric.metricName} ${Math.round(Number(metric.weight || 0) * 100)}%`).join(" · ");
+  return `<section class="connection-v3-panel connection-positioning-panel"><header><div><h3>经营定位</h3><p>定位由人工确认，系统不会根据销售数据自动判断。</p></div>${current ? `<span class="status-pill">${escapeHtml(current.positioningName)}</span>` : `<span class="status-pill">未设置</span>`}</header>
+    <div class="connection-positioning-summary"><div><span>当前定位</span><strong>${escapeHtml(current?.positioningName || "未设置")}</strong></div><div><span>目标模板</span><strong>${escapeHtml(template?.name || "设置定位后自动关联")}</strong><small>${template ? `${template.windowDays}天 · V${template.version}` : "—"}</small></div><div><span>指标权重</span><strong>${escapeHtml(metricText || "—")}</strong></div></div>
+    ${model.permissions?.canEdit ? `<form class="connection-positioning-form" data-connection-positioning-form><label>经营定位<select name="positioningType" required><option value="">请选择</option>${model.options.map((option) => `<option value="${escapeHtml(option.value)}" ${current?.positioningType === option.value ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select></label><label>修改原因<textarea name="decisionReason" rows="2" maxlength="500" required placeholder="说明本次人工判断依据"></textarea></label><button type="submit" class="primary-button">保存定位</button></form>` : `<p class="form-note">普通运营可查看定位；仅管理员或当前链接负责人可以修改。</p>`}
+    ${history.length ? `<details class="connection-positioning-history"><summary>定位历史（${history.length}）</summary><div class="connection-template-list">${history.map((row) => `<article><div><strong>${escapeHtml(row.positioningName)}</strong><span>${escapeHtml(row.status === "active" ? "当前生效" : `${row.effectiveFrom} 至 ${row.effectiveTo || "—"}`)}</span><small>${escapeHtml(row.decisionReason)} · ${escapeHtml(row.decidedByName || "未知操作人")}</small></div></article>`).join("")}</div></details>` : ""}
+  </section>`;
+}
+function goalMetric(plan, code) { return plan?.metrics?.find((metric) => metric.metricCode === code) ?? null; }
+function goalModeText(mode) { return ({ system_suggested: "系统建议", manual: "人工设置", hybrid: "人工调整" })[mode] || mode || "—"; }
+function goalStatusText(status) { return ({ draft: "待人工设置", pending_confirm: "待确认", active: "生效中", expired: "已到期", cancelled: "已取消" })[status] || status || "—"; }
+function goalGradeText(grade) { return ({ excellent: "优秀", good: "良好", on_target: "达标", underperforming: "不达标" })[grade] || "—"; }
+function renderConnectionGoalEvaluation(core) {
+  const evaluation = core?.businessGoalEvaluation;
+  if (!evaluation) return `<div class="empty-state compact">正在计算近30天目标达成…</div>`;
+  if (evaluation.evaluationStatus !== "evaluated") {
+    const dataPeriod = evaluation.periodStart ? ` · 数据周期 ${evaluation.periodStart} 至 ${evaluation.periodEnd}` : "";
+    return `<div class="connection-goal-evaluation pending"><strong>待评价</strong><span>${escapeHtml(evaluation.reason || "暂不满足评价条件")}${escapeHtml(dataPeriod)}</span></div>`;
+  }
+  return `<div class="connection-goal-evaluation"><header><div><strong>近30天目标达成</strong><small>${escapeHtml(`${evaluation.periodStart} 至 ${evaluation.periodEnd}`)}</small></div><span class="status-pill goal-grade-${escapeHtml(evaluation.grade)}">${escapeHtml(goalGradeText(evaluation.grade))}</span></header><div class="connection-goal-evaluation-grid"><div><span>销售目标</span><strong>${coreMoney(evaluation.salesTarget)}</strong><small>实际 ${coreMoney(evaluation.salesActual)} · 完成 ${corePercent(evaluation.salesAchievement)}</small></div><div><span>利润目标</span><strong>${coreMoney(evaluation.profitTarget)}</strong><small>实际 ${coreMoney(evaluation.profitActual)} · 完成 ${corePercent(evaluation.profitAchievement)}</small></div><div><span>综合完成率</span><strong>${corePercent(evaluation.totalAchievement)}</strong><small>销售权重 ${corePercent(evaluation.salesWeight)} · 利润权重 ${corePercent(evaluation.profitWeight)}</small></div></div></div>`;
+}
+function renderConnectionBusinessGoals(core) {
+  const model = core?.businessGoals;
+  if (!model) return `<section class="connection-v3-panel connection-positioning-panel"><h3>经营目标</h3><div class="empty-state compact">正在读取经营目标…</div></section>`;
+  const current = model.current;
+  const awaiting = model.awaitingConfirmation;
+  const history = model.history ?? [];
+  const sales = goalMetric(current, "sales_amount");
+  const profit = goalMetric(current, "profit_amount");
+  const pendingSales = goalMetric(awaiting, "sales_amount");
+  const pendingProfit = goalMetric(awaiting, "profit_amount");
+  const period = current?.effectiveFrom ? `${current.effectiveFrom.slice(0, 10)} 至 ${current.effectiveTo.slice(0, 10)}` : "近30天";
+  return `<section class="connection-v3-panel connection-positioning-panel"><header><div><h3>经营目标</h3><p>目标建议来自销售日报事实的完整30天窗口，不计算完成率或评级。</p></div>${current ? `<span class="status-pill status-active">生效中</span>` : awaiting ? `<span class="status-pill">${escapeHtml(goalStatusText(awaiting.status))}</span>` : ""}</header>
+    ${current ? `<div class="connection-positioning-summary"><div><span>目标周期</span><strong>${escapeHtml(period)}</strong></div><div><span>销售目标</span><strong>${coreMoney(sales?.finalTargetValue)}</strong></div><div><span>利润目标</span><strong>${coreMoney(profit?.finalTargetValue)}</strong></div><div><span>目标来源</span><strong>${escapeHtml(goalModeText(current.targetMode))}</strong></div></div>` : ""}
+    ${renderConnectionGoalEvaluation(core)}
+    ${awaiting ? `<div class="connection-goal-pending"><div class="connection-positioning-summary"><div><span>状态</span><strong>${escapeHtml(goalStatusText(awaiting.status))}</strong></div><div><span>系统建议销售</span><strong>${coreMoney(pendingSales?.suggestedTargetValue)}</strong></div><div><span>系统建议利润</span><strong>${coreMoney(pendingProfit?.suggestedTargetValue)}</strong></div><div><span>基准周期</span><strong>${awaiting.baselineStart ? escapeHtml(`${awaiting.baselineStart} 至 ${awaiting.baselineEnd}`) : "数据不足30天"}</strong></div></div>
+      ${model.permissions?.canEdit ? `<form class="connection-positioning-form connection-goal-confirm-form" data-connection-goal-confirm-form data-plan-id="${escapeHtml(awaiting.id)}"><label>销售目标<input name="salesAmount" type="number" min="0" step="0.01" required value="${pendingSales?.suggestedTargetValue ?? ""}" /></label><label>利润目标<input name="profitAmount" type="number" step="0.01" required value="${pendingProfit?.suggestedTargetValue ?? ""}" /></label><label>调整原因<textarea name="approvalReason" rows="2" maxlength="500" placeholder="按建议确认可留空；修改建议必须填写"></textarea></label><button type="submit" class="primary-button">确认并生效</button></form>` : `<p class="form-note">等待管理员或当前链接负责人确认。</p>`}</div>` : ""}
+    ${!awaiting && model.permissions?.canEdit ? `<button type="button" class="secondary-button" data-create-connection-goal>生成目标建议</button>` : !current && !awaiting ? `<div class="empty-state compact">当前没有目标计划</div>` : ""}
+    ${history.length ? `<details class="connection-positioning-history"><summary>目标历史（${history.length}）</summary><div class="connection-template-list">${history.map((plan) => `<article><div><strong>${escapeHtml(`${plan.positioningName} · ${goalStatusText(plan.status)}`)}</strong><span>${escapeHtml(`${plan.templateName} V${plan.templateVersion} · ${goalModeText(plan.targetMode)}`)}</span><small>销售 ${coreMoney(goalMetric(plan, "sales_amount")?.finalTargetValue ?? goalMetric(plan, "sales_amount")?.suggestedTargetValue)} · 利润 ${coreMoney(goalMetric(plan, "profit_amount")?.finalTargetValue ?? goalMetric(plan, "profit_amount")?.suggestedTargetValue)}${plan.approvalReason ? ` · ${escapeHtml(plan.approvalReason)}` : ""}</small></div></article>`).join("")}</div></details>` : ""}
+  </section>`;
+}
 function renderCorePlatform(core) {
   const platform = core?.platformPerformance;
   return `<section class="connection-v3-panel"><h3>平台表现</h3>${platform ? `<div class="connection-v3-metrics"><div><span>访客</span><strong>${coreNumber(platform.visitorCount)}</strong></div><div><span>浏览</span><strong>${coreNumber(platform.viewCount)}</strong></div><div><span>点击</span><strong>${coreNumber(platform.metrics?.clickCount)}</strong></div><div><span>收藏</span><strong>${coreNumber(platform.metrics?.favoriteCount)}</strong></div><div><span>加购</span><strong>${coreNumber(platform.cartCount)}</strong></div><div><span>转化率</span><strong>${corePercent(platform.conversionRate)}</strong></div></div>` : `<div class="empty-state compact">暂无平台经营数据</div>`}</section>`;
@@ -908,7 +1029,7 @@ function renderDetail() {
   let body = "";
   if (pageState.coreDetailLoading) body = `<div class="empty-state">正在读取链接经营详情…</div>`;
   else if (pageState.detailTab === "business") body = renderUiModule("link_business_summary", {
-    metricsHtml: renderCoreOperatingOverview(item, pageState.coreDetail),
+    metricsHtml: `${renderConnectionBusinessPositioning(pageState.coreDetail)}${renderConnectionBusinessGoals(pageState.coreDetail)}${renderCoreOperatingOverview(item, pageState.coreDetail)}`,
     trendHtml: renderCorePlatform(pageState.coreDetail),
     healthHtml: `<section class="connection-v3-panel"><h3>健康状态</h3><div class="connection-v3-metrics"><div><span>健康分</span><strong>${item.healthScore == null ? "—" : Number(item.healthScore)}</strong></div><div><span>经营状态</span><strong>${escapeHtml(healthText(item.healthStatus || "no_data"))}</strong></div><div><span>销售趋势</span><strong>${growthText(item.salesGrowth)}</strong></div><div><span>利润趋势</span><strong>${growthText(item.profitGrowth)}</strong></div></div></section>`,
     productHtml: renderCoreProducts(pageState.coreDetail),
@@ -1032,7 +1153,7 @@ function renderImprovementModal() {
 }
 
 export function renderConnectionCenterPage() {
-  const pageContent = pageState.section === "cockpit" ? renderBusinessCockpit() : pageState.section === "hospital" ? renderConnectionHospital() : pageState.section === "my-links" ? renderMyLinksWorkbench() : pageState.section === "data-import" ? renderDataUpdateWorkspace() : pageState.section === "sales-relation-governance" ? renderSalesRelationGovernance() : pageState.section === "sales-data-quality-governance" ? renderSalesDataQualityGovernance() : pageState.section === "erp-usage-governance" ? renderErpUsageGovernance() : pageState.section === "data-center" ? renderConnectionDataCenter() : renderConnectionAssets();
+  const pageContent = pageState.section === "cockpit" ? renderBusinessCockpit() : pageState.section === "hospital" ? renderConnectionHospital() : pageState.section === "my-links" ? renderMyLinksWorkbench() : pageState.section === "goal-management" ? renderGoalManagement() : pageState.section === "data-import" ? renderDataUpdateWorkspace() : pageState.section === "sales-relation-governance" ? renderSalesRelationGovernance() : pageState.section === "sales-data-quality-governance" ? renderSalesDataQualityGovernance() : renderConnectionAssets();
   return `<section class="connection-center-page">${pageState.error ? `<div class="form-error">${escapeHtml(pageState.error)}</div>` : ""}${pageState.loading ? `<div class="empty-state">正在读取连接…</div>` : pageState.selectedId ? renderDetail() : `${renderSectionNavigation()}${pageContent}`}${renderMappingModal()}${renderImprovementModal()}${renderBenchmarkModal()}${renderDiagnosisModal()}</section>`;
 }
 
@@ -1160,10 +1281,76 @@ async function loadLinkBusinessTablePage(render) {
   render();
 }
 
+async function loadGoalWorkbenchPage(render, overrides = {}) {
+  const current = pageState.goalWorkbench;
+  const filters = { ...current.filters, ...(overrides.filters || {}) };
+  const pagination = { ...current.pagination, ...(overrides.pagination || {}) };
+  pageState.goalWorkbench = { ...current, filters, pagination, loading: true }; pageState.error = ""; render();
+  try {
+    const result = await loadConnectionGoalWorkbench({ ...filters, page: pagination.page, pageSize: pagination.pageSize });
+    pageState.goalWorkbench = { ...pageState.goalWorkbench, ...result, filters, filterOptions: result.filters || { owners: [] },
+      selectedIds: new Set(), loading: false, loaded: true, operating: false };
+    pageState.loadedSections.add("goal-management");
+  } catch (error) { pageState.error = error.message; pageState.goalWorkbench = { ...pageState.goalWorkbench, loading: false, operating: false }; }
+  render();
+}
+
+async function loadGoalPilotPage(render, overrides = {}) {
+  const current = pageState.goalPilot;
+  pageState.goalPilot = { ...current, loading: true }; pageState.error = ""; render();
+  try {
+    const batchResult = await loadConnectionGoalPilotBatches({ page: current.batchPagination.page, pageSize: current.batchPagination.pageSize });
+    const selectedBatchId = overrides.selectedBatchId ?? current.selectedBatchId ?? batchResult.items?.[0]?.id ?? "";
+    const selectedId = batchResult.items?.some((item) => item.id === selectedBatchId) ? selectedBatchId : batchResult.items?.[0]?.id || "";
+    let memberResult = { batch: null, items: [], pagination: current.memberPagination, permissions: batchResult.permissions };
+    if (selectedId) memberResult = await loadConnectionGoalPilotMembers(selectedId, { ...current.memberFilters, page: overrides.memberPage || current.memberPagination.page, pageSize: current.memberPagination.pageSize });
+    pageState.goalPilot = { ...pageState.goalPilot, batches: batchResult.items || [], batchPagination: batchResult.pagination,
+      selectedBatchId: selectedId, batch: memberResult.batch, members: memberResult.items || [], memberPagination: memberResult.pagination,
+      permissions: { ...batchResult.permissions, ...memberResult.permissions }, loaded: true, loading: false, operating: false };
+    pageState.loadedSections.add("goal-management");
+    if (pageState.goalPilot.showCandidates && selectedId) await loadGoalPilotCandidatePage(render, { page: 1, silent: true });
+  } catch (error) { pageState.error = error.message; pageState.goalPilot = { ...pageState.goalPilot, loading: false, operating: false }; }
+  render();
+}
+
+async function loadGoalPilotCandidatePage(render, overrides = {}) {
+  const model = pageState.goalPilot;
+  if (!model.selectedBatchId) return;
+  if (!overrides.silent) { pageState.goalPilot = { ...model, loading: true }; render(); }
+  try {
+    const page = overrides.page || model.candidatePagination.page;
+    const result = await loadConnectionGoalPilotCandidates(model.selectedBatchId, { ...model.candidateFilters, page, pageSize: model.candidatePagination.pageSize });
+    pageState.goalPilot = { ...pageState.goalPilot, candidates: result.items || [], candidatePagination: result.pagination,
+      filterOptions: result.filters || { owners: [] }, candidateSelectedIds: new Set(), loading: false };
+  } catch (error) { pageState.error = error.message; pageState.goalPilot = { ...pageState.goalPilot, loading: false }; }
+  if (!overrides.silent) render();
+}
+
+async function runGoalPilotOperation(render, operation) {
+  pageState.goalPilot = { ...pageState.goalPilot, operating: true }; pageState.error = ""; render();
+  try { await operation(); await loadGoalPilotPage(render); }
+  catch (error) { pageState.error = error.message; pageState.goalPilot = { ...pageState.goalPilot, operating: false }; render(); }
+}
+
+async function runGoalWorkbenchBatch(render, operation) {
+  const selectedIds = [...pageState.goalWorkbench.selectedIds];
+  if (!selectedIds.length) return;
+  pageState.goalWorkbench = { ...pageState.goalWorkbench, operating: true }; pageState.error = ""; render();
+  try {
+    const result = await operation(selectedIds);
+    const completed = result.changedCount ?? result.generatedCount ?? result.confirmedCount ?? 0;
+    const skipped = result.skippedCount ?? 0;
+    window.alert(`批量操作完成：处理 ${completed} 个，跳过 ${skipped} 个。`);
+    await loadGoalWorkbenchPage(render);
+  } catch (error) {
+    pageState.error = error.message; pageState.goalWorkbench = { ...pageState.goalWorkbench, operating: false }; render();
+  }
+}
+
 async function loadBusinessCockpitPage(render) {
   try {
-    const [cockpit, managementOverview] = await Promise.all([loadConnectionBusinessCockpit(), loadConnectionManagementOverview()]);
-    pageState.cockpit = { ...pageState.cockpit, ...cockpit }; pageState.managementOverview = managementOverview; pageState.error = "";
+    const [cockpit, managementOverview, goalHealth] = await Promise.all([loadConnectionBusinessCockpit(), loadConnectionManagementOverview(), loadConnectionGoalHealthSummary()]);
+    pageState.cockpit = { ...pageState.cockpit, ...cockpit }; pageState.managementOverview = managementOverview; pageState.goalHealth = goalHealth; pageState.error = "";
   }
   catch (error) { pageState.error = error.message; }
   render();
@@ -1172,9 +1359,10 @@ async function loadBusinessCockpitPage(render) {
 async function loadPage(render) {
   pageState.loading = true; pageState.error = ""; render();
   try {
-    const [cockpit, managementOverview, distribution] = await Promise.all([loadConnectionBusinessCockpit(), loadConnectionManagementOverview(), loadLinkSalesDistribution({ scope: isAdmin() ? "company" : "mine", preset: "7d" })]);
+    const [cockpit, managementOverview, distribution, goalHealth] = await Promise.all([loadConnectionBusinessCockpit(), loadConnectionManagementOverview(), loadLinkSalesDistribution({ scope: isAdmin() ? "company" : "mine", preset: "7d" }), loadConnectionGoalHealthSummary()]);
     pageState.cockpit = { ...pageState.cockpit, ...cockpit };
     pageState.managementOverview = managementOverview;
+    pageState.goalHealth = goalHealth;
     pageState.salesDistribution = { ...pageState.salesDistribution, ...distribution, loaded: true, loading: false, error: "" };
     pageState.loadedSections.add("cockpit");
     pageState.loaded = true;
@@ -1186,7 +1374,10 @@ async function loadPage(render) {
 async function openConnection(id, render) {
   if (window.location.hash !== `#connectionCenter/${encodeURIComponent(id)}`) window.history.replaceState(null, "", `#connectionCenter/${encodeURIComponent(id)}`);
   pageState.selectedId = id; pageState.detailTab = "business"; pageState.detailLoaded = new Set(["business"]); pageState.coreDetail = null; pageState.coreDetailLoading = true; pageState.dailySales = { data: null, loading: false, loaded: false, rangePreset: "30d", error: "" }; pageState.actions = []; pageState.periodSnapshots = []; pageState.growthAnalysis = null; pageState.healthRecords = []; pageState.healthModalId = ""; pageState.improvements = []; pageState.benchmarks = { items: [], candidates: [], comparison: null, comparisonId: "", loading: false }; render();
-  try { pageState.coreDetail = await loadConnectionCoreDetail(id); pageState.error = ""; }
+  try {
+    const [detail, businessPositioning, businessGoals, businessGoalEvaluation] = await Promise.all([loadConnectionCoreDetail(id), loadConnectionBusinessPositioning(id), loadConnectionBusinessGoals(id), loadConnectionBusinessGoalEvaluation(id)]);
+    pageState.coreDetail = { ...detail, businessPositioning, businessGoals, businessGoalEvaluation }; pageState.error = "";
+  }
   catch (error) { pageState.error = error.message; }
   pageState.coreDetailLoading = false; render();
 }
@@ -1243,27 +1434,11 @@ async function loadDataFoundation(render) {
   try {
     const [loaded, currentSalesPreview, currentDailyPreview, ownerImport] = await Promise.all([loadConnectionDataFoundation(), loadCurrentConnectionSalesFactImport(), loadCurrentConnectionSalesDailyImport(), canManage() ? loadCurrentConnectionOwnerImport() : Promise.resolve(null)]);
     pageState.foundation = { ...loaded, loading: false, preview: pageState.foundation.preview ?? null, bulkPreview: loaded.bulkPreview ?? pageState.foundation.bulkPreview ?? null, salesPreview: pageState.foundation.salesPreview ?? currentSalesPreview ?? null, salesLoading: pageState.foundation.salesLoading ?? false, salesError: pageState.foundation.salesError ?? "", salesMessage: pageState.foundation.salesMessage ?? "", salesFileName: pageState.foundation.salesFileName ?? "", salesFile: pageState.foundation.salesFile ?? null, dailyPreview: pageState.foundation.dailyPreview ?? currentDailyPreview ?? null, dailyLoading: pageState.foundation.dailyLoading ?? false, dailyCommitting: pageState.foundation.dailyCommitting ?? false, dailyError: pageState.foundation.dailyError ?? "", dailyMessage: pageState.foundation.dailyMessage ?? "", dailyFileName: pageState.foundation.dailyFileName ?? "", dailyFile: pageState.foundation.dailyFile ?? null, dailyCategory: pageState.foundation.dailyCategory ?? "ready", shopMappingPreview: pageState.foundation.shopMappingPreview ?? null };
-    const dailyBatchId = pageState.foundation.dailyPreview?.batch?.id;
-    if (dailyBatchId) {
-      pageState.relationCandidates = { ...pageState.relationCandidates, ...await loadSalesRelationCandidates({ sourceBatchId: dailyBatchId, status: "pending", candidateType: pageState.relationCandidates.candidateType, page: 1, pageSize: 50 }), selected: pageState.relationCandidates.selected, loading: false };
-      pageState.comboReviews = { ...pageState.comboReviews, ...await loadComboReviews({ sourceBatchId: dailyBatchId, status: "pending", page: 1, pageSize: 20 }), filters: { ...pageState.comboReviews.filters, sourceBatchId: dailyBatchId }, loading: false };
-    }
     pageState.ownerImport.result = ownerImport;
     pageState.loadedSections.add("data-import");
     if (["waiting", "running"].includes(pageState.foundation.bulkPreview?.batch?.status)) window.setTimeout(() => void pollConnectionBulkPreview(pageState.foundation.bulkPreview.batch.id, render), 800);
   }
   catch (error) { pageState.error = error.message; pageState.foundation.loading = false; }
-  render();
-}
-
-async function loadErpUsageGovernancePage(render, overrides = {}) {
-  const model = pageState.erpUsageGovernance;
-  model.loading = true; pageState.error = ""; render();
-  try {
-    const filters = { ...model.filters, ...overrides };
-    const result = await loadErpSkuUsageGovernance({ ...filters, page: overrides.page || model.pagination.page || 1, pageSize: 30 });
-    pageState.erpUsageGovernance = { ...model, ...result, filters, loading: false, loaded: true, selected: model.selected };
-  } catch (error) { pageState.error = error.message; model.loading = false; }
   render();
 }
 
@@ -1289,13 +1464,6 @@ async function loadSalesDataQualityGovernancePage(render, overrides = {}) {
   render();
 }
 
-async function openErpUsageGovernance(erpSkuId, render, page = 1) {
-  pageState.erpUsageGovernance.loading = true; pageState.error = ""; render();
-  try { pageState.erpUsageGovernance.selected = await loadErpSkuUsageGovernanceDetail(erpSkuId, { page, pageSize: 30 }); }
-  catch (error) { pageState.error = error.message; }
-  pageState.erpUsageGovernance.loading = false; render();
-}
-
 async function pollConnectionBulkPreview(batchId, render) {
   try {
     const result = await readConnectionFoundationBulkImport(batchId);
@@ -1314,6 +1482,7 @@ export function bindConnectionCenterPageEvents(render) {
     pageState.myWorkbench = { items: [], summary: { total: 0, better: 0, risk: 0, followed: 0 }, filter: "all", search: "", page: 1, pageSize: 20, isAdmin: false, loading: false, loaded: false };
     pageState.myLinkTable = { ...pageState.myLinkTable, items: [], pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 }, loading: false, loaded: false };
     pageState.businessTable = { ...pageState.businessTable, items: [], pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 }, loading: false, loaded: false };
+    pageState.goalWorkbench = { ...pageState.goalWorkbench, summary: {}, items: [], selectedIds: new Set(), loading: false, loaded: false, operating: false };
     pageState.linkDataStatus = { data: null, shopId: "", loading: false, loaded: false, error: "" };
     pageState.salesDailyQuality = { data: null, loading: false, loaded: false, error: "" };
     pageState.salesDistribution = { scope: isAdmin() ? "company" : "mine", range: { preset: "7d" }, items: [], summary: {}, selectedGroup: 0, selectedRange: null, drillTable: null, loading: false, loaded: false, error: "" };
@@ -1322,7 +1491,9 @@ export function bindConnectionCenterPageEvents(render) {
     pageState.ownerImport = { loading: false, result: null, showCompletion: false };
   }
   if (!pageState.loaded && !pageState.loading) void loadPage(render);
-  const route = parseConnectionCenterRoute(window.location.hash); const hasDetailRoute = Boolean(route.detailId);
+  const route = parseConnectionCenterRoute(window.location.hash);
+  if (route.redirectHash) { window.location.hash = route.redirectHash; return; }
+  const hasDetailRoute = Boolean(route.detailId);
   if (pageState.loaded && hasDetailRoute && pageState.selectedId !== route.detailId) void openConnection(route.detailId, render);
   if (!hasDetailRoute) {
     const previousSection = pageState.section; const hadDetail = Boolean(pageState.selectedId);
@@ -1384,27 +1555,6 @@ export function bindConnectionCenterPageEvents(render) {
       }
     } catch (error) { pageState.error = error.message; }
     render();
-  });
-  root.querySelector("[data-erp-usage-filters]")?.addEventListener("submit", (event) => {
-    event.preventDefault(); const data = Object.fromEntries(new FormData(event.currentTarget));
-    void loadErpUsageGovernancePage(render, { ...data, page: 1 });
-  });
-  root.querySelector("[data-reset-erp-usage-filters]")?.addEventListener("click", () => {
-    pageState.erpUsageGovernance.filters = { keyword: "", status: "unconfirmed", suggestedUsage: "", priority: "" };
-    void loadErpUsageGovernancePage(render, { page: 1 });
-  });
-  root.querySelectorAll("[data-erp-usage-page]").forEach((button) => button.addEventListener("click", () => void loadErpUsageGovernancePage(render, { page: Number(button.dataset.erpUsagePage) })));
-  root.querySelectorAll("[data-view-erp-usage]").forEach((button) => button.addEventListener("click", () => void openErpUsageGovernance(button.dataset.viewErpUsage, render)));
-  root.querySelector("[data-close-erp-usage]")?.addEventListener("click", () => { pageState.erpUsageGovernance.selected = null; render(); });
-  root.querySelector("[data-confirm-erp-usage]")?.addEventListener("submit", async (event) => {
-    event.preventDefault(); const selected = pageState.erpUsageGovernance.selected; if (!selected) return;
-    const input = Object.fromEntries(new FormData(event.currentTarget)); pageState.erpUsageGovernance.confirming = true; pageState.error = ""; render();
-    try {
-      await confirmErpSkuUsage(selected.item.erpSkuId, input);
-      await loadErpUsageGovernancePage(render);
-      await openErpUsageGovernance(selected.item.erpSkuId, render);
-    } catch (error) { pageState.error = error.message; }
-    pageState.erpUsageGovernance.confirming = false; render();
   });
   root.querySelector("[data-link-distribution-filter]")?.addEventListener("submit", (event) => {
     event.preventDefault(); const data = new FormData(event.currentTarget); const preset = String(data.get("preset") || "7d");
@@ -1493,13 +1643,6 @@ export function bindConnectionCenterPageEvents(render) {
     pageState.salesDistribution = { ...pageState.salesDistribution, selectedGroup: event.currentTarget.dataset.distributionBack === "all" ? 0 : pageState.salesDistribution.selectedGroup,
       selectedRange: null, drillTable: null }; render();
   });
-  root.querySelectorAll("[data-connection-data-tab]").forEach((button) => button.addEventListener("click", () => {
-    pageState.dataCenterTab = button.dataset.connectionDataTab; render();
-    if (pageState.dataCenterTab === "pending-connections") void loadPendingConnections(render);
-    if (pageState.dataCenterTab === "mappings") void loadMappings(render);
-    if (pageState.dataCenterTab === "imports") void loadImportBatches(render, true);
-    if (pageState.dataCenterTab === "data-foundation") void loadDataFoundation(render);
-  }));
   root.querySelectorAll("[data-workbench-go]").forEach((button) => button.addEventListener("click", () => {
     const section = selectConnectionSection(button.dataset.workbenchGo); render(); ensureConnectionSectionLoaded(section, render);
   }));
@@ -1587,7 +1730,6 @@ export function bindConnectionCenterPageEvents(render) {
     try { await updateConnectionFollow(button.dataset.toggleConnectionFollow, button.dataset.followed !== "true"); await loadMyLinks(render); }
     catch (error) { pageState.error = error.message; render(); }
   }));
-  root.querySelectorAll("[data-open-pending-connections]").forEach((button) => button.addEventListener("click", () => { selectConnectionSection("data-center"); pageState.dataCenterTab = "pending-connections"; void loadPendingConnections(render); }));
   root.querySelector("[data-open-business-import]")?.addEventListener("click", () => { selectConnectionSection("data-import"); void loadDataFoundation(render); });
   root.querySelector("[data-connection-owner-import-form]")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const form = new FormData(event.currentTarget);
@@ -1622,7 +1764,6 @@ export function bindConnectionCenterPageEvents(render) {
   root.querySelector("[data-view-owner-import-result]")?.addEventListener("click", () => { pageState.ownerImport.showCompletion = false; render(); });
   root.querySelector("[data-return-connection-center]")?.addEventListener("click", () => { selectConnectionSection("cockpit"); pageState.ownerImport.showCompletion = false; render(); });
   root.querySelector("[data-continue-owner-import]")?.addEventListener("click", () => { pageState.ownerImport = { loading: false, result: null, showCompletion: false }; render(); });
-  root.querySelector("[data-open-admin-data-center]")?.addEventListener("click", () => { window.location.hash = "dataCenter"; });
   root.querySelector("[data-cancel-owner-import]")?.addEventListener("click", async (event) => {
     pageState.ownerImport.loading = true; pageState.error = ""; render();
     try { pageState.ownerImport.result = await cancelConnectionOwnerImport(event.currentTarget.dataset.cancelOwnerImport); }
@@ -1663,12 +1804,106 @@ export function bindConnectionCenterPageEvents(render) {
   root.querySelector("[data-save-connection-list-config]")?.addEventListener("click", () => {
     saveListConfig(); pageState.fieldSettingsOpen = false; pageState.error = ""; render();
   });
+  root.querySelector("[data-goal-workbench-filters]")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void loadGoalWorkbenchPage(render, { filters: Object.fromEntries(new FormData(event.currentTarget)), pagination: { page: 1 } });
+  });
+  root.querySelectorAll("[data-goal-workbench-select]").forEach((checkbox) => checkbox.addEventListener("change", () => {
+    const selectedIds = new Set(pageState.goalWorkbench.selectedIds);
+    if (checkbox.checked) selectedIds.add(checkbox.dataset.goalWorkbenchSelect); else selectedIds.delete(checkbox.dataset.goalWorkbenchSelect);
+    pageState.goalWorkbench = { ...pageState.goalWorkbench, selectedIds }; render();
+  }));
+  root.querySelector("[data-goal-workbench-select-all]")?.addEventListener("change", (event) => {
+    const selectedIds = new Set(pageState.goalWorkbench.selectedIds);
+    pageState.goalWorkbench.items.filter((item) => item.canManage).forEach((item) => { if (event.currentTarget.checked) selectedIds.add(item.id); else selectedIds.delete(item.id); });
+    pageState.goalWorkbench = { ...pageState.goalWorkbench, selectedIds }; render();
+  });
+  root.querySelectorAll("[data-goal-workbench-page]").forEach((button) => button.addEventListener("click", () => {
+    const page = Number(button.dataset.goalWorkbenchPage);
+    if (page < 1 || page > pageState.goalWorkbench.pagination.totalPages) return;
+    void loadGoalWorkbenchPage(render, { pagination: { page } });
+  }));
+  root.querySelector("[data-goal-workbench-positioning]")?.addEventListener("submit", (event) => {
+    event.preventDefault(); const input = Object.fromEntries(new FormData(event.currentTarget));
+    void runGoalWorkbenchBatch(render, (connectionIds) => batchSetConnectionGoalPositioning({ connectionIds, ...input }));
+  });
+  root.querySelector("[data-goal-workbench-suggest]")?.addEventListener("click", () => {
+    if (!window.confirm("为已选链接生成目标建议？建议不会自动生效。")) return;
+    void runGoalWorkbenchBatch(render, (connectionIds) => batchGenerateConnectionGoalSuggestions({ connectionIds }));
+  });
+  root.querySelector("[data-goal-workbench-confirm]")?.addEventListener("click", () => {
+    if (!window.confirm("按系统建议批量确认目标并使其生效？仅待确认建议会被处理。")) return;
+    void runGoalWorkbenchBatch(render, (connectionIds) => batchConfirmConnectionGoals({ connectionIds, approvalReason: "链接经营管理工作台批量确认" }));
+  });
+  root.querySelectorAll("[data-goal-management-tab]").forEach((button) => button.addEventListener("click", () => {
+    pageState.goalManagementTab = button.dataset.goalManagementTab;
+    if (pageState.goalManagementTab === "pilots") void loadGoalPilotPage(render); else void loadGoalWorkbenchPage(render);
+  }));
+  root.querySelector("[data-goal-pilot-create]")?.addEventListener("submit", (event) => {
+    event.preventDefault(); const input = Object.fromEntries(new FormData(event.currentTarget));
+    void runGoalPilotOperation(render, async () => {
+      const result = await createConnectionGoalPilotBatch(input); pageState.goalPilot.selectedBatchId = result.item.id;
+    });
+  });
+  root.querySelector("[data-goal-pilot-batch-select]")?.addEventListener("change", (event) => {
+    pageState.goalPilot.selectedBatchId = event.currentTarget.value; pageState.goalPilot.memberPagination.page = 1;
+    void loadGoalPilotPage(render, { selectedBatchId: event.currentTarget.value, memberPage: 1 });
+  });
+  root.querySelector("[data-goal-pilot-advance]")?.addEventListener("click", (event) => {
+    const status = event.currentTarget.dataset.goalPilotAdvance;
+    if (!window.confirm(`确认将批次推进到“${goalPilotBatchStatusLabels[status]}”？批次历史会保留。`)) return;
+    void runGoalPilotOperation(render, () => updateConnectionGoalPilotBatch(pageState.goalPilot.selectedBatchId, { status }));
+  });
+  root.querySelector("[data-goal-pilot-toggle-candidates]")?.addEventListener("click", () => {
+    pageState.goalPilot.showCandidates = !pageState.goalPilot.showCandidates; render();
+    if (pageState.goalPilot.showCandidates) void loadGoalPilotCandidatePage(render, { page: 1 });
+  });
+  root.querySelector("[data-goal-pilot-candidate-filter]")?.addEventListener("submit", (event) => {
+    event.preventDefault(); pageState.goalPilot.candidateFilters = Object.fromEntries(new FormData(event.currentTarget));
+    void loadGoalPilotCandidatePage(render, { page: 1 });
+  });
+  root.querySelectorAll("[data-goal-pilot-candidate]").forEach((checkbox) => checkbox.addEventListener("change", () => {
+    const selected = new Set(pageState.goalPilot.candidateSelectedIds);
+    if (checkbox.checked) selected.add(checkbox.dataset.goalPilotCandidate); else selected.delete(checkbox.dataset.goalPilotCandidate);
+    pageState.goalPilot.candidateSelectedIds = selected; render();
+  }));
+  root.querySelector("[data-goal-pilot-add-candidates]")?.addEventListener("click", () => {
+    const connectionIds = [...pageState.goalPilot.candidateSelectedIds];
+    void runGoalPilotOperation(render, () => addConnectionGoalPilotLinks(pageState.goalPilot.selectedBatchId, connectionIds));
+  });
+  root.querySelector("[data-goal-pilot-member-filter]")?.addEventListener("submit", (event) => {
+    event.preventDefault(); pageState.goalPilot.memberFilters = Object.fromEntries(new FormData(event.currentTarget));
+    pageState.goalPilot.memberPagination.page = 1; void loadGoalPilotPage(render, { memberPage: 1 });
+  });
+  root.querySelectorAll("[data-goal-pilot-member-page]").forEach((button) => button.addEventListener("click", () => {
+    const page = Number(button.dataset.goalPilotMemberPage); if (page < 1 || page > pageState.goalPilot.memberPagination.totalPages) return;
+    pageState.goalPilot.memberPagination.page = page; void loadGoalPilotPage(render, { memberPage: page });
+  }));
+  root.querySelectorAll("[data-goal-pilot-candidate-page]").forEach((button) => button.addEventListener("click", () => {
+    const page = Number(button.dataset.goalPilotCandidatePage); if (page < 1 || page > pageState.goalPilot.candidatePagination.totalPages) return;
+    pageState.goalPilot.candidatePagination.page = page; void loadGoalPilotCandidatePage(render, { page });
+  }));
+  root.querySelectorAll("[data-goal-pilot-positioning]").forEach((form) => form.addEventListener("submit", (event) => {
+    event.preventDefault(); const input = Object.fromEntries(new FormData(event.currentTarget));
+    void runGoalPilotOperation(render, () => confirmConnectionGoalPilotPositioning(pageState.goalPilot.selectedBatchId, form.dataset.memberId, input));
+  }));
+  root.querySelectorAll("[data-goal-pilot-suggestion]").forEach((button) => button.addEventListener("click", () => {
+    void runGoalPilotOperation(render, () => createConnectionGoalPilotSuggestion(pageState.goalPilot.selectedBatchId, button.dataset.goalPilotSuggestion));
+  }));
+  root.querySelectorAll("[data-goal-pilot-target]").forEach((form) => form.addEventListener("submit", (event) => {
+    event.preventDefault(); const input = { ...Object.fromEntries(new FormData(event.currentTarget)), planId: form.dataset.planId };
+    void runGoalPilotOperation(render, () => confirmConnectionGoalPilotTarget(pageState.goalPilot.selectedBatchId, form.dataset.memberId, input));
+  }));
+  root.querySelectorAll("[data-goal-pilot-exclude]").forEach((button) => button.addEventListener("click", () => {
+    if (!window.confirm("确认从当前试点范围排除该链接？历史记录仍会保留。")) return;
+    void runGoalPilotOperation(render, () => excludeConnectionGoalPilotMember(pageState.goalPilot.selectedBatchId, button.dataset.goalPilotExclude));
+  }));
   root.querySelectorAll("[data-open-connection]").forEach((element) => {
-    const open = () => void openConnection(element.dataset.openConnection, render);
+    const open = () => { pageState.detailReturnSection = element.dataset.returnSection || pageState.section || "connections"; void openConnection(element.dataset.openConnection, render); };
     element.addEventListener("click", open);
     element.addEventListener("keydown", (event) => { if (["Enter", " "].includes(event.key)) open(); });
   });
-  root.querySelector('[data-action="back-connections"]')?.addEventListener("click", () => { selectConnectionSection("connections"); render(); });
+  root.querySelector('[data-action="back-connections"]')?.addEventListener("click", () => { selectConnectionSection(pageState.detailReturnSection || "connections"); render(); });
   root.querySelector("[data-connection-profile-form]")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
@@ -1676,6 +1911,36 @@ export function bindConnectionCenterPageEvents(render) {
       pageState.items = pageState.items.map((item) => item.id === result.item.id ? { ...item, ...result.item } : item);
       pageState.error = ""; render();
     } catch (error) { pageState.error = error.message; render(); }
+  });
+  root.querySelector("[data-connection-positioning-form]")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget; const button = form.querySelector("button[type='submit']");
+    if (button) button.disabled = true;
+    try {
+      const result = await updateConnectionBusinessPositioning(pageState.selectedId, Object.fromEntries(new FormData(form)));
+      const businessGoalEvaluation = await loadConnectionBusinessGoalEvaluation(pageState.selectedId);
+      pageState.coreDetail = { ...pageState.coreDetail, businessPositioning: result, businessGoalEvaluation };
+      pageState.error = ""; render();
+    } catch (error) { pageState.error = error.message; if (button) button.disabled = false; render(); }
+  });
+  root.querySelector("[data-create-connection-goal]")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget; button.disabled = true;
+    try {
+      const result = await createConnectionBusinessGoalSuggestion(pageState.selectedId);
+      pageState.coreDetail = { ...pageState.coreDetail, businessGoals: result };
+      pageState.error = ""; render();
+    } catch (error) { pageState.error = error.message; button.disabled = false; render(); }
+  });
+  root.querySelector("[data-connection-goal-confirm-form]")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget; const button = form.querySelector("button[type='submit']");
+    if (button) button.disabled = true;
+    try {
+      const result = await confirmConnectionBusinessGoal(pageState.selectedId, form.dataset.planId, Object.fromEntries(new FormData(form)));
+      const businessGoalEvaluation = await loadConnectionBusinessGoalEvaluation(pageState.selectedId);
+      pageState.coreDetail = { ...pageState.coreDetail, businessGoals: result, businessGoalEvaluation };
+      pageState.error = ""; render();
+    } catch (error) { pageState.error = error.message; if (button) button.disabled = false; render(); }
   });
   root.querySelectorAll("[data-connection-tab]").forEach((button) => button.addEventListener("click", async () => {
     pageState.detailTab = button.dataset.connectionTab; render();
@@ -1693,6 +1958,13 @@ export function bindConnectionCenterPageEvents(render) {
   root.querySelectorAll("[data-sales-period-type]").forEach((button) => button.addEventListener("click", () => { pageState.salesPeriodType = button.dataset.salesPeriodType; render(); }));
   root.querySelectorAll("[data-daily-sales-range]").forEach((button) => button.addEventListener("click", () => void loadDailySales(render, button.dataset.dailySalesRange)));
   root.querySelectorAll("[data-cockpit-period]").forEach((button) => button.addEventListener("click", () => { pageState.cockpit.periodType = button.dataset.cockpitPeriod; render(); }));
+  root.querySelectorAll("[data-goal-health-drill]").forEach((button) => button.addEventListener("click", () => {
+    const filters = { keyword: "", positioning: button.dataset.positioning || "", goalStatus: "", evaluationStatus: "", ownerId: "" };
+    if (button.dataset.goalHealthDrill === "goal-pending") filters.goalStatus = "pending";
+    if (button.dataset.goalHealthDrill === "grade") filters.evaluationStatus = button.dataset.evaluationStatus || "underperforming";
+    selectConnectionSection("goal-management");
+    void loadGoalWorkbenchPage(render, { filters, pagination: { page: 1 } });
+  }));
   root.querySelector("[data-benchmark-settings]")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const payload = Object.fromEntries(new FormData(event.currentTarget));
     try { const result = await createConnectionBenchmark(pageState.selectedId, payload); pageState.benchmarks.items.push(result.item);

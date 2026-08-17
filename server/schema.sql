@@ -1530,6 +1530,223 @@ CREATE TABLE IF NOT EXISTS connection_profiles (
 CREATE INDEX IF NOT EXISTS idx_connection_profiles_owner_status
   ON connection_profiles(ownerId, status);
 
+CREATE TABLE IF NOT EXISTS connection_business_profiles (
+  id TEXT PRIMARY KEY,
+  connectionId TEXT NOT NULL,
+  positioningType TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  effectiveFrom TEXT NOT NULL,
+  effectiveTo TEXT,
+  decisionReason TEXT NOT NULL,
+  decidedBy TEXT NOT NULL,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(connectionId) REFERENCES connection_profiles(id),
+  FOREIGN KEY(decidedBy) REFERENCES persons(id),
+  CHECK(positioningType IN ('sales_growth','balanced_sales','long_tail','profit_contribution')),
+  CHECK(status IN ('active','historical')),
+  CHECK(length(trim(decisionReason)) > 0),
+  CHECK(effectiveTo IS NULL OR effectiveTo >= effectiveFrom)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_business_profiles_one_active
+  ON connection_business_profiles(connectionId) WHERE status='active';
+CREATE INDEX IF NOT EXISTS idx_connection_business_profiles_history
+  ON connection_business_profiles(connectionId,effectiveFrom DESC,id DESC);
+
+CREATE TABLE IF NOT EXISTS connection_goal_templates (
+  id TEXT PRIMARY KEY,
+  code TEXT NOT NULL,
+  name TEXT NOT NULL,
+  positioningType TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  windowDays INTEGER NOT NULL DEFAULT 30,
+  status TEXT NOT NULL DEFAULT 'active',
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  CHECK(positioningType IN ('sales_growth','balanced_sales','long_tail','profit_contribution')),
+  CHECK(version > 0),
+  CHECK(windowDays > 0),
+  CHECK(status IN ('active','inactive')),
+  UNIQUE(code,version)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_goal_templates_one_active
+  ON connection_goal_templates(positioningType) WHERE status='active';
+
+CREATE TABLE IF NOT EXISTS connection_goal_template_metrics (
+  id TEXT PRIMARY KEY,
+  templateId TEXT NOT NULL,
+  metricCode TEXT NOT NULL,
+  weight REAL NOT NULL,
+  sortOrder INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY(templateId) REFERENCES connection_goal_templates(id),
+  CHECK(metricCode IN ('sales_amount','profit_amount')),
+  CHECK(weight > 0 AND weight <= 1),
+  UNIQUE(templateId,metricCode)
+);
+
+CREATE INDEX IF NOT EXISTS idx_connection_goal_template_metrics_order
+  ON connection_goal_template_metrics(templateId,sortOrder,id);
+
+CREATE TRIGGER IF NOT EXISTS trg_connection_goal_templates_no_delete
+  BEFORE DELETE ON connection_goal_templates
+  BEGIN
+    SELECT RAISE(ABORT, '目标模板不可直接删除，请停用或创建新版本');
+  END;
+
+DROP TRIGGER IF EXISTS trg_connection_goal_template_metrics_weight_limit_insert;
+CREATE TRIGGER trg_connection_goal_template_metrics_weight_limit_insert
+  BEFORE INSERT ON connection_goal_template_metrics
+  WHEN NOT EXISTS (
+    SELECT 1 FROM connection_goal_template_metrics
+    WHERE id=NEW.id OR (templateId=NEW.templateId AND metricCode=NEW.metricCode)
+  )
+  AND (SELECT COALESCE(SUM(weight),0) FROM connection_goal_template_metrics WHERE templateId=NEW.templateId) + NEW.weight > 1.000001
+  BEGIN
+    SELECT RAISE(ABORT, '目标模板指标权重合计不能超过100%');
+  END;
+
+CREATE TRIGGER IF NOT EXISTS trg_connection_goal_template_metrics_weight_limit_update
+  BEFORE UPDATE OF weight,templateId ON connection_goal_template_metrics
+  WHEN (SELECT COALESCE(SUM(weight),0) FROM connection_goal_template_metrics WHERE templateId=NEW.templateId AND id<>OLD.id) + NEW.weight > 1.000001
+  BEGIN
+    SELECT RAISE(ABORT, '目标模板指标权重合计不能超过100%');
+  END;
+
+INSERT OR IGNORE INTO connection_goal_templates
+  (id,code,name,positioningType,version,windowDays,status,createdAt,updatedAt)
+VALUES
+  ('connection-goal-template-sales-growth-v1','sales_growth','引流爆款模板','sales_growth',1,30,'active','2026-08-18T00:00:00.000Z','2026-08-18T00:00:00.000Z'),
+  ('connection-goal-template-balanced-sales-v1','balanced_sales','优质动销款模板','balanced_sales',1,30,'active','2026-08-18T00:00:00.000Z','2026-08-18T00:00:00.000Z'),
+  ('connection-goal-template-long-tail-v1','long_tail','长尾动销款模板','long_tail',1,30,'active','2026-08-18T00:00:00.000Z','2026-08-18T00:00:00.000Z'),
+  ('connection-goal-template-profit-contribution-v1','profit_contribution','高毛利款模板','profit_contribution',1,30,'active','2026-08-18T00:00:00.000Z','2026-08-18T00:00:00.000Z');
+
+INSERT OR IGNORE INTO connection_goal_template_metrics
+  (id,templateId,metricCode,weight,sortOrder)
+VALUES
+  ('connection-goal-template-sales-growth-sales','connection-goal-template-sales-growth-v1','sales_amount',0.70,1),
+  ('connection-goal-template-sales-growth-profit','connection-goal-template-sales-growth-v1','profit_amount',0.30,2),
+  ('connection-goal-template-balanced-sales-sales','connection-goal-template-balanced-sales-v1','sales_amount',0.50,1),
+  ('connection-goal-template-balanced-sales-profit','connection-goal-template-balanced-sales-v1','profit_amount',0.50,2),
+  ('connection-goal-template-long-tail-sales','connection-goal-template-long-tail-v1','sales_amount',0.60,1),
+  ('connection-goal-template-long-tail-profit','connection-goal-template-long-tail-v1','profit_amount',0.40,2),
+  ('connection-goal-template-profit-contribution-sales','connection-goal-template-profit-contribution-v1','sales_amount',0.30,1),
+  ('connection-goal-template-profit-contribution-profit','connection-goal-template-profit-contribution-v1','profit_amount',0.70,2);
+
+CREATE TABLE IF NOT EXISTS connection_goal_plans (
+  id TEXT PRIMARY KEY,
+  connectionId TEXT NOT NULL,
+  positioningId TEXT NOT NULL,
+  templateId TEXT NOT NULL,
+  templateVersion INTEGER NOT NULL,
+  targetMode TEXT NOT NULL,
+  status TEXT NOT NULL,
+  baselineStart TEXT,
+  baselineEnd TEXT,
+  effectiveFrom TEXT,
+  effectiveTo TEXT,
+  createdBy TEXT NOT NULL,
+  approvedBy TEXT,
+  approvalReason TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(connectionId) REFERENCES connection_profiles(id),
+  FOREIGN KEY(positioningId) REFERENCES connection_business_profiles(id),
+  FOREIGN KEY(templateId) REFERENCES connection_goal_templates(id),
+  FOREIGN KEY(createdBy) REFERENCES persons(id),
+  FOREIGN KEY(approvedBy) REFERENCES persons(id),
+  CHECK(targetMode IN ('system_suggested','manual','hybrid')),
+  CHECK(status IN ('draft','pending_confirm','active','expired','cancelled')),
+  CHECK(templateVersion > 0),
+  CHECK((status <> 'active') OR (effectiveFrom IS NOT NULL AND effectiveTo IS NOT NULL AND approvedBy IS NOT NULL)),
+  CHECK(effectiveTo IS NULL OR effectiveFrom IS NULL OR effectiveTo >= effectiveFrom)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_goal_plans_one_active
+  ON connection_goal_plans(connectionId) WHERE status='active';
+CREATE INDEX IF NOT EXISTS idx_connection_goal_plans_history
+  ON connection_goal_plans(connectionId,createdAt DESC,id DESC);
+
+CREATE TABLE IF NOT EXISTS connection_goal_metrics (
+  id TEXT PRIMARY KEY,
+  goalPlanId TEXT NOT NULL,
+  metricCode TEXT NOT NULL,
+  baselineValue REAL,
+  suggestedTargetValue REAL,
+  finalTargetValue REAL,
+  weight REAL NOT NULL,
+  createdAt TEXT NOT NULL,
+  FOREIGN KEY(goalPlanId) REFERENCES connection_goal_plans(id),
+  CHECK(metricCode IN ('sales_amount','profit_amount')),
+  CHECK(weight > 0 AND weight <= 1),
+  CHECK(metricCode <> 'sales_amount' OR finalTargetValue IS NULL OR finalTargetValue >= 0),
+  UNIQUE(goalPlanId,metricCode)
+);
+
+CREATE INDEX IF NOT EXISTS idx_connection_goal_metrics_plan
+  ON connection_goal_metrics(goalPlanId,metricCode);
+
+CREATE TABLE IF NOT EXISTS connection_goal_evaluations (
+  id TEXT PRIMARY KEY,
+  connectionId TEXT NOT NULL,
+  goalPlanId TEXT NOT NULL UNIQUE,
+  periodStart TEXT,
+  periodEnd TEXT,
+  salesActual REAL,
+  profitActual REAL,
+  salesAchievement REAL,
+  profitAchievement REAL,
+  totalAchievement REAL,
+  grade TEXT,
+  evaluationStatus TEXT NOT NULL,
+  statusReason TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(connectionId) REFERENCES connection_profiles(id),
+  FOREIGN KEY(goalPlanId) REFERENCES connection_goal_plans(id),
+  CHECK(evaluationStatus IN ('evaluated','pending')),
+  CHECK(grade IS NULL OR grade IN ('excellent','good','on_target','underperforming')),
+  CHECK(periodEnd IS NULL OR periodStart IS NULL OR periodEnd >= periodStart)
+);
+
+CREATE INDEX IF NOT EXISTS idx_connection_goal_evaluations_connection
+  ON connection_goal_evaluations(connectionId,updatedAt DESC);
+
+CREATE TABLE IF NOT EXISTS connection_goal_init_batches (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',
+  createdBy TEXT NOT NULL,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(createdBy) REFERENCES persons(id),
+  CHECK(length(trim(name)) > 0),
+  CHECK(status IN ('draft','positioning','target_confirm','evaluation','completed'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_connection_goal_init_batches_status
+  ON connection_goal_init_batches(status,createdAt DESC,id DESC);
+
+CREATE TABLE IF NOT EXISTS connection_goal_init_batch_links (
+  id TEXT PRIMARY KEY,
+  batchId TEXT NOT NULL,
+  connectionId TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'selected',
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(batchId) REFERENCES connection_goal_init_batches(id),
+  FOREIGN KEY(connectionId) REFERENCES connection_profiles(id),
+  CHECK(status IN ('selected','positioning_pending','target_pending','active','excluded')),
+  UNIQUE(batchId,connectionId)
+);
+
+CREATE INDEX IF NOT EXISTS idx_connection_goal_init_batch_links_batch_status
+  ON connection_goal_init_batch_links(batchId,status,updatedAt DESC,id DESC);
+CREATE INDEX IF NOT EXISTS idx_connection_goal_init_batch_links_connection
+  ON connection_goal_init_batch_links(connectionId,createdAt DESC,id DESC);
+
 CREATE TABLE IF NOT EXISTS connection_benchmark_targets (
   id TEXT PRIMARY KEY,
   connectionId TEXT NOT NULL,

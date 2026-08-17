@@ -17,7 +17,7 @@ export const modules = [
   },
   {
     id: "connectionCenter",
-    name: "经营链接中心",
+    name: "链接中心",
   },
   {
     id: "products",

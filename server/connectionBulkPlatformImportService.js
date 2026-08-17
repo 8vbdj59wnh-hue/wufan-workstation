@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { getDatabase } from "./db.js";
 import { confirmConnectionDataImport, previewConnectionDataImport } from "./connectionDataFoundationService.js";
+import { normalizeUploadedFileName } from "./uploadFileName.js";
 
 const text = (value) => String(value ?? "").trim();
 const now = () => new Date().toISOString();
@@ -13,7 +14,7 @@ let queueRunning = false;
 
 function childRow(row) {
   if (!row) return null;
-  return { ...row, summary: json(row.summaryJson, {}), contentBlob: undefined };
+  return { ...row, fileName: normalizeUploadedFileName(row.fileName), summary: json(row.summaryJson, {}), contentBlob: undefined };
 }
 
 function refreshBatch(database, batchId) {
@@ -51,7 +52,7 @@ function batchResult(database, batchId) {
 
 export function createConnectionBulkPlatformImport({ files = [], createdBy = "" } = {}) {
   const normalized = files.filter((file) => Buffer.isBuffer(file?.buffer) && file.buffer.length).map((file, index) => ({
-    fileName: text(file.originalname || file.fileName) || `平台链接数据-${index + 1}.xlsx`, buffer: file.buffer, fileHash: hash(file.buffer), sequenceNo: index + 1,
+    fileName: text(normalizeUploadedFileName(file.originalname || file.fileName)) || `平台链接数据-${index + 1}.xlsx`, buffer: file.buffer, fileHash: hash(file.buffer), sequenceNo: index + 1,
   }));
   if (!normalized.length) throw new Error("请选择至少一个平台链接Excel文件。");
   if (normalized.length > 20) throw new Error("一次最多上传20个Excel文件。");

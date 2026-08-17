@@ -1,6 +1,6 @@
 export const CONNECTION_CENTER_SECTIONS = new Set([
-  "cockpit", "my-links", "connections", "hospital", "data-import", "sales-relation-governance",
-  "sales-data-quality-governance", "erp-usage-governance", "data-center",
+  "cockpit", "my-links", "connections", "goal-management", "hospital", "data-import", "sales-relation-governance",
+  "sales-data-quality-governance",
 ]);
 
 const sectionAliases = new Map([
@@ -19,6 +19,8 @@ export function parseConnectionCenterRoute(hash = "") {
   if (!route.startsWith("connectionCenter/")) return { section: "", detailId: "" };
   const suffix = decoded(route.slice("connectionCenter/".length));
   const section = sectionAliases.get(suffix) || suffix;
+  if (section === "data-center") return { section: "", detailId: "", redirectHash: "#dataCenter" };
+  if (section === "erp-usage-governance") return { section: "", detailId: "", redirectHash: "#connectionCenter/data-import" };
   return CONNECTION_CENTER_SECTIONS.has(section) ? { section, detailId: "" } : { section: "", detailId: suffix };
 }
 
