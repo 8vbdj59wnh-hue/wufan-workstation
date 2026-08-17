@@ -792,7 +792,7 @@ function platformValidation(staging, submittedMappings = {}) {
       continue;
     }
     const errors = [];
-    if (!mapping || mapping.mappingStatus !== "confirmed") errors.push("店铺映射尚未确认");
+    if (!mapping || mapping.mappingStatus !== "confirmed") errors.push("未识别店铺，请由管理员确认店铺名称或别名");
     const platformGoodsId = value(record["货品ID"]);
     const canonicalUrl = canonicalizeSalesUrl(record["平台商品链接"]);
     if (!platformGoodsId && !canonicalUrl) errors.push("货品ID和商品链接均为空");

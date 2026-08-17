@@ -285,8 +285,8 @@ function detectPlatformLinkTemplate(database, buffer, fileName) {
     ranked.push({ candidate, score, exactLinks, configuredMappings });
   }
   ranked.sort((left, right) => right.score - left.score || right.configuredMappings - left.configuredMappings || right.exactLinks - left.exactLinks);
-  if (!ranked.length) throw new Error("无法自动识别平台，请由管理员维护对应平台解析模板或导入店铺匹配表。");
-  if (ranked.length > 1 && ranked[0].score === ranked[1].score) throw new Error("文件同时匹配多个平台模板，无法安全确定平台和店铺，请先导入店铺匹配表。");
+  if (!ranked.length) throw new Error("无法自动识别平台。未识别店铺，请进入管理员店铺治理确认店铺名称或别名。");
+  if (ranked.length > 1 && ranked[0].score === ranked[1].score) throw new Error("文件同时匹配多个平台模板，无法安全确定平台和店铺。请进入管理员店铺治理确认店铺名称或别名。");
   return ranked[0].candidate;
 }
 
@@ -317,7 +317,7 @@ export function iterateConnectionImportTemplate(templateId, input, userId) {
 function ensureShop(database, platform, shopName, configuredShopId = "") {
   const selected = text(configuredShopId) ? database.prepare("SELECT * FROM sales_shops WHERE id=?").get(text(configuredShopId)) : findShop(database, text(platform), text(shopName));
   if (selected) return selected;
-  throw Object.assign(new Error("导入模板绑定的系统店铺不存在，请先校准模板店铺。"), { type: "missing_shop" });
+  throw Object.assign(new Error("未识别店铺，请进入管理员店铺治理确认店铺名称或别名。"), { type: "missing_shop" });
 }
 
 function findLink(database, row) {

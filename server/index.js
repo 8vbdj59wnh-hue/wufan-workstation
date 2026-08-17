@@ -118,7 +118,7 @@ import { getSalesBusinessDashboard } from "./salesBusinessDashboardService.js";
 import { queryBusinessAnomalies } from "./capabilities/queryBusinessAnomalies.js";
 import { queryBusinessImprovementResult } from "./capabilities/queryBusinessImprovementResult.js";
 import { commitPlatformGoodsExcelDataSync, previewPlatformGoodsExcelDataSync, readPlatformGoodsExcelDataSyncPreview } from "./platformGoodsExcelDataSyncAdapter.js";
-import { confirmPlatformLinkShopMappings, listPlatformLinkShopMappings, previewPlatformLinkShopMappings } from "./platformLinkShopMappingImportService.js";
+import { listPlatformLinkShopMappings } from "./platformLinkShopMappingImportService.js";
 import {
   confirmConnectionBulkPlatformImport,
   createConnectionBulkPlatformImport,
@@ -3495,23 +3495,16 @@ app.post("/api/connection-data-foundation/sales-relation-candidates/:id/confirm"
 });
 
 app.get("/api/connection-data-foundation/shop-mappings", requireLinkView, (request, response) => {
-  try { response.json({ success: true, items: listPlatformLinkShopMappings(request.query.limit) }); }
+  try { response.json({ success: true, migrated: true, message: "该功能已迁移至管理员店铺治理。", items: listPlatformLinkShopMappings(request.query.limit) }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "店铺匹配配置读取失败。" }); }
 });
 
-app.post("/api/connection-data-foundation/shop-mappings/preview", requireLinkImport, (request, response) => {
-  uploadConnectionWorkbook.single("file")(request, response, (error) => {
-    if (error) { response.status(400).json({ success: false, message: error.message || "店铺匹配表上传失败。" }); return; }
-    try {
-      const result = previewPlatformLinkShopMappings({ buffer: request.file?.buffer, fileName: normalizeUploadedFileName(request.file?.originalname), createdBy: getUserPersonId(request.user) });
-      response.status(result.idempotent ? 200 : 201).json({ success: true, ...result });
-    } catch (uploadError) { response.status(400).json({ success: false, message: uploadError.message || "店铺匹配预览失败。" }); }
-  });
+app.post("/api/connection-data-foundation/shop-mappings/preview", requireLinkImport, (_request, response) => {
+  response.status(410).json({ success: false, migrated: true, message: "该功能已迁移至管理员店铺治理。" });
 });
 
-app.post("/api/connection-data-foundation/shop-mappings/:id/confirm", requireLinkImport, (request, response) => {
-  try { response.json({ success: true, ...confirmPlatformLinkShopMappings(request.params.id) }); }
-  catch (error) { response.status(400).json({ success: false, message: error.message || "店铺匹配确认失败。" }); }
+app.post("/api/connection-data-foundation/shop-mappings/:id/confirm", requireLinkImport, (_request, response) => {
+  response.status(410).json({ success: false, migrated: true, message: "该功能已迁移至管理员店铺治理。" });
 });
 
 app.get("/api/connection-import-batches", requireLinkView, (_request, response) => {

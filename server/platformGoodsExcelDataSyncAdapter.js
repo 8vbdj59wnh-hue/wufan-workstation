@@ -123,7 +123,7 @@ function analyzeRows(rows) {
       ? shopIdentities.get(`${sourceShop.platform}\u0000${sourceShop.shopName}`) || []
       : shopNames.get(sourceShop.shopName) || [];
     if (!matchedShops.length && sourceShop.shopName !== row.sourceShopName) matchedShops = shopNames.get(row.sourceShopName) || [];
-    if (!matchedShops.length) { evaluated.push(exception(row, "missing_shop", `店铺“${row.sourceShopName}”未匹配到系统店铺。`)); continue; }
+    if (!matchedShops.length) { evaluated.push(exception(row, "missing_shop", "未识别店铺，请进入管理员店铺治理确认店铺名称或别名。")); continue; }
     if (matchedShops.length > 1) { evaluated.push(exception(row, "ambiguous_shop", `店铺“${row.sourceShopName}”匹配到多个系统店铺。`)); continue; }
     const shop = matchedShops[0];
     if (!row.platformGoodsId) { evaluated.push(exception(row, "missing_platform_goods_id", "货品ID为空，无法匹配链接。")); continue; }
