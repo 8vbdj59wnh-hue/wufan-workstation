@@ -1479,9 +1479,21 @@ app.get("/api/task-center/tasks", (request, response) => {
       processTemplateNodes: readResource("processTemplateNodes"),
       taskTemplates: readResource("taskTemplates"),
     };
+    const taskTemplateById = new Map(data.taskTemplates.map((item) => [item.id, item]));
+    const processInstanceById = new Map(data.processInstances.map((item) => [item.id, item]));
+    const isClearanceTask = (task) => {
+      if (task.source === "clearance") return true;
+      const instance = processInstanceById.get(task.processInstanceId);
+      const templateId = task.taskTemplateId ?? task.standardWorkId
+        ?? instance?.taskTemplateId ?? instance?.standardWorkId;
+      if (taskTemplateById.get(templateId)?.name === "库存清仓") return true;
+      return [instance?.standardWorkName, instance?.taskTemplateName, instance?.displayTitle, instance?.name]
+        .filter(Boolean)
+        .some((value) => String(value).includes("库存清仓"));
+    };
     const actorId = String(request.user?.personId ?? request.user?.id ?? "");
     const today = new Date().toISOString().slice(0, 10);
-    let items = filterTasksByScope(data.tasks, request.user, data).filter((task) => task.source !== "clearance");
+    let items = filterTasksByScope(data.tasks, request.user, data).filter((task) => !isClearanceTask(task));
     items = items.filter((task) => {
       if (view === "mine" && (task.executorId !== actorId || isTaskListDone(task) || isTaskListCanceled(task))) return false;
       if (view === "overdue" && !isTaskListOverdue(task, today)) return false;
