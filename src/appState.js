@@ -371,6 +371,7 @@ export async function loadTaskCenterTasks({ page = 1, pageSize = 50, view = "tod
   replaceArray(state.tasks, data.items ?? []);
   replaceArray(state.processInstances, data.context?.processInstances ?? []);
   replaceArray(state.workPlans, data.context?.workPlans ?? []);
+  replaceArray(state.taskProductContexts, data.context?.taskProductContexts ?? []);
   replaceArray(state.taskWaves, data.context?.taskWaves ?? []);
   return data;
 }
@@ -387,6 +388,7 @@ export async function loadTaskCenterTaskDetail(taskId) {
   const mergeById = (target, incoming) => replaceArray(target, [...new Map([...target, ...incoming].map((item) => [item.id, item])).values()]);
   mergeById(state.processInstances, data.context?.processInstances ?? []);
   mergeById(state.workPlans, data.context?.workPlans ?? []);
+  mergeById(state.templates, data.context?.templates ?? []);
   mergeById(state.taskProductContexts, data.context?.taskProductContexts ?? []);
   mergeById(state.taskWaves, data.context?.taskWaves ?? []);
   return data.task;
