@@ -14,18 +14,24 @@ function displayDay(value) {
   return `${value}${weekday ? ` · ${weekday}` : ""}`;
 }
 
+function businessSourceText(value) {
+  const text = String(value || "");
+  if (/WDT_API_URL|WDT_SID|WDT_KEY|WDT_SALT/.test(text)) return "旺店通连接尚未配置，请联系管理员完成接口设置。";
+  return text.replaceAll("API", "接口");
+}
+
 function renderMatrixCell(cell = {}) {
   const symbol = ({ completed: "✓", no_change: "✓", partial: "◐", pending_review: "◷", updating: "↻", failed: "✕", missing: "✕" })[cell.status] || "—";
   const coverage = cell.status === "partial" && cell.expectedShopCount
     ? `<small>${Number(cell.completedShopCount || 0)}/${Number(cell.expectedShopCount)} 家店铺</small>` : "";
-  return `<span class="daily-source-status is-${escapeHtml(cell.status || "missing")}" title="${escapeHtml(cell.detail || "")}"><b>${symbol}</b><span>${escapeHtml(cell.label || "未完成")}</span>${coverage}</span>`;
+  return `<span class="daily-source-status is-${escapeHtml(cell.status || "missing")}" title="${escapeHtml(businessSourceText(cell.detail))}"><b>${symbol}</b><span>${escapeHtml(businessSourceText(cell.label || "未完成"))}</span>${coverage}</span>`;
 }
 
 function renderDailySourceMatrix(data = {}) {
   const matrix = data.dailySourceMatrix;
   if (!matrix) return "";
   const options = (matrix.shopOptions || []).map((shop) => `<option value="${escapeHtml(shop.id)}" ${matrix.selectedShopId === shop.id ? "selected" : ""}>${escapeHtml(shop.name)} · ${escapeHtml(shop.platform)}</option>`).join("");
-  const headers = (matrix.columns || []).map((column) => `<th><span>${escapeHtml(column.label)}</span>${column.scope === "global" ? `<small>企业级</small>` : ""}</th>`).join("");
+  const headers = (matrix.columns || []).map((column) => `<th><span>${escapeHtml(businessSourceText(column.label))}</span>${column.scope === "global" ? `<small>企业级</small>` : ""}</th>`).join("");
   const rows = (matrix.rows || []).map((row) => `<tr><td><strong>${escapeHtml(displayDay(row.date))}</strong></td>${(matrix.columns || []).map((column) => `<td>${renderMatrixCell(row.sources?.[column.key])}</td>`).join("")}</tr>`).join("");
   return `<section class="link-daily-source-matrix">
     <header><div><span>每日数据更新</span><strong>${escapeHtml(matrix.startDate || "—")} 至 ${escapeHtml(matrix.endDate || "—")}</strong><small>今天不计入检查；店铺筛选仅影响具有店铺归属的前两类数据。</small></div><label><span>店铺</span><select data-link-data-status-shop ${data.loading ? "disabled" : ""}><option value="">全部店铺</option>${options}</select></label></header>

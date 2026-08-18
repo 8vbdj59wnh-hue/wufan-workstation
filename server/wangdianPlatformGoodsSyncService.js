@@ -279,7 +279,7 @@ function analyzeRows(logId, rows, scope = {}) {
     if ((shopScope.size && !shopScope.has(mapping.shopId)) || (platformScope.size && !platformScope.has(lower(mapping.platform)))) return;
     if (restrictedPlatforms.has(mapping.platform)) { reject("platform_restricted", "淘系平台货品接口返回范围受限，本行不作为链接关系来源。"); return; }
     if (!goodsId || !specId) { reject("invalid_data", "平台商品ID或平台SKU ID缺失。"); return; }
-    if (Number(source.match_target_type) === 2) { reject("bundle_sku", "旺店通返回组合货品，已进入人工关系治理，不自动生成single关系。"); return; }
+    if (Number(source.match_target_type) === 2) { reject("missing_product_structure", "旺店通返回组合商品，已进入商品结构治理；不创建独立组合审核组，也不自动生成单品关系。"); return; }
     const identity = `${mapping.shopId}|${goodsId}|${specId}`;
     if (seen.has(identity)) { reject("duplicate_platform_sku", "同一店铺、商品和平台SKU在响应中重复。"); return; }
     seen.add(identity);

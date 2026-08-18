@@ -3445,7 +3445,7 @@ app.get("/api/connection-data-foundation/sales-relation-candidates/:id", require
 
 app.post("/api/connection-data-foundation/combo-reviews/generate", requireLinkImport, (request, response) => {
   try { response.json({ success: true, result: generatePendingComboGroups(request.body?.sourceBatchId, { createdBy: request.auth?.person?.id }) }); }
-  catch (error) { response.status(400).json({ success: false, message: error.message || "Combo审核草稿生成失败。" }); }
+  catch (error) { response.status(error.code === "product_structure_only" ? 410 : 400).json({ success: false, code: error.code, message: error.message || "组合审核草稿生成失败。" }); }
 });
 
 app.get("/api/connection-data-foundation/combo-reviews", requireLinkImport, (request, response) => {
@@ -3460,12 +3460,12 @@ app.get("/api/connection-data-foundation/combo-reviews/erp-skus/search", require
 
 app.put("/api/connection-data-foundation/combo-reviews/:id/draft", requireLinkManage, (request, response) => {
   try { response.json({ success: true, result: saveComboReviewDraft(request.params.id, request.body, { reviewedBy: getUserPersonId(request.user) }) }); }
-  catch (error) { response.status(/不存在/.test(error.message || "") ? 404 : /只有待审核/.test(error.message || "") ? 409 : 400).json({ success: false, message: error.message || "Combo审核草稿保存失败。" }); }
+  catch (error) { response.status(error.code === "product_structure_only" ? 410 : /不存在/.test(error.message || "") ? 404 : /只有待审核/.test(error.message || "") ? 409 : 400).json({ success: false, code: error.code, message: error.message || "组合审核草稿保存失败。" }); }
 });
 
 app.post("/api/connection-data-foundation/combo-reviews/:id/confirm", requireLinkManage, (request, response) => {
   try { response.json({ success: true, result: confirmComboReviewGroup(request.params.id, { reviewedBy: getUserPersonId(request.user), reviewNote: request.body?.reviewNote }) }); }
-  catch (error) { response.status(error.code === "group_not_found" ? 404 : error.code === "group_not_pending" || /conflict/.test(error.code || "") ? 409 : 400).json({ success: false, code: error.code || "combo_confirmation_failed", message: error.message || "Combo整组确认失败。" }); }
+  catch (error) { response.status(error.code === "product_structure_only" ? 410 : error.code === "group_not_found" ? 404 : error.code === "group_not_pending" || /conflict/.test(error.code || "") ? 409 : 400).json({ success: false, code: error.code || "combo_confirmation_failed", message: error.message || "组合整组确认失败。" }); }
 });
 
 app.get("/api/connection-data-foundation/combo-reviews/:id/anomaly-dates", requireLinkImport, (request, response) => {

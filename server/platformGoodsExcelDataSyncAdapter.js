@@ -5,8 +5,9 @@ import { assertCurrentDataSyncPreview, completeDataSyncBatch, createDataSyncBatc
 
 const TASK_CODE = "platform_goods_excel_import";
 const SOURCE_BATCH_TYPE = "platform_goods_excel_import";
-const PARSER_VERSION = "platform-goods-excel-v3-all-shops";
+const PARSER_VERSION = "platform-goods-excel-v4-non-business-filter";
 const text = (value) => String(value ?? "").trim();
+const NON_BUSINESS_SHOP_NAME = /^(?:无效|总计|合计|汇总)[:：]?$/u;
 
 function normalizeCell(value) {
   if (value === null || value === undefined) return "";
@@ -53,6 +54,10 @@ function exception(row, exceptionType, message, extra = {}) {
     ...row, action: "exception", exceptionType, message,
     rawData: { ...row.rawData, ...extra },
   };
+}
+
+function isNonBusinessRow(row) {
+  return NON_BUSINESS_SHOP_NAME.test(text(row.sourceShopName).replace(/\s+/gu, ""));
 }
 
 function parseSourceShopIdentity(sourceShopName) {
@@ -117,6 +122,15 @@ function analyzeRows(rows) {
   const evaluated = [];
 
   for (const row of rows) {
+    if (isNonBusinessRow(row)) {
+      evaluated.push({
+        ...row,
+        action: "ignored",
+        exceptionType: "non_business_row",
+        message: "汇总或无效行已过滤，不进入店铺匹配和异常治理。",
+      });
+      continue;
+    }
     if (!row.sourceShopName) { evaluated.push(exception(row, "missing_shop_name", "店铺字段为空，无法匹配系统店铺。")); continue; }
     const sourceShop = parseSourceShopIdentity(row.sourceShopName);
     let matchedShops = sourceShop.platform
@@ -128,7 +142,7 @@ function analyzeRows(rows) {
     const shop = matchedShops[0];
     if (!row.platformGoodsId) { evaluated.push(exception(row, "missing_platform_goods_id", "货品ID为空，无法匹配链接。")); continue; }
     if (!row.platformSkuId) { evaluated.push(exception(row, "missing_platform_sku_id", "规格ID为空，无法确定平台SKU身份。")); continue; }
-    if (row.systemGoodsType === "组合装") { evaluated.push(exception(row, "bundle_sku", "组合装可能对应多个ERP SKU，已隔离。")); continue; }
+    if (row.systemGoodsType === "组合装") { evaluated.push(exception(row, "missing_product_structure", "组合商品需要商品结构，已进入商品结构治理；不再创建独立组合审核组。")); continue; }
     if (!row.systemGoodsType || row.systemGoodsType === "无") { evaluated.push(exception(row, "no_system_goods", "系统货品为空或为“无”，已隔离。")); continue; }
     if (!row.merchantSkuCode) { evaluated.push(exception(row, "missing_erp_sku_code", "平台规格编码为空，无法匹配ERP SKU。")); continue; }
     const identity = `${shop.id}\u0000${row.platformGoodsId}\u0000${row.platformSkuId}`;
@@ -164,10 +178,11 @@ function summaryFor(batch, rows) {
   const types = Object.fromEntries([...new Set(exceptions.map((row) => row.exceptionType))].map((type) => [type, exceptions.filter((row) => row.exceptionType === type).length]));
   return {
     fileName: batch.fileName, fileHash: batch.scope?.sourceFileHash || batch.fileHash, parserVersion: batch.scope?.parserVersion || PARSER_VERSION, periodStart: batch.periodStart, periodEnd: batch.periodEnd,
-    sourceRows: rows.length, totalPlatformSkus: rows.filter((row) => row.platformSkuId).length,
+    sourceRows: rows.length, totalPlatformSkus: rows.filter((row) => row.action !== "ignored" && row.platformSkuId).length,
     linkable: count("link"), alreadyLinked: count("already_linked"), exceptionCount: exceptions.length,
-    bundleCount: types.bundle_sku || 0, exceptionTypes: types,
-    sourceShopCount: new Set(rows.map((row) => text(row.sourceShopName)).filter(Boolean)).size,
+    ignoredNonBusiness: rows.filter((row) => row.action === "ignored" && row.exceptionType === "non_business_row").length,
+    bundleCount: types.missing_product_structure || types.bundle_sku || 0, exceptionTypes: types,
+    sourceShopCount: new Set(rows.filter((row) => row.action !== "ignored").map((row) => text(row.sourceShopName)).filter(Boolean)).size,
     matchedShopCount: new Set(rows.filter((row) => ["link", "already_linked"].includes(row.action)).map((row) => text(row.sourceShopName)).filter(Boolean)).size,
   };
 }

@@ -2717,8 +2717,14 @@ function runLightweightMigrations() {
   ensureColumn("data_sync_exceptions", "status", "TEXT NOT NULL DEFAULT 'open'");
   ensureColumn("data_sync_exceptions", "resolvedAt", "TEXT");
   ensureColumn("data_sync_exceptions", "resolvedReason", "TEXT");
+  ensureColumn("data_sync_exceptions", "resolutionType", "TEXT");
   ensureColumn("connection_import_rows", "resolvedAt", "TEXT");
   ensureColumn("connection_import_rows", "resolvedReason", "TEXT");
+  ensureColumn("connection_import_rows", "resolutionType", "TEXT");
+  ensureColumn("connection_import_rows", "resolutionNote", "TEXT");
+  ensureColumn("platform_goods_excel_import_rows", "resolutionType", "TEXT");
+  ensureColumn("platform_goods_excel_import_rows", "resolutionNote", "TEXT");
+  ensureColumn("platform_goods_excel_import_rows", "resolvedAt", "TEXT");
   getDatabase().exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_data_sync_batches_task_file_hash ON data_sync_batches(taskId,fileHash) WHERE fileHash IS NOT NULL AND fileHash<>''");
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS wangdian_shop_discovery_batches (

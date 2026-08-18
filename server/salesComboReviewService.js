@@ -8,6 +8,12 @@ const stableId = (prefix, ...parts) => `${prefix}-${crypto.createHash("sha256").
 const now = () => new Date().toISOString();
 const statusLabels = { pending: "待审核", approved: "已确认", rejected: "已拒绝", inactive: "已停用", conflict: "冲突" };
 
+function productStructureOnlyError() {
+  return Object.assign(new Error("独立组合审核已停用，请通过商品结构治理创建或审核 Product Structure。"), {
+    code: "product_structure_only",
+  });
+}
+
 function sourceRows(database, batchId, salesLinkSkuId) {
   return database.prepare(`SELECT rowNumber,rawDataJson,normalizedDataJson FROM connection_import_rows
     WHERE batchId=? AND status IN ('pending_relation','missing_relation') ORDER BY rowNumber`).all(batchId).map((row) => ({
@@ -82,7 +88,9 @@ function viewGroup(database, row, prefetchedRows = null, componentIds = null) {
   };
 }
 
-export function generatePendingComboGroups(sourceBatchId, { createdBy } = {}) {
+// Legacy implementation is retained for historical compatibility and audit only.
+// Runtime callers are blocked by the exported wrapper below.
+function legacyGeneratePendingComboGroups(sourceBatchId, { createdBy } = {}) {
   const batchId = text(sourceBatchId); if (!batchId) throw new Error("请选择销售日报预览批次。");
   const database = getDatabase(); const batch = database.prepare("SELECT id,fileHash FROM connection_import_batches WHERE id=?").get(batchId);
   if (!batch) throw new Error("销售日报预览批次不存在。");
@@ -106,6 +114,10 @@ export function generatePendingComboGroups(sourceBatchId, { createdBy } = {}) {
     }
   })();
   return { sourceBatchId: batchId, candidateCount: candidates.length, platformSkuCount: groups.size, createdGroups, existingGroups: groups.size - createdGroups, createdComponents };
+}
+
+export function generatePendingComboGroups() {
+  throw productStructureOnlyError();
 }
 
 export function queryComboReviewGroups(options = {}) {
@@ -177,7 +189,7 @@ export function searchComboReviewErpSkus(keyword, options = {}) {
     ORDER BY CASE WHEN merchantSkuCode=? THEN 0 ELSE 1 END,merchantSkuCode LIMIT ?`).all(`%${search}%`, `%${search}%`, search, limit);
 }
 
-export function saveComboReviewDraft(groupId, payload = {}, { reviewedBy } = {}) {
+function legacySaveComboReviewDraft(groupId, payload = {}, { reviewedBy } = {}) {
   const database = getDatabase(); const id = text(groupId);
   const group = database.prepare("SELECT * FROM sales_link_sku_combo_groups WHERE id=?").get(id);
   if (!group) throw new Error("Combo审核组不存在。");
@@ -217,6 +229,10 @@ export function saveComboReviewDraft(groupId, payload = {}, { reviewedBy } = {})
   return { groupId: id, status: "pending", changed: true, idempotent: false, addedComponents };
 }
 
+export function saveComboReviewDraft() {
+  throw productStructureOnlyError();
+}
+
 function markComboPreviewForRecalculation(database, batchId, confirmedAt) {
   if (!batchId) return;
   const batch = database.prepare("SELECT previewSummaryJson FROM connection_import_batches WHERE id=?").get(batchId); if (!batch) return;
@@ -228,7 +244,7 @@ function markComboPreviewForRecalculation(database, batchId, confirmedAt) {
   database.prepare("UPDATE connection_import_batches SET previewSummaryJson=?,updatedAt=? WHERE id=?").run(JSON.stringify(summary), confirmedAt, batchId);
 }
 
-export function confirmComboReviewGroup(groupId, { reviewedBy, reviewNote } = {}) {
+function legacyConfirmComboReviewGroup(groupId, { reviewedBy, reviewNote } = {}) {
   const database = getDatabase(); const id = text(groupId); const reviewer = text(reviewedBy);
   if (!reviewer) throw Object.assign(new Error("无法识别当前审核人。"), { code: "reviewer_required" });
   const group = database.prepare("SELECT * FROM sales_link_sku_combo_groups WHERE id=?").get(id);
@@ -279,6 +295,10 @@ export function confirmComboReviewGroup(groupId, { reviewedBy, reviewNote } = {}
     markComboPreviewForRecalculation(database, group.sourceBatchId, confirmedAt);
   })();
   return { groupId: id, status: "approved", outcome: "created", mappingIds, confirmedAt, sourceBatchId: group.sourceBatchId };
+}
+
+export function confirmComboReviewGroup() {
+  throw productStructureOnlyError();
 }
 
 export function queryComboReviewAnomalyDates(groupId, options = {}) {

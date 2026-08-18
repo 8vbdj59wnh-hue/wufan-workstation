@@ -443,7 +443,7 @@ export function previewConnectionDataImport({ buffer, fileName, importType, temp
   if (version && version.dataType !== importType) throw new Error("模板与导入类型不匹配。");
   const matchRules = version?.matchRules || {}; const workbook = readWorkbook(buffer, matchRules); const mapping = version?.fieldMappings || defaultMapping(workbook.headers, definition.fields);
   const filtered = workbook.rawRows.filter((item) => rowMatchesFilters(item.raw, matchRules.rowFilters || []));
-  const isSalesFactParser = importType === "erp_sales" && text(parserVersion).startsWith("sales-fact-v2");
+  const isSalesFactParser = importType === "erp_sales" && /^sales-fact-v\d/.test(text(parserVersion));
   const normalizedRows = filtered.map((item) => {
     const data = normalizeRow(item.raw, mapping, matchRules, workbook.sheetName);
     if (isSalesFactParser) {

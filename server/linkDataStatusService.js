@@ -1,6 +1,10 @@
 import { getDatabase } from "./db.js";
 
 const linkTaskCodes = ["platform_operations", "sales_fact_excel_import", "platform_goods_excel_import", "wangdian_platform_goods"];
+const governanceExceptionTypes = new Set([
+  "bundle_sku", "combo_goods", "missing_product_structure", "product_structure_review_pending", "product_structure_conflict",
+  "duplicate_data", "missing_erp_mapping", "erp_relation_governance_pending", "erp_relation_conflict",
+]);
 const successfulStatuses = new Set(["completed", "partial", "completed_with_errors", "completed_with_exceptions"]);
 const activeStatuses = new Set(["waiting", "queued", "running"]);
 const dailyHistoryLimit = 120;
@@ -22,6 +26,10 @@ function dateRange(startDate, endDate) {
   const result = [];
   for (let date = startDate; date <= endDate; date = addDays(date, 1)) result.push(date);
   return result;
+}
+
+function tableColumnNames(database, tableName) {
+  return new Set(database.prepare(`PRAGMA table_info(${tableName})`).all().map((column) => column.name));
 }
 
 function matrixCell(status, detail, extra = {}) {
@@ -199,6 +207,8 @@ function normalizeLegacyBatch(row) {
 
 export function getLinkDataStatus({ includeDetails = false, shopId = "" } = {}) {
   const database = getDatabase();
+  const unifiedExceptionColumns = tableColumnNames(database, "data_sync_exceptions");
+  const legacyExceptionColumns = tableColumnNames(database, "connection_import_rows");
   const taskPlaceholders = linkTaskCodes.map(() => "?").join(",");
   const unifiedRows = database.prepare(`SELECT b.*,t.taskCode,t.name taskName FROM data_sync_batches b
     JOIN data_sync_tasks t ON t.id=b.taskId WHERE t.taskCode IN (${taskPlaceholders}) ORDER BY b.createdAt DESC,b.id DESC`).all(...linkTaskCodes);
@@ -212,12 +222,40 @@ export function getLinkDataStatus({ includeDetails = false, shopId = "" } = {}) 
   const salesDataDate = database.prepare("SELECT MAX(saleDate) value FROM connection_sku_sales_daily_facts").get()?.value ?? null;
   const platformDataDate = database.prepare("SELECT MAX(substr(periodEnd,1,10)) value FROM connection_period_snapshots").get()?.value ?? null;
   const latestDataDate = maxText([salesDataDate, platformDataDate, latestSuccessfulBatch?.dataDate]);
-  const openUnifiedExceptions = Number(database.prepare(`SELECT COUNT(*) count FROM data_sync_exceptions e
-    JOIN data_sync_tasks t ON t.id=e.taskId WHERE e.status='open' AND t.taskCode IN (${taskPlaceholders})`).get(...linkTaskCodes)?.count || 0);
-  const legacyExceptions = Number(database.prepare(`SELECT COUNT(*) count FROM connection_import_rows r JOIN connection_import_batches b ON b.id=r.batchId
-    WHERE r.status='error' AND (b.importType IS NOT NULL OR b.sourceType IN ('business_advisor','platform_operations'))
-      AND NOT EXISTS (SELECT 1 FROM data_sync_batches ds WHERE ds.sourceBatchId=b.id)`).get()?.count || 0);
-  const exceptionCount = openUnifiedExceptions + legacyExceptions;
+  const unifiedExceptionType = unifiedExceptionColumns.has("exceptionType") ? "e.exceptionType" : "'data_validation'";
+  const unifiedResolutionType = unifiedExceptionColumns.has("resolutionType") ? "e.resolutionType" : "NULL";
+  const unifiedExceptionGroups = database.prepare(`SELECT e.status,${unifiedExceptionType} exceptionType,${unifiedResolutionType} resolutionType,COUNT(*) count
+    FROM data_sync_exceptions e JOIN data_sync_tasks t ON t.id=e.taskId
+    WHERE t.taskCode IN (${taskPlaceholders}) GROUP BY 1,2,3`).all(...linkTaskCodes);
+  const legacyExceptionType = legacyExceptionColumns.has("errorType") ? "r.errorType" : "'data_validation'";
+  const legacyResolutionType = legacyExceptionColumns.has("resolutionType") ? "r.resolutionType" : "NULL";
+  const legacyStatusCondition = legacyExceptionColumns.has("resolutionType") ? "(r.status='error' OR r.resolutionType IS NOT NULL)" : "r.status='error'";
+  const legacyExceptionGroups = database.prepare(`SELECT r.status,${legacyExceptionType} errorType,${legacyResolutionType} resolutionType,COUNT(*) count
+    FROM connection_import_rows r JOIN connection_import_batches b ON b.id=r.batchId
+    WHERE ${legacyStatusCondition}
+      AND (b.importType IS NOT NULL OR b.sourceType IN ('business_advisor','platform_operations'))
+      AND NOT EXISTS (SELECT 1 FROM data_sync_batches ds WHERE ds.sourceBatchId=b.id)
+    GROUP BY 1,2,3`).all();
+  const exceptionSummary = { blockingErrorCount: 0, governancePendingCount: 0, historicalCount: 0, idempotentSkippedCount: 0, resolvedCount: 0, totalCount: 0 };
+  for (const row of unifiedExceptionGroups) {
+    const count = Number(row.count || 0); exceptionSummary.totalCount += count;
+    if (row.status === "open") {
+      if (governanceExceptionTypes.has(row.exceptionType)) exceptionSummary.governancePendingCount += count;
+      else exceptionSummary.blockingErrorCount += count;
+    } else if (row.status === "idempotent_skipped") exceptionSummary.idempotentSkippedCount += count;
+    else if (row.status === "resolved") exceptionSummary.resolvedCount += count;
+    else if (["ignored", "superseded"].includes(row.status)) exceptionSummary.historicalCount += count;
+  }
+  for (const row of legacyExceptionGroups) {
+    const count = Number(row.count || 0); exceptionSummary.totalCount += count;
+    if (row.status === "error") exceptionSummary.blockingErrorCount += count;
+    else if (row.status === "idempotent_skipped") exceptionSummary.idempotentSkippedCount += count;
+    else if (row.status === "resolved") exceptionSummary.resolvedCount += count;
+    else if (["ignored", "superseded"].includes(row.status)) exceptionSummary.historicalCount += count;
+  }
+  const openUnifiedExceptions = unifiedExceptionGroups.filter((row) => row.status === "open").reduce((sum, row) => sum + Number(row.count || 0), 0);
+  const legacyExceptions = legacyExceptionGroups.filter((row) => row.status === "error").reduce((sum, row) => sum + Number(row.count || 0), 0);
+  const exceptionCount = exceptionSummary.blockingErrorCount + exceptionSummary.governancePendingCount;
   let status = "no_data";
   if (activeBatch) status = "updating";
   else if (latestBatch && ["failed", "interrupted"].includes(latestBatch.status)
@@ -230,6 +268,8 @@ export function getLinkDataStatus({ includeDetails = false, shopId = "" } = {}) 
     statusLabel: ({ no_data: "暂无数据", updating: "更新中", failed: "更新失败", updated_with_exceptions: "已更新，有异常", updated: "已更新" })[status],
     hasExceptions: exceptionCount > 0,
     exceptionCount,
+    ...exceptionSummary,
+    actionableCount: exceptionCount,
     dailyCompleteness: getSalesDailyCompleteness(database),
     dailySourceMatrix: getDailySourceMatrix(database, shopId),
   };
@@ -238,7 +278,7 @@ export function getLinkDataStatus({ includeDetails = false, shopId = "" } = {}) 
     latestSuccessfulBatch,
     activeBatch,
     dataDates: { sales: salesDataDate, platformOperations: platformDataDate },
-    exceptionCounts: { unified: openUnifiedExceptions, legacy: legacyExceptions },
+    exceptionCounts: { unified: openUnifiedExceptions, legacy: legacyExceptions, ...exceptionSummary, actionable: exceptionCount },
     recentBatches: batches.slice(0, 10),
   };
   return result;

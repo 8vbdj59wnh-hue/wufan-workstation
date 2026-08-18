@@ -62,11 +62,16 @@ try {
     { 店铺: "点意旗舰店-天猫-公司", 货品ID: "1001", 规格ID: "sku-1", 平台规格编码: "ERP-001", 系统货品: "单品" },
     { 店铺: "Banran半然-淘宝", 货品ID: "2001", 规格ID: "sku-2", 平台规格编码: "ERP-002", 系统货品: "单品" },
     { 店铺: "系统不存在-淘宝", 货品ID: "9999", 规格ID: "sku-9", 平台规格编码: "ERP-009", 系统货品: "单品" },
+    { 店铺: "无效", 货品ID: "invalid", 规格ID: "invalid-sku", 平台规格编码: "ERP-009", 系统货品: "单品" },
+    { 店铺: "总计:", 货品ID: "NA", 规格ID: "NA", 平台规格编码: "NA", 系统货品: "NA" },
+    { 店铺: "汇总", 货品ID: "summary", 规格ID: "summary-sku", 平台规格编码: "ERP-009", 系统货品: "单品" },
   ]);
   const relationPreview = previewPlatformGoodsExcelDataSync({ taskId: "sync-task-platform-goods-excel", buffer: relationFile, fileName: "平台货品.xlsx", createdBy: "" });
   assert(relationPreview.summary.linkable === 1 && relationPreview.summary.alreadyLinked === 1, "平台货品全量预览未正确区分新增和已有关系。");
   assert(relationPreview.summary.sourceShopCount === 3 && relationPreview.summary.matchedShopCount === 2, "平台货品全量预览店铺统计错误。");
   assert(relationPreview.summary.exceptionTypes.missing_shop === 1, "不存在的店铺未进入异常中心。");
+  assert(relationPreview.summary.ignoredNonBusiness === 3, "平台货品非业务行未在店铺匹配前过滤。");
+  assert(!relationPreview.summary.exceptionTypes.non_business_row, "平台货品非业务行错误进入异常统计。");
   const relationCommit = commitPlatformGoodsExcelDataSync(relationPreview.dataSyncBatch.id);
   assert(relationCommit.created === 1, "平台货品多店铺V2关系未创建或重复创建已有关系。");
   const mapping = db.prepare("SELECT * FROM sales_link_sku_erp_mappings WHERE salesLinkSkuId='link-sku-1' AND erpSkuId='erp-sku-1'").get();
@@ -127,6 +132,7 @@ try {
     platformGoodsSourceShops: relationPreview.summary.sourceShopCount,
     platformGoodsMatchedShops: relationPreview.summary.matchedShopCount,
     platformGoodsMissingShopExceptions: relationPreview.summary.exceptionTypes.missing_shop,
+    platformGoodsIgnoredNonBusinessRows: relationPreview.summary.ignoredNonBusiness,
     shopMappingsCreated: shopCommit.created,
     detectedPlatforms: [...supportedPlatforms].sort(),
     detectedShopId: platformPreview.preview.shopId,
