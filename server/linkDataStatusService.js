@@ -92,6 +92,10 @@ function getDailySourceMatrix(database, requestedShopId = "") {
     const exceptionCount = Number(attempt.exceptionCount || 0);
     const batch = { scope: "global", batchId: attempt.id, batchStatus: attempt.status };
     if (attempt.status === "preview_ready") return matrixCell("pending_review", `${sourceName}已读取，等待确认写入`, batch);
+    if (distinguishOutcome && ["failed", "interrupted"].includes(attempt.status)
+      && String(attempt.errorMessage || "").includes("未返回可同步的SKU记录")) {
+      return matrixCell("no_change", `${sourceName}已同步，当日无新增或变更`, batch);
+    }
     if (["failed", "interrupted"].includes(attempt.status)) return matrixCell("failed", attempt.errorMessage || `${sourceName}同步失败`, batch);
     if (activeStatuses.has(attempt.status)) return matrixCell("updating", `${sourceName}正在更新`, batch);
     if (matrixCompletedStatuses.has(attempt.status) && exceptionCount === 0) {

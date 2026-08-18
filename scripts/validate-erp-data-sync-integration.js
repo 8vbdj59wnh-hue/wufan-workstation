@@ -77,10 +77,20 @@ assert.equal(scheduled[0].success, true);
 assert.equal(db.prepare("SELECT COUNT(*) total FROM data_sync_batches WHERE triggerMode='automatic'").get().total, 2);
 assert.ok(new Date(center.getDataSyncTask(task.id).nextRunAt).getTime() > Date.now());
 
+db.prepare("UPDATE data_sync_tasks SET nextRunAt='2000-01-01T00:00:00.000Z' WHERE id=?").run(task.id);
+const noChange = await adapter.runDueErpGoodsSyncTasks({ queryGoods: async () => ({ status: 0, data: { total_count: 0, goods_list: [] } }) });
+assert.equal(noChange[0].success, true);
+assert.equal(noChange[0].result.noChange, true);
+assert.equal(noChange[0].result.dataSyncBatch.status, "succeeded");
+assert.equal(noChange[0].result.dataSyncBatch.totalCount, 0);
+assert.equal(noChange[0].result.dataSyncBatch.errorMessage, null);
+assert.equal(db.prepare("SELECT status FROM wangdian_goods_sync_logs ORDER BY startedAt DESC LIMIT 1").get().status, "completed");
+assert.equal(db.prepare("SELECT COUNT(*) total FROM data_sync_batches WHERE triggerMode='automatic'").get().total, 3);
+
 assert.ok(db.prepare("SELECT COUNT(*) total FROM data_sync_logs").get().total >= 9);
 assert.equal(db.pragma("integrity_check", { simple: true }), "ok");
 assert.deepEqual(db.pragma("foreign_key_check"), []);
 dbModule.closeDatabase();
 fs.rmSync(root, { recursive: true, force: true });
 
-console.log(JSON.stringify({ previews: 2, stalePreviewBlocked: true, fullSync: { goods: 10, skus: 10 }, incrementalSync: true, legacyRunsCreated: 0, productsCreated: 0, schedulerExecuted: true, integrityCheck: "ok", foreignKeyCheck: 0 }, null, 2));
+console.log(JSON.stringify({ previews: 2, stalePreviewBlocked: true, fullSync: { goods: 10, skus: 10 }, incrementalSync: true, noChangeCompleted: true, legacyRunsCreated: 0, productsCreated: 0, schedulerExecuted: true, integrityCheck: "ok", foreignKeyCheck: 0 }, null, 2));

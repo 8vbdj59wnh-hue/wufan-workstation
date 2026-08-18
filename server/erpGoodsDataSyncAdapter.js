@@ -42,6 +42,17 @@ export async function previewErpGoodsDataSync({ taskId, resumeBatchId = "", sync
       createdBy,
       ...(queryGoods ? { queryGoods } : {}),
     });
+    if (parsed.noChange) {
+      const dataSyncBatch = completeDataSyncBatch(batch.id, {
+        status: "succeeded",
+        totalCount: 0,
+        createdCount: 0,
+        updatedCount: 0,
+        invalidatedCount: 0,
+        exceptionCount: 0,
+      });
+      return { ...parsed, dataSyncBatch };
+    }
     const validated = validateErpV2Import(parsed.batch.id);
     const exceptions = (parsed.imageWarnings ?? []).map((warning) => ({
       exceptionType: "image_download_warning",
@@ -119,7 +130,7 @@ export async function runDueErpGoodsSyncTasks({ createdBy = "system-scheduler", 
   for (const task of listDueDataSyncTasks().filter((item) => item.taskCode === "erp_goods")) {
     try {
       const preview = await previewErpGoodsDataSync({ taskId: task.id, syncMode: "incremental", triggerMode: "automatic", createdBy, ...(queryGoods ? { queryGoods } : {}) });
-      results.push({ taskId: task.id, success: true, result: commitErpGoodsDataSync(preview.dataSyncBatch.id) });
+      results.push({ taskId: task.id, success: true, result: preview.noChange ? preview : commitErpGoodsDataSync(preview.dataSyncBatch.id) });
     } catch (error) {
       let failedBatchId = error.dataSyncBatchId || null;
       if (!failedBatchId) {

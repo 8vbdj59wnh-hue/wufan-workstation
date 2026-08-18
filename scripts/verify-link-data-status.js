@@ -28,6 +28,7 @@ insertBatch.run("batch-goods", "task-goods", "partial", null, null, null, "2026-
 insertBatch.run("batch-goods-review", "task-goods", "preview_ready", null, null, null, "2026-08-09T23:59:59", 0, null, "2026-08-10T01:00:00Z", "2026-08-10T01:01:00Z", null, 10, 0, 0, 0, null);
 insertBatch.run("batch-goods-no-change", "task-goods", "succeeded", null, null, null, "2026-08-10T23:59:59", 0, null, "2026-08-11T01:00:00Z", "2026-08-11T01:01:00Z", "2026-08-11T01:02:00Z", 10, 0, 0, 0, null);
 insertBatch.run("batch-goods-failed", "task-goods", "failed", null, null, null, "2026-08-11T23:59:59", 1, null, "2026-08-12T01:00:00Z", "2026-08-12T01:01:00Z", "2026-08-12T01:02:00Z", 0, 0, 0, 0, "模拟同步失败");
+insertBatch.run("batch-goods-legacy-empty", "task-goods", "interrupted", null, null, null, "2026-08-12T23:59:59", 0, null, "2026-08-13T01:00:00Z", "2026-08-13T01:01:00Z", "2026-08-13T01:02:00Z", 0, 0, 0, 0, "旺店通未返回可同步的SKU记录。");
 database.prepare("INSERT INTO data_sync_exceptions VALUES (?,?,?,?,?)").run("exception-1", "task-sales", "batch-sales", "open", "error");
 database.prepare("INSERT INTO connection_sku_sales_facts VALUES (?,?)").run("fact-1", "2026-08-08T23:59:59Z");
 database.prepare("INSERT INTO sales_shops VALUES (?,?,?,?,?)").run("shop-1", "天猫", "店铺一", "店铺一", "active");
@@ -52,6 +53,7 @@ if (matrixDay?.sources.wangdianInventory.status !== "completed" || matrixDay?.so
 if (operator.dailySourceMatrix.rows.find((item) => item.date === "2026-08-09")?.sources.wangdianGoods.status !== "pending_review") throw new Error("待确认状态识别失败。");
 if (operator.dailySourceMatrix.rows.find((item) => item.date === "2026-08-10")?.sources.wangdianGoods.status !== "no_change") throw new Error("无变化状态识别失败。");
 if (operator.dailySourceMatrix.rows.find((item) => item.date === "2026-08-11")?.sources.wangdianGoods.status !== "failed") throw new Error("同步失败状态识别失败。");
+if (operator.dailySourceMatrix.rows.find((item) => item.date === "2026-08-12")?.sources.wangdianGoods.status !== "no_change") throw new Error("历史零变化状态兼容失败。");
 const selectedShop = getLinkDataStatus({ shopId: "shop-1" });
 if (selectedShop.dailySourceMatrix.selectedShopId !== "shop-1" || selectedShop.dailySourceMatrix.rows.find((item) => item.date === "2026-08-08")?.sources.platformLinks.status !== "completed") throw new Error("店铺筛选验证失败。");
 const admin = getLinkDataStatus({ includeDetails: true });

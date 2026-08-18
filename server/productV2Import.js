@@ -1150,9 +1150,26 @@ export async function parseWangdianGoodsImport({ syncRunId, dataSyncBatchId, que
   }
   const sourceCanonicalRecords = [...canonicalByIdentity.values()];
   if (sourceCanonicalRecords.length === 0) {
-    const message = "旺店通未返回可同步的SKU记录。";
-    getDatabase().prepare(`UPDATE wangdian_goods_sync_logs SET status='failed',pageCount=?,goodsCount=?,skuCount=0,errorCount=1,errorMessage=?,completedAt=? WHERE id=?`).run(sourcePages, sourceGoodsCount, message, new Date().toISOString(), logId);
-    throw new Error(message);
+    const message = "旺店通商品档案已同步，当期无新增或变更。";
+    const completedAt = new Date().toISOString();
+    if (dataSyncBatch) {
+      getDatabase().prepare(`UPDATE wangdian_goods_sync_logs SET status='completed',pageCount=?,goodsCount=?,skuCount=0,successCount=0,failedCount=0,errorCount=0,errorMessage=NULL,completedAt=? WHERE id=?`).run(sourcePages, sourceGoodsCount, completedAt, logId);
+      clearDataSyncCheckpoint(dataSyncBatch.id);
+      return {
+        noChange: true,
+        message,
+        batch: null,
+        syncRun: null,
+        duplicate: null,
+        valid: true,
+        summary: { validGoods: 0, total: 0, importable: 0, skipped: 0, warnings: 0, sourceGoodsCount, sourceSkuCount: 0, sourcePages },
+        preview: [],
+        imageWarnings: [],
+        syncLog: listWangdianGoodsSyncLogs(200).find((item) => item.id === logId),
+      };
+    }
+    getDatabase().prepare(`UPDATE wangdian_goods_sync_logs SET status='failed',pageCount=?,goodsCount=?,skuCount=0,errorCount=1,errorMessage=?,completedAt=? WHERE id=?`).run(sourcePages, sourceGoodsCount, "旺店通未返回可同步的SKU记录。", completedAt, logId);
+    throw new Error("旺店通未返回可同步的SKU记录。");
   }
   const batchId = `erp-v2-goods_info-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
   const fileHash = crypto.createHash("sha256").update(JSON.stringify(sourceCanonicalRecords)).digest("hex");
