@@ -3,43 +3,13 @@ import XLSX from "xlsx";
 import { getDatabase } from "./db.js";
 
 const IMPORT_TYPE = "connection_owner_assignments";
-const PARSER_VERSION = "connection-owner-v3-shop-platform-inference";
+const PARSER_VERSION = "connection-owner-v4-link-id-owner-selection";
 const PREVIEW_TTL_MS = 24 * 60 * 60 * 1000;
 
 function text(value) { return String(value ?? "").trim(); }
 function json(value, fallback = {}) { try { return JSON.parse(value || ""); } catch { return fallback; } }
 function id(prefix) { return `${prefix}-${crypto.randomUUID()}`; }
 function now() { return new Date().toISOString(); }
-
-function normalizePlatform(value) {
-  const raw = text(value).toLowerCase().replaceAll(" ", "");
-  return ({
-    tmall: "天猫", "天猫": "天猫", taobao: "淘宝", "淘宝": "淘宝",
-    jd: "京东", jingdong: "京东", "京东": "京东",
-    xiaohongshu: "小红书", redbook: "小红书", "小红书": "小红书",
-    douyin: "抖店", doudian: "抖店", "抖音": "抖店", "抖店": "抖店",
-    wechat: "视频号小店", "视频号": "视频号小店", "视频号小店": "视频号小店",
-  })[raw] || "";
-}
-
-function inferPlatformFromShop(value) {
-  const shop = text(value).replaceAll(" ", "");
-  if (shop.includes("小红书")) return "小红书";
-  if (shop.endsWith("-天猫") || shop.includes("-天猫-")) return "天猫";
-  if (shop.endsWith("-淘宝") || shop.includes("-淘宝C店")) return "淘宝";
-  if (shop.endsWith("-京东") || shop.includes("-京东-")) return "京东";
-  if (shop.includes("-抖店")) return "抖店";
-  if (shop.includes("-视频号小店")) return "视频号小店";
-  return "";
-}
-
-function sourceShopNames(value, platform) {
-  const raw = text(value); const names = [raw];
-  const suffixes = platform === "淘宝" ? ["-淘宝", "-淘宝C店"] : [`-${platform}`, `-${platform}-公司`];
-  for (const suffix of suffixes) if (raw.endsWith(suffix)) names.push(raw.slice(0, -suffix.length).trim());
-  if (platform === "小红书" && raw.startsWith("小红书")) names.push(raw.slice(3).trim());
-  return [...new Set(names.filter(Boolean))];
-}
 
 function readRows(buffer) {
   if (!Buffer.isBuffer(buffer) || !buffer.length) throw new Error("请选择负责人匹配Excel文件。");
@@ -51,11 +21,7 @@ function readRows(buffer) {
   return rows.map((raw, index) => ({
     rowNumber: index + 2,
     raw,
-    platformRaw: text(raw["平台"] ?? raw.platform) || inferPlatformFromShop(raw["店铺"] ?? raw.shop),
-    shopName: text(raw["店铺"] ?? raw.shop),
-    platformGoodsId: text(raw["商品ID"] ?? raw["货品ID"] ?? raw.platformGoodsId),
-    ownerName: text(raw["负责人"] ?? raw.owner),
-    operationGroup: text(raw["运营组"] ?? raw.operationGroup),
+    linkId: text(raw["链接ID"] ?? raw["链接Id"] ?? raw["链接id"] ?? raw.linkId ?? raw.connectionId),
     remark: text(raw["备注"] ?? raw.remark),
   })).filter((row) => Object.values(row.raw).some((value) => text(value)));
 }
@@ -68,6 +34,8 @@ function previewExpiresAt(batch) {
 function changeSummary(rows) {
   const matched = rows.filter((row) => row.status === "matched");
   const changed = matched.filter((row) => text(row.data?.currentOwnerId) !== text(row.data?.newOwnerId));
+  const firstAssignmentRows = changed.filter((row) => !text(row.data?.currentOwnerId)).length;
+  const reassignmentRows = changed.length - firstAssignmentRows;
   const groups = new Map();
   for (const row of changed) {
     const data = row.data || {};
@@ -91,7 +59,14 @@ function changeSummary(rows) {
     });
     groups.set(key, group);
   }
-  return { changeRows: changed.length, unchangedRows: matched.length - changed.length, ownerChangeGroups: [...groups.values()] };
+  return {
+    changeRows: changed.length,
+    firstAssignmentRows,
+    reassignmentRows,
+    unchangedRows: matched.length - changed.length,
+    requiresOverwriteConfirmation: reassignmentRows > 0,
+    ownerChangeGroups: [...groups.values()],
+  };
 }
 
 function submissionState(database, batch) {
@@ -104,6 +79,7 @@ function submissionState(database, batch) {
   if (["completed", "partial"].includes(batch.status)) reason = "批次已经提交。";
   else if (batch.status === "cancelled") reason = "本次预览已取消。";
   else if (!ready) reason = "批次不是待确认状态。";
+  else if (preview.parserVersion !== PARSER_VERSION) reason = "负责人匹配规则已更新，请重新上传链接ID表。";
   else if (latest?.id !== batch.id) reason = "批次不是当前有效预览。";
   else if (Date.now() > new Date(previewExpiresAt(batch)).getTime()) reason = "预览已经过期，请重新生成。";
   else if (Number(preview.updatableLinks || batch.matchedRows || 0) <= 0) reason = "没有可更新链接。";
@@ -148,10 +124,12 @@ export function getCurrentConnectionOwnerImport(userId) {
   return batch ? batchSummaryResult(database, batch) : null;
 }
 
-export function previewConnectionOwnerImport({ buffer, fileName, userId, replaceBatchId = "", preserveFileHash = "" }) {
+export function previewConnectionOwnerImport({ buffer, fileName, userId, ownerId, replaceBatchId = "", preserveFileHash = "" }) {
   if (!Buffer.isBuffer(buffer) || !buffer.length) throw new Error("请选择负责人匹配Excel文件。");
   const database = getDatabase();
-  const hash = crypto.createHash("sha256").update(buffer).update(`|${PARSER_VERSION}`).digest("hex");
+  const selectedOwner = database.prepare("SELECT id,name FROM persons WHERE id=? AND status='active'").get(text(ownerId));
+  if (!selectedOwner) throw new Error("请选择有效负责人。");
+  const hash = crypto.createHash("sha256").update(buffer).update(`|${PARSER_VERSION}|${selectedOwner.id}`).digest("hex");
   const existing = replaceBatchId ? null : database.prepare("SELECT * FROM connection_import_batches WHERE importType=? AND fileHash=? AND status<>'cancelled' ORDER BY createdAt DESC LIMIT 1").get(IMPORT_TYPE, hash);
   if (existing) return batchSummaryResult(database, existing, true);
 
@@ -159,70 +137,43 @@ export function previewConnectionOwnerImport({ buffer, fileName, userId, replace
   if (!sourceRows.length) throw new Error("Excel中没有负责人匹配数据。");
   const identityGroups = new Map();
   for (const row of sourceRows) {
-    const platform = normalizePlatform(row.platformRaw);
-    const key = `${platform}\u0000${row.shopName}\u0000${row.platformGoodsId}`;
-    const group = identityGroups.get(key) || [];
-    group.push(row); identityGroups.set(key, group);
+    const group = identityGroups.get(row.linkId) || [];
+    group.push(row); identityGroups.set(row.linkId, group);
   }
-  const repeatedRows = new Set(); const conflictingIdentities = new Set();
-  for (const [key, group] of identityGroups) {
+  const repeatedRows = new Set();
+  for (const group of identityGroups.values()) {
     if (group.length < 2) continue;
-    if (new Set(group.map((row) => row.ownerName)).size > 1) conflictingIdentities.add(key);
-    else for (const row of group.slice(1)) repeatedRows.add(row.rowNumber);
+    for (const row of group.slice(1)) repeatedRows.add(row.rowNumber);
   }
 
-  const shops = database.prepare("SELECT id,platform,shopName,displayName FROM sales_shops WHERE status='active'").all();
-  const links = database.prepare(`SELECT sl.id,sl.shopId,sl.platformGoodsId,sl.title,sh.platform,sh.shopName,sh.displayName
-    FROM sales_links sl JOIN sales_shops sh ON sh.id=sl.shopId WHERE sl.currentState='active' AND sh.status='active'`).all();
-  const people = database.prepare("SELECT id,name FROM persons WHERE status='active'").all();
+  const links = database.prepare(`SELECT sl.id salesLinkId,sl.platformGoodsId,sl.title,sh.platform,
+      COALESCE(NULLIF(sh.displayName,''),sh.shopName) shopName,cp.id connectionId,cp.name connectionName,cp.ownerId
+    FROM sales_links sl JOIN sales_shops sh ON sh.id=sl.shopId
+    LEFT JOIN connection_profiles cp ON cp.salesLinkId=sl.id
+    WHERE sl.currentState='active' AND sh.status='active'`).all();
 
   const rows = sourceRows.map((row) => {
     let status = "matched"; let errorType = null; let errorMessage = null;
-    let salesLink = null; let profile = null; let owner = null; let shop = null;
-    const platform = normalizePlatform(row.platformRaw);
-    const identity = `${platform}\u0000${row.shopName}\u0000${row.platformGoodsId}`;
-    if (!row.platformRaw || !platform) { status = "unmatched"; errorType = "invalid_platform"; errorMessage = "平台为空或不受支持。"; }
-    else if (!row.shopName) { status = "unmatched"; errorType = "missing_shop"; errorMessage = "店铺不能为空。"; }
-    else if (!row.platformGoodsId) { status = "unmatched"; errorType = "missing_goods_id"; errorMessage = "商品ID不能为空。"; }
-    else if (!row.ownerName) { status = "ignored"; errorType = "empty_owner"; errorMessage = "负责人为空，本行不会更新。"; }
-    else if (conflictingIdentities.has(identity)) { status = "conflict"; errorType = "duplicate_owner_conflict"; errorMessage = "同一平台、店铺和商品ID对应多个负责人，本行已隔离。"; }
-    else if (repeatedRows.has(row.rowNumber)) { status = "ignored"; errorType = "duplicate_relation"; errorMessage = "文件内负责人关系重复，本行不重复更新。"; }
+    let link = null;
+    if (!row.linkId) { status = "unmatched"; errorType = "missing_link_id"; errorMessage = "链接ID不能为空。"; }
+    else if (repeatedRows.has(row.rowNumber)) { status = "ignored"; errorType = "duplicate_relation"; errorMessage = "文件内链接ID重复，本行不重复更新。"; }
     if (status === "matched") {
-      const names = sourceShopNames(row.shopName, platform);
-      const namedShops = shops.filter((item) => names.includes(text(item.shopName)) || names.includes(text(item.displayName)));
-      const matchingShops = namedShops.filter((item) => item.platform === platform);
-      if (!matchingShops.length && namedShops.length) { status = "conflict"; errorType = "platform_mismatch"; errorMessage = "店铺存在，但所属平台与文件平台不一致。"; }
-      else if (!matchingShops.length) { status = "unmatched"; errorType = "shop_not_found"; errorMessage = "系统中不存在该平台店铺。"; }
-      else if (matchingShops.length > 1) { status = "conflict"; errorType = "shop_conflict"; errorMessage = "店铺字段匹配到多个系统店铺。"; }
-      else {
-        shop = matchingShops[0];
-        const platformLinks = links.filter((item) => item.platform === platform && item.platformGoodsId === row.platformGoodsId);
-        const matchingLinks = platformLinks.filter((item) => item.shopId === shop.id);
-        if (!platformLinks.length) { status = "unmatched"; errorType = "goods_not_found"; errorMessage = "该平台未找到商品ID。"; }
-        else if (!matchingLinks.length) { status = "conflict"; errorType = "shop_link_conflict"; errorMessage = "商品ID存在，但不属于文件指定店铺。"; }
-        else if (matchingLinks.length > 1) { status = "conflict"; errorType = "link_conflict"; errorMessage = "平台、店铺和商品ID对应多个销售链接。"; }
-        else {
-          salesLink = matchingLinks[0]; profile = database.prepare("SELECT id,name,ownerId FROM connection_profiles WHERE salesLinkId=?").get(salesLink.id);
-          if (!profile) { status = "unmatched"; errorType = "profile_not_found"; errorMessage = "商品ID尚未建立链接档案。"; }
-        }
-      }
+      const direct = links.filter((item) => item.salesLinkId === row.linkId);
+      const matched = direct.length ? direct : links.filter((item) => item.connectionId === row.linkId);
+      if (!matched.length) { status = "unmatched"; errorType = "link_not_found"; errorMessage = "系统中不存在该链接ID。"; }
+      else if (matched.length > 1) { status = "conflict"; errorType = "link_conflict"; errorMessage = "链接ID匹配到多个链接，请联系管理员处理。"; }
+      else if (!matched[0].connectionId) { status = "unmatched"; errorType = "profile_not_found"; errorMessage = "该链接尚未建立链接档案。"; }
+      else link = matched[0];
     }
-    if (status === "matched") {
-      const owners = people.filter((item) => item.name === row.ownerName);
-      if (owners.length === 0) { status = "conflict"; errorType = "owner_not_found"; errorMessage = "系统中不存在该负责人。"; }
-      else if (owners.length > 1) { status = "conflict"; errorType = "owner_conflict"; errorMessage = "存在多个同名负责人，请先处理人员重名。"; }
-      else owner = owners[0];
-    }
-    const currentOwner = profile?.ownerId ? database.prepare("SELECT id,name FROM persons WHERE id=?").get(profile.ownerId) : null;
+    const currentOwner = link?.ownerId ? database.prepare("SELECT id,name FROM persons WHERE id=?").get(link.ownerId) : null;
     return {
       ...row, status, errorType, errorMessage,
       data: {
-        platform, shopId: shop?.id || null, shopName: shop?.displayName || shop?.shopName || row.shopName,
-        platformGoodsId: row.platformGoodsId,
-        salesLinkId: salesLink?.id || null, connectionId: profile?.id || null, linkTitle: salesLink?.title || profile?.name || "",
+        platform: link?.platform || "", shopName: link?.shopName || "", platformGoodsId: link?.platformGoodsId || "",
+        salesLinkId: link?.salesLinkId || null, connectionId: link?.connectionId || null, linkTitle: link?.title || link?.connectionName || "",
         currentOwnerId: currentOwner?.id || null, currentOwnerName: currentOwner?.name || "未分配",
-        newOwnerId: owner?.id || null, newOwnerName: owner?.name || row.ownerName,
-        operationGroup: row.operationGroup, remark: row.remark,
+        newOwnerId: selectedOwner.id, newOwnerName: selectedOwner.name,
+        remark: row.remark,
       },
     };
   });
@@ -231,7 +182,7 @@ export function previewConnectionOwnerImport({ buffer, fileName, userId, replace
   const unmatched = rows.filter((row) => row.status === "unmatched").length;
   const conflicts = rows.filter((row) => row.status === "conflict").length;
   const ignored = rows.filter((row) => row.status === "ignored").length;
-  const duplicateRelations = rows.filter((row) => ["duplicate_relation", "duplicate_owner_conflict"].includes(row.errorType)).length;
+  const duplicateRelations = rows.filter((row) => row.errorType === "duplicate_relation").length;
   const changes = changeSummary(rows);
   const replacedBatch = replaceBatchId ? database.prepare("SELECT * FROM connection_import_batches WHERE id=? AND importType=?").get(text(replaceBatchId), IMPORT_TYPE) : null;
   if (replaceBatchId && !replacedBatch) throw new Error("负责人匹配批次不存在。");
@@ -242,12 +193,12 @@ export function previewConnectionOwnerImport({ buffer, fileName, userId, replace
   const preview = {
     totalRows: rows.length, matchedRows: matched, unmatchedRows: unmatched,
     conflictRows: conflicts, ignoredRows: ignored,
-    ownerCount: new Set(rows.map((row) => row.ownerName).filter(Boolean)).size,
-    platformCount: new Set(rows.map((row) => normalizePlatform(row.platformRaw)).filter(Boolean)).size,
-    shopCount: new Set(rows.map((row) => row.shopName).filter(Boolean)).size,
+    selectedOwnerId: selectedOwner.id, selectedOwnerName: selectedOwner.name, ownerCount: 1,
+    platformCount: new Set(rows.map((row) => row.data?.platform).filter(Boolean)).size,
+    shopCount: new Set(rows.map((row) => row.data?.shopName).filter(Boolean)).size,
     updatableLinks: changes.changeRows,
-    unmatchedLinks: rows.filter((row) => ["goods_not_found", "profile_not_found"].includes(row.errorType)).length,
-    shopConflictRows: rows.filter((row) => ["missing_shop", "shop_not_found", "shop_conflict", "shop_link_conflict", "platform_mismatch"].includes(row.errorType)).length,
+    unmatchedLinks: rows.filter((row) => ["link_not_found", "profile_not_found"].includes(row.errorType)).length,
+    shopConflictRows: 0,
     duplicateRelations,
     ...changes, parserVersion: PARSER_VERSION, expiresAt,
   };
@@ -266,7 +217,7 @@ export function previewConnectionOwnerImport({ buffer, fileName, userId, replace
     const insert = database.prepare(`INSERT INTO connection_import_rows
       (id,batchId,rowNumber,externalKey,rawDataJson,normalizedDataJson,status,errorType,errorMessage,createdAt)
       VALUES (?,?,?,?,?,?,?,?,?,?)`);
-    for (const row of rows) insert.run(id("connection-owner-import-row"), batchId, row.rowNumber, `${normalizePlatform(row.platformRaw)}|${row.shopName}|${row.platformGoodsId}`, JSON.stringify(row.raw), JSON.stringify(row.data), row.status, row.errorType, row.errorMessage, createdAt);
+    for (const row of rows) insert.run(id("connection-owner-import-row"), batchId, row.rowNumber, row.linkId, JSON.stringify(row.raw), JSON.stringify(row.data), row.status, row.errorType, row.errorMessage, createdAt);
   })();
   return batchSummaryResult(database, database.prepare("SELECT * FROM connection_import_batches WHERE id=?").get(batchId));
 }
@@ -280,19 +231,23 @@ export function rebuildConnectionOwnerImportPreview(batchId, userId) {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rawRows), "负责人匹配");
   const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
-  return previewConnectionOwnerImport({ buffer, fileName: batch.fileName, userId, replaceBatchId: batch.id, preserveFileHash: batch.fileHash });
+  return previewConnectionOwnerImport({ buffer, fileName: batch.fileName, userId, ownerId: json(batch.previewSummaryJson).selectedOwnerId, replaceBatchId: batch.id, preserveFileHash: batch.fileHash });
 }
 
-export function confirmConnectionOwnerImport(batchId, userId) {
+export function confirmConnectionOwnerImport(batchId, userId, { confirmOverwrite = false } = {}) {
   const database = getDatabase();
   const batch = database.prepare("SELECT * FROM connection_import_batches WHERE id=? AND importType=?").get(text(batchId), IMPORT_TYPE);
   if (!batch) throw new Error("负责人匹配批次不存在。");
   if (batch.createdBy && batch.createdBy !== text(userId)) throw new Error("无权提交其他用户创建的负责人匹配预览。");
-  if (["completed", "partial"].includes(batch.status)) return { ...batchSummaryResult(database, batch, true), result: json(batch.previewSummaryJson).result || { updated: 0, unchanged: 0 } };
+  if (["completed", "partial"].includes(batch.status)) return { ...batchSummaryResult(database, batch, true), result: json(batch.previewSummaryJson).result || { updated: 0, unchanged: 0, firstAssigned: 0, reassigned: 0 } };
   const submission = submissionState(database, batch);
   if (!submission.canSubmit) throw new Error(submission.reason);
+  const previewBeforeSubmit = json(batch.previewSummaryJson);
+  if (Number(previewBeforeSubmit.reassignmentRows || 0) > 0 && confirmOverwrite !== true) {
+    throw new Error(`其中 ${previewBeforeSubmit.reassignmentRows} 个链接已有负责人，请确认后再变更。`);
+  }
   const rows = database.prepare("SELECT * FROM connection_import_rows WHERE batchId=? AND status='matched' ORDER BY rowNumber").all(batch.id);
-  let updated = 0; let unchanged = 0;
+  let updated = 0; let unchanged = 0; let firstAssigned = 0; let reassigned = 0;
   database.transaction(() => {
     for (const row of rows) {
       const data = json(row.normalizedDataJson);
@@ -300,15 +255,18 @@ export function confirmConnectionOwnerImport(batchId, userId) {
       const owner = database.prepare("SELECT id FROM persons WHERE id=? AND status='active'").get(data.newOwnerId);
       if (!profile || !owner || text(profile.ownerId) !== text(data.currentOwnerId)) throw new Error(`第${row.rowNumber}行的链接、负责人或现有数据已变化，请重新生成预览。`);
       if (profile.ownerId === owner.id) unchanged += 1;
-      else { database.prepare("UPDATE connection_profiles SET ownerId=?,updatedAt=? WHERE id=?").run(owner.id, now(), profile.id); updated += 1; }
+      else {
+        if (profile.ownerId) reassigned += 1; else firstAssigned += 1;
+        database.prepare("UPDATE connection_profiles SET ownerId=?,updatedAt=? WHERE id=?").run(owner.id, now(), profile.id); updated += 1;
+      }
       database.prepare("UPDATE connection_import_rows SET status='success' WHERE id=?").run(row.id);
     }
-    const completedAt = now(); const preview = { ...json(batch.previewSummaryJson), result: { updated, unchanged } };
+    const completedAt = now(); const preview = { ...json(batch.previewSummaryJson), result: { updated, unchanged, firstAssigned, reassigned } };
     const finalStatus = Number(batch.errorRows || 0) > 0 ? "partial" : "completed";
     database.prepare("UPDATE connection_import_batches SET status=?,completedAt=?,updatedAt=?,previewSummaryJson=? WHERE id=?").run(finalStatus, completedAt, completedAt, JSON.stringify(preview), batch.id);
   })();
   const completed = database.prepare("SELECT * FROM connection_import_batches WHERE id=?").get(batch.id);
-  return { ...batchSummaryResult(database, completed), result: { updated, unchanged } };
+  return { ...batchSummaryResult(database, completed), result: { updated, unchanged, firstAssigned, reassigned } };
 }
 
 export function cancelConnectionOwnerImport(batchId, userId) {

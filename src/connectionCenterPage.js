@@ -765,15 +765,18 @@ function renderConnectionAssets() {
 
 function renderOwnerImportUploader() {
   if (!canManage()) return "";
+  const people = (state.people ?? []).filter((person) => person.status === "active");
   return `<form data-connection-owner-import-form class="connection-foundation-import-form">
-    <label>负责人匹配表<input type="file" name="file" accept=".xls,.xlsx" required /></label>
-    <button type="submit" class="secondary-button" ${pageState.ownerImport.loading ? "disabled" : ""}>${pageState.ownerImport.loading ? "正在解析…" : "生成匹配预览"}</button>
+    <label>链接ID表<input type="file" name="file" accept=".xls,.xlsx" required /><small>Excel仅需一列：链接ID</small></label>
+    <label>匹配负责人<select name="ownerId" required><option value="">请选择负责人</option>${people.map((person) => `<option value="${escapeHtml(person.id)}">${escapeHtml(person.name)}</option>`).join("")}</select></label>
+    <button type="submit" class="secondary-button" ${pageState.ownerImport.loading ? "disabled" : ""}>${pageState.ownerImport.loading ? "正在解析…" : "读取链接并预览"}</button>
   </form>`;
 }
 
 function renderOwnerImport() {
   if (!canManage()) return "";
   const result = pageState.ownerImport.result; const preview = result?.preview ?? {}; const rows = pageState.ownerImport.detailRows ?? [];
+  if (result && preview.parserVersion !== "connection-owner-v4-link-id-owner-selection") return "";
   const statusText = { matched: "已匹配", unmatched: "未匹配", conflict: "冲突", ignored: "已忽略", success: "已更新" };
   const batchStatus = { validated: "待确认", preview_ready: "待确认", completed: "已完成", partial: "部分完成", cancelled: "已取消" };
   const exceptions = rows.filter((row) => row.status !== "matched" && row.status !== "success");
@@ -782,19 +785,19 @@ function renderOwnerImport() {
   const canSubmit = canManage() && result?.submission?.canSubmit && !pageState.ownerImport.loading;
   if (result && pageState.ownerImport.showCompletion && ["completed", "partial"].includes(result.batch?.status)) {
     const exceptionCount = Number(preview.unmatchedRows || 0) + Number(preview.conflictRows || 0) + Number(preview.ignoredRows || 0);
-    return `<section class="connection-owner-completion"><span class="connection-owner-completion-mark">✓</span><h2>负责人匹配完成</h2>${result.batch.status === "partial" ? `<p class="connection-owner-partial-note">部分数据已成功更新。异常数据未更新，可进入异常中心处理。</p>` : `<p>本次负责人匹配已全部完成。</p>`}<div class="connection-owner-change-summary"><span>新增负责人<strong>0</strong></span><span>负责人变更<strong>${result.result?.updated || 0}</strong></span><span>保持不变<strong>${result.result?.unchanged || 0}</strong></span><span>异常<strong>${exceptionCount}</strong></span></div><footer><button type="button" class="secondary-button" data-view-owner-import-result>查看本次详情</button><button type="button" class="secondary-button" data-return-connection-center>返回链接经营中心</button><button type="button" class="primary-button" data-continue-owner-import>继续导入负责人表</button></footer></section>`;
+    return `<section class="connection-owner-completion"><span class="connection-owner-completion-mark">✓</span><h2>负责人匹配完成</h2>${result.batch.status === "partial" ? `<p class="connection-owner-partial-note">部分数据已成功更新。异常数据未更新，可进入异常中心处理。</p>` : `<p>本次负责人匹配已全部完成。</p>`}<div class="connection-owner-change-summary"><span>首次分配<strong>${result.result?.firstAssigned || 0}</strong></span><span>负责人变更<strong>${result.result?.reassigned || 0}</strong></span><span>保持不变<strong>${result.result?.unchanged || 0}</strong></span><span>异常<strong>${exceptionCount}</strong></span></div><footer><button type="button" class="secondary-button" data-view-owner-import-result>查看本次详情</button><button type="button" class="secondary-button" data-return-connection-center>返回链接中心</button><button type="button" class="primary-button" data-continue-owner-import>继续匹配负责人</button></footer></section>`;
   }
   if (!result) return "";
   return `<details class="connection-foundation-panel connection-owner-import" ${result ? "open" : ""}>
     <summary>负责人匹配结果</summary>
     ${result ? `<section class="connection-import-preview"><header><div><h3>本次负责人匹配</h3><p>${escapeHtml(result.batch?.fileName || "负责人匹配表")}</p></div><span class="status-pill">${batchStatus[result.batch?.status] || result.batch?.status}</span></header>
-      <div class="connection-owner-change-summary"><span>文件总行数<strong>${preview.totalRows || 0}</strong></span><span>可更新链接<strong>${preview.updatableLinks || 0}</strong></span><span>负责人变更<strong>${preview.changeRows || 0}</strong></span><span>保持不变<strong>${preview.unchangedRows || 0}</strong></span><span>异常<strong>${Number(preview.unmatchedRows || 0) + Number(preview.conflictRows || 0) + Number(preview.ignoredRows || 0)}</strong></span></div>
-      <div class="connection-import-preview-grid"><span>可更新链接<strong>${preview.updatableLinks || 0}</strong></span><span>涉及负责人<strong>${preview.ownerCount || 0}</strong></span><span>涉及平台<strong>${preview.platformCount || 0}</strong></span><span>涉及店铺<strong>${preview.shopCount || 0}</strong></span><span>异常行<strong>${Number(preview.unmatchedRows || 0) + Number(preview.conflictRows || 0)}</strong></span><span>不会更新<strong>${skipped}</strong></span></div>
+      <div class="connection-owner-change-summary"><span>文件总行数<strong>${preview.totalRows || 0}</strong></span><span>可匹配链接<strong>${preview.updatableLinks || 0}</strong></span><span>首次分配<strong>${preview.firstAssignmentRows || 0}</strong></span><span>负责人变更<strong>${preview.reassignmentRows || 0}</strong></span><span>保持不变<strong>${preview.unchangedRows || 0}</strong></span><span>异常<strong>${Number(preview.unmatchedRows || 0) + Number(preview.conflictRows || 0) + Number(preview.ignoredRows || 0)}</strong></span></div>
+      <div class="connection-import-preview-grid"><span>目标负责人<strong>${escapeHtml(preview.selectedOwnerName || "—")}</strong></span><span>可匹配链接<strong>${preview.updatableLinks || 0}</strong></span><span>涉及平台<strong>${preview.platformCount || 0}</strong></span><span>涉及店铺<strong>${preview.shopCount || 0}</strong></span><span>异常行<strong>${Number(preview.unmatchedRows || 0) + Number(preview.conflictRows || 0)}</strong></span><span>不会更新<strong>${skipped}</strong></span></div>
       <div class="connection-owner-detail-actions"><button type="button" class="secondary-button" data-owner-import-detail="changes">查看匹配明细</button><button type="button" class="secondary-button" data-owner-import-detail="errors">查看异常</button></div>
-      ${pageState.ownerImport.detailKind ? `<section class="connection-table-wrap"><table class="connection-table"><thead><tr><th>行</th><th>平台</th><th>店铺</th><th>商品ID</th><th>链接标题</th><th>当前负责人</th><th>新负责人</th><th>状态</th><th>说明</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${row.rowNumber}</td><td>${escapeHtml(row.data?.platform || row.rawData?.平台 || "—")}</td><td>${escapeHtml(row.data?.shopName || row.rawData?.店铺 || "—")}</td><td>${escapeHtml(row.data?.platformGoodsId || "—")}</td><td>${escapeHtml(row.data?.linkTitle || "—")}</td><td>${escapeHtml(row.data?.currentOwnerName || "未分配")}</td><td>${escapeHtml(row.data?.newOwnerName || "—")}</td><td>${escapeHtml(statusText[row.status] || row.status)}</td><td>${escapeHtml(row.errorMessage || "—")}</td></tr>`).join("")}</tbody></table></section>` : ""}
-      <section class="connection-owner-change-groups"><h4>负责人变更</h4>${changeGroups.length ? changeGroups.map((group) => `<details><summary><span>${escapeHtml(group.currentOwnerName)} <b>→</b> ${escapeHtml(group.newOwnerName)}</span><strong>${group.linkCount}条链接</strong></summary><ul>${(group.links || []).map((link) => `<li><strong>${escapeHtml(link.title || link.platformGoodsId || "未命名链接")}</strong><span>${escapeHtml(`${link.platform || "—"} · ${link.shop || "—"} · ${link.platformGoodsId || "—"}`)}</span></li>`).join("")}</ul></details>`).join("") : `<p class="form-note">本次没有负责人变更。</p>`}</section>
-      <aside class="connection-owner-overwrite-note"><strong>本次将按导入文件覆盖更新负责人。</strong><p>导入后，符合匹配条件的链接负责人将更新为文件中的负责人，不会保留旧负责人。</p><small>不会修改：店铺、链接身份、平台SKU、ERP SKU、库存、销售数据。</small></aside>
-      ${!["completed", "partial", "cancelled"].includes(result.batch?.status) ? `<footer><button type="button" class="primary-button" data-confirm-owner-import="${escapeHtml(result.batch.id)}" ${canSubmit ? "" : "disabled"}>确认匹配负责人</button>${!canSubmit && result.preview?.parserVersion !== "connection-owner-v3-shop-platform-inference" ? `<button type="button" class="secondary-button" data-rebuild-owner-import="${escapeHtml(result.batch.id)}">重新校验当前预览</button>` : ""}<button type="button" class="secondary-button" data-cancel-owner-import="${escapeHtml(result.batch.id)}">取消本次预览</button>${canSubmit ? "" : `<span class="form-note">${escapeHtml(result?.submission?.reason || "当前用户没有提交权限。")}</span>`}</footer>` : ""}
+      ${pageState.ownerImport.detailKind ? `<section class="connection-table-wrap"><table class="connection-table"><thead><tr><th>行</th><th>链接ID</th><th>链接标题</th><th>平台</th><th>店铺</th><th>当前负责人</th><th>新负责人</th><th>状态</th><th>说明</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${row.rowNumber}</td><td>${escapeHtml(row.externalKey || row.rawData?.链接ID || "—")}</td><td>${escapeHtml(row.data?.linkTitle || "—")}</td><td>${escapeHtml(row.data?.platform || "—")}</td><td>${escapeHtml(row.data?.shopName || "—")}</td><td>${escapeHtml(row.data?.currentOwnerName || "未分配")}</td><td>${escapeHtml(row.data?.newOwnerName || "—")}</td><td>${escapeHtml(statusText[row.status] || row.status)}</td><td>${escapeHtml(row.errorMessage || "—")}</td></tr>`).join("")}</tbody></table></section>` : ""}
+      <section class="connection-owner-change-groups"><h4>匹配变化</h4>${changeGroups.length ? changeGroups.map((group) => `<details><summary><span>${escapeHtml(group.currentOwnerName)} <b>→</b> ${escapeHtml(group.newOwnerName)}</span><strong>${group.linkCount}条链接</strong></summary><ul>${(group.links || []).map((link) => `<li><strong>${escapeHtml(link.title || link.platformGoodsId || "未命名链接")}</strong><span>${escapeHtml(`${link.platform || "—"} · ${link.shop || "—"} · ${link.platformGoodsId || "—"}`)}</span></li>`).join("")}</ul></details>`).join("") : `<p class="form-note">本次没有负责人变化。</p>`}</section>
+      <aside class="connection-owner-overwrite-note"><strong>${preview.reassignmentRows ? `其中 ${preview.reassignmentRows} 个链接已有负责人。` : "所选链接均为首次分配负责人。"}</strong><p>${preview.reassignmentRows ? `确认后将变更为「${escapeHtml(preview.selectedOwnerName || "所选负责人")}」，提交前会再次提醒。` : `确认后将直接分配给「${escapeHtml(preview.selectedOwnerName || "所选负责人")}」，无需覆盖提醒。`}</p><small>不会修改：店铺、链接身份、平台SKU、ERP SKU、库存、销售数据。</small></aside>
+      ${!["completed", "partial", "cancelled"].includes(result.batch?.status) ? `<footer><button type="button" class="primary-button" data-confirm-owner-import="${escapeHtml(result.batch.id)}" ${canSubmit ? "" : "disabled"}>确认匹配负责人</button>${!canSubmit && preview.parserVersion === "connection-owner-v4-link-id-owner-selection" ? `<button type="button" class="secondary-button" data-rebuild-owner-import="${escapeHtml(result.batch.id)}">重新校验当前预览</button>` : ""}<button type="button" class="secondary-button" data-cancel-owner-import="${escapeHtml(result.batch.id)}">取消本次预览</button>${canSubmit ? "" : `<span class="form-note">${escapeHtml(result?.submission?.reason || "当前用户没有提交权限。")}</span>`}</footer>` : ""}
     </section>` : ""}
   </details>`;
 }
@@ -1729,7 +1732,7 @@ export function bindConnectionCenterPageEvents(render) {
   root.querySelector("[data-connection-owner-import-form]")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const form = new FormData(event.currentTarget);
     pageState.ownerImport.loading = true; pageState.error = ""; render();
-    try { pageState.ownerImport.result = await previewConnectionOwnerImport(form.get("file")); }
+    try { pageState.ownerImport.result = await previewConnectionOwnerImport(form.get("file"), form.get("ownerId")); }
     catch (error) { pageState.error = error.message; }
     pageState.ownerImport.loading = false; render();
   });
@@ -1742,9 +1745,12 @@ export function bindConnectionCenterPageEvents(render) {
     pageState.ownerImport.loading = false; render();
   }));
   root.querySelector("[data-confirm-owner-import]")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget; const preview = pageState.ownerImport.result?.preview || {};
+    const requiresOverwrite = Number(preview.reassignmentRows || 0) > 0;
+    if (requiresOverwrite && !window.confirm(`其中 ${preview.reassignmentRows} 个链接已有负责人，确认要变更为「${preview.selectedOwnerName || "所选负责人"}」吗？`)) return;
     pageState.ownerImport.loading = true; pageState.error = ""; render();
     try {
-      const result = await confirmConnectionOwnerImport(event.currentTarget.dataset.confirmOwnerImport);
+      const result = await confirmConnectionOwnerImport(button.dataset.confirmOwnerImport, { confirmOverwrite: requiresOverwrite });
       pageState.ownerImport.result = result;
       pageState.ownerImport.showCompletion = true;
       await Promise.all([loadConnectionAssetsPage(render), loadMyLinks(render)]);

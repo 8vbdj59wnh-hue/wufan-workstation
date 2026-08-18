@@ -1338,8 +1338,8 @@ export async function loadConnectionAssets(filters = {}) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-assets${query.size ? `?${query}` : ""}`), "链接资产读取失败。");
 }
 
-export async function previewConnectionOwnerImport(file) {
-  const form = new FormData(); form.append("file", file);
+export async function previewConnectionOwnerImport(file, ownerId) {
+  const form = new FormData(); form.append("file", file); form.append("ownerId", ownerId);
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-assets/owner-imports/preview`, { method: "POST", body: form }), "负责人匹配预览失败。");
 }
 
@@ -1352,8 +1352,10 @@ export async function loadConnectionOwnerImportRows(batchId, kind = "changes", p
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-assets/owner-imports/${encodeURIComponent(batchId)}/${kind}?page=${page}&pageSize=${pageSize}`), "负责人匹配明细读取失败。");
 }
 
-export async function confirmConnectionOwnerImport(batchId) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-assets/owner-imports/${encodeURIComponent(batchId)}/confirm`, { method: "POST" }), "负责人批量更新失败。");
+export async function confirmConnectionOwnerImport(batchId, { confirmOverwrite = false } = {}) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-assets/owner-imports/${encodeURIComponent(batchId)}/confirm`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmOverwrite }),
+  }), "负责人批量更新失败。");
 }
 
 export async function rebuildConnectionOwnerImportPreview(batchId) {

@@ -2767,6 +2767,7 @@ app.post("/api/connection-assets/owner-imports/preview", requireLinkManage, (req
         buffer: request.file?.buffer,
         fileName: normalizeUploadedFileName(request.file?.originalname),
         userId: getUserPersonId(request.user),
+        ownerId: request.body?.ownerId,
       });
       response.status(result.idempotent ? 200 : 201).json({ success: true, ...result });
     } catch (uploadError) {
@@ -2791,7 +2792,7 @@ app.get("/api/connection-assets/owner-imports/:id/errors", requireLinkManage, (r
 });
 
 app.post("/api/connection-assets/owner-imports/:id/confirm", requireLinkManage, (request, response) => {
-  try { response.json({ success: true, ...confirmConnectionOwnerImport(request.params.id, getUserPersonId(request.user)) }); }
+  try { response.json({ success: true, ...confirmConnectionOwnerImport(request.params.id, getUserPersonId(request.user), { confirmOverwrite: request.body?.confirmOverwrite === true }) }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "负责人批量更新失败。" }); }
 });
 
