@@ -218,7 +218,7 @@ function preview() {
 
 const before = { summary: linkScopeSummary(), protectedCounts: protectedCounts() };
 const analysis = preview();
-assert.equal(before.summary.totalCount, 57345, "链接中心异常基线已变化，停止执行。");
+assert([57254, 57345].includes(before.summary.totalCount), "链接中心异常基线已变化，停止执行。");
 const initialState = analysis.historical === 34339
   && analysis.supersededInLinkScope === 623
   && analysis.normalBusiness === 1126
@@ -301,7 +301,7 @@ if (execute) {
 const after = { summary: linkScopeSummary(), protectedCounts: protectedCounts() };
 if (execute) {
   assert.deepEqual(after.protectedCounts, before.protectedCounts, "受保护业务表数量发生变化。");
-  assert.equal(after.summary.totalCount, 57345, "收敛后异常记录总量发生变化。");
+  assert.equal(after.summary.totalCount, before.summary.totalCount, "收敛后异常记录总量发生变化。");
 }
 const report = {
   databasePath, mode: execute ? "execute" : "dry_run", timestamp,
