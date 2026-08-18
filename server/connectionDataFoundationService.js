@@ -10,6 +10,7 @@ export const connectionImportTypes = [
   "erp_product_relations",
   "erp_inventory",
 ];
+export const PLATFORM_LINK_OPERATION_PARSER_VERSION = "platform-link-id-date-v4";
 
 const typeDefinitions = {
   platform_link_operations: {
@@ -341,6 +342,29 @@ function findPlatformOperationLink(database, row) {
   return link;
 }
 
+function isolateMinorityShopRows(rows) {
+  const validRows = rows.filter((item) => item.status === "validated" && text(item.data.shopId));
+  const counts = new Map();
+  for (const item of validRows) counts.set(item.data.shopId, (counts.get(item.data.shopId) || 0) + 1);
+  if (counts.size <= 1 || validRows.length < 5) return null;
+  const ranked = [...counts.entries()].sort((left, right) => right[1] - left[1]);
+  const [dominantShopId, dominantCount] = ranked[0];
+  const confidence = dominantCount / validRows.length;
+  if (confidence < 0.9) return null;
+  const dominant = validRows.find((item) => item.data.shopId === dominantShopId)?.data;
+  let isolatedRows = 0;
+  for (const item of validRows) {
+    if (item.data.shopId === dominantShopId) continue;
+    isolatedRows += 1;
+    Object.assign(item, {
+      status: "error",
+      errorType: "link_shop_mismatch",
+      errorMessage: `链接ID当前登记店铺“${text(item.data.shop) || "未知"}”与文件主店铺“${text(dominant?.shop) || "未知"}”不一致，已单行隔离。`,
+    });
+  }
+  return { shopId: dominantShopId, shop: text(dominant?.shop), confidence, isolatedRows };
+}
+
 function ensureLink(database, row, batchId, resolvedLink = null) {
   const shop = resolvedLink
     ? database.prepare("SELECT * FROM sales_shops WHERE id=?").get(resolvedLink.shopId)
@@ -442,7 +466,7 @@ function previewSummary(database, rows, importType) {
 export function previewConnectionDataImport({ buffer, fileName, importType, templateVersionId, userId, parserVersion = "" }) {
   if (!Buffer.isBuffer(buffer) || !buffer.length) throw new Error("请选择Excel文件。");
   const definition = typeDefinitions[text(importType)]; if (!definition) throw new Error("导入类型无效。");
-  const effectiveParserVersion = importType === "platform_link_operations" ? "platform-link-id-date-v2" : text(parserVersion);
+  const effectiveParserVersion = importType === "platform_link_operations" ? PLATFORM_LINK_OPERATION_PARSER_VERSION : text(parserVersion);
   const database = getDatabase(); const sourceFileHash = crypto.createHash("sha256").update(buffer).digest("hex");
   const hash = effectiveParserVersion ? crypto.createHash("sha256").update(buffer).update(`\0${effectiveParserVersion}`).digest("hex") : sourceFileHash;
   const existing = database.prepare("SELECT * FROM connection_import_batches WHERE importType=? AND fileHash=? ORDER BY createdAt DESC").all(importType, hash)
@@ -508,6 +532,7 @@ export function previewConnectionDataImport({ buffer, fileName, importType, temp
       }
     }
   }
+  const inferredFileShop = importType === "platform_link_operations" ? isolateMinorityShopRows(rows) : null;
   const duplicateKey = (data) => importType === "erp_sales"
     ? [data.shop, data.platformGoodsId, data.platformSkuId, data.skuCode, data.periodStart, data.periodEnd].map(text).join("|")
     : importType === "platform_link_operations"
@@ -525,10 +550,10 @@ export function previewConnectionDataImport({ buffer, fileName, importType, temp
   const resolvedPlatforms = [...new Set(rows.filter((item) => item.status === "validated").map((item) => text(item.data.platform)).filter(Boolean))];
   const resolvedShopIds = [...new Set(rows.filter((item) => item.status === "validated").map((item) => text(item.data.shopId)).filter(Boolean))];
   const resolvedShops = [...new Set(rows.filter((item) => item.status === "validated").map((item) => text(item.data.shop)).filter(Boolean))];
-  const preview = { parserVersion: effectiveParserVersion, sourceFileHash, templateName: version?.templateName || "自动字段映射", detectedAutomatically: importType === "platform_link_operations", platform: resolvedPlatforms.length === 1 ? resolvedPlatforms[0] : resolvedPlatforms.length > 1 ? "mixed" : "", shopId: resolvedShopIds.length === 1 ? resolvedShopIds[0] : "", shop: resolvedShops.length === 1 ? resolvedShops[0] : resolvedShops.length > 1 ? "多店铺" : "", resolvedShopCount: resolvedShopIds.length, sheetName: workbook.sheetName, periodStart: previewPeriodStart, periodEnd: previewPeriodEnd, rawRows: workbook.rawRows.length, filteredRows: rows.length, ignoredSummaryRows: normalizedRows.length - rows.length, newLinks: counts.createLinks, updatedLinks: counts.updateLinks, operationFacts: counts.facts, errors: errorRows, governancePending: governanceRows, duplicateGoodsIds: [...new Set([...duplicateKeys].map((key) => key.split("|")[0]))] };
+  const preview = { parserVersion: effectiveParserVersion, sourceFileHash, templateName: version?.templateName || "自动字段映射", detectedAutomatically: importType === "platform_link_operations", platform: resolvedPlatforms.length === 1 ? resolvedPlatforms[0] : resolvedPlatforms.length > 1 ? "mixed" : "", shopId: resolvedShopIds.length === 1 ? resolvedShopIds[0] : "", shop: resolvedShops.length === 1 ? resolvedShops[0] : resolvedShops.length > 1 ? "多店铺" : "", resolvedShopCount: resolvedShopIds.length, shopInference: inferredFileShop, sheetName: workbook.sheetName, periodStart: previewPeriodStart, periodEnd: previewPeriodEnd, rawRows: workbook.rawRows.length, filteredRows: rows.length, ignoredSummaryRows: normalizedRows.length - rows.length, newLinks: counts.createLinks, updatedLinks: counts.updateLinks, operationFacts: counts.facts, errors: errorRows, governancePending: governanceRows, duplicateGoodsIds: [...new Set([...duplicateKeys].map((key) => key.split("|")[0]))] };
   const batchId = id("connection-import"); const createdAt = now(); const batchStatus = duplicateKeys.size && !isSalesFactParser ? "blocked" : "validated";
   database.transaction(() => {
-    database.prepare(`INSERT INTO connection_import_batches (id,sourceType,externalShopId,fileName,fileHash,businessDate,periodStart,periodEnd,periodType,status,totalRows,matchedRows,pendingRows,errorRows,createdBy,createdAt,updatedAt,importType,templateVersionId,sourcePlatform,previewSummaryJson) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(batchId, importType, preview.shopId || null, text(fileName) || "链接数据.xlsx", hash, preview.periodEnd || createdAt.slice(0, 10), preview.periodStart || null, preview.periodEnd || null, text(matchRules.periodType) || null, batchStatus, rows.length, 0, validRows + governanceRows, errorRows, text(userId) || null, createdAt, createdAt, importType, null, preview.platform, JSON.stringify(preview));
+    database.prepare(`INSERT INTO connection_import_batches (id,sourceType,externalShopId,fileName,fileHash,businessDate,periodStart,periodEnd,periodType,status,totalRows,matchedRows,pendingRows,errorRows,createdBy,createdAt,updatedAt,importType,templateVersionId,sourcePlatform,previewSummaryJson) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(batchId, importType, preview.shopId || "", text(fileName) || "链接数据.xlsx", hash, preview.periodEnd || createdAt.slice(0, 10), preview.periodStart || null, preview.periodEnd || null, text(matchRules.periodType) || null, batchStatus, rows.length, 0, validRows + governanceRows, errorRows, text(userId) || null, createdAt, createdAt, importType, null, preview.platform, JSON.stringify(preview));
     const insert = database.prepare(`INSERT INTO connection_import_rows (id,batchId,rowNumber,externalKey,rawDataJson,normalizedDataJson,status,errorType,errorMessage,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?)`);
     for (const item of rows) insert.run(id("connection-import-row"), batchId, item.rowNumber, text(item.data.platformGoodsId || item.data.skuCode), JSON.stringify(item.raw), JSON.stringify(item.data), item.status, item.errorType, item.errorMessage, createdAt);
     const insertCandidate = database.prepare(`INSERT OR IGNORE INTO sales_link_sku_erp_mapping_candidates

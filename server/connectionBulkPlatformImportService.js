@@ -1,6 +1,10 @@
 import crypto from "node:crypto";
 import { getDatabase } from "./db.js";
-import { confirmConnectionDataImport, previewConnectionDataImport } from "./connectionDataFoundationService.js";
+import {
+  confirmConnectionDataImport,
+  PLATFORM_LINK_OPERATION_PARSER_VERSION,
+  previewConnectionDataImport,
+} from "./connectionDataFoundationService.js";
 import { normalizeUploadedFileName } from "./uploadFileName.js";
 
 const text = (value) => String(value ?? "").trim();
@@ -56,7 +60,11 @@ export function createConnectionBulkPlatformImport({ files = [], createdBy = "" 
   }));
   if (!normalized.length) throw new Error("请选择至少一个平台链接Excel文件。");
   if (normalized.length > 20) throw new Error("一次最多上传20个Excel文件。");
-  const batchHash = crypto.createHash("sha256").update(normalized.map((file) => file.fileHash).sort().join("|")).digest("hex");
+  const batchHash = crypto.createHash("sha256")
+    .update(PLATFORM_LINK_OPERATION_PARSER_VERSION)
+    .update("\0")
+    .update(normalized.map((file) => file.fileHash).sort().join("|"))
+    .digest("hex");
   const database = getDatabase();
   const existing = database.prepare("SELECT id FROM connection_bulk_platform_import_batches WHERE batchHash=? ORDER BY createdAt DESC LIMIT 1").get(batchHash);
   if (existing) return { ...batchResult(database, existing.id), idempotent: true };

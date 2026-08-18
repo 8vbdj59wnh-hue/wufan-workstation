@@ -455,7 +455,7 @@ const importErrorLabels = {
   duplicate_relation: "重复关系", empty_owner: "负责人为空", erp_relation_conflict: "ERP关系冲突",
   erp_relation_governance_pending: "ERP关系待确认", invalid_platform: "平台信息无效", invalid_format: "数据格式错误",
   missing_erp_mapping: "ERP关系缺失", missing_erp_sku: "ERP商品编码未匹配", missing_erp_sku_code: "ERP商品编码缺失",
-  missing_field: "必填字段缺失", missing_link: "链接未匹配", missing_period: "数据日期缺失",
+  missing_field: "必填字段缺失", missing_link: "链接未匹配", missing_period: "数据日期缺失", link_shop_mismatch: "链接店铺归属不一致",
   missing_platform_sku: "平台规格未匹配", missing_platform_sku_id: "平台规格编号缺失", missing_shop: "店铺未匹配",
   profile_not_found: "负责人档案不存在", no_system_goods: "系统商品未匹配", api_or_validation_error: "接口或数据校验异常",
   erp_sku_row_isolated: "ERP商品数据已隔离", erp_sku_row_warning: "ERP商品数据提醒", image_download_warning: "图片下载提醒",
