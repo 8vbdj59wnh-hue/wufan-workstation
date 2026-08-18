@@ -108,10 +108,11 @@ import {
   readProductStructureApplicationPreview,
   reviewProductStructureApplicationItem,
 } from "./productStructureApplicationApprovalService.js";
-import { confirmComboReviewGroup, generatePendingComboGroups, queryComboReviewAnomalyDates, queryComboReviewGroups, queryComboReviewSourceRows, readComboReviewGroup, saveComboReviewDraft, searchComboReviewErpSkus } from "./salesComboReviewService.js";
+import { queryComboReviewAnomalyDates, queryComboReviewGroups, queryComboReviewSourceRows, readComboReviewGroup } from "./salesComboReviewService.js";
 import { confirmErpSkuProductUsages, confirmErpSkuUsageGovernance, queryErpSkuProductUsageCandidates, queryErpSkuUsageGovernance, readErpSkuUsageGovernance } from "./erpSkuUsageGovernanceService.js";
 import { getConnectionDailySalesPerformance } from "./connectionDailySalesService.js";
 import { getProductDailySalesPerformance } from "./productDailySalesService.js";
+import { queryProductSalesLinks, queryProductSalesSummaries, queryUnmatchedPlatformSkus } from "./productLinkV2ReadService.js";
 import { querySalesDailyDataQuality } from "./salesDailyDataQualityService.js";
 import { querySalesDataQualityAnomalies, submitSalesDataQualityAnomalyDecision } from "./salesDataQualityAnomalyGovernanceService.js";
 import { getSalesBusinessDashboard } from "./salesBusinessDashboardService.js";
@@ -3443,29 +3444,9 @@ app.get("/api/connection-data-foundation/sales-relation-candidates/:id", require
   catch (error) { response.status(404).json({ success: false, message: error.message || "销售关系候选详情读取失败。" }); }
 });
 
-app.post("/api/connection-data-foundation/combo-reviews/generate", requireLinkImport, (request, response) => {
-  try { response.json({ success: true, result: generatePendingComboGroups(request.body?.sourceBatchId, { createdBy: request.auth?.person?.id }) }); }
-  catch (error) { response.status(error.code === "product_structure_only" ? 410 : 400).json({ success: false, code: error.code, message: error.message || "组合审核草稿生成失败。" }); }
-});
-
 app.get("/api/connection-data-foundation/combo-reviews", requireLinkImport, (request, response) => {
   try { response.json({ success: true, ...queryComboReviewGroups(request.query) }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "Combo审核列表读取失败。" }); }
-});
-
-app.get("/api/connection-data-foundation/combo-reviews/erp-skus/search", requireLinkManage, (request, response) => {
-  try { response.json({ success: true, items: searchComboReviewErpSkus(request.query.keyword, request.query) }); }
-  catch (error) { response.status(400).json({ success: false, message: error.message || "ERP SKU搜索失败。" }); }
-});
-
-app.put("/api/connection-data-foundation/combo-reviews/:id/draft", requireLinkManage, (request, response) => {
-  try { response.json({ success: true, result: saveComboReviewDraft(request.params.id, request.body, { reviewedBy: getUserPersonId(request.user) }) }); }
-  catch (error) { response.status(error.code === "product_structure_only" ? 410 : /不存在/.test(error.message || "") ? 404 : /只有待审核/.test(error.message || "") ? 409 : 400).json({ success: false, code: error.code, message: error.message || "组合审核草稿保存失败。" }); }
-});
-
-app.post("/api/connection-data-foundation/combo-reviews/:id/confirm", requireLinkManage, (request, response) => {
-  try { response.json({ success: true, result: confirmComboReviewGroup(request.params.id, { reviewedBy: getUserPersonId(request.user), reviewNote: request.body?.reviewNote }) }); }
-  catch (error) { response.status(error.code === "product_structure_only" ? 410 : error.code === "group_not_found" ? 404 : error.code === "group_not_pending" || /conflict/.test(error.code || "") ? 409 : 400).json({ success: false, code: error.code || "combo_confirmation_failed", message: error.message || "组合整组确认失败。" }); }
 });
 
 app.get("/api/connection-data-foundation/combo-reviews/:id/anomaly-dates", requireLinkImport, (request, response) => {
@@ -3734,40 +3715,7 @@ app.post("/api/products/erp-v2/:id/commit", requirePermission("products.create")
 
 app.get("/api/products/platform-skus/unmatched", requirePermission("products.view"), (request, response) => {
   try {
-    const database = getDatabase();
-    const query = String(request.query.query ?? "").trim();
-    const limit = Math.min(200, Math.max(20, Number(request.query.limit) || 100));
-    const offset = Math.max(0, Number(request.query.offset) || 0);
-    const search = `%${query}%`;
-    const where = `
-      x.productId IS NULL
-      AND x.currentState='active'
-      AND l.currentState='active'
-      AND x.matchStatus NOT IN ('ignored','combination')
-      AND (? = '' OR x.platformSkuCode LIKE ? OR x.platformSkuId LIKE ? OR x.specificationName LIKE ?
-        OR l.title LIKE ? OR l.platformGoodsCode LIKE ? OR l.platformGoodsId LIKE ?)
-    `;
-    const params = [query, search, search, search, search, search, search];
-    const total = database.prepare(`
-      SELECT COUNT(*) AS total
-      FROM sales_link_skus x
-      JOIN sales_links l ON l.id=x.salesLinkId
-      WHERE ${where}
-    `).get(...params).total;
-    const rows = database.prepare(`
-      SELECT
-        x.*, l.shopId, l.platformGoodsId, l.platformGoodsCode, l.title, l.rawUrl, l.canonicalUrl,
-        s.platform, s.shopName, s.displayName,
-        g.id AS possibleErpGoodsId, g.goodsCode AS possibleErpGoodsCode, g.goodsName AS possibleErpGoodsName
-      FROM sales_link_skus x
-      JOIN sales_links l ON l.id=x.salesLinkId
-      JOIN sales_shops s ON s.id=l.shopId
-      LEFT JOIN erp_goods g ON lower(g.goodsCode)=lower(l.platformGoodsCode)
-      WHERE ${where}
-      ORDER BY s.platform, s.displayName, l.title, x.platformSkuCode
-      LIMIT ? OFFSET ?
-    `).all(...params, limit, offset);
-    response.json({ success: true, rows, pagination: { total, limit, offset } });
+    response.json({ success: true, ...queryUnmatchedPlatformSkus(request.query) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "未匹配平台SKU读取失败。" });
   }
@@ -3775,30 +3723,7 @@ app.get("/api/products/platform-skus/unmatched", requirePermission("products.vie
 
 app.get("/api/products/sales-summary", requirePermission("products.view"), (request, response) => {
   try {
-    const database = getDatabase();
-    const rows = database.prepare(`
-      SELECT
-        x.productId,
-        COUNT(DISTINCT x.salesLinkId) AS linkCount,
-        COUNT(DISTINCT l.shopId) AS shopCount,
-        COUNT(DISTINCT s.platform) AS platformCount,
-        json_group_array(DISTINCT s.platform) AS platformsJson
-      FROM sales_link_skus x
-      JOIN sales_links l ON l.id=x.salesLinkId
-      JOIN sales_shops s ON s.id=l.shopId
-      WHERE x.productId IS NOT NULL
-        AND x.currentState='active'
-        AND l.currentState='active'
-        AND x.matchStatus IN ('matched_auto','matched_manual')
-      GROUP BY x.productId
-    `).all().map((row) => ({
-      productId: row.productId,
-      linkCount: Number(row.linkCount) || 0,
-      shopCount: Number(row.shopCount) || 0,
-      platformCount: Number(row.platformCount) || 0,
-      platforms: JSON.parse(row.platformsJson || "[]").filter(Boolean),
-    }));
-    response.json({ success: true, rows });
+    response.json({ success: true, rows: queryProductSalesSummaries() });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "产品销售汇总读取失败。" });
   }
@@ -3849,21 +3774,7 @@ app.get("/api/products/:id/sales-links", requirePermission("products.view"), (re
       response.status(404).json({ success: false, message: "产品不存在。" });
       return;
     }
-    const rows = database.prepare(`
-      SELECT
-        x.*, l.shopId, l.platformGoodsId, l.platformGoodsCode, l.title, l.rawUrl, l.canonicalUrl,
-        l.status AS linkStatus, l.activityStatus, l.category, l.identityStrength,
-        s.platform, s.shopName, s.displayName, c.id AS connectionProfileId
-      FROM sales_link_skus x
-      JOIN sales_links l ON l.id=x.salesLinkId
-      JOIN sales_shops s ON s.id=l.shopId
-      LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
-      WHERE x.productId=?
-        AND x.currentState='active'
-        AND l.currentState='active'
-        AND x.matchStatus IN ('matched_auto','matched_manual')
-      ORDER BY s.platform, s.displayName, l.title, x.platformSkuCode
-    `).all(request.params.id);
+    const rows = queryProductSalesLinks(request.params.id, { database });
     response.json({ success: true, productId: request.params.id, rows });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "产品销售链接读取失败。" });

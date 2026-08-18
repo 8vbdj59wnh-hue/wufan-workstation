@@ -1,18 +1,9 @@
-import crypto from "node:crypto";
 import { getDatabase } from "./db.js";
 
 const text = (value) => String(value ?? "").trim();
 const json = (value, fallback = {}) => { try { return JSON.parse(value || ""); } catch { return fallback; } };
 const numberOrNull = (value) => value === null || value === undefined || value === "" ? null : Number(value);
-const stableId = (prefix, ...parts) => `${prefix}-${crypto.createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 24)}`;
-const now = () => new Date().toISOString();
 const statusLabels = { pending: "待审核", approved: "已确认", rejected: "已拒绝", inactive: "已停用", conflict: "冲突" };
-
-function productStructureOnlyError() {
-  return Object.assign(new Error("独立组合审核已停用，请通过商品结构治理创建或审核 Product Structure。"), {
-    code: "product_structure_only",
-  });
-}
 
 function sourceRows(database, batchId, salesLinkSkuId) {
   return database.prepare(`SELECT rowNumber,rawDataJson,normalizedDataJson FROM connection_import_rows
@@ -88,38 +79,6 @@ function viewGroup(database, row, prefetchedRows = null, componentIds = null) {
   };
 }
 
-// Legacy implementation is retained for historical compatibility and audit only.
-// Runtime callers are blocked by the exported wrapper below.
-function legacyGeneratePendingComboGroups(sourceBatchId, { createdBy } = {}) {
-  const batchId = text(sourceBatchId); if (!batchId) throw new Error("请选择销售日报预览批次。");
-  const database = getDatabase(); const batch = database.prepare("SELECT id,fileHash FROM connection_import_batches WHERE id=?").get(batchId);
-  if (!batch) throw new Error("销售日报预览批次不存在。");
-  const candidates = database.prepare(`SELECT * FROM sales_link_sku_erp_mapping_candidates
-    WHERE sourceBatchId=? AND candidateType='combo' AND status='pending' ORDER BY salesLinkSkuId,sourceRowNumber,erpSkuId`).all(batchId);
-  const groups = new Map();
-  for (const candidate of candidates) { const items = groups.get(candidate.salesLinkSkuId) || []; items.push(candidate); groups.set(candidate.salesLinkSkuId, items); }
-  const stamp = now(); let createdGroups = 0; let createdComponents = 0;
-  database.transaction(() => {
-    const insertGroup = database.prepare(`INSERT OR IGNORE INTO sales_link_sku_combo_groups
-      (id,salesLinkSkuId,groupCode,status,sourceType,sourceBatchId,sourceFileHash,sourceCandidateIdsJson,createdBy,createdAt,updatedAt)
-      VALUES (?,?,?,'pending','sales_daily_relation_review',?,?,?,?,?,?)`);
-    const insertComponent = database.prepare(`INSERT OR IGNORE INTO sales_link_sku_combo_group_components
-      (id,comboGroupId,erpSkuId,quantity,quantitySource,sortOrder,status,sourceType,sourceCandidateId,createdAt,updatedAt)
-      VALUES (?,?,?,NULL,NULL,?,'included',?,?,?,?)`);
-    for (const [salesLinkSkuId, items] of groups) {
-      const groupId = stableId("combo-group", batchId, salesLinkSkuId);
-      const groupCode = `CG-${crypto.createHash("sha256").update(`${batchId}|${salesLinkSkuId}`).digest("hex").slice(0, 16).toUpperCase()}`;
-      createdGroups += insertGroup.run(groupId, salesLinkSkuId, groupCode, batchId, batch.fileHash || items[0].sourceFileHash, JSON.stringify(items.map((item) => item.id)), text(createdBy) || null, stamp, stamp).changes;
-      items.forEach((candidate, index) => { createdComponents += insertComponent.run(stableId("combo-component", groupId, candidate.erpSkuId), groupId, candidate.erpSkuId, index + 1, candidate.sourceType || "sales_daily_preview", candidate.id, stamp, stamp).changes; });
-    }
-  })();
-  return { sourceBatchId: batchId, candidateCount: candidates.length, platformSkuCount: groups.size, createdGroups, existingGroups: groups.size - createdGroups, createdComponents };
-}
-
-export function generatePendingComboGroups() {
-  throw productStructureOnlyError();
-}
-
 export function queryComboReviewGroups(options = {}) {
   const database = getDatabase(); const where = []; const params = [];
   if (text(options.sourceBatchId)) { where.push("g.sourceBatchId=?"); params.push(text(options.sourceBatchId)); }
@@ -179,126 +138,6 @@ export function readComboReviewGroup(groupId) {
       };
     });
   return { item, components, notice: "销售日报组件数量仅供审核参考，不等于正式组合数量。" };
-}
-
-export function searchComboReviewErpSkus(keyword, options = {}) {
-  const database = getDatabase(); const search = text(keyword); if (!search) return [];
-  const limit = Math.min(50, Math.max(1, Number(options.limit || 20)));
-  return database.prepare(`SELECT id,merchantSkuCode,specificationName,currentState FROM erp_skus
-    WHERE currentState='active' AND (merchantSkuCode LIKE ? OR specificationName LIKE ?)
-    ORDER BY CASE WHEN merchantSkuCode=? THEN 0 ELSE 1 END,merchantSkuCode LIMIT ?`).all(`%${search}%`, `%${search}%`, search, limit);
-}
-
-function legacySaveComboReviewDraft(groupId, payload = {}, { reviewedBy } = {}) {
-  const database = getDatabase(); const id = text(groupId);
-  const group = database.prepare("SELECT * FROM sales_link_sku_combo_groups WHERE id=?").get(id);
-  if (!group) throw new Error("Combo审核组不存在。");
-  if (group.status !== "pending") throw new Error("只有待审核Combo组可以编辑草稿。");
-  if (!Array.isArray(payload.components) || !payload.components.length) throw new Error("Combo草稿至少需要一个组件。");
-  const desired = payload.components.map((item, index) => {
-    const erpSkuId = text(item.erpSkuId); if (!erpSkuId) throw new Error("ERP SKU不能为空。");
-    const status = text(item.status) || "included"; if (!["included", "excluded"].includes(status)) throw new Error("组件状态无效。");
-    const quantity = item.quantity === null || item.quantity === undefined || text(item.quantity) === "" ? null : Number(item.quantity);
-    if (quantity !== null && (!Number.isFinite(quantity) || quantity <= 0)) throw new Error("组件数量必须为空或大于0。");
-    return { erpSkuId, quantity, quantitySource: quantity === null ? null : "manual_confirmation", status, sortOrder: index + 1, decisionNote: text(item.decisionNote) || null };
-  });
-  if (new Set(desired.map((item) => item.erpSkuId)).size !== desired.length) throw new Error("同一ERP SKU不能重复添加。");
-  const existing = database.prepare("SELECT * FROM sales_link_sku_combo_group_components WHERE comboGroupId=? ORDER BY sortOrder,id").all(id);
-  const existingIds = new Set(existing.map((item) => item.erpSkuId)); const desiredIds = new Set(desired.map((item) => item.erpSkuId));
-  if (existing.some((item) => !desiredIds.has(item.erpSkuId))) throw new Error("已有组件不能从草稿中删除，请将其标记为排除。");
-  const placeholders = desired.map(() => "?").join(",");
-  const validIds = new Set(database.prepare(`SELECT id FROM erp_skus WHERE currentState='active' AND id IN (${placeholders})`).all(...desired.map((item) => item.erpSkuId)).map((item) => item.id));
-  if (desired.some((item) => !validIds.has(item.erpSkuId))) throw new Error("存在无效或已停用的ERP SKU。");
-  const reviewNote = text(payload.reviewNote) || null;
-  const same = reviewNote === (group.reviewNote || null) && desired.length === existing.length && desired.every((item, index) => {
-    const current = existing[index]; return current?.erpSkuId === item.erpSkuId && numberOrNull(current.quantity) === item.quantity && (current.quantitySource || null) === item.quantitySource && current.status === item.status && Number(current.sortOrder) === item.sortOrder && (current.decisionNote || null) === item.decisionNote;
-  });
-  if (same) return { groupId: id, status: "pending", changed: false, idempotent: true, addedComponents: 0 };
-  const stamp = now(); let addedComponents = 0;
-  database.transaction(() => {
-    const update = database.prepare(`UPDATE sales_link_sku_combo_group_components SET quantity=?,quantitySource=?,sortOrder=?,status=?,decisionNote=?,updatedAt=? WHERE comboGroupId=? AND erpSkuId=?`);
-    const insert = database.prepare(`INSERT INTO sales_link_sku_combo_group_components
-      (id,comboGroupId,erpSkuId,quantity,quantitySource,sortOrder,status,sourceType,sourceCandidateId,decisionNote,createdAt,updatedAt)
-      VALUES (?,?,?,?,?,?,?,'manual_added',NULL,?,?,?)`);
-    for (const item of desired) {
-      if (existingIds.has(item.erpSkuId)) update.run(item.quantity, item.quantitySource, item.sortOrder, item.status, item.decisionNote, stamp, id, item.erpSkuId);
-      else { insert.run(stableId("combo-component-manual", id, item.erpSkuId), id, item.erpSkuId, item.quantity, item.quantitySource, item.sortOrder, item.status, item.decisionNote, stamp, stamp); addedComponents += 1; }
-    }
-    database.prepare(`UPDATE sales_link_sku_combo_groups SET reviewNote=?,reviewedBy=?,reviewedAt=?,updatedAt=? WHERE id=? AND status='pending'`).run(reviewNote, text(reviewedBy) || null, stamp, stamp, id);
-  })();
-  return { groupId: id, status: "pending", changed: true, idempotent: false, addedComponents };
-}
-
-export function saveComboReviewDraft() {
-  throw productStructureOnlyError();
-}
-
-function markComboPreviewForRecalculation(database, batchId, confirmedAt) {
-  if (!batchId) return;
-  const batch = database.prepare("SELECT previewSummaryJson FROM connection_import_batches WHERE id=?").get(batchId); if (!batch) return;
-  const summary = json(batch.previewSummaryJson);
-  summary.relationRecalculationRequired = true;
-  summary.relationLastConfirmedAt = confirmedAt;
-  summary.relationConfirmationCount = Number(summary.relationConfirmationCount || 0) + 1;
-  summary.comboRelationConfirmationCount = Number(summary.comboRelationConfirmationCount || 0) + 1;
-  database.prepare("UPDATE connection_import_batches SET previewSummaryJson=?,updatedAt=? WHERE id=?").run(JSON.stringify(summary), confirmedAt, batchId);
-}
-
-function legacyConfirmComboReviewGroup(groupId, { reviewedBy, reviewNote } = {}) {
-  const database = getDatabase(); const id = text(groupId); const reviewer = text(reviewedBy);
-  if (!reviewer) throw Object.assign(new Error("无法识别当前审核人。"), { code: "reviewer_required" });
-  const group = database.prepare("SELECT * FROM sales_link_sku_combo_groups WHERE id=?").get(id);
-  if (!group) throw Object.assign(new Error("Combo审核组不存在。"), { code: "group_not_found" });
-  if (group.status === "approved") {
-    const mappings = database.prepare("SELECT * FROM sales_link_sku_erp_mappings WHERE comboGroupId=? AND mappingType='combo' AND currentState='active' ORDER BY erpSkuId").all(id);
-    const components = database.prepare("SELECT * FROM sales_link_sku_combo_group_components WHERE comboGroupId=? AND status='included' ORDER BY erpSkuId").all(id);
-    const valid = mappings.length === components.length && components.every((component) => mappings.some((mapping) => mapping.erpSkuId === component.erpSkuId && Number(mapping.quantity) === Number(component.quantity)));
-    if (valid) return { groupId: id, status: "approved", outcome: "idempotent", mappingIds: mappings.map((item) => item.id) };
-    throw Object.assign(new Error("已确认Combo组与正式映射不一致，请先处理冲突。"), { code: "approved_mapping_conflict" });
-  }
-  if (group.status !== "pending") throw Object.assign(new Error(`Combo审核组当前状态为${group.status}，不能确认。`), { code: "group_not_pending" });
-  const components = database.prepare(`SELECT c.*,e.currentState erpState FROM sales_link_sku_combo_group_components c
-    LEFT JOIN erp_skus e ON e.id=c.erpSkuId WHERE c.comboGroupId=? ORDER BY c.sortOrder,c.id`).all(id);
-  const included = components.filter((item) => item.status === "included");
-  if (included.length < 2) throw Object.assign(new Error("Combo关系至少需要两个纳入的ERP组件。"), { code: "components_incomplete" });
-  if (included.some((item) => item.erpState !== "active")) throw Object.assign(new Error("存在无效或已停用的ERP SKU。"), { code: "erp_sku_invalid" });
-  if (included.some((item) => item.quantity === null || item.quantitySource !== "manual_confirmation" || Number(item.quantity) <= 0)) throw Object.assign(new Error("所有纳入组件都必须由人工确认正数组件数量。"), { code: "quantity_unconfirmed" });
-  const candidateIds = components.map((item) => item.sourceCandidateId).filter(Boolean);
-  if (candidateIds.length) {
-    const placeholders = candidateIds.map(() => "?").join(",");
-    const candidates = database.prepare(`SELECT * FROM sales_link_sku_erp_mapping_candidates WHERE id IN (${placeholders})`).all(...candidateIds);
-    if (candidates.length !== candidateIds.length || candidates.some((item) => item.status !== "pending" || item.candidateType !== "combo")) throw Object.assign(new Error("来源候选状态已变化，不能确认当前Combo草稿。"), { code: "candidate_conflict" });
-  }
-  const otherApproved = database.prepare("SELECT id FROM sales_link_sku_combo_groups WHERE salesLinkSkuId=? AND status='approved' AND id<>?").get(group.salesLinkSkuId, id);
-  if (otherApproved) throw Object.assign(new Error("该平台SKU已存在其他已确认Combo组。"), { code: "approved_combo_conflict" });
-  const activeMappings = database.prepare("SELECT * FROM sales_link_sku_erp_mappings WHERE salesLinkSkuId=? AND currentState='active'").all(group.salesLinkSkuId);
-  if (activeMappings.some((item) => item.mappingType === "single")) throw Object.assign(new Error("该平台SKU已存在active single关系，不能确认Combo。"), { code: "single_conflict" });
-  if (activeMappings.length) throw Object.assign(new Error("该平台SKU已存在active combo关系，不能重复确认另一组Combo。"), { code: "active_combo_conflict" });
-  const exactHistorical = database.prepare(`SELECT m.id FROM sales_link_sku_erp_mappings m WHERE m.salesLinkSkuId=? AND m.erpSkuId IN (${included.map(() => "?").join(",")})`).all(group.salesLinkSkuId, ...included.map((item) => item.erpSkuId));
-  if (exactHistorical.length) throw Object.assign(new Error("部分组件存在历史映射，禁止静默覆盖或恢复。"), { code: "historical_mapping_conflict" });
-  const confirmedAt = now(); const mappingIds = [];
-  database.transaction(() => {
-    const insertMapping = database.prepare(`INSERT INTO sales_link_sku_erp_mappings
-      (id,salesLinkSkuId,erpSkuId,mappingType,quantity,currentState,sourceType,sourceBatchId,comboGroupId,createdAt,updatedAt)
-      VALUES (?,?,?,'combo',?,'active','sales_relation_confirmation',?,?,?,?)`);
-    const candidateApprove = database.prepare("UPDATE sales_link_sku_erp_mapping_candidates SET status='approved',reviewedBy=?,reviewedAt=?,decisionNote='人工确认Combo关系',mappingId=?,updatedAt=? WHERE id=? AND status='pending'");
-    const candidateReject = database.prepare("UPDATE sales_link_sku_erp_mapping_candidates SET status='rejected',reviewedBy=?,reviewedAt=?,decisionNote='Combo整组确认时人工排除组件',mappingId=NULL,updatedAt=? WHERE id=? AND status='pending'");
-    for (const component of included) {
-      const mappingId = stableId("sales-link-sku-erp-map-combo", id, component.erpSkuId); mappingIds.push(mappingId);
-      insertMapping.run(mappingId, group.salesLinkSkuId, component.erpSkuId, component.quantity, group.sourceBatchId, id, confirmedAt, confirmedAt);
-      if (component.sourceCandidateId && candidateApprove.run(reviewer, confirmedAt, mappingId, confirmedAt, component.sourceCandidateId).changes !== 1) throw new Error("候选状态更新失败，已回滚整组确认。");
-    }
-    for (const component of components.filter((item) => item.status === "excluded" && item.sourceCandidateId)) if (candidateReject.run(reviewer, confirmedAt, confirmedAt, component.sourceCandidateId).changes !== 1) throw new Error("排除候选状态更新失败，已回滚整组确认。");
-    const finalNote = text(reviewNote) || group.reviewNote || "人工确认Combo关系";
-    const changed = database.prepare(`UPDATE sales_link_sku_combo_groups SET status='approved',reviewedBy=?,reviewedAt=?,reviewNote=?,approvedAt=?,updatedAt=? WHERE id=? AND status='pending'`).run(reviewer, confirmedAt, finalNote, confirmedAt, confirmedAt, id).changes;
-    if (changed !== 1) throw new Error("Combo审核组状态已变化，已回滚整组确认。");
-    markComboPreviewForRecalculation(database, group.sourceBatchId, confirmedAt);
-  })();
-  return { groupId: id, status: "approved", outcome: "created", mappingIds, confirmedAt, sourceBatchId: group.sourceBatchId };
-}
-
-export function confirmComboReviewGroup() {
-  throw productStructureOnlyError();
 }
 
 export function queryComboReviewAnomalyDates(groupId, options = {}) {

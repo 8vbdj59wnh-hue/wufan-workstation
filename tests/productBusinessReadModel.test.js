@@ -27,7 +27,11 @@ test("产品经营读取层复用销售、库存、SKU、健康与行动事实",
   const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "product-business-read-model-"));
   process.env.WUFAN_DB_PATH = path.join(tempDirectory, "workstation.db");
   const { closeDatabase, getDatabase, initializeDatabase, replaceActionProducts } = await import("../server/db.js");
-  const { getProductBusinessReadModel, mapProductBusinessLifecycle } = await import("../server/productBusinessReadModel.js");
+  const { getProductBusinessReadModel, mapProductBusinessLifecycle, salesMetrics } = await import("../server/productBusinessReadModel.js");
+  const { readConnectionInventorySupply, readProductInventorySupply } = await import("../server/inventorySupplyQueryService.js");
+  const { readConnectionProductsBySalesLinkIds } = await import("../server/connectionService.js");
+  const { getConnectionCoreDetail, listConnectionCoreProfilesPage } = await import("../server/connectionCorePageService.js");
+  const { buildErpSnapshotRows, collectErpSnapshotFacts } = await import("../server/erpFactSnapshots.js");
   const { createProductHealthAction, getProductImprovementCenter, productIssueTypeCatalog, recordProductImprovementResult } = await import("../server/productManagementV2Service.js");
   const { addProductStrategyStep, createProductStrategyAction, getProductStrategy, saveProductStrategySection, updateProductStrategyStep } = await import("../server/productStrategyService.js");
   const { attachProductDiagnosisSummaries, getProductBusinessDiagnosis } = await import("../server/productBusinessDiagnosisService.js");
@@ -54,8 +58,12 @@ test("产品经营读取层复用销售、库存、SKU、健康与行动事实",
       .run("erp-batch-board-1", "goods_info", "test.xlsx", "hash-board-1", "completed", now);
     database.prepare("INSERT INTO erp_skus(id,merchantSkuCode,erpGoodsId,rawSourceData,firstSeenBatchId,lastSeenBatchId,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)")
       .run("erp-sku-board-1", "ERP-SKU-BOARD-1", "erp-goods-board-1", "{}", "erp-batch-board-1", "erp-batch-board-1", "active", now, now);
-    database.prepare("INSERT INTO product_erp_mappings(id,productId,erpGoodsId,merchantSkuCode,matchMethod,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?)")
-      .run("mapping-board-1", "product-board-1", "erp-goods-board-1", "ERP-SKU-BOARD-1", "exact_sku", "active", now, now);
+    database.prepare("INSERT INTO erp_skus(id,merchantSkuCode,erpGoodsId,rawSourceData,firstSeenBatchId,lastSeenBatchId,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)")
+      .run("erp-sku-board-decline", "ERP-SKU-DECLINE", "erp-goods-board-1", "{}", "erp-batch-board-1", "erp-batch-board-1", "active", now, now);
+    database.prepare("INSERT INTO product_erp_mappings(id,productId,erpGoodsId,erpSkuId,merchantSkuCode,matchMethod,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)")
+      .run("mapping-board-1", "product-board-1", "erp-goods-board-1", "erp-sku-board-1", "ERP-SKU-BOARD-1", "exact_sku", "active", now, now);
+    database.prepare("INSERT INTO product_erp_mappings(id,productId,erpGoodsId,erpSkuId,merchantSkuCode,matchMethod,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)")
+      .run("mapping-board-decline", "product-board-decline", "erp-goods-board-1", "erp-sku-board-decline", "ERP-SKU-DECLINE", "exact_sku", "active", now, now);
     database.prepare("INSERT INTO wangdian_inventory_sync_batches(id,importMode,businessDate,requestJson,status,startedAt) VALUES(?,?,?,?,?,?)")
       .run("inventory-batch-board-1", "incremental", "2026-08-08", "{}", "completed", now);
     database.prepare("INSERT INTO erp_sku_inventory_daily_summaries(id,businessDate,erpSkuId,warehouseCount,stockNum,availableSendStock,costPrice,inventoryCostAmount,sales7d,salesMonth,sales90d,syncBatchId,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
@@ -68,6 +76,10 @@ test("产品经营读取层复用销售、库存、SKU、健康与行动事实",
       .run("link-sku-board-1", "link-board-1", "product-board-1", "erp-sku-board-1", "platform-sku-board-1", "matched", "active", now, now);
     database.prepare("INSERT INTO sales_link_skus(id,salesLinkId,productId,erpSkuId,platformSkuId,matchStatus,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)")
       .run("link-sku-board-decline", "link-board-1", "product-board-decline", null, "platform-sku-board-decline", "matched", "active", now, now);
+    database.prepare("INSERT INTO sales_link_sku_erp_mappings(id,salesLinkSkuId,erpSkuId,mappingType,quantity,currentState,sourceType,createdAt,updatedAt) VALUES(?,?,?,?,?,'active','platform_goods_excel',?,?)")
+      .run("link-map-board-1", "link-sku-board-1", "erp-sku-board-1", "single", 1, now, now);
+    database.prepare("INSERT INTO sales_link_sku_erp_mappings(id,salesLinkSkuId,erpSkuId,mappingType,quantity,currentState,sourceType,createdAt,updatedAt) VALUES(?,?,?,?,?,'active','platform_goods_excel',?,?)")
+      .run("link-map-board-decline", "link-sku-board-decline", "erp-sku-board-decline", "single", 1, now, now);
     database.prepare("INSERT INTO connection_import_batches(id,sourceType,externalShopId,fileName,fileHash,businessDate,periodStart,periodEnd,status,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
       .run("sales-batch-board-1", "erp_sales", "", "sales.xlsx", "sales-hash-board-1", "2026-08-07", "2026-08-01", "2026-08-07", "completed", now, now);
     const fact = database.prepare("INSERT INTO connection_sku_sales_facts(id,batchId,salesLinkId,salesLinkSkuId,platformGoodsId,skuCode,periodStart,periodEnd,shippedQuantity,salesAmount,costAmount,profitAmount,rawDataJson,createdAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
@@ -78,6 +90,12 @@ test("产品经营读取层复用销售、库存、SKU、健康与行动事实",
     fact.run("sales-fact-decline-earlier", "sales-batch-board-1", "link-board-1", "link-sku-board-decline", "goods-board-1", "SKU-DECLINE", "2026-07-18", "2026-07-24", 3, 300, null, null, "{}", now);
     fact.run("sales-fact-decline-30d-previous", "sales-batch-board-1", "link-board-1", "link-sku-board-decline", "goods-board-1", "SKU-DECLINE", "2026-06-20", "2026-06-26", 7, 700, null, null, "{}", now);
     fact.run("sales-fact-decline-30d-earlier", "sales-batch-board-1", "link-board-1", "link-sku-board-decline", "goods-board-1", "SKU-DECLINE", "2026-05-20", "2026-05-26", 8, 800, null, null, "{}", now);
+    const distributed = salesMetrics(database, "2026-08-01", "2026-08-07", { attributionsBySku: new Map([
+      ["link-sku-board-1", [{ productId: "product-board-1", share: 0.25 }, { productId: "product-board-decline", share: 0.75 }]],
+    ]) });
+    assert.equal(distributed.get("product-board-1").salesAmount, 250);
+    assert.equal(distributed.get("product-board-1").grossProfit, 75);
+    assert.equal(distributed.get("product-board-decline").salesAmount, 750);
     database.prepare("INSERT INTO product_health_records(id,productId,snapshotKey,healthScore,healthStatus,metricsJson,problemsJson,suggestionsJson,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?)")
       .run("health-board-1", "product-board-1", "snapshot-board-1", 82, "growth", "{}", "[]", "[]", now, now);
     database.prepare("INSERT INTO process_instances(id,templateId,templateVersion,name,goalId,initiatorId,status,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)")
@@ -284,6 +302,62 @@ test("产品经营读取层复用销售、库存、SKU、健康与行动事实",
       erpSkus: database.prepare("SELECT COUNT(*) count FROM erp_skus").get().count,
     }, insightBoundaryBefore);
     assert.equal(database.prepare("SELECT COUNT(*) count FROM product_insights WHERE productId=?").get("product-board-1").count, 4);
+    database.prepare("INSERT INTO products(id,skuCode,name,brand,category,status,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?)")
+      .run("product-inventory-component", "SKU-INVENTORY-COMPONENT", "库存组合组件", "测试品牌", "测试分类", "成熟期", now, now);
+    database.prepare("INSERT INTO erp_skus(id,merchantSkuCode,erpGoodsId,rawSourceData,firstSeenBatchId,lastSeenBatchId,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)")
+      .run("erp-sku-inventory-component", "ERP-INVENTORY-COMPONENT", "erp-goods-board-1", "{}", "erp-batch-board-1", "erp-batch-board-1", "active", now, now);
+    database.prepare("INSERT INTO product_erp_mappings(id,productId,erpGoodsId,erpSkuId,merchantSkuCode,matchMethod,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)")
+      .run("mapping-inventory-component", "product-inventory-component", "erp-goods-board-1", "erp-sku-inventory-component", "ERP-INVENTORY-COMPONENT", "exact_sku", "active", now, now);
+    database.prepare("INSERT INTO erp_sku_inventory_daily_summaries(id,businessDate,erpSkuId,warehouseCount,stockNum,availableSendStock,costPrice,inventoryCostAmount,sales7d,salesMonth,sales90d,syncBatchId,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+      .run("inventory-summary-component", "2026-08-08", "erp-sku-inventory-component", 1, 9, 8, 10, 90, 3, 6, 12, "inventory-batch-board-1", now, now);
+    database.prepare("INSERT INTO sales_links(id,shopId,platformGoodsId,title,identityStrength,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?)")
+      .run("link-inventory-structure", "shop-board-1", "goods-inventory-structure", "结构库存测试链接", "strong", "active", now, now);
+    for (const [salesLinkSkuId, platformSkuId] of [["link-sku-inventory-single", "platform-inventory-single"], ["link-sku-inventory-combo", "platform-inventory-combo"]]) {
+      database.prepare("INSERT INTO sales_link_skus(id,salesLinkId,platformSkuId,matchStatus,currentState,createdAt,updatedAt) VALUES(?,?,?,'matched','active',?,?)")
+        .run(salesLinkSkuId, "link-inventory-structure", platformSkuId, now, now);
+    }
+    const structureReviewerId = database.prepare("SELECT id FROM persons ORDER BY id LIMIT 1").get().id;
+    const addStructure = (id, salesLinkSkuId, components) => {
+      database.prepare("INSERT INTO sales_link_sku_product_structures(id,salesLinkSkuId,structureCode,structureHash,status,sourceType,reviewedBy,reviewedAt,activatedAt,createdAt,updatedAt) VALUES(?,?,?,?, 'pending_review','verification',?,?,?,?,?)")
+        .run(id, salesLinkSkuId, `code-${id}`, `hash-${id}`, structureReviewerId, now, now, now, now);
+      components.forEach(([erpSkuId, quantity], index) => database.prepare("INSERT INTO sales_link_sku_product_structure_components(id,productStructureId,erpSkuId,quantity,sortOrder,sourceType,createdAt,updatedAt) VALUES(?,?,?,?,?,'verification',?,?)")
+        .run(`${id}-component-${index}`, id, erpSkuId, quantity, index + 1, now, now));
+      database.prepare("UPDATE sales_link_sku_product_structures SET status='active' WHERE id=?").run(id);
+      components.forEach(([erpSkuId, quantity]) => database.prepare("INSERT INTO sales_link_sku_erp_mappings(id,salesLinkSkuId,erpSkuId,mappingType,quantity,currentState,sourceType,productStructureId,createdAt,updatedAt) VALUES(?,?,?,?,?,'active','product_structure',?,?,?)")
+        .run(`${id}-mapping-${erpSkuId}`, salesLinkSkuId, erpSkuId, components.length > 1 ? "combo" : "single", quantity, id, now, now));
+    };
+    addStructure("structure-inventory-single", "link-sku-inventory-single", [["erp-sku-board-1", 2]]);
+    addStructure("structure-inventory-combo", "link-sku-inventory-combo", [["erp-sku-board-1", 2], ["erp-sku-inventory-component", 3]]);
+    database.prepare("INSERT INTO connection_profiles(id,salesLinkId,name,status,originSource,createdAt,updatedAt) VALUES(?,?,?,'active','verification',?,?)")
+      .run("connection-inventory-structure", "link-inventory-structure", "结构库存测试链接", now, now);
+    const connectionProducts = readConnectionProductsBySalesLinkIds(database, ["link-inventory-structure"]).get("link-inventory-structure");
+    assert.deepEqual(connectionProducts.map((row) => row.id), ["product-board-1", "product-inventory-component"]);
+    const connectionInventory = readConnectionInventorySupply("link-inventory-structure", { includeCost: true, database });
+    assert.equal(connectionInventory.rows.length, 2);
+    assert.equal(connectionInventory.linkSkuAvailability.find((row) => row.salesLinkSkuId === "link-sku-inventory-single").availableSendStock, 15);
+    assert.equal(connectionInventory.linkSkuAvailability.find((row) => row.salesLinkSkuId === "link-sku-inventory-combo").stockNum, 3);
+    assert.equal(connectionInventory.linkSkuAvailability.find((row) => row.salesLinkSkuId === "link-sku-inventory-combo").availableSendStock, 2);
+    const connectionDetail = getConnectionCoreDetail("connection-inventory-structure", "", true);
+    assert.deepEqual(connectionDetail.products.map((row) => row.id), ["product-board-1", "product-inventory-component"]);
+    assert.equal(connectionDetail.inventory.length, 2);
+    assert.equal(connectionDetail.linkSkuAvailability.find((row) => row.salesLinkSkuId === "link-sku-inventory-combo").availableSendStock, 2);
+    const productFilteredConnections = listConnectionCoreProfilesPage({ productCode: "SKU-INVENTORY-COMPONENT", pageSize: 20 }, "", true);
+    assert.equal(productFilteredConnections.items.some((row) => row.id === "connection-inventory-structure"), true);
+    assert.equal(productFilteredConnections.items.find((row) => row.id === "connection-inventory-structure").productCount, 2);
+    const componentProductInventory = readProductInventorySupply("product-inventory-component", { includeCost: true, database });
+    assert.equal(componentProductInventory.summary.stockNum, 9);
+    assert.equal(componentProductInventory.summary.inventoryCostAmount, 90);
+    const snapshotFacts = collectErpSnapshotFacts(database);
+    const snapshotRows = buildErpSnapshotRows(snapshotFacts, { id: "snapshot-read-verification", businessDate: "2026-08-08", createdAt: now }, { inventoryBatchId: null, platformGoodsBatchId: null });
+    assert.equal(snapshotRows.productRows.length, snapshotFacts.products.length);
+    assert.equal(snapshotRows.erpRows.length, snapshotFacts.mappings.length);
+    assert.equal(snapshotRows.linkRows.length, snapshotFacts.links.length);
+    assert.equal(snapshotRows.skuRows.length, snapshotFacts.skus.length);
+    assert.equal(snapshotRows.skuRows.find((row) => row.salesLinkSkuId === "link-sku-inventory-single").productId, "product-board-1");
+    assert.equal(snapshotRows.skuRows.find((row) => row.salesLinkSkuId === "link-sku-inventory-single").combinationFlag, 1);
+    assert.equal(snapshotRows.skuRows.find((row) => row.salesLinkSkuId === "link-sku-inventory-combo").productId, null);
+    assert.equal(snapshotRows.skuRows.find((row) => row.salesLinkSkuId === "link-sku-inventory-combo").combinationFlag, 1);
+    assert.ok(snapshotRows.relationRows.some((row) => row.productId === "product-inventory-component" && row.shopId === "shop-board-1"));
     assert.deepEqual([
       mapProductBusinessLifecycle("开发中", null, "no_data"),
       mapProductBusinessLifecycle("成长期", null, "stable"),

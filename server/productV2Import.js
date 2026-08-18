@@ -795,9 +795,9 @@ function platformValidation(staging, submittedMappings = {}) {
     if (!mapping || mapping.mappingStatus !== "confirmed") errors.push("未识别店铺，请由管理员确认店铺名称或别名");
     const platformGoodsId = value(record["货品ID"]);
     const canonicalUrl = canonicalizeSalesUrl(record["平台商品链接"]);
-    if (!platformGoodsId && !canonicalUrl) errors.push("货品ID和商品链接均为空");
+    if (!platformGoodsId) errors.push("货品ID为空，商品链接不能作为链接身份创建依据");
     const match = findPlatformProduct(record);
-    const linkIdentity = `${rawShopName}|${platformGoodsId || canonicalUrl}`;
+    const linkIdentity = `${rawShopName}|${platformGoodsId}`;
     links.add(linkIdentity);
     summary.total += 1;
     if (errors.length) summary.error += 1;
@@ -827,7 +827,7 @@ function platformValidation(staging, submittedMappings = {}) {
   summary.links = links.size;
   const classifiedLinks = new Set();
   for (const row of rows.filter((item) => item.errors.length === 0)) {
-    const identity = `${row.rawShopName}|${row.platformGoodsId || row.canonicalUrl}`;
+    const identity = `${row.rawShopName}|${row.platformGoodsId}`;
     if (classifiedLinks.has(identity)) continue;
     classifiedLinks.add(identity);
     const mapping = row.shopMapping;
@@ -838,9 +838,7 @@ function platformValidation(staging, submittedMappings = {}) {
         ? database.prepare("SELECT id FROM sales_shops WHERE platform=? AND normalizedShopName=?").get(mapping.platform, normalizedShopName)
         : null;
     const existingLink = shop
-      ? row.platformGoodsId
-        ? database.prepare("SELECT id FROM sales_links WHERE shopId=? AND platformGoodsId=?").get(shop.id, row.platformGoodsId)
-        : database.prepare("SELECT id FROM sales_links WHERE shopId=? AND canonicalUrl=?").get(shop.id, row.canonicalUrl)
+      ? database.prepare("SELECT id FROM sales_links WHERE shopId=? AND platformGoodsId=?").get(shop.id, row.platformGoodsId)
       : null;
     if (existingLink) summary.updated += 1;
     else summary.created += 1;
@@ -861,7 +859,7 @@ function buildPlatformPreview(rows, { platform = "", shop = "", status = "", que
       normalizedQuery
       && !lower(`${row.title} ${row.platformGoodsId} ${row.platformGoodsCode} ${row.platformSkuCode} ${row.platformSkuId}`).includes(normalizedQuery)
     ) continue;
-    const key = `${row.rawShopName}|${row.platformGoodsId || row.canonicalUrl}`;
+    const key = `${row.rawShopName}|${row.platformGoodsId}`;
     const group = groups.get(key) ?? {
       key,
       platform: rowPlatform,
@@ -1580,7 +1578,7 @@ function commitPlatform(batch, staging, shopMappings) {
   const mappingByRaw = new Map(validation.shopMappings.map((item) => [item.rawName, item]));
   const grouped = new Map();
   for (const row of validation.rows.filter((item) => item.errors.length === 0)) {
-    const key = `${row.rawShopName}|${row.platformGoodsId || row.canonicalUrl}`;
+    const key = `${row.rawShopName}|${row.platformGoodsId}`;
     const group = grouped.get(key) ?? [];
     group.push(row);
     grouped.set(key, group);
@@ -1589,21 +1587,20 @@ function commitPlatform(batch, staging, shopMappings) {
   for (const rows of grouped.values()) {
     const transaction = database.transaction(() => {
       const first = rows[0];
+      if (!first.platformGoodsId) throw new Error("货品ID为空，禁止使用商品链接创建链接身份。");
       const mapping = mappingByRaw.get(first.rawShopName);
       const shop = ensureShop(mapping, now);
       seenShops.add(shop.id);
-      let link = first.platformGoodsId
-        ? database.prepare("SELECT * FROM sales_links WHERE shopId=? AND platformGoodsId=?").get(shop.id, first.platformGoodsId)
-        : database.prepare("SELECT * FROM sales_links WHERE shopId=? AND (platformGoodsId IS NULL OR platformGoodsId='') AND canonicalUrl=?").get(shop.id, first.canonicalUrl);
-      const linkId = link?.id ?? id("sales-link", `${shop.id}|${first.platformGoodsId || first.canonicalUrl}`);
+      const link = database.prepare("SELECT * FROM sales_links WHERE shopId=? AND platformGoodsId=?").get(shop.id, first.platformGoodsId);
+      const linkId = link?.id ?? id("sales-link", `${shop.id}|${first.platformGoodsId}`);
       const linkValues = {
-        id: linkId, shopId: shop.id, platformGoodsId: first.platformGoodsId || null,
+        id: linkId, shopId: shop.id, platformGoodsId: first.platformGoodsId,
         platformGoodsCode: first.platformGoodsCode || null, title: first.title || null,
         canonicalUrl: first.canonicalUrl || null, rawUrl: first.rawUrl || null,
         status: value(staging.records.find((item) => item.rowNumber === first.rowNumber)?.record["状态"]) || null,
         activityStatus: value(staging.records.find((item) => item.rowNumber === first.rowNumber)?.record["活动状态"]) || null,
         category: value(staging.records.find((item) => item.rowNumber === first.rowNumber)?.record["平台类目"]) || null,
-        identityStrength: first.platformGoodsId ? "strong" : "weak",
+        identityStrength: "strong",
         originSource: link?.originSource && link.originSource !== "legacy_unknown" ? link.originSource : "erp_platform_goods",
         enrichmentStatus: "complete",
         lastModifiedAt: value(staging.records.find((item) => item.rowNumber === first.rowNumber)?.record["最后修改时间"]) || null,

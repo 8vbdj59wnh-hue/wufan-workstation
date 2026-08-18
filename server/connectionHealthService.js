@@ -3,6 +3,7 @@ import { createResource, getDatabase } from "./db.js";
 import { createConnectionAction } from "./connectionService.js";
 import { getConnectionGrowthAnalysis } from "./connectionGrowthService.js";
 import { createConnectionImprovement } from "./connectionImprovementService.js";
+import { FORMAL_SALES_OBJECT_RESOLVER_SCOPES, resolveLinkSkuRelationsForRead } from "./capabilities/resolveLinkSkuRelationRead.js";
 
 function text(value) {
   return String(value ?? "").trim();
@@ -18,6 +19,33 @@ function parseRecord(row) {
   if (!row) return row;
   const parse = (value, fallback) => { try { return JSON.parse(value || JSON.stringify(fallback)); } catch { return fallback; } };
   return { ...row, problems: parse(row.problemsJson, []), suggestions: parse(row.suggestionsJson, []) };
+}
+
+function resolveConnectionProductIds(database, connectionId) {
+  const linkSkus = database.prepare(`
+    SELECT s.id FROM connection_profiles c
+    JOIN sales_link_skus s ON s.salesLinkId=c.salesLinkId
+    WHERE c.id=? AND COALESCE(s.currentState,'active')='active'
+  `).all(connectionId);
+  if (!linkSkus.length) return [];
+  const relations = resolveLinkSkuRelationsForRead(
+    { salesLinkSkuIds: linkSkus.map((item) => item.id) },
+    {
+      database,
+      scope: "linkDetail",
+      salesObjectResolverEnabled: true,
+      enabledScopes: FORMAL_SALES_OBJECT_RESOLVER_SCOPES,
+    },
+  ).results;
+  const erpSkuIds = [...new Set(Object.values(relations)
+    .filter((relation) => relation?.isUsable)
+    .flatMap((relation) => relation.mappings.map((mapping) => mapping.erpSkuId)))];
+  if (!erpSkuIds.length) return [];
+  const placeholders = erpSkuIds.map(() => "?").join(",");
+  return database.prepare(`
+    SELECT DISTINCT productId FROM product_erp_mappings
+    WHERE erpSkuId IN (${placeholders}) AND currentState='active' AND productId IS NOT NULL
+  `).all(...erpSkuIds).map((item) => item.productId);
 }
 
 function evaluate(analysis) {
@@ -126,14 +154,10 @@ export function createImprovementAction(healthRecordId, input, userId) {
       createdAt: now,
       updatedAt: now,
     });
-    const linkedProducts = database.prepare(`
-      SELECT DISTINCT s.productId FROM connection_profiles c
-      JOIN sales_link_skus s ON s.salesLinkId=c.salesLinkId
-      WHERE c.id=? AND s.productId IS NOT NULL AND COALESCE(s.currentState,'active')='active'
-    `).all(record.connectionId);
-    for (const product of linkedProducts) {
+    const linkedProductIds = resolveConnectionProductIds(database, record.connectionId);
+    for (const productId of linkedProductIds) {
       database.prepare(`INSERT OR IGNORE INTO action_products (id,actionId,productId,createdAt) VALUES (?,?,?,?)`)
-        .run(`action-product-${crypto.randomUUID()}`, instance.id, product.productId, now);
+        .run(`action-product-${crypto.randomUUID()}`, instance.id, productId, now);
     }
     const problemTitles = problems.map((problem) => problem.title).join("、") || "持续改善";
     const connectionAction = createConnectionAction(record.connectionId, { title: `系统发现问题：${problemTitles}`,

@@ -116,7 +116,8 @@ export function matchBusinessAdvisorRows(rows, shopId = "") {
       return { ...row, previewStatus: "matched", matchMethod: "goods_id", resolutionAction: direct[0].connectionId ? "reuse" : "create_profile", ...direct[0], candidates: direct };
     }
     if (direct.length === 0 && text(shopId)) {
-      return { ...row, previewStatus: "matched", matchMethod: "goods_id", resolutionAction: "create_sales_link_profile", candidates: [] };
+      return { ...row, previewStatus: "error", matchMethod: "goods_id", resolutionAction: "missing_sales_link",
+        parseError: "未匹配到已有链接，请先通过平台货品导入建立链接身份。", candidates: [] };
     }
     const pendingReason = direct.length > 1 ? "ambiguous_goods_id" : "missing_sales_link";
     return { ...row, previewStatus: "pending", matchMethod: null, pendingReason, candidates: direct };

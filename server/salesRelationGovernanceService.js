@@ -37,7 +37,7 @@ function groupCandidates(rows, quantityEvidence) {
       shop: { id: row.shopId, name: row.shopDisplayName || row.shopName, platform: row.platform },
       candidateIds: [], erpSkus: [], statuses: new Set(), candidateTypes: new Set(),
       affectedRows: 0, salesAmount: 0, profitAmount: 0,
-      dateStart: null, dateEnd: null, comboGroupId: row.comboGroupId || null,
+      dateStart: null, dateEnd: null,
     };
     group.candidateIds.push(row.candidateId);
     group.erpSkus.push({ id: row.erpSkuId, merchantSkuCode: row.merchantSkuCode, specificationName: row.erpSpecificationName });
@@ -46,7 +46,6 @@ function groupCandidates(rows, quantityEvidence) {
     group.salesAmount += Number(row.salesAmount || 0); group.profitAmount += Number(row.profitAmount || 0);
     if (row.affectedDateStart && (!group.dateStart || row.affectedDateStart < group.dateStart)) group.dateStart = row.affectedDateStart;
     if (row.affectedDateEnd && (!group.dateEnd || row.affectedDateEnd > group.dateEnd)) group.dateEnd = row.affectedDateEnd;
-    if (row.comboGroupId) group.comboGroupId = row.comboGroupId;
     grouped.set(key, group);
   }
   return [...grouped.values()].map((group) => {
@@ -57,7 +56,7 @@ function groupCandidates(rows, quantityEvidence) {
     const statuses = [...group.statuses];
     const status = statuses.length === 1 ? statuses[0] : statuses.includes("conflict") ? "conflict" : "pending";
     const reviewTarget = governanceType === "combo"
-      ? { kind: "combo_review", id: group.comboGroupId, sourceBatchId: group.sourceBatchId, requiresDraftGeneration: !group.comboGroupId }
+      ? { kind: "product_structure_governance", salesLinkSkuId: group.salesLinkSkuId, sourceBatchId: group.sourceBatchId }
       : { kind: governanceType === "single" ? "single_confirmation" : "single_quantity_confirmation", id: group.candidateIds[0], sourceBatchId: group.sourceBatchId };
     return {
       ...group, candidateIds: [...new Set(group.candidateIds)], erpSkus: [...new Map(group.erpSkus.map((item) => [item.id, item])).values()],
@@ -83,8 +82,7 @@ export function querySalesRelationGovernance(options = {}) {
     c.sourceBatchId,c.affectedRowCount,c.affectedDateStart,c.affectedDateEnd,c.salesAmount,c.profitAmount,
     sku.salesLinkId,sku.platformSkuId,sku.specificationName platformSkuName,
     l.title linkName,l.platformGoodsId,l.shopId,sh.platform,sh.shopName,sh.displayName shopDisplayName,
-    e.merchantSkuCode,e.specificationName erpSpecificationName,b.fileName,
-    (SELECT g.id FROM sales_link_sku_combo_groups g WHERE g.salesLinkSkuId=c.salesLinkSkuId AND g.sourceBatchId=c.sourceBatchId AND g.status='pending' ORDER BY g.createdAt DESC LIMIT 1) comboGroupId
+    e.merchantSkuCode,e.specificationName erpSpecificationName,b.fileName
     FROM sales_link_sku_erp_mapping_candidates c
     JOIN sales_link_skus sku ON sku.id=c.salesLinkSkuId
     JOIN sales_links l ON l.id=sku.salesLinkId JOIN sales_shops sh ON sh.id=l.shopId

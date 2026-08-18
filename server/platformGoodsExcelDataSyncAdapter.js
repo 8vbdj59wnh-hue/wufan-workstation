@@ -181,7 +181,7 @@ function summaryFor(batch, rows) {
     sourceRows: rows.length, totalPlatformSkus: rows.filter((row) => row.action !== "ignored" && row.platformSkuId).length,
     linkable: count("link"), alreadyLinked: count("already_linked"), exceptionCount: exceptions.length,
     ignoredNonBusiness: rows.filter((row) => row.action === "ignored" && row.exceptionType === "non_business_row").length,
-    bundleCount: types.missing_product_structure || types.bundle_sku || 0, exceptionTypes: types,
+    bundleCount: types.missing_product_structure || 0, exceptionTypes: types,
     sourceShopCount: new Set(rows.filter((row) => row.action !== "ignored").map((row) => text(row.sourceShopName)).filter(Boolean)).size,
     matchedShopCount: new Set(rows.filter((row) => ["link", "already_linked"].includes(row.action)).map((row) => text(row.sourceShopName)).filter(Boolean)).size,
   };

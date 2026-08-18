@@ -2,6 +2,7 @@ import { getDatabase } from "./db.js";
 import { listConnectionProfiles, readConnectionProfile } from "./connectionService.js";
 import { readConnectionV3Metrics, readConnectionV3MetricsMap } from "./connectionV3MetricsService.js";
 import { FORMAL_SALES_OBJECT_RESOLVER_SCOPES, resolveLinkSkuRelationsForRead } from "./capabilities/resolveLinkSkuRelationRead.js";
+import { readConnectionInventorySupply } from "./inventorySupplyQueryService.js";
 
 function text(value) { return String(value ?? "").trim(); }
 function parseJson(value, fallback = {}) { try { return JSON.parse(value || ""); } catch { return fallback; } }
@@ -27,24 +28,22 @@ function readSkuRelationExplanations(database, salesLinkSkuIds) {
     LEFT JOIN products p ON p.id=pm.productId
     WHERE e.id IN (${erpSkuIds.map(() => "?").join(",")})
   `).all(...erpSkuIds) : [];
-  const erpById = new Map(erpRows.map((row) => [row.erpSkuId, row]));
+  const erpById = new Map(); const productsByErpSku = new Map();
+  for (const row of erpRows) {
+    if (!erpById.has(row.erpSkuId)) erpById.set(row.erpSkuId, row);
+    if (row.productId) {
+      if (!productsByErpSku.has(row.erpSkuId)) productsByErpSku.set(row.erpSkuId, []);
+      productsByErpSku.get(row.erpSkuId).push({ id: row.productId, skuCode: row.productSkuCode, name: row.productName, mainImage: row.productImage });
+    }
+  }
   return new Map(ids.map((salesLinkSkuId) => {
     const relation = relations[salesLinkSkuId];
     const erpRelations = (relation?.mappings ?? []).map((mapping) => ({
       ...mapping,
       merchantSkuCode: erpById.get(mapping.erpSkuId)?.merchantSkuCode ?? null,
       specificationName: erpById.get(mapping.erpSkuId)?.specificationName ?? null,
-      productId: erpById.get(mapping.erpSkuId)?.productId ?? null,
-      productSkuCode: erpById.get(mapping.erpSkuId)?.productSkuCode ?? null,
-      productName: erpById.get(mapping.erpSkuId)?.productName ?? null,
-      productImage: erpById.get(mapping.erpSkuId)?.productImage ?? null,
     }));
-    const products = relation?.isUsable ? [...new Map(erpRelations.filter((row) => row.productId).map((row) => [row.productId, {
-      id: row.productId,
-      skuCode: row.productSkuCode,
-      name: row.productName,
-      mainImage: row.productImage,
-    }])).values()] : [];
+    const products = relation?.isUsable ? [...new Map((relation.mappings ?? []).flatMap((mapping) => productsByErpSku.get(mapping.erpSkuId) ?? []).map((product) => [product.id, product])).values()] : [];
     return [salesLinkSkuId, {
       relationStatus: relation?.relationStatus ?? "missing",
       relationshipShape: relation?.relationshipShape ?? null,
@@ -63,26 +62,30 @@ function readRelationCounts(database, salesLinkIds) {
   const ids = [...new Set(salesLinkIds.filter(Boolean))];
   if (!ids.length) return new Map();
   const marks = ids.map(() => "?").join(","); const skus = database.prepare(`SELECT id,salesLinkId FROM sales_link_skus WHERE salesLinkId IN (${marks}) AND COALESCE(currentState,'active')='active'`).all(...ids);
-  const explanations = readSkuRelationExplanations(database, skus.map((row) => row.id)); const result = new Map(ids.map((id) => [id, { salesLinkId: id, skuCount: 0, productCount: 0, products: new Set() }]));
-  for (const sku of skus) { const row = result.get(sku.salesLinkId); row.skuCount += 1; for (const product of explanations.get(sku.id)?.products || []) row.products.add(product.id); }
-  return new Map([...result].map(([id, row]) => [id, { salesLinkId: id, skuCount: row.skuCount, productCount: row.products.size }]));
+  const explanations = readSkuRelationExplanations(database, skus.map((row) => row.id)); const result = new Map(ids.map((id) => [id, { salesLinkId: id, skuCount: 0, products: new Map() }]));
+  for (const sku of skus) {
+    const row = result.get(sku.salesLinkId); row.skuCount += 1;
+    for (const product of explanations.get(sku.id)?.products || []) row.products.set(product.id, product);
+  }
+  return new Map([...result].map(([id, row]) => [id, { salesLinkId: id, skuCount: row.skuCount, productCount: row.products.size,
+    products: [...row.products.values()].sort((left, right) => text(left.skuCode).localeCompare(text(right.skuCode), "zh-CN") || left.id.localeCompare(right.id)) }]));
 }
 
 function relationFilterLinkIds(database, options) {
   if (![options.productCode, options.productRelation, options.category, options.lifecycle].some((value) => text(value))) return null;
   const skus = database.prepare("SELECT id,salesLinkId FROM sales_link_skus WHERE COALESCE(currentState,'active')='active'").all();
   const explanations = readSkuRelationExplanations(database, skus.map((row) => row.id));
-  const erpIds = [...new Set([...explanations.values()].flatMap((row) => row.erpRelations.map((item) => item.erpSkuId)))];
-  const erps = erpIds.length ? database.prepare(`SELECT e.id,e.merchantSkuCode,p.category,p.status lifecycle FROM erp_skus e LEFT JOIN product_erp_mappings pm ON pm.erpSkuId=e.id AND pm.currentState='active' LEFT JOIN products p ON p.id=pm.productId WHERE e.id IN (${erpIds.map(() => "?").join(",")})`).all(...erpIds) : [];
-  const erpById = new Map(erps.map((row) => [row.id, row])); const matched = new Set();
+  const productIds = [...new Set([...explanations.values()].flatMap((row) => row.products.map((item) => item.id)))];
+  const productDetails = productIds.length ? database.prepare(`SELECT id,skuCode,category,status lifecycle FROM products WHERE id IN (${productIds.map(() => "?").join(",")})`).all(...productIds) : [];
+  const productById = new Map(productDetails.map((row) => [row.id, row])); const matched = new Set();
   for (const sku of skus) {
-    const relation = explanations.get(sku.id); const components = relation?.erpRelations || [];
-    const linked = Boolean(relation?.isUsable && components.length);
+    const relation = explanations.get(sku.id);
+    const linked = Boolean(relation?.isUsable && relation.products.length);
     if (options.productRelation === "linked" && !linked) continue;
     if (options.productRelation === "unlinked" && linked) continue;
-    if (text(options.productCode) && !components.some((row) => text(erpById.get(row.erpSkuId)?.merchantSkuCode).includes(text(options.productCode)))) continue;
-    if (text(options.category) && !components.some((row) => erpById.get(row.erpSkuId)?.category === text(options.category))) continue;
-    if (text(options.lifecycle) && !components.some((row) => erpById.get(row.erpSkuId)?.lifecycle === text(options.lifecycle))) continue;
+    if (text(options.productCode) && !relation.products.some((row) => text(row.skuCode).includes(text(options.productCode)))) continue;
+    if (text(options.category) && !relation.products.some((row) => productById.get(row.id)?.category === text(options.category))) continue;
+    if (text(options.lifecycle) && !relation.products.some((row) => productById.get(row.id)?.lifecycle === text(options.lifecycle))) continue;
     matched.add(sku.salesLinkId);
   }
   return [...matched];
@@ -157,7 +160,7 @@ export function listConnectionCoreProfilesPage(rawOptions = {}, userId = "", isA
   const items = rows.map((row) => ({ ...row,
     erpSales: metrics.get(row.salesLinkId)?.current ?? null,
     skuCount: Number(relations.get(row.salesLinkId)?.skuCount || row.skuCount || 0),
-    productCount: Number(relations.get(row.salesLinkId)?.productCount || 0), products: [],
+    productCount: Number(relations.get(row.salesLinkId)?.productCount || 0), products: relations.get(row.salesLinkId)?.products ?? [],
   }));
   return { items, pagination: { page: options.page, pageSize: options.pageSize, total, totalPages: Math.max(1, Math.ceil(total / options.pageSize)) } };
 }
@@ -170,7 +173,7 @@ export function listConnectionCoreProfiles(userId = "", isAdmin = false) {
   return profiles.map((item) => {
     const sales = metrics.get(item.salesLinkId)?.current ?? latestSalesSummary(database, item.salesLinkId);
     const relation = relationCounts.get(item.salesLinkId) ?? {};
-    return { ...item, erpSales: sales, skuCount: Number(relation.skuCount || 0), productCount: Number(relation.productCount || 0) };
+    return { ...item, erpSales: sales, skuCount: Number(relation.skuCount || 0), productCount: Number(relation.productCount || 0), products: relation.products ?? [] };
   });
 }
 
@@ -207,11 +210,11 @@ export function getConnectionCoreDetail(connectionId, userId = "", isAdmin = fal
   }
   const products = [...productAccumulator.values()].map((product) => ({ ...product, skuCount: product.salesLinkSkuIds.size, salesLinkSkuIds: undefined })).sort((a, b) => text(a.skuCode).localeCompare(text(b.skuCode), "zh-CN") || a.id.localeCompare(b.id));
   const relation = { skuCount: activeLinkSkus.length, productCount: products.length };
-  const inventory = database.prepare(`
-    SELECT i.salesLinkSkuId,i.skuCode,i.businessDate,i.currentStock,i.availableStock,i.unitCost,i.salesVelocity,s.specificationName,p.id productId,p.name productName
-    FROM connection_sku_inventory_facts i JOIN sales_link_skus s ON s.id=i.salesLinkSkuId LEFT JOIN products p ON p.id=s.productId
-    WHERE s.salesLinkId=? AND i.businessDate=(SELECT MAX(latest.businessDate) FROM connection_sku_inventory_facts latest WHERE latest.salesLinkSkuId=i.salesLinkSkuId)
-    ORDER BY i.skuCode,i.salesLinkSkuId
-  `).all(profile.salesLinkId).map((row) => { const days = Number(row.salesVelocity) > 0 ? Number(row.availableStock || 0) / Number(row.salesVelocity) : null; return { ...row, stockDays: days, stockRisk: Number(row.availableStock || 0) <= 0 ? "out" : days !== null && days < 7 ? "low" : days !== null && days > 90 ? "high" : "normal" }; });
-  return { profile: { ...profile, products, erpSales: salesOverview, skuCount: Number(relation.skuCount || 0), productCount: Number(relation.productCount || 0) }, salesOverview, platformPerformance, erpTrend, skuSales, products, inventory };
+  const inventorySupply = readConnectionInventorySupply(profile.salesLinkId, { includeCost: true, database });
+  const inventory = inventorySupply.rows.map((row) => ({ ...row,
+    currentStock: row.stockNum, availableStock: row.availableSendStock, unitCost: row.costPrice,
+    salesVelocity: row.salesMonth === null || row.salesMonth === undefined ? null : Number(row.salesMonth) / 30,
+  }));
+  return { profile: { ...profile, products, erpSales: salesOverview, skuCount: Number(relation.skuCount || 0), productCount: Number(relation.productCount || 0) }, salesOverview, platformPerformance, erpTrend, skuSales, products, inventory,
+    inventorySummary: inventorySupply.summary, linkSkuAvailability: inventorySupply.linkSkuAvailability };
 }

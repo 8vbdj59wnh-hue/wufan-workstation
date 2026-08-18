@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
 import { getDatabase } from "./db.js";
+import { FORMAL_SALES_OBJECT_RESOLVER_SCOPES, resolveLinkSkuRelationsForRead } from "./capabilities/resolveLinkSkuRelationRead.js";
 
-const validMatchStatuses = new Set(["matched_auto", "matched_manual"]);
+const chunk = (items, size = 500) => Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, (index + 1) * size));
 
 function parseJson(value, fallback = {}) {
   try {
@@ -30,7 +31,7 @@ function readSnapshotRow(id) {
   return getDatabase().prepare("SELECT * FROM erp_fact_snapshots WHERE id=?").get(id) ?? null;
 }
 
-function collectSnapshotFacts(database) {
+export function collectErpSnapshotFacts(database) {
   const products = database.prepare("SELECT id,skuCode,name,status FROM products ORDER BY id").all();
   const mappings = database.prepare(`
     SELECT m.*,g.goodsCode
@@ -51,10 +52,30 @@ function collectSnapshotFacts(database) {
     WHERE x.currentState='active'
     ORDER BY x.id
   `).all();
-  return { products, mappings, shops, links, skus };
+  const resolved = {};
+  for (const ids of chunk(skus.map((sku) => sku.id))) {
+    Object.assign(resolved, resolveLinkSkuRelationsForRead({ salesLinkSkuIds: ids }, {
+      database, scope: "productWorkspace", salesObjectResolverEnabled: true,
+      enabledScopes: FORMAL_SALES_OBJECT_RESOLVER_SCOPES, logDifference: () => {},
+    }).results);
+  }
+  const productByErpSku = new Map(database.prepare(`
+    SELECT erpSkuId,productId FROM product_erp_mappings
+    WHERE currentState='active' AND erpSkuId IS NOT NULL AND productId IS NOT NULL
+    ORDER BY updatedAt,id
+  `).all().map((row) => [row.erpSkuId, row.productId]));
+  const relationsBySku = new Map(skus.map((sku) => {
+    const relation = resolved[sku.id];
+    const components = relation?.isUsable ? relation.mappings.map((mapping) => ({
+      erpSkuId: mapping.erpSkuId, quantity: Number(mapping.quantity), productId: productByErpSku.get(mapping.erpSkuId) ?? null,
+    })) : [];
+    return [sku.id, { relationStatus: relation?.relationStatus ?? "missing", relationshipShape: relation?.relationshipShape ?? null,
+      resolverSource: relation?.resolverSource ?? null, components, productIds: [...new Set(components.map((item) => item.productId).filter(Boolean))] }];
+  }));
+  return { products, mappings, shops, links, skus, relationsBySku };
 }
 
-function buildSnapshotRows(facts, snapshot, run) {
+export function buildErpSnapshotRows(facts, snapshot, run) {
   const mappingsByProduct = new Map();
   for (const mapping of facts.mappings) {
     const rows = mappingsByProduct.get(mapping.productId) ?? [];
@@ -69,10 +90,11 @@ function buildSnapshotRows(facts, snapshot, run) {
     const linkRows = skusByLink.get(sku.salesLinkId) ?? [];
     linkRows.push(sku);
     skusByLink.set(sku.salesLinkId, linkRows);
-    if (sku.productId && validMatchStatuses.has(sku.matchStatus)) {
-      const productRows = validSkusByProduct.get(sku.productId) ?? [];
+    const resolvedRelation = facts.relationsBySku.get(sku.id);
+    for (const productId of resolvedRelation?.productIds ?? []) {
+      const productRows = validSkusByProduct.get(productId) ?? [];
       productRows.push(sku);
-      validSkusByProduct.set(sku.productId, productRows);
+      validSkusByProduct.set(productId, productRows);
     }
   }
 
@@ -163,24 +185,27 @@ function buildSnapshotRows(facts, snapshot, run) {
     };
   });
 
-  const skuRows = facts.skus.map((sku) => ({
-    snapshotId: snapshot.id,
-    businessDate: snapshot.businessDate,
-    salesLinkSkuId: sku.id,
-    salesLinkId: sku.salesLinkId,
-    platformSkuId: sku.platformSkuId ?? null,
-    merchantCode: sku.platformSkuCode ?? null,
-    skuName: sku.specificationName ?? null,
-    matchStatus: sku.matchStatus,
-    productId: sku.productId ?? null,
-    manualBindingId: sku.manualBindingId ?? null,
-    combinationFlag: sku.matchStatus === "combination" ? 1 : 0,
-    platformPrice: sku.price ?? null,
-    platformStock: sku.platformStock ?? null,
-    occupiedStock: sku.occupiedStock ?? null,
-    sourceBatchId: sku.lastSeenBatchId ?? run.platformGoodsBatchId,
-    createdAt: snapshot.createdAt,
-  }));
+  const skuRows = facts.skus.map((sku) => {
+    const resolvedRelation = facts.relationsBySku.get(sku.id);
+    return {
+      snapshotId: snapshot.id,
+      businessDate: snapshot.businessDate,
+      salesLinkSkuId: sku.id,
+      salesLinkId: sku.salesLinkId,
+      platformSkuId: sku.platformSkuId ?? null,
+      merchantCode: sku.platformSkuCode ?? null,
+      skuName: sku.specificationName ?? null,
+      matchStatus: sku.matchStatus,
+      productId: resolvedRelation?.productIds.length === 1 ? resolvedRelation.productIds[0] : null,
+      manualBindingId: sku.manualBindingId ?? null,
+      combinationFlag: ["multi_component", "single_multi_quantity"].includes(resolvedRelation?.relationshipShape) ? 1 : 0,
+      platformPrice: sku.price ?? null,
+      platformStock: sku.platformStock ?? null,
+      occupiedStock: sku.occupiedStock ?? null,
+      sourceBatchId: sku.lastSeenBatchId ?? run.platformGoodsBatchId,
+      createdAt: snapshot.createdAt,
+    };
+  });
 
   const relationMap = new Map();
   for (const [productId, skus] of validSkusByProduct.entries()) {
@@ -278,8 +303,8 @@ export function generateErpFactSnapshot(syncRunId, { failAfterStage = "" } = {})
           @contentHash,@createdAt,@completedAt,@errorSummary
         )
       `).run(snapshot);
-      const facts = collectSnapshotFacts(database);
-      const rows = buildSnapshotRows(facts, snapshot, run);
+      const facts = collectErpSnapshotFacts(database);
+      const rows = buildErpSnapshotRows(facts, snapshot, run);
       insertRows(database, "product_daily_snapshots", [
         "snapshotId", "businessDate", "productId", "skuCode", "productName", "erpGoodsCount",
         "totalStock", "availableStock", "shippableStock", "purchaseInTransit", "pendingShipment",

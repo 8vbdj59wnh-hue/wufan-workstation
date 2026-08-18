@@ -1757,7 +1757,7 @@ function renderPlatformV2Preview() {
 function renderPlatformPreviewRows(rows) {
   let previousLink = "";
   return rows.map((row) => {
-    const linkKey = `${row.rawShopName}|${row.platformGoodsId || row.canonicalUrl}`;
+    const linkKey = `${row.rawShopName}|${row.platformGoodsId}`;
     const linkHeader = linkKey === previousLink ? "" : `<tr class="platform-link-preview-row"><td colspan="6"><strong>商品链接</strong> · ${escapeHtml(row.rawShopName || "-")} · ${escapeHtml(row.title || row.platformGoodsCode || row.platformGoodsId || "-")}</td></tr>`;
     previousLink = linkKey;
     return `${linkHeader}<tr class="${row.errors?.length ? "import-row-error" : ""}"><td>${row.rowNumber}</td><td>${escapeHtml(row.rawShopName || "-")}</td><td>${escapeHtml(row.title || row.platformGoodsCode || "-")}</td><td>${escapeHtml(row.platformSkuCode || row.platformSkuId || "-")}</td><td>${escapeHtml(row.product ? `${row.product.skuCode} · ${row.product.name}` : "未匹配")}</td><td>${escapeHtml(row.errors?.join("；") || row.matchReason || row.matchStatus)}</td></tr>`;

@@ -5043,18 +5043,27 @@ function readProductSkuChangeImpact(productId, newSkuCode) {
     .get({ normalized: normalizedNewSkuCode, productId });
   const platformConflict = db
     .prepare(`
-      SELECT id, productId, platformSkuCode
-      FROM sales_link_skus
-      WHERE lower(trim(platformSkuCode)) = @normalized
-        AND productId IS NOT NULL
-        AND productId <> @productId
+      SELECT s.id, pem.productId, s.platformSkuCode
+      FROM sales_link_skus s
+      JOIN sales_link_sku_erp_mappings rel
+        ON rel.salesLinkSkuId=s.id AND rel.currentState='active'
+      JOIN product_erp_mappings pem
+        ON pem.erpSkuId=rel.erpSkuId AND pem.currentState='active'
+      WHERE lower(trim(s.platformSkuCode)) = @normalized
+        AND pem.productId <> @productId
       LIMIT 1
     `)
     .get({ normalized: normalizedNewSkuCode, productId });
   const counts = db.prepare(`
     SELECT
       (SELECT COUNT(*) FROM product_erp_mappings WHERE productId = @productId) AS erpMappingCount,
-      (SELECT COUNT(*) FROM sales_link_skus WHERE productId = @productId) AS platformSkuCount,
+      (SELECT COUNT(DISTINCT s.id)
+       FROM sales_link_skus s
+       JOIN sales_link_sku_erp_mappings rel
+         ON rel.salesLinkSkuId=s.id AND rel.currentState='active'
+       JOIN product_erp_mappings pem
+         ON pem.erpSkuId=rel.erpSkuId AND pem.currentState='active'
+       WHERE pem.productId = @productId) AS platformSkuCount,
       (SELECT COUNT(*) FROM platform_sku_manual_bindings WHERE productId = @productId) AS manualBindingCount,
       (SELECT COUNT(*) FROM product_daily_snapshots WHERE productId = @productId) AS historySnapshotCount,
       (SELECT COUNT(DISTINCT businessDate) FROM product_daily_snapshots WHERE productId = @productId) AS historyBusinessDayCount,

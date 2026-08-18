@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { getDatabase } from "./db.js";
 import { listConnectionGrowthAnalyses } from "./connectionGrowthService.js";
 import { readConnectionV3MetricsMap } from "./connectionV3MetricsService.js";
+import { FORMAL_SALES_OBJECT_RESOLVER_SCOPES, resolveLinkSkuRelationsForRead } from "./capabilities/resolveLinkSkuRelationRead.js";
 
 const profileStatuses = new Set(["active", "paused", "archived"]);
 const profileLevels = new Set(["new", "growing", "mature", "priority"]);
@@ -19,28 +20,50 @@ function placeholders(values) {
   return values.map(() => "?").join(",");
 }
 
-function readProductsBySalesLinkIds(salesLinkIds) {
+export function readConnectionProductsBySalesLinkIds(database, salesLinkIds) {
   if (salesLinkIds.length === 0) return new Map();
-  const rows = getDatabase().prepare(`
-    SELECT DISTINCT s.salesLinkId, p.id, p.skuCode, p.name, p.mainImage
+  const linkSkus = database.prepare(`
+    SELECT s.id salesLinkSkuId,s.salesLinkId
     FROM sales_link_skus s
-    JOIN products p ON p.id=s.productId
     WHERE s.salesLinkId IN (${placeholders(salesLinkIds)})
-      AND s.productId IS NOT NULL
       AND COALESCE(s.currentState,'active')='active'
-    ORDER BY s.salesLinkId, s.createdAt, s.id, p.id
+    ORDER BY s.salesLinkId,s.createdAt,s.id
   `).all(...salesLinkIds);
-  const byLink = new Map();
-  for (const row of rows) {
-    const products = byLink.get(row.salesLinkId) ?? [];
-    if (!products.some((item) => item.id === row.id)) products.push({ id: row.id, skuCode: row.skuCode, name: row.name, mainImage: row.mainImage });
-    byLink.set(row.salesLinkId, products);
+  const relations = {};
+  for (let offset = 0; offset < linkSkus.length; offset += 500) {
+    Object.assign(relations, resolveLinkSkuRelationsForRead({ salesLinkSkuIds: linkSkus.slice(offset, offset + 500).map((row) => row.salesLinkSkuId) }, {
+      database, scope: "linkDetail", salesObjectResolverEnabled: true,
+      enabledScopes: FORMAL_SALES_OBJECT_RESOLVER_SCOPES, logDifference: () => {},
+    }).results);
   }
+  const productRows = database.prepare(`
+    SELECT m.erpSkuId,p.id,p.skuCode,p.name,p.mainImage
+    FROM product_erp_mappings m JOIN products p ON p.id=m.productId
+    WHERE m.currentState='active' AND m.erpSkuId IS NOT NULL
+    ORDER BY m.updatedAt,m.id
+  `).all();
+  const productsByErpSku = new Map();
+  for (const row of productRows) {
+    if (!productsByErpSku.has(row.erpSkuId)) productsByErpSku.set(row.erpSkuId, []);
+    productsByErpSku.get(row.erpSkuId).push(row);
+  }
+  const byLink = new Map(salesLinkIds.map((id) => [id, []]));
+  for (const linkSku of linkSkus) {
+    const relation = relations[linkSku.salesLinkSkuId];
+    if (!relation?.isUsable) continue;
+    const products = byLink.get(linkSku.salesLinkId);
+    for (const mapping of relation.mappings) {
+      for (const product of productsByErpSku.get(mapping.erpSkuId) ?? []) {
+        if (!products.some((item) => item.id === product.id)) products.push({ id: product.id, skuCode: product.skuCode, name: product.name, mainImage: product.mainImage });
+      }
+    }
+  }
+  for (const products of byLink.values()) products.sort((left, right) => value(left.skuCode).localeCompare(value(right.skuCode), "zh-CN") || left.id.localeCompare(right.id));
   return byLink;
 }
 
 function enrichConnectionRows(rows) {
-  const productsByLink = readProductsBySalesLinkIds([...new Set(rows.map((row) => row.salesLinkId))]);
+  const productsByLink = readConnectionProductsBySalesLinkIds(getDatabase(), [...new Set(rows.map((row) => row.salesLinkId))]);
   return rows.map((row) => ({
     ...row,
     products: productsByLink.get(row.salesLinkId) ?? [],
@@ -203,11 +226,7 @@ export function listAvailableSalesLinks(filters = {}) {
   const rows = getDatabase().prepare(`
     SELECT l.id AS salesLinkId, l.title AS salesLinkTitle, l.canonicalUrl, l.platformGoodsId, l.platformGoodsCode,
            s.id AS shopId, s.platform, s.displayName AS shopDisplayName, s.shopName,
-           c.id AS connectionId,
-           CASE WHEN EXISTS (
-             SELECT 1 FROM sales_link_skus sku
-             WHERE sku.salesLinkId=l.id AND sku.productId IS NOT NULL AND COALESCE(sku.currentState,'active')='active'
-           ) THEN 1 ELSE 0 END AS hasLinkedProduct
+           c.id AS connectionId
     FROM sales_links l
     JOIN sales_shops s ON s.id=l.shopId
     LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
@@ -215,20 +234,14 @@ export function listAvailableSalesLinks(filters = {}) {
       AND (?='all' OR (?='pending' AND c.id IS NULL) OR (?='existing' AND c.id IS NOT NULL))
       AND (?='' OR s.platform=?)
       AND (?='' OR s.id=?)
-      AND (?='' OR (?='linked' AND EXISTS (
-        SELECT 1 FROM sales_link_skus sku
-        WHERE sku.salesLinkId=l.id AND sku.productId IS NOT NULL AND COALESCE(sku.currentState,'active')='active'
-      )) OR (?='unlinked' AND NOT EXISTS (
-        SELECT 1 FROM sales_link_skus sku
-        WHERE sku.salesLinkId=l.id AND sku.productId IS NOT NULL AND COALESCE(sku.currentState,'active')='active'
-      )))
       AND (?='' OR LOWER(COALESCE(l.title,'')) LIKE ? OR LOWER(COALESCE(l.platformGoodsId,'')) LIKE ?
         OR LOWER(COALESCE(l.platformGoodsCode,'')) LIKE ? OR LOWER(COALESCE(s.displayName,s.shopName,'')) LIKE ?)
     ORDER BY l.updatedAt DESC, l.id DESC
-    LIMIT 500
+    LIMIT ?
   `).all(connectionStatus, connectionStatus, connectionStatus, platform, platform, shopId, shopId,
-    productRelation, productRelation, productRelation, query, `%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`);
-  const items = enrichConnectionRows(rows);
+    query, `%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`, productRelation ? 10000 : 500);
+  const items = enrichConnectionRows(rows).map((item) => ({ ...item, hasLinkedProduct: item.products.length ? 1 : 0 }))
+    .filter((item) => !productRelation || (productRelation === "linked" ? item.hasLinkedProduct : !item.hasLinkedProduct)).slice(0, 500);
   return {
     items,
     summary: { total: Number(summary.total || 0), existing: Number(summary.existing || 0), pending: Number(summary.pending || 0) },
@@ -240,12 +253,7 @@ export function listAvailableSalesLinks(filters = {}) {
 }
 
 function connectionImageForSalesLink(database, salesLinkId) {
-  const product = database.prepare(`
-    SELECT p.mainImage FROM sales_link_skus sku JOIN products p ON p.id=sku.productId
-    WHERE sku.salesLinkId=? AND sku.productId IS NOT NULL AND COALESCE(sku.currentState,'active')='active'
-      AND COALESCE(p.mainImage,'')<>''
-    ORDER BY sku.createdAt,sku.id,p.id LIMIT 1
-  `).get(salesLinkId);
+  const product = readConnectionProductsBySalesLinkIds(database, [salesLinkId]).get(salesLinkId)?.find((item) => value(item.mainImage));
   return product?.mainImage ? { mainImage: product.mainImage, imageSource: "product" } : { mainImage: null, imageSource: null };
 }
 
@@ -274,22 +282,10 @@ export function ensureBusinessAdvisorConnection(input, userId) {
     if (!["validated", "completed"].includes(batch.status)) throw new Error("生意参谋导入批次尚未通过校验。");
     const shop = database.prepare("SELECT id,platform,shopName,displayName,status FROM sales_shops WHERE id=?").get(shopId);
     if (!shop || shop.status !== "active") throw new Error("请选择有效的平台店铺。");
-    let link = database.prepare("SELECT * FROM sales_links WHERE shopId=? AND platformGoodsId=?").get(shopId, platformGoodsId);
-    let salesLinkCreated = false;
+    const link = database.prepare("SELECT * FROM sales_links WHERE shopId=? AND platformGoodsId=?").get(shopId, platformGoodsId);
+    if (!link) throw Object.assign(new Error("生意参谋经营数据未匹配到已有链接，请先通过平台货品导入建立链接身份。"), { type: "missing_link" });
+    const salesLinkCreated = false;
     const now = new Date().toISOString();
-    if (!link) {
-      const id = `sales-link-${crypto.randomUUID()}`;
-      database.prepare(`
-        INSERT INTO sales_links (
-          id,shopId,platformGoodsId,platformGoodsCode,title,canonicalUrl,rawUrl,status,activityStatus,category,
-          identityStrength,originSource,enrichmentStatus,lastModifiedAt,lastSeenBatchId,currentState,missingAt,
-          lastImportedAt,createdAt,updatedAt
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-      `).run(id, shopId, platformGoodsId, null, title, null, null, "待ERP补充", null, null,
-        "strong", businessAdvisorSource, "pending_erp", null, null, "active", null, now, now, now);
-      link = database.prepare("SELECT * FROM sales_links WHERE id=?").get(id);
-      salesLinkCreated = true;
-    }
     let profile = database.prepare("SELECT * FROM connection_profiles WHERE salesLinkId=?").get(link.id);
     let profileCreated = false;
     if (!profile) {

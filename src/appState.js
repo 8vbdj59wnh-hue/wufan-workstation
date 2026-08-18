@@ -1739,10 +1739,6 @@ export async function confirmSalesRelationCandidateBatch(candidateIds) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-relation-candidates/confirm-batch`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ candidateIds }) }), "销售单品关系批量确认失败。");
 }
 
-export async function generatePendingComboReviews(sourceBatchId) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/combo-reviews/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sourceBatchId }) }), "Combo审核草稿生成失败。");
-}
-
 export async function loadComboReviews(options = {}) {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(options)) if (value !== undefined && value !== null && String(value) !== "") query.set(key, String(value));
@@ -1751,19 +1747,6 @@ export async function loadComboReviews(options = {}) {
 
 export async function loadComboReviewDetail(groupId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/combo-reviews/${encodeURIComponent(groupId)}`), "Combo审核详情读取失败。");
-}
-
-export async function searchComboReviewErpSkus(keyword) {
-  const query = new URLSearchParams({ keyword: String(keyword || "") });
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/combo-reviews/erp-skus/search?${query}`), "ERP SKU搜索失败。");
-}
-
-export async function saveComboReviewDraft(groupId, payload) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/combo-reviews/${encodeURIComponent(groupId)}/draft`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "Combo审核草稿保存失败。");
-}
-
-export async function confirmComboReviewGroup(groupId, reviewNote = "") {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/combo-reviews/${encodeURIComponent(groupId)}/confirm`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reviewNote }) }), "Combo整组确认失败。");
 }
 
 export async function loadComboReviewAnomalyDates(groupId, options = {}) {

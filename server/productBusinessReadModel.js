@@ -1,6 +1,7 @@
 import { getDatabase } from "./db.js";
 import { readProductInventorySupplyMap } from "./inventorySupplyQueryService.js";
 import { classifyProductBusinessZones } from "./productManagementV2Service.js";
+import { FORMAL_SALES_OBJECT_RESOLVER_SCOPES, resolveLinkSkuRelationsForRead } from "./capabilities/resolveLinkSkuRelationRead.js";
 
 export const productBusinessLifecycleStatuses = Object.freeze(["新品", "成长", "爆款", "稳定销售", "衰退", "清仓", "归档"]);
 export const productBusinessHealthStatuses = Object.freeze(["healthy", "attention", "risk", "no_data"]);
@@ -33,27 +34,72 @@ export function resolveProductBusinessPeriod(query = {}) {
     earlierPeriodStart: addDays(previousPeriodStart, -periodDays), earlierPeriodEnd: addDays(previousPeriodStart, -1), periodDays };
 }
 
-function salesMetrics(database, periodStart, periodEnd) {
-  const rows = database.prepare(`
-    SELECT s.productId,
-      COUNT(DISTINCT f.id) factCount,
-      SUM(f.salesAmount) salesAmount,
-      SUM(f.shippedQuantity) salesQuantity,
-      SUM(f.profitAmount) grossProfit,
-      SUM(CASE WHEN f.salesAmount IS NOT NULL THEN 1 ELSE 0 END) salesAmountFactCount,
-      SUM(CASE WHEN f.shippedQuantity IS NOT NULL THEN 1 ELSE 0 END) salesQuantityFactCount,
-      SUM(CASE WHEN f.profitAmount IS NOT NULL THEN 1 ELSE 0 END) profitFactCount
-    FROM connection_sku_sales_facts f
-    JOIN sales_link_skus s ON s.id=f.salesLinkSkuId
-    WHERE s.productId IS NOT NULL
-      AND f.periodStart>=? AND f.periodEnd<=?
-      AND COALESCE(s.matchStatus,'matched') IN ('matched','matched_auto','matched_manual')
-    GROUP BY s.productId
-  `).all(periodStart, periodEnd);
-  return new Map(rows.map((row) => [row.productId, row]));
+export function readProductBusinessRelationContext(database) {
+  const linkSkus = database.prepare(`
+    SELECT s.id salesLinkSkuId,s.salesLinkId
+    FROM sales_link_skus s JOIN sales_links l ON l.id=s.salesLinkId
+    WHERE COALESCE(s.currentState,'active')='active'
+      AND COALESCE(l.currentState,'active')='active'
+      AND COALESCE(s.matchStatus,'matched') IN ('matched','matched_auto','matched_manual','erp_linked')
+    ORDER BY s.id
+  `).all();
+  const relations = {};
+  for (let offset = 0; offset < linkSkus.length; offset += 500) {
+    const ids = linkSkus.slice(offset, offset + 500).map((row) => row.salesLinkSkuId);
+    Object.assign(relations, resolveLinkSkuRelationsForRead({ salesLinkSkuIds: ids }, {
+      database, scope: "productWorkspace", salesObjectResolverEnabled: true,
+      enabledScopes: FORMAL_SALES_OBJECT_RESOLVER_SCOPES, logDifference: () => {},
+    }).results);
+  }
+  const productByErpSku = new Map(database.prepare(`
+    SELECT m.erpSkuId,m.productId
+    FROM product_erp_mappings m
+    WHERE m.currentState='active' AND m.erpSkuId IS NOT NULL AND m.productId IS NOT NULL
+    ORDER BY m.updatedAt,m.id
+  `).all().map((row) => [row.erpSkuId, row.productId]));
+  const attributionsBySku = new Map();
+  const linksByProduct = new Map();
+  for (const sku of linkSkus) {
+    const relation = relations[sku.salesLinkSkuId];
+    if (!relation?.isUsable) continue;
+    const totalQuantity = relation.mappings.reduce((sum, mapping) => sum + Number(mapping.quantity || 0), 0);
+    if (!(totalQuantity > 0)) continue;
+    const quantityByProduct = new Map();
+    for (const mapping of relation.mappings) {
+      const productId = productByErpSku.get(mapping.erpSkuId);
+      if (!productId) continue;
+      quantityByProduct.set(productId, (quantityByProduct.get(productId) || 0) + Number(mapping.quantity || 0));
+    }
+    const attributions = [...quantityByProduct].map(([productId, quantity]) => ({ productId, quantity, share: quantity / totalQuantity }));
+    if (!attributions.length) continue;
+    attributionsBySku.set(sku.salesLinkSkuId, attributions);
+    for (const attribution of attributions) {
+      const links = linksByProduct.get(attribution.productId) ?? new Set();
+      links.add(sku.salesLinkId); linksByProduct.set(attribution.productId, links);
+    }
+  }
+  return { attributionsBySku, linksByProduct, resolvedLinkSkuCount: attributionsBySku.size };
 }
 
-function structureMetrics(database) {
+export function salesMetrics(database, periodStart, periodEnd, relationContext) {
+  const rows = database.prepare(`
+    SELECT f.id,f.salesLinkSkuId,f.salesAmount,f.shippedQuantity,f.profitAmount
+    FROM connection_sku_sales_facts f
+    WHERE f.periodStart>=? AND f.periodEnd<=?
+  `).all(periodStart, periodEnd);
+  const result = new Map();
+  for (const fact of rows) for (const attribution of relationContext.attributionsBySku.get(fact.salesLinkSkuId) ?? []) {
+    const metric = result.get(attribution.productId) ?? { productId: attribution.productId, factCount: 0, salesAmount: 0, salesQuantity: 0, grossProfit: 0, salesAmountFactCount: 0, salesQuantityFactCount: 0, profitFactCount: 0 };
+    metric.factCount += 1;
+    if (fact.salesAmount !== null) { metric.salesAmount += Number(fact.salesAmount) * attribution.share; metric.salesAmountFactCount += 1; }
+    if (fact.shippedQuantity !== null) { metric.salesQuantity += Number(fact.shippedQuantity) * attribution.share; metric.salesQuantityFactCount += 1; }
+    if (fact.profitAmount !== null) { metric.grossProfit += Number(fact.profitAmount) * attribution.share; metric.profitFactCount += 1; }
+    result.set(attribution.productId, metric);
+  }
+  return result;
+}
+
+export function structureMetrics(database, relationContext) {
   const skuRows = database.prepare(`
     SELECT productId,
       COUNT(DISTINCT CASE WHEN trim(m.merchantSkuCode)<>'' THEN lower(trim(m.merchantSkuCode)) ELSE m.id END) skuCount,
@@ -63,48 +109,39 @@ function structureMetrics(database) {
     WHERE productId IS NOT NULL AND COALESCE(m.currentState,'active')='active'
     GROUP BY productId
   `).all();
-  const linkRows = database.prepare(`
-    SELECT s.productId,COUNT(DISTINCT s.salesLinkId) salesLinkCount
-    FROM sales_link_skus s JOIN sales_links l ON l.id=s.salesLinkId
-    WHERE s.productId IS NOT NULL
-      AND COALESCE(s.currentState,'active')='active'
-      AND COALESCE(l.currentState,'active')='active'
-      AND COALESCE(s.matchStatus,'matched') IN ('matched','matched_auto','matched_manual')
-    GROUP BY s.productId
-  `).all();
   return {
     skus: new Map(skuRows.map((row) => [row.productId, { skuCount: Number(row.skuCount || 0), productCodes: text(row.productCodes).split(",").filter(Boolean) }])),
-    links: new Map(linkRows.map((row) => [row.productId, Number(row.salesLinkCount || 0)])),
+    links: new Map([...relationContext.linksByProduct].map(([productId, links]) => [productId, links.size])),
   };
 }
 
-function linkPerformanceMetrics(database, periodStart, periodEnd) {
+export function linkPerformanceMetrics(database, periodStart, periodEnd, relationContext) {
   const rows = database.prepare(`
-    WITH product_links AS (
-      SELECT DISTINCT s.productId,s.salesLinkId
-      FROM sales_link_skus s JOIN sales_links l ON l.id=s.salesLinkId
-      WHERE s.productId IS NOT NULL
-        AND COALESCE(s.currentState,'active')='active'
-        AND COALESCE(l.currentState,'active')='active'
-        AND COALESCE(s.matchStatus,'matched') IN ('matched','matched_auto','matched_manual')
-    ), link_period AS (
-      SELECT salesLinkId,SUM(payAmount) payAmount,SUM(visitorCount) visitorCount,
-        CASE WHEN SUM(visitorCount)>0 THEN SUM(conversionRate*visitorCount)/SUM(visitorCount) ELSE NULL END conversionRate
-      FROM connection_period_snapshots
-      WHERE periodStart>=? AND periodEnd<=?
-      GROUP BY salesLinkId
-    )
-    SELECT p.productId,COUNT(DISTINCT p.salesLinkId) linkCount,
-      SUM(l.payAmount) payAmount,SUM(l.visitorCount) visitorCount,
-      CASE WHEN SUM(l.visitorCount)>0 THEN SUM(l.conversionRate*l.visitorCount)/SUM(l.visitorCount) ELSE NULL END conversionRate,
-      SUM(CASE WHEN l.salesLinkId IS NOT NULL THEN 1 ELSE 0 END) measuredLinkCount
-    FROM product_links p LEFT JOIN link_period l ON l.salesLinkId=p.salesLinkId
-    GROUP BY p.productId
+    SELECT salesLinkId,SUM(payAmount) payAmount,SUM(visitorCount) visitorCount,
+      CASE WHEN SUM(visitorCount)>0 THEN SUM(conversionRate*visitorCount)/SUM(visitorCount) ELSE NULL END conversionRate
+    FROM connection_period_snapshots
+    WHERE periodStart>=? AND periodEnd<=?
+    GROUP BY salesLinkId
   `).all(periodStart, periodEnd);
-  return new Map(rows.map((row) => [row.productId, {
-    linkCount: Number(row.linkCount || 0), payAmount: numeric(row.payAmount), visitorCount: numeric(row.visitorCount),
-    conversionRate: numeric(row.conversionRate), measuredLinkCount: Number(row.measuredLinkCount || 0),
-  }]));
+  const snapshotsByLink = new Map(rows.map((row) => [row.salesLinkId, row]));
+  const result = new Map();
+  for (const [productId, links] of relationContext.linksByProduct) {
+    let payAmount = 0; let payAmountCount = 0; let visitorCount = 0; let visitorCountCount = 0;
+    let weightedConversion = 0; let conversionVisitors = 0; let measuredLinkCount = 0;
+    for (const salesLinkId of links) {
+      const snapshot = snapshotsByLink.get(salesLinkId); if (!snapshot) continue;
+      measuredLinkCount += 1;
+      if (snapshot.payAmount !== null) { payAmount += Number(snapshot.payAmount); payAmountCount += 1; }
+      if (snapshot.visitorCount !== null) { visitorCount += Number(snapshot.visitorCount); visitorCountCount += 1; }
+      if (snapshot.conversionRate !== null && Number(snapshot.visitorCount) > 0) {
+        weightedConversion += Number(snapshot.conversionRate) * Number(snapshot.visitorCount);
+        conversionVisitors += Number(snapshot.visitorCount);
+      }
+    }
+    result.set(productId, { linkCount: links.size, payAmount: payAmountCount ? payAmount : null,
+      visitorCount: visitorCountCount ? visitorCount : null, conversionRate: conversionVisitors ? weightedConversion / conversionVisitors : null, measuredLinkCount });
+  }
+  return result;
 }
 
 function latestHealth(database) {
@@ -279,11 +316,12 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
   const visible = visibleProductIds ? new Set(visibleProductIds) : null;
   const scopedProducts = visible ? products.filter((product) => visible.has(product.id)) : products;
   const productIds = scopedProducts.map((product) => product.id);
-  const currentSales = salesMetrics(database, period.periodStart, period.periodEnd);
-  const previousSales = salesMetrics(database, period.previousPeriodStart, period.previousPeriodEnd);
-  const earlierSales = salesMetrics(database, period.earlierPeriodStart, period.earlierPeriodEnd);
-  const structures = structureMetrics(database);
-  const linkPerformance = linkPerformanceMetrics(database, period.periodStart, period.periodEnd);
+  const relationContext = readProductBusinessRelationContext(database);
+  const currentSales = salesMetrics(database, period.periodStart, period.periodEnd, relationContext);
+  const previousSales = salesMetrics(database, period.previousPeriodStart, period.previousPeriodEnd, relationContext);
+  const earlierSales = salesMetrics(database, period.earlierPeriodStart, period.earlierPeriodEnd, relationContext);
+  const structures = structureMetrics(database, relationContext);
+  const linkPerformance = linkPerformanceMetrics(database, period.periodStart, period.periodEnd, relationContext);
   const health = latestHealth(database);
   const actions = actionMetrics(database);
   const inventory = readProductInventorySupplyMap(productIds, { includeCost: includeInventoryCost });

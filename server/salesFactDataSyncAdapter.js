@@ -190,7 +190,7 @@ export function commitSalesFactDataSync(batchId) {
   const batch = assertCurrentDataSyncPreview(batchId);
   if (batch.sourceBatchType !== "connection_sales_import" || !batch.sourceBatchId) throw new Error("同步批次未关联真实销售导入预览。");
   const parserVersion = parseJson(batch.scopeJson).parserVersion;
-  const blocking = getDatabase().prepare("SELECT COUNT(*) total FROM data_sync_exceptions WHERE batchId=? AND status='open' AND exceptionType IN ('missing_link','missing_sku','missing_platform_sku','missing_erp_sku','missing_erp_mapping','erp_relation_governance_pending','erp_relation_conflict','combo_goods')").get(batch.id).total;
+  const blocking = getDatabase().prepare("SELECT COUNT(*) total FROM data_sync_exceptions WHERE batchId=? AND status='open' AND exceptionType IN ('missing_link','missing_sku','missing_platform_sku','missing_erp_sku','missing_erp_mapping','erp_relation_governance_pending','erp_relation_conflict','missing_product_structure','product_structure_review_pending','product_structure_conflict')").get(batch.id).total;
   if (parserVersion !== SALES_FACT_PARSER_VERSION && blocking) throw new Error(`当前预览存在 ${blocking} 条链接、SKU或重复事实异常，不能确认写入。`);
   try {
     const result = confirmConnectionDataImport(batch.sourceBatchId);

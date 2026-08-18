@@ -30,6 +30,11 @@ try {
     db.prepare("INSERT INTO sales_shops (id,platform,shopName,normalizedShopName,displayName,status,createdAt,updatedAt) VALUES (?,?,?,?,?,'active',?,?)")
       .run(shop[0], shop[1], shop[2], shop[2], shop[2], stamp, stamp);
   }
+  for (const link of [["link-tmall-100", "shop-tmall", "TM-100", "天猫测试"], ["link-jd-200", "shop-jd", "JD-200", "京东测试"]]) {
+    db.prepare(`INSERT INTO sales_links
+      (id,shopId,platformGoodsId,title,identityStrength,originSource,enrichmentStatus,currentState,createdAt,updatedAt)
+      VALUES (?,?,?,?,'strong','erp_platform_goods','complete','active',?,?)`).run(...link, stamp, stamp);
+  }
   ensurePlatformLinkOperationTemplates();
   const tmall = workbook([["说明"], ["说明"], ["说明"], ["说明"], ["商品ID", "商品名称", "统计日期", "商品访客数", "支付金额"], ["TM-100", "天猫测试", "2026-08-06", 12, 88]], "生意参谋平台-商品");
   const jd = workbook([["SPU", "SPU名称", "时间", "商品访客数", "成交金额"], ["JD-200", "京东测试", "2026-08-06", 8, 66]], "商品明细");
@@ -57,9 +62,8 @@ try {
   assert(JSON.stringify(afterPreview) === JSON.stringify(before), "批量预览修改了业务数据。");
   const committed = confirmConnectionBulkPlatformImport(created.batch.id);
   assert(committed.batch.status === "completed_with_errors", "批量确认状态错误。");
-  assert(committed.result.createdLinks === 2 && committed.result.factsCreated === 2, "批量确认写入汇总错误。");
-  assert(db.prepare("SELECT id FROM sales_links WHERE shopId='shop-tmall' AND platformGoodsId='TM-100'").get(), "天猫链接身份未按既有规则创建。");
-  assert(db.prepare("SELECT id FROM sales_links WHERE shopId='shop-jd' AND platformGoodsId='JD-200'").get(), "京东链接身份未按既有规则创建。");
+  assert(committed.result.createdLinks === 0 && committed.result.factsCreated === 2, "批量确认应只写入既有链接的经营事实。");
+  assert(db.prepare("SELECT COUNT(*) count FROM sales_links").get().count === before.links, "经营数据导入不得创建链接。");
   const protectedAfter = db.prepare(`SELECT (SELECT COUNT(*) FROM sales_link_skus) linkSkus,(SELECT COUNT(*) FROM erp_skus) erpSkus,
     (SELECT COUNT(*) FROM sales_link_sku_erp_mappings) mappings,(SELECT COUNT(*) FROM connection_sku_sales_facts) salesFacts,
     (SELECT COUNT(*) FROM erp_sku_inventory_daily_summaries) inventory`).get();
@@ -77,10 +81,15 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 10));
     backgroundPreview = readConnectionBulkPlatformImport(background.batch.id);
   }
-  assert(backgroundPreview.batch.status === "preview_ready", "后台队列未自动完成文件预览。");
+  assert(backgroundPreview.batch.status === "preview_ready" && backgroundPreview.summary.errors === 1,
+    "缺少已有链接的经营数据应在预览阶段被隔离。");
+  const backgroundCommitted = confirmConnectionBulkPlatformImport(background.batch.id);
+  assert(backgroundCommitted.result.createdLinks === 0
+    && !db.prepare("SELECT id FROM sales_links WHERE shopId='shop-tmall' AND platformGoodsId='TM-101'").get(),
+  "缺失链接的经营数据确认时不得创建链接。");
   initializeDatabase({ reset: false });
   assert(db.pragma("integrity_check", { simple: true }) === "ok" && db.pragma("foreign_key_check").length === 0, "隔离数据库完整性检查失败。");
-  console.log(JSON.stringify({ files: 3, processed: preview.batch.processedCount, backgroundQueue: backgroundPreview.batch.status, queueResume: true, platforms: preview.files.slice(0, 2).map((file) => file.platform), shops: preview.files.slice(0, 2).map((file) => file.shopId), isolatedErrors: 1, createdLinks: committed.result.createdLinks, operationFacts: committed.result.factsCreated, idempotent: true, protectedRelationsChanged: false, migrationIdempotent: true, integrityCheck: "ok", foreignKeyCheck: 0 }, null, 2));
+  console.log(JSON.stringify({ files: 3, processed: preview.batch.processedCount, backgroundQueue: backgroundPreview.batch.status, queueResume: true, platforms: preview.files.slice(0, 2).map((file) => file.platform), shops: preview.files.slice(0, 2).map((file) => file.shopId), isolatedErrors: 1, missingLinkBlocked: true, createdLinks: committed.result.createdLinks, operationFacts: committed.result.factsCreated, idempotent: true, protectedRelationsChanged: false, migrationIdempotent: true, integrityCheck: "ok", foreignKeyCheck: 0 }, null, 2));
 } finally {
   closeDatabase();
   if (fs.existsSync(databasePath)) fs.unlinkSync(databasePath);
