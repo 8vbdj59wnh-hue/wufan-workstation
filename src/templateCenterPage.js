@@ -251,9 +251,14 @@ function getPreviewImage(material) {
 }
 
 function getSourceFile(material) {
-  if (material.sourceFile && typeof material.sourceFile === "object") return material.sourceFile;
+  if (material.sourceFile && typeof material.sourceFile === "object") {
+    return {
+      fileName: material.sourceFile.fileName ?? "",
+      fileUrl: material.sourceFile.fileUrl ?? "",
+    };
+  }
   return {
-    fileName: material.fileName ?? "源文件",
+    fileName: material.fileName ?? "",
     fileUrl: material.fileUrl ?? "",
   };
 }
@@ -286,7 +291,6 @@ function hasAnyTag(tags) {
 
 function isValidTemplatePayload(payload) {
   return Boolean(payload.previewImage)
-    && Boolean(payload.sourceFile)
     && hasAnyTag(payload.tags);
 }
 
@@ -688,7 +692,7 @@ export function renderTemplateCenterPage() {
             <input data-template-preview-upload type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" />
           </label>
           <label class="template-file-picker">
-            <span>源文件</span>
+            <span>源文件（选填）</span>
             ${renderUploadFileState(uploadDraft.sourceFile, "")}
             <input data-template-source-upload type="file" accept="${templateSourceFileAccept}" />
           </label>
@@ -909,15 +913,15 @@ export function bindTemplateCenterPageEvents(rerender) {
   page.querySelector("[data-action='create-template-from-upload']")?.addEventListener("click", async () => {
     if (!isValidTemplatePayload({
       previewImage: uploadDraft.previewFile,
-      sourceFile: uploadDraft.sourceFile,
       tags: uploadTags,
     })) return;
-    const sourceFileType = detectSourceFileType(uploadDraft.sourceFile);
+    const sourceFileType = uploadDraft.sourceFile === null
+      ? detectFileType(uploadDraft.previewFile)
+      : detectSourceFileType(uploadDraft.sourceFile);
     if (sourceFileType === null) return;
     const tags = normalizeMaterialTags(uploadTags);
     if (!isValidTemplatePayload({
       previewImage: uploadDraft.previewFile,
-      sourceFile: uploadDraft.sourceFile,
       tags,
     })) return;
     const templateName = generateTemplateName(tags);
@@ -931,11 +935,13 @@ export function bindTemplateCenterPageEvents(rerender) {
       } catch (error) {
         throw new Error(`预览图上传失败：${normalizeTemplateUploadError(error, { fileKind: "preview" })}`);
       }
-      let sourceUpload;
-      try {
-        sourceUpload = await uploadGenericFile(uploadDraft.sourceFile);
-      } catch (error) {
-        throw new Error(`源文件上传失败：${normalizeTemplateUploadError(error, { fileKind: "source" })}`);
+      let sourceUpload = null;
+      if (uploadDraft.sourceFile !== null) {
+        try {
+          sourceUpload = await uploadGenericFile(uploadDraft.sourceFile);
+        } catch (error) {
+          throw new Error(`源文件上传失败：${normalizeTemplateUploadError(error, { fileKind: "source" })}`);
+        }
       }
       const now = new Date().toISOString();
       try {
@@ -946,10 +952,12 @@ export function bindTemplateCenterPageEvents(rerender) {
             fileName: uploadDraft.previewFile.name,
             fileUrl: previewUpload.url,
           },
-          sourceFile: {
-            fileName: sourceUpload.originalName ?? uploadDraft.sourceFile.name,
-            fileUrl: sourceUpload.url,
-          },
+          sourceFile: sourceUpload === null
+            ? {}
+            : {
+                fileName: sourceUpload.originalName ?? uploadDraft.sourceFile.name,
+                fileUrl: sourceUpload.url,
+              },
           fileType: sourceFileType,
           tags,
           createdAt: now,

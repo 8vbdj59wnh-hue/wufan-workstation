@@ -811,14 +811,10 @@ function hasTemplateTags(tags) {
 
 function validateTemplateItem(item) {
   const previewImage = item.previewImage;
-  const sourceFile = item.sourceFile;
   if (String(item.id ?? "").trim() === "") throw new Error("模板 id 不能为空。");
   if (String(item.name ?? "").trim() === "") throw new Error("模板名称不能为空。");
   if (previewImage === null || typeof previewImage !== "object" || String(previewImage.fileUrl ?? "").trim() === "") {
     throw new Error("模板预览图不能为空。");
-  }
-  if (sourceFile === null || typeof sourceFile !== "object" || String(sourceFile.fileUrl ?? "").trim() === "") {
-    throw new Error("模板源文件不能为空。");
   }
   if (!hasTemplateTags(item.tags)) throw new Error("模板标签不能为空。");
 }
