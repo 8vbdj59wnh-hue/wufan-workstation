@@ -1,160 +1,81 @@
 import crypto from "node:crypto";
 import { createResource, getDatabase } from "./db.js";
-import { resolveErpSkuSalesObjectLinks } from "./capabilities/resolveLinkSkuRelationRead.js";
+import { getProductBusinessReadModel } from "./productBusinessReadModel.js";
+export { classifyProductBusinessZones } from "./productBusinessClassification.js";
 
 export const productLifecycleStatuses = ["开发中", "上架", "成长期", "成熟期", "风险期", "淘汰"];
-export const productBusinessZones = ["new", "hit", "active", "clearance"];
-const newProductCycleDays = Math.max(1, Number(process.env.PRODUCT_NEW_CYCLE_DAYS) || 30);
-const explicitNewStatuses = new Set(["新品", "开发中", "待上架", "上架"]);
-const clearanceStatuses = new Set(["风险期", "淘汰", "清仓", "停售"]);
 
 function text(value) { return String(value ?? "").trim(); }
-function number(value) { return value === null || value === undefined ? null : Number(value); }
 function parseJson(value, fallback) { try { return JSON.parse(value || JSON.stringify(fallback)); } catch { return fallback; } }
 function now() { return new Date().toISOString(); }
-function ratio(current, previous) { return previous === null || previous === 0 || current === null ? null : (current - previous) / Math.abs(previous); }
 
-export function classifyProductBusinessZones(items, options = {}) {
-  const cycleDays = Math.max(1, Number(options.newCycleDays) || newProductCycleDays);
-  const nowTime = Number(options.nowTime) || Date.now();
-  const cycleStart = nowTime - cycleDays * 86400000;
-  const isNew = (item) => {
-    if (explicitNewStatuses.has(item.status)) return true;
-    if (clearanceStatuses.has(item.status)) return false;
-    const listedTime = Date.parse(item.listedAt || "");
-    return Number.isFinite(listedTime) && listedTime >= cycleStart && listedTime <= nowTime;
+function analysisFromReadModelItem(item, period) {
+  const salesQuantity = item.sales.quantity;
+  const stock = item.inventory.quantity;
+  const grossProfit = item.profit.grossProfit;
+  const revenue = item.sales.amount;
+  return {
+    product: { id: item.id, name: item.name, skuCode: item.sku, status: item.status, mainImage: item.image, updatedAt: item.updatedAt },
+    snapshotKey: `daily-facts:${period.periodStart}:${period.periodEnd}:${item.healthAnalysis.ruleVersion}`,
+    sales: { businessDate: period.periodEnd, periodStart: period.periodStart, periodEnd: period.periodEnd,
+      sales30d: salesQuantity, salesAmount: revenue, previousSales30d: item.sales.previousQuantity, previousSalesAmount: item.sales.previousAmount,
+      growth: item.sales.trend.rate, trend: item.sales.trend, factCount: item.sales.factCount },
+    inventory: { actualStock: stock, availableStock: item.inventory.availableQuantity, amount: item.inventory.amount,
+      businessDate: item.inventory.businessDate, turnover: stock !== null && salesQuantity !== null && stock + salesQuantity > 0 ? salesQuantity / (stock + salesQuantity) : null,
+      risk: ({ backlog: "积压", stockout: "缺货", attention: "关注", healthy: "正常", no_data: "暂无数据" })[item.inventory.status.code] ?? "暂无数据",
+      status: item.inventory.status, coverageDays: item.inventory.coverageDays },
+    finance: { revenue, refunds: null, cost: revenue !== null && grossProfit !== null ? revenue - grossProfit : null, expense: null,
+      grossProfit, netProfit: null, profitMargin: item.profit.grossMargin, metric: "sales_gross_profit" },
+    connections: { current: item.linkPerformance, previous: null, salesAmountGrowth: null, visitorGrowth: null, conversionChange: null },
+    healthAnalysis: item.healthAnalysis,
+    lifecycle: item.lifecycle,
+    structure: item.structure,
+    dataSource: { sales: "connection_sku_sales_daily_facts", relation: "sales_object", inventory: "erp_sku_inventory_daily_summaries" },
   };
-  const newIds = new Set(items.filter(isNew).map((item) => item.id));
-  const sustained = items.filter((item) => !newIds.has(item.id) && !clearanceStatuses.has(item.status)
-    && Number(item.analysis?.sales?.sales30d || 0) > 0
-    && (Number(item.analysis?.sales?.previousSales30d || 0) > 0
-      || Number(item.analysis?.sales?.sales90d || 0) > Number(item.analysis?.sales?.sales30d || 0)));
-  const topCount = sustained.length ? Math.max(1, Math.ceil(sustained.length * 0.2)) : 0;
-  const topBy = (read) => new Set([...sustained].filter((item) => read(item) > 0)
-    .sort((left, right) => read(right) - read(left)).slice(0, topCount).map((item) => item.id));
-  const topRevenueIds = topBy((item) => Number(item.analysis?.finance?.revenue || 0));
-  const topSalesIds = topBy((item) => Number(item.analysis?.sales?.sales30d || 0));
-  const hitIds = new Set([...topRevenueIds, ...topSalesIds]);
-  const positiveSales = items.filter((item) => !newIds.has(item.id) && !hitIds.has(item.id))
-    .map((item) => Number(item.analysis?.sales?.sales30d || 0)).filter((value) => value > 0).sort((left, right) => left - right);
-  const lowSalesThreshold = positiveSales.length >= 5 ? positiveSales[Math.max(0, Math.ceil(positiveSales.length * 0.2) - 1)] : 0;
-  const counts = Object.fromEntries(productBusinessZones.map((zone) => [zone, 0]));
-  const classified = items.map((item) => {
-    const sales30d = Number(item.analysis?.sales?.sales30d || 0);
-    const stock = Number(item.analysis?.inventory?.actualStock || 0);
-    let businessZone = null;
-    if (newIds.has(item.id)) businessZone = "new";
-    else if (hitIds.has(item.id)) businessZone = "hit";
-    else if (stock > 0 && (clearanceStatuses.has(item.status) || sales30d <= 0 || (lowSalesThreshold > 0 && sales30d <= lowSalesThreshold))) businessZone = "clearance";
-    else if (sales30d > 0) businessZone = "active";
-    if (businessZone) counts[businessZone] += 1;
-    return { ...item, businessZone };
-  });
-  return { items: classified, counts, rules: { newProductCycleDays: cycleDays, hitTopPercent: 20, lowSalesPercent: 20 } };
 }
 
-function latestProductSnapshots(database, productId) {
-  const rows = database.prepare(`
-    SELECT p.*,f.businessDate,f.id AS factSnapshotId
-    FROM product_daily_snapshots p JOIN erp_fact_snapshots f ON f.id=p.snapshotId
-    WHERE p.productId=? AND f.status='completed'
-    ORDER BY f.businessDate DESC,f.createdAt DESC LIMIT 2
-  `).all(productId);
-  return { current: rows[0] ?? null, previous: rows[1] ?? null };
-}
-
-function financeMetrics(database, productId) {
-  const rows = database.prepare(`SELECT entryType,amount FROM finance_entries WHERE productId=? AND status IN ('confirmed','approved')`).all(productId);
-  if (!rows.length) return { revenue: null, refunds: null, cost: null, expense: null, grossProfit: null, netProfit: null, profitMargin: null };
-  const sum = (type) => rows.filter((row) => row.entryType === type).reduce((total, row) => total + Number(row.amount || 0), 0);
-  const grossIncome = sum("income"); const refunds = sum("refund"); const revenue = grossIncome - refunds;
-  const cost = sum("cost"); const expense = sum("expense"); const grossProfit = revenue - cost; const netProfit = grossProfit - expense;
-  return { revenue, refunds, cost, expense, grossProfit, netProfit, profitMargin: revenue ? netProfit / revenue : null };
-}
-
-function resolveProductSalesLinkIds(database, productId) {
-  const erpSkuIds = database.prepare(`
-    SELECT DISTINCT erpSkuId
-    FROM product_erp_mappings
-    WHERE productId=? AND currentState='active' AND erpSkuId IS NOT NULL
-    ORDER BY erpSkuId
-  `).all(productId).map((row) => row.erpSkuId);
-  if (!erpSkuIds.length) return [];
-  const salesLinkIds = new Set();
-  const reverse = resolveErpSkuSalesObjectLinks({ erpSkuIds }, { database, scope: "productWorkspace" }).results;
-  for (const relations of Object.values(reverse)) for (const relation of relations) if (relation.salesLinkId) salesLinkIds.add(relation.salesLinkId);
-  return [...salesLinkIds].sort();
-}
-
-function connectionMetrics(database, productId) {
-  const salesLinkIds = resolveProductSalesLinkIds(database, productId);
-  const periods = salesLinkIds.length ? database.prepare(`
-    SELECT s.periodStart,s.periodEnd,SUM(s.payAmount) payAmount,SUM(s.visitorCount) visitorCount,
-      CASE WHEN SUM(s.visitorCount)>0 THEN SUM(s.conversionRate*s.visitorCount)/SUM(s.visitorCount) ELSE NULL END conversionRate
-    FROM connection_period_snapshots s
-    WHERE s.salesLinkId IN (${salesLinkIds.map(() => "?").join(",")})
-    GROUP BY s.periodStart,s.periodEnd ORDER BY s.periodEnd DESC,s.periodStart DESC LIMIT 2
-  `).all(...salesLinkIds) : [];
-  const current = periods[0] ?? null; const previous = periods[1] ?? null;
-  return { current, previous, salesAmountGrowth: ratio(number(current?.payAmount), number(previous?.payAmount)),
-    visitorGrowth: ratio(number(current?.visitorCount), number(previous?.visitorCount)),
-    conversionChange: current?.conversionRate === null || previous?.conversionRate === null || !current || !previous
-      ? null : Number(current.conversionRate) - Number(previous.conversionRate) };
-}
-
-export function getProductBusinessAnalysis(productId) {
-  const database = getDatabase();
-  const product = database.prepare("SELECT id,name,skuCode,status,mainImage,createdAt,updatedAt FROM products WHERE id=?").get(text(productId));
-  if (!product) throw new Error("产品不存在。");
-  const snapshots = latestProductSnapshots(database, product.id);
-  const currentSales = number(snapshots.current?.sales30d); const previousSales = number(snapshots.previous?.sales30d);
-  const actualStock = number(snapshots.current?.totalStock);
-  const salesGrowth = ratio(currentSales, previousSales);
-  const inventoryTurnover = actualStock !== null && currentSales !== null && actualStock + currentSales > 0 ? currentSales / (actualStock + currentSales) : null;
-  return { product, snapshotKey: snapshots.current?.factSnapshotId ?? `live:${new Date().toISOString().slice(0, 10)}`,
-    sales: { businessDate: snapshots.current?.businessDate ?? null, sales30d: currentSales, previousSales30d: previousSales, growth: salesGrowth },
-    inventory: { actualStock, turnover: inventoryTurnover, risk: actualStock !== null && actualStock > 0 && (currentSales ?? 0) === 0 ? "积压" : actualStock === 0 ? "缺货" : "正常" },
-    finance: financeMetrics(database, product.id), connections: connectionMetrics(database, product.id) };
-}
-
-function evaluate(analysis) {
-  const problems = []; const suggestions = [];
-  if (analysis.sales.growth !== null && analysis.sales.growth < -0.2) { problems.push({ type: "sales_decline", title: "销售下降", severity: analysis.sales.growth < -0.4 ? "high" : "medium", value: analysis.sales.growth }); suggestions.push({ title: "复盘产品销售下降原因", reason: "近两期销量下降" }); }
-  if (analysis.inventory.risk === "积压") { problems.push({ type: "inventory_backlog", title: "库存积压", severity: "high", value: analysis.inventory.actualStock }); suggestions.push({ title: "制定库存去化方案", reason: "有库存但近30天无销量" }); }
-  if (analysis.inventory.risk === "缺货" && (analysis.sales.sales30d ?? 0) > 0) { problems.push({ type: "stockout", title: "库存不足", severity: "medium", value: 0 }); suggestions.push({ title: "检查补货计划", reason: "有销量但当前库存为零" }); }
-  if (analysis.finance.profitMargin !== null && analysis.finance.profitMargin < 0.1) { problems.push({ type: "profit_low", title: "利润偏低", severity: analysis.finance.profitMargin < 0 ? "high" : "medium", value: analysis.finance.profitMargin }); suggestions.push({ title: "复核成本与费用结构", reason: "产品利润率低于10%" }); }
-  if (analysis.connections.conversionChange !== null && analysis.connections.conversionChange < -0.01) { problems.push({ type: "conversion_decline", title: "转化下降", severity: "medium", value: analysis.connections.conversionChange }); suggestions.push({ title: "检查关联连接主图、详情和价格", reason: "连接转化率下降超过1个百分点" }); }
-  const scores = [];
-  if (analysis.sales.sales30d !== null) scores.push(analysis.sales.sales30d > 0 ? 75 + Math.max(-25, Math.min(25, (analysis.sales.growth ?? 0) * 100)) : 25);
-  if (analysis.finance.profitMargin !== null) scores.push(Math.max(0, Math.min(100, 50 + analysis.finance.profitMargin * 100)));
-  if (analysis.inventory.actualStock !== null) scores.push(analysis.inventory.risk === "正常" ? 85 : analysis.inventory.risk === "缺货" ? 55 : 25);
-  if (analysis.connections.conversionChange !== null) scores.push(Math.max(0, Math.min(100, 70 + analysis.connections.conversionChange * 1000)));
-  const healthScore = scores.length ? Math.round(scores.reduce((sum, value) => sum + value, 0) / scores.length) : null;
-  const healthStatus = healthScore === null ? "no_data" : healthScore >= 80 ? "growth" : healthScore >= 60 ? "stable" : healthScore >= 40 ? "attention" : "risk";
-  return { healthScore, healthStatus, problems, suggestions };
+export function getProductBusinessAnalysis(productId, options = {}) {
+  const readModel = getProductBusinessReadModel({ range: "30d", productId: text(productId), page: 1, pageSize: 1 }, options);
+  const item = readModel.items[0];
+  if (!item || item.id !== text(productId)) throw new Error("产品不存在或无权查看。");
+  return analysisFromReadModelItem(item, readModel.period);
 }
 
 function parseHealth(row) { return row ? { ...row, metrics: parseJson(row.metricsJson, {}), problems: parseJson(row.problemsJson, []), suggestions: parseJson(row.suggestionsJson, []) } : null; }
 
-export function evaluateProductHealth(productId) {
-  const database = getDatabase(); const analysis = getProductBusinessAnalysis(productId); const result = evaluate(analysis); const timestamp = now();
+export function evaluateProductHealth(productId, options = {}) {
+  const database = getDatabase(); const analysis = getProductBusinessAnalysis(productId, options); const health = analysis.healthAnalysis; const timestamp = now();
+  const issueProfiles = {
+    sales_decline: { type: "sales_decline", title: "销售下降" },
+    inventory_backlog: { type: "inventory_backlog", title: "库存积压" },
+    inventory_stockout: { type: "stockout_risk", title: "库存不足" },
+    profit_low: { type: "gross_margin_insufficient", title: "毛利不足" },
+    link_optimization: { type: "sales_link_performance", title: "销售链接表现需优化" },
+  };
+  const problems = (health.recommendations ?? []).map((recommendation) => {
+    const profile = issueProfiles[recommendation.code] ?? { type: recommendation.code, title: recommendation.title };
+    const dimension = ({ sales_decline: "sales", inventory_backlog: "inventory", inventory_stockout: "inventory", profit_low: "profit", link_optimization: "links" })[recommendation.code];
+    const severity = health.dimensions?.[dimension]?.severity === "risk" ? "high" : "medium";
+    return { type: profile.type, title: profile.title, severity, reason: recommendation.reason, sourceRecommendationCode: recommendation.code };
+  });
+  const suggestions = (health.recommendations ?? []).map((item) => ({ title: item.title, reason: item.reason, code: item.code }));
   const save = database.transaction(() => {
     const existing = database.prepare("SELECT id,createdAt FROM product_health_records WHERE productId=? AND snapshotKey=?").get(text(productId), analysis.snapshotKey);
     const id = existing?.id ?? `product-health-${crypto.randomUUID()}`;
     database.prepare(`INSERT INTO product_health_records (id,productId,snapshotKey,healthScore,healthStatus,metricsJson,problemsJson,suggestionsJson,createdAt,updatedAt)
       VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(productId,snapshotKey) DO UPDATE SET healthScore=excluded.healthScore,healthStatus=excluded.healthStatus,
       metricsJson=excluded.metricsJson,problemsJson=excluded.problemsJson,suggestionsJson=excluded.suggestionsJson,updatedAt=excluded.updatedAt`)
-      .run(id, text(productId), analysis.snapshotKey, result.healthScore, result.healthStatus, JSON.stringify(analysis), JSON.stringify(result.problems), JSON.stringify(result.suggestions), existing?.createdAt ?? timestamp, timestamp);
+      .run(id, text(productId), analysis.snapshotKey, null, health.overall.code, JSON.stringify(analysis), JSON.stringify(problems), JSON.stringify(suggestions), existing?.createdAt ?? timestamp, timestamp);
     const issue = database.prepare(`INSERT INTO product_issues (id,productId,healthRecordId,issueType,title,severity,detailJson,status,createdAt,updatedAt)
       VALUES (?,?,?,?,?,?,?,'open',?,?) ON CONFLICT(healthRecordId,issueType) DO UPDATE SET title=excluded.title,severity=excluded.severity,detailJson=excluded.detailJson,updatedAt=excluded.updatedAt`);
-    for (const problem of result.problems) issue.run(`product-issue-${crypto.randomUUID()}`, text(productId), id, problem.type, problem.title, problem.severity, JSON.stringify(problem), timestamp, timestamp);
+    for (const problem of problems) issue.run(`product-issue-${crypto.randomUUID()}`, text(productId), id, problem.type, problem.title, problem.severity, JSON.stringify(problem), timestamp, timestamp);
     return id;
   });
   const id = save(); return parseHealth(database.prepare("SELECT * FROM product_health_records WHERE id=?").get(id));
 }
 
-export function getProductV2Detail(productId) {
-  const database = getDatabase(); const analysis = getProductBusinessAnalysis(productId);
+export function getProductV2Detail(productId, options = {}) {
+  const database = getDatabase(); const analysis = getProductBusinessAnalysis(productId, options);
   const lifecycle = database.prepare("SELECT * FROM product_lifecycle_events WHERE productId=? ORDER BY changedAt DESC").all(text(productId));
   const healthRecords = database.prepare("SELECT * FROM product_health_records WHERE productId=? ORDER BY updatedAt DESC LIMIT 20").all(text(productId)).map(parseHealth);
   const issues = database.prepare("SELECT * FROM product_issues WHERE productId=? ORDER BY updatedAt DESC").all(text(productId)).map((row) => ({ ...row, detail: parseJson(row.detailJson, {}) }));
@@ -163,36 +84,15 @@ export function getProductV2Detail(productId) {
 }
 
 export function getProductV2Overview() {
-  const database = getDatabase(); const products = database.prepare("SELECT id,name,skuCode,status,mainImage,createdAt,updatedAt FROM products WHERE status<>'已归档'").all();
-  const listedRows = database.prepare(`SELECT productId,MIN(changedAt) listedAt FROM product_lifecycle_events
-    WHERE toStatus IN ('新品','上架','在售') GROUP BY productId`).all();
-  const listedByProduct = new Map(listedRows.map((row) => [row.productId, row.listedAt]));
-  const snapshots = database.prepare(`SELECT * FROM (SELECT p.*,f.businessDate,f.id factSnapshotId,ROW_NUMBER() OVER (PARTITION BY p.productId ORDER BY f.businessDate DESC,f.createdAt DESC) position
-    FROM product_daily_snapshots p JOIN erp_fact_snapshots f ON f.id=p.snapshotId WHERE f.status='completed') WHERE position<=2`).all();
-  const snapshotsByProduct = new Map(); for (const row of snapshots) { const value=snapshotsByProduct.get(row.productId)||{}; value[row.position===1?"current":"previous"]=row; snapshotsByProduct.set(row.productId,value); }
-  const liveRows = database.prepare(`SELECT productId,
-    SUM(COALESCE(CAST(json_extract(latestStateJson,'$.sales30d') AS REAL),0)) sales30d,
-    SUM(COALESCE(CAST(json_extract(latestStateJson,'$.sales90d') AS REAL),0)) sales90d,
-    SUM(COALESCE(CAST(json_extract(latestStateJson,'$.actualStock') AS REAL),0)) actualStock
-    FROM product_erp_mappings WHERE productId IS NOT NULL GROUP BY productId`).all();
-  const liveByProduct = new Map(liveRows.map((row) => [row.productId, row]));
-  const financeRows = database.prepare(`SELECT productId,
-    SUM(CASE WHEN entryType='income' THEN amount ELSE 0 END) grossIncome,SUM(CASE WHEN entryType='refund' THEN amount ELSE 0 END) refunds,
-    SUM(CASE WHEN entryType='cost' THEN amount ELSE 0 END) cost,SUM(CASE WHEN entryType='expense' THEN amount ELSE 0 END) expense
-    FROM finance_entries WHERE productId IS NOT NULL AND status IN ('confirmed','approved') GROUP BY productId`).all();
-  const financeByProduct = new Map(financeRows.map((row)=>{const revenue=Number(row.grossIncome||0)-Number(row.refunds||0);const grossProfit=revenue-Number(row.cost||0);const netProfit=grossProfit-Number(row.expense||0);return [row.productId,{revenue,refunds:Number(row.refunds||0),cost:Number(row.cost||0),expense:Number(row.expense||0),grossProfit,netProfit,profitMargin:revenue?netProfit/revenue:null}];}));
-  const emptyFinance = { revenue:null,refunds:null,cost:null,expense:null,grossProfit:null,netProfit:null,profitMargin:null };
-  const rawItems = products.map((product) => { const pair=snapshotsByProduct.get(product.id)||{};const live=liveByProduct.get(product.id)||{};const currentSales=number(pair.current?.sales30d)??number(live.sales30d);const previousSales=number(pair.previous?.sales30d);const sales90d=number(live.sales90d);const actualStock=number(pair.current?.totalStock)??number(live.actualStock);const listedAt=listedByProduct.get(product.id)??null;const analysis={ product,snapshotKey:pair.current?.factSnapshotId??null,
-    sales:{businessDate:pair.current?.businessDate??null,sales30d:currentSales,sales90d,previousSales30d:previousSales,growth:ratio(currentSales,previousSales)},
-    inventory:{actualStock,turnover:actualStock!==null&&currentSales!==null&&actualStock+currentSales>0?currentSales/(actualStock+currentSales):null,risk:actualStock!==null&&actualStock>0&&(currentSales??0)===0?"积压":actualStock===0?"缺货":"正常"},
-    finance:financeByProduct.get(product.id)||emptyFinance,connections:{current:null,previous:null,salesAmountGrowth:null,visitorGrowth:null,conversionChange:null} }; const health=evaluate(analysis);return {...product,listedAt,analysis,...health}; });
-  const zones = classifyProductBusinessZones(rawItems);
-  const items = zones.items;
+  const readModel = getProductBusinessReadModel({ range: "30d", page: 1 }, { includeInventoryCost: false, unpaged: true });
+  const items = readModel.items.map((item) => ({ ...item, skuCode: item.sku, mainImage: item.image,
+    analysis: analysisFromReadModelItem(item, readModel.period), healthScore: item.health.score, healthStatus: item.healthAnalysis.overall.code }));
   const lifecycle = Object.fromEntries(productLifecycleStatuses.map((status) => [status, items.filter((item) => item.status === status).length]));
   lifecycle["待归类"] = items.filter((item) => !productLifecycleStatuses.includes(item.status)).length;
-  return { total: items.length, lifecycle, businessZones: zones.counts, businessZoneRules: zones.rules,
+  return { total: items.length, lifecycle, businessZones: {}, businessZoneRules: null,
     growth: items.filter((item) => item.healthStatus === "growth").sort((a,b) => (b.healthScore ?? -1)-(a.healthScore ?? -1)).slice(0,10),
-    risks: items.filter((item) => ["attention","risk"].includes(item.healthStatus)).sort((a,b) => (a.healthScore ?? 101)-(b.healthScore ?? 101)).slice(0,10), items };
+    risks: items.filter((item) => ["attention","risk"].includes(item.healthStatus)).sort((a,b) => (a.healthScore ?? 101)-(b.healthScore ?? 101)).slice(0,10), items,
+    migratedTo: "product-business-dashboard", definitions: readModel.definitions };
 }
 
 export function changeProductLifecycle(productId, input, userId) {

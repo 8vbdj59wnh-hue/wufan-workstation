@@ -223,6 +223,15 @@ const defaultLoader = createRouteModuleLoader({
     }),
     requiredExports: ["render", "bind"],
   },
+  adminDataCenter: {
+    loader: () => import("./dataCenterPage.js"),
+    adapt: (module) => ({
+      moduleId: "adminDataCenter",
+      render: module.renderAdminDataCenterPage,
+      bind: module.bindAdminDataCenterPageEvents,
+    }),
+    requiredExports: ["render", "bind"],
+  },
 });
 
 export const registerRouteModule = defaultLoader.registerRouteModule;

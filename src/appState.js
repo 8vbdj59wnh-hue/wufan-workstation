@@ -273,7 +273,8 @@ export function applyDataSnapshot(data) {
 
 export async function loadPersistentData({ includeTaskWaves = null } = {}) {
   try {
-    const route = window.location.hash.replace(/^#/, "").split("/")[0];
+    const fullRoute = window.location.hash.replace(/^#/, "");
+    const route = fullRoute === "settings/admin-data-center" ? "adminDataCenter" : fullRoute.split("/")[0];
     const lightweightModules = new Set([
       "",
       "dashboard",
@@ -285,13 +286,11 @@ export async function loadPersistentData({ includeTaskWaves = null } = {}) {
       "scheduleBoard",
       "financeCenter",
       "finance-center",
-      "dataCenter",
-      "data-center",
+      "adminDataCenter",
     ]);
     const bootstrapModuleAliases = {
       "dashboard-management": "dashboardManagement",
       "finance-center": "financeCenter",
-      "data-center": "dataCenter",
     };
     const bootstrapModule = bootstrapModuleAliases[route] ?? (route || "dashboard");
     const shouldLoadTaskWaves =
@@ -935,19 +934,6 @@ export async function recalculateErpSyncRun(syncRunId) {
   return readApiJson(response, "ERP缺失记录对账重试失败。");
 }
 
-export async function generateErpSyncSnapshot(syncRunId) {
-  const response = await authFetch(`${apiBaseUrl}/api/products/erp-sync-runs/${encodeURIComponent(syncRunId)}/generate-snapshot`, {
-    method: "POST",
-  });
-  return readApiJson(response, "ERP历史快照生成失败。");
-}
-
-export async function loadDataCenterView(view, params = {}) {
-  const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== "" && value !== undefined));
-  const response = await authFetch(`${apiBaseUrl}/api/data-center/${view}${query.size ? `?${query}` : ""}`);
-  return readApiJson(response, "数据中心读取失败。");
-}
-
 export async function loadDataSyncCenter() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center`), "数据同步中心读取失败。");
 }
@@ -1050,11 +1036,6 @@ export async function resolveDataSyncException(exceptionId, note = "") {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/exceptions/${encodeURIComponent(exceptionId)}/resolve`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note }),
   }), "同步异常处理失败。");
-}
-
-export async function loadDataCenterProductDetail(productId, source) {
-  const response = await authFetch(`${apiBaseUrl}/api/data-center/products/${encodeURIComponent(productId)}?source=${encodeURIComponent(source)}`);
-  return readApiJson(response, "产品分析详情读取失败。");
 }
 
 export async function loadOperationDashboard() {

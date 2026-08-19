@@ -76,26 +76,38 @@ test("产品经营读取层复用销售、库存、SKU、健康与行动事实",
       .run("link-sku-board-1", "link-board-1", "product-board-1", "erp-sku-board-1", "platform-sku-board-1", "matched", "active", now, now);
     database.prepare("INSERT INTO sales_link_skus(id,salesLinkId,productId,erpSkuId,platformSkuId,matchStatus,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)")
       .run("link-sku-board-decline", "link-board-1", "product-board-decline", null, "platform-sku-board-decline", "matched", "active", now, now);
-    database.prepare("INSERT INTO sales_link_sku_erp_mappings(id,salesLinkSkuId,erpSkuId,mappingType,quantity,currentState,sourceType,createdAt,updatedAt) VALUES(?,?,?,?,?,'active','platform_goods_excel',?,?)")
-      .run("link-map-board-1", "link-sku-board-1", "erp-sku-board-1", "single", 1, now, now);
-    database.prepare("INSERT INTO sales_link_sku_erp_mappings(id,salesLinkSkuId,erpSkuId,mappingType,quantity,currentState,sourceType,createdAt,updatedAt) VALUES(?,?,?,?,?,'active','platform_goods_excel',?,?)")
-      .run("link-map-board-decline", "link-sku-board-decline", "erp-sku-board-decline", "single", 1, now, now);
+    const reviewerId = database.prepare("SELECT id FROM persons ORDER BY id LIMIT 1").get().id;
+    for (const [suffix, linkSkuId, erpSkuId] of [
+      ["board-1", "link-sku-board-1", "erp-sku-board-1"],
+      ["board-decline", "link-sku-board-decline", "erp-sku-board-decline"],
+    ]) {
+      database.prepare("INSERT INTO sales_objects(id,objectCode,normalizedObjectCode,objectType,source,sourceType,sourceCode,status,firstSeenAt,lastSeenAt,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,'active',?,?,?,?)")
+        .run(`sales-object-${suffix}`, `SO-${suffix}`, `so-${suffix}`, "single", "test", "product_structure", linkSkuId, now, now, now, now);
+      database.prepare("INSERT INTO sales_link_sku_sales_object_relations(id,linkSkuId,salesObjectId,effectiveFrom,status,sourceType,sourceReferenceJson,createdAt,updatedAt) VALUES(?,?,?,?,'active','product_structure','{}',?,?)")
+        .run(`sales-object-relation-${suffix}`, linkSkuId, `sales-object-${suffix}`, now, now, now);
+      database.prepare("INSERT INTO sales_object_structures(id,salesObjectId,version,structureHash,effectiveFrom,status,sourceType,sourceReferenceJson,createdAt,updatedAt) VALUES(?,?,?,?,?,'draft','product_structure','{}',?,?)")
+        .run(`sales-object-structure-${suffix}`, `sales-object-${suffix}`, 1, `structure-hash-${suffix}`, now, now, now);
+      database.prepare("INSERT INTO sales_object_structure_components(id,structureId,salesObjectId,erpSkuId,quantity,sortOrder,status,sourceType,sourceReferenceJson,createdAt,updatedAt) VALUES(?,?,?,?,?,1,'active','product_structure','{}',?,?)")
+        .run(`sales-object-component-${suffix}`, `sales-object-structure-${suffix}`, `sales-object-${suffix}`, erpSkuId, 1, now, now);
+      database.prepare("UPDATE sales_object_structures SET status='active',reviewedBy=?,reviewedAt=?,activatedAt=?,updatedAt=? WHERE id=?")
+        .run(reviewerId, now, now, now, `sales-object-structure-${suffix}`);
+    }
     database.prepare("INSERT INTO connection_import_batches(id,sourceType,externalShopId,fileName,fileHash,businessDate,periodStart,periodEnd,status,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
       .run("sales-batch-board-1", "erp_sales", "", "sales.xlsx", "sales-hash-board-1", "2026-08-07", "2026-08-01", "2026-08-07", "completed", now, now);
-    const fact = database.prepare("INSERT INTO connection_sku_sales_facts(id,batchId,salesLinkId,salesLinkSkuId,platformGoodsId,skuCode,periodStart,periodEnd,shippedQuantity,salesAmount,costAmount,profitAmount,rawDataJson,createdAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
-    fact.run("sales-fact-board-current", "sales-batch-board-1", "link-board-1", "link-sku-board-1", "goods-board-1", "ERP-SKU-BOARD-1", "2026-08-01", "2026-08-07", 10, 1000, 700, 300, "{}", now);
-    fact.run("sales-fact-board-previous", "sales-batch-board-1", "link-board-1", "link-sku-board-1", "goods-board-1", "ERP-SKU-BOARD-1", "2026-07-25", "2026-07-31", 5, 500, 400, 100, "{}", now);
-    fact.run("sales-fact-decline-current", "sales-batch-board-1", "link-board-1", "link-sku-board-decline", "goods-board-1", "SKU-DECLINE", "2026-08-01", "2026-08-07", 1, 100, null, null, "{}", now);
-    fact.run("sales-fact-decline-previous", "sales-batch-board-1", "link-board-1", "link-sku-board-decline", "goods-board-1", "SKU-DECLINE", "2026-07-25", "2026-07-31", 2, 200, null, null, "{}", now);
-    fact.run("sales-fact-decline-earlier", "sales-batch-board-1", "link-board-1", "link-sku-board-decline", "goods-board-1", "SKU-DECLINE", "2026-07-18", "2026-07-24", 3, 300, null, null, "{}", now);
-    fact.run("sales-fact-decline-30d-previous", "sales-batch-board-1", "link-board-1", "link-sku-board-decline", "goods-board-1", "SKU-DECLINE", "2026-06-20", "2026-06-26", 7, 700, null, null, "{}", now);
-    fact.run("sales-fact-decline-30d-earlier", "sales-batch-board-1", "link-board-1", "link-sku-board-decline", "goods-board-1", "SKU-DECLINE", "2026-05-20", "2026-05-26", 8, 800, null, null, "{}", now);
-    const distributed = salesMetrics(database, "2026-08-01", "2026-08-07", { attributionsBySku: new Map([
-      ["link-sku-board-1", [{ productId: "product-board-1", share: 0.25 }, { productId: "product-board-decline", share: 0.75 }]],
-    ]) });
-    assert.equal(distributed.get("product-board-1").salesAmount, 250);
-    assert.equal(distributed.get("product-board-1").grossProfit, 75);
-    assert.equal(distributed.get("product-board-decline").salesAmount, 750);
+    const fact = database.prepare(`INSERT INTO connection_sku_sales_daily_facts
+      (id,salesLinkId,salesLinkSkuId,erpSkuId,saleDate,quantity,salesAmount,costAmount,profitAmount,factType,sourceBatchId,sourceRowNumber,rawDataJson,createdAt,updatedAt)
+      VALUES(?,?,?,?,?,?,?,?,?,'normal','sales-batch-board-1',?,'{}',?,?)`);
+    fact.run("sales-fact-board-current", "link-board-1", "link-sku-board-1", "erp-sku-board-1", "2026-08-07", 10, 1000, 700, 300, 1, now, now);
+    fact.run("sales-fact-board-previous", "link-board-1", "link-sku-board-1", "erp-sku-board-1", "2026-07-31", 5, 500, 400, 100, 2, now, now);
+    fact.run("sales-fact-decline-current", "link-board-1", "link-sku-board-decline", "erp-sku-board-decline", "2026-08-07", 1, 100, null, null, 3, now, now);
+    fact.run("sales-fact-decline-previous", "link-board-1", "link-sku-board-decline", "erp-sku-board-decline", "2026-07-31", 2, 200, null, null, 4, now, now);
+    fact.run("sales-fact-decline-earlier", "link-board-1", "link-sku-board-decline", "erp-sku-board-decline", "2026-07-24", 3, 300, null, null, 5, now, now);
+    fact.run("sales-fact-decline-30d-previous", "link-board-1", "link-sku-board-decline", "erp-sku-board-decline", "2026-06-26", 7, 700, null, null, 6, now, now);
+    fact.run("sales-fact-decline-30d-earlier", "link-board-1", "link-sku-board-decline", "erp-sku-board-decline", "2026-05-26", 8, 800, null, null, 7, now, now);
+    const distributed = salesMetrics(database, "2026-08-01", "2026-08-07");
+    assert.equal(distributed.get("product-board-1").salesAmount, 1000);
+    assert.equal(distributed.get("product-board-1").grossProfit, 300);
+    assert.equal(distributed.get("product-board-decline").salesAmount, 100);
     database.prepare("INSERT INTO product_health_records(id,productId,snapshotKey,healthScore,healthStatus,metricsJson,problemsJson,suggestionsJson,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?)")
       .run("health-board-1", "product-board-1", "snapshot-board-1", 82, "growth", "{}", "[]", "[]", now, now);
     database.prepare("INSERT INTO process_instances(id,templateId,templateVersion,name,goalId,initiatorId,status,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)")
@@ -142,7 +154,7 @@ test("产品经营读取层复用销售、库存、SKU、健康与行动事实",
     assert.equal(declineItem.healthAnalysis.overall.code, "attention");
     assert.ok(declineItem.healthAnalysis.recommendations.some((entry) => entry.code === "sales_decline"));
     const taskCountBeforeAction = database.prepare("SELECT COUNT(*) count FROM tasks").get().count;
-    const factCountBeforeAction = database.prepare("SELECT COUNT(*) count FROM connection_sku_sales_facts").get().count;
+    const factCountBeforeAction = database.prepare("SELECT COUNT(*) count FROM connection_sku_sales_daily_facts").get().count;
     const improvementHealth = { overall: { code: "attention", label: "关注" }, dimensions: { profit: { severity: "attention", evidence: { grossMargin: 0.08 } } },
       recommendations: [{ code: "profit_low", title: "优化产品成本结构", reason: "毛利率 8.0%，低于正常阈值。" }] };
     const created = createProductHealthAction("product-board-1", {
@@ -174,9 +186,9 @@ test("产品经营读取层复用销售、库存、SKU、健康与行动事实",
     assert.equal(database.prepare("SELECT status FROM product_issues WHERE id=?").get(created.issue.id).status, "improving");
     assert.equal(database.prepare("SELECT status FROM process_instances WHERE id=?").get(created.instance.id).status, "done");
     assert.equal(database.prepare("SELECT COUNT(*) count FROM tasks").get().count, taskCountBeforeAction);
-    assert.equal(database.prepare("SELECT COUNT(*) count FROM connection_sku_sales_facts").get().count, factCountBeforeAction);
+    assert.equal(database.prepare("SELECT COUNT(*) count FROM connection_sku_sales_daily_facts").get().count, factCountBeforeAction);
     const strategyFactCounts = {
-      sales: database.prepare("SELECT COUNT(*) count FROM connection_sku_sales_facts").get().count,
+      sales: database.prepare("SELECT COUNT(*) count FROM connection_sku_sales_daily_facts").get().count,
       inventory: database.prepare("SELECT COUNT(*) count FROM erp_sku_inventory_daily_summaries").get().count,
       erpSkus: database.prepare("SELECT COUNT(*) count FROM erp_skus").get().count,
       tasks: database.prepare("SELECT COUNT(*) count FROM tasks").get().count,
@@ -215,7 +227,7 @@ test("产品经营读取层复用销售、库存、SKU、健康与行动事实",
     assert.equal(database.prepare("SELECT status FROM products WHERE id='product-board-1'").get().status, "成熟期");
     assert.equal(database.prepare("PRAGMA table_info(products)").all().some((column) => column.name.toLowerCase().includes("strategy")), false);
     assert.deepEqual({
-      sales: database.prepare("SELECT COUNT(*) count FROM connection_sku_sales_facts").get().count,
+      sales: database.prepare("SELECT COUNT(*) count FROM connection_sku_sales_daily_facts").get().count,
       inventory: database.prepare("SELECT COUNT(*) count FROM erp_sku_inventory_daily_summaries").get().count,
       erpSkus: database.prepare("SELECT COUNT(*) count FROM erp_skus").get().count,
       tasks: database.prepare("SELECT COUNT(*) count FROM tasks").get().count,
@@ -264,7 +276,7 @@ test("产品经营读取层复用销售、库存、SKU、健康与行动事实",
       tasks: database.prepare("SELECT COUNT(*) count FROM tasks").get().count,
       actions: database.prepare("SELECT COUNT(*) count FROM process_instances").get().count,
       strategies: database.prepare("SELECT COUNT(*) count FROM product_strategy_versions").get().count,
-      sales: database.prepare("SELECT COUNT(*) count FROM connection_sku_sales_facts").get().count,
+      sales: database.prepare("SELECT COUNT(*) count FROM connection_sku_sales_daily_facts").get().count,
       inventory: database.prepare("SELECT COUNT(*) count FROM erp_sku_inventory_daily_summaries").get().count,
       erpSkus: database.prepare("SELECT COUNT(*) count FROM erp_skus").get().count,
     };
@@ -297,7 +309,7 @@ test("产品经营读取层复用销售、库存、SKU、健康与行动事实",
       tasks: database.prepare("SELECT COUNT(*) count FROM tasks").get().count,
       actions: database.prepare("SELECT COUNT(*) count FROM process_instances").get().count,
       strategies: database.prepare("SELECT COUNT(*) count FROM product_strategy_versions").get().count,
-      sales: database.prepare("SELECT COUNT(*) count FROM connection_sku_sales_facts").get().count,
+      sales: database.prepare("SELECT COUNT(*) count FROM connection_sku_sales_daily_facts").get().count,
       inventory: database.prepare("SELECT COUNT(*) count FROM erp_sku_inventory_daily_summaries").get().count,
       erpSkus: database.prepare("SELECT COUNT(*) count FROM erp_skus").get().count,
     }, insightBoundaryBefore);
@@ -318,13 +330,18 @@ test("产品经营读取层复用销售、库存、SKU、健康与行动事实",
     }
     const structureReviewerId = database.prepare("SELECT id FROM persons ORDER BY id LIMIT 1").get().id;
     const addStructure = (id, salesLinkSkuId, components) => {
-      database.prepare("INSERT INTO sales_link_sku_product_structures(id,salesLinkSkuId,structureCode,structureHash,status,sourceType,reviewedBy,reviewedAt,activatedAt,createdAt,updatedAt) VALUES(?,?,?,?, 'pending_review','verification',?,?,?,?,?)")
-        .run(id, salesLinkSkuId, `code-${id}`, `hash-${id}`, structureReviewerId, now, now, now, now);
-      components.forEach(([erpSkuId, quantity], index) => database.prepare("INSERT INTO sales_link_sku_product_structure_components(id,productStructureId,erpSkuId,quantity,sortOrder,sourceType,createdAt,updatedAt) VALUES(?,?,?,?,?,'verification',?,?)")
-        .run(`${id}-component-${index}`, id, erpSkuId, quantity, index + 1, now, now));
-      database.prepare("UPDATE sales_link_sku_product_structures SET status='active' WHERE id=?").run(id);
-      components.forEach(([erpSkuId, quantity]) => database.prepare("INSERT INTO sales_link_sku_erp_mappings(id,salesLinkSkuId,erpSkuId,mappingType,quantity,currentState,sourceType,productStructureId,createdAt,updatedAt) VALUES(?,?,?,?,?,'active','product_structure',?,?,?)")
-        .run(`${id}-mapping-${erpSkuId}`, salesLinkSkuId, erpSkuId, components.length > 1 ? "combo" : "single", quantity, id, now, now));
+      const salesObjectId = `${id}-sales-object`;
+      const objectType = components.length === 1 && Number(components[0][1]) === 1 ? "single" : "bundle";
+      database.prepare("INSERT INTO sales_objects(id,objectCode,normalizedObjectCode,objectType,source,sourceType,sourceCode,status,firstSeenAt,lastSeenAt,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,'active',?,?,?,?)")
+        .run(salesObjectId, `SO-${id}`, `so-${id}`, objectType, "verification", "product_structure", salesLinkSkuId, now, now, now, now);
+      database.prepare("INSERT INTO sales_link_sku_sales_object_relations(id,linkSkuId,salesObjectId,effectiveFrom,status,sourceType,sourceReferenceJson,createdAt,updatedAt) VALUES(?,?,?,?,'active','product_structure','{}',?,?)")
+        .run(`${id}-sales-object-relation`, salesLinkSkuId, salesObjectId, now, now, now);
+      database.prepare("INSERT INTO sales_object_structures(id,salesObjectId,version,structureHash,effectiveFrom,status,sourceType,sourceReferenceJson,createdAt,updatedAt) VALUES(?,?,?,?,?,'draft','product_structure','{}',?,?)")
+        .run(`${id}-sales-object-structure`, salesObjectId, 1, `sales-object-hash-${id}`, now, now, now);
+      components.forEach(([erpSkuId, quantity], index) => database.prepare("INSERT INTO sales_object_structure_components(id,structureId,salesObjectId,erpSkuId,quantity,sortOrder,status,sourceType,sourceReferenceJson,createdAt,updatedAt) VALUES(?,?,?,?,?,?,'active','product_structure','{}',?,?)")
+        .run(`${id}-sales-object-component-${index}`, `${id}-sales-object-structure`, salesObjectId, erpSkuId, quantity, index + 1, now, now));
+      database.prepare("UPDATE sales_object_structures SET status='active',reviewedBy=?,reviewedAt=?,activatedAt=?,updatedAt=? WHERE id=?")
+        .run(structureReviewerId, now, now, now, `${id}-sales-object-structure`);
     };
     addStructure("structure-inventory-single", "link-sku-inventory-single", [["erp-sku-board-1", 2]]);
     addStructure("structure-inventory-combo", "link-sku-inventory-combo", [["erp-sku-board-1", 2], ["erp-sku-inventory-component", 3]]);

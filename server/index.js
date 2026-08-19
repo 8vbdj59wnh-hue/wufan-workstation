@@ -37,12 +37,6 @@ import {
   createProductsFromErpSkus,
   commitErpV2Import,
   createErpSyncRun,
-  generateErpFactSnapshot,
-  getCapitalOccupationProducts,
-  getDataCenterProductDetail,
-  getDataCenterSummary,
-  getSlowMovingProducts,
-  getTrendProducts,
   hasWangdianConfig,
   listErpSyncRuns,
   listWangdianGoodsSyncLogs,
@@ -1396,7 +1390,7 @@ app.get("/api/bootstrap", (request, response) => {
       "task-list": ["goals"],
       scheduleBoard: ["goals", "tasks", "taskTemplates", "processTemplates", "processTemplateNodes", "processInstances", "workPlans", "contentSchedules", "actionProducts"],
       financeCenter: [],
-      dataCenter: [],
+      adminDataCenter: [],
     };
     if (!(moduleName in moduleResources)) { response.status(400).json({ success: false, message: "该模块尚未接入轻量启动。" }); return; }
     const common = ["tasks", "task-list"].includes(moduleName) ? taskCommon : defaultCommon;
@@ -2063,12 +2057,7 @@ app.post("/api/products/erp-sync-runs/:id/recalculate-status", requirePermission
 });
 
 app.post("/api/products/erp-sync-runs/:id/generate-snapshot", requirePermission("products.create"), (request, response) => {
-  try {
-    const result = generateErpFactSnapshot(request.params.id);
-    response.json({ success: true, ...result, syncRun: readErpSyncRun(request.params.id) });
-  } catch (error) {
-    response.status(400).json({ success: false, message: error.message || "ERP历史快照生成失败。" });
-  }
+  response.status(410).json({ success: false, code: "legacy_snapshot_retired", message: "旧经营快照生成已停止；产品经营统一读取销售日报、Sales Object和库存事实。", migratedTo: "/api/product-management/business-dashboard" });
 });
 
 app.get("/api/products/erp-snapshots", requirePermission("products.view"), (request, response) => {
@@ -2101,14 +2090,6 @@ app.get("/api/products/:id/snapshots", requirePermission("products.view"), (requ
     response.json({ success: true, productId: request.params.id, snapshots: listProductFactSnapshots(request.params.id) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "产品历史快照读取失败。" });
-  }
-});
-
-app.get("/api/data-center/summary", requirePermission("dataCenter.view"), (_request, response) => {
-  try {
-    response.json({ success: true, summary: getDataCenterSummary() });
-  } catch (error) {
-    response.status(400).json({ success: false, message: error.message || "数据中心概览读取失败。" });
   }
 });
 
@@ -2145,7 +2126,7 @@ app.get("/api/data-asset-map/graphs/:id", requirePermission("settings.viewDataAs
   response.json(payload);
 });
 
-app.get("/api/data-sync-center", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+app.get("/api/data-sync-center", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
   try {
     response.json({ success: true, ...getDataSyncCenterOverview(request.query ?? {}) });
   } catch (error) {
@@ -2153,7 +2134,7 @@ app.get("/api/data-sync-center", requirePermission("dataCenter.view"), requireAd
   }
 });
 
-app.post("/api/data-sync-center/tasks/:id/status", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+app.post("/api/data-sync-center/tasks/:id/status", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
   try {
     response.json({ success: true, task: setDataSyncTaskStatus(request.params.id, String(request.body?.status ?? "")) });
   } catch (error) {
@@ -2161,7 +2142,7 @@ app.post("/api/data-sync-center/tasks/:id/status", requirePermission("dataCenter
   }
 });
 
-app.post("/api/data-sync-center/tasks/:id/run", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+app.post("/api/data-sync-center/tasks/:id/run", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
   try {
     response.status(201).json({ success: true, batch: createManualDataSyncBatch(request.params.id, {
       syncMode: request.body?.syncMode,
@@ -2174,7 +2155,7 @@ app.post("/api/data-sync-center/tasks/:id/run", requirePermission("dataCenter.vi
   }
 });
 
-app.post("/api/data-sync-center/tasks/:id/erp-goods/preview", requirePermission("dataCenter.view"), requireAdminUser, async (request, response) => {
+app.post("/api/data-sync-center/tasks/:id/erp-goods/preview", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, async (request, response) => {
   try {
     const result = await previewErpGoodsDataSync({
       taskId: request.params.id,
@@ -2190,7 +2171,7 @@ app.post("/api/data-sync-center/tasks/:id/erp-goods/preview", requirePermission(
   }
 });
 
-app.post("/api/data-sync-center/batches/:id/erp-goods/commit", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+app.post("/api/data-sync-center/batches/:id/erp-goods/commit", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
   try {
     response.json({ success: true, ...commitErpGoodsDataSync(request.params.id) });
   } catch (error) {
@@ -2198,7 +2179,7 @@ app.post("/api/data-sync-center/batches/:id/erp-goods/commit", requirePermission
   }
 });
 
-app.get("/api/data-sync-center/batches/:id/erp-goods/preview", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+app.get("/api/data-sync-center/batches/:id/erp-goods/preview", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
   try {
     response.json({ success: true, ...readErpGoodsDataSyncPreview(request.params.id) });
   } catch (error) {
@@ -2206,7 +2187,7 @@ app.get("/api/data-sync-center/batches/:id/erp-goods/preview", requirePermission
   }
 });
 
-app.post("/api/data-sync-center/shop-mappings", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+app.post("/api/data-sync-center/shop-mappings", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
   try {
     response.json({ success: true, mapping: saveWangdianShopMapping(request.body, getUserPersonId(request.user)) });
   } catch (error) {
@@ -2214,7 +2195,7 @@ app.post("/api/data-sync-center/shop-mappings", requirePermission("dataCenter.vi
   }
 });
 
-app.post("/api/data-sync-center/shop-mappings/discover", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+app.post("/api/data-sync-center/shop-mappings/discover", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
   try {
     const batch = createWangdianShopDiscoveryBatch({ startTime: request.body?.startTime, endTime: request.body?.endTime, shopId: request.body?.shopId, createdBy: getUserPersonId(request.user) });
     queueWangdianShopDiscoveryBatch(batch.id);
@@ -2224,7 +2205,7 @@ app.post("/api/data-sync-center/shop-mappings/discover", requirePermission("data
   }
 });
 
-app.get("/api/data-sync-center/shop-discovery-batches/:id", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+app.get("/api/data-sync-center/shop-discovery-batches/:id", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
   try {
     response.json({ success: true, batch: readWangdianShopDiscoveryBatch(request.params.id) });
   } catch (error) {
@@ -2232,7 +2213,7 @@ app.get("/api/data-sync-center/shop-discovery-batches/:id", requirePermission("d
   }
 });
 
-app.post("/api/data-sync-center/shop-discovery-batches/:id/resume", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+app.post("/api/data-sync-center/shop-discovery-batches/:id/resume", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
   try {
     response.json({ success: true, batch: resumeWangdianShopDiscoveryBatch(request.params.id) });
   } catch (error) {
@@ -2240,7 +2221,7 @@ app.post("/api/data-sync-center/shop-discovery-batches/:id/resume", requirePermi
   }
 });
 
-app.post("/api/data-sync-center/tasks/:id/platform-goods/preview", requirePermission("dataCenter.view"), requireAdminUser, async (request, response) => {
+app.post("/api/data-sync-center/tasks/:id/platform-goods/preview", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, async (request, response) => {
   try {
     const result = await previewPlatformGoodsDataSync({ taskId: request.params.id, resumeBatchId: request.body?.resumeBatchId, syncMode: request.body?.syncMode, requestStart: request.body?.requestStart, requestEnd: request.body?.requestEnd, scope: request.body?.scope, createdBy: getUserPersonId(request.user) });
     response.status(201).json({ success: true, ...result });
@@ -2249,7 +2230,7 @@ app.post("/api/data-sync-center/tasks/:id/platform-goods/preview", requirePermis
   }
 });
 
-app.get("/api/data-sync-center/batches/:id/platform-goods/preview", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+app.get("/api/data-sync-center/batches/:id/platform-goods/preview", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
   try {
     response.json({ success: true, ...readPlatformGoodsDataSyncPreview(request.params.id) });
   } catch (error) {
@@ -2257,7 +2238,7 @@ app.get("/api/data-sync-center/batches/:id/platform-goods/preview", requirePermi
   }
 });
 
-app.post("/api/data-sync-center/batches/:id/platform-goods/commit", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+app.post("/api/data-sync-center/batches/:id/platform-goods/commit", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
   try {
     response.json({ success: true, ...commitPlatformGoodsDataSync(request.params.id) });
   } catch (error) {
@@ -2265,7 +2246,7 @@ app.post("/api/data-sync-center/batches/:id/platform-goods/commit", requirePermi
   }
 });
 
-app.post("/api/data-sync-center/tasks/:id/inventory/preview", requirePermission("dataCenter.view"), requireAdminUser, async (request, response) => {
+app.post("/api/data-sync-center/tasks/:id/inventory/preview", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, async (request, response) => {
   try {
     const result = await previewInventoryDataSync({ taskId: request.params.id, resumeBatchId: request.body?.resumeBatchId, syncMode: request.body?.syncMode, requestStart: request.body?.requestStart, requestEnd: request.body?.requestEnd, businessDate: request.body?.businessDate, scope: request.body?.scope, createdBy: getUserPersonId(request.user) });
     response.status(201).json({ success: true, ...result });
@@ -2274,7 +2255,7 @@ app.post("/api/data-sync-center/tasks/:id/inventory/preview", requirePermission(
   }
 });
 
-app.get("/api/data-sync-center/batches/:id/inventory/preview", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+app.get("/api/data-sync-center/batches/:id/inventory/preview", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
   try {
     response.json({ success: true, ...readInventoryDataSyncPreview(request.params.id) });
   } catch (error) {
@@ -2282,7 +2263,7 @@ app.get("/api/data-sync-center/batches/:id/inventory/preview", requirePermission
   }
 });
 
-app.post("/api/data-sync-center/batches/:id/inventory/commit", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+app.post("/api/data-sync-center/batches/:id/inventory/commit", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
   try {
     response.json({ success: true, ...commitInventoryDataSync(request.params.id) });
   } catch (error) {
@@ -2290,7 +2271,7 @@ app.post("/api/data-sync-center/batches/:id/inventory/commit", requirePermission
   }
 });
 
-app.post("/api/data-sync-center/tasks/:id/sales-facts/preview", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+app.post("/api/data-sync-center/tasks/:id/sales-facts/preview", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
   uploadConnectionWorkbook.single("file")(request, response, (error) => {
     if (error) { response.status(400).json({ success: false, message: error.message || "真实销售文件上传失败。" }); return; }
     try {
@@ -2300,17 +2281,17 @@ app.post("/api/data-sync-center/tasks/:id/sales-facts/preview", requirePermissio
   });
 });
 
-app.get("/api/data-sync-center/batches/:id/sales-facts/preview", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+app.get("/api/data-sync-center/batches/:id/sales-facts/preview", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
   try { response.json({ success: true, ...readSalesFactDataSyncPreview(request.params.id) }); }
   catch (error) { response.status(404).json({ success: false, message: error.message || "真实销售导入预览读取失败。" }); }
 });
 
-app.post("/api/data-sync-center/batches/:id/sales-facts/commit", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+app.post("/api/data-sync-center/batches/:id/sales-facts/commit", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
   try { response.json({ success: true, ...commitSalesFactDataSync(request.params.id) }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "真实销售导入提交失败。" }); }
 });
 
-app.post("/api/data-sync-center/tasks/:id/platform-goods-excel/preview", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+app.post("/api/data-sync-center/tasks/:id/platform-goods-excel/preview", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
   uploadConnectionWorkbook.single("file")(request, response, (error) => {
     if (error) { response.status(400).json({ success: false, message: error.message || "平台货品Excel上传失败。" }); return; }
     try {
@@ -2325,17 +2306,17 @@ app.post("/api/data-sync-center/tasks/:id/platform-goods-excel/preview", require
   });
 });
 
-app.get("/api/data-sync-center/batches/:id/platform-goods-excel/preview", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+app.get("/api/data-sync-center/batches/:id/platform-goods-excel/preview", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
   try { response.json({ success: true, ...readPlatformGoodsExcelDataSyncPreview(request.params.id) }); }
   catch (error) { response.status(404).json({ success: false, message: error.message || "平台货品Excel预览读取失败。" }); }
 });
 
-app.post("/api/data-sync-center/batches/:id/platform-goods-excel/commit", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+app.post("/api/data-sync-center/batches/:id/platform-goods-excel/commit", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
   try { response.json({ success: true, ...commitPlatformGoodsExcelDataSync(request.params.id) }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "平台货品Excel关系提交失败。" }); }
 });
 
-app.post("/api/data-sync-center/exceptions/:id/resolve", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+app.post("/api/data-sync-center/exceptions/:id/resolve", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
   try {
     response.json({ success: true, exception: resolveDataSyncException(request.params.id, { note: request.body?.note, resolvedBy: getUserPersonId(request.user) }) });
   } catch (error) {
@@ -2343,7 +2324,7 @@ app.post("/api/data-sync-center/exceptions/:id/resolve", requirePermission("data
   }
 });
 
-app.get("/api/operation-dashboard", requirePermission("dataCenter.view"), (_request, response) => {
+app.get("/api/operation-dashboard", requirePermission("operations.view"), (_request, response) => {
   try {
     response.json({ success: true, dashboard: getOperationDashboard() });
   } catch (error) {
@@ -2351,12 +2332,12 @@ app.get("/api/operation-dashboard", requirePermission("dataCenter.view"), (_requ
   }
 });
 
-app.get("/api/sales-business-dashboard", requirePermission("dataCenter.view"), (request, response) => {
+app.get("/api/sales-business-dashboard", requirePermission("operations.view"), (request, response) => {
   try { response.json({ success: true, dashboard: getSalesBusinessDashboard(request.query) }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "销售经营驾驶舱读取失败。" }); }
 });
 
-app.get("/api/business-anomalies", requirePermission("dataCenter.view"), (request, response) => {
+app.get("/api/business-anomalies", requirePermission("operations.view"), (request, response) => {
   try { response.json({ success: true, anomalies: queryBusinessAnomalies(request.query) }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "经营异常读取失败。" }); }
 });
@@ -2501,7 +2482,7 @@ app.post("/api/customer-center/customers/:id/tags", requireCustomerMaintain, (re
 app.post("/api/customer-center/customers/:id/followups", requireCustomerMaintain, (request,response)=>{try{assertCustomerAccess(request.user,request.params.id);response.status(201).json({success:true,item:addFollowup(request.params.id,request.body,request.user.id)});}catch(error){response.status(400).json({success:false,message:error.message||"跟进记录保存失败。"});}});
 
 function aiEnterpriseKnowledge(){const db=getDatabase();const safe=(sql)=>{try{return db.prepare(sql).all();}catch{return[];}};return{actionStandards:safe("SELECT id,name FROM task_templates WHERE status='active' AND defaultProcessTemplateId IS NOT NULL ORDER BY updatedAt DESC LIMIT 30"),effectiveImprovements:[...safe("SELECT id,title,resultSummary,'connection' AS objectType FROM connection_improvements WHERE status='effective' ORDER BY updatedAt DESC LIMIT 15"),...safe("SELECT id,title,resultSummary,'product' AS objectType FROM product_improvements WHERE status='effective' ORDER BY updatedAt DESC LIMIT 15")]};}
-function aiEvidence(request){const type=String(request.body?.analysisType||"");let evidence;if(type==="company"){if(!hasPermission(request.user,"dataCenter.view"))throw new Error("没有经营驾驶舱权限。");evidence=getOperationDashboard();}else if(type==="product"){if(!hasPermission(request.user,"products.view"))throw new Error("没有产品数据权限。");const scoped=filterDataByScope(readAllData({exclude:["salesLinks","salesLinkSkus"]}),request.user);if(!scoped.products?.some(item=>item.id===request.body?.objectId))throw new Error("无权分析该产品。");evidence=getProductBusinessAnalysis(request.body.objectId);}else if(type==="connection"){if(!hasPermission(request.user,"links.view")&&!hasPermission(request.user,"products.view"))throw new Error("没有连接数据权限。");evidence=getConnectionGrowthAnalysis(request.body.objectId);}else if(type==="finance"){if(!hasPermission(request.user,"finance.view"))throw new Error("没有财务数据权限。");evidence=getFinanceStatement(request.body||{});}else if(type==="supply"){if(!hasPermission(request.user,"supplyChain.view")&&!hasPermission(request.user,"products.view"))throw new Error("没有供应链数据权限。");evidence=getSupplyChainOverview();}else if(type==="customer"){if(!hasPermission(request.user,"customers.view"))throw new Error("没有客户数据权限。");evidence=getCustomerOverview(customerScope(request.user));}else throw new Error("分析类型无效。");return{...evidence,knowledge:aiEnterpriseKnowledge()};}
+function aiEvidence(request){const type=String(request.body?.analysisType||"");let evidence;if(type==="company"){if(!hasPermission(request.user,"operations.view"))throw new Error("没有经营驾驶舱权限。");evidence=getOperationDashboard();}else if(type==="product"){if(!hasPermission(request.user,"products.view"))throw new Error("没有产品数据权限。");const scoped=filterDataByScope(readAllData({exclude:["salesLinks","salesLinkSkus"]}),request.user);const visibleProductIds=(scoped.products??[]).map(item=>item.id);if(!visibleProductIds.includes(request.body?.objectId))throw new Error("无权分析该产品。");evidence=getProductBusinessAnalysis(request.body.objectId,{includeInventoryCost:hasPermission(request.user,"finance.view"),visibleProductIds});}else if(type==="connection"){if(!hasPermission(request.user,"links.view")&&!hasPermission(request.user,"products.view"))throw new Error("没有连接数据权限。");evidence=getConnectionGrowthAnalysis(request.body.objectId);}else if(type==="finance"){if(!hasPermission(request.user,"finance.view"))throw new Error("没有财务数据权限。");evidence=getFinanceStatement(request.body||{});}else if(type==="supply"){if(!hasPermission(request.user,"supplyChain.view")&&!hasPermission(request.user,"products.view"))throw new Error("没有供应链数据权限。");evidence=getSupplyChainOverview();}else if(type==="customer"){if(!hasPermission(request.user,"customers.view"))throw new Error("没有客户数据权限。");evidence=getCustomerOverview(customerScope(request.user));}else throw new Error("分析类型无效。");return{...evidence,knowledge:aiEnterpriseKnowledge()};}
 app.get("/api/ai-operation/analyses",requireAiView,(request,response)=>{try{response.json({success:true,items:listAnalyses(request.user.id,getDataScope(request.user)==="all")});}catch(error){response.status(400).json({success:false,message:error.message||"分析记录读取失败。"});}});
 app.get("/api/ai-operation/analyses/:id",requireAiView,(request,response)=>{try{const item=readAnalysis(request.params.id);if(getDataScope(request.user)!=="all"&&item.generatedBy!==request.user.id)return response.status(403).json({success:false,message:"无权查看该分析。"});response.json({success:true,item});}catch(error){response.status(404).json({success:false,message:error.message||"分析不存在。"});}});
 app.post("/api/ai-operation/analyses",requireAiAnalyze,(request,response)=>{try{response.status(201).json({success:true,item:createAnalysis(request.body,request.user.id,aiEvidence(request))});}catch(error){response.status(400).json({success:false,message:error.message||"经营分析失败。"});}});
@@ -2569,7 +2550,7 @@ app.get("/api/product-management/business-dashboard", requirePermission("product
 });
 
 app.get("/api/product-management/products/:id", requirePermission("products.view"), (request, response) => {
-  try { response.json({ success: true, detail: getProductV2Detail(request.params.id), lifecycleStatuses: productLifecycleStatuses }); }
+  try { const scoped=filterDataByScope(readAllData({exclude:["salesLinks","salesLinkSkus"]}),request.user); response.json({ success: true, detail: getProductV2Detail(request.params.id,{includeInventoryCost:hasPermission(request.user,"finance.view"),visibleProductIds:(scoped.products??[]).map((product)=>product.id)}), lifecycleStatuses: productLifecycleStatuses }); }
   catch (error) { response.status(404).json({ success: false, message: error.message || "产品经营详情读取失败。" }); }
 });
 
@@ -2630,7 +2611,7 @@ app.post("/api/product-management/products/:id/lifecycle", requirePermission("pr
 });
 
 app.post("/api/product-management/products/:id/evaluate", requirePermission("products.edit"), (request, response) => {
-  try { response.json({ success: true, healthRecord: evaluateProductHealth(request.params.id) }); }
+  try { const scoped=filterDataByScope(readAllData({exclude:["salesLinks","salesLinkSkus"]}),request.user); response.json({ success: true, healthRecord: evaluateProductHealth(request.params.id,{includeInventoryCost:false,visibleProductIds:(scoped.products??[]).map((product)=>product.id)}) }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "产品经营评价失败。" }); }
 });
 
@@ -2705,43 +2686,6 @@ app.put("/api/product-management/products/:id/strategy/next-steps/:itemId", requ
 app.post("/api/product-management/products/:id/strategy/next-steps/:itemId/action", requirePermission("products.edit"), (request, response) => {
   try { requireScopedProduct(request, request.params.id); response.status(201).json({ success: true, ...createProductStrategyAction(request.params.id, request.params.itemId, request.body, request.user.id) }); }
   catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "战略关键行动创建失败。" }); }
-});
-
-app.get("/api/data-center/trends", requirePermission("dataCenter.view"), (request, response) => {
-  try {
-    response.json({ success: true, ...getTrendProducts(request.query) });
-  } catch (error) {
-    response.status(400).json({ success: false, message: error.message || "产品趋势读取失败。" });
-  }
-});
-
-app.get("/api/data-center/slow-moving", requirePermission("dataCenter.view"), (request, response) => {
-  try {
-    response.json({ success: true, ...getSlowMovingProducts(request.query) });
-  } catch (error) {
-    response.status(400).json({ success: false, message: error.message || "长期滞销分析读取失败。" });
-  }
-});
-
-app.get("/api/data-center/capital-occupation", requirePermission("dataCenter.view"), (request, response) => {
-  try {
-    response.json({ success: true, ...getCapitalOccupationProducts(request.query) });
-  } catch (error) {
-    response.status(400).json({ success: false, message: error.message || "资金占用分析读取失败。" });
-  }
-});
-
-app.get("/api/data-center/products/:productId", requirePermission("dataCenter.view"), (request, response) => {
-  try {
-    const detail = getDataCenterProductDetail(request.params.productId, String(request.query.source ?? "trends"));
-    if (!detail) {
-      response.status(404).json({ success: false, message: "该产品没有正式历史快照。" });
-      return;
-    }
-    response.json({ success: true, detail });
-  } catch (error) {
-    response.status(400).json({ success: false, message: error.message || "产品分析详情读取失败。" });
-  }
 });
 
 app.get("/api/connections", requireLinkView, (request, response) => {

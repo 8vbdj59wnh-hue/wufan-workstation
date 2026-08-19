@@ -285,6 +285,12 @@ function canCurrentUser(permissionPath) {
   return hasPermission(getCurrentUser(), permissionPath);
 }
 
+function canManageAdminDataCenter() {
+  const user = getCurrentUser();
+  return (["admin", "system_admin"].includes(user?.role) || user?.authRole === "admin")
+    && canCurrentUser("settings.manageAdminDataCenter");
+}
+
 function getPersonPermissions(person) {
   return normalizePermissions(person?.permissions, person?.authRole ?? "user");
 }
@@ -3769,6 +3775,10 @@ export function bindSettingsPageEvents(rerender) {
   }
 }
 
+function renderAdminDataCenterSection() {
+  return `<section class="settings-section" id="admin-data-center"><div class="section-heading with-actions"><div><h2>管理员数据中心</h2><p>统一管理ERP货品、库存、平台货品同步任务以及批次和技术异常。</p></div><a class="primary-button" href="#settings/admin-data-center">进入管理员数据中心</a></div><div class="form-note">经营驾驶舱权限与管理员同步权限已经分离；此入口不承载产品经营分析。</div></section>`;
+}
+
 function getSettingsSubmodules() {
   return [
     {
@@ -3833,6 +3843,15 @@ function getSettingsSubmodules() {
       description: "查看数据来源、业务对象、关系链与唯一真相源。",
       canView: () => canCurrentUser("settings.viewDataAssetMap"),
       render: renderDataAssetMap,
+    },
+    {
+      id: "admin-data-center",
+      title: "管理员数据中心",
+      group: "数据管理",
+      icon: "数",
+      description: "管理外部数据同步任务、执行批次与技术异常。",
+      canView: canManageAdminDataCenter,
+      render: renderAdminDataCenterSection,
     },
     {
       id: "form-design",

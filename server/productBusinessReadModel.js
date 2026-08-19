@@ -1,6 +1,6 @@
 import { getDatabase } from "./db.js";
 import { readProductInventorySupplyMap } from "./inventorySupplyQueryService.js";
-import { classifyProductBusinessZones } from "./productManagementV2Service.js";
+import { classifyProductBusinessZones } from "./productBusinessClassification.js";
 import { FORMAL_SALES_OBJECT_RESOLVER_SCOPES, resolveLinkSkuRelationsForRead } from "./capabilities/resolveLinkSkuRelationRead.js";
 
 export const productBusinessLifecycleStatuses = Object.freeze(["新品", "成长", "爆款", "稳定销售", "衰退", "清仓", "归档"]);
@@ -81,20 +81,21 @@ export function readProductBusinessRelationContext(database) {
   return { attributionsBySku, linksByProduct, resolvedLinkSkuCount: attributionsBySku.size };
 }
 
-export function salesMetrics(database, periodStart, periodEnd, relationContext) {
+export function salesMetrics(database, periodStart, periodEnd) {
   const rows = database.prepare(`
-    SELECT f.id,f.salesLinkSkuId,f.salesAmount,f.shippedQuantity,f.profitAmount
-    FROM connection_sku_sales_facts f
-    WHERE f.periodStart>=? AND f.periodEnd<=?
+    SELECT f.id,m.productId,f.salesAmount,f.quantity,f.profitAmount
+    FROM connection_sku_sales_daily_facts f
+    JOIN product_erp_mappings m ON m.erpSkuId=f.erpSkuId AND m.currentState='active'
+    WHERE f.saleDate>=? AND f.saleDate<=?
   `).all(periodStart, periodEnd);
   const result = new Map();
-  for (const fact of rows) for (const attribution of relationContext.attributionsBySku.get(fact.salesLinkSkuId) ?? []) {
-    const metric = result.get(attribution.productId) ?? { productId: attribution.productId, factCount: 0, salesAmount: 0, salesQuantity: 0, grossProfit: 0, salesAmountFactCount: 0, salesQuantityFactCount: 0, profitFactCount: 0 };
+  for (const fact of rows) {
+    const metric = result.get(fact.productId) ?? { productId: fact.productId, factCount: 0, salesAmount: 0, salesQuantity: 0, grossProfit: 0, salesAmountFactCount: 0, salesQuantityFactCount: 0, profitFactCount: 0 };
     metric.factCount += 1;
-    if (fact.salesAmount !== null) { metric.salesAmount += Number(fact.salesAmount) * attribution.share; metric.salesAmountFactCount += 1; }
-    if (fact.shippedQuantity !== null) { metric.salesQuantity += Number(fact.shippedQuantity) * attribution.share; metric.salesQuantityFactCount += 1; }
-    if (fact.profitAmount !== null) { metric.grossProfit += Number(fact.profitAmount) * attribution.share; metric.profitFactCount += 1; }
-    result.set(attribution.productId, metric);
+    if (fact.salesAmount !== null) { metric.salesAmount += Number(fact.salesAmount); metric.salesAmountFactCount += 1; }
+    if (fact.quantity !== null) { metric.salesQuantity += Number(fact.quantity); metric.salesQuantityFactCount += 1; }
+    if (fact.profitAmount !== null) { metric.grossProfit += Number(fact.profitAmount); metric.profitFactCount += 1; }
+    result.set(fact.productId, metric);
   }
   return result;
 }
@@ -309,7 +310,7 @@ function compareNullable(left, right, direction, collator) {
   return direction === "asc" ? comparison : -comparison;
 }
 
-export function getProductBusinessReadModel(query = {}, { includeInventoryCost = false, visibleProductIds = null } = {}) {
+export function getProductBusinessReadModel(query = {}, { includeInventoryCost = false, visibleProductIds = null, unpaged = false } = {}) {
   const database = getDatabase();
   const period = resolveProductBusinessPeriod(query);
   const products = database.prepare(`SELECT p.*,owner.name ownerName FROM products p LEFT JOIN persons owner ON owner.id=p.ownerId ORDER BY p.updatedAt DESC,p.id`).all();
@@ -317,9 +318,9 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
   const scopedProducts = visible ? products.filter((product) => visible.has(product.id)) : products;
   const productIds = scopedProducts.map((product) => product.id);
   const relationContext = readProductBusinessRelationContext(database);
-  const currentSales = salesMetrics(database, period.periodStart, period.periodEnd, relationContext);
-  const previousSales = salesMetrics(database, period.previousPeriodStart, period.previousPeriodEnd, relationContext);
-  const earlierSales = salesMetrics(database, period.earlierPeriodStart, period.earlierPeriodEnd, relationContext);
+  const currentSales = salesMetrics(database, period.periodStart, period.periodEnd);
+  const previousSales = salesMetrics(database, period.previousPeriodStart, period.previousPeriodEnd);
+  const earlierSales = salesMetrics(database, period.earlierPeriodStart, period.earlierPeriodEnd);
   const structures = structureMetrics(database, relationContext);
   const linkPerformance = linkPerformanceMetrics(database, period.periodStart, period.periodEnd, relationContext);
   const health = latestHealth(database);
@@ -344,7 +345,10 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
       image: product.mainImage, brand: product.brand || null, category: product.category || null, ownerId: product.ownerId || null,
       ownerName: product.ownerName || "未分配", status: product.status, lifecycle: null,
       sales: { amount: salesAmount, quantity: salesQuantity, previousAmount: prior?.salesAmountFactCount ? numeric(prior.salesAmount) : null,
-        earlierAmount: earlier?.salesAmountFactCount ? numeric(earlier.salesAmount) : null, contribution: null, trend, factCount: Number(current?.factCount || 0) },
+        earlierAmount: earlier?.salesAmountFactCount ? numeric(earlier.salesAmount) : null,
+        previousQuantity: prior?.salesQuantityFactCount ? numeric(prior.salesQuantity) : null,
+        earlierQuantity: earlier?.salesQuantityFactCount ? numeric(earlier.salesQuantity) : null,
+        contribution: null, trend, factCount: Number(current?.factCount || 0) },
       structure: { skuCount: structure.skuCount, salesLinkCount: structures.links.get(product.id) ?? 0 },
       inventory: { quantity: numeric(inventorySummary?.stockNum), availableQuantity: numeric(inventorySummary?.availableSendStock), amount: includeInventoryCost ? numeric(inventorySummary?.inventoryCostAmount) : null,
         coverageDays: numeric(inventorySummary?.stockDays), stockRisk: inventorySummary?.stockRisk ?? "no_data", status: stockStatus, businessDate: inventorySummary?.businessDate ?? null },
@@ -406,8 +410,8 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
   items.sort((left, right) => compareNullable(sortFields[sortBy](left), sortFields[sortBy](right), sortDirection, collator) || collator.compare(left.sku, right.sku));
 
   const page = normalizePage(query.page, 1);
-  const pageSize = Math.min(100, normalizePage(query.pageSize, 30));
   const total = items.length;
+  const pageSize = unpaged ? Math.max(1, total) : Math.min(100, normalizePage(query.pageSize, 30));
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const currentPage = Math.min(page, pages);
   const pageItems = items.slice((currentPage - 1) * pageSize, currentPage * pageSize);
@@ -422,7 +426,7 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
       healthStatuses: productBusinessHealthStatuses, inventoryStatuses: productBusinessInventoryStatuses,
       owners: [...new Map(scopedProducts.filter((item) => item.ownerId).map((item) => [item.ownerId, { id: item.ownerId, name: item.ownerName || "未分配" }])).values()].sort((left, right) => collator.compare(left.name, right.name)) },
     sort: { sortBy, sortDirection },
-    definitions: { sales: "connection_sku_sales_facts", inventory: "现有库存供应查询", health: "ProductBusinessReadModel 规则分析", actions: "product_improvements + action_products + tasks", readOnly: true },
+    definitions: { sales: "connection_sku_sales_daily_facts", inventory: "现有库存供应查询", health: "ProductBusinessReadModel 规则分析", actions: "product_improvements + action_products + tasks", readOnly: true },
   };
 }
 

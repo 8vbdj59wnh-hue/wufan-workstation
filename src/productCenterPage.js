@@ -7,7 +7,6 @@ import {
   commitProductImport,
   commitProductV2Import,
   createErpSyncRun,
-  generateErpSyncSnapshot,
   bindPlatformSku,
   getNow,
   loadProductSalesLinks,
@@ -288,7 +287,7 @@ function formatMetric(value) {
 
 function formatMoney(value) { return value === null || value === undefined ? "—" : `¥${Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 2 })}`; }
 function formatPercent(value) { return value === null || value === undefined ? "—" : `${(Number(value) * 100).toFixed(1)}%`; }
-function healthLabel(status) { return ({ growth: "成长", stable: "稳定", attention: "关注", risk: "风险", no_data: "数据不足" })[status] || status || "数据不足"; }
+function healthLabel(status) { return ({ growth: "成长", stable: "稳定", healthy: "健康", attention: "关注", risk: "风险", no_data: "数据不足" })[status] || status || "数据不足"; }
 
 function renderProductManagementOverview() {
   const overview = productManagementState.overview;
@@ -1064,8 +1063,8 @@ function renderProductBusinessTab(product) {
   const analysis = detail.analysis; const latestHealth = detail.healthRecords?.[0];
   return `<div class="product-business-analysis"><div class="product-business-metrics">
     <article><span>近30天销量</span><strong>${formatMetric(analysis.sales.sales30d)}</strong><small>增长 ${formatPercent(analysis.sales.growth)}</small></article>
-    <article><span>产品收入</span><strong>${formatMoney(analysis.finance.revenue)}</strong><small>近30天</small></article>
-    <article><span>净利润</span><strong>${formatMoney(analysis.finance.netProfit)}</strong><small>利润率 ${formatPercent(analysis.finance.profitMargin)}</small></article>
+    <article><span>销售额</span><strong>${formatMoney(analysis.finance.revenue)}</strong><small>来自销售日报事实</small></article>
+    <article><span>毛利润</span><strong>${formatMoney(analysis.finance.grossProfit)}</strong><small>毛利率 ${formatPercent(analysis.finance.profitMargin)}</small></article>
     <article><span>实际库存</span><strong>${formatMetric(analysis.inventory.actualStock)}</strong><small>${escapeHtml(analysis.inventory.risk)}</small></article>
     <article><span>库存周转</span><strong>${formatPercent(analysis.inventory.turnover)}</strong><small>库存效率</small></article>
     <article><span>健康状态</span><strong>${escapeHtml(detail.healthAnalysis?.overall?.label || healthLabel(latestHealth?.healthStatus))}</strong><small>详细原因请查看“产品健康分析”</small></article>
@@ -1596,28 +1595,12 @@ function renderErpSyncDashboard() {
           ? `<p class="form-error">三张表已完成，但缺失记录对账失败：${escapeHtml(run.reconciliationError || "未知错误")}</p>
             <button class="secondary-button" type="button" data-action="retry-erp-reconciliation">重新执行对账</button>`
           : `<p class="form-note">系统正在对账当日未出现的ERP事实，对账完成后生成快照。</p>`}
-      ${run.reconciliationStatus === "completed" && run.syncType === "master_data" ? `
+      ${run.reconciliationStatus === "completed" ? `
       <div>
-        <span>历史快照</span>
-        <strong>不生成</strong>
+        <span>经营事实</span>
+        <strong>已切换新数据链</strong>
       </div>
-      <p class="form-note">主数据同步只维护ERP货品与SKU事实；历史经营快照由经营数据同步生成。</p>` : run.reconciliationStatus === "completed" ? `
-      <div>
-        <span>历史快照</span>
-        <strong>${run.snapshotStatus === "completed" ? "已生成" : run.snapshotStatus === "failed" ? "生成失败" : "生成中"}</strong>
-      </div>
-      ${run.snapshotStatus === "completed"
-        ? `<div class="erp-sync-snapshot-summary">
-            <span>快照版本：V${run.version}</span>
-            <span>产品：${run.snapshot?.productCount ?? "—"}</span>
-            <span>ERP规格：${run.snapshot?.inventoryRowCount ?? "—"}</span>
-            <span>链接：${run.snapshot?.salesLinkCount ?? "—"}</span>
-            <span>平台SKU：${run.snapshot?.platformSkuCount ?? "—"}</span>
-          </div>`
-        : run.snapshotStatus === "failed"
-          ? `<p class="form-error">三张表已导入完成，但历史快照生成失败：${escapeHtml(run.snapshotError || "未知错误")}</p>
-            <button class="secondary-button" type="button" data-action="retry-erp-snapshot">重新生成快照</button>`
-          : `<p class="form-note">缺失记录对账已完成，系统正在生成历史事实快照。</p>`}` : ""}
+      <p class="form-note">产品经营统一读取销售日报、Sales Object与库存事实，不再生成旧经营快照。</p>` : ""}
     </section>` : ""}
     ${(run.errorSummary ?? []).length ? `<div class="form-error">${(run.errorSummary ?? []).map((item) =>
       `${escapeHtml(item.importType)}：${escapeHtml(item.reason)}`).join("<br>")}</div>` : ""}
@@ -2648,7 +2631,7 @@ export function bindProductCenterPageEvents(rerender) {
       catch(error){productManagementState={...productManagementState,error:error.message||"产品经营体检失败。"};rerender();}
     }
     if (action === "new-product") { modalState = { kind: "create", error: "" }; rerender(); }
-    if (action === "open-product-analysis") { window.location.hash = "dataCenter"; }
+    if (action === "open-product-analysis") { productSubmodule = "business-dashboard"; window.location.hash = "products"; }
     if (action === "open-product-import") {
       importState = { version: "v2", step: "upload", importType: "goods_info", loading: false, error: "" };
       rerender();
@@ -2710,17 +2693,6 @@ export function bindProductCenterPageEvents(rerender) {
       const syncRunId = importState.syncRun?.id || importState.result?.syncRun?.id || importState.batch?.syncRunId;
       await refreshErpSyncState(syncRunId);
       importState = { version: "v2", step: "sync", loading: false, error: "" };
-      rerender();
-    }
-    if (action === "retry-erp-snapshot") {
-      erpSyncState = { ...erpSyncState, loading: true, error: "" };
-      rerender();
-      try {
-        const result = await generateErpSyncSnapshot(erpSyncState.active.id);
-        erpSyncState = { ...erpSyncState, loading: false, active: result.syncRun, error: "" };
-      } catch (error) {
-        erpSyncState = { ...erpSyncState, loading: false, error: error.message || "ERP历史快照生成失败。" };
-      }
       rerender();
     }
     if (action === "retry-erp-reconciliation") {

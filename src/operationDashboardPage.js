@@ -46,7 +46,7 @@ function ranking(items, kind, emptyText) {
 }
 
 function trendBars(points) {
-  if (!points?.length) return `<div class="empty-state compact">经营快照尚未积累</div>`;
+  if (!points?.length) return `<div class="empty-state compact">经营事实尚未积累</div>`;
   const values = points.map((item) => Number(item.sales30d || 0));
   const max = Math.max(...values, 1);
   return `<div class="operation-trend-bars" aria-label="产品近30天销量趋势">${points.map((item) => `<div title="${escapeHtml(item.date)} · ${number(item.sales30d)}"><span style="height:${Math.max(4, (Number(item.sales30d || 0) / max) * 100)}%"></span><small>${escapeHtml(item.date.slice(5))}</small></div>`).join("")}</div>`;
@@ -61,7 +61,7 @@ export function renderOperationDashboardPage() {
   const execution = dashboard.execution;
   const improvements = dashboard.improvements.summary || dashboard.improvements;
   return `<section class="operation-dashboard">
-    <div class="operation-hero"><div><p class="eyebrow">经营管理基础 V2.0</p><h1>经营驾驶舱</h1><p>统一查看经营事实、风险和改善执行。所有指标来自现有正式快照，不补造利润或缺失数据。</p></div><button class="secondary-button" data-action="refresh-operation-dashboard">刷新数据</button></div>
+    <div class="operation-hero"><div><p class="eyebrow">经营管理基础 V2.0</p><h1>经营驾驶舱</h1><p>统一查看经营事实、风险和改善执行。指标读取销售日报、Sales Object关系和库存事实，不补造利润或缺失数据。</p></div><button class="secondary-button" data-action="refresh-operation-dashboard">刷新数据</button></div>
     ${renderUiModule("sales_business_dashboard", { state: { loading: salesDashboardLoading, error: salesDashboardError, data: salesDashboard } })}
     ${renderUiModule("business_anomalies", { state: { loading: anomaliesLoading, error: anomaliesError, data: anomalies, selectedKey: selectedAnomalyKey, canLaunch: hasPermission(getCurrentUser(), "workPlans.launch") } })}
     <div class="operation-metric-grid">
@@ -71,9 +71,9 @@ export function renderOperationDashboardPage() {
       <article><span>经营风险</span><strong>${dashboard.company.risks.connectionRisk + dashboard.company.risks.connectionAttention}</strong><em class="is-risk">风险 ${dashboard.company.risks.connectionRisk} · 关注 ${dashboard.company.risks.connectionAttention}</em><small>下滑产品 ${dashboard.company.risks.decliningProducts}</small></article>
     </div>
     <div class="operation-layout">
-      <article class="operation-panel operation-wide"><header><div><h2>公司经营趋势</h2><p>产品正式ERP快照中的sales30d汇总</p></div><button data-operation-target="dataCenter" class="text-button">进入数据中心</button></header>${trendBars(dashboard.trend)}</article>
-      <article class="operation-panel"><header><div><h2>产品销售排行</h2><p>最新正式快照</p></div></header>${ranking(dashboard.products.salesTop, "sales", "暂无产品销售事实")}</article>
-      <article class="operation-panel"><header><div><h2>成长产品</h2><p>相邻正式快照变化</p></div></header>${ranking(dashboard.products.growthTop, "growth", "暂无可比产品周期")}</article>
+      <article class="operation-panel operation-wide"><header><div><h2>公司经营趋势</h2><p>销售日报事实按日汇总</p></div><button data-operation-target="products" class="text-button">进入产品中心</button></header>${trendBars(dashboard.trend)}</article>
+      <article class="operation-panel"><header><div><h2>产品销售排行</h2><p>销售日报按产品汇总</p></div></header>${ranking(dashboard.products.salesTop, "sales", "暂无产品销售事实")}</article>
+      <article class="operation-panel"><header><div><h2>成长产品</h2><p>相邻同长销售周期变化</p></div></header>${ranking(dashboard.products.growthTop, "growth", "暂无可比产品周期")}</article>
       <article class="operation-panel"><header><div><h2>高增长连接</h2><p>最新两个经营周期</p></div><button data-operation-target="connectionCenter" class="text-button">进入连接中心</button></header>${ranking(dashboard.connections.topGrowth, "growth", "至少需要两个连接经营周期")}</article>
       <article class="operation-panel"><header><div><h2>风险连接</h2><p>健康分低于60</p></div></header>${ranking(dashboard.connections.risks, "growth", "当前没有风险连接")}</article>
     </div>

@@ -13,13 +13,12 @@ const dataCenterPage = read("src/dataCenterPage.js");
 
 assert.match(
   appState,
-  /const lightweightModules = new Set\(\[[\s\S]*?"financeCenter"[\s\S]*?"finance-center"[\s\S]*?"dataCenter"[\s\S]*?"data-center"[\s\S]*?\]\);/,
-  "财务中心和数据中心必须通过轻量模块启动，不能回落到 /api/data。",
+  /const lightweightModules = new Set\(\[[\s\S]*?"financeCenter"[\s\S]*?"finance-center"[\s\S]*?"adminDataCenter"[\s\S]*?\]\);/,
+  "财务中心和管理员同步中心必须通过轻量模块启动，不能回落到 /api/data。",
 );
 assert.match(appState, /"finance-center":\s*"financeCenter"/, "财务中心兼容路由必须映射到轻量模块名。");
-assert.match(appState, /"data-center":\s*"dataCenter"/, "数据中心兼容路由必须映射到轻量模块名。");
 assert.match(server, /financeCenter:\s*\[\]/, "服务端必须注册财务中心轻量 bootstrap。");
-assert.match(server, /dataCenter:\s*\[\]/, "服务端必须注册数据中心轻量 bootstrap。");
+assert.match(server, /adminDataCenter:\s*\[\]/, "服务端必须注册管理员同步中心轻量 bootstrap。");
 
 assert.doesNotMatch(financePage, /loadPersistentData|\/api\/data(?:["'`/?])/, "财务页面不得触发全局快照。");
 assert.doesNotMatch(dataCenterPage, /loadPersistentData|\/api\/data(?:["'`/?])/, "数据中心页面不得触发全局快照。");
@@ -34,14 +33,13 @@ for (const financeLoader of [
   assert.match(financePage, new RegExp(`\\b${financeLoader}\\b`), `财务中心缺少专用数据源 ${financeLoader}。`);
 }
 
-for (const dataCenterLoader of ["loadDataCenterView", "loadDataSyncCenter", "loadDataCenterProductDetail"]) {
-  assert.match(dataCenterPage, new RegExp(`\\b${dataCenterLoader}\\b`), `数据中心缺少专用数据源 ${dataCenterLoader}。`);
-}
+assert.match(dataCenterPage, /\bloadDataSyncCenter\b/, "管理员数据中心缺少专用同步数据源。");
+assert.doesNotMatch(dataCenterPage, /\b(?:loadDataCenterView|loadDataCenterProductDetail)\b/, "管理员同步页面不得保留经营数据中心读取。");
 
 console.log(JSON.stringify({
   success: true,
-  modules: ["financeCenter", "dataCenter"],
+  modules: ["financeCenter", "adminDataCenter"],
   globalSnapshotReferencedByPages: false,
   financeDataSource: "finance dedicated APIs",
-  dataCenterDataSource: "data-center and data-sync-center dedicated APIs",
+  dataCenterDataSource: "data-sync-center dedicated APIs",
 }, null, 2));

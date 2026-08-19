@@ -11,6 +11,7 @@ import {
   loadConnectionDataMappings,
   loadConnectionImportBatches,
   loadConnectionDataFoundation,
+  loadDataSyncCenter,
   loadConnectionImportShops,
   loadConnectionImportPreview,
   loadConnectionGrowthAnalysis,
@@ -45,10 +46,12 @@ import {
   loadSalesRelationCandidates,
   loadSalesRelationGovernance,
   loadSalesDataQualityAnomalies,
+  loadPlatformGoodsExcelDataSyncPreview,
   submitSalesDataQualityAnomalyDecision,
   loadSalesRelationCandidateDetail,
   confirmSalesRelationCandidate,
   confirmSalesRelationCandidateBatch,
+  commitPlatformGoodsExcelDataSync,
   confirmConnectionOwnerImport,
   rebuildConnectionOwnerImportPreview,
   cancelConnectionOwnerImport,
@@ -89,6 +92,7 @@ import {
   uploadConnectionImport,
   uploadConnectionFoundationImport,
   uploadConnectionFoundationBulkImport,
+  previewPlatformGoodsExcelDataSync,
   createConnectionFoundationTemplate,
   iterateConnectionFoundationTemplate,
   resolveAssetUrl,
@@ -192,6 +196,7 @@ const pageState = {
   importLoading: false,
   importTab: "matched",
   foundation: { definitions: {}, templates: [], batches: [], errors: [], loading: false, preview: null, bulkPreview: null, salesPreview: null, salesLoading: false, salesError: "", salesMessage: "", salesFileName: "", salesFile: null, dailyPreview: null, dailyLoading: false, dailyCommitting: false, dailyError: "", dailyMessage: "", dailyFileName: "", dailyFile: null, dailyCategory: "ready" },
+  platformGoodsImport: { taskId: "", preview: null, loading: false, loaded: false, error: "", message: "" },
   relationCandidates: { items: [], summary: {}, pagination: {}, filterOptions: {}, candidateType: "", loading: false, confirming: false, selected: null, selectedIds: [] },
   relationGovernance: { items: [], summary: { byType: {} }, pagination: {}, filterOptions: {}, filters: { governanceType: "", shopId: "", keyword: "", minSales: "", maxSales: "", status: "pending" }, selected: null, loading: false, loaded: false },
   salesDataQualityGovernance: { items: [], summary: { byType: {} }, pagination: {}, filters: { anomalyType: "", keyword: "" }, selected: null, loading: false, saving: false, loaded: false },
@@ -316,6 +321,10 @@ function isAdmin() {
   return ["admin", "system_admin"].includes(user?.role) || user?.authRole === "admin";
 }
 
+function canManageAdminDataCenter() {
+  return isAdmin() && hasPermission(getCurrentUser(), "settings.manageAdminDataCenter");
+}
+
 function canImportBusinessData() {
   return canManage() || hasPermission(getCurrentUser(), "links.import");
 }
@@ -368,6 +377,7 @@ function ensureConnectionSectionLoaded(section, render) {
     if (!pageState.linkDataStatus.loaded && !pageState.linkDataStatus.loading) void loadMyLinkDataStatus(render);
     if (!pageState.salesDailyQuality.loaded && !pageState.salesDailyQuality.loading) void loadSalesDailyQualityPanel(render);
     if (canImportBusinessData() && !pageState.loadedSections.has("data-import") && !pageState.foundation.loading) void loadDataFoundation(render);
+    if (canManageAdminDataCenter() && !pageState.platformGoodsImport.loaded && !pageState.platformGoodsImport.loading) void loadPlatformGoodsImport(render);
   }
   if (section === "sales-relation-governance" && canImportBusinessData()
     && !pageState.relationGovernance.loaded && !pageState.relationGovernance.loading) void loadSalesRelationGovernancePage(render, { page: 1 });
@@ -522,7 +532,16 @@ function renderSectionNavigation() {
 }
 
 function renderDataUpdateWorkspace() {
-  return `<section class="link-data-update-workspace">${canImportBusinessData() ? renderDataFoundation() : ""}${renderUiModule("link_data_status", { state: pageState.linkDataStatus, showDailyCompleteness: true })}${renderUiModule("sales_daily_data_quality", { state: pageState.salesDailyQuality, showGovernanceEntry: canImportBusinessData() })}${canImportBusinessData() ? "" : `<div class="empty-state compact"><strong>数据由管理员统一更新</strong><p>当前账号可查看最新数据状态；如有异常，请联系数据管理员处理。</p></div>`}</section>`;
+  const platformGoodsImportEntry = renderPlatformGoodsImport();
+  return `<section class="link-data-update-workspace">${platformGoodsImportEntry}${canImportBusinessData() ? renderDataFoundation() : ""}${renderUiModule("link_data_status", { state: pageState.linkDataStatus, showDailyCompleteness: true })}${renderUiModule("sales_daily_data_quality", { state: pageState.salesDailyQuality, showGovernanceEntry: canImportBusinessData() })}${canImportBusinessData() ? "" : `<div class="empty-state compact"><strong>数据由管理员统一更新</strong><p>当前账号可查看最新数据状态；如有异常，请联系数据管理员处理。</p></div>`}</section>`;
+}
+
+function renderPlatformGoodsImport() {
+  if (!canManageAdminDataCenter()) return "";
+  const model = pageState.platformGoodsImport;
+  const summary = model.preview?.summary || {};
+  const preview = model.preview ? `<section class="connection-import-preview ${Number(summary.exceptionCount || 0) ? "is-blocked" : ""}"><header><div><p class="eyebrow">平台货品预览</p><h3>${model.preview.isCurrent ? "当前有效预览" : "历史预览"}</h3></div><span class="status-pill">${model.preview.isCurrent ? "待确认" : "仅查看"}</span></header><div class="connection-import-preview-grid"><span>文件<strong>${escapeHtml(summary.fileName || "—")}</strong></span><span>平台规格<strong>${escapeHtml(summary.totalPlatformSkus || 0)}</strong></span><span>可关联<strong>${escapeHtml(summary.linkable || 0)}</strong></span><span>已关联<strong>${escapeHtml(summary.alreadyLinked || 0)}</strong></span><span>组合装<strong>${escapeHtml(summary.bundleCount || 0)}</strong></span><span>异常<strong>${escapeHtml(summary.exceptionCount || 0)}</strong></span></div><footer><small>继续使用现有平台货品导入API；确认前不写入正式关系。</small>${model.preview.isCurrent ? `<button type="button" class="primary-button" data-confirm-platform-goods-excel="${escapeHtml(model.preview.dataSyncBatch?.id)}">确认补充ERP商品关系</button>` : ""}</footer></section>` : "";
+  return `<section class="connection-foundation-panel"><header class="connection-section-heading"><div><h3>平台货品导入</h3><p>用于建立平台店铺、链接和Link SKU身份。</p></div><a class="text-button" href="#settings/admin-data-center">管理员数据中心</a></header>${model.loading && !model.loaded ? `<p class="form-note">正在加载平台货品导入能力…</p>` : model.taskId ? `<form class="connection-foundation-import-form" data-platform-goods-excel-form><label>平台货品Excel<input type="file" name="file" accept=".xlsx,.xls" required ${model.loading ? "disabled" : ""} /></label><button type="submit" class="primary-button" ${model.loading ? "disabled" : ""}>${model.loading ? "正在生成预览…" : "上传并生成预览"}</button></form>` : `<p class="form-error">${escapeHtml(model.error || "平台货品导入任务不可用。")}</p>`}${model.message ? `<p class="form-success">${escapeHtml(model.message)}</p>` : ""}${model.error && model.taskId ? `<p class="form-error">${escapeHtml(model.error)}</p>` : ""}${preview}</section>`;
 }
 
 const goalPositioningLabels = { sales_growth: "引流爆款", balanced_sales: "优质动销款", long_tail: "长尾动销款", profit_contribution: "高毛利款" };
@@ -1466,6 +1485,25 @@ async function loadDataFoundation(render) {
   render();
 }
 
+async function loadPlatformGoodsImport(render) {
+  if (!canManageAdminDataCenter()) return;
+  pageState.platformGoodsImport = { ...pageState.platformGoodsImport, loading: true, error: "" }; render();
+  try {
+    const overview = await loadDataSyncCenter();
+    const task = (overview.tasks || []).find((item) => item.taskCode === "platform_goods_excel_import");
+    pageState.platformGoodsImport = {
+      ...pageState.platformGoodsImport,
+      taskId: task?.id || "",
+      loading: false,
+      loaded: true,
+      error: task ? "" : "平台货品导入任务不存在。",
+    };
+  } catch (error) {
+    pageState.platformGoodsImport = { ...pageState.platformGoodsImport, loading: false, loaded: true, error: error.message || "平台货品导入能力读取失败。" };
+  }
+  render();
+}
+
 async function loadSalesRelationGovernancePage(render, overrides = {}) {
   const model = pageState.relationGovernance;
   pageState.relationGovernance = { ...model, loading: true }; pageState.error = ""; render();
@@ -1510,6 +1548,7 @@ export function bindConnectionCenterPageEvents(render) {
     pageState.linkDataStatus = { data: null, shopId: "", loading: false, loaded: false, error: "" };
     pageState.salesDailyQuality = { data: null, loading: false, loaded: false, error: "" };
     pageState.salesDistribution = { scope: isAdmin() ? "company" : "mine", range: { preset: "7d" }, items: [], summary: {}, selectedGroup: 0, selectedRange: null, drillTable: null, loading: false, loaded: false, error: "" };
+    pageState.platformGoodsImport = { taskId: "", preview: null, loading: false, loaded: false, error: "", message: "" };
     pageState.selectedId = "";
     pageState.coreDetail = null;
     pageState.ownerImport = { loading: false, result: null, showCompletion: false };
@@ -2071,6 +2110,35 @@ export function bindConnectionCenterPageEvents(render) {
       if (result.idempotent && ["completed", "completed_with_errors"].includes(result.batch?.status)) window.alert("该组文件已经完成导入，本次未重复写入。");
       else void pollConnectionBulkPreview(result.batch.id, render);
     } catch (error) { pageState.error = error.message; pageState.foundation.loading = false; render(); }
+  });
+  root.querySelector("[data-platform-goods-excel-form]")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const file = event.currentTarget.querySelector('input[name="file"]')?.files?.[0];
+    if (!file || !pageState.platformGoodsImport.taskId) return;
+    pageState.platformGoodsImport = { ...pageState.platformGoodsImport, loading: true, error: "", message: "" }; render();
+    try {
+      pageState.platformGoodsImport.preview = await previewPlatformGoodsExcelDataSync(pageState.platformGoodsImport.taskId, { file });
+      pageState.platformGoodsImport.message = pageState.platformGoodsImport.preview.idempotent ? "该文件已有预览，本次未重复创建批次。" : "平台货品预览已生成。";
+    } catch (error) {
+      pageState.platformGoodsImport.error = error.message || "平台货品Excel预览失败。";
+    } finally {
+      pageState.platformGoodsImport.loading = false; render();
+    }
+  });
+  root.querySelector("[data-confirm-platform-goods-excel]")?.addEventListener("click", async (event) => {
+    const batchId = event.currentTarget.dataset.confirmPlatformGoodsExcel;
+    if (!batchId) return;
+    pageState.platformGoodsImport = { ...pageState.platformGoodsImport, loading: true, error: "", message: "" }; render();
+    try {
+      await commitPlatformGoodsExcelDataSync(batchId);
+      pageState.platformGoodsImport.preview = await loadPlatformGoodsExcelDataSyncPreview(batchId);
+      pageState.platformGoodsImport.message = "平台货品关系已确认，链接中心数据将按现有流程刷新。";
+      pageState.assetMetaLoaded = false;
+    } catch (error) {
+      pageState.platformGoodsImport.error = error.message || "平台货品关系确认失败。";
+    } finally {
+      pageState.platformGoodsImport.loading = false; render();
+    }
   });
   root.querySelector("[data-sales-fact-file]")?.addEventListener("change", (event) => {
     const file = event.currentTarget.files?.[0] || null;

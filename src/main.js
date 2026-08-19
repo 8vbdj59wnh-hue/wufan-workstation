@@ -6,7 +6,6 @@ import { bindScheduleBoardPageEvents, renderScheduleBoardPage } from "./schedule
 import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js";
 import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js";
 import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js";
-import { bindDataCenterPageEvents, renderDataCenterPage } from "./dataCenterPage.js";
 import { bindOperationDashboardPageEvents, renderOperationDashboardPage } from "./operationDashboardPage.js";
 import { bindFinanceCenterPageEvents, renderFinanceCenterPage } from "./financeCenterPage.js";
 import { bindSupplyChainCenterPageEvents, renderSupplyChainCenterPage } from "./pages/supplyChainCenterPage.js";
@@ -101,8 +100,6 @@ const moduleHashMap = {
   assessment: "dashboard",
   templateCenter: "templateCenter",
   products: "products",
-  dataCenter: "dataCenter",
-  "data-center": "dataCenter",
   financeCenter: "financeCenter",
   "finance-center": "financeCenter",
   connectionCenter: "connectionCenter",
@@ -152,7 +149,18 @@ const moduleHashMap = {
   "issues-requirements": "settings",
   "settings/issues-requirements": "settings",
   "settings/data-asset-map": "settings",
+  "settings/admin-data-center": "adminDataCenter",
 };
+
+function normalizeRetiredDataCenterRoute() {
+  const hash = window.location.hash.replace(/^#/, "");
+  if (!/^(?:dataCenter|data-center)(?:\/|$)/.test(hash)) return false;
+  const target = /\/(?:sync|platform-goods-excel)(?:\/|$)/.test(hash) ? "settings/admin-data-center" : "products";
+  window.history.replaceState(null, "", `#${target}`);
+  return true;
+}
+
+normalizeRetiredDataCenterRoute();
 
 if (["content-schedule", "contentSchedule", "contentSchedules"].includes(window.location.hash.replace(/^#/, ""))) {
   window.history.replaceState(null, "", "#schedule-board/content-note");
@@ -195,7 +203,7 @@ let plannedModulesExpanded = modules.some(
 
 async function prepareRouteModule(moduleId, { showLoading = false } = {}) {
   const revision = beginRouteNavigation(moduleId);
-  if (!["tasks", "connectionCenter", "products"].includes(moduleId)) return { revision, loaded: true };
+  if (!["tasks", "connectionCenter", "products", "adminDataCenter"].includes(moduleId)) return { revision, loaded: true };
   try {
     const modulePromise = loadRouteModule(moduleId, { navigationRevision: revision });
     if (showLoading && getLoadedRouteModule(moduleId) === null) render({ navigation: true });
@@ -531,8 +539,12 @@ function renderPage() {
     }
   }
 
-  if (canAccessActiveModule && activeModule.id === "dataCenter") {
-    content = renderDataCenterPage();
+  if (canAccessActiveModule && activeModule.id === "adminDataCenter") {
+    const adminDataCenterModule = getLoadedRouteModule("adminDataCenter");
+    const adminDataCenterStatus = getRouteModuleStatus("adminDataCenter");
+    if (adminDataCenterModule !== null) content = adminDataCenterModule.render();
+    else if (adminDataCenterStatus.status === "error") content = `<section class="placeholder route-module-error" role="alert"><h2>管理员数据中心加载失败</h2><p>同步能力没有成功加载，其他模块不受影响。</p><button class="primary-button" type="button" data-action="retry-route-module" data-module-id="adminDataCenter">重新加载</button></section>`;
+    else content = `<section class="placeholder route-module-loading" aria-live="polite" aria-busy="true"><h2>正在加载管理员数据中心…</h2></section>`;
   }
 
   if (canAccessActiveModule && activeModule.id === "operationDashboard") {
@@ -783,7 +795,7 @@ function render({ navigation = false } = {}) {
 
   document.querySelector('[data-action="retry-route-module"]')?.addEventListener("click", async (event) => {
     const moduleId = event.currentTarget.dataset.moduleId;
-    if (!["tasks", "connectionCenter", "products"].includes(moduleId)) return;
+    if (!["tasks", "connectionCenter", "products", "adminDataCenter"].includes(moduleId)) return;
     const retryPromise = retryRouteModule(moduleId);
     render();
     try {
@@ -860,8 +872,8 @@ function render({ navigation = false } = {}) {
     getLoadedRouteModule("products")?.bind(render);
   }
 
-  if (activeModuleId === "dataCenter") {
-    bindDataCenterPageEvents(render);
+  if (activeModuleId === "adminDataCenter") {
+    getLoadedRouteModule("adminDataCenter")?.bind(render);
   }
 
   if (activeModuleId === "operationDashboard") {
@@ -953,6 +965,7 @@ window.addEventListener("unhandledrejection", (event) => {
   if (app.innerHTML.trim() === "") renderStartupError(event.reason);
 });
 window.addEventListener("hashchange", async () => {
+  normalizeRetiredDataCenterRoute();
   const nextModuleId = getModuleIdFromHash();
   const { revision } = await prepareRouteModule(nextModuleId, { showLoading: true });
   if (nextModuleId !== loadedDataModuleId && isNavigationCurrent(revision, nextModuleId)) {

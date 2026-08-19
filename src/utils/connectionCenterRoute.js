@@ -19,7 +19,7 @@ export function parseConnectionCenterRoute(hash = "") {
   if (!route.startsWith("connectionCenter/")) return { section: "", detailId: "" };
   const suffix = decoded(route.slice("connectionCenter/".length));
   const section = sectionAliases.get(suffix) || suffix;
-  if (section === "data-center") return { section: "", detailId: "", redirectHash: "#dataCenter" };
+  if (section === "data-center") return { section: "", detailId: "", redirectHash: "#products" };
   if (section === "erp-usage-governance") return { section: "", detailId: "", redirectHash: "#connectionCenter/data-import" };
   return CONNECTION_CENTER_SECTIONS.has(section) ? { section, detailId: "" } : { section: "", detailId: suffix };
 }

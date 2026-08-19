@@ -21,7 +21,7 @@ export const permissionGroups = [
       { key: "methods", label: "可访问关键行动方法论" },
       { key: "settings", label: "可访问设置模块" },
       { key: "products", label: "可访问产品中心" },
-      { key: "dataCenter", label: "可访问数据中心" },
+      { key: "operations", label: "可查看经营驾驶舱" },
       { key: "finance", label: "可访问财务中心" },
       { key: "customers", label: "可访问客户中心" },
       { key: "aiAssistant", label: "可访问AI经营助手" },
@@ -60,10 +60,10 @@ export const permissionGroups = [
     ],
   },
   {
-    key: "dataCenter",
-    title: "数据中心权限",
+    key: "operations",
+    title: "经营权限",
     permissions: [
-      { key: "view", label: "查看数据中心" },
+      { key: "view", label: "查看经营驾驶舱" },
     ],
   },
   {
@@ -178,6 +178,7 @@ export const permissionGroups = [
       { key: "editStores", label: "编辑店铺管理" },
       { key: "editCategories", label: "编辑分类设置" },
       { key: "viewDataAssetMap", label: "查看数据资产地图" },
+      { key: "manageAdminDataCenter", label: "管理管理员数据中心" },
     ],
   },
 ];
@@ -215,6 +216,13 @@ function getDefaultPermissions(role = "user") {
 }
 
 function applyLegacyPermissionCompatibility(normalized, source) {
+  if (typeof source?.operations?.view !== "boolean") {
+    if (typeof source?.dataCenter?.view === "boolean") normalized.operations.view = source.dataCenter.view;
+    else if (typeof source?.modules?.dataCenter === "boolean") normalized.operations.view = source.modules.dataCenter;
+  }
+  if (typeof source?.modules?.operations !== "boolean" && typeof source?.modules?.dataCenter === "boolean") {
+    normalized.modules.operations = source.modules.dataCenter;
+  }
   const isPermissionManager = source?.modules?.settings === true && source?.settings?.managePermissions === true;
   if (!isPermissionManager) return;
 
@@ -402,7 +410,7 @@ export function canAccessTemplateCenter(userOrPermissions) {
 
 export function canAccessModule(userOrPermissions, moduleId) {
   if (moduleId === "dashboard") {
-    return hasPermission(userOrPermissions, "dataCenter.view") || hasPermission(userOrPermissions, "assessment.view");
+    return hasPermission(userOrPermissions, "operations.view") || hasPermission(userOrPermissions, "assessment.view");
   }
   if (moduleId === "templateCenter") return canAccessTemplateCenter(userOrPermissions);
   if (moduleId === "processes") {
@@ -419,8 +427,8 @@ export function canAccessModule(userOrPermissions, moduleId) {
     methods: "methods",
     settings: "settings",
     products: "products",
-    operationDashboard: "dataCenter",
-    dataCenter: "dataCenter",
+    operationDashboard: "operations",
+    adminDataCenter: "settings",
     financeCenter: "finance",
     connectionCenter: "products",
     supplyChainCenter: "products",
@@ -431,8 +439,12 @@ export function canAccessModule(userOrPermissions, moduleId) {
   if (moduleId === "products") {
     return hasPermission(userOrPermissions, "products.view");
   }
-  if (moduleId === "dataCenter" || moduleId === "operationDashboard") {
-    return hasPermission(userOrPermissions, "dataCenter.view");
+  if (moduleId === "operationDashboard") {
+    return hasPermission(userOrPermissions, "operations.view");
+  }
+  if (moduleId === "adminDataCenter") {
+    const role = userOrPermissions?.role ?? userOrPermissions?.authRole ?? "";
+    return ["admin", "system_admin"].includes(role) && hasPermission(userOrPermissions, "settings.manageAdminDataCenter");
   }
   if (moduleId === "financeCenter") {
     return hasPermission(userOrPermissions, "finance.view");

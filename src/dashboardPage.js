@@ -11,7 +11,7 @@ function currentView() {
 }
 
 function canViewOperation() {
-  return hasPermission(getCurrentUser(), "dataCenter.view");
+  return hasPermission(getCurrentUser(), "operations.view");
 }
 
 function canViewManagement() {

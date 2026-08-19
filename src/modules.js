@@ -39,9 +39,9 @@ export const modules = [
     status: "planned",
   },
   {
-    id: "dataCenter",
-    name: "经营数据中心",
-    status: "planned",
+    id: "adminDataCenter",
+    name: "管理员数据中心",
+    hidden: true,
   },
   {
     id: "aiOperationAssistant",

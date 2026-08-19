@@ -2,11 +2,12 @@ import { getDatabase } from "./db.js";
 import { listConnectionGrowthRankings } from "./connectionGrowthService.js";
 import { listAttentionConnectionHealthRecords } from "./connectionHealthService.js";
 import { getConnectionImprovementSummary } from "./connectionImprovementService.js";
+import { getProductBusinessReadModel } from "./productBusinessReadModel.js";
 
 export const operationMetricDefinitions = Object.freeze({
-  productSales: { key: "product.sales30d", label: "产品近30天销量", source: "product_daily_snapshots.sales30d", aggregation: "最新正式快照按产品求和" },
-  stock: { key: "inventory.actualStock", label: "实际库存", source: "product_erp_daily_snapshots.actualStock", aggregation: "最新正式快照按ERP规格求和" },
-  capital: { key: "inventory.capitalOccupation", label: "库存资金占用", source: "actualStock × unitCost", aggregation: "最新正式快照逐规格计算后求和；缺失字段不估算" },
+  productSales: { key: "product.sales30d", label: "产品近30天销量", source: "connection_sku_sales_daily_facts.quantity", aggregation: "正式销售日报按产品汇总" },
+  stock: { key: "inventory.actualStock", label: "实际库存", source: "erp_sku_inventory_daily_summaries.stockNum", aggregation: "每个ERP SKU最新库存事实按产品汇总" },
+  capital: { key: "inventory.capitalOccupation", label: "库存资金占用", source: "erp_sku_inventory_daily_summaries.inventoryCostAmount", aggregation: "每个ERP SKU最新库存金额按产品汇总；缺失字段不估算" },
   connectionSales: { key: "connection.payAmount", label: "连接周期销售额", source: "connection_period_snapshots.payAmount", aggregation: "最新经营周期按销售连接求和" },
   connectionGrowth: { key: "connection.salesGrowth", label: "连接销售增长率", source: "connection_period_snapshots.payAmount", aggregation: "(当前周期-上一周期)/上一周期" },
 });
@@ -15,70 +16,26 @@ function number(value) {
   return value === null || value === undefined ? null : Number(value);
 }
 
-function officialSnapshots(database) {
-  return database.prepare(`SELECT id,businessDate FROM erp_fact_snapshots WHERE status='completed' AND isCurrent=1 ORDER BY businessDate`).all();
-}
-
-function productSummary(database, snapshots) {
-  const latest = snapshots.at(-1);
-  const previous = snapshots.at(-2);
-  if (!latest) return { latestBusinessDate: null, sales30d: null, previousSales30d: null, salesGrowth: null, actualStock: null, capitalOccupation: null, capitalCoverage: 0, productCount: 0 };
-  const aggregate = (snapshotId) => database.prepare(`
-    SELECT COUNT(*) AS productCount,SUM(sales30d) AS sales30d,SUM(totalStock) AS totalStock
-    FROM product_daily_snapshots WHERE snapshotId=?
-  `).get(snapshotId);
-  const current = aggregate(latest.id);
-  const prior = previous ? aggregate(previous.id) : null;
-  const capital = database.prepare(`
-    SELECT COUNT(*) AS specificationCount,
-      SUM(CASE WHEN actualStock IS NOT NULL AND unitCost IS NOT NULL THEN 1 ELSE 0 END) AS completeCount,
-      SUM(CASE WHEN actualStock IS NOT NULL AND unitCost IS NOT NULL THEN actualStock * unitCost ELSE 0 END) AS amount,
-      SUM(actualStock) AS actualStock
-    FROM product_erp_daily_snapshots WHERE snapshotId=?
-  `).get(latest.id);
-  const currentSales = number(current.sales30d);
-  const previousSales = number(prior?.sales30d);
-  return {
-    latestBusinessDate: latest.businessDate,
-    productCount: Number(current.productCount || 0),
-    sales30d: currentSales,
-    previousSales30d: previousSales,
-    salesGrowth: previousSales && currentSales !== null ? (currentSales - previousSales) / Math.abs(previousSales) : null,
-    totalStock: number(current.totalStock),
-    actualStock: number(capital.actualStock),
-    capitalOccupation: Number(capital.amount || 0),
-    capitalCoverage: capital.specificationCount ? Number(capital.completeCount || 0) / Number(capital.specificationCount) : 0,
-  };
-}
-
-function productRankings(database, snapshots, limit = 10) {
-  const latest = snapshots.at(-1);
-  const previous = snapshots.at(-2);
-  if (!latest) return { salesTop: [], growthTop: [], risks: [] };
-  const rows = database.prepare(`
-    SELECT p.productId,p.productName,p.skuCode,p.sales30d,p.totalStock,products.mainImage
-    FROM product_daily_snapshots p LEFT JOIN products ON products.id=p.productId
-    WHERE p.snapshotId=?
-  `).all(latest.id);
-  const prior = previous ? new Map(database.prepare(`SELECT productId,sales30d FROM product_daily_snapshots WHERE snapshotId=?`).all(previous.id).map((row) => [row.productId, number(row.sales30d)])) : new Map();
-  const normalized = rows.map((row) => {
-    const previousSales = prior.get(row.productId);
-    const currentSales = number(row.sales30d);
-    return { ...row, sales30d: currentSales, totalStock: number(row.totalStock), salesGrowth: previousSales && currentSales !== null ? (currentSales - previousSales) / Math.abs(previousSales) : null };
-  });
-  return {
-    salesTop: [...normalized].sort((a, b) => (b.sales30d ?? -1) - (a.sales30d ?? -1)).slice(0, limit),
-    growthTop: normalized.filter((item) => item.salesGrowth !== null).sort((a, b) => b.salesGrowth - a.salesGrowth).slice(0, limit),
-    risks: normalized.filter((item) => item.salesGrowth !== null && item.salesGrowth < -0.1).sort((a, b) => a.salesGrowth - b.salesGrowth).slice(0, limit),
-  };
-}
-
-function productTrend(database, snapshots) {
-  if (!snapshots.length) return [];
-  return snapshots.slice(-14).map((snapshot) => {
-    const row = database.prepare(`SELECT SUM(sales30d) AS sales30d,SUM(totalStock) AS totalStock FROM product_daily_snapshots WHERE snapshotId=?`).get(snapshot.id);
-    return { date: snapshot.businessDate, sales30d: number(row.sales30d), stock: number(row.totalStock) };
-  });
+function readProductDashboard(database) {
+  const latestSaleDate = database.prepare("SELECT MAX(saleDate) value FROM connection_sku_sales_daily_facts").get()?.value;
+  const query = latestSaleDate ? { range: "custom", periodStart: new Date(`${latestSaleDate}T00:00:00Z`).toISOString().slice(0, 10), periodEnd: latestSaleDate } : { range: "30d" };
+  if (latestSaleDate) { const start = new Date(`${latestSaleDate}T00:00:00Z`); start.setUTCDate(start.getUTCDate() - 29); query.periodStart = start.toISOString().slice(0, 10); }
+  const model = getProductBusinessReadModel(query, { includeInventoryCost: true, unpaged: true });
+  const items = model.items.map((item) => ({ productId: item.id, productName: item.name, skuCode: item.sku, mainImage: item.image,
+    sales30d: item.sales.quantity, totalStock: item.inventory.quantity, salesGrowth: item.sales.trend.rate }));
+  const sum = (read) => { const values = model.items.map(read).filter((value) => value !== null && value !== undefined); return values.length ? values.reduce((total, value) => total + Number(value), 0) : null; };
+  const costItems = model.items.filter((item) => item.inventory.amount !== null);
+  const summary = { latestBusinessDate: model.period.periodEnd, productCount: model.summary.totalProducts,
+    sales30d: model.summary.salesQuantity, previousSales30d: sum((item) => item.sales.previousQuantity),
+    salesGrowth: null, totalStock: model.summary.inventoryQuantity, actualStock: model.summary.inventoryQuantity,
+    capitalOccupation: sum((item) => item.inventory.amount), capitalCoverage: model.items.length ? costItems.length / model.items.length : 0 };
+  summary.salesGrowth = summary.previousSales30d && summary.sales30d !== null ? (summary.sales30d - summary.previousSales30d) / Math.abs(summary.previousSales30d) : null;
+  const rankings = { salesTop: [...items].sort((a, b) => (b.sales30d ?? -1) - (a.sales30d ?? -1)).slice(0, 10),
+    growthTop: items.filter((item) => item.salesGrowth !== null).sort((a, b) => b.salesGrowth - a.salesGrowth).slice(0, 10),
+    risks: items.filter((item) => item.salesGrowth !== null && item.salesGrowth < -0.1).sort((a, b) => a.salesGrowth - b.salesGrowth).slice(0, 10) };
+  const daily = database.prepare(`SELECT saleDate date,SUM(quantity) sales30d FROM connection_sku_sales_daily_facts GROUP BY saleDate ORDER BY saleDate DESC LIMIT 14`).all().reverse();
+  const latestStock = summary.actualStock;
+  return { model, summary, rankings, trend: daily.map((row) => ({ date: row.date, sales30d: number(row.sales30d), stock: latestStock })) };
 }
 
 function executionSummary(database) {
@@ -105,19 +62,19 @@ function latestConnectionSummary(database) {
 
 export function getOperationDashboard() {
   const database = getDatabase();
-  const snapshots = officialSnapshots(database);
-  const productAnalysis = productRankings(database, snapshots);
+  const product = readProductDashboard(database);
+  const productAnalysis = product.rankings;
   const connectionRankings = listConnectionGrowthRankings("overview", 10, "", true);
   const attention = listAttentionConnectionHealthRecords("", true);
   return {
     generatedAt: new Date().toISOString(),
     definitions: operationMetricDefinitions,
     company: {
-      products: productSummary(database, snapshots),
+      products: product.summary,
       connections: latestConnectionSummary(database),
       risks: { connectionRisk: attention.counts.risk, connectionAttention: attention.counts.attention, decliningProducts: productAnalysis.risks.length },
     },
-    trend: productTrend(database, snapshots),
+    trend: product.trend,
     products: productAnalysis,
     connections: { topGrowth: connectionRankings.topGrowth, risks: connectionRankings.risks, salesTop: connectionRankings.salesTop },
     execution: executionSummary(database),

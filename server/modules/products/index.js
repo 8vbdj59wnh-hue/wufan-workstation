@@ -27,11 +27,4 @@ export {
   listProductFactSnapshots,
   readErpFactSnapshot,
 } from "../../erpFactSnapshots.js";
-export {
-  getCapitalOccupationProducts,
-  getDataCenterProductDetail,
-  getDataCenterSummary,
-  getSlowMovingProducts,
-  getTrendProducts,
-} from "../../dataCenterService.js";
 export { createProductFromErpSku, createProductsFromErpSkus, listPendingErpSkus } from "../../erpSkuService.js";

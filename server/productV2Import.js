@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import * as XLSX from "xlsx";
 import { getDatabase, uploadsDir } from "./db.js";
-import { generateErpFactSnapshot, readErpFactSnapshot } from "./erpFactSnapshots.js";
+import { readErpFactSnapshot } from "./erpFactSnapshots.js";
 import { parseProductWorkbook } from "./productImport.js";
 import { reconcileErpSyncRun } from "./erpReconciliation.js";
 import { queryWangdianGoods } from "./wangdianClient.js";
@@ -358,18 +358,6 @@ export function recalculateErpSyncRun(syncRunId) {
       return decodeSyncRun(getSyncRunRow(syncRunId));
     }
     run = decodeSyncRun(getSyncRunRow(syncRunId));
-  }
-  if (
-    run.status === "completed"
-    && run.syncType !== "master_data"
-    && run.reconciliationStatus === "completed"
-    && run.snapshotStatus !== "completed"
-  ) {
-    try {
-      generateErpFactSnapshot(run.id);
-    } catch (error) {
-      console.error(`ERP同步 ${run.syncCode} 历史快照生成失败`, error);
-    }
   }
   return decodeSyncRun(getSyncRunRow(syncRunId));
 }
