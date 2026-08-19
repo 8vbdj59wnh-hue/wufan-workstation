@@ -37,3 +37,21 @@ test("旧快照生成停止且经营数据中心正式退役", () => {
   assert.doesNotMatch(dataCenterPage, /loadDataCenterView|loadDataCenterProductDetail|产品经营分析已迁移/);
   assert.doesNotMatch(server, /\/api\/data-center\/(?:summary|trends|slow-moving|capital-occupation|products)/);
 });
+
+test("管理员数据中心使用公共数字格式化且不依赖旧经营页面", () => {
+  const dataCenterPage = source("src/dataCenterPage.js");
+  const format = source("src/utils/format.js");
+  assert.match(dataCenterPage, /import \{ formatNumber \} from "\.\/utils\/format\.js"/);
+  assert.match(dataCenterPage, /formatNumber\(\(item\.matchRate \?\? 0\) \* 100, 2\)/);
+  assert.doesNotMatch(dataCenterPage, /\bnumber\(/);
+  assert.match(format, /export function formatNumber/);
+});
+
+test("产品详情通过单产品接口按需读取产品档案", () => {
+  const productPage = source("src/productCenterPage.js");
+  const management = source("server/productManagementV2Service.js");
+  assert.match(management, /SELECT \* FROM products WHERE id=\?/);
+  assert.match(management, /return \{ product, analysis, lifecycle, healthRecords, issues, improvements \}/);
+  assert.match(productPage, /getProductManagementDetail\(productId\)\?\.product/);
+  assert.match(productPage, /routeProductId && !getProductManagementDetail\(routeProductId\)/);
+});

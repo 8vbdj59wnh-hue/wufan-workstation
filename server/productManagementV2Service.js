@@ -43,6 +43,24 @@ export function getProductBusinessAnalysis(productId, options = {}) {
 
 function parseHealth(row) { return row ? { ...row, metrics: parseJson(row.metricsJson, {}), problems: parseJson(row.problemsJson, []), suggestions: parseJson(row.suggestionsJson, []) } : null; }
 
+function parseProductProfile(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    galleryImages: parseJson(row.galleryImages, []),
+    warehouseInfo: parseJson(row.warehouseInfo, {}),
+    tags: parseJson(row.tags, []),
+    priceInfo: parseJson(row.priceInfo, {}),
+    pointsInfo: parseJson(row.pointsInfo, {}),
+    unitInfo: parseJson(row.unitInfo, {}),
+    supplierInfo: parseJson(row.supplierInfo, {}),
+    preSaleInfo: parseJson(row.preSaleInfo, {}),
+    erpAttributes: parseJson(row.erpAttributes, {}),
+    identifiers: parseJson(row.identifiers, {}),
+    rawSourceData: parseJson(row.rawSourceData, {}),
+  };
+}
+
 export function evaluateProductHealth(productId, options = {}) {
   const database = getDatabase(); const analysis = getProductBusinessAnalysis(productId, options); const health = analysis.healthAnalysis; const timestamp = now();
   const issueProfiles = {
@@ -76,11 +94,12 @@ export function evaluateProductHealth(productId, options = {}) {
 
 export function getProductV2Detail(productId, options = {}) {
   const database = getDatabase(); const analysis = getProductBusinessAnalysis(productId, options);
+  const product = parseProductProfile(database.prepare("SELECT * FROM products WHERE id=?").get(text(productId)));
   const lifecycle = database.prepare("SELECT * FROM product_lifecycle_events WHERE productId=? ORDER BY changedAt DESC").all(text(productId));
   const healthRecords = database.prepare("SELECT * FROM product_health_records WHERE productId=? ORDER BY updatedAt DESC LIMIT 20").all(text(productId)).map(parseHealth);
   const issues = database.prepare("SELECT * FROM product_issues WHERE productId=? ORDER BY updatedAt DESC").all(text(productId)).map((row) => ({ ...row, detail: parseJson(row.detailJson, {}) }));
   const improvements = database.prepare(`SELECT i.*,p.name actionName,p.status actionStatus FROM product_improvements i JOIN process_instances p ON p.id=i.actionId WHERE i.productId=? ORDER BY i.updatedAt DESC`).all(text(productId)).map((row) => ({ ...row, beforeMetrics: parseJson(row.beforeMetricsJson, {}), afterMetrics: parseJson(row.afterMetricsJson, {}) }));
-  return { analysis, lifecycle, healthRecords, issues, improvements };
+  return { product, analysis, lifecycle, healthRecords, issues, improvements };
 }
 
 export function getProductV2Overview() {

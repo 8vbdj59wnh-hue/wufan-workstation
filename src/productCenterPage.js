@@ -1834,7 +1834,11 @@ export function renderProductCenterPage() {
   const erpSkuId = getRouteErpSkuId();
   if (erpSkuId) return renderProductSkuV2Detail();
   const productId = getRouteProductId();
-  const product = state.products.find((item) => item.id === productId);
+  const product = state.products.find((item) => item.id === productId) ?? getProductManagementDetail(productId)?.product;
+  if (productId && !product) {
+    const message = productManagementState.error || "正在读取产品详情…";
+    return `<section class="product-center-page product-detail-page"><button class="text-button product-detail-back" type="button" data-action="back-products">← 返回产品列表</button><div class="product-detail-empty">${escapeHtml(message)}</div></section>${renderPlatformProductLinkModal()}`;
+  }
   return `${product ? renderProductDetail(product) : renderProductList()}${renderPlatformProductLinkModal()}`;
 }
 
@@ -2200,7 +2204,7 @@ export function bindProductCenterPageEvents(rerender) {
   const routeProductId = getRouteProductId();
   if (!routeProductId && !routeErpSkuId && productSubmodule === "sku-management" && !productSkuV2State.loaded && !productSkuV2State.loading) void refreshProductSkuV2List(rerender);
   if (routeErpSkuId && productSkuV2State.detailId !== routeErpSkuId && !productSkuV2State.loading) void refreshProductSkuV2Detail(routeErpSkuId, rerender);
-  if (routeProductId && ["business", "lifecycle", "improvements"].includes(productDetailTab) && !getProductManagementDetail(routeProductId) && productManagementState.loadingProductId !== routeProductId) void refreshProductManagementDetail(routeProductId, rerender);
+  if (routeProductId && !getProductManagementDetail(routeProductId) && productManagementState.loadingProductId !== routeProductId) void refreshProductManagementDetail(routeProductId, rerender);
   if (!routeProductId && !routeErpSkuId && productSubmodule === "business-dashboard" && !productBusinessDashboardState.readModel && !productBusinessDashboardState.loading) void refreshProductBusinessDashboard(rerender);
   if (routeProductId && productDetailTab === "health-analysis" && (!getProductManagementDetail(routeProductId)?.healthAnalysis || !getProductManagementDetail(routeProductId)?.improvementCenter) && productManagementState.loadingProductId !== routeProductId) void refreshProductHealthAnalysis(routeProductId, rerender);
   if (routeProductId && productDetailTab === "business-improvement" && !getProductManagementDetail(routeProductId)?.improvementCenter && productManagementState.loadingProductId !== routeProductId) void refreshProductImprovementCenter(routeProductId, rerender);
