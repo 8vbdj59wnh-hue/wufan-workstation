@@ -4,6 +4,20 @@ import { resolveLinkSalesRankingRange } from "./linkSalesRankingService.js";
 const scopes = new Set(["mine", "company"]);
 const text = (value) => String(value ?? "").trim();
 
+function latestCompleteSalesDate(database) {
+  const batchDate = database.prepare(`
+    SELECT b.periodEnd
+    FROM connection_import_batches b
+    WHERE b.sourceType='erp_sales_daily_preview'
+      AND b.status IN ('completed','completed_with_exceptions')
+      AND b.periodEnd IS NOT NULL
+      AND EXISTS (SELECT 1 FROM connection_sku_sales_daily_facts f WHERE f.sourceBatchId=b.id)
+    ORDER BY COALESCE(b.completedAt,b.updatedAt,b.createdAt) DESC,b.id DESC
+    LIMIT 1
+  `).get()?.periodEnd;
+  return batchDate || database.prepare("SELECT MAX(saleDate) periodEnd FROM connection_sku_sales_daily_facts").get()?.periodEnd || "";
+}
+
 export function getLinkSalesDistribution(input = {}, userId = "", isAdmin = false) {
   const scope = text(input.scope || "company");
   if (!scopes.has(scope)) throw new Error("销售分布范围无效。");
@@ -14,23 +28,25 @@ export function getLinkSalesDistribution(input = {}, userId = "", isAdmin = fals
   }
   const ownerId = text(userId);
   if (scope === "mine" && !ownerId) throw new Error("无法识别当前登录人员。");
-  const range = resolveLinkSalesRankingRange(input);
+  const database = getDatabase();
+  const range = resolveLinkSalesRankingRange(input, latestCompleteSalesDate(database));
   const ownerWhere = scope === "mine" ? "AND c.ownerId=@ownerId" : "";
-  const rows = getDatabase().prepare(`
+  const rows = database.prepare(`
     WITH selected_sales AS (
       SELECT salesLinkId,SUM(COALESCE(salesAmount,0)) salesAmount,COUNT(id) factCount
       FROM connection_sku_sales_daily_facts
       WHERE saleDate BETWEEN @startDate AND @endDate
       GROUP BY salesLinkId
     )
-    SELECT c.id linkId,c.name linkName,c.mainImage,selected_sales.salesAmount,
+    SELECT l.id linkId,COALESCE(NULLIF(c.name,''),NULLIF(l.title,''),l.platformGoodsId) linkName,
+      c.mainImage,selected_sales.salesAmount,
       COALESCE(selected_sales.factCount,0) factCount
-    FROM connection_profiles c
-    JOIN sales_links l ON l.id=c.salesLinkId
-    LEFT JOIN selected_sales ON selected_sales.salesLinkId=c.salesLinkId
-    WHERE 1=1 ${ownerWhere}
+    FROM sales_links l
+    LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
+    LEFT JOIN selected_sales ON selected_sales.salesLinkId=l.id
+    WHERE COALESCE(l.currentState,'active')='active' ${ownerWhere}
     ORDER BY CASE WHEN selected_sales.factCount IS NULL THEN 1 ELSE 0 END,
-      selected_sales.salesAmount DESC,c.id ASC
+      selected_sales.salesAmount DESC,l.id ASC
   `).all({ startDate: range.startDate, endDate: range.endDate, ownerId });
   const totalSalesAmount = rows.reduce((sum, row) => sum + (Number(row.factCount) > 0 ? Number(row.salesAmount || 0) : 0), 0);
   const items = rows.map((row, index) => {

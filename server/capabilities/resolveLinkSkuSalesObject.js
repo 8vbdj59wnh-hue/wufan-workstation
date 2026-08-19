@@ -7,6 +7,7 @@ const placeholders = (values) => values.map(() => "?").join(",");
 function base(salesLinkSkuId = null) {
   return {
     capability: "ResolveLinkSkuSalesObject", contractVersion: CONTRACT_VERSION, salesLinkSkuId,
+    salesLinkId: null,
     status: "missing_sales_object", isComplete: false, isUsable: false,
     salesObject: null, relation: null, structure: null, components: [], warnings: [], conflicts: [],
   };
@@ -42,6 +43,7 @@ function load(database, ids, onQuery) {
 function resolveLoaded(salesLinkSkuId, loaded) {
   const result = base(salesLinkSkuId);
   if (!loaded.linkSkus.has(salesLinkSkuId)) return { ...result, status: "not_found" };
+  result.salesLinkId = loaded.linkSkus.get(salesLinkSkuId).salesLinkId;
   const relations = loaded.relations.get(salesLinkSkuId) || [];
   if (!relations.length) return result;
   if (relations.length !== 1) {

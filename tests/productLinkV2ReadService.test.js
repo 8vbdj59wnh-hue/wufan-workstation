@@ -33,12 +33,23 @@ test("产品链接接口仅按V2关系解析产品归属", async () => {
       .run("link-sku-v2", "link-v2", "product-legacy", null, "platform-sku-v2", "PLATFORM-SKU-V2", "matched_manual", "active", now, now);
     database.prepare("INSERT INTO sales_link_skus(id,salesLinkId,productId,erpSkuId,platformSkuId,platformSkuCode,matchStatus,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?)")
       .run("link-sku-unmatched", "link-v2", "product-legacy", null, "platform-sku-unmatched", "PLATFORM-SKU-UNMATCHED", "pending", "active", now, now);
-    database.prepare("INSERT INTO sales_link_sku_erp_mappings(id,salesLinkSkuId,erpSkuId,mappingType,quantity,currentState,sourceType,createdAt,updatedAt) VALUES(?,?,?,?,?,'active','product_structure',?,?)")
-      .run("link-map-v2", "link-sku-v2", "erp-sku-v2", "single", 1, now, now);
+    const reviewerId = database.prepare("SELECT id FROM persons ORDER BY id LIMIT 1").get().id;
+    database.prepare("INSERT INTO sales_objects(id,objectCode,normalizedObjectCode,objectType,source,sourceType,sourceCode,status,firstSeenAt,lastSeenAt,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,'active',?,?,?,?)")
+      .run("sales-object-v2", "SO-V2", "so-v2", "single", "test", "product_structure", "link-sku-v2", now, now, now, now);
+    database.prepare("INSERT INTO sales_link_sku_sales_object_relations(id,linkSkuId,salesObjectId,effectiveFrom,status,sourceType,sourceReferenceJson,createdAt,updatedAt) VALUES(?,?,?,?,'active','product_structure','{}',?,?)")
+      .run("sales-object-relation-v2", "link-sku-v2", "sales-object-v2", now, now, now);
+    database.prepare("INSERT INTO sales_object_structures(id,salesObjectId,version,structureHash,effectiveFrom,status,sourceType,sourceReferenceJson,createdAt,updatedAt) VALUES(?,?,?,?,?,'draft','product_structure','{}',?,?)")
+      .run("sales-object-structure-v2", "sales-object-v2", 1, "structure-hash-v2", now, now, now);
+    database.prepare("INSERT INTO sales_object_structure_components(id,structureId,salesObjectId,erpSkuId,quantity,sortOrder,status,sourceType,sourceReferenceJson,createdAt,updatedAt) VALUES(?,?,?,?,?,1,'active','product_structure','{}',?,?)")
+      .run("sales-object-component-v2", "sales-object-structure-v2", "sales-object-v2", "erp-sku-v2", 1, now, now);
+    database.prepare("UPDATE sales_object_structures SET status='active',reviewedBy=?,reviewedAt=?,activatedAt=?,updatedAt=? WHERE id=?")
+      .run(reviewerId, now, now, now, "sales-object-structure-v2");
     database.prepare("INSERT INTO connection_import_batches(id,sourceType,externalShopId,fileName,fileHash,businessDate,periodStart,periodEnd,status,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
       .run("sales-batch-v2", "erp_sales", "", "sales.xlsx", "sales-hash-v2", "2026-08-18", "2026-08-18", "2026-08-18", "completed", now, now);
-    database.prepare("INSERT INTO connection_sku_sales_facts(id,batchId,salesLinkId,salesLinkSkuId,erpSkuId,platformGoodsId,skuCode,periodStart,periodEnd,shippedQuantity,salesAmount,costAmount,profitAmount,rawDataJson,createdAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-      .run("sales-fact-v2", "sales-batch-v2", "link-v2", "link-sku-v2", "erp-sku-v2", "goods-v2", "ERP-SKU-V2", "2026-08-18", "2026-08-18", 1, 100, 60, 40, "{}", now);
+    database.prepare(`INSERT INTO connection_sku_sales_daily_facts
+      (id,salesLinkId,salesLinkSkuId,erpSkuId,saleDate,quantity,salesAmount,costAmount,profitAmount,factType,sourceBatchId,sourceRowNumber,rawDataJson,createdAt,updatedAt)
+      VALUES(?,?,?,?,?,?,?,?,?,'normal',?,1,'{}',?,?)`)
+      .run("sales-daily-fact-v2", "link-v2", "link-sku-v2", "erp-sku-v2", "2026-08-18", 1, 100, 60, 40, "sales-batch-v2", now, now);
 
     const unmatched = queryUnmatchedPlatformSkus({ query: "PLATFORM-SKU", limit: 100 }, { database });
     assert.deepEqual(unmatched.rows.map((row) => row.id), ["link-sku-unmatched"]);
@@ -51,11 +62,29 @@ test("产品链接接口仅按V2关系解析产品归属", async () => {
 
     const links = queryProductSalesLinks("product-v2", { database });
     assert.deepEqual(links.map((row) => row.id), ["link-sku-v2"]);
+    assert.equal(database.prepare("SELECT COUNT(*) count FROM sqlite_master WHERE type='table' AND name='sales_link_sku_erp_mappings'").get().count, 0);
     assert.equal(links[0].productId, "product-v2");
     assert.deepEqual(links[0].resolvedErpSkuIds, ["erp-sku-v2"]);
     assert.deepEqual(queryProductSalesLinks("product-legacy", { database }), []);
   } finally {
     closeDatabase();
     fs.rmSync(tempDirectory, { recursive: true, force: true });
+  }
+});
+
+test("正式业务读取服务不直接查询Legacy关系资产", () => {
+  const serviceFiles = [
+    "productLinkV2ReadService.js",
+    "connectionBusinessCockpitService.js",
+    "connectionCorePageService.js",
+    "connectionDailySalesService.js",
+    "connectionService.js",
+    "salesDataQualityAnomalyGovernanceService.js",
+    "salesRelationGovernanceService.js",
+  ];
+  for (const fileName of serviceFiles) {
+    const source = fs.readFileSync(new URL(`../server/${fileName}`, import.meta.url), "utf8");
+    assert.doesNotMatch(source, /sales_link_sku_erp_mappings|sales_link_sku_product_structures|sales_link_sku_combo_groups|resolveLinkSkuErpRelation/,
+      `${fileName} 不得绕过统一读取门面直接依赖Legacy关系`);
   }
 });

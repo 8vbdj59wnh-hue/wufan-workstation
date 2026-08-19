@@ -92,7 +92,7 @@ export function evaluateConnectionGoal(connectionId, context = {}) {
   const database = context.database || getDatabase();
   const profile = loadProfile(database, connectionId);
   if (!profile) {
-    const error = new Error("链接经营档案不存在。");
+    const error = new Error("Link资产不存在。");
     error.statusCode = 404;
     throw error;
   }

@@ -104,7 +104,6 @@ export const state = {
   salesLinks: [],
   salesLinkSkus: [],
   erpImportBatches: [],
-  platformSkuManualBindings: [],
   taskWaves: [],
   taskWaveDetails: {},
 };
@@ -218,7 +217,6 @@ export function getDataSnapshot() {
     salesLinks: state.salesLinks,
     salesLinkSkus: state.salesLinkSkus,
     erpImportBatches: state.erpImportBatches,
-    platformSkuManualBindings: state.platformSkuManualBindings,
   };
 }
 
@@ -265,7 +263,6 @@ export function applyDataSnapshot(data) {
   replaceArray(state.salesLinks, data.salesLinks ?? []);
   replaceArray(state.salesLinkSkus, data.salesLinkSkus ?? []);
   replaceArray(state.erpImportBatches, data.erpImportBatches ?? []);
-  replaceArray(state.platformSkuManualBindings, data.platformSkuManualBindings ?? []);
   isApplyingRemoteData = false;
   ensureTaskTemplatesHaveProcessTemplates();
   ensureDefaultStandardWorkLibrary();
@@ -1004,32 +1001,22 @@ export async function commitInventoryDataSync(batchId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/batches/${encodeURIComponent(batchId)}/inventory/commit`, { method: "POST" }), "库存同步提交失败。");
 }
 
-export async function previewSalesFactDataSync(taskId, file) {
-  const form = new FormData();
-  form.append("file", file);
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/tasks/${encodeURIComponent(taskId)}/sales-facts/preview`, { method: "POST", body: form }), "真实销售导入预览失败。");
-}
-
-export async function loadSalesFactDataSyncPreview(batchId) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/batches/${encodeURIComponent(batchId)}/sales-facts/preview`), "真实销售导入预览读取失败。");
-}
-
-export async function commitSalesFactDataSync(batchId) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/batches/${encodeURIComponent(batchId)}/sales-facts/commit`, { method: "POST" }), "真实销售导入提交失败。");
-}
-
 export async function previewPlatformGoodsExcelDataSync(taskId, { file }) {
   const form = new FormData();
   form.append("file", file);
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/tasks/${encodeURIComponent(taskId)}/platform-goods-excel/preview`, { method: "POST", body: form }), "平台货品Excel预览失败。");
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/tasks/${encodeURIComponent(taskId)}/platform-goods-excel/preview`, { method: "POST", body: form }), "平台货品资产差异分析失败。");
 }
 
 export async function loadPlatformGoodsExcelDataSyncPreview(batchId) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/batches/${encodeURIComponent(batchId)}/platform-goods-excel/preview`), "平台货品Excel预览读取失败。");
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/batches/${encodeURIComponent(batchId)}/platform-goods-excel/preview`), "平台货品资产预览读取失败。");
+}
+
+export async function reanalyzePlatformGoodsExcelDataSync(batchId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/batches/${encodeURIComponent(batchId)}/platform-goods-excel/reanalyze`, { method: "POST" }), "平台货品资产重新分析失败。");
 }
 
 export async function commitPlatformGoodsExcelDataSync(batchId) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/batches/${encodeURIComponent(batchId)}/platform-goods-excel/commit`, { method: "POST" }), "平台货品Excel关系提交失败。");
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/batches/${encodeURIComponent(batchId)}/platform-goods-excel/commit`, { method: "POST" }), "平台货品资产同步失败。");
 }
 
 export async function resolveDataSyncException(exceptionId, note = "") {
@@ -1504,10 +1491,6 @@ export async function loadAvailableSalesLinks(filters = {}) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/available-sales-links${query.size ? `?${query}` : ""}`), "可建立连接读取失败。");
 }
 
-export async function loadConnectionImportShops() {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/import-shops`), "生意参谋店铺读取失败。");
-}
-
 export async function loadConnection(connectionId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}`), "连接档案读取失败。");
 }
@@ -1549,35 +1532,6 @@ export async function removeConnectionAction(connectionId, actionId) {
   return readApiJson(response, "经营动作删除失败。");
 }
 
-export async function loadConnectionDataMappings(filters = {}) {
-  const query = new URLSearchParams(Object.entries(filters).filter(([, item]) => item !== "" && item !== undefined));
-  const response = await authFetch(`${apiBaseUrl}/api/connection-data-mappings${query.size ? `?${query}` : ""}`);
-  return readApiJson(response, "外部数据映射读取失败。");
-}
-
-export async function createConnectionDataMapping(payload) {
-  const response = await authFetch(`${apiBaseUrl}/api/connection-data-mappings`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
-  });
-  return readApiJson(response, "外部数据映射创建失败。");
-}
-
-export async function updateConnectionDataMapping(mappingId, payload) {
-  const response = await authFetch(`${apiBaseUrl}/api/connection-data-mappings/${encodeURIComponent(mappingId)}`, {
-    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
-  });
-  return readApiJson(response, "外部数据映射更新失败。");
-}
-
-export async function removeConnectionDataMapping(mappingId) {
-  const response = await authFetch(`${apiBaseUrl}/api/connection-data-mappings/${encodeURIComponent(mappingId)}`, { method: "DELETE" });
-  return readApiJson(response, "外部数据映射删除失败。");
-}
-
-export async function loadConnectionImportBatches() {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-import-batches`), "经营数据导入批次读取失败。");
-}
-
 export async function loadConnectionDataFoundation() {
   const [definitions, templates, batches, errors, bulkBatches] = await Promise.all([
     readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/definitions`), "导入类型读取失败。"),
@@ -1615,21 +1569,9 @@ export async function confirmConnectionFoundationImport(batchId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/imports/${encodeURIComponent(batchId)}/confirm`, { method: "POST" }), "链接数据确认导入失败。");
 }
 
-export async function previewConnectionSalesFactImport(file) {
-  if (!(file instanceof File) || !file.size) throw new Error("请先选择链接利润表Excel文件。");
-  if (!/\.xlsx?$/i.test(file.name)) throw new Error("文件格式不支持，请选择 .xls 或 .xlsx 文件。");
-  const form = new FormData(); form.append("file", file);
-  const response = await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-facts/preview`, { method: "POST", body: form });
-  return { ...await readApiJson(response, "链接利润表预览失败。"), httpStatus: response.status };
-}
-
 export async function loadCurrentConnectionSalesFactImport() {
   const result = await readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-facts/current`), "最近利润表预览读取失败。");
   return result.preview ?? null;
-}
-
-export async function confirmConnectionSalesFactImport(batchId) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-facts/${encodeURIComponent(batchId)}/confirm`, { method: "POST" }), "链接利润表确认导入失败。");
 }
 
 export async function previewConnectionSalesDailyImport(file) {
@@ -1720,66 +1662,12 @@ export async function confirmSalesRelationCandidateBatch(candidateIds) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-relation-candidates/confirm-batch`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ candidateIds }) }), "销售单品关系批量确认失败。");
 }
 
-export async function loadComboReviews(options = {}) {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(options)) if (value !== undefined && value !== null && String(value) !== "") query.set(key, String(value));
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/combo-reviews?${query}`), "Combo审核列表读取失败。");
-}
-
-export async function loadComboReviewDetail(groupId) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/combo-reviews/${encodeURIComponent(groupId)}`), "Combo审核详情读取失败。");
-}
-
-export async function loadComboReviewAnomalyDates(groupId, options = {}) {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(options)) if (value !== undefined && value !== null && String(value) !== "") query.set(key, String(value));
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/combo-reviews/${encodeURIComponent(groupId)}/anomaly-dates?${query}`), "Combo异常日期读取失败。");
-}
-
-export async function loadComboReviewSourceRows(groupId, options = {}) {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(options)) if (value !== undefined && value !== null && String(value) !== "") query.set(key, String(value));
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/combo-reviews/${encodeURIComponent(groupId)}/source-rows?${query}`), "Combo来源记录读取失败。");
-}
-
-export async function previewPlatformLinkShopMappingImport(file) {
-  const form = new FormData(); form.append("file", file);
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/shop-mappings/preview`, { method: "POST", body: form }), "店铺匹配预览失败。");
-}
-
-export async function confirmPlatformLinkShopMappingImport(batchId) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/shop-mappings/${encodeURIComponent(batchId)}/confirm`, { method: "POST" }), "店铺匹配确认失败。");
-}
-
 export async function createConnectionFoundationTemplate(payload) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/templates`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "导入模板创建失败。");
 }
 
 export async function iterateConnectionFoundationTemplate(templateId, payload) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/templates/${encodeURIComponent(templateId)}/versions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "导入模板迭代失败。");
-}
-
-export async function uploadConnectionImport(file, options = {}) {
-  const form = new FormData();
-  form.append("file", file);
-  form.append("businessDate", options.businessDate ?? "");
-  form.append("externalShopId", options.externalShopId ?? "");
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-import-batches`, { method: "POST", body: form }), "生意参谋文件上传失败。");
-}
-
-export async function loadConnectionImportPreview(batchId) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-import-batches/${encodeURIComponent(batchId)}/preview`), "经营数据匹配预览读取失败。");
-}
-
-export async function commitConnectionImport(batchId) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-import-batches/${encodeURIComponent(batchId)}/commit`, { method: "POST" }), "自动匹配确认失败。");
-}
-
-export async function createConnectionPeriodSnapshots(batchId, period) {
-  const response = await authFetch(`${apiBaseUrl}/api/connection-import-batches/${encodeURIComponent(batchId)}/period-snapshots`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...period, confirmed: true }),
-  });
-  return readApiJson(response, "经营周期快照生成失败。");
 }
 
 export async function loadConnectionPeriodSnapshots(connectionId) {
@@ -1878,17 +1766,6 @@ export async function updateConnectionImprovement(improvementId, payload) {
   return readApiJson(response, "连接改善结果保存失败。");
 }
 
-export async function confirmConnectionImportRow(batchId, externalId, selection) {
-  const response = await authFetch(`${apiBaseUrl}/api/connection-import-batches/${encodeURIComponent(batchId)}/rows/${encodeURIComponent(externalId)}/confirm`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(selection),
-  });
-  return readApiJson(response, "人工匹配确认失败。");
-}
-
-export async function ignoreConnectionImportRow(batchId, externalId) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-import-batches/${encodeURIComponent(batchId)}/rows/${encodeURIComponent(externalId)}/ignore`, { method: "POST" }), "外部商品忽略失败。");
-}
-
 export async function validateProductV2Import(batchId, options = {}) {
   const response = await authFetch(`${apiBaseUrl}/api/products/erp-v2/${encodeURIComponent(batchId)}/validate`, {
     method: "POST",
@@ -1936,13 +1813,6 @@ export async function bindPlatformSku(salesLinkSkuId, productId) {
     body: JSON.stringify({ productId }),
   });
   const body = await readApiJson(response, "平台 SKU 绑定失败。");
-  if (body.data) applyDataSnapshot(body.data);
-  return body;
-}
-
-export async function unbindPlatformSku(salesLinkSkuId) {
-  const response = await authFetch(`${apiBaseUrl}/api/products/platform-skus/${encodeURIComponent(salesLinkSkuId)}/bind`, { method: "DELETE" });
-  const body = await readApiJson(response, "平台 SKU 解绑失败。");
   if (body.data) applyDataSnapshot(body.data);
   return body;
 }

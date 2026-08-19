@@ -61,14 +61,4 @@ export const modules = [
     name: "行动标准",
     hidden: true,
   },
-  {
-    id: "operationDashboard",
-    name: "经营驾驶舱",
-    hidden: true,
-  },
-  {
-    id: "assessment",
-    name: "工作结果",
-    hidden: true,
-  },
 ];

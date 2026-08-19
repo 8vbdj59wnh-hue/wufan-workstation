@@ -24,7 +24,6 @@ import {
   recalculateErpSyncRun,
   resolveAssetUrl,
   updatePersistentResource,
-  unbindPlatformSku,
   uploadImageFile,
   validateProductImportBatch,
   validateProductV2Import,
@@ -902,9 +901,9 @@ function renderProductSalesGroups(rows) {
             ${link.connectionProfileId ? `<a class="text-button" href="#connectionCenter/${encodeURIComponent(link.connectionProfileId)}">进入经营链接详情</a>` : ""}
           </div>
           <div class="table-wrap"><table class="data-table"><thead><tr><th>平台SKU编码</th><th>产品编码</th><th>产品名称</th><th>规格名称</th><th>价格</th><th>平台库存</th><th>关联时间</th><th>关联状态</th><th>匹配方式</th><th>操作</th></tr></thead>
-            <tbody>${link.skus.map((sku) => { const product = state.products.find((item) => item.id === sku.productId); const manualBinding = state.platformSkuManualBindings.find((item) => item.salesLinkSkuId === sku.id); return `<tr><td>${escapeHtml(sku.platformSkuCode || sku.platformSkuId || "—")}</td><td><strong>${escapeHtml(product?.skuCode || "—")}</strong></td><td>${escapeHtml(product?.name || "—")}</td><td>${escapeHtml(sku.specificationName || "—")}</td>
-              <td>${sku.price ?? "—"}</td><td>${sku.platformStock ?? "—"}</td><td>${formatDateTime(manualBinding?.createdAt || sku.updatedAt)}</td><td><span class="status-badge">${escapeHtml(sku.currentState === "active" ? "关联有效" : sku.currentState || "—")}</span></td><td>${escapeHtml(sku.matchMethod === "manual" ? "人工绑定" : sku.matchMethod === "sku_code" ? "规格编码匹配" : sku.matchMethod === "goods_single_sku" ? "单规格货品匹配" : sku.matchStatus || "—")}</td>
-              <td>${sku.matchStatus === "matched_manual" ? `<button class="text-button" type="button" data-action="unbind-platform-sku" data-sku-id="${escapeHtml(sku.id)}">取消关联</button>` : "—"}</td></tr>`; }).join("")}</tbody>
+            <tbody>${link.skus.map((sku) => { const product = state.products.find((item) => item.id === sku.productId); return `<tr><td>${escapeHtml(sku.platformSkuCode || sku.platformSkuId || "—")}</td><td><strong>${escapeHtml(product?.skuCode || "—")}</strong></td><td>${escapeHtml(product?.name || "—")}</td><td>${escapeHtml(sku.specificationName || "—")}</td>
+              <td>${sku.price ?? "—"}</td><td>${sku.platformStock ?? "—"}</td><td>${formatDateTime(sku.updatedAt)}</td><td><span class="status-badge">${escapeHtml(sku.currentState === "active" ? "关联有效" : sku.currentState || "—")}</span></td><td>${escapeHtml(sku.matchMethod === "manual" ? "关系审批" : sku.matchMethod === "sku_code" ? "规格编码匹配" : sku.matchMethod === "goods_single_sku" ? "单规格货品匹配" : sku.matchStatus || "—")}</td>
+              <td>—</td></tr>`; }).join("")}</tbody>
           </table></div>
         </details>`).join("")}
       </div>`).join("")}
@@ -1349,7 +1348,6 @@ function renderProductSkuChangeModal() {
       ${impact ? `<section class="product-info-group"><h3>影响范围</h3><div class="product-info-grid">
         <div><span>ERP规格映射</span><strong>${impact.erpMappingCount}</strong></div>
         <div><span>平台SKU</span><strong>${impact.platformSkuCount}</strong></div>
-        <div><span>人工平台绑定</span><strong>${impact.manualBindingCount}</strong></div>
         <div><span>历史快照</span><strong>${impact.historySnapshotCount}</strong></div>
         <div><span>历史业务日</span><strong>${impact.historyBusinessDayCount}</strong></div>
         <div><span>关联关键行动</span><strong>${impact.actionCount}</strong></div>
@@ -2046,7 +2044,7 @@ async function refreshProductManagementOverview(rerender) {
   try { const result = await loadProductManagementOverview(); const moduleData=result.moduleData||{};
     state.products=moduleData.products||[]; state.actionProducts=moduleData.actionProducts||[]; state.erpGoods=moduleData.erpGoods||[];
     state.productErpMappings=moduleData.productErpMappings||[]; state.salesShops=moduleData.salesShops||[]; state.salesShopAliases=moduleData.salesShopAliases||[];
-    state.productImportBatches=moduleData.productImportBatches||[]; state.erpImportBatches=moduleData.erpImportBatches||[]; state.platformSkuManualBindings=moduleData.platformSkuManualBindings||[];
+    state.productImportBatches=moduleData.productImportBatches||[]; state.erpImportBatches=moduleData.erpImportBatches||[];
     productManagementState = { ...productManagementState, overview: result.overview, loadingOverview: false, error: "" }; }
   catch (error) { productManagementState = { ...productManagementState, loadingOverview: false, error: error.message || "产品经营概览读取失败。" }; }
   rerender();
@@ -2884,14 +2882,6 @@ export function bindProductCenterPageEvents(rerender) {
         platformProductLinkState = { skuId: "", query: "", selectedProductId: "", error: "" };
         await Promise.all([refreshUnmatchedPlatformSkus(rerender), refreshProductSalesSummaries(rerender)]); }
       catch (error) { platformProductLinkState = { ...platformProductLinkState, error: error.message || "产品关联失败。" }; rerender(); }
-    }
-    if (action === "unbind-platform-sku") {
-      if (!window.confirm("确认取消该平台SKU与产品的人工关联？")) return;
-      await unbindPlatformSku(button.dataset.skuId);
-      await Promise.all([
-        refreshProductSalesLinks(getRouteProductId(), rerender),
-        refreshProductSalesSummaries(rerender),
-      ]);
     }
     if (action === "mark-platform-combination") { await markPlatformSku(button.dataset.skuId, "combination"); await refreshUnmatchedPlatformSkus(rerender); }
     if (action === "ignore-platform-sku") { await markPlatformSku(button.dataset.skuId, "ignored"); await refreshUnmatchedPlatformSkus(rerender); }

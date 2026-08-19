@@ -39,7 +39,7 @@ function baseCtes(periodStart, periodEnd) {
 }
 
 function buildWhere(options, userId, isAdmin) {
-  const where = ["1=1"];
+  const where = ["COALESCE(l.currentState,'active')='active'"];
   const params = {};
   if (!isAdmin) { where.push("c.ownerId=@scopeOwnerId"); params.scopeOwnerId = clean(userId); }
   if (clean(options.keyword)) {

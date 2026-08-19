@@ -350,6 +350,7 @@ export function commitWangdianPlatformGoodsSync(logId) {
   let created = 0;
   let updated = 0;
   let mappingCreated = 0;
+  let governancePending = 0;
   database.transaction(() => {
     for (const row of rows) {
       const source = row.source;
@@ -385,11 +386,15 @@ export function commitWangdianPlatformGoodsSync(logId) {
           matchReason=CASE WHEN sales_link_skus.matchMethod='manual' OR sales_link_skus.matchStatus='matched_manual' THEN sales_link_skus.matchReason ELSE excluded.matchReason END,
           lastSeenBatchId=excluded.lastSeenBatchId,currentState='active',missingAt=NULL,updatedAt=excluded.updatedAt`).run(skuRow);
       const relation = ensureSingleLinkSkuErpMapping(database, { salesLinkSkuId: id, erpSkuId: row.erpSkuId, sourceType: "wangdian_platform_goods", sourceBatchId: logId, timestamp: now });
-      if (relation.outcome === "governance_pending") throw new Error(relation.reason);
+      if (relation.outcome === "governance_pending") {
+        governancePending += 1;
+        database.prepare("UPDATE sales_link_skus SET matchStatus='pending_relation',matchMethod='product_structure_application',matchReason=?,updatedAt=? WHERE id=?")
+          .run(relation.reason, now, id);
+      }
       if (relation.outcome === "created") mappingCreated += 1;
       if (current) updated += 1; else created += 1;
     }
     database.prepare(`UPDATE wangdian_platform_goods_sync_logs SET status='completed',createdCount=?,updatedCount=?,completedAt=? WHERE id=?`).run(created, updated, now, logId);
   })();
-  return { ...readWangdianPlatformGoodsSync(logId), mappingCreated, idempotent: false };
+  return { ...readWangdianPlatformGoodsSync(logId), mappingCreated, governancePending, idempotent: false };
 }

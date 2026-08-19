@@ -3,10 +3,8 @@ import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js";
 import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js";
 import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js";
 import { bindScheduleBoardPageEvents, renderScheduleBoardPage } from "./scheduleBoardPage.js";
-import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js";
 import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js";
 import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js";
-import { bindOperationDashboardPageEvents, renderOperationDashboardPage } from "./operationDashboardPage.js";
 import { bindFinanceCenterPageEvents, renderFinanceCenterPage } from "./financeCenterPage.js";
 import { bindSupplyChainCenterPageEvents, renderSupplyChainCenterPage } from "./pages/supplyChainCenterPage.js";
 import { bindCustomerCenterPageEvents, renderCustomerCenterPage } from "./pages/customerCenterPage.js";
@@ -511,10 +509,6 @@ function renderPage() {
       : renderProcessesPage();
   }
 
-  if (activeModule.id === "assessment") {
-    content = renderAssessmentPage();
-  }
-
   if (activeModule.id === "templateCenter") {
     content = renderTemplateCenterPage();
   }
@@ -545,10 +539,6 @@ function renderPage() {
     if (adminDataCenterModule !== null) content = adminDataCenterModule.render();
     else if (adminDataCenterStatus.status === "error") content = `<section class="placeholder route-module-error" role="alert"><h2>管理员数据中心加载失败</h2><p>同步能力没有成功加载，其他模块不受影响。</p><button class="primary-button" type="button" data-action="retry-route-module" data-module-id="adminDataCenter">重新加载</button></section>`;
     else content = `<section class="placeholder route-module-loading" aria-live="polite" aria-busy="true"><h2>正在加载管理员数据中心…</h2></section>`;
-  }
-
-  if (canAccessActiveModule && activeModule.id === "operationDashboard") {
-    content = renderOperationDashboardPage();
   }
 
   if (canAccessActiveModule && activeModule.id === "financeCenter") {
@@ -860,10 +850,6 @@ function render({ navigation = false } = {}) {
     bindProcessesPageEvents(render);
   }
 
-  if (activeModuleId === "assessment") {
-    bindAssessmentPageEvents(render);
-  }
-
   if (activeModuleId === "templateCenter") {
     bindTemplateCenterPageEvents(render);
   }
@@ -874,10 +860,6 @@ function render({ navigation = false } = {}) {
 
   if (activeModuleId === "adminDataCenter") {
     getLoadedRouteModule("adminDataCenter")?.bind(render);
-  }
-
-  if (activeModuleId === "operationDashboard") {
-    bindOperationDashboardPageEvents(render);
   }
 
   if (activeModuleId === "financeCenter") {

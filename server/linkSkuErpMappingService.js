@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createProductStructureApplicationBatch } from "./productStructureApplicationApprovalService.js";
 
 const text = (value) => String(value ?? "").trim();
 
@@ -16,13 +17,17 @@ export function resolveUniqueProductErpSku(database, productId) {
 }
 
 export function inspectSingleLinkSkuErpMapping(database, salesLinkSkuId, erpSkuId) {
-  const active = database.prepare(`
-    SELECT * FROM sales_link_sku_erp_mappings
-    WHERE salesLinkSkuId=? AND currentState='active'
-    ORDER BY createdAt,id
-  `).all(text(salesLinkSkuId));
+  const active = database.prepare(`SELECT c.erpSkuId,c.quantity,
+      CASE WHEN COUNT(*) OVER (PARTITION BY s.id)>1 THEN 'multi_component'
+        WHEN c.quantity=1 THEN 'single_unit' ELSE 'single_multi_quantity' END mappingType,
+      r.salesObjectId,s.id salesObjectStructureId,r.id salesObjectRelationId
+    FROM sales_link_sku_sales_object_relations r
+    JOIN sales_object_structures s ON s.salesObjectId=r.salesObjectId AND s.status='active'
+    JOIN sales_object_structure_components c ON c.structureId=s.id AND c.status='active'
+    WHERE r.linkSkuId=? AND r.status='active'
+    ORDER BY c.sortOrder,c.erpSkuId,c.id`).all(text(salesLinkSkuId));
   const exact = active.find((row) => row.erpSkuId === text(erpSkuId)) ?? null;
-  if (active.length === 1 && exact && exact.mappingType === "single" && Number(exact.quantity) === 1) {
+  if (active.length === 1 && exact && Number(exact.quantity) === 1) {
     return { status: "active_exact", mapping: exact, active };
   }
   if (active.length) {
@@ -30,20 +35,7 @@ export function inspectSingleLinkSkuErpMapping(database, salesLinkSkuId, erpSkuI
       status: "active_conflict",
       mapping: exact,
       active,
-      reason: "链接SKU已存在其他或非single×1的active V2关系，必须进入人工治理。",
-    };
-  }
-  const historical = database.prepare(`
-    SELECT * FROM sales_link_sku_erp_mappings
-    WHERE salesLinkSkuId=? AND erpSkuId=?
-    ORDER BY updatedAt DESC,id DESC LIMIT 1
-  `).get(text(salesLinkSkuId), text(erpSkuId));
-  if (historical) {
-    return {
-      status: "inactive_conflict",
-      mapping: historical,
-      active,
-      reason: "链接SKU与ERP SKU存在inactive历史关系，禁止自动恢复，必须进入人工治理。",
+      reason: "链接SKU已存在其他或非single×1的active Sales Object结构，必须进入人工治理。",
     };
   }
   return { status: "missing", mapping: null, active };
@@ -54,27 +46,54 @@ export function ensureSingleLinkSkuErpMapping(database, {
   erpSkuId,
   sourceType,
   sourceBatchId = null,
+  sourceEvidence = null,
   timestamp = new Date().toISOString(),
 } = {}) {
   const linkSkuId = text(salesLinkSkuId);
   const targetErpSkuId = text(erpSkuId);
   if (!linkSkuId || !targetErpSkuId || !text(sourceType)) throw new Error("V2关系写入缺少链接SKU、ERP SKU或来源。");
   const inspection = inspectSingleLinkSkuErpMapping(database, linkSkuId, targetErpSkuId);
-  if (inspection.status === "active_exact") return { outcome: "idempotent", mapping: inspection.mapping };
-  if (inspection.status !== "missing") return { outcome: "governance_pending", ...inspection };
-  const mapping = {
-    id: `sales-link-sku-erp-map-${crypto.randomUUID()}`,
-    salesLinkSkuId: linkSkuId,
-    erpSkuId: targetErpSkuId,
+  if (inspection.status === "active_exact") return { outcome: "idempotent", mapping: inspection.mapping, salesObjectRelation: inspection.mapping };
+  const pendingApplication = database.prepare(`SELECT id,applicationBatchId,targetComponentsJson
+    FROM product_structure_application_items
+    WHERE salesLinkSkuId=? AND approvalStatus='pending'
+    ORDER BY createdAt DESC`).all(linkSkuId).find((item) => {
+    try {
+      const components = JSON.parse(item.targetComponentsJson || "[]");
+      return components.length === 1 && components[0]?.erpSkuId === targetErpSkuId && Number(components[0]?.quantity) === 1;
+    } catch { return false; }
+  });
+  if (pendingApplication) {
+    return {
+      outcome: "governance_pending",
+      status: "product_structure_review_pending",
+      applicationBatchId: pendingApplication.applicationBatchId,
+      applicationItemId: pendingApplication.id,
+      idempotent: true,
+      reason: "相同ERP关系候选已在Product Structure审批队列中，本次未重复创建。",
+    };
+  }
+  const proposalCode = crypto.createHash("sha256")
+    .update([text(sourceType), text(sourceBatchId) || "no-batch", linkSkuId, targetErpSkuId, "single", "1"].join("|"))
+    .digest("hex");
+  const application = createProductStructureApplicationBatch({
+    batchCode: `relation-proposal-${proposalCode}`,
     sourceType: text(sourceType),
-    sourceBatchId: text(sourceBatchId) || null,
-    createdAt: timestamp,
-    updatedAt: timestamp,
+    previewItems: [{
+      salesLinkSkuId: linkSkuId,
+      previewStatus: inspection.active.length ? "structure_upgrade" : "new_structure",
+      relationshipShape: "single",
+      currentMappings: inspection.active,
+      components: [{ erpSkuId: targetErpSkuId, quantity: 1, sourceType: text(sourceType) }],
+      sourceRows: [{ sourceBatchId: text(sourceBatchId) || null, sourceEvidence, proposedAt: timestamp }],
+    }],
+  }, { database });
+  return {
+    outcome: "governance_pending",
+    status: "product_structure_review_pending",
+    applicationBatchId: application.batchId,
+    reason: inspection.reason || "ERP关系建议已进入Sales Object结构审批，审批应用前不会生成正式关系。",
   };
-  database.prepare(`INSERT INTO sales_link_sku_erp_mappings
-    (id,salesLinkSkuId,erpSkuId,mappingType,quantity,currentState,sourceType,sourceBatchId,createdAt,updatedAt)
-    VALUES (@id,@salesLinkSkuId,@erpSkuId,'single',1,'active',@sourceType,@sourceBatchId,@createdAt,@updatedAt)`).run(mapping);
-  return { outcome: "created", mapping: { ...mapping, mappingType: "single", quantity: 1, currentState: "active" } };
 }
 
 export function deactivateOwnedSingleLinkSkuErpMapping(database, {
@@ -84,14 +103,13 @@ export function deactivateOwnedSingleLinkSkuErpMapping(database, {
   reason = "V2人工关系已取消",
   timestamp = new Date().toISOString(),
 } = {}) {
-  const result = database.prepare(`UPDATE sales_link_sku_erp_mappings
-    SET currentState='inactive',invalidatedAt=?,updatedAt=?
-    WHERE salesLinkSkuId=? AND sourceType=? AND sourceBatchId=? AND currentState='active'`).run(
-    timestamp,
-    timestamp,
-    text(salesLinkSkuId),
-    text(sourceType),
-    text(sourceBatchId),
-  );
-  return { changed: result.changes, reason };
+  void database; void timestamp;
+  return {
+    changed: 0,
+    outcome: "governance_pending",
+    salesLinkSkuId: text(salesLinkSkuId),
+    sourceType: text(sourceType),
+    sourceBatchId: text(sourceBatchId),
+    reason: `${reason}；正式关系只能由Sales Object结构审批流程变更。`,
+  };
 }

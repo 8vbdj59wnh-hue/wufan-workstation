@@ -322,8 +322,8 @@ test("产品经营读取层复用销售、库存、SKU、健康与行动事实",
       .run("mapping-inventory-component", "product-inventory-component", "erp-goods-board-1", "erp-sku-inventory-component", "ERP-INVENTORY-COMPONENT", "exact_sku", "active", now, now);
     database.prepare("INSERT INTO erp_sku_inventory_daily_summaries(id,businessDate,erpSkuId,warehouseCount,stockNum,availableSendStock,costPrice,inventoryCostAmount,sales7d,salesMonth,sales90d,syncBatchId,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
       .run("inventory-summary-component", "2026-08-08", "erp-sku-inventory-component", 1, 9, 8, 10, 90, 3, 6, 12, "inventory-batch-board-1", now, now);
-    database.prepare("INSERT INTO sales_links(id,shopId,platformGoodsId,title,identityStrength,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?)")
-      .run("link-inventory-structure", "shop-board-1", "goods-inventory-structure", "结构库存测试链接", "strong", "active", now, now);
+    database.prepare("INSERT INTO sales_links(id,shopId,platformGoodsId,title,displayName,managementStatus,managementLevel,managementOriginSource,identityStrength,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,'active','new','verification',?,?,?,?)")
+      .run("link-inventory-structure", "shop-board-1", "goods-inventory-structure", "结构库存测试链接", "结构库存测试链接", "strong", "active", now, now);
     for (const [salesLinkSkuId, platformSkuId] of [["link-sku-inventory-single", "platform-inventory-single"], ["link-sku-inventory-combo", "platform-inventory-combo"]]) {
       database.prepare("INSERT INTO sales_link_skus(id,salesLinkId,platformSkuId,matchStatus,currentState,createdAt,updatedAt) VALUES(?,?,?,'matched','active',?,?)")
         .run(salesLinkSkuId, "link-inventory-structure", platformSkuId, now, now);
@@ -345,8 +345,6 @@ test("产品经营读取层复用销售、库存、SKU、健康与行动事实",
     };
     addStructure("structure-inventory-single", "link-sku-inventory-single", [["erp-sku-board-1", 2]]);
     addStructure("structure-inventory-combo", "link-sku-inventory-combo", [["erp-sku-board-1", 2], ["erp-sku-inventory-component", 3]]);
-    database.prepare("INSERT INTO connection_profiles(id,salesLinkId,name,status,originSource,createdAt,updatedAt) VALUES(?,?,?,'active','verification',?,?)")
-      .run("connection-inventory-structure", "link-inventory-structure", "结构库存测试链接", now, now);
     const connectionProducts = readConnectionProductsBySalesLinkIds(database, ["link-inventory-structure"]).get("link-inventory-structure");
     assert.deepEqual(connectionProducts.map((row) => row.id), ["product-board-1", "product-inventory-component"]);
     const connectionInventory = readConnectionInventorySupply("link-inventory-structure", { includeCost: true, database });
@@ -354,13 +352,13 @@ test("产品经营读取层复用销售、库存、SKU、健康与行动事实",
     assert.equal(connectionInventory.linkSkuAvailability.find((row) => row.salesLinkSkuId === "link-sku-inventory-single").availableSendStock, 15);
     assert.equal(connectionInventory.linkSkuAvailability.find((row) => row.salesLinkSkuId === "link-sku-inventory-combo").stockNum, 3);
     assert.equal(connectionInventory.linkSkuAvailability.find((row) => row.salesLinkSkuId === "link-sku-inventory-combo").availableSendStock, 2);
-    const connectionDetail = getConnectionCoreDetail("connection-inventory-structure", "", true);
+    const connectionDetail = getConnectionCoreDetail("link-inventory-structure", "", true);
     assert.deepEqual(connectionDetail.products.map((row) => row.id), ["product-board-1", "product-inventory-component"]);
     assert.equal(connectionDetail.inventory.length, 2);
     assert.equal(connectionDetail.linkSkuAvailability.find((row) => row.salesLinkSkuId === "link-sku-inventory-combo").availableSendStock, 2);
     const productFilteredConnections = listConnectionCoreProfilesPage({ productCode: "SKU-INVENTORY-COMPONENT", pageSize: 20 }, "", true);
-    assert.equal(productFilteredConnections.items.some((row) => row.id === "connection-inventory-structure"), true);
-    assert.equal(productFilteredConnections.items.find((row) => row.id === "connection-inventory-structure").productCount, 2);
+    assert.equal(productFilteredConnections.items.some((row) => row.id === "link-inventory-structure"), true);
+    assert.equal(productFilteredConnections.items.find((row) => row.id === "link-inventory-structure").productCount, 2);
     const componentProductInventory = readProductInventorySupply("product-inventory-component", { includeCost: true, database });
     assert.equal(componentProductInventory.summary.stockNum, 9);
     assert.equal(componentProductInventory.summary.inventoryCostAmount, 90);

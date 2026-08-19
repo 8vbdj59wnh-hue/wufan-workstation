@@ -54,8 +54,7 @@ import {
   readErpSyncRun,
   readProductImportStaging,
   recalculateErpSyncRun,
-  removePlatformSkuManualBinding,
-  updatePlatformSkuManualBinding,
+  proposePlatformSkuProductRelation,
   validateProductImport,
   validateErpV2Import,
 } from "./modules/products/index.js";
@@ -92,7 +91,7 @@ import {
   readInventoryDataSyncPreview,
   runDueInventorySyncTasks,
 } from "./inventoryDataSyncAdapter.js";
-import { commitSalesFactDataSync, previewSalesFactDataSync, readCurrentSalesFactDataSyncPreview, readSalesFactDataSyncPreview } from "./salesFactDataSyncAdapter.js";
+import { readCurrentSalesFactDataSyncPreview, readSalesFactDataSyncPreview } from "./salesFactDataSyncAdapter.js";
 import { commitSalesDailyFacts, previewSalesDailyFacts, readCurrentSalesDailyFactPreview, readSalesDailyFactPreview, recalculateSalesDailyFactPreview } from "./salesDailyFactPreviewService.js";
 import { confirmSalesRelationCandidate, confirmSalesRelationCandidates, querySalesRelationCandidates, readSalesRelationCandidate } from "./salesRelationCandidateService.js";
 import { querySalesRelationGovernance } from "./salesRelationGovernanceService.js";
@@ -102,7 +101,6 @@ import {
   readProductStructureApplicationPreview,
   reviewProductStructureApplicationItem,
 } from "./productStructureApplicationApprovalService.js";
-import { queryComboReviewAnomalyDates, queryComboReviewGroups, queryComboReviewSourceRows, readComboReviewGroup } from "./salesComboReviewService.js";
 import { confirmErpSkuProductUsages, confirmErpSkuUsageGovernance, queryErpSkuProductUsageCandidates, queryErpSkuUsageGovernance, readErpSkuUsageGovernance } from "./erpSkuUsageGovernanceService.js";
 import { getConnectionDailySalesPerformance } from "./connectionDailySalesService.js";
 import { getProductDailySalesPerformance } from "./productDailySalesService.js";
@@ -112,7 +110,7 @@ import { querySalesDataQualityAnomalies, submitSalesDataQualityAnomalyDecision }
 import { getSalesBusinessDashboard } from "./salesBusinessDashboardService.js";
 import { queryBusinessAnomalies } from "./capabilities/queryBusinessAnomalies.js";
 import { queryBusinessImprovementResult } from "./capabilities/queryBusinessImprovementResult.js";
-import { commitPlatformGoodsExcelDataSync, previewPlatformGoodsExcelDataSync, readPlatformGoodsExcelDataSyncPreview } from "./platformGoodsExcelDataSyncAdapter.js";
+import { commitPlatformGoodsExcelDataSync, previewPlatformGoodsExcelDataSync, readPlatformGoodsExcelDataSyncPreview, reanalyzePlatformGoodsExcelDataSync } from "./platformGoodsExcelDataSyncAdapter.js";
 import { listPlatformLinkShopMappings } from "./platformLinkShopMappingImportService.js";
 import {
   confirmConnectionBulkPlatformImport,
@@ -1179,7 +1177,6 @@ function filterDataByScope(data, user) {
         salesLinks: [],
         salesLinkSkus: [],
         erpImportBatches: data.erpImportBatches ?? [],
-        platformSkuManualBindings: data.platformSkuManualBindings ?? [],
       }
     : {
         erpGoods: [],
@@ -1189,7 +1186,6 @@ function filterDataByScope(data, user) {
         salesLinks: [],
         salesLinkSkus: [],
         erpImportBatches: [],
-        platformSkuManualBindings: [],
       };
   const productsWereLoaded = Object.hasOwn(data, "products");
   const visibleProductIds = new Set(products.map((product) => product.id));
@@ -2272,13 +2268,7 @@ app.post("/api/data-sync-center/batches/:id/inventory/commit", requirePermission
 });
 
 app.post("/api/data-sync-center/tasks/:id/sales-facts/preview", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
-  uploadConnectionWorkbook.single("file")(request, response, (error) => {
-    if (error) { response.status(400).json({ success: false, message: error.message || "真实销售文件上传失败。" }); return; }
-    try {
-      const result = previewSalesFactDataSync({ taskId: request.params.id, buffer: request.file?.buffer, fileName: normalizeUploadedFileName(request.file?.originalname), createdBy: getUserPersonId(request.user) });
-      response.status(result.idempotent ? 200 : 201).json({ success: true, ...result });
-    } catch (uploadError) { response.status(400).json({ success: false, message: uploadError.message || "真实销售导入预览失败。" }); }
-  });
+  response.status(410).json({ success: false, code: "sales_import_entry_moved", message: "链接利润表上传已迁移至链接中心的数据更新页面。" });
 });
 
 app.get("/api/data-sync-center/batches/:id/sales-facts/preview", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
@@ -2287,8 +2277,7 @@ app.get("/api/data-sync-center/batches/:id/sales-facts/preview", requirePermissi
 });
 
 app.post("/api/data-sync-center/batches/:id/sales-facts/commit", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
-  try { response.json({ success: true, ...commitSalesFactDataSync(request.params.id) }); }
-  catch (error) { response.status(400).json({ success: false, message: error.message || "真实销售导入提交失败。" }); }
+  response.status(410).json({ success: false, code: "sales_import_entry_moved", message: "链接利润表确认已迁移至链接中心的数据更新页面。" });
 });
 
 app.post("/api/data-sync-center/tasks/:id/platform-goods-excel/preview", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
@@ -2302,18 +2291,23 @@ app.post("/api/data-sync-center/tasks/:id/platform-goods-excel/preview", require
         createdBy: getUserPersonId(request.user),
       });
       response.status(result.idempotent ? 200 : 201).json({ success: true, ...result });
-    } catch (uploadError) { response.status(400).json({ success: false, message: uploadError.message || "平台货品Excel预览失败。" }); }
+    } catch (uploadError) { response.status(400).json({ success: false, message: uploadError.message || "平台货品资产差异分析失败。" }); }
   });
 });
 
 app.get("/api/data-sync-center/batches/:id/platform-goods-excel/preview", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
   try { response.json({ success: true, ...readPlatformGoodsExcelDataSyncPreview(request.params.id) }); }
-  catch (error) { response.status(404).json({ success: false, message: error.message || "平台货品Excel预览读取失败。" }); }
+  catch (error) { response.status(404).json({ success: false, message: error.message || "平台货品资产预览读取失败。" }); }
+});
+
+app.post("/api/data-sync-center/batches/:id/platform-goods-excel/reanalyze", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
+  try { response.status(201).json({ success: true, ...reanalyzePlatformGoodsExcelDataSync(request.params.id, { createdBy: getUserPersonId(request.user) }) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "平台货品资产重新分析失败。" }); }
 });
 
 app.post("/api/data-sync-center/batches/:id/platform-goods-excel/commit", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
   try { response.json({ success: true, ...commitPlatformGoodsExcelDataSync(request.params.id) }); }
-  catch (error) { response.status(400).json({ success: false, message: error.message || "平台货品Excel关系提交失败。" }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "平台货品资产同步失败。" }); }
 });
 
 app.post("/api/data-sync-center/exceptions/:id/resolve", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
@@ -2491,12 +2485,12 @@ app.post("/api/ai-operation/analyses/:id/action",requireAiAction,(request,respon
 
 app.get("/api/product-management/overview", requirePermission("products.view"), (request, response) => {
   try {
+    response.set("Deprecation", "true").set("Link", "</api/product-management/business-dashboard>; rel=successor-version");
     const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
     response.json({ success: true, overview: getProductV2Overview(), lifecycleStatuses: productLifecycleStatuses,
       moduleData: { products: scoped.products ?? [], actionProducts: scoped.actionProducts ?? [], erpGoods: scoped.erpGoods ?? [],
         productErpMappings: scoped.productErpMappings ?? [], salesShops: scoped.salesShops ?? [], salesShopAliases: scoped.salesShopAliases ?? [],
-        productImportBatches: scoped.productImportBatches ?? [], erpImportBatches: scoped.erpImportBatches ?? [],
-        platformSkuManualBindings: scoped.platformSkuManualBindings ?? [] } });
+        productImportBatches: scoped.productImportBatches ?? [], erpImportBatches: scoped.erpImportBatches ?? [] } });
   }
   catch (error) { response.status(400).json({ success: false, message: error.message || "产品经营概览读取失败。" }); }
 });
@@ -3241,22 +3235,11 @@ app.post("/api/connection-data-foundation/platform-links/bulk/:id/confirm", requ
 
 app.post("/api/connection-data-foundation/imports/:id/confirm", requireLinkImport, (request, response) => {
   try { response.json({ success: true, ...confirmConnectionDataImport(request.params.id) }); }
-  catch (error) { response.status(400).json({ success: false, message: error.message || "链接数据确认导入失败。" }); }
+  catch (error) { response.status(400).json({ success: false, code: error.code || null, message: error.message || "链接数据确认导入失败。" }); }
 });
 
 app.post("/api/connection-data-foundation/sales-facts/preview", requireLinkImport, (request, response) => {
-  uploadConnectionWorkbook.single("file")(request, response, (error) => {
-    if (error) { response.status(400).json({ success: false, message: error.message || "链接利润表上传失败。" }); return; }
-    try {
-      const task = getDatabase().prepare("SELECT id FROM data_sync_tasks WHERE taskCode='sales_fact_excel_import' AND status='enabled'").get();
-      if (!task) throw new Error("链接利润表导入任务未启用。");
-      const result = previewSalesFactDataSync({ taskId: task.id, buffer: request.file?.buffer, fileName: normalizeUploadedFileName(request.file?.originalname), createdBy: getUserPersonId(request.user) });
-      response.status(result.idempotent ? 200 : 201).json({ success: true, ...result });
-    } catch (uploadError) {
-      console.error("[sales-fact-preview]", uploadError);
-      response.status(400).json({ success: false, message: uploadError.message || "链接利润表预览失败。" });
-    }
-  });
+  response.status(410).json({ success: false, code: "sales_import_entry_moved", message: "旧利润表上传入口已停用，请使用销售日报事实预览入口。" });
 });
 
 app.get("/api/connection-data-foundation/sales-facts/current", requireLinkImport, (request, response) => {
@@ -3270,8 +3253,7 @@ app.get("/api/connection-data-foundation/sales-facts/:id", requireLinkImport, (r
 });
 
 app.post("/api/connection-data-foundation/sales-facts/:id/confirm", requireLinkImport, (request, response) => {
-  try { response.json({ success: true, ...commitSalesFactDataSync(request.params.id) }); }
-  catch (error) { response.status(400).json({ success: false, message: error.message || "链接利润表确认导入失败。" }); }
+  response.status(410).json({ success: false, code: "sales_import_entry_moved", message: "旧利润表确认入口已停用，请使用销售日报事实确认入口。" });
 });
 
 app.post("/api/connection-data-foundation/sales-daily/preview", requireLinkImport, (request, response) => {
@@ -3386,26 +3368,6 @@ app.post("/api/connection-data-foundation/product-structure-application-items/:i
 app.get("/api/connection-data-foundation/sales-relation-candidates/:id", requireLinkImport, (request, response) => {
   try { response.json({ success: true, ...readSalesRelationCandidate(request.params.id) }); }
   catch (error) { response.status(404).json({ success: false, message: error.message || "销售关系候选详情读取失败。" }); }
-});
-
-app.get("/api/connection-data-foundation/combo-reviews", requireLinkImport, (request, response) => {
-  try { response.json({ success: true, ...queryComboReviewGroups(request.query) }); }
-  catch (error) { response.status(400).json({ success: false, message: error.message || "Combo审核列表读取失败。" }); }
-});
-
-app.get("/api/connection-data-foundation/combo-reviews/:id/anomaly-dates", requireLinkImport, (request, response) => {
-  try { response.json({ success: true, ...queryComboReviewAnomalyDates(request.params.id, request.query) }); }
-  catch (error) { response.status(404).json({ success: false, message: error.message || "Combo异常日期读取失败。" }); }
-});
-
-app.get("/api/connection-data-foundation/combo-reviews/:id/source-rows", requireLinkImport, (request, response) => {
-  try { response.json({ success: true, ...queryComboReviewSourceRows(request.params.id, request.query) }); }
-  catch (error) { response.status(404).json({ success: false, message: error.message || "Combo来源记录读取失败。" }); }
-});
-
-app.get("/api/connection-data-foundation/combo-reviews/:id", requireLinkImport, (request, response) => {
-  try { response.json({ success: true, ...readComboReviewGroup(request.params.id) }); }
-  catch (error) { response.status(404).json({ success: false, message: error.message || "Combo审核详情读取失败。" }); }
 });
 
 app.post("/api/connection-data-foundation/sales-relation-candidates/confirm-batch", requireLinkManage, (request, response) => {
@@ -3727,20 +3689,19 @@ app.get("/api/products/:id/sales-links", requirePermission("products.view"), (re
 
 app.post("/api/products/platform-skus/:id/bind", requirePermission("products.edit"), (request, response) => {
   try {
-    updatePlatformSkuManualBinding(request.params.id, String(request.body?.productId ?? ""), getUserPersonId(request.user));
-    response.json({ success: true });
+    const result = proposePlatformSkuProductRelation(request.params.id, String(request.body?.productId ?? ""), getUserPersonId(request.user));
+    response.json({ success: true, result });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "人工绑定失败。" });
   }
 });
 
 app.delete("/api/products/platform-skus/:id/bind", requirePermission("products.edit"), (request, response) => {
-  try {
-    removePlatformSkuManualBinding(request.params.id);
-    response.json({ success: true });
-  } catch (error) {
-    response.status(400).json({ success: false, message: error.message || "取消绑定失败。" });
-  }
+  response.status(410).json({
+    success: false,
+    code: "legacy_manual_binding_retired",
+    message: "旧人工绑定已退役；已审核的Sales Object关系必须通过正式关系审批流程变更。",
+  });
 });
 
 app.post("/api/products/platform-skus/:id/mark", requirePermission("products.edit"), (request, response) => {

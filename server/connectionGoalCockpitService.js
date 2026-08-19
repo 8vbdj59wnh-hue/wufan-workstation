@@ -11,7 +11,7 @@ function numeric(row = {}) {
 export function readConnectionGoalCockpitSummary(context = {}) {
   const database = context.database || getDatabase();
   const params = {};
-  const scopeWhere = context.isAdmin ? "1=1" : "c.ownerId=@ownerId";
+  const scopeWhere = context.isAdmin ? "COALESCE(l.currentState,'active')='active'" : "COALESCE(l.currentState,'active')='active' AND c.ownerId=@ownerId";
   if (!context.isAdmin) params.ownerId = clean(context.userId);
   const ctes = `WITH active_positioning AS (
       SELECT id,connectionId,positioningType FROM connection_business_profiles WHERE status='active'
@@ -22,6 +22,7 @@ export function readConnectionGoalCockpitSummary(context = {}) {
     ), scoped AS (
       SELECT c.id,bp.positioningType,gp.id goalPlanId,ge.evaluationStatus,ge.grade,ge.periodStart,ge.periodEnd
       FROM connection_profiles c
+      JOIN sales_links l ON l.id=c.salesLinkId
       LEFT JOIN active_positioning bp ON bp.connectionId=c.id
       LEFT JOIN active_goals gp ON gp.connectionId=c.id
       LEFT JOIN current_evaluations ge ON ge.goalPlanId=gp.id

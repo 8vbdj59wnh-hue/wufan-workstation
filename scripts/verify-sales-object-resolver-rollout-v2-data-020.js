@@ -26,22 +26,24 @@ try {
   const before = counts(); generateSalesObjectsFromMasterData({ platformRows: rows(platformPath), comboRows: rows(comboPath) }, { database });
   const ids = database.prepare("SELECT linkSkuId FROM sales_link_sku_sales_object_relations WHERE status='active' ORDER BY linkSkuId LIMIT 500").all().map((row) => row.linkSkuId);
   const logs = [];
-  let oldQueries = 0; let newQueries = 0; let started = performance.now();
-  const disabled = resolveLinkSkuRelationsForRead({ salesLinkSkuIds: ids }, { database, scope: "comboSkuManagement", salesObjectResolverEnabled: false, onOldQuery: () => oldQueries++, onNewQuery: () => newQueries++ });
-  const disabledMs = performance.now() - started;
-  assert.equal(disabled.feature.active, false); assert.equal(newQueries, 0); assert(Object.values(disabled.results).every((row) => row.resolverSource !== "sales_object"));
-  oldQueries = 0; newQueries = 0; started = performance.now();
-  const enabled = resolveLinkSkuRelationsForRead({ salesLinkSkuIds: ids }, { database, scope: "comboSkuManagement", salesObjectResolverEnabled: true, logDifference: (row) => logs.push(row), onOldQuery: () => oldQueries++, onNewQuery: () => newQueries++ });
-  const enabledMs = performance.now() - started;
-  assert.equal(enabled.feature.active, true); assert.equal(enabled.differences.filter((row) => ["reduced","conflict"].includes(row.differenceType)).length, 0);
-  const excludedScope = resolveLinkSkuRelationsForRead({ salesLinkSkuIds: ids.slice(0, 5) }, { database, scope: "linkBusinessTable", salesObjectResolverEnabled: true });
-  assert.equal(excludedScope.feature.active, false); assert(Object.values(excludedScope.results).every((row) => row.resolverSource !== "sales_object"));
+  let formalOldQueries = 0; let formalNewQueries = 0; let started = performance.now();
+  const formal = resolveLinkSkuRelationsForRead({ salesLinkSkuIds: ids }, { database, scope: "comboSkuManagement", salesObjectResolverEnabled: false, onOldQuery: () => formalOldQueries++, onNewQuery: () => formalNewQueries++ });
+  const formalMs = performance.now() - started;
+  assert.equal(formal.feature.active, true); assert.equal(formal.feature.mode, "sales_object_single_read");
+  assert.equal(formalOldQueries, 0); assert(formalNewQueries > 0); assert(Object.values(formal.results).every((row) => row.resolverSource === "sales_object"));
+  let shadowOldQueries = 0; let shadowNewQueries = 0; started = performance.now();
+  const shadow = resolveLinkSkuRelationsForRead({ salesLinkSkuIds: ids }, { database, scope: "resolverDiagnostic", shadowCompare: true, logDifference: (row) => logs.push(row), onOldQuery: () => shadowOldQueries++, onNewQuery: () => shadowNewQueries++ });
+  const shadowMs = performance.now() - started;
+  assert(shadowOldQueries > 0); assert(shadowNewQueries > 0); assert.equal(shadow.diagnostics.mode, "shadow_compare");
+  assert.deepEqual(shadow.results, formal.results); assert.equal(shadow.differences.filter((row) => ["reduced","conflict"].includes(row.differenceType)).length, 0);
+  const formerlyExcludedScope = resolveLinkSkuRelationsForRead({ salesLinkSkuIds: ids.slice(0, 5) }, { database, scope: "linkBusinessTable", salesObjectResolverEnabled: false });
+  assert.equal(formerlyExcludedScope.feature.active, true); assert(Object.values(formerlyExcludedScope.results).every((row) => row.resolverSource === "sales_object"));
   const combo = listSalesObjectComboSkus({ limit: 100 }, { database, salesObjectResolverEnabled: true, logDifference: (row) => logs.push(row) });
   assert(combo.items.length > 0); assert(combo.items.every((row) => row.objectType === "bundle" && row.relation.isUsable));
   const knownAdded = database.prepare(`SELECT r.linkSkuId FROM sales_link_sku_sales_object_relations r
     WHERE r.status='active' AND NOT EXISTS (SELECT 1 FROM sales_link_sku_erp_mappings m WHERE m.salesLinkSkuId=r.linkSkuId AND m.currentState='active') LIMIT 1`).get();
   if (knownAdded) {
-    const addedRead = resolveLinkSkuRelationsForRead({ salesLinkSkuIds: [knownAdded.linkSkuId] }, { database, scope: "comboSkuManagement", salesObjectResolverEnabled: true, logDifference: (row) => logs.push(row) });
+    const addedRead = resolveLinkSkuRelationsForRead({ salesLinkSkuIds: [knownAdded.linkSkuId] }, { database, scope: "resolverDiagnostic", shadowCompare: true, logDifference: (row) => logs.push(row) });
     assert.equal(addedRead.differences[0]?.differenceType, "added"); assert.equal(addedRead.results[knownAdded.linkSkuId].resolverSource, "sales_object");
   }
   const administrator = database.prepare("SELECT id FROM persons ORDER BY id LIMIT 1").get();
@@ -52,6 +54,6 @@ try {
   assert.deepEqual(businessOn, businessOff); assert.deepEqual(productOn, productOff);
   const facts = database.prepare("SELECT COUNT(*) total,SUM(salesAmount) salesAmount,SUM(profitAmount) profitAmount FROM connection_sku_sales_daily_facts").get();
   const after = counts(); assert.deepEqual(after, before);
-  const result = { success: true, sourceHash, defaultFeature: readSalesObjectResolverFeature({ environment: {} }), disabled: { active: disabled.feature.active, oldQueries, newQueries: 0, elapsedMs: Number(disabledMs.toFixed(4)) }, enabled: { active: enabled.feature.active, batchSize: ids.length, oldQueries, newQueries, elapsedMs: Number(enabledMs.toFixed(4)), differences: enabled.differences }, excludedScope: excludedScope.feature, comboSkuManagement: { items: combo.items.length, usable: combo.items.filter((row) => row.relation.isUsable).length, differences: combo.differences }, existingBusinessReads: { linkBusinessTableStable: true, productWorkspaceStable: true, businessRows: businessOn.items?.length ?? businessOn.rows?.length ?? 0, products: productOn.total }, metrics: { facts: facts.total, salesAmount: facts.salesAmount, profitAmount: facts.profitAmount, unchanged: true }, protectedBefore: before, protectedAfter: after, differenceLogs: logs, integrityCheck: database.pragma("integrity_check", { simple: true }), foreignKeyCheckErrors: database.pragma("foreign_key_check").length };
+  const result = { success: true, sourceHash, legacyFlagMetadata: readSalesObjectResolverFeature({ environment: {} }), formal: { active: formal.feature.active, mode: formal.feature.mode, batchSize: ids.length, oldQueries: formalOldQueries, newQueries: formalNewQueries, elapsedMs: Number(formalMs.toFixed(4)) }, shadowCompare: { oldQueries: shadowOldQueries, newQueries: shadowNewQueries, elapsedMs: Number(shadowMs.toFixed(4)), summary: shadow.diagnostics, differences: shadow.differences }, formerlyExcludedScope: formerlyExcludedScope.feature, comboSkuManagement: { items: combo.items.length, usable: combo.items.filter((row) => row.relation.isUsable).length, differences: combo.differences }, existingBusinessReads: { linkBusinessTableStable: true, productWorkspaceStable: true, businessRows: businessOn.items?.length ?? businessOn.rows?.length ?? 0, products: productOn.total }, metrics: { facts: facts.total, salesAmount: facts.salesAmount, profitAmount: facts.profitAmount, unchanged: true }, protectedBefore: before, protectedAfter: after, differenceLogs: logs, integrityCheck: database.pragma("integrity_check", { simple: true }), foreignKeyCheckErrors: database.pragma("foreign_key_check").length };
   if (outputPath) fs.writeFileSync(outputPath, `${JSON.stringify(result, null, 2)}\n`); console.log(JSON.stringify(result, null, 2));
 } finally { closeDatabase(); assert.equal(sha(sourcePath), sourceHash); fs.rmSync(directory, { recursive: true, force: true }); }

@@ -286,22 +286,16 @@ export function ensureBusinessAdvisorConnection(input, userId) {
     if (!link) throw Object.assign(new Error("生意参谋经营数据未匹配到已有链接，请先通过平台货品导入建立链接身份。"), { type: "missing_link" });
     const salesLinkCreated = false;
     const now = new Date().toISOString();
-    let profile = database.prepare("SELECT * FROM connection_profiles WHERE salesLinkId=?").get(link.id);
-    let profileCreated = false;
-    if (!profile) {
-      const id = `connection-${crypto.randomUUID()}`;
-      const image = connectionImageForSalesLink(database, link.id);
-      database.prepare(`
-        INSERT INTO connection_profiles (
-          id,salesLinkId,name,mainImage,imageSource,ownerId,status,level,notes,originSource,
-          originImportBatchId,identifiedAt,createdBy,createdAt,updatedAt
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-      `).run(id, link.id, title, image.mainImage, image.imageSource, null, "active", "new", "",
-        businessAdvisorSource, importBatchId, now, value(userId) || null, now, now);
-      profile = database.prepare("SELECT * FROM connection_profiles WHERE id=?").get(id);
-      profileCreated = true;
-    }
-    return { connectionId: profile.id, salesLinkId: link.id, profileCreated, salesLinkCreated };
+    const image = connectionImageForSalesLink(database, link.id);
+    database.prepare(`UPDATE sales_links SET
+      displayName=COALESCE(NULLIF(displayName,''),?),
+      mainImage=COALESCE(NULLIF(mainImage,''),?),imageSource=COALESCE(NULLIF(imageSource,''),?),
+      managementOriginSource=CASE WHEN managementOriginSource='asset_native' THEN ? ELSE managementOriginSource END,
+      managementOriginImportBatchId=COALESCE(managementOriginImportBatchId,?),
+      managementIdentifiedAt=COALESCE(managementIdentifiedAt,?),
+      managementCreatedBy=COALESCE(managementCreatedBy,?),updatedAt=? WHERE id=?`)
+      .run(title, image.mainImage, image.imageSource, businessAdvisorSource, importBatchId, now, value(userId) || null, now, link.id);
+    return { connectionId: link.id, salesLinkId: link.id, profileCreated: false, salesLinkCreated };
   });
   return ensure();
 }
@@ -332,7 +326,7 @@ export function updateConnectionProfile(id, input) {
   if (!profileLevels.has(level)) throw new Error("连接等级无效。");
   const database = getDatabase();
   if (ownerId && !database.prepare("SELECT 1 FROM persons WHERE id=? AND status='active'").get(ownerId)) throw new Error("负责人不存在或已停用。");
-  database.prepare(`UPDATE connection_profiles SET name=?,ownerId=?,status=?,level=?,updatedAt=? WHERE id=?`)
+  database.prepare(`UPDATE sales_links SET displayName=?,ownerId=?,managementStatus=?,managementLevel=?,updatedAt=? WHERE id=?`)
     .run(name, ownerId, status, level, new Date().toISOString(), current.id);
   return readConnectionProfile(current.id);
 }

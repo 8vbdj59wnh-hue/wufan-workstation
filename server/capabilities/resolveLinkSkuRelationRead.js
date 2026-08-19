@@ -7,7 +7,7 @@ export const SALES_OBJECT_RESOLVER_ENV = "SALES_OBJECT_RESOLVER_ENABLED";
 export const SALES_OBJECT_RESOLVER_SCOPES_ENV = "SALES_OBJECT_RESOLVER_SCOPES";
 export const DEFAULT_SALES_OBJECT_RESOLVER_SCOPES = Object.freeze(["comboSkuManagement"]);
 export const FORMAL_SALES_OBJECT_RESOLVER_SCOPES = Object.freeze([
-  "comboSkuManagement", "linkDetail", "linkSkuManagement", "productWorkspace", "productAssociations",
+  "comboSkuManagement", "linkDetail", "linkSkuManagement", "productWorkspace", "productAssociations", "salesDailyPreview", "anomalyGovernance",
 ]);
 
 const clean = (value) => String(value ?? "").trim();
@@ -23,13 +23,12 @@ export function readSalesObjectResolverFeature(options = {}) {
   return { flag: SALES_OBJECT_RESOLVER_FLAG, enabled, enabledScopes: configuredScopes.length ? configuredScopes : [...DEFAULT_SALES_OBJECT_RESOLVER_SCOPES] };
 }
 
-function asLegacyContract(salesObjectResult, legacyResult) {
+function asBusinessContract(salesObjectResult, salesLinkId = null) {
   return {
-    ...legacyResult,
     capability: "ResolveLinkSkuRelationRead",
     contractVersion: "1.0",
     salesLinkSkuId: salesObjectResult.salesLinkSkuId,
-    salesLinkId: legacyResult?.salesLinkId ?? null,
+    salesLinkId,
     relationStatus: salesObjectResult.status === "active_complete" ? "active_complete" : salesObjectResult.status === "missing_sales_object" ? "missing" : salesObjectResult.status,
     relationshipShape: salesObjectResult.structure?.shape ?? null,
     isComplete: Boolean(salesObjectResult.isComplete),
@@ -49,7 +48,62 @@ function asLegacyContract(salesObjectResult, legacyResult) {
     })),
     salesObject: salesObjectResult.salesObject,
     salesObjectStructure: salesObjectResult.structure,
+    relation: salesObjectResult.relation,
+    warnings: salesObjectResult.warnings,
+    conflicts: salesObjectResult.conflicts,
     resolverSource: "sales_object",
+  };
+}
+
+function compareResolverResults(ids, oldResults, newResults, scope, options) {
+  const comparisons = [];
+  const differences = [];
+  const counts = { consistent: 0, added: 0, reduced: 0, conflict: 0 };
+  for (const salesLinkSkuId of ids) {
+    const oldResult = oldResults[salesLinkSkuId];
+    const newResult = newResults[salesLinkSkuId];
+    const oldSet = canonical(oldResult?.mappings);
+    const newSet = canonical(newResult?.components);
+    const same = oldSet === newSet;
+    const oldHas = Boolean(oldResult?.mappings?.length);
+    const newHas = Boolean(newResult?.components?.length);
+    const differenceType = same ? "consistent" : !oldHas && newHas ? "added" : oldHas && !newHas ? "reduced" : "conflict";
+    const reason = differenceType === "consistent"
+      ? "component_set_equal"
+      : differenceType === "added"
+        ? "sales_object_only"
+        : differenceType === "reduced"
+          ? "legacy_only"
+          : "component_set_mismatch";
+    const detail = {
+      event: "sales_object_resolver_shadow_compare",
+      scope,
+      salesLinkSkuId,
+      status: same ? "consistent" : "different",
+      differenceType,
+      reason,
+      oldStatus: oldResult?.relationStatus ?? null,
+      newStatus: newResult?.status ?? null,
+      oldComponents: JSON.parse(oldSet),
+      newComponents: JSON.parse(newSet),
+      occurredAt: new Date().toISOString(),
+    };
+    counts[differenceType] += 1;
+    comparisons.push(detail);
+    if (!same) {
+      differences.push(detail);
+      writeDifference(options.logDifference, detail);
+    }
+  }
+  return {
+    comparisons,
+    differences,
+    summary: {
+      total: comparisons.length,
+      consistent: counts.consistent,
+      different: comparisons.length - counts.consistent,
+      byType: counts,
+    },
   };
 }
 
@@ -63,27 +117,33 @@ export function resolveLinkSkuRelationsForRead(input = {}, options = {}) {
   const database = options.database || getDatabase();
   const scope = clean(options.scope);
   const feature = readSalesObjectResolverFeature(options);
-  const scopeEnabled = feature.enabled && feature.enabledScopes.includes(scope);
-  const oldResults = resolveLinkSkuErpRelations({ salesLinkSkuIds: ids }, { database, onQuery: options.onOldQuery }).results;
-  if (!scopeEnabled && !options.shadowCompare) {
-    return { capability: "ResolveLinkSkuRelationRead", contractVersion: "1.0", feature: { ...feature, scope, active: false }, results: oldResults, differences: [] };
-  }
   const newResults = resolveLinkSkuSalesObjects({ salesLinkSkuIds: ids }, { database, onQuery: options.onNewQuery }).results;
-  const results = {}; const differences = [];
+  const results = {};
   for (const id of ids) {
-    const oldResult = oldResults[id]; const newResult = newResults[id];
-    const oldSet = canonical(oldResult?.mappings); const newSet = canonical(newResult?.components);
-    const same = oldSet === newSet;
-    const oldHas = Boolean(oldResult?.mappings?.length); const newHas = Boolean(newResult?.components?.length);
-    const differenceType = same ? "consistent" : !oldHas && newHas ? "added" : oldHas && !newHas ? "reduced" : "conflict";
-    if (!same) {
-      const detail = { event: "sales_object_resolver_difference", scope, salesLinkSkuId: id, differenceType, oldStatus: oldResult?.relationStatus ?? null, newStatus: newResult?.status ?? null, oldComponents: JSON.parse(oldSet), newComponents: JSON.parse(newSet), occurredAt: new Date().toISOString() };
-      differences.push(detail); writeDifference(options.logDifference, detail);
-    }
-    const safeToUseNew = scopeEnabled && !["reduced", "conflict"].includes(differenceType) && newResult?.isUsable;
-    results[id] = safeToUseNew ? asLegacyContract(newResult, oldResult) : { ...oldResult, resolverSource: "legacy", salesObjectFallbackReason: scopeEnabled && !safeToUseNew ? differenceType : null };
+    results[id] = asBusinessContract(newResults[id], newResults[id]?.salesLinkId ?? null);
   }
-  return { capability: "ResolveLinkSkuRelationRead", contractVersion: "1.0", feature: { ...feature, scope, active: scopeEnabled }, results, differences };
+  let shadow = null;
+  let legacyDiagnosticUnavailable = false;
+  if (options.shadowCompare === true) {
+    const legacyTables = ["sales_link_sku_erp_mappings", "sales_link_sku_product_structures", "sales_link_sku_product_structure_components"];
+    const available = legacyTables.every((name) => database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
+    if (available) {
+      const oldResults = resolveLinkSkuErpRelations({ salesLinkSkuIds: ids }, { database, onQuery: options.onOldQuery }).results;
+      shadow = compareResolverResults(ids, oldResults, newResults, scope, options);
+    } else legacyDiagnosticUnavailable = true;
+  }
+  return {
+    capability: "ResolveLinkSkuRelationRead",
+    contractVersion: "1.0",
+    feature: { ...feature, scope, active: true, mode: "sales_object_single_read" },
+    results,
+    differences: shadow?.differences ?? [],
+    diagnostics: legacyDiagnosticUnavailable
+      ? { mode: "legacy_unavailable", total: 0, consistent: 0, different: 0, byType: { consistent: 0, added: 0, reduced: 0, conflict: 0 }, comparisons: [] }
+      : shadow
+      ? { mode: "shadow_compare", ...shadow.summary, comparisons: shadow.comparisons }
+      : { mode: "disabled", total: 0, consistent: 0, different: 0, byType: { consistent: 0, added: 0, reduced: 0, conflict: 0 }, comparisons: [] },
+  };
 }
 
 export function resolveErpSkuSalesObjectLinks(input = {}, options = {}) {
@@ -100,19 +160,9 @@ export function resolveErpSkuSalesObjectLinks(input = {}, options = {}) {
   const read = { results: {}, differences: [] }; const linkSkuIds = [...new Set(candidates.map((row) => row.linkSkuId))];
   for (let offset = 0; offset < linkSkuIds.length; offset += 500) {
     const batchIds = linkSkuIds.slice(offset, offset + 500);
-    const batch = options.salesObjectOnly
-      ? (() => {
-          const resolved = resolveLinkSkuSalesObjects({ salesLinkSkuIds: batchIds }, { database, onQuery: options.onNewQuery }).results;
-          return {
-            results: Object.fromEntries(batchIds.map((id) => [id, asLegacyContract(resolved[id], undefined)])),
-            differences: [],
-          };
-        })()
-      : resolveLinkSkuRelationsForRead({ salesLinkSkuIds: batchIds }, {
-          ...options, database, scope: clean(options.scope) || "productAssociations",
-          salesObjectResolverEnabled: options.salesObjectResolverEnabled ?? true,
-          enabledScopes: options.enabledScopes || FORMAL_SALES_OBJECT_RESOLVER_SCOPES,
-        });
+    const batch = resolveLinkSkuRelationsForRead({ salesLinkSkuIds: batchIds }, {
+      ...options, database, scope: clean(options.scope) || "productAssociations",
+    });
     Object.assign(read.results, batch.results); read.differences.push(...batch.differences);
   }
   for (const candidate of candidates) {
@@ -124,7 +174,7 @@ export function resolveErpSkuSalesObjectLinks(input = {}, options = {}) {
 
 export function resolveLinkSkuRelationForRead(input = {}, options = {}) {
   const salesLinkSkuId = clean(input.salesLinkSkuId);
-  if (!salesLinkSkuId) return { capability: "ResolveLinkSkuRelationRead", contractVersion: "1.0", relationStatus: "invalid_input", isUsable: false, mappings: [], resolverSource: "legacy" };
+  if (!salesLinkSkuId) return { capability: "ResolveLinkSkuRelationRead", contractVersion: "1.0", relationStatus: "invalid_input", isUsable: false, mappings: [], resolverSource: "sales_object" };
   return resolveLinkSkuRelationsForRead({ salesLinkSkuIds: [salesLinkSkuId] }, options).results[salesLinkSkuId];
 }
 

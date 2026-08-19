@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { getDatabase } from "./db.js";
 import { classifySalesDailyPreviewRows } from "./salesDailyFactPreviewService.js";
-import { resolveLinkSkuErpRelations } from "./capabilities/resolveLinkSkuErpRelation.js";
+import { FORMAL_SALES_OBJECT_RESOLVER_SCOPES, resolveLinkSkuRelationsForRead } from "./capabilities/resolveLinkSkuRelationRead.js";
 
 const clean = (value) => String(value ?? "").trim();
 const json = (value, fallback = {}) => { try { return JSON.parse(value || ""); } catch { return fallback; } };
@@ -35,22 +35,32 @@ function identityReason(errorType) {
 function loadContext(database, salesLinkSkuIds) {
   if (!salesLinkSkuIds.length) return { structures: new Map(), mappings: new Map(), resolutions: {} };
   const marks = salesLinkSkuIds.map(() => "?").join(",");
+  const resolutions = resolveLinkSkuRelationsForRead({ salesLinkSkuIds }, {
+    database,
+    scope: "anomalyGovernance",
+    salesObjectResolverEnabled: true,
+    enabledScopes: FORMAL_SALES_OBJECT_RESOLVER_SCOPES,
+  }).results;
   const structures = new Map();
-  for (const row of database.prepare(`SELECT s.id,s.salesLinkSkuId,s.status,s.sourceType,c.erpSkuId,c.quantity
-    FROM sales_link_sku_product_structures s LEFT JOIN sales_link_sku_product_structure_components c ON c.productStructureId=s.id
-    WHERE s.salesLinkSkuId IN (${marks}) ORDER BY CASE s.status WHEN 'active' THEN 0 ELSE 1 END,s.updatedAt DESC,c.sortOrder,c.id`).all(...salesLinkSkuIds)) {
+  for (const row of database.prepare(`SELECT r.linkSkuId salesLinkSkuId,r.salesObjectId,
+      s.id,s.status,COALESCE(s.sourceType,o.sourceType) sourceType,c.erpSkuId,c.quantity
+    FROM sales_link_sku_sales_object_relations r
+    JOIN sales_objects o ON o.id=r.salesObjectId AND o.status='active'
+    LEFT JOIN sales_object_structures s ON s.salesObjectId=o.id
+    LEFT JOIN sales_object_structure_components c ON c.structureId=s.id AND c.status='active'
+    WHERE r.linkSkuId IN (${marks}) AND r.status='active'
+    ORDER BY r.linkSkuId,CASE s.status WHEN 'active' THEN 0 ELSE 1 END,s.updatedAt DESC,c.sortOrder,c.id`).all(...salesLinkSkuIds)) {
     const list = structures.get(row.salesLinkSkuId) || [];
     let structure = list.find((item) => item.id === row.id);
-    if (!structure) { structure = { id: row.id, status: row.status, sourceType: row.sourceType, components: [] }; list.push(structure); }
+    if (!structure) { structure = { id: row.id, salesObjectId: row.salesObjectId, status: row.status || "missing", sourceType: row.sourceType, components: [] }; list.push(structure); }
     if (row.erpSkuId) structure.components.push({ erpSkuId: row.erpSkuId, quantity: row.quantity });
     structures.set(row.salesLinkSkuId, list);
   }
   const mappings = new Map();
-  for (const row of database.prepare(`SELECT id,salesLinkSkuId,erpSkuId,quantity,mappingType,sourceType,productStructureId
-    FROM sales_link_sku_erp_mappings WHERE currentState='active' AND salesLinkSkuId IN (${marks}) ORDER BY salesLinkSkuId,erpSkuId,id`).all(...salesLinkSkuIds)) {
-    const list = mappings.get(row.salesLinkSkuId) || []; list.push(row); mappings.set(row.salesLinkSkuId, list);
+  for (const salesLinkSkuId of salesLinkSkuIds) {
+    mappings.set(salesLinkSkuId, resolutions[salesLinkSkuId]?.mappings || []);
   }
-  return { structures, mappings, resolutions: resolveLinkSkuErpRelations({ salesLinkSkuIds }, { database }).results };
+  return { structures, mappings, resolutions };
 }
 
 function missingReason(item, context) {

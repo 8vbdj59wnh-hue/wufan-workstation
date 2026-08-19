@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import XLSX from "xlsx";
 import { getDatabase } from "./db.js";
-import { resolveLinkSkuErpRelations } from "./capabilities/resolveLinkSkuErpRelation.js";
+import { FORMAL_SALES_OBJECT_RESOLVER_SCOPES, resolveLinkSkuRelationsForRead } from "./capabilities/resolveLinkSkuRelationRead.js";
 import { resolveErpSkuBusinessUsages } from "./capabilities/resolveErpSkuBusinessUsage.js";
 import { normalizeSalesDetailLine } from "./capabilities/salesDetailNormalizer.js";
 import { classifySalesDetailLine } from "./capabilities/classifySalesDetailLine.js";
@@ -170,7 +170,15 @@ export function classifySalesDailyPreviewRows(database, items, {
     const usage = usages[item.result.erpSku.id];
     return !usage?.isUsable || usage.usageType === "product";
   }).map((item) => item.result.salesLinkSku.id))];
-  const relations = resolveLinkSkuErpRelations({ salesLinkSkuIds: relationSkuIds }, { database, onQuery: onRelationQuery }).results;
+  const relations = resolveLinkSkuRelationsForRead({ salesLinkSkuIds: relationSkuIds }, {
+    database,
+    scope: "salesDailyPreview",
+    salesObjectResolverEnabled: true,
+    enabledScopes: FORMAL_SALES_OBJECT_RESOLVER_SCOPES,
+    onOldQuery: onRelationQuery,
+    onNewQuery: onRelationQuery,
+    logDifference: () => {},
+  }).results;
 
   return merged.map((item) => {
     const standard = item.standard;

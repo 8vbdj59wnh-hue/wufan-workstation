@@ -16,8 +16,7 @@ export {
   readErpV2Import,
   readErpSyncRun,
   recalculateErpSyncRun,
-  removePlatformSkuManualBinding,
-  updatePlatformSkuManualBinding,
+  proposePlatformSkuProductRelation,
   validateErpV2Import,
 } from "../../productV2Import.js";
 export { hasWangdianConfig } from "../../wangdianClient.js";

@@ -24,7 +24,6 @@ export {
   recalculateErpSyncRun,
   resolveAssetUrl,
   updatePersistentResource,
-  unbindPlatformSku,
   uploadImageFile,
   validateProductImportBatch,
   validateProductV2Import,

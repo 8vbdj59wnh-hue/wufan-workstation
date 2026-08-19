@@ -7,15 +7,15 @@ import { resolveConnectionGrowthDirection } from "./connectionService.js";
 
 const scopes = new Set(["mine", "company"]);
 const sortColumns = {
-  default: "c.updatedAt",
-  name: "c.name",
+  default: "COALESCE(c.updatedAt,l.updatedAt)",
+  name: "COALESCE(NULLIF(c.name,''),NULLIF(l.title,''),l.platformGoodsId)",
   platform: "sh.platform",
   shop: "COALESCE(sh.displayName,sh.shopName)",
   yesterdaySales: "COALESCE(sa.yesterdaySales,0)",
   sales7d: "COALESCE(sa.sales7d,0)",
   sales30d: "COALESCE(sa.sales30d,0)",
   selectedSales: "COALESCE(sa.selectedSales,0)",
-  archiveStatus: "c.status",
+  archiveStatus: "COALESCE(c.status,l.currentState,'active')",
 };
 const allowedFields = new Set([
   "image", "name", "platform", "shop", "goodsId", "owner", "yesterdaySales", "sales7d", "sales30d",
@@ -48,7 +48,7 @@ export function queryLinkDataTable(raw = {}, userId = "", isAdmin = false) {
   const personId = text(userId);
   if (options.scope === "mine" && !personId) throw new Error("无法识别当前登录人员。");
   const ranges = resolveLinkSalesDateRanges({ preset: options.preset || "7d", startDate: options.startDate, endDate: options.endDate });
-  const where = ["1=1"];
+  const where = ["COALESCE(l.currentState,'active')='active'"];
   const params = {
     yesterdayStart: ranges.yesterday.startDate, yesterdayEnd: ranges.yesterday.endDate,
     sevenStart: ranges.sevenDays.startDate, sevenEnd: ranges.sevenDays.endDate,
@@ -56,13 +56,13 @@ export function queryLinkDataTable(raw = {}, userId = "", isAdmin = false) {
     selectedStart: ranges.selected.startDate, selectedEnd: ranges.selected.endDate,
   };
   if (options.scope === "mine") { where.push("c.ownerId=@ownerId"); params.ownerId = personId; }
-  if (text(options.keyword)) { where.push("(c.name LIKE @keyword OR l.title LIKE @keyword OR l.platformGoodsId LIKE @keyword)"); params.keyword = `%${text(options.keyword)}%`; }
+  if (text(options.keyword)) { where.push("(COALESCE(c.name,'') LIKE @keyword OR COALESCE(l.title,'') LIKE @keyword OR l.platformGoodsId LIKE @keyword)"); params.keyword = `%${text(options.keyword)}%`; }
   if (text(options.platform)) { where.push("sh.platform=@platform"); params.platform = text(options.platform); }
   if (text(options.shopId)) { where.push("sh.id=@shopId"); params.shopId = text(options.shopId); }
   if (text(options.archiveStatus)) { where.push("c.status=@archiveStatus"); params.archiveStatus = text(options.archiveStatus); }
   if (options.connectionIds.length) {
     const placeholders = options.connectionIds.map((id, index) => { params[`connectionId${index}`] = id; return `@connectionId${index}`; });
-    where.push(`c.id IN (${placeholders.join(",")})`);
+    where.push(`(c.id IN (${placeholders.join(",")}) OR l.id IN (${placeholders.join(",")}))`);
   }
   const whereSql = where.join(" AND ");
   const salesAggregate = `
@@ -80,23 +80,26 @@ export function queryLinkDataTable(raw = {}, userId = "", isAdmin = false) {
       AND saleDate<=MAX(@thirtyEnd,@selectedEnd,@yesterdayEnd)
     GROUP BY salesLinkId`;
   const database = getDatabase();
-  const total = Number(database.prepare(`SELECT COUNT(*) count FROM connection_profiles c
-    JOIN sales_links l ON l.id=c.salesLinkId JOIN sales_shops sh ON sh.id=l.shopId WHERE ${whereSql}`).get(params)?.count || 0);
+  const total = Number(database.prepare(`SELECT COUNT(*) count FROM sales_links l
+    JOIN sales_shops sh ON sh.id=l.shopId LEFT JOIN connection_profiles c ON c.salesLinkId=l.id WHERE ${whereSql}`).get(params)?.count || 0);
   const orderBy = sortColumns[options.sortField];
   const rows = database.prepare(`WITH sales_aggregate AS (${salesAggregate})
-    SELECT c.id,c.salesLinkId,c.name,c.mainImage,c.ownerId,c.status archiveStatus,c.level,
+    SELECT COALESCE(c.id,l.id) id,c.id connectionProfileId,l.id salesLinkId,
+      COALESCE(NULLIF(c.name,''),NULLIF(l.title,''),l.platformGoodsId) name,c.mainImage,c.ownerId,
+      COALESCE(c.status,l.currentState,'active') archiveStatus,c.level,
       l.platformGoodsId,l.canonicalUrl,sh.id shopId,sh.platform,COALESCE(sh.displayName,sh.shopName) shopName,
       p.name ownerName,sa.yesterdaySales,sa.yesterdayCount,sa.sales7d,sa.count7d,sa.sales30d,sa.count30d,sa.selectedSales,sa.selectedCount
-    FROM connection_profiles c JOIN sales_links l ON l.id=c.salesLinkId JOIN sales_shops sh ON sh.id=l.shopId
-    LEFT JOIN persons p ON p.id=c.ownerId LEFT JOIN sales_aggregate sa ON sa.salesLinkId=c.salesLinkId
-    WHERE ${whereSql} ORDER BY ${orderBy} ${options.sortDirection},c.id ${options.sortDirection}
+    FROM sales_links l JOIN sales_shops sh ON sh.id=l.shopId
+    LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
+    LEFT JOIN persons p ON p.id=c.ownerId LEFT JOIN sales_aggregate sa ON sa.salesLinkId=l.id
+    WHERE ${whereSql} ORDER BY ${orderBy} ${options.sortDirection},l.id ${options.sortDirection}
     LIMIT @limit OFFSET @offset`).all({ ...params, limit: options.pageSize, offset: options.offset });
-  const connectionIds = rows.map((item) => item.id);
+  const connectionIds = rows.map((item) => item.connectionProfileId).filter(Boolean);
   const analyses = new Map(listConnectionGrowthAnalysesByConnectionIds(connectionIds).map((item) => [item.connectionId, item]));
   const v3 = readConnectionV3MetricsMap(rows.map((item) => item.salesLinkId));
   const hospital = getConnectionHospitalStages(connectionIds);
   const items = rows.map((row) => {
-    const baseAnalysis = analyses.get(row.id) ?? { comparable: false, healthStatus: "no_data", healthScore: null };
+    const baseAnalysis = (row.connectionProfileId ? analyses.get(row.connectionProfileId) : null) ?? { comparable: false, healthStatus: "no_data", healthScore: null };
     const v3Metric = v3.get(row.salesLinkId);
     const analysis = { ...baseAnalysis, salesGrowth: v3Metric?.salesGrowth ?? baseAnalysis.salesGrowth,
       profitGrowth: v3Metric?.profitGrowth ?? baseAnalysis.profitGrowth };
@@ -108,14 +111,15 @@ export function queryLinkDataTable(raw = {}, userId = "", isAdmin = false) {
       growthStatus: analysis.comparable ? resolveConnectionGrowthDirection(analysis) : "no_data",
       growthRate: analysis.salesGrowth ?? null,
       healthStatus: analysis.healthStatus || "no_data", healthScore: analysis.healthScore ?? null,
-      hospitalStatus: hospital.get(row.id) || "none", archiveStatus: row.archiveStatus,
+      hospitalStatus: row.connectionProfileId ? hospital.get(row.connectionProfileId) || "none" : "none", archiveStatus: row.archiveStatus,
+      hasBusinessProfile: Boolean(row.connectionProfileId),
     };
   });
   const sourceDate = database.prepare(`SELECT MIN(saleDate) minDate,MAX(saleDate) maxDate
     FROM connection_sku_sales_daily_facts`).get();
-  const optionWhere = options.scope === "mine" ? "WHERE c.ownerId=@ownerId" : "";
+  const optionWhere = options.scope === "mine" ? "WHERE COALESCE(l.currentState,'active')='active' AND c.ownerId=@ownerId" : "WHERE COALESCE(l.currentState,'active')='active'";
   const filterRows = database.prepare(`SELECT DISTINCT sh.id shopId,sh.platform,COALESCE(sh.displayName,sh.shopName) shopName
-    FROM connection_profiles c JOIN sales_links l ON l.id=c.salesLinkId JOIN sales_shops sh ON sh.id=l.shopId
+    FROM sales_links l JOIN sales_shops sh ON sh.id=l.shopId LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
     ${optionWhere} ORDER BY sh.platform,shopName,sh.id`).all(params);
   return { scope: options.scope, range: ranges.selected, ranges, fields: options.fields, items,
     pagination: { page: options.page, pageSize: options.pageSize, total, totalPages: Math.max(1, Math.ceil(total / options.pageSize)) },

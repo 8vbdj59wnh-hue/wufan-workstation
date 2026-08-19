@@ -19,24 +19,29 @@ try {
     VALUES ('distribution-shop','天猫','分布测试店','分布测试店','分布测试店','active',?,?)`).run(now, now);
   db.prepare(`INSERT INTO connection_import_batches
     (id,sourceType,fileName,fileHash,businessDate,status,createdAt,updatedAt) VALUES ('distribution-batch','excel','distribution.xlsx','distribution-hash',?,'completed',?,?)`).run(date(-1), now, now);
+  db.prepare(`INSERT INTO erp_goods
+    (id,goodsCode,goodsName,lastSeenBatchId,currentState,createdAt,updatedAt,rawSourceData)
+    VALUES ('distribution-goods','DISTRIBUTION-GOODS','测试ERP商品','distribution-batch','active',?,?,'{}')`).run(now, now);
+  db.prepare(`INSERT INTO erp_skus
+    (id,merchantSkuCode,erpGoodsId,specificationName,firstSeenBatchId,lastSeenBatchId,currentState,createdAt,updatedAt,rawSourceData)
+    VALUES ('distribution-erp','DISTRIBUTION-ERP','distribution-goods','测试ERP','distribution-batch','distribution-batch','active',?,?,'{}')`).run(now, now);
   const insertLink = db.prepare(`INSERT INTO sales_links
-    (id,shopId,platformGoodsId,title,canonicalUrl,identityStrength,originSource,enrichmentStatus,currentState,createdAt,updatedAt)
-    VALUES (?,'distribution-shop',?,?,?,'strong','test','complete','active',?,?)`);
-  const insertProfile = db.prepare(`INSERT INTO connection_profiles
-    (id,salesLinkId,name,mainImage,ownerId,status,level,originSource,createdAt,updatedAt)
-    VALUES (?,?,?,?,?,'active','new','test',?,?)`);
+    (id,shopId,platformGoodsId,title,displayName,canonicalUrl,identityStrength,originSource,enrichmentStatus,currentState,
+      mainImage,ownerId,managementStatus,managementLevel,managementOriginSource,createdAt,updatedAt)
+    VALUES (?,'distribution-shop',?,?,?,?,'strong','test','complete','active',?,?,'active','new','test',?,?)`);
   const insertSku = db.prepare(`INSERT INTO sales_link_skus
     (id,salesLinkId,platformSkuId,specificationName,matchStatus,currentState,createdAt,updatedAt)
     VALUES (?,?,?,?,'matched','active',?,?)`);
-  const insertFact = db.prepare(`INSERT INTO connection_sku_sales_facts
-    (id,batchId,salesLinkId,salesLinkSkuId,platformGoodsId,skuCode,periodStart,periodEnd,shippedQuantity,salesAmount,costAmount,profitAmount,rawDataJson,createdAt)
-    VALUES (?,'distribution-batch',?,?,?,?,?,?,?,?,?,?,'{}',?)`);
+  const erpSkuId = "distribution-erp";
+  const insertFact = db.prepare(`INSERT INTO connection_sku_sales_daily_facts
+    (id,salesLinkId,salesLinkSkuId,erpSkuId,saleDate,quantity,salesAmount,costAmount,profitAmount,sourceBatchId,sourceRowNumber,rawDataJson,createdAt,updatedAt)
+    VALUES (?,?,?,?,?,1,?,1,1,'distribution-batch',?,'{}',?,?)`);
   for (let index = 1; index <= 4345; index += 1) {
-    const link = `distribution-link-${index}`; const profile = `distribution-profile-${index}`; const sku = `distribution-sku-${index}`;
-    insertLink.run(link, `goods-${index}`, `分布链接${index}`, `https://example.com/${index}`, now, now);
-    insertProfile.run(profile, link, `分布链接${index}`, index === 1 ? "/uploads/first.jpg" : null, index <= 2200 ? mine.id : other.id, now, now);
+    const link = `distribution-link-${index}`; const sku = `distribution-sku-${index}`;
+    insertLink.run(link, `goods-${index}`, `分布链接${index}`, `分布链接${index}`, `https://example.com/${index}`,
+      index === 1 ? "/uploads/first.jpg" : null, index <= 4340 ? (index <= 2200 ? mine.id : other.id) : null, now, now);
     insertSku.run(sku, link, `platform-sku-${index}`, `规格${index}`, now, now);
-    if (index <= 4325) insertFact.run(`distribution-fact-${index}`, link, sku, `goods-${index}`, `SKU-${index}`, date(-1), date(-1), 1, 10000 - index, 1, 1, now);
+    if (index <= 4325) insertFact.run(`distribution-fact-${index}`, link, sku, erpSkuId, date(-1), 10000 - index, index, now, now);
   }
 
   const queryStarted = performance.now();
@@ -57,7 +62,7 @@ try {
 
   const ids = company.items.slice(100, 110).map((item) => item.linkId);
   const drill = queryLinkDataTable({ scope: "company", preset: "7d", connectionIds: ids.join(","), pageSize: 20, sortField: "selectedSales" }, mine.id, true);
-  assert.equal(drill.pagination.total, 10); assert.deepEqual(new Set(drill.items.map((item) => item.id)), new Set(ids));
+  assert.equal(drill.pagination.total, 10); assert.deepEqual(new Set(drill.items.map((item) => item.salesLinkId)), new Set(ids));
 
   await import("../src/uiModules/linkImage.js"); await import("../src/uiModules/linkDataTable.js");
   const { renderLinkSalesDistribution } = await import("../src/uiModules/linkSalesDistribution.js");

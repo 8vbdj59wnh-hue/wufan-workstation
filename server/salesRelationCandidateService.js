@@ -1,11 +1,10 @@
-import crypto from "node:crypto";
 import { getDatabase } from "./db.js";
+import { ensureSingleLinkSkuErpMapping } from "./linkSkuErpMappingService.js";
 
 const text = (value) => String(value ?? "").trim();
 const json = (value, fallback = {}) => { try { return JSON.parse(value || ""); } catch { return fallback; } };
 const allowedStatuses = new Set(["pending", "approved", "rejected", "superseded", "conflict"]);
 const allowedTypes = new Set(["single", "combo"]);
-const makeId = (prefix) => `${prefix}-${crypto.randomUUID()}`;
 const now = () => new Date().toISOString();
 
 function candidateView(row) {
@@ -94,10 +93,7 @@ function markPreviewForRecalculation(database, sourceBatchIds, confirmedAt) {
 
 function confirmCandidateInTransaction(database, candidate, reviewedBy, confirmedAt) {
   if (candidate.candidateType !== "single") throw Object.assign(new Error("组合候选不能通过单品关系确认。"), { code: "combo_not_allowed" });
-  if (candidate.status === "approved" && candidate.mappingId) {
-    const mapping = database.prepare("SELECT * FROM sales_link_sku_erp_mappings WHERE id=?").get(candidate.mappingId);
-    if (mapping) return { candidateId: candidate.id, mappingId: mapping.id, outcome: "idempotent", sourceBatchId: candidate.sourceBatchId };
-  }
+  if (candidate.status === "approved") return { candidateId: candidate.id, mappingId: null, outcome: "idempotent", sourceBatchId: candidate.sourceBatchId };
   if (candidate.status !== "pending") throw Object.assign(new Error(`候选当前状态为${candidate.status}，不能确认。`), { code: "candidate_not_pending" });
   const salesLinkSku = database.prepare("SELECT id FROM sales_link_skus WHERE id=?").get(candidate.salesLinkSkuId);
   const erpSku = database.prepare("SELECT id FROM erp_skus WHERE id=?").get(candidate.erpSkuId);
@@ -106,24 +102,21 @@ function confirmCandidateInTransaction(database, candidate, reviewedBy, confirme
     database.prepare("UPDATE sales_link_sku_erp_mapping_candidates SET status='conflict',reviewedBy=?,reviewedAt=?,decisionNote=?,updatedAt=? WHERE id=?").run(reviewedBy, confirmedAt, reason, confirmedAt, candidate.id);
     return { candidateId: candidate.id, mappingId: null, outcome: "conflict", message: reason, sourceBatchId: candidate.sourceBatchId };
   }
-  const activeMappings = database.prepare("SELECT * FROM sales_link_sku_erp_mappings WHERE salesLinkSkuId=? AND currentState='active'").all(candidate.salesLinkSkuId);
-  if (activeMappings.length) {
-    const exact = activeMappings.find((mapping) => mapping.erpSkuId === candidate.erpSkuId);
-    const reason = exact ? "该平台SKU与ERP SKU的active关系已存在。" : "该平台SKU已存在其他active关系，不能确认为单品关系。";
-    database.prepare("UPDATE sales_link_sku_erp_mapping_candidates SET status='conflict',reviewedBy=?,reviewedAt=?,decisionNote=?,mappingId=?,updatedAt=? WHERE id=?").run(reviewedBy, confirmedAt, reason, exact?.id || null, confirmedAt, candidate.id);
-    return { candidateId: candidate.id, mappingId: exact?.id || null, outcome: "conflict", message: reason, sourceBatchId: candidate.sourceBatchId };
+  const relation = ensureSingleLinkSkuErpMapping(database, {
+    salesLinkSkuId: candidate.salesLinkSkuId,
+    erpSkuId: candidate.erpSkuId,
+    sourceType: "sales_relation_confirmation",
+    sourceBatchId: candidate.sourceBatchId,
+    timestamp: confirmedAt,
+  });
+  if (relation.outcome === "idempotent") {
+    database.prepare("UPDATE sales_link_sku_erp_mapping_candidates SET status='approved',reviewedBy=?,reviewedAt=?,decisionNote='与已审核Sales Object结构一致',mappingId=NULL,updatedAt=? WHERE id=?")
+      .run(reviewedBy, confirmedAt, confirmedAt, candidate.id);
+    return { candidateId: candidate.id, mappingId: null, outcome: "idempotent", sourceBatchId: candidate.sourceBatchId };
   }
-  const inactiveExact = database.prepare("SELECT * FROM sales_link_sku_erp_mappings WHERE salesLinkSkuId=? AND erpSkuId=?").get(candidate.salesLinkSkuId, candidate.erpSkuId);
-  if (inactiveExact) {
-    const reason = "该关系存在inactive历史记录，禁止自动恢复或覆盖。";
-    database.prepare("UPDATE sales_link_sku_erp_mapping_candidates SET status='conflict',reviewedBy=?,reviewedAt=?,decisionNote=?,mappingId=?,updatedAt=? WHERE id=?").run(reviewedBy, confirmedAt, reason, inactiveExact.id, confirmedAt, candidate.id);
-    return { candidateId: candidate.id, mappingId: inactiveExact.id, outcome: "conflict", message: reason, sourceBatchId: candidate.sourceBatchId };
-  }
-  const mappingId = makeId("sales-link-sku-erp-map");
-  database.prepare(`INSERT INTO sales_link_sku_erp_mappings (id,salesLinkSkuId,erpSkuId,mappingType,quantity,currentState,sourceType,sourceBatchId,createdAt,updatedAt)
-    VALUES (?,?,?,'single',1,'active','sales_relation_confirmation',?,?,?)`).run(mappingId, candidate.salesLinkSkuId, candidate.erpSkuId, candidate.sourceBatchId, confirmedAt, confirmedAt);
-  database.prepare("UPDATE sales_link_sku_erp_mapping_candidates SET status='approved',reviewedBy=?,reviewedAt=?,decisionNote='人工确认单品关系',mappingId=?,updatedAt=? WHERE id=?").run(reviewedBy, confirmedAt, mappingId, confirmedAt, candidate.id);
-  return { candidateId: candidate.id, mappingId, outcome: "created", sourceBatchId: candidate.sourceBatchId };
+  database.prepare("UPDATE sales_link_sku_erp_mapping_candidates SET decisionNote=?,reviewedBy=?,reviewedAt=?,updatedAt=? WHERE id=?")
+    .run(relation.reason, reviewedBy, confirmedAt, confirmedAt, candidate.id);
+  return { candidateId: candidate.id, mappingId: null, outcome: "governance_pending", applicationBatchId: relation.applicationBatchId || null, sourceBatchId: candidate.sourceBatchId };
 }
 
 export function confirmSalesRelationCandidates(candidateIds, { reviewedBy } = {}) {
@@ -148,6 +141,7 @@ export function confirmSalesRelationCandidates(candidateIds, { reviewedBy } = {}
       requested: ids.length,
       created: results.filter((item) => item.outcome === "created").length,
       idempotent: results.filter((item) => item.outcome === "idempotent").length,
+      governancePending: results.filter((item) => item.outcome === "governance_pending").length,
       conflicts: results.filter((item) => item.outcome === "conflict").length,
     },
     confirmedAt,

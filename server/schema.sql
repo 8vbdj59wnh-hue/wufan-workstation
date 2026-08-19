@@ -896,6 +896,8 @@ CREATE TABLE IF NOT EXISTS platform_goods_excel_import_rows (
   batchId TEXT NOT NULL,
   rowNumber INTEGER NOT NULL,
   sourceShopName TEXT,
+  shopId TEXT,
+  platform TEXT,
   platformGoodsId TEXT,
   platformSkuId TEXT,
   merchantSkuCode TEXT,
@@ -904,6 +906,10 @@ CREATE TABLE IF NOT EXISTS platform_goods_excel_import_rows (
   salesLinkSkuId TEXT,
   erpSkuId TEXT,
   action TEXT NOT NULL,
+  shopAction TEXT,
+  linkAction TEXT,
+  skuAction TEXT,
+  relationAction TEXT,
   exceptionType TEXT,
   message TEXT,
   rawDataJson TEXT NOT NULL DEFAULT '{}',
@@ -913,6 +919,18 @@ CREATE TABLE IF NOT EXISTS platform_goods_excel_import_rows (
 
 CREATE INDEX IF NOT EXISTS idx_platform_goods_excel_rows_action
   ON platform_goods_excel_import_rows(batchId,action);
+
+CREATE TABLE IF NOT EXISTS platform_goods_excel_source_files (
+  sourceFileHash TEXT PRIMARY KEY,
+  fileName TEXT NOT NULL,
+  contentBlob BLOB NOT NULL,
+  firstUploadedAt TEXT NOT NULL,
+  lastUploadedAt TEXT NOT NULL,
+  uploadedBy TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_platform_goods_excel_source_files_time
+  ON platform_goods_excel_source_files(lastUploadedAt DESC);
 CREATE TABLE IF NOT EXISTS erp_sync_runs (
   id TEXT PRIMARY KEY,
   syncCode TEXT NOT NULL UNIQUE,
@@ -1173,6 +1191,17 @@ CREATE TABLE IF NOT EXISTS sales_links (
   status TEXT,
   activityStatus TEXT,
   category TEXT,
+  displayName TEXT,
+  ownerId TEXT,
+  managementStatus TEXT NOT NULL DEFAULT 'active',
+  managementNotes TEXT,
+  mainImage TEXT,
+  imageSource TEXT,
+  managementLevel TEXT NOT NULL DEFAULT 'new',
+  managementOriginSource TEXT NOT NULL DEFAULT 'asset_native',
+  managementOriginImportBatchId TEXT,
+  managementIdentifiedAt TEXT,
+  managementCreatedBy TEXT,
   identityStrength TEXT NOT NULL,
   originSource TEXT NOT NULL DEFAULT 'legacy_unknown',
   enrichmentStatus TEXT NOT NULL DEFAULT 'complete',
@@ -1183,7 +1212,10 @@ CREATE TABLE IF NOT EXISTS sales_links (
   lastImportedAt TEXT,
   createdAt TEXT,
   updatedAt TEXT,
-  FOREIGN KEY(shopId) REFERENCES sales_shops(id)
+  FOREIGN KEY(shopId) REFERENCES sales_shops(id),
+  FOREIGN KEY(ownerId) REFERENCES persons(id),
+  FOREIGN KEY(managementOriginImportBatchId) REFERENCES connection_import_batches(id),
+  FOREIGN KEY(managementCreatedBy) REFERENCES persons(id)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_links_goods_identity
@@ -1228,36 +1260,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_link_skus_fallback
   ON sales_link_skus(salesLinkId, normalizedPlatformSkuCode, normalizedSpecificationName)
   WHERE platformSkuId IS NULL OR platformSkuId = '';
 
-CREATE TABLE IF NOT EXISTS sales_link_sku_erp_mappings (
-  id TEXT PRIMARY KEY,
-  salesLinkSkuId TEXT NOT NULL,
-  erpSkuId TEXT NOT NULL,
-  mappingType TEXT NOT NULL DEFAULT 'single',
-  quantity REAL NOT NULL DEFAULT 1,
-  currentState TEXT NOT NULL DEFAULT 'active',
-  sourceType TEXT NOT NULL DEFAULT 'legacy_migration',
-  sourceBatchId TEXT,
-  comboGroupId TEXT,
-  productStructureId TEXT,
-  createdAt TEXT NOT NULL,
-  updatedAt TEXT NOT NULL,
-  invalidatedAt TEXT,
-  FOREIGN KEY(salesLinkSkuId) REFERENCES sales_link_skus(id),
-  FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),
-  FOREIGN KEY(comboGroupId) REFERENCES sales_link_sku_combo_groups(id),
-  FOREIGN KEY(productStructureId) REFERENCES sales_link_sku_product_structures(id),
-  UNIQUE(salesLinkSkuId,erpSkuId),
-  CHECK(mappingType IN ('single','combo')),
-  CHECK(quantity > 0),
-  CHECK(currentState IN ('active','inactive'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_sales_link_sku_erp_mapping_link_state
-  ON sales_link_sku_erp_mappings(salesLinkSkuId,currentState);
-CREATE INDEX IF NOT EXISTS idx_sales_link_sku_erp_mapping_erp_state
-  ON sales_link_sku_erp_mappings(erpSkuId,currentState);
-CREATE INDEX IF NOT EXISTS idx_sales_link_sku_erp_mapping_batch
-  ON sales_link_sku_erp_mappings(sourceBatchId);
 CREATE TABLE IF NOT EXISTS platform_link_shop_mappings (
   id TEXT PRIMARY KEY,
   platform TEXT NOT NULL,
@@ -1506,29 +1508,13 @@ CREATE INDEX IF NOT EXISTS idx_erp_sku_inventory_summary_date ON erp_sku_invento
 CREATE INDEX IF NOT EXISTS idx_erp_sku_inventory_summary_sku_date ON erp_sku_inventory_daily_summaries(erpSkuId,businessDate DESC,updatedAt DESC);
 CREATE INDEX IF NOT EXISTS idx_sales_link_skus_link_state ON sales_link_skus(salesLinkId,currentState);
 
-CREATE TABLE IF NOT EXISTS connection_profiles (
-  id TEXT PRIMARY KEY,
-  salesLinkId TEXT NOT NULL UNIQUE,
-  name TEXT NOT NULL,
-  mainImage TEXT,
-  imageSource TEXT,
-  ownerId TEXT,
-  status TEXT NOT NULL DEFAULT 'active',
-  level TEXT NOT NULL DEFAULT 'new',
-  notes TEXT,
-  originSource TEXT NOT NULL DEFAULT 'legacy_unknown',
-  originImportBatchId TEXT,
-  identifiedAt TEXT,
-  createdBy TEXT,
-  createdAt TEXT NOT NULL,
-  updatedAt TEXT NOT NULL,
-  FOREIGN KEY(salesLinkId) REFERENCES sales_links(id),
-  FOREIGN KEY(originImportBatchId) REFERENCES connection_import_batches(id),
-  FOREIGN KEY(ownerId) REFERENCES persons(id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_connection_profiles_owner_status
-  ON connection_profiles(ownerId, status);
+CREATE VIEW IF NOT EXISTS connection_profiles AS
+SELECT id,id AS salesLinkId,COALESCE(NULLIF(displayName,''),NULLIF(title,''),platformGoodsId) AS name,
+       mainImage,imageSource,ownerId,managementStatus AS status,managementLevel AS level,
+       managementNotes AS notes,managementOriginSource AS originSource,
+       managementOriginImportBatchId AS originImportBatchId,managementIdentifiedAt AS identifiedAt,
+       managementCreatedBy AS createdBy,createdAt,updatedAt
+FROM sales_links;
 
 CREATE TABLE IF NOT EXISTS connection_business_profiles (
   id TEXT PRIMARY KEY,
@@ -1541,7 +1527,7 @@ CREATE TABLE IF NOT EXISTS connection_business_profiles (
   decidedBy TEXT NOT NULL,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
-  FOREIGN KEY(connectionId) REFERENCES connection_profiles(id),
+  FOREIGN KEY(connectionId) REFERENCES sales_links(id),
   FOREIGN KEY(decidedBy) REFERENCES persons(id),
   CHECK(positioningType IN ('sales_growth','balanced_sales','long_tail','profit_contribution')),
   CHECK(status IN ('active','historical')),
@@ -1650,7 +1636,7 @@ CREATE TABLE IF NOT EXISTS connection_goal_plans (
   approvalReason TEXT,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
-  FOREIGN KEY(connectionId) REFERENCES connection_profiles(id),
+  FOREIGN KEY(connectionId) REFERENCES sales_links(id),
   FOREIGN KEY(positioningId) REFERENCES connection_business_profiles(id),
   FOREIGN KEY(templateId) REFERENCES connection_goal_templates(id),
   FOREIGN KEY(createdBy) REFERENCES persons(id),
@@ -1702,7 +1688,7 @@ CREATE TABLE IF NOT EXISTS connection_goal_evaluations (
   statusReason TEXT,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
-  FOREIGN KEY(connectionId) REFERENCES connection_profiles(id),
+  FOREIGN KEY(connectionId) REFERENCES sales_links(id),
   FOREIGN KEY(goalPlanId) REFERENCES connection_goal_plans(id),
   CHECK(evaluationStatus IN ('evaluated','pending')),
   CHECK(grade IS NULL OR grade IN ('excellent','good','on_target','underperforming')),
@@ -1736,7 +1722,7 @@ CREATE TABLE IF NOT EXISTS connection_goal_init_batch_links (
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
   FOREIGN KEY(batchId) REFERENCES connection_goal_init_batches(id),
-  FOREIGN KEY(connectionId) REFERENCES connection_profiles(id),
+  FOREIGN KEY(connectionId) REFERENCES sales_links(id),
   CHECK(status IN ('selected','positioning_pending','target_pending','active','excluded')),
   UNIQUE(batchId,connectionId)
 );
@@ -1764,8 +1750,8 @@ CREATE TABLE IF NOT EXISTS connection_benchmark_targets (
   createdBy TEXT,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
-  FOREIGN KEY(connectionId) REFERENCES connection_profiles(id) ON DELETE CASCADE,
-  FOREIGN KEY(internalConnectionId) REFERENCES connection_profiles(id) ON DELETE SET NULL,
+  FOREIGN KEY(connectionId) REFERENCES sales_links(id) ON DELETE CASCADE,
+  FOREIGN KEY(internalConnectionId) REFERENCES sales_links(id) ON DELETE SET NULL,
   FOREIGN KEY(createdBy) REFERENCES persons(id),
   CHECK(targetType IN ('external','internal')),
   CHECK(internalConnectionId IS NULL OR connectionId <> internalConnectionId)
@@ -1780,7 +1766,7 @@ CREATE TABLE IF NOT EXISTS connection_follows (
   connectionId TEXT NOT NULL,
   createdAt TEXT NOT NULL,
   FOREIGN KEY(userId) REFERENCES persons(id) ON DELETE CASCADE,
-  FOREIGN KEY(connectionId) REFERENCES connection_profiles(id) ON DELETE CASCADE,
+  FOREIGN KEY(connectionId) REFERENCES sales_links(id) ON DELETE CASCADE,
   UNIQUE(userId, connectionId)
 );
 
@@ -1798,7 +1784,7 @@ CREATE TABLE IF NOT EXISTS connection_actions (
   createdBy TEXT,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
-  FOREIGN KEY(connectionProfileId) REFERENCES connection_profiles(id) ON DELETE CASCADE,
+  FOREIGN KEY(connectionProfileId) REFERENCES sales_links(id) ON DELETE CASCADE,
   FOREIGN KEY(ownerId) REFERENCES persons(id)
 );
 
@@ -1822,7 +1808,7 @@ CREATE TABLE IF NOT EXISTS connection_data_mappings (
   updatedAt TEXT NOT NULL,
   deletedAt TEXT,
   deletedBy TEXT,
-  FOREIGN KEY(connectionId) REFERENCES connection_profiles(id),
+  FOREIGN KEY(connectionId) REFERENCES sales_links(id),
   FOREIGN KEY(salesLinkId) REFERENCES sales_links(id),
   FOREIGN KEY(confirmedBy) REFERENCES persons(id),
   FOREIGN KEY(deletedBy) REFERENCES persons(id)
@@ -1962,31 +1948,6 @@ CREATE TABLE IF NOT EXISTS connection_bulk_platform_import_files (
 CREATE INDEX IF NOT EXISTS idx_connection_bulk_platform_files_queue
   ON connection_bulk_platform_import_files(status,createdAt,sequenceNo);
 
-CREATE TABLE IF NOT EXISTS connection_sku_sales_facts (
-  id TEXT PRIMARY KEY,
-  batchId TEXT NOT NULL,
-  salesLinkId TEXT NOT NULL,
-  salesLinkSkuId TEXT NOT NULL,
-  erpSkuId TEXT,
-  platformGoodsId TEXT NOT NULL,
-  skuCode TEXT NOT NULL,
-  periodStart TEXT NOT NULL,
-  periodEnd TEXT NOT NULL,
-  shippedQuantity REAL,
-  salesAmount REAL,
-  costAmount REAL,
-  profitAmount REAL,
-  rawDataJson TEXT NOT NULL DEFAULT '{}',
-  createdAt TEXT NOT NULL,
-  FOREIGN KEY(batchId) REFERENCES connection_import_batches(id),
-  FOREIGN KEY(salesLinkId) REFERENCES sales_links(id),
-  FOREIGN KEY(salesLinkSkuId) REFERENCES sales_link_skus(id),
-  FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_connection_sku_sales_link_period
-  ON connection_sku_sales_facts(salesLinkId,periodEnd DESC,periodStart DESC);
-
 CREATE TABLE IF NOT EXISTS connection_sku_sales_daily_facts (
   id TEXT PRIMARY KEY,
   salesLinkId TEXT NOT NULL,
@@ -2059,7 +2020,6 @@ CREATE TABLE IF NOT EXISTS sales_link_sku_erp_mapping_candidates (
   FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),
   FOREIGN KEY(sourceBatchId) REFERENCES connection_import_batches(id),
   FOREIGN KEY(reviewedBy) REFERENCES persons(id),
-  FOREIGN KEY(mappingId) REFERENCES sales_link_sku_erp_mappings(id),
   UNIQUE(salesLinkSkuId,erpSkuId,sourceBatchId),
   CHECK(candidateType IN ('single','combo')),
   CHECK(status IN ('pending','approved','rejected','superseded','conflict')),
@@ -2077,179 +2037,6 @@ CREATE INDEX IF NOT EXISTS idx_sales_relation_candidates_link_sku
 CREATE INDEX IF NOT EXISTS idx_sales_relation_candidates_erp_sku
   ON sales_link_sku_erp_mapping_candidates(erpSkuId,status);
 
-CREATE TABLE IF NOT EXISTS sales_link_sku_combo_groups (
-  id TEXT PRIMARY KEY,
-  salesLinkSkuId TEXT NOT NULL,
-  groupCode TEXT NOT NULL UNIQUE,
-  status TEXT NOT NULL DEFAULT 'pending',
-  sourceType TEXT NOT NULL,
-  sourceBatchId TEXT,
-  sourceFileHash TEXT,
-  sourceCandidateIdsJson TEXT NOT NULL DEFAULT '[]',
-  reviewedBy TEXT,
-  reviewedAt TEXT,
-  reviewNote TEXT,
-  approvedAt TEXT,
-  invalidatedAt TEXT,
-  replacedGroupId TEXT,
-  createdBy TEXT,
-  createdAt TEXT NOT NULL,
-  updatedAt TEXT NOT NULL,
-  FOREIGN KEY(salesLinkSkuId) REFERENCES sales_link_skus(id),
-  FOREIGN KEY(sourceBatchId) REFERENCES connection_import_batches(id),
-  FOREIGN KEY(reviewedBy) REFERENCES persons(id),
-  FOREIGN KEY(replacedGroupId) REFERENCES sales_link_sku_combo_groups(id),
-  FOREIGN KEY(createdBy) REFERENCES persons(id),
-  CHECK(status IN ('pending','approved','rejected','inactive','conflict')),
-  CHECK(status <> 'approved' OR (reviewedBy IS NOT NULL AND reviewedAt IS NOT NULL AND approvedAt IS NOT NULL))
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_link_sku_combo_groups_one_approved
-  ON sales_link_sku_combo_groups(salesLinkSkuId) WHERE status='approved';
-CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_link_sku_combo_groups_batch_sku
-  ON sales_link_sku_combo_groups(sourceBatchId,salesLinkSkuId) WHERE sourceBatchId IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_sales_link_sku_combo_groups_status_updated
-  ON sales_link_sku_combo_groups(status,updatedAt DESC);
-CREATE INDEX IF NOT EXISTS idx_sales_link_sku_combo_groups_batch
-  ON sales_link_sku_combo_groups(sourceBatchId,status);
-
-CREATE TABLE IF NOT EXISTS sales_link_sku_combo_group_components (
-  id TEXT PRIMARY KEY,
-  comboGroupId TEXT NOT NULL,
-  erpSkuId TEXT NOT NULL,
-  quantity REAL,
-  quantitySource TEXT,
-  sourceType TEXT NOT NULL DEFAULT 'sales_daily_preview',
-  sortOrder INTEGER NOT NULL DEFAULT 0,
-  status TEXT NOT NULL DEFAULT 'included',
-  sourceCandidateId TEXT,
-  decisionNote TEXT,
-  createdAt TEXT NOT NULL,
-  updatedAt TEXT NOT NULL,
-  FOREIGN KEY(comboGroupId) REFERENCES sales_link_sku_combo_groups(id),
-  FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),
-  FOREIGN KEY(sourceCandidateId) REFERENCES sales_link_sku_erp_mapping_candidates(id),
-  UNIQUE(comboGroupId,erpSkuId),
-  CHECK(quantity IS NULL OR quantity > 0),
-  CHECK(quantitySource IS NULL OR quantitySource='manual_confirmation'),
-  CHECK(status IN ('included','excluded'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_sales_link_sku_combo_components_group_order
-  ON sales_link_sku_combo_group_components(comboGroupId,status,sortOrder,id);
-CREATE INDEX IF NOT EXISTS idx_sales_link_sku_combo_components_erp
-  ON sales_link_sku_combo_group_components(erpSkuId,status);
-
-CREATE TRIGGER IF NOT EXISTS trg_combo_component_approved_insert
-  BEFORE INSERT ON sales_link_sku_combo_group_components
-  WHEN NEW.status='included'
-    AND EXISTS (SELECT 1 FROM sales_link_sku_combo_groups g WHERE g.id=NEW.comboGroupId AND g.status='approved')
-    AND (NEW.quantity IS NULL OR COALESCE(NEW.quantitySource,'')<>'manual_confirmation')
-  BEGIN
-    SELECT RAISE(ABORT,'approved combo group requires manually confirmed component quantity');
-  END;
-
-CREATE TRIGGER IF NOT EXISTS trg_combo_component_approved_update
-  BEFORE UPDATE ON sales_link_sku_combo_group_components
-  WHEN NEW.status='included'
-    AND EXISTS (SELECT 1 FROM sales_link_sku_combo_groups g WHERE g.id=NEW.comboGroupId AND g.status='approved')
-    AND (NEW.quantity IS NULL OR COALESCE(NEW.quantitySource,'')<>'manual_confirmation')
-  BEGIN
-    SELECT RAISE(ABORT,'approved combo group requires manually confirmed component quantity');
-  END;
-
-CREATE TRIGGER IF NOT EXISTS trg_combo_group_approval_insert
-  BEFORE INSERT ON sales_link_sku_combo_groups
-  WHEN NEW.status='approved'
-    AND (
-      NOT EXISTS (SELECT 1 FROM sales_link_sku_combo_group_components c WHERE c.comboGroupId=NEW.id AND c.status='included')
-      OR EXISTS (SELECT 1 FROM sales_link_sku_combo_group_components c WHERE c.comboGroupId=NEW.id AND c.status='included' AND (c.quantity IS NULL OR COALESCE(c.quantitySource,'')<>'manual_confirmation'))
-    )
-  BEGIN
-    SELECT RAISE(ABORT,'combo group cannot be approved before all included quantities are manually confirmed');
-  END;
-
-CREATE TRIGGER IF NOT EXISTS trg_combo_group_approval_update
-  BEFORE UPDATE OF status ON sales_link_sku_combo_groups
-  WHEN NEW.status='approved'
-    AND (
-      NOT EXISTS (SELECT 1 FROM sales_link_sku_combo_group_components c WHERE c.comboGroupId=NEW.id AND c.status='included')
-      OR EXISTS (SELECT 1 FROM sales_link_sku_combo_group_components c WHERE c.comboGroupId=NEW.id AND c.status='included' AND (c.quantity IS NULL OR COALESCE(c.quantitySource,'')<>'manual_confirmation'))
-    )
-  BEGIN
-    SELECT RAISE(ABORT,'combo group cannot be approved before all included quantities are manually confirmed');
-  END;
-
-CREATE TABLE IF NOT EXISTS sales_link_sku_product_structures (
-  id TEXT PRIMARY KEY,
-  salesLinkSkuId TEXT NOT NULL,
-  structureCode TEXT NOT NULL UNIQUE,
-  structureHash TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'draft',
-  sourceType TEXT NOT NULL,
-  sourceBatchId TEXT,
-  sourceFileHash TEXT,
-  sourceReferenceJson TEXT NOT NULL DEFAULT '{}',
-  reviewedBy TEXT,
-  reviewedAt TEXT,
-  reviewNote TEXT,
-  activatedAt TEXT,
-  invalidatedAt TEXT,
-  replacedStructureId TEXT,
-  createdBy TEXT,
-  createdAt TEXT NOT NULL,
-  updatedAt TEXT NOT NULL,
-  FOREIGN KEY(salesLinkSkuId) REFERENCES sales_link_skus(id),
-  FOREIGN KEY(sourceBatchId) REFERENCES connection_import_batches(id),
-  FOREIGN KEY(reviewedBy) REFERENCES persons(id),
-  FOREIGN KEY(replacedStructureId) REFERENCES sales_link_sku_product_structures(id),
-  FOREIGN KEY(createdBy) REFERENCES persons(id),
-  CHECK(status IN ('draft','pending_review','active','inactive','conflict')),
-  CHECK(status <> 'active' OR (reviewedBy IS NOT NULL AND reviewedAt IS NOT NULL AND activatedAt IS NOT NULL))
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_link_sku_product_structures_one_active
-  ON sales_link_sku_product_structures(salesLinkSkuId) WHERE status='active';
-CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_link_sku_product_structures_batch_sku_hash
-  ON sales_link_sku_product_structures(sourceBatchId,salesLinkSkuId,structureHash)
-  WHERE sourceBatchId IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_sales_link_sku_product_structures_status_updated
-  ON sales_link_sku_product_structures(status,updatedAt DESC);
-
-CREATE TABLE IF NOT EXISTS sales_link_sku_product_structure_components (
-  id TEXT PRIMARY KEY,
-  productStructureId TEXT NOT NULL,
-  erpSkuId TEXT NOT NULL,
-  quantity REAL NOT NULL,
-  sortOrder INTEGER NOT NULL DEFAULT 0,
-  sourceType TEXT NOT NULL,
-  sourceReferenceJson TEXT NOT NULL DEFAULT '{}',
-  createdAt TEXT NOT NULL,
-  updatedAt TEXT NOT NULL,
-  FOREIGN KEY(productStructureId) REFERENCES sales_link_sku_product_structures(id),
-  FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),
-  UNIQUE(productStructureId,erpSkuId),
-  CHECK(quantity > 0)
-);
-CREATE INDEX IF NOT EXISTS idx_sales_link_sku_product_structure_components_order
-  ON sales_link_sku_product_structure_components(productStructureId,sortOrder,id);
-CREATE INDEX IF NOT EXISTS idx_sales_link_sku_product_structure_components_erp
-  ON sales_link_sku_product_structure_components(erpSkuId);
-
-CREATE TRIGGER IF NOT EXISTS trg_product_structure_activation_insert
-  BEFORE INSERT ON sales_link_sku_product_structures
-  WHEN NEW.status='active'
-    AND NOT EXISTS (SELECT 1 FROM sales_link_sku_product_structure_components c WHERE c.productStructureId=NEW.id)
-  BEGIN
-    SELECT RAISE(ABORT,'product structure cannot be active without components');
-  END;
-CREATE TRIGGER IF NOT EXISTS trg_product_structure_activation_update
-  BEFORE UPDATE OF status ON sales_link_sku_product_structures
-  WHEN NEW.status='active'
-    AND NOT EXISTS (SELECT 1 FROM sales_link_sku_product_structure_components c WHERE c.productStructureId=NEW.id)
-  BEGIN
-    SELECT RAISE(ABORT,'product structure cannot be active without components');
-  END;
-
 CREATE TABLE IF NOT EXISTS product_structure_application_batches (
   id TEXT PRIMARY KEY,
   batchCode TEXT NOT NULL UNIQUE,
@@ -2266,6 +2053,8 @@ CREATE TABLE IF NOT EXISTS product_structure_application_items (
   id TEXT PRIMARY KEY,
   applicationBatchId TEXT NOT NULL,
   productStructureId TEXT,
+  salesObjectStructureId TEXT,
+  structureVersion INTEGER,
   salesLinkSkuId TEXT NOT NULL,
   classification TEXT NOT NULL,
   approvalStatus TEXT NOT NULL DEFAULT 'pending',
@@ -2282,7 +2071,7 @@ CREATE TABLE IF NOT EXISTS product_structure_application_items (
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
   FOREIGN KEY(applicationBatchId) REFERENCES product_structure_application_batches(id),
-  FOREIGN KEY(productStructureId) REFERENCES sales_link_sku_product_structures(id),
+  FOREIGN KEY(salesObjectStructureId) REFERENCES sales_object_structures(id),
   FOREIGN KEY(salesLinkSkuId) REFERENCES sales_link_skus(id),
   FOREIGN KEY(reviewedBy) REFERENCES persons(id),
   UNIQUE(applicationBatchId,salesLinkSkuId),
@@ -2298,7 +2087,9 @@ CREATE INDEX IF NOT EXISTS idx_product_structure_application_items_sku
 CREATE TABLE IF NOT EXISTS product_structure_application_audits (
   id TEXT PRIMARY KEY,
   applicationItemId TEXT NOT NULL,
-  productStructureId TEXT NOT NULL,
+  productStructureId TEXT,
+  salesObjectStructureId TEXT,
+  structureVersion INTEGER,
   executionMode TEXT NOT NULL,
   outcome TEXT NOT NULL,
   oldMappingsSnapshotJson TEXT NOT NULL,
@@ -2308,7 +2099,7 @@ CREATE TABLE IF NOT EXISTS product_structure_application_audits (
   appliedAt TEXT NOT NULL,
   createdAt TEXT NOT NULL,
   FOREIGN KEY(applicationItemId) REFERENCES product_structure_application_items(id),
-  FOREIGN KEY(productStructureId) REFERENCES sales_link_sku_product_structures(id),
+  FOREIGN KEY(salesObjectStructureId) REFERENCES sales_object_structures(id),
   FOREIGN KEY(appliedBy) REFERENCES persons(id),
   CHECK(executionMode IN ('isolated_simulation','production')),
   CHECK(outcome IN ('applied','idempotent','failed','rolled_back'))
@@ -2388,7 +2179,7 @@ CREATE TABLE IF NOT EXISTS connection_period_snapshots (
   competitionScore REAL,
   metricsJson TEXT NOT NULL DEFAULT '{}',
   createdAt TEXT NOT NULL,
-  FOREIGN KEY(connectionId) REFERENCES connection_profiles(id),
+  FOREIGN KEY(connectionId) REFERENCES sales_links(id),
   FOREIGN KEY(salesLinkId) REFERENCES sales_links(id),
   FOREIGN KEY(mappingId) REFERENCES connection_data_mappings(id),
   FOREIGN KEY(importBatchId) REFERENCES connection_import_batches(id)
@@ -2413,7 +2204,7 @@ CREATE TABLE IF NOT EXISTS connection_health_records (
   suggestionsJson TEXT NOT NULL DEFAULT '[]',
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
-  FOREIGN KEY(connectionId) REFERENCES connection_profiles(id),
+  FOREIGN KEY(connectionId) REFERENCES sales_links(id),
   FOREIGN KEY(snapshotId) REFERENCES connection_period_snapshots(id),
   UNIQUE(connectionId, snapshotId)
 );
@@ -2434,7 +2225,7 @@ CREATE TABLE IF NOT EXISTS connection_diagnosis_entries (
   status TEXT NOT NULL DEFAULT 'active',
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
-  FOREIGN KEY(connectionId) REFERENCES connection_profiles(id) ON DELETE CASCADE,
+  FOREIGN KEY(connectionId) REFERENCES sales_links(id) ON DELETE CASCADE,
   FOREIGN KEY(initiatedBy) REFERENCES persons(id),
   CHECK(status IN ('active','closed'))
 );
@@ -2457,7 +2248,7 @@ CREATE TABLE IF NOT EXISTS connection_improvements (
   resultSummary TEXT,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
-  FOREIGN KEY(connectionId) REFERENCES connection_profiles(id),
+  FOREIGN KEY(connectionId) REFERENCES sales_links(id),
   FOREIGN KEY(healthRecordId) REFERENCES connection_health_records(id),
   FOREIGN KEY(actionId) REFERENCES process_instances(id),
   UNIQUE(healthRecordId, actionId)
@@ -2465,17 +2256,6 @@ CREATE TABLE IF NOT EXISTS connection_improvements (
 
 CREATE INDEX IF NOT EXISTS idx_connection_improvements_connection_status
   ON connection_improvements(connectionId, status, updatedAt DESC);
-
-CREATE TABLE IF NOT EXISTS platform_sku_manual_bindings (
-  id TEXT PRIMARY KEY,
-  salesLinkSkuId TEXT NOT NULL UNIQUE,
-  productId TEXT NOT NULL,
-  createdBy TEXT,
-  createdAt TEXT,
-  updatedAt TEXT,
-  FOREIGN KEY(salesLinkSkuId) REFERENCES sales_link_skus(id),
-  FOREIGN KEY(productId) REFERENCES products(id)
-);
 
 CREATE TABLE IF NOT EXISTS finance_import_batches (
   id TEXT PRIMARY KEY,

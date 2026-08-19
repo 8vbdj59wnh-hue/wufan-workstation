@@ -45,9 +45,8 @@ export function collectErpSnapshotFacts(database) {
   const shops = database.prepare("SELECT id,platform,status FROM sales_shops ORDER BY id").all();
   const links = database.prepare("SELECT * FROM sales_links WHERE currentState='active' ORDER BY id").all();
   const skus = database.prepare(`
-    SELECT x.*,b.id AS manualBindingId
+    SELECT x.*
     FROM sales_link_skus x
-    LEFT JOIN platform_sku_manual_bindings b ON b.salesLinkSkuId=x.id
     JOIN sales_links l ON l.id=x.salesLinkId AND l.currentState='active'
     WHERE x.currentState='active'
     ORDER BY x.id
@@ -197,7 +196,6 @@ export function buildErpSnapshotRows(facts, snapshot, run) {
       skuName: sku.specificationName ?? null,
       matchStatus: sku.matchStatus,
       productId: resolvedRelation?.productIds.length === 1 ? resolvedRelation.productIds[0] : null,
-      manualBindingId: sku.manualBindingId ?? null,
       combinationFlag: ["multi_component", "single_multi_quantity"].includes(resolvedRelation?.relationshipShape) ? 1 : 0,
       platformPrice: sku.price ?? null,
       platformStock: sku.platformStock ?? null,
@@ -325,7 +323,7 @@ export function generateErpFactSnapshot(syncRunId, { failAfterStage = "" } = {})
       ], rows.linkRows);
       insertRows(database, "sales_link_sku_daily_snapshots", [
         "snapshotId", "businessDate", "salesLinkSkuId", "salesLinkId", "platformSkuId", "merchantCode",
-        "skuName", "matchStatus", "productId", "manualBindingId", "combinationFlag", "platformPrice",
+        "skuName", "matchStatus", "productId", "combinationFlag", "platformPrice",
         "platformStock", "occupiedStock", "sourceBatchId", "createdAt",
       ], rows.skuRows);
       insertRows(database, "product_shop_daily_snapshots", [

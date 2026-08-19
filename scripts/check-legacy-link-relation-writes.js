@@ -9,6 +9,10 @@ const compatibilityReadRules = [
   { file: "server/db.js", marker: "legacy_migration", reason: "显式一次性旧关系迁移" },
   { file: "server/db.js", marker: "connection_sku_sales_facts_v2", reason: "旧销售事实表结构升级" },
 ];
+const platformAssetWriters = new Set([
+  "server/productV2Import.js",
+  "server/platformGoodsExcelDataSyncAdapter.js",
+]);
 
 function listJavaScriptFiles(directory) {
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -66,7 +70,7 @@ function inspectFile(file) {
   for (const match of source.matchAll(updatePattern)) findings.push({ file, line: lineFor(source, match.index), type: "update", columns: [match[1]] });
   const linkInsertPattern = /INSERT\s+(?:OR\s+\w+\s+)?INTO\s+sales_links\s*\(/giu;
   for (const match of source.matchAll(linkInsertPattern)) {
-    if (relative !== "server/productV2Import.js") findings.push({ file, line: lineFor(source, match.index), type: "sales_link_write_outside_platform_goods", columns: [] });
+    if (!platformAssetWriters.has(relative)) findings.push({ file, line: lineFor(source, match.index), type: "sales_link_write_outside_platform_goods", columns: [] });
   }
   if (relative === "server/productV2Import.js") {
     for (const pattern of [

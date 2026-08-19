@@ -38,14 +38,16 @@ export function queryErpSkuUsageCandidates(input = {}, options = {}) {
   const idsSql = placeholders(erpSkuIds);
   const skuRows = database.prepare(`SELECT s.id,s.merchantSkuCode,s.specificationName,s.currentState,g.goodsName
     FROM erp_skus s LEFT JOIN erp_goods g ON g.id=s.erpGoodsId WHERE s.id IN (${idsSql})`).all(...erpSkuIds);
-  const activeRelations = new Set(database.prepare(`SELECT DISTINCT erpSkuId FROM sales_link_sku_erp_mappings
-    WHERE currentState='active' AND erpSkuId IN (${idsSql})`).all(...erpSkuIds).map((row) => row.erpSkuId));
+  const activeRelations = new Set(database.prepare(`SELECT DISTINCT c.erpSkuId
+    FROM sales_link_sku_sales_object_relations r
+    JOIN sales_objects o ON o.id=r.salesObjectId AND o.status='active'
+    JOIN sales_object_structures s ON s.salesObjectId=o.id AND s.status='active'
+    JOIN sales_object_structure_components c ON c.structureId=s.id AND c.status='active'
+    WHERE r.status='active' AND c.erpSkuId IN (${idsSql})`).all(...erpSkuIds).map((row) => row.erpSkuId));
   const productMappings = new Set(database.prepare(`SELECT DISTINCT erpSkuId FROM product_erp_mappings
     WHERE currentState='active' AND erpSkuId IN (${idsSql})`).all(...erpSkuIds).map((row) => row.erpSkuId));
-  const salesFacts = new Set([
-    ...database.prepare(`SELECT DISTINCT erpSkuId FROM connection_sku_sales_daily_facts WHERE erpSkuId IN (${idsSql})`).all(...erpSkuIds).map((row) => row.erpSkuId),
-    ...database.prepare(`SELECT DISTINCT erpSkuId FROM connection_sku_sales_daily_facts WHERE erpSkuId IN (${idsSql})`).all(...erpSkuIds).map((row) => row.erpSkuId),
-  ]);
+  const salesFacts = new Set(database.prepare(`SELECT DISTINCT erpSkuId FROM connection_sku_sales_daily_facts
+    WHERE erpSkuId IN (${idsSql})`).all(...erpSkuIds).map((row) => row.erpSkuId));
   const usageRows = database.prepare(`SELECT * FROM erp_sku_business_usages WHERE erpSkuId IN (${idsSql}) ORDER BY erpSkuId,updatedAt DESC,id`).all(...erpSkuIds);
   const usageByErpSku = new Map();
   for (const row of usageRows) {

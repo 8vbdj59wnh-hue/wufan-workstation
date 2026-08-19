@@ -50,6 +50,27 @@ function productIdsForRelation(relation, productsByErpSku) {
   return [...new Set(relation.mappings.flatMap((mapping) => productsByErpSku.get(mapping.erpSkuId) ?? []))];
 }
 
+function readSalesObjectLinkSkuIdsByErpSku(database, erpSkuIds) {
+  const ids = [...new Set(erpSkuIds.map(text).filter(Boolean))];
+  const linkSkuIds = [];
+  for (let offset = 0; offset < ids.length; offset += BATCH_SIZE) {
+    const batch = ids.slice(offset, offset + BATCH_SIZE);
+    linkSkuIds.push(...database.prepare(`
+      SELECT DISTINCT relation.linkSkuId
+      FROM sales_object_structure_components component
+      JOIN sales_object_structures structure
+        ON structure.id=component.structureId AND structure.status='active'
+      JOIN sales_objects salesObject
+        ON salesObject.id=structure.salesObjectId AND salesObject.status='active'
+      JOIN sales_link_sku_sales_object_relations relation
+        ON relation.salesObjectId=salesObject.id AND relation.status='active'
+      WHERE component.status='active' AND component.erpSkuId IN (${placeholders(batch)})
+      ORDER BY relation.linkSkuId
+    `).all(...batch).map((row) => row.linkSkuId));
+  }
+  return [...new Set(linkSkuIds)];
+}
+
 function readLinkSkuRows(database, salesLinkSkuIds) {
   const ids = [...new Set(salesLinkSkuIds.map(text).filter(Boolean))];
   const rows = [];
@@ -103,10 +124,16 @@ export function queryUnmatchedPlatformSkus(options = {}, context = {}) {
       AND COALESCE(x.matchStatus,'pending') NOT IN ('ignored','combination')
       AND NOT EXISTS (
         SELECT 1
-        FROM sales_link_sku_erp_mappings relation
+        FROM sales_link_sku_sales_object_relations relation
+        JOIN sales_objects salesObject
+          ON salesObject.id=relation.salesObjectId AND salesObject.status='active'
+        JOIN sales_object_structures structure
+          ON structure.salesObjectId=salesObject.id AND structure.status='active'
+        JOIN sales_object_structure_components component
+          ON component.structureId=structure.id AND component.status='active'
         JOIN product_erp_mappings productMapping
-          ON productMapping.erpSkuId=relation.erpSkuId AND productMapping.currentState='active'
-        WHERE relation.salesLinkSkuId=x.id AND relation.currentState='active'
+          ON productMapping.erpSkuId=component.erpSkuId AND productMapping.currentState='active'
+        WHERE relation.linkSkuId=x.id AND relation.status='active'
       )
       AND (?='' OR x.platformSkuCode LIKE ? OR x.platformSkuId LIKE ? OR x.specificationName LIKE ?
         OR l.title LIKE ? OR l.platformGoodsCode LIKE ? OR l.platformGoodsId LIKE ?)
@@ -130,11 +157,7 @@ export function queryProductSalesSummaries(context = {}) {
   const database = context.database || getDatabase();
   const factRows = database.prepare(`
     SELECT DISTINCT facts.salesLinkSkuId,x.salesLinkId,l.shopId,s.platform
-    FROM (
-      SELECT salesLinkSkuId FROM connection_sku_sales_facts WHERE salesLinkSkuId IS NOT NULL
-      UNION
-      SELECT salesLinkSkuId FROM connection_sku_sales_daily_facts WHERE salesLinkSkuId IS NOT NULL
-    ) facts
+    FROM connection_sku_sales_daily_facts facts
     JOIN sales_link_skus x ON x.id=facts.salesLinkSkuId
     JOIN sales_links l ON l.id=x.salesLinkId
     JOIN sales_shops s ON s.id=l.shopId
@@ -172,17 +195,7 @@ export function queryProductSalesLinks(productIdValue, context = {}) {
     ORDER BY erpSkuId
   `).all(productId).map((row) => row.erpSkuId);
   if (!erpSkuIds.length) return [];
-  const candidateIds = [];
-  for (let offset = 0; offset < erpSkuIds.length; offset += BATCH_SIZE) {
-    const batch = erpSkuIds.slice(offset, offset + BATCH_SIZE);
-    candidateIds.push(...database.prepare(`
-      SELECT DISTINCT salesLinkSkuId
-      FROM sales_link_sku_erp_mappings
-      WHERE currentState='active' AND erpSkuId IN (${placeholders(batch)})
-      ORDER BY salesLinkSkuId
-    `).all(...batch).map((row) => row.salesLinkSkuId));
-  }
-  const uniqueCandidateIds = [...new Set(candidateIds)];
+  const uniqueCandidateIds = readSalesObjectLinkSkuIdsByErpSku(database, erpSkuIds);
   const relations = resolveRelations(database, uniqueCandidateIds);
   const targetErpSkuIds = new Set(erpSkuIds);
   const matchedIds = uniqueCandidateIds.filter((id) => relations[id]?.isUsable

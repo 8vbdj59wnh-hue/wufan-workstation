@@ -257,7 +257,7 @@ export function confirmConnectionOwnerImport(batchId, userId, { confirmOverwrite
       if (profile.ownerId === owner.id) unchanged += 1;
       else {
         if (profile.ownerId) reassigned += 1; else firstAssigned += 1;
-        database.prepare("UPDATE connection_profiles SET ownerId=?,updatedAt=? WHERE id=?").run(owner.id, now(), profile.id); updated += 1;
+        database.prepare("UPDATE sales_links SET ownerId=?,updatedAt=? WHERE id=?").run(owner.id, now(), profile.id); updated += 1;
       }
       database.prepare("UPDATE connection_import_rows SET status='success' WHERE id=?").run(row.id);
     }

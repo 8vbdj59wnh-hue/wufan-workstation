@@ -3,6 +3,36 @@ import { getDatabase } from "./db.js";
 
 const parseJson = (raw, fallback = {}) => { try { return JSON.parse(raw || "{}"); } catch { return fallback; } };
 const now = () => new Date().toISOString();
+const technicalRecordTypes = new Set(["image_download_warning", "erp_sku_row_warning", "source_audit", "disabled_erp_sku"]);
+const normalBusinessTypes = new Set(["no_system_goods", "non_business_row"]);
+const legacyStructureTypes = new Set(["combo_goods", "bundle_sku"]);
+
+function normalizeBusinessException(item = {}, resolvedAt = now()) {
+  const originalType = item.exceptionType || "data_error";
+  const exceptionType = legacyStructureTypes.has(originalType) ? "missing_product_structure" : originalType;
+  if (technicalRecordTypes.has(exceptionType)) return {
+    ...item, exceptionType, status: "ignored", resolutionType: "technical_record",
+    resolutionNote: "技术过程记录，不进入业务异常治理。", resolvedAt,
+  };
+  if (normalBusinessTypes.has(exceptionType)) return {
+    ...item, exceptionType, status: "ignored", resolutionType: "normal_business",
+    resolutionNote: "正常业务状态，不进入异常治理。", resolvedAt,
+  };
+  return { ...item, exceptionType, status: "open", resolutionType: null, resolutionNote: null, resolvedAt: null };
+}
+
+function insertBusinessException(db, batch, item, createdAt) {
+  if (item.status !== "open") return false;
+  db.prepare(`INSERT INTO data_sync_exceptions
+    (id,taskId,batchId,exceptionType,severity,status,message,entityType,entityId,rawDataJson,resolutionType,resolutionNote,resolvedReason,createdAt,resolvedAt)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    `data-sync-exception-${crypto.randomUUID()}`, batch.taskId, batch.id, item.exceptionType,
+    item.severity || "error", item.status, item.message || "同步数据异常", item.entityType || null,
+    item.entityId || null, JSON.stringify(item.rawData || {}), item.resolutionType, item.resolutionNote,
+    item.resolutionNote, createdAt, item.resolvedAt,
+  );
+  return true;
+}
 
 function decodeTask(row) {
   return row ? { ...row, config: parseJson(row.configJson), enabled: row.status === "enabled" } : null;
@@ -17,6 +47,37 @@ export function getDataSyncCenterOverview({ batchLimit = 50, exceptionLimit = 50
   const tasks = db.prepare("SELECT * FROM data_sync_tasks ORDER BY transportType, name").all().map(decodeTask);
   const batches = db.prepare("SELECT b.*,t.name taskName,t.syncType,t.taskCode FROM data_sync_batches b JOIN data_sync_tasks t ON t.id=b.taskId ORDER BY b.createdAt DESC LIMIT ?").all(Math.min(200, Math.max(1, Number(batchLimit) || 50))).map(decodeBatch);
   const exceptions = db.prepare("SELECT e.*,t.name taskName FROM data_sync_exceptions e JOIN data_sync_tasks t ON t.id=e.taskId ORDER BY CASE e.status WHEN 'open' THEN 0 ELSE 1 END,e.createdAt DESC LIMIT ?").all(Math.min(200, Math.max(1, Number(exceptionLimit) || 50))).map((row) => ({ ...row, rawData: parseJson(row.rawDataJson) }));
+  const salesDailyBatches = db.prepare(`SELECT b.id,b.fileName,b.status,b.periodStart,b.periodEnd,b.totalRows,b.matchedRows,b.pendingRows,b.errorRows,
+      b.createdAt,b.updatedAt,b.completedAt,b.previewSummaryJson,
+      SUM(CASE WHEN r.status='ready' THEN 1 ELSE 0 END) readyRowCount,
+      SUM(CASE WHEN r.status IN ('pending_relation','missing_relation') THEN 1 ELSE 0 END) governanceRowCount,
+      SUM(CASE WHEN r.status NOT IN ('ready','pending_relation','missing_relation','accounting_auxiliary','shipping_adjustment','other_adjustment','excluded') THEN 1 ELSE 0 END) exceptionRowCount
+    FROM connection_import_batches b
+    LEFT JOIN connection_import_rows r ON r.batchId=b.id
+    WHERE b.importType='erp_sales_daily_preview'
+    GROUP BY b.id
+    ORDER BY b.createdAt DESC,b.id DESC LIMIT ?`).all(Math.min(200, Math.max(1, Number(batchLimit) || 50))).map((row) => {
+      const summary = parseJson(row.previewSummaryJson);
+      const factCommit = summary.factCommit || null;
+      return {
+        id: row.id,
+        fileName: row.fileName,
+        status: row.status,
+        periodStart: row.periodStart,
+        periodEnd: row.periodEnd,
+        totalCount: Number(row.totalRows || 0),
+        successfulCount: factCommit
+          ? Number(factCommit.insertedCount || 0) + Number(factCommit.skippedCount || 0)
+          : Number(row.readyRowCount || 0),
+        exceptionCount: Number(row.governanceRowCount || 0) + Number(row.exceptionRowCount || 0),
+        governanceCount: Number(row.governanceRowCount || 0),
+        insertedCount: Number(factCommit?.insertedCount || 0),
+        skippedCount: Number(factCommit?.skippedCount || 0),
+        updatePendingCount: Number(factCommit?.updatePendingCount || 0),
+        syncedAt: row.completedAt || row.updatedAt || row.createdAt,
+        createdAt: row.createdAt,
+      };
+    });
   const legacy = {
     erpSyncRuns: db.prepare("SELECT COUNT(*) total FROM erp_sync_runs").get().total,
     wangdianGoodsLogs: db.prepare("SELECT COUNT(*) total FROM wangdian_goods_sync_logs").get().total,
@@ -31,7 +92,7 @@ export function getDataSyncCenterOverview({ batchLimit = 50, exceptionLimit = 50
     (SELECT COUNT(*) FROM data_sync_batches WHERE status IN ('queued','running','preview_ready','interrupted')) activeBatchCount,
     (SELECT COUNT(*) FROM data_sync_exceptions WHERE status='open') openExceptionCount
   `).get();
-  return { tasks, batches, exceptions, legacy, counts, salesShops, wangdianShopMappings, latestShopDiscoveryBatch };
+  return { tasks, batches, exceptions, salesDailyBatches, latestSalesDailyBatch: salesDailyBatches[0] || null, legacy, counts, salesShops, wangdianShopMappings, latestShopDiscoveryBatch };
 }
 
 export function setDataSyncTaskStatus(taskId, status) {
@@ -102,7 +163,11 @@ export function markDataSyncBatchPreviewReady(batchId, { sourceBatchType = "erp_
   return db.transaction(() => {
     const batch = db.prepare("SELECT * FROM data_sync_batches WHERE id=?").get(batchId);
     if (!batch || !["queued", "running"].includes(batch.status)) throw new Error("同步批次不存在或当前状态不可生成预览。");
-    const exceptionCount = exceptions.length || Number(summary.exceptionCount || 0) || Number(summary.invalid || 0) + Number(summary.error || 0);
+    const rawItems = exceptions.length ? exceptions : Number(summary.exceptionCount || 0) || Number(summary.invalid || 0) + Number(summary.error || 0)
+      ? [{ exceptionType: "data_validation", severity: "error", message: `同步预览存在 ${Number(summary.exceptionCount || 0) || Number(summary.invalid || 0) + Number(summary.error || 0)} 项校验异常。`, rawData: summary }]
+      : [];
+    const items = rawItems.map((item) => normalizeBusinessException(item, completedAt));
+    const exceptionCount = items.filter((item) => item.status === "open").length;
     db.prepare("UPDATE data_sync_batches SET status='superseded' WHERE taskId=? AND status='preview_ready' AND id<>?").run(batch.taskId, batchId);
     db.prepare(`UPDATE data_sync_batches SET status='preview_ready',requestStart=COALESCE(?,requestStart),requestEnd=COALESCE(?,requestEnd),totalCount=?,createdCount=?,updatedCount=?,exceptionCount=?,sourceBatchType=?,sourceBatchId=?,completedAt=NULL WHERE id=?`).run(
       requestStart, requestEnd, Number(summary.total || 0), Number(summary.created || 0), Number(summary.updated || 0), exceptionCount, sourceBatchType, sourceBatchId, batchId,
@@ -110,10 +175,7 @@ export function markDataSyncBatchPreviewReady(batchId, { sourceBatchType = "erp_
     db.prepare("INSERT INTO data_sync_logs (id,batchId,level,eventType,message,detailJson,createdAt) VALUES (?,?,?,?,?,?,?)").run(
       `data-sync-log-${crypto.randomUUID()}`, batchId, exceptionCount ? "warn" : "info", "preview_ready", message, JSON.stringify({ sourceBatchType, sourceBatchId, summary }), completedAt,
     );
-    const items = exceptions.length ? exceptions : exceptionCount ? [{ exceptionType: "data_validation", severity: "error", message: `同步预览存在 ${exceptionCount} 项校验异常。`, rawData: summary }] : [];
-    for (const item of items) db.prepare(`INSERT INTO data_sync_exceptions (id,taskId,batchId,exceptionType,severity,status,message,entityType,entityId,rawDataJson,createdAt) VALUES (?,?,?,?,?,'open',?,?,?,?,?)`).run(
-      `data-sync-exception-${crypto.randomUUID()}`, batch.taskId, batchId, item.exceptionType || "data_validation", item.severity || "error", item.message || "同步数据异常", item.entityType || null, item.entityId || null, JSON.stringify(item.rawData || {}), completedAt,
-    );
+    for (const item of items) insertBusinessException(db, batch, item, completedAt);
     return decodeBatch(db.prepare("SELECT * FROM data_sync_batches WHERE id=?").get(batchId));
   }).immediate();
 }
@@ -181,15 +243,12 @@ export function completeDataSyncBatch(batchId, result = {}) {
   return db.transaction(() => {
     const batch = db.prepare("SELECT * FROM data_sync_batches WHERE id=?").get(batchId);
     if (!batch || !["queued", "running", "preview_ready"].includes(batch.status)) throw new Error("同步批次不存在或已结束。");
-    const exceptions = Array.isArray(result.exceptions) ? result.exceptions : [];
+    const exceptions = (Array.isArray(result.exceptions) ? result.exceptions : []).map((item) => normalizeBusinessException(item, completedAt));
+    const businessExceptionCount = exceptions.filter((item) => item.status === "open").length;
     db.prepare(`UPDATE data_sync_batches SET status=?,totalCount=?,createdCount=?,updatedCount=?,invalidatedCount=?,exceptionCount=?,errorMessage=?,startedAt=COALESCE(startedAt,?),completedAt=? WHERE id=?`).run(
-      status, Number(result.totalCount || 0), Number(result.createdCount || 0), Number(result.updatedCount || 0), Number(result.invalidatedCount || 0), Number(result.exceptionCount ?? exceptions.length), result.errorMessage || null, completedAt, completedAt, batchId,
+      status, Number(result.totalCount || 0), Number(result.createdCount || 0), Number(result.updatedCount || 0), Number(result.invalidatedCount || 0), exceptions.length ? businessExceptionCount : Number(result.exceptionCount || 0), result.errorMessage || null, completedAt, completedAt, batchId,
     );
-    for (const item of exceptions) {
-      db.prepare(`INSERT INTO data_sync_exceptions (id,taskId,batchId,exceptionType,severity,status,message,entityType,entityId,rawDataJson,createdAt) VALUES (?,?,?,?,?,'open',?,?,?,?,?)`).run(
-        `data-sync-exception-${crypto.randomUUID()}`, batch.taskId, batchId, item.exceptionType || "data_error", item.severity || "error", item.message || "同步数据异常", item.entityType || null, item.entityId || null, JSON.stringify(item.rawData || {}), completedAt,
-      );
-    }
+    for (const item of exceptions) insertBusinessException(db, batch, item, completedAt);
     db.prepare("INSERT INTO data_sync_logs (id,batchId,level,eventType,message,detailJson,createdAt) VALUES (?,?,?,?,?,?,?)").run(
       `data-sync-log-${crypto.randomUUID()}`, batchId, status === "failed" ? "error" : "info", "batch_completed", status === "succeeded" ? "同步批次执行成功。" : status === "partial" ? "同步批次部分成功。" : "同步批次执行失败。", JSON.stringify(result), completedAt,
     );

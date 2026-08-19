@@ -26,7 +26,7 @@ function median(values) {
 
 function loadProfile(database, connectionId) {
   const profile = database.prepare("SELECT id,salesLinkId,name,ownerId,status FROM connection_profiles WHERE id=?").get(clean(connectionId));
-  if (!profile) fail("链接经营档案不存在。", 404);
+  if (!profile) fail("Link资产不存在。", 404);
   return profile;
 }
 

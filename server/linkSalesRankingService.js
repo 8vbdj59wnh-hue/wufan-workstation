@@ -12,18 +12,18 @@ function dateOnly(value) {
   return normalized;
 }
 
-function defaultRange(days) {
-  const end = new Date();
-  end.setUTCDate(end.getUTCDate() - 1);
+function defaultRange(days, anchorDate = "") {
+  const end = anchorDate ? new Date(`${dateOnly(anchorDate)}T00:00:00Z`) : new Date();
+  if (!anchorDate) end.setUTCDate(end.getUTCDate() - 1);
   const start = new Date(end);
   start.setUTCDate(start.getUTCDate() - days + 1);
   return { startDate: start.toISOString().slice(0, 10), endDate: end.toISOString().slice(0, 10) };
 }
 
-export function resolveLinkSalesRankingRange(input = {}) {
+export function resolveLinkSalesRankingRange(input = {}, anchorDate = "") {
   const preset = text(input.preset || "7d");
-  if (preset === "7d") return { preset, ...defaultRange(7) };
-  if (preset === "30d") return { preset, ...defaultRange(30) };
+  if (preset === "7d") return { preset, ...defaultRange(7, anchorDate) };
+  if (preset === "30d") return { preset, ...defaultRange(30, anchorDate) };
   if (preset !== "custom") throw new Error("销售排行时间范围无效。");
   const startDate = dateOnly(input.startDate);
   const endDate = dateOnly(input.endDate);

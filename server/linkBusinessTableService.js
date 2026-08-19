@@ -109,10 +109,10 @@ export function queryLinkBusinessTable(raw = {}, userId = "", isAdmin = false) {
   const personId = text(userId);
   if (options.scope === "mine" && !personId) throw new Error("无法识别当前登录人员。");
   const ranges = dateRanges(options);
-  const where = ["1=1"];
+  const where = ["COALESCE(l.currentState,'active')='active'"];
   const params = { startDate: ranges.selected.startDate, endDate: ranges.selected.endDate };
   if (options.scope === "mine") { where.push("c.ownerId=@scopeOwnerId"); params.scopeOwnerId = personId; }
-  if (text(options.keyword)) { where.push("(c.name LIKE @keyword OR l.title LIKE @keyword OR l.platformGoodsId LIKE @keyword)"); params.keyword = `%${text(options.keyword)}%`; }
+  if (text(options.keyword)) { where.push("(COALESCE(c.name,'') LIKE @keyword OR COALESCE(l.title,'') LIKE @keyword OR l.platformGoodsId LIKE @keyword)"); params.keyword = `%${text(options.keyword)}%`; }
   for (const [key, column] of [["platform", "sh.platform"], ["shopId", "sh.id"], ["ownerId", "c.ownerId"], ["archiveStatus", "c.status"]]) {
     if (text(options[key])) { where.push(`${column}=@${key}`); params[key] = text(options[key]); }
   }
@@ -203,7 +203,9 @@ export function queryLinkBusinessTable(raw = {}, userId = "", isAdmin = false) {
         COUNT(conversionRate) conversionCount
       FROM platform_source GROUP BY salesLinkId
     )
-    SELECT c.id,c.salesLinkId,c.name,c.mainImage,c.ownerId,c.status archiveStatus,c.updatedAt,
+    SELECT COALESCE(c.id,l.id) id,c.id connectionProfileId,l.id salesLinkId,
+      COALESCE(NULLIF(c.name,''),NULLIF(l.title,''),l.platformGoodsId) name,c.mainImage,c.ownerId,
+      COALESCE(c.status,l.currentState,'active') archiveStatus,COALESCE(c.updatedAt,l.updatedAt) updatedAt,
       l.platformGoodsId,l.canonicalUrl,l.category,l.status platformStatus,sh.id shopId,sh.platform,COALESCE(sh.displayName,sh.shopName) shopName,p.name ownerName,
       fa.salesAmount,fa.salesCount,fa.quantity,fa.quantityCount,fa.costAmount,fa.costCount,fa.profitAmount,fa.profitCount,
       pa.periodStart,pa.periodEnd,pa.statisticsDate,pa.productType,pa.productStatus,pa.productTags,
@@ -222,15 +224,16 @@ export function queryLinkBusinessTable(raw = {}, userId = "", isAdmin = false) {
       pa.searchVisitorCount,pa.searchVisitorCountRows,pa.searchPayBuyerCount,pa.searchPayBuyerCountRows,
       pa.structuredDetailConversionRate,pa.structuredDetailConversionRateRows,
       pa.structuredDetailTransactionShare,pa.structuredDetailTransactionShareRows
-    FROM connection_profiles c JOIN sales_links l ON l.id=c.salesLinkId JOIN sales_shops sh ON sh.id=l.shopId
-    LEFT JOIN persons p ON p.id=c.ownerId LEFT JOIN fact_aggregate fa ON fa.salesLinkId=c.salesLinkId
-    LEFT JOIN platform_aggregate pa ON pa.salesLinkId=c.salesLinkId WHERE ${where.join(" AND ")}
+    FROM sales_links l JOIN sales_shops sh ON sh.id=l.shopId
+    LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
+    LEFT JOIN persons p ON p.id=c.ownerId LEFT JOIN fact_aggregate fa ON fa.salesLinkId=l.id
+    LEFT JOIN platform_aggregate pa ON pa.salesLinkId=l.id WHERE ${where.join(" AND ")}
   `).all(params);
-  const ids = rows.map((row) => row.id);
+  const ids = rows.map((row) => row.connectionProfileId).filter(Boolean);
   const analyses = new Map(listConnectionGrowthAnalysesByConnectionIds(ids).map((item) => [item.connectionId, item]));
   const hospitals = getConnectionHospitalStages(ids);
   let items = rows.map((row) => {
-    const analysis = analyses.get(row.id) ?? { comparable: false, healthStatus: "no_data", healthScore: null, salesGrowth: null };
+    const analysis = (row.connectionProfileId ? analyses.get(row.connectionProfileId) : null) ?? { comparable: false, healthStatus: "no_data", healthScore: null, salesGrowth: null };
     const profitMargin = Number(row.salesCount || 0) > 0 && Number(row.salesAmount) !== 0
       ? metric(Number(row.profitAmount || 0) / Number(row.salesAmount), 1) : metric(null, 0);
     return {
@@ -264,7 +267,8 @@ export function queryLinkBusinessTable(raw = {}, userId = "", isAdmin = false) {
         structuredDetailTransactionShare: metric(row.structuredDetailTransactionShare, row.structuredDetailTransactionShareRows) },
       growthStatus: analysis.comparable ? resolveConnectionGrowthDirection(analysis) : "no_data", growthRate: analysis.salesGrowth ?? null,
       healthStatus: analysis.healthStatus || "no_data", healthScore: analysis.healthScore ?? null,
-      hospitalStatus: hospitals.get(row.id) || "none",
+      hospitalStatus: row.connectionProfileId ? hospitals.get(row.connectionProfileId) || "none" : "none",
+      hasBusinessProfile: Boolean(row.connectionProfileId),
     };
   });
   if (text(options.growthStatus)) items = items.filter((item) => item.growthStatus === text(options.growthStatus));
@@ -274,9 +278,9 @@ export function queryLinkBusinessTable(raw = {}, userId = "", isAdmin = false) {
     || left.id.localeCompare(right.id));
   const total = items.length;
   items = items.slice((options.page - 1) * options.pageSize, options.page * options.pageSize);
-  const optionWhere = options.scope === "mine" ? "WHERE c.ownerId=@scopeOwnerId" : "";
+  const optionWhere = options.scope === "mine" ? "WHERE COALESCE(l.currentState,'active')='active' AND c.ownerId=@scopeOwnerId" : "WHERE COALESCE(l.currentState,'active')='active'";
   const optionRows = database.prepare(`SELECT DISTINCT sh.id shopId,sh.platform,COALESCE(sh.displayName,sh.shopName) shopName
-    FROM connection_profiles c JOIN sales_links l ON l.id=c.salesLinkId JOIN sales_shops sh ON sh.id=l.shopId ${optionWhere}
+    FROM sales_links l JOIN sales_shops sh ON sh.id=l.shopId LEFT JOIN connection_profiles c ON c.salesLinkId=l.id ${optionWhere}
     ORDER BY sh.platform,shopName,sh.id`).all(params);
   const owners = database.prepare(`SELECT DISTINCT p.id,p.name FROM connection_profiles c JOIN persons p ON p.id=c.ownerId
     ${options.scope === "mine" ? "WHERE c.ownerId=@scopeOwnerId" : ""} ORDER BY p.name,p.id`).all(params);

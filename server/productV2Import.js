@@ -9,7 +9,7 @@ import { reconcileErpSyncRun } from "./erpReconciliation.js";
 import { queryWangdianGoods } from "./wangdianClient.js";
 import { adaptWangdianGoodsResponse, canonicalGoodsRecordsToStaging } from "./wangdianGoodsAdapter.js";
 import { clearDataSyncCheckpoint, runWangdianPagedWindows } from "./dataSyncPagedExecution.js";
-import { deactivateOwnedSingleLinkSkuErpMapping, ensureSingleLinkSkuErpMapping, resolveUniqueProductErpSku } from "./linkSkuErpMappingService.js";
+import { ensureSingleLinkSkuErpMapping, resolveUniqueProductErpSku } from "./linkSkuErpMappingService.js";
 
 const stagingRoot = path.join(uploadsDir, "product-v2-imports");
 const goodsInfoRequiredHeaders = ["货品编号", "商家编码", "货品名称"];
@@ -722,7 +722,7 @@ function findPlatformProduct(record) {
   const platformSkuCode = value(record["平台规格编码"]);
   const platformGoodsCode = value(record["平台货品编号"]);
   const systemGoodsType = value(record["系统货品"]);
-  if (systemGoodsType === "组合装") return { product: null, erpSku: null, status: "combination", method: null, reason: "组合装进入人工V2关系治理" };
+  if (systemGoodsType === "组合装") return { product: null, erpSku: null, status: "pending_relation", method: "product_structure_application", reason: "组合商品需要Product Structure审核" };
   const exact = platformSkuCode ? database.prepare(`
     SELECT e.id erpSkuId,e.merchantSkuCode,p.id productId,p.skuCode,p.name
     FROM erp_skus e
@@ -767,7 +767,7 @@ function platformValidation(staging, submittedMappings = {}) {
   const links = new Set();
   const summary = {
     total: 0, shops: shopMappings.length, links: 0, matchedAuto: 0, matchedManual: 0,
-    unmatched: 0, ambiguous: 0, combination: 0, ignored: 0, error: 0,
+    unmatched: 0, ambiguous: 0, pending_relation: 0, ignored: 0, error: 0,
     created: 0, updated: 0, unchanged: 0,
   };
   for (const item of staging.records) {
@@ -1561,7 +1561,7 @@ function commitPlatform(batch, staging, shopMappings) {
   const now = new Date().toISOString();
   const stats = {
     created: 0, updated: 0, unchanged: 0, matched: 0, matchedAuto: 0, matchedManual: 0,
-    unmatched: 0, ambiguous: 0, combination: 0, relationPending: 0, mappingsCreated: 0, errors: 0, shops: 0, links: 0, skus: 0,
+    unmatched: 0, ambiguous: 0, pending_relation: 0, relationPending: 0, mappingsCreated: 0, errors: 0, shops: 0, links: 0, skus: 0,
   };
   const mappingByRaw = new Map(validation.shopMappings.map((item) => [item.rawName, item]));
   const grouped = new Map();
@@ -1649,7 +1649,11 @@ function commitPlatform(batch, staging, shopMappings) {
         if (row.erpSku?.id) {
           const relation = ensureSingleLinkSkuErpMapping(database, { salesLinkSkuId: skuId, erpSkuId: row.erpSku.id, sourceType: "erp_platform_goods", sourceBatchId: batch.id, timestamp: now });
           if (relation.outcome === "created") stats.mappingsCreated += 1;
-          if (relation.outcome === "governance_pending") stats.relationPending += 1;
+          if (relation.outcome === "governance_pending") {
+            stats.relationPending += 1;
+            database.prepare("UPDATE sales_link_skus SET matchStatus='pending_relation',matchMethod='product_structure_application',matchReason=?,updatedAt=? WHERE id=?")
+              .run(relation.reason, now, skuId);
+          }
         }
         stats.skus += 1;
         if (matchStatus.startsWith("matched")) {
@@ -1716,7 +1720,7 @@ export function commitErpV2Import(batchId, { shopMappings = {} } = {}) {
     const nextBatch = saveBatch({
       ...batch, status: "completed", totalRows: batch.totalRows,
       createdCount: stats.created ?? 0, updatedCount: stats.updated ?? 0, unchangedCount: stats.unchanged ?? 0,
-      matchedCount: stats.matched ?? 0, unmatchedCount: (stats.unmatched ?? 0) + (stats.ambiguous ?? 0) + (stats.combination ?? 0),
+      matchedCount: stats.matched ?? 0, unmatchedCount: (stats.unmatched ?? 0) + (stats.ambiguous ?? 0) + (stats.pending_relation ?? 0) + (stats.relationPending ?? 0),
       errorCount: stats.errors ?? 0,
       summaryJson: { ...stats, shopMappings: batch.summaryJson?.shopMappings ?? [], importStartedAt },
       completedAt,
@@ -1753,7 +1757,7 @@ export function commitErpV2Import(batchId, { shopMappings = {} } = {}) {
   }
 }
 
-export function updatePlatformSkuManualBinding(salesLinkSkuId, productId, createdBy) {
+export function proposePlatformSkuProductRelation(salesLinkSkuId, productId, createdBy) {
   const database = getDatabase();
   const sku = database.prepare("SELECT * FROM sales_link_skus WHERE id=?").get(salesLinkSkuId);
   if (!sku) throw new Error("平台SKU不存在。");
@@ -1763,46 +1767,35 @@ export function updatePlatformSkuManualBinding(salesLinkSkuId, productId, create
   if (resolution.status === "missing") throw new Error("该产品没有唯一可用的ERP SKU，已阻止旧productId绑定，请先在V2关系治理中补齐ERP关系。");
   if (resolution.status === "multiple") throw new Error("该产品对应多个ERP SKU，无法自动判断组成关系，已进入人工V2关系治理。");
   const now = new Date().toISOString();
-  const bindingId = id("platform-sku-binding", salesLinkSkuId);
-  const existingBinding = database.prepare("SELECT * FROM platform_sku_manual_bindings WHERE salesLinkSkuId=?").get(salesLinkSkuId);
-  const transaction = database.transaction(() => {
-    if (existingBinding && existingBinding.productId !== productId) {
-      deactivateOwnedSingleLinkSkuErpMapping(database, { salesLinkSkuId, sourceType: "manual_product_binding", sourceBatchId: existingBinding.id, timestamp: now });
-    }
-    const relation = ensureSingleLinkSkuErpMapping(database, {
+  const proposalSourceId = id("platform-sku-product-relation", salesLinkSkuId);
+  let relation = null;
+  database.transaction(() => {
+    relation = ensureSingleLinkSkuErpMapping(database, {
       salesLinkSkuId,
       erpSkuId: resolution.erpSku.erpSkuId,
-      sourceType: "manual_product_binding",
-      sourceBatchId: bindingId,
+      sourceType: "product_relation_proposal",
+      sourceBatchId: proposalSourceId,
+      sourceEvidence: { productId, createdBy },
       timestamp: now,
     });
-    if (relation.outcome === "governance_pending") throw new Error(relation.reason);
-    database.prepare(`
-      INSERT INTO platform_sku_manual_bindings (id,salesLinkSkuId,productId,createdBy,createdAt,updatedAt)
-      VALUES (?,?,?,?,?,?)
-      ON CONFLICT(salesLinkSkuId) DO UPDATE SET productId=excluded.productId,createdBy=excluded.createdBy,updatedAt=excluded.updatedAt
-    `).run(bindingId, salesLinkSkuId, productId, createdBy, now, now);
-    database.prepare("UPDATE sales_link_skus SET matchStatus='matched_manual',matchMethod='manual',matchReason='人工确认V2 ERP SKU关系',updatedAt=? WHERE id=?")
-      .run(now, salesLinkSkuId);
-  });
-  transaction();
-  return database.prepare("SELECT * FROM platform_sku_manual_bindings WHERE salesLinkSkuId=?").get(salesLinkSkuId);
-}
-
-export function removePlatformSkuManualBinding(salesLinkSkuId) {
-  const database = getDatabase();
-  const binding = database.prepare("SELECT * FROM platform_sku_manual_bindings WHERE salesLinkSkuId=?").get(salesLinkSkuId);
-  const transaction = database.transaction(() => {
-    if (binding) deactivateOwnedSingleLinkSkuErpMapping(database, { salesLinkSkuId, sourceType: "manual_product_binding", sourceBatchId: binding.id });
-    database.prepare("DELETE FROM platform_sku_manual_bindings WHERE salesLinkSkuId=?").run(salesLinkSkuId);
-    database.prepare("UPDATE sales_link_skus SET matchStatus='unmatched',matchMethod=NULL,matchReason='人工V2关系已取消',updatedAt=? WHERE id=?")
-      .run(new Date().toISOString(), salesLinkSkuId);
-  });
-  transaction();
+    database.prepare("UPDATE sales_link_skus SET matchStatus=?,matchMethod='sales_object_approval',matchReason=?,updatedAt=? WHERE id=?")
+      .run(
+        relation.outcome === "governance_pending" ? "pending_relation" : "matched_manual",
+        relation.outcome === "governance_pending" ? relation.reason : "人工选择与已审核Sales Object结构一致",
+        now,
+        salesLinkSkuId,
+      );
+  })();
+  return {
+    salesLinkSkuId,
+    productId,
+    outcome: relation.outcome,
+    applicationBatchId: relation.applicationBatchId || null,
+  };
 }
 
 export function markPlatformSku(salesLinkSkuId, status) {
   if (!["combination", "ignored"].includes(status)) throw new Error("标记状态无效。");
   getDatabase().prepare("UPDATE sales_link_skus SET matchStatus=?,matchMethod='manual',matchReason=?,updatedAt=? WHERE id=?")
-    .run(status, status === "combination" ? "人工标记组合装" : "人工忽略", new Date().toISOString(), salesLinkSkuId);
+    .run(status === "combination" ? "pending_relation" : status, status === "combination" ? "组合商品需要Product Structure审核" : "人工忽略", new Date().toISOString(), salesLinkSkuId);
 }

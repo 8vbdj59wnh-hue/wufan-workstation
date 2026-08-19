@@ -374,15 +374,15 @@ function ensureLink(database, row, batchId, resolvedLink = null) {
   const createdAt = now();
   database.prepare(`UPDATE sales_links SET title=COALESCE(NULLIF(?,''),title),canonicalUrl=COALESCE(NULLIF(?,''),canonicalUrl),rawUrl=COALESCE(NULLIF(?,''),rawUrl),category=COALESCE(NULLIF(?,''),category),status=COALESCE(NULLIF(?,''),status),lastSeenBatchId=?,lastImportedAt=?,updatedAt=? WHERE id=?`).run(text(row.title), text(row.url), text(row.url), text(row.category), text(row.status), batchId, createdAt, createdAt, link.id);
   link = database.prepare("SELECT * FROM sales_links WHERE id=?").get(link.id);
-  let profile = database.prepare("SELECT * FROM connection_profiles WHERE salesLinkId=?").get(link.id);
-  if (!profile) {
-    const profileId = id("connection");
-    database.prepare(`INSERT INTO connection_profiles (id,salesLinkId,name,mainImage,imageSource,status,level,notes,originSource,originImportBatchId,identifiedAt,createdAt,updatedAt) VALUES (?,?,?,?,?,'active','new','','platform_link_operations',?,?,?,?)`).run(profileId, link.id, text(row.title) || text(row.platformGoodsId), text(row.mainImage) || null, text(row.mainImage) ? "platform_link_operations" : null, batchId, createdAt, createdAt, createdAt);
-    profile = database.prepare("SELECT * FROM connection_profiles WHERE id=?").get(profileId);
-  } else {
-    database.prepare("UPDATE connection_profiles SET name=COALESCE(NULLIF(?,''),name),mainImage=CASE WHEN COALESCE(mainImage,'')='' THEN NULLIF(?,'') ELSE mainImage END,imageSource=CASE WHEN COALESCE(mainImage,'')='' AND ?<>'' THEN 'platform_link_operations' ELSE imageSource END,updatedAt=? WHERE id=?").run(text(row.title), text(row.mainImage), text(row.mainImage), createdAt, profile.id);
-    profile = database.prepare("SELECT * FROM connection_profiles WHERE id=?").get(profile.id);
-  }
+  database.prepare(`UPDATE sales_links SET
+    displayName=COALESCE(NULLIF(?,''),displayName,title,platformGoodsId),
+    mainImage=CASE WHEN COALESCE(mainImage,'')='' THEN NULLIF(?,'') ELSE mainImage END,
+    imageSource=CASE WHEN COALESCE(mainImage,'')='' AND ?<>'' THEN 'platform_link_operations' ELSE imageSource END,
+    managementOriginSource=CASE WHEN managementOriginSource='asset_native' THEN 'platform_link_operations' ELSE managementOriginSource END,
+    managementOriginImportBatchId=COALESCE(managementOriginImportBatchId,?),
+    managementIdentifiedAt=COALESCE(managementIdentifiedAt,?),updatedAt=? WHERE id=?`)
+    .run(text(row.title), text(row.mainImage), text(row.mainImage), batchId, createdAt, createdAt, link.id);
+  const profile = database.prepare("SELECT * FROM connection_profiles WHERE id=?").get(link.id);
   return { link, profile, created: false };
 }
 
@@ -421,19 +421,7 @@ function applyRow(database, importType, row, batchId, raw) {
     const link = requireLink(database, row); const profile = database.prepare("SELECT * FROM connection_profiles WHERE salesLinkId=?").get(link.id); if (!profile) throw Object.assign(new Error("链接档案不存在。"), { type: "missing_connection_profile" }); const mapping = ensurePlatformMapping(database, row, link, profile, raw); insertPlatformSnapshot(database, row, raw, batchId, link, profile, mapping); return { link, profile };
   }
   if (importType === "erp_sales") {
-    const link = requireLink(database, row); const sku = findLinkSkuByPlatformId(database, link.id, row.platformSkuId);
-    if (!sku) throw Object.assign(new Error("平台SKU不存在。"), { type: "missing_sku" });
-    const erpSku = database.prepare("SELECT * FROM erp_skus WHERE LOWER(merchantSkuCode)=LOWER(?)").get(text(row.skuCode));
-    if (!erpSku) throw Object.assign(new Error("ERP SKU编码不存在。"), { type: "missing_erp_sku" });
-    const mapping = database.prepare("SELECT * FROM sales_link_sku_erp_mappings WHERE salesLinkSkuId=? AND erpSkuId=? AND currentState='active'").get(sku.id, erpSku.id);
-    if (!mapping) throw Object.assign(new Error("平台SKU与ERP SKU关系不存在。"), { type: "missing_erp_mapping" });
-    const existing = database.prepare("SELECT id FROM connection_sku_sales_facts WHERE salesLinkSkuId=? AND erpSkuId=? AND periodStart=? AND periodEnd=?").get(sku.id, erpSku.id, text(row.periodStart), text(row.periodEnd));
-    database.prepare(`INSERT INTO connection_sku_sales_facts (id,batchId,salesLinkId,salesLinkSkuId,erpSkuId,platformGoodsId,skuCode,periodStart,periodEnd,shippedQuantity,salesAmount,costAmount,profitAmount,rawDataJson,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-      ON CONFLICT(salesLinkSkuId,erpSkuId,periodStart,periodEnd) WHERE erpSkuId IS NOT NULL DO UPDATE SET
-        batchId=excluded.batchId,salesLinkId=excluded.salesLinkId,platformGoodsId=excluded.platformGoodsId,skuCode=excluded.skuCode,
-        shippedQuantity=excluded.shippedQuantity,salesAmount=excluded.salesAmount,costAmount=excluded.costAmount,profitAmount=excluded.profitAmount,
-        rawDataJson=excluded.rawDataJson,createdAt=excluded.createdAt`).run(id("connection-sku-sales"), batchId, link.id, sku.id, erpSku.id, text(row.platformGoodsId), text(row.skuCode), text(row.periodStart), text(row.periodEnd), row.shippedQuantity, row.salesAmount, row.costAmount, row.profitAmount, JSON.stringify(raw), createdAt);
-    return { link, sku, erpSku, factCreated: !existing, factUpdated: Boolean(existing) };
+    throw Object.assign(new Error("旧周期销售事实已进入只读状态，请使用销售日报导入。"), { code: "legacy_read_only", type: "legacy_read_only" });
   }
   if (importType === "erp_product_relations") {
     const link = requireLink(database, row);
@@ -444,9 +432,10 @@ function applyRow(database, importType, row, batchId, raw) {
     const sku = findLinkSku(database, link.id, row.skuCode);
     if (!sku) throw Object.assign(new Error("ERP关系导入未匹配到已有链接SKU，请先通过平台货品导入建立SKU身份。"), { type: "missing_sku" });
     const relation = ensureSingleLinkSkuErpMapping(database, { salesLinkSkuId: sku.id, erpSkuId: resolution.erpSku.erpSkuId, sourceType: "erp_product_relations", sourceBatchId: batchId, timestamp: createdAt });
-    if (relation.outcome === "governance_pending") throw Object.assign(new Error(relation.reason), { type: "erp_relation_governance_pending" });
-    database.prepare("UPDATE sales_link_skus SET matchStatus='erp_linked',matchMethod='v2_erp_mapping',matchReason='ERP产品关系导入已建立V2关系',updatedAt=? WHERE id=?").run(createdAt, sku.id);
-    return { link, product, sku, mapping: relation.mapping };
+    const pending = relation.outcome === "governance_pending";
+    database.prepare("UPDATE sales_link_skus SET matchStatus=?,matchMethod='product_structure_application',matchReason=?,updatedAt=? WHERE id=?")
+      .run(pending ? "pending_relation" : "erp_linked", pending ? relation.reason : "ERP产品关系与已审核Product Structure一致", createdAt, sku.id);
+    return { link, product, sku, mapping: relation.mapping || null, governancePending: pending, applicationBatchId: relation.applicationBatchId || null };
   }
   if (importType === "erp_inventory") {
     const skus = database.prepare("SELECT * FROM sales_link_skus WHERE LOWER(COALESCE(normalizedPlatformSkuCode,platformSkuCode,''))=LOWER(?)").all(text(row.skuCode)); if (!skus.length) throw Object.assign(new Error("SKU不存在。"), { type: "missing_sku" });
@@ -575,6 +564,7 @@ export function previewConnectionDataImport({ buffer, fileName, importType, temp
 export function confirmConnectionDataImport(batchId) {
   const database = getDatabase(); const batch = readConnectionFoundationBatch(batchId);
   if (batch.status === "completed" || batch.status === "completed_with_errors") return { batch, idempotent: true, preview: json(batch.previewSummaryJson, {}) };
+  if (batch.importType === "erp_sales") throw Object.assign(new Error("旧周期销售事实已进入只读状态，请按销售日报事实模型重新生成预览。"), { code: "legacy_read_only" });
   if (batch.status !== "validated") throw new Error(batch.status === "blocked" ? "批次存在重复商品ID，不能确认导入。" : "当前批次不能确认导入。");
   const allRows = listConnectionFoundationRows(batch.id); const rows = allRows.filter((row) => row.status === "validated"); const governancePending = allRows.filter((row) => row.status === "pending_relation").length; let createdLinks = 0; let updatedLinks = 0; let factsCreated = 0; let factsUpdated = 0;
   database.transaction(() => {
