@@ -3,6 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 
 import {
+  canAccessTemplateCenter,
   canAccessModule,
   hasPermission,
   normalizePermissions,
@@ -24,6 +25,39 @@ test("权限清单包含独立链接和供应链权限域", () => {
 
 test("权限清单包含独立上传权限域", () => {
   assert.deepEqual(groupKeys("uploads"), ["image", "file", "standardWorkAttachment"]);
+});
+
+test("模板中心使用角色或显式权限，不再按部门自动放行", () => {
+  assert(groupKeys("modules").includes("templateCenter"));
+  const deniedPermissions = normalizePermissions({
+    modules: { templateCenter: false },
+    settings: { viewStandardWorks: false },
+    processes: { viewTemplates: false },
+    methods: { view: false },
+  });
+
+  assert.equal(canAccessTemplateCenter({
+    role: "user",
+    departmentId: "dept-marketing",
+    departmentName: "视觉营销部",
+    permissions: deniedPermissions,
+  }), false);
+  assert.equal(canAccessTemplateCenter({
+    role: "user",
+    permissions: { ...deniedPermissions, modules: { ...deniedPermissions.modules, templateCenter: true } },
+  }), true);
+  assert.equal(canAccessTemplateCenter({ role: "company_manager", permissions: deniedPermissions }), true);
+  assert.equal(canAccessTemplateCenter({
+    role: "user",
+    permissions: { ...deniedPermissions, processes: { ...deniedPermissions.processes, viewTemplates: true } },
+  }), true);
+});
+
+test("模板中心运行时权限守卫不读取部门字段", () => {
+  const permissionSource = fs.readFileSync(new URL("../src/permissions.js", import.meta.url), "utf8");
+  const guardSource = permissionSource.match(/export function canAccessTemplateCenter[\s\S]*?\n}/)?.[0] ?? "";
+  assert.notEqual(guardSource, "");
+  assert.doesNotMatch(guardSource, /department(?:Id|Name)?/i);
 });
 
 test("旧账号保留上传能力，显式上传权限边界不会回退", () => {

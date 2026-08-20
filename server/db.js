@@ -3302,7 +3302,112 @@ function runLightweightMigrations() {
       updatedAt TEXT
     )
   `);
+  backfillExplicitTemplateCenterPermissions();
   ensureStandardWorkValueChainCategories();
+}
+
+const legacyTemplateCenterDepartmentIds = new Set([
+  "dept-marketing",
+  "dept-channel",
+  "dept-operation",
+  "dept-visual",
+  "dept-visual-marketing",
+]);
+
+function hasExplicitTemplateCenterBoundary(permissions) {
+  return typeof permissions?.modules?.templateCenter === "boolean";
+}
+
+function addExplicitTemplateCenterBoundary(permissions, canAccess) {
+  const nextPermissions = permissions !== null && typeof permissions === "object"
+    ? cloneJson(permissions)
+    : {};
+  nextPermissions.modules = {
+    ...(nextPermissions.modules !== null && typeof nextPermissions.modules === "object" ? nextPermissions.modules : {}),
+    templateCenter: canAccess,
+  };
+  return nextPermissions;
+}
+
+function hadLegacyTemplateCenterAccess(person, effectivePermissions, departmentName) {
+  if (effectivePermissions.settings.viewStandardWorks) return true;
+  if (effectivePermissions.processes.viewTemplates) return true;
+  if (effectivePermissions.methods.view) return true;
+
+  const departmentId = String(person.departmentId ?? "").toLowerCase();
+  if (legacyTemplateCenterDepartmentIds.has(departmentId)) return true;
+  return /视觉|营销|运营|渠道|内容/.test(String(departmentName ?? "").toLowerCase());
+}
+
+function backfillExplicitTemplateCenterPermissions() {
+  const database = getDatabase();
+  const templateRows = database.prepare("SELECT * FROM permission_templates").all();
+  const originalTemplates = new Map(
+    templateRows.map((row) => {
+      const template = decodeRow(row, resourceConfigs.permissionTemplates);
+      return [template.id, template];
+    }),
+  );
+  const personRows = database
+    .prepare(`SELECT persons.*, departments.name AS departmentName
+      FROM persons
+      LEFT JOIN departments ON departments.id = persons.departmentId`)
+    .all();
+
+  const migrate = database.transaction(() => {
+    const updateTemplate = database.prepare("UPDATE permission_templates SET permissions = @permissions WHERE id = @id");
+    for (const template of originalTemplates.values()) {
+      if (hasExplicitTemplateCenterBoundary(template.permissions)) continue;
+      const normalized = normalizePermissions(template.permissions, "user");
+      const canAccess = normalized.settings.viewStandardWorks ||
+        normalized.processes.viewTemplates ||
+        normalized.methods.view;
+      updateTemplate.run({
+        id: template.id,
+        permissions: JSON.stringify(addExplicitTemplateCenterBoundary(template.permissions, canAccess)),
+      });
+    }
+
+    const updatePersonPermissions = database.prepare("UPDATE persons SET permissions = @permissions WHERE id = @id");
+    const updatePersonOverrides = database.prepare("UPDATE persons SET permissionOverrides = @permissionOverrides WHERE id = @id");
+    for (const row of personRows) {
+      const person = decodeRow(row, resourceConfigs.people);
+      const role = person.authRole ?? "user";
+      const template = originalTemplates.get(person.permissionTemplateId);
+      const usesTemplate = template !== undefined && template.status !== "inactive";
+      const boundarySource = usesTemplate ? person.permissionOverrides : person.permissions;
+      if (
+        hasExplicitTemplateCenterBoundary(boundarySource) ||
+        (usesTemplate && hasExplicitTemplateCenterBoundary(template.permissions))
+      ) continue;
+
+      // Only records without the new boundary are historical. Once written, later
+      // department changes cannot grant or revoke template-center access.
+      const effectivePermissions = usesTemplate
+        ? mergePermissionSources(template.permissions, person.permissionOverrides, role)
+        : normalizePermissions(person.permissions, role);
+      const canAccess = hadLegacyTemplateCenterAccess(person, effectivePermissions, row.departmentName);
+
+      if (usesTemplate) {
+        const templatePermissions = normalizePermissions(template.permissions, "user");
+        const templateCanAccess = templatePermissions.settings.viewStandardWorks ||
+          templatePermissions.processes.viewTemplates ||
+          templatePermissions.methods.view;
+        if (templateCanAccess === canAccess) continue;
+        updatePersonOverrides.run({
+          id: person.id,
+          permissionOverrides: JSON.stringify(addExplicitTemplateCenterBoundary(person.permissionOverrides, canAccess)),
+        });
+        continue;
+      }
+
+      updatePersonPermissions.run({
+        id: person.id,
+        permissions: JSON.stringify(addExplicitTemplateCenterBoundary(person.permissions, canAccess)),
+      });
+    }
+  });
+  migrate();
 }
 
 function getPermissionTemplateById(templateId) {
@@ -4709,6 +4814,7 @@ export function replaceAllData(data) {
     }
   });
   replace();
+  backfillExplicitTemplateCenterPermissions();
 }
 
 export function deleteProcessTemplate(templateId) {
