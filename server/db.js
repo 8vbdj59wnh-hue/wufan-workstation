@@ -3319,11 +3319,13 @@ function hasExplicitTemplateCenterBoundary(permissions) {
 }
 
 function addExplicitTemplateCenterBoundary(permissions, canAccess) {
-  const nextPermissions = permissions !== null && typeof permissions === "object"
+  const nextPermissions = permissions !== null && typeof permissions === "object" && !Array.isArray(permissions)
     ? cloneJson(permissions)
     : {};
   nextPermissions.modules = {
-    ...(nextPermissions.modules !== null && typeof nextPermissions.modules === "object" ? nextPermissions.modules : {}),
+    ...(nextPermissions.modules !== null && typeof nextPermissions.modules === "object" && !Array.isArray(nextPermissions.modules)
+      ? nextPermissions.modules
+      : {}),
     templateCenter: canAccess,
   };
   return nextPermissions;

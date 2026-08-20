@@ -30,6 +30,7 @@ test("历史部门兼容结果被一次性固化为显式权限", async () => {
       .run({ permissions: JSON.stringify(denied) });
     database.prepare("UPDATE persons SET permissions = @permissions, permissionTemplateId = NULL, permissionOverrides = '{}' WHERE id = 'person-005'")
       .run({ permissions: JSON.stringify(denied) });
+    database.prepare("UPDATE persons SET permissions = '[]', permissionTemplateId = NULL, permissionOverrides = '[]' WHERE id = 'person-006'").run();
     database.prepare(`INSERT INTO permission_templates (id, name, description, permissions, status, createdAt, updatedAt)
       VALUES ('legacy-template', '历史受限模板', '', @permissions, 'active', @timestamp, @timestamp)`)
       .run({ permissions: JSON.stringify(denied), timestamp });
@@ -39,11 +40,14 @@ test("历史部门兼容结果被一次性固化为显式权限", async () => {
 
     const productPersonPermissions = JSON.parse(database.prepare("SELECT permissions FROM persons WHERE id = 'person-004'").get().permissions);
     const marketingPersonPermissions = JSON.parse(database.prepare("SELECT permissions FROM persons WHERE id = 'person-005'").get().permissions);
+    const arrayShapedPersonPermissions = JSON.parse(database.prepare("SELECT permissions FROM persons WHERE id = 'person-006'").get().permissions);
     const channelPersonOverrides = JSON.parse(database.prepare("SELECT permissionOverrides FROM persons WHERE id = 'person-007'").get().permissionOverrides);
     const templatePermissions = JSON.parse(database.prepare("SELECT permissions FROM permission_templates WHERE id = 'legacy-template'").get().permissions);
 
     assert.equal(productPersonPermissions.modules.templateCenter, false);
     assert.equal(marketingPersonPermissions.modules.templateCenter, true);
+    assert.equal(Array.isArray(arrayShapedPersonPermissions), false);
+    assert.equal(arrayShapedPersonPermissions.modules.templateCenter, true);
     assert.equal(templatePermissions.modules.templateCenter, false);
     assert.equal(channelPersonOverrides.modules.templateCenter, true);
 
