@@ -4,7 +4,8 @@ const sources = [
   { id: "platform-goods-file", name: "平台货品表", type: "file", purpose: "同步平台链接、链接 SKU 与销售对象身份", status: "active", tables: ["platform_goods_excel_import_rows"], upstream: [], downstream: ["sales-link", "link-sku", "sales-object"] },
   { id: "platform-operation-file", name: "平台经营数据表", type: "file", purpose: "同步链接流量、支付与转化表现", status: "active", tables: ["connection_period_snapshots"], upstream: [], downstream: ["platform-performance"] },
   { id: "sales-daily-file", name: "链接利润表（SKU明细）", type: "file", purpose: "写入销售、成本与利润日报事实", status: "active", tables: ["connection_sku_sales_daily_facts"], upstream: [], downstream: ["sales-daily-fact"] },
-  { id: "combo-detail-file", name: "组合装明细", type: "file", purpose: "定义组合销售对象的 ERP SKU 组件与数量", status: "active", tables: ["sales_object_structure_components"], upstream: [], downstream: ["sales-object"] },
+  { id: "wangdian-suite-api", name: "旺店通组合装 API", type: "api", purpose: "同步组合销售对象的 ERP SKU 组件、数量及结构版本", status: "active", tables: ["sales_objects", "sales_object_structures", "sales_object_structure_components"], upstream: [], downstream: ["sales-object"] },
+  { id: "combo-detail-file", name: "历史组合装明细", type: "file", purpose: "Sales Object初始化历史基线，不再作为日常组合结构更新入口", status: "legacy", tables: ["sales_object_structure_components"], upstream: [], downstream: ["sales-object"] },
   { id: "wangdian-goods-api", name: "旺店通货品档案 API", type: "api", purpose: "同步 ERP Goods 与 ERP SKU 主数据", status: "active", tables: ["erp_goods", "erp_skus"], upstream: [], downstream: ["erp-sku"] },
   { id: "wangdian-inventory-api", name: "旺店通库存 API", type: "api", purpose: "同步 ERP SKU 库存事实", status: "active", tables: ["erp_sku_warehouse_inventory_facts", "erp_fact_snapshots"], upstream: [], downstream: ["inventory-fact"] },
   { id: "product-profile", name: "产品档案", type: "internal", purpose: "维护企业产品经营档案", status: "active", tables: ["products", "product_erp_mappings"], upstream: ["erp-sku"], downstream: ["product"] },
@@ -14,7 +15,7 @@ const sources = [
 const objects = [
   { id: "sales-link", name: "Link", definition: "渠道中的链接经营单元。", type: "master", truthStatus: "source_of_truth", tables: ["sales_links"], sources: ["platform-goods-file"], upstream: ["platform-goods-file"], downstream: ["link-sku", "platform-performance", "sales-daily-fact"] },
   { id: "link-sku", name: "Link SKU", definition: "链接下的平台销售规格。", type: "master", truthStatus: "source_of_truth", tables: ["sales_link_skus"], sources: ["platform-goods-file"], upstream: ["sales-link"], downstream: ["sales-object", "sales-daily-fact"] },
-  { id: "sales-object", name: "Sales Object", definition: "平台实际销售单位，统一表达单品与组合装。", type: "master", truthStatus: "source_of_truth", tables: ["sales_objects", "sales_link_sku_sales_object_relations", "sales_object_structures", "sales_object_structure_components"], sources: ["platform-goods-file", "combo-detail-file"], upstream: ["link-sku"], downstream: ["erp-sku"] },
+  { id: "sales-object", name: "Sales Object", definition: "平台实际销售单位，统一表达单品与组合装。", type: "master", truthStatus: "source_of_truth", tables: ["sales_objects", "sales_link_sku_sales_object_relations", "sales_object_structures", "sales_object_structure_components"], sources: ["platform-goods-file", "wangdian-suite-api", "combo-detail-file"], upstream: ["link-sku"], downstream: ["erp-sku"] },
   { id: "erp-sku", name: "ERP SKU", definition: "旺店通中的企业货品规格身份。", type: "master", truthStatus: "source_of_truth", tables: ["erp_skus"], sources: ["wangdian-goods-api"], upstream: ["sales-object", "wangdian-goods-api"], downstream: ["product", "inventory-fact"] },
   { id: "product", name: "Product", definition: "企业产品经营档案。", type: "master", truthStatus: "source_of_truth", tables: ["products", "product_erp_mappings"], sources: ["product-profile"], upstream: ["erp-sku"], downstream: ["product-workspace"] },
   { id: "sales-daily-fact", name: "销售日报事实", definition: "按销售发生日期记录销量、销售额、成本和利润。", type: "fact", truthStatus: "source_of_truth", tables: ["connection_sku_sales_daily_facts"], sources: ["sales-daily-file"], upstream: ["sales-daily-file", "link-sku"], downstream: ["sales-analysis", "product-workspace"] },
@@ -44,6 +45,11 @@ const fieldMappings = {
     ["组合编码", "sales_objects.objectCode", "组合销售对象"],
     ["单品编码", "sales_object_structure_components.erpSkuId", "ERP组件"],
     ["单品数量", "sales_object_structure_components.quantity", "每销售单位组件数量"],
+  ],
+  "wangdian-suite-api": [
+    ["suite_no", "sales_objects.objectCode", "组合装身份编码"],
+    ["detail_list.spec_no", "sales_object_structure_components.erpSkuId", "按ERP SKU编码精确匹配组件"],
+    ["detail_list.num", "sales_object_structure_components.quantity", "每个组合装包含的组件数量"],
   ],
 };
 

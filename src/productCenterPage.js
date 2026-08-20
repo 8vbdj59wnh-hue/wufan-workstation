@@ -116,8 +116,12 @@ const productBusinessMetricGroups = [
 ];
 
 function getRouteProductId() {
-  const match = window.location.hash.replace(/^#/, "").match(/^products\/(?!sku\/)(.+)$/);
+  const match = window.location.hash.replace(/^#/, "").match(/^products\/(?!sku\/|combo-skus(?:\/|$))(.+)$/);
   return match ? decodeURIComponent(match[1]) : "";
+}
+
+function isComboSkuRoute() {
+  return /^products\/combo-skus(?:\/|$)/u.test(window.location.hash.replace(/^#/, ""));
 }
 
 function getRouteErpSkuId() {
@@ -376,7 +380,7 @@ function renderProductCards(products, index) {
 function renderProductWorkspaceTabs() {
   const isProductDetail = Boolean(getRouteProductId());
   const skuManagementActive = Boolean(getRouteErpSkuId())
-    || (!isProductDetail && ["sku-management", "pending-skus"].includes(productSubmodule));
+    || (!isProductDetail && ["sku-management", "pending-skus", "combo-skus"].includes(productSubmodule));
   return `<nav class="product-workspace-tabs" aria-label="产品中心视图">
     <button type="button" data-action="product-workspace-view" data-view="business-dashboard" class="${skuManagementActive ? "" : "is-active"}">产品经营</button>
     <button type="button" data-action="product-workspace-view" data-view="sku-management" class="${skuManagementActive ? "is-active" : ""}">SKU管理</button>
@@ -1829,6 +1833,7 @@ async function refreshErpSyncState(syncRunId = erpSyncState.active?.id) {
 }
 
 export function renderProductCenterPage() {
+  if (isComboSkuRoute()) productSubmodule = "combo-skus";
   const erpSkuId = getRouteErpSkuId();
   if (erpSkuId) return renderProductSkuV2Detail();
   const productId = getRouteProductId();
@@ -2198,6 +2203,7 @@ async function refreshPlatformPreview(rerender, { page = 1, filters = importStat
 }
 
 export function bindProductCenterPageEvents(rerender) {
+  if (isComboSkuRoute()) productSubmodule = "combo-skus";
   const routeErpSkuId = getRouteErpSkuId();
   const routeProductId = getRouteProductId();
   if (!routeProductId && !routeErpSkuId && productSubmodule === "sku-management" && !productSkuV2State.loaded && !productSkuV2State.loading) void refreshProductSkuV2List(rerender);

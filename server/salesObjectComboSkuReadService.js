@@ -5,7 +5,9 @@ const clean = (value) => String(value ?? "").trim();
 const number = (value) => Number(value || 0);
 
 function objectNameSql(alias = "o") {
-  return `COALESCE((SELECT NULLIF(g.goodsName,'') FROM erp_skus e JOIN erp_goods g ON g.id=e.erpGoodsId
+  return `COALESCE((SELECT NULLIF(json_extract(s.sourceReferenceJson,'$.suiteName'),'') FROM sales_object_structures s
+      WHERE s.salesObjectId=${alias}.id AND s.status='active' LIMIT 1),
+    (SELECT NULLIF(g.goodsName,'') FROM erp_skus e JOIN erp_goods g ON g.id=e.erpGoodsId
     WHERE lower(trim(e.merchantSkuCode))=${alias}.normalizedObjectCode LIMIT 1),${alias}.objectCode)`;
 }
 

@@ -2975,6 +2975,7 @@ function runLightweightMigrations() {
     INSERT OR IGNORE INTO data_sync_tasks
       (id,taskCode,name,syncType,sourceType,sourceMethod,transportType,executionMode,defaultSyncMode,scheduleCron,scheduleDescription,status,configJson,createdAt,updatedAt)
     VALUES
+      ('sync-task-wangdian-suites','wangdian_suites','旺店通组合装同步','wangdian_suites','wangdian_api','goods.Suite.search','api','both','incremental','15 2 * * *','每天02:15','paused','{"baseline":"combo_master_excel"}',datetime('now'),datetime('now')),
       ('sync-task-platform-goods-excel','platform_goods_excel_import','平台货品关系导入','platform_goods_excel_import','excel',NULL,'excel','manual','full',NULL,NULL,'enabled','{}',datetime('now'),datetime('now'));
     CREATE TABLE IF NOT EXISTS platform_goods_excel_import_rows (
       batchId TEXT NOT NULL,

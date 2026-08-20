@@ -119,6 +119,17 @@ export async function queryWangdianGoods({ params = {}, pageNo = 0, pageSize = 1
   });
 }
 
+export async function queryWangdianSuites({ params = {}, pageNo = 0, pageSize = 100, ...options } = {}) {
+  return callWangdianApi({
+    ...options,
+    method: "goods.Suite.search",
+    body: params,
+    pageNo,
+    pageSize,
+    calcTotal: pageNo === 0 ? 1 : 0,
+  });
+}
+
 export async function queryWangdianPlatformGoods({ params = {}, pageNo = 0, pageSize = 100, ...options } = {}) {
   return callWangdianApi({
     ...options,
