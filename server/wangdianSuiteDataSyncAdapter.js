@@ -84,6 +84,7 @@ export async function readWangdianSuiteChanges(input = {}, options = {}) {
   let requestCount = 0;
   const readQuery = async (query) => {
     let pageNo = 0;
+    let totalCount = null;
     while (true) {
       const result = await searchWangdianSuites({ ...query, pageNo, pageSize: 500, hideDeleted: false }, querySuites ? { querySuites } : {});
       requestCount += 1;
@@ -93,8 +94,11 @@ export async function readWangdianSuiteChanges(input = {}, options = {}) {
         const existing = suites.get(code);
         if (!existing || clean(suite.modifiedAt) >= clean(existing.modifiedAt)) suites.set(code, suite);
       }
-      const total = Number(result.pagination.total || 0);
-      if ((pageNo + 1) * result.pagination.pageSize >= total || result.items.length === 0) break;
+      const reportedTotal = Number(result.pagination.total || 0);
+      if (reportedTotal > 0) totalCount = reportedTotal;
+      const pageSize = Number(result.pagination.pageSize || 500);
+      if (result.items.length === 0 || result.items.length < pageSize) break;
+      if (totalCount !== null && (pageNo + 1) * pageSize >= totalCount) break;
       pageNo += 1;
     }
   };

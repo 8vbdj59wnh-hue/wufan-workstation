@@ -52,6 +52,31 @@ test("权限不足不会被误判为限流重试", () => {
   assert.equal(isWangdianRateLimitError(new Error("旺店通接口失败（100）：超过每分钟最大调用频率限制")), true);
 });
 
+test("组合装时间查询在后续页不返回total_count时仍读取全部分页", async () => {
+  const { readWangdianSuiteChanges } = await import("../server/wangdianSuiteDataSyncAdapter.js");
+  const pageSizes = [500, 500, 200];
+  const result = await readWangdianSuiteChanges({
+    requestStart: "2024-07-01T00:00:00.000Z",
+    requestEnd: "2024-07-29T00:00:00.000Z",
+  }, {
+    querySuites: async ({ pageNo }) => ({
+      status: 0,
+      data: {
+        total_count: pageNo === 0 ? 1200 : 0,
+        suite_list: Array.from({ length: pageSizes[pageNo] ?? 0 }, (_, index) => ({
+          suite_id: `${pageNo}-${index}`,
+          suite_no: `SUITE-${pageNo}-${index}`,
+          suite_name: `组合装${pageNo}-${index}`,
+          suite_modified: "2024-07-18 10:30:00",
+          detail_list: [],
+        })),
+      },
+    }),
+  });
+  assert.equal(result.requestCount, 3);
+  assert.equal(result.items.length, 1200);
+});
+
 test("旺店通组合装同步幂等生成Sales Object并以版本保护结构变更", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "wangdian-suite-sync-"));
   process.env.WUFAN_DB_PATH = path.join(directory, "workstation.db");
