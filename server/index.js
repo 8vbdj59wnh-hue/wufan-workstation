@@ -134,6 +134,10 @@ import {
   validateUploadMetadata,
 } from "./uploadGovernanceService.js";
 import {
+  pickGoalCenterBootstrapResources,
+  readGoalCenterBootstrap,
+} from "./goalCenterBootstrapService.js";
+import {
   createConnectionAction,
   createConnectionDataMapping,
   createConnectionProfile,
@@ -1447,6 +1451,23 @@ app.get("/api/data", (request, response) => {
     response.json(scopedSnapshot);
   } catch (error) {
     response.status(500).json({ error: error.message || "读取本地数据库失败。" });
+  }
+});
+
+app.get("/api/goal-center/bootstrap", requirePermission("modules.goals"), (request, response) => {
+  try {
+    const startedAt = performance.now();
+    const snapshot = readGoalCenterBootstrap(readResource);
+    const readCompletedAt = performance.now();
+    const scopedSnapshot = pickGoalCenterBootstrapResources(filterDataByScope(snapshot, request.user));
+    const filterCompletedAt = performance.now();
+    response.set(
+      "Server-Timing",
+      `database;dur=${(readCompletedAt - startedAt).toFixed(1)}, scope;dur=${(filterCompletedAt - readCompletedAt).toFixed(1)}`,
+    );
+    response.json(scopedSnapshot);
+  } catch (error) {
+    response.status(500).json({ error: error.message || "读取目标管理数据失败。" });
   }
 });
 

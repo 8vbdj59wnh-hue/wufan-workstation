@@ -220,49 +220,52 @@ export function getDataSnapshot() {
   };
 }
 
-export function applyDataSnapshot(data) {
+export function applyDataSnapshot(data, { preserveMissingResources = false } = {}) {
+  const shouldReplace = (...keys) => !preserveMissingResources || keys.some((key) => Object.hasOwn(data, key));
   isApplyingRemoteData = true;
-  replaceArray(state.companies, data.companies);
-  replaceArray(state.departments, (data.departments ?? []).map((department) => normalizeDepartment(department)));
-  replaceArray(state.positions, data.positions);
-  replaceArray(state.people, data.people ?? data.persons);
-  replaceArray(state.permissionTemplates, data.permissionTemplates ?? []);
-  replaceArray(state.categories, data.categories);
-  replaceArray(state.stores, data.stores);
-  replaceArray(state.publishingAccounts, data.publishingAccounts ?? initialPublishingAccounts);
-  replaceArray(state.goals, data.goals);
-  replaceArray(state.taskTemplates, data.taskTemplates);
-  replaceArray(state.tasks, data.tasks);
-  replaceArray(state.processTemplates, data.processTemplates);
-  replaceArray(
-    state.processTemplateNodes,
-    (data.processTemplateNodes ?? []).map((node) => normalizeProcessTemplateNode(node)),
-  );
+  if (shouldReplace("companies")) replaceArray(state.companies, data.companies);
+  if (shouldReplace("departments")) replaceArray(state.departments, (data.departments ?? []).map((department) => normalizeDepartment(department)));
+  if (shouldReplace("positions")) replaceArray(state.positions, data.positions);
+  if (shouldReplace("people", "persons")) replaceArray(state.people, data.people ?? data.persons);
+  if (shouldReplace("permissionTemplates")) replaceArray(state.permissionTemplates, data.permissionTemplates ?? []);
+  if (shouldReplace("categories")) replaceArray(state.categories, data.categories);
+  if (shouldReplace("stores")) replaceArray(state.stores, data.stores);
+  if (shouldReplace("publishingAccounts")) replaceArray(state.publishingAccounts, data.publishingAccounts ?? initialPublishingAccounts);
+  if (shouldReplace("goals")) replaceArray(state.goals, data.goals);
+  if (shouldReplace("taskTemplates")) replaceArray(state.taskTemplates, data.taskTemplates);
+  if (shouldReplace("tasks")) replaceArray(state.tasks, data.tasks);
+  if (shouldReplace("processTemplates")) replaceArray(state.processTemplates, data.processTemplates);
+  if (shouldReplace("processTemplateNodes")) {
+    replaceArray(
+      state.processTemplateNodes,
+      (data.processTemplateNodes ?? []).map((node) => normalizeProcessTemplateNode(node)),
+    );
+  }
   normalizeAllProcessStepOrders();
   normalizeTaskSubmitRequirements();
-  replaceArray(state.processInstances, data.processInstances);
-  replaceArray(state.contentSchedules, data.contentSchedules);
-  replaceArray(state.workPlans, (data.workPlans ?? []).map((workPlan) => normalizeWorkPlan(workPlan)));
-  replaceArray(state.weeklyReports, data.weeklyReports);
-  replaceArray(state.weeklyReportProblems, data.weeklyReportProblems);
-  replaceArray(state.methodologies, data.methodologies);
-  replaceArray(state.notifications, data.notifications);
-  replaceArray(state.templates, data.templates);
-  replaceArray(state.templateTagCategories, data.templateTagCategories ?? initialTemplateTagCategories);
-  replaceArray(state.templateTags, data.templateTags ?? initialTemplateTags);
-  replaceArray(state.issuesRequirements, data.issuesRequirements ?? initialIssuesRequirements);
-  replaceArray(state.standardWorkForms, data.standardWorkForms ?? initialStandardWorkForms);
-  replaceArray(state.products, data.products ?? []);
-  replaceArray(state.actionProducts, data.actionProducts ?? []);
-  replaceArray(state.taskProductContexts, data.taskProductContexts ?? []);
-  replaceArray(state.productImportBatches, data.productImportBatches ?? []);
-  replaceArray(state.erpGoods, data.erpGoods ?? []);
-  replaceArray(state.productErpMappings, data.productErpMappings ?? []);
-  replaceArray(state.salesShops, data.salesShops ?? []);
-  replaceArray(state.salesShopAliases, data.salesShopAliases ?? []);
-  replaceArray(state.salesLinks, data.salesLinks ?? []);
-  replaceArray(state.salesLinkSkus, data.salesLinkSkus ?? []);
-  replaceArray(state.erpImportBatches, data.erpImportBatches ?? []);
+  if (shouldReplace("processInstances")) replaceArray(state.processInstances, data.processInstances);
+  if (shouldReplace("contentSchedules")) replaceArray(state.contentSchedules, data.contentSchedules);
+  if (shouldReplace("workPlans")) replaceArray(state.workPlans, (data.workPlans ?? []).map((workPlan) => normalizeWorkPlan(workPlan)));
+  if (shouldReplace("weeklyReports")) replaceArray(state.weeklyReports, data.weeklyReports);
+  if (shouldReplace("weeklyReportProblems")) replaceArray(state.weeklyReportProblems, data.weeklyReportProblems);
+  if (shouldReplace("methodologies")) replaceArray(state.methodologies, data.methodologies);
+  if (shouldReplace("notifications")) replaceArray(state.notifications, data.notifications);
+  if (shouldReplace("templates")) replaceArray(state.templates, data.templates);
+  if (shouldReplace("templateTagCategories")) replaceArray(state.templateTagCategories, data.templateTagCategories ?? initialTemplateTagCategories);
+  if (shouldReplace("templateTags")) replaceArray(state.templateTags, data.templateTags ?? initialTemplateTags);
+  if (shouldReplace("issuesRequirements")) replaceArray(state.issuesRequirements, data.issuesRequirements ?? initialIssuesRequirements);
+  if (shouldReplace("standardWorkForms")) replaceArray(state.standardWorkForms, data.standardWorkForms ?? initialStandardWorkForms);
+  if (shouldReplace("products")) replaceArray(state.products, data.products ?? []);
+  if (shouldReplace("actionProducts")) replaceArray(state.actionProducts, data.actionProducts ?? []);
+  if (shouldReplace("taskProductContexts")) replaceArray(state.taskProductContexts, data.taskProductContexts ?? []);
+  if (shouldReplace("productImportBatches")) replaceArray(state.productImportBatches, data.productImportBatches ?? []);
+  if (shouldReplace("erpGoods")) replaceArray(state.erpGoods, data.erpGoods ?? []);
+  if (shouldReplace("productErpMappings")) replaceArray(state.productErpMappings, data.productErpMappings ?? []);
+  if (shouldReplace("salesShops")) replaceArray(state.salesShops, data.salesShops ?? []);
+  if (shouldReplace("salesShopAliases")) replaceArray(state.salesShopAliases, data.salesShopAliases ?? []);
+  if (shouldReplace("salesLinks")) replaceArray(state.salesLinks, data.salesLinks ?? []);
+  if (shouldReplace("salesLinkSkus")) replaceArray(state.salesLinkSkus, data.salesLinkSkus ?? []);
+  if (shouldReplace("erpImportBatches")) replaceArray(state.erpImportBatches, data.erpImportBatches ?? []);
   isApplyingRemoteData = false;
   ensureTaskTemplatesHaveProcessTemplates();
   ensureDefaultStandardWorkLibrary();
@@ -290,15 +293,19 @@ export async function loadPersistentData({ includeTaskWaves = null } = {}) {
       "finance-center": "financeCenter",
     };
     const bootstrapModule = bootstrapModuleAliases[route] ?? (route || "dashboard");
+    const moduleDataEndpoints = {
+      goals: `${apiBaseUrl}/api/goal-center/bootstrap`,
+    };
+    const moduleDataEndpoint = moduleDataEndpoints[route] ?? null;
     const shouldLoadTaskWaves =
       includeTaskWaves ??
       route === "task-waves";
     const [response, waveResponse] = await Promise.all([
-      authFetch(lightweightModules.has(route) ? `${apiBaseUrl}/api/bootstrap?module=${encodeURIComponent(bootstrapModule)}` : `${apiBaseUrl}/api/data`),
+      authFetch(moduleDataEndpoint ?? (lightweightModules.has(route) ? `${apiBaseUrl}/api/bootstrap?module=${encodeURIComponent(bootstrapModule)}` : `${apiBaseUrl}/api/data`)),
       shouldLoadTaskWaves ? authFetch(`${apiBaseUrl}/api/task-waves`) : Promise.resolve(null),
     ]);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    applyDataSnapshot(await response.json());
+    applyDataSnapshot(await response.json(), { preserveMissingResources: moduleDataEndpoint !== null });
     if (waveResponse !== null) {
       const waveData = await waveResponse.json().catch(() => []);
       if (waveResponse.status === 403) {
