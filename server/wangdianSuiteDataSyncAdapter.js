@@ -118,7 +118,8 @@ export function applyWangdianSuiteChanges(suites, input = {}, options = {}) {
   const erpByCode = new Map(erpRows.map((row) => [normalized(row.merchantSkuCode), row]));
   const result = {
     totalCount: suites.length, createdCount: 0, updatedCount: 0, invalidatedCount: 0,
-    unchangedCount: 0, structuresCreated: 0, componentsCreated: 0, relationsCreated: 0, exceptions: [],
+    unchangedCount: 0, structuresCreated: 0, structuresReactivated: 0,
+    componentsCreated: 0, relationsCreated: 0, exceptions: [],
   };
   const exception = (suite, exceptionType, message, rawData = {}) => result.exceptions.push({
     exceptionType, severity: "error", message, entityType: "sales_object", entityId: clean(suite.suiteCode) || null,
@@ -181,6 +182,17 @@ export function applyWangdianSuiteChanges(suites, input = {}, options = {}) {
           .run(SOURCE_TYPE, input.sourceBatchId || null, referenceJson, timestamp, activeStructure.id);
         result.unchangedCount += 1;
       } else {
+        const matchingStructure = database.prepare("SELECT * FROM sales_object_structures WHERE salesObjectId=? AND structureHash=?").get(salesObjectId, structureHash);
+        if (matchingStructure) {
+          if (activeStructure) database.prepare("UPDATE sales_object_structures SET status='superseded',effectiveTo=?,updatedAt=? WHERE id=?").run(timestamp, timestamp, activeStructure.id);
+          database.prepare(`UPDATE sales_object_structures
+            SET status='active',effectiveFrom=?,effectiveTo=NULL,sourceType=?,sourceBatchId=?,sourceReferenceJson=?,
+                supersedesStructureId=?,reviewedBy=?,reviewedAt=?,activatedAt=?,updatedAt=?
+            WHERE id=?`)
+            .run(timestamp, SOURCE_TYPE, input.sourceBatchId || null, referenceJson, activeStructure?.id || null, reviewedBy, timestamp, timestamp, timestamp, matchingStructure.id);
+          result.structuresReactivated += 1;
+          result.updatedCount += 1;
+        } else {
         const version = Number(database.prepare("SELECT COALESCE(MAX(version),0)+1 version FROM sales_object_structures WHERE salesObjectId=?").get(salesObjectId).version);
         const structureId = stableId("sales-object-structure", `${salesObjectId}|${structureHash}`);
         database.prepare(`INSERT INTO sales_object_structures
@@ -198,6 +210,7 @@ export function applyWangdianSuiteChanges(suites, input = {}, options = {}) {
         database.prepare("UPDATE sales_object_structures SET status='active',updatedAt=? WHERE id=?").run(timestamp, structureId);
         result.structuresCreated += 1;
         if (existing) result.updatedCount += 1;
+        }
       }
 
       const linkSkus = database.prepare(`SELECT id FROM sales_link_skus
