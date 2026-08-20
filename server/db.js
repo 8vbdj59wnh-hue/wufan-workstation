@@ -5,6 +5,11 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { ensureSalesAnomalyActionStandards } from "./capabilities/salesAnomalyActionStandards.js";
 import { hashPassword } from "./security.js";
+import {
+  assertDatabaseCanOpen,
+  assertDatabaseResetAllowed,
+  resolveDatabasePath,
+} from "./databaseSafety.js";
 import { createEmptyPermissions, mergePermissionSources, normalizePermissions, serializePermissions } from "../shared/permissions.js";
 import {
   categories,
@@ -34,11 +39,7 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
-const configuredDatabasePath = String(process.env.WUFAN_DB_PATH ?? "").trim();
-export const databasePath =
-  configuredDatabasePath === ""
-    ? path.join(projectRoot, "data", "workstation.db")
-    : path.resolve(configuredDatabasePath);
+export const databasePath = resolveDatabasePath({ projectRoot });
 export const dataDir = path.dirname(databasePath);
 export const uploadsDir = path.join(projectRoot, "uploads");
 const schemaPath = path.join(__dirname, "schema.sql");
@@ -3527,6 +3528,7 @@ function ensureDefaultAdmin() {
 
 export function getDatabase() {
   if (db === undefined) {
+    assertDatabaseCanOpen(databasePath);
     ensureDataDir();
     db = new Database(databasePath);
   }
@@ -3535,6 +3537,7 @@ export function getDatabase() {
 }
 
 export function initializeDatabase({ reset = false } = {}) {
+  if (reset) assertDatabaseResetAllowed(databasePath);
   if (reset && fs.existsSync(databasePath)) {
     if (db !== undefined) {
       db.close();

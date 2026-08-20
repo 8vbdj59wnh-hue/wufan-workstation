@@ -7,6 +7,8 @@ import path from "node:path";
 test("视觉模板不上传源文件也可以保存", async () => {
   const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "template-source-optional-"));
   process.env.WUFAN_DB_PATH = path.join(tempDirectory, "workstation.db");
+  process.env.WUFAN_ENV = "test";
+  process.env.WUFAN_ALLOW_DB_RESET = "1";
   const { closeDatabase, createResource, initializeDatabase } = await import("../server/db.js");
 
   try {

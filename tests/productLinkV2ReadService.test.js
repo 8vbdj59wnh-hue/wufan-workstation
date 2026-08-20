@@ -7,6 +7,8 @@ import path from "node:path";
 test("产品链接接口仅按V2关系解析产品归属", async () => {
   const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "product-link-v2-read-"));
   process.env.WUFAN_DB_PATH = path.join(tempDirectory, "workstation.db");
+  process.env.WUFAN_ENV = "test";
+  process.env.WUFAN_ALLOW_DB_RESET = "1";
   const { closeDatabase, getDatabase, initializeDatabase } = await import("../server/db.js");
   const { queryProductSalesLinks, queryProductSalesSummaries, queryUnmatchedPlatformSkus } = await import("../server/productLinkV2ReadService.js");
   try {

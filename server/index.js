@@ -108,6 +108,11 @@ import { getConnectionDailySalesPerformance } from "./connectionDailySalesServic
 import { getProductDailySalesPerformance } from "./productDailySalesService.js";
 import { queryProductSalesLinks, queryProductSalesSummaries, queryUnmatchedPlatformSkus } from "./productLinkV2ReadService.js";
 import { querySalesDailyDataQuality } from "./salesDailyDataQualityService.js";
+import {
+  assertBusinessBaselineHealthy,
+  evaluateDatabaseHealth,
+  shouldEnforceBusinessBaseline,
+} from "./databaseSafety.js";
 import { querySalesDataQualityAnomalies, submitSalesDataQualityAnomalyDecision } from "./salesDataQualityAnomalyGovernanceService.js";
 import { getSalesBusinessDashboard } from "./salesBusinessDashboardService.js";
 import { queryBusinessAnomalies } from "./capabilities/queryBusinessAnomalies.js";
@@ -381,7 +386,12 @@ const uploadFinanceWorkbook = multer({
   },
 });
 
+if (shouldEnforceBusinessBaseline()) {
+  assertBusinessBaselineHealthy(evaluateDatabaseHealth(getDatabase()));
+}
 initializeDatabase();
+const startupDatabaseHealth = evaluateDatabaseHealth(getDatabase());
+assertBusinessBaselineHealthy(startupDatabaseHealth);
 bootstrapTemplateVersions();
 fs.mkdirSync(imageUploadsDir, { recursive: true });
 fs.mkdirSync(fileUploadsDir, { recursive: true });
@@ -505,20 +515,14 @@ app.use("/api", (request, response, next) => {
 });
 
 app.get("/api/health", (_request, response) => {
-  try {
-    getDatabase().prepare("SELECT 1").get();
-    response.json({
-      status: "ok",
-      database: "ok",
-      version: applicationVersion,
-    });
-  } catch {
-    response.status(500).json({
-      status: "error",
-      database: "error",
-      version: applicationVersion,
-    });
-  }
+  const statusCode = startupDatabaseHealth.status === "ok" ? 200 : 503;
+  response.status(statusCode).json({
+    status: startupDatabaseHealth.status,
+    database: startupDatabaseHealth.technicalHealth.status === "ok" ? "technically_ok" : "error",
+    technicalHealth: startupDatabaseHealth.technicalHealth,
+    businessDataHealth: startupDatabaseHealth.businessDataHealth,
+    version: applicationVersion,
+  });
 });
 
 function getBearerToken(request) {

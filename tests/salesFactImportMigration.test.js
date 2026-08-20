@@ -33,6 +33,8 @@ test("旧周期销售事实仅保留归档，不再有生产写入或重新迁�
 test("正式销售导入只写daily facts并保持幂等，Legacy表不增长", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sales-fact-single-track-"));
   process.env.WUFAN_DB_PATH = path.join(directory, "workstation.db");
+  process.env.WUFAN_ENV = "test";
+  process.env.WUFAN_ALLOW_DB_RESET = "1";
   const { closeDatabase, getDatabase, initializeDatabase } = await import("../server/db.js");
   const { confirmConnectionDataImport } = await import("../server/connectionDataFoundationService.js");
   const { previewSalesFactDataSync, commitSalesFactDataSync } = await import("../server/salesFactDataSyncAdapter.js");

@@ -26,6 +26,8 @@ test("产品中心默认进入产品经营并保留SKU管理与产品档案入�
 test("产品经营读取层复用销售、库存、SKU、健康与行动事实", async () => {
   const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "product-business-read-model-"));
   process.env.WUFAN_DB_PATH = path.join(tempDirectory, "workstation.db");
+  process.env.WUFAN_ENV = "test";
+  process.env.WUFAN_ALLOW_DB_RESET = "1";
   const { closeDatabase, getDatabase, initializeDatabase, replaceActionProducts } = await import("../server/db.js");
   const { getProductBusinessReadModel, mapProductBusinessLifecycle, salesMetrics } = await import("../server/productBusinessReadModel.js");
   const { readConnectionInventorySupply, readProductInventorySupply } = await import("../server/inventorySupplyQueryService.js");

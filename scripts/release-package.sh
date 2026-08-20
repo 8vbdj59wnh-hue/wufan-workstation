@@ -79,6 +79,7 @@ git -C "$PROJECT_DIR" update-ref -d "$PACKAGE_REF"
 git -C "$PROJECT_DIR" archive "$TOOLING_COMMIT" \
   scripts/release-from-package.sh \
   scripts/release-backup.sh \
+  scripts/release-business-baseline-check.sh \
   scripts/release-classify.sh \
   scripts/release-health-check.sh \
   scripts/release-migration-preview.sh \

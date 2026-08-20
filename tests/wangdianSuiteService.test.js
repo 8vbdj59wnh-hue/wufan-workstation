@@ -7,6 +7,12 @@ import { queryWangdianSuites } from "../server/wangdianClient.js";
 import { isWangdianRateLimitError } from "../server/wangdianRequestScheduler.js";
 import { normalizeWangdianSuiteQuery, searchWangdianSuites } from "../server/wangdianSuiteService.js";
 
+const suiteTestDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "wangdian-suite-sync-"));
+process.env.WUFAN_ENV = "test";
+process.env.WUFAN_DB_PATH = path.join(suiteTestDirectory, "workstation.db");
+process.env.WUFAN_ALLOW_DB_RESET = "1";
+test.after(() => fs.rmSync(suiteTestDirectory, { recursive: true, force: true }));
+
 test("组合装客户端使用goods.Suite.search和suite_no", async () => {
   let request;
   const payload = await queryWangdianSuites({
@@ -78,8 +84,6 @@ test("组合装时间查询在后续页不返回total_count时仍读取全部分
 });
 
 test("旺店通组合装同步幂等生成Sales Object并以版本保护结构变更", async () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "wangdian-suite-sync-"));
-  process.env.WUFAN_DB_PATH = path.join(directory, "workstation.db");
   const { closeDatabase, getDatabase, initializeDatabase } = await import("../server/db.js");
   const { syncWangdianSuites } = await import("../server/wangdianSuiteDataSyncAdapter.js");
   try {
@@ -140,6 +144,5 @@ test("旺店通组合装同步幂等生成Sales Object并以版本保护结构�
     assert.equal(database.pragma("foreign_key_check").length, 0);
   } finally {
     closeDatabase();
-    fs.rmSync(directory, { recursive: true, force: true });
   }
 });

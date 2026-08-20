@@ -18,6 +18,8 @@ function legacyDeniedPermissions() {
 test("历史部门兼容结果被一次性固化为显式权限", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "permission-compat-cleanup-"));
   process.env.WUFAN_DB_PATH = path.join(directory, "workstation.db");
+  process.env.WUFAN_ENV = "test";
+  process.env.WUFAN_ALLOW_DB_RESET = "1";
   const { closeDatabase, getDatabase, initializeDatabase } = await import("../server/db.js");
 
   try {

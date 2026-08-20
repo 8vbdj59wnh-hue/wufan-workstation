@@ -14,6 +14,8 @@ function workbookBuffer(rows) {
 test("平台货品资产同步先生成Diff，确认后只同步资产和关系候选", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "platform-assets-v2-"));
   process.env.WUFAN_DB_PATH = path.join(directory, "workstation.db");
+  process.env.WUFAN_ENV = "test";
+  process.env.WUFAN_ALLOW_DB_RESET = "1";
   const { closeDatabase, getDatabase, initializeDatabase } = await import("../server/db.js");
     const { commitPlatformGoodsExcelDataSync, previewPlatformGoodsExcelDataSync, reanalyzePlatformGoodsExcelDataSync } = await import("../server/platformGoodsExcelDataSyncAdapter.js");
   try {

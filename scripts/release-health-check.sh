@@ -4,7 +4,9 @@ set -euo pipefail
 EXPECTED_PROJECT_DIR="/Users/meiyounaichatouyuna/Projects/goal-execution-system"
 RELEASE_ROOT="/Users/meiyounaichatouyuna/WufanWorkstationReleases"
 NODE22_BIN="/opt/homebrew/opt/node@22/bin"
-DATABASE_PATH="$EXPECTED_PROJECT_DIR/data/workstation.db"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DATABASE_PATH="/Users/meiyounaichatouyuna/WufanWorkstationData/production/workstation.db"
+BASELINE_PATH="/Users/meiyounaichatouyuna/WufanWorkstationData/production/business-baseline.json"
 
 COMMIT_SHA=""
 RELEASE_DIR=""
@@ -43,6 +45,7 @@ PROJECT_DIR="$EXPECTED_PROJECT_DIR"
 if [[ "${RELEASE_TEST_MODE:-}" == "1" ]]; then
   PROJECT_DIR="${RELEASE_TEST_PROJECT_DIR:-$PROJECT_DIR}"
   DATABASE_PATH="${RELEASE_TEST_DATABASE_PATH:-$PROJECT_DIR/data/workstation.db}"
+  BASELINE_PATH="${RELEASE_TEST_BASELINE_PATH:-$PROJECT_DIR/data/business-baseline.json}"
   case "$RELEASE_DIR" in /tmp/*|/private/tmp/*) ;; *) basic_fail "test release directory must be under /tmp" ;; esac
   NODE_COMMAND="${RELEASE_TEST_NODE_COMMAND:-$(command -v node)}"
 else
@@ -144,15 +147,22 @@ done
 
 HEALTH_JSON="$(curl --fail --silent --show-error http://127.0.0.1:3001/api/health)" \
   || fail "backend health request failed"
-HEALTH_JSON="$HEALTH_JSON" "$NODE_COMMAND" <<'NODE' \
+HEALTH_JSON="$HEALTH_JSON" PHASE="$PHASE" "$NODE_COMMAND" <<'NODE' \
   || fail "backend health payload invalid"
 const health = JSON.parse(process.env.HEALTH_JSON);
-const currentContract = health.status === "ok" && health.database === "ok";
+const currentContract = health.status === "ok" &&
+  health.technicalHealth?.status === "ok" &&
+  ["ok", "not_enforced"].includes(health.businessDataHealth?.status);
 const legacyContract = health.ok === true;
-if (!currentContract && !legacyContract) {
+if (!currentContract && !(process.env.PHASE === "before" && legacyContract)) {
   throw new Error("health status or database is not ok");
 }
 NODE
+
+[[ -f "$BASELINE_PATH" ]] || fail "business baseline is missing: $BASELINE_PATH"
+BUSINESS_BASELINE_JSON="$($SCRIPT_DIR/release-business-baseline-check.sh \
+  --database "$DATABASE_PATH" \
+  --baseline "$BASELINE_PATH")" || fail "business baseline check failed"
 
 FRONT_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:5173/)"
 [[ "$FRONT_STATUS" == "200" ]] || fail "frontend returned HTTP $FRONT_STATUS"
@@ -213,7 +223,7 @@ fi
 } >> "$LOG_PATH"
 
 export RESULT_PATH PHASE COMMIT_SHA CURRENT_COMMIT HEALTH_JSON FRONT_STATUS
-export DATABASE_PATH DATABASE_INTEGRITY PM2_SAFE_PATH RESOURCE_RESULTS
+export DATABASE_PATH DATABASE_INTEGRITY PM2_SAFE_PATH RESOURCE_RESULTS BUSINESS_BASELINE_JSON
 export CLIENT_ERROR_LOG_SIZE SERVER_ERROR_LOG_SIZE NEW_FATAL_ERRORS
 "$NODE_COMMAND" <<'NODE'
 const fs = require("fs");
@@ -236,6 +246,7 @@ const result = {
   resources,
   databasePath: process.env.DATABASE_PATH,
   databaseIntegrity: process.env.DATABASE_INTEGRITY,
+  businessDataHealth: JSON.parse(process.env.BUSINESS_BASELINE_JSON),
   errorLogOffsets: {
     client: Number(process.env.CLIENT_ERROR_LOG_SIZE),
     server: Number(process.env.SERVER_ERROR_LOG_SIZE),

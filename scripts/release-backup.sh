@@ -3,7 +3,7 @@ set -euo pipefail
 
 EXPECTED_PROJECT_DIR="/Users/meiyounaichatouyuna/Projects/goal-execution-system"
 RELEASE_ROOT="/Users/meiyounaichatouyuna/WufanWorkstationReleases"
-DATABASE_PATH="$EXPECTED_PROJECT_DIR/data/workstation.db"
+DATABASE_PATH="/Users/meiyounaichatouyuna/WufanWorkstationData/production/workstation.db"
 
 COMMIT_SHA=""
 CHANGE_TYPE=""

@@ -16,6 +16,9 @@ RELEASE_DIR=""
 MANIFEST=""
 STAGE="argument-validation"
 SOURCE_STAGING=""
+CHECK_DATABASE_DIR=""
+PRODUCTION_DATABASE_PATH="/Users/meiyounaichatouyuna/WufanWorkstationData/production/workstation.db"
+PRODUCTION_BASELINE_PATH="/Users/meiyounaichatouyuna/WufanWorkstationData/production/business-baseline.json"
 
 fail() {
   echo "RELEASE_FROM_PACKAGE_FAIL: $*" >&2
@@ -25,6 +28,7 @@ fail() {
 cleanup() {
   git -C "$EXPECTED_PROJECT_DIR" update-ref -d "$PACKAGE_REF" >/dev/null 2>&1 || true
   [[ -z "$SOURCE_STAGING" || ! -d "$SOURCE_STAGING" ]] || rm -rf "$SOURCE_STAGING"
+  [[ -z "$CHECK_DATABASE_DIR" || ! -d "$CHECK_DATABASE_DIR" ]] || rm -rf "$CHECK_DATABASE_DIR"
 }
 trap cleanup EXIT
 
@@ -46,6 +50,7 @@ REQUIRED_FILES=(
   release-metadata.json
   SHA256SUMS
   scripts/release-backup.sh
+  scripts/release-business-baseline-check.sh
   scripts/release-classify.sh
   scripts/release-health-check.sh
   scripts/release-migration-preview.sh
@@ -131,10 +136,15 @@ ARCHIVE_CHECK_SHA="$(
 )"
 [[ "$ARCHIVE_CHECK_SHA" == "$SOURCE_SHA256" ]] || fail "source archive does not match target Git commit"
 
-DATABASE_PATH="$PROJECT_DIR/data/workstation.db"
+DATABASE_PATH="$PRODUCTION_DATABASE_PATH"
 [[ -f "$DATABASE_PATH" ]] || fail "production database is missing"
+[[ -f "$PRODUCTION_BASELINE_PATH" ]] || fail "production business baseline is missing"
 DATABASE_INTEGRITY="$(sqlite3 "file:$DATABASE_PATH?mode=ro" 'PRAGMA integrity_check;')"
 [[ "$DATABASE_INTEGRITY" == "ok" ]] || fail "production database integrity check failed"
+"$PACKAGE_DIR/scripts/release-business-baseline-check.sh" \
+  --database "$DATABASE_PATH" \
+  --baseline "$PRODUCTION_BASELINE_PATH" >/dev/null \
+  || fail "production business baseline check failed"
 DATABASE_SIZE="$(stat -f '%z' "$DATABASE_PATH")"
 DISK_FREE_BYTES="$(df -Pk "$PROJECT_DIR" | awk 'NR==2 {printf "%.0f\n", $4 * 1024}')"
 REQUIRED_FREE_BYTES=$((DATABASE_SIZE + NPM_TEMP_BYTES + MINIMUM_SAFETY_BYTES))
@@ -161,7 +171,7 @@ for port in 5173 3001; do
 done
 curl --fail --silent --show-error http://127.0.0.1:3001/api/health \
   | "$NODE_COMMAND" -e \
-    'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const h=JSON.parse(s);const current=h.status==="ok"&&h.database==="ok";const legacy=h.ok===true;if(!current&&!legacy)process.exit(1)})'
+    'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const h=JSON.parse(s);const current=h.status==="ok"&&h.technicalHealth?.status==="ok"&&["ok","not_enforced"].includes(h.businessDataHealth?.status);const legacy=h.status==="ok"&&h.database==="ok"||h.ok===true;if(!current&&!legacy)process.exit(1)})'
 
 CLASSIFICATION_JSON="$(
   PROJECT_DIR="$PROJECT_DIR" NODE_COMMAND="$NODE_COMMAND" \
@@ -330,7 +340,17 @@ if [[ "$REQUIRES_NPM_CI" == "true" ]]; then
 fi
 
 STAGE="code-check"
-(cd "$PROJECT_DIR" && "$NPM_COMMAND" run check)
+CHECK_DATABASE_DIR="$(mktemp -d /private/tmp/wufan-release-check.XXXXXX)"
+(
+  cd "$PROJECT_DIR"
+  WUFAN_ENV=test \
+  WUFAN_DB_PATH="$CHECK_DATABASE_DIR/workstation.db" \
+  WUFAN_TEST_DATABASE_ROOT="$CHECK_DATABASE_DIR" \
+  WUFAN_ALLOW_DB_RESET=1 \
+    "$NPM_COMMAND" run check
+)
+rm -rf "$CHECK_DATABASE_DIR"
+CHECK_DATABASE_DIR=""
 
 STAGE="service-restart"
 [[ "$REQUIRES_CLIENT_RESTART" != "true" ]] || pm2 restart wufan-client

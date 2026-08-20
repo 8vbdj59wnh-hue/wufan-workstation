@@ -31,6 +31,9 @@ module.exports = {
       env: {
         HOST: "0.0.0.0",
         PORT: "3001",
+        WUFAN_ENV: "production",
+        WUFAN_DB_PATH: "/Users/meiyounaichatouyuna/WufanWorkstationData/production/workstation.db",
+        WUFAN_DB_BASELINE_PATH: "/Users/meiyounaichatouyuna/WufanWorkstationData/production/business-baseline.json",
       },
       autorestart: true,
       restart_delay: 1000,

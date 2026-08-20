@@ -12,6 +12,8 @@ const directory = fs.mkdtempSync(path.join(os.tmpdir(), "goal-center-api-"));
 const databasePath = path.join(directory, "workstation.db");
 const port = 3400 + (process.pid % 200);
 process.env.WUFAN_DB_PATH = databasePath;
+process.env.WUFAN_ENV = "test";
+process.env.WUFAN_ALLOW_DB_RESET = "1";
 
 const databaseModule = await import("../server/db.js");
 databaseModule.initializeDatabase({ reset: true });

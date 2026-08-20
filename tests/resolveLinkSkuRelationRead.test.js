@@ -7,6 +7,8 @@ import path from "node:path";
 test("正式关系读取仅执行Sales Object Resolver，Shadow Compare独立诊断", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sales-object-single-read-"));
   process.env.WUFAN_DB_PATH = path.join(directory, "workstation.db");
+  process.env.WUFAN_ENV = "test";
+  process.env.WUFAN_ALLOW_DB_RESET = "1";
   const { closeDatabase, getDatabase, initializeDatabase } = await import("../server/db.js");
   const { resolveLinkSkuRelationsForRead } = await import("../server/capabilities/resolveLinkSkuRelationRead.js");
   try {
