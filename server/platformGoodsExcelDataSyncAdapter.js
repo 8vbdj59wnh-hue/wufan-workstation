@@ -2,7 +2,6 @@ import crypto from "node:crypto";
 import * as XLSX from "xlsx";
 import { getDatabase } from "./db.js";
 import { assertCurrentDataSyncPreview, completeDataSyncBatch, createDataSyncBatch, getDataSyncBatch, getDataSyncTask, markDataSyncBatchPreviewReady } from "./dataSyncCenterService.js";
-import { ensureSingleLinkSkuErpMapping } from "./linkSkuErpMappingService.js";
 import { canonicalizeSalesUrl } from "./productV2Import.js";
 
 const TASK_CODE = "platform_goods_excel_import";
@@ -308,7 +307,7 @@ function analyzeRows(rows) {
         rawData: { ...row.rawData, currentErpSkuIds: conflictingMappings.map((item) => item.erpSkuId), expectedErpSkuId: erpSku.id },
       }));
     } else {
-      evaluated.push(actionResult(row, { ...relationBase, erpSkuId: erpSku.id, relationAction: "candidate", message: "资产确认后将生成ERP关系候选，正式关系仍需审批。" }));
+      evaluated.push(actionResult(row, { ...relationBase, erpSkuId: erpSku.id, relationAction: "candidate", message: "资产确认后由V3自动投影建立Sales Object关系，不进入正常人工审批。" }));
     }
   }
   return { evaluated };
@@ -609,23 +608,10 @@ export function commitPlatformGoodsExcelDataSync(batchId) {
       );
     }
 
-    const proposals = new Set();
-    for (const row of rows) {
-      if (row.relationAction !== "candidate" || !row.salesLinkSkuId || !row.erpSkuId) continue;
-      const proposalKey = `${row.salesLinkSkuId}|${row.erpSkuId}`;
-      if (proposals.has(proposalKey)) continue;
-      proposals.add(proposalKey);
-      const relation = ensureSingleLinkSkuErpMapping(db, {
-        salesLinkSkuId: row.salesLinkSkuId,
-        erpSkuId: row.erpSkuId,
-        sourceType: "platform_goods_asset_sync_v2",
-        sourceBatchId: batchId,
-        sourceEvidence: { rowNumber: row.rowNumber, fileName: batch.fileName, merchantSkuCode: row.merchantSkuCode },
-        timestamp: committedAt,
-      });
-      if (relation.outcome === "governance_pending") db.prepare("UPDATE sales_link_skus SET matchStatus='pending_relation',matchMethod='product_structure_application',matchReason=?,updatedAt=? WHERE id=?")
-        .run(relation.reason, committedAt, row.salesLinkSkuId);
-    }
+    db.prepare(`UPDATE sales_link_skus SET matchStatus='pending_relation',matchMethod='v3_auto_projection',
+      matchReason='等待V3平台货品→旺店通身份→Sales Object自动投影',updatedAt=?
+      WHERE id IN (SELECT DISTINCT salesLinkSkuId FROM platform_goods_excel_import_rows
+        WHERE batchId=? AND relationAction='candidate' AND salesLinkSkuId IS NOT NULL)`).run(committedAt, batchId);
   }).immediate();
   const protectedAfter = {
     dailyFacts: tableCount("connection_sku_sales_daily_facts"),

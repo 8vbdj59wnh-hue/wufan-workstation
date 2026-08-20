@@ -1,0 +1,83 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import Database from "better-sqlite3";
+import {
+  compareV3ProjectionResolver,
+  projectOperatingSalesObjects,
+} from "../server/salesObjectAutoProjectionService.js";
+import { createProductStructureApplicationBatch } from "../server/productStructureApplicationApprovalService.js";
+
+function fixture() {
+  const db = new Database(":memory:");
+  db.pragma("foreign_keys=ON");
+  db.exec(`
+    CREATE TABLE persons(id TEXT PRIMARY KEY,status TEXT,authRole TEXT);
+    INSERT INTO persons VALUES ('admin','active','admin');
+    CREATE TABLE erp_import_batches(id TEXT PRIMARY KEY,importType TEXT,status TEXT,importMode TEXT,businessDate TEXT,completedAt TEXT,createdAt TEXT,originalFilename TEXT);
+    INSERT INTO erp_import_batches VALUES ('batch','platform_goods','completed','full','2026-08-05','2026-08-05','2026-08-05','8.5.xlsx');
+    CREATE TABLE erp_skus(id TEXT PRIMARY KEY,merchantSkuCode TEXT,currentState TEXT);
+    CREATE TABLE sales_objects(id TEXT PRIMARY KEY,objectCode TEXT,normalizedObjectCode TEXT UNIQUE,objectType TEXT,source TEXT,sourceType TEXT,sourceCode TEXT,sourceBatchId TEXT,status TEXT,blockedReason TEXT,firstSeenAt TEXT,lastSeenAt TEXT,createdAt TEXT,updatedAt TEXT);
+    CREATE TABLE sales_object_structures(id TEXT PRIMARY KEY,salesObjectId TEXT,version INTEGER,structureHash TEXT,effectiveFrom TEXT,effectiveTo TEXT,status TEXT,sourceType TEXT,sourceBatchId TEXT,sourceReferenceJson TEXT,validityBasis TEXT,sourceState TEXT,sourceUpdatedAt TEXT,lastVerifiedAt TEXT,syncedAt TEXT,supersedesStructureId TEXT,reviewedBy TEXT,reviewedAt TEXT,activatedAt TEXT,createdAt TEXT,updatedAt TEXT,UNIQUE(id,salesObjectId));
+    CREATE TABLE sales_object_structure_components(id TEXT PRIMARY KEY,structureId TEXT,salesObjectId TEXT,erpSkuId TEXT,quantity REAL,sortOrder INTEGER,status TEXT,sourceType TEXT,sourceReferenceJson TEXT,createdAt TEXT,updatedAt TEXT);
+    CREATE TABLE sales_object_structure_effective_periods(id TEXT PRIMARY KEY,structureId TEXT,salesObjectId TEXT,validFrom TEXT,validTo TEXT,sourceState TEXT,validityBasis TEXT,sourceUpdatedAt TEXT,firstVerifiedAt TEXT,lastVerifiedAt TEXT,syncedAt TEXT,sourceReferenceJson TEXT,createdAt TEXT,updatedAt TEXT,FOREIGN KEY(structureId,salesObjectId) REFERENCES sales_object_structures(id,salesObjectId));
+    CREATE UNIQUE INDEX one_open ON sales_object_structure_effective_periods(salesObjectId) WHERE validTo IS NULL AND sourceState='active';
+    CREATE TABLE sales_link_skus(id TEXT PRIMARY KEY,lastSeenBatchId TEXT,normalizedPlatformSkuCode TEXT,platformSkuCode TEXT);
+    CREATE TABLE sales_link_sku_sales_object_relations(id TEXT PRIMARY KEY,linkSkuId TEXT,salesObjectId TEXT,effectiveFrom TEXT,effectiveTo TEXT,status TEXT,sourceType TEXT,sourceBatchId TEXT,sourceReferenceJson TEXT,reviewedBy TEXT,reviewedAt TEXT,createdAt TEXT,updatedAt TEXT);
+    CREATE UNIQUE INDEX one_relation ON sales_link_sku_sales_object_relations(linkSkuId) WHERE status='active';
+    CREATE TABLE operating_erp_identity_observations(normalizedCode TEXT PRIMARY KEY,merchantSkuCode TEXT,inOperatingObjectSet INTEGER,resolvedIdentityType TEXT,identityStatus TEXT,goodsErpSkuId TEXT,suiteSalesObjectId TEXT,sourceMode TEXT,sourceCheckedAt TEXT,sourceUpdatedAt TEXT,detailJson TEXT);
+    CREATE TABLE operating_erp_identity_shadow_comparisons(normalizedCode TEXT PRIMARY KEY,currentSalesObjectId TEXT,bundleStructureStatus TEXT,productMappingStatus TEXT,comparisonStatus TEXT);
+    CREATE TABLE connection_sku_sales_daily_facts(id TEXT PRIMARY KEY);
+    INSERT INTO connection_sku_sales_daily_facts VALUES ('fact');
+    CREATE TABLE sales_link_sku_product_structures(id TEXT PRIMARY KEY);
+    CREATE TABLE sales_link_sku_product_structure_components(id TEXT PRIMARY KEY);
+    CREATE TABLE sales_link_sku_erp_mappings(id TEXT PRIMARY KEY);
+    CREATE TABLE product_structure_application_batches(id TEXT PRIMARY KEY,batchCode TEXT UNIQUE,sourceType TEXT,sourceFileHashesJson TEXT,status TEXT,createdBy TEXT,createdAt TEXT,updatedAt TEXT);
+    CREATE TABLE product_structure_application_items(id TEXT PRIMARY KEY,applicationBatchId TEXT,productStructureId TEXT,salesLinkSkuId TEXT,classification TEXT,approvalStatus TEXT,relationshipShape TEXT,sourceTypesJson TEXT,currentMappingsJson TEXT,targetComponentsJson TEXT,componentDiffJson TEXT,impactSalesAmount REAL,impactProfitAmount REAL,createdAt TEXT,updatedAt TEXT);
+  `);
+  return db;
+}
+
+const legacyCounts = (db) => ({
+  productStructures: db.prepare("SELECT COUNT(*) total FROM sales_link_sku_product_structures").get().total,
+  legacyMappings: db.prepare("SELECT COUNT(*) total FROM sales_link_sku_erp_mappings").get().total,
+  applicationItems: db.prepare("SELECT COUNT(*) total FROM product_structure_application_items").get().total,
+});
+
+function addCandidate(db, { code = "SINGLE", type = "single", status = "confirmed", erpSkuId = "erp-single", productMappingStatus = "complete", linkCount = 1 } = {}) {
+  const normalizedCode = code.toLowerCase();
+  if (erpSkuId) db.prepare("INSERT OR IGNORE INTO erp_skus VALUES (?,?,'active')").run(erpSkuId, code);
+  db.prepare("INSERT INTO operating_erp_identity_observations VALUES (?,?,1,?,?,?,NULL,'materialized','2026-08-20','2026-08-20','{}')").run(normalizedCode, code, type, status, type === "single" ? erpSkuId : null);
+  db.prepare("INSERT INTO operating_erp_identity_shadow_comparisons VALUES (?,NULL,?,?,?)").run(normalizedCode, type === "bundle" ? "complete" : "not_applicable", productMappingStatus, status === "confirmed" ? "v3_fill" : status);
+  for (let index = 0; index < linkCount; index += 1) db.prepare("INSERT INTO sales_link_skus VALUES (?,'batch',?,?)").run(`${normalizedCode}-link-${index}`, normalizedCode, code);
+}
+
+function addExistingProjection(db, { code = "BUNDLE", type = "bundle", componentId = "erp-part", quantity = 2, sourceType = type === "bundle" ? "wangdian_suite_api" : "wangdian_goods_api" } = {}) {
+  const normalizedCode = code.toLowerCase();
+  db.prepare("INSERT OR IGNORE INTO erp_skus VALUES (?,?,'active')").run(componentId, componentId);
+  db.prepare("INSERT INTO sales_objects VALUES (?,?,?,?,?,?,?,NULL,'active',NULL,'2026','2026','2026','2026')").run(`so-${normalizedCode}`, code, normalizedCode, type, "wangdian", sourceType, code);
+  db.prepare("INSERT INTO sales_object_structures VALUES (?,?,1,'hash','2026',NULL,'active',?,NULL,'{}','exact','active',NULL,'2026','2026',NULL,'admin','2026','2026','2026','2026')").run(`st-${normalizedCode}`, `so-${normalizedCode}`, sourceType);
+  db.prepare("INSERT INTO sales_object_structure_components VALUES (?,?,?,?,?,1,'active',?,'{}','2026','2026')").run(`component-${normalizedCode}`, `st-${normalizedCode}`, `so-${normalizedCode}`, componentId, quantity, sourceType);
+  db.prepare("UPDATE operating_erp_identity_shadow_comparisons SET currentSalesObjectId=?,comparisonStatus='consistent' WHERE normalizedCode=?").run(`so-${normalizedCode}`, normalizedCode);
+  db.prepare("UPDATE operating_erp_identity_observations SET suiteSalesObjectId=? WHERE normalizedCode=?").run(`so-${normalizedCode}`, normalizedCode);
+  return `so-${normalizedCode}`;
+}
+
+test("Single首次自动投影", () => { const db = fixture(); addCandidate(db); const result = projectOperatingSalesObjects({ database: db }); assert.equal(result.objectsCreated, 1); assert.equal(db.prepare("SELECT COUNT(*) total FROM sales_objects").get().total, 1); });
+test("Single重复投影幂等", () => { const db = fixture(); addCandidate(db); projectOperatingSalesObjects({ database: db }); const second = projectOperatingSalesObjects({ database: db }); assert.equal(second.objectsCreated, 0); assert.equal(db.prepare("SELECT COUNT(*) total FROM sales_object_structures").get().total, 1); });
+test("Bundle首次由权威BOM投影", () => { const db = fixture(); addCandidate(db, { code: "PACK", type: "bundle", erpSkuId: null }); db.prepare("INSERT INTO erp_skus VALUES ('part','PART','active')").run(); const result = projectOperatingSalesObjects({ database: db, bundleSources: { pack: { components: [{ erpSkuId: "part", quantity: 2 }] } } }); assert.equal(result.objectsCreated, 1); assert.equal(db.prepare("SELECT objectType FROM sales_objects").get().objectType, "bundle"); });
+test("Bundle读取Phase3当前版本", () => { const db = fixture(); addCandidate(db, { code: "PACK", type: "bundle", erpSkuId: null }); addExistingProjection(db, { code: "PACK" }); const result = projectOperatingSalesObjects({ database: db }); assert.equal(result.bundleCount, 1); assert.equal(result.exceptions.length, 0); });
+test("正确Link关系自动建立", () => { const db = fixture(); addCandidate(db); const result = projectOperatingSalesObjects({ database: db }); assert.equal(result.relationsCreated, 1); });
+test("重复Link关系不增长", () => { const db = fixture(); addCandidate(db); projectOperatingSalesObjects({ database: db }); const result = projectOperatingSalesObjects({ database: db }); assert.equal(result.relationsCreated, 0); assert.equal(result.relationsUnchanged, 1); });
+test("Relation Write关闭时只报告待写关系", () => { const db = fixture(); addCandidate(db); const result = projectOperatingSalesObjects({ database: db, relationWriteEnabled: false }); assert.equal(result.relationsCreated, 0); assert.equal(result.relationsWouldCreate, 1); });
+test("已有正确关系切换为V3可追溯来源", () => { const db = fixture(); addCandidate(db); projectOperatingSalesObjects({ database: db }); db.prepare("UPDATE sales_link_sku_sales_object_relations SET sourceType='legacy',sourceBatchId=NULL,sourceReferenceJson='{}'").run(); const result = projectOperatingSalesObjects({ database: db }); const relation = db.prepare("SELECT sourceType,sourceBatchId,sourceReferenceJson FROM sales_link_sku_sales_object_relations").get(); assert.equal(result.relationsProvenanceUpdated, 1); assert.equal(relation.sourceType, 'platform_goods_v3_projection'); assert.equal(relation.sourceBatchId, 'batch'); assert.equal(JSON.parse(relation.sourceReferenceJson).createdByProjection, false); });
+test("已有不同Link关系不静默覆盖", () => { const db = fixture(); addCandidate(db); db.prepare("INSERT INTO sales_objects VALUES ('wrong','WRONG','wrong','single','legacy','manual_legacy','WRONG',NULL,'active',NULL,'2026','2026','2026','2026')").run(); db.prepare("INSERT INTO sales_link_sku_sales_object_relations VALUES ('wrong-r','single-link-0','wrong','2026',NULL,'active','legacy',NULL,'{}',NULL,NULL,'2026','2026')").run(); const result = projectOperatingSalesObjects({ database: db }); assert.equal(result.relationConflicts, 1); assert.equal(db.prepare("SELECT salesObjectId FROM sales_link_sku_sales_object_relations").get().salesObjectId, "wrong"); });
+test("ERP不存在保持异常", () => { const db = fixture(); addCandidate(db, { status: "erp_not_found", erpSkuId: null }); const result = projectOperatingSalesObjects({ database: db }); assert.equal(result.objectsCreated, 0); assert.equal(result.exceptions[0].type, "erp_not_found"); });
+test("类型冲突不覆盖现有对象", () => { const db = fixture(); addCandidate(db); db.prepare("INSERT INTO sales_objects VALUES ('bundle','SINGLE','single','bundle','wangdian','wangdian_suite_api','SINGLE',NULL,'active',NULL,'2026','2026','2026','2026')").run(); const result = projectOperatingSalesObjects({ database: db }); assert.equal(result.exceptions[0].type, "type_conflict"); assert.equal(db.prepare("SELECT objectType FROM sales_objects").get().objectType, "bundle"); });
+test("Product Mapping缺失不阻断投影", () => { const db = fixture(); addCandidate(db, { productMappingStatus: "missing" }); const result = projectOperatingSalesObjects({ database: db }); assert.equal(result.objectsCreated, 1); assert.equal(result.productMappingGovernance, 1); });
+test("正常投影不创建Product Structure", () => { const db = fixture(); addCandidate(db); const before = legacyCounts(db); projectOperatingSalesObjects({ database: db }); assert.equal(legacyCounts(db).productStructures, before.productStructures); });
+test("正常投影不创建Legacy Mapping", () => { const db = fixture(); addCandidate(db); const before = legacyCounts(db); projectOperatingSalesObjects({ database: db }); assert.equal(legacyCounts(db).legacyMappings, before.legacyMappings); });
+test("两个已知缺口无需审批自动补齐", () => { const db = fixture(); addCandidate(db, { code: "HP1025-1", erpSkuId: "erp-1025", linkCount: 1 }); addCandidate(db, { code: "HP1055-1", erpSkuId: "erp-1055", linkCount: 1 }); const result = projectOperatingSalesObjects({ database: db }); assert.equal(result.objectsCreated, 2); assert.equal(result.relationsCreated, 2); assert.equal(legacyCounts(db).applicationItems, 0); });
+test("投影失败事务完整回滚", () => { const db = fixture(); addCandidate(db, { code: "FAIL" }); assert.throws(() => projectOperatingSalesObjects({ database: db, failAfterCode: "FAIL" }), /isolated_sales_object_projection_failure/u); assert.equal(db.prepare("SELECT COUNT(*) total FROM sales_objects").get().total, 0); });
+test("投影不改变Daily Facts", () => { const db = fixture(); addCandidate(db); projectOperatingSalesObjects({ database: db }); assert.equal(db.prepare("SELECT COUNT(*) total FROM connection_sku_sales_daily_facts").get().total, 1); });
+test("影子Resolver识别V3新增关系", () => { const db = fixture(); addCandidate(db); projectOperatingSalesObjects({ database: db }); db.prepare("DELETE FROM sales_link_sku_sales_object_relations").run(); const shadow = compareV3ProjectionResolver({ database: db }); assert.equal(shadow.summary.v3_missing_current, 1); });
+test("V3可解释的正常关系不再创建人工审批项", () => { const db = fixture(); addCandidate(db); const result = createProductStructureApplicationBatch({ batchCode: "v3-normal", sourceType: "platform_goods", previewItems: [{ salesLinkSkuId: "single-link-0", previewStatus: "new_structure", components: [{ erpSkuId: "erp-single", quantity: 1, sourceType: "platform_goods" }], currentMappings: [] }] }, { database: db }); assert.equal(result.itemCount, 0); assert.equal(result.autoProjectedSkipped, 1); assert.equal(db.prepare("SELECT COUNT(*) total FROM product_structure_application_items").get().total, 0); });

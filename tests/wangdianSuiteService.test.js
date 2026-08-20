@@ -107,7 +107,7 @@ test("旺店通组合装同步幂等生成Sales Object并以版本保护结构�
         ...extra,
       ],
     }] } });
-    const first = await syncWangdianSuites({ taskId: task.id, suiteNo: "FZH0103-11", syncMode: "incremental", createdBy: reviewer.id }, { database, querySuites: async () => payload() });
+    const first = await syncWangdianSuites({ taskId: task.id, suiteNo: "FZH0103-11", syncMode: "incremental", createdBy: reviewer.id }, { database, relationWriteEnabled: true, querySuites: async () => payload() });
     assert.equal(first.result.createdCount, 1);
     assert.equal(first.result.structuresCreated, 1);
     assert.equal(first.result.componentsCreated, 2);
@@ -117,25 +117,25 @@ test("旺店通组合装同步幂等生成Sales Object并以版本保护结构�
     assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_object_structures WHERE salesObjectId=?").get(object.id).total, 1);
     assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_link_sku_sales_object_relations WHERE linkSkuId='suite-link-sku' AND status='active'").get().total, 1);
 
-    const repeated = await syncWangdianSuites({ taskId: task.id, suiteNo: "FZH0103-11", syncMode: "incremental", createdBy: reviewer.id }, { database, querySuites: async () => payload() });
+    const repeated = await syncWangdianSuites({ taskId: task.id, suiteNo: "FZH0103-11", syncMode: "incremental", createdBy: reviewer.id }, { database, relationWriteEnabled: true, querySuites: async () => payload() });
     assert.equal(repeated.result.unchangedCount, 1);
     assert.equal(repeated.result.structuresCreated, 0);
     assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_object_structures WHERE salesObjectId=?").get(object.id).total, 1);
 
-    const changed = await syncWangdianSuites({ taskId: task.id, suiteNo: "FZH0103-11", syncMode: "incremental", createdBy: reviewer.id }, { database, querySuites: async () => payload(6) });
+    const changed = await syncWangdianSuites({ taskId: task.id, suiteNo: "FZH0103-11", syncMode: "incremental", createdBy: reviewer.id }, { database, relationWriteEnabled: true, querySuites: async () => payload(6) });
     assert.equal(changed.result.updatedCount, 1);
     assert.equal(changed.result.structuresCreated, 1);
     assert.deepEqual(database.prepare("SELECT version,status FROM sales_object_structures WHERE salesObjectId=? ORDER BY version").all(object.id), [{ version: 1, status: "superseded" }, { version: 2, status: "active" }]);
     assert.equal(database.prepare("SELECT quantity FROM sales_object_structure_components c JOIN sales_object_structures s ON s.id=c.structureId WHERE s.salesObjectId=? AND s.status='active' AND c.erpSkuId='suite-erp-b'").get(object.id).quantity, 6);
 
-    const reverted = await syncWangdianSuites({ taskId: task.id, suiteNo: "FZH0103-11", syncMode: "incremental", createdBy: reviewer.id }, { database, querySuites: async () => payload(5) });
+    const reverted = await syncWangdianSuites({ taskId: task.id, suiteNo: "FZH0103-11", syncMode: "incremental", createdBy: reviewer.id }, { database, relationWriteEnabled: true, querySuites: async () => payload(5) });
     assert.equal(reverted.result.structuresCreated, 0);
     assert.equal(reverted.result.structuresReactivated, 1);
     assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_object_structures WHERE salesObjectId=?").get(object.id).total, 2);
     assert.deepEqual(database.prepare("SELECT version,status FROM sales_object_structures WHERE salesObjectId=? ORDER BY version").all(object.id), [{ version: 1, status: "active" }, { version: 2, status: "superseded" }]);
     assert.equal(database.prepare("SELECT quantity FROM sales_object_structure_components c JOIN sales_object_structures s ON s.id=c.structureId WHERE s.salesObjectId=? AND s.status='active' AND c.erpSkuId='suite-erp-b'").get(object.id).quantity, 5);
 
-    const blocked = await syncWangdianSuites({ taskId: task.id, suiteNo: "FZH0103-11", syncMode: "incremental", createdBy: reviewer.id }, { database, querySuites: async () => payload(5, [{ rec_id: 3, spec_no: "ERP-MISSING", num: 1, deleted: 0 }]) });
+    const blocked = await syncWangdianSuites({ taskId: task.id, suiteNo: "FZH0103-11", syncMode: "incremental", createdBy: reviewer.id }, { database, relationWriteEnabled: true, querySuites: async () => payload(5, [{ rec_id: 3, spec_no: "ERP-MISSING", num: 1, deleted: 0 }]) });
     assert.equal(blocked.dataSyncBatch.status, "partial");
     assert.equal(blocked.result.exceptions[0].exceptionType, "suite_structure_incomplete");
     assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_object_structures WHERE salesObjectId=?").get(object.id).total, 2, "异常结构不得覆盖当前正式结构");

@@ -10,6 +10,8 @@ import {
   startDataSyncBatch,
 } from "./dataSyncCenterService.js";
 import { searchWangdianSuites } from "./wangdianSuiteService.js";
+import { closeBomEffectivePeriod, openBomEffectivePeriod } from "./wangdianBomAuthorityService.js";
+import { readV3RelationFeatureFlags } from "./v3RelationFeatureFlags.js";
 
 const TASK_CODE = "wangdian_suites";
 const SOURCE_TYPE = "wangdian_suite_api";
@@ -111,6 +113,9 @@ export async function readWangdianSuiteChanges(input = {}, options = {}) {
 
 export function applyWangdianSuiteChanges(suites, input = {}, options = {}) {
   const database = options.database || getDatabase();
+  const relationWriteEnabled = options.relationWriteEnabled === undefined
+    ? readV3RelationFeatureFlags({ environment: options.environment || process.env }).relationWrite
+    : Boolean(options.relationWriteEnabled);
   const timestamp = input.timestamp || now();
   const reviewedBy = reviewerId(database, input.createdBy);
   if (!reviewedBy) throw new Error("缺少可用于激活组合装结构的系统审核身份。");
@@ -135,9 +140,12 @@ export function applyWangdianSuiteChanges(suites, input = {}, options = {}) {
         if (!existing) { result.unchangedCount += 1; continue; }
         const activeRelations = Number(database.prepare("SELECT COUNT(*) total FROM sales_link_sku_sales_object_relations WHERE salesObjectId=? AND status='active'").get(existing.id).total);
         if (activeRelations) exception(suite, "suite_deleted_in_use", "旺店通组合装已删除，但仍有关联链接，系统已保留原结构。", { activeRelations });
-        else {
-          result.invalidatedCount += database.prepare("UPDATE sales_objects SET status='inactive',lastSeenAt=?,updatedAt=? WHERE id=? AND status<>'inactive'").run(timestamp, timestamp, existing.id).changes;
-        }
+        result.invalidatedCount += database.prepare("UPDATE sales_objects SET status='inactive',lastSeenAt=?,updatedAt=? WHERE id=? AND status<>'inactive'").run(timestamp, timestamp, existing.id).changes;
+        closeBomEffectivePeriod(existing.id, timestamp, { database, sourceReferenceJson: sourceReference(suite) });
+        database.prepare(`UPDATE sales_object_structures SET status='superseded',effectiveTo=?,sourceState='source_removed',
+          lastVerifiedAt=?,syncedAt=?,sourceUpdatedAt=?,sourceReferenceJson=?,updatedAt=?
+          WHERE salesObjectId=? AND status='active'`)
+          .run(timestamp, timestamp, timestamp, clean(suite.modifiedAt) || null, sourceReference(suite), timestamp, existing.id);
         continue;
       }
       if (existing && existing.objectType !== "bundle") {
@@ -178,8 +186,10 @@ export function applyWangdianSuiteChanges(suites, input = {}, options = {}) {
       }
       const activeStructure = database.prepare("SELECT * FROM sales_object_structures WHERE salesObjectId=? AND status='active'").get(salesObjectId);
       if (activeStructure?.structureHash === structureHash) {
-        database.prepare("UPDATE sales_object_structures SET sourceType=?,sourceBatchId=?,sourceReferenceJson=?,updatedAt=? WHERE id=?")
-          .run(SOURCE_TYPE, input.sourceBatchId || null, referenceJson, timestamp, activeStructure.id);
+        database.prepare(`UPDATE sales_object_structures SET sourceType=?,sourceBatchId=?,sourceReferenceJson=?,validityBasis='exact',
+          sourceState='active',sourceUpdatedAt=?,lastVerifiedAt=?,syncedAt=?,updatedAt=? WHERE id=?`)
+          .run(SOURCE_TYPE, input.sourceBatchId || null, referenceJson, clean(suite.modifiedAt) || null, timestamp, timestamp, timestamp, activeStructure.id);
+        openBomEffectivePeriod({ structureId: activeStructure.id, salesObjectId, validFrom: timestamp, validityBasis: "exact", sourceUpdatedAt: suite.modifiedAt, sourceReferenceJson: referenceJson }, { database });
         result.unchangedCount += 1;
       } else {
         const matchingStructure = database.prepare("SELECT * FROM sales_object_structures WHERE salesObjectId=? AND structureHash=?").get(salesObjectId, structureHash);
@@ -187,18 +197,20 @@ export function applyWangdianSuiteChanges(suites, input = {}, options = {}) {
           if (activeStructure) database.prepare("UPDATE sales_object_structures SET status='superseded',effectiveTo=?,updatedAt=? WHERE id=?").run(timestamp, timestamp, activeStructure.id);
           database.prepare(`UPDATE sales_object_structures
             SET status='active',effectiveFrom=?,effectiveTo=NULL,sourceType=?,sourceBatchId=?,sourceReferenceJson=?,
+                validityBasis='exact',sourceState='active',sourceUpdatedAt=?,lastVerifiedAt=?,syncedAt=?,
                 supersedesStructureId=?,reviewedBy=?,reviewedAt=?,activatedAt=?,updatedAt=?
             WHERE id=?`)
-            .run(timestamp, SOURCE_TYPE, input.sourceBatchId || null, referenceJson, activeStructure?.id || null, reviewedBy, timestamp, timestamp, timestamp, matchingStructure.id);
+            .run(timestamp, SOURCE_TYPE, input.sourceBatchId || null, referenceJson, clean(suite.modifiedAt) || null, timestamp, timestamp, activeStructure?.id || null, reviewedBy, timestamp, timestamp, timestamp, matchingStructure.id);
+          openBomEffectivePeriod({ structureId: matchingStructure.id, salesObjectId, validFrom: timestamp, validityBasis: "exact", sourceUpdatedAt: suite.modifiedAt, sourceReferenceJson: referenceJson }, { database });
           result.structuresReactivated += 1;
           result.updatedCount += 1;
         } else {
         const version = Number(database.prepare("SELECT COALESCE(MAX(version),0)+1 version FROM sales_object_structures WHERE salesObjectId=?").get(salesObjectId).version);
         const structureId = stableId("sales-object-structure", `${salesObjectId}|${structureHash}`);
         database.prepare(`INSERT INTO sales_object_structures
-          (id,salesObjectId,version,structureHash,effectiveFrom,status,sourceType,sourceBatchId,sourceReferenceJson,supersedesStructureId,reviewedBy,reviewedAt,activatedAt,createdAt,updatedAt)
-          VALUES (?,?,?,?,?,'draft',?,?,?,?,?,?,?, ?,?)`)
-          .run(structureId, salesObjectId, version, structureHash, timestamp, SOURCE_TYPE, input.sourceBatchId || null, referenceJson, activeStructure?.id || null, reviewedBy, timestamp, timestamp, timestamp, timestamp);
+          (id,salesObjectId,version,structureHash,effectiveFrom,status,sourceType,sourceBatchId,sourceReferenceJson,validityBasis,sourceState,sourceUpdatedAt,lastVerifiedAt,syncedAt,supersedesStructureId,reviewedBy,reviewedAt,activatedAt,createdAt,updatedAt)
+          VALUES (?,?,?,?,?,'draft',?,?,?,'exact','active',?,?,?,?,?,?,?, ?,?)`)
+          .run(structureId, salesObjectId, version, structureHash, timestamp, SOURCE_TYPE, input.sourceBatchId || null, referenceJson, clean(suite.modifiedAt) || null, timestamp, timestamp, activeStructure?.id || null, reviewedBy, timestamp, timestamp, timestamp, timestamp);
         const insertComponent = database.prepare(`INSERT INTO sales_object_structure_components
           (id,structureId,salesObjectId,erpSkuId,quantity,sortOrder,status,sourceType,sourceReferenceJson,createdAt,updatedAt)
           VALUES (?,?,?,?,?,?,'active',?,?,?,?)`);
@@ -208,13 +220,16 @@ export function applyWangdianSuiteChanges(suites, input = {}, options = {}) {
         });
         if (activeStructure) database.prepare("UPDATE sales_object_structures SET status='superseded',effectiveTo=?,updatedAt=? WHERE id=?").run(timestamp, timestamp, activeStructure.id);
         database.prepare("UPDATE sales_object_structures SET status='active',updatedAt=? WHERE id=?").run(timestamp, structureId);
+        openBomEffectivePeriod({ structureId, salesObjectId, validFrom: timestamp, validityBasis: "exact", sourceUpdatedAt: suite.modifiedAt, sourceReferenceJson: referenceJson }, { database });
         result.structuresCreated += 1;
         if (existing) result.updatedCount += 1;
         }
       }
 
-      const linkSkus = database.prepare(`SELECT id FROM sales_link_skus
-        WHERE currentState='active' AND lower(trim(COALESCE(NULLIF(normalizedPlatformSkuCode,''),platformSkuCode)))=?`).all(code);
+      const linkSkus = relationWriteEnabled
+        ? database.prepare(`SELECT id FROM sales_link_skus
+          WHERE currentState='active' AND lower(trim(COALESCE(NULLIF(normalizedPlatformSkuCode,''),platformSkuCode)))=?`).all(code)
+        : [];
       for (const linkSku of linkSkus) {
         const relation = database.prepare("SELECT * FROM sales_link_sku_sales_object_relations WHERE linkSkuId=? AND status='active'").get(linkSku.id);
         if (relation?.salesObjectId === salesObjectId) continue;

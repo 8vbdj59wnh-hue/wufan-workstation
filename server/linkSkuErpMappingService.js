@@ -88,6 +88,14 @@ export function ensureSingleLinkSkuErpMapping(database, {
       sourceRows: [{ sourceBatchId: text(sourceBatchId) || null, sourceEvidence, proposedAt: timestamp }],
     }],
   }, { database });
+  if (application.itemCount === 0 && application.autoProjectedSkipped > 0) {
+    return {
+      outcome: "automatic_projection_pending",
+      status: "v3_auto_projection_required",
+      applicationBatchId: application.batchId,
+      reason: "该关系可由平台货品与旺店通身份自动解释，未创建人工审批项；等待V3自动投影流程建立正式关系。",
+    };
+  }
   return {
     outcome: "governance_pending",
     status: "product_structure_review_pending",

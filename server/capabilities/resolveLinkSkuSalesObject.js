@@ -19,12 +19,15 @@ function shape(components) {
   return Number(components[0].quantity) === 1 ? "single_unit" : "single_multi_quantity";
 }
 
-function load(database, ids, onQuery) {
+function load(database, ids, onQuery, relationSourceType = "", excludeProjectionCreated = false) {
   if (!ids.length) return { linkSkus: new Map(), relations: new Map(), objects: new Map(), structures: new Map(), components: new Map(), erpSkus: new Map() };
   const query = (sql, params) => { onQuery?.(sql, params); return database.prepare(sql).all(...params); };
   const sqlIds = placeholders(ids);
   const linkSkuRows = query(`SELECT id,salesLinkId FROM sales_link_skus WHERE id IN (${sqlIds})`, ids);
-  const relationRows = query(`SELECT * FROM sales_link_sku_sales_object_relations WHERE linkSkuId IN (${sqlIds}) AND status='active'`, ids);
+  let relationRows = query(`SELECT * FROM sales_link_sku_sales_object_relations WHERE linkSkuId IN (${sqlIds}) AND status='active'${relationSourceType ? " AND sourceType=?" : ""}`, relationSourceType ? [...ids, relationSourceType] : ids);
+  if (excludeProjectionCreated) relationRows = relationRows.filter((row) => {
+    try { return JSON.parse(row.sourceReferenceJson || "{}").createdByProjection !== true; } catch { return true; }
+  });
   const objectIds = [...new Set(relationRows.map((row) => row.salesObjectId))];
   const objectRows = objectIds.length ? query(`SELECT * FROM sales_objects WHERE id IN (${placeholders(objectIds)})`, objectIds) : [];
   const structureRows = objectIds.length ? query(`SELECT * FROM sales_object_structures WHERE salesObjectId IN (${placeholders(objectIds)}) AND status='active'`, objectIds) : [];
@@ -76,7 +79,7 @@ function resolveLoaded(salesLinkSkuId, loaded) {
 export function resolveLinkSkuSalesObject(input = {}, options = {}) {
   const salesLinkSkuId = clean(input.salesLinkSkuId);
   if (!salesLinkSkuId) return { ...base(null), status: "invalid_input" };
-  const loaded = load(options.database || getDatabase(), [salesLinkSkuId], options.onQuery);
+  const loaded = load(options.database || getDatabase(), [salesLinkSkuId], options.onQuery, clean(options.relationSourceType), Boolean(options.excludeProjectionCreated));
   return resolveLoaded(salesLinkSkuId, loaded);
 }
 
@@ -84,7 +87,7 @@ export function resolveLinkSkuSalesObjects(input = {}, options = {}) {
   const ids = [...new Set((Array.isArray(input.salesLinkSkuIds) ? input.salesLinkSkuIds : []).map(clean).filter(Boolean))];
   const response = { capability: "ResolveLinkSkuSalesObjects", contractVersion: CONTRACT_VERSION, results: {} };
   if (!ids.length) return response;
-  const loaded = load(options.database || getDatabase(), ids, options.onQuery);
+  const loaded = load(options.database || getDatabase(), ids, options.onQuery, clean(options.relationSourceType), Boolean(options.excludeProjectionCreated));
   for (const id of ids) response.results[id] = resolveLoaded(id, loaded);
   return response;
 }

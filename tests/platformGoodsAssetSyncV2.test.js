@@ -71,7 +71,8 @@ test("平台货品资产同步先生成Diff，确认后只同步资产和关系�
     assert.equal(committed.result.linkSkus.created, 4);
     assert.equal(committed.result.linkSkus.updated, 1);
     assert.equal(committed.result.erpRelations.candidates, 1);
-    assert.equal(database.prepare("SELECT COUNT(*) total FROM product_structure_application_items WHERE approvalStatus='pending'").get().total, 1);
+    assert.equal(database.prepare("SELECT COUNT(*) total FROM product_structure_application_items WHERE approvalStatus='pending'").get().total, 0);
+    assert.equal(database.prepare("SELECT matchMethod FROM sales_link_skus WHERE platformSkuId='sku-new'").get().matchMethod, "v3_auto_projection");
     assert.equal(database.prepare("SELECT title FROM sales_links WHERE id='link-existing'").get().title, "新标题");
     assert.equal(database.prepare("SELECT specificationName FROM sales_link_skus WHERE id='sku-existing'").get().specificationName, "新规格");
     assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_shops").get().total, before.shops + 1);
@@ -89,7 +90,7 @@ test("平台货品资产同步先生成Diff，确认后只同步资产和关系�
     assert.equal(repeated.history.length, 1);
     assert.equal(database.prepare("SELECT COUNT(*) total FROM platform_goods_excel_source_files").get().total, 1);
     assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_links").get().total, before.links + 4);
-    assert.equal(database.prepare("SELECT COUNT(*) total FROM product_structure_application_items").get().total, 1);
+    assert.equal(database.prepare("SELECT COUNT(*) total FROM product_structure_application_items").get().total, 0);
     const repeatedInitialCommit = commitPlatformGoodsExcelDataSync(preview.dataSyncBatch.id);
     assert.equal(repeatedInitialCommit.idempotent, true);
     assert.equal(repeatedInitialCommit.result.links.created, 0);
@@ -113,7 +114,7 @@ test("平台货品资产同步先生成Diff，确认后只同步资产和关系�
     assert.equal(duplicateCommit.idempotent, true);
     assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_links").get().total, before.links + 4);
     assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_link_skus").get().total, before.skus + 4);
-    assert.equal(database.prepare("SELECT COUNT(*) total FROM product_structure_application_items").get().total, 1);
+    assert.equal(database.prepare("SELECT COUNT(*) total FROM product_structure_application_items").get().total, 0);
     assert.equal(database.prepare("SELECT COUNT(*) total FROM connection_sku_sales_daily_facts").get().total, before.dailyFacts);
     assert.equal(database.pragma("integrity_check", { simple: true }), "ok");
     assert.equal(database.pragma("foreign_key_check").length, 0);

@@ -1,6 +1,7 @@
 import { getDatabase } from "../db.js";
 import { resolveLinkSkuErpRelations } from "./resolveLinkSkuErpRelation.js";
 import { resolveLinkSkuSalesObjects } from "./resolveLinkSkuSalesObject.js";
+import { readV3RelationFeatureFlags } from "../v3RelationFeatureFlags.js";
 
 export const SALES_OBJECT_RESOLVER_FLAG = "salesObjectResolverEnabled";
 export const SALES_OBJECT_RESOLVER_ENV = "SALES_OBJECT_RESOLVER_ENABLED";
@@ -117,7 +118,18 @@ export function resolveLinkSkuRelationsForRead(input = {}, options = {}) {
   const database = options.database || getDatabase();
   const scope = clean(options.scope);
   const feature = readSalesObjectResolverFeature(options);
-  const newResults = resolveLinkSkuSalesObjects({ salesLinkSkuIds: ids }, { database, onQuery: options.onNewQuery }).results;
+  const v3Feature = readV3RelationFeatureFlags({
+    environment: options.environment || process.env,
+    relationRead: options.v3RelationReadEnabled,
+    projection: options.v3Projection,
+    relationWrite: options.v3RelationWriteEnabled,
+  });
+  const newResults = resolveLinkSkuSalesObjects({ salesLinkSkuIds: ids }, {
+    database,
+    onQuery: options.onNewQuery,
+    relationSourceType: v3Feature.relationRead ? v3Feature.relationSourceType : "",
+    excludeProjectionCreated: !v3Feature.relationRead,
+  }).results;
   const results = {};
   for (const id of ids) {
     results[id] = asBusinessContract(newResults[id], newResults[id]?.salesLinkId ?? null);
@@ -135,7 +147,7 @@ export function resolveLinkSkuRelationsForRead(input = {}, options = {}) {
   return {
     capability: "ResolveLinkSkuRelationRead",
     contractVersion: "1.0",
-    feature: { ...feature, scope, active: true, mode: "sales_object_single_read" },
+    feature: { ...feature, v3Relation: v3Feature, scope, active: true, mode: "sales_object_single_read" },
     results,
     differences: shadow?.differences ?? [],
     diagnostics: legacyDiagnosticUnavailable

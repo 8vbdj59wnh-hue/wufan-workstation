@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { getDatabase } from "./db.js";
 import { deriveProductStructureShape, hashProductStructure } from "./productStructureMasterDataService.js";
+import { assertWangdianBomManualOverrideAllowed } from "./wangdianBomAuthorityService.js";
 
 const clean = (value) => String(value ?? "").trim();
 const json = (value, fallback) => { try { return JSON.parse(value || ""); } catch { return fallback; } };
@@ -8,6 +9,27 @@ const stableId = (...parts) => crypto.createHash("sha256").update(parts.join("|"
 const canonical = (rows = []) => [...rows]
   .map((row) => ({ erpSkuId: clean(row.erpSkuId), quantity: Number(row.quantity) }))
   .sort((left, right) => left.erpSkuId.localeCompare(right.erpSkuId));
+
+function tableExists(database, name) {
+  return Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
+}
+
+function isV3AutoProjectableTarget(database, salesLinkSkuId, targetComponents) {
+  if (!tableExists(database, "operating_erp_identity_observations") || !tableExists(database, "operating_erp_identity_shadow_comparisons")) return false;
+  const identity = database.prepare(`SELECT o.resolvedIdentityType,o.identityStatus,o.goodsErpSkuId,o.suiteSalesObjectId,c.bundleStructureStatus
+    FROM sales_link_skus sku JOIN operating_erp_identity_observations o
+      ON o.normalizedCode=lower(trim(COALESCE(NULLIF(sku.normalizedPlatformSkuCode,''),sku.platformSkuCode,'')))
+    JOIN operating_erp_identity_shadow_comparisons c USING(normalizedCode)
+    WHERE sku.id=? AND o.inOperatingObjectSet=1`).get(salesLinkSkuId);
+  if (!identity || identity.identityStatus !== "confirmed") return false;
+  const target = canonical(targetComponents);
+  if (identity.resolvedIdentityType === "single") return target.length === 1 && target[0].erpSkuId === identity.goodsErpSkuId && Number(target[0].quantity) === 1;
+  if (identity.resolvedIdentityType !== "bundle" || identity.bundleStructureStatus !== "complete" || !identity.suiteSalesObjectId) return false;
+  const authoritative = canonical(database.prepare(`SELECT c.erpSkuId,c.quantity FROM sales_object_structures s
+    JOIN sales_object_structure_components c ON c.structureId=s.id AND c.status='active'
+    WHERE s.salesObjectId=? AND s.status='active' ORDER BY c.erpSkuId`).all(identity.suiteSalesObjectId));
+  return JSON.stringify(authoritative) === JSON.stringify(target);
+}
 
 export function classifyStructureApplication(previewStatus) {
   return previewStatus === "new_structure" ? "ready_to_apply" : previewStatus;
@@ -55,6 +77,7 @@ function applySalesObjectStructure(database, { salesLinkSkuId, target, sourceBat
   if (JSON.stringify(current.components) === JSON.stringify(canonical(target)) && current.structure) {
     return { salesObjectId: currentRelation.salesObjectId, structureId: current.structure.id, structureVersion: Number(current.structure.version), outcome: "idempotent" };
   }
+  assertWangdianBomManualOverrideAllowed(current.structure, current.components, target);
   let salesObjectId = currentRelation?.salesObjectId || `sales-object-${stableId("product-structure", salesLinkSkuId)}`;
   let activeStructure = current.structure;
   if (currentRelation && activeStructure) {
@@ -119,6 +142,8 @@ export function createProductStructureApplicationBatch({ batchCode, sourceType, 
   const batchId = `product-structure-application-${stableId(code)}`;
   const existing = database.prepare("SELECT id FROM product_structure_application_batches WHERE batchCode=?").get(code);
   if (existing) return { batchId: existing.id, idempotent: true, itemCount: database.prepare("SELECT COUNT(*) total FROM product_structure_application_items WHERE applicationBatchId=?").get(existing.id).total };
+  let itemCount = 0;
+  let autoProjectedSkipped = 0;
   database.transaction(() => {
     database.prepare(`INSERT INTO product_structure_application_batches
       (id,batchCode,sourceType,sourceFileHashesJson,status,createdBy,createdAt,updatedAt)
@@ -129,12 +154,18 @@ export function createProductStructureApplicationBatch({ batchCode, sourceType, 
     for (const item of previewItems) {
       const classification = classifyStructureApplication(item.previewStatus);
       const components = canonical(item.components);
+      if (isV3AutoProjectableTarget(database, item.salesLinkSkuId, components)) {
+        autoProjectedSkipped += 1;
+        continue;
+      }
       const current = canonical(item.currentMappings);
       const diff = buildComponentDiff(current, components);
       insertItem.run(`product-structure-application-item-${stableId(batchId, item.salesLinkSkuId)}`, batchId, null, item.salesLinkSkuId, classification, defaultApprovalStatus(classification), item.relationshipShape || deriveProductStructureShape(components), JSON.stringify([...new Set(item.components.map((component) => component.sourceType).filter(Boolean))]), JSON.stringify(current), JSON.stringify(components), JSON.stringify(diff), Number(item.impactSalesAmount || 0), Number(item.impactProfitAmount || 0), timestamp, timestamp);
+      itemCount += 1;
     }
+    if (itemCount === 0) database.prepare("UPDATE product_structure_application_batches SET status='closed',updatedAt=? WHERE id=?").run(timestamp, batchId);
   })();
-  return { batchId, idempotent: false, itemCount: previewItems.length };
+  return { batchId, idempotent: false, itemCount, autoProjectedSkipped };
 }
 
 export function queryProductStructureApplicationQueue(applicationBatchId, options = {}, { database = getDatabase() } = {}) {
