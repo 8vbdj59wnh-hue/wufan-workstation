@@ -87,6 +87,9 @@ import {
 import { createWangdianShopDiscoveryBatch, queueWangdianShopDiscoveryBatch, readWangdianShopDiscoveryBatch, resumePendingWangdianShopDiscoveryBatches, resumeWangdianShopDiscoveryBatch, saveWangdianShopMapping } from "./wangdianPlatformGoodsSyncService.js";
 import { searchWangdianSuites } from "./wangdianSuiteService.js";
 import { runDueWangdianSuiteSyncTasks, syncWangdianSuites } from "./wangdianSuiteDataSyncAdapter.js";
+import { queryOperatingErpSet, readOperatingErpSetSummary } from "./operatingErpSetService.js";
+import { queryOperatingErpIdentityShadow } from "./operatingErpIdentityShadowService.js";
+import { listV3ShadowDifferences, readV3ShadowSummary, scheduleV3ShadowObservation } from "./v3ShadowObservationService.js";
 import {
   commitInventoryDataSync,
   previewInventoryDataSync,
@@ -2268,6 +2271,7 @@ app.post("/api/data-sync-center/tasks/:id/wangdian-suites/sync", requirePermissi
       createdBy: getUserPersonId(request.user),
     });
     response.status(201).json({ success: true, ...result });
+    scheduleV3ShadowObservation({ type: "wangdian_suite_sync", objectId: result.dataSyncBatch?.id || request.params.id });
   } catch (error) {
     const permissionRequired = /接口权限不足.*goods\.Suite\.search/iu.test(error.message ?? "");
     response.status(permissionRequired ? 403 : 400).json({
@@ -2287,6 +2291,7 @@ app.post("/api/products/erp-sync-runs/:id/wangdian/preview", requirePermission("
       createdBy: getUserPersonId(request.user),
     });
     response.json({ success: true, ...result });
+    scheduleV3ShadowObservation({ type: "wangdian_goods_sync", objectId: request.params.id });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "旺店通货品读取失败。" });
   }
@@ -2389,6 +2394,40 @@ app.get("/api/data-sync-center", requirePermission("settings.manageAdminDataCent
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "数据同步中心读取失败。" });
   }
+});
+
+app.get("/api/data-sync-center/operating-erp-set", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
+  try {
+    response.json({ success: true, ...queryOperatingErpSet(request.query ?? {}) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "经营ERP对象集合读取失败。" });
+  }
+});
+
+app.get("/api/data-sync-center/operating-erp-set/summary", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
+  try {
+    response.json({ success: true, ...readOperatingErpSetSummary() });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "经营ERP对象集合摘要读取失败。" });
+  }
+});
+
+app.get("/api/data-sync-center/operating-erp-identities", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
+  try {
+    response.json({ success: true, ...queryOperatingErpIdentityShadow(request.query) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "经营ERP身份影子结果读取失败。" });
+  }
+});
+
+app.get("/api/data-sync-center/v3-shadow", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (_request, response) => {
+  try { response.json({ success: true, ...readV3ShadowSummary() }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "V3 Shadow摘要读取失败。" }); }
+});
+
+app.get("/api/data-sync-center/v3-shadow/differences", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
+  try { response.json({ success: true, ...listV3ShadowDifferences(request.query) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "V3 Shadow差异读取失败。" }); }
 });
 
 app.post("/api/data-sync-center/tasks/:id/status", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
@@ -2567,7 +2606,11 @@ app.post("/api/data-sync-center/batches/:id/platform-goods-excel/reanalyze", req
 });
 
 app.post("/api/data-sync-center/batches/:id/platform-goods-excel/commit", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
-  try { response.json({ success: true, ...commitPlatformGoodsExcelDataSync(request.params.id) }); }
+  try {
+    const result = commitPlatformGoodsExcelDataSync(request.params.id);
+    response.json({ success: true, ...result });
+    scheduleV3ShadowObservation({ type: result.idempotent ? "platform_goods_repeat" : "platform_goods_import", objectId: request.params.id, batchId: request.params.id });
+  }
   catch (error) { response.status(400).json({ success: false, message: error.message || "平台货品资产同步失败。" }); }
 });
 
@@ -3554,7 +3597,10 @@ app.post("/api/connection-data-foundation/sales-daily/:id/recalculate", requireL
 });
 
 app.post("/api/connection-data-foundation/sales-daily/:id/confirm", requireLinkImport, (request, response) => {
-  try { response.json({ success: true, ...commitSalesDailyFacts(request.params.id, { confirmedBy: getUserPersonId(request.user) }) }); }
+  try {
+    response.json({ success: true, ...commitSalesDailyFacts(request.params.id, { confirmedBy: getUserPersonId(request.user) }) });
+    scheduleV3ShadowObservation({ type: "sales_daily_import", objectId: request.params.id });
+  }
   catch (error) {
     const status = error.code === "preview_not_found" ? 404 : error.code === "preview_not_ready" ? 409 : 400;
     response.status(status).json({ success: false, message: error.message || "销售日报事实写入失败。" });
@@ -4730,6 +4776,7 @@ const server = app.listen(port, host, () => {
   console.log(`Local API server running at http://${host}:${port}`);
   console.log(`Local access: http://127.0.0.1:${port}`);
   console.log(`SQLite database: ${databasePath}`);
+  scheduleV3ShadowObservation({ type: "service_restart", objectId: process.pid });
 });
 
 resumePendingWangdianShopDiscoveryBatches();
@@ -4751,6 +4798,7 @@ const dataSyncSchedulerTimer = setInterval(async () => {
   try {
     const results = [...await runDueErpGoodsSyncTasks(), ...await runDueWangdianSuiteSyncTasks(), ...await runDuePlatformGoodsSyncTasks(), ...await runDueInventorySyncTasks()];
     for (const result of results.filter((item) => !item.success)) console.error("ERP货品自动同步失败", result.error);
+    if (results.some((item) => item.success)) scheduleV3ShadowObservation({ type: "scheduled_data_sync", objectId: new Date().toISOString() });
   } catch (error) {
     console.error("数据同步中心调度失败", error);
   } finally {
