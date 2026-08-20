@@ -64,12 +64,28 @@ test("最新完整批次优先选择新数据同步中心批次", () => {
   const db = new Database(":memory:"); db.exec(`
     CREATE TABLE erp_import_batches(id TEXT,importType TEXT,status TEXT,importMode TEXT,businessDate TEXT,completedAt TEXT,createdAt TEXT,originalFilename TEXT);
     CREATE TABLE data_sync_tasks(id TEXT,taskCode TEXT);
-    CREATE TABLE data_sync_batches(id TEXT,taskId TEXT,status TEXT,syncMode TEXT,periodEnd TEXT,completedAt TEXT,createdAt TEXT,fileName TEXT,fileHash TEXT);
+    CREATE TABLE data_sync_batches(id TEXT,taskId TEXT,status TEXT,syncMode TEXT,periodEnd TEXT,completedAt TEXT,createdAt TEXT,fileName TEXT,fileHash TEXT,totalCount INTEGER);
+    CREATE TABLE sales_link_skus(id TEXT,lastSeenBatchId TEXT);
     INSERT INTO erp_import_batches VALUES('old','platform_goods','completed','full','2026-08-05','2026-08-05','2026-08-05','8.5.xlsx');
     INSERT INTO data_sync_tasks VALUES('task','platform_goods_excel_import');
-    INSERT INTO data_sync_batches VALUES('new','task','succeeded','full','2026-08-19','2026-08-19T23:00:00Z','2026-08-19T22:00:00Z','8.19.xlsx','hash');
+    INSERT INTO data_sync_batches VALUES('new','task','succeeded','full','2026-08-19','2026-08-19T23:00:00Z','2026-08-19T22:00:00Z','8.19.xlsx','hash',100);
+    INSERT INTO sales_link_skus VALUES('sku','new');
   `);
   assert.equal(getLatestCompletePlatformBatch(db).id, "new"); db.close();
+});
+
+test("忽略未形成Link SKU批次覆盖的历史partial批次", () => {
+  const db = new Database(":memory:"); db.exec(`
+    CREATE TABLE erp_import_batches(id TEXT,importType TEXT,status TEXT,importMode TEXT,businessDate TEXT,completedAt TEXT,createdAt TEXT,originalFilename TEXT);
+    CREATE TABLE data_sync_tasks(id TEXT,taskCode TEXT);
+    CREATE TABLE data_sync_batches(id TEXT,taskId TEXT,status TEXT,syncMode TEXT,periodEnd TEXT,completedAt TEXT,createdAt TEXT,fileName TEXT,fileHash TEXT,totalCount INTEGER);
+    CREATE TABLE sales_link_skus(id TEXT,lastSeenBatchId TEXT);
+    INSERT INTO erp_import_batches VALUES('materialized','platform_goods','completed','full','2026-08-05','2026-08-05','2026-08-05','8.5.xlsx');
+    INSERT INTO data_sync_tasks VALUES('task','platform_goods_excel_import');
+    INSERT INTO data_sync_batches VALUES('partial-unmaterialized','task','partial','full','2026-08-06','2026-08-06','2026-08-06','8.6.xlsx','hash',34244);
+    INSERT INTO sales_link_skus VALUES('sku','materialized');
+  `);
+  assert.equal(getLatestCompletePlatformBatch(db).id, "materialized"); db.close();
 });
 
 test("Relation Read开启时只选择V3关系资产", () => {
