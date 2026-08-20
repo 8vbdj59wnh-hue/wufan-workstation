@@ -2782,6 +2782,11 @@ CREATE TABLE IF NOT EXISTS sales_object_structures (
   sourceType TEXT NOT NULL,
   sourceBatchId TEXT,
   sourceReferenceJson TEXT NOT NULL DEFAULT '{}',
+  validityBasis TEXT NOT NULL DEFAULT 'unknown',
+  sourceState TEXT NOT NULL DEFAULT 'active',
+  sourceUpdatedAt TEXT,
+  lastVerifiedAt TEXT,
+  syncedAt TEXT,
   supersedesStructureId TEXT,
   reviewedBy TEXT,
   reviewedAt TEXT,
@@ -2795,11 +2800,39 @@ CREATE TABLE IF NOT EXISTS sales_object_structures (
   UNIQUE(salesObjectId,version),
   UNIQUE(salesObjectId,structureHash),
   CHECK(version>0),
+  CHECK(validityBasis IN ('exact','inferred','legacy_evidence','unknown')),
+  CHECK(sourceState IN ('active','source_removed')),
   CHECK(status IN ('draft','pending_review','active','superseded','blocked')),
   CHECK((status='active' AND effectiveTo IS NULL AND reviewedBy IS NOT NULL AND reviewedAt IS NOT NULL AND activatedAt IS NOT NULL) OR status<>'active')
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_object_structures_one_active ON sales_object_structures(salesObjectId) WHERE status='active';
 CREATE INDEX IF NOT EXISTS idx_sales_object_structures_status ON sales_object_structures(status,updatedAt DESC);
+
+CREATE TABLE IF NOT EXISTS sales_object_structure_effective_periods (
+  id TEXT PRIMARY KEY,
+  structureId TEXT NOT NULL,
+  salesObjectId TEXT NOT NULL,
+  validFrom TEXT NOT NULL,
+  validTo TEXT,
+  sourceState TEXT NOT NULL DEFAULT 'active',
+  validityBasis TEXT NOT NULL DEFAULT 'unknown',
+  sourceUpdatedAt TEXT,
+  firstVerifiedAt TEXT NOT NULL,
+  lastVerifiedAt TEXT NOT NULL,
+  syncedAt TEXT NOT NULL,
+  sourceReferenceJson TEXT NOT NULL DEFAULT '{}',
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(structureId,salesObjectId) REFERENCES sales_object_structures(id,salesObjectId),
+  FOREIGN KEY(salesObjectId) REFERENCES sales_objects(id),
+  CHECK(validTo IS NULL OR validTo>=validFrom),
+  CHECK(sourceState IN ('active','source_removed')),
+  CHECK(validityBasis IN ('exact','inferred','legacy_evidence','unknown'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_object_structure_period_one_open
+  ON sales_object_structure_effective_periods(salesObjectId) WHERE validTo IS NULL AND sourceState='active';
+CREATE INDEX IF NOT EXISTS idx_sales_object_structure_period_lookup
+  ON sales_object_structure_effective_periods(salesObjectId,validFrom,validTo);
 
 CREATE TABLE IF NOT EXISTS sales_object_structure_components (
   id TEXT PRIMARY KEY,
@@ -2822,6 +2855,155 @@ CREATE TABLE IF NOT EXISTS sales_object_structure_components (
 );
 CREATE INDEX IF NOT EXISTS idx_sales_object_components_object ON sales_object_structure_components(salesObjectId,status);
 CREATE INDEX IF NOT EXISTS idx_sales_object_components_erp ON sales_object_structure_components(erpSkuId,status);
+
+CREATE TABLE IF NOT EXISTS operating_erp_set_members (
+  normalizedCode TEXT PRIMARY KEY COLLATE NOCASE,
+  merchantSkuCode TEXT NOT NULL,
+  erpSkuId TEXT,
+  salesObjectId TEXT,
+  lifecycleStatus TEXT NOT NULL,
+  sourceCount INTEGER NOT NULL DEFAULT 0,
+  firstSeenAt TEXT NOT NULL,
+  lastSeenAt TEXT NOT NULL,
+  calculatedAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),
+  FOREIGN KEY(salesObjectId) REFERENCES sales_objects(id),
+  CHECK(lifecycleStatus IN ('active','active_dependency','sales_active','archived','external_unused','unresolved')),
+  CHECK(sourceCount >= 0)
+);
+CREATE INDEX IF NOT EXISTS idx_operating_erp_members_lifecycle
+  ON operating_erp_set_members(lifecycleStatus,updatedAt DESC);
+CREATE INDEX IF NOT EXISTS idx_operating_erp_members_erp
+  ON operating_erp_set_members(erpSkuId,lifecycleStatus);
+CREATE INDEX IF NOT EXISTS idx_operating_erp_members_object
+  ON operating_erp_set_members(salesObjectId,lifecycleStatus);
+
+CREATE TABLE IF NOT EXISTS operating_erp_set_evidence (
+  id TEXT PRIMARY KEY,
+  normalizedCode TEXT NOT NULL COLLATE NOCASE,
+  sourceType TEXT NOT NULL,
+  sourceObjectType TEXT NOT NULL,
+  sourceObjectId TEXT NOT NULL,
+  sourceBatchId TEXT,
+  firstSeenAt TEXT NOT NULL,
+  lastSeenAt TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  calculatedAt TEXT NOT NULL,
+  metadataJson TEXT NOT NULL DEFAULT '{}',
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(normalizedCode) REFERENCES operating_erp_set_members(normalizedCode),
+  CHECK(sourceType IN ('platform_active','bundle_dependency','sales_active')),
+  CHECK(active IN (0,1)),
+  UNIQUE(normalizedCode,sourceType,sourceObjectType,sourceObjectId)
+);
+CREATE INDEX IF NOT EXISTS idx_operating_erp_evidence_active_source
+  ON operating_erp_set_evidence(active,sourceType,normalizedCode);
+CREATE INDEX IF NOT EXISTS idx_operating_erp_evidence_object
+  ON operating_erp_set_evidence(sourceObjectType,sourceObjectId,active);
+
+-- Architecture Upgrade-003 Phase 2: read-only Wangdian identity observations.
+-- These tables are a shadow contract only. They do not replace ERP SKU, Sales Object,
+-- Link SKU relations, Product mappings, facts, inventory, or the production resolver.
+CREATE TABLE IF NOT EXISTS operating_erp_identity_observations (
+  normalizedCode TEXT PRIMARY KEY COLLATE NOCASE,
+  merchantSkuCode TEXT NOT NULL,
+  inOperatingErpSet INTEGER NOT NULL DEFAULT 0,
+  inOperatingObjectSet INTEGER NOT NULL DEFAULT 0,
+  goodsStatus TEXT NOT NULL,
+  suiteStatus TEXT NOT NULL,
+  resolvedIdentityType TEXT NOT NULL,
+  identityStatus TEXT NOT NULL,
+  goodsErpSkuId TEXT,
+  suiteSalesObjectId TEXT,
+  sourceMode TEXT NOT NULL,
+  sourceCheckedAt TEXT,
+  sourceUpdatedAt TEXT,
+  detailJson TEXT NOT NULL DEFAULT '{}',
+  calculatedAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(goodsErpSkuId) REFERENCES erp_skus(id),
+  FOREIGN KEY(suiteSalesObjectId) REFERENCES sales_objects(id),
+  CHECK(inOperatingErpSet IN (0,1)),
+  CHECK(inOperatingObjectSet IN (0,1)),
+  CHECK(goodsStatus IN ('found','not_found','source_unavailable','not_checked')),
+  CHECK(suiteStatus IN ('found','not_found','source_unavailable','not_checked')),
+  CHECK(resolvedIdentityType IN ('single','bundle','conflict','unresolved')),
+  CHECK(identityStatus IN ('confirmed','sku_type_conflict','source_conflict','erp_not_found','source_unavailable','not_checked')),
+  CHECK(sourceMode IN ('materialized','live','mixed'))
+);
+CREATE INDEX IF NOT EXISTS idx_operating_erp_identity_status
+  ON operating_erp_identity_observations(identityStatus,resolvedIdentityType,updatedAt DESC);
+
+CREATE TABLE IF NOT EXISTS operating_erp_identity_shadow_comparisons (
+  normalizedCode TEXT PRIMARY KEY COLLATE NOCASE,
+  merchantSkuCode TEXT NOT NULL,
+  currentIdentityType TEXT NOT NULL,
+  v3IdentityType TEXT NOT NULL,
+  comparisonStatus TEXT NOT NULL,
+  currentSalesObjectId TEXT,
+  projectedSalesObjectCode TEXT,
+  bundleStructureStatus TEXT NOT NULL,
+  productMappingStatus TEXT NOT NULL,
+  detailJson TEXT NOT NULL DEFAULT '{}',
+  calculatedAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(normalizedCode) REFERENCES operating_erp_identity_observations(normalizedCode),
+  FOREIGN KEY(currentSalesObjectId) REFERENCES sales_objects(id),
+  CHECK(currentIdentityType IN ('single','bundle','conflict','unresolved','none')),
+  CHECK(v3IdentityType IN ('single','bundle','conflict','unresolved')),
+  CHECK(comparisonStatus IN ('consistent','v3_fill','type_conflict','source_conflict','erp_not_found','source_unavailable','current_extra')),
+  CHECK(bundleStructureStatus IN ('not_applicable','complete','bom_missing','component_missing','quantity_invalid','structure_conflict','not_checked')),
+  CHECK(productMappingStatus IN ('complete','partial','missing','not_applicable','not_checked'))
+);
+CREATE INDEX IF NOT EXISTS idx_operating_erp_shadow_status
+  ON operating_erp_identity_shadow_comparisons(comparisonStatus,bundleStructureStatus,updatedAt DESC);
+
+-- Architecture Upgrade-003 Phase 6: bounded production shadow diagnostics.
+-- Shadow records may describe business assets but must never become a relation source.
+CREATE TABLE IF NOT EXISTS v3_relation_shadow_runs (
+  id TEXT PRIMARY KEY,
+  triggerType TEXT NOT NULL,
+  triggerObjectId TEXT,
+  sourceBatchId TEXT,
+  status TEXT NOT NULL,
+  startedAt TEXT NOT NULL,
+  completedAt TEXT,
+  durationMs REAL,
+  metricsJson TEXT NOT NULL DEFAULT '{}',
+  protectedBeforeJson TEXT NOT NULL DEFAULT '{}',
+  protectedAfterJson TEXT NOT NULL DEFAULT '{}',
+  errorMessage TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  CHECK(status IN ('running','completed','failed'))
+);
+CREATE INDEX IF NOT EXISTS idx_v3_shadow_runs_time
+  ON v3_relation_shadow_runs(startedAt DESC,status);
+
+CREATE TABLE IF NOT EXISTS v3_relation_shadow_differences (
+  id TEXT PRIMARY KEY,
+  objectType TEXT NOT NULL,
+  objectId TEXT NOT NULL,
+  normalizedCode TEXT,
+  differenceType TEXT NOT NULL,
+  currentResultJson TEXT NOT NULL DEFAULT '{}',
+  v3ResultJson TEXT NOT NULL DEFAULT '{}',
+  firstSeenAt TEXT NOT NULL,
+  lastSeenAt TEXT NOT NULL,
+  occurrenceCount INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'active',
+  lastRunId TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(lastRunId) REFERENCES v3_relation_shadow_runs(id) ON DELETE SET NULL,
+  UNIQUE(objectType,objectId,differenceType),
+  CHECK(occurrenceCount>0),
+  CHECK(status IN ('active','resolved'))
+);
+CREATE INDEX IF NOT EXISTS idx_v3_shadow_differences_active
+  ON v3_relation_shadow_differences(status,differenceType,lastSeenAt DESC);
 
 CREATE TRIGGER IF NOT EXISTS trg_sales_object_structure_activate_components
   BEFORE UPDATE OF status ON sales_object_structures
