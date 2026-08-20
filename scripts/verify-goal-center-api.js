@@ -4,17 +4,18 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { createEmptyPermissions } from "../shared/permissions.js";
-import { createToken } from "../server/security.js";
-import { goalCenterBootstrapResources } from "../server/goalCenterBootstrapService.js";
-
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), "goal-center-api-"));
 const databasePath = path.join(directory, "workstation.db");
 const port = 3400 + (process.pid % 200);
 process.env.WUFAN_DB_PATH = databasePath;
 process.env.WUFAN_ENV = "test";
 process.env.WUFAN_ALLOW_DB_RESET = "1";
+process.env.WUFAN_TEST_DATABASE_ROOT = directory;
 
+// Database safety variables must exist before any application module is loaded.
+const { createEmptyPermissions } = await import("../shared/permissions.js");
+const { createToken } = await import("../server/security.js");
+const { goalCenterBootstrapResources } = await import("../server/goalCenterBootstrapService.js");
 const databaseModule = await import("../server/db.js");
 databaseModule.initializeDatabase({ reset: true });
 const database = databaseModule.getDatabase();

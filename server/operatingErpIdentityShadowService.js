@@ -211,20 +211,81 @@ export function calculateOperatingErpIdentityShadow(options = {}) {
 export function materializeOperatingErpIdentityShadow(options = {}) {
   const database = options.database || getDatabase();
   const result = calculateOperatingErpIdentityShadow({ ...options, database });
+  const batchSize = Math.max(25, Number(options.writeBatchSize || process.env.V3_SHADOW_WRITE_BATCH_SIZE || 250));
+  const materialization = { writeBatchSize: batchSize, batchCount: 0, longestTransactionMs: 0, observationsChanged: 0, comparisonsChanged: 0, staleRowsDeleted: 0 };
+  const writeBatches = (items, operation) => {
+    for (let offset = 0; offset < items.length; offset += batchSize) {
+      const batch = items.slice(offset, offset + batchSize);
+      const started = performance.now();
+      database.transaction(() => batch.forEach(operation)).immediate();
+      materialization.batchCount += 1;
+      materialization.longestTransactionMs = Math.max(materialization.longestTransactionMs, performance.now() - started);
+    }
+  };
   const insertObservation = database.prepare(`INSERT INTO operating_erp_identity_observations
     (normalizedCode,merchantSkuCode,inOperatingErpSet,inOperatingObjectSet,goodsStatus,suiteStatus,resolvedIdentityType,identityStatus,goodsErpSkuId,suiteSalesObjectId,sourceMode,sourceCheckedAt,sourceUpdatedAt,detailJson,calculatedAt,updatedAt)
     VALUES (@normalizedCode,@merchantSkuCode,@inOperatingErpSet,@inOperatingObjectSet,@goodsStatus,@suiteStatus,@resolvedIdentityType,@identityStatus,@goodsErpSkuId,@suiteSalesObjectId,@sourceMode,@sourceCheckedAt,@sourceUpdatedAt,@detailJson,@calculatedAt,@updatedAt)
-    ON CONFLICT(normalizedCode) DO UPDATE SET merchantSkuCode=excluded.merchantSkuCode,inOperatingErpSet=excluded.inOperatingErpSet,inOperatingObjectSet=excluded.inOperatingObjectSet,goodsStatus=excluded.goodsStatus,suiteStatus=excluded.suiteStatus,resolvedIdentityType=excluded.resolvedIdentityType,identityStatus=excluded.identityStatus,goodsErpSkuId=excluded.goodsErpSkuId,suiteSalesObjectId=excluded.suiteSalesObjectId,sourceMode=excluded.sourceMode,sourceCheckedAt=excluded.sourceCheckedAt,sourceUpdatedAt=excluded.sourceUpdatedAt,detailJson=excluded.detailJson,calculatedAt=excluded.calculatedAt,updatedAt=excluded.updatedAt`);
+    ON CONFLICT(normalizedCode) DO UPDATE SET merchantSkuCode=excluded.merchantSkuCode,inOperatingErpSet=excluded.inOperatingErpSet,inOperatingObjectSet=excluded.inOperatingObjectSet,goodsStatus=excluded.goodsStatus,suiteStatus=excluded.suiteStatus,resolvedIdentityType=excluded.resolvedIdentityType,identityStatus=excluded.identityStatus,goodsErpSkuId=excluded.goodsErpSkuId,suiteSalesObjectId=excluded.suiteSalesObjectId,sourceMode=excluded.sourceMode,sourceCheckedAt=excluded.sourceCheckedAt,sourceUpdatedAt=excluded.sourceUpdatedAt,detailJson=excluded.detailJson,calculatedAt=excluded.calculatedAt,updatedAt=excluded.updatedAt
+    WHERE operating_erp_identity_observations.merchantSkuCode IS NOT excluded.merchantSkuCode
+       OR operating_erp_identity_observations.inOperatingErpSet IS NOT excluded.inOperatingErpSet
+       OR operating_erp_identity_observations.inOperatingObjectSet IS NOT excluded.inOperatingObjectSet
+       OR operating_erp_identity_observations.goodsStatus IS NOT excluded.goodsStatus
+       OR operating_erp_identity_observations.suiteStatus IS NOT excluded.suiteStatus
+       OR operating_erp_identity_observations.resolvedIdentityType IS NOT excluded.resolvedIdentityType
+       OR operating_erp_identity_observations.identityStatus IS NOT excluded.identityStatus
+       OR operating_erp_identity_observations.goodsErpSkuId IS NOT excluded.goodsErpSkuId
+       OR operating_erp_identity_observations.suiteSalesObjectId IS NOT excluded.suiteSalesObjectId
+       OR operating_erp_identity_observations.sourceMode IS NOT excluded.sourceMode
+       OR operating_erp_identity_observations.sourceCheckedAt IS NOT excluded.sourceCheckedAt
+       OR operating_erp_identity_observations.sourceUpdatedAt IS NOT excluded.sourceUpdatedAt
+       OR operating_erp_identity_observations.detailJson IS NOT excluded.detailJson`);
   const insertComparison = database.prepare(`INSERT INTO operating_erp_identity_shadow_comparisons
     (normalizedCode,merchantSkuCode,currentIdentityType,v3IdentityType,comparisonStatus,currentSalesObjectId,projectedSalesObjectCode,bundleStructureStatus,productMappingStatus,detailJson,calculatedAt,updatedAt)
     VALUES (@normalizedCode,@merchantSkuCode,@currentIdentityType,@v3IdentityType,@comparisonStatus,@currentSalesObjectId,@projectedSalesObjectCode,@bundleStructureStatus,@productMappingStatus,@detailJson,@calculatedAt,@updatedAt)
-    ON CONFLICT(normalizedCode) DO UPDATE SET merchantSkuCode=excluded.merchantSkuCode,currentIdentityType=excluded.currentIdentityType,v3IdentityType=excluded.v3IdentityType,comparisonStatus=excluded.comparisonStatus,currentSalesObjectId=excluded.currentSalesObjectId,projectedSalesObjectCode=excluded.projectedSalesObjectCode,bundleStructureStatus=excluded.bundleStructureStatus,productMappingStatus=excluded.productMappingStatus,detailJson=excluded.detailJson,calculatedAt=excluded.calculatedAt,updatedAt=excluded.updatedAt`);
-  database.transaction(() => {
-    database.prepare("DELETE FROM operating_erp_identity_shadow_comparisons").run();
-    database.prepare("DELETE FROM operating_erp_identity_observations").run();
-    for (const item of result.observations) insertObservation.run(item);
-    for (const item of result.comparisons) insertComparison.run(item);
-  }).immediate();
+    ON CONFLICT(normalizedCode) DO UPDATE SET merchantSkuCode=excluded.merchantSkuCode,currentIdentityType=excluded.currentIdentityType,v3IdentityType=excluded.v3IdentityType,comparisonStatus=excluded.comparisonStatus,currentSalesObjectId=excluded.currentSalesObjectId,projectedSalesObjectCode=excluded.projectedSalesObjectCode,bundleStructureStatus=excluded.bundleStructureStatus,productMappingStatus=excluded.productMappingStatus,detailJson=excluded.detailJson,calculatedAt=excluded.calculatedAt,updatedAt=excluded.updatedAt
+    WHERE operating_erp_identity_shadow_comparisons.merchantSkuCode IS NOT excluded.merchantSkuCode
+       OR operating_erp_identity_shadow_comparisons.currentIdentityType IS NOT excluded.currentIdentityType
+       OR operating_erp_identity_shadow_comparisons.v3IdentityType IS NOT excluded.v3IdentityType
+       OR operating_erp_identity_shadow_comparisons.comparisonStatus IS NOT excluded.comparisonStatus
+       OR operating_erp_identity_shadow_comparisons.currentSalesObjectId IS NOT excluded.currentSalesObjectId
+       OR operating_erp_identity_shadow_comparisons.projectedSalesObjectCode IS NOT excluded.projectedSalesObjectCode
+       OR operating_erp_identity_shadow_comparisons.bundleStructureStatus IS NOT excluded.bundleStructureStatus
+       OR operating_erp_identity_shadow_comparisons.productMappingStatus IS NOT excluded.productMappingStatus
+       OR operating_erp_identity_shadow_comparisons.detailJson IS NOT excluded.detailJson`);
+  const observationCodes = new Set(result.observations.map((item) => item.normalizedCode));
+  const comparisonCodes = new Set(result.comparisons.map((item) => item.normalizedCode));
+  const observationRows = database.prepare("SELECT * FROM operating_erp_identity_observations").all();
+  const comparisonRows = database.prepare("SELECT * FROM operating_erp_identity_shadow_comparisons").all();
+  const observationByCode = new Map(observationRows.map((item) => [item.normalizedCode, item]));
+  const comparisonByCode = new Map(comparisonRows.map((item) => [item.normalizedCode, item]));
+  const observationFields = ["merchantSkuCode", "inOperatingErpSet", "inOperatingObjectSet", "goodsStatus", "suiteStatus", "resolvedIdentityType", "identityStatus", "goodsErpSkuId", "suiteSalesObjectId", "sourceMode", "sourceCheckedAt", "sourceUpdatedAt", "detailJson"];
+  const comparisonFields = ["merchantSkuCode", "currentIdentityType", "v3IdentityType", "comparisonStatus", "currentSalesObjectId", "projectedSalesObjectCode", "bundleStructureStatus", "productMappingStatus", "detailJson"];
+  const differs = (current, desired, fields) => !current || fields.some((field) => current[field] !== desired[field]);
+  const changedObservations = result.observations.filter((item) => differs(observationByCode.get(item.normalizedCode), item, observationFields));
+  const changedComparisons = result.comparisons.filter((item) => differs(comparisonByCode.get(item.normalizedCode), item, comparisonFields));
+  const staleObservations = observationRows
+    .filter((item) => !observationCodes.has(item.normalizedCode));
+  const staleComparisons = comparisonRows
+    .filter((item) => !comparisonCodes.has(item.normalizedCode));
+  const deleteObservation = database.prepare("DELETE FROM operating_erp_identity_observations WHERE normalizedCode=?");
+  const deleteComparison = database.prepare("DELETE FROM operating_erp_identity_shadow_comparisons WHERE normalizedCode=?");
+  writeBatches(changedObservations, (item) => {
+    const info = insertObservation.run(item);
+    materialization.observationsChanged += Number(info.changes || 0);
+  });
+  writeBatches(changedComparisons, (item) => {
+    const info = insertComparison.run(item);
+    materialization.comparisonsChanged += Number(info.changes || 0);
+  });
+  writeBatches(staleComparisons, (item) => {
+    const info = deleteComparison.run(item.normalizedCode);
+    materialization.staleRowsDeleted += Number(info.changes || 0);
+  });
+  writeBatches(staleObservations, (item) => {
+    const info = deleteObservation.run(item.normalizedCode);
+    materialization.staleRowsDeleted += Number(info.changes || 0);
+  });
+  result.materialization = materialization;
   return result;
 }
 

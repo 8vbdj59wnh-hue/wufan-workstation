@@ -106,8 +106,11 @@ test("重复影子物化幂等且不修改正式业务表", () => {
     mappings: db.prepare("SELECT COUNT(*) total FROM product_erp_mappings").get().total,
   };
   materializeOperatingErpIdentityShadow({ database: db, calculatedAt: "2026-08-21T01:00:00Z" });
-  materializeOperatingErpIdentityShadow({ database: db, calculatedAt: "2026-08-21T02:00:00Z" });
+  const repeated = materializeOperatingErpIdentityShadow({ database: db, calculatedAt: "2026-08-21T02:00:00Z" });
   assert.equal(queryOperatingErpIdentityShadow({}, { database: db }).total, 4);
+  assert.equal(repeated.materialization.observationsChanged, 0);
+  assert.equal(repeated.materialization.comparisonsChanged, 0);
+  assert.equal(repeated.materialization.staleRowsDeleted, 0);
   assert.deepEqual({
     erp: db.prepare("SELECT COUNT(*) total FROM erp_skus").get().total,
     objects: db.prepare("SELECT COUNT(*) total FROM sales_objects").get().total,

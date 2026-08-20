@@ -171,11 +171,14 @@ test("重复计算与物化保持幂等", () => {
     members: db.prepare("SELECT COUNT(*) total FROM operating_erp_set_members").get().total,
     evidence: db.prepare("SELECT COUNT(*) total FROM operating_erp_set_evidence").get().total,
   };
-  materializeOperatingErpSet({ database: db, calculatedAt: "2026-08-21T02:00:00.000Z" });
+  const repeated = materializeOperatingErpSet({ database: db, calculatedAt: "2026-08-21T02:00:00.000Z" });
   assert.deepEqual({
     members: db.prepare("SELECT COUNT(*) total FROM operating_erp_set_members").get().total,
     evidence: db.prepare("SELECT COUNT(*) total FROM operating_erp_set_evidence").get().total,
   }, first);
+  assert.equal(repeated.materialization.membersChanged, 0);
+  assert.equal(repeated.materialization.evidenceChanged, 0);
+  assert.equal(repeated.materialization.evidenceDeactivated, 0);
   assert.equal(queryOperatingErpSet({ sourceType: "bundle_dependency" }, { database: db }).total, 2);
   db.close();
 });

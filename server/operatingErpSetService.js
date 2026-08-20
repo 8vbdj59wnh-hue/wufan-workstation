@@ -286,25 +286,80 @@ export function calculateOperatingErpSet(options = {}) {
 export function materializeOperatingErpSet(options = {}) {
   const database = options.database || getDatabase();
   const result = calculateOperatingErpSet({ ...options, database });
+  const batchSize = Math.max(25, Number(options.writeBatchSize || process.env.V3_SHADOW_WRITE_BATCH_SIZE || 250));
+  const materialization = { writeBatchSize: batchSize, batchCount: 0, longestTransactionMs: 0, membersChanged: 0, evidenceChanged: 0, evidenceDeactivated: 0 };
+  const writeBatches = (items, operation) => {
+    for (let offset = 0; offset < items.length; offset += batchSize) {
+      const batch = items.slice(offset, offset + batchSize);
+      const started = performance.now();
+      database.transaction(() => batch.forEach(operation)).immediate();
+      materialization.batchCount += 1;
+      materialization.longestTransactionMs = Math.max(materialization.longestTransactionMs, performance.now() - started);
+    }
+  };
   const insertMember = database.prepare(`INSERT INTO operating_erp_set_members
     (normalizedCode,merchantSkuCode,erpSkuId,salesObjectId,lifecycleStatus,sourceCount,firstSeenAt,lastSeenAt,calculatedAt,updatedAt)
     VALUES (@normalizedCode,@merchantSkuCode,@erpSkuId,@salesObjectId,@lifecycleStatus,@sourceCount,@firstSeenAt,@lastSeenAt,@calculatedAt,@updatedAt)
     ON CONFLICT(normalizedCode) DO UPDATE SET merchantSkuCode=excluded.merchantSkuCode,erpSkuId=COALESCE(excluded.erpSkuId,operating_erp_set_members.erpSkuId),
       salesObjectId=COALESCE(excluded.salesObjectId,operating_erp_set_members.salesObjectId),lifecycleStatus=excluded.lifecycleStatus,
-      sourceCount=excluded.sourceCount,lastSeenAt=excluded.lastSeenAt,calculatedAt=excluded.calculatedAt,updatedAt=excluded.updatedAt`);
+      sourceCount=excluded.sourceCount,lastSeenAt=excluded.lastSeenAt,calculatedAt=excluded.calculatedAt,updatedAt=excluded.updatedAt
+    WHERE operating_erp_set_members.merchantSkuCode IS NOT excluded.merchantSkuCode
+       OR operating_erp_set_members.erpSkuId IS NOT COALESCE(excluded.erpSkuId,operating_erp_set_members.erpSkuId)
+       OR operating_erp_set_members.salesObjectId IS NOT COALESCE(excluded.salesObjectId,operating_erp_set_members.salesObjectId)
+       OR operating_erp_set_members.lifecycleStatus IS NOT excluded.lifecycleStatus
+       OR operating_erp_set_members.sourceCount IS NOT excluded.sourceCount`);
   const insertEvidence = database.prepare(`INSERT INTO operating_erp_set_evidence
     (id,normalizedCode,sourceType,sourceObjectType,sourceObjectId,sourceBatchId,firstSeenAt,lastSeenAt,active,calculatedAt,metadataJson,createdAt,updatedAt)
     VALUES (@id,@normalizedCode,@sourceType,@sourceObjectType,@sourceObjectId,@sourceBatchId,@firstSeenAt,@lastSeenAt,@active,@calculatedAt,@metadataJson,@createdAt,@updatedAt)
     ON CONFLICT(normalizedCode,sourceType,sourceObjectType,sourceObjectId) DO UPDATE SET sourceBatchId=excluded.sourceBatchId,lastSeenAt=excluded.lastSeenAt,
-      active=1,calculatedAt=excluded.calculatedAt,metadataJson=excluded.metadataJson,updatedAt=excluded.updatedAt`);
-  database.transaction(() => {
-    database.prepare("UPDATE operating_erp_set_evidence SET active=0,updatedAt=? WHERE active=1").run(result.calculatedAt);
-    for (const member of result.members) insertMember.run({ ...member, updatedAt: result.calculatedAt });
-    for (const item of result.evidence) insertEvidence.run(item);
-    database.prepare(`UPDATE operating_erp_set_members
-      SET sourceCount=(SELECT COUNT(DISTINCT sourceType) FROM operating_erp_set_evidence e WHERE e.normalizedCode=operating_erp_set_members.normalizedCode AND e.active=1),
-          calculatedAt=?,updatedAt=?`).run(result.calculatedAt, result.calculatedAt);
-  }).immediate();
+      active=1,calculatedAt=excluded.calculatedAt,metadataJson=excluded.metadataJson,updatedAt=excluded.updatedAt
+    WHERE operating_erp_set_evidence.sourceBatchId IS NOT excluded.sourceBatchId
+       OR operating_erp_set_evidence.active IS NOT 1
+       OR operating_erp_set_evidence.metadataJson IS NOT excluded.metadataJson`);
+  const desiredEvidenceKeys = new Set(result.evidence.map((item) => `${item.normalizedCode}\u0000${item.sourceType}\u0000${item.sourceObjectType}\u0000${item.sourceObjectId}`));
+  const memberRows = database.prepare(`SELECT normalizedCode,merchantSkuCode,erpSkuId,salesObjectId,lifecycleStatus,sourceCount
+    FROM operating_erp_set_members`).all();
+  const memberByCode = new Map(memberRows.map((item) => [item.normalizedCode, item]));
+  const desiredMemberCodes = new Set(result.members.map((item) => item.normalizedCode));
+  const changedMembers = result.members.filter((member) => {
+    const current = memberByCode.get(member.normalizedCode);
+    if (!current) return true;
+    return current.merchantSkuCode !== member.merchantSkuCode
+      || current.erpSkuId !== (member.erpSkuId || current.erpSkuId)
+      || current.salesObjectId !== (member.salesObjectId || current.salesObjectId)
+      || current.lifecycleStatus !== member.lifecycleStatus
+      || Number(current.sourceCount) !== Number(member.sourceCount);
+  });
+  const evidenceRows = database.prepare(`SELECT id,normalizedCode,sourceType,sourceObjectType,sourceObjectId,sourceBatchId,active,metadataJson
+    FROM operating_erp_set_evidence`).all();
+  const evidenceByKey = new Map(evidenceRows.map((item) => [`${item.normalizedCode}\u0000${item.sourceType}\u0000${item.sourceObjectType}\u0000${item.sourceObjectId}`, item]));
+  const changedEvidence = result.evidence.filter((item) => {
+    const key = `${item.normalizedCode}\u0000${item.sourceType}\u0000${item.sourceObjectType}\u0000${item.sourceObjectId}`;
+    const current = evidenceByKey.get(key);
+    return !current || current.sourceBatchId !== item.sourceBatchId || Number(current.active) !== 1 || current.metadataJson !== item.metadataJson;
+  });
+  const staleEvidence = evidenceRows.filter((item) => item.active === 1 && (
+    !desiredEvidenceKeys.has(`${item.normalizedCode}\u0000${item.sourceType}\u0000${item.sourceObjectType}\u0000${item.sourceObjectId}`)
+  ));
+  const deactivateEvidence = database.prepare("UPDATE operating_erp_set_evidence SET active=0,calculatedAt=?,updatedAt=? WHERE id=? AND active=1");
+  const clearStaleMemberSources = database.prepare("UPDATE operating_erp_set_members SET sourceCount=0,calculatedAt=?,updatedAt=? WHERE normalizedCode=? AND sourceCount<>0");
+  writeBatches(changedMembers, (member) => {
+    const info = insertMember.run({ ...member, updatedAt: result.calculatedAt });
+    materialization.membersChanged += Number(info.changes || 0);
+  });
+  writeBatches(changedEvidence, (item) => {
+    const info = insertEvidence.run(item);
+    materialization.evidenceChanged += Number(info.changes || 0);
+  });
+  writeBatches(staleEvidence, (item) => {
+    const info = deactivateEvidence.run(result.calculatedAt, result.calculatedAt, item.id);
+    materialization.evidenceDeactivated += Number(info.changes || 0);
+  });
+  writeBatches(memberRows.filter((item) => Number(item.sourceCount) !== 0 && !desiredMemberCodes.has(item.normalizedCode)), (item) => {
+    const info = clearStaleMemberSources.run(result.calculatedAt, result.calculatedAt, item.normalizedCode);
+    materialization.membersChanged += Number(info.changes || 0);
+  });
+  result.materialization = materialization;
   return result;
 }
 

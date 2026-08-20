@@ -116,22 +116,56 @@ function differenceRows(database, result) {
 }
 
 function persistDifferences(database, runId, rows, timestamp) {
-  const seen = new Set();
+  const batchSize = Math.max(25, Number(process.env.V3_SHADOW_WRITE_BATCH_SIZE || 250));
+  const stats = { writeBatchSize: batchSize, batchCount: 0, longestTransactionMs: 0, changed: 0, resolved: 0, stableSkipped: 0 };
+  const writeBatches = (items, operation) => {
+    for (let offset = 0; offset < items.length; offset += batchSize) {
+      const batch = items.slice(offset, offset + batchSize);
+      const started = performance.now();
+      database.transaction(() => batch.forEach(operation)).immediate();
+      stats.batchCount += 1;
+      stats.longestTransactionMs = Math.max(stats.longestTransactionMs, performance.now() - started);
+    }
+  };
+  const desired = new Map();
+  for (const row of rows) {
+    const key = `${row.objectType}\u0000${row.objectId}\u0000${row.differenceType}`;
+    if (!desired.has(key)) desired.set(key, row);
+  }
+  const existing = new Map(database.prepare(`SELECT * FROM v3_relation_shadow_differences`).all()
+    .map((row) => [`${row.objectType}\u0000${row.objectId}\u0000${row.differenceType}`, row]));
+  const changed = [];
+  for (const [key, row] of desired) {
+    const current = existing.get(key);
+    const currentJson = json(row.current);
+    const v3Json = json(row.v3);
+    if (current?.status === "active"
+      && current.normalizedCode === row.normalizedCode
+      && current.currentResultJson === currentJson
+      && current.v3ResultJson === v3Json) {
+      stats.stableSkipped += 1;
+      continue;
+    }
+    changed.push({ ...row, key, currentJson, v3Json });
+  }
+  const resolved = [...existing.entries()].filter(([key, row]) => row.status === "active" && !desired.has(key)).map(([, row]) => row);
   const upsert = database.prepare(`INSERT INTO v3_relation_shadow_differences
     (id,objectType,objectId,normalizedCode,differenceType,currentResultJson,v3ResultJson,firstSeenAt,lastSeenAt,occurrenceCount,status,lastRunId,createdAt,updatedAt)
     VALUES (?,?,?,?,?,?,?,?,?,1,'active',?,?,?)
     ON CONFLICT(objectType,objectId,differenceType) DO UPDATE SET
       normalizedCode=excluded.normalizedCode,currentResultJson=excluded.currentResultJson,v3ResultJson=excluded.v3ResultJson,
       lastSeenAt=excluded.lastSeenAt,occurrenceCount=v3_relation_shadow_differences.occurrenceCount+1,status='active',lastRunId=excluded.lastRunId,updatedAt=excluded.updatedAt`);
-  for (const row of rows) {
-    const key = `${row.objectType}\u0000${row.objectId}\u0000${row.differenceType}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    upsert.run(stableId("v3-shadow-diff", key), row.objectType, row.objectId, row.normalizedCode, row.differenceType,
-      json(row.current), json(row.v3), timestamp, timestamp, runId, timestamp, timestamp);
-  }
-  database.prepare(`UPDATE v3_relation_shadow_differences SET status='resolved',updatedAt=?
-    WHERE status='active' AND lastRunId<>?`).run(timestamp, runId);
+  const resolve = database.prepare("UPDATE v3_relation_shadow_differences SET status='resolved',updatedAt=? WHERE id=? AND status='active'");
+  writeBatches(changed, (row) => {
+    const info = upsert.run(stableId("v3-shadow-diff", row.key), row.objectType, row.objectId, row.normalizedCode, row.differenceType,
+      row.currentJson, row.v3Json, timestamp, timestamp, runId, timestamp, timestamp);
+    stats.changed += Number(info.changes || 0);
+  });
+  writeBatches(resolved, (row) => {
+    const info = resolve.run(timestamp, row.id);
+    stats.resolved += Number(info.changes || 0);
+  });
+  return stats;
 }
 
 function prune(database, timestamp) {
@@ -167,12 +201,15 @@ export async function executeV3ShadowObservation(trigger = {}, options = {}) {
     if (json(before) !== json(after)) throw new Error("v3_shadow_business_asset_mutation_detected");
     const metrics = metricsFor(database, result);
     const completedAt = new Date().toISOString();
-    database.transaction(() => {
-      persistDifferences(database, runId, differenceRows(database, result), completedAt);
-      database.prepare(`UPDATE v3_relation_shadow_runs SET status='completed',completedAt=?,durationMs=?,metricsJson=?,protectedAfterJson=?,updatedAt=? WHERE id=?`)
-        .run(completedAt, performance.now() - started, json(metrics), json(after), completedAt, runId);
-      prune(database, completedAt);
-    }).immediate();
+    const diagnosticWrites = persistDifferences(database, runId, differenceRows(database, result), completedAt);
+    metrics.engineering = {
+      operatingSet: result.operatingSet?.materialization || null,
+      identity: result.identity?.materialization || null,
+      diagnosticWrites,
+    };
+    database.prepare(`UPDATE v3_relation_shadow_runs SET status='completed',completedAt=?,durationMs=?,metricsJson=?,protectedAfterJson=?,updatedAt=? WHERE id=?`)
+      .run(completedAt, performance.now() - started, json(metrics), json(after), completedAt, runId);
+    prune(database, completedAt);
     return { skipped: false, runId, status: "completed", metrics, before, after };
   } catch (error) {
     const completedAt = new Date().toISOString();

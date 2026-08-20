@@ -71,7 +71,9 @@ test("Shadow只保存诊断摘要和去重差异", async () => {
   assert.deepEqual(readV3ShadowProtectedSnapshot({ database: db }), before);
   assert.equal(db.prepare("SELECT COUNT(*) total FROM v3_relation_shadow_runs").get().total, 2);
   assert.equal(db.prepare("SELECT COUNT(*) total FROM v3_relation_shadow_differences").get().total, 2);
-  assert.equal(db.prepare("SELECT occurrenceCount FROM v3_relation_shadow_differences WHERE objectId='sku-new'").get().occurrenceCount, 2);
+  assert.equal(db.prepare("SELECT occurrenceCount FROM v3_relation_shadow_differences WHERE objectId='sku-new'").get().occurrenceCount, 1);
+  assert.equal(second.metrics.engineering.diagnosticWrites.stableSkipped, 2);
+  assert.equal(second.metrics.engineering.diagnosticWrites.changed, 0);
   assert.equal(readV3ShadowSummary({ database: db }).latest.metrics.same, 1);
   assert.equal(listV3ShadowDifferences({}, { database: db }).pagination.total, 2);
   assert.equal(second.status, "completed");
