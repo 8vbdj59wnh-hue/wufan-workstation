@@ -24,14 +24,48 @@ function targets(database, options = {}) {
     WHERE m.lifecycleStatus IN ('active','sales_active','unresolved') AND e.id IS NULL AND o.id IS NULL
     ORDER BY m.normalizedCode`).all();
   if (!tableExists(database, "operating_erp_identity_observations")) return { rows, cached: [] };
-  const negativeTtlMs = duration(options.negativeCacheTtlMs,
-    duration(process.env.V3_WANGDIAN_NEGATIVE_CACHE_TTL_HOURS, 6) * HOUR_MS);
-  if (negativeTtlMs === 0) return { rows, cached: [] };
-  const cutoff = new Date((options.now ? new Date(options.now) : new Date()).getTime() - negativeTtlMs).toISOString();
-  const recent = new Map(database.prepare(`SELECT normalizedCode,merchantSkuCode,sourceCheckedAt
-    FROM operating_erp_identity_observations
-    WHERE identityStatus='erp_not_found' AND sourceCheckedAt IS NOT NULL AND sourceCheckedAt>=?`).all(cutoff)
-    .map((item) => [normalized(item.normalizedCode), item]));
+  const now = (options.now ? new Date(options.now) : new Date()).getTime();
+  const negativeTtlMs = duration(options.negativeCacheTtlMs, duration(process.env.V3_WANGDIAN_NEGATIVE_CACHE_TTL_HOURS, 6) * HOUR_MS);
+  const identityTtlMs = duration(options.identityCacheTtlMs, duration(process.env.V3_WANGDIAN_IDENTITY_CACHE_TTL_HOURS, 6) * HOUR_MS);
+  const unavailableTtlMs = duration(options.sourceUnavailableCacheTtlMs, duration(process.env.V3_WANGDIAN_UNAVAILABLE_CACHE_TTL_MINUTES, 5) * 60 * 1000);
+  const observations = database.prepare(`SELECT normalizedCode,merchantSkuCode,sourceCheckedAt,sourceUpdatedAt,
+      resolvedIdentityType,identityStatus,goodsStatus,suiteStatus,goodsErpSkuId,suiteSalesObjectId
+    FROM operating_erp_identity_observations WHERE sourceCheckedAt IS NOT NULL`).all();
+  const componentsByObject = new Map();
+  if (tableExists(database, "sales_object_structures") && tableExists(database, "sales_object_structure_components")) {
+    const components = database.prepare(`SELECT s.salesObjectId,e.merchantSkuCode skuCode,c.quantity
+      FROM sales_object_structures s
+      JOIN sales_object_structure_components c ON c.structureId=s.id AND c.status='active'
+      JOIN erp_skus e ON e.id=c.erpSkuId
+      WHERE s.status='active' ORDER BY s.salesObjectId,c.sortOrder,c.id`).all();
+    for (const item of components) componentsByObject.set(item.salesObjectId, [...(componentsByObject.get(item.salesObjectId) || []), item]);
+  }
+  const recent = new Map();
+  for (const item of observations) {
+    const checkedAt = new Date(item.sourceCheckedAt).getTime();
+    const ttl = item.identityStatus === "erp_not_found" ? negativeTtlMs
+      : item.identityStatus === "source_unavailable" ? unavailableTtlMs : identityTtlMs;
+    if (!(ttl > 0) || !Number.isFinite(checkedAt) || now - checkedAt > ttl) continue;
+    const bundleComponents = componentsByObject.get(item.suiteSalesObjectId) || [];
+    if (item.suiteStatus === "found" && !bundleComponents.length) continue;
+    recent.set(normalized(item.normalizedCode), {
+      code: clean(item.merchantSkuCode), checkedAt: item.sourceCheckedAt,
+      goodsChecked: item.goodsStatus !== "not_checked", suiteChecked: item.suiteStatus !== "not_checked",
+      goods: item.goodsStatus === "found" ? {
+        merchantSkuCode: clean(item.merchantSkuCode),
+        goodsDeleted: item.identityStatus === "source_conflict" && item.resolvedIdentityType === "single",
+        erpStatus: item.identityStatus === "source_conflict" && item.resolvedIdentityType === "single" ? "inactive" : "active",
+      } : null,
+      suite: item.suiteStatus === "found" ? {
+        suiteCode: clean(item.merchantSkuCode), modifiedAt: item.sourceUpdatedAt,
+        deleted: item.identityStatus === "source_conflict" && item.resolvedIdentityType === "bundle",
+        components: bundleComponents.map((component) => ({ skuCode: component.skuCode, quantity: component.quantity, deleted: false })),
+      } : null,
+      goodsError: item.goodsStatus === "source_unavailable" ? "cached_source_unavailable" : null,
+      suiteError: item.suiteStatus === "source_unavailable" ? "cached_source_unavailable" : null,
+      cacheStatus: item.identityStatus === "erp_not_found" ? "negative_hit" : "identity_hit",
+    });
+  }
   const cached = [];
   const pending = [];
   for (const row of rows) {
@@ -49,11 +83,7 @@ export async function enrichOperatingErpObjects(input = {}, options = {}) {
   const targetSet = targets(database, options);
   const rows = targetSet.rows;
   const erpByCode = new Map(database.prepare("SELECT id,merchantSkuCode FROM erp_skus WHERE currentState='active'").all().map((item) => [normalized(item.merchantSkuCode), item]));
-  const liveObservations = Object.fromEntries(targetSet.cached.map((item) => [normalized(item.normalizedCode), {
-    code: clean(item.merchantSkuCode), checkedAt: item.sourceCheckedAt,
-    goodsChecked: true, suiteChecked: true, goods: null, suite: null,
-    goodsError: null, suiteError: null, cacheStatus: "negative_hit",
-  }]));
+  const liveObservations = Object.fromEntries(targetSet.cached.map((item) => [normalized(item.code), item]));
   const bundleSources = {};
   let cursor = 0;
   const workers = Array.from({ length: Math.min(Math.max(1, Number(options.concurrency || 8)), rows.length) }, async () => {
@@ -91,6 +121,8 @@ export async function enrichOperatingErpObjects(input = {}, options = {}) {
     changedCodes: rows.length,
     evaluatedCodes: rows.length + targetSet.cached.length,
     cacheHits: targetSet.cached.length,
+    identityCacheHits: targetSet.cached.filter((item) => item.cacheStatus === "identity_hit").length,
+    negativeCacheHits: targetSet.cached.filter((item) => item.cacheStatus === "negative_hit").length,
     estimatedApiRequests: rows.length * 2,
     sourceFailures, bomPending, liveObservations, bundleSources,
   };
