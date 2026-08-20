@@ -882,6 +882,7 @@ INSERT OR IGNORE INTO data_sync_tasks
   (id,taskCode,name,syncType,sourceType,sourceMethod,transportType,executionMode,defaultSyncMode,scheduleCron,scheduleDescription,status,configJson,createdAt,updatedAt)
 VALUES
   ('sync-task-erp-goods','erp_goods','ERP货品同步','wangdian_erp_goods','wangdian_api','goods.Goods.queryWithSpec','api','both','incremental','0 2 * * *','每天02:00','paused','{}',datetime('now'),datetime('now')),
+  ('sync-task-wangdian-suites','wangdian_suites','旺店通组合装同步','wangdian_suites','wangdian_api','goods.Suite.search','api','both','incremental','15 2 * * *','每天02:15','paused','{"baseline":"combo_master_excel"}',datetime('now'),datetime('now')),
   ('sync-task-platform-goods','wangdian_platform_goods','平台货品关系同步','wangdian_platform_goods','wangdian_api','goods.ApiGoods.search','api','both','incremental','30 2 * * *','每天02:30','paused','{}',datetime('now'),datetime('now')),
   ('sync-task-platform-goods-excel','platform_goods_excel_import','平台货品关系导入','platform_goods_excel_import','excel',NULL,'excel','manual','full',NULL,NULL,'enabled','{}',datetime('now'),datetime('now')),
   ('sync-task-inventory','wangdian_inventory','库存同步','wangdian_inventory','wangdian_api','wms.StockSpec.search2','api','both','incremental','0 3 * * *','每天03:00','paused','{}',datetime('now'),datetime('now')),

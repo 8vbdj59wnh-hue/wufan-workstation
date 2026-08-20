@@ -1,10 +1,11 @@
-import { commitErpGoodsDataSync, commitInventoryDataSync, commitPlatformGoodsDataSync, commitPlatformGoodsExcelDataSync, createDataSyncBatch, discoverWangdianPlatformShops, loadDataSyncCenter, loadErpGoodsDataSyncPreview, loadInventoryDataSyncPreview, loadPlatformGoodsDataSyncPreview, loadPlatformGoodsExcelDataSyncPreview, loadWangdianShopDiscoveryBatch, previewErpGoodsDataSync, previewInventoryDataSync, previewPlatformGoodsDataSync, previewPlatformGoodsExcelDataSync, resumeWangdianShopDiscoveryBatch, saveWangdianShopMapping, updateDataSyncTaskStatus } from "./appState.js";
+import { commitErpGoodsDataSync, commitInventoryDataSync, commitPlatformGoodsDataSync, commitPlatformGoodsExcelDataSync, createDataSyncBatch, discoverWangdianPlatformShops, loadDataSyncCenter, loadErpGoodsDataSyncPreview, loadInventoryDataSyncPreview, loadPlatformGoodsDataSyncPreview, loadPlatformGoodsExcelDataSyncPreview, loadWangdianShopDiscoveryBatch, previewErpGoodsDataSync, previewInventoryDataSync, previewPlatformGoodsDataSync, previewPlatformGoodsExcelDataSync, resumeWangdianShopDiscoveryBatch, saveWangdianShopMapping, syncWangdianSuites, updateDataSyncTaskStatus } from "./appState.js";
 import { formatNumber } from "./utils/format.js";
 
 let loading = false;
 let error = "";
 let result = null;
 let syncPreview = null;
+let suiteSyncResult = null;
 let platformSyncPreview = null;
 let inventorySyncPreview = null;
 let platformGoodsExcelPreview = null;
@@ -41,6 +42,7 @@ function renderDataSyncCenter() {
   const taskStatus = { enabled: "已启用", paused: "已暂停" };
   const batchStatus = { queued: "等待", waiting: "等待", running: "执行中", interrupted: "已中断·可续跑", preview_ready: "待确认", validated: "待确认", superseded: "历史预览", succeeded: "成功", completed: "成功", completed_with_exceptions: "部分完成", partial: "部分成功", failed: "失败" };
   const erpTask = (result.tasks ?? []).find((task) => task.taskCode === "erp_goods");
+  const suiteTask = (result.tasks ?? []).find((task) => task.taskCode === "wangdian_suites");
   const platformTask = (result.tasks ?? []).find((task) => task.taskCode === "wangdian_platform_goods");
   const inventoryTask = (result.tasks ?? []).find((task) => task.taskCode === "wangdian_inventory");
   const salesFactTask = (result.tasks ?? []).find((task) => task.taskCode === "sales_fact_excel_import");
@@ -72,7 +74,7 @@ function renderDataSyncCenter() {
       <div><span>待处理异常</span><strong>${result.counts?.openExceptionCount ?? 0}</strong></div>
     </div>
     <section><h2>同步任务</h2><div class="table-wrap"><table class="data-table"><thead><tr><th>任务名称</th><th>当前状态</th><th>最近成功</th><th>下次执行</th><th>异常数量</th><th>操作</th></tr></thead><tbody>
-      ${(result.tasks ?? []).map((task) => `<tr><td><strong>${escapeHtml(task.name)}</strong></td><td><span class="status-badge">${taskStatus[task.status] || "状态待确认"}</span></td><td>${task.taskCode === "sales_fact_excel_import" ? formatDate(latestSalesDailyBatch?.syncedAt) : formatDate(task.lastSuccessAt)}</td><td>${formatDate(task.nextRunAt)}</td><td>${task.taskCode === "sales_fact_excel_import" ? latestSalesDailyBatch?.exceptionCount ?? 0 : taskExceptionCount(task)}</td><td>${task.taskCode === "sales_fact_excel_import" ? "仅状态查看" : `<button class="text-button" data-action="toggle-data-sync-task" data-task-id="${escapeHtml(task.id)}" data-next-status="${task.status === "enabled" ? "paused" : "enabled"}">${task.status === "enabled" ? "暂停" : "启用"}</button>${task.status === "enabled" && !["erp_goods", "wangdian_platform_goods", "wangdian_inventory", "platform_goods_excel_import"].includes(task.taskCode) ? `<button class="text-button" data-action="create-data-sync-batch" data-task-id="${escapeHtml(task.id)}" data-sync-mode="${escapeHtml(task.defaultSyncMode)}">立即执行</button>` : ""}`}</td></tr>`).join("")}
+      ${(result.tasks ?? []).map((task) => `<tr><td><strong>${escapeHtml(task.name)}</strong></td><td><span class="status-badge">${taskStatus[task.status] || "状态待确认"}</span></td><td>${task.taskCode === "sales_fact_excel_import" ? formatDate(latestSalesDailyBatch?.syncedAt) : formatDate(task.lastSuccessAt)}</td><td>${formatDate(task.nextRunAt)}</td><td>${task.taskCode === "sales_fact_excel_import" ? latestSalesDailyBatch?.exceptionCount ?? 0 : taskExceptionCount(task)}</td><td>${task.taskCode === "sales_fact_excel_import" ? "仅状态查看" : `<button class="text-button" data-action="toggle-data-sync-task" data-task-id="${escapeHtml(task.id)}" data-next-status="${task.status === "enabled" ? "paused" : "enabled"}">${task.status === "enabled" ? "暂停" : "启用"}</button>${task.status === "enabled" && !["erp_goods", "wangdian_suites", "wangdian_platform_goods", "wangdian_inventory", "platform_goods_excel_import"].includes(task.taskCode) ? `<button class="text-button" data-action="create-data-sync-batch" data-task-id="${escapeHtml(task.id)}" data-sync-mode="${escapeHtml(task.defaultSyncMode)}">立即执行</button>` : ""}`}</td></tr>`).join("")}
     </tbody></table></div></section>
     ${erpTask ? `<section><h2>ERP货品同步执行</h2>${erpTask.status !== "enabled" ? `<div class="data-center-notice">ERP货品同步任务当前已暂停。启用后才可生成全量或增量预览；启用自动调度前请先完成一次全量同步。</div>` : `<form id="erp-data-sync-form" class="data-center-filter">
       <label><span>开始时间</span><input name="requestStart" type="datetime-local" value="2021-01-01T00:00" /></label>
@@ -81,6 +83,7 @@ function renderDataSyncCenter() {
       <button type="button" class="primary-button" data-action="preview-erp-data-sync" data-sync-mode="incremental" data-task-id="${escapeHtml(erpTask.id)}">执行增量预览</button>
     </form>`}
     ${syncPreview ? `<div class="data-center-notice"><strong>${syncPreview.noChange ? "已同步，无变化" : syncPreview.isCurrent === false ? "历史预览" : "当前有效预览"}</strong><p>${syncPreview.noChange ? escapeHtml(syncPreview.message || "旺店通商品档案已同步，当期无新增或变更。") : `ERP货品 ${syncPreview.summary?.validGoods ?? 0}；SKU总数 ${syncPreview.summary?.total ?? 0}；可导入 ${syncPreview.summary?.importable ?? 0}；异常跳过 ${syncPreview.summary?.skipped ?? 0}；警告 ${syncPreview.summary?.warningCount ?? syncPreview.summary?.warnings ?? 0}。`}</p>${syncPreview.noChange ? `<span>本次无需确认写入，商品档案和SKU数据未发生变化。</span>` : syncPreview.isCurrent === false ? `<span>该预览已被更新结果替代，仅供查看。</span>` : `<span>本次同步将导入 ${syncPreview.summary?.importable ?? 0} 个SKU，隔离 ${syncPreview.summary?.skipped ?? 0} 个异常SKU；不会创建产品或修改产品映射。</span><button class="primary-button" data-action="commit-erp-data-sync" data-batch-id="${escapeHtml(syncPreview.dataSyncBatch?.id)}">确认提交当前预览</button>`}${technicalDetails([["批次ID", syncPreview.dataSyncBatch?.id], ["预览版本", syncPreview.summary?.previewVersion]])}</div>` : ""}</section>` : ""}
+    ${suiteTask ? `<section><h2>旺店通组合装同步</h2><p>旺店通组合装是组合装结构的权威来源。同步后直接生成或更新 Sales Object(bundle) 版本，产品中心“组合装管理”会自动读取最新结构；表格组合装明细仅作为历史基线保留。</p>${suiteTask.status !== "enabled" ? `<div class="data-center-notice">组合装同步任务当前已暂停。首次启用后建议先执行一次全量同步，再由系统每天02:15自动增量同步。</div>` : `<form id="wangdian-suite-sync-form" class="data-center-filter"><label><span>开始时间</span><input name="requestStart" type="datetime-local" value="${today}T00:00" /></label><label><span>结束时间</span><input name="requestEnd" type="datetime-local" value="${today}T23:59" /></label><input name="suiteNo" placeholder="组合装编码（可选，如FZH0103-11）" /><button type="button" class="secondary-button" data-action="sync-wangdian-suites" data-sync-mode="full" data-task-id="${escapeHtml(suiteTask.id)}">同步时间范围</button><button type="button" class="primary-button" data-action="sync-wangdian-suites" data-sync-mode="incremental" data-task-id="${escapeHtml(suiteTask.id)}">立即增量同步</button></form>`}${suiteSyncResult ? `<div class="data-center-notice"><strong>组合装同步完成</strong><p>读取 ${suiteSyncResult.result?.totalCount ?? 0} 个；新增 ${suiteSyncResult.result?.createdCount ?? 0}；结构更新 ${suiteSyncResult.result?.updatedCount ?? 0}；无变化 ${suiteSyncResult.result?.unchangedCount ?? 0}；新增Link SKU关系 ${suiteSyncResult.result?.relationsCreated ?? 0}；隔离 ${suiteSyncResult.result?.exceptions?.length ?? 0}。</p><a href="#products/combo-skus">前往产品中心查看组合装</a>${technicalDetails([["同步批次", suiteSyncResult.dataSyncBatch?.id], ["API请求次数", suiteSyncResult.source?.requestCount]])}</div>` : ""}</section>` : ""}
     ${platformTask ? `<section><h2>平台货品关系同步执行</h2>${platformTask.status !== "enabled" ? `<div class="data-center-notice">平台货品关系同步任务当前已暂停。请先维护旺店通店铺映射并完成一次全量同步，再启用自动调度。</div>` : `<form id="platform-data-sync-form" class="data-center-filter">
       <label><span>开始时间</span><input name="requestStart" type="datetime-local" value="2021-01-01T00:00" /></label>
       <label><span>结束时间</span><input name="requestEnd" type="datetime-local" value="${today}T23:59" /></label>
@@ -166,6 +169,21 @@ export function bindAdminDataCenterPageEvents(rerender) {
   }));
   document.querySelectorAll("[data-action='load-erp-data-sync-preview']").forEach((button) => button.addEventListener("click", async () => {
     try { syncPreview = await loadErpGoodsDataSyncPreview(button.dataset.batchId); rerender(); } catch (caught) { error = caught.message; rerender(); }
+  }));
+  document.querySelectorAll("[data-action='sync-wangdian-suites']").forEach((button) => button.addEventListener("click", async () => {
+    const form = document.querySelector("#wangdian-suite-sync-form");
+    const suiteNo = form?.elements.suiteNo?.value?.trim() || "";
+    const syncMode = button.dataset.syncMode;
+    loading = true; error = ""; rerender();
+    try {
+      suiteSyncResult = await syncWangdianSuites(button.dataset.taskId, {
+        syncMode,
+        suiteNo,
+        requestStart: suiteNo ? "" : form?.elements.requestStart?.value,
+        requestEnd: form?.elements.requestEnd?.value,
+      });
+      await refresh(rerender);
+    } catch (caught) { loading = false; error = caught.message; rerender(); }
   }));
   document.querySelector("#wangdian-shop-mapping-form")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const form = new FormData(event.currentTarget);

@@ -1,4 +1,4 @@
-const rateLimitPattern = /(?:status\s*[=:]?\s*100|接口失败（100）|调用频率|频率限制|too many requests)/iu;
+const rateLimitPattern = /(?:调用频率|频率限制|超过每分钟|too many requests|rate limit)/iu;
 
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 

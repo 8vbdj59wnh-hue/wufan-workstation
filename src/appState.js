@@ -961,6 +961,12 @@ export async function loadErpGoodsDataSyncPreview(batchId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/batches/${encodeURIComponent(batchId)}/erp-goods/preview`), "ERP货品同步预览读取失败。");
 }
 
+export async function syncWangdianSuites(taskId, options = {}) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/tasks/${encodeURIComponent(taskId)}/wangdian-suites/sync`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(options),
+  }), "旺店通组合装同步失败。");
+}
+
 export async function saveWangdianShopMapping(input) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/shop-mappings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }), "旺店通店铺映射保存失败。");
 }

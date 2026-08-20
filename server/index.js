@@ -85,6 +85,8 @@ import {
   runDuePlatformGoodsSyncTasks,
 } from "./platformGoodsDataSyncAdapter.js";
 import { createWangdianShopDiscoveryBatch, queueWangdianShopDiscoveryBatch, readWangdianShopDiscoveryBatch, resumePendingWangdianShopDiscoveryBatches, resumeWangdianShopDiscoveryBatch, saveWangdianShopMapping } from "./wangdianPlatformGoodsSyncService.js";
+import { searchWangdianSuites } from "./wangdianSuiteService.js";
+import { runDueWangdianSuiteSyncTasks, syncWangdianSuites } from "./wangdianSuiteDataSyncAdapter.js";
 import {
   commitInventoryDataSync,
   previewInventoryDataSync,
@@ -2027,6 +2029,42 @@ app.get("/api/products/wangdian/status", requirePermission("products.view"), req
 
 app.get("/api/products/wangdian/sync-logs", requirePermission("products.view"), requireAdminUser, (request, response) => {
   response.json({ success: true, items: listWangdianGoodsSyncLogs(request.query.limit) });
+});
+
+app.get("/api/products/wangdian/suites/search", requirePermission("products.view"), requireAdminUser, async (request, response) => {
+  try {
+    response.json({ success: true, ...(await searchWangdianSuites(request.query)) });
+  } catch (error) {
+    const permissionRequired = /接口权限不足.*goods\.Suite\.search/iu.test(error.message ?? "");
+    response.status(permissionRequired ? 403 : 400).json({
+      success: false,
+      code: permissionRequired ? "wangdian_suite_permission_required" : "wangdian_suite_search_failed",
+      message: permissionRequired
+        ? "旺店通API账号尚未开通组合装查询的品牌权限。"
+        : error.message || "旺店通组合装读取失败。",
+    });
+  }
+});
+
+app.post("/api/data-sync-center/tasks/:id/wangdian-suites/sync", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, async (request, response) => {
+  try {
+    const result = await syncWangdianSuites({
+      taskId: request.params.id,
+      syncMode: request.body?.syncMode,
+      requestStart: request.body?.requestStart,
+      requestEnd: request.body?.requestEnd,
+      suiteNo: request.body?.suiteNo,
+      createdBy: getUserPersonId(request.user),
+    });
+    response.status(201).json({ success: true, ...result });
+  } catch (error) {
+    const permissionRequired = /接口权限不足.*goods\.Suite\.search/iu.test(error.message ?? "");
+    response.status(permissionRequired ? 403 : 400).json({
+      success: false,
+      code: permissionRequired ? "wangdian_suite_permission_required" : "wangdian_suite_sync_failed",
+      message: permissionRequired ? "旺店通API账号尚未开通组合装查询权限。" : error.message || "旺店通组合装同步失败。",
+    });
+  }
 });
 
 app.post("/api/products/erp-sync-runs/:id/wangdian/preview", requirePermission("products.create"), requireAdminUser, async (request, response) => {
@@ -4488,7 +4526,7 @@ const dataSyncSchedulerTimer = setInterval(async () => {
   if (dataSyncSchedulerRunning) return;
   dataSyncSchedulerRunning = true;
   try {
-    const results = [...await runDueErpGoodsSyncTasks(), ...await runDuePlatformGoodsSyncTasks(), ...await runDueInventorySyncTasks()];
+    const results = [...await runDueErpGoodsSyncTasks(), ...await runDueWangdianSuiteSyncTasks(), ...await runDuePlatformGoodsSyncTasks(), ...await runDueInventorySyncTasks()];
     for (const result of results.filter((item) => !item.success)) console.error("ERP货品自动同步失败", result.error);
   } catch (error) {
     console.error("数据同步中心调度失败", error);
