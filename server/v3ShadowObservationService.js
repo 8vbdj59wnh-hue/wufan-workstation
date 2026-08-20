@@ -157,7 +157,12 @@ export async function executeV3ShadowObservation(trigger = {}, options = {}) {
   const started = performance.now();
   try {
     const runMainChain = options.runMainChain || runV3RelationMainChain;
-    const result = await runMainChain({ batchId: trigger.batchId, detailLimit: 5000 }, { database, flags: { projection: "shadow", relationWrite: false, relationRead: false }, enrichmentOptions: options.enrichmentOptions });
+    const shadowConcurrency = Math.max(1, Number(process.env.V3_SHADOW_WANGDIAN_CONCURRENCY || 2));
+    const result = await runMainChain({ batchId: trigger.batchId, detailLimit: 5000 }, {
+      database,
+      flags: { projection: "shadow", relationWrite: false, relationRead: false },
+      enrichmentOptions: { concurrency: shadowConcurrency, ...(options.enrichmentOptions || {}) },
+    });
     const after = readV3ShadowProtectedSnapshot({ database });
     if (json(before) !== json(after)) throw new Error("v3_shadow_business_asset_mutation_detected");
     const metrics = metricsFor(database, result);
