@@ -536,16 +536,16 @@ function requireAnyPermission(...permissionPaths) {
   };
 }
 
-const requireLinkView = requireAnyPermission("links.view", "products.view");
-const requireLinkManage = requireAnyPermission("links.manage", "products.edit");
-const requireLinkImport = requireAnyPermission("links.import", "products.edit");
-const requireLinkHealth = requireAnyPermission("links.health", "products.view");
-const requireLinkHealthManage = requireAnyPermission("links.health", "products.edit");
-const requireLinkImprove = requireAnyPermission("links.improve", "products.edit");
-const requireSupplyView = requireAnyPermission("supplyChain.view", "products.view");
-const requireSupplyManage = requireAnyPermission("supplyChain.manage", "products.edit");
-const requireSupplyPurchase = requireAnyPermission("supplyChain.purchase", "products.edit");
-const requireSupplyQuality = requireAnyPermission("supplyChain.quality", "products.edit");
+const requireLinkView = requirePermission("links.view");
+const requireLinkManage = requirePermission("links.manage");
+const requireLinkImport = requirePermission("links.import");
+const requireLinkHealth = requirePermission("links.health");
+const requireLinkHealthManage = requirePermission("links.manageHealth");
+const requireLinkImprove = requirePermission("links.improve");
+const requireSupplyView = requirePermission("supplyChain.view");
+const requireSupplyManage = requirePermission("supplyChain.manage");
+const requireSupplyPurchase = requirePermission("supplyChain.purchase");
+const requireSupplyQuality = requirePermission("supplyChain.quality");
 const requireCustomerView = requirePermission("customers.view");
 const requireCustomerManage = requirePermission("customers.manage");
 const requireCustomerMaintain = requirePermission("customers.maintain");
@@ -2476,7 +2476,7 @@ app.post("/api/customer-center/customers/:id/tags", requireCustomerMaintain, (re
 app.post("/api/customer-center/customers/:id/followups", requireCustomerMaintain, (request,response)=>{try{assertCustomerAccess(request.user,request.params.id);response.status(201).json({success:true,item:addFollowup(request.params.id,request.body,request.user.id)});}catch(error){response.status(400).json({success:false,message:error.message||"跟进记录保存失败。"});}});
 
 function aiEnterpriseKnowledge(){const db=getDatabase();const safe=(sql)=>{try{return db.prepare(sql).all();}catch{return[];}};return{actionStandards:safe("SELECT id,name FROM task_templates WHERE status='active' AND defaultProcessTemplateId IS NOT NULL ORDER BY updatedAt DESC LIMIT 30"),effectiveImprovements:[...safe("SELECT id,title,resultSummary,'connection' AS objectType FROM connection_improvements WHERE status='effective' ORDER BY updatedAt DESC LIMIT 15"),...safe("SELECT id,title,resultSummary,'product' AS objectType FROM product_improvements WHERE status='effective' ORDER BY updatedAt DESC LIMIT 15")]};}
-function aiEvidence(request){const type=String(request.body?.analysisType||"");let evidence;if(type==="company"){if(!hasPermission(request.user,"operations.view"))throw new Error("没有经营驾驶舱权限。");evidence=getOperationDashboard();}else if(type==="product"){if(!hasPermission(request.user,"products.view"))throw new Error("没有产品数据权限。");const scoped=filterDataByScope(readAllData({exclude:["salesLinks","salesLinkSkus"]}),request.user);const visibleProductIds=(scoped.products??[]).map(item=>item.id);if(!visibleProductIds.includes(request.body?.objectId))throw new Error("无权分析该产品。");evidence=getProductBusinessAnalysis(request.body.objectId,{includeInventoryCost:hasPermission(request.user,"finance.view"),visibleProductIds});}else if(type==="connection"){if(!hasPermission(request.user,"links.view")&&!hasPermission(request.user,"products.view"))throw new Error("没有连接数据权限。");evidence=getConnectionGrowthAnalysis(request.body.objectId);}else if(type==="finance"){if(!hasPermission(request.user,"finance.view"))throw new Error("没有财务数据权限。");evidence=getFinanceStatement(request.body||{});}else if(type==="supply"){if(!hasPermission(request.user,"supplyChain.view")&&!hasPermission(request.user,"products.view"))throw new Error("没有供应链数据权限。");evidence=getSupplyChainOverview();}else if(type==="customer"){if(!hasPermission(request.user,"customers.view"))throw new Error("没有客户数据权限。");evidence=getCustomerOverview(customerScope(request.user));}else throw new Error("分析类型无效。");return{...evidence,knowledge:aiEnterpriseKnowledge()};}
+function aiEvidence(request){const type=String(request.body?.analysisType||"");let evidence;if(type==="company"){if(!hasPermission(request.user,"operations.view"))throw new Error("没有经营驾驶舱权限。");evidence=getOperationDashboard();}else if(type==="product"){if(!hasPermission(request.user,"products.view"))throw new Error("没有产品数据权限。");const scoped=filterDataByScope(readAllData({exclude:["salesLinks","salesLinkSkus"]}),request.user);const visibleProductIds=(scoped.products??[]).map(item=>item.id);if(!visibleProductIds.includes(request.body?.objectId))throw new Error("无权分析该产品。");evidence=getProductBusinessAnalysis(request.body.objectId,{includeInventoryCost:hasPermission(request.user,"finance.view"),visibleProductIds});}else if(type==="connection"){if(!hasPermission(request.user,"links.view"))throw new Error("没有连接数据权限。");evidence=getConnectionGrowthAnalysis(request.body.objectId);}else if(type==="finance"){if(!hasPermission(request.user,"finance.view"))throw new Error("没有财务数据权限。");evidence=getFinanceStatement(request.body||{});}else if(type==="supply"){if(!hasPermission(request.user,"supplyChain.view"))throw new Error("没有供应链数据权限。");evidence=getSupplyChainOverview();}else if(type==="customer"){if(!hasPermission(request.user,"customers.view"))throw new Error("没有客户数据权限。");evidence=getCustomerOverview(customerScope(request.user));}else throw new Error("分析类型无效。");return{...evidence,knowledge:aiEnterpriseKnowledge()};}
 app.get("/api/ai-operation/analyses",requireAiView,(request,response)=>{try{response.json({success:true,items:listAnalyses(request.user.id,getDataScope(request.user)==="all")});}catch(error){response.status(400).json({success:false,message:error.message||"分析记录读取失败。"});}});
 app.get("/api/ai-operation/analyses/:id",requireAiView,(request,response)=>{try{const item=readAnalysis(request.params.id);if(getDataScope(request.user)!=="all"&&item.generatedBy!==request.user.id)return response.status(403).json({success:false,message:"无权查看该分析。"});response.json({success:true,item});}catch(error){response.status(404).json({success:false,message:error.message||"分析不存在。"});}});
 app.post("/api/ai-operation/analyses",requireAiAnalyze,(request,response)=>{try{response.status(201).json({success:true,item:createAnalysis(request.body,request.user.id,aiEvidence(request))});}catch(error){response.status(400).json({success:false,message:error.message||"经营分析失败。"});}});

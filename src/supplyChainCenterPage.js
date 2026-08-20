@@ -19,9 +19,9 @@ const html = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "
 const number = (value, digits = 0) => value === null || value === undefined ? "—" : Number(value).toLocaleString("zh-CN", { maximumFractionDigits: digits });
 const money = (value) => value === null || value === undefined ? "—" : `¥${number(value, 2)}`;
 const statusName = (value) => ({ active: "合作中", paused: "暂停", archived: "归档", draft: "草稿", planned: "计划中", ordered: "已下单", partial: "部分到货", received: "已到货", canceled: "已取消", open: "待处理", improving: "改善中", resolved: "已解决", closed: "已关闭" })[value] || value || "—";
-const canManage = () => hasPermission(getCurrentUser(), "supplyChain.manage") || hasPermission(getCurrentUser(), "products.edit");
-const canPurchase = () => hasPermission(getCurrentUser(), "supplyChain.purchase") || hasPermission(getCurrentUser(), "products.edit");
-const canQuality = () => hasPermission(getCurrentUser(), "supplyChain.quality") || hasPermission(getCurrentUser(), "products.edit");
+const canManage = () => hasPermission(getCurrentUser(), "supplyChain.manage");
+const canPurchase = () => hasPermission(getCurrentUser(), "supplyChain.purchase");
+const canQuality = () => hasPermission(getCurrentUser(), "supplyChain.quality");
 
 function summary() {
   const item = overview?.summary || {};

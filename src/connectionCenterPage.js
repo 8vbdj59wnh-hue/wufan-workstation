@@ -295,7 +295,7 @@ function saveMyLinkTableConfig() {
 loadMyLinkTableConfig();
 
 function canManage() {
-  return hasPermission(getCurrentUser(), "links.manage") || hasPermission(getCurrentUser(), "products.edit");
+  return hasPermission(getCurrentUser(), "links.manage");
 }
 
 function isAdmin() {
@@ -316,11 +316,11 @@ function canCreateImprovement() {
 }
 
 function canImprove() {
-  return hasPermission(getCurrentUser(), "links.improve") || hasPermission(getCurrentUser(), "products.edit");
+  return hasPermission(getCurrentUser(), "links.improve");
 }
 
 function canViewHealth() {
-  return hasPermission(getCurrentUser(), "links.health") || hasPermission(getCurrentUser(), "products.view");
+  return hasPermission(getCurrentUser(), "links.health");
 }
 
 function canOpenConnectionSection(section) {

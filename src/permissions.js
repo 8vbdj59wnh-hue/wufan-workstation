@@ -21,6 +21,8 @@ export const permissionGroups = [
       { key: "methods", label: "可访问关键行动方法论" },
       { key: "settings", label: "可访问设置模块" },
       { key: "products", label: "可访问产品中心" },
+      { key: "links", label: "可访问链接中心" },
+      { key: "supplyChain", label: "可访问供应链中心" },
       { key: "operations", label: "可查看经营驾驶舱" },
       { key: "finance", label: "可访问财务中心" },
       { key: "customers", label: "可访问客户中心" },
@@ -57,6 +59,28 @@ export const permissionGroups = [
       { key: "create", label: "新增产品" },
       { key: "edit", label: "编辑产品" },
       { key: "archive", label: "归档产品" },
+    ],
+  },
+  {
+    key: "links",
+    title: "链接中心权限",
+    permissions: [
+      { key: "view", label: "查看链接" },
+      { key: "manage", label: "管理链接档案与经营配置" },
+      { key: "import", label: "导入链接与经营数据" },
+      { key: "health", label: "查看链接体检" },
+      { key: "manageHealth", label: "创建和管理链接体检" },
+      { key: "improve", label: "发起和管理链接改善" },
+    ],
+  },
+  {
+    key: "supplyChain",
+    title: "供应链中心权限",
+    permissions: [
+      { key: "view", label: "查看供应链数据" },
+      { key: "manage", label: "管理供应商与合作产品" },
+      { key: "purchase", label: "管理采购记录" },
+      { key: "quality", label: "管理品质问题" },
     ],
   },
   {
@@ -269,6 +293,56 @@ function normalizeProductCenterAccess(normalized) {
   normalized.products.view = canViewProducts;
 }
 
+const legacyBusinessPermissionMappings = {
+  links: {
+    moduleKey: "links",
+    permissions: {
+      view: "view",
+      manage: "edit",
+      import: "edit",
+      health: "view",
+      manageHealth: "edit",
+      improve: "edit",
+    },
+  },
+  supplyChain: {
+    moduleKey: "supplyChain",
+    permissions: {
+      view: "view",
+      manage: "edit",
+      purchase: "edit",
+      quality: "edit",
+    },
+  },
+};
+
+function hasExplicitBusinessPermissionBoundary(source, groupKey, definition) {
+  return typeof source?.modules?.[definition.moduleKey] === "boolean" ||
+    typeof source?.[groupKey]?.view === "boolean";
+}
+
+function applyLegacyBusinessPermissionCompatibility(normalized, source) {
+  for (const [groupKey, definition] of Object.entries(legacyBusinessPermissionMappings)) {
+    if (hasExplicitBusinessPermissionBoundary(source, groupKey, definition)) continue;
+    normalized.modules[definition.moduleKey] = normalized.modules.products;
+    for (const [permissionKey, productPermissionKey] of Object.entries(definition.permissions)) {
+      if (typeof source?.[groupKey]?.[permissionKey] === "boolean") continue;
+      normalized[groupKey][permissionKey] = normalized.products[productPermissionKey] === true;
+    }
+  }
+  if (typeof source?.links?.health === "boolean" && typeof source?.links?.manageHealth !== "boolean") {
+    normalized.links.manageHealth = source.links.health;
+  }
+}
+
+function normalizeBusinessModuleAccess(normalized) {
+  for (const [groupKey, definition] of Object.entries(legacyBusinessPermissionMappings)) {
+    const canView = normalized.modules[definition.moduleKey] === true || normalized[groupKey].view === true;
+    normalized.modules[definition.moduleKey] = canView;
+    normalized[groupKey].view = canView;
+  }
+}
+
 function normalizeActionLaunchPermissions(normalized, source) {
   const sourceWorkPlans = source?.workPlans;
   const hasExplicitScope = ["all", "selected"].includes(sourceWorkPlans?.launchTemplateScope);
@@ -306,6 +380,8 @@ export function normalizePermissions(rawPermissions, role = "user") {
     applyContentSchedulePermissionCompatibility(normalized, source, role);
   }
   normalizeProductCenterAccess(normalized);
+  applyLegacyBusinessPermissionCompatibility(normalized, source);
+  normalizeBusinessModuleAccess(normalized);
   normalizeActionLaunchPermissions(normalized, source);
 
   return normalized;
@@ -430,8 +506,8 @@ export function canAccessModule(userOrPermissions, moduleId) {
     operationDashboard: "operations",
     adminDataCenter: "settings",
     financeCenter: "finance",
-    connectionCenter: "products",
-    supplyChainCenter: "products",
+    connectionCenter: "links",
+    supplyChainCenter: "supplyChain",
     customerCenter: "customers",
     aiOperationAssistant: "aiAssistant",
   };
@@ -450,10 +526,10 @@ export function canAccessModule(userOrPermissions, moduleId) {
     return hasPermission(userOrPermissions, "finance.view");
   }
   if (moduleId === "connectionCenter") {
-    return hasPermission(userOrPermissions, "links.view") || hasPermission(userOrPermissions, "products.view");
+    return hasPermission(userOrPermissions, "links.view");
   }
   if (moduleId === "supplyChainCenter") {
-    return hasPermission(userOrPermissions, "supplyChain.view") || hasPermission(userOrPermissions, "products.view");
+    return hasPermission(userOrPermissions, "supplyChain.view");
   }
   if (moduleId === "customerCenter") {
     return hasPermission(userOrPermissions, "customers.view");
