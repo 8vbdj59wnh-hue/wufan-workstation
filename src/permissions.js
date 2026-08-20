@@ -27,6 +27,7 @@ export const permissionGroups = [
       { key: "finance", label: "可访问财务中心" },
       { key: "customers", label: "可访问客户中心" },
       { key: "aiAssistant", label: "可访问AI经营助手" },
+      { key: "templateCenter", label: "可访问模板中心" },
     ],
   },
   {
@@ -493,16 +494,10 @@ export function canAccessTemplateCenter(userOrPermissions) {
   if (userOrPermissions === null || userOrPermissions === undefined) return false;
   const role = userOrPermissions.role ?? userOrPermissions.authRole ?? "user";
   if (["admin", "system_admin", "company_manager"].includes(role)) return true;
+  if (hasPermission(userOrPermissions, "modules.templateCenter")) return true;
   if (hasPermission(userOrPermissions, "settings.viewStandardWorks")) return true;
   if (hasPermission(userOrPermissions, "processes.viewTemplates")) return true;
-  if (hasPermission(userOrPermissions, "methods.view")) return true;
-
-  // 临时兼容：模板中心还没有独立权限项，先按视觉/营销/运营/渠道相关部门开放。
-  const departmentId = String(userOrPermissions.departmentId ?? "").toLowerCase();
-  const departmentName = String(userOrPermissions.departmentName ?? userOrPermissions.department ?? "").toLowerCase();
-  const allowedDepartmentIds = new Set(["dept-marketing", "dept-channel", "dept-operation", "dept-visual", "dept-visual-marketing"]);
-  if (allowedDepartmentIds.has(departmentId)) return true;
-  return /视觉|营销|运营|渠道|内容/.test(departmentName);
+  return hasPermission(userOrPermissions, "methods.view");
 }
 
 export function canAccessModule(userOrPermissions, moduleId) {
