@@ -22,9 +22,11 @@ const allowedLegacyRelationReadFiles = new Set([
   "server/db.js",
   "server/productStructureSchema.js",
   "server/dataAssetMapService.js",
+  "server/v3ShadowObservationService.js",
   "server/capabilities/resolveLinkSkuErpRelation.js",
   "server/capabilities/resolveLinkSkuRelationRead.js",
 ]);
+const allowedLegacyDiagnosticFiles = new Set(["server/v3ShadowObservationService.js"]);
 const allowedLegacySalesReadFiles = new Set(["server/db.js", "server/dataAssetMapService.js"]);
 
 function files(directory) {
@@ -127,7 +129,7 @@ for (const file of files(serverRoot)) {
     for (const match of source.matchAll(/\bsales_link_sku_combo_(?:groups|group_components)\b/gu)) {
       findings.push({ file: relative, line: lineAt(source, match.index), type: "legacy_combo_runtime_dependency" });
     }
-    for (const match of source.matchAll(/\bplatform_sku_manual_bindings\b/gu)) {
+    if (!allowedLegacyDiagnosticFiles.has(relative)) for (const match of source.matchAll(/\bplatform_sku_manual_bindings\b/gu)) {
       findings.push({ file: relative, line: lineAt(source, match.index), type: "legacy_manual_binding_runtime_dependency" });
     }
   }
