@@ -134,6 +134,12 @@ import {
   validateUploadMetadata,
 } from "./uploadGovernanceService.js";
 import {
+  getApiUsageLedger,
+  recordApiUsage,
+  resolveApiUsageRoute,
+  resolveApiUsageSource,
+} from "./apiUsageLedgerService.js";
+import {
   pickGoalCenterBootstrapResources,
   readGoalCenterBootstrap,
 } from "./goalCenterBootstrapService.js";
@@ -475,6 +481,28 @@ const uploadProductImport = multer({
 app.use(cors());
 app.use(express.json({ limit: "20mb" }));
 app.use("/uploads", express.static(uploadsDir));
+
+app.use("/api", (request, response, next) => {
+  const source = resolveApiUsageSource(request);
+  let finalized = false;
+  const finalize = (statusCode) => {
+    if (finalized) return;
+    finalized = true;
+    try {
+      recordApiUsage(getDatabase(), {
+        method: request.method,
+        routePattern: resolveApiUsageRoute(request),
+        source,
+        statusCode,
+      });
+    } catch (error) {
+      console.error("API 使用台账记录失败", error);
+    }
+  };
+  response.once("finish", () => finalize(response.statusCode));
+  response.once("close", () => finalize(response.writableFinished ? response.statusCode : 499));
+  next();
+});
 
 app.get("/api/health", (_request, response) => {
   try {
@@ -2337,6 +2365,18 @@ app.get("/api/data-asset-map/graphs/:id", requirePermission("settings.viewDataAs
   const payload = readDataAssetRelationGraph(request.params.id);
   if (!payload) return response.status(404).json({ message: "关系地图不存在。" });
   response.json(payload);
+});
+
+app.get("/api/admin/api-usage", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
+  response.json({
+    success: true,
+    ...getApiUsageLedger(getDatabase(), {
+      method: request.query.method,
+      route: request.query.route,
+      source: request.query.source,
+      limit: request.query.limit,
+    }),
+  });
 });
 
 app.get("/api/data-sync-center", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {

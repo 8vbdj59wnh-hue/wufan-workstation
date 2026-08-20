@@ -83,6 +83,26 @@ CREATE TABLE IF NOT EXISTS upload_audits (
 CREATE INDEX IF NOT EXISTS idx_upload_audits_user_created ON upload_audits(userId,createdAt DESC);
 CREATE INDEX IF NOT EXISTS idx_upload_audits_status_created ON upload_audits(status,createdAt DESC);
 
+CREATE TABLE IF NOT EXISTS api_usage_ledger (
+  method TEXT NOT NULL,
+  routePattern TEXT NOT NULL,
+  source TEXT NOT NULL,
+  callCount INTEGER NOT NULL DEFAULT 0,
+  successCount INTEGER NOT NULL DEFAULT 0,
+  clientErrorCount INTEGER NOT NULL DEFAULT 0,
+  serverErrorCount INTEGER NOT NULL DEFAULT 0,
+  firstAccessAt TEXT NOT NULL,
+  lastAccessAt TEXT NOT NULL,
+  lastStatusCode INTEGER,
+  PRIMARY KEY (method, routePattern, source),
+  CHECK(callCount >= 0),
+  CHECK(successCount >= 0),
+  CHECK(clientErrorCount >= 0),
+  CHECK(serverErrorCount >= 0)
+);
+CREATE INDEX IF NOT EXISTS idx_api_usage_ledger_last_access ON api_usage_ledger(lastAccessAt DESC);
+CREATE INDEX IF NOT EXISTS idx_api_usage_ledger_route_method ON api_usage_ledger(routePattern,method);
+
 CREATE TABLE IF NOT EXISTS categories (
   id TEXT PRIMARY KEY,
   type TEXT NOT NULL,

@@ -129,10 +129,24 @@ function setAuthToken(token) {
   window.localStorage.setItem(authTokenKey, token);
 }
 
+export function getApiUsageSource(hash = window.location.hash) {
+  const firstSegment = String(hash ?? "").replace(/^#\/?/u, "").split(/[/?]/u)[0].trim();
+  if (firstSegment === "") return "web:startup";
+  if (/^methodology-/u.test(firstSegment)) return "web:methodologies";
+  if (/^process-template-/u.test(firstSegment)) return "web:processes";
+  const moduleId = firstSegment
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/gu, "-")
+    .replace(/^-+|-+$/gu, "")
+    .slice(0, 60);
+  return `web:${moduleId || "unknown"}`;
+}
+
 export async function authFetch(url, options = {}) {
   const headers = new Headers(options.headers ?? {});
   const token = getAuthToken();
   if (token !== "") headers.set("Authorization", `Bearer ${token}`);
+  if (!headers.has("X-Wufan-API-Source")) headers.set("X-Wufan-API-Source", getApiUsageSource());
   return fetch(url, { ...options, headers });
 }
 
@@ -508,7 +522,7 @@ export async function login(username, password) {
   try {
     const response = await fetch(`${apiBaseUrl}/api/auth/login`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-Wufan-API-Source": "web:login" },
       body: JSON.stringify({ username, password }),
     });
     const data = await response.json().catch(() => ({}));
