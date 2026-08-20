@@ -14,7 +14,7 @@ process.env.WUFAN_DB_PATH = databasePath;
 const { initializeDatabase, getDatabase, closeDatabase } = await import("../server/db.js");
 const { previewSalesDailyFacts, readSalesDailyFactPreview } = await import("../server/salesDailyFactPreviewService.js");
 const { confirmSalesRelationCandidate, confirmSalesRelationCandidates } = await import("../server/salesRelationCandidateService.js");
-const { hasPermission } = await import("../src/permissions.js");
+const { hasPermission } = await import("../shared/permissions.js");
 
 const count = (database, table) => Number(database.prepare(`SELECT COUNT(*) total FROM ${table}`).get().total || 0);
 

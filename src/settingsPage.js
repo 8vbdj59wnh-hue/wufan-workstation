@@ -9,7 +9,7 @@ import {
   normalizePermissions,
   permissionCount,
   permissionGroups,
-} from "./permissions.js";
+} from "../shared/permissions.js";
 import { rerenderPreservingInputFocus } from "./inputFocus.js";
 import { bindDataAssetMapEvents, renderDataAssetMap } from "./dataAssetMapPage.js";
 import {

@@ -9,11 +9,28 @@ import {
   normalizePermissions,
   permissionGroups,
   serializePermissions,
-} from "../src/permissions.js";
+} from "../shared/permissions.js";
 
 function groupKeys(groupKey) {
   return permissionGroups.find((group) => group.key === groupKey)?.permissions.map((item) => item.key) ?? [];
 }
+
+test("前后端从共享权限层读取同一套定义", async () => {
+  const compatibilityFacade = await import("../src/permissions.js");
+  assert.equal(compatibilityFacade.hasPermission, hasPermission);
+  assert.equal(compatibilityFacade.permissionGroups, permissionGroups);
+
+  const sharedSource = fs.readFileSync(new URL("../shared/permissions.js", import.meta.url), "utf8");
+  const databaseSource = fs.readFileSync(new URL("../server/db.js", import.meta.url), "utf8");
+  const authSource = fs.readFileSync(new URL("../server/modules/auth/index.js", import.meta.url), "utf8");
+  const frontendSource = fs.readFileSync(new URL("../src/main.js", import.meta.url), "utf8");
+
+  assert.doesNotMatch(sharedSource, /^import\s/m);
+  assert.match(databaseSource, /from "\.\.\/shared\/permissions\.js"/);
+  assert.match(authSource, /from "\.\.\/\.\.\/\.\.\/shared\/permissions\.js"/);
+  assert.match(frontendSource, /from "\.\.\/shared\/permissions\.js"/);
+  assert.doesNotMatch(`${databaseSource}\n${authSource}`, /src\/permissions\.js/);
+});
 
 test("权限清单包含独立链接和供应链权限域", () => {
   assert.deepEqual(groupKeys("links"), ["view", "manage", "import", "health", "manageHealth", "improve"]);
@@ -54,7 +71,7 @@ test("模板中心使用角色或显式权限，不再按部门自动放行", ()
 });
 
 test("模板中心运行时权限守卫不读取部门字段", () => {
-  const permissionSource = fs.readFileSync(new URL("../src/permissions.js", import.meta.url), "utf8");
+  const permissionSource = fs.readFileSync(new URL("../shared/permissions.js", import.meta.url), "utf8");
   const guardSource = permissionSource.match(/export function canAccessTemplateCenter[\s\S]*?\n}/)?.[0] ?? "";
   assert.notEqual(guardSource, "");
   assert.doesNotMatch(guardSource, /department(?:Id|Name)?/i);

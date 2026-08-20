@@ -23,7 +23,7 @@ import {
 } from "./workFormEditor.js";
 import { normalizePublicFormFields } from "./publicFormFields.js";
 import { bindActionProductSelectors, collectActionProductIds, getActionProductIds, getActionProducts, renderActionProductSelector, renderLinkedActionProducts } from "./actionProductRelations.js";
-import { hasPermission } from "./permissions.js";
+import { hasPermission } from "../shared/permissions.js";
 import { getActionDeadlinePresentation } from "./data/actionDeadline.js";
 import { normalizePublishTimeFields, normalizePublishTimeMode, PublishTimeMode } from "./data/contentPublishTime.js";
 import {

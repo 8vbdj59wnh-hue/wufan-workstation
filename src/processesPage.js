@@ -15,7 +15,7 @@ import {
   updateProcessTemplateNodeStatus,
   updatePersistentResource,
 } from "./appState.js";
-import { canLaunchActionTemplate, hasPermission } from "./permissions.js";
+import { canLaunchActionTemplate, hasPermission } from "../shared/permissions.js";
 import {
   CategoryType,
   GoalStatus,

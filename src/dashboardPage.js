@@ -1,7 +1,7 @@
 import { bindAssessmentPageEvents, renderAssessmentPage } from "./assessmentPage.js";
 import { bindOperationDashboardPageEvents, renderOperationDashboardPage } from "./operationDashboardPage.js";
 import { ensureDashboardManagementLoaded, getCurrentUser } from "./appState.js";
-import { hasPermission } from "./permissions.js";
+import { hasPermission } from "../shared/permissions.js";
 
 function currentView() {
   const hash = window.location.hash.replace(/^#/, "");

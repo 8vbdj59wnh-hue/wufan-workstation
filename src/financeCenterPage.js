@@ -2,7 +2,7 @@ import {
   approveFinanceEntry, commitFinanceBill, createFinanceRule, deleteFinanceRule, getCurrentUser, loadFinanceAnalysis,
   loadFinanceEntries, loadFinanceImportBatches, loadFinanceRules, loadFinanceStatement, uploadFinanceBill,
 } from "./appState.js";
-import { hasPermission } from "./permissions.js";
+import { hasPermission } from "../shared/permissions.js";
 
 let tab = "overview";
 let loading = false;

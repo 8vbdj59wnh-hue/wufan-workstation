@@ -31,7 +31,7 @@ import {
   uploadImageFile,
   validateCurrentSession,
 } from "./appState.js";
-import { canAccessModule, getFirstAccessibleModule } from "./permissions.js";
+import { canAccessModule, getFirstAccessibleModule } from "../shared/permissions.js";
 import {
   beginRouteNavigation,
   getLoadedRouteModule,

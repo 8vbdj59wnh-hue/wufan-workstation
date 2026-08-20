@@ -8,7 +8,7 @@ import {
   state,
   updatePersistentResource,
 } from "./appState.js";
-import { getDataScope, hasPermission } from "./permissions.js";
+import { getDataScope, hasPermission } from "../shared/permissions.js";
 import {
   ProcessInstanceStatus,
   TaskStatus,

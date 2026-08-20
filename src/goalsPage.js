@@ -15,7 +15,7 @@ import {
   canLaunchAnyActionTemplate,
   canAccessTemplateCenter,
   hasPermission,
-} from "./permissions.js";
+} from "../shared/permissions.js";
 import {
   CategoryType,
   GoalLevel,

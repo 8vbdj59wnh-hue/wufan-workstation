@@ -9,7 +9,7 @@ process.env.WUFAN_DB_PATH = path.join(tempDirectory, "workstation.db");
 
 const databaseModule = await import("../server/db.js");
 const service = await import("../server/dataAssetMapService.js");
-const permissions = await import("../src/permissions.js");
+const permissions = await import("../shared/permissions.js");
 
 try {
   databaseModule.initializeDatabase({ reset: true });

@@ -43,7 +43,7 @@ import {
   canLaunchActionTemplate,
   canLaunchAnyActionTemplate,
   hasPermission,
-} from "./permissions.js";
+} from "../shared/permissions.js";
 import {
   CategoryType,
   GoalStatus,
