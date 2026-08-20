@@ -123,6 +123,17 @@ import {
 } from "./connectionBulkPlatformImportService.js";
 import { normalizeUploadedFileName } from "./uploadFileName.js";
 import {
+  UploadQuotaExceededError,
+  beginUploadAttempt,
+  finalizeUploadAttempt,
+  getUploadDailyQuotaBytes,
+  getUserUploadQuota,
+  listUploadAudits,
+  recordRejectedUploadAttempt,
+  validateUploadContent,
+  validateUploadMetadata,
+} from "./uploadGovernanceService.js";
+import {
   createConnectionAction,
   createConnectionDataMapping,
   createConnectionProfile,
@@ -322,6 +333,7 @@ const imageUploadsDir = path.join(uploadsDir, "images");
 const fileUploadsDir = path.join(uploadsDir, "files");
 const standardWorkAttachmentsDir = path.join(uploadsDir, "standard-work-attachments");
 const productImportUploadsDir = path.join(uploadsDir, "product-import-uploads");
+const uploadStagingDir = path.join(path.dirname(databasePath), ".upload-staging");
 const uploadContentNoteWorkbook = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
@@ -365,11 +377,11 @@ fs.mkdirSync(imageUploadsDir, { recursive: true });
 fs.mkdirSync(fileUploadsDir, { recursive: true });
 fs.mkdirSync(standardWorkAttachmentsDir, { recursive: true });
 fs.mkdirSync(productImportUploadsDir, { recursive: true });
+fs.mkdirSync(uploadStagingDir, { recursive: true });
 
-const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 const imageStorage = multer.diskStorage({
   destination: (_request, _file, callback) => {
-    callback(null, imageUploadsDir);
+    callback(null, uploadStagingDir);
   },
   filename: (_request, file, callback) => {
     const ext = path.extname(file.originalname).toLowerCase();
@@ -381,36 +393,18 @@ const uploadImage = multer({
   storage: imageStorage,
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_request, file, callback) => {
-    if (!allowedImageTypes.has(file.mimetype)) {
-      callback(new Error("只支持 JPG、PNG、WebP 图片。"));
+    const validation = validateUploadMetadata(file, "image");
+    if (!validation.valid) {
+      callback(new Error(`${validation.reason}只支持 JPG、PNG、WebP 图片。`));
       return;
     }
     callback(null, true);
   },
 });
 
-const allowedFileTypes = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "application/pdf",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/zip",
-  "text/plain",
-  "video/mp4",
-  "video/quicktime",
-  "video/x-m4v",
-  "video/webm",
-  "application/illustrator",
-  "application/postscript",
-]);
-const allowedFileExts = new Set([".jpg", ".jpeg", ".png", ".webp", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".txt", ".mp4", ".mov", ".m4v", ".webm", ".psd", ".psb", ".ai", ".fig"]);
 const fileStorage = multer.diskStorage({
   destination: (_request, _file, callback) => {
-    callback(null, fileUploadsDir);
+    callback(null, uploadStagingDir);
   },
   filename: (_request, file, callback) => {
     const ext = path.extname(file.originalname).toLowerCase();
@@ -421,9 +415,9 @@ const uploadFile = multer({
   storage: fileStorage,
   limits: { fileSize: 600 * 1024 * 1024 },
   fileFilter: (_request, file, callback) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (!allowedFileTypes.has(file.mimetype) && !allowedFileExts.has(ext)) {
-      callback(new Error("只支持图片、PSD、PSB、AI、FIG、PDF、Word、Excel、ZIP、视频和文本文件。"));
+    const validation = validateUploadMetadata(file, "file");
+    if (!validation.valid) {
+      callback(new Error(`${validation.reason}只支持图片、PSD、PSB、AI、FIG、PDF、Word、Excel、ZIP、视频和文本文件。`));
       return;
     }
     callback(null, true);
@@ -433,7 +427,7 @@ const uploadFile = multer({
 const allowedSpreadsheetExts = new Set([".xlsx", ".xls", ".csv"]);
 const spreadsheetStorage = multer.diskStorage({
   destination: (_request, _file, callback) => {
-    callback(null, standardWorkAttachmentsDir);
+    callback(null, uploadStagingDir);
   },
   filename: (_request, file, callback) => {
     const ext = path.extname(file.originalname).toLowerCase();
@@ -445,9 +439,9 @@ const uploadSpreadsheet = multer({
   storage: spreadsheetStorage,
   limits: { fileSize: 20 * 1024 * 1024 },
   fileFilter: (_request, file, callback) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (!allowedSpreadsheetExts.has(ext)) {
-      callback(new Error("只支持 .xlsx、.xls、.csv 表格附件。"));
+    const validation = validateUploadMetadata(file, "spreadsheet");
+    if (!validation.valid) {
+      callback(new Error(`${validation.reason}只支持 .xlsx、.xls、.csv 表格附件。`));
       return;
     }
     callback(null, true);
@@ -1339,6 +1333,90 @@ app.get("/api/auth/me", requireAuth, (request, response) => {
 
 app.use("/api", requireAuth);
 
+function isMultipartUpload(request) {
+  return Boolean(request.is("multipart/form-data"));
+}
+
+function getUploadedFiles(request) {
+  if (request.file !== undefined) return [request.file];
+  if (Array.isArray(request.files)) return request.files;
+  if (request.files !== null && typeof request.files === "object") {
+    return Object.values(request.files).flatMap((files) => Array.isArray(files) ? files : []);
+  }
+  return [];
+}
+
+function getUploadAuditRequestDetails(request) {
+  return {
+    userId: request.user.id,
+    requestPath: String(request.originalUrl ?? request.path ?? "").split("?")[0],
+    method: request.method,
+    ipAddress: request.ip,
+    userAgent: request.get("user-agent") ?? "",
+  };
+}
+
+app.use("/api", (request, response, next) => {
+  if (!isMultipartUpload(request)) {
+    next();
+    return;
+  }
+
+  const details = getUploadAuditRequestDetails(request);
+  const quotaLimitBytes = getUploadDailyQuotaBytes();
+  try {
+    const attempt = beginUploadAttempt(getDatabase(), {
+      ...details,
+      contentLength: Number(request.get("content-length")),
+      quotaLimitBytes,
+    });
+    request.uploadAuditId = attempt.id;
+  } catch (error) {
+    const isQuotaError = error instanceof UploadQuotaExceededError;
+    const responseStatus = isQuotaError ? 429 : error.code === "UPLOAD_LENGTH_REQUIRED" ? 411 : 500;
+    const reasonCode = error.code ?? "UPLOAD_AUDIT_FAILED";
+    const reasonMessage = error.message || "上传治理检查失败。";
+    try {
+      recordRejectedUploadAttempt(getDatabase(), {
+        ...details,
+        quotaLimitBytes,
+        responseStatus,
+        reasonCode,
+        reasonMessage,
+      });
+    } catch (auditError) {
+      console.error("上传拒绝审计记录失败", auditError);
+    }
+    response.status(responseStatus).json({
+      success: false,
+      error: reasonMessage,
+      code: reasonCode,
+      quota: isQuotaError ? error.snapshot : undefined,
+    });
+    return;
+  }
+
+  let finalized = false;
+  const finalize = (aborted = false) => {
+    if (finalized) return;
+    finalized = true;
+    try {
+      finalizeUploadAttempt(getDatabase(), {
+        id: request.uploadAuditId,
+        files: getUploadedFiles(request),
+        responseStatus: aborted ? 499 : response.statusCode,
+        reasonCode: aborted ? "CLIENT_ABORTED" : request.uploadAuditFailure?.code,
+        reasonMessage: aborted ? "客户端在上传完成前中断连接。" : request.uploadAuditFailure?.message,
+      });
+    } catch (error) {
+      console.error("上传审计收尾失败", error);
+    }
+  };
+  response.once("finish", () => finalize(false));
+  response.once("close", () => finalize(!response.writableFinished));
+  next();
+});
+
 app.put("/api/me/avatar", (request, response) => {
   try {
     const avatarUrl = String(request.body?.avatarUrl ?? "").trim();
@@ -1718,19 +1796,91 @@ app.post("/api/data", requirePermission("settings.managePermissions"), (request,
   }
 });
 
-app.post("/api/uploads/image", (request, response) => {
+function readUploadHeader(filePath, maxBytes = 8192) {
+  const descriptor = fs.openSync(filePath, "r");
+  try {
+    const buffer = Buffer.alloc(maxBytes);
+    const bytesRead = fs.readSync(descriptor, buffer, 0, maxBytes, 0);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+function removeStagedUpload(filePath) {
+  const resolvedFilePath = path.resolve(filePath);
+  const resolvedStagingDir = `${path.resolve(uploadStagingDir)}${path.sep}`;
+  if (resolvedFilePath.startsWith(resolvedStagingDir)) fs.rmSync(resolvedFilePath, { force: true });
+}
+
+function rejectInvalidStoredUpload(request, response, policyKey) {
+  if (request.file === undefined) return false;
+  let validation;
+  try {
+    validation = validateUploadContent(request.file, readUploadHeader(request.file.path), policyKey);
+  } catch {
+    validation = { valid: false, reason: "文件内容无法读取或已损坏。" };
+  }
+  if (validation.valid) return false;
+
+  removeStagedUpload(request.file.path);
+  request.uploadAuditFailure = { code: "UPLOAD_CONTENT_MISMATCH", message: validation.reason };
+  response.status(400).json({ error: validation.reason, code: "UPLOAD_CONTENT_MISMATCH" });
+  return true;
+}
+
+function promoteValidatedUpload(request, response, destinationDirectory) {
+  const destinationPath = path.join(destinationDirectory, request.file.filename);
+  try {
+    if (fs.existsSync(destinationPath)) throw new Error("目标文件名冲突。");
+    fs.renameSync(request.file.path, destinationPath);
+    request.file.path = destinationPath;
+    return false;
+  } catch (error) {
+    removeStagedUpload(request.file.path);
+    console.error("已校验上传文件入库失败", error);
+    const message = "文件保存失败，请稍后重试。";
+    request.uploadAuditFailure = { code: "UPLOAD_PROMOTION_FAILED", message };
+    response.status(500).json({ error: message, code: "UPLOAD_PROMOTION_FAILED" });
+    return true;
+  }
+}
+
+app.get("/api/uploads/quota", (request, response) => {
+  response.json({
+    success: true,
+    quota: getUserUploadQuota(getDatabase(), request.user.id),
+  });
+});
+
+app.get("/api/uploads/audits", requirePermission("settings.managePermissions"), (request, response) => {
+  response.json({
+    success: true,
+    audits: listUploadAudits(getDatabase(), {
+      userId: request.query.userId,
+      status: request.query.status,
+      limit: request.query.limit,
+    }),
+  });
+});
+
+app.post("/api/uploads/image", requirePermission("uploads.image"), (request, response) => {
   uploadImage.single("image")(request, response, (error) => {
     if (error !== undefined) {
       const message =
         error.code === "LIMIT_FILE_SIZE" ? "图片大小不能超过 10MB。" : error.message || "图片上传失败。";
+      request.uploadAuditFailure = { code: error.code ?? "UPLOAD_IMAGE_REJECTED", message };
       response.status(error.code === "LIMIT_FILE_SIZE" ? 413 : 400).json({ error: message });
       return;
     }
 
     if (request.file === undefined) {
+      request.uploadAuditFailure = { code: "UPLOAD_FILE_REQUIRED", message: "请选择要上传的图片。" };
       response.status(400).json({ error: "请选择要上传的图片。" });
       return;
     }
+    if (rejectInvalidStoredUpload(request, response, "image")) return;
+    if (promoteValidatedUpload(request, response, imageUploadsDir)) return;
 
     response.json({
       url: `/uploads/images/${request.file.filename}`,
@@ -1739,19 +1889,23 @@ app.post("/api/uploads/image", (request, response) => {
   });
 });
 
-app.post("/api/uploads/file", (request, response) => {
+app.post("/api/uploads/file", requirePermission("uploads.file"), (request, response) => {
   uploadFile.single("file")(request, response, (error) => {
     if (error !== undefined) {
       const message =
         error.code === "LIMIT_FILE_SIZE" ? "源文件超过上传限制，请压缩后上传，当前限制为600MB。" : error.message || "文件上传失败。";
+      request.uploadAuditFailure = { code: error.code ?? "UPLOAD_FILE_REJECTED", message };
       response.status(error.code === "LIMIT_FILE_SIZE" ? 413 : 400).json({ error: message });
       return;
     }
 
     if (request.file === undefined) {
+      request.uploadAuditFailure = { code: "UPLOAD_FILE_REQUIRED", message: "请选择要上传的文件。" };
       response.status(400).json({ error: "请选择要上传的文件。" });
       return;
     }
+    if (rejectInvalidStoredUpload(request, response, "file")) return;
+    if (promoteValidatedUpload(request, response, fileUploadsDir)) return;
 
     response.json({
       url: `/uploads/files/${request.file.filename}`,
@@ -1763,19 +1917,23 @@ app.post("/api/uploads/file", (request, response) => {
   });
 });
 
-app.post("/api/uploads/standard-work-attachment", (request, response) => {
+app.post("/api/uploads/standard-work-attachment", requirePermission("uploads.standardWorkAttachment"), (request, response) => {
   uploadSpreadsheet.single("file")(request, response, (error) => {
     if (error !== undefined) {
       const message =
         error.code === "LIMIT_FILE_SIZE" ? "表格附件大小不能超过 20MB。" : error.message || "表格附件上传失败。";
-      response.status(400).json({ error: message });
+      request.uploadAuditFailure = { code: error.code ?? "UPLOAD_ATTACHMENT_REJECTED", message };
+      response.status(error.code === "LIMIT_FILE_SIZE" ? 413 : 400).json({ error: message });
       return;
     }
 
     if (request.file === undefined) {
+      request.uploadAuditFailure = { code: "UPLOAD_FILE_REQUIRED", message: "请选择要上传的表格附件。" };
       response.status(400).json({ error: "请选择要上传的表格附件。" });
       return;
     }
+    if (rejectInvalidStoredUpload(request, response, "spreadsheet")) return;
+    if (promoteValidatedUpload(request, response, standardWorkAttachmentsDir)) return;
 
     response.json({
       url: `/uploads/standard-work-attachments/${request.file.filename}`,

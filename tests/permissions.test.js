@@ -22,6 +22,27 @@ test("权限清单包含独立链接和供应链权限域", () => {
   assert.deepEqual(groupKeys("products"), ["view", "create", "edit", "archive"]);
 });
 
+test("权限清单包含独立上传权限域", () => {
+  assert.deepEqual(groupKeys("uploads"), ["image", "file", "standardWorkAttachment"]);
+});
+
+test("旧账号保留上传能力，显式上传权限边界不会回退", () => {
+  const legacyPermissions = normalizePermissions({
+    modules: { execution: true },
+    tasks: { view: true },
+  });
+  assert.equal(legacyPermissions.uploads.image, true);
+  assert.equal(legacyPermissions.uploads.file, true);
+  assert.equal(legacyPermissions.uploads.standardWorkAttachment, true);
+
+  const explicitPermissions = normalizePermissions({
+    uploads: { image: true, file: false, standardWorkAttachment: false },
+  });
+  assert.equal(explicitPermissions.uploads.image, true);
+  assert.equal(explicitPermissions.uploads.file, false);
+  assert.equal(explicitPermissions.uploads.standardWorkAttachment, false);
+});
+
 test("旧产品查看角色继续获得链接和供应链只读兼容权限", () => {
   const permissions = normalizePermissions({
     modules: { products: true },

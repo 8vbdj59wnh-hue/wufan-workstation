@@ -55,6 +55,34 @@ CREATE TABLE IF NOT EXISTS permission_templates (
   updatedAt TEXT
 );
 
+CREATE TABLE IF NOT EXISTS upload_audits (
+  id TEXT PRIMARY KEY,
+  userId TEXT NOT NULL,
+  requestPath TEXT NOT NULL,
+  method TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  fileCount INTEGER NOT NULL DEFAULT 0,
+  originalNamesJson TEXT NOT NULL DEFAULT '[]',
+  mimeTypesJson TEXT NOT NULL DEFAULT '[]',
+  byteSize INTEGER NOT NULL DEFAULT 0,
+  reservedBytes INTEGER NOT NULL DEFAULT 0,
+  quotaLimitBytes INTEGER NOT NULL,
+  responseStatus INTEGER,
+  reasonCode TEXT,
+  reasonMessage TEXT,
+  ipAddress TEXT,
+  userAgent TEXT,
+  createdAt TEXT NOT NULL,
+  completedAt TEXT,
+  CHECK(status IN ('pending','success','rejected')),
+  CHECK(fileCount >= 0),
+  CHECK(byteSize >= 0),
+  CHECK(reservedBytes >= 0),
+  CHECK(quotaLimitBytes > 0)
+);
+CREATE INDEX IF NOT EXISTS idx_upload_audits_user_created ON upload_audits(userId,createdAt DESC);
+CREATE INDEX IF NOT EXISTS idx_upload_audits_status_created ON upload_audits(status,createdAt DESC);
+
 CREATE TABLE IF NOT EXISTS categories (
   id TEXT PRIMARY KEY,
   type TEXT NOT NULL,

@@ -120,6 +120,15 @@ export const permissionGroups = [
     ],
   },
   {
+    key: "uploads",
+    title: "上传权限",
+    permissions: [
+      { key: "image", label: "上传图片" },
+      { key: "file", label: "上传通用文件" },
+      { key: "standardWorkAttachment", label: "上传关键行动表格附件" },
+    ],
+  },
+  {
     key: "tasks",
     title: "任务权限",
     permissions: [
@@ -287,6 +296,17 @@ function applyContentSchedulePermissionCompatibility(normalized, source, role) {
   }
 }
 
+function applyLegacyUploadPermissionCompatibility(normalized, source) {
+  const hasExplicitUploadBoundary = ["image", "file", "standardWorkAttachment"]
+    .some((permissionKey) => typeof source?.uploads?.[permissionKey] === "boolean");
+  if (hasExplicitUploadBoundary) return;
+  Object.assign(normalized.uploads, {
+    image: true,
+    file: true,
+    standardWorkAttachment: true,
+  });
+}
+
 function normalizeProductCenterAccess(normalized) {
   const canViewProducts = normalized.modules.products === true || normalized.products.view === true;
   normalized.modules.products = canViewProducts;
@@ -379,6 +399,7 @@ export function normalizePermissions(rawPermissions, role = "user") {
     applyLegacyPermissionCompatibility(normalized, source);
     applyContentSchedulePermissionCompatibility(normalized, source, role);
   }
+  applyLegacyUploadPermissionCompatibility(normalized, source);
   normalizeProductCenterAccess(normalized);
   applyLegacyBusinessPermissionCompatibility(normalized, source);
   normalizeBusinessModuleAccess(normalized);
