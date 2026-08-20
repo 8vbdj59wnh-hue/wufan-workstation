@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { createEmptyPermissions } from "../src/permissions.js";
+import { createEmptyPermissions } from "../shared/permissions.js";
 
 function legacyDeniedPermissions() {
   const permissions = createEmptyPermissions("self");

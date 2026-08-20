@@ -1,5 +1,5 @@
 import { getCurrentUser, loadBusinessAnomalies, loadOperationDashboard, loadSalesBusinessDashboard } from "./appState.js";
-import { hasPermission } from "./permissions.js";
+import { hasPermission } from "../shared/permissions.js";
 import { renderUiModule } from "./uiModuleRegistry.js";
 import "./uiModules/salesBusinessDashboard.js";
 import "./uiModules/businessAnomalies.js";

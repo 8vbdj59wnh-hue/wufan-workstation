@@ -88,7 +88,7 @@ import {
   resolveAssetUrl,
 } from "./services/connectionCenterService.js";
 import { getCurrentUser, state } from "./appState.js";
-import { hasPermission } from "./permissions.js";
+import { hasPermission } from "../shared/permissions.js";
 import { escapeHtml } from "./utils/html.js";
 import { CONNECTION_CENTER_SECTIONS, connectionCenterSectionHash, parseConnectionCenterRoute } from "./utils/connectionCenterRoute.js";
 import { renderUiModule } from "./uiModuleRegistry.js";

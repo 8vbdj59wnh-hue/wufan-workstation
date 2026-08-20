@@ -60,7 +60,7 @@ import {
 } from "./services/productCenterService.js";
 import { getCurrentUser, state } from "./stores/appStore.js";
 import { getProcessInstanceBusinessStatus, getProcessInstanceOwner } from "./data/processInstanceSelectors.js";
-import { canAccessModule, hasPermission } from "./permissions.js";
+import { canAccessModule, hasPermission } from "../shared/permissions.js";
 import { normalizeProductSkuCode } from "./data/productSku.js";
 import { escapeHtml } from "./utils/html.js";
 import { renderUiModule } from "./uiModuleRegistry.js";

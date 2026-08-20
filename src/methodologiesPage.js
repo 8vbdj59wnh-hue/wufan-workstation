@@ -9,7 +9,7 @@ import {
   uploadImageFile,
 } from "./appState.js";
 import { rerenderPreservingInputFocus } from "./inputFocus.js";
-import { hasPermission } from "./permissions.js";
+import { hasPermission } from "../shared/permissions.js";
 import { getValueModuleName, inferValueModuleIdFromText, isValueModuleId } from "./data/modelOptions.js";
 
 const demoMethodology = {

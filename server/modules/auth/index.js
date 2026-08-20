@@ -4,4 +4,4 @@ export {
   canLaunchActionTemplate,
   getDataScope,
   hasPermission,
-} from "../../../src/permissions.js";
+} from "../../../shared/permissions.js";

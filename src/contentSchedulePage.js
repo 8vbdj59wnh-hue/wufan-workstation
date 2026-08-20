@@ -22,7 +22,7 @@ import {
   renderBusinessHourOptions,
 } from "./businessTime.js";
 import { getEffectivePublishTime, normalizePublishTimeMode, PublishTimeMode } from "./data/contentPublishTime.js";
-import { canLaunchActionTemplate, hasPermission } from "./permissions.js";
+import { canLaunchActionTemplate, hasPermission } from "../shared/permissions.js";
 import { rerenderPreservingInputFocus } from "./inputFocus.js";
 import { normalizeProductSkuCode, splitProductSkuCodes } from "./data/productSku.js";
 import {

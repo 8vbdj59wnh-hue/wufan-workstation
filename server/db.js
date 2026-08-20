@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { ensureSalesAnomalyActionStandards } from "./capabilities/salesAnomalyActionStandards.js";
 import { hashPassword } from "./security.js";
-import { createEmptyPermissions, mergePermissionSources, normalizePermissions, serializePermissions } from "../src/permissions.js";
+import { createEmptyPermissions, mergePermissionSources, normalizePermissions, serializePermissions } from "../shared/permissions.js";
 import {
   categories,
   companies,
