@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import multer from "multer";
 import * as XLSX from "xlsx";
+import { shouldShowTaskInTaskCenter } from "../shared/taskCenterVisibility.js";
 import {
   closeDatabase,
   createResource,
@@ -1751,6 +1752,7 @@ app.get("/api/task-center/tasks", (request, response) => {
     }
     let items = filterTasksByScope(data.tasks, request.user, data).filter((task) => !isClearanceTask(task));
     items = items.filter((task) => {
+      if (!shouldShowTaskInTaskCenter(task, filters)) return false;
       const identifierMatch = (matchedTaskId !== null && task.id === matchedTaskId)
         || (matchedProcessInstanceId !== null && task.processInstanceId === matchedProcessInstanceId);
       const templateCodeMatch = matchedVisualTemplateProcessInstanceIds.has(task.processInstanceId);

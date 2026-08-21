@@ -40,10 +40,23 @@ try {
   }
   const ordered = samples.map((item) => item.milliseconds).sort((left, right) => left - right);
   const latest = samples.at(-1);
+  if (latest.data.items.some((item) => item.source === "process")) throw new Error("默认任务列表仍展示改善行动任务。");
   const directTasks = await measure(`http://127.0.0.1:${port}/api/task-center/tasks?page=1&pageSize=100&view=all&filters=${encodeURIComponent(JSON.stringify({ source: "direct", showDone: true, showCanceled: true }))}`);
-  const improvementTasks = await measure(`http://127.0.0.1:${port}/api/task-center/tasks?page=1&pageSize=100&view=all&filters=${encodeURIComponent(JSON.stringify({ source: "process", showDone: true, showCanceled: true }))}`);
+  const hiddenImprovementTasks = await measure(`http://127.0.0.1:${port}/api/task-center/tasks?page=1&pageSize=100&view=all&filters=${encodeURIComponent(JSON.stringify({ source: "process", showDone: true, showCanceled: true }))}`);
+  const improvementTasks = await measure(`http://127.0.0.1:${port}/api/task-center/tasks?page=1&pageSize=100&view=all&filters=${encodeURIComponent(JSON.stringify({ source: "process", showDone: true, showCanceled: true, showImprovementTasks: true }))}`);
+  const allVisibleTasks = await measure(`http://127.0.0.1:${port}/api/task-center/tasks?page=1&pageSize=100&view=all&filters=${encodeURIComponent(JSON.stringify({ showDone: true, showCanceled: true, showImprovementTasks: true }))}`);
+  if (hiddenImprovementTasks.data.total !== 0) throw new Error("未勾选时仍可通过任务类型返回改善行动任务。");
   if (directTasks.data.items.some((item) => item.source === "process")) throw new Error("普通任务类型筛选返回了改善行动任务。");
   if (improvementTasks.data.items.some((item) => item.source !== "process")) throw new Error("改善行动任务类型筛选返回了普通任务。");
+  if (allVisibleTasks.data.total !== directTasks.data.total + improvementTasks.data.total) throw new Error("勾选后的任务总数与普通任务、改善行动任务数量不一致。");
+  const viewResults = {};
+  for (const view of ["today", "mine", "overdue", "all"]) {
+    const hidden = await measure(`http://127.0.0.1:${port}/api/task-center/tasks?page=1&pageSize=100&view=${view}&filters=${encodeURIComponent(JSON.stringify({ showDone: true, showCanceled: true }))}`);
+    const shown = await measure(`http://127.0.0.1:${port}/api/task-center/tasks?page=1&pageSize=100&view=${view}&filters=${encodeURIComponent(JSON.stringify({ showDone: true, showCanceled: true, showImprovementTasks: true }))}`);
+    if (hidden.data.items.some((item) => item.source === "process")) throw new Error(`${view}视图默认仍展示改善行动任务。`);
+    if (shown.data.total < hidden.data.total) throw new Error(`${view}视图勾选后的数量反而减少。`);
+    viewResults[view] = { hidden: hidden.data.total, shown: shown.data.total, added: shown.data.total - hidden.data.total };
+  }
   const doneTasks = await measure(`http://127.0.0.1:${port}/api/task-center/tasks?page=1&pageSize=100&view=all&filters=${encodeURIComponent(JSON.stringify({ status: "done" }))}`);
   const canceledTasks = await measure(`http://127.0.0.1:${port}/api/task-center/tasks?page=1&pageSize=100&view=all&filters=${encodeURIComponent(JSON.stringify({ status: "canceled" }))}`);
   if (doneTasks.data.items.some((item) => item.status !== "done")) throw new Error("已完成状态筛选返回了其他状态。");
@@ -51,7 +64,7 @@ try {
   if (doneTasks.data.total === 0) throw new Error("已完成状态筛选没有返回实际存在的已完成任务。");
   const searchableAction = improvementTasks.data.context?.processInstances?.find((item) => item.businessCode);
   if (searchableAction) {
-    const actionSearch = await measure(`http://127.0.0.1:${port}/api/task-center/tasks?page=1&pageSize=100&view=today&keyword=${encodeURIComponent(searchableAction.businessCode)}&filters=%7B%7D`);
+    const actionSearch = await measure(`http://127.0.0.1:${port}/api/task-center/tasks?page=1&pageSize=100&view=today&keyword=${encodeURIComponent(searchableAction.businessCode)}&filters=${encodeURIComponent(JSON.stringify({ showImprovementTasks: true }))}`);
     if (actionSearch.data.total === 0) throw new Error("使用行动编码搜索没有返回任务。");
     if (actionSearch.data.items.some((item) => item.processInstanceId !== searchableAction.id)) throw new Error("行动编码搜索返回了其他行动的任务。");
   }
@@ -65,6 +78,7 @@ try {
     returnedTasks: latest.data.items.length,
     directTaskCount: directTasks.data.total,
     improvementTaskCount: improvementTasks.data.total,
+    improvementVisibilityByView: viewResults,
     doneTaskCount: doneTasks.data.total,
     canceledTaskCount: canceledTasks.data.total,
     p50Milliseconds: Number(ordered[Math.floor(ordered.length * 0.5)].toFixed(1)),

@@ -44,6 +44,7 @@ import {
   canLaunchAnyActionTemplate,
   hasPermission,
 } from "../shared/permissions.js";
+import { shouldShowTaskInTaskCenter } from "../shared/taskCenterVisibility.js";
 import {
   CategoryType,
   GoalStatus,
@@ -149,6 +150,7 @@ let filters = {
   overdue: "",
   showDone: false,
   showCanceled: false,
+  showImprovementTasks: false,
 };
 let processProgressFilters = {
   keyword: "",
@@ -1394,6 +1396,7 @@ function matchesFilters(task, identifierTarget = null, isTemplateCodeSearch = fa
   ].join(" ").toLowerCase();
 
   if (!matchesTaskStatusFilter(task, filters.status)) return false;
+  if (!shouldShowTaskInTaskCenter(task, filters)) return false;
   if (!shouldShowDone && isDoneStatus(task.status)) return false;
   if (!shouldShowCanceled && isCanceledStatus(task.status)) return false;
   if (identifierTarget !== null && !taskMatchesIdentifierSearch(task, identifierTarget)) return false;
@@ -3123,6 +3126,11 @@ function renderFilters() {
   const filterOptions = `
     <div class="task-filter-options">
       <label class="checkbox-field task-filter-checkbox">
+        <input name="showImprovementTasks" type="checkbox" ${filters.showImprovementTasks ? "checked" : ""} />
+        <span>显示改善行动任务</span>
+      </label>
+      ${taskListView === "overdue" ? "" : `
+      <label class="checkbox-field task-filter-checkbox">
         <input name="showDone" type="checkbox" ${filters.showDone ? "checked" : ""} />
         <span>显示已完成</span>
       </label>
@@ -3130,6 +3138,7 @@ function renderFilters() {
         <input name="showCanceled" type="checkbox" ${filters.showCanceled ? "checked" : ""} />
         <span>显示已取消</span>
       </label>
+      `}
     </div>
   `;
 
@@ -3165,7 +3174,7 @@ function renderFilters() {
       </label>
       ${taskListView === "overdue" ? "" : overdueFilter}
       ${peopleFilters}
-      ${taskListView === "overdue" ? "" : filterOptions}
+      ${filterOptions}
     </form>
   `;
 }
@@ -4656,6 +4665,7 @@ function updateFilters(form) {
     overdue: formData.get("overdue")?.toString() ?? "",
     showDone: formData.has("showDone"),
     showCanceled: formData.has("showCanceled"),
+    showImprovementTasks: formData.has("showImprovementTasks"),
   };
 }
 
@@ -6377,7 +6387,15 @@ export function bindTasksPageEvents(rerender) {
     updateFilters(filterForm);
     if (keywordInput !== null) keywordInput.dataset.pendingTaskSearch = "true";
   });
-  filterForm.addEventListener("change", () => {
+  filterForm.addEventListener("change", (event) => {
+    const sourceSelect = filterForm.querySelector('select[name="source"]');
+    const improvementCheckbox = filterForm.querySelector('input[name="showImprovementTasks"]');
+    if (event.target === sourceSelect && sourceSelect?.value === TaskSource.Process && improvementCheckbox !== null) {
+      improvementCheckbox.checked = true;
+    }
+    if (event.target === improvementCheckbox && !improvementCheckbox.checked && sourceSelect?.value === TaskSource.Process) {
+      sourceSelect.value = "";
+    }
     updateFilters(filterForm);
     void refreshTaskCenterList(rerender, { resetPage: true });
   });
