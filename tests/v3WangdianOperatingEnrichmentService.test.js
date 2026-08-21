@@ -61,6 +61,8 @@ test("近期已确认Bundle身份复用当前结构且不重复请求", async ()
   assert.equal(requests, 0);
   assert.equal(result.identityCacheHits, 1);
   assert.deepEqual(result.liveObservations.pack.suite.components.map((item) => [item.skuCode, item.quantity]), [["A", 2]]);
+  assert.deepEqual(result.bundleSources.pack.components, [{ erpSkuId: "erp-a", skuCode: "A", quantity: 2 }]);
+  assert.equal(result.bundleSources.pack.sourceUpdatedAt, "2026-08-20T23:00:00.000Z");
   database.close();
 });
 

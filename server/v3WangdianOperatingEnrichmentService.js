@@ -85,6 +85,17 @@ export async function enrichOperatingErpObjects(input = {}, options = {}) {
   const erpByCode = new Map(database.prepare("SELECT id,merchantSkuCode FROM erp_skus WHERE currentState='active'").all().map((item) => [normalized(item.merchantSkuCode), item]));
   const liveObservations = Object.fromEntries(targetSet.cached.map((item) => [normalized(item.code), item]));
   const bundleSources = {};
+  for (const observation of targetSet.cached) {
+    if (!observation.suite || observation.suite.deleted) continue;
+    bundleSources[normalized(observation.code)] = {
+      sourceUpdatedAt: observation.suite.modifiedAt || null,
+      components: observation.suite.components.filter((item) => !item.deleted).map((item) => ({
+        erpSkuId: erpByCode.get(normalized(item.skuCode))?.id || null,
+        skuCode: clean(item.skuCode),
+        quantity: Number(item.quantity),
+      })),
+    };
+  }
   let cursor = 0;
   const workers = Array.from({ length: Math.min(Math.max(1, Number(options.concurrency || 8)), rows.length) }, async () => {
     while (cursor < rows.length) {
