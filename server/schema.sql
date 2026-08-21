@@ -764,6 +764,29 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_erp_sku_business_usages_open_suggestion
 CREATE INDEX IF NOT EXISTS idx_erp_sku_business_usages_status_updated
   ON erp_sku_business_usages(status,updatedAt DESC);
 
+-- Architecture Upgrade-003 Phase 9B: ERP purpose is independent from the
+-- operating lifecycle and from the legacy sales-line business usage contract.
+-- Automatic evidence remains a read-only projection; this table stores only an
+-- administrator's explicit confirmation and must not be overwritten by sync.
+CREATE TABLE IF NOT EXISTS erp_sku_usage_profiles (
+  erpSkuId TEXT PRIMARY KEY,
+  confirmedPrimaryUsage TEXT NOT NULL,
+  confirmedSaleGoods INTEGER NOT NULL DEFAULT 0,
+  confirmedBundleComponent INTEGER NOT NULL DEFAULT 0,
+  confirmedBy TEXT NOT NULL,
+  confirmedAt TEXT NOT NULL,
+  evidenceNote TEXT NOT NULL,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),
+  FOREIGN KEY(confirmedBy) REFERENCES persons(id),
+  CHECK(confirmedPrimaryUsage IN ('sale_goods','packaging_material','consumable_auxiliary','unknown')),
+  CHECK(confirmedSaleGoods IN (0,1)),
+  CHECK(confirmedBundleComponent IN (0,1))
+);
+CREATE INDEX IF NOT EXISTS idx_erp_sku_usage_profiles_usage
+  ON erp_sku_usage_profiles(confirmedPrimaryUsage,updatedAt DESC);
+
 CREATE TRIGGER IF NOT EXISTS trg_erp_sku_usage_supersedes_insert
   BEFORE INSERT ON erp_sku_business_usages
   WHEN NEW.supersedesUsageId IS NOT NULL
@@ -2902,6 +2925,26 @@ CREATE INDEX IF NOT EXISTS idx_operating_erp_evidence_active_source
   ON operating_erp_set_evidence(active,sourceType,normalizedCode);
 CREATE INDEX IF NOT EXISTS idx_operating_erp_evidence_object
   ON operating_erp_set_evidence(sourceObjectType,sourceObjectId,active);
+
+CREATE TABLE IF NOT EXISTS operating_erp_lifecycle_events (
+  id TEXT PRIMARY KEY,
+  normalizedCode TEXT NOT NULL COLLATE NOCASE,
+  erpSkuId TEXT,
+  fromStatus TEXT,
+  toStatus TEXT NOT NULL,
+  sourceTypesJson TEXT NOT NULL DEFAULT '[]',
+  reason TEXT NOT NULL,
+  calculatedAt TEXT NOT NULL,
+  createdAt TEXT NOT NULL,
+  FOREIGN KEY(normalizedCode) REFERENCES operating_erp_set_members(normalizedCode),
+  FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),
+  CHECK(fromStatus IS NULL OR fromStatus IN ('active','active_dependency','sales_active','archived','external_unused','unresolved')),
+  CHECK(toStatus IN ('active','active_dependency','sales_active','archived','external_unused','unresolved'))
+);
+CREATE INDEX IF NOT EXISTS idx_operating_erp_lifecycle_events_code_time
+  ON operating_erp_lifecycle_events(normalizedCode,calculatedAt DESC);
+CREATE INDEX IF NOT EXISTS idx_operating_erp_lifecycle_events_transition
+  ON operating_erp_lifecycle_events(fromStatus,toStatus,calculatedAt DESC);
 
 -- Architecture Upgrade-003 Phase 2: read-only Wangdian identity observations.
 -- These tables are a shadow contract only. They do not replace ERP SKU, Sales Object,

@@ -1124,8 +1124,8 @@ export async function loadProductManagementOverview() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/overview`), "产品经营概览读取失败。");
 }
 
-export async function loadProductCenterV2Skus({ search = "", includeUnarchived = false, profileStatus = "all", erpStatus = "", brand = "", category = "", lifecycleStatus = "", platform = "", stockStatus = "", businessZone = "all", sort = "updated-desc", limit = 50, offset = 0 } = {}) {
-  const query = new URLSearchParams({ search, includeUnarchived: String(includeUnarchived === true), profileStatus, erpStatus, brand, category, lifecycleStatus, platform, stockStatus, businessZone, sort, limit: String(limit), offset: String(offset) });
+export async function loadProductCenterV2Skus({ search = "", includeUnarchived = false, includeHistorical = false, profileStatus = "all", erpStatus = "", brand = "", category = "", lifecycleStatus = "", operatingLifecycleStatus = "", platform = "", stockStatus = "", businessZone = "all", sort = "updated-desc", limit = 50, offset = 0 } = {}) {
+  const query = new URLSearchParams({ search, includeUnarchived: String(includeUnarchived === true), includeHistorical: String(includeHistorical === true), profileStatus, erpStatus, brand, category, lifecycleStatus, operatingLifecycleStatus, platform, stockStatus, businessZone, sort, limit: String(limit), offset: String(offset) });
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-center-v2/skus?${query}`), "ERP SKU列表读取失败。");
 }
 
@@ -1133,8 +1133,8 @@ export async function loadProductCenterV2Metadata() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-center-v2/metadata`), "ERP SKU筛选摘要读取失败。");
 }
 
-export async function loadProductComboSkus({ search = "", limit = 20, offset = 0 } = {}) {
-  const query = new URLSearchParams({ search, limit: String(limit), offset: String(offset) });
+export async function loadProductComboSkus({ search = "", includeHistorical = false, limit = 20, offset = 0 } = {}) {
+  const query = new URLSearchParams({ search, includeHistorical: String(includeHistorical === true), limit: String(limit), offset: String(offset) });
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-center-v2/combo-skus?${query}`), "组合SKU列表读取失败。");
 }
 

@@ -3,6 +3,11 @@ import { resolveLinkSkuSalesObjects } from "./capabilities/resolveLinkSkuSalesOb
 
 const clean = (value) => String(value ?? "").trim();
 const number = (value) => Number(value || 0);
+const enabled = (value) => value === true || clean(value).toLowerCase() === "true" || clean(value) === "1";
+
+function operatingLifecycleReady(database) {
+  return Number(database.prepare("SELECT COUNT(*) total FROM operating_erp_set_members WHERE salesObjectId IS NOT NULL").get()?.total || 0) > 0;
+}
 
 function objectNameSql(alias = "o") {
   return `COALESCE((SELECT NULLIF(json_extract(s.sourceReferenceJson,'$.suiteName'),'') FROM sales_object_structures s
@@ -54,9 +59,16 @@ export function listSalesObjectComboSkus(input = {}, options = {}) {
   const offset = Math.max(0, Number(input.offset) || 0);
   const keyword = clean(input.search || input.keyword);
   const params = { limit, offset, keyword: `%${keyword}%` };
-  const where = `o.objectType='bundle' AND o.status='active' AND (@keyword='%%' OR o.objectCode LIKE @keyword OR ${objectNameSql("o")} LIKE @keyword)`;
+  const lifecycleReady = operatingLifecycleReady(database);
+  const lifecycleFilter = lifecycleReady && !enabled(input.includeHistorical)
+    ? " AND EXISTS (SELECT 1 FROM operating_erp_set_members om WHERE om.salesObjectId=o.id AND om.lifecycleStatus IN ('active','sales_active'))"
+    : "";
+  const where = `o.objectType='bundle' AND o.status='active'${lifecycleFilter} AND (@keyword='%%' OR o.objectCode LIKE @keyword OR ${objectNameSql("o")} LIKE @keyword)`;
   const total = number(database.prepare(`SELECT COUNT(*) count FROM sales_objects o WHERE ${where}`).get(params)?.count);
   const rows = database.prepare(`SELECT o.id salesObjectId,o.objectCode,${objectNameSql("o")} name,o.objectType,o.status,o.updatedAt,
+      ${lifecycleReady ? `(SELECT om.lifecycleStatus FROM operating_erp_set_members om
+        WHERE om.salesObjectId=o.id
+        ORDER BY CASE om.lifecycleStatus WHEN 'active' THEN 0 WHEN 'sales_active' THEN 1 ELSE 2 END LIMIT 1)` : "NULL"} operatingLifecycleStatus,
       s.id structureId,s.version,COUNT(DISTINCT c.erpSkuId) componentCount,
       COUNT(DISTINCT r.linkSkuId) linkedLinkSkuCount,COUNT(DISTINCT l.id) linkedSalesLinkCount,
       COUNT(DISTINCT pm.productId) linkedProductCount
@@ -81,7 +93,9 @@ export function listSalesObjectComboSkus(input = {}, options = {}) {
       linkedProductCount: number(row.linkedProductCount),
       salesAmount: cardData.get(row.salesObjectId)?.salesAmount || 0,
       componentProducts: cardData.get(row.salesObjectId)?.componentProducts || [],
+      operatingLifecycleStatus: row.operatingLifecycleStatus || null,
     })),
+    lifecycle: { ready: lifecycleReady, includeHistorical: enabled(input.includeHistorical) },
   };
 }
 

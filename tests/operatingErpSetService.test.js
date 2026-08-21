@@ -30,7 +30,7 @@ function fixture() {
       id TEXT PRIMARY KEY,linkSkuId TEXT,salesObjectId TEXT,effectiveFrom TEXT,effectiveTo TEXT,status TEXT,sourceBatchId TEXT
     );
     CREATE TABLE sales_object_structures (
-      id TEXT PRIMARY KEY,salesObjectId TEXT,version INTEGER,status TEXT
+      id TEXT PRIMARY KEY,salesObjectId TEXT,version INTEGER,status TEXT,sourceType TEXT,sourceState TEXT
     );
     CREATE TABLE sales_object_structure_components (
       id TEXT PRIMARY KEY,structureId TEXT,salesObjectId TEXT,erpSkuId TEXT,quantity REAL,status TEXT
@@ -55,6 +55,10 @@ function fixture() {
       calculatedAt TEXT NOT NULL,metadataJson TEXT NOT NULL,createdAt TEXT NOT NULL,updatedAt TEXT NOT NULL,
       UNIQUE(normalizedCode,sourceType,sourceObjectType,sourceObjectId)
     );
+    CREATE TABLE operating_erp_lifecycle_events (
+      id TEXT PRIMARY KEY,normalizedCode TEXT NOT NULL COLLATE NOCASE,erpSkuId TEXT,fromStatus TEXT,toStatus TEXT NOT NULL,
+      sourceTypesJson TEXT NOT NULL,reason TEXT NOT NULL,calculatedAt TEXT NOT NULL,createdAt TEXT NOT NULL
+    );
   `);
   const now = "2026-08-21T00:00:00.000Z";
   db.prepare("INSERT INTO erp_import_batches VALUES (?,?,?,?,?,?,?,?)")
@@ -64,13 +68,13 @@ function fixture() {
   const insertObject = db.prepare("INSERT INTO sales_objects VALUES (?,?,?,?,?,?,?)");
   for (const code of ["A", "C", "F", "G", "H"]) insertObject.run(`so-${code}`, code, code.toLowerCase(), "single", "active", "2026-01-01", now);
   insertObject.run("so-bundle", "BUNDLE-1", "bundle-1", "bundle", "active", "2026-01-01", now);
-  const insertStructure = db.prepare("INSERT INTO sales_object_structures VALUES (?,?,?,?)");
+  const insertStructure = db.prepare("INSERT INTO sales_object_structures VALUES (?,?,?,?,?,?)");
   const insertComponent = db.prepare("INSERT INTO sales_object_structure_components VALUES (?,?,?,?,?,?)");
   for (const code of ["A", "C", "F", "G", "H"]) {
-    insertStructure.run(`st-${code}`, `so-${code}`, 1, "active");
+    insertStructure.run(`st-${code}`, `so-${code}`, 1, "active", "v3_auto_projection", "active");
     insertComponent.run(`sc-${code}`, `st-${code}`, `so-${code}`, `erp-${code}`, 1, "active");
   }
-  insertStructure.run("st-bundle", "so-bundle", 1, "active");
+  insertStructure.run("st-bundle", "so-bundle", 1, "active", "wangdian_suite_api", "active");
   insertComponent.run("sc-bundle-b", "st-bundle", "so-bundle", "erp-B", 2, "active");
   insertComponent.run("sc-bundle-h", "st-bundle", "so-bundle", "erp-H", 1, "active");
   const insertSku = db.prepare("INSERT INTO sales_link_skus VALUES (?,?,?,?,?,?,?,?)");
@@ -110,7 +114,36 @@ test("Bundle Dependency只展开当前经营Bundle组件", () => {
   const db = fixture();
   const result = calculate(db);
   assert.equal(member(result, "B").lifecycleStatus, "active_dependency");
-  assert(result.evidence.some((item) => item.normalizedCode === "b" && item.sourceType === "bundle_dependency"));
+  const evidence = result.evidence.find((item) => item.normalizedCode === "b" && item.sourceType === "bundle_dependency");
+  assert.equal(JSON.parse(evidence.metadataJson).structureSourceType,"wangdian_suite_api");
+  db.close();
+});
+
+test("历史Excel结构不能定义当前Dependency", () => {
+  const db = fixture();
+  db.prepare("UPDATE sales_object_structures SET sourceType='combo_master_excel' WHERE id='st-bundle'").run();
+  const result = calculate(db);
+  assert.equal(member(result,"B").lifecycleStatus,"archived");
+  assert.ok(!result.evidence.some((item)=>item.normalizedCode==="b"&&item.sourceType==="bundle_dependency"));
+  assert.ok(result.exceptions.some((item)=>item.type==="bundle_authoritative_bom_missing"&&item.code==="BUNDLE-1"));
+  db.close();
+});
+
+test("旺店通当前BOM移除Component后Dependency重新计算", () => {
+  const db = fixture();
+  db.prepare("DELETE FROM sales_object_structure_components WHERE id='sc-bundle-b'").run();
+  const result = calculate(db);
+  assert.equal(member(result,"B").lifecycleStatus,"archived");
+  assert.equal(result.summary.operatingErpSet,4);
+  db.close();
+});
+
+test("旺店通Suite已移除时进入source conflict而不回退Excel", () => {
+  const db = fixture();
+  db.prepare("UPDATE sales_object_structures SET status='inactive',sourceState='source_removed' WHERE id='st-bundle'").run();
+  const result = calculate(db);
+  assert.equal(member(result,"B").lifecycleStatus,"archived");
+  assert.ok(result.exceptions.some((item)=>item.type==="bundle_source_conflict"&&item.sourceRemoved===true));
   db.close();
 });
 
@@ -179,6 +212,8 @@ test("重复计算与物化保持幂等", () => {
   assert.equal(repeated.materialization.membersChanged, 0);
   assert.equal(repeated.materialization.evidenceChanged, 0);
   assert.equal(repeated.materialization.evidenceDeactivated, 0);
+  assert.equal(repeated.materialization.lifecycleEventsChanged, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) total FROM operating_erp_lifecycle_events").get().total, 8);
   assert.equal(queryOperatingErpSet({ sourceType: "bundle_dependency" }, { database: db }).total, 2);
   db.close();
 });

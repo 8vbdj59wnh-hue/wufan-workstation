@@ -93,17 +93,17 @@ let unmatchedSkuState = { loading: false, loaded: false, rows: [], total: 0, que
 let platformProductLinkState = { skuId: "", query: "", selectedProductId: "", error: "" };
 let productSubmodule = "business-dashboard";
 let pendingSkuState = { loading: false, loaded: false, rows: [], query: "", error: "", notice: "" };
-let comboSkuState = { loading: false, loaded: false, rows: [], detail: null, search: "", viewMode: "card", page: 1, pageSize: 20, pagination: { total: 0 }, error: "" };
+let comboSkuState = { loading: false, loaded: false, rows: [], detail: null, search: "", includeHistorical: false, viewMode: "card", page: 1, pageSize: 20, pagination: { total: 0 }, error: "" };
 let selectedPendingSkuIds = new Set();
 let platformPreviewRequestId = 0;
 let productManagementState = { overview: null, details: new Map(), loadingOverview: false, loadingProductId: "", error: "", notice: "" };
-let productSkuV2State = { loading: false, loaded: false, rows: [], detail: null, detailId: "", search: "", includeUnarchived: false, profileStatus: "all", erpStatus: "", brand: "", category: "", lifecycleStatus: "", platform: "", stockStatus: "", businessZone: "all", sort: "updated-desc", facets: { brands: [], categories: [], lifecycleStatuses: [], platforms: [] }, page: 1, pageSize: 50, pagination: { total: 0 }, summary: { total: 0, profiled: 0, unprofiled: 0, businessZones: {} }, error: "", notice: "" };
+let productSkuV2State = { loading: false, loaded: false, rows: [], detail: null, detailId: "", search: "", includeUnarchived: false, includeHistorical: false, profileStatus: "all", erpStatus: "", brand: "", category: "", lifecycleStatus: "", operatingLifecycleStatus: "", platform: "", stockStatus: "", businessZone: "all", sort: "updated-desc", facets: { brands: [], categories: [], lifecycleStatuses: [], operatingLifecycleStatuses: [], platforms: [] }, page: 1, pageSize: 50, pagination: { total: 0 }, summary: { total: 0, profiled: 0, unprofiled: 0, historical: 0, businessZones: {} }, error: "", notice: "" };
 let productSkuV2RequestId = 0;
 let productSkuV2SearchTimer = 0;
 let productSkuV2MetadataLoading = false;
 let productWorkspaceState = { activeTab: "overview", sections: {}, marketingMode: "read", marketingNotice: "", dailySales: { data: null, loading: false, loaded: false, rangePreset: "30d", error: "" } };
 let productBusinessDashboardState = { readModel: null, loading: false, error: "" };
-let productBusinessFilters = { query: "", brand: "", category: "", lifecycle: "", status: "", healthStatus: "", inventoryStatus: "", ownerId: "", range: "30d", periodStart: "", periodEnd: "", sortBy: "updatedAt", sortDirection: "desc", page: 1, pageSize: 30 };
+let productBusinessFilters = { query: "", brand: "", category: "", lifecycle: "", status: "", healthStatus: "", inventoryStatus: "", ownerId: "", includeHistorical: false, range: "30d", periodStart: "", periodEnd: "", sortBy: "updatedAt", sortDirection: "desc", page: 1, pageSize: 30 };
 let productBusinessVisibleMetrics = new Set(["sales", "structure", "inventory", "profit", "health", "diagnosis"]);
 
 const productBusinessMetricGroups = [
@@ -419,6 +419,7 @@ function renderProductBusinessFilters(readModel) {
       <select name="healthStatus">${renderBusinessSelect(options.healthStatuses, productBusinessFilters.healthStatus, "全部健康状态", (value) => value, (value) => healthLabels[value] || value)}</select>
       <select name="inventoryStatus">${renderBusinessSelect(options.inventoryStatuses, productBusinessFilters.inventoryStatus, "全部库存状态", (value) => value, (value) => inventoryLabels[value] || value)}</select>
       <select name="ownerId">${renderBusinessSelect(options.owners, productBusinessFilters.ownerId, "全部负责人", (value) => value.id, (value) => value.name)}</select>
+      <label class="product-unarchived-toggle"><input type="checkbox" name="includeHistorical" ${productBusinessFilters.includeHistorical ? "checked" : ""}/><span>显示历史产品</span></label>
     </div>
     <div class="product-business-period">
       <span>销售周期</span>
@@ -521,9 +522,11 @@ function renderProductSkuV2List() {
       <select name="brand">${renderFilterOptions(facets.brands ?? [], productSkuV2State.brand, "全部品牌")}</select>
       <select name="category">${renderFilterOptions(facets.categories ?? [], productSkuV2State.category, "全部分类")}</select>
       <label class="product-unarchived-toggle"><input type="checkbox" name="includeUnarchived" ${productSkuV2State.includeUnarchived ? "checked" : ""} /><span>显示未建档产品</span></label>
+      <label class="product-unarchived-toggle"><input type="checkbox" name="includeHistorical" ${productSkuV2State.includeHistorical ? "checked" : ""} /><span>显示历史/非经营ERP SKU</span></label>
       <details class="product-more-filters" ${productSkuV2State.erpStatus || productSkuV2State.lifecycleStatus || productSkuV2State.platform || productSkuV2State.stockStatus ? "open" : ""}>
         <summary>更多筛选</summary><div>
           <select name="lifecycleStatus">${renderFilterOptions(facets.lifecycleStatuses ?? [], productSkuV2State.lifecycleStatus, "全部生命周期")}</select>
+          <select name="operatingLifecycleStatus"><option value="">全部经营状态</option>${(facets.operatingLifecycleStatuses || []).map((item) => `<option value="${escapeHtml(item.value)}" ${productSkuV2State.operatingLifecycleStatus === item.value ? "selected" : ""}>${escapeHtml(({ active: "当前经营", active_dependency: "组合依赖", sales_active: "近期销售", archived: "历史经营", external_unused: "外部/未使用" })[item.value] || item.value)} (${item.total})</option>`).join("")}</select>
           <select name="platform">${renderFilterOptions(facets.platforms ?? [], productSkuV2State.platform, "全部销售平台")}</select>
           <select name="stockStatus"><option value="">全部库存</option><option value="available" ${productSkuV2State.stockStatus === "available" ? "selected" : ""}>有库存</option><option value="low" ${productSkuV2State.stockStatus === "low" ? "selected" : ""}>低库存</option><option value="empty" ${productSkuV2State.stockStatus === "empty" ? "selected" : ""}>无库存</option></select>
           <details><summary>技术筛选</summary><input name="erpStatus" value="${escapeHtml(productSkuV2State.erpStatus)}" placeholder="ERP状态" /></details>
@@ -547,10 +550,13 @@ function renderProductSkuV2Cards(rows) {
     const product = item.productId ? state.products.find((entry) => entry.id === item.productId) : null;
     const title = item.productName || item.goodsName || item.specificationName || item.merchantSkuCode;
     const imageSource = { mainImage: item.productImage || item.skuImage, name: title };
+    const usageLabel = ({ sale_goods: "销售商品", packaging_material: "包装材料", consumable_auxiliary: "耗材/辅料", unknown: "用途待确认" })[item.erpUsage?.primaryUsage] || "用途待确认";
+    const lifecycleLabel = ({ active: "当前经营", active_dependency: "组合依赖", sales_active: "近期销售", archived: "历史经营", external_unused: "外部/未使用" })[item.operatingLifecycleStatus] || "状态待确认";
     return `<article class="product-archive-card ${item.productId ? "is-profiled" : "is-unprofiled"}" data-action="view-product-v2-sku" data-erp-sku-id="${escapeHtml(item.erpSkuId)}" role="button" tabindex="0" aria-label="查看SKU：${escapeHtml(title)}">
       <div class="product-archive-card-media">${renderImage(imageSource, "product-card-image")}</div>
       <div class="product-archive-card-body">
         <div class="product-archive-card-heading"><h3 title="${escapeHtml(title)}">${escapeHtml(title)}</h3>${businessZoneBadge(item.businessZone)}</div>
+        <small class="product-card-listed-at">${escapeHtml(usageLabel)} · ${escapeHtml(lifecycleLabel)}${item.erpUsage?.saleGoods ? " · 直接销售" : ""}${item.erpUsage?.bundleComponent ? " · 参与组合装" : ""}</small>
         <div class="product-card-metrics">
           <div><strong>${formatMoney(item.salesAmount)}</strong><span>销售表现</span></div>
           <div><strong>${formatMoney(item.profitAmount)}</strong><span>利润</span></div>
@@ -596,7 +602,12 @@ function renderProductSkuV2Detail() {
       <div>${renderUiModule("product_ai_tools", { productId: sku.productId, notice: productWorkspaceState.marketingNotice })}${renderUiModule("product_lifecycle_strategy", moduleContext)}</div>
     </div>
   </div>`;
-  if (activeTab === "sku") tabContent = `<section class="product-workspace-panel">${renderInfoGroup("SKU与ERP关系", [["SKU编码",sku.merchantSkuCode],["规格",sku.specificationName],["条码",sku.barcode],["单位",sku.unit],["ERP状态",sku.erpStatus],["ERP货品",`${sku.goodsCode || "—"} · ${sku.goodsName || "—"}`],["档案映射",sku.mappingState]])}</section>`;
+  if (activeTab === "sku") {
+    const usage = detail.erpUsage;
+    const usageLabel = ({ sale_goods: "销售商品", packaging_material: "包装材料", consumable_auxiliary: "耗材/辅料", unknown: "用途待确认" })[usage?.primaryUsage] || "用途待确认";
+    const lifecycleLabel = ({ active: "当前经营", active_dependency: "组合依赖", sales_active: "近期销售", archived: "历史经营", external_unused: "外部/未使用" })[sku.operatingLifecycleStatus] || "状态待确认";
+    tabContent = `<section class="product-workspace-panel">${renderInfoGroup("SKU与ERP关系", [["SKU编码",sku.merchantSkuCode],["用途",usageLabel],["经营状态",lifecycleLabel],["Product",sku.productName || "—"],["当前库存",inventory?.stockNum ?? "—"],["直接销售",usage?.saleGoods ? "是" : "否"],["参与组合装",usage?.bundleComponent ? "是" : "否"],["规格",sku.specificationName],["条码",sku.barcode],["单位",sku.unit],["ERP货品",`${sku.goodsCode || "—"} · ${sku.goodsName || "—"}`]])}</section>`;
+  }
   if (activeTab === "marketing") {
     tabContent = !sku.productId
       ? `<section class="product-workspace-panel"><div class="empty-state">需先建立产品档案，才能维护产品营销资产。</div></section>`
@@ -641,7 +652,7 @@ function renderProductSubmoduleTabs() {
 function renderComboSkuList() {
   const total = Number(comboSkuState.pagination.total || 0); const totalPages = Math.max(1, Math.ceil(total / comboSkuState.pageSize));
   return `<section class="product-center-page"><div class="section-heading"><div><h1>组合装管理</h1><p>组合装是 Sales Object(bundle)，由一个或多个 ERP SKU 按数量组成的销售组合</p></div></div>${renderProductWorkspaceTabs()}${renderProductSubmoduleTabs()}
-    <form class="filter-bar" data-combo-sku-search><input type="search" name="search" value="${escapeHtml(comboSkuState.search)}" placeholder="搜索组合装编码或名称"/><button class="secondary-button" type="submit">搜索</button></form>
+    <form class="filter-bar" data-combo-sku-search><input type="search" name="search" value="${escapeHtml(comboSkuState.search)}" placeholder="搜索组合装编码或名称"/><label class="product-unarchived-toggle"><input type="checkbox" name="includeHistorical" ${comboSkuState.includeHistorical ? "checked" : ""}/><span>显示历史组合装</span></label><button class="secondary-button" type="submit">搜索</button></form>
     <div class="product-list-toolbar"><span>当前筛选 ${total} 个组合装</span><div class="product-view-switch" aria-label="组合装视图"><button type="button" data-action="combo-sku-view" data-view="card" class="${comboSkuState.viewMode === "card" ? "is-active" : ""}">卡片</button><button type="button" data-action="combo-sku-view" data-view="table" class="${comboSkuState.viewMode === "table" ? "is-active" : ""}">列表</button></div></div>
     ${comboSkuState.error ? `<div class="form-error">${escapeHtml(comboSkuState.error)}</div>` : ""}${comboSkuState.loading ? `<div class="empty-state">正在读取组合装…</div>` : !comboSkuState.rows.length ? `<div class="empty-state">暂无组合装</div>` : comboSkuState.viewMode === "card" ? renderComboSkuCards(comboSkuState.rows) : renderComboSkuTable(comboSkuState.rows)}
     <nav class="pagination"><span>共 ${total} 个 · 第 ${comboSkuState.page}/${totalPages} 页</span><div><button class="secondary-button" type="button" data-action="combo-sku-page" data-page="${comboSkuState.page - 1}" ${comboSkuState.page <= 1 ? "disabled" : ""}>上一页</button><button class="secondary-button" type="button" data-action="combo-sku-page" data-page="${comboSkuState.page + 1}" ${comboSkuState.page >= totalPages ? "disabled" : ""}>下一页</button></div></nav></section>`;
@@ -1849,9 +1860,9 @@ async function refreshProductSkuV2List(rerender) {
   const requestId = ++productSkuV2RequestId;
   productSkuV2State = { ...productSkuV2State, loading: true, error: "" }; rerender();
   try {
-    const result = await loadProductCenterV2Skus({ search: productSkuV2State.search, includeUnarchived: productSkuV2State.includeUnarchived, profileStatus: "all",
+    const result = await loadProductCenterV2Skus({ search: productSkuV2State.search, includeUnarchived: productSkuV2State.includeUnarchived, includeHistorical: productSkuV2State.includeHistorical, profileStatus: "all",
       erpStatus: productSkuV2State.erpStatus, brand: productSkuV2State.brand, category: productSkuV2State.category,
-      lifecycleStatus: productSkuV2State.lifecycleStatus, platform: productSkuV2State.platform, stockStatus: productSkuV2State.stockStatus,
+      lifecycleStatus: productSkuV2State.lifecycleStatus, operatingLifecycleStatus: productSkuV2State.operatingLifecycleStatus, platform: productSkuV2State.platform, stockStatus: productSkuV2State.stockStatus,
       businessZone: productSkuV2State.businessZone, sort: productSkuV2State.sort,
       limit: productSkuV2State.pageSize, offset: (productSkuV2State.page - 1) * productSkuV2State.pageSize });
     if (requestId !== productSkuV2RequestId) return;
@@ -1866,7 +1877,7 @@ async function refreshProductSkuV2List(rerender) {
 
 async function refreshComboSkuList(rerender) {
   comboSkuState = { ...comboSkuState, loading: true, error: "" }; rerender();
-  try { const result = await loadProductComboSkus({ search: comboSkuState.search, limit: comboSkuState.pageSize, offset: (comboSkuState.page - 1) * comboSkuState.pageSize }); comboSkuState = { ...comboSkuState, loading: false, loaded: true, rows: result.items || [], pagination: result.pagination || { total: 0 }, error: "" }; }
+  try { const result = await loadProductComboSkus({ search: comboSkuState.search, includeHistorical: comboSkuState.includeHistorical, limit: comboSkuState.pageSize, offset: (comboSkuState.page - 1) * comboSkuState.pageSize }); comboSkuState = { ...comboSkuState, loading: false, loaded: true, rows: result.items || [], pagination: result.pagination || { total: 0 }, error: "" }; }
   catch (error) { comboSkuState = { ...comboSkuState, loading: false, loaded: true, rows: [], error: error.message || "组合装列表读取失败。" }; } rerender();
 }
 
@@ -2228,7 +2239,7 @@ export function bindProductCenterPageEvents(rerender) {
     void refreshPendingErpSkus(rerender);
   }
   if (!routeProductId && !routeErpSkuId && productSubmodule === "combo-skus" && !comboSkuState.loaded && !comboSkuState.loading && !comboSkuState.detail) void refreshComboSkuList(rerender);
-  document.querySelector("[data-combo-sku-search]")?.addEventListener("submit", (event) => { event.preventDefault(); comboSkuState = { ...comboSkuState, search: event.currentTarget.elements.search.value.trim(), page: 1, loaded: false, detail: null }; void refreshComboSkuList(rerender); });
+  document.querySelector("[data-combo-sku-search]")?.addEventListener("submit", (event) => { event.preventDefault(); comboSkuState = { ...comboSkuState, search: event.currentTarget.elements.search.value.trim(), includeHistorical: event.currentTarget.elements.includeHistorical.checked, page: 1, loaded: false, detail: null }; void refreshComboSkuList(rerender); });
   document.querySelector("[data-product-business-filter]")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -2237,6 +2248,7 @@ export function bindProductCenterPageEvents(rerender) {
       query: form.elements.query.value.trim(), brand: form.elements.brand.value, category: form.elements.category.value,
       lifecycle: form.elements.lifecycle.value, status: form.elements.status.value, healthStatus: form.elements.healthStatus.value,
       inventoryStatus: form.elements.inventoryStatus.value, ownerId: form.elements.ownerId.value,
+      includeHistorical: form.elements.includeHistorical.checked,
       periodStart: form.elements.periodStart.value, periodEnd: form.elements.periodEnd.value, page: 1,
     };
     void refreshProductBusinessDashboard(rerender);
@@ -2305,9 +2317,9 @@ export function bindProductCenterPageEvents(rerender) {
   });
   document.querySelector("[data-product-v2-filter]")?.addEventListener("submit", (event) => {
     event.preventDefault(); const form = event.currentTarget;
-    productSkuV2State = { ...productSkuV2State, search: form.elements.search.value.trim(), includeUnarchived: form.elements.includeUnarchived.checked, profileStatus: "all",
+    productSkuV2State = { ...productSkuV2State, search: form.elements.search.value.trim(), includeUnarchived: form.elements.includeUnarchived.checked, includeHistorical: form.elements.includeHistorical.checked, profileStatus: "all",
       erpStatus: form.elements.erpStatus.value.trim(), brand: form.elements.brand.value, category: form.elements.category.value,
-      lifecycleStatus: form.elements.lifecycleStatus.value, platform: form.elements.platform.value, stockStatus: form.elements.stockStatus.value,
+      lifecycleStatus: form.elements.lifecycleStatus.value, operatingLifecycleStatus: form.elements.operatingLifecycleStatus.value, platform: form.elements.platform.value, stockStatus: form.elements.stockStatus.value,
       page: 1, loaded: false, notice: "" };
     void refreshProductSkuV2List(rerender);
   });
@@ -2468,7 +2480,7 @@ export function bindProductCenterPageEvents(rerender) {
       return;
     }
     if (action === "clear-product-v2-filter") {
-      productSkuV2State = { ...productSkuV2State, search: "", includeUnarchived: false, profileStatus: "all", erpStatus: "", brand: "", category: "", lifecycleStatus: "", platform: "", stockStatus: "", businessZone: "all", sort: "updated-desc", page: 1, loaded: false, notice: "" };
+      productSkuV2State = { ...productSkuV2State, search: "", includeUnarchived: false, includeHistorical: false, profileStatus: "all", erpStatus: "", brand: "", category: "", lifecycleStatus: "", operatingLifecycleStatus: "", platform: "", stockStatus: "", businessZone: "all", sort: "updated-desc", page: 1, loaded: false, notice: "" };
       void refreshProductSkuV2List(rerender);
       return;
     }
@@ -2531,7 +2543,7 @@ export function bindProductCenterPageEvents(rerender) {
       rerender();
     }
     if (action === "clear-product-business-filters") {
-      productBusinessFilters = { ...productBusinessFilters, query: "", brand: "", category: "", lifecycle: "", status: "", healthStatus: "", inventoryStatus: "", ownerId: "", range: "30d", periodStart: "", periodEnd: "", page: 1 };
+      productBusinessFilters = { ...productBusinessFilters, query: "", brand: "", category: "", lifecycle: "", status: "", healthStatus: "", inventoryStatus: "", ownerId: "", includeHistorical: false, range: "30d", periodStart: "", periodEnd: "", page: 1 };
       void refreshProductBusinessDashboard(rerender);
     }
     if (action === "product-submodule") {

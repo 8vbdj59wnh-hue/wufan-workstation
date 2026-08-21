@@ -88,6 +88,8 @@ import { createWangdianShopDiscoveryBatch, queueWangdianShopDiscoveryBatch, read
 import { searchWangdianSuites } from "./wangdianSuiteService.js";
 import { runDueWangdianSuiteSyncTasks, syncWangdianSuites } from "./wangdianSuiteDataSyncAdapter.js";
 import { queryOperatingErpSet, readOperatingErpSetSummary } from "./operatingErpSetService.js";
+import { getErpLifecycleSyncPolicy, listNonOperatingInventoryRisk, queryErpOperatingLifecycle, readErpOperatingLifecycleSummary, simulateErpOperatingLifecycleViews } from "./erpOperatingLifecycleService.js";
+import { confirmErpSkuUsageProfile, readErpSkuUsageInventoryGovernance, readUnknownErpUsageConvergence } from "./erpSkuUsageProfileService.js";
 import { queryOperatingErpIdentityShadow } from "./operatingErpIdentityShadowService.js";
 import { listV3ShadowDifferences, readV3ShadowSummary, scheduleV3ShadowObservation } from "./v3ShadowObservationService.js";
 import {
@@ -2410,6 +2412,36 @@ app.get("/api/data-sync-center/operating-erp-set/summary", requirePermission("se
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "经营ERP对象集合摘要读取失败。" });
   }
+});
+
+app.get("/api/product-center-v2/erp-operating-lifecycle", requirePermission("products.view"), (request, response) => {
+  try { response.json({ success: true, ...queryErpOperatingLifecycle(request.query ?? {}) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "ERP经营生命周期读取失败。" }); }
+});
+
+app.get("/api/product-center-v2/erp-operating-lifecycle/summary", requirePermission("products.view"), (_request, response) => {
+  try { response.json({ success: true, summary: readErpOperatingLifecycleSummary(), impact: simulateErpOperatingLifecycleViews(), syncPolicy: getErpLifecycleSyncPolicy() }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "ERP经营生命周期摘要读取失败。" }); }
+});
+
+app.get("/api/product-center-v2/non-operating-inventory", requirePermission("products.view"), (request, response) => {
+  try { response.json({ success: true, ...listNonOperatingInventoryRisk(request.query ?? {}) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "非经营库存风险读取失败。" }); }
+});
+
+app.get("/api/product-center-v2/erp-usage-inventory-governance", requirePermission("products.view"), (request, response) => {
+  try { response.json({ success: true, ...readErpSkuUsageInventoryGovernance(request.query ?? {}) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "ERP用途与库存治理读取失败。" }); }
+});
+
+app.get("/api/product-center-v2/erp-usage-unknown-governance", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
+  try { response.json({ success: true, ...readUnknownErpUsageConvergence(request.query ?? {}) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "Unknown ERP用途治理读取失败。" }); }
+});
+
+app.post("/api/product-center-v2/erp-usage-profiles/:id/confirm", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {
+  try { response.json({ success: true, ...confirmErpSkuUsageProfile(request.params.id, request.body ?? {}, { confirmedBy: getUserPersonId(request.user) }) }); }
+  catch (error) { response.status(/不存在/.test(error.message || "") ? 404 : /冲突/.test(error.message || "") ? 409 : 400).json({ success: false, message: error.message || "ERP用途确认失败。" }); }
 });
 
 app.get("/api/data-sync-center/operating-erp-identities", requirePermission("settings.manageAdminDataCenter"), requireAdminUser, (request, response) => {

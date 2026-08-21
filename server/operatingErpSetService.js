@@ -84,15 +84,29 @@ export function calculateOperatingErpSet(options = {}) {
   const activeRelations = database.prepare(`SELECT linkSkuId,salesObjectId,effectiveFrom,effectiveTo,sourceBatchId
     FROM sales_link_sku_sales_object_relations WHERE status='active'`).all();
   const relationByLinkSku = new Map(activeRelations.map((item) => [item.linkSkuId, item]));
-  const componentRows = database.prepare(`SELECT s.salesObjectId,s.id structureId,s.version,c.erpSkuId,c.quantity
+  const componentRows = database.prepare(`SELECT s.salesObjectId,s.id structureId,s.version,s.sourceType,c.erpSkuId,c.quantity
     FROM sales_object_structures s
     JOIN sales_object_structure_components c ON c.structureId=s.id AND c.status='active'
     WHERE s.status='active'`).all();
+  const structureStateRows = database.prepare(`SELECT salesObjectId,sourceType,status,sourceState
+    FROM sales_object_structures`).all();
+  const structureStatesByObject = new Map();
+  for (const item of structureStateRows) {
+    const rows = structureStatesByObject.get(item.salesObjectId) || [];
+    rows.push(item);
+    structureStatesByObject.set(item.salesObjectId, rows);
+  }
   const componentsByObject = new Map();
+  const authoritativeBundleComponentsByObject = new Map();
   for (const item of componentRows) {
     const rows = componentsByObject.get(item.salesObjectId) || [];
     rows.push(item);
     componentsByObject.set(item.salesObjectId, rows);
+    if (item.sourceType === "wangdian_suite_api" && salesObjectById.get(item.salesObjectId)?.objectType === "bundle") {
+      const authoritativeRows = authoritativeBundleComponentsByObject.get(item.salesObjectId) || [];
+      authoritativeRows.push(item);
+      authoritativeBundleComponentsByObject.set(item.salesObjectId, authoritativeRows);
+    }
   }
 
   const members = new Map();
@@ -199,9 +213,13 @@ export function calculateOperatingErpSet(options = {}) {
 
   for (const salesObjectId of operatingBundleIds) {
     const salesObject = salesObjectById.get(salesObjectId);
-    const components = componentsByObject.get(salesObjectId) || [];
+    const components = authoritativeBundleComponentsByObject.get(salesObjectId) || [];
     if (!components.length) {
-      exceptions.push({ type: "bundle_component_missing", objectType: "sales_object", objectId: salesObjectId, code: salesObject?.objectCode || null });
+      const historicalSources = [...new Set((componentsByObject.get(salesObjectId) || []).map((item) => item.sourceType).filter(Boolean))];
+      const sourceRemoved = (structureStatesByObject.get(salesObjectId) || []).some((item) => item.sourceType === "wangdian_suite_api" && item.sourceState === "source_removed");
+      exceptions.push({ type: sourceRemoved ? "bundle_source_conflict" : "bundle_authoritative_bom_missing",
+        objectType: "sales_object", objectId: salesObjectId, code: salesObject?.objectCode || null,
+        historicalSources, requiredSource: "wangdian_suite_api", sourceRemoved });
       continue;
     }
     for (const component of components) {
@@ -211,7 +229,8 @@ export function calculateOperatingErpSet(options = {}) {
         continue;
       }
       addEvidence({ code: erpSku.merchantSkuCode, sourceType: "bundle_dependency", sourceObjectType: "sales_object_structure", sourceObjectId: component.structureId,
-        erpSkuId: erpSku.id, salesObjectId, metadata: { bundleCode: salesObject?.objectCode || null, quantity: component.quantity, version: component.version }, seed: erpSku });
+        erpSkuId: erpSku.id, salesObjectId, metadata: { bundleCode: salesObject?.objectCode || null, quantity: component.quantity,
+          version: component.version, structureSourceType: component.sourceType }, seed: erpSku });
       historicalErpIds.add(erpSku.id);
     }
   }
@@ -287,7 +306,7 @@ export function materializeOperatingErpSet(options = {}) {
   const database = options.database || getDatabase();
   const result = calculateOperatingErpSet({ ...options, database });
   const batchSize = Math.max(25, Number(options.writeBatchSize || process.env.V3_SHADOW_WRITE_BATCH_SIZE || 250));
-  const materialization = { writeBatchSize: batchSize, batchCount: 0, longestTransactionMs: 0, membersChanged: 0, evidenceChanged: 0, evidenceDeactivated: 0 };
+  const materialization = { writeBatchSize: batchSize, batchCount: 0, longestTransactionMs: 0, membersChanged: 0, evidenceChanged: 0, evidenceDeactivated: 0, lifecycleEventsChanged: 0 };
   const writeBatches = (items, operation) => {
     for (let offset = 0; offset < items.length; offset += batchSize) {
       const batch = items.slice(offset, offset + batchSize);
@@ -320,6 +339,12 @@ export function materializeOperatingErpSet(options = {}) {
   const memberRows = database.prepare(`SELECT normalizedCode,merchantSkuCode,erpSkuId,salesObjectId,lifecycleStatus,sourceCount
     FROM operating_erp_set_members`).all();
   const memberByCode = new Map(memberRows.map((item) => [item.normalizedCode, item]));
+  const lifecycleSourceTypesByCode = new Map();
+  for (const item of result.evidence) {
+    const sources = lifecycleSourceTypesByCode.get(item.normalizedCode) || new Set();
+    sources.add(item.sourceType);
+    lifecycleSourceTypesByCode.set(item.normalizedCode, sources);
+  }
   const desiredMemberCodes = new Set(result.members.map((item) => item.normalizedCode));
   const changedMembers = result.members.filter((member) => {
     const current = memberByCode.get(member.normalizedCode);
@@ -330,6 +355,22 @@ export function materializeOperatingErpSet(options = {}) {
       || current.lifecycleStatus !== member.lifecycleStatus
       || Number(current.sourceCount) !== Number(member.sourceCount);
   });
+  const lifecycleChanges = changedMembers.filter((member) => member.erpSkuId && memberByCode.get(member.normalizedCode)?.lifecycleStatus !== member.lifecycleStatus)
+    .map((member) => ({
+      id: stableId("operating-erp-lifecycle-event", `${member.normalizedCode}|${memberByCode.get(member.normalizedCode)?.lifecycleStatus || "initial"}|${member.lifecycleStatus}|${result.calculatedAt}`),
+      normalizedCode: member.normalizedCode,
+      erpSkuId: member.erpSkuId,
+      fromStatus: memberByCode.get(member.normalizedCode)?.lifecycleStatus || null,
+      toStatus: member.lifecycleStatus,
+      sourceTypesJson: JSON.stringify([...(lifecycleSourceTypesByCode.get(member.normalizedCode) || [])].sort()),
+      reason: member.lifecycleStatus === "active" ? "latest_platform_batch"
+        : member.lifecycleStatus === "active_dependency" ? "current_bundle_dependency"
+          : member.lifecycleStatus === "sales_active" ? "recent_daily_fact"
+            : member.lifecycleStatus === "archived" ? "historical_business_evidence_without_current_operating_evidence"
+              : "no_reliable_business_evidence",
+      calculatedAt: result.calculatedAt,
+      createdAt: result.calculatedAt,
+    }));
   const evidenceRows = database.prepare(`SELECT id,normalizedCode,sourceType,sourceObjectType,sourceObjectId,sourceBatchId,active,metadataJson
     FROM operating_erp_set_evidence`).all();
   const evidenceByKey = new Map(evidenceRows.map((item) => [`${item.normalizedCode}\u0000${item.sourceType}\u0000${item.sourceObjectType}\u0000${item.sourceObjectId}`, item]));
@@ -343,9 +384,16 @@ export function materializeOperatingErpSet(options = {}) {
   ));
   const deactivateEvidence = database.prepare("UPDATE operating_erp_set_evidence SET active=0,calculatedAt=?,updatedAt=? WHERE id=? AND active=1");
   const clearStaleMemberSources = database.prepare("UPDATE operating_erp_set_members SET sourceCount=0,calculatedAt=?,updatedAt=? WHERE normalizedCode=? AND sourceCount<>0");
+  const insertLifecycleEvent = database.prepare(`INSERT OR IGNORE INTO operating_erp_lifecycle_events
+    (id,normalizedCode,erpSkuId,fromStatus,toStatus,sourceTypesJson,reason,calculatedAt,createdAt)
+    VALUES (@id,@normalizedCode,@erpSkuId,@fromStatus,@toStatus,@sourceTypesJson,@reason,@calculatedAt,@createdAt)`);
   writeBatches(changedMembers, (member) => {
     const info = insertMember.run({ ...member, updatedAt: result.calculatedAt });
     materialization.membersChanged += Number(info.changes || 0);
+  });
+  writeBatches(lifecycleChanges, (event) => {
+    const info = insertLifecycleEvent.run(event);
+    materialization.lifecycleEventsChanged += Number(info.changes || 0);
   });
   writeBatches(changedEvidence, (item) => {
     const info = insertEvidence.run(item);

@@ -310,12 +310,35 @@ function compareNullable(left, right, direction, collator) {
   return direction === "asc" ? comparison : -comparison;
 }
 
+// ERP经营生命周期只控制默认展示，Product战略生命周期保持独立。
+function operatingProductLifecycleMap(database) {
+  const rows = database.prepare(`SELECT pm.productId,m.lifecycleStatus
+    FROM operating_erp_set_members m JOIN product_erp_mappings pm ON pm.erpSkuId=m.erpSkuId AND pm.currentState='active'
+    WHERE m.erpSkuId IS NOT NULL`).all();
+  const priority = { active: 0, active_dependency: 1, sales_active: 2, archived: 3, external_unused: 4, unresolved: 5 };
+  const result = new Map();
+  for (const row of rows) {
+    const current = result.get(row.productId) || { statuses: new Set(), primaryStatus: row.lifecycleStatus };
+    current.statuses.add(row.lifecycleStatus);
+    if ((priority[row.lifecycleStatus] ?? 99) < (priority[current.primaryStatus] ?? 99)) current.primaryStatus = row.lifecycleStatus;
+    result.set(row.productId, current);
+  }
+  return result;
+}
+
 export function getProductBusinessReadModel(query = {}, { includeInventoryCost = false, visibleProductIds = null, unpaged = false } = {}) {
   const database = getDatabase();
   const period = resolveProductBusinessPeriod(query);
   const products = database.prepare(`SELECT p.*,owner.name ownerName FROM products p LEFT JOIN persons owner ON owner.id=p.ownerId ORDER BY p.updatedAt DESC,p.id`).all();
   const visible = visibleProductIds ? new Set(visibleProductIds) : null;
-  const scopedProducts = visible ? products.filter((product) => visible.has(product.id)) : products;
+  const allScopedProducts = visible ? products.filter((product) => visible.has(product.id)) : products;
+  const productLifecycle = operatingProductLifecycleMap(database);
+  const lifecycleReady = productLifecycle.size > 0;
+  const showHistorical = query.includeHistorical === true || text(query.includeHistorical).toLowerCase() === "true" || text(query.includeHistorical) === "1";
+  const defaultOperatingView = lifecycleReady && !showHistorical && !text(query.productId);
+  const scopedProducts = defaultOperatingView
+    ? allScopedProducts.filter((product) => [...(productLifecycle.get(product.id)?.statuses || [])].some((status) => ["active", "active_dependency", "sales_active"].includes(status)))
+    : allScopedProducts;
   const productIds = scopedProducts.map((product) => product.id);
   const relationContext = readProductBusinessRelationContext(database);
   const currentSales = salesMetrics(database, period.periodStart, period.periodEnd);
