@@ -138,21 +138,12 @@ function resolveBundleProjection(database, candidate, timestamp, actor, bundleSo
   }
   if (!current.structure || !current.components.length) return { status: "bundle_bom_missing", salesObjectId: object.id };
   if (current.structure.sourceType !== "wangdian_suite_api") {
-    if (sourceComponents && JSON.stringify(current.components) !== JSON.stringify(sourceComponents)) {
-      const version = createBundleStructureVersion(database, object, sourceComponents, candidate, timestamp, actor, bundleSource, current);
-      current = activeStructure(database, object.id);
-      objectUpdated = updateSalesObjectAuthority(database, object, "bundle", clean(candidate.merchantSkuCode) || code, timestamp);
-      return { status: "created", createdObject, objectUpdated, createdStructure: true, structureUpdated: false, structureSuperseded: version.superseded, componentCount: version.componentCount, salesObjectId: object.id, structureId: version.structureId };
-    }
     if (!sourceComponents) return { status: "source_conflict", salesObjectId: object.id };
-    database.prepare(`UPDATE sales_object_structures SET sourceType='wangdian_suite_api',sourceReferenceJson=?,validityBasis='exact',sourceState='active',
-      sourceUpdatedAt=?,lastVerifiedAt=?,syncedAt=?,updatedAt=? WHERE id=?`)
-      .run(JSON.stringify({ suiteCode: clean(candidate.merchantSkuCode), projection: "v3", authorityTransition: true }), bundleSource.sourceUpdatedAt || null, timestamp, timestamp, timestamp, current.structure.id);
-    database.prepare("UPDATE sales_object_structure_components SET sourceType='wangdian_suite_api',sourceReferenceJson=?,updatedAt=? WHERE structureId=?")
-      .run(JSON.stringify({ projection: "v3", authorityTransition: true }), timestamp, current.structure.id);
-    current = activeStructure(database, object.id);
+    // Active components are immutable. Authority transition therefore creates
+    // a new WDT version even when the component set itself is unchanged.
+    const version = createBundleStructureVersion(database, object, sourceComponents, candidate, timestamp, actor, bundleSource, current);
     objectUpdated = updateSalesObjectAuthority(database, object, "bundle", clean(candidate.merchantSkuCode) || code, timestamp);
-    return { status: "same", createdObject, objectUpdated, createdStructure: false, structureUpdated: true, structureSuperseded: false, componentCount: 0, salesObjectId: object.id, structureId: current.structure.id };
+    return { status: "created", createdObject, objectUpdated, createdStructure: true, structureUpdated: false, structureSuperseded: version.superseded, componentCount: version.componentCount, salesObjectId: object.id, structureId: version.structureId };
   }
   if (sourceComponents && JSON.stringify(current.components) !== JSON.stringify(sourceComponents)) {
     const version = createBundleStructureVersion(database, object, sourceComponents, candidate, timestamp, actor, bundleSource, current);
