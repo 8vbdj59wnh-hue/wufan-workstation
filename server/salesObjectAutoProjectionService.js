@@ -26,28 +26,46 @@ function reviewer(database) {
   return database.prepare("SELECT id FROM persons WHERE status='active' ORDER BY CASE authRole WHEN 'admin' THEN 0 ELSE 1 END,id LIMIT 1").get()?.id || null;
 }
 
+function updateSalesObjectAuthority(database, object, objectType, displayCode, timestamp) {
+  const sourceType = objectType === "bundle" ? "wangdian_suite_api" : "wangdian_goods_api";
+  if (object.objectCode === displayCode
+    && object.source === "wangdian"
+    && object.sourceType === sourceType
+    && object.sourceCode === displayCode
+    && object.status === "active") return false;
+  database.prepare(`UPDATE sales_objects SET objectCode=?,source='wangdian',sourceType=?,sourceCode=?,status='active',lastSeenAt=?,updatedAt=? WHERE id=?`)
+    .run(displayCode, sourceType, displayCode, timestamp, timestamp, object.id);
+  return true;
+}
+
 function createSingleProjection(database, candidate, timestamp, actor) {
   const code = normalized(candidate.normalizedCode || candidate.merchantSkuCode);
   const displayCode = clean(candidate.merchantSkuCode) || code;
   const existing = database.prepare("SELECT * FROM sales_objects WHERE normalizedObjectCode=?").get(code);
   if (existing && existing.objectType !== "single") return { status: "type_conflict", salesObjectId: existing.id };
   const salesObjectId = existing?.id || stableId("sales-object-v3", "single", code);
+  let objectUpdated = false;
   if (!existing) {
     database.prepare(`INSERT INTO sales_objects
       (id,objectCode,normalizedObjectCode,objectType,source,sourceType,sourceCode,status,firstSeenAt,lastSeenAt,createdAt,updatedAt)
       VALUES (?,?,?,'single','wangdian','wangdian_goods_api',?,'active',?,?,?,?)`)
       .run(salesObjectId, displayCode, code, displayCode, timestamp, timestamp, timestamp, timestamp);
   } else {
-    database.prepare(`UPDATE sales_objects SET objectCode=?,source='wangdian',sourceType='wangdian_goods_api',sourceCode=?,status='active',lastSeenAt=?,updatedAt=? WHERE id=?`)
-      .run(displayCode, displayCode, timestamp, timestamp, salesObjectId);
+    objectUpdated = updateSalesObjectAuthority(database, existing, "single", displayCode, timestamp);
   }
   const current = activeStructure(database, salesObjectId);
   const target = [{ erpSkuId: candidate.goodsErpSkuId, quantity: 1 }];
   if (current.structure) {
     if (JSON.stringify(current.components) !== JSON.stringify(target)) return { status: "relation_conflict", salesObjectId };
-    database.prepare(`UPDATE sales_object_structures SET sourceType='wangdian_goods_api',validityBasis='exact',sourceState='active',
+    const structureUpdated = current.structure.sourceType !== "wangdian_goods_api"
+      || current.structure.validityBasis !== "exact"
+      || current.structure.sourceState !== "active";
+    if (structureUpdated) database.prepare(`UPDATE sales_object_structures SET sourceType='wangdian_goods_api',validityBasis='exact',sourceState='active',
       lastVerifiedAt=?,syncedAt=?,updatedAt=? WHERE id=?`).run(timestamp, timestamp, timestamp, current.structure.id);
-    return { status: existing ? "same" : "created", salesObjectId, structureId: current.structure.id };
+    return {
+      status: existing ? "same" : "created", createdObject: !existing, objectUpdated,
+      createdStructure: false, structureUpdated, componentCount: 0, salesObjectId, structureId: current.structure.id,
+    };
   }
   if (!actor) throw new Error("sales_object_projection_reviewer_missing");
   const structureHash = calculateBomStructureHash(target);
@@ -61,7 +79,37 @@ function createSingleProjection(database, candidate, timestamp, actor) {
     VALUES (?,?,?,?,1,1,'active','wangdian_goods_api',?,?,?)`)
     .run(stableId("sales-object-component-v3", structureId, candidate.goodsErpSkuId), structureId, salesObjectId, candidate.goodsErpSkuId, JSON.stringify({ projection: "v3" }), timestamp, timestamp);
   database.prepare("UPDATE sales_object_structures SET status='active',updatedAt=? WHERE id=?").run(timestamp, structureId);
-  return { status: "created", salesObjectId, structureId };
+  return { status: "created", createdObject: !existing, objectUpdated, createdStructure: true, structureUpdated: false, componentCount: 1, salesObjectId, structureId };
+}
+
+function createBundleStructureVersion(database, object, sourceComponents, candidate, timestamp, actor, bundleSource, current = null) {
+  if (!actor) throw new Error("sales_object_projection_reviewer_missing");
+  const structureHash = calculateBomStructureHash(sourceComponents);
+  const version = Number(current?.structure?.version || 0) + 1;
+  const structureId = stableId("sales-object-structure-v3", object.id, version, structureHash);
+  if (current?.structure) {
+    database.prepare(`UPDATE sales_object_structures SET status='superseded',effectiveTo=?,updatedAt=? WHERE id=? AND status='active'`)
+      .run(timestamp, timestamp, current.structure.id);
+  }
+  database.prepare(`INSERT INTO sales_object_structures
+    (id,salesObjectId,version,structureHash,effectiveFrom,status,sourceType,sourceReferenceJson,validityBasis,sourceState,sourceUpdatedAt,lastVerifiedAt,syncedAt,supersedesStructureId,reviewedBy,reviewedAt,activatedAt,createdAt,updatedAt)
+    VALUES (?,?,?,?,?,'draft','wangdian_suite_api',?,'exact','active',?,?,?,?,?,?,?,?,?)`)
+    .run(structureId, object.id, version, structureHash, timestamp,
+      JSON.stringify({ suiteCode: clean(candidate.merchantSkuCode), projection: "v3" }), bundleSource?.sourceUpdatedAt || null,
+      timestamp, timestamp, current?.structure?.id || null, actor, timestamp, timestamp, timestamp, timestamp);
+  const insertComponent = database.prepare(`INSERT INTO sales_object_structure_components
+    (id,structureId,salesObjectId,erpSkuId,quantity,sortOrder,status,sourceType,sourceReferenceJson,createdAt,updatedAt)
+    VALUES (?,?,?,?,?,?,'active','wangdian_suite_api',?,?,?)`);
+  sourceComponents.forEach((component, index) => insertComponent.run(
+    stableId("sales-object-component-v3", structureId, component.erpSkuId), structureId, object.id, component.erpSkuId,
+    component.quantity, index + 1, JSON.stringify({ projection: "v3" }), timestamp, timestamp,
+  ));
+  database.prepare("UPDATE sales_object_structures SET status='active',updatedAt=? WHERE id=?").run(timestamp, structureId);
+  openBomEffectivePeriod({
+    structureId, salesObjectId: object.id, validFrom: timestamp, validityBasis: "exact",
+    sourceUpdatedAt: bundleSource?.sourceUpdatedAt, sourceReferenceJson: JSON.stringify({ suiteCode: clean(candidate.merchantSkuCode), projection: "v3" }),
+  }, { database });
+  return { structureId, version, superseded: Boolean(current?.structure), componentCount: sourceComponents.length };
 }
 
 function resolveBundleProjection(database, candidate, timestamp, actor, bundleSource = null) {
@@ -70,6 +118,7 @@ function resolveBundleProjection(database, candidate, timestamp, actor, bundleSo
   const sourceComponents = bundleSource?.components?.length ? canonicalizeBomComponents(bundleSource.components) : null;
   if (!object && !sourceComponents) return { status: "bundle_bom_missing", salesObjectId: null };
   let createdObject = false;
+  let objectUpdated = false;
   if (!object) {
     const salesObjectId = stableId("sales-object-v3", "bundle", code);
     database.prepare(`INSERT INTO sales_objects
@@ -83,36 +132,40 @@ function resolveBundleProjection(database, candidate, timestamp, actor, bundleSo
   let current = activeStructure(database, object.id);
   let createdStructure = false;
   if (!current.structure && sourceComponents) {
-    if (!actor) throw new Error("sales_object_projection_reviewer_missing");
-    const structureHash = calculateBomStructureHash(sourceComponents);
-    const structureId = stableId("sales-object-structure-v3", object.id, structureHash);
-    database.prepare(`INSERT INTO sales_object_structures
-      (id,salesObjectId,version,structureHash,effectiveFrom,status,sourceType,sourceReferenceJson,validityBasis,sourceState,sourceUpdatedAt,lastVerifiedAt,syncedAt,reviewedBy,reviewedAt,activatedAt,createdAt,updatedAt)
-      VALUES (?,?,1,?,?,'draft','wangdian_suite_api',?,'exact','active',?,?,?,?,?,?,?,?)`)
-      .run(structureId, object.id, structureHash, timestamp, JSON.stringify({ suiteCode: clean(candidate.merchantSkuCode), projection: "v3" }), bundleSource.sourceUpdatedAt || null, timestamp, timestamp, actor, timestamp, timestamp, timestamp, timestamp);
-    const insertComponent = database.prepare(`INSERT INTO sales_object_structure_components
-      (id,structureId,salesObjectId,erpSkuId,quantity,sortOrder,status,sourceType,sourceReferenceJson,createdAt,updatedAt)
-      VALUES (?,?,?,?,?,?,'active','wangdian_suite_api',?,?,?)`);
-    sourceComponents.forEach((component, index) => insertComponent.run(stableId("sales-object-component-v3", structureId, component.erpSkuId), structureId, object.id, component.erpSkuId, component.quantity, index + 1, JSON.stringify({ projection: "v3" }), timestamp, timestamp));
-    database.prepare("UPDATE sales_object_structures SET status='active',updatedAt=? WHERE id=?").run(timestamp, structureId);
-    openBomEffectivePeriod({ structureId, salesObjectId: object.id, validFrom: timestamp, validityBasis: "exact", sourceUpdatedAt: bundleSource.sourceUpdatedAt, sourceReferenceJson: JSON.stringify({ suiteCode: clean(candidate.merchantSkuCode), projection: "v3" }) }, { database });
+    createBundleStructureVersion(database, object, sourceComponents, candidate, timestamp, actor, bundleSource);
     current = activeStructure(database, object.id);
     createdStructure = true;
   }
   if (!current.structure || !current.components.length) return { status: "bundle_bom_missing", salesObjectId: object.id };
   if (current.structure.sourceType !== "wangdian_suite_api") {
-    if (!sourceComponents || JSON.stringify(current.components) !== JSON.stringify(sourceComponents)) return { status: "source_conflict", salesObjectId: object.id };
+    if (sourceComponents && JSON.stringify(current.components) !== JSON.stringify(sourceComponents)) {
+      const version = createBundleStructureVersion(database, object, sourceComponents, candidate, timestamp, actor, bundleSource, current);
+      current = activeStructure(database, object.id);
+      objectUpdated = updateSalesObjectAuthority(database, object, "bundle", clean(candidate.merchantSkuCode) || code, timestamp);
+      return { status: "created", createdObject, objectUpdated, createdStructure: true, structureUpdated: false, structureSuperseded: version.superseded, componentCount: version.componentCount, salesObjectId: object.id, structureId: version.structureId };
+    }
+    if (!sourceComponents) return { status: "source_conflict", salesObjectId: object.id };
     database.prepare(`UPDATE sales_object_structures SET sourceType='wangdian_suite_api',sourceReferenceJson=?,validityBasis='exact',sourceState='active',
       sourceUpdatedAt=?,lastVerifiedAt=?,syncedAt=?,updatedAt=? WHERE id=?`)
       .run(JSON.stringify({ suiteCode: clean(candidate.merchantSkuCode), projection: "v3", authorityTransition: true }), bundleSource.sourceUpdatedAt || null, timestamp, timestamp, timestamp, current.structure.id);
     database.prepare("UPDATE sales_object_structure_components SET sourceType='wangdian_suite_api',sourceReferenceJson=?,updatedAt=? WHERE structureId=?")
       .run(JSON.stringify({ projection: "v3", authorityTransition: true }), timestamp, current.structure.id);
     current = activeStructure(database, object.id);
+    objectUpdated = updateSalesObjectAuthority(database, object, "bundle", clean(candidate.merchantSkuCode) || code, timestamp);
+    return { status: "same", createdObject, objectUpdated, createdStructure: false, structureUpdated: true, structureSuperseded: false, componentCount: 0, salesObjectId: object.id, structureId: current.structure.id };
   }
-  if (sourceComponents && JSON.stringify(current.components) !== JSON.stringify(sourceComponents)) return { status: "source_conflict", salesObjectId: object.id };
-  database.prepare("UPDATE sales_objects SET source='wangdian',sourceType='wangdian_suite_api',sourceCode=?,status='active',lastSeenAt=?,updatedAt=? WHERE id=?")
-    .run(clean(candidate.merchantSkuCode), timestamp, timestamp, object.id);
-  return { status: createdStructure ? "created" : "same", createdObject, createdStructure, salesObjectId: object.id, structureId: current.structure.id };
+  if (sourceComponents && JSON.stringify(current.components) !== JSON.stringify(sourceComponents)) {
+    const version = createBundleStructureVersion(database, object, sourceComponents, candidate, timestamp, actor, bundleSource, current);
+    current = activeStructure(database, object.id);
+    objectUpdated = updateSalesObjectAuthority(database, object, "bundle", clean(candidate.merchantSkuCode) || code, timestamp);
+    return { status: "created", createdObject, objectUpdated, createdStructure: true, structureUpdated: false, structureSuperseded: version.superseded, componentCount: version.componentCount, salesObjectId: object.id, structureId: version.structureId };
+  }
+  objectUpdated = updateSalesObjectAuthority(database, object, "bundle", clean(candidate.merchantSkuCode) || code, timestamp);
+  return {
+    status: createdStructure ? "created" : "same", createdObject, objectUpdated, createdStructure, structureUpdated: false,
+    structureSuperseded: false, componentCount: createdStructure ? sourceComponents?.length || 0 : 0,
+    salesObjectId: object.id, structureId: current.structure.id,
+  };
 }
 
 export function compareV3ProjectionResolver(options = {}) {
@@ -161,18 +214,34 @@ export function projectOperatingSalesObjects(options = {}) {
   const candidateByCode = new Map(rows.map((item) => [normalized(item.normalizedCode), item]));
   const result = {
     candidateCount: rows.length, confirmedCount: 0, singleCount: 0, bundleCount: 0,
-    objectsCreated: 0, objectsUpdated: 0, structuresCreated: 0, relationsCreated: 0,
+    objectsCreated: 0, objectsUpdated: 0, structuresCreated: 0, structuresUpdated: 0, structuresSuperseded: 0, componentsCreated: 0, relationsCreated: 0,
     relationsWouldCreate: 0, relationsProvenanceUpdated: 0, relationsUnchanged: 0, relationConflicts: 0, productMappingGovernance: 0,
     exceptions: [], projectedByCode: new Map(),
+    engineering: { writeBatchSize: 0, batchCount: 0, longestTransactionMs: 0 },
+  };
+  const batchSize = Math.max(10, Number(options.writeBatchSize || process.env.V3_PROJECTION_WRITE_BATCH_SIZE || 100));
+  result.engineering.writeBatchSize = batchSize;
+  const writeBatches = (items, operation) => {
+    for (let offset = 0; offset < items.length; offset += batchSize) {
+      const batch = items.slice(offset, offset + batchSize);
+      const started = performance.now();
+      const changesBefore = Number(database.prepare("SELECT total_changes()").pluck().get());
+      database.transaction(() => batch.forEach(operation)).deferred();
+      if (Number(database.prepare("SELECT total_changes()").pluck().get()) > changesBefore) {
+        result.engineering.batchCount += 1;
+        result.engineering.longestTransactionMs = Math.max(result.engineering.longestTransactionMs, performance.now() - started);
+      }
+    }
   };
   const beforeDailyFacts = Number(database.prepare("SELECT COUNT(*) total FROM connection_sku_sales_daily_facts").get().total);
-  database.transaction(() => {
-    for (const candidate of rows) {
+  const confirmedRows = [];
+  for (const candidate of rows) {
+    const code = normalized(candidate.normalizedCode);
+    if (candidate.identityStatus !== "confirmed") result.exceptions.push({ code, type: candidate.identityStatus });
+    else confirmedRows.push(candidate);
+  }
+  writeBatches(confirmedRows, (candidate) => {
       const code = normalized(candidate.normalizedCode);
-      if (candidate.identityStatus !== "confirmed") {
-        result.exceptions.push({ code, type: candidate.identityStatus });
-        continue;
-      }
       result.confirmedCount += 1;
       if (candidate.productMappingStatus !== "complete") result.productMappingGovernance += 1;
       let projected;
@@ -186,26 +255,27 @@ export function projectOperatingSalesObjects(options = {}) {
       } else projected = { status: "type_conflict" };
       if (!["same", "created"].includes(projected.status)) {
         result.exceptions.push({ code, type: projected.status, salesObjectId: projected.salesObjectId || null });
-        continue;
+        return;
       }
       result.projectedByCode.set(code, projected.salesObjectId);
-      if (projected.status === "created") {
-        result.objectsCreated += projected.createdObject === false ? 0 : 1;
-        result.structuresCreated += projected.createdStructure === false ? 0 : 1;
-      }
-      else result.objectsUpdated += 1;
+      result.objectsCreated += projected.createdObject ? 1 : 0;
+      result.objectsUpdated += projected.objectUpdated ? 1 : 0;
+      result.structuresCreated += projected.createdStructure ? 1 : 0;
+      result.structuresUpdated += projected.structureUpdated ? 1 : 0;
+      result.structuresSuperseded += projected.structureSuperseded ? 1 : 0;
+      result.componentsCreated += Number(projected.componentCount || 0);
       if (options.failAfterCode && code === normalized(options.failAfterCode)) throw new Error("isolated_sales_object_projection_failure");
-    }
-    const linkSkus = database.prepare(`SELECT id,COALESCE(NULLIF(normalizedPlatformSkuCode,''),platformSkuCode,'') sourceCode
-      FROM sales_link_skus WHERE lastSeenBatchId=? ORDER BY id`).all(batch.id);
-    const insert = database.prepare(`INSERT INTO sales_link_sku_sales_object_relations
+  });
+  const linkSkus = database.prepare(`SELECT id,COALESCE(NULLIF(normalizedPlatformSkuCode,''),platformSkuCode,'') sourceCode
+    FROM sales_link_skus WHERE lastSeenBatchId=? ORDER BY id`).all(batch.id);
+  const insert = database.prepare(`INSERT INTO sales_link_sku_sales_object_relations
       (id,linkSkuId,salesObjectId,effectiveFrom,status,sourceType,sourceBatchId,sourceReferenceJson,reviewedBy,reviewedAt,createdAt,updatedAt)
       VALUES (?,?,?,?,'active',?,?,?,?,?,?,?)`);
-    for (const linkSku of linkSkus) {
+  const processLinkSku = (linkSku) => {
       const code = normalized(linkSku.sourceCode);
-      if (!code) continue;
+      if (!code) return;
       const targetId = result.projectedByCode.get(code);
-      if (!targetId) continue;
+      if (!targetId) return;
       const current = database.prepare("SELECT * FROM sales_link_sku_sales_object_relations WHERE linkSkuId=? AND status='active'").get(linkSku.id);
       const candidate = candidateByCode.get(code);
       const structure = database.prepare("SELECT id,version,structureHash,sourceType,sourceUpdatedAt,lastVerifiedAt FROM sales_object_structures WHERE salesObjectId=? AND status='active'").get(targetId);
@@ -225,20 +295,21 @@ export function projectOperatingSalesObjects(options = {}) {
             .run(V3_RELATION_SOURCE_TYPE, batch.id, evidence, timestamp, current.id);
           result.relationsProvenanceUpdated += 1;
         } else result.relationsUnchanged += 1;
-        continue;
+        return;
       }
       if (current) {
         result.relationConflicts += 1;
         result.exceptions.push({ code, linkSkuId: linkSku.id, type: "relation_conflict", currentSalesObjectId: current.salesObjectId, targetSalesObjectId: targetId });
-        continue;
+        return;
       }
-      if (options.relationWriteEnabled === false) { result.relationsWouldCreate += 1; continue; }
+      if (options.relationWriteEnabled === false) { result.relationsWouldCreate += 1; return; }
       insert.run(stableId("sales-link-sku-sales-object-v3", linkSku.id, targetId), linkSku.id, targetId, timestamp, V3_RELATION_SOURCE_TYPE, batch.id, evidence, actor, timestamp, timestamp, timestamp);
       result.relationsCreated += 1;
-    }
-    const afterDailyFacts = Number(database.prepare("SELECT COUNT(*) total FROM connection_sku_sales_daily_facts").get().total);
-    if (beforeDailyFacts !== afterDailyFacts) throw new Error("daily_facts_changed_by_projection");
-  }).immediate();
+  };
+  if (options.relationWriteEnabled === false) linkSkus.forEach(processLinkSku);
+  else writeBatches(linkSkus, processLinkSku);
+  const afterDailyFacts = Number(database.prepare("SELECT COUNT(*) total FROM connection_sku_sales_daily_facts").get().total);
+  if (beforeDailyFacts !== afterDailyFacts) throw new Error("daily_facts_changed_by_projection");
   result.projectedByCode = Object.fromEntries(result.projectedByCode);
   return { ...result, batch };
 }

@@ -22,6 +22,13 @@ function count(database, table) {
   return tableExists(database, table) ? Number(database.prepare(`SELECT COUNT(*) total FROM ${table}`).get().total) : 0;
 }
 
+function tableDigest(database, table) {
+  if (!tableExists(database, table)) return null;
+  const digest = crypto.createHash("sha256");
+  for (const row of database.prepare(`SELECT * FROM ${table} ORDER BY id`).iterate()) digest.update(json(row));
+  return digest.digest("hex");
+}
+
 export function readV3ShadowProtectedSnapshot(options = {}) {
   const database = options.database || getDatabase();
   const facts = tableExists(database, "connection_sku_sales_daily_facts")
@@ -36,18 +43,27 @@ export function readV3ShadowProtectedSnapshot(options = {}) {
     structures: count(database, "sales_object_structures"),
     structureComponents: count(database, "sales_object_structure_components"),
     relations: count(database, "sales_link_sku_sales_object_relations"),
+    relationsHash: tableDigest(database, "sales_link_sku_sales_object_relations"),
     legacyMappings: count(database, "sales_link_sku_erp_mappings"),
+    legacyMappingsHash: tableDigest(database, "sales_link_sku_erp_mappings"),
     productStructures: count(database, "sales_link_sku_product_structures"),
+    productStructuresHash: tableDigest(database, "sales_link_sku_product_structures"),
     manualBindings: count(database, "platform_sku_manual_bindings"),
     comboAssets: count(database, "sales_combo_groups") + count(database, "sales_combo_group_items"),
     products: count(database, "products"),
     links: count(database, "sales_links"),
     erpSkus: count(database, "erp_skus"),
     dailyFacts: Number(facts.facts || 0),
+    dailyFactsHash: tableDigest(database, "connection_sku_sales_daily_facts"),
     salesAmount: Number(facts.salesAmount || 0),
     costAmount: Number(facts.costAmount || 0),
     profitAmount: Number(facts.profitAmount || 0),
   };
+}
+
+function protectedChanges(before, after, projectionEnabled) {
+  const allowed = projectionEnabled ? new Set(["salesObjects", "structures", "structureComponents"]) : new Set();
+  return Object.keys(before).filter((key) => !allowed.has(key) && json(before[key]) !== json(after[key]));
 }
 
 function trueMissingCodeCount(database, batchId) {
@@ -178,7 +194,7 @@ function prune(database, timestamp) {
 export async function executeV3ShadowObservation(trigger = {}, options = {}) {
   const database = options.database || getDatabase();
   const flags = readV3RelationFeatureFlags(options.flags || {});
-  if (flags.projection !== "shadow" || flags.relationWrite || flags.relationRead) {
+  if (!flags.shadowEnabled || !["shadow", "on"].includes(flags.projection) || flags.relationWrite || flags.relationRead) {
     return { skipped: true, reason: "v3_shadow_disabled", flags };
   }
   const startedAt = new Date().toISOString();
@@ -194,12 +210,31 @@ export async function executeV3ShadowObservation(trigger = {}, options = {}) {
     const shadowConcurrency = Math.max(1, Number(process.env.V3_SHADOW_WANGDIAN_CONCURRENCY || 2));
     const result = await runMainChain({ batchId: trigger.batchId, detailLimit: 5000 }, {
       database,
-      flags: { projection: "shadow", relationWrite: false, relationRead: false },
+      flags: { projection: flags.projection, shadowEnabled: true, relationWrite: false, relationRead: false },
       enrichmentOptions: { concurrency: shadowConcurrency, ...(options.enrichmentOptions || {}) },
     });
     const after = readV3ShadowProtectedSnapshot({ database });
-    if (json(before) !== json(after)) throw new Error("v3_shadow_business_asset_mutation_detected");
+    const changedProtectedAssets = protectedChanges(before, after, flags.projection === "on");
+    if (changedProtectedAssets.length) throw new Error(`v3_shadow_business_asset_mutation_detected:${changedProtectedAssets.join(",")}`);
     const metrics = metricsFor(database, result);
+    metrics.pipelineStatus = result.status;
+    metrics.projection = result.projection ? {
+      candidateCount: Number(result.projection.candidateCount || 0),
+      confirmedCount: Number(result.projection.confirmedCount || 0),
+      singleCount: Number(result.projection.singleCount || 0),
+      bundleCount: Number(result.projection.bundleCount || 0),
+      objectsCreated: Number(result.projection.objectsCreated || 0),
+      objectsUpdated: Number(result.projection.objectsUpdated || 0),
+      structuresCreated: Number(result.projection.structuresCreated || 0),
+      structuresUpdated: Number(result.projection.structuresUpdated || 0),
+      structuresSuperseded: Number(result.projection.structuresSuperseded || 0),
+      componentsCreated: Number(result.projection.componentsCreated || 0),
+      relationsWouldCreate: Number(result.projection.relationsWouldCreate || 0),
+      relationConflicts: Number(result.projection.relationConflicts || 0),
+      exceptions: Number(result.projection.exceptions?.length || 0),
+      engineering: result.projection.engineering || null,
+    } : null;
+    metrics.protectedAssetsUnchanged = true;
     const completedAt = new Date().toISOString();
     const diagnosticWrites = persistDifferences(database, runId, differenceRows(database, result), completedAt);
     metrics.engineering = {
@@ -234,7 +269,7 @@ async function drainQueue(options = {}) {
 
 export function scheduleV3ShadowObservation(trigger = {}, options = {}) {
   const flags = readV3RelationFeatureFlags(options.flags || {});
-  if (flags.projection !== "shadow" || flags.relationWrite || flags.relationRead) return { scheduled: false, reason: "v3_shadow_disabled" };
+  if (!flags.shadowEnabled || !["shadow", "on"].includes(flags.projection) || flags.relationWrite || flags.relationRead) return { scheduled: false, reason: "v3_shadow_disabled" };
   queuedTrigger = trigger;
   setImmediate(() => drainQueue(options));
   return { scheduled: true };

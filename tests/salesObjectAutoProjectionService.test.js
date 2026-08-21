@@ -63,9 +63,29 @@ function addExistingProjection(db, { code = "BUNDLE", type = "bundle", component
 }
 
 test("Single首次自动投影", () => { const db = fixture(); addCandidate(db); const result = projectOperatingSalesObjects({ database: db }); assert.equal(result.objectsCreated, 1); assert.equal(db.prepare("SELECT COUNT(*) total FROM sales_objects").get().total, 1); });
-test("Single重复投影幂等", () => { const db = fixture(); addCandidate(db); projectOperatingSalesObjects({ database: db }); const second = projectOperatingSalesObjects({ database: db }); assert.equal(second.objectsCreated, 0); assert.equal(db.prepare("SELECT COUNT(*) total FROM sales_object_structures").get().total, 1); });
+test("Single重复投影幂等", () => { const db = fixture(); addCandidate(db); projectOperatingSalesObjects({ database: db }); const second = projectOperatingSalesObjects({ database: db }); assert.equal(second.objectsCreated, 0); assert.equal(second.objectsUpdated, 0); assert.equal(second.structuresCreated, 0); assert.equal(second.structuresUpdated, 0); assert.equal(second.componentsCreated, 0); assert.equal(second.engineering.batchCount, 0); assert.equal(db.prepare("SELECT COUNT(*) total FROM sales_object_structures").get().total, 1); });
 test("Bundle首次由权威BOM投影", () => { const db = fixture(); addCandidate(db, { code: "PACK", type: "bundle", erpSkuId: null }); db.prepare("INSERT INTO erp_skus VALUES ('part','PART','active')").run(); const result = projectOperatingSalesObjects({ database: db, bundleSources: { pack: { components: [{ erpSkuId: "part", quantity: 2 }] } } }); assert.equal(result.objectsCreated, 1); assert.equal(db.prepare("SELECT objectType FROM sales_objects").get().objectType, "bundle"); });
 test("Bundle读取Phase3当前版本", () => { const db = fixture(); addCandidate(db, { code: "PACK", type: "bundle", erpSkuId: null }); addExistingProjection(db, { code: "PACK" }); const result = projectOperatingSalesObjects({ database: db }); assert.equal(result.bundleCount, 1); assert.equal(result.exceptions.length, 0); });
+test("Bundle BOM变化建立新版本并保持Relation关闭", () => {
+  const db = fixture();
+  addCandidate(db, { code: "PACK", type: "bundle", erpSkuId: null });
+  addExistingProjection(db, { code: "PACK", quantity: 2 });
+  const first = projectOperatingSalesObjects({ database: db, relationWriteEnabled: false, bundleSources: { pack: { sourceUpdatedAt: "2026-08-21", components: [{ erpSkuId: "erp-part", quantity: 3 }] } } });
+  assert.equal(first.objectsCreated, 0);
+  assert.equal(first.structuresCreated, 1);
+  assert.equal(first.structuresSuperseded, 1);
+  assert.equal(first.componentsCreated, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) total FROM sales_object_structures").get().total, 2);
+  assert.equal(db.prepare("SELECT COUNT(*) total FROM sales_object_structures WHERE status='active'").get().total, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) total FROM sales_link_sku_sales_object_relations").get().total, 0);
+  const second = projectOperatingSalesObjects({ database: db, relationWriteEnabled: false, bundleSources: { pack: { sourceUpdatedAt: "2026-08-21", components: [{ erpSkuId: "erp-part", quantity: 3 }] } } });
+  assert.equal(second.objectsCreated, 0);
+  assert.equal(second.structuresCreated, 0);
+  assert.equal(second.structuresUpdated, 0);
+  assert.equal(second.structuresSuperseded, 0);
+  assert.equal(second.componentsCreated, 0);
+  assert.equal(second.engineering.batchCount, 0);
+});
 test("正确Link关系自动建立", () => { const db = fixture(); addCandidate(db); const result = projectOperatingSalesObjects({ database: db }); assert.equal(result.relationsCreated, 1); });
 test("重复Link关系不增长", () => { const db = fixture(); addCandidate(db); projectOperatingSalesObjects({ database: db }); const result = projectOperatingSalesObjects({ database: db }); assert.equal(result.relationsCreated, 0); assert.equal(result.relationsUnchanged, 1); });
 test("Relation Write关闭时只报告待写关系", () => { const db = fixture(); addCandidate(db); const result = projectOperatingSalesObjects({ database: db, relationWriteEnabled: false }); assert.equal(result.relationsCreated, 0); assert.equal(result.relationsWouldCreate, 1); });

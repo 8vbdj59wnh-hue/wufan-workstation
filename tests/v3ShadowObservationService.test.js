@@ -88,3 +88,20 @@ test("Shadow检测到正式资产变化时记录失败", async () => {
   }), /v3_shadow_business_asset_mutation_detected/u);
   assert.equal(db.prepare("SELECT status FROM v3_relation_shadow_runs").get().status, "failed");
 });
+
+test("Projection ON时允许Sales Object投影但保护正式Relation与销售事实", async () => {
+  const db = fixture();
+  const relationBefore = readV3ShadowProtectedSnapshot({ database: db }).relationsHash;
+  const result = await executeV3ShadowObservation({ type: "projection", batchId: "batch" }, {
+    database: db,
+    flags: { projection: "on", shadowEnabled: true, relationWrite: false, relationRead: false },
+    runMainChain: async () => {
+      db.prepare("INSERT INTO sales_objects VALUES ('projected')").run();
+      return { ...mainChainResult(), status: "projection_completed", projection: { objectsCreated: 1, structuresCreated: 0, relationsWouldCreate: 1, exceptions: [] } };
+    },
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(result.metrics.projection.objectsCreated, 1);
+  assert.equal(result.metrics.protectedAssetsUnchanged, true);
+  assert.equal(readV3ShadowProtectedSnapshot({ database: db }).relationsHash, relationBefore);
+});

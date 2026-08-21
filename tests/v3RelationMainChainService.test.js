@@ -6,7 +6,7 @@ import { getLatestCompletePlatformBatch } from "../server/v3PlatformBatchService
 import { readV3RelationFeatureFlags, V3_RELATION_SOURCE_TYPE } from "../server/v3RelationFeatureFlags.js";
 import { runV3RelationMainChain } from "../server/v3RelationMainChainService.js";
 
-const flags = (overrides = {}) => ({ environment: {}, projection: "off", relationWrite: false, relationRead: false, ...overrides });
+const flags = (overrides = {}) => ({ environment: {}, projection: "off", shadowEnabled: false, relationWrite: false, relationRead: false, ...overrides });
 const fakeResult = () => ({ observations: [{ identityStatus: "confirmed" }], summary: { operatingTotal: 1 }, members: [{ normalizedCode: "a" }] });
 function deps(log = []) {
   return {
@@ -19,9 +19,14 @@ function deps(log = []) {
   };
 }
 
-test("Feature Flags默认全部关闭", () => assert.deepEqual(readV3RelationFeatureFlags({ environment: {} }), { projection: "off", relationWrite: false, relationRead: false, safeDefault: true, relationSourceType: V3_RELATION_SOURCE_TYPE }));
+test("Feature Flags默认全部关闭", () => assert.deepEqual(readV3RelationFeatureFlags({ environment: {} }), { projection: "off", shadowEnabled: false, relationWrite: false, relationRead: false, safeDefault: true, relationSourceType: V3_RELATION_SOURCE_TYPE }));
 test("Projection支持shadow", () => assert.equal(readV3RelationFeatureFlags(flags({ projection: "shadow" })).projection, "shadow"));
 test("Projection支持on", () => assert.equal(readV3RelationFeatureFlags(flags({ projection: "on" })).projection, "on"));
+test("Projection ON与Shadow ON可以独立同时开启", () => {
+  const result = readV3RelationFeatureFlags(flags({ projection: "on", shadowEnabled: true }));
+  assert.equal(result.projection, "on");
+  assert.equal(result.shadowEnabled, true);
+});
 test("无效Projection值被拒绝", () => assert.throws(() => readV3RelationFeatureFlags(flags({ projection: "maybe" })), /invalid_v3_auto_projection_flag/u));
 test("Relation Write不能脱离Projection", () => assert.throws(() => readV3RelationFeatureFlags(flags({ relationWrite: true })), /v3_relation_write_requires_projection/u));
 test("Relation Read可以独立回切", () => assert.equal(readV3RelationFeatureFlags(flags({ relationRead: true })).relationRead, true));

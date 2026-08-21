@@ -35,6 +35,7 @@ module.exports = {
         WUFAN_DB_PATH: "/Users/meiyounaichatouyuna/WufanWorkstationData/production/workstation.db",
         WUFAN_DB_BASELINE_PATH: "/Users/meiyounaichatouyuna/WufanWorkstationData/production/business-baseline.json",
         V3_AUTO_PROJECTION: "off",
+        V3_SHADOW_ENABLED: "off",
         V3_AUTO_RELATION_WRITE: "off",
         V3_RELATION_READ: "off",
       },
