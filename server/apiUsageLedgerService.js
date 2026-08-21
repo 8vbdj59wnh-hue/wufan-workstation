@@ -54,6 +54,12 @@ export function resolveApiUsageSource(request) {
   return DEFAULT_SOURCE;
 }
 
+export function shouldRecordApiUsage(request) {
+  const route = String(request?.originalUrl ?? request?.path ?? "").split("?")[0];
+  if (["/api/health", "/api/release-maintenance/status"].includes(route)) return false;
+  return true;
+}
+
 export function recordApiUsage(database, input) {
   const accessedAt = input.accessedAt instanceof Date
     ? input.accessedAt.toISOString()

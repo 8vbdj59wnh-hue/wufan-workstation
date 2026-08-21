@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { getDatabase } from "./db.js";
 import { runV3RelationMainChain } from "./v3RelationMainChainService.js";
 import { readV3RelationFeatureFlags } from "./v3RelationFeatureFlags.js";
+import { beginReleaseManagedJob, finishReleaseManagedJob, isReleaseMaintenanceModeActive } from "./releaseMaintenanceService.js";
 
 const DAY_MS = 86400000;
 const RUN_RETENTION_DAYS = 90;
@@ -256,6 +257,15 @@ export async function executeV3ShadowObservation(trigger = {}, options = {}) {
 
 async function drainQueue(options = {}) {
   if (running) return;
+  if (isReleaseMaintenanceModeActive(options)) {
+    queuedTrigger = null;
+    return;
+  }
+  const maintenanceToken = beginReleaseManagedJob("v3_shadow", options);
+  if (!maintenanceToken) {
+    queuedTrigger = null;
+    return;
+  }
   running = true;
   try {
     while (queuedTrigger) {
@@ -264,12 +274,16 @@ async function drainQueue(options = {}) {
       try { await executeV3ShadowObservation(trigger, options); }
       catch (error) { console.error("[v3-shadow]", error); }
     }
-  } finally { running = false; }
+  } finally {
+    running = false;
+    finishReleaseManagedJob(maintenanceToken);
+  }
 }
 
 export function scheduleV3ShadowObservation(trigger = {}, options = {}) {
   const flags = readV3RelationFeatureFlags(options.flags || {});
   if (!flags.shadowEnabled || !["shadow", "on"].includes(flags.projection) || flags.relationWrite || flags.relationRead) return { scheduled: false, reason: "v3_shadow_disabled" };
+  if (isReleaseMaintenanceModeActive(options)) return { scheduled: false, reason: "release_maintenance" };
   queuedTrigger = trigger;
   setImmediate(() => drainQueue(options));
   return { scheduled: true };

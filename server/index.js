@@ -148,7 +148,14 @@ import {
   recordApiUsage,
   resolveApiUsageRoute,
   resolveApiUsageSource,
+  shouldRecordApiUsage,
 } from "./apiUsageLedgerService.js";
+import {
+  beginReleaseManagedJob,
+  finishReleaseManagedJob,
+  isReleaseMaintenanceModeActive,
+  readReleaseMaintenanceStatus,
+} from "./releaseMaintenanceService.js";
 import {
   pickGoalCenterBootstrapResources,
   readGoalCenterBootstrap,
@@ -498,6 +505,31 @@ app.use(express.json({ limit: "20mb" }));
 app.use("/uploads", express.static(uploadsDir));
 
 app.use("/api", (request, response, next) => {
+  if (["GET", "HEAD", "OPTIONS"].includes(request.method)) {
+    next();
+    return;
+  }
+  const maintenanceToken = beginReleaseManagedJob(`api:${request.method}:${request.path}`);
+  if (!maintenanceToken) {
+    response.status(503).json({ success: false, code: "release_maintenance", message: "系统正在执行受控发布维护，请稍后重试。" });
+    return;
+  }
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    finishReleaseManagedJob(maintenanceToken);
+  };
+  response.once("finish", finish);
+  response.once("close", finish);
+  next();
+});
+
+app.use("/api", (request, response, next) => {
+  if (!shouldRecordApiUsage(request)) {
+    next();
+    return;
+  }
   const source = resolveApiUsageSource(request);
   let finalized = false;
   const finalize = (statusCode) => {
@@ -528,6 +560,10 @@ app.get("/api/health", (_request, response) => {
     businessDataHealth: startupDatabaseHealth.businessDataHealth,
     version: applicationVersion,
   });
+});
+
+app.get("/api/release-maintenance/status", (_request, response) => {
+  response.json({ success: true, ...readReleaseMaintenanceStatus() });
 });
 
 function getBearerToken(request) {
@@ -4808,17 +4844,23 @@ const server = app.listen(port, host, () => {
   console.log(`Local API server running at http://${host}:${port}`);
   console.log(`Local access: http://127.0.0.1:${port}`);
   console.log(`SQLite database: ${databasePath}`);
-  scheduleV3ShadowObservation({ type: "service_restart", objectId: process.pid });
+  if (!isReleaseMaintenanceModeActive()) scheduleV3ShadowObservation({ type: "service_restart", objectId: process.pid });
 });
 
-resumePendingWangdianShopDiscoveryBatches();
-resumeConnectionBulkPlatformImports();
+if (!isReleaseMaintenanceModeActive()) {
+  resumePendingWangdianShopDiscoveryBatches();
+  resumeConnectionBulkPlatformImports();
+}
 
 const taskWaveCollectionTimer = setInterval(() => {
+  const maintenanceToken = beginReleaseManagedJob("task_wave_collection");
+  if (!maintenanceToken) return;
   try {
     generateEligibleTaskWaves();
   } catch (error) {
     console.error("任务波次自动收集失败", error);
+  } finally {
+    finishReleaseManagedJob(maintenanceToken);
   }
 }, 60_000);
 taskWaveCollectionTimer.unref();
@@ -4826,6 +4868,8 @@ taskWaveCollectionTimer.unref();
 let dataSyncSchedulerRunning = false;
 const dataSyncSchedulerTimer = setInterval(async () => {
   if (dataSyncSchedulerRunning) return;
+  const maintenanceToken = beginReleaseManagedJob("data_sync_scheduler");
+  if (!maintenanceToken) return;
   dataSyncSchedulerRunning = true;
   try {
     const results = [...await runDueErpGoodsSyncTasks(), ...await runDueWangdianSuiteSyncTasks(), ...await runDuePlatformGoodsSyncTasks(), ...await runDueInventorySyncTasks()];
@@ -4835,6 +4879,7 @@ const dataSyncSchedulerTimer = setInterval(async () => {
     console.error("数据同步中心调度失败", error);
   } finally {
     dataSyncSchedulerRunning = false;
+    finishReleaseManagedJob(maintenanceToken);
   }
 }, 60_000);
 dataSyncSchedulerTimer.unref();

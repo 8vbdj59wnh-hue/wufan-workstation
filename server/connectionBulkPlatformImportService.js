@@ -6,6 +6,7 @@ import {
   previewConnectionDataImport,
 } from "./connectionDataFoundationService.js";
 import { normalizeUploadedFileName } from "./uploadFileName.js";
+import { beginReleaseManagedJob, finishReleaseManagedJob } from "./releaseMaintenanceService.js";
 
 const text = (value) => String(value ?? "").trim();
 const now = () => new Date().toISOString();
@@ -113,11 +114,16 @@ export function scheduleConnectionBulkPlatformImportQueue() {
   queueScheduled = true;
   setImmediate(() => {
     queueScheduled = false;
+    const maintenanceToken = beginReleaseManagedJob("connection_bulk_platform_import");
+    if (!maintenanceToken) return;
     let processed = false;
     queueRunning = true;
     try { processed = processOne(); }
     catch (error) { console.error("平台链接批量导入队列执行失败", error); }
-    finally { queueRunning = false; }
+    finally {
+      queueRunning = false;
+      finishReleaseManagedJob(maintenanceToken);
+    }
     if (processed) scheduleConnectionBulkPlatformImportQueue();
   });
 }

@@ -145,7 +145,7 @@ for port in 5173 3001; do
   [[ "$listener_cwd" == "$PROJECT_DIR" ]] || fail "port $port listener cwd mismatch: $listener_cwd"
 done
 
-HEALTH_JSON="$(curl --fail --silent --show-error http://127.0.0.1:3001/api/health)" \
+HEALTH_JSON="$(curl --fail --silent --show-error -H 'x-wufan-api-source: system:release' http://127.0.0.1:3001/api/health)" \
   || fail "backend health request failed"
 HEALTH_JSON="$HEALTH_JSON" PHASE="$PHASE" "$NODE_COMMAND" <<'NODE' \
   || fail "backend health payload invalid"
@@ -160,9 +160,14 @@ if (!currentContract && !(process.env.PHASE === "before" && legacyContract)) {
 NODE
 
 [[ -f "$BASELINE_PATH" ]] || fail "business baseline is missing: $BASELINE_PATH"
-BUSINESS_BASELINE_JSON="$($SCRIPT_DIR/release-business-baseline-check.sh \
+BUSINESS_BASELINE_JSON=""
+if ! BUSINESS_BASELINE_JSON="$(WUFAN_PROJECT_DIR="$PROJECT_DIR" "$SCRIPT_DIR/release-business-baseline-check.sh" \
   --database "$DATABASE_PATH" \
-  --baseline "$BASELINE_PATH")" || fail "business baseline check failed"
+  --baseline "$BASELINE_PATH")"; then
+  BASELINE_ERROR_TYPE="$(printf '%s' "$BUSINESS_BASELINE_JSON" | "$NODE_COMMAND" -e \
+    'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).errorType||"baseline_query_failed")}catch{process.stdout.write("baseline_query_failed")}})')"
+  fail "business baseline check failed: $BASELINE_ERROR_TYPE"
+fi
 
 FRONT_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:5173/)"
 [[ "$FRONT_STATUS" == "200" ]] || fail "frontend returned HTTP $FRONT_STATUS"

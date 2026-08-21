@@ -80,10 +80,13 @@ git -C "$PROJECT_DIR" archive "$TOOLING_COMMIT" \
   scripts/release-from-package.sh \
   scripts/release-backup.sh \
   scripts/release-business-baseline-check.sh \
+  scripts/release-business-baseline-check.mjs \
+  scripts/release-maintenance-mode.mjs \
   scripts/release-classify.sh \
   scripts/release-health-check.sh \
   scripts/release-migration-preview.sh \
   scripts/release-migration-runner.mjs \
+  server/releaseMaintenanceService.js \
   | tar -x -C "$PACKAGE_DIR"
 chmod +x "$PACKAGE_DIR"/scripts/*.sh
 

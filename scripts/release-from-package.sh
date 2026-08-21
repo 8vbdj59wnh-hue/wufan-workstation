@@ -17,8 +17,11 @@ MANIFEST=""
 STAGE="argument-validation"
 SOURCE_STAGING=""
 CHECK_DATABASE_DIR=""
+MAINTENANCE_ENTERED=false
+BOOTSTRAP_SERVER_STOPPED=false
 PRODUCTION_DATABASE_PATH="/Users/meiyounaichatouyuna/WufanWorkstationData/production/workstation.db"
 PRODUCTION_BASELINE_PATH="/Users/meiyounaichatouyuna/WufanWorkstationData/production/business-baseline.json"
+RELEASE_MAINTENANCE_PATH="/Users/meiyounaichatouyuna/WufanWorkstationData/production/release-maintenance.json"
 
 fail() {
   echo "RELEASE_FROM_PACKAGE_FAIL: $*" >&2
@@ -26,6 +29,16 @@ fail() {
 }
 
 cleanup() {
+  if [[ "$MAINTENANCE_ENTERED" == true && -n "${NODE_COMMAND:-}" && -n "${PACKAGE_DIR:-}" ]]; then
+    WUFAN_ENV=production WUFAN_DB_PATH="$PRODUCTION_DATABASE_PATH" \
+      WUFAN_RELEASE_MAINTENANCE_PATH="$RELEASE_MAINTENANCE_PATH" \
+      "$NODE_COMMAND" "$PACKAGE_DIR/scripts/release-maintenance-mode.mjs" exit >/dev/null 2>&1 || true
+    MAINTENANCE_ENTERED=false
+  fi
+  if [[ "$BOOTSTRAP_SERVER_STOPPED" == true ]] && command -v pm2 >/dev/null 2>&1; then
+    pm2 restart wufan-server >/dev/null 2>&1 || true
+    BOOTSTRAP_SERVER_STOPPED=false
+  fi
   git -C "$EXPECTED_PROJECT_DIR" update-ref -d "$PACKAGE_REF" >/dev/null 2>&1 || true
   [[ -z "$SOURCE_STAGING" || ! -d "$SOURCE_STAGING" ]] || rm -rf "$SOURCE_STAGING"
   [[ -z "$CHECK_DATABASE_DIR" || ! -d "$CHECK_DATABASE_DIR" ]] || rm -rf "$CHECK_DATABASE_DIR"
@@ -51,10 +64,13 @@ REQUIRED_FILES=(
   SHA256SUMS
   scripts/release-backup.sh
   scripts/release-business-baseline-check.sh
+  scripts/release-business-baseline-check.mjs
+  scripts/release-maintenance-mode.mjs
   scripts/release-classify.sh
   scripts/release-health-check.sh
   scripts/release-migration-preview.sh
   scripts/release-migration-runner.mjs
+  server/releaseMaintenanceService.js
 )
 for required in "${REQUIRED_FILES[@]}"; do
   [[ -f "$PACKAGE_DIR/$required" ]] || fail "package file missing: $required"
@@ -139,12 +155,6 @@ ARCHIVE_CHECK_SHA="$(
 DATABASE_PATH="$PRODUCTION_DATABASE_PATH"
 [[ -f "$DATABASE_PATH" ]] || fail "production database is missing"
 [[ -f "$PRODUCTION_BASELINE_PATH" ]] || fail "production business baseline is missing"
-DATABASE_INTEGRITY="$(sqlite3 "file:$DATABASE_PATH?mode=ro" 'PRAGMA integrity_check;')"
-[[ "$DATABASE_INTEGRITY" == "ok" ]] || fail "production database integrity check failed"
-"$PACKAGE_DIR/scripts/release-business-baseline-check.sh" \
-  --database "$DATABASE_PATH" \
-  --baseline "$PRODUCTION_BASELINE_PATH" >/dev/null \
-  || fail "production business baseline check failed"
 DATABASE_SIZE="$(stat -f '%z' "$DATABASE_PATH")"
 DISK_FREE_BYTES="$(df -Pk "$PROJECT_DIR" | awk 'NR==2 {printf "%.0f\n", $4 * 1024}')"
 REQUIRED_FREE_BYTES=$((DATABASE_SIZE + NPM_TEMP_BYTES + MINIMUM_SAFETY_BYTES))
@@ -169,9 +179,43 @@ for port in 5173 3001; do
   "$LSOF_BIN" -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null \
     || fail "port $port is not listening"
 done
-curl --fail --silent --show-error http://127.0.0.1:3001/api/health \
+curl --fail --silent --show-error -H 'x-wufan-api-source: system:release' http://127.0.0.1:3001/api/health \
   | "$NODE_COMMAND" -e \
     'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const h=JSON.parse(s);const current=h.status==="ok"&&h.technicalHealth?.status==="ok"&&["ok","not_enforced"].includes(h.businessDataHealth?.status);const legacy=h.status==="ok"&&h.database==="ok"||h.ok===true;if(!current&&!legacy)process.exit(1)})'
+
+WUFAN_ENV=production WUFAN_DB_PATH="$PRODUCTION_DATABASE_PATH" \
+  WUFAN_RELEASE_MAINTENANCE_PATH="$RELEASE_MAINTENANCE_PATH" \
+  "$NODE_COMMAND" "$PACKAGE_DIR/scripts/release-maintenance-mode.mjs" enter \
+    --reason phase9_release --release-id "preflight-${TARGET_COMMIT:0:8}" >/dev/null
+MAINTENANCE_ENTERED=true
+
+if ! WUFAN_ENV=production WUFAN_DB_PATH="$PRODUCTION_DATABASE_PATH" \
+  WUFAN_RELEASE_MAINTENANCE_PATH="$RELEASE_MAINTENANCE_PATH" \
+  "$NODE_COMMAND" "$PACKAGE_DIR/scripts/release-maintenance-mode.mjs" wait \
+    --timeout-ms 120000 >/dev/null 2>&1; then
+  # One-time bootstrap: the pre-Hotfix server cannot report maintenance status.
+  # PM2 sends SIGTERM and the server drains requests before closing SQLite.
+  pm2 stop wufan-server >/dev/null
+  BOOTSTRAP_SERVER_STOPPED=true
+  for attempt in {1..60}; do
+    [[ -z "$(lsof "$DATABASE_PATH" 2>/dev/null || true)" ]] && break
+    [[ "$attempt" -lt 60 ]] || fail "bootstrap maintenance could not drain database users"
+    sleep 1
+  done
+fi
+
+DATABASE_INTEGRITY="$(sqlite3 "file:$DATABASE_PATH?mode=ro" 'PRAGMA integrity_check;')"
+[[ "$DATABASE_INTEGRITY" == "ok" ]] || fail "production database integrity check failed"
+for baseline_attempt in 1 2 3; do
+  BASELINE_RESULT=""
+  if ! BASELINE_RESULT="$(WUFAN_PROJECT_DIR="$PROJECT_DIR" "$PACKAGE_DIR/scripts/release-business-baseline-check.sh" \
+    --database "$DATABASE_PATH" \
+    --baseline "$PRODUCTION_BASELINE_PATH")"; then
+    BASELINE_ERROR_TYPE="$(printf '%s' "$BASELINE_RESULT" | "$NODE_COMMAND" -e \
+      'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).errorType||"baseline_query_failed")}catch{process.stdout.write("baseline_query_failed")}})')"
+    fail "production business baseline check failed: $BASELINE_ERROR_TYPE (attempt $baseline_attempt)"
+  fi
+done
 
 CLASSIFICATION_JSON="$(
   PROJECT_DIR="$PROJECT_DIR" NODE_COMMAND="$NODE_COMMAND" \
@@ -315,10 +359,12 @@ if [[ "$REQUIRES_MIGRATION_PREVIEW" == "true" ]]; then
 fi
 
 STAGE="health-before"
-"$PACKAGE_DIR/scripts/release-health-check.sh" \
-  --commit "$TARGET_COMMIT" \
-  --release-dir "$RELEASE_DIR" \
-  --phase before
+if [[ "$BOOTSTRAP_SERVER_STOPPED" != true ]]; then
+  "$PACKAGE_DIR/scripts/release-health-check.sh" \
+    --commit "$TARGET_COMMIT" \
+    --release-dir "$RELEASE_DIR" \
+    --phase before
+fi
 
 STAGE="source-staging"
 SOURCE_STAGING="$(mktemp -d /tmp/wufan-source-staging.XXXXXX)"
@@ -365,7 +411,7 @@ if [[ "$REQUIRES_CLIENT_RESTART" == "true" ]]; then
   done
 fi
 for attempt in {1..10}; do
-  curl --fail --silent http://127.0.0.1:3001/api/health >/dev/null && break
+  curl --fail --silent -H 'x-wufan-api-source: system:release' http://127.0.0.1:3001/api/health >/dev/null && break
   [[ "$attempt" -lt 10 ]]
   sleep 2
 done
@@ -376,6 +422,14 @@ STAGE="health-after"
   --release-dir "$RELEASE_DIR" \
   --phase after
 [[ "$(sqlite3 "file:$DATABASE_PATH?mode=ro" 'PRAGMA integrity_check;')" == "ok" ]]
+
+WUFAN_ENV=production WUFAN_DB_PATH="$PRODUCTION_DATABASE_PATH" \
+  WUFAN_RELEASE_MAINTENANCE_PATH="$RELEASE_MAINTENANCE_PATH" \
+  "$NODE_COMMAND" "$PACKAGE_DIR/scripts/release-maintenance-mode.mjs" exit >/dev/null
+MAINTENANCE_ENTERED=false
+BOOTSTRAP_SERVER_STOPPED=false
+curl --fail --silent --show-error -H 'x-wufan-api-source: system:release' \
+  http://127.0.0.1:3001/api/health >/dev/null
 
 STAGE="manifest-finalize"
 PM2_AFTER="$(pm2 jlist)"

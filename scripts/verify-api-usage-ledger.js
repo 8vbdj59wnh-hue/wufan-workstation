@@ -66,6 +66,10 @@ try {
     source: "web:products",
   });
   assert.equal(dynamic.response.status, 200);
+  await request("/api/products/product-does-not-exist/snapshots", {
+    token: adminToken,
+    source: "web:products",
+  });
 
   const denied = await request("/api/admin/api-usage", { token: deniedToken, source: "web:admin-data-center" });
   assert.equal(denied.response.status, 403);
@@ -78,15 +82,15 @@ try {
 
   const startup = ledger.data.items.find((item) =>
     item.method === "GET" && item.routePattern === "/api/health" && item.source === "web:startup");
-  assert.equal(startup.callCount, 2);
+  assert.equal(startup, undefined);
   const unauthorized = ledger.data.items.find((item) =>
     item.routePattern === "/api/goal-center/bootstrap" && item.source === "web:goals");
   assert.equal(unauthorized.clientErrorCount, 1);
   const product = ledger.data.items.find((item) =>
     item.routePattern === "/api/products/:id/snapshots" && item.source === "web:products");
-  assert.equal(product.callCount, 1);
+  assert.equal(product.callCount, 2);
   assert.equal(ledger.data.items.some((item) => item.routePattern.includes("product-does-not-exist")), false);
-  assert.ok(ledger.data.summary.totalCalls >= 6);
+  assert.ok(ledger.data.summary.totalCalls >= 4);
 
   console.log(JSON.stringify({
     success: true,
@@ -97,7 +101,7 @@ try {
     recordedSources: [...new Set(ledger.data.items.map((item) => item.source))].sort(),
     totalCalls: ledger.data.summary.totalCalls,
     dynamicRoutePattern: product.routePattern,
-    startupCalls: startup.callCount,
+    internalHealthExcluded: true,
   }, null, 2));
 } finally {
   if (child.exitCode === null) child.kill("SIGTERM");

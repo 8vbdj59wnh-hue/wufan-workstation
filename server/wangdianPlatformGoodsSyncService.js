@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { beginReleaseManagedJob, finishReleaseManagedJob } from "./releaseMaintenanceService.js";
 import fs from "node:fs";
 import path from "node:path";
 import { getDatabase, uploadsDir } from "./db.js";
@@ -236,7 +237,17 @@ export async function runWangdianShopDiscoveryBatch(batchId, { queryApi = queryW
 }
 
 export function queueWangdianShopDiscoveryBatch(batchId, options = {}) {
-  setImmediate(() => runWangdianShopDiscoveryBatch(batchId, options).catch((error) => console.error("旺店通店铺识别后台批次失败", error)));
+  setImmediate(async () => {
+    const maintenanceToken = beginReleaseManagedJob("wangdian_shop_discovery");
+    if (!maintenanceToken) return;
+    try {
+      await runWangdianShopDiscoveryBatch(batchId, options);
+    } catch (error) {
+      console.error("旺店通店铺识别后台批次失败", error);
+    } finally {
+      finishReleaseManagedJob(maintenanceToken);
+    }
+  });
 }
 
 export function resumeWangdianShopDiscoveryBatch(batchId, options = {}) {
