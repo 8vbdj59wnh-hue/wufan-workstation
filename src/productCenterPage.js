@@ -107,7 +107,7 @@ let productBusinessFilters = { query: "", brand: "", category: "", lifecycle: ""
 let productBusinessVisibleMetrics = new Set(["sales", "structure", "inventory", "profit", "health", "diagnosis"]);
 
 const productBusinessMetricGroups = [
-  { key: "sales", label: "销售表现", count: 3 },
+  { key: "sales", label: "销售贡献", count: 5 },
   { key: "structure", label: "产品结构", count: 2 },
   { key: "inventory", label: "库存经营", count: 3 },
   { key: "profit", label: "利润表现", count: 3 },
@@ -319,7 +319,7 @@ function renderProductActions(product) {
 function renderProductTable(products, index) {
   return `<div class="table-wrap">
     <table class="data-table product-table">
-      <thead><tr><th>产品主图</th><th>SKU编码</th><th>产品名称</th><th>经营区</th><th>生命周期</th><th>上架时间</th><th>销售额</th><th>销量</th><th>增长</th><th>净利润</th><th>库存</th><th>负责人</th><th>操作</th></tr></thead>
+      <thead><tr><th>产品主图</th><th>SKU编码</th><th>产品名称</th><th>经营区</th><th>生命周期</th><th>上架时间</th><th>直接销售额</th><th>实际出货</th><th>出货增长</th><th>直接毛利润</th><th>库存</th><th>负责人</th><th>操作</th></tr></thead>
       <tbody>
         ${products.length === 0 ? `<tr><td colspan="13" class="empty-cell">暂无匹配产品</td></tr>` : products.map((product) => {
           const relatedCount = getRelatedActions(product.id).length;
@@ -327,8 +327,8 @@ function renderProductTable(products, index) {
           const business = management?.analysis;
           return `<tr>
             <td>${renderImage(product)}</td><td><strong>${escapeHtml(product.skuCode)}</strong></td><td>${escapeHtml(product.name)}</td>
-            <td>${businessZoneBadge(management?.businessZone)}</td><td><span class="status-badge">${escapeHtml(product.status)}</span></td><td>${formatDateTime(management?.listedAt)}</td><td>${formatMoney(business?.finance?.revenue)}</td><td>${formatMetric(business?.sales?.sales30d)}</td><td>${formatPercent(business?.sales?.growth)}</td>
-            <td>${formatMoney(business?.finance?.netProfit)}</td><td>${formatMetric(business?.inventory?.actualStock)}</td><td>${escapeHtml(findName(state.people, product.ownerId))}<small> · ${relatedCount}个行动</small></td>
+            <td>${businessZoneBadge(management?.businessZone)}</td><td><span class="status-badge">${escapeHtml(product.status)}</span></td><td>${formatDateTime(management?.listedAt)}</td><td>${formatMoney(business?.finance?.revenue)}</td><td>${formatMetric(business?.sales?.totalPhysicalContribution)}</td><td>${formatPercent(business?.sales?.growth)}</td>
+            <td>${formatMoney(business?.finance?.grossProfit)}</td><td>${formatMetric(business?.inventory?.actualStock)}</td><td>${escapeHtml(findName(state.people, product.ownerId))}<small> · ${relatedCount}个行动</small></td>
             <td>${renderProductActions(product)}</td>
           </tr>`;
         }).join("")}
@@ -358,10 +358,10 @@ function renderProductCards(products, index) {
             <span>ERP <strong>${escapeHtml(erp.goods?.goodsCode || "—")}</strong></span>
           </div>
           <div class="product-card-metrics">
-            <div><strong>${formatMoney(business?.finance?.revenue)}</strong><span>销售额</span></div>
-            <div><strong>${formatMetric(business?.sales?.sales30d)}</strong><span>30天销量</span></div>
-            <div><strong>${formatPercent(business?.sales?.growth)}</strong><span>增长</span></div>
-            <div><strong>${formatMoney(business?.finance?.netProfit)}</strong><span>净利润</span></div>
+            <div><strong>${formatMoney(business?.finance?.revenue)}</strong><span>直接销售额</span></div>
+            <div><strong>${formatMetric(business?.sales?.totalPhysicalContribution)}</strong><span>30天实际出货</span></div>
+            <div><strong>${formatPercent(business?.sales?.growth)}</strong><span>出货增长</span></div>
+            <div><strong>${formatMoney(business?.finance?.grossProfit)}</strong><span>直接毛利润</span></div>
             <div><strong>${formatMetric(business?.inventory?.actualStock ?? erp.stock.actualStock)}</strong><span>库存</span></div>
             <div><strong>${sales.loaded ? sales.linkCount : "—"}</strong><span>销售链接</span></div>
           </div>
@@ -443,7 +443,7 @@ function renderProductBusinessTable(readModel) {
   return `<div class="product-business-table-wrap"><table class="product-business-table">
     <thead><tr class="product-business-groups"><th colspan="5">产品信息</th><th colspan="2">生命周期</th>${groups.map((group) => `<th colspan="${group.count}">${group.label}</th>`).join("")}<th colspan="2">经营动作</th></tr>
     <tr><th>图片</th><th>${businessSortHeader("name", "产品")}</th><th>品牌</th><th>分类</th><th>负责人</th><th>生命周期</th><th>产品状态</th>
-      ${businessMetricEnabled("sales") ? `<th>${businessSortHeader("salesAmount", "销售额")}</th><th>${businessSortHeader("salesQuantity", "销量")}</th><th>${businessSortHeader("salesTrend", "销售趋势")}</th>` : ""}
+      ${businessMetricEnabled("sales") ? `<th>${businessSortHeader("salesAmount", "直接销售额")}</th><th>直接销量</th><th>组合贡献</th><th>${businessSortHeader("salesQuantity", "实际出货")}</th><th>${businessSortHeader("salesTrend", "出货趋势")}</th>` : ""}
       ${businessMetricEnabled("structure") ? `<th>${businessSortHeader("skuCount", "SKU数量")}</th><th>${businessSortHeader("salesLinkCount", "销售链接")}</th>` : ""}
       ${businessMetricEnabled("inventory") ? `<th>${businessSortHeader("inventoryQuantity", "库存数量")}</th><th>${businessSortHeader("inventoryAmount", "库存金额")}</th><th>库存状态</th>` : ""}
       ${businessMetricEnabled("profit") ? `<th>${businessSortHeader("grossMargin", "毛利率")}</th><th>${businessSortHeader("grossProfit", "毛利润")}</th><th>盈利状态</th>` : ""}
@@ -455,7 +455,7 @@ function renderProductBusinessTable(readModel) {
       <td><button type="button" class="product-business-product-button" data-action="view-product" data-direct-product-detail data-product-id="${escapeHtml(item.id)}"><strong>${escapeHtml(item.name)}</strong><small>SKU ${escapeHtml(item.sku || "—")}</small><small>产品编码 ${escapeHtml(item.productCode || "—")}</small></button></td>
       <td>${escapeHtml(item.brand || "—")}</td><td>${escapeHtml(item.category || "—")}</td><td>${escapeHtml(item.ownerName || "未分配")}</td>
       <td>${businessStatus(item.lifecycle, item.lifecycle, "lifecycle")}</td><td>${businessStatus(item.status, "product")}</td>
-      ${businessMetricEnabled("sales") ? `<td>${businessMoney(item.sales.amount)}</td><td>${businessValue(item.sales.quantity)}</td><td>${businessTrend(item.sales.trend)}</td>` : ""}
+      ${businessMetricEnabled("sales") ? `<td>${businessMoney(item.sales.directAmount)}</td><td>${businessValue(item.sales.directQuantity)}</td><td>${businessValue(item.sales.bundleContributionQuantity)}</td><td>${businessValue(item.sales.totalPhysicalContribution)}</td><td>${businessTrend(item.sales.trend)}</td>` : ""}
       ${businessMetricEnabled("structure") ? `<td>${businessValue(item.structure.skuCount)}</td><td>${businessValue(item.structure.salesLinkCount)}</td>` : ""}
       ${businessMetricEnabled("inventory") ? `<td>${businessValue(item.inventory.quantity)}</td><td>${businessMoney(item.inventory.amount)}</td><td>${businessStatus(item.inventory.status.label, item.inventory.status.code, "inventory")}</td>` : ""}
       ${businessMetricEnabled("profit") ? `<td>${businessPercent(item.profit.grossMargin)}</td><td>${businessMoney(item.profit.grossProfit)}</td><td>${businessStatus(item.profit.status.label, item.profit.status.code, "profit")}</td>` : ""}
@@ -481,7 +481,7 @@ function renderProductBusinessDashboard() {
     ${renderProductWorkspaceTabs()}
     <section class="product-business-hero"><div><p class="eyebrow">产品经营分析</p><h2>全部产品经营数据表</h2><p>展示产品销售、库存、利润、生命周期及健康状态，帮助判断产品经营质量。</p></div>${readModel?.period ? `<small>销售数据周期 ${escapeHtml(readModel.period.periodStart)} 至 ${escapeHtml(readModel.period.periodEnd)}</small>` : ""}</section>
     ${productBusinessDashboardState.error ? `<div class="form-error">${escapeHtml(productBusinessDashboardState.error)}</div>` : ""}
-    ${summary ? `<section class="product-business-summary"><article><span>产品总数</span><strong>${businessValue(summary.totalProducts)}</strong><small>与产品库同源</small></article><article><span>筛选结果</span><strong>${businessValue(summary.filteredProducts)}</strong><small>当前筛选范围</small></article><article><span>周期销售额</span><strong>${businessMoney(summary.salesAmount)}</strong><small>复用销售事实</small></article><article><span>周期销量</span><strong>${businessValue(summary.salesQuantity)}</strong><small>复用销售事实</small></article><article><span>库存数量</span><strong>${businessValue(summary.inventoryQuantity)}</strong><small>库存模块最新口径</small></article><article><span>风险产品</span><strong>${businessValue(summary.riskProducts)}</strong><small>健康或库存风险</small></article></section>` : ""}
+    ${summary ? `<section class="product-business-summary"><article><span>产品总数</span><strong>${businessValue(summary.totalProducts)}</strong><small>与产品库同源</small></article><article><span>筛选结果</span><strong>${businessValue(summary.filteredProducts)}</strong><small>当前筛选范围</small></article><article><span>直接销售额</span><strong>${businessMoney(summary.directSalesAmount)}</strong><small>仅Single直接事实</small></article><article><span>直接销量</span><strong>${businessValue(summary.directSalesQuantity)}</strong><small>Single直接销售</small></article><article><span>组合贡献销量</span><strong>${businessValue(summary.bundleContributionQuantity)}</strong><small>Bundle销量 × BOM数量</small></article><article><span>实际出货贡献</span><strong>${businessValue(summary.totalPhysicalContribution)}</strong><small>直接 + 组合贡献</small></article><article><span>库存数量</span><strong>${businessValue(summary.inventoryQuantity)}</strong><small>库存模块最新口径</small></article><article><span>风险产品</span><strong>${businessValue(summary.riskProducts)}</strong><small>健康或库存风险</small></article></section>` : ""}
     ${renderProductBusinessFilters(readModel)}
     <div class="product-business-toolbar"><span>${productBusinessDashboardState.loading ? "正在读取产品经营数据…" : `共 ${summary?.filteredProducts ?? 0} 个产品`}</span>${renderProductBusinessMetricSettings()}</div>
     ${productBusinessDashboardState.loading && !readModel ? `<div class="empty-state">正在读取销售、库存与经营数据…</div>` : renderProductBusinessTable(readModel)}
@@ -1076,9 +1076,11 @@ function renderProductBusinessTab(product) {
   if (!detail) return `<div class="product-detail-empty">${productManagementState.loadingProductId === product.id ? "正在读取经营分析…" : "暂无经营分析"}</div>`;
   const analysis = detail.analysis; const latestHealth = detail.healthRecords?.[0];
   return `<div class="product-business-analysis"><div class="product-business-metrics">
-    <article><span>近30天销量</span><strong>${formatMetric(analysis.sales.sales30d)}</strong><small>增长 ${formatPercent(analysis.sales.growth)}</small></article>
-    <article><span>销售额</span><strong>${formatMoney(analysis.finance.revenue)}</strong><small>来自销售日报事实</small></article>
-    <article><span>毛利润</span><strong>${formatMoney(analysis.finance.grossProfit)}</strong><small>毛利率 ${formatPercent(analysis.finance.profitMargin)}</small></article>
+    <article><span>直接销量</span><strong>${formatMetric(analysis.sales.directSalesQuantity)}</strong><small>Single直接销售</small></article>
+    <article><span>组合贡献销量</span><strong>${formatMetric(analysis.sales.bundleContributionQuantity)}</strong><small>参与 ${formatMetric(analysis.sales.contributingBundleCount)} 个组合装</small></article>
+    <article><span>实际出货贡献</span><strong>${formatMetric(analysis.sales.totalPhysicalContribution)}</strong><small>增长 ${formatPercent(analysis.sales.growth)}</small></article>
+    <article><span>直接销售额</span><strong>${formatMoney(analysis.finance.revenue)}</strong><small>Bundle金额不分摊</small></article>
+    <article><span>直接毛利润</span><strong>${formatMoney(analysis.finance.grossProfit)}</strong><small>毛利率 ${formatPercent(analysis.finance.profitMargin)}</small></article>
     <article><span>实际库存</span><strong>${formatMetric(analysis.inventory.actualStock)}</strong><small>${escapeHtml(analysis.inventory.risk)}</small></article>
     <article><span>库存周转</span><strong>${formatPercent(analysis.inventory.turnover)}</strong><small>库存效率</small></article>
     <article><span>健康状态</span><strong>${escapeHtml(detail.healthAnalysis?.overall?.label || healthLabel(latestHealth?.healthStatus))}</strong><small>详细原因请查看“产品健康分析”</small></article>

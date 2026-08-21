@@ -2,6 +2,7 @@ import { getDatabase } from "./db.js";
 import { readProductInventorySupplyMap } from "./inventorySupplyQueryService.js";
 import { classifyProductBusinessZones } from "./productBusinessClassification.js";
 import { FORMAL_SALES_OBJECT_RESOLVER_SCOPES, resolveLinkSkuRelationsForRead } from "./capabilities/resolveLinkSkuRelationRead.js";
+import { queryProductContributions } from "./productContributionReadModel.js";
 
 export const productBusinessLifecycleStatuses = Object.freeze(["新品", "成长", "爆款", "稳定销售", "衰退", "清仓", "归档"]);
 export const productBusinessHealthStatuses = Object.freeze(["healthy", "attention", "risk", "no_data"]);
@@ -62,15 +63,13 @@ export function readProductBusinessRelationContext(database) {
   for (const sku of linkSkus) {
     const relation = relations[sku.salesLinkSkuId];
     if (!relation?.isUsable) continue;
-    const totalQuantity = relation.mappings.reduce((sum, mapping) => sum + Number(mapping.quantity || 0), 0);
-    if (!(totalQuantity > 0)) continue;
     const quantityByProduct = new Map();
     for (const mapping of relation.mappings) {
       const productId = productByErpSku.get(mapping.erpSkuId);
       if (!productId) continue;
       quantityByProduct.set(productId, (quantityByProduct.get(productId) || 0) + Number(mapping.quantity || 0));
     }
-    const attributions = [...quantityByProduct].map(([productId, quantity]) => ({ productId, quantity, share: quantity / totalQuantity }));
+    const attributions = [...quantityByProduct].map(([productId, quantity]) => ({ productId, quantity }));
     if (!attributions.length) continue;
     attributionsBySku.set(sku.salesLinkSkuId, attributions);
     for (const attribution of attributions) {
@@ -205,6 +204,20 @@ function salesTrend(current, previous, earlier) {
   return { rate, code: "stable", label: "稳定" };
 }
 
+function physicalContributionTrend(current, previous, earlier) {
+  const currentValue = numeric(current?.totalPhysicalContribution);
+  const previousValue = numeric(previous?.totalPhysicalContribution);
+  const earlierValue = numeric(earlier?.totalPhysicalContribution);
+  if (currentValue === null || previousValue === null || previousValue === 0) return { rate: null, code: "no_data", label: "暂无对比", metric: "total_physical_contribution" };
+  const rate = (currentValue - previousValue) / Math.abs(previousValue);
+  if (rate > 0.1) return { rate, code: "up", label: "上升", metric: "total_physical_contribution" };
+  if (rate < -0.1 && earlierValue !== null && previousValue < earlierValue) return { rate, code: "down", label: "下降", sustained: true, metric: "total_physical_contribution" };
+  if (rate < -0.1) return { rate, code: "stable", label: "稳定", metric: "total_physical_contribution", observation: earlierValue === null
+    ? "本期实际出货贡献下降，但缺少更早同周期数据，暂不判定为持续下降。"
+    : "本期实际出货贡献下降，但未形成连续两个周期下降，暂按稳定观察。" };
+  return { rate, code: "stable", label: "稳定", metric: "total_physical_contribution" };
+}
+
 function healthDimension(code, label, severity, explanation, evidence = {}) {
   return { code, label, severity, explanation, evidence };
 }
@@ -221,8 +234,8 @@ function buildProductHealthAnalysis(item, context) {
   const sales = trend.code === "no_data"
     ? healthDimension("no_data", "暂无数据", "no_data", "现有销售事实不足以完成近30天同期对比。")
     : healthDimension(trend.code === "up" ? "growth" : trend.code, trend.code === "up" ? "↑增长" : trend.code === "down" ? "↓下降" : "→稳定",
-      trend.code === "down" ? "attention" : "healthy", trend.observation || `当前${context.period.periodDays}天销售额较上一个同长周期${trend.code === "up" ? "上涨" : trend.code === "down" ? "下降" : "变化在±10%内"}${trend.rate === null ? "" : ` ${Math.abs(trend.rate * 100).toFixed(1)}%`}。`,
-      { currentAmount: item.sales.amount, previousAmount: item.sales.previousAmount, earlierAmount: item.sales.earlierAmount, changeRate: trend.rate, sustained: Boolean(trend.sustained) });
+      trend.code === "down" ? "attention" : "healthy", trend.observation || `当前${context.period.periodDays}天实际出货贡献较上一个同长周期${trend.code === "up" ? "上涨" : trend.code === "down" ? "下降" : "变化在±10%内"}${trend.rate === null ? "" : ` ${Math.abs(trend.rate * 100).toFixed(1)}%`}。`,
+      { currentQuantity: item.sales.totalPhysicalContribution, previousQuantity: item.sales.previousQuantity, earlierQuantity: item.sales.earlierQuantity, directQuantity: item.sales.directQuantity, bundleContributionQuantity: item.sales.bundleContributionQuantity, changeRate: trend.rate, sustained: Boolean(trend.sustained) });
 
   const inventoryCode = item.inventory.status.code;
   const inventory = inventoryCode === "no_data"
@@ -245,10 +258,10 @@ function buildProductHealthAnalysis(item, context) {
   const link = item.linkPerformance;
   let links;
   if (!link.linkCount) links = healthDimension("needs_optimization", "需优化", "attention", "当前未关联有效销售链接，无法观察销售贡献与转化表现。", { linkCount: 0 });
-  else if (!link.measuredLinkCount && item.sales.amount === null) links = healthDimension("no_data", "暂无数据", "no_data", `已关联 ${link.linkCount} 个销售链接，但当前周期没有销售或转化事实。`, { ...link });
+  else if (!link.measuredLinkCount && item.sales.directAmount === null) links = healthDimension("no_data", "暂无数据", "no_data", `已关联 ${link.linkCount} 个销售链接，但当前周期没有Single直接销售或转化事实。`, { ...link });
   else {
     const conversionWeak = link.conversionRate !== null && context.averageConversionRate !== null && link.conversionRate < context.averageConversionRate * 0.8;
-    const noContribution = item.sales.amount !== null && item.sales.amount <= 0;
+    const noContribution = item.sales.directAmount !== null && item.sales.directAmount <= 0;
     const excellent = link.linkCount >= 2 && item.sales.contribution !== null && context.averageSalesContribution !== null && item.sales.contribution >= context.averageSalesContribution
       && link.conversionRate !== null && context.averageConversionRate !== null && link.conversionRate >= context.averageConversionRate;
     const code = noContribution || conversionWeak ? "needs_optimization" : excellent ? "excellent" : "normal";
@@ -270,7 +283,7 @@ function buildProductHealthAnalysis(item, context) {
   if (inventory.code === "stockout") recommendations.push({ code: "inventory_stockout", title: "制定补货保障方案", reason: inventory.explanation });
   if (profit.code === "low") recommendations.push({ code: "profit_low", title: "优化产品成本结构", reason: profit.explanation });
   if (overallCode !== "no_data" && links.code === "needs_optimization") recommendations.push({ code: "link_optimization", title: "优化关联销售链接表现", reason: links.explanation });
-  return { overall, dimensions, availableDimensionCount: availableCount, recommendations, evaluatedPeriod: context.period, readOnly: true, ruleVersion: "product-health-phase2-v1" };
+  return { overall, dimensions, availableDimensionCount: availableCount, recommendations, evaluatedPeriod: context.period, readOnly: true, ruleVersion: "product-health-phase8-contribution-v1" };
 }
 
 export function mapProductBusinessLifecycle(productStatus, zone, trendCode) {
@@ -344,6 +357,11 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
   const currentSales = salesMetrics(database, period.periodStart, period.periodEnd);
   const previousSales = salesMetrics(database, period.previousPeriodStart, period.previousPeriodEnd);
   const earlierSales = salesMetrics(database, period.earlierPeriodStart, period.earlierPeriodEnd);
+  const contributionOptions = { database };
+  const currentContributionResult = queryProductContributions({ periodStart: period.periodStart, periodEnd: period.periodEnd, productIds }, contributionOptions);
+  const currentContribution = new Map(currentContributionResult.items.map((item) => [item.productId, item]));
+  const previousContribution = new Map(queryProductContributions({ periodStart: period.previousPeriodStart, periodEnd: period.previousPeriodEnd, productIds }, contributionOptions).items.map((item) => [item.productId, item]));
+  const earlierContribution = new Map(queryProductContributions({ periodStart: period.earlierPeriodStart, periodEnd: period.earlierPeriodEnd, productIds }, contributionOptions).items.map((item) => [item.productId, item]));
   const structures = structureMetrics(database, relationContext);
   const linkPerformance = linkPerformanceMetrics(database, period.periodStart, period.periodEnd, relationContext);
   const health = latestHealth(database);
@@ -353,25 +371,38 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
     const current = currentSales.get(product.id);
     const prior = previousSales.get(product.id);
     const earlier = earlierSales.get(product.id);
-    const trend = salesTrend(current, prior, earlier);
+    const contribution = currentContribution.get(product.id);
+    const priorContribution = previousContribution.get(product.id);
+    const earlierContributionItem = earlierContribution.get(product.id);
+    const legacyTrend = salesTrend(current, prior, earlier);
+    const trend = physicalContributionTrend(contribution, priorContribution, earlierContributionItem);
     const inventorySummary = inventory.get(product.id)?.summary;
     const stockStatus = inventoryStatus(inventorySummary);
     const healthRecord = health.get(product.id);
     const structure = structures.skus.get(product.id) ?? { skuCount: 0, productCodes: [] };
     const action = actions.get(product.id) ?? { improvementCount: 0, actionCount: 0, taskCount: 0 };
-    const salesAmount = current?.salesAmountFactCount ? numeric(current.salesAmount) : null;
-    const salesQuantity = current?.salesQuantityFactCount ? numeric(current.salesQuantity) : null;
-    const grossProfit = current?.profitFactCount ? numeric(current.grossProfit) : null;
+    const salesAmount = numeric(contribution?.directSalesAmount);
+    const salesQuantity = numeric(contribution?.totalPhysicalContribution);
+    const legacySalesAmount = current?.salesAmountFactCount ? numeric(current.salesAmount) : null;
+    const legacySalesQuantity = current?.salesQuantityFactCount ? numeric(current.salesQuantity) : null;
+    const grossProfit = numeric(contribution?.directProfit);
     const grossMargin = grossProfit !== null && salesAmount !== null && salesAmount !== 0 ? grossProfit / salesAmount : null;
     return {
       id: product.id, name: product.name, sku: product.skuCode, productCode: structure.productCodes.join(" / ") || null,
       image: product.mainImage, brand: product.brand || null, category: product.category || null, ownerId: product.ownerId || null,
       ownerName: product.ownerName || "未分配", status: product.status, lifecycle: null,
-      sales: { amount: salesAmount, quantity: salesQuantity, previousAmount: prior?.salesAmountFactCount ? numeric(prior.salesAmount) : null,
-        earlierAmount: earlier?.salesAmountFactCount ? numeric(earlier.salesAmount) : null,
-        previousQuantity: prior?.salesQuantityFactCount ? numeric(prior.salesQuantity) : null,
-        earlierQuantity: earlier?.salesQuantityFactCount ? numeric(earlier.salesQuantity) : null,
-        contribution: null, trend, factCount: Number(current?.factCount || 0) },
+      operatingLifecycle: { primaryStatus: productLifecycle.get(product.id)?.primaryStatus || null,
+        statuses: [...(productLifecycle.get(product.id)?.statuses || [])].sort(), current: [...(productLifecycle.get(product.id)?.statuses || [])].some((status) => ["active", "active_dependency", "sales_active"].includes(status)) },
+      sales: { amount: legacySalesAmount, quantity: legacySalesQuantity, directAmount: salesAmount, directCost: numeric(contribution?.directCost), directProfit: grossProfit,
+        directQuantity: numeric(contribution?.directSalesQuantity), bundleContributionQuantity: numeric(contribution?.bundleContributionQuantity), totalPhysicalContribution: salesQuantity,
+        previousAmount: numeric(priorContribution?.directSalesAmount), earlierAmount: numeric(earlierContributionItem?.directSalesAmount),
+        previousQuantity: numeric(priorContribution?.totalPhysicalContribution), earlierQuantity: numeric(earlierContributionItem?.totalPhysicalContribution),
+        bundleParticipationCount: Number(contribution?.bundleParticipationCount || 0), contributingBundleCount: Number(contribution?.contributingBundleCount || 0),
+        bomEvidenceLevel: contribution?.bomEvidenceLevel ?? null, bomEvidence: contribution?.bomEvidence ?? { exact: 0, legacy_evidence: 0, inferred: 0, unknown: 0 },
+        contribution: null, trend, factCount: Number(contribution?.directFactCount || 0) + Number(contribution?.bundleParticipationCount || 0),
+        legacy: { amount: legacySalesAmount, quantity: legacySalesQuantity,
+          profit: current?.profitFactCount ? numeric(current.grossProfit) : null, previousAmount: prior?.salesAmountFactCount ? numeric(prior.salesAmount) : null,
+          previousQuantity: prior?.salesQuantityFactCount ? numeric(prior.salesQuantity) : null, trend: legacyTrend } },
       structure: { skuCount: structure.skuCount, salesLinkCount: structures.links.get(product.id) ?? 0 },
       inventory: { quantity: numeric(inventorySummary?.stockNum), availableQuantity: numeric(inventorySummary?.availableSendStock), amount: includeInventoryCost ? numeric(inventorySummary?.inventoryCostAmount) : null,
         coverageDays: numeric(inventorySummary?.stockDays), stockRisk: inventorySummary?.stockRisk ?? "no_data", status: stockStatus, businessDate: inventorySummary?.businessDate ?? null },
@@ -382,8 +413,8 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
       legacyHealth: { score: healthRecord?.healthScore === null || healthRecord?.healthScore === undefined ? null : Number(healthRecord.healthScore), evaluatedAt: healthRecord?.updatedAt ?? null },
       actions: { ...action, pendingCount: action.improvementCount + action.actionCount + action.taskCount },
       updatedAt: product.updatedAt,
-      _zone: businessZone(product, current, inventorySummary),
-      _previousSalesQuantity: prior?.salesQuantityFactCount ? numeric(prior.salesQuantity) : null,
+      _zone: businessZone(product, { salesAmount, salesQuantity }, inventorySummary),
+      _previousSalesQuantity: numeric(priorContribution?.totalPhysicalContribution),
     };
   });
   const classifiedZones = classifyProductBusinessZones(items.map((item) => ({
@@ -391,9 +422,9 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
     status: item.status,
     listedAt: null,
     analysis: {
-      sales: { sales30d: item.sales.quantity, previousSales30d: item._previousSalesQuantity, sales90d: null },
+      sales: { sales30d: item.sales.totalPhysicalContribution, previousSales30d: item._previousSalesQuantity, sales90d: null },
       inventory: { actualStock: item.inventory.quantity },
-      finance: { revenue: item.sales.amount },
+      finance: { revenue: item.sales.directAmount },
     },
   })));
   const zoneByProduct = new Map(classifiedZones.items.map((item) => [item.id, item.businessZone]));
@@ -403,14 +434,14 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
     return { ...publicItem, lifecycle };
   });
 
-  const totalSalesAmount = items.map((item) => item.sales.amount).filter((value) => value !== null).reduce((sum, value) => sum + Math.max(0, value), 0);
-  const salesProductCount = items.filter((item) => item.sales.amount !== null && item.sales.amount > 0).length;
+  const totalSalesAmount = items.map((item) => item.sales.directAmount).filter((value) => value !== null).reduce((sum, value) => sum + Math.max(0, value), 0);
+  const salesProductCount = items.filter((item) => item.sales.directAmount !== null && item.sales.directAmount > 0).length;
   const measuredLinks = items.map((item) => item.linkPerformance).filter((item) => item.conversionRate !== null && item.visitorCount > 0);
   const totalVisitors = measuredLinks.reduce((sum, item) => sum + item.visitorCount, 0);
   const averageConversionRate = totalVisitors > 0 ? measuredLinks.reduce((sum, item) => sum + item.conversionRate * item.visitorCount, 0) / totalVisitors : null;
   const healthContext = { period, averageSalesContribution: salesProductCount ? 1 / salesProductCount : null, averageConversionRate };
   items = items.map((item) => {
-    const sales = { ...item.sales, contribution: item.sales.amount !== null && totalSalesAmount > 0 ? Math.max(0, item.sales.amount) / totalSalesAmount : null };
+    const sales = { ...item.sales, contribution: item.sales.directAmount !== null && totalSalesAmount > 0 ? Math.max(0, item.sales.directAmount) / totalSalesAmount : null };
     const withContribution = { ...item, sales };
     return { ...withContribution, healthAnalysis: buildProductHealthAnalysis(withContribution, healthContext) };
   });
@@ -422,7 +453,7 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
     && matches(item.status, query.status) && matches(item.healthAnalysis.overall.code, query.healthStatus)
     && matches(item.ownerId, query.ownerId) && matches(item.inventory.status.code, query.inventoryStatus));
 
-  const sortFields = { name: (item) => item.name, salesAmount: (item) => item.sales.amount, salesQuantity: (item) => item.sales.quantity,
+  const sortFields = { name: (item) => item.name, salesAmount: (item) => item.sales.directAmount, salesQuantity: (item) => item.sales.totalPhysicalContribution,
     salesTrend: (item) => item.sales.trend.rate, skuCount: (item) => item.structure.skuCount, salesLinkCount: (item) => item.structure.salesLinkCount,
     inventoryQuantity: (item) => item.inventory.quantity, inventoryAmount: (item) => item.inventory.amount, grossMargin: (item) => item.profit.grossMargin,
     grossProfit: (item) => item.profit.grossProfit, healthStatus: (item) => ({ risk: 3, attention: 2, healthy: 1, no_data: 0 }[item.healthAnalysis.overall.code]),
@@ -441,15 +472,28 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
   const allItems = scopedProducts.length;
   const sum = (read) => { const values = items.map(read).filter((value) => value !== null && value !== undefined); return values.length ? values.reduce((totalValue, value) => totalValue + Number(value), 0) : null; };
   const options = (key) => [...new Set(scopedProducts.map((item) => text(item[key])).filter(Boolean))].sort(collator.compare);
+  const physicalTrendByDate = new Map();
+  for (const item of currentContributionResult.dailyItems) {
+    if (visible && !visible.has(item.productId)) continue;
+    physicalTrendByDate.set(item.date, (physicalTrendByDate.get(item.date) || 0) + Number(item.totalPhysicalContribution || 0));
+  }
   return {
     generatedAt: new Date().toISOString(), period,
-    summary: { totalProducts: allItems, filteredProducts: total, salesAmount: sum((item) => item.sales.amount), salesQuantity: sum((item) => item.sales.quantity), inventoryQuantity: sum((item) => item.inventory.quantity), riskProducts: items.filter((item) => ["attention", "risk"].includes(item.healthAnalysis.overall.code)).length },
-    items: pageItems, pagination: { page: currentPage, pageSize, total, pages },
+    summary: { totalProducts: allItems, currentProductAssets: allScopedProducts.length, historicalProducts: Math.max(0, allScopedProducts.length - allItems), lifecycleReady,
+      filteredProducts: total, directSalesAmount: sum((item) => item.sales.directAmount), directSalesQuantity: sum((item) => item.sales.directQuantity),
+      bundleContributionQuantity: sum((item) => item.sales.bundleContributionQuantity), totalPhysicalContribution: sum((item) => item.sales.totalPhysicalContribution),
+      salesAmount: sum((item) => item.sales.legacy.amount), salesQuantity: sum((item) => item.sales.legacy.quantity), inventoryQuantity: sum((item) => item.inventory.quantity), riskProducts: items.filter((item) => ["attention", "risk"].includes(item.healthAnalysis.overall.code)).length },
+    items: pageItems, physicalTrend: [...physicalTrendByDate].map(([dateValue, totalPhysicalContribution]) => ({ date: dateValue, totalPhysicalContribution })).sort((left, right) => left.date.localeCompare(right.date)),
+    unallocatedContribution: currentContributionResult.unallocatedContribution,
+    pagination: { page: currentPage, pageSize, total, pages },
     options: { brands: options("brand"), categories: options("category"), statuses: options("status"), lifecycleStatuses: productBusinessLifecycleStatuses,
       healthStatuses: productBusinessHealthStatuses, inventoryStatuses: productBusinessInventoryStatuses,
       owners: [...new Map(scopedProducts.filter((item) => item.ownerId).map((item) => [item.ownerId, { id: item.ownerId, name: item.ownerName || "未分配" }])).values()].sort((left, right) => collator.compare(left.name, right.name)) },
     sort: { sortBy, sortDirection },
-    definitions: { sales: "connection_sku_sales_daily_facts", inventory: "现有库存供应查询", health: "ProductBusinessReadModel 规则分析", actions: "product_improvements + action_products + tasks", readOnly: true },
+    definitions: { sales: "connection_sku_sales_daily_facts + Sales Object + BOM + Product Mapping", salesContractVersion: "product-contribution-v1",
+      productEconomics: "Single直接事实；Bundle金额/利润不分摊", physicalQuantity: "Direct Sales Quantity + Bundle Contribution Quantity",
+      legacyFields: "summary.salesAmount/summary.salesQuantity与item.sales.legacy仅用于兼容旧调用方", operatingView: "Active + Active Dependency + Sales Active；Product战略生命周期保持独立",
+      inventory: "现有库存供应查询", health: "ProductBusinessReadModel 规则分析", actions: "product_improvements + action_products + tasks", readOnly: true },
   };
 }
 

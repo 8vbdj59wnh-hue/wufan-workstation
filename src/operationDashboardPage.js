@@ -49,7 +49,7 @@ function trendBars(points) {
   if (!points?.length) return `<div class="empty-state compact">经营事实尚未积累</div>`;
   const values = points.map((item) => Number(item.sales30d || 0));
   const max = Math.max(...values, 1);
-  return `<div class="operation-trend-bars" aria-label="产品近30天销量趋势">${points.map((item) => `<div title="${escapeHtml(item.date)} · ${number(item.sales30d)}"><span style="height:${Math.max(4, (Number(item.sales30d || 0) / max) * 100)}%"></span><small>${escapeHtml(item.date.slice(5))}</small></div>`).join("")}</div>`;
+  return `<div class="operation-trend-bars" aria-label="产品近30天实际出货趋势">${points.map((item) => `<div title="${escapeHtml(item.date)} · ${number(item.sales30d)}"><span style="height:${Math.max(4, (Number(item.sales30d || 0) / max) * 100)}%"></span><small>${escapeHtml(item.date.slice(5))}</small></div>`).join("")}</div>`;
 }
 
 export function renderOperationDashboardPage() {
@@ -65,14 +65,14 @@ export function renderOperationDashboardPage() {
     ${renderUiModule("sales_business_dashboard", { state: { loading: salesDashboardLoading, error: salesDashboardError, data: salesDashboard } })}
     ${renderUiModule("business_anomalies", { state: { loading: anomaliesLoading, error: anomaliesError, data: anomalies, selectedKey: selectedAnomalyKey, canLaunch: hasPermission(getCurrentUser(), "workPlans.launch") } })}
     <div class="operation-metric-grid">
-      <article><span>产品近30天销量</span><strong>${number(products.sales30d)}</strong><em class="${products.salesGrowth < 0 ? "is-risk" : ""}">${percent(products.salesGrowth)}</em><small>业务日期 ${escapeHtml(products.latestBusinessDate || "—")}</small></article>
+      <article><span>产品近30天实际出货贡献</span><strong>${number(products.sales30d)}</strong><em class="${products.salesGrowth < 0 ? "is-risk" : ""}">${percent(products.salesGrowth)}</em><small>直接销量 + 组合贡献 · ${escapeHtml(products.latestBusinessDate || "—")}</small></article>
       <article><span>库存资金占用</span><strong>${money(products.capitalOccupation)}</strong><em>${number(products.actualStock)} 件实际库存</em><small>成本完整率 ${percent(products.capitalCoverage)}</small></article>
       <article><span>连接周期销售额</span><strong>${money(connections.payAmount)}</strong><em>${number(connections.connectionCount)} 条有经营数据连接</em><small>${connections.periodStart ? `${escapeHtml(connections.periodStart)}—${escapeHtml(connections.periodEnd)}` : "暂无周期数据"}</small></article>
       <article><span>经营风险</span><strong>${dashboard.company.risks.connectionRisk + dashboard.company.risks.connectionAttention}</strong><em class="is-risk">风险 ${dashboard.company.risks.connectionRisk} · 关注 ${dashboard.company.risks.connectionAttention}</em><small>下滑产品 ${dashboard.company.risks.decliningProducts}</small></article>
     </div>
     <div class="operation-layout">
-      <article class="operation-panel operation-wide"><header><div><h2>公司经营趋势</h2><p>销售日报事实按日汇总</p></div><button data-operation-target="products" class="text-button">进入产品中心</button></header>${trendBars(dashboard.trend)}</article>
-      <article class="operation-panel"><header><div><h2>产品销售排行</h2><p>销售日报按产品汇总</p></div></header>${ranking(dashboard.products.salesTop, "sales", "暂无产品销售事实")}</article>
+      <article class="operation-panel operation-wide"><header><div><h2>产品实际出货趋势</h2><p>Single直接销量 + Bundle组件贡献；不分摊Bundle金额</p></div><button data-operation-target="products" class="text-button">进入产品中心</button></header>${trendBars(dashboard.trend)}</article>
+      <article class="operation-panel"><header><div><h2>产品实际出货排行</h2><p>直接销量 + 组合贡献销量</p></div></header>${ranking(dashboard.products.salesTop, "sales", "暂无产品出货事实")}</article>
       <article class="operation-panel"><header><div><h2>成长产品</h2><p>相邻同长销售周期变化</p></div></header>${ranking(dashboard.products.growthTop, "growth", "暂无可比产品周期")}</article>
       <article class="operation-panel"><header><div><h2>高增长连接</h2><p>最新两个经营周期</p></div><button data-operation-target="connectionCenter" class="text-button">进入连接中心</button></header>${ranking(dashboard.connections.topGrowth, "growth", "至少需要两个连接经营周期")}</article>
       <article class="operation-panel"><header><div><h2>风险连接</h2><p>健康分低于60</p></div></header>${ranking(dashboard.connections.risks, "growth", "当前没有风险连接")}</article>

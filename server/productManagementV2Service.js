@@ -10,27 +10,32 @@ function parseJson(value, fallback) { try { return JSON.parse(value || JSON.stri
 function now() { return new Date().toISOString(); }
 
 function analysisFromReadModelItem(item, period) {
-  const salesQuantity = item.sales.quantity;
+  const salesQuantity = item.sales.totalPhysicalContribution;
   const stock = item.inventory.quantity;
   const grossProfit = item.profit.grossProfit;
-  const revenue = item.sales.amount;
+  const revenue = item.sales.directAmount;
   return {
     product: { id: item.id, name: item.name, skuCode: item.sku, status: item.status, mainImage: item.image, updatedAt: item.updatedAt },
-    snapshotKey: `daily-facts:${period.periodStart}:${period.periodEnd}:${item.healthAnalysis.ruleVersion}`,
+    snapshotKey: `product-contribution:${period.periodStart}:${period.periodEnd}:${item.healthAnalysis.ruleVersion}`,
     sales: { businessDate: period.periodEnd, periodStart: period.periodStart, periodEnd: period.periodEnd,
-      sales30d: salesQuantity, salesAmount: revenue, previousSales30d: item.sales.previousQuantity, previousSalesAmount: item.sales.previousAmount,
-      growth: item.sales.trend.rate, trend: item.sales.trend, factCount: item.sales.factCount },
+      sales30d: salesQuantity, directSalesQuantity: item.sales.directQuantity, bundleContributionQuantity: item.sales.bundleContributionQuantity,
+      totalPhysicalContribution: salesQuantity, salesAmount: revenue, directSalesAmount: item.sales.directAmount,
+      previousSales30d: item.sales.previousQuantity, previousSalesAmount: item.sales.previousAmount,
+      growth: item.sales.trend.rate, trend: item.sales.trend, factCount: item.sales.factCount,
+      bundleParticipationCount: item.sales.bundleParticipationCount, contributingBundleCount: item.sales.contributingBundleCount,
+      bomEvidenceLevel: item.sales.bomEvidenceLevel, bomEvidence: item.sales.bomEvidence,
+      legacy: item.sales.legacy, metricContract: "product-contribution-v1" },
     inventory: { actualStock: stock, availableStock: item.inventory.availableQuantity, amount: item.inventory.amount,
       businessDate: item.inventory.businessDate, turnover: stock !== null && salesQuantity !== null && stock + salesQuantity > 0 ? salesQuantity / (stock + salesQuantity) : null,
       risk: ({ backlog: "积压", stockout: "缺货", attention: "关注", healthy: "正常", no_data: "暂无数据" })[item.inventory.status.code] ?? "暂无数据",
       status: item.inventory.status, coverageDays: item.inventory.coverageDays },
-    finance: { revenue, refunds: null, cost: revenue !== null && grossProfit !== null ? revenue - grossProfit : null, expense: null,
-      grossProfit, netProfit: null, profitMargin: item.profit.grossMargin, metric: "sales_gross_profit" },
+    finance: { revenue, refunds: null, cost: item.sales.directCost, expense: null,
+      grossProfit, netProfit: null, profitMargin: item.profit.grossMargin, metric: "single_direct_sales_gross_profit", bundleAllocation: "none" },
     connections: { current: item.linkPerformance, previous: null, salesAmountGrowth: null, visitorGrowth: null, conversionChange: null },
     healthAnalysis: item.healthAnalysis,
     lifecycle: item.lifecycle,
     structure: item.structure,
-    dataSource: { sales: "connection_sku_sales_daily_facts", relation: "sales_object", inventory: "erp_sku_inventory_daily_summaries" },
+    dataSource: { sales: "connection_sku_sales_daily_facts", relation: "sales_object", bundleStructure: "sales_object_structure_version", productMapping: "product_erp_mappings", inventory: "erp_sku_inventory_daily_summaries" },
   };
 }
 

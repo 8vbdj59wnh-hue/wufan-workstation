@@ -1,4 +1,5 @@
 import { getDatabase } from "../db.js";
+import { queryProductContribution, queryProductContributions } from "../productContributionReadModel.js";
 
 const SOURCE = "daily_fact_v1";
 const DIMENSIONS = new Set(["company", "salesLink", "salesLinkSku", "erpSku", "product"]);
@@ -68,8 +69,37 @@ function metricValue(row, field) {
   return row ? Number(row[field] || 0) : null;
 }
 
+function productMetricRow(item, product = null, rank = null) {
+  const hasData = item.totalPhysicalContribution !== null || item.directSalesAmount !== null;
+  return {
+    ...(rank === null ? {} : { rank }), targetId: item.productId, targetName: product?.name || null, targetCode: product?.skuCode || null,
+    quantity: item.totalPhysicalContribution, directSalesQuantity: item.directSalesQuantity, bundleContributionQuantity: item.bundleContributionQuantity,
+    salesAmount: item.directSalesAmount, costAmount: item.directCost, profitAmount: item.directProfit,
+    profitMargin: Number(item.directSalesAmount || 0) ? Number(item.directProfit || 0) / Number(item.directSalesAmount) : null,
+    dataCount: Number(item.directFactCount || 0) + Number(item.bundleParticipationCount || 0), hasData,
+    metricContract: "product-contribution-v1", bundleAllocation: "none", bomEvidenceLevel: item.bomEvidenceLevel,
+  };
+}
+
+function productSummary(request, database, includeSalesLinkBreakdown = false) {
+  const result = queryProductContribution(request.targetId, { periodStart: request.startDate, periodEnd: request.endDate }, { database });
+  const item = result.item; const daily = result.dailyItems.filter((row) => row.productId === request.targetId && row.totalPhysicalContribution !== null);
+  const metric = productMetricRow(item);
+  return {
+    capability: "QueryDailySalesSummary", contractVersion: "2.0", dimension: "product", targetId: request.targetId,
+    startDate: request.startDate, endDate: request.endDate, quantity: metric.quantity, directSalesQuantity: metric.directSalesQuantity,
+    bundleContributionQuantity: metric.bundleContributionQuantity, salesAmount: metric.salesAmount, costAmount: metric.costAmount, profitAmount: metric.profitAmount,
+    dataCount: metric.dataCount, dataSource: "product_contribution_v1", hasData: metric.hasData, dataStart: daily[0]?.date || null, dataEnd: daily.at(-1)?.date || null,
+    source: "product_contribution_v1", coverage: { requestedDays: dateList(request.startDate, request.endDate).length, dataDays: new Set(daily.map((row) => row.date)).size,
+      ratio: dateList(request.startDate, request.endDate).length ? new Set(daily.map((row) => row.date)).size / dateList(request.startDate, request.endDate).length : null },
+    salesLinkBreakdown: includeSalesLinkBreakdown ? item.directLinks.map((row) => ({ ...row, dataCount: row.factCount, dataStart: null, dataEnd: null })) : [],
+    metricContract: metric.metricContract, bundleAllocation: "none", bomEvidenceLevel: item.bomEvidenceLevel,
+  };
+}
+
 export function queryDailySalesSummary(input = {}, options = {}) {
   const request = normalizeInput(input); const database = options.database || getDatabase(); const definition = queryDefinition(request.dimension);
+  if (request.dimension === "product") return productSummary(request, database, Boolean(input.includeSalesLinkBreakdown));
   const row = database.prepare(`SELECT COUNT(*) dataCount,MIN(f.saleDate) dataStart,MAX(f.saleDate) dataEnd,
       SUM(f.quantity) quantity,SUM(f.salesAmount) salesAmount,SUM(f.costAmount) costAmount,SUM(f.profitAmount) profitAmount,
       COUNT(DISTINCT f.saleDate) dataDays
@@ -104,6 +134,16 @@ export function queryDailySalesSummaryRanking(input = {}, options = {}) {
   const limit = Math.min(100, Math.max(1, Number(input.limit || 10)));
   if (!startDate || !endDate || startDate > endDate) throw new Error("销售日报查询日期范围无效。");
   const definition = rankingDefinition(dimension); const database = options.database || getDatabase();
+  if (dimension === "product") {
+    const contribution = queryProductContributions({ periodStart: startDate, periodEnd: endDate }, { database });
+    const ids = contribution.items.filter((item) => item.totalPhysicalContribution !== null || item.directSalesAmount !== null).map((item) => item.productId);
+    const products = ids.length ? new Map(database.prepare(`SELECT id,name,skuCode FROM products WHERE id IN (${ids.map(() => "?").join(",")})`).all(...ids).map((item) => [item.id, item])) : new Map();
+    const items = contribution.items.filter((item) => item.totalPhysicalContribution !== null || item.directSalesAmount !== null)
+      .sort((left, right) => Number(right.directSalesAmount || 0) - Number(left.directSalesAmount || 0) || Number(right.totalPhysicalContribution || 0) - Number(left.totalPhysicalContribution || 0))
+      .slice(0, limit).map((item, index) => productMetricRow(item, products.get(item.productId), index + 1));
+    return { capability: "QueryDailySalesSummary", contractVersion: "2.0", mode: "ranking", dimension, startDate, endDate, items, hasData: items.length > 0,
+      source: "product_contribution_v1", metricContract: "product-contribution-v1", bundleAllocation: "none" };
+  }
   const rows = database.prepare(`SELECT ${definition.identity} targetId,${definition.name} targetName,${definition.code} targetCode,
       COUNT(*) dataCount,COUNT(DISTINCT f.saleDate) dataDays,MIN(f.saleDate) dataStart,MAX(f.saleDate) dataEnd,
       SUM(f.quantity) quantity,SUM(f.salesAmount) salesAmount,SUM(f.costAmount) costAmount,SUM(f.profitAmount) profitAmount
@@ -128,6 +168,23 @@ export function queryDailySalesSummaryComparison(input = {}, options = {}) {
   const compareStart = validDate(input.compareStart); const compareEnd = validDate(input.compareEnd);
   if (!currentStart || !currentEnd || !compareStart || !compareEnd || compareStart > compareEnd || currentStart > currentEnd) throw new Error("销售日报对比日期范围无效。");
   const definition = rankingDefinition(dimension); const database = options.database || getDatabase();
+  if (dimension === "product") {
+    const current = queryProductContributions({ periodStart: currentStart, periodEnd: currentEnd }, { database });
+    const compare = queryProductContributions({ periodStart: compareStart, periodEnd: compareEnd }, { database });
+    const currentById = new Map(current.items.map((item) => [item.productId, item])); const compareById = new Map(compare.items.map((item) => [item.productId, item]));
+    const ids = [...new Set([...currentById.keys(), ...compareById.keys()])];
+    const products = ids.length ? new Map(database.prepare(`SELECT id,name,skuCode FROM products WHERE id IN (${ids.map(() => "?").join(",")})`).all(...ids).map((item) => [item.id, item])) : new Map();
+    const currentEndByProduct = new Map();
+    for (const item of current.dailyItems) if (item.totalPhysicalContribution !== null) currentEndByProduct.set(item.productId, item.date);
+    const items = ids.map((productId) => { const currentItem = currentById.get(productId); const compareItem = compareById.get(productId); const product = products.get(productId);
+      return { targetId: productId, targetName: product?.name || null, targetCode: product?.skuCode || null,
+        currentDataCount: Number(currentItem?.directFactCount || 0) + Number(currentItem?.bundleParticipationCount || 0), compareDataCount: Number(compareItem?.directFactCount || 0) + Number(compareItem?.bundleParticipationCount || 0),
+        currentDataEnd: currentEndByProduct.get(productId) || null, currentQuantity: currentItem?.totalPhysicalContribution ?? null, compareQuantity: compareItem?.totalPhysicalContribution ?? null,
+        currentSalesAmount: currentItem?.directSalesAmount ?? null, compareSalesAmount: compareItem?.directSalesAmount ?? null,
+        currentProfitAmount: currentItem?.directProfit ?? null, compareProfitAmount: compareItem?.directProfit ?? null, metricContract: "product-contribution-v1", bundleAllocation: "none" }; });
+    return { capability: "QueryDailySalesSummary", contractVersion: "2.0", mode: "comparison", dimension, currentPeriod: { startDate: currentStart, endDate: currentEnd },
+      comparePeriod: { startDate: compareStart, endDate: compareEnd }, items, source: "product_contribution_v1", bundleAllocation: "none" };
+  }
   const rows = database.prepare(`SELECT ${definition.identity} targetId,${definition.name} targetName,${definition.code} targetCode,
       SUM(CASE WHEN f.saleDate BETWEEN ? AND ? THEN 1 ELSE 0 END) currentDataCount,
       SUM(CASE WHEN f.saleDate BETWEEN ? AND ? THEN 1 ELSE 0 END) compareDataCount,
@@ -152,6 +209,17 @@ export function queryDailySalesSummaryComparison(input = {}, options = {}) {
 
 export function queryDailySalesTrend(input = {}, options = {}) {
   const request = normalizeInput(input); const database = options.database || getDatabase(); const definition = queryDefinition(request.dimension);
+  if (request.dimension === "product") {
+    const result = queryProductContribution(request.targetId, { periodStart: request.startDate, periodEnd: request.endDate }, { database });
+    const byDate = new Map(result.dailyItems.filter((item) => item.productId === request.targetId).map((item) => [item.date, item]));
+    const items = dateList(request.startDate, request.endDate).map((dateValue) => { const item = byDate.get(dateValue); return item && item.totalPhysicalContribution !== null
+      ? { date: dateValue, noData: false, quantity: item.totalPhysicalContribution, directSalesQuantity: item.directSalesQuantity, bundleContributionQuantity: item.bundleContributionQuantity,
+        salesAmount: item.directSalesAmount, costAmount: item.directCost, profitAmount: item.directProfit, dataCount: Number(item.directFactCount || 0) + Number(item.bundleParticipationCount || 0), bomEvidenceLevel: item.bomEvidenceLevel }
+      : { date: dateValue, noData: true, quantity: null, directSalesQuantity: null, bundleContributionQuantity: null, salesAmount: null, costAmount: null, profitAmount: null, dataCount: 0, bomEvidenceLevel: null }; });
+    return { capability: "QueryDailySalesTrend", contractVersion: "2.0", dimension: "product", targetId: request.targetId, startDate: request.startDate, endDate: request.endDate,
+      items, hasData: result.item.totalPhysicalContribution !== null, dataStart: items.find((item) => !item.noData)?.date || null, dataEnd: [...items].reverse().find((item) => !item.noData)?.date || null,
+      source: "product_contribution_v1", metricContract: "product-contribution-v1", bundleAllocation: "none" };
+  }
   const rows = database.prepare(`SELECT f.saleDate date,COUNT(*) dataCount,SUM(f.quantity) quantity,SUM(f.salesAmount) salesAmount,
       SUM(f.costAmount) costAmount,SUM(f.profitAmount) profitAmount
     FROM connection_sku_sales_daily_facts f ${definition.joins}
