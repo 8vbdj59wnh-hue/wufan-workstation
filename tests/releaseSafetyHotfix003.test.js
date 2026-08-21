@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import test from "node:test";
 import Database from "better-sqlite3";
 
-import { runBusinessBaselineCheck } from "../scripts/release-business-baseline-check.mjs";
+import { isCliEntrypoint, runBusinessBaselineCheck } from "../scripts/release-business-baseline-check.mjs";
 import {
   beginReleaseManagedJob,
   clearReleaseMaintenanceMarker,
@@ -103,6 +103,98 @@ test("baseline uses one connection and absorbs twenty normal short locks", async
     clearReleaseMaintenanceMarker(maintenanceOptions);
     fs.rmSync(fixture.directory, { recursive: true, force: true });
   }
+});
+
+test("baseline CLI entrypoint recognizes logical and symlink paths by physical identity", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "release-baseline-symlink-"));
+  try {
+    const physical = path.join(directory, "baseline.mjs");
+    const logical = path.join(directory, "current-baseline.mjs");
+    fs.writeFileSync(physical, "// fixture\n");
+    fs.symlinkSync(physical, logical);
+    assert.equal(isCliEntrypoint(new URL(`file://${physical}`).href, logical), true);
+    assert.equal(isCliEntrypoint(new URL(`file://${physical}`).href, path.join(directory, "missing.mjs")), false);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("baseline shell CLI emits parseable JSON through a symlinked package path", async () => {
+  const fixture = baselineFixture();
+  const repository = path.resolve(import.meta.dirname, "..");
+  const physicalPackage = path.join(fixture.directory, "physical-package");
+  const logicalPackage = path.join(fixture.directory, "current");
+  fs.mkdirSync(physicalPackage);
+  fs.cpSync(path.join(repository, "scripts"), path.join(physicalPackage, "scripts"), { recursive: true });
+  fs.symlinkSync(physicalPackage, logicalPackage);
+  const result = await new Promise((resolve, reject) => {
+    const child = spawn(path.join(logicalPackage, "scripts", "release-business-baseline-check.sh"), [
+      "--database", fixture.databasePath,
+      "--baseline", fixture.baselinePath,
+    ], {
+      cwd: logicalPackage,
+      env: { ...process.env, WUFAN_PROJECT_DIR: repository, WUFAN_NODE_COMMAND: process.execPath },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.once("error", reject);
+    child.once("exit", (code) => resolve({ code, stdout, stderr }));
+  });
+  try {
+    assert.equal(result.code, 0, result.stderr);
+    assert.ok(result.stdout.trim().length > 0);
+    assert.equal(JSON.parse(result.stdout).status, "ok");
+  } finally {
+    fs.rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("baseline shell CLI blocks successful child processes that emit empty stdout", async () => {
+  const fixture = baselineFixture();
+  const repository = path.resolve(import.meta.dirname, "..");
+  const packageRoot = path.join(fixture.directory, "empty-output-package");
+  fs.mkdirSync(packageRoot);
+  fs.cpSync(path.join(repository, "scripts", "release-business-baseline-check.sh"), path.join(packageRoot, "release-business-baseline-check.sh"));
+  fs.writeFileSync(path.join(packageRoot, "release-business-baseline-check.mjs"), "process.exitCode = 0;\n");
+  const result = await new Promise((resolve, reject) => {
+    const child = spawn(path.join(packageRoot, "release-business-baseline-check.sh"), [
+      "--database", fixture.databasePath,
+      "--baseline", fixture.baselinePath,
+    ], {
+      cwd: packageRoot,
+      env: { ...process.env, WUFAN_PROJECT_DIR: repository, WUFAN_NODE_COMMAND: process.execPath },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.once("error", reject);
+    child.once("exit", (code) => resolve({ code, stdout, stderr }));
+  });
+  try {
+    assert.equal(result.code, 65);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /baseline_cli_contract_violation/);
+  } finally {
+    fs.rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("pre-switch dry run stops after real readiness gates and before Git mutation", () => {
+  const repository = path.resolve(import.meta.dirname, "..");
+  const source = fs.readFileSync(path.join(repository, "scripts", "release-from-package.sh"), "utf8");
+  const migration = source.indexOf('STAGE="migration-preview"');
+  const health = source.indexOf('STAGE="health-before"');
+  const staging = source.indexOf('STAGE="source-staging"');
+  const ready = source.indexOf('if [[ "$PRE_SWITCH_DRY_RUN" == true ]]');
+  const fastForward = source.indexOf('STAGE="git-fast-forward"');
+  assert.ok(migration > 0 && health > migration && staging > health && ready > staging && fastForward > ready);
+  assert.match(source.slice(ready, fastForward), /NEXT_STAGE=git-fast-forward/);
+  assert.match(source.slice(ready, fastForward), /SOURCE_UPDATED=false/);
 });
 
 test("baseline blocks five sustained locks as database_busy without fake zero counts", async () => {

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(path.join(process.env.WUFAN_PROJECT_DIR || process.cwd(), "package.json"));
 const Database = require("better-sqlite3");
@@ -135,10 +136,19 @@ function pathIsAbsolute(value) {
   return value.startsWith("/");
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+export function isCliEntrypoint(moduleUrl = import.meta.url, argvPath = process.argv[1]) {
+  if (!argvPath) return false;
+  try {
+    return fs.realpathSync(fileURLToPath(moduleUrl)) === fs.realpathSync(argvPath);
+  } catch {
+    return false;
+  }
+}
+
+export function runBusinessBaselineCli(argv = process.argv.slice(2)) {
   let result;
   try {
-    result = runBusinessBaselineCheck(parseArguments(process.argv.slice(2)));
+    result = runBusinessBaselineCheck(parseArguments(argv));
   } catch (error) {
     result = {
       status: error.code ?? "baseline_query_failed",
@@ -149,4 +159,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (result.status !== "ok") process.exitCode = 1;
+  return result;
+}
+
+if (isCliEntrypoint()) {
+  runBusinessBaselineCli();
 }

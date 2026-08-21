@@ -23,7 +23,25 @@ done
 [[ "$DATABASE_PATH" == /* && -f "$DATABASE_PATH" ]] || fail "database must be an existing absolute file"
 [[ "$BASELINE_PATH" == /* && -f "$BASELINE_PATH" ]] || fail "baseline must be an existing absolute file"
 
-exec node "$SCRIPT_DIR/release-business-baseline-check.mjs" \
+NODE_COMMAND="${WUFAN_NODE_COMMAND:-node}"
+OUTPUT=""
+set +e
+OUTPUT="$("$NODE_COMMAND" "$SCRIPT_DIR/release-business-baseline-check.mjs" \
   --database "$DATABASE_PATH" \
   --baseline "$BASELINE_PATH" \
-  --busy-timeout-ms "$BUSY_TIMEOUT_MS"
+  --busy-timeout-ms "$BUSY_TIMEOUT_MS")"
+STATUS=$?
+set -e
+
+if [[ -z "${OUTPUT//[[:space:]]/}" ]]; then
+  echo "DATABASE_BASELINE_CHECK_FAIL: baseline_cli_contract_violation (stdout is empty)" >&2
+  exit 65
+fi
+if ! BASELINE_OUTPUT="$OUTPUT" "$NODE_COMMAND" -e \
+  'const value=JSON.parse(process.env.BASELINE_OUTPUT);if(!value||typeof value.status!=="string")process.exit(1)' ; then
+  echo "DATABASE_BASELINE_CHECK_FAIL: baseline_cli_contract_violation (stdout is not valid result JSON)" >&2
+  exit 65
+fi
+
+printf '%s\n' "$OUTPUT"
+exit "$STATUS"

@@ -168,6 +168,11 @@ if ! BUSINESS_BASELINE_JSON="$(WUFAN_PROJECT_DIR="$PROJECT_DIR" "$SCRIPT_DIR/rel
     'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).errorType||"baseline_query_failed")}catch{process.stdout.write("baseline_query_failed")}})')"
   fail "business baseline check failed: $BASELINE_ERROR_TYPE"
 fi
+[[ -n "${BUSINESS_BASELINE_JSON//[[:space:]]/}" ]] \
+  || fail "business baseline check failed: baseline_cli_contract_violation"
+BUSINESS_BASELINE_JSON="$BUSINESS_BASELINE_JSON" "$NODE_COMMAND" -e \
+  'const value=JSON.parse(process.env.BUSINESS_BASELINE_JSON);if(!value||value.status!=="ok")process.exit(1)' \
+  || fail "business baseline check failed: baseline_cli_contract_violation"
 
 FRONT_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:5173/)"
 [[ "$FRONT_STATUS" == "200" ]] || fail "frontend returned HTTP $FRONT_STATUS"

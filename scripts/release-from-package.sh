@@ -12,6 +12,7 @@ NPM_TEMP_BYTES=$((2 * 1024 * 1024 * 1024))
 PACKAGE_DIR=""
 CONFIRM=""
 DRY_RUN=false
+PRE_SWITCH_DRY_RUN=false
 RELEASE_DIR=""
 MANIFEST=""
 STAGE="argument-validation"
@@ -50,12 +51,15 @@ while [[ $# -gt 0 ]]; do
     --package-dir) PACKAGE_DIR="${2:-}"; shift 2 ;;
     --confirm) CONFIRM="${2:-}"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
+    --pre-switch-dry-run) PRE_SWITCH_DRY_RUN=true; shift ;;
     *) fail "unknown argument: $1" ;;
   esac
 done
 
 [[ "$PACKAGE_DIR" == /* && -d "$PACKAGE_DIR" ]] || fail "--package-dir must be an existing absolute directory"
-[[ "$DRY_RUN" == true || "$CONFIRM" == "DEPLOY" ]] || fail "--confirm must exactly equal DEPLOY"
+[[ "$DRY_RUN" == false || "$PRE_SWITCH_DRY_RUN" == false ]] || fail "dry-run modes are mutually exclusive"
+[[ "$DRY_RUN" == true || "$PRE_SWITCH_DRY_RUN" == true || "$CONFIRM" == "DEPLOY" ]] \
+  || fail "--confirm must exactly equal DEPLOY"
 
 REQUIRED_FILES=(
   source.tar.gz
@@ -237,6 +241,7 @@ NO_OP="$(class_value noOp)"
 
 echo "PACKAGE_VERIFIED=true"
 echo "DRY_RUN=$DRY_RUN"
+echo "PRE_SWITCH_DRY_RUN=$PRE_SWITCH_DRY_RUN"
 echo "CURRENT_COMMIT=$CURRENT_COMMIT"
 echo "TARGET_COMMIT=$TARGET_COMMIT"
 echo "PARENT_COMMIT=$PARENT_COMMIT"
@@ -370,6 +375,23 @@ STAGE="source-staging"
 SOURCE_STAGING="$(mktemp -d /tmp/wufan-source-staging.XXXXXX)"
 tar -xzf "$PACKAGE_DIR/source.tar.gz" -C "$SOURCE_STAGING"
 [[ -f "$SOURCE_STAGING/wufan-workstation/package.json" ]] || fail "staged source is incomplete"
+
+if [[ "$PRE_SWITCH_DRY_RUN" == true ]]; then
+  STATUS="pre_switch_verified" STAGE="pre-switch-ready" MANIFEST="$MANIFEST" "$NODE_COMMAND" <<'NODE'
+const fs = require("fs");
+const manifest = JSON.parse(fs.readFileSync(process.env.MANIFEST, "utf8"));
+manifest.status = process.env.STATUS;
+manifest.preSwitchVerifiedAt = new Date().toISOString();
+manifest.nextStage = "git-fast-forward";
+fs.writeFileSync(process.env.MANIFEST, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+  echo "PRE_SWITCH_READY=true"
+  echo "NEXT_STAGE=git-fast-forward"
+  echo "SOURCE_UPDATED=false"
+  echo "SERVICE_RESTARTED=false"
+  echo "TAG_CREATED=false"
+  exit 0
+fi
 
 STAGE="git-fast-forward"
 git -C "$PROJECT_DIR" merge-base --is-ancestor HEAD "$TARGET_COMMIT"
