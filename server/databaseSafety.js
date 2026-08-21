@@ -24,6 +24,7 @@ export const defaultMinimumCounts = Object.freeze({
 const clean = (value) => String(value ?? "").trim();
 const isProduction = (environment = process.env) => clean(environment.WUFAN_ENV).toLowerCase() === "production";
 const isTest = (environment = process.env) => clean(environment.WUFAN_ENV).toLowerCase() === "test";
+const isIsolation = (environment = process.env) => ["isolation", "migration-preview"].includes(clean(environment.WUFAN_ENV).toLowerCase());
 
 function safetyError(code, message = code) {
   const error = new Error(message);
@@ -48,6 +49,13 @@ export function isAllowedTestDatabasePath(databasePath, environment = process.en
   return allowedTestRoots(environment).some((root) => pathIsInside(resolved, root));
 }
 
+export function isAllowedIsolationDatabasePath(databasePath, environment = process.env) {
+  const isolationRoot = clean(environment.WUFAN_ISOLATION_DATABASE_ROOT);
+  if (isolationRoot === "" || !path.isAbsolute(isolationRoot)) return false;
+  const resolved = path.resolve(databasePath);
+  return resolved !== productionDatabasePath && pathIsInside(resolved, isolationRoot);
+}
+
 export function resolveDatabasePath({ environment = process.env, projectRoot } = {}) {
   const configuredPath = clean(environment.WUFAN_DB_PATH);
   if (isProduction(environment)) {
@@ -68,18 +76,37 @@ export function resolveDatabasePath({ environment = process.env, projectRoot } =
     }
     return resolved;
   }
+  if (isIsolation(environment)) {
+    if (configuredPath === "") throw safetyError("isolation_database_path_required");
+    if (!path.isAbsolute(configuredPath)) throw safetyError("isolation_database_path_must_be_absolute");
+    const resolved = path.resolve(configuredPath);
+    if (!isAllowedIsolationDatabasePath(resolved, environment)) {
+      throw safetyError("isolation_database_path_not_allowed");
+    }
+    if (pathIsInside(resolved, projectRoot)) throw safetyError("isolation_database_path_inside_repository");
+    return resolved;
+  }
   return configuredPath === ""
     ? path.join(projectRoot, "data", "workstation.db")
     : path.resolve(configuredPath);
 }
 
 export function assertDatabaseCanOpen(databasePath, environment = process.env) {
-  if (!isProduction(environment)) return;
-  if (path.resolve(databasePath) !== productionDatabasePath) {
-    throw safetyError("production_database_path_not_locked");
+  if (isProduction(environment)) {
+    if (path.resolve(databasePath) !== productionDatabasePath) {
+      throw safetyError("production_database_path_not_locked");
+    }
+    if (!fs.existsSync(databasePath)) throw safetyError("production_database_missing");
+    if (!fs.statSync(databasePath).isFile()) throw safetyError("production_database_not_a_file");
+    return;
   }
-  if (!fs.existsSync(databasePath)) throw safetyError("production_database_missing");
-  if (!fs.statSync(databasePath).isFile()) throw safetyError("production_database_not_a_file");
+  if (isIsolation(environment)) {
+    if (!isAllowedIsolationDatabasePath(databasePath, environment)) {
+      throw safetyError("isolation_database_path_not_allowed");
+    }
+    if (!fs.existsSync(databasePath)) throw safetyError("isolation_database_missing");
+    if (!fs.statSync(databasePath).isFile()) throw safetyError("isolation_database_not_a_file");
+  }
 }
 
 export function assertDatabaseResetAllowed(databasePath, environment = process.env) {

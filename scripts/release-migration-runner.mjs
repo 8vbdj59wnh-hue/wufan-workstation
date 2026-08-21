@@ -4,14 +4,21 @@ import {
   initializeDatabase,
   readAllData,
 } from "../server/db.js";
+import path from "node:path";
 
 if (process.env.WUFAN_MIGRATION_PREVIEW !== "1") {
   throw new Error("release-migration-runner requires WUFAN_MIGRATION_PREVIEW=1");
+}
+if (process.env.WUFAN_ENV !== "migration-preview") {
+  throw new Error("release-migration-runner requires WUFAN_ENV=migration-preview");
 }
 
 const requestedPath = String(process.env.WUFAN_DB_PATH ?? "").trim();
 if (requestedPath === "") {
   throw new Error("release-migration-runner requires an explicit WUFAN_DB_PATH");
+}
+if (databasePath !== path.resolve(requestedPath)) {
+  throw new Error("release-migration-runner database path mismatch");
 }
 
 console.log(`[migration-preview] databasePath=${databasePath}`);

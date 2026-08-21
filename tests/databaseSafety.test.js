@@ -10,6 +10,7 @@ import {
   assertBusinessBaselineHealthy,
   assertDatabaseResetAllowed,
   evaluateDatabaseHealth,
+  isAllowedIsolationDatabasePath,
   productionDatabasePath,
   resolveDatabasePath,
 } from "../server/databaseSafety.js";
@@ -39,6 +40,67 @@ test("production requires the locked external database path", () => {
   }), productionDatabasePath);
 });
 
+test("migration preview requires an explicit database inside its isolated root", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "database-preview-"));
+  const previewDatabase = path.join(directory, "preview.db");
+  const environment = {
+    WUFAN_ENV: "migration-preview",
+    WUFAN_DB_PATH: previewDatabase,
+    WUFAN_ISOLATION_DATABASE_ROOT: directory,
+  };
+  try {
+    assert.equal(isAllowedIsolationDatabasePath(previewDatabase, environment), true);
+    assert.equal(resolveDatabasePath({ environment, projectRoot }), previewDatabase);
+    assert.throws(
+      () => resolveDatabasePath({ environment: { ...environment, WUFAN_DB_PATH: "" }, projectRoot }),
+      (error) => error.code === "isolation_database_path_required",
+    );
+    assert.throws(
+      () => resolveDatabasePath({ environment: { ...environment, WUFAN_DB_PATH: "relative.db" }, projectRoot }),
+      (error) => error.code === "isolation_database_path_must_be_absolute",
+    );
+    assert.throws(
+      () => resolveDatabasePath({ environment: { ...environment, WUFAN_DB_PATH: productionDatabasePath }, projectRoot }),
+      (error) => error.code === "isolation_database_path_not_allowed",
+    );
+    assert.throws(
+      () => resolveDatabasePath({ environment: { ...environment, WUFAN_ISOLATION_DATABASE_ROOT: "" }, projectRoot }),
+      (error) => error.code === "isolation_database_path_not_allowed",
+    );
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("database module keeps the explicit preview path and child processes inherit it", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "database-preview-module-"));
+  const previewDatabase = path.join(directory, "preview.db");
+  fs.closeSync(fs.openSync(previewDatabase, "w"));
+  try {
+    const result = runDatabaseModule(`
+      import { spawnSync } from "node:child_process";
+      import { databasePath } from "./server/db.js";
+      const expected = process.env.WUFAN_DB_PATH;
+      if (databasePath !== expected) process.exit(2);
+      const child = spawnSync(process.execPath, ["--input-type=module", "--eval",
+        'const {databasePath}=await import("./server/db.js");if(databasePath!==process.env.WUFAN_DB_PATH)process.exit(3)'],
+        { cwd: process.cwd(), env: process.env, encoding: "utf8" });
+      if (child.status !== 0) throw new Error(child.stderr || "child path mismatch");
+      process.env.WUFAN_DB_PATH = "/private/tmp/should-not-rebind.db";
+      const cached = await import("./server/db.js");
+      if (cached.databasePath !== expected) process.exit(4);
+    `, {
+      WUFAN_ENV: "migration-preview",
+      WUFAN_DB_PATH: previewDatabase,
+      WUFAN_ISOLATION_DATABASE_ROOT: directory,
+      WUFAN_MIGRATION_PREVIEW: "1",
+    });
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("reset is allowed only for an explicitly enabled test temporary database", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "database-safety-"));
   const temporaryDatabase = path.join(directory, "workstation.db");
@@ -52,6 +114,7 @@ test("reset is allowed only for an explicitly enabled test temporary database", 
       { WUFAN_ENV: "production", WUFAN_ALLOW_DB_RESET: "1" },
       { WUFAN_ENV: "test" },
       { WUFAN_ENV: "test", WUFAN_ALLOW_DB_RESET: "1", WUFAN_TEST_DATABASE_ROOT: directory },
+      { WUFAN_ENV: "migration-preview", WUFAN_ALLOW_DB_RESET: "1", WUFAN_ISOLATION_DATABASE_ROOT: directory },
     ]) {
       const target = environment.WUFAN_ENV === "test" && environment.WUFAN_ALLOW_DB_RESET === "1"
         ? productionDatabasePath

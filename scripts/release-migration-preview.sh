@@ -114,9 +114,23 @@ sqlite3 "$BACKUP_PATH" ".backup '$PREVIEW_DB'"
 sqlite3 "$PREVIEW_DB" ".schema" > "$SCHEMA_BEFORE"
 mkdir "$TARGET_SOURCE"
 git -C "$PROJECT_DIR" archive "$COMMIT_SHA" | tar -x -C "$TARGET_SOURCE"
-grep -q "WUFAN_DB_PATH" "$TARGET_SOURCE/server/db.js" \
-  || fail "target commit does not support isolated WUFAN_DB_PATH"
 ln -s "$PROJECT_DIR/node_modules" "$TARGET_SOURCE/node_modules"
+
+BACKUP_SHA_BEFORE="$(shasum -a 256 "$BACKUP_PATH" | awk '{print $1}')"
+BACKUP_SIZE_BEFORE="$(stat -f '%z' "$BACKUP_PATH")"
+BACKUP_INODE_BEFORE="$(stat -f '%i' "$BACKUP_PATH")"
+
+RESOLVED_DATABASE_PATH="$(
+  cd "$TARGET_SOURCE"
+  WUFAN_ENV=migration-preview \
+    WUFAN_DB_PATH="$PREVIEW_DB" \
+    WUFAN_ISOLATION_DATABASE_ROOT="$RELEASE_DIR/checks" \
+    WUFAN_MIGRATION_PREVIEW=1 \
+    "$NODE_COMMAND" --input-type=module --eval \
+      'const {databasePath}=await import("./server/db.js");process.stdout.write(databasePath)'
+)"
+[[ "$RESOLVED_DATABASE_PATH" == "$PREVIEW_DB" ]] \
+  || fail "target commit resolved the wrong isolated database path: $RESOLVED_DATABASE_PATH"
 
 INTEGRITY_BEFORE="$(sqlite3 "$PREVIEW_DB" 'PRAGMA integrity_check;')"
 TABLES_BEFORE="$(sqlite3 "$PREVIEW_DB" "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")"
@@ -125,7 +139,8 @@ log "table count before: $TABLES_BEFORE"
 
 (
   cd "$TARGET_SOURCE"
-  WUFAN_DB_PATH="$PREVIEW_DB" WUFAN_MIGRATION_PREVIEW=1 \
+  WUFAN_ENV=migration-preview WUFAN_DB_PATH="$PREVIEW_DB" \
+    WUFAN_ISOLATION_DATABASE_ROOT="$RELEASE_DIR/checks" WUFAN_MIGRATION_PREVIEW=1 \
     "$NODE_COMMAND" scripts/release-migration-runner.mjs
 ) >> "$LOG_PATH" 2>&1
 sqlite3 "$PREVIEW_DB" ".schema" > "$SCHEMA_AFTER_FIRST"
@@ -134,7 +149,8 @@ TABLES_AFTER_FIRST="$(sqlite3 "$PREVIEW_DB" "SELECT COUNT(*) FROM sqlite_master 
 
 (
   cd "$TARGET_SOURCE"
-  WUFAN_DB_PATH="$PREVIEW_DB" WUFAN_MIGRATION_PREVIEW=1 \
+  WUFAN_ENV=migration-preview WUFAN_DB_PATH="$PREVIEW_DB" \
+    WUFAN_ISOLATION_DATABASE_ROOT="$RELEASE_DIR/checks" WUFAN_MIGRATION_PREVIEW=1 \
     "$NODE_COMMAND" scripts/release-migration-runner.mjs
 ) >> "$LOG_PATH" 2>&1
 sqlite3 "$PREVIEW_DB" ".schema" > "$SCHEMA_AFTER_SECOND"
@@ -152,10 +168,19 @@ fi
 [[ "$INTEGRITY_AFTER_SECOND" == "ok" ]] || fail "preview database invalid after second migration"
 [[ "$IDEMPOTENT" == true ]] || fail "schema changed during the second migration run"
 
+BACKUP_SHA_AFTER="$(shasum -a 256 "$BACKUP_PATH" | awk '{print $1}')"
+BACKUP_SIZE_AFTER="$(stat -f '%z' "$BACKUP_PATH")"
+BACKUP_INODE_AFTER="$(stat -f '%i' "$BACKUP_PATH")"
+[[ "$BACKUP_SHA_AFTER" == "$BACKUP_SHA_BEFORE" ]] || fail "source database checksum changed during preview"
+[[ "$BACKUP_SIZE_AFTER" == "$BACKUP_SIZE_BEFORE" ]] || fail "source database size changed during preview"
+[[ "$BACKUP_INODE_AFTER" == "$BACKUP_INODE_BEFORE" ]] || fail "source database inode changed during preview"
+
 BASIC_QUERY_COUNT="$(sqlite3 "$PREVIEW_DB" 'SELECT COUNT(*) FROM sqlite_master WHERE type="table";')"
 export RESULT_PATH COMMIT_SHA BACKUP_PATH PREVIEW_DB
 export INTEGRITY_BEFORE INTEGRITY_AFTER_FIRST INTEGRITY_AFTER_SECOND
 export TABLES_BEFORE TABLES_AFTER_FIRST TABLES_AFTER_SECOND IDEMPOTENT BASIC_QUERY_COUNT SCHEMA_DIFF
+export RESOLVED_DATABASE_PATH BACKUP_SHA_BEFORE BACKUP_SHA_AFTER
+export BACKUP_SIZE_BEFORE BACKUP_SIZE_AFTER BACKUP_INODE_BEFORE BACKUP_INODE_AFTER
 "$NODE_COMMAND" <<'NODE'
 const fs = require("fs");
 const result = {
@@ -167,6 +192,16 @@ const result = {
   databaseBackupPath: process.env.BACKUP_PATH,
   previewDatabasePath: process.env.PREVIEW_DB,
   sourceDatabaseOpened: false,
+  resolvedDatabasePath: process.env.RESOLVED_DATABASE_PATH,
+  sourceDatabaseUnchanged: process.env.BACKUP_SHA_BEFORE === process.env.BACKUP_SHA_AFTER
+    && process.env.BACKUP_SIZE_BEFORE === process.env.BACKUP_SIZE_AFTER
+    && process.env.BACKUP_INODE_BEFORE === process.env.BACKUP_INODE_AFTER,
+  sourceDatabaseSha256Before: process.env.BACKUP_SHA_BEFORE,
+  sourceDatabaseSha256After: process.env.BACKUP_SHA_AFTER,
+  sourceDatabaseSizeBefore: Number(process.env.BACKUP_SIZE_BEFORE),
+  sourceDatabaseSizeAfter: Number(process.env.BACKUP_SIZE_AFTER),
+  sourceDatabaseInodeBefore: process.env.BACKUP_INODE_BEFORE,
+  sourceDatabaseInodeAfter: process.env.BACKUP_INODE_AFTER,
   integrityBefore: process.env.INTEGRITY_BEFORE,
   integrityAfterFirstRun: process.env.INTEGRITY_AFTER_FIRST,
   integrityAfterSecondRun: process.env.INTEGRITY_AFTER_SECOND,
