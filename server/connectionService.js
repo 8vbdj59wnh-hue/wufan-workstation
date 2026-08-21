@@ -3,6 +3,7 @@ import { getDatabase } from "./db.js";
 import { listConnectionGrowthAnalyses } from "./connectionGrowthService.js";
 import { readConnectionV3MetricsMap } from "./connectionV3MetricsService.js";
 import { FORMAL_SALES_OBJECT_RESOLVER_SCOPES, resolveLinkSkuRelationsForRead } from "./capabilities/resolveLinkSkuRelationRead.js";
+import { buildLinkOperatingScope } from "./linkOperatingSetService.js";
 
 const profileStatuses = new Set(["active", "paused", "archived"]);
 const profileLevels = new Set(["new", "growing", "mature", "priority"]);
@@ -88,7 +89,9 @@ const connectionSelect = `
 `;
 
 export function listConnectionProfiles() {
-  const rows = getDatabase().prepare(`${connectionSelect} ORDER BY c.updatedAt DESC, c.id DESC`).all();
+  const database = getDatabase();
+  const operatingScope = buildLinkOperatingScope(database, { alias: "l", prefix: "connectionProfilesOperating" });
+  const rows = database.prepare(`${connectionSelect} WHERE ${operatingScope.predicate} ORDER BY c.updatedAt DESC, c.id DESC`).all(operatingScope.params);
   return enrichConnectionRows(rows);
 }
 
@@ -210,19 +213,22 @@ export function listAvailableSalesLinks(filters = {}) {
   if (productRelation && !["linked", "unlinked"].includes(productRelation)) throw new Error("产品关联筛选无效。");
   if (!["pending", "existing", "all"].includes(connectionStatus)) throw new Error("连接状态筛选无效。");
   const database = getDatabase();
+  const operatingScope = buildLinkOperatingScope(database, { alias: "l", prefix: "availableLinksOperating" });
   const summary = database.prepare(`
     SELECT COUNT(*) AS total,
            SUM(CASE WHEN c.id IS NOT NULL THEN 1 ELSE 0 END) AS existing,
            SUM(CASE WHEN c.id IS NULL THEN 1 ELSE 0 END) AS pending
     FROM sales_links l LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
-    WHERE COALESCE(l.currentState,'active')='active'
-  `).get();
+    WHERE ${operatingScope.predicate}
+  `).get(operatingScope.params);
   const optionRows = database.prepare(`
     SELECT DISTINCT s.id AS shopId,s.platform,s.displayName AS shopDisplayName,s.shopName
     FROM sales_links l JOIN sales_shops s ON s.id=l.shopId
-    WHERE COALESCE(l.currentState,'active')='active'
+    WHERE ${operatingScope.predicate}
     ORDER BY s.platform,COALESCE(s.displayName,s.shopName),s.id
-  `).all();
+  `).all(operatingScope.params);
+  const rowParams = { ...operatingScope.params, connectionStatus, platform, shopId, query,
+    keyword: `%${query}%`, limit: productRelation ? 10000 : 500 };
   const rows = getDatabase().prepare(`
     SELECT l.id AS salesLinkId, l.title AS salesLinkTitle, l.canonicalUrl, l.platformGoodsId, l.platformGoodsCode,
            s.id AS shopId, s.platform, s.displayName AS shopDisplayName, s.shopName,
@@ -230,16 +236,15 @@ export function listAvailableSalesLinks(filters = {}) {
     FROM sales_links l
     JOIN sales_shops s ON s.id=l.shopId
     LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
-    WHERE COALESCE(l.currentState,'active')='active'
-      AND (?='all' OR (?='pending' AND c.id IS NULL) OR (?='existing' AND c.id IS NOT NULL))
-      AND (?='' OR s.platform=?)
-      AND (?='' OR s.id=?)
-      AND (?='' OR LOWER(COALESCE(l.title,'')) LIKE ? OR LOWER(COALESCE(l.platformGoodsId,'')) LIKE ?
-        OR LOWER(COALESCE(l.platformGoodsCode,'')) LIKE ? OR LOWER(COALESCE(s.displayName,s.shopName,'')) LIKE ?)
+    WHERE ${operatingScope.predicate}
+      AND (@connectionStatus='all' OR (@connectionStatus='pending' AND c.id IS NULL) OR (@connectionStatus='existing' AND c.id IS NOT NULL))
+      AND (@platform='' OR s.platform=@platform)
+      AND (@shopId='' OR s.id=@shopId)
+      AND (@query='' OR LOWER(COALESCE(l.title,'')) LIKE @keyword OR LOWER(COALESCE(l.platformGoodsId,'')) LIKE @keyword
+        OR LOWER(COALESCE(l.platformGoodsCode,'')) LIKE @keyword OR LOWER(COALESCE(s.displayName,s.shopName,'')) LIKE @keyword)
     ORDER BY l.updatedAt DESC, l.id DESC
-    LIMIT ?
-  `).all(connectionStatus, connectionStatus, connectionStatus, platform, platform, shopId, shopId,
-    query, `%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`, productRelation ? 10000 : 500);
+    LIMIT @limit
+  `).all(rowParams);
   const items = enrichConnectionRows(rows).map((item) => ({ ...item, hasLinkedProduct: item.products.length ? 1 : 0 }))
     .filter((item) => !productRelation || (productRelation === "linked" ? item.hasLinkedProduct : !item.hasLinkedProduct)).slice(0, 500);
   return {

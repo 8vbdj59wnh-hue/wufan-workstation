@@ -1,6 +1,7 @@
 import { getDatabase } from "./db.js";
 import { listConnectionGrowthAnalyses } from "./connectionGrowthService.js";
 import { FORMAL_SALES_OBJECT_RESOLVER_SCOPES, resolveLinkSkuRelationsForRead } from "./capabilities/resolveLinkSkuRelationRead.js";
+import { buildLinkOperatingScope } from "./linkOperatingSetService.js";
 
 function text(value) { return String(value ?? "").trim(); }
 function ratio(current, previous) { return previous ? (current - previous) / previous : null; }
@@ -134,6 +135,7 @@ function readProductAttributionContext(database, salesLinkIds) {
 
 export function getConnectionBusinessCockpit(userId = "", isAdmin = false) {
   const database = getDatabase(); const personId = text(userId);
+  const operatingScope = buildLinkOperatingScope(database, { alias: "l", prefix: "connectionCockpitOperating" });
   const profiles = database.prepare(`
     SELECT COALESCE(c.id,l.id) id,c.id connectionProfileId,l.id salesLinkId,
       COALESCE(NULLIF(c.name,''),NULLIF(l.title,''),l.platformGoodsId) name,c.mainImage,c.ownerId,
@@ -141,9 +143,9 @@ export function getConnectionBusinessCockpit(userId = "", isAdmin = false) {
       l.platformGoodsId,s.platform,s.id shopId,COALESCE(s.displayName,s.shopName) shopName
     FROM sales_links l JOIN sales_shops s ON s.id=l.shopId
     LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
-    WHERE COALESCE(l.currentState,'active')='active' ${isAdmin ? "" : "AND c.ownerId=?"}
+    WHERE ${operatingScope.predicate} ${isAdmin ? "" : "AND c.ownerId=@scopeOwnerId"}
     ORDER BY COALESCE(c.updatedAt,l.updatedAt) DESC,l.id DESC
-  `).all(...(isAdmin ? [] : [personId]));
+  `).all({ ...operatingScope.params, ...(isAdmin ? {} : { scopeOwnerId: personId }) });
   const connectionIds = profiles.map((item) => item.connectionProfileId).filter(Boolean); const salesLinkIds = profiles.map((item) => item.salesLinkId);
   if (!profiles.length) return emptyCockpit();
   const placeholders = connectionIds.map(() => "?").join(","); const linkPlaceholders = salesLinkIds.map(() => "?").join(",");

@@ -1,5 +1,6 @@
 import { getDatabase } from "./db.js";
 import { CONNECTION_POSITIONING_TYPES } from "./connectionGoalFoundationService.js";
+import { buildLinkOperatingScope } from "./linkOperatingSetService.js";
 
 const clean = (value) => String(value ?? "").trim();
 const gradeCodes = ["excellent", "good", "on_target", "underperforming"];
@@ -10,8 +11,9 @@ function numeric(row = {}) {
 
 export function readConnectionGoalCockpitSummary(context = {}) {
   const database = context.database || getDatabase();
-  const params = {};
-  const scopeWhere = context.isAdmin ? "COALESCE(l.currentState,'active')='active'" : "COALESCE(l.currentState,'active')='active' AND c.ownerId=@ownerId";
+  const operatingScope = buildLinkOperatingScope(database, { alias: "l", prefix: "connectionGoalCockpitOperating" });
+  const params = { ...operatingScope.params };
+  const scopeWhere = context.isAdmin ? operatingScope.predicate : `${operatingScope.predicate} AND c.ownerId=@ownerId`;
   if (!context.isAdmin) params.ownerId = clean(context.userId);
   const ctes = `WITH active_positioning AS (
       SELECT id,connectionId,positioningType FROM connection_business_profiles WHERE status='active'

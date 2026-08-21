@@ -3,6 +3,7 @@ import { listConnectionProfiles, readConnectionProfile } from "./connectionServi
 import { readConnectionV3Metrics, readConnectionV3MetricsMap } from "./connectionV3MetricsService.js";
 import { FORMAL_SALES_OBJECT_RESOLVER_SCOPES, resolveLinkSkuRelationsForRead } from "./capabilities/resolveLinkSkuRelationRead.js";
 import { readConnectionInventorySupply } from "./inventorySupplyQueryService.js";
+import { buildLinkOperatingScope, getLinkOperatingSummary } from "./linkOperatingSetService.js";
 
 function text(value) { return String(value ?? "").trim(); }
 function parseJson(value, fallback = {}) { try { return JSON.parse(value || ""); } catch { return fallback; } }
@@ -109,8 +110,10 @@ function listOptions(raw = {}) {
 export function listConnectionCoreProfilesPage(rawOptions = {}, userId = "", isAdmin = false) {
   const database = getDatabase();
   const options = listOptions(rawOptions);
-  const where = ["COALESCE(l.currentState,'active')='active'"];
-  const params = {};
+  const operatingScope = buildLinkOperatingScope(database, { alias: "l", prefix: "connectionCoreOperating" });
+  const includeHistorical = [true, 1, "1", "true"].includes(options.includeHistorical);
+  const where = includeHistorical ? ["1=1"] : [operatingScope.predicate];
+  const params = includeHistorical ? {} : { ...operatingScope.params };
   const relationLinkIds = relationFilterLinkIds(database, options);
   if (relationLinkIds !== null) {
     if (!relationLinkIds.length) where.push("0");
@@ -148,6 +151,7 @@ export function listConnectionCoreProfilesPage(rawOptions = {}, userId = "", isA
         COALESCE(c.status,l.currentState,'active') status,COALESCE(c.level,'unmanaged') level,c.notes,
         COALESCE(c.originSource,l.originSource) originSource,COALESCE(c.createdAt,l.createdAt) createdAt,COALESCE(c.updatedAt,l.updatedAt) updatedAt,
         l.title salesLinkTitle,l.canonicalUrl,l.platformGoodsId,l.platformGoodsCode,l.currentState salesLinkState,
+        CASE WHEN ${operatingScope.predicate} THEN 'operating' ELSE 'historical' END operatingState,
         sh.id shopId,sh.platform,sh.displayName shopDisplayName,sh.shopName,p.name ownerName,
         COALESCE((SELECT SUM(f.salesAmount) FROM connection_sku_sales_daily_facts f WHERE f.salesLinkId=l.id),0) salesAmount,
         COALESCE((SELECT SUM(f.profitAmount) FROM connection_sku_sales_daily_facts f WHERE f.salesLinkId=l.id),0) profitAmount,
@@ -157,7 +161,7 @@ export function listConnectionCoreProfilesPage(rawOptions = {}, userId = "", isA
       FROM candidates q JOIN sales_links l ON l.id=q.salesLinkId JOIN sales_shops sh ON sh.id=l.shopId
       LEFT JOIN connection_profiles c ON c.salesLinkId=l.id LEFT JOIN persons p ON p.id=c.ownerId
       ORDER BY q.sortValue ${sortDirection},l.id ${sortDirection}
-  `).all({ ...params, limit: options.pageSize, offset: options.offset });
+  `).all({ ...operatingScope.params, ...params, limit: options.pageSize, offset: options.offset });
   const ids = rows.map((row) => row.salesLinkId);
   const relations = readRelationCounts(database, ids);
   const metrics = readConnectionV3MetricsMap(ids);
@@ -166,7 +170,8 @@ export function listConnectionCoreProfilesPage(rawOptions = {}, userId = "", isA
     skuCount: Number(relations.get(row.salesLinkId)?.skuCount || row.skuCount || 0),
     productCount: Number(relations.get(row.salesLinkId)?.productCount || 0), products: relations.get(row.salesLinkId)?.products ?? [],
   }));
-  return { items, pagination: { page: options.page, pageSize: options.pageSize, total, totalPages: Math.max(1, Math.ceil(total / options.pageSize)) } };
+  return { items, operatingSummary: getLinkOperatingSummary({ database }),
+    pagination: { page: options.page, pageSize: options.pageSize, total, totalPages: Math.max(1, Math.ceil(total / options.pageSize)) } };
 }
 
 export function listConnectionCoreProfiles(userId = "", isAdmin = false) {

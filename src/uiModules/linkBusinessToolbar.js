@@ -20,6 +20,7 @@ export function renderLinkBusinessToolbar({ range = {}, filters = {}, options = 
       <select name="growthStatus">${option("","全部增长状态",filters.growthStatus)}${option("better","增长",filters.growthStatus)}${option("stable","稳定",filters.growthStatus)}${option("worse","下滑",filters.growthStatus)}${option("no_data","暂无数据",filters.growthStatus)}</select>
       <select name="healthStatus">${option("","全部健康状态",filters.healthStatus)}${option("growing","健康",filters.healthStatus)}${option("stable","稳定",filters.healthStatus)}${option("attention","需关注",filters.healthStatus)}${option("risk","风险",filters.healthStatus)}${option("no_data","暂无数据",filters.healthStatus)}</select>
       <select name="hospitalStatus">${option("","全部医院状态",filters.hospitalStatus)}${option("diagnosis","待诊断",filters.hospitalStatus)}${option("treatment","改善中",filters.hospitalStatus)}${option("observation","观察中",filters.hospitalStatus)}${option("none","无问题",filters.hospitalStatus)}</select>
+      <label><input type="checkbox" name="includeHistorical" value="true" ${filters.includeHistorical ? "checked" : ""} />显示历史/退出经营链接</label>
       <button type="button" class="text-button" data-clear-link-business-filters>清除筛选</button>
     </div></details></form>
     <p class="link-business-source-note">ERP销售：${escapeHtml(dataSources.erp?.maxDate ? `数据至 ${dataSources.erp.maxDate}` : "暂无数据")} · 平台经营：${escapeHtml(dataSources.platform?.maxDate ? `数据至 ${dataSources.platform.maxDate}` : "暂无数据")} · 两类口径不合并</p>

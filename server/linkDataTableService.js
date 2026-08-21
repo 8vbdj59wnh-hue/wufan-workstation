@@ -4,6 +4,7 @@ import { getConnectionHospitalStages } from "./connectionHospitalService.js";
 import { readConnectionV3MetricsMap } from "./connectionV3MetricsService.js";
 import { resolveLinkSalesDateRanges } from "./linkSalesRankingService.js";
 import { resolveConnectionGrowthDirection } from "./connectionService.js";
+import { buildLinkOperatingScope } from "./linkOperatingSetService.js";
 
 const scopes = new Set(["mine", "company"]);
 const sortColumns = {
@@ -48,8 +49,11 @@ export function queryLinkDataTable(raw = {}, userId = "", isAdmin = false) {
   const personId = text(userId);
   if (options.scope === "mine" && !personId) throw new Error("无法识别当前登录人员。");
   const ranges = resolveLinkSalesDateRanges({ preset: options.preset || "7d", startDate: options.startDate, endDate: options.endDate });
-  const where = ["COALESCE(l.currentState,'active')='active'"];
+  const database = getDatabase();
+  const operatingScope = buildLinkOperatingScope(database, { alias: "l", prefix: "linkDataOperating" });
+  const where = [operatingScope.predicate];
   const params = {
+    ...operatingScope.params,
     yesterdayStart: ranges.yesterday.startDate, yesterdayEnd: ranges.yesterday.endDate,
     sevenStart: ranges.sevenDays.startDate, sevenEnd: ranges.sevenDays.endDate,
     thirtyStart: ranges.thirtyDays.startDate, thirtyEnd: ranges.thirtyDays.endDate,
@@ -79,7 +83,6 @@ export function queryLinkDataTable(raw = {}, userId = "", isAdmin = false) {
     WHERE saleDate>=MIN(@thirtyStart,@selectedStart,@yesterdayStart)
       AND saleDate<=MAX(@thirtyEnd,@selectedEnd,@yesterdayEnd)
     GROUP BY salesLinkId`;
-  const database = getDatabase();
   const total = Number(database.prepare(`SELECT COUNT(*) count FROM sales_links l
     JOIN sales_shops sh ON sh.id=l.shopId LEFT JOIN connection_profiles c ON c.salesLinkId=l.id WHERE ${whereSql}`).get(params)?.count || 0);
   const orderBy = sortColumns[options.sortField];
@@ -117,7 +120,7 @@ export function queryLinkDataTable(raw = {}, userId = "", isAdmin = false) {
   });
   const sourceDate = database.prepare(`SELECT MIN(saleDate) minDate,MAX(saleDate) maxDate
     FROM connection_sku_sales_daily_facts`).get();
-  const optionWhere = options.scope === "mine" ? "WHERE COALESCE(l.currentState,'active')='active' AND c.ownerId=@ownerId" : "WHERE COALESCE(l.currentState,'active')='active'";
+  const optionWhere = options.scope === "mine" ? `WHERE ${operatingScope.predicate} AND c.ownerId=@ownerId` : `WHERE ${operatingScope.predicate}`;
   const filterRows = database.prepare(`SELECT DISTINCT sh.id shopId,sh.platform,COALESCE(sh.displayName,sh.shopName) shopName
     FROM sales_links l JOIN sales_shops sh ON sh.id=l.shopId LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
     ${optionWhere} ORDER BY sh.platform,shopName,sh.id`).all(params);

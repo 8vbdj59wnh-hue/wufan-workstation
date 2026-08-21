@@ -84,7 +84,7 @@ function fieldAlignment(field) {
 
 const statusNames = { better: "增长", stable: "稳定", worse: "下滑", no_data: "暂无数据", insufficient_data: "数据不足",
   growing: "健康", attention: "需关注", risk: "风险", healthy: "健康", diagnosis: "待诊断", treatment: "改善中",
-  observation: "观察中", none: "无问题", active: "正常", paused: "暂停", archived: "归档" };
+  observation: "观察中", none: "无问题", active: "正常", paused: "暂停", archived: "归档", historical: "历史/退出经营" };
 function status(value, type) { const normalized = value || "no_data"; return `<span class="link-table-status is-${escapeHtml(normalized)}" data-status-type="${escapeHtml(type)}">${escapeHtml(statusNames[normalized] || normalized)}</span>`; }
 function number(metric) { return metric?.noData ? "暂无数据" : Number(metric?.value || 0).toLocaleString("zh-CN", { maximumFractionDigits: 2 }); }
 function money(metric) { return metric?.noData ? "暂无数据" : `¥${number(metric)}`; }

@@ -1,6 +1,7 @@
 import { getDatabase } from "./db.js";
 import { setConnectionBusinessPositioning } from "./connectionGoalFoundationService.js";
 import { confirmConnectionGoalPlan, createConnectionGoalSuggestion } from "./connectionGoalPlanService.js";
+import { buildLinkOperatingScope } from "./linkOperatingSetService.js";
 
 const clean = (value) => String(value ?? "").trim();
 const positioningTypes = new Set(["sales_growth", "balanced_sales", "long_tail", "profit_contribution"]);
@@ -38,9 +39,9 @@ function baseCtes(periodStart, periodEnd) {
     )`;
 }
 
-function buildWhere(options, userId, isAdmin) {
-  const where = ["COALESCE(l.currentState,'active')='active'"];
-  const params = {};
+function buildWhere(options, userId, isAdmin, operatingScope) {
+  const where = [operatingScope.predicate];
+  const params = { ...operatingScope.params };
   if (!isAdmin) { where.push("c.ownerId=@scopeOwnerId"); params.scopeOwnerId = clean(userId); }
   if (clean(options.keyword)) {
     where.push("(c.name LIKE @keyword OR l.title LIKE @keyword OR l.platformGoodsId LIKE @keyword)");
@@ -67,10 +68,11 @@ function sourcePeriod(database) {
 export function readConnectionGoalWorkbench(rawOptions = {}, context = {}) {
   const database = context.database || getDatabase();
   const options = normalizeListOptions(rawOptions);
+  const operatingScope = buildLinkOperatingScope(database, { alias: "l", prefix: "connectionGoalWorkbenchOperating" });
   const { periodStart, periodEnd } = sourcePeriod(database);
   const ctes = baseCtes(periodStart, periodEnd);
-  const scope = buildWhere({}, context.userId, context.isAdmin);
-  const filtered = buildWhere(options, context.userId, context.isAdmin);
+  const scope = buildWhere({}, context.userId, context.isAdmin, operatingScope);
+  const filtered = buildWhere(options, context.userId, context.isAdmin, operatingScope);
   const joins = `FROM connection_profiles c
     JOIN sales_links l ON l.id=c.salesLinkId
     JOIN sales_shops sh ON sh.id=l.shopId

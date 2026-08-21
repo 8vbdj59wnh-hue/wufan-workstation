@@ -2,6 +2,7 @@ import { getDatabase } from "./db.js";
 import { listConnectionGrowthAnalysesByConnectionIds } from "./connectionGrowthService.js";
 import { getConnectionHospitalStages } from "./connectionHospitalService.js";
 import { resolveConnectionGrowthDirection } from "./connectionService.js";
+import { buildLinkOperatingScope, getLinkOperatingSummary } from "./linkOperatingSetService.js";
 import { resolveLinkSalesDateRanges } from "./linkSalesRankingService.js";
 
 export const LINK_BUSINESS_FIELDS = new Set([
@@ -108,9 +109,12 @@ export function queryLinkBusinessTable(raw = {}, userId = "", isAdmin = false) {
   }
   const personId = text(userId);
   if (options.scope === "mine" && !personId) throw new Error("无法识别当前登录人员。");
+  const database = getDatabase();
   const ranges = dateRanges(options);
-  const where = ["COALESCE(l.currentState,'active')='active'"];
-  const params = { startDate: ranges.selected.startDate, endDate: ranges.selected.endDate };
+  const operatingScope = buildLinkOperatingScope(database, { alias: "l", prefix: "linkBusinessOperating" });
+  const includeHistorical = [true, 1, "1", "true"].includes(options.includeHistorical);
+  const where = includeHistorical ? ["1=1"] : [operatingScope.predicate];
+  const params = { ...operatingScope.params, startDate: ranges.selected.startDate, endDate: ranges.selected.endDate };
   if (options.scope === "mine") { where.push("c.ownerId=@scopeOwnerId"); params.scopeOwnerId = personId; }
   if (text(options.keyword)) { where.push("(COALESCE(c.name,'') LIKE @keyword OR COALESCE(l.title,'') LIKE @keyword OR l.platformGoodsId LIKE @keyword)"); params.keyword = `%${text(options.keyword)}%`; }
   for (const [key, column] of [["platform", "sh.platform"], ["shopId", "sh.id"], ["ownerId", "c.ownerId"], ["archiveStatus", "c.status"]]) {
@@ -122,7 +126,6 @@ export function queryLinkBusinessTable(raw = {}, userId = "", isAdmin = false) {
   if (maxSales !== null) { where.push("fa.salesCount>0 AND fa.salesAmount<=@maxSales"); params.maxSales = maxSales; }
   if (minProfit !== null) { where.push("fa.profitCount>0 AND fa.profitAmount>=@minProfit"); params.minProfit = minProfit; }
   if (maxProfit !== null) { where.push("fa.profitCount>0 AND fa.profitAmount<=@maxProfit"); params.maxProfit = maxProfit; }
-  const database = getDatabase();
   const rows = database.prepare(`
     WITH fact_aggregate AS (
       SELECT salesLinkId,SUM(salesAmount) salesAmount,COUNT(salesAmount) salesCount,
@@ -205,7 +208,9 @@ export function queryLinkBusinessTable(raw = {}, userId = "", isAdmin = false) {
     )
     SELECT COALESCE(c.id,l.id) id,c.id connectionProfileId,l.id salesLinkId,
       COALESCE(NULLIF(c.name,''),NULLIF(l.title,''),l.platformGoodsId) name,c.mainImage,c.ownerId,
-      COALESCE(c.status,l.currentState,'active') archiveStatus,COALESCE(c.updatedAt,l.updatedAt) updatedAt,
+      COALESCE(c.status,l.currentState,'active') archiveStatus,
+      CASE WHEN ${operatingScope.predicate} THEN 'operating' ELSE 'historical' END operatingState,
+      COALESCE(c.updatedAt,l.updatedAt) updatedAt,
       l.platformGoodsId,l.canonicalUrl,l.category,l.status platformStatus,sh.id shopId,sh.platform,COALESCE(sh.displayName,sh.shopName) shopName,p.name ownerName,
       fa.salesAmount,fa.salesCount,fa.quantity,fa.quantityCount,fa.costAmount,fa.costCount,fa.profitAmount,fa.profitCount,
       pa.periodStart,pa.periodEnd,pa.statisticsDate,pa.productType,pa.productStatus,pa.productTags,
@@ -240,7 +245,8 @@ export function queryLinkBusinessTable(raw = {}, userId = "", isAdmin = false) {
       id: row.id, salesLinkId: row.salesLinkId, name: row.name, mainImage: row.mainImage, ownerId: row.ownerId,
       ownerName: row.ownerName, platform: row.platform, shopId: row.shopId, shopName: row.shopName,
       platformGoodsId: row.platformGoodsId, canonicalUrl: row.canonicalUrl, category: row.category, platformStatus: row.platformStatus,
-      platformPeriodStart: row.periodStart, platformPeriodEnd: row.periodEnd, archiveStatus: row.archiveStatus, updatedAt: row.updatedAt,
+      platformPeriodStart: row.periodStart, platformPeriodEnd: row.periodEnd,
+      operatingState: row.operatingState, archiveStatus: row.operatingState === "historical" ? "historical" : row.archiveStatus, updatedAt: row.updatedAt,
       erp: { salesAmount: metric(row.salesAmount, row.salesCount), quantity: metric(row.quantity, row.quantityCount),
         costAmount: metric(row.costAmount, row.costCount), profitAmount: metric(row.profitAmount, row.profitCount), profitMargin },
       platformMetrics: { statisticsDate: row.statisticsDate, productType: row.productType, productStatus: row.productStatus, productTags: row.productTags,
@@ -278,7 +284,8 @@ export function queryLinkBusinessTable(raw = {}, userId = "", isAdmin = false) {
     || left.id.localeCompare(right.id));
   const total = items.length;
   items = items.slice((options.page - 1) * options.pageSize, options.page * options.pageSize);
-  const optionWhere = options.scope === "mine" ? "WHERE COALESCE(l.currentState,'active')='active' AND c.ownerId=@scopeOwnerId" : "WHERE COALESCE(l.currentState,'active')='active'";
+  const optionScope = includeHistorical ? "1=1" : operatingScope.predicate;
+  const optionWhere = options.scope === "mine" ? `WHERE ${optionScope} AND c.ownerId=@scopeOwnerId` : `WHERE ${optionScope}`;
   const optionRows = database.prepare(`SELECT DISTINCT sh.id shopId,sh.platform,COALESCE(sh.displayName,sh.shopName) shopName
     FROM sales_links l JOIN sales_shops sh ON sh.id=l.shopId LEFT JOIN connection_profiles c ON c.salesLinkId=l.id ${optionWhere}
     ORDER BY sh.platform,shopName,sh.id`).all(params);
@@ -289,6 +296,7 @@ export function queryLinkBusinessTable(raw = {}, userId = "", isAdmin = false) {
     platform: database.prepare("SELECT MIN(substr(periodStart,1,10)) minDate,MAX(substr(periodEnd,1,10)) maxDate FROM connection_period_snapshots").get(),
   };
   return { scope: options.scope, range: ranges.selected, fields: options.fields, items,
+    operatingSummary: getLinkOperatingSummary({ database }),
     pagination: { page: options.page, pageSize: options.pageSize, total, totalPages: Math.max(1, Math.ceil(total / options.pageSize)) },
     sort: { field: options.sortField, direction: options.sortDirection }, dataSources: sources,
     filterOptions: { platforms: [...new Set(optionRows.map((item) => item.platform).filter(Boolean))],

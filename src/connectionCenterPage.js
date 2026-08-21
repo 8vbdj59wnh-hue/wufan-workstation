@@ -135,7 +135,8 @@ const pageState = {
   view: "list",
   sort: "default",
   columnSort: { key: "", direction: "asc" },
-  listFilters: { search: "", platform: "", shopId: "", productCode: "", ownerId: "", healthStatus: "", status: "", salesStatus: "", profitStatus: "", productRelation: "", skuCount: "" },
+  listFilters: { search: "", platform: "", shopId: "", productCode: "", ownerId: "", healthStatus: "", status: "", salesStatus: "", profitStatus: "", productRelation: "", skuCount: "", includeHistorical: "" },
+  operatingSummary: { historicalAssetCount: 0, operatingCount: 0, historicalCount: 0 },
   visibleColumns: ["image", "name", "platform", "shop", "erpSales", "erpProfit", "health", "owner", "status"],
   fieldSettingsOpen: false,
   detailTab: "business",
@@ -160,7 +161,7 @@ const pageState = {
     visibleFields: [...DEFAULT_MINE_LINK_FIELDS], fieldOrder: LINK_DATA_COLUMNS.map((item) => item.key), filterOptions: { platforms: [], shops: [] },
     dataSource: {}, columnSettingOpen: false, loading: false, loaded: false },
   businessTable: { items: [], pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 }, range: { preset: "7d", startDate: "", endDate: "" },
-    filters: { keyword: "", platform: "", shopId: "", ownerId: "", minSales: "", maxSales: "", minProfit: "", maxProfit: "", growthStatus: "", healthStatus: "", hospitalStatus: "", expanded: false },
+    filters: { keyword: "", platform: "", shopId: "", ownerId: "", minSales: "", maxSales: "", minProfit: "", maxProfit: "", growthStatus: "", healthStatus: "", hospitalStatus: "", includeHistorical: "", expanded: false },
     sort: { field: "salesAmount", direction: "desc" }, visibleFields: [...DEFAULT_LINK_BUSINESS_FIELDS],
     fieldOrder: LINK_BUSINESS_COLUMNS.map((item) => item.key), filterOptions: { platforms: [], shops: [], owners: [] }, dataSources: {}, indicatorOpen: false, loading: false, loaded: false },
   goalWorkbench: { summary: {}, items: [], pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 },
@@ -500,7 +501,7 @@ function renderSectionNavigation() {
   return `<nav class="connection-section-nav" aria-label="连接中心页面">
     <button type="button" class="${pageState.section === "cockpit" ? "active" : ""}" data-connection-section="cockpit">经营驾驶舱</button>
     <button type="button" class="${pageState.section === "my-links" ? "active" : ""}" data-connection-section="my-links">我的链接</button>
-    <button type="button" class="${pageState.section === "connections" ? "active" : ""}" data-connection-section="connections">全部链接</button>
+    <button type="button" class="${pageState.section === "connections" ? "active" : ""}" data-connection-section="connections">Link资产</button>
     <button type="button" class="${pageState.section === "goal-management" ? "active" : ""}" data-connection-section="goal-management">链接经营管理</button>
     ${canViewHealth() ? `<button type="button" class="${pageState.section === "hospital" ? "active" : ""}" data-connection-section="hospital">链接医院</button>` : ""}
     <button type="button" class="${["data-import", "sales-relation-governance", "sales-data-quality-governance"].includes(pageState.section) ? "active" : ""}" data-connection-section="data-import">数据更新</button>
@@ -729,7 +730,7 @@ function renderConnectionWorkbenchHome() {
     <section class="connection-workbench-block"><header><div><h3>我的经营</h3><p>风险优先排列当前负责链接</p></div><button type="button" class="text-button" data-workbench-go="my-links">查看全部 →</button></header><div class="connection-workbench-mine-stats"><span>正常 <b>${normalCount}</b></span><span>向好 <b>${summary.better || 0}</b></span><span>风险 <b>${summary.risk || 0}</b></span></div>${renderWorkbenchLinkCards(mine.items, { emptyText: "当前账号暂无负责链接" })}</section>
     <section class="connection-workbench-block is-risk"><header><div><h3>风险链接</h3><p>优先处理经营指标明显下降的连接</p></div><button type="button" class="text-button" data-workbench-my-filter="worse">查看风险链接 →</button></header>${renderWorkbenchLinkCards(risks, { emptyText: "当前没有风险链接", limit: 4 })}</section>
     <section class="connection-workbench-block"><header><div><h3>重点关注</h3><p>当前账号主动收藏的重要链接</p></div><button type="button" class="text-button" data-workbench-my-filter="followed">查看全部关注 →</button></header>${renderWorkbenchLinkCards(followed, { emptyText: "尚未关注链接", limit: 4, showFollow: true })}</section>
-    <section class="connection-workbench-block is-all-links"><header><div><h3>全部链接</h3><p>完整经营链接资产，支持负责人、店铺、平台、健康和经营状态组合筛选</p></div></header>${renderToolbar()}${renderList()}</section>
+    <section class="connection-workbench-block is-all-links"><header><div><h3>${pageState.listFilters.includeHistorical ? "全部历史 Link 资产" : "当前经营 Link"}</h3><p>当前经营 ${pageState.operatingSummary.operatingCount || 0} · 历史/退出 ${pageState.operatingSummary.historicalCount || 0} · 历史总资产 ${pageState.operatingSummary.historicalAssetCount || 0}</p></div></header>${renderToolbar()}${renderList()}</section>
   </section>`;
 }
 
@@ -753,6 +754,7 @@ function renderToolbar() {
       <select name="productRelation" aria-label="产品关联筛选"><option value="">全部产品关联</option><option value="linked" ${filters.productRelation === "linked" ? "selected" : ""}>已关联产品</option><option value="unlinked" ${filters.productRelation === "unlinked" ? "selected" : ""}>未关联产品</option></select>
       <select name="skuCount" aria-label="SKU数量筛选"><option value="">全部SKU数量</option><option value="single" ${filters.skuCount === "single" ? "selected" : ""}>单SKU</option><option value="multiple" ${filters.skuCount === "multiple" ? "selected" : ""}>多SKU</option><option value="none" ${filters.skuCount === "none" ? "selected" : ""}>无SKU</option></select>
       <select name="status" aria-label="状态筛选"><option value="">全部状态</option>${["active", "paused", "archived"].map((status) => `<option value="${status}" ${filters.status === status ? "selected" : ""}>${escapeHtml(statusText(status))}</option>`).join("")}</select>
+      <label class="connection-history-toggle"><input type="checkbox" name="includeHistorical" value="true" ${filters.includeHistorical ? "checked" : ""} />显示历史/退出经营链接</label>
       <button type="submit" class="secondary-button">筛选</button>
       <button type="button" class="text-button" data-clear-connection-filters>清除</button>
     </form>
@@ -790,7 +792,7 @@ function renderConnectionAssets() {
     fields: orderedFields, sort: table.sort, loading: table.loading });
   return `<section class="connection-assets company-links-workspace">
     ${renderUiModule("link_data_status", { state: pageState.linkDataStatus })}
-    <section class="link-business-analysis"><header><div><h3>全部链接经营数据表</h3></div></header>${toolbarHtml}${tableHtml}</section>
+    <section class="link-business-analysis"><header><div><h3>${table.filters.includeHistorical ? "全部历史 Link 资产" : "当前经营 Link"}</h3><p>当前经营 ${table.operatingSummary?.operatingCount || 0} · 历史/退出 ${table.operatingSummary?.historicalCount || 0} · 历史总资产 ${table.operatingSummary?.historicalAssetCount || 0}</p></div></header>${toolbarHtml}${tableHtml}</section>
   </section>`;
 }
 
@@ -859,7 +861,7 @@ function renderBusinessCockpit() {
   const salesPeriodText = cockpitSalesPeriodText(summary);
   return `<section class="connection-business-cockpit"><header><div><h2>经营链接驾驶舱</h2></div></header>
     ${renderUiModule("link_sales_distribution", { state: pageState.salesDistribution, canViewCompany: isAdmin() })}
-    <section class="cockpit-summary"><div><span>Link资产数量</span><strong>${summary.connectionCount||0}</strong><small>链接身份与经营信息统一维护</small></div><div class="is-sales"><span>近30天ERP销售额</span><strong>${coreMoney(summary.salesAmount)}</strong><small>${escapeHtml(salesPeriodText)}</small><small>${summary.previousPeriodComplete ? `较上一30天 ${growthText(summary.salesGrowth)}` : `上一30天数据仅${summary.previousPeriodDateCount||0}天，暂不比较`}</small></div><div><span>利润</span><strong>${coreMoney(summary.profitAmount)}</strong><small>利润率 ${corePercent(summary.profitMargin)}</small></div><div class="is-risk"><span>风险链接</span><strong>${summary.riskCount||0}</strong><small>需要管理关注</small></div><div class="is-diagnosis"><span>诊断中</span><strong>${summary.diagnosisCount||0}</strong><small>等待定位问题</small></div><div class="is-treatment"><span>治疗中</span><strong>${summary.treatmentCount||0}</strong><small>正在推进改善</small></div></section>
+    <section class="cockpit-summary"><div><span>当前经营 Link</span><strong>${summary.connectionCount||0}</strong><small>以最新完整平台货品批次为准</small></div><div class="is-sales"><span>近30天ERP销售额</span><strong>${coreMoney(summary.salesAmount)}</strong><small>${escapeHtml(salesPeriodText)}</small><small>${summary.previousPeriodComplete ? `较上一30天 ${growthText(summary.salesGrowth)}` : `上一30天数据仅${summary.previousPeriodDateCount||0}天，暂不比较`}</small></div><div><span>利润</span><strong>${coreMoney(summary.profitAmount)}</strong><small>利润率 ${corePercent(summary.profitMargin)}</small></div><div class="is-risk"><span>风险链接</span><strong>${summary.riskCount||0}</strong><small>需要管理关注</small></div><div class="is-diagnosis"><span>诊断中</span><strong>${summary.diagnosisCount||0}</strong><small>等待定位问题</small></div><div class="is-treatment"><span>治疗中</span><strong>${summary.treatmentCount||0}</strong><small>正在推进改善</small></div></section>
     <section class="cockpit-health"><header><h3>健康状态</h3><span>高利润链接 ${summary.highProfitCount||0} · 利润风险 ${summary.profitRiskCount||0}</span></header><div><span>健康 <b>${health.healthy||0}</b><em>${healthRate(health.healthy)}</em></span><span>关注 <b>${health.attention||0}</b><em>${healthRate(health.attention)}</em></span><span>异常 <b>${health.risk||0}</b><em>${healthRate(health.risk)}</em></span><span>待积累数据 <b>${health.noData||0}</b><em>${healthRate(health.noData)}</em></span></div></section>
     ${renderGoalHealthCockpit()}
     ${renderOwnerContribution()}
@@ -1207,6 +1209,7 @@ function applyConnectionAssetData(connections, rankings, managementOverview) {
   });
   pageState.growthRankings = rankings;
   pageState.managementOverview = managementOverview;
+  pageState.operatingSummary = connections.operatingSummary || pageState.operatingSummary;
 }
 
 async function loadConnectionAssetsPage(render) {
@@ -1219,7 +1222,8 @@ async function loadConnectionAssetsPage(render) {
       keyword: pageState.listFilters.search, platform: pageState.listFilters.platform, shopId: pageState.listFilters.shopId,
       ownerId: pageState.listFilters.ownerId, status: pageState.listFilters.status, productCode: pageState.listFilters.productCode,
       salesStatus: pageState.listFilters.salesStatus, profitStatus: pageState.listFilters.profitStatus,
-      productRelation: pageState.listFilters.productRelation, skuCount: pageState.listFilters.skuCount, sortField, sortDirection });
+      productRelation: pageState.listFilters.productRelation, skuCount: pageState.listFilters.skuCount,
+      includeHistorical: pageState.listFilters.includeHistorical, sortField, sortDirection });
     const [rankings, managementOverview] = pageState.assetMetaLoaded
       ? [pageState.growthRankings, pageState.managementOverview]
       : await Promise.all([loadConnectionGrowthRankings(), loadConnectionManagementOverview()]);
@@ -1243,6 +1247,7 @@ async function loadLinkBusinessTablePage(render) {
       keyword: table.filters.keyword, platform: table.filters.platform, shopId: table.filters.shopId, ownerId: table.filters.ownerId,
       minSales: table.filters.minSales, maxSales: table.filters.maxSales, minProfit: table.filters.minProfit, maxProfit: table.filters.maxProfit,
       growthStatus: table.filters.growthStatus, healthStatus: table.filters.healthStatus, hospitalStatus: table.filters.hospitalStatus,
+      includeHistorical: table.filters.includeHistorical,
       sortField: table.sort.field, sortDirection: table.sort.direction, fields: table.visibleFields.join(",") });
     pageState.businessTable = { ...pageState.businessTable, ...result, loaded: true, loading: false,
       range: { ...pageState.businessTable.range, ...result.range }, pagination: result.pagination || pageState.businessTable.pagination,
@@ -1539,7 +1544,8 @@ export function bindConnectionCenterPageEvents(render) {
     pageState.businessTable.filters = { ...pageState.businessTable.filters, keyword: String(data.keyword || ""), platform: String(data.platform || ""),
       shopId: String(data.shopId || ""), ownerId: String(data.ownerId || ""), minSales: String(data.minSales || ""), maxSales: String(data.maxSales || ""),
       minProfit: String(data.minProfit || ""), maxProfit: String(data.maxProfit || ""), growthStatus: String(data.growthStatus || ""),
-      healthStatus: String(data.healthStatus || ""), hospitalStatus: String(data.hospitalStatus || "") };
+      healthStatus: String(data.healthStatus || ""), hospitalStatus: String(data.hospitalStatus || ""),
+      includeHistorical: String(data.includeHistorical || "") };
     pageState.businessTable.pagination.page = 1; void loadLinkBusinessTablePage(render);
   });
   root.querySelectorAll("[data-business-preset]").forEach((button) => button.addEventListener("click", () => {
@@ -1599,7 +1605,7 @@ export function bindConnectionCenterPageEvents(render) {
     saveLinkBusinessTableConfig(); pageState.businessTable.indicatorOpen = false; void loadLinkBusinessTablePage(render);
   });
   root.querySelector("[data-clear-link-business-filters]")?.addEventListener("click", () => {
-    pageState.businessTable.filters = { keyword: "", platform: "", shopId: "", ownerId: "", minSales: "", maxSales: "", minProfit: "", maxProfit: "", growthStatus: "", healthStatus: "", hospitalStatus: "", expanded: false };
+    pageState.businessTable.filters = { keyword: "", platform: "", shopId: "", ownerId: "", minSales: "", maxSales: "", minProfit: "", maxProfit: "", growthStatus: "", healthStatus: "", hospitalStatus: "", includeHistorical: "", expanded: false };
     pageState.businessTable.pagination.page = 1; void loadLinkBusinessTablePage(render);
   });
   root.querySelector("[data-distribution-back]")?.addEventListener("click", (event) => {
@@ -1745,7 +1751,7 @@ export function bindConnectionCenterPageEvents(render) {
     connectionSearchTimer = window.setTimeout(() => { pageState.listFilters.search = value; pageState.pagination.page = 1; void loadConnectionAssetsPage(render); }, 280);
   });
   root.querySelector("[data-clear-connection-filters]")?.addEventListener("click", () => {
-    pageState.listFilters = { search: "", platform: "", shopId: "", productCode: "", ownerId: "", healthStatus: "", status: "", salesStatus: "", profitStatus: "", productRelation: "", skuCount: "" }; pageState.pagination.page = 1; void loadConnectionAssetsPage(render);
+    pageState.listFilters = { search: "", platform: "", shopId: "", productCode: "", ownerId: "", healthStatus: "", status: "", salesStatus: "", profitStatus: "", productRelation: "", skuCount: "", includeHistorical: "" }; pageState.pagination.page = 1; void loadConnectionAssetsPage(render);
   });
   root.querySelectorAll("[data-connection-sort]").forEach((button) => button.addEventListener("click", () => {
     pageState.sort = button.dataset.connectionSort; pageState.columnSort = { key: "", direction: "asc" }; pageState.pagination.page = 1; void loadConnectionAssetsPage(render);

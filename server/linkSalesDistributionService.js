@@ -1,5 +1,6 @@
 import { getDatabase } from "./db.js";
 import { resolveLinkSalesRankingRange } from "./linkSalesRankingService.js";
+import { buildLinkOperatingScope } from "./linkOperatingSetService.js";
 
 const scopes = new Set(["mine", "company"]);
 const text = (value) => String(value ?? "").trim();
@@ -30,6 +31,7 @@ export function getLinkSalesDistribution(input = {}, userId = "", isAdmin = fals
   if (scope === "mine" && !ownerId) throw new Error("无法识别当前登录人员。");
   const database = getDatabase();
   const range = resolveLinkSalesRankingRange(input, latestCompleteSalesDate(database));
+  const operatingScope = buildLinkOperatingScope(database, { alias: "l", prefix: "linkDistributionOperating" });
   const ownerWhere = scope === "mine" ? "AND c.ownerId=@ownerId" : "";
   const rows = database.prepare(`
     WITH selected_sales AS (
@@ -44,10 +46,10 @@ export function getLinkSalesDistribution(input = {}, userId = "", isAdmin = fals
     FROM sales_links l
     LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
     LEFT JOIN selected_sales ON selected_sales.salesLinkId=l.id
-    WHERE COALESCE(l.currentState,'active')='active' ${ownerWhere}
+    WHERE ${operatingScope.predicate} ${ownerWhere}
     ORDER BY CASE WHEN selected_sales.factCount IS NULL THEN 1 ELSE 0 END,
       selected_sales.salesAmount DESC,l.id ASC
-  `).all({ startDate: range.startDate, endDate: range.endDate, ownerId });
+  `).all({ ...operatingScope.params, startDate: range.startDate, endDate: range.endDate, ownerId });
   const totalSalesAmount = rows.reduce((sum, row) => sum + (Number(row.factCount) > 0 ? Number(row.salesAmount || 0) : 0), 0);
   const items = rows.map((row, index) => {
     const hasData = Number(row.factCount) > 0;
