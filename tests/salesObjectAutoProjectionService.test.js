@@ -86,17 +86,18 @@ test("Bundle BOM变化建立新版本并保持Relation关闭", () => {
   assert.equal(second.componentsCreated, 0);
   assert.equal(second.engineering.batchCount, 0);
 });
-test("Bundle权威迁移保留旧版并新建旺店通版本", () => {
+test("Bundle内容未变时只迁移结构权威且不改不可变组件", () => {
   const db = fixture();
   addCandidate(db, { code: "PACK", type: "bundle", erpSkuId: null });
   addExistingProjection(db, { code: "PACK", quantity: 2, sourceType: "legacy_excel" });
   const source = { pack: { sourceUpdatedAt: "2026-08-21", components: [{ erpSkuId: "erp-part", quantity: 2 }] } };
   const first = projectOperatingSalesObjects({ database: db, relationWriteEnabled: false, bundleSources: source });
-  assert.equal(first.structuresCreated, 1);
-  assert.equal(first.structuresSuperseded, 1);
-  assert.equal(db.prepare("SELECT COUNT(*) total FROM sales_object_structures WHERE status='superseded'").get().total, 1);
+  assert.equal(first.structuresCreated, 0);
+  assert.equal(first.structuresUpdated, 1);
+  assert.equal(first.structuresSuperseded, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) total FROM sales_object_structures").get().total, 1);
   assert.equal(db.prepare("SELECT sourceType FROM sales_object_structures WHERE status='active'").get().sourceType, "wangdian_suite_api");
-  assert.equal(db.prepare("SELECT sourceType FROM sales_object_structure_components WHERE structureId=(SELECT id FROM sales_object_structures WHERE status='active')").get().sourceType, "wangdian_suite_api");
+  assert.equal(db.prepare("SELECT sourceType FROM sales_object_structure_components WHERE structureId=(SELECT id FROM sales_object_structures WHERE status='active')").get().sourceType, "legacy_excel");
   const second = projectOperatingSalesObjects({ database: db, relationWriteEnabled: false, bundleSources: source });
   assert.equal(second.structuresCreated, 0);
   assert.equal(second.structuresSuperseded, 0);
