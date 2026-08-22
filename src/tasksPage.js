@@ -90,7 +90,12 @@ import {
 import { bindActionLinkedTemplatePreviewEvents, bindLaunchedProcessDetailEvents, renderActionLinkedTemplates, renderLaunchedProcessDetail } from "./processInstanceDetail.js";
 import { getMethodologyLinkByNodeId } from "./methodologiesPage.js";
 import { renderWorkFormViewer } from "./workFormViewer.js";
-import { normalizePublicFormFields } from "./publicFormFields.js";
+import {
+  collectPublicFormMultiSelectValues,
+  normalizePublicFormFields,
+  renderPublicFormMultiSelectField,
+  validatePublicFormMultiSelectValue,
+} from "./publicFormFields.js";
 import {
   getPublishingAccountFieldOptions,
   isPublishingAccountField,
@@ -1125,7 +1130,7 @@ function getTaskProcessStepName(task) {
 }
 
 function renderCustomFieldInput(field, customFields = {}) {
-  const value = customFields[field.key] ?? (field.type === "multi_select" ? [] : "");
+  const value = customFields[field.key] ?? (field.type === "multi_select" ? field.defaultValue ?? [] : "");
   const requiredMark = "";
 
   if (field.type === "textarea") {
@@ -1152,14 +1157,7 @@ function renderCustomFieldInput(field, customFields = {}) {
 
   if (field.type === "multi_select") {
     const options = getDynamicFieldOptions(field);
-    return `
-      <label>
-        <span>${field.label}${requiredMark}</span>
-        <select name="custom__${field.key}" multiple size="${Math.min(options.length, 5)}">
-          ${options.map((option) => `<option value="${escapeHtml(option.value)}" ${Array.isArray(value) && value.includes(option.value) ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
-        </select>
-      </label>
-    `;
+    return renderPublicFormMultiSelectField(field, options, customFields);
   }
 
   if (field.type === "image") {
@@ -1220,7 +1218,7 @@ function collectCustomFields(form, template) {
     } else if (isProductImageField(field)) {
       collectProductImageField(formData, result, field);
     } else if (field.type === "multi_select") {
-      result[field.key] = formData.getAll(`custom__${field.key}`).map((item) => item.toString());
+      result[field.key] = collectPublicFormMultiSelectValues(formData, field.key);
     } else {
       result[field.key] = getFormValue(form, `custom__${field.key}`);
     }
@@ -1237,6 +1235,11 @@ function validateCustomFields(customFields, template) {
   if (productImagesError !== "") return productImagesError;
   for (const field of getSortedFormFields(template)) {
     const value = customFields[field.key];
+    if (field.type === "multi_select") {
+      const error = validatePublicFormMultiSelectValue(field, value, getDynamicFieldOptions(field));
+      if (error !== "") return error;
+      continue;
+    }
     const isEmpty = Array.isArray(value) ? value.length === 0 : value === "";
     if (isEmpty) continue;
     if (typeof value === "string" && value.startsWith("__INVALID_BUSINESS_TIME__:")) return value.replace("__INVALID_BUSINESS_TIME__:", "");
@@ -1246,7 +1249,6 @@ function validateCustomFields(customFields, template) {
     if (field.type === "url" && !isValidUrl(value)) return `${field.label}必须是有效链接。`;
     if (field.type === "image" && !isValidImagePath(value)) return `${field.label}必须是上传后的图片路径。`;
     if (field.type === "select" && !getDynamicFieldOptions(field).some((option) => option.value === value)) return `${field.label}必须选择有效选项。`;
-    if (field.type === "multi_select" && value.some((item) => !getDynamicFieldOptions(field).some((option) => option.value === item))) return `${field.label}包含无效选项。`;
   }
   return "";
 }
