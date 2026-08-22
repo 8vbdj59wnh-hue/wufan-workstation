@@ -28,9 +28,10 @@ export function getLinkSalesDistribution(input = {}, userId = "", isAdmin = fals
       GROUP BY salesLinkId
     )
     SELECT l.id linkId,COALESCE(NULLIF(c.name,''),NULLIF(l.title,''),l.platformGoodsId) linkName,
-      c.mainImage,selected_sales.salesAmount,
+      c.mainImage,sh.platform,COALESCE(sh.displayName,sh.shopName) shopName,selected_sales.salesAmount,
       COALESCE(selected_sales.factCount,0) factCount
     FROM sales_links l
+    JOIN sales_shops sh ON sh.id=l.shopId
     LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
     LEFT JOIN selected_sales ON selected_sales.salesLinkId=l.id
     WHERE ${operatingScope.predicate} ${ownerWhere}
@@ -42,7 +43,8 @@ export function getLinkSalesDistribution(input = {}, userId = "", isAdmin = fals
     const hasData = Number(row.factCount) > 0;
     const salesAmount = hasData ? Number(row.salesAmount || 0) : null;
     return {
-      linkId: row.linkId, linkName: row.linkName, mainImage: row.mainImage || "", salesAmount,
+      linkId: row.linkId, linkName: row.linkName, mainImage: row.mainImage || "",
+      platform: row.platform || "", shopName: row.shopName || "", salesAmount,
       salesPercentage: hasData && totalSalesAmount > 0 ? salesAmount / totalSalesAmount : (hasData ? 0 : null),
       rank: index + 1, groupIndex: Math.floor(index / 100) + 1, hasData, noData: !hasData,
     };

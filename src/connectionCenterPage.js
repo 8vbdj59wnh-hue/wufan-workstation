@@ -1145,12 +1145,13 @@ function renderConnectionHospitalDetail(item) {
 }
 
 function renderDetail() {
+  const detailProfile = pageState.coreDetail?.profile;
   const listItem = pageState.items.find((candidate) => candidate.id === pageState.selectedId)
     ?? pageState.myWorkbench.items.find((candidate) => candidate.id === pageState.selectedId)
     ?? pageState.myLinkTable.items.find((candidate) => candidate.id === pageState.selectedId)
-    ?? pageState.businessTable.items.find((candidate) => candidate.id === pageState.selectedId);
-  if (!listItem) return "";
-  const detailProfile = pageState.coreDetail?.profile;
+    ?? pageState.businessTable.items.find((candidate) => candidate.id === pageState.selectedId)
+    ?? (detailProfile ? { ...detailProfile, id: detailProfile.id || pageState.selectedId } : null)
+    ?? { id: pageState.selectedId, name: "链接详情", salesLinkTitle: "链接详情", platform: "—", shopName: "—", products: [] };
   const item = detailProfile ? { ...listItem, ...detailProfile,
     products: detailProfile.products ?? pageState.coreDetail?.products ?? listItem.products ?? [] } : listItem;
   const tabs = [["business", "经营概览"], ["diagnosis", "问题诊断"], ["sales", "销售分析"], ["inventory", "商品库存"], ["advanced", "高级信息"]];
@@ -1661,6 +1662,98 @@ export function bindConnectionCenterPageEvents(render) {
     const ids = String(element.dataset.distributionLinkIds || "").split(",").filter(Boolean);
     void loadDistributionRangeTable(render, start, end, ids);
   }));
+  let distributionTooltip = document.querySelector(".distribution-link-hover-card");
+  if (!distributionTooltip) {
+    distributionTooltip = document.createElement("div");
+    distributionTooltip.className = "distribution-link-hover-card is-hidden";
+    distributionTooltip.innerHTML = `<div class="distribution-link-hover-card-media"><img alt="" hidden /><span>暂无主图</span></div><div class="distribution-link-hover-card-body"><strong></strong><span data-distribution-tooltip-shop></span><div><b data-distribution-tooltip-sales></b><em data-distribution-tooltip-share></em></div><small>点击进入链接详情 →</small></div>`;
+    document.body.appendChild(distributionTooltip);
+  }
+  distributionTooltip.classList.add("is-hidden");
+  let distributionTooltipCloseTimer = null;
+  const cancelDistributionTooltipClose = () => {
+    window.clearTimeout(distributionTooltipCloseTimer);
+    distributionTooltipCloseTimer = null;
+  };
+  const hideDistributionTooltip = () => {
+    cancelDistributionTooltipClose();
+    distributionTooltip.classList.add("is-hidden");
+  };
+  const scheduleDistributionTooltipClose = () => {
+    cancelDistributionTooltipClose();
+    distributionTooltipCloseTimer = window.setTimeout(() => {
+      const activeBar = root.querySelector(`[data-distribution-bar][data-open-connection="${CSS.escape(distributionTooltip.dataset.connectionId || "")}"]`);
+      if (activeBar?.matches(":hover") || distributionTooltip.matches(":hover")) return;
+      hideDistributionTooltip();
+    }, 140);
+  };
+  distributionTooltip.onmouseenter = cancelDistributionTooltipClose;
+  distributionTooltip.onmouseleave = scheduleDistributionTooltipClose;
+  distributionTooltip.onclick = () => {
+    const connectionId = distributionTooltip.dataset.connectionId || "";
+    if (!connectionId) return;
+    hideDistributionTooltip();
+    pageState.detailReturnSection = "cockpit";
+    void openConnection(connectionId, render);
+  };
+  const distributionBarFromEvent = (event) => event.target instanceof Element
+    ? event.target.closest("[data-distribution-bar]")
+    : null;
+  const positionDistributionTooltip = (bar, event) => {
+      const barBounds = bar.getBoundingClientRect();
+      const clientX = Number.isFinite(event?.clientX) ? event.clientX : barBounds.left + barBounds.width / 2;
+      const clientY = Number.isFinite(event?.clientY) ? event.clientY : barBounds.top;
+      const margin = 12;
+      let left = clientX + 16;
+      let top = clientY + 14;
+      if (left + distributionTooltip.offsetWidth > window.innerWidth - margin) left = clientX - distributionTooltip.offsetWidth - 16;
+      if (top + distributionTooltip.offsetHeight > window.innerHeight - margin) top = clientY - distributionTooltip.offsetHeight - 14;
+      distributionTooltip.style.left = `${Math.max(margin, left)}px`;
+      distributionTooltip.style.top = `${Math.max(margin, top)}px`;
+  };
+  const showDistributionTooltip = (bar, event) => {
+      cancelDistributionTooltipClose();
+      distributionTooltip.dataset.connectionId = bar.dataset.openConnection || "";
+      const image = distributionTooltip.querySelector("img");
+      const imagePlaceholder = distributionTooltip.querySelector(".distribution-link-hover-card-media span");
+      const imageUrl = bar.dataset.linkImage || "";
+      image.hidden = !imageUrl;
+      imagePlaceholder.hidden = Boolean(imageUrl);
+      image.onerror = () => { image.hidden = true; imagePlaceholder.hidden = false; };
+      if (imageUrl) image.src = resolveAssetUrl(imageUrl);
+      distributionTooltip.querySelector("strong").textContent = bar.dataset.linkName || "未命名链接";
+      distributionTooltip.querySelector("[data-distribution-tooltip-shop]").textContent = [bar.dataset.linkPlatform, bar.dataset.linkShop].filter(Boolean).join(" · ") || "店铺信息未设置";
+      distributionTooltip.querySelector("[data-distribution-tooltip-sales]").textContent = bar.dataset.salesLabel || "暂无数据";
+      distributionTooltip.querySelector("[data-distribution-tooltip-share]").textContent = `第${bar.dataset.linkRank || "—"}名 · 占比 ${bar.dataset.percentageLabel || "暂无数据"}`;
+      distributionTooltip.classList.remove("is-hidden");
+      positionDistributionTooltip(bar, event);
+  };
+  root.addEventListener("pointerover", (event) => {
+    const bar = distributionBarFromEvent(event);
+    if (!bar || bar.contains(event.relatedTarget)) return;
+    showDistributionTooltip(bar, event);
+  });
+  root.addEventListener("pointermove", (event) => {
+    const bar = distributionBarFromEvent(event);
+    if (!bar) return;
+    if (distributionTooltip.dataset.connectionId !== bar.dataset.openConnection || distributionTooltip.classList.contains("is-hidden")) {
+      showDistributionTooltip(bar, event);
+      return;
+    }
+    positionDistributionTooltip(bar, event);
+  });
+  root.addEventListener("pointerout", (event) => {
+    const bar = distributionBarFromEvent(event);
+    if (!bar || bar.contains(event.relatedTarget)) return;
+    scheduleDistributionTooltipClose();
+  });
+  root.addEventListener("focusin", (event) => {
+    const bar = distributionBarFromEvent(event);
+    if (bar) showDistributionTooltip(bar, event);
+  });
+  root.addEventListener("focusout", (event) => {
+    if (distributionBarFromEvent(event)) scheduleDistributionTooltipClose();
+  });
   root.querySelector("[data-link-business-toolbar]")?.addEventListener("submit", (event) => {
     event.preventDefault(); const data = Object.fromEntries(new FormData(event.currentTarget));
     pageState.businessTable.range = { preset: String(data.preset || "7d"), startDate: String(data.startDate || ""), endDate: String(data.endDate || "") };
