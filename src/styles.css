@@ -10930,6 +10930,26 @@ button.content-template-thumb {
 .cockpit-panel, .cockpit-health { border-radius: var(--link-radius); box-shadow: 0 2px 8px rgb(16 24 40 / 4%); }
 .cockpit-two-columns .cockpit-panel, .cockpit-growth-grid .connection-cockpit-link { min-height: 100%; }
 .connection-cockpit-link { min-height: 82px; border-radius: 12px; }
+.shop-operations-panel > header > div { display: grid; gap: 3px; }
+.shop-operations-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.shop-operation-card { display: grid; gap: 14px; min-width: 0; padding: 15px; border: 1px solid #e1e8e5; border-radius: 13px; background: linear-gradient(145deg, #fff, #f8fbfa); }
+.shop-operation-card > header { display: grid; gap: 4px; min-width: 0; }
+.shop-operation-card > header strong { overflow: hidden; color: #173f34; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.shop-operation-card > header span, .shop-operation-card > footer { color: #667085; font-size: 11px; }
+.shop-operation-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.shop-operation-metrics > div { display: grid; gap: 4px; min-width: 0; padding: 10px; border-radius: 10px; background: #fff; }
+.shop-operation-metrics span, .shop-operation-metrics small { color: #667085; font-size: 11px; }
+.shop-operation-metrics strong { overflow: hidden; color: #101828; font-size: 17px; text-overflow: ellipsis; white-space: nowrap; }
+.shop-operation-metrics small.is-better { color: #027a48; }
+.shop-operation-metrics small.is-worse { color: #c01048; }
+.shop-operation-grades { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.shop-operation-grades span { display: grid; gap: 2px; padding: 7px 5px; border-radius: 8px; background: #f2f4f7; text-align: center; }
+.shop-operation-grades em { color: #667085; font-size: 10px; font-style: normal; }
+.shop-operation-grades b { color: #344054; font-size: 13px; }
+.shop-operation-grades span:first-child { background: #ecfdf3; }
+.shop-operation-grades span:first-child b { color: #027a48; }
+.shop-operation-grades span:last-child { background: #fff1f3; }
+.shop-operation-grades span:last-child b { color: #c01048; }
 
 .my-links-summary button { min-height: 104px; border-radius: var(--link-radius); box-shadow: 0 2px 8px rgb(16 24 40 / 4%); }
 .connection-workbench-block { border-radius: var(--link-radius); }
@@ -10979,6 +10999,11 @@ button.content-template-thumb {
 
 @media (max-width: 1180px) {
   .cockpit-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .shop-operations-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 900px) {
+  .shop-operations-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 .my-links-summary > div { display: grid; gap: 6px; min-height: 104px; padding: 15px; border: 1px solid #e1e8e5; border-radius: var(--link-radius, 14px); background: #fff; color: #475467; box-shadow: 0 2px 8px rgb(16 24 40 / 4%); }
@@ -11215,6 +11240,7 @@ button.content-template-thumb {
   .connection-card { min-height: 420px; }
   .connection-import-status { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cockpit-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .shop-operations-grid { grid-template-columns: 1fr; }
   .connection-v3-card-metrics { grid-template-columns: 1fr 1fr 1fr; }
   .link-data-status-module { grid-template-columns: 1fr; }
   .link-daily-source-matrix > header { align-items: stretch; flex-direction: column; }

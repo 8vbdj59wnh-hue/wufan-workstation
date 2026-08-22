@@ -115,11 +115,9 @@ export function classifySalesDetailLine(line = {}, context = {}) {
     warnings: ["ERP_USAGE_DEFAULTED_TO_PRODUCT"],
   });
 
-  // An existing ERP SKU is treated as a product by default. Business-usage
-  // governance is an exclusion list here: only an explicitly confirmed
-  // non-product usage may divert a row before relation resolution. The formal
-  // link-SKU relation remains mandatory downstream before a fact is eligible.
-  if (usage?.warnings?.some((warning) => warning?.code === "ERP_USAGE_NOT_CLASSIFIED")) return output("product_sale", {
+  // ERP身份已经在进入本能力前完成精确匹配。除非用途被明确确认成非商品，
+  // 否则统一进入商品关系解析；“用途尚未人工确认”不再构成业务异常。
+  return output("product_sale", {
     isFactEligible: false,
     reasonCodes: ["ERP_USAGE_DEFAULT_PRODUCT"],
     evidence: {
@@ -128,16 +126,6 @@ export function classifySalesDetailLine(line = {}, context = {}) {
       relationStatus: relation?.relationStatus || null,
     },
     warnings: ["ERP_USAGE_DEFAULTED_TO_PRODUCT", "AWAITING_RELATION_RESOLUTION"],
-  });
-
-  return output("unknown", {
-    isFactEligible: false,
-    reasonCodes: ["ERP_USAGE_NOT_CLASSIFIED"],
-    evidence: {
-      ...evidence,
-      relationStatus: relation?.relationStatus || null,
-    },
-    warnings: ["ERP SKU业务用途尚未人工确认，禁止根据编码、名称、金额、利润或quantity自动分类。"],
   });
 }
 

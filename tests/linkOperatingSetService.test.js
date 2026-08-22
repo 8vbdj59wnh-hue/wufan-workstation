@@ -13,12 +13,12 @@ function fixture() {
   database.exec(`
     CREATE TABLE erp_import_batches(id TEXT,importType TEXT,status TEXT,importMode TEXT,businessDate TEXT,completedAt TEXT,createdAt TEXT,originalFilename TEXT);
     CREATE TABLE data_sync_tasks(id TEXT,taskCode TEXT);
-    CREATE TABLE data_sync_batches(id TEXT,taskId TEXT,status TEXT,syncMode TEXT,periodEnd TEXT,completedAt TEXT,createdAt TEXT,fileName TEXT,fileHash TEXT,totalCount INTEGER);
+    CREATE TABLE data_sync_batches(id TEXT,taskId TEXT,status TEXT,syncMode TEXT,periodEnd TEXT,completedAt TEXT,createdAt TEXT,fileName TEXT,fileHash TEXT,totalCount INTEGER,scopeJson TEXT);
     CREATE TABLE sales_links(id TEXT PRIMARY KEY,lastSeenBatchId TEXT,currentState TEXT);
     CREATE TABLE sales_link_skus(id TEXT PRIMARY KEY,salesLinkId TEXT,lastSeenBatchId TEXT);
     CREATE TABLE connection_sku_sales_daily_facts(id TEXT PRIMARY KEY,salesLinkId TEXT,salesLinkSkuId TEXT,erpSkuId TEXT,saleDate TEXT,sourceBatchId TEXT);
     INSERT INTO data_sync_tasks VALUES('platform-task','platform_goods_excel_import');
-    INSERT INTO data_sync_batches VALUES('latest-batch','platform-task','succeeded','full','2026-08-19','2026-08-19T12:00:00Z','2026-08-19T11:00:00Z','8.19平台货品.xlsx','hash',2);
+    INSERT INTO data_sync_batches VALUES('latest-batch','platform-task','succeeded','full','2026-08-19','2026-08-19T12:00:00Z','2026-08-19T11:00:00Z','8.19平台货品.xlsx','hash',2,'{"platformSnapshotMode":"full"}');
     INSERT INTO sales_links VALUES('platform-link','latest-batch','active');
     INSERT INTO sales_links VALUES('recent-sales-link','older-batch','active');
     INSERT INTO sales_links VALUES('historical-link','older-batch','active');
@@ -58,6 +58,19 @@ test("历史Link重新出现在完整批次后自动恢复且重复计算幂等"
   database.close();
 });
 
+test("preview、partial和单店批次不能替换最新完整平台批次", () => {
+  const database = fixture();
+  database.prepare("INSERT INTO data_sync_batches VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(
+    "partial-batch", "platform-task", "partial", "full", "2026-08-20", "2026-08-20T12:00:00Z", "2026-08-20T11:00:00Z",
+    "单店平台货品.xlsx", "partial-hash", 1, JSON.stringify({ platformSnapshotMode: "partial", sourceShopNames: ["测试店"] }),
+  );
+  database.prepare("UPDATE sales_links SET lastSeenBatchId='partial-batch' WHERE id='recent-sales-link'").run();
+  const summary = getLinkOperatingSummary({ database });
+  assert.equal(summary.platformBatch.id, "latest-batch");
+  assert.equal(summary.operatingCount, 1);
+  database.close();
+});
+
 test("驾驶舱、链接列表与经营分析复用统一规则，历史筛选保留", () => {
   for (const file of [
     "server/connectionBusinessCockpitService.js",
@@ -67,11 +80,13 @@ test("驾驶舱、链接列表与经营分析复用统一规则，历史筛选�
     "server/linkSalesDistributionService.js",
     "server/connectionGoalCockpitService.js",
     "server/connectionGoalWorkbenchService.js",
+    "server/connectionGrowthService.js",
   ]) assert.match(fs.readFileSync(path.join(root, file), "utf8"), /buildLinkOperatingScope/u, `${file} 应复用Link Operating Set`);
   const page = fs.readFileSync(path.join(root, "src/connectionCenterPage.js"), "utf8");
   const businessToolbar = fs.readFileSync(path.join(root, "src/uiModules/linkBusinessToolbar.js"), "utf8");
   assert.match(page, /includeHistorical/u);
   assert.match(page, /显示历史\/退出经营链接/u);
   assert.match(page, /当前经营 Link/u);
+  assert.match(page, /invalidateLinkOperatingViews\(committed\.operatingSet\)/u, "平台完整批次提交后应立即失效页面经营范围缓存");
   assert.match(businessToolbar, /name="includeHistorical"/u);
 });

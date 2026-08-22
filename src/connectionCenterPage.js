@@ -368,6 +368,16 @@ function ensureConnectionSectionLoaded(section, render) {
     && !pageState.salesDataQualityGovernance.loaded && !pageState.salesDataQualityGovernance.loading) void loadSalesDataQualityGovernancePage(render, { page: 1 });
 }
 
+function invalidateLinkOperatingViews(operatingSet = null) {
+  for (const section of ["cockpit", "connections", "goal-management", "my-links"]) pageState.loadedSections.delete(section);
+  pageState.assetMetaLoaded = false;
+  pageState.businessTable = { ...pageState.businessTable, items: [], pagination: { ...pageState.businessTable.pagination, page: 1, total: 0 }, loaded: false, loading: false };
+  pageState.myLinkTable = { ...pageState.myLinkTable, items: [], pagination: { ...pageState.myLinkTable.pagination, page: 1, total: 0 }, loaded: false, loading: false };
+  pageState.goalWorkbench = { ...pageState.goalWorkbench, summary: {}, items: [], pagination: { ...pageState.goalWorkbench.pagination, page: 1, total: 0 }, loaded: false, loading: false };
+  pageState.salesDistribution = { ...pageState.salesDistribution, items: [], summary: {}, selectedGroup: 0, selectedRange: null, drillTable: null, loaded: false, loading: false };
+  if (operatingSet) pageState.operatingSummary = operatingSet;
+}
+
 function connectionAnomalies(item) {
   const problems = [];
   if (Number(item.salesGrowth) < -0.2) problems.push({ title: "销售明显下降", value: growthText(item.salesGrowth) });
@@ -626,7 +636,7 @@ function renderDataFoundation() {
   const dailyCategoryLabels = { ready: "可导入日报", pending_relation: "待确认销售关系", error: "异常" };
   const dailyCoverage = (value) => value === null || value === undefined ? "暂无数据" : `${(Number(value) * 100).toFixed(2)}%`;
   const factCommit = dailySummary.factCommit;
-  const dailyPreviewPanel = dailyPreview ? `<section class="connection-import-preview ${dailySummary.errorRows ? "is-blocked" : ""}"><header><div><p class="eyebrow">销售日报预览</p><h3>销售日报导入预览</h3></div><span class="status-pill">第 ${dailySummary.previewRevision || 1} 版</span></header><div class="connection-import-preview-grid"><span>文件<strong>${escapeHtml(dailySummary.fileName || "—")}</strong></span><span>日期范围<strong>${escapeHtml(dailySummary.dateStart && dailySummary.dateEnd ? `${dailySummary.dateStart} 至 ${dailySummary.dateEnd}` : "—")}</strong></span><span>总行数<strong>${dailySummary.totalRows || 0}</strong></span><span>可导入日报<strong>${dailySummary.readyRows || 0}</strong></span><span>待确认关系<strong>${dailySummary.pendingRelationRows || 0}</strong></span><span>异常<strong>${dailySummary.errorRows || 0}</strong></span><span>销售额覆盖率<strong>${dailyCoverage(dailySummary.salesAmountCoverage)}</strong></span><span>利润覆盖率<strong>${dailyCoverage(dailySummary.profitAmountCoverage)}</strong></span></div>${dailySummary.changes ? `<p class="form-note">本次重算：新增可导入 ${Number(dailySummary.changes.readyRows || 0)} 条，减少待确认 ${Math.max(0, -Number(dailySummary.changes.pendingRelationRows || 0))} 条，异常变化 ${Number(dailySummary.changes.errorRows || 0)} 条。</p>` : ""}${dailySummary.relationRecalculationRequired ? `<p class="form-note">销售关系已更新，此预览需要人工重新计算；不会自动写入日报事实。</p>` : ""}${factCommit ? `<div class="connection-import-preview-grid"><span>新增事实<strong>${factCommit.insertedCount || 0}</strong></span><span>重复数据已跳过<strong>${factCommit.skippedCount || 0}</strong></span><span>待确认更新<strong>${factCommit.updatePendingCount || 0}</strong></span><span>未写入<strong>${factCommit.blockedCount || 0}</strong></span><span>写入销售额<strong>¥${usageMoney(factCommit.insertedSalesAmount)}</strong></span><span>写入利润<strong>¥${usageMoney(factCommit.insertedProfitAmount)}</strong></span></div>` : ""}<nav class="connection-data-center-nav" aria-label="销售日报预览分类">${Object.entries(dailyCategoryLabels).map(([key, label]) => `<button type="button" class="${dailyCategory === key ? "active" : ""}" data-daily-preview-category="${key}">${label}</button>`).join("")}</nav><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>行号</th><th>店铺</th><th>货品编号</th><th>平台规格编号</th><th>商家编码</th><th>日期</th><th>销售额</th><th>利润</th><th>结果</th></tr></thead><tbody>${dailyRows.map((row) => { const item = row.normalized || {}; return `<tr><td>${escapeHtml(row.rowNumber)}</td><td>${escapeHtml(item.shopName || "—")}</td><td>${escapeHtml(item.platformGoodsId || "—")}</td><td>${escapeHtml(item.platformSkuId || "—")}</td><td>${escapeHtml(item.merchantSkuCode || "—")}</td><td>${escapeHtml(item.saleDate || "—")}</td><td>${item.salesAmount === null || item.salesAmount === undefined ? "暂无数据" : escapeHtml(Number(item.salesAmount).toFixed(2))}</td><td>${item.profitAmount === null || item.profitAmount === undefined ? "暂无数据" : escapeHtml(Number(item.profitAmount).toFixed(2))}</td><td>${escapeHtml(importErrorMessageText(row.errorMessage || dailyCategoryLabels[row.category] || row.category))}</td></tr>`; }).join("") || `<tr><td colspan="9">当前分类暂无数据</td></tr>`}</tbody></table></div><footer><small>${factCommit ? `事实写入已确认于 ${escapeHtml(factCommit.confirmedAt)}` : "确认时会重新执行分类、用途与关系校验。"}</small>${!factCommit && canImportBusinessData() ? `<button type="button" class="primary-button" data-confirm-sales-daily-facts="${escapeHtml(dailyPreview.batch?.id)}" ${foundation.dailyCommitting ? "disabled" : ""}>${foundation.dailyCommitting ? "正在写入…" : "确认写入日报事实"}</button>` : ""}${canImportBusinessData() && !factCommit && (dailySummary.relationRecalculationRequired || Number(dailySummary.previewRevision || 1) > 1) ? `<button type="button" class="secondary-button" data-recalculate-sales-daily-preview="${escapeHtml(dailyPreview.batch?.id)}" ${foundation.dailyLoading ? "disabled" : ""}>${foundation.dailyLoading ? "正在重新计算…" : "重新计算预览"}</button>` : ""}</footer></section>` : "";
+  const dailyPreviewPanel = dailyPreview ? `<section class="connection-import-preview ${dailySummary.errorRows ? "is-blocked" : ""}"><header><div><p class="eyebrow">销售日报预览</p><h3>销售日报导入预览</h3></div><span class="status-pill">第 ${dailySummary.previewRevision || 1} 版</span></header><div class="connection-import-preview-grid"><span>文件<strong>${escapeHtml(dailySummary.fileName || "—")}</strong></span><span>日期范围<strong>${escapeHtml(dailySummary.dateStart && dailySummary.dateEnd ? `${dailySummary.dateStart} 至 ${dailySummary.dateEnd}` : "—")}</strong></span><span>总行数<strong>${dailySummary.totalRows || 0}</strong></span><span>可导入日报<strong>${dailySummary.readyRows || 0}</strong></span><span>待确认关系<strong>${dailySummary.pendingRelationRows || 0}</strong></span><span>异常<strong>${dailySummary.errorRows || 0}</strong></span><span>商品销售额覆盖率<strong>${dailyCoverage(dailySummary.salesAmountCoverage)}</strong></span><span>商品利润覆盖率<strong>${dailyCoverage(dailySummary.profitAmountCoverage)}</strong></span></div>${dailySummary.changes ? `<p class="form-note">本次重算：新增可导入 ${Number(dailySummary.changes.readyRows || 0)} 条，减少待确认 ${Math.max(0, -Number(dailySummary.changes.pendingRelationRows || 0))} 条，异常变化 ${Number(dailySummary.changes.errorRows || 0)} 条。</p>` : ""}${dailySummary.relationRecalculationRequired ? `<p class="form-note">销售关系已更新，此预览需要人工重新计算；不会自动写入日报事实。</p>` : ""}${factCommit ? `<div class="connection-import-preview-grid"><span>新增事实<strong>${factCommit.insertedCount || 0}</strong></span><span>重复数据已跳过<strong>${factCommit.skippedCount || 0}</strong></span><span>待确认更新<strong>${factCommit.updatePendingCount || 0}</strong></span><span>未写入<strong>${factCommit.blockedCount || 0}</strong></span><span>写入销售额<strong>¥${usageMoney(factCommit.insertedSalesAmount)}</strong></span><span>写入利润<strong>¥${usageMoney(factCommit.insertedProfitAmount)}</strong></span></div>` : ""}<nav class="connection-data-center-nav" aria-label="销售日报预览分类">${Object.entries(dailyCategoryLabels).map(([key, label]) => `<button type="button" class="${dailyCategory === key ? "active" : ""}" data-daily-preview-category="${key}">${label}</button>`).join("")}</nav><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>行号</th><th>店铺</th><th>货品编号</th><th>平台规格编号</th><th>商家编码</th><th>日期</th><th>销售额</th><th>利润</th><th>结果</th></tr></thead><tbody>${dailyRows.map((row) => { const item = row.normalized || {}; return `<tr><td>${escapeHtml(row.rowNumber)}</td><td>${escapeHtml(item.shopName || "—")}</td><td>${escapeHtml(item.platformGoodsId || "—")}</td><td>${escapeHtml(item.platformSkuId || "—")}</td><td>${escapeHtml(item.merchantSkuCode || "—")}</td><td>${escapeHtml(item.saleDate || "—")}</td><td>${item.salesAmount === null || item.salesAmount === undefined ? "暂无数据" : escapeHtml(Number(item.salesAmount).toFixed(2))}</td><td>${item.profitAmount === null || item.profitAmount === undefined ? "暂无数据" : escapeHtml(Number(item.profitAmount).toFixed(2))}</td><td>${escapeHtml(importErrorMessageText(row.errorMessage || dailyCategoryLabels[row.category] || row.category))}</td></tr>`; }).join("") || `<tr><td colspan="9">当前分类暂无数据</td></tr>`}</tbody></table></div><footer><small>${factCommit ? `事实写入已确认于 ${escapeHtml(factCommit.confirmedAt)}` : "覆盖率仅统计商品销售；运费、会计辅助及其他已确认非商品用途不进入分母。确认时会重新执行分类、用途与关系校验。"}</small>${!factCommit && canImportBusinessData() ? `<button type="button" class="primary-button" data-confirm-sales-daily-facts="${escapeHtml(dailyPreview.batch?.id)}" ${foundation.dailyCommitting ? "disabled" : ""}>${foundation.dailyCommitting ? "正在写入…" : "确认写入日报事实"}</button>` : ""}${canImportBusinessData() && !factCommit && (dailySummary.relationRecalculationRequired || Number(dailySummary.previewRevision || 1) > 1) ? `<button type="button" class="secondary-button" data-recalculate-sales-daily-preview="${escapeHtml(dailyPreview.batch?.id)}" ${foundation.dailyLoading ? "disabled" : ""}>${foundation.dailyLoading ? "正在重新计算…" : "重新计算预览"}</button>` : ""}</footer></section>` : "";
   const candidates = pageState.relationCandidates;
   const candidateSummary = candidates.summary || {};
   const selectedCandidate = candidates.selected;
@@ -852,6 +862,30 @@ function renderGoalHealthCockpit() {
     <div class="connection-goal-positioning-summary">${(model.positioningSummary || []).map((item) => `<article><header><strong>${escapeHtml(item.positioningName)}</strong><small>${item.totalLinks || 0} 条 · 已评价 ${item.evaluatedLinks || 0}</small></header><div>${gradeItems.map(([code,label]) => code === "underperforming" ? `<button type="button" data-goal-health-drill="grade" data-positioning="${escapeHtml(item.positioningType)}" data-evaluation-status="${code}"><span>${label}</span><b>${item[code] || 0}</b></button>` : `<span><em>${label}</em><b>${item[code] || 0}</b></span>`).join("")}</div></article>`).join("")}</div>
   </section>`;
 }
+function renderShopOperations(cockpit) {
+  const shops = cockpit.shopOperations ?? [];
+  const summary = cockpit.summary ?? {};
+  const period = summary.salesPeriodStart && summary.salesPeriodEnd
+    ? `${summary.salesPeriodStart} 至 ${summary.salesPeriodEnd}`
+    : "当前暂无销售周期";
+  const trendMeta = (shop) => {
+    if (!summary.previousPeriodComplete) return { className: "stable", text: "上一周期数据不完整，暂不比较" };
+    if (!Number(shop.previousSalesAmount || 0)) {
+      return Number(shop.salesAmount || 0)
+        ? { className: "better", text: "上期无销售" }
+        : { className: "stable", text: "与上期持平" };
+    }
+    const value = Number(shop.salesTrend || 0);
+    return { className: value > 0 ? "better" : value < 0 ? "worse" : "stable", text: growthText(value) };
+  };
+  return `<section class="cockpit-panel shop-operations-panel"><header><div><h3>店铺经营</h3><span>${escapeHtml(period)} · 当前有效店铺 ${shops.length} 家</span></div></header>${shops.length
+    ? `<div class="shop-operations-grid">${shops.map((shop) => {
+      const trend = trendMeta(shop);
+      return `<article class="shop-operation-card"><header><strong>${escapeHtml(`${shop.platform} · ${shop.shopName}`)}</strong><span>${shop.totalLinks || 0} 条当前经营 Link</span></header><div class="shop-operation-metrics"><div><span>当前周期销售额</span><strong>${coreMoney(shop.salesAmount)}</strong><small class="is-${trend.className}">${trend.className === "better" ? "↗" : trend.className === "worse" ? "↘" : "→"} ${escapeHtml(trend.text)}</small></div><div><span>当前周期毛利</span><strong>${coreMoney(shop.profitAmount)}</strong><small>毛利率 ${corePercent(shop.profitMargin)}</small></div></div><div class="shop-operation-grades"><span><em>优秀</em><b>${shop.excellentLinks || 0}</b></span><span><em>良好</em><b>${shop.goodLinks || 0}</b></span><span><em>达标</em><b>${shop.onTargetLinks || 0}</b></span><span><em>不达标</em><b>${shop.underperformingLinks || 0}</b></span></div><footer>参与评价 ${shop.evaluatedLinks || 0} / 总链接 ${shop.totalLinks || 0}</footer></article>`;
+    }).join("")}</div>`
+    : `<div class="empty-state compact">暂无当前有效店铺</div>`}</section>`;
+}
+
 function renderBusinessCockpit() {
   const cockpit=pageState.cockpit; const summary=cockpit.summary??{}; const health=cockpit.health??{};
   const totalHealth=Number(health.healthy||0)+Number(health.attention||0)+Number(health.risk||0)+Number(health.noData||0);
@@ -862,6 +896,7 @@ function renderBusinessCockpit() {
   return `<section class="connection-business-cockpit"><header><div><h2>经营链接驾驶舱</h2></div></header>
     ${renderUiModule("link_sales_distribution", { state: pageState.salesDistribution, canViewCompany: isAdmin() })}
     <section class="cockpit-summary"><div><span>当前经营 Link</span><strong>${summary.connectionCount||0}</strong><small>以最新完整平台货品批次为准</small></div><div class="is-sales"><span>近30天ERP销售额</span><strong>${coreMoney(summary.salesAmount)}</strong><small>${escapeHtml(salesPeriodText)}</small><small>${summary.previousPeriodComplete ? `较上一30天 ${growthText(summary.salesGrowth)}` : `上一30天数据仅${summary.previousPeriodDateCount||0}天，暂不比较`}</small></div><div><span>利润</span><strong>${coreMoney(summary.profitAmount)}</strong><small>利润率 ${corePercent(summary.profitMargin)}</small></div><div class="is-risk"><span>风险链接</span><strong>${summary.riskCount||0}</strong><small>需要管理关注</small></div><div class="is-diagnosis"><span>诊断中</span><strong>${summary.diagnosisCount||0}</strong><small>等待定位问题</small></div><div class="is-treatment"><span>治疗中</span><strong>${summary.treatmentCount||0}</strong><small>正在推进改善</small></div></section>
+    ${renderShopOperations(cockpit)}
     <section class="cockpit-health"><header><h3>健康状态</h3><span>高利润链接 ${summary.highProfitCount||0} · 利润风险 ${summary.profitRiskCount||0}</span></header><div><span>健康 <b>${health.healthy||0}</b><em>${healthRate(health.healthy)}</em></span><span>关注 <b>${health.attention||0}</b><em>${healthRate(health.attention)}</em></span><span>异常 <b>${health.risk||0}</b><em>${healthRate(health.risk)}</em></span><span>待积累数据 <b>${health.noData||0}</b><em>${healthRate(health.noData)}</em></span></div></section>
     ${renderGoalHealthCockpit()}
     ${renderOwnerContribution()}
@@ -2041,8 +2076,13 @@ export function bindConnectionCenterPageEvents(render) {
     try {
       const committed = await commitPlatformGoodsExcelDataSync(batchId);
       pageState.platformGoodsImport.preview = await loadPlatformGoodsExcelDataSyncPreview(batchId);
-      pageState.platformGoodsImport.message = committed.idempotent ? "该预览已同步完成，本次未重复创建或更新资产。" : "平台货品资产已同步；ERP关系候选已进入审核流程。";
-      pageState.assetMetaLoaded = false;
+      invalidateLinkOperatingViews(committed.operatingSet);
+      const operatingCount = Number(committed.operatingSet?.operatingCount || 0);
+      pageState.platformGoodsImport.message = committed.platformSnapshot?.mode !== "full"
+        ? `资产已同步，但该文件被识别为部分文件，不会替换当前经营Link基线。${committed.platformSnapshot?.reason ? `原因：${committed.platformSnapshot.reason}。` : ""}`
+        : committed.idempotent
+          ? `该完整平台批次已同步完成；当前经营Link已刷新为 ${operatingCount} 个。`
+          : `平台货品资产已同步，当前经营Link已刷新为 ${operatingCount} 个；ERP关系候选已进入审核流程。`;
     } catch (error) {
       pageState.platformGoodsImport.error = error.message || "平台货品资产同步失败。";
     } finally {
@@ -2067,7 +2107,7 @@ export function bindConnectionCenterPageEvents(render) {
       pageState.foundation.dailyCategory = "ready";
       pageState.foundation.dailyPreview = await loadConnectionSalesDailyPreview(result.batch.id, { category: "ready", page: 1, pageSize: 50 });
       pageState.relationCandidates = { ...pageState.relationCandidates, ...await loadSalesRelationCandidates({ sourceBatchId: result.batch.id, status: "pending", page: 1, pageSize: 50 }), candidateType: "", selected: null, selectedIds: [], loading: false };
-      pageState.foundation.dailyMessage = result.idempotent ? "已展示该文件已有的日报预览，未重复创建批次。" : "销售日报解析与身份匹配预览已生成。";
+      pageState.foundation.dailyMessage = "已按当前链接、商品结构和ERP用途规则重新生成销售日报预览。";
     } catch (error) { pageState.foundation.dailyError = error.message || "销售日报预览失败。"; }
     finally { pageState.foundation.dailyLoading = false; render(); }
   });

@@ -18,7 +18,7 @@ import {
 
 const digest = (buffer) => crypto.createHash("sha256").update(buffer).digest("hex");
 const parseJson = (raw) => { try { return JSON.parse(raw || "{}"); } catch { return {}; } };
-const SALES_FACT_PARSER_VERSION = "sales-fact-v4-daily-resolver";
+const SALES_FACT_PARSER_VERSION = "sales-fact-v5-current-v2";
 
 function summarize(sourceBatch) {
   const preview = parseJson(sourceBatch.previewSummaryJson);
@@ -65,11 +65,12 @@ export function previewSalesFactDataSync({ taskId, buffer, fileName, createdBy =
   const task = getDataSyncTask(taskId);
   if (!task || task.taskCode !== "sales_fact_excel_import") throw new Error("真实销售导入任务不存在。");
   const sourceFileHash = digest(buffer);
-  const fileHash = digest(Buffer.concat([buffer, Buffer.from(`\0${SALES_FACT_PARSER_VERSION}`)]));
-  const existing = getDatabase().prepare("SELECT * FROM data_sync_batches WHERE taskId=? AND fileHash=? ORDER BY createdAt DESC").all(task.id, fileHash)
-    .find((item) => parseJson(item.scopeJson).parserVersion === SALES_FACT_PARSER_VERSION);
-  if (existing) return { ...responseFor(getDataSyncBatch(existing.id)), idempotent: true };
-
+  // 相同源文件允许基于当前主数据和规则重新分析；批次哈希只标识本次分析，
+  // 稳定的源文件哈希保存在 scope.sourceFileHash 中供确认写入做幂等判断。
+  const fileHash = digest(Buffer.concat([
+    buffer,
+    Buffer.from(`\0${SALES_FACT_PARSER_VERSION}\0${crypto.randomUUID()}`),
+  ]));
   const batch = createDataSyncBatch(task.id, { triggerMode: "manual", syncMode: "incremental", fileName, fileHash, scope: { parserVersion: SALES_FACT_PARSER_VERSION, sourceFileHash }, createdBy });
   startDataSyncBatch(batch.id);
   try {
@@ -111,8 +112,7 @@ export function readCurrentSalesFactDataSyncPreview() {
   const batches = getDatabase().prepare("SELECT * FROM data_sync_batches WHERE taskId=? ORDER BY CASE status WHEN 'preview_ready' THEN 0 ELSE 1 END,createdAt DESC LIMIT 20").all(task.id);
   const batch = batches.find((item) => parseJson(item.scopeJson).parserVersion === SALES_FACT_PARSER_VERSION
     && ["preview_ready", "superseded", "succeeded", "partial"].includes(item.status)
-    && item.sourceBatchType === "sales_daily_preview")
-    || batches.find((item) => ["preview_ready", "superseded", "succeeded", "partial"].includes(item.status) && item.sourceBatchType === "connection_sales_import");
+    && item.sourceBatchType === "sales_daily_preview");
   return batch ? responseFor(batch) : null;
 }
 

@@ -3,6 +3,7 @@ import * as XLSX from "xlsx";
 import { getDatabase } from "./db.js";
 import { assertCurrentDataSyncPreview, completeDataSyncBatch, createDataSyncBatch, getDataSyncBatch, getDataSyncTask, markDataSyncBatchPreviewReady } from "./dataSyncCenterService.js";
 import { canonicalizeSalesUrl } from "./productV2Import.js";
+import { getLinkOperatingSummary } from "./linkOperatingSetService.js";
 
 const TASK_CODE = "platform_goods_excel_import";
 const SOURCE_BATCH_TYPE = "platform_goods_excel_import";
@@ -74,6 +75,45 @@ function parseWorkbook(buffer) {
 
 function isNonBusinessRow(row) {
   return NON_BUSINESS_SHOP_NAME.test(text(row.sourceShopName).replace(/\s+/gu, ""));
+}
+
+function classifyPlatformSnapshot(rows) {
+  const sourceShopNames = [...new Set(rows.map((row) => text(row.sourceShopName)).filter(Boolean))].sort();
+  const businessShopNames = sourceShopNames.filter((name) => !NON_BUSINESS_SHOP_NAME.test(name.replace(/\s+/gu, "")));
+  const hasSummaryRow = rows.some((row) => isNonBusinessRow(row) && /^(?:总计|合计|汇总)[:：]?$/u.test(text(row.sourceShopName).replace(/\s+/gu, "")));
+  const mode = businessShopNames.length > 1 && hasSummaryRow ? "full" : "partial";
+  return {
+    mode,
+    sourceShopNames,
+    businessShopCount: businessShopNames.length,
+    hasSummaryRow,
+    reason: mode === "full" ? "多店完整平台货品表且包含汇总行" : businessShopNames.length <= 1 ? "仅包含单店数据" : "缺少完整导出汇总行",
+  };
+}
+
+function classifyStoredPlatformSnapshot(batch, rows) {
+  if (["full", "partial"].includes(batch.scope?.platformSnapshotMode)) {
+    return {
+      mode: batch.scope.platformSnapshotMode,
+      sourceShopNames: batch.scope.sourceShopNames || [],
+      businessShopCount: Number(batch.scope.platformSnapshotBusinessShopCount || 0),
+      hasSummaryRow: Boolean(batch.scope.platformSnapshotHasSummaryRow),
+      reason: batch.scope.platformSnapshotReason || "",
+    };
+  }
+  return classifyPlatformSnapshot(rows.map((row) => ({ sourceShopName: row.sourceShopName })));
+}
+
+function persistPlatformSnapshotClassification(database, batch, classification) {
+  const scope = {
+    ...(batch.scope || {}),
+    platformSnapshotMode: classification.mode,
+    platformSnapshotBusinessShopCount: classification.businessShopCount,
+    platformSnapshotHasSummaryRow: classification.hasSummaryRow,
+    platformSnapshotReason: classification.reason,
+  };
+  database.prepare("UPDATE data_sync_batches SET scopeJson=? WHERE id=?").run(JSON.stringify(scope), batch.id);
+  return scope;
 }
 
 function parseSourceShopIdentity(sourceShopName) {
@@ -430,8 +470,11 @@ function createPlatformGoodsExcelAnalysis({ taskId, buffer, fileName, createdBy 
   const parsed = parseWorkbook(buffer);
   const analysis = analyzeRows(parsed.rows);
   const dates = parsed.rows.map((row) => row.sourceModifiedAt).filter((value) => /^\d{4}-\d{2}-\d{2}/u.test(value)).sort();
-  const sourceShopNames = [...new Set(parsed.rows.map((row) => row.sourceShopName).filter(Boolean))].sort();
-  const scope = { shopMode: "excel_all", sourceShopNames, sheetName: parsed.sheetName, parserVersion: PARSER_VERSION, sourceFileHash, reanalysisOf };
+  const snapshot = classifyPlatformSnapshot(parsed.rows);
+  const scope = { shopMode: snapshot.mode === "full" ? "excel_all" : "partial", sourceShopNames: snapshot.sourceShopNames,
+    platformSnapshotMode: snapshot.mode, platformSnapshotBusinessShopCount: snapshot.businessShopCount,
+    platformSnapshotHasSummaryRow: snapshot.hasSummaryRow, platformSnapshotReason: snapshot.reason,
+    sheetName: parsed.sheetName, parserVersion: PARSER_VERSION, sourceFileHash, reanalysisOf };
   const batch = createDataSyncBatch(taskId, { triggerMode: "manual", syncMode: "full", fileName, fileHash, periodStart: dates[0] || null, periodEnd: dates.at(-1) || null, scope, createdBy });
   const db = getDatabase();
   const insert = db.prepare(`INSERT INTO platform_goods_excel_import_rows (batchId,rowNumber,sourceShopName,shopId,platform,platformGoodsId,platformSkuId,merchantSkuCode,systemGoodsType,salesLinkId,salesLinkSkuId,erpSkuId,action,shopAction,linkAction,skuAction,relationAction,exceptionType,message,rawDataJson) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
@@ -510,10 +553,18 @@ export function readPlatformGoodsExcelDataSyncPreview(batchId) {
 export function commitPlatformGoodsExcelDataSync(batchId) {
   const existingBatch = getDataSyncBatch(batchId);
   if (existingBatch && ["succeeded", "partial"].includes(existingBatch.status)) {
-    const existingRows = getDatabase().prepare("SELECT * FROM platform_goods_excel_import_rows WHERE batchId=? AND action<>'ignored' ORDER BY rowNumber").all(batchId);
+    const database = getDatabase();
+    const allExistingRows = database.prepare("SELECT * FROM platform_goods_excel_import_rows WHERE batchId=? ORDER BY rowNumber").all(batchId);
+    const existingRows = allExistingRows.filter((row) => row.action !== "ignored");
+    const snapshot = classifyStoredPlatformSnapshot(existingBatch, allExistingRows);
+    persistPlatformSnapshotClassification(database, existingBatch, snapshot);
+    if (snapshot.mode === "full" && existingBatch.status !== "succeeded") {
+      database.prepare("UPDATE data_sync_batches SET status='succeeded' WHERE id=?").run(batchId);
+    }
+    const refreshedBatch = getDataSyncBatch(batchId);
     const existingSummary = summaryFor(existingBatch, existingRows);
     return {
-      dataSyncBatch: existingBatch,
+      dataSyncBatch: refreshedBatch,
       idempotent: true,
       result: {
         shops: { created: 0, updated: 0, unchanged: existingSummary.shops.total - existingSummary.shops.exception, exceptions: existingSummary.shops.exception },
@@ -522,6 +573,8 @@ export function commitPlatformGoodsExcelDataSync(batchId) {
         erpRelations: { existing: existingSummary.erpRelations.existing, candidates: 0, conflicts: existingSummary.erpRelations.conflicts },
       },
       originalPreview: existingSummary,
+      operatingSet: getLinkOperatingSummary({ database }),
+      platformSnapshot: snapshot,
       protected: { salesFactsChanged: 0, formalSalesObjectsChanged: 0, formalProductStructuresChanged: 0, linksDeleted: 0, linkSkusDeleted: 0, erpRelationsDeleted: 0 },
     };
   }
@@ -530,6 +583,10 @@ export function commitPlatformGoodsExcelDataSync(batchId) {
   if (batch.scope?.parserVersion !== PARSER_VERSION) throw new Error("该预览来自旧版解析规则，请重新上传文件生成资产差异预览。");
   const db = getDatabase();
   const rows = db.prepare("SELECT * FROM platform_goods_excel_import_rows WHERE batchId=? AND action<>'ignored' ORDER BY rowNumber").all(batchId);
+  const allRows = db.prepare("SELECT * FROM platform_goods_excel_import_rows WHERE batchId=? ORDER BY rowNumber").all(batchId);
+  const snapshot = classifyStoredPlatformSnapshot(batch, allRows);
+  persistPlatformSnapshotClassification(db, batch, snapshot);
+  const isCompleteSnapshot = snapshot.mode === "full";
   const raw = (row) => decodedRaw(row);
   const tableCount = (name) => db.prepare("SELECT COUNT(*) total FROM sqlite_master WHERE type='table' AND name=?").get(name).total
     ? Number(db.prepare(`SELECT COUNT(*) total FROM ${name}`).get().total) : null;
@@ -575,7 +632,7 @@ export function commitPlatformGoodsExcelDataSync(batchId) {
           platformGoodsCode=COALESCE(excluded.platformGoodsCode,sales_links.platformGoodsCode),
           title=COALESCE(excluded.title,sales_links.title),canonicalUrl=COALESCE(excluded.canonicalUrl,sales_links.canonicalUrl),rawUrl=COALESCE(excluded.rawUrl,sales_links.rawUrl),
           status=COALESCE(excluded.status,sales_links.status),activityStatus=COALESCE(excluded.activityStatus,sales_links.activityStatus),category=COALESCE(excluded.category,sales_links.category),
-          identityStrength='strong',lastModifiedAt=COALESCE(excluded.lastModifiedAt,sales_links.lastModifiedAt),lastSeenBatchId=excluded.lastSeenBatchId,
+          identityStrength='strong',lastModifiedAt=COALESCE(excluded.lastModifiedAt,sales_links.lastModifiedAt),lastSeenBatchId=CASE WHEN ${isCompleteSnapshot ? 1 : 0}=1 THEN excluded.lastSeenBatchId ELSE sales_links.lastSeenBatchId END,
           lastImportedAt=excluded.lastImportedAt,updatedAt=excluded.updatedAt,currentState='active',missingAt=NULL,
           originSource=CASE WHEN sales_links.originSource IS NULL OR sales_links.originSource='' OR sales_links.originSource='legacy_unknown' THEN excluded.originSource ELSE sales_links.originSource END,
           enrichmentStatus='complete'`).run(values);
@@ -598,7 +655,7 @@ export function commitPlatformGoodsExcelDataSync(batchId) {
           matchStatus=CASE WHEN sales_link_skus.matchMethod='manual' OR sales_link_skus.matchStatus='matched_manual' THEN sales_link_skus.matchStatus ELSE excluded.matchStatus END,
           matchMethod=CASE WHEN sales_link_skus.matchMethod='manual' OR sales_link_skus.matchStatus='matched_manual' THEN sales_link_skus.matchMethod ELSE excluded.matchMethod END,
           matchReason=CASE WHEN sales_link_skus.matchMethod='manual' OR sales_link_skus.matchStatus='matched_manual' THEN sales_link_skus.matchReason ELSE excluded.matchReason END,
-          lastSeenBatchId=excluded.lastSeenBatchId,updatedAt=excluded.updatedAt,currentState='active',missingAt=NULL`).run(
+          lastSeenBatchId=CASE WHEN ${isCompleteSnapshot ? 1 : 0}=1 THEN excluded.lastSeenBatchId ELSE sales_link_skus.lastSeenBatchId END,updatedAt=excluded.updatedAt,currentState='active',missingAt=NULL`).run(
         row.salesLinkSkuId, row.salesLinkId, row.platformSkuId, row.merchantSkuCode || null, lower(row.merchantSkuCode) || null,
         text(source["规格名称"]) || null, lower(source["规格名称"]) || null,
         numberValue(source["价格"]), numberValue(source["平台库存"]), numberValue(source["占用库存"]), row.systemGoodsType || null,
@@ -630,12 +687,15 @@ export function commitPlatformGoodsExcelDataSync(batchId) {
   const updatedCount = result.shops.updated + result.links.updated + result.linkSkus.updated;
   const exceptionCount = Number(batch.exceptionCount || 0);
   const completed = completeDataSyncBatch(batchId, {
-    status: exceptionCount ? "partial" : "succeeded",
+    status: isCompleteSnapshot ? "succeeded" : "partial",
     totalCount: Number(batch.totalCount || rows.length), createdCount, updatedCount, exceptionCount,
   });
+  const operatingSet = getLinkOperatingSummary({ database: db });
   return {
     dataSyncBatch: completed,
     result,
+    platformSnapshot: snapshot,
+    operatingSet,
     protected: {
       salesFactsChanged: 0, formalSalesObjectsChanged: 0, formalProductStructuresChanged: 0,
       linksDeleted: 0, linkSkusDeleted: 0, erpRelationsDeleted: 0,

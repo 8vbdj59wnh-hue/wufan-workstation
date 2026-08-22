@@ -65,6 +65,10 @@ test("平台货品资产同步先生成Diff，确认后只同步资产和关系�
     }, { shops: before.shops, links: before.links, skus: before.skus }, "预览阶段不应写入资产");
 
     const committed = commitPlatformGoodsExcelDataSync(preview.dataSyncBatch.id);
+    assert.equal(committed.dataSyncBatch.status, "succeeded", "完整平台快照即使有关系治理项也应成功建立经营基线");
+    assert.equal(committed.platformSnapshot.mode, "full");
+    assert.equal(committed.operatingSet.platformBatch.id, preview.dataSyncBatch.id);
+    assert.equal(committed.operatingSet.operatingCount, 5);
     assert.equal(committed.result.shops.created, 1);
     assert.equal(committed.result.links.created, 4);
     assert.equal(committed.result.links.updated, 1);
@@ -116,6 +120,19 @@ test("平台货品资产同步先生成Diff，确认后只同步资产和关系�
     assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_link_skus").get().total, before.skus + 4);
     assert.equal(database.prepare("SELECT COUNT(*) total FROM product_structure_application_items").get().total, 0);
     assert.equal(database.prepare("SELECT COUNT(*) total FROM connection_sku_sales_daily_facts").get().total, before.dailyFacts);
+
+    const singleShopPreview = previewPlatformGoodsExcelDataSync({
+      taskId: task.id,
+      buffer: workbookBuffer([sourceRows[0]]),
+      fileName: "单店平台货品测试.xlsx",
+      createdBy: reviewer.id,
+    });
+    assert.equal(singleShopPreview.dataSyncBatch.scope.platformSnapshotMode, "partial");
+    const singleShopCommit = commitPlatformGoodsExcelDataSync(singleShopPreview.dataSyncBatch.id);
+    assert.equal(singleShopCommit.dataSyncBatch.status, "partial");
+    assert.equal(singleShopCommit.operatingSet.platformBatch.id, reanalyzed.dataSyncBatch.id, "单店文件不能替换完整平台批次");
+    assert.equal(database.prepare("SELECT lastSeenBatchId FROM sales_links WHERE id='link-existing'").get().lastSeenBatchId, reanalyzed.dataSyncBatch.id,
+      "单店文件不能把当前经营Link移出完整批次基线");
     assert.equal(database.pragma("integrity_check", { simple: true }), "ok");
     assert.equal(database.pragma("foreign_key_check").length, 0);
   } finally {

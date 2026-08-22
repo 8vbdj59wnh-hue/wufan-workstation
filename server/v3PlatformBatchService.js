@@ -17,10 +17,19 @@ function legacyBatch(database) {
 
 function dataSyncBatch(database) {
   if (!tableExists(database, "data_sync_batches") || !tableExists(database, "data_sync_tasks")) return null;
-  const row = database.prepare(`SELECT b.id,b.periodEnd businessDate,b.completedAt,b.createdAt,b.fileName,b.fileHash,b.syncMode,b.totalCount
+  const rows = database.prepare(`SELECT b.id,b.periodEnd businessDate,b.completedAt,b.createdAt,b.fileName,b.fileHash,b.syncMode,b.totalCount,b.scopeJson,b.status
     FROM data_sync_batches b JOIN data_sync_tasks t ON t.id=b.taskId
-    WHERE t.taskCode='platform_goods_excel_import' AND b.status IN ('succeeded','partial') AND b.syncMode='full'
-    ORDER BY COALESCE(b.completedAt,b.createdAt) DESC,b.id DESC LIMIT 1`).get();
+    WHERE t.taskCode='platform_goods_excel_import' AND b.status='succeeded' AND b.syncMode='full'
+    ORDER BY COALESCE(b.completedAt,b.createdAt) DESC,b.id DESC LIMIT 50`).all();
+  const row = rows.find((candidate) => {
+    let scope = {};
+    try { scope = JSON.parse(candidate.scopeJson || "{}"); } catch { scope = {}; }
+    if (scope.platformSnapshotMode === "full") return true;
+    const names = Array.isArray(scope.sourceShopNames) ? scope.sourceShopNames.map(clean).filter(Boolean) : [];
+    const businessNames = names.filter((name) => !/^(?:无效|总计|合计|汇总)[:：]?$/u.test(name.replace(/\s+/gu, "")));
+    const hasSummaryRow = names.some((name) => /^(?:总计|合计|汇总)[:：]?$/u.test(name.replace(/\s+/gu, "")));
+    return scope.shopMode === "excel_all" && businessNames.length > 1 && hasSummaryRow;
+  });
   return row ? { ...row, source: "data_sync_batches", sortAt: row.completedAt || row.createdAt || row.businessDate || "" } : null;
 }
 

@@ -30,6 +30,28 @@ test("旧周期销售事实仅保留归档，不再有生产写入或重新迁�
   assert.doesNotMatch(appState, /migrate-legacy|reparseLegacyConnectionSalesFactImport/);
 });
 
+test("ERP用途未人工确认不再作为商品销售异常", async () => {
+  const { classifySalesDetailLine } = await import("../server/capabilities/classifySalesDetailLine.js");
+  const result = classifySalesDetailLine({
+    normalizationStatus: "valid",
+    isAtomicLine: true,
+    erpSkuId: "erp-sku-current",
+    salesLinkSkuId: "link-sku-current",
+  }, {
+    erpSkuBusinessUsage: {
+      usageType: "unknown",
+      isConfirmed: false,
+      isUsable: true,
+      conflicts: [],
+      warnings: [{ code: "ERP_USAGE_NOT_CLASSIFIED" }],
+    },
+    relation: { relationStatus: "missing", isUsable: false, mappings: [] },
+  });
+  assert.equal(result.classification, "product_sale");
+  assert.equal(result.requiresManualReview, false);
+  assert.deepEqual(result.reasonCodes, ["ERP_USAGE_DEFAULT_PRODUCT"]);
+});
+
 test("正式销售导入只写daily facts并保持幂等，Legacy表不增长", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sales-fact-single-track-"));
   process.env.WUFAN_DB_PATH = path.join(directory, "workstation.db");
@@ -74,10 +96,16 @@ test("正式销售导入只写daily facts并保持幂等，Legacy表不增长", 
     const legacyTableCount = () => database.prepare("SELECT COUNT(*) count FROM sqlite_master WHERE type='table' AND name='connection_sku_sales_facts'").get().count;
     assert.equal(legacyTableCount(), 0);
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet([{
-      店铺: "测试店铺", 平台货品ID: "goods-single-track", 平台规格ID: "platform-sku-single-track", 商家编码: "ERP-SKU",
-      日期: "2026-08-19", 销量: "2", 销售额: "88.8888", 成本: "50", 利润: "38.8888",
-    }]), "Sheet1");
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet([
+      {
+        店铺: "测试店铺", 平台货品ID: "goods-single-track", 平台规格ID: "platform-sku-single-track", 商家编码: "ERP-SKU",
+        日期: "2026-08-19", 销量: "2", 销售额: "88.8888", 成本: "50", 利润: "38.8888",
+      },
+      {
+        店铺: "合计:", 平台货品ID: "NA", 平台规格ID: "NA", 商家编码: "NA",
+        日期: "", 销量: "2", 销售额: "88.8888", 成本: "50", 利润: "38.8888",
+      },
+    ]), "Sheet1");
     const task = database.prepare("SELECT id FROM data_sync_tasks WHERE taskCode='sales_fact_excel_import'").get();
     const preview = previewSalesFactDataSync({
       taskId: task.id,
@@ -85,6 +113,9 @@ test("正式销售导入只写daily facts并保持幂等，Legacy表不增长", 
       fileName: "正式利润表.xlsx",
       createdBy: reviewer.id,
     });
+    assert.equal(preview.summary.excludedRows, 1);
+    assert.equal(preview.summary.sourceSalesAmount, 88.8888);
+    assert.equal(preview.summary.salesAmountCoverage, 1);
     const committed = commitSalesFactDataSync(preview.dataSyncBatch.id);
     assert.equal(committed.result.insertedCount, 1);
     assert.equal(legacyTableCount(), 0);
@@ -95,8 +126,21 @@ test("正式销售导入只写daily facts并保持幂等，Legacy表不增长", 
     assert.equal(repeated.result.skippedCount, 1);
     assert.equal(repeated.result.idempotent, true);
     assert.equal(legacyTableCount(), 0);
+
+    const reanalyzed = previewSalesFactDataSync({
+      taskId: task.id,
+      buffer: XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }),
+      fileName: "正式利润表.xlsx",
+      createdBy: reviewer.id,
+    });
+    assert.equal(reanalyzed.idempotent, false);
+    assert.notEqual(reanalyzed.dataSyncBatch.id, preview.dataSyncBatch.id);
+    assert.notEqual(reanalyzed.importBatch.id, preview.importBatch.id);
+    assert.equal(reanalyzed.summary.readyRows, 1);
+    assert.equal(reanalyzed.summary.errorRows, 0);
+    assert.equal(reanalyzed.summary.salesAmountCoverage, 1);
     const overview = getDataSyncCenterOverview();
-    assert.equal(overview.latestSalesDailyBatch.id, preview.importBatch.id);
+    assert.equal(overview.latestSalesDailyBatch.id, reanalyzed.importBatch.id);
     assert.equal(database.pragma("integrity_check", { simple: true }), "ok");
     assert.equal(database.pragma("foreign_key_check").length, 0);
   } finally {

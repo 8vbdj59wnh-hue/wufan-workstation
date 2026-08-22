@@ -7,7 +7,7 @@ import { normalizeSalesDetailLine } from "./capabilities/salesDetailNormalizer.j
 import { classifySalesDetailLine } from "./capabilities/classifySalesDetailLine.js";
 
 const IMPORT_TYPE = "erp_sales_daily_preview";
-const PARSER_VERSION = "sales-daily-preview-v2-classification";
+const PARSER_VERSION = "sales-daily-preview-v3-current-v2";
 const REQUIRED_HEADERS = ["店铺", "平台货品ID", "平台规格ID", "商家编码", "日期"];
 const FIELD_MAP = {
   店铺: "shopName", 平台货品ID: "platformGoodsId", 平台规格ID: "platformSkuId", 商家编码: "merchantSkuCode", 日期: "saleDate",
@@ -258,7 +258,15 @@ function applyDuplicateIdentityRules(classified) {
 }
 
 function amountCoverage(rows, category, field) {
-  const denominator = rows.reduce((sum, row) => sum + Math.abs(Number(row.normalized[field] || 0)), 0);
+  const nonProductCategories = new Set([
+    "excluded",
+    "accounting_auxiliary",
+    "shipping_adjustment",
+    "other_adjustment",
+  ]);
+  const denominator = rows
+    .filter((row) => !nonProductCategories.has(row.result.category))
+    .reduce((sum, row) => sum + Math.abs(Number(row.normalized[field] || 0)), 0);
   const numerator = rows.filter((row) => row.result.category === category).reduce((sum, row) => sum + Math.abs(Number(row.normalized[field] || 0)), 0);
   return denominator ? numerator / denominator : null;
 }
@@ -273,8 +281,8 @@ function summarizeClassified(classified, base = {}) {
   const dates = classified.map((item) => item.normalized.saleDate).filter(Boolean).sort();
   const amountByCategory = (field) => Object.fromEntries(Object.keys(counts).map((category) => [category, classified.filter((item) => item.result.category === category).reduce((sum, item) => sum + Number(item.normalized[field] || 0), 0)]));
   const salesAmounts = amountByCategory("salesAmount"); const profitAmounts = amountByCategory("profitAmount");
-  const sourceSalesAmount = Object.values(salesAmounts).reduce((sum, value) => sum + value, 0);
-  const sourceProfitAmount = Object.values(profitAmounts).reduce((sum, value) => sum + value, 0);
+  const sourceSalesAmount = Object.entries(salesAmounts).filter(([category]) => category !== "excluded").reduce((sum, [, value]) => sum + value, 0);
+  const sourceProfitAmount = Object.entries(profitAmounts).filter(([category]) => category !== "excluded").reduce((sum, [, value]) => sum + value, 0);
   const pendingItems = classified.filter((item) => ["pending_relation", "missing_relation"].includes(item.result.category));
   const pendingRelationCount = new Set(pendingItems.map((item) => `${item.result.salesLinkSku.id}|${item.result.erpSku.id}`)).size;
   const errorBreakdown = Object.fromEntries(Object.entries(classified.filter((item) => ["unknown", "relation_conflict"].includes(item.result.category)).reduce((result, item) => {
@@ -296,8 +304,8 @@ function summarizeClassified(classified, base = {}) {
     unknown: section(["unknown"]),
     excluded: section(["excluded"]),
   };
-  const classifiedSalesAmount = Object.values(classificationSummary).reduce((sum, item) => sum + item.salesAmount, 0);
-  const classifiedProfitAmount = Object.values(classificationSummary).reduce((sum, item) => sum + item.profitAmount, 0);
+  const classifiedSalesAmount = Object.entries(classificationSummary).filter(([category]) => category !== "excluded").reduce((sum, [, item]) => sum + item.salesAmount, 0);
+  const classifiedProfitAmount = Object.entries(classificationSummary).filter(([category]) => category !== "excluded").reduce((sum, [, item]) => sum + item.profitAmount, 0);
   return {
     ...base, dateStart: dates[0] || null, dateEnd: dates.at(-1) || null, totalRows: classified.length,
     readyRows: counts.ready, pendingRelationRows: counts.pending_relation + counts.missing_relation, pendingConfirmedRows: counts.pending_relation,
@@ -319,8 +327,8 @@ function summarizeClassified(classified, base = {}) {
     classifiedProfitAmount,
     classificationSalesAmountDifference: sourceSalesAmount - classifiedSalesAmount,
     classificationProfitAmountDifference: sourceProfitAmount - classifiedProfitAmount,
-    salesAmountReconciliationDifference: sourceSalesAmount - Object.values(salesAmounts).reduce((sum, value) => sum + value, 0),
-    profitAmountReconciliationDifference: sourceProfitAmount - Object.values(profitAmounts).reduce((sum, value) => sum + value, 0),
+    salesAmountReconciliationDifference: sourceSalesAmount - Object.entries(salesAmounts).filter(([category]) => category !== "excluded").reduce((sum, [, value]) => sum + value, 0),
+    profitAmountReconciliationDifference: sourceProfitAmount - Object.entries(profitAmounts).filter(([category]) => category !== "excluded").reduce((sum, [, value]) => sum + value, 0),
   };
 }
 
@@ -389,6 +397,20 @@ function ensureCandidatesForStoredPreview(database, batch) {
 
 function response(database, batch, options = {}) {
   const summary = parseJson(batch.previewSummaryJson);
+  const currentCoverage = database.prepare(`
+    SELECT
+      SUM(CASE WHEN status='ready' THEN ABS(COALESCE(CAST(json_extract(normalizedDataJson,'$.salesAmount') AS REAL),0)) ELSE 0 END) readySales,
+      SUM(CASE WHEN status='ready' THEN ABS(COALESCE(CAST(json_extract(normalizedDataJson,'$.profitAmount') AS REAL),0)) ELSE 0 END) readyProfit,
+      SUM(CASE WHEN status NOT IN ('excluded','accounting_auxiliary','shipping_adjustment','other_adjustment') THEN ABS(COALESCE(CAST(json_extract(normalizedDataJson,'$.salesAmount') AS REAL),0)) ELSE 0 END) productSales,
+      SUM(CASE WHEN status NOT IN ('excluded','accounting_auxiliary','shipping_adjustment','other_adjustment') THEN ABS(COALESCE(CAST(json_extract(normalizedDataJson,'$.profitAmount') AS REAL),0)) ELSE 0 END) productProfit
+    FROM connection_import_rows WHERE batchId=?
+  `).get(batch.id);
+  summary.salesAmountCoverage = Number(currentCoverage.productSales || 0)
+    ? Number(currentCoverage.readySales || 0) / Number(currentCoverage.productSales || 0)
+    : null;
+  summary.profitAmountCoverage = Number(currentCoverage.productProfit || 0)
+    ? Number(currentCoverage.readyProfit || 0) / Number(currentCoverage.productProfit || 0)
+    : null;
   const category = [
     "ready", "pending_relation", "missing_relation", "relation_conflict",
     "accounting_auxiliary", "shipping_adjustment", "other_adjustment", "unknown", "excluded",
@@ -405,16 +427,17 @@ function response(database, batch, options = {}) {
 export function previewSalesDailyFacts({ buffer, fileName, createdBy = "" } = {}) {
   if (!Buffer.isBuffer(buffer) || !buffer.length) throw new Error("请选择销售日报Excel文件。");
   const database = getDatabase();
-  const hash = versionedDigest(buffer); const sourceHash = fileDigest(buffer);
-  const existing = database.prepare("SELECT * FROM connection_import_batches WHERE importType=? AND fileHash=? ORDER BY createdAt DESC LIMIT 1").get(IMPORT_TYPE, hash);
-  if (existing) return { ...response(database, ensureCandidatesForStoredPreview(database, existing)), idempotent: true };
-
+  const sourceHash = fileDigest(buffer);
+  const hash = `${versionedDigest(buffer)}:analysis:${crypto.randomUUID()}`;
   const workbook = readRows(buffer);
   const classificationCache = {
     shops: new Map(), links: new Map(), skus: new Map(), erpSkus: new Map(),
     dailyFactKeys: new Set(database.prepare("SELECT salesLinkSkuId,erpSkuId,saleDate FROM connection_sku_sales_daily_facts").all().map((item) => `${item.salesLinkSkuId}|${item.erpSkuId}|${item.saleDate}`)),
   };
-  const classified = classifySalesDailyPreviewRows(database, workbook.rows, { cache: classificationCache });
+  const classified = classifySalesDailyPreviewRows(database, workbook.rows, {
+    cache: classificationCache,
+    ignoreExistingDailyFacts: true,
+  });
   const summary = summarizeClassified(classified, {
     parserVersion: PARSER_VERSION,
     sourceFileHash: sourceHash,
@@ -448,7 +471,13 @@ export function readSalesDailyFactPreview(batchId, options = {}) {
 
 export function readCurrentSalesDailyFactPreview(options = {}) {
   const database = getDatabase();
-  const batch = database.prepare("SELECT * FROM connection_import_batches WHERE importType=? ORDER BY createdAt DESC LIMIT 1").get(IMPORT_TYPE);
+  // “当前预览”只展示由现行规则生成的批次。旧解析结果仍可按批次编号
+  // 只读查看，但不能继续冒充当前待确认结果。
+  const batch = database.prepare(`
+    SELECT * FROM connection_import_batches
+    WHERE importType=? AND json_extract(previewSummaryJson,'$.parserVersion')=?
+    ORDER BY createdAt DESC LIMIT 1
+  `).get(IMPORT_TYPE, PARSER_VERSION);
   return batch ? response(database, ensureCandidatesForStoredPreview(database, batch), options) : null;
 }
 
@@ -460,7 +489,7 @@ export function evaluateSalesDailyFactCoverage(batchId) {
   const classified = classifySalesDailyPreviewRows(database, storedRows.map((row) => {
     const raw = parseJson(row.rawDataJson); const item = { rowNumber: row.rowNumber, raw, normalized: normalizedFromRaw(raw) };
     return item;
-  }), { cache });
+  }), { cache, ignoreExistingDailyFacts: true });
   const candidates = buildCandidateGroups(classified, batch.id, parseJson(batch.previewSummaryJson).sourceFileHash || batch.fileHash, batch.fileName);
   const rows = classified.map((item) => {
     return { rowNumber: item.rowNumber, category: item.result.category, errorType: item.result.errorType, message: item.result.message || "", raw: item.raw, normalized: item.normalized, identity: { matchedShopId: item.result.shop?.id || null, systemShop: item.result.shop?.displayName || item.result.shop?.shopName || null, salesLinkId: item.result.link?.id || null, salesLinkSkuId: item.result.salesLinkSku?.id || null, erpSkuId: item.result.erpSku?.id || null, mappingId: item.result.mapping?.id || null, mappingType: item.result.mapping?.mappingType || null } };
@@ -495,7 +524,7 @@ export function recalculateSalesDailyFactPreview(batchId, { createdBy = "" } = {
   const classified = classifySalesDailyPreviewRows(database, storedRows.map((row) => {
     const raw = parseJson(row.rawDataJson); const item = { rowNumber: row.rowNumber, raw, normalized: normalizedFromRaw(raw) };
     return item;
-  }), { cache: classificationCache });
+  }), { cache: classificationCache, ignoreExistingDailyFacts: true });
   const previousSummary = parseJson(sourceBatch.previewSummaryJson); const previewRevision = Number(previousSummary.previewRevision || 1) + 1;
   const rootBatchId = previousSummary.rootBatchId || sourceBatch.id;
   const summary = summarizeClassified(classified, {

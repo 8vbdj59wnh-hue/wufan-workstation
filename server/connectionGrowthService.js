@@ -1,4 +1,5 @@
 import { getDatabase } from "./db.js";
+import { buildLinkOperatingScope } from "./linkOperatingSetService.js";
 
 function text(value) {
   return String(value ?? "").trim();
@@ -105,17 +106,25 @@ function analyze(profile, snapshotRows, financeRows = []) {
     conversionChange, customerValueChange, healthScore, healthStatus: healthStatus(healthScore) };
 }
 
-function listConnectionGrowthAnalysesForIds(connectionIds = null) {
+function listConnectionGrowthAnalysesForIds(connectionIds = null, { includeHistorical = false } = {}) {
   const database = getDatabase();
   const ids = connectionIds === null ? null : [...new Set(connectionIds.map(text).filter(Boolean))];
   if (ids !== null && !ids.length) return [];
-  const profileWhere = ids === null ? "" : `WHERE c.id IN (${ids.map(() => "?").join(",")})`;
+  const operatingScope = buildLinkOperatingScope(database, { alias: "l", prefix: "connectionGrowthOperating" });
+  const where = [];
+  const params = {};
+  if (!includeHistorical) { where.push(operatingScope.predicate); Object.assign(params, operatingScope.params); }
+  if (ids !== null) {
+    const keys = ids.map((id, index) => { params[`connectionGrowthId${index}`] = id; return `@connectionGrowthId${index}`; });
+    where.push(`c.id IN (${keys.join(",")})`);
+  }
+  const profileWhere = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const profiles = database.prepare(`
     SELECT c.id AS connectionId,c.salesLinkId,c.name,c.ownerId,c.status,s.platform,s.displayName AS shopDisplayName,s.shopName,
            COALESCE(p.name,'未分配') AS ownerName
     FROM connection_profiles c JOIN sales_links l ON l.id=c.salesLinkId JOIN sales_shops s ON s.id=l.shopId
     LEFT JOIN persons p ON p.id=c.ownerId ${profileWhere}
-  `).all(...(ids ?? []));
+  `).all(params);
   if (!profiles.length) return [];
   const salesLinkIds = profiles.map((item) => item.salesLinkId);
   const salesLinkMarks = salesLinkIds.map(() => "?").join(",");
@@ -145,11 +154,11 @@ export function listConnectionGrowthAnalyses() {
 }
 
 export function listConnectionGrowthAnalysesByConnectionIds(connectionIds = []) {
-  return listConnectionGrowthAnalysesForIds(connectionIds);
+  return listConnectionGrowthAnalysesForIds(connectionIds, { includeHistorical: true });
 }
 
 export function getConnectionGrowthAnalysis(connectionId) {
-  const analysis = listConnectionGrowthAnalyses().find((item) => item.connectionId === text(connectionId));
+  const analysis = listConnectionGrowthAnalysesForIds([connectionId], { includeHistorical: true })[0];
   if (!analysis) throw new Error("未找到连接档案。");
   return analysis;
 }
@@ -182,13 +191,14 @@ export function listConnectionGrowthRankings(sort = "overview", limit = 10, user
 
 export function getConnectionManagementOverview(userId = "", isAdmin = false) {
   const database = getDatabase();
+  const operatingScope = buildLinkOperatingScope(database, { alias: "l", prefix: "connectionManagementOperating" });
   const analyses = listConnectionGrowthAnalyses().filter((item) => isAdmin || item.ownerId === text(userId));
   const comparable = analyses.filter((item) => item.comparable);
   const effectiveByOwner = new Map(database.prepare(`
     SELECT COALESCE(c.ownerId,'unassigned') ownerId,COUNT(*) count
-    FROM connection_improvements i JOIN connection_profiles c ON c.id=i.connectionId
-    WHERE i.status='effective' GROUP BY COALESCE(c.ownerId,'unassigned')
-  `).all().map((row) => [row.ownerId, Number(row.count || 0)]));
+    FROM connection_improvements i JOIN connection_profiles c ON c.id=i.connectionId JOIN sales_links l ON l.id=c.salesLinkId
+    WHERE i.status='effective' AND ${operatingScope.predicate} GROUP BY COALESCE(c.ownerId,'unassigned')
+  `).all(operatingScope.params).map((row) => [row.ownerId, Number(row.count || 0)]));
   const ownerMap = new Map();
   for (const item of analyses) {
     const ownerId = item.ownerId || "unassigned";
