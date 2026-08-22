@@ -107,6 +107,7 @@ import { LINK_DATA_COLUMNS, DEFAULT_MINE_LINK_FIELDS } from "./uiModules/linkDat
 import { reorderVisibleLinkBusinessField } from "./uiModules/linkIndicatorSetting.js";
 import { businessPlatformLabel } from "./uiModules/linkBusinessToolbar.js";
 import { LINK_BUSINESS_COLUMN_GROUPS, LINK_BUSINESS_COLUMNS, DEFAULT_LINK_BUSINESS_FIELDS } from "./uiModules/linkBusinessTable.js";
+import { LINK_TIME_RANGE_OPTIONS, linkTimeRangeDays } from "../shared/linkTimeRange.js";
 
 const connectionSectionStorageKey = "connection-center-section-v1";
 
@@ -186,7 +187,7 @@ const pageState = {
   salesDataQualityGovernance: { items: [], summary: { byType: {} }, pagination: {}, filters: { anomalyType: "", keyword: "" }, selected: null, loading: false, saving: false, loaded: false },
   coreDetail: null,
   coreDetailLoading: false,
-  dailySales: { data: null, loading: false, loaded: false, rangePreset: "30d", error: "" },
+  dailySales: { data: null, loading: false, loaded: false, rangePreset: "30d", startDate: "", endDate: "", error: "" },
   ownerImport: { loading: false, result: null, showCompletion: false, detailKind: "", detailRows: [], detailPagination: null },
   salesPeriodType: "month",
   error: "",
@@ -868,7 +869,7 @@ function renderGoalHealthCockpit() {
 }
 function renderCockpitGlobalRange() {
   const range = pageState.cockpitRange || {};
-  return `<form class="cockpit-global-range" data-cockpit-global-range><div class="cockpit-global-presets">${[["7d","7天"],["30d","30天"],["90d","90天"]].map(([preset,label]) => `<button type="button" data-cockpit-range-preset="${preset}" class="${range.preset === preset ? "active" : ""}" ${range.loading ? "disabled" : ""}>${label}</button>`).join("")}</div><div class="cockpit-global-dates"><label><span>开始日期</span><input type="date" name="startDate" value="${escapeHtml(range.startDate || "")}" ${range.loading ? "disabled" : ""} /></label><i>→</i><label><span>结束日期</span><input type="date" name="endDate" value="${escapeHtml(range.endDate || "")}" ${range.loading ? "disabled" : ""} /></label></div>${range.loading ? `<small>正在更新全页面经营数据…</small>` : `<small>全页面统一时间范围</small>`}</form>`;
+  return `<form class="cockpit-global-range" data-cockpit-global-range><div class="cockpit-global-presets">${LINK_TIME_RANGE_OPTIONS.map(({ value, label }) => `<button type="button" data-cockpit-range-preset="${value}" class="${range.preset === value ? "active" : ""}" ${range.loading ? "disabled" : ""}>${label}</button>`).join("")}</div><div class="cockpit-global-dates"><label><span>开始日期</span><input type="date" name="startDate" value="${escapeHtml(range.startDate || "")}" ${range.loading ? "disabled" : ""} /></label><i>→</i><label><span>结束日期</span><input type="date" name="endDate" value="${escapeHtml(range.endDate || "")}" ${range.loading ? "disabled" : ""} /></label></div>${range.loading ? `<small>正在更新全页面经营数据…</small>` : `<small>全页面统一时间范围</small>`}</form>`;
 }
 function renderShopOperations(cockpit) {
   const shops = cockpit.shopOperations ?? [];
@@ -1112,7 +1113,7 @@ function renderDetail() {
     actionsHtml: `${renderImprovements()}${renderActions(item)}`,
   });
   else if (pageState.detailTab === "sales") body = renderUiModule("link_sales_analysis", {
-    platformHtml: renderUiModule("link_daily_sales", { data: pageState.dailySales.data, loading: pageState.dailySales.loading, rangePreset: pageState.dailySales.rangePreset }), erpHtml: `${renderCorePlatform(pageState.coreDetail)}${renderErpSales(pageState.coreDetail)}`, skuHtml: renderSkuSales(pageState.coreDetail),
+    platformHtml: renderUiModule("link_daily_sales", { data: pageState.dailySales.data, loading: pageState.dailySales.loading, rangePreset: pageState.dailySales.rangePreset, startDate: pageState.dailySales.startDate, endDate: pageState.dailySales.endDate }), erpHtml: `${renderCorePlatform(pageState.coreDetail)}${renderErpSales(pageState.coreDetail)}`, skuHtml: renderSkuSales(pageState.coreDetail),
     trendHtml: pageState.growthAnalysis ? renderCoreOperatingOverview(item, pageState.coreDetail) : `<div class="empty-state compact">正在按需读取经营趋势…</div>`,
   });
   else if (pageState.detailTab === "inventory") body = renderUiModule("link_inventory_summary", { productsHtml: renderCoreProducts(pageState.coreDetail), inventoryHtml: renderInventory(pageState.coreDetail) });
@@ -1411,7 +1412,7 @@ async function loadPage(render) {
 
 async function openConnection(id, render) {
   if (window.location.hash !== `#connectionCenter/${encodeURIComponent(id)}`) window.history.replaceState(null, "", `#connectionCenter/${encodeURIComponent(id)}`);
-  pageState.selectedId = id; pageState.detailTab = "business"; pageState.detailLoaded = new Set(["business"]); pageState.coreDetail = null; pageState.coreDetailLoading = true; pageState.dailySales = { data: null, loading: false, loaded: false, rangePreset: "30d", error: "" }; pageState.actions = []; pageState.periodSnapshots = []; pageState.growthAnalysis = null; pageState.healthRecords = []; pageState.healthModalId = ""; pageState.improvements = []; pageState.benchmarks = { items: [], candidates: [], comparison: null, comparisonId: "", loading: false }; render();
+  pageState.selectedId = id; pageState.detailTab = "business"; pageState.detailLoaded = new Set(["business"]); pageState.coreDetail = null; pageState.coreDetailLoading = true; pageState.dailySales = { data: null, loading: false, loaded: false, rangePreset: "30d", startDate: "", endDate: "", error: "" }; pageState.actions = []; pageState.periodSnapshots = []; pageState.growthAnalysis = null; pageState.healthRecords = []; pageState.healthModalId = ""; pageState.improvements = []; pageState.benchmarks = { items: [], candidates: [], comparison: null, comparisonId: "", loading: false }; render();
   try {
     const detail = await loadConnectionCoreDetail(id);
     const [businessPositioning, businessGoals, businessGoalEvaluation] = detail.profile?.hasBusinessProfile
@@ -1423,14 +1424,18 @@ async function openConnection(id, render) {
   pageState.coreDetailLoading = false; render();
 }
 
-async function loadDailySales(render, rangePreset = pageState.dailySales.rangePreset) {
+async function loadDailySales(render, rangePreset = pageState.dailySales.rangePreset, customRange = {}) {
+  const days = linkTimeRangeDays(rangePreset);
   const end = new Date();
   const start = new Date(end);
-  start.setDate(start.getDate() - (rangePreset === "7d" ? 6 : 29));
-  pageState.dailySales = { ...pageState.dailySales, loading: true, rangePreset, error: "" }; render();
+  if (days) start.setDate(start.getDate() - days + 1);
+  const startDate = rangePreset === "custom" ? String(customRange.startDate || pageState.dailySales.startDate || "") : start.toISOString().slice(0, 10);
+  const endDate = rangePreset === "custom" ? String(customRange.endDate || pageState.dailySales.endDate || "") : end.toISOString().slice(0, 10);
+  if (!startDate || !endDate) return;
+  pageState.dailySales = { ...pageState.dailySales, loading: true, rangePreset, startDate, endDate, error: "" }; render();
   try {
-    const data = await loadConnectionDailySales(pageState.selectedId, { startDate: start.toISOString().slice(0, 10), endDate: end.toISOString().slice(0, 10) });
-    pageState.dailySales = { data, loading: false, loaded: true, rangePreset, error: "" };
+    const data = await loadConnectionDailySales(pageState.selectedId, { startDate, endDate });
+    pageState.dailySales = { data, loading: false, loaded: true, rangePreset, startDate, endDate, error: "" };
   } catch (error) { pageState.dailySales = { ...pageState.dailySales, loading: false, error: error.message || "销售日报读取失败。" }; }
   render();
 }
@@ -1714,9 +1719,10 @@ export function bindConnectionCenterPageEvents(render) {
     if (pageState.myLinkTable.range.preset === "custom" && !pageState.myLinkTable.visibleFields.includes("selectedSales")) pageState.myLinkTable.visibleFields.push("selectedSales");
     pageState.myLinkTable.pagination.page = 1; void loadMyLinks(render);
   });
-  root.querySelector('[data-link-data-toolbar] [name="preset"]')?.addEventListener("change", (event) => {
-    pageState.myLinkTable.range.preset = event.currentTarget.value; render();
-  });
+  root.querySelectorAll("[data-link-data-preset]").forEach((button) => button.addEventListener("click", () => {
+    const preset = button.dataset.linkDataPreset; pageState.myLinkTable.range = { ...pageState.myLinkTable.range, preset };
+    if (preset === "custom") render(); else { pageState.myLinkTable.pagination.page = 1; void loadMyLinks(render); }
+  }));
   root.querySelector("[data-clear-link-data-filters]")?.addEventListener("click", () => {
     pageState.myLinkTable.filters = { keyword: "", platform: "", shopId: "", archiveStatus: "" };
     pageState.myLinkTable.range = { preset: "7d", startDate: "", endDate: "" };
@@ -1990,10 +1996,18 @@ export function bindConnectionCenterPageEvents(render) {
     } catch (error) { pageState.error = error.message; render(); }
   }));
   root.querySelectorAll("[data-sales-period-type]").forEach((button) => button.addEventListener("click", () => { pageState.salesPeriodType = button.dataset.salesPeriodType; render(); }));
-  root.querySelectorAll("[data-daily-sales-range]").forEach((button) => button.addEventListener("click", () => void loadDailySales(render, button.dataset.dailySalesRange)));
+  root.querySelectorAll("[data-daily-sales-range]").forEach((button) => button.addEventListener("click", () => {
+    const preset = button.dataset.dailySalesRange;
+    if (preset === "custom") { pageState.dailySales = { ...pageState.dailySales, rangePreset: preset }; render(); }
+    else void loadDailySales(render, preset);
+  }));
+  root.querySelector("[data-daily-sales-range-form]")?.addEventListener("submit", (event) => {
+    event.preventDefault(); const data = new FormData(event.currentTarget);
+    void loadDailySales(render, "custom", { startDate: String(data.get("startDate") || ""), endDate: String(data.get("endDate") || "") });
+  });
   root.querySelectorAll("[data-cockpit-range-preset]").forEach((button) => button.addEventListener("click", () => {
     pageState.cockpitRange = { ...pageState.cockpitRange, preset: button.dataset.cockpitRangePreset, loading: false };
-    void loadBusinessCockpitPage(render);
+    if (button.dataset.cockpitRangePreset === "custom") render(); else void loadBusinessCockpitPage(render);
   }));
   root.querySelector("[data-cockpit-global-range]")?.addEventListener("change", (event) => {
     if (!event.target.matches("input[type='date']")) return;

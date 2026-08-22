@@ -1,4 +1,5 @@
 import { getDatabase } from "./db.js";
+import { linkTimeRangeDays } from "../shared/linkTimeRange.js";
 
 const allowedScopes = new Set(["mine", "company"]);
 
@@ -22,9 +23,8 @@ function defaultRange(days, anchorDate = "") {
 
 export function resolveLinkSalesRankingRange(input = {}, anchorDate = "") {
   const preset = text(input.preset || "7d");
-  if (preset === "7d") return { preset, ...defaultRange(7, anchorDate) };
-  if (preset === "30d") return { preset, ...defaultRange(30, anchorDate) };
-  if (preset === "90d") return { preset, ...defaultRange(90, anchorDate) };
+  const days = linkTimeRangeDays(preset);
+  if (days) return { preset, ...defaultRange(days, anchorDate) };
   if (preset !== "custom") throw new Error("销售排行时间范围无效。");
   const startDate = dateOnly(input.startDate);
   const endDate = dateOnly(input.endDate);

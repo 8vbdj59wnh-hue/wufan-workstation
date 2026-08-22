@@ -1,5 +1,6 @@
 import { registerUiModule } from "../uiModuleRegistry.js";
 import { escapeHtml } from "../utils/html.js";
+import { LINK_TIME_RANGE_OPTIONS, LINK_TIME_RANGE_VALUES } from "../../shared/linkTimeRange.js";
 
 const platformNames = {
   tmall: "天猫",
@@ -25,7 +26,7 @@ export function renderLinkBusinessToolbar({ range = {}, filters = {}, options = 
   const option = (value, label, selected) => `<option value="${escapeHtml(value)}" ${selected === value ? "selected" : ""}>${escapeHtml(label)}</option>`;
   return `<section class="link-business-toolbar-module" data-module-key="link_business_toolbar"><form data-link-business-toolbar>
     <div class="link-business-toolbar-primary"><input type="search" name="keyword" value="${escapeHtml(filters.keyword || "")}" placeholder="搜索链接名称或商品ID" />
-      <div class="segmented-control" data-business-range>${[["yesterday","昨日"],["7d","7日"],["30d","30日"],["custom","自定义"]].map(([value,label]) => `<button type="button" data-business-preset="${value}" class="${preset === value ? "active" : ""}">${label}</button>`).join("")}</div>
+      <div class="segmented-control" data-business-range>${LINK_TIME_RANGE_OPTIONS.map(({ value, label }) => `<button type="button" data-business-preset="${value}" class="${preset === value ? "active" : ""}">${label}</button>`).join("")}</div>
       <input type="hidden" name="preset" value="${escapeHtml(preset)}" />
       <label class="link-business-custom-date ${preset === "custom" ? "" : "is-hidden"}">开始<input type="date" name="startDate" value="${escapeHtml(range.startDate || "")}" /></label>
       <label class="link-business-custom-date ${preset === "custom" ? "" : "is-hidden"}">结束<input type="date" name="endDate" value="${escapeHtml(range.endDate || "")}" /></label>
@@ -48,4 +49,4 @@ export function renderLinkBusinessToolbar({ range = {}, filters = {}, options = 
 
 registerUiModule({ moduleKey: "link_business_toolbar", name: "LinkBusinessToolbar", domain: "business_links",
   description: "提供全部链接经营分析的搜索、日期、基础与经营筛选及指标设置入口。", render: renderLinkBusinessToolbar,
-  configSchema: { ranges: ["yesterday", "7d", "30d", "custom"] }, dependencies: ["QueryLinkBusinessTable", "LinkIndicatorSetting"] });
+  configSchema: { ranges: LINK_TIME_RANGE_VALUES }, dependencies: ["QueryLinkBusinessTable", "LinkIndicatorSetting"] });

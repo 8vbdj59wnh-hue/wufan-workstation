@@ -1,12 +1,14 @@
 import { registerUiModule } from "../uiModuleRegistry.js";
 import { escapeHtml } from "../utils/html.js";
+import { LINK_TIME_RANGE_OPTIONS, LINK_TIME_RANGE_VALUES } from "../../shared/linkTimeRange.js";
 
 export function renderLinkDataToolbar({ keyword = "", range = {}, filters = {}, platforms = [], shops = [], columnSettingHtml = "", dataSource = {} } = {}) {
   const preset = range.preset || "7d";
   return `<section class="link-data-toolbar-module" data-module-key="link_data_toolbar">
     <form data-link-data-toolbar><div class="link-data-toolbar-main">
       <input type="search" name="keyword" value="${escapeHtml(keyword)}" placeholder="搜索链接名称或商品ID" aria-label="搜索我的链接" />
-      <select name="preset" aria-label="销售时间范围"><option value="7d" ${preset === "7d" ? "selected" : ""}>近7日</option><option value="30d" ${preset === "30d" ? "selected" : ""}>近30日</option><option value="custom" ${preset === "custom" ? "selected" : ""}>自定义日期</option></select>
+      <div class="segmented-control" aria-label="销售时间范围">${LINK_TIME_RANGE_OPTIONS.map(({ value, label }) => `<button type="button" data-link-data-preset="${value}" class="${preset === value ? "active" : ""}">${label}</button>`).join("")}</div>
+      <input type="hidden" name="preset" value="${escapeHtml(preset)}" />
       <label class="link-custom-date ${preset === "custom" ? "" : "is-hidden"}">开始<input type="date" name="startDate" value="${escapeHtml(range.startDate || "")}" /></label>
       <label class="link-custom-date ${preset === "custom" ? "" : "is-hidden"}">结束<input type="date" name="endDate" value="${escapeHtml(range.endDate || "")}" /></label>
       <button type="submit" class="primary-button">查询</button>
@@ -22,4 +24,4 @@ export function renderLinkDataToolbar({ keyword = "", range = {}, filters = {}, 
 
 registerUiModule({ moduleKey: "link_data_toolbar", name: "LinkDataToolbar", domain: "business_links",
   description: "提供链接经营数据表搜索、服务端筛选、时间范围和字段设置入口。", render: renderLinkDataToolbar,
-  configSchema: { scopes: ["mine", "company"], ranges: ["7d", "30d", "custom"] }, dependencies: ["QueryLinkDataTable", "LinkColumnSetting"] });
+  configSchema: { scopes: ["mine", "company"], ranges: LINK_TIME_RANGE_VALUES }, dependencies: ["QueryLinkDataTable", "LinkColumnSetting"] });
