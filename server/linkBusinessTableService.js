@@ -122,10 +122,19 @@ export function queryLinkBusinessTable(raw = {}, userId = "", isAdmin = false) {
   }
   const minSales = finite(options.minSales); const maxSales = finite(options.maxSales);
   const minProfit = finite(options.minProfit); const maxProfit = finite(options.maxProfit);
+  const minProfitMargin = finite(options.minProfitMargin); const maxProfitMargin = finite(options.maxProfitMargin);
   if (minSales !== null) { where.push("fa.salesCount>0 AND fa.salesAmount>=@minSales"); params.minSales = minSales; }
   if (maxSales !== null) { where.push("fa.salesCount>0 AND fa.salesAmount<=@maxSales"); params.maxSales = maxSales; }
   if (minProfit !== null) { where.push("fa.profitCount>0 AND fa.profitAmount>=@minProfit"); params.minProfit = minProfit; }
   if (maxProfit !== null) { where.push("fa.profitCount>0 AND fa.profitAmount<=@maxProfit"); params.maxProfit = maxProfit; }
+  if (minProfitMargin !== null) {
+    where.push("fa.salesCount>0 AND fa.profitCount>0 AND fa.salesAmount<>0 AND 1.0*fa.profitAmount/fa.salesAmount>=@minProfitMargin");
+    params.minProfitMargin = minProfitMargin / 100;
+  }
+  if (maxProfitMargin !== null) {
+    where.push("fa.salesCount>0 AND fa.profitCount>0 AND fa.salesAmount<>0 AND 1.0*fa.profitAmount/fa.salesAmount<=@maxProfitMargin");
+    params.maxProfitMargin = maxProfitMargin / 100;
+  }
   const rows = database.prepare(`
     WITH fact_aggregate AS (
       SELECT salesLinkId,SUM(salesAmount) salesAmount,COUNT(salesAmount) salesCount,

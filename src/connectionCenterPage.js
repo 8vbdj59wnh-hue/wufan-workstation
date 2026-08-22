@@ -163,7 +163,7 @@ const pageState = {
     visibleFields: [...DEFAULT_MINE_LINK_FIELDS], fieldOrder: LINK_DATA_COLUMNS.map((item) => item.key), filterOptions: { platforms: [], shops: [] },
     dataSource: {}, columnSettingOpen: false, loading: false, loaded: false },
   businessTable: { items: [], pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 }, range: { preset: "7d", startDate: "", endDate: "" },
-    filters: { keyword: "", platform: "", shopId: "", ownerId: "", minSales: "", maxSales: "", minProfit: "", maxProfit: "", growthStatus: "", healthStatus: "", hospitalStatus: "", includeHistorical: "" },
+    filters: { keyword: "", platform: "", shopId: "", ownerId: "", minSales: "", maxSales: "", minProfit: "", maxProfit: "", minProfitMargin: "", maxProfitMargin: "", growthStatus: "", healthStatus: "", hospitalStatus: "", includeHistorical: "" },
     sort: { field: "salesAmount", direction: "desc" }, visibleFields: [...DEFAULT_LINK_BUSINESS_FIELDS],
     fieldOrder: LINK_BUSINESS_COLUMNS.map((item) => item.key), filterOptions: { platforms: [], shops: [], owners: [] }, dataSources: {}, indicatorOpen: false, loading: false, loaded: false },
   goalWorkbench: { summary: {}, items: [], pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 },
@@ -1294,6 +1294,7 @@ async function loadLinkBusinessTablePage(render) {
       pageSize: table.pagination.pageSize, preset: table.range.preset, startDate: table.range.startDate, endDate: table.range.endDate,
       keyword: table.filters.keyword, platform: table.filters.platform, shopId: table.filters.shopId, ownerId: table.filters.ownerId,
       minSales: table.filters.minSales, maxSales: table.filters.maxSales, minProfit: table.filters.minProfit, maxProfit: table.filters.maxProfit,
+      minProfitMargin: table.filters.minProfitMargin, maxProfitMargin: table.filters.maxProfitMargin,
       growthStatus: table.filters.growthStatus, healthStatus: table.filters.healthStatus, hospitalStatus: table.filters.hospitalStatus,
       includeHistorical: table.filters.includeHistorical,
       sortField: table.sort.field, sortDirection: table.sort.direction, fields: table.visibleFields.join(",") });
@@ -1611,6 +1612,7 @@ export function bindConnectionCenterPageEvents(render) {
     pageState.businessTable.filters = { ...pageState.businessTable.filters, keyword: String(data.keyword || ""), platform: String(data.platform || ""),
       shopId: String(data.shopId || ""), ownerId: String(data.ownerId || ""), minSales: String(data.minSales || ""), maxSales: String(data.maxSales || ""),
       minProfit: String(data.minProfit || ""), maxProfit: String(data.maxProfit || ""), growthStatus: String(data.growthStatus || ""),
+      minProfitMargin: String(data.minProfitMargin || ""), maxProfitMargin: String(data.maxProfitMargin || ""),
       healthStatus: String(data.healthStatus || ""), hospitalStatus: String(data.hospitalStatus || ""),
       includeHistorical: String(data.includeHistorical || "") };
     pageState.businessTable.pagination.page = 1; void loadLinkBusinessTablePage(render);
@@ -1672,7 +1674,7 @@ export function bindConnectionCenterPageEvents(render) {
     saveLinkBusinessTableConfig(); pageState.businessTable.indicatorOpen = false; void loadLinkBusinessTablePage(render);
   });
   root.querySelector("[data-clear-link-business-filters]")?.addEventListener("click", () => {
-    pageState.businessTable.filters = { keyword: "", platform: "", shopId: "", ownerId: "", minSales: "", maxSales: "", minProfit: "", maxProfit: "", growthStatus: "", healthStatus: "", hospitalStatus: "", includeHistorical: "" };
+    pageState.businessTable.filters = { keyword: "", platform: "", shopId: "", ownerId: "", minSales: "", maxSales: "", minProfit: "", maxProfit: "", minProfitMargin: "", maxProfitMargin: "", growthStatus: "", healthStatus: "", hospitalStatus: "", includeHistorical: "" };
     pageState.businessTable.pagination.page = 1; void loadLinkBusinessTablePage(render);
   });
   root.querySelector("[data-distribution-back]")?.addEventListener("click", (event) => {
