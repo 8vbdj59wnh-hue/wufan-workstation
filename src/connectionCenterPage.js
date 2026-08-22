@@ -149,6 +149,8 @@ const pageState = {
   managementOverview: { summary: {}, owners: [] },
   cockpit: { summary: {}, health: {}, coreLinks: [], riskLinks: [], growthLinks: [], platforms: [], productChannels: [], trends: { erp: [], platform: [] }, periodType: "day" },
   cockpitRange: { preset: "30d", startDate: "", endDate: "", loading: false },
+  cockpitShopShareMetric: "salesAmount",
+  cockpitShopShareSelectedId: "",
   goalHealth: { totalLinks: 0, positionedLinks: 0, unpositionedLinks: 0, activeGoalLinks: 0, pendingGoalLinks: 0, evaluatedLinks: 0, pendingEvaluationLinks: 0, gradeSummary: {}, positioningSummary: [], evaluationPeriod: {} },
   healthRecords: [],
   healthAttention: { items: [], counts: { risk: 0, attention: 0, traffic: 0, conversion: 0, sales: 0 } },
@@ -874,28 +876,72 @@ function renderCockpitGlobalRange() {
   const range = pageState.cockpitRange || {};
   return `<form class="cockpit-global-range" data-cockpit-global-range><div class="cockpit-global-presets">${LINK_TIME_RANGE_OPTIONS.map(({ value, label }) => `<button type="button" data-cockpit-range-preset="${value}" class="${range.preset === value ? "active" : ""}" ${range.loading ? "disabled" : ""}>${label}</button>`).join("")}</div><div class="cockpit-global-dates"><label><span>开始日期</span><input type="date" name="startDate" value="${escapeHtml(range.startDate || "")}" ${range.loading ? "disabled" : ""} /></label><i>→</i><label><span>结束日期</span><input type="date" name="endDate" value="${escapeHtml(range.endDate || "")}" ${range.loading ? "disabled" : ""} /></label></div>${range.loading ? `<small>正在更新全页面经营数据…</small>` : `<small>全页面统一时间范围</small>`}</form>`;
 }
+function shopOperationTrend(shop, summary) {
+  if (!summary.previousPeriodComplete) return { className: "stable", text: "上一周期数据不完整，暂不比较" };
+  if (!Number(shop.previousSalesAmount || 0)) {
+    return Number(shop.salesAmount || 0)
+      ? { className: "better", text: "上期无销售" }
+      : { className: "stable", text: "与上期持平" };
+  }
+  const value = Number(shop.salesTrend || 0);
+  return { className: value > 0 ? "better" : value < 0 ? "worse" : "stable", text: growthText(value) };
+}
+function renderShopOperationCard(shop, summary, { className = "", shareLabel = "", shareValue = 0 } = {}) {
+  const trend = shopOperationTrend(shop, summary);
+  return `<article class="shop-operation-card${className ? ` ${className}` : ""}"><header><strong>${escapeHtml(`${shop.platform} · ${shop.shopName}`)}</strong><span>${shop.totalLinks || 0} 条当前经营 Link</span></header><div class="shop-operation-metrics"><div><span>当前周期销售额</span><strong>${coreMoney(shop.salesAmount)}</strong><small class="is-${trend.className}">${trend.className === "better" ? "↗" : trend.className === "worse" ? "↘" : "→"} ${escapeHtml(trend.text)}</small></div><div><span>当前周期毛利</span><strong>${coreMoney(shop.profitAmount)}</strong><small>毛利率 ${corePercent(shop.profitMargin)}</small></div></div><div class="shop-operation-grades"><span><em>优秀</em><b>${shop.excellentLinks || 0}</b></span><span><em>良好</em><b>${shop.goodLinks || 0}</b></span><span><em>达标</em><b>${shop.onTargetLinks || 0}</b></span><span><em>不达标</em><b>${shop.underperformingLinks || 0}</b></span></div><footer>${shareLabel ? `${escapeHtml(shareLabel)}占比 ${corePercent(shareValue)} · ` : ""}参与评价 ${shop.evaluatedLinks || 0} / 总链接 ${shop.totalLinks || 0}</footer></article>`;
+}
 function renderShopOperations(cockpit) {
   const shops = cockpit.shopOperations ?? [];
   const summary = cockpit.summary ?? {};
   const period = summary.salesPeriodStart && summary.salesPeriodEnd
     ? `${summary.salesPeriodStart} 至 ${summary.salesPeriodEnd}`
     : "当前暂无销售周期";
-  const trendMeta = (shop) => {
-    if (!summary.previousPeriodComplete) return { className: "stable", text: "上一周期数据不完整，暂不比较" };
-    if (!Number(shop.previousSalesAmount || 0)) {
-      return Number(shop.salesAmount || 0)
-        ? { className: "better", text: "上期无销售" }
-        : { className: "stable", text: "与上期持平" };
-    }
-    const value = Number(shop.salesTrend || 0);
-    return { className: value > 0 ? "better" : value < 0 ? "worse" : "stable", text: growthText(value) };
-  };
   return `<section class="cockpit-panel shop-operations-panel"><header><div><h3>店铺经营</h3><span>${escapeHtml(period)} · 当前有效店铺 ${shops.length} 家</span></div></header>${shops.length
-    ? `<div class="shop-operations-grid">${shops.map((shop) => {
-      const trend = trendMeta(shop);
-      return `<article class="shop-operation-card"><header><strong>${escapeHtml(`${shop.platform} · ${shop.shopName}`)}</strong><span>${shop.totalLinks || 0} 条当前经营 Link</span></header><div class="shop-operation-metrics"><div><span>当前周期销售额</span><strong>${coreMoney(shop.salesAmount)}</strong><small class="is-${trend.className}">${trend.className === "better" ? "↗" : trend.className === "worse" ? "↘" : "→"} ${escapeHtml(trend.text)}</small></div><div><span>当前周期毛利</span><strong>${coreMoney(shop.profitAmount)}</strong><small>毛利率 ${corePercent(shop.profitMargin)}</small></div></div><div class="shop-operation-grades"><span><em>优秀</em><b>${shop.excellentLinks || 0}</b></span><span><em>良好</em><b>${shop.goodLinks || 0}</b></span><span><em>达标</em><b>${shop.onTargetLinks || 0}</b></span><span><em>不达标</em><b>${shop.underperformingLinks || 0}</b></span></div><footer>参与评价 ${shop.evaluatedLinks || 0} / 总链接 ${shop.totalLinks || 0}</footer></article>`;
-    }).join("")}</div>`
+    ? `<div class="shop-operations-grid">${shops.map((shop) => renderShopOperationCard(shop, summary)).join("")}</div>`
     : `<div class="empty-state compact">暂无当前有效店铺</div>`}</section>`;
+}
+
+const shopShareColors = ["#157a5b", "#2e90fa", "#f79009", "#7f56d9", "#e04f67", "#0e9384", "#ee46bc", "#6172f3", "#84ad36", "#f04438", "#4e5ba6", "#dc6803"];
+function shopSharePoint(ratio, radius = 116) {
+  const angle = ratio * Math.PI * 2 - Math.PI / 2;
+  return [140 + Math.cos(angle) * radius, 140 + Math.sin(angle) * radius];
+}
+function shopShareSector(start, end, color, shop, selected) {
+  const middleAngle = ((start + end) / 2) * Math.PI * 2 - Math.PI / 2;
+  const transform = selected ? `translate(${(Math.cos(middleAngle) * 8).toFixed(3)} ${(Math.sin(middleAngle) * 8).toFixed(3)})` : "";
+  const interaction = `class="shop-share-slice${selected ? " is-selected" : ""}" data-shop-share-slice="${escapeHtml(shop.shopId)}" tabindex="0" role="button" aria-label="查看${escapeHtml(shop.shopName || "未命名店铺")}业绩" transform="${transform}"`;
+  const title = `<title>${escapeHtml(shop.shopName || "未命名店铺")}：销售额 ${coreMoney(shop.salesAmount)}，利润 ${coreMoney(shop.profitAmount)}</title>`;
+  const share = end - start;
+  const labelRadius = share >= 0.1 ? 78 : 91;
+  const labelSize = share >= 0.1 ? 7.5 : 6.2;
+  const [labelX, labelY] = shopSharePoint((start + end) / 2, labelRadius);
+  const label = share >= 0.035 ? `<text class="shop-share-label" x="${labelX.toFixed(3)}" y="${labelY.toFixed(3)}" fill="#fff" stroke="#173f34" stroke-opacity="0.58" stroke-width="1.4" paint-order="stroke" font-size="${labelSize}" font-weight="750" text-anchor="middle" dominant-baseline="middle" pointer-events="none">${(share * 100).toFixed(1)}%</text>` : "";
+  if (share >= 0.999999) return `<g ${interaction}>${title}<circle cx="140" cy="140" r="116" fill="${color}" />${label}</g>`;
+  const [startX, startY] = shopSharePoint(start);
+  const [endX, endY] = shopSharePoint(end);
+  const largeArc = share > 0.5 ? 1 : 0;
+  return `<g ${interaction}>${title}<path d="M 140 140 L ${startX.toFixed(3)} ${startY.toFixed(3)} A 116 116 0 ${largeArc} 1 ${endX.toFixed(3)} ${endY.toFixed(3)} Z" fill="${color}" stroke="#fff" stroke-width="1.5" />${label}</g>`;
+}
+function renderShopPerformanceShare(cockpit) {
+  const metric = pageState.cockpitShopShareMetric === "profitAmount" ? "profitAmount" : "salesAmount";
+  const metricLabel = metric === "profitAmount" ? "毛利" : "销售额";
+  const shops = [...(cockpit.shopOperations ?? [])]
+    .map((shop) => ({ ...shop, metricValue: Number(shop[metric] || 0) }))
+    .sort((left, right) => Math.max(0, right.metricValue) - Math.max(0, left.metricValue));
+  const shareTotal = shops.reduce((sum, shop) => sum + Math.max(0, shop.metricValue), 0);
+  const netTotal = shops.reduce((sum, shop) => sum + shop.metricValue, 0);
+  const selectedShop = shops.find((shop) => shop.shopId === pageState.cockpitShopShareSelectedId) ?? null;
+  const selectedShare = selectedShop && shareTotal > 0 ? Math.max(0, selectedShop.metricValue) / shareTotal : 0;
+  let consumed = 0;
+  const sectors = shops.filter((shop) => shop.metricValue > 0).map((shop, index) => {
+    const start = shareTotal ? consumed / shareTotal : 0;
+    consumed += shop.metricValue;
+    const end = shareTotal ? consumed / shareTotal : 0;
+    return shopShareSector(start, end, shopShareColors[index % shopShareColors.length], shop, shop.shopId === selectedShop?.shopId);
+  });
+  return `<section class="cockpit-panel shop-share-panel"><header><div><h3>店铺业绩占比</h3><span>按当前统一时间范围统计${metric === "profitAmount" ? " · 亏损店铺不计入正向占比" : ""}</span></div><div class="segmented-control shop-share-metric-switch">${[["salesAmount","销售额"],["profitAmount","毛利"]].map(([value,label]) => { const active = metric === value; return `<button type="button" data-shop-share-metric="${value}" class="${active ? "active is-selected" : ""}" aria-pressed="${active}"${active ? ` style="border-color:#2e90fa;background:#2e90fa;color:#fff"` : ""}>${label}</button>`; }).join("")}</div></header>${shops.length && shareTotal > 0
+    ? `<div class="shop-share-content"><div class="shop-share-visual"><svg class="shop-share-pie" width="560" height="560" viewBox="0 0 280 280" role="img" aria-label="各店铺${metricLabel}占比">${sectors.join("")}</svg><div><span>${escapeHtml(metricLabel)}合计</span><strong>${coreMoney(netTotal)}</strong></div></div>${selectedShop ? renderShopOperationCard(selectedShop, cockpit.summary ?? {}, { className: "shop-share-selected-card", shareLabel: metricLabel, shareValue: selectedShare }) : `<div class="shop-share-selection-hint">点击饼图扇区查看店铺经营卡片</div>`}</div>`
+    : `<div class="empty-state compact">当前周期暂无可展示的${escapeHtml(metricLabel)}数据</div>`}</section>`;
 }
 
 function renderBusinessCockpit() {
@@ -914,7 +960,7 @@ function renderBusinessCockpit() {
     <section class="cockpit-health"><header><h3>健康状态</h3><span>高利润链接 ${summary.highProfitCount||0} · 利润风险 ${summary.profitRiskCount||0}</span></header><div><span>健康 <b>${health.healthy||0}</b><em>${healthRate(health.healthy)}</em></span><span>关注 <b>${health.attention||0}</b><em>${healthRate(health.attention)}</em></span><span>异常 <b>${health.risk||0}</b><em>${healthRate(health.risk)}</em></span><span>待积累数据 <b>${health.noData||0}</b><em>${healthRate(health.noData)}</em></span></div></section>
     ${renderGoalHealthCockpit()}
     ${renderOwnerContribution(cockpit)}
-    <div class="cockpit-two-columns"><section class="cockpit-panel"><header><h3>核心链接</h3><span>按ERP销售额、利润排序</span></header>${cockpit.coreLinks?.length?cockpit.coreLinks.map((item)=>linkCard(item,`销量 ${coreNumber(item.erpSales?.shippedQuantity)}`)).join(""):`<div class="empty-state compact">暂无ERP销售事实</div>`}</section><section class="cockpit-panel is-risk"><header><h3>风险链接</h3><button type="button" class="text-button" data-workbench-hospital="diagnosis">进入链接医院 →</button></header>${cockpit.riskLinks?.length?cockpit.riskLinks.map((item)=>linkCard(item,`${item.anomalyTypes?.join("、")||"健康异常"} · ${cockpitStageText(item.operationStage)}`)).join(""):`<div class="empty-state compact">当前没有风险链接</div>`}</section></div>
+    <div class="cockpit-two-columns"><section class="cockpit-panel"><header><h3>核心链接</h3><span>按ERP销售额、利润排序</span></header>${cockpit.coreLinks?.length?cockpit.coreLinks.map((item)=>linkCard(item,`销量 ${coreNumber(item.erpSales?.shippedQuantity)}`)).join(""):`<div class="empty-state compact">暂无ERP销售事实</div>`}</section>${renderShopPerformanceShare(cockpit)}</div>
     <section class="cockpit-panel"><header><h3>增长链接</h3></header><div class="cockpit-growth-grid">${cockpit.growthLinks?.length?cockpit.growthLinks.map((item)=>linkCard(item,`最快增长 ${growthText(item.growthMetric)}`)).join(""):`<div class="empty-state compact">尚无可比较的增长链接</div>`}</div></section>
     <section class="cockpit-panel"><header><h3>平台渠道分析</h3><span>ERP销售和利润按平台汇总</span></header><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>平台</th><th>链接数</th><th>销售额</th><th>利润</th><th>利润率</th><th>健康率</th></tr></thead><tbody>${cockpit.platforms?.map((item)=>`<tr><td><strong>${escapeHtml(item.platform)}</strong></td><td>${item.connectionCount}</td><td>${coreMoney(item.salesAmount)}</td><td>${coreMoney(item.profitAmount)}</td><td>${corePercent(item.profitMargin)}</td><td>${corePercent(item.healthyRate)}</td></tr>`).join("")||`<tr><td colspan="6">暂无平台经营事实</td></tr>`}</tbody></table></div></section>
     <section class="cockpit-panel"><header><h3>产品直接销售渠道</h3><span>仅Single直接销售额；Bundle金额不分摊</span></header><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>产品编码</th><th>产品</th><th>平台</th><th>链接数</th><th>直接销售额</th><th>占产品直接销售</th></tr></thead><tbody>${cockpit.productChannels?.map((item)=>`<tr><td><a href="#products/${encodeURIComponent(item.productId)}">${escapeHtml(item.skuCode)}</a></td><td>${escapeHtml(item.name)}</td><td>${escapeHtml(item.platform)}</td><td>${item.linkCount}</td><td>${coreMoney(item.directSalesAmount)}</td><td>${corePercent(item.contribution)}</td></tr>`).join("")||`<tr><td colspan="6">暂无产品直接销售事实</td></tr>`}</tbody></table></div></section>
@@ -2046,6 +2092,15 @@ export function bindConnectionCenterPageEvents(render) {
     void loadBusinessCockpitPage(render);
   });
   root.querySelectorAll("[data-cockpit-period]").forEach((button) => button.addEventListener("click", () => { pageState.cockpit.periodType = button.dataset.cockpitPeriod; render(); }));
+  root.querySelectorAll("[data-shop-share-metric]").forEach((button) => button.addEventListener("click", () => {
+    pageState.cockpitShopShareMetric = button.dataset.shopShareMetric === "profitAmount" ? "profitAmount" : "salesAmount";
+    render();
+  }));
+  root.querySelectorAll("[data-shop-share-slice]").forEach((slice) => {
+    const selectShop = () => { pageState.cockpitShopShareSelectedId = slice.dataset.shopShareSlice; render(); };
+    slice.addEventListener("click", selectShop);
+    slice.addEventListener("keydown", (event) => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); selectShop(); } });
+  });
   root.querySelectorAll("[data-goal-health-drill]").forEach((button) => button.addEventListener("click", () => {
     const filters = { keyword: "", positioning: button.dataset.positioning || "", goalStatus: "", evaluationStatus: "", ownerId: "" };
     if (button.dataset.goalHealthDrill === "goal-pending") filters.goalStatus = "pending";
