@@ -35,6 +35,7 @@ const uploadTypePolicies = {
       ".psb": ["image/vnd.adobe.photoshop", "application/octet-stream"],
       ".ai": ["application/illustrator", "application/postscript", "application/pdf", "application/octet-stream"],
       ".fig": ["application/zip", "application/octet-stream"],
+      ".xmind": ["application/x-xmind", "application/vnd.xmind.workbook", "application/zip", "application/x-zip-compressed", "application/octet-stream"],
     },
   },
   spreadsheet: {
@@ -42,6 +43,7 @@ const uploadTypePolicies = {
       ".xlsx": ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/zip", "application/octet-stream"],
       ".xls": ["application/vnd.ms-excel", "application/octet-stream"],
       ".csv": ["text/csv", "application/csv", "text/plain", "application/vnd.ms-excel", "application/octet-stream"],
+      ".xmind": ["application/x-xmind", "application/vnd.xmind.workbook", "application/zip", "application/x-zip-compressed", "application/octet-stream"],
     },
   },
 };
@@ -69,7 +71,7 @@ function matchesFileSignature(extension, buffer) {
   if (extension === ".webp") return buffer.subarray(0, 4).toString("ascii") === "RIFF" && buffer.subarray(8, 12).toString("ascii") === "WEBP";
   if (extension === ".pdf") return buffer.subarray(0, 5).toString("ascii") === "%PDF-";
   if ([".doc", ".xls"].includes(extension)) return startsWith(buffer, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
-  if ([".docx", ".xlsx", ".zip"].includes(extension)) return isZip(buffer);
+  if ([".docx", ".xlsx", ".zip", ".xmind"].includes(extension)) return isZip(buffer);
   if ([".txt", ".csv"].includes(extension)) return isText(buffer);
   if ([".mp4", ".mov", ".m4v"].includes(extension)) return buffer.subarray(4, 8).toString("ascii") === "ftyp";
   if (extension === ".webm") return startsWith(buffer, [0x1a, 0x45, 0xdf, 0xa3]);

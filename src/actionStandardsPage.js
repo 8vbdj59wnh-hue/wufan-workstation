@@ -51,12 +51,18 @@ import {
   renderBusinessHourOptions,
   renderBusinessMinuteOptions,
 } from "./businessTime.js";
-import { normalizePublicFormFields } from "./publicFormFields.js";
+import {
+  collectPublicFormMultiSelectValues,
+  normalizePublicFormFields,
+  renderPublicFormMultiSelectField,
+  validatePublicFormMultiSelectValue,
+} from "./publicFormFields.js";
 import { bindActionProductSelectors, collectActionProductIds, renderActionProductSelector } from "./actionProductRelations.js";
 import {
   getPublishingAccountFieldOptions,
   isPublishingAccountField,
 } from "./publishingAccountOptions.js";
+import { standardWorkAttachmentAccept, validateStandardWorkAttachmentFiles } from "./standardWorkAttachmentPolicy.js";
 
 const categories = state.categories;
 const departments = state.departments;
@@ -65,8 +71,6 @@ const people = state.people;
 const publishingAccounts = state.publishingAccounts;
 const stores = state.stores;
 const standardWorkAttachmentsKey = "standardWorkAttachments";
-const spreadsheetAttachmentExts = new Set([".xlsx", ".xls", ".csv"]);
-const maxStandardWorkAttachmentSize = 20 * 1024 * 1024;
 const hiddenLegacyStandardWorkNames = [
   "小红书笔记发布",
   "买家秀图片制作",
@@ -785,7 +789,7 @@ function isValidImagePath(value) {
 }
 
 function renderCustomFieldInput(field, customFields = {}) {
-  const value = customFields[field.key] ?? (field.type === "multi_select" ? [] : "");
+  const value = customFields[field.key] ?? (field.type === "multi_select" ? field.defaultValue ?? [] : "");
   const requiredMark = "";
   if (field.type === "textarea") {
     return `<label><span>${escapeHtml(field.label)}${requiredMark}</span><textarea name="custom__${escapeAttribute(field.key)}" rows="3" placeholder="${escapeAttribute(field.placeholder ?? "")}">${escapeHtml(value)}</textarea></label>`;
@@ -804,14 +808,7 @@ function renderCustomFieldInput(field, customFields = {}) {
   }
   if (field.type === "multi_select") {
     const options = getDynamicFieldOptions(field);
-    return `
-      <label>
-        <span>${escapeHtml(field.label)}${requiredMark}</span>
-        <select name="custom__${escapeAttribute(field.key)}" multiple size="${Math.min(options.length, 5)}">
-          ${options.map((option) => `<option value="${escapeAttribute(option.value)}" ${Array.isArray(value) && value.includes(option.value) ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
-        </select>
-      </label>
-    `;
+    return renderPublicFormMultiSelectField(field, options, customFields);
   }
   if (field.type === "image") {
     if (isProductImageField(field)) return renderProductImageEditor(field, customFields);
@@ -859,7 +856,7 @@ function collectCustomFields(form, template) {
     } else if (isProductImageField(field)) {
       collectProductImageField(formData, result, field);
     } else if (field.type === "multi_select") {
-      result[field.key] = formData.getAll(`custom__${field.key}`).map((item) => item.toString());
+      result[field.key] = collectPublicFormMultiSelectValues(formData, field.key);
     } else {
       result[field.key] = getFormValue(form, `custom__${field.key}`);
     }
@@ -876,6 +873,11 @@ function validateCustomFields(customFields, template) {
   if (productImagesError !== "") return productImagesError;
   for (const field of getSortedFormFields(template)) {
     const value = customFields[field.key];
+    if (field.type === "multi_select") {
+      const error = validatePublicFormMultiSelectValue(field, value, getDynamicFieldOptions(field));
+      if (error !== "") return error;
+      continue;
+    }
     const isEmpty = Array.isArray(value) ? value.length === 0 : value === "";
     if (isEmpty) continue;
     if (typeof value === "string" && value.startsWith("__INVALID_BUSINESS_TIME__:")) return value.replace("__INVALID_BUSINESS_TIME__:", "");
@@ -885,7 +887,6 @@ function validateCustomFields(customFields, template) {
     if (field.type === "url" && !isValidUrl(value)) return `${field.label}必须是有效链接。`;
     if (field.type === "image" && !isValidImagePath(value)) return `${field.label}必须是上传后的图片路径。`;
     if (field.type === "select" && !getDynamicFieldOptions(field).some((option) => option.value === value)) return `${field.label}必须选择有效选项。`;
-    if (field.type === "multi_select" && value.some((item) => !getDynamicFieldOptions(field).some((option) => option.value === item))) return `${field.label}包含无效选项。`;
   }
   return "";
 }
@@ -904,23 +905,14 @@ function getFileExt(filename = "") {
   return dotIndex === -1 ? "" : filename.slice(dotIndex).toLowerCase();
 }
 
-function validateStandardWorkAttachmentFiles(files) {
-  for (const file of files) {
-    const ext = getFileExt(file.name);
-    if (!spreadsheetAttachmentExts.has(ext)) return "表格附件只支持 .xlsx、.xls、.csv。";
-    if (file.size > maxStandardWorkAttachmentSize) return "单个表格附件不能超过 20MB。";
-  }
-  return "";
-}
-
 function renderStandardWorkAttachmentsField() {
   return `
     <div class="standard-work-attachments-field">
       <label>
-        <span>表格附件</span>
-        <input name="standardWorkAttachments" type="file" accept=".xlsx,.xls,.csv" multiple data-standard-work-attachments />
+        <span>附件</span>
+        <input name="standardWorkAttachments" type="file" accept="${standardWorkAttachmentAccept}" multiple data-standard-work-attachments />
       </label>
-      <p class="form-note">支持 .xlsx、.xls、.csv，单个文件不超过 20MB。未上传也可以发起关键行动。</p>
+      <p class="form-note">支持 .xlsx、.xls、.csv、.xmind，单个文件不超过 20MB。未上传也可以发起关键行动。</p>
       <div class="selected-attachment-list" data-selected-standard-work-attachments><p class="form-note">暂无已选择附件</p></div>
     </div>
   `;
@@ -1029,7 +1021,7 @@ async function saveActionStandardLaunch(form, rerender) {
   try {
     uploadedAttachments = await uploadSelectedStandardWorkAttachments(form);
   } catch (uploadError) {
-    return setModalError(uploadError.message ?? "表格附件上传失败。", rerender);
+    return setModalError(uploadError.message ?? "附件上传失败。", rerender);
   }
 
   const now = getNow();

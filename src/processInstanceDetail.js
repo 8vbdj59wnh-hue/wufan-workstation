@@ -37,14 +37,13 @@ import {
   renderBusinessHourOptions,
   renderBusinessMinuteOptions,
 } from "./businessTime.js";
+import { standardWorkAttachmentAccept, validateStandardWorkAttachmentFiles } from "./standardWorkAttachmentPolicy.js";
 
 const goals = state.goals;
 const people = state.people;
 const standardWorkAttachmentsKey = "standardWorkAttachments";
 const linkedActionTemplateIdsKey = "linkedTemplateIds";
 const returnRecordsKey = "returnRecords";
-const spreadsheetAttachmentExts = new Set([".xlsx", ".xls", ".csv"]);
-const maxStandardWorkAttachmentSize = 20 * 1024 * 1024;
 const executorEditableTaskStatuses = new Set([TaskStatus.Waiting, TaskStatus.Todo, TaskStatus.Doing]);
 let taskExecutorPickerState = null;
 const improvementResultState = new Map();
@@ -378,15 +377,6 @@ export function renderActionTemplatePicker(
   `;
 }
 
-function validateStandardWorkAttachmentFiles(files) {
-  for (const file of files) {
-    const ext = getFileExt(file.name);
-    if (!spreadsheetAttachmentExts.has(ext)) return "表格附件只支持 .xlsx、.xls、.csv。";
-    if (file.size > maxStandardWorkAttachmentSize) return "单个表格附件不能超过 20MB。";
-  }
-  return "";
-}
-
 function getTaskReturnRecords(task) {
   const records = task.customFields?.[returnRecordsKey];
   return Array.isArray(records) ? records : [];
@@ -468,7 +458,7 @@ function renderEditableStandardWorkAttachments(instance, editable, { embedded = 
   return `
     <div class="${embedded ? "process-record-section" : "detail-block"} standard-work-attachments-field">
       <h3>附件</h3>
-      <p class="form-note">支持 .xlsx、.xls、.csv，单个文件不超过 20MB。新增附件会追加到已有附件；删除只移除关联，不删除 uploads 里的实际文件。</p>
+      <p class="form-note">支持 .xlsx、.xls、.csv、.xmind，单个文件不超过 20MB。新增附件会追加到已有附件；删除只移除关联，不删除 uploads 里的实际文件。</p>
       <div data-existing-standard-work-attachments>
         ${
           attachments.length === 0
@@ -494,8 +484,8 @@ function renderEditableStandardWorkAttachments(instance, editable, { embedded = 
         }
       </div>
       <label>
-        <span>新增表格附件</span>
-        <input name="standardWorkAttachments" type="file" accept=".xlsx,.xls,.csv" multiple data-standard-work-attachments />
+        <span>新增附件</span>
+        <input name="standardWorkAttachments" type="file" accept="${standardWorkAttachmentAccept}" multiple data-standard-work-attachments />
       </label>
       <div class="selected-attachment-list" data-selected-standard-work-attachments>
         <p class="form-note">暂无新选择附件</p>
@@ -1262,7 +1252,7 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
       const uploadedAttachments = await uploadSelectedStandardWorkAttachments(form, instanceId);
       customFields[standardWorkAttachmentsKey] = [...existingAttachments, ...uploadedAttachments];
     } catch (error) {
-      return showFormError(form, error.message || "表格附件上传失败。");
+      return showFormError(form, error.message || "附件上传失败。");
     }
 
     const updatedInstance = { ...instance, name, goalId, description, dueDate: instanceDueDateResult.value, customFields, updatedAt: now };

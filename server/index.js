@@ -457,14 +457,14 @@ const uploadFile = multer({
   },
 });
 
-const allowedSpreadsheetExts = new Set([".xlsx", ".xls", ".csv"]);
+const allowedStandardWorkAttachmentExts = new Set([".xlsx", ".xls", ".csv", ".xmind"]);
 const spreadsheetStorage = multer.diskStorage({
   destination: (_request, _file, callback) => {
     callback(null, uploadStagingDir);
   },
   filename: (_request, file, callback) => {
     const ext = path.extname(file.originalname).toLowerCase();
-    const safeExt = allowedSpreadsheetExts.has(ext) ? ext : "";
+    const safeExt = allowedStandardWorkAttachmentExts.has(ext) ? ext : "";
     callback(null, `${Date.now()}-${Math.random().toString(36).slice(2, 10)}${safeExt}`);
   },
 });
@@ -474,7 +474,7 @@ const uploadSpreadsheet = multer({
   fileFilter: (_request, file, callback) => {
     const validation = validateUploadMetadata(file, "spreadsheet");
     if (!validation.valid) {
-      callback(new Error(`${validation.reason}只支持 .xlsx、.xls、.csv 表格附件。`));
+      callback(new Error(`${validation.reason}只支持 .xlsx、.xls、.csv、.xmind 附件。`));
       return;
     }
     callback(null, true);
@@ -1696,6 +1696,7 @@ app.get("/api/task-center/tasks", (request, response) => {
     const data = {
       tasks: readResource("tasks"),
       processInstances: readResource("processInstances"),
+      workPlans: readResource("workPlans"),
       processTemplateNodes: readResource("processTemplateNodes"),
       taskTemplates: readResource("taskTemplates"),
       goals: keyword === "" ? [] : readResource("goals"),
@@ -1707,6 +1708,12 @@ app.get("/api/task-center/tasks", (request, response) => {
     const goalById = new Map(data.goals.map((item) => [item.id, item]));
     const departmentById = new Map(data.departments.map((item) => [item.id, item]));
     const personById = new Map(data.people.map((item) => [item.id, item]));
+    const improvementProcessInstanceIds = new Set(
+      data.workPlans
+        .filter((item) => item.workType === "rectification")
+        .map((item) => String(item.processInstanceId ?? "").trim())
+        .filter(Boolean),
+    );
     const isClearanceTask = (task) => {
       if (task.source === "clearance") return true;
       const instance = processInstanceById.get(task.processInstanceId);
@@ -1752,7 +1759,7 @@ app.get("/api/task-center/tasks", (request, response) => {
     }
     let items = filterTasksByScope(data.tasks, request.user, data).filter((task) => !isClearanceTask(task));
     items = items.filter((task) => {
-      if (!shouldShowTaskInTaskCenter(task, filters)) return false;
+      if (!shouldShowTaskInTaskCenter(task, filters, improvementProcessInstanceIds)) return false;
       const identifierMatch = (matchedTaskId !== null && task.id === matchedTaskId)
         || (matchedProcessInstanceId !== null && task.processInstanceId === matchedProcessInstanceId);
       const templateCodeMatch = matchedVisualTemplateProcessInstanceIds.has(task.processInstanceId);
@@ -2017,15 +2024,15 @@ app.post("/api/uploads/standard-work-attachment", requirePermission("uploads.sta
   uploadSpreadsheet.single("file")(request, response, (error) => {
     if (error !== undefined) {
       const message =
-        error.code === "LIMIT_FILE_SIZE" ? "表格附件大小不能超过 20MB。" : error.message || "表格附件上传失败。";
+        error.code === "LIMIT_FILE_SIZE" ? "附件大小不能超过 20MB。" : error.message || "附件上传失败。";
       request.uploadAuditFailure = { code: error.code ?? "UPLOAD_ATTACHMENT_REJECTED", message };
       response.status(error.code === "LIMIT_FILE_SIZE" ? 413 : 400).json({ error: message });
       return;
     }
 
     if (request.file === undefined) {
-      request.uploadAuditFailure = { code: "UPLOAD_FILE_REQUIRED", message: "请选择要上传的表格附件。" };
-      response.status(400).json({ error: "请选择要上传的表格附件。" });
+      request.uploadAuditFailure = { code: "UPLOAD_FILE_REQUIRED", message: "请选择要上传的附件。" };
+      response.status(400).json({ error: "请选择要上传的附件。" });
       return;
     }
     if (rejectInvalidStoredUpload(request, response, "spreadsheet")) return;

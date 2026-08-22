@@ -9366,6 +9366,24 @@ button.content-template-thumb {
   gap: 6px;
 }
 
+.public-form-multi-select-field {
+  display: grid;
+  gap: 7px;
+}
+
+.modal-form .public-form-multi-select-field > .public-form-field-label {
+  color: #374151;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.modal-form .public-form-multi-select input[type="checkbox"] {
+  width: 16px;
+  min-height: 16px;
+  margin: 0;
+  padding: 0;
+}
+
 .form-renderer-image-preview {
   max-width: 180px;
   max-height: 120px;

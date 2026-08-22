@@ -65,6 +65,32 @@ test("上传类型同时校验扩展名、MIME 和文件签名", () => {
   assert.equal(validateUploadMetadata({ originalname: "script.exe", mimetype: "text/plain" }, "file").valid, false);
 });
 
+test("XMind 作为普通附件通过扩展名、MIME 和 ZIP 签名校验", () => {
+  const xmindZip = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00]);
+  for (const mimetype of [
+    "application/x-xmind",
+    "application/vnd.xmind.workbook",
+    "application/zip",
+    "application/x-zip-compressed",
+    "application/octet-stream",
+  ]) {
+    const file = { originalname: "经营复盘.xmind", mimetype };
+    assert.equal(validateUploadContent(file, xmindZip, "spreadsheet").valid, true);
+    assert.equal(validateUploadContent(file, xmindZip, "file").valid, true);
+  }
+
+  assert.equal(validateUploadMetadata({ originalname: "经营复盘.xmind", mimetype: "text/plain" }, "spreadsheet").valid, false);
+  assert.equal(validateUploadContent({ originalname: "经营复盘.xmind", mimetype: "application/x-xmind" }, Buffer.from("not zip"), "spreadsheet").valid, false);
+});
+
+test("标准工作附件原有格式保持可用", () => {
+  const zip = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00]);
+  const legacyExcel = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+  assert.equal(validateUploadContent({ originalname: "计划.xlsx", mimetype: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }, zip, "spreadsheet").valid, true);
+  assert.equal(validateUploadContent({ originalname: "计划.xls", mimetype: "application/vnd.ms-excel" }, legacyExcel, "spreadsheet").valid, true);
+  assert.equal(validateUploadContent({ originalname: "计划.csv", mimetype: "text/csv" }, Buffer.from("name,value\nA,1"), "spreadsheet").valid, true);
+});
+
 test("用户每日配额会预留并按实际成功字节结算", () => {
   const database = createAuditDatabase();
   const now = new Date("2026-08-20T04:00:00.000Z");
@@ -152,4 +178,5 @@ test("上传读取路径保持公开，通用上传入口使用独立权限", ()
   assert.match(serverSource, /app\.post\("\/api\/uploads\/image", requirePermission\("uploads\.image"\)/);
   assert.match(serverSource, /app\.post\("\/api\/uploads\/file", requirePermission\("uploads\.file"\)/);
   assert.match(serverSource, /app\.post\("\/api\/uploads\/standard-work-attachment", requirePermission\("uploads\.standardWorkAttachment"\)/);
+  assert.match(serverSource, /\/uploads\/standard-work-attachments\/\$\{request\.file\.filename\}/);
 });
