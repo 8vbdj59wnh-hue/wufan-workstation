@@ -372,7 +372,8 @@ function ensureLink(database, row, batchId, resolvedLink = null) {
   let link = resolvedLink || database.prepare("SELECT * FROM sales_links WHERE shopId=? AND platformGoodsId=?").get(shop.id, text(row.platformGoodsId));
   if (!link) throw Object.assign(new Error("平台经营数据未匹配到已有链接，请先通过平台货品导入建立链接身份。"), { type: "missing_link" });
   const createdAt = now();
-  database.prepare(`UPDATE sales_links SET title=COALESCE(NULLIF(?,''),title),canonicalUrl=COALESCE(NULLIF(?,''),canonicalUrl),rawUrl=COALESCE(NULLIF(?,''),rawUrl),category=COALESCE(NULLIF(?,''),category),status=COALESCE(NULLIF(?,''),status),lastSeenBatchId=?,lastImportedAt=?,updatedAt=? WHERE id=?`).run(text(row.title), text(row.url), text(row.url), text(row.category), text(row.status), batchId, createdAt, createdAt, link.id);
+  // 经营数据只补充经营展示信息，不得覆盖平台货品资产批次身份。
+  database.prepare(`UPDATE sales_links SET title=COALESCE(NULLIF(?,''),title),canonicalUrl=COALESCE(NULLIF(?,''),canonicalUrl),rawUrl=COALESCE(NULLIF(?,''),rawUrl),category=COALESCE(NULLIF(?,''),category),status=COALESCE(NULLIF(?,''),status),updatedAt=? WHERE id=?`).run(text(row.title), text(row.url), text(row.url), text(row.category), text(row.status), createdAt, link.id);
   link = database.prepare("SELECT * FROM sales_links WHERE id=?").get(link.id);
   database.prepare(`UPDATE sales_links SET
     displayName=COALESCE(NULLIF(?,''),displayName,title,platformGoodsId),

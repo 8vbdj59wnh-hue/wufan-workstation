@@ -105,7 +105,7 @@ import "./uiModules/linkColumnSetting.js";
 import "./uiModules/linkDataToolbar.js";
 import { LINK_DATA_COLUMNS, DEFAULT_MINE_LINK_FIELDS } from "./uiModules/linkDataTable.js";
 import { reorderVisibleLinkBusinessField } from "./uiModules/linkIndicatorSetting.js";
-import "./uiModules/linkBusinessToolbar.js";
+import { businessPlatformLabel } from "./uiModules/linkBusinessToolbar.js";
 import { LINK_BUSINESS_COLUMN_GROUPS, LINK_BUSINESS_COLUMNS, DEFAULT_LINK_BUSINESS_FIELDS } from "./uiModules/linkBusinessTable.js";
 
 const connectionSectionStorageKey = "connection-center-section-v1";
@@ -162,7 +162,7 @@ const pageState = {
     visibleFields: [...DEFAULT_MINE_LINK_FIELDS], fieldOrder: LINK_DATA_COLUMNS.map((item) => item.key), filterOptions: { platforms: [], shops: [] },
     dataSource: {}, columnSettingOpen: false, loading: false, loaded: false },
   businessTable: { items: [], pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 }, range: { preset: "7d", startDate: "", endDate: "" },
-    filters: { keyword: "", platform: "", shopId: "", ownerId: "", minSales: "", maxSales: "", minProfit: "", maxProfit: "", growthStatus: "", healthStatus: "", hospitalStatus: "", includeHistorical: "", expanded: false },
+    filters: { keyword: "", platform: "", shopId: "", ownerId: "", minSales: "", maxSales: "", minProfit: "", maxProfit: "", growthStatus: "", healthStatus: "", hospitalStatus: "", includeHistorical: "" },
     sort: { field: "salesAmount", direction: "desc" }, visibleFields: [...DEFAULT_LINK_BUSINESS_FIELDS],
     fieldOrder: LINK_BUSINESS_COLUMNS.map((item) => item.key), filterOptions: { platforms: [], shops: [], owners: [] }, dataSources: {}, indicatorOpen: false, loading: false, loaded: false },
   goalWorkbench: { summary: {}, items: [], pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 },
@@ -512,7 +512,7 @@ function renderSectionNavigation() {
   return `<nav class="connection-section-nav" aria-label="连接中心页面">
     <button type="button" class="${pageState.section === "cockpit" ? "active" : ""}" data-connection-section="cockpit">经营驾驶舱</button>
     <button type="button" class="${pageState.section === "my-links" ? "active" : ""}" data-connection-section="my-links">我的链接</button>
-    <button type="button" class="${pageState.section === "connections" ? "active" : ""}" data-connection-section="connections">Link资产</button>
+    <button type="button" class="${pageState.section === "connections" ? "active" : ""}" data-connection-section="connections">全部链接</button>
     <button type="button" class="${pageState.section === "goal-management" ? "active" : ""}" data-connection-section="goal-management">链接经营管理</button>
     ${canViewHealth() ? `<button type="button" class="${pageState.section === "hospital" ? "active" : ""}" data-connection-section="hospital">链接医院</button>` : ""}
     <button type="button" class="${["data-import", "sales-relation-governance", "sales-data-quality-governance"].includes(pageState.section) ? "active" : ""}" data-connection-section="data-import">数据更新</button>
@@ -741,22 +741,24 @@ function renderConnectionWorkbenchHome() {
     <section class="connection-workbench-block"><header><div><h3>我的经营</h3><p>风险优先排列当前负责链接</p></div><button type="button" class="text-button" data-workbench-go="my-links">查看全部 →</button></header><div class="connection-workbench-mine-stats"><span>正常 <b>${normalCount}</b></span><span>向好 <b>${summary.better || 0}</b></span><span>风险 <b>${summary.risk || 0}</b></span></div>${renderWorkbenchLinkCards(mine.items, { emptyText: "当前账号暂无负责链接" })}</section>
     <section class="connection-workbench-block is-risk"><header><div><h3>风险链接</h3><p>优先处理经营指标明显下降的连接</p></div><button type="button" class="text-button" data-workbench-my-filter="worse">查看风险链接 →</button></header>${renderWorkbenchLinkCards(risks, { emptyText: "当前没有风险链接", limit: 4 })}</section>
     <section class="connection-workbench-block"><header><div><h3>重点关注</h3><p>当前账号主动收藏的重要链接</p></div><button type="button" class="text-button" data-workbench-my-filter="followed">查看全部关注 →</button></header>${renderWorkbenchLinkCards(followed, { emptyText: "尚未关注链接", limit: 4, showFollow: true })}</section>
-    <section class="connection-workbench-block is-all-links"><header><div><h3>${pageState.listFilters.includeHistorical ? "全部历史 Link 资产" : "当前经营 Link"}</h3><p>当前经营 ${pageState.operatingSummary.operatingCount || 0} · 历史/退出 ${pageState.operatingSummary.historicalCount || 0} · 历史总资产 ${pageState.operatingSummary.historicalAssetCount || 0}</p></div></header>${renderToolbar()}${renderList()}</section>
+    <section class="connection-workbench-block is-all-links"><header><div><h3>全部链接</h3><p>当前经营 ${pageState.operatingSummary.operatingCount || 0} · 历史/退出 ${pageState.operatingSummary.historicalCount || 0} · 历史总数 ${pageState.operatingSummary.historicalAssetCount || 0}</p></div></header>${renderToolbar()}${renderList()}</section>
   </section>`;
 }
 
 function renderToolbar() {
   const platforms = [...new Set(pageState.items.map((item) => item.platform).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"));
-  const shops = [...new Map(pageState.items.map((item) => [item.shopId, { id: item.shopId, name: shopName(item) }])).values()].sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+  const shops = [...new Map(pageState.items.map((item) => [item.shopId, { id: item.shopId, name: shopName(item), platform: item.platform }])).values()]
+    .map((shop) => ({ ...shop, label: `${businessPlatformLabel(shop.platform)} · ${shop.name}` }))
+    .sort((a, b) => a.label.localeCompare(b.label, "zh-CN"));
   const owners = [...new Map([...(state.people ?? []).filter((person) => person.status === "active"),
     ...(pageState.managementOverview.owners ?? []).filter((owner) => owner.ownerId !== "unassigned")
       .map((owner) => ({ id: owner.ownerId, name: owner.ownerName, status: "active" }))].map((person) => [person.id, person])).values()];
   const filters = pageState.listFilters;
   return `<div class="connection-list-tools">
     <form class="connection-list-filters" data-connection-list-filters>
-      <input name="search" value="${escapeHtml(filters.search)}" placeholder="搜索名称 / 商品ID / 店铺 / 平台 / 产品编码" aria-label="链接资产统一搜索" />
+      <input name="search" value="${escapeHtml(filters.search)}" placeholder="搜索名称 / 商品ID / 店铺 / 平台 / 产品编码" aria-label="全部链接统一搜索" />
       <select name="platform" aria-label="平台筛选"><option value="">全部平台</option>${platforms.map((platform) => `<option value="${escapeHtml(platform)}" ${filters.platform === platform ? "selected" : ""}>${escapeHtml(platform)}</option>`).join("")}</select>
-      <select name="shopId" aria-label="店铺筛选"><option value="">全部店铺</option>${shops.map((shop) => `<option value="${escapeHtml(shop.id)}" ${filters.shopId === shop.id ? "selected" : ""}>${escapeHtml(shop.name)}</option>`).join("")}</select>
+      <select name="shopId" aria-label="店铺筛选"><option value="">全部店铺</option>${shops.map((shop) => `<option value="${escapeHtml(shop.id)}" ${filters.shopId === shop.id ? "selected" : ""}>${escapeHtml(shop.label)}</option>`).join("")}</select>
       <input name="productCode" value="${escapeHtml(filters.productCode)}" placeholder="筛选产品编码" aria-label="关联产品编码筛选" />
       <select name="ownerId" aria-label="负责人筛选"><option value="">全部负责人</option><option value="unassigned" ${filters.ownerId === "unassigned" ? "selected" : ""}>未分配负责人</option><option value="assigned" ${filters.ownerId === "assigned" ? "selected" : ""}>已分配负责人</option>${owners.map((person) => `<option value="${escapeHtml(person.id)}" ${filters.ownerId === person.id ? "selected" : ""}>${escapeHtml(person.name)}</option>`).join("")}</select>
       <select name="healthStatus" aria-label="健康状态筛选"><option value="">全部健康状态</option>${["growing", "stable", "attention", "risk", "insufficient_data", "no_data"].map((status) => `<option value="${status}" ${filters.healthStatus === status ? "selected" : ""}>${escapeHtml(healthText(status))}</option>`).join("")}</select>
@@ -803,7 +805,7 @@ function renderConnectionAssets() {
     fields: orderedFields, sort: table.sort, loading: table.loading });
   return `<section class="connection-assets company-links-workspace">
     ${renderUiModule("link_data_status", { state: pageState.linkDataStatus })}
-    <section class="link-business-analysis"><header><div><h3>${table.filters.includeHistorical ? "全部历史 Link 资产" : "当前经营 Link"}</h3><p>当前经营 ${table.operatingSummary?.operatingCount || 0} · 历史/退出 ${table.operatingSummary?.historicalCount || 0} · 历史总资产 ${table.operatingSummary?.historicalAssetCount || 0}</p></div></header>${toolbarHtml}${tableHtml}</section>
+    <section class="link-business-analysis"><header><div><h3>全部链接</h3><p>当前经营 ${table.operatingSummary?.operatingCount || 0} · 历史/退出 ${table.operatingSummary?.historicalCount || 0} · 历史总数 ${table.operatingSummary?.historicalAssetCount || 0}</p></div></header>${toolbarHtml}${tableHtml}</section>
   </section>`;
 }
 
@@ -942,7 +944,7 @@ function renderHealthReport() {
 }
 
 function renderList() {
-  if (!pageState.items.length) return `<div class="empty-state"><strong>还没有链接资产</strong><p>请在数据中心选择平台链接经营模板，上传平台导出表建立第一条链接资产。</p></div>`;
+  if (!pageState.items.length) return `<div class="empty-state"><strong>还没有链接</strong><p>请在数据更新中上传平台货品表，建立第一条链接。</p></div>`;
   const filters = pageState.listFilters;
   const items = [...pageState.items];
   const valueForColumn = (item, key) => ({
@@ -974,7 +976,7 @@ function renderList() {
 
 function renderConnectionPagination() {
   const pagination = pageState.pagination;
-  return `<nav class="pagination" aria-label="链接资产分页"><button type="button" class="secondary-button" data-connection-page="${pagination.page - 1}" ${pagination.page <= 1 ? "disabled" : ""}>上一页</button><span>第 ${pagination.page} / ${pagination.totalPages} 页 · 共 ${pagination.total} 条</span><button type="button" class="secondary-button" data-connection-page="${pagination.page + 1}" ${pagination.page >= pagination.totalPages ? "disabled" : ""}>下一页</button></nav>`;
+  return `<nav class="pagination" aria-label="全部链接分页"><button type="button" class="secondary-button" data-connection-page="${pagination.page - 1}" ${pagination.page <= 1 ? "disabled" : ""}>上一页</button><span>第 ${pagination.page} / ${pagination.totalPages} 页 · 共 ${pagination.total} 条</span><button type="button" class="secondary-button" data-connection-page="${pagination.page + 1}" ${pagination.page >= pagination.totalPages ? "disabled" : ""}>下一页</button></nav>`;
 }
 
 function renderActions(item) {
@@ -1665,7 +1667,7 @@ export function bindConnectionCenterPageEvents(render) {
     saveLinkBusinessTableConfig(); pageState.businessTable.indicatorOpen = false; void loadLinkBusinessTablePage(render);
   });
   root.querySelector("[data-clear-link-business-filters]")?.addEventListener("click", () => {
-    pageState.businessTable.filters = { keyword: "", platform: "", shopId: "", ownerId: "", minSales: "", maxSales: "", minProfit: "", maxProfit: "", growthStatus: "", healthStatus: "", hospitalStatus: "", includeHistorical: "", expanded: false };
+    pageState.businessTable.filters = { keyword: "", platform: "", shopId: "", ownerId: "", minSales: "", maxSales: "", minProfit: "", maxProfit: "", growthStatus: "", healthStatus: "", hospitalStatus: "", includeHistorical: "" };
     pageState.businessTable.pagination.page = 1; void loadLinkBusinessTablePage(render);
   });
   root.querySelector("[data-distribution-back]")?.addEventListener("click", (event) => {

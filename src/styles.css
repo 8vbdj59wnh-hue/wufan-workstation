@@ -11182,7 +11182,8 @@ button.content-template-thumb {
 .link-business-toolbar-primary .segmented-control button { min-height: 36px; }
 .link-business-custom-date { display: flex; align-items: center; gap: 5px; color: #667085; font-size: 12px; }
 .link-business-custom-date input { min-height: 36px; border: 1px solid #d7dde3; border-radius: 8px; background: #fff; }
-.link-business-filters summary { width: max-content; color: #475467; font-size: 12px; cursor: pointer; }
+.link-business-filters { display: grid; gap: 8px; }
+.link-business-filters-title { color: #475467; font-size: 12px; }
 .link-business-filters > div { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 10px; }
 .link-business-filters select, .link-business-filters input { min-height: 34px; max-width: 150px; border: 1px solid #d7dde3; border-radius: 8px; background: #fff; font-size: 12px; }
 .link-business-filters label { display: flex; align-items: center; gap: 6px; color: #667085; font-size: 12px; }
@@ -11220,29 +11221,18 @@ button.content-template-thumb {
 .link-indicator-setting-module aside > footer span { margin-left: auto; color: #667085; font-size: 12px; }
 .link-business-table-module { display: grid; min-width: 0; background: #fff; }
 .link-business-table-scroll { max-width: 100%; overflow: auto; }
-.link-business-table-module table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; table-layout: auto; }
-.link-business-table-module th, .link-business-table-module td { min-width: 112px; padding: 10px 12px; border-bottom: 1px solid #edf0f2; color: #475467; font-size: 12px; text-align: right; white-space: nowrap; vertical-align: middle; }
+.link-business-table-module table { width: max-content; border-collapse: separate; border-spacing: 0; table-layout: auto; }
+.link-business-table-module th, .link-business-table-module td { padding: 8px 6px; border-bottom: 1px solid #edf0f2; color: #475467; font-size: 12px; text-align: right; white-space: nowrap; vertical-align: middle; }
 .link-business-table-module th { position: sticky; top: 0; z-index: 2; background: #f7f9fb; color: #667085; font-weight: 600; }
 .link-business-table-module th[data-align="left"], .link-business-table-module td[data-align="left"] { text-align: left; }
 .link-business-table-module th[data-align="center"], .link-business-table-module td[data-align="center"] { text-align: center; }
 .link-business-table-module th[data-align="right"], .link-business-table-module td[data-align="right"] { text-align: right; }
 .link-business-table-module th button { display: inline-flex; align-items: center; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
-.link-business-table-module th[data-field="image"], .link-business-table-module td[data-field="image"] { min-width: 76px; width: 76px; }
-.link-business-table-module th[data-field="name"], .link-business-table-module td[data-field="name"] { min-width: 260px; width: 260px; }
-.link-business-table-module th[data-field="periodStart"], .link-business-table-module td[data-field="periodStart"],
-.link-business-table-module th[data-field="periodEnd"], .link-business-table-module td[data-field="periodEnd"],
-.link-business-table-module th[data-field="statisticsDate"], .link-business-table-module td[data-field="statisticsDate"] { min-width: 120px; }
-.link-business-table-module th[data-field="productTags"], .link-business-table-module td[data-field="productTags"] { min-width: 160px; }
-.link-business-table-module th[data-field="bounceRate"], .link-business-table-module td[data-field="bounceRate"],
-.link-business-table-module th[data-field="searchPayConversionRate"], .link-business-table-module td[data-field="searchPayConversionRate"],
-.link-business-table-module th[data-field="searchPayBuyerCount"], .link-business-table-module td[data-field="searchPayBuyerCount"],
-.link-business-table-module th[data-field="structuredDetailConversionRate"], .link-business-table-module td[data-field="structuredDetailConversionRate"],
-.link-business-table-module th[data-field="structuredDetailTransactionShare"], .link-business-table-module td[data-field="structuredDetailTransactionShare"] { min-width: 176px; }
-.link-business-table-module th[data-field="actions"], .link-business-table-module td[data-field="actions"] { min-width: 92px; width: 92px; }
+.link-business-table-module th[data-field="image"], .link-business-table-module td[data-field="image"] { min-width: 60px; width: 60px; }
 .link-business-table-module td small { display: block; margin-top: 3px; color: #98a2b3; font-size: 10px; }
 .link-business-table-module > footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 18px; color: #667085; font-size: 12px; }
 .link-business-table-module > footer div { display: flex; gap: 8px; }
-.link-data-name { display: grid; gap: 3px; max-width: 280px; padding: 0; border: 0; background: transparent; text-align: left; cursor: pointer; }
+.link-data-name { display: grid; gap: 3px; max-width: 220px; padding: 0; border: 0; background: transparent; text-align: left; cursor: pointer; }
 .link-data-name strong, .link-data-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .link-image-module { position: relative; display: inline-grid; place-items: center; width: 48px; height: 48px; overflow: hidden; border-radius: 10px; background: #f2f4f7; color: #98a2b3; }
 .link-image-module img { position: relative; z-index: 1; width: 100%; height: 100%; object-fit: cover; }

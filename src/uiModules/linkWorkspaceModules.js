@@ -29,7 +29,7 @@ export function renderLinkHospitalOverview({ overviewHtml = "", listHtml = "", a
   return `<section class="link-hospital-overview-module" data-module-key="link_hospital_overview">${overviewHtml}${listHtml}${actionsHtml}</section>`;
 }
 
-register("link_filter", "LinkFilter", "复用链接资产既有搜索、筛选、排序与字段设置能力。", ["BusinessLink", "QueryBusinessLinks"], renderLinkFilter);
+register("link_filter", "LinkFilter", "复用全部链接页面既有搜索、筛选、排序与字段设置能力。", ["BusinessLink", "QueryBusinessLinks"], renderLinkFilter);
 register("link_detail_header", "LinkDetailHeader", "链接详情 Workspace 的统一身份、渠道与经营操作头部。", ["BusinessLink", "ProductRelation"], renderLinkDetailHeader);
 register("link_business_summary", "LinkBusinessSummary", "组合既有核心指标、趋势、健康与产品摘要。", ["BusinessLink", "ConnectionPeriodSnapshot", "ConnectionHealthRecord"], renderLinkBusinessSummary);
 register("link_sales_analysis", "LinkSalesAnalysis", "组合既有平台表现、ERP销售、SKU销售与趋势能力。", ["ConnectionPeriodSnapshot", "ConnectionSkuSalesFact"], renderLinkSalesAnalysis);

@@ -83,11 +83,10 @@ export function reconcileErpSyncRun(syncRunId, { failAfterStage = "" } = {}) {
           SET inventoryCurrentState='missing',inventoryMissingAt=COALESCE(inventoryMissingAt,@now),updatedAt=@now
           WHERE COALESCE(lastSeenInventoryBatchId,'')<>@batchId AND inventoryCurrentState='active'
         `).run({ batchId: run.inventoryBatchId, now }).changes;
-        result.links.missing = database.prepare(`
-          UPDATE sales_links
-          SET currentState='missing',missingAt=COALESCE(missingAt,@now),updatedAt=@now
-          WHERE COALESCE(lastSeenBatchId,'')<>@batchId AND currentState='active'
-        `).run({ batchId: run.platformGoodsBatchId, now }).changes;
+        // 平台货品同步按增量资产原则执行。本批未出现不代表Link退出经营，
+        // Link转为missing必须由明确的业务生命周期动作触发。
+        result.links.missing = 0;
+        result.links.missingPolicy = "explicit_business_action_only";
         result.platformSkus.missing = database.prepare(`
           UPDATE sales_link_skus
           SET currentState='missing',missingAt=COALESCE(missingAt,@now),updatedAt=@now

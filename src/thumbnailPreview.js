@@ -11,6 +11,7 @@ const thumbnailPreviewSelector = [
   ".work-form-image",
   ".form-renderer-image-preview",
   ".method-media",
+  "[data-link-image-preview]",
 ].join(",");
 
 const previewGap = 12;
@@ -48,12 +49,12 @@ function hideThumbnailPreview() {
   if (previewImage !== null) previewImage.removeAttribute("src");
 }
 
-function getImageDisplaySize(image, viewportWidth, viewportHeight) {
+function getImageDisplaySize(image, viewportWidth, viewportHeight, maximumWidth = previewMaxWidth) {
   const naturalWidth = image.naturalWidth || image.width || previewMaxWidth;
   const naturalHeight = image.naturalHeight || image.height || naturalWidth;
   const maxAvailableWidth = Math.max(120, viewportWidth - previewGap * 2);
   const maxAvailableHeight = Math.max(120, viewportHeight - previewGap * 2);
-  const targetWidth = Math.min(naturalWidth, previewMaxWidth, maxAvailableWidth);
+  const targetWidth = Math.min(naturalWidth, maximumWidth, maxAvailableWidth);
   const widthScale = targetWidth / naturalWidth;
   const heightAtWidth = naturalHeight * widthScale;
 
@@ -76,17 +77,26 @@ function positionThumbnailPreview(anchor) {
   const rect = anchor.getBoundingClientRect();
   const viewportWidth = window.innerWidth;
   const viewportHeight = window.innerHeight;
-  const { width, height } = getImageDisplaySize(previewImage, viewportWidth, viewportHeight);
+  const configuredWidth = Number(anchor.dataset.previewMaxWidth || 0);
+  const { width, height } = getImageDisplaySize(previewImage, viewportWidth, viewportHeight,
+    configuredWidth > 0 ? configuredWidth : previewMaxWidth);
 
   previewElement.style.width = `${Math.round(width)}px`;
   previewImage.style.width = `${Math.round(width)}px`;
   previewImage.style.height = `${Math.round(height)}px`;
 
-  let left = rect.right + previewGap;
-  if (left + width > viewportWidth - previewGap) left = rect.left - width - previewGap;
+  let left;
+  let top;
+  if (anchor.matches("[data-link-image-preview]")) {
+    left = Math.min(Math.max(rect.left, previewGap), viewportWidth - width - previewGap);
+    top = rect.bottom + previewGap;
+    if (top + height > viewportHeight - previewGap) top = rect.top - height - previewGap;
+  } else {
+    left = rect.right + previewGap;
+    if (left + width > viewportWidth - previewGap) left = rect.left - width - previewGap;
+    top = rect.top;
+  }
   if (left < previewGap) left = previewGap;
-
-  let top = rect.top;
   if (top + height > viewportHeight - previewGap) top = viewportHeight - height - previewGap;
   if (top < previewGap) top = previewGap;
 
