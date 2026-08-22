@@ -18,6 +18,28 @@ function addDays(dateText, days) {
   return value.toISOString().slice(0, 10);
 }
 
+function shanghaiMonth(value = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit" }).formatToParts(value);
+  const read = (type) => parts.find((part) => part.type === type)?.value;
+  return `${read("year")}-${read("month")}`;
+}
+
+function monthRange(value = "") {
+  const targetMonth = clean(value) || shanghaiMonth();
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(targetMonth)) fail("目标月份格式无效。");
+  const [year, month] = targetMonth.split("-").map(Number);
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return { targetMonth, startDate: `${targetMonth}-01`, endDate: `${targetMonth}-${String(lastDay).padStart(2, "0")}` };
+}
+
+function profitMargin(profit, sales) {
+  const salesValue = Number(sales);
+  const profitValue = Number(profit);
+  return Number.isFinite(salesValue) && salesValue !== 0 && Number.isFinite(profitValue)
+    ? Math.round((profitValue / salesValue + Number.EPSILON) * 1_000_000) / 1_000_000
+    : null;
+}
+
 function median(values) {
   const sorted = [...values].sort((left, right) => left - right);
   const middle = Math.floor(sorted.length / 2);
@@ -74,6 +96,8 @@ function buildSuggestion(database, salesLinkId) {
       WHERE saleDate BETWEEN ? AND ?`).get(addDays(latestDate, -89), latestDate).count);
     return { available: false, reason: coverageDays < 30 ? `最近数据仅覆盖${coverageDays}天，少于30天。` : "最近没有完整的30天数据窗口。", windows, baselineStart: null, baselineEnd: null };
   }
+  const salesAmount = roundMoney(median(completeWindows.map((item) => item.salesAmount)));
+  const profitAmount = roundMoney(median(completeWindows.map((item) => item.profitAmount)));
   return {
     available: true,
     reason: `采用最近${completeWindows.length}个完整30天窗口的中位数。`,
@@ -81,8 +105,9 @@ function buildSuggestion(database, salesLinkId) {
     baselineStart: completeWindows.at(-1).start,
     baselineEnd: completeWindows[0].end,
     values: {
-      sales_amount: roundMoney(median(completeWindows.map((item) => item.salesAmount))),
-      profit_amount: roundMoney(median(completeWindows.map((item) => item.profitAmount))),
+      sales_amount: salesAmount,
+      profit_amount: profitAmount,
+      profit_margin: profitMargin(profitAmount, salesAmount),
     },
   };
 }
@@ -91,9 +116,14 @@ function decoratePlan(database, plan) {
   if (!plan) return null;
   const metrics = database.prepare("SELECT * FROM connection_goal_metrics WHERE goalPlanId=? ORDER BY metricCode DESC").all(plan.id)
     .map((metric) => ({ ...metric, metricName: CONNECTION_GOAL_METRICS[metric.metricCode] || metric.metricCode }));
+  const sales = metrics.find((metric) => metric.metricCode === "sales_amount");
+  const profit = metrics.find((metric) => metric.metricCode === "profit_amount");
   return {
     ...plan,
     positioningName: CONNECTION_POSITIONING_TYPES[plan.positioningType] || plan.positioningType,
+    targetMonth: plan.effectiveFrom?.slice(0, 7) || null,
+    suggestedProfitMargin: profitMargin(profit?.suggestedTargetValue, sales?.suggestedTargetValue),
+    finalProfitMargin: profitMargin(profit?.finalTargetValue, sales?.finalTargetValue),
     metrics,
   };
 }
@@ -164,30 +194,35 @@ export function confirmConnectionGoalPlan(connectionId, planId, input = {}, cont
   if (!plan) fail("待确认目标计划不存在或状态已变化。", 409);
   const metrics = database.prepare("SELECT * FROM connection_goal_metrics WHERE goalPlanId=?").all(plan.id);
   const salesAmount = clean(input.salesAmount);
+  const marginInput = clean(input.profitMargin);
   const profitAmount = clean(input.profitAmount);
+  const salesValue = salesAmount === "" ? Number.NaN : Number(salesAmount);
+  const marginPercent = marginInput === "" ? null : Number(marginInput);
+  if (marginPercent !== null && (!Number.isFinite(marginPercent) || marginPercent < -100 || marginPercent > 100)) fail("目标毛利率必须是-100%至100%之间的数字。");
   const values = {
-    sales_amount: salesAmount === "" ? Number.NaN : Number(salesAmount),
-    profit_amount: profitAmount === "" ? Number.NaN : Number(profitAmount),
+    sales_amount: salesValue,
+    profit_amount: marginPercent === null ? (profitAmount === "" ? Number.NaN : Number(profitAmount)) : roundMoney(salesValue * marginPercent / 100),
   };
   if (!Number.isFinite(values.sales_amount) || values.sales_amount < 0) fail("销售目标必须是大于或等于0的数字。");
   if (!Number.isFinite(values.profit_amount)) fail("利润目标必须是有效数字。");
+  const targetRange = monthRange(input.targetMonth);
   const adjusted = metrics.some((metric) => metric.suggestedTargetValue === null
     || Math.abs(Number(metric.suggestedTargetValue) - values[metric.metricCode]) > 0.005);
-  const approvalReason = clean(input.approvalReason);
-  if (adjusted && !approvalReason) fail("调整系统建议或人工设置目标时必须填写原因。");
+  const approvalReason = clean(input.approvalReason) || (adjusted ? "人工调整经营目标" : "按系统建议确认");
   if (approvalReason.length > 500) fail("确认原因不能超过500个字符。");
 
   database.transaction(() => {
     const timestamp = now();
-    const effectiveFrom = timestamp.slice(0, 10);
-    const effectiveTo = addDays(effectiveFrom, 29);
-    database.prepare(`UPDATE connection_goal_plans SET status='expired',effectiveTo=?,updatedAt=?
-      WHERE connectionId=? AND status='active'`).run(effectiveFrom, timestamp, profile.id);
+    const effectiveFrom = targetRange.startDate;
+    const effectiveTo = targetRange.endDate;
+    const previousEffectiveTo = addDays(effectiveFrom, -1);
+    database.prepare(`UPDATE connection_goal_plans SET status='expired',effectiveTo=CASE WHEN effectiveFrom>? THEN effectiveFrom ELSE ? END,updatedAt=?
+      WHERE connectionId=? AND status='active'`).run(previousEffectiveTo, previousEffectiveTo, timestamp, profile.id);
     const updateMetric = database.prepare("UPDATE connection_goal_metrics SET finalTargetValue=? WHERE goalPlanId=? AND metricCode=?");
     for (const metric of metrics) updateMetric.run(values[metric.metricCode], plan.id, metric.metricCode);
     database.prepare(`UPDATE connection_goal_plans SET targetMode=?,status='active',effectiveFrom=?,effectiveTo=?,approvedBy=?,approvalReason=?,updatedAt=? WHERE id=?`).run(
       adjusted ? (metrics.every((metric) => metric.suggestedTargetValue === null) ? "manual" : "hybrid") : "system_suggested",
-      effectiveFrom, effectiveTo, userId, approvalReason || "按系统建议确认", timestamp, plan.id,
+      effectiveFrom, effectiveTo, userId, approvalReason, timestamp, plan.id,
     );
   })();
   return { ...readConnectionGoalPlans(profile.id, { ...context, database }), changed: true };

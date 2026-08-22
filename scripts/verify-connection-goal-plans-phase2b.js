@@ -20,6 +20,10 @@ function dateAtOffset(start, offset) {
   return date.toISOString().slice(0, 10);
 }
 
+function goalMetricValue(plan, metricCode) {
+  return plan.metrics.find((item) => item.metricCode === metricCode)?.finalTargetValue;
+}
+
 try {
   initializeDatabase({ reset: true });
   const database = getDatabase();
@@ -36,16 +40,14 @@ try {
   database.prepare(`INSERT INTO sales_links
     (id,shopId,platformGoodsId,title,identityStrength,originSource,enrichmentStatus,currentState,createdAt,updatedAt)
     VALUES ('phase2b-link','phase2b-shop','phase2b-goods','Phase 2B验证链接','strong','manual','complete','active',?,?)`).run(timestamp, timestamp);
-  database.prepare(`INSERT INTO connection_profiles
-    (id,salesLinkId,name,ownerId,status,level,originSource,createdAt,updatedAt)
-    VALUES ('phase2b-connection','phase2b-link','Phase 2B验证链接',?,'active','new','manual',?,?)`).run(owner.id, timestamp, timestamp);
-  setConnectionBusinessPositioning("phase2b-connection", {
+  database.prepare(`UPDATE sales_links SET displayName='Phase 2B验证链接',ownerId=?,managementStatus='active',managementLevel='new',managementOriginSource='manual' WHERE id='phase2b-link'`).run(owner.id);
+  setConnectionBusinessPositioning("phase2b-link", {
     positioningType: "sales_growth",
     decisionReason: "Phase 2B验证定位",
   }, { database, userId: owner.id });
 
-  assert.throws(() => createConnectionGoalSuggestion("phase2b-connection", { database, userId: viewer.id }), /仅管理员或该链接负责人/);
-  const insufficient = createConnectionGoalSuggestion("phase2b-connection", { database, userId: owner.id });
+  assert.throws(() => createConnectionGoalSuggestion("phase2b-link", { database, userId: viewer.id }), /仅管理员或该链接负责人/);
+  const insufficient = createConnectionGoalSuggestion("phase2b-link", { database, userId: owner.id });
   assert.equal(insufficient.awaitingConfirmation.status, "draft");
   assert.equal(insufficient.awaitingConfirmation.targetMode, "manual");
   assert.equal(insufficient.awaitingConfirmation.metrics.every((item) => item.suggestedTargetValue === null), true);
@@ -72,7 +74,7 @@ try {
   }
   const factCountBefore = database.prepare("SELECT COUNT(*) count FROM connection_sku_sales_daily_facts").get().count;
 
-  const suggested = createConnectionGoalSuggestion("phase2b-connection", { database, userId: owner.id });
+  const suggested = createConnectionGoalSuggestion("phase2b-link", { database, userId: owner.id });
   assert.equal(suggested.awaitingConfirmation.status, "pending_confirm");
   assert.equal(suggested.history.filter((plan) => plan.status === "cancelled").length, 1);
   assert.equal(suggested.suggestion.windows.filter((window) => window.complete).length, 3);
@@ -80,32 +82,37 @@ try {
   const profitSuggestion = suggested.awaitingConfirmation.metrics.find((item) => item.metricCode === "profit_amount");
   assert.equal(salesSuggestion.suggestedTargetValue, 3000);
   assert.equal(profitSuggestion.suggestedTargetValue, 300);
+  assert.equal(suggested.awaitingConfirmation.suggestedProfitMargin, 0.1);
   assert.equal(suggested.awaitingConfirmation.metrics.reduce((sum, item) => sum + item.weight, 0), 1);
 
-  const first = confirmConnectionGoalPlan("phase2b-connection", suggested.awaitingConfirmation.id, {
+  const first = confirmConnectionGoalPlan("phase2b-link", suggested.awaitingConfirmation.id, {
+    targetMonth: "2026-08",
     salesAmount: 3000,
-    profitAmount: 300,
+    profitMargin: 10,
   }, { database, userId: owner.id });
   assert.equal(first.current.status, "active");
   assert.equal(first.current.targetMode, "system_suggested");
   assert.equal(first.current.approvalReason, "按系统建议确认");
+  assert.equal(first.current.targetMonth, "2026-08");
+  assert.equal(first.current.effectiveFrom, "2026-08-01");
+  assert.equal(first.current.effectiveTo, "2026-08-31");
+  assert.equal(first.current.finalProfitMargin, 0.1);
 
-  const nextSuggestion = createConnectionGoalSuggestion("phase2b-connection", { database, userId: owner.id });
-  assert.throws(() => confirmConnectionGoalPlan("phase2b-connection", nextSuggestion.awaitingConfirmation.id, {
+  const nextSuggestion = createConnectionGoalSuggestion("phase2b-link", { database, userId: owner.id });
+  const second = confirmConnectionGoalPlan("phase2b-link", nextSuggestion.awaitingConfirmation.id, {
+    targetMonth: "2026-09",
     salesAmount: 3600,
-    profitAmount: 360,
-  }, { database, userId: owner.id }), /必须填写原因/);
-  const second = confirmConnectionGoalPlan("phase2b-connection", nextSuggestion.awaitingConfirmation.id, {
-    salesAmount: 3600,
-    profitAmount: 360,
-    approvalReason: "负责人结合下月活动调整目标",
+    profitMargin: 10,
   }, { database, userId: owner.id });
   assert.equal(second.current.targetMode, "hybrid");
+  assert.equal(second.current.approvalReason, "人工调整经营目标");
+  assert.equal(second.current.targetMonth, "2026-09");
+  assert.equal(goalMetricValue(second.current, "profit_amount"), 360);
   assert.equal(second.history.filter((plan) => plan.status === "expired").length, 1);
-  assert.equal(database.prepare("SELECT COUNT(*) count FROM connection_goal_plans WHERE connectionId=? AND status='active'").get("phase2b-connection").count, 1);
-  assert.equal(database.prepare("SELECT COUNT(*) count FROM connection_goal_plans WHERE connectionId=?").get("phase2b-connection").count, 3);
+  assert.equal(database.prepare("SELECT COUNT(*) count FROM connection_goal_plans WHERE connectionId=? AND status='active'").get("phase2b-link").count, 1);
+  assert.equal(database.prepare("SELECT COUNT(*) count FROM connection_goal_plans WHERE connectionId=?").get("phase2b-link").count, 3);
   assert.equal(database.prepare("SELECT COUNT(*) count FROM connection_sku_sales_daily_facts").get().count, factCountBefore);
-  assert.equal(readConnectionGoalPlans("phase2b-connection", { database, userId: viewer.id }).permissions.canEdit, false);
+  assert.equal(readConnectionGoalPlans("phase2b-link", { database, userId: viewer.id }).permissions.canEdit, false);
   assert.equal(database.pragma("foreign_key_check").length, 0);
   assert.equal(database.pragma("integrity_check", { simple: true }), "ok");
 

@@ -49,14 +49,11 @@ try {
   database.prepare(`INSERT INTO sales_links
     (id,shopId,platformGoodsId,title,identityStrength,originSource,enrichmentStatus,currentState,createdAt,updatedAt)
     VALUES ('phase2a-link','phase2a-shop','phase2a-goods','Phase 2A验证链接','strong','manual','complete','active',?,?)`).run(timestamp, timestamp);
-  database.prepare(`INSERT INTO connection_profiles
-    (id,salesLinkId,name,ownerId,status,level,originSource,createdAt,updatedAt)
-    VALUES ('phase2a-connection','phase2a-link','Phase 2A验证链接',?,'active','new','manual',?,?)`).run(owner.id, timestamp, timestamp);
+  database.prepare(`UPDATE sales_links SET displayName='Phase 2A验证链接',ownerId=?,managementStatus='active',managementLevel='new',managementOriginSource='manual' WHERE id='phase2a-link'`).run(owner.id);
 
   const protectedTables = [
     "sales_links",
     "sales_link_skus",
-    "connection_sku_sales_facts",
     "connection_sku_sales_daily_facts",
   ];
   const countRows = () => Object.fromEntries(protectedTables.map((table) => [
@@ -65,29 +62,24 @@ try {
   ]));
   const before = countRows();
 
-  const initial = readConnectionGoalFoundation("phase2a-connection", { database, userId: owner.id });
+  const initial = readConnectionGoalFoundation("phase2a-link", { database, userId: owner.id });
   assert.equal(initial.current, null);
   assert.equal(initial.templates.length, 4);
   assert.equal(initial.permissions.canEdit, true);
-  assert.equal(readConnectionGoalFoundation("phase2a-connection", { database, userId: viewer.id }).permissions.canEdit, false);
-  assert.throws(() => setConnectionBusinessPositioning("phase2a-connection", {
+  assert.equal(readConnectionGoalFoundation("phase2a-link", { database, userId: viewer.id }).permissions.canEdit, false);
+  assert.throws(() => setConnectionBusinessPositioning("phase2a-link", {
     positioningType: "sales_growth",
     decisionReason: "无权限验证",
   }, { database, userId: viewer.id }), /仅管理员或该链接负责人/);
-  assert.throws(() => setConnectionBusinessPositioning("phase2a-connection", {
+  const first = setConnectionBusinessPositioning("phase2a-link", {
     positioningType: "sales_growth",
-    decisionReason: "",
-  }, { database, userId: owner.id }), /必须填写原因/);
-
-  const first = setConnectionBusinessPositioning("phase2a-connection", {
-    positioningType: "sales_growth",
-    decisionReason: "首次人工确定经营定位",
   }, { database, userId: owner.id });
   assert.equal(first.changed, true);
   assert.equal(first.current.positioningType, "sales_growth");
+  assert.equal(first.current.decisionReason, "人工修改经营定位");
   assert.equal(first.currentTemplate.positioningType, "sales_growth");
 
-  const second = setConnectionBusinessPositioning("phase2a-connection", {
+  const second = setConnectionBusinessPositioning("phase2a-link", {
     positioningType: "balanced_sales",
     decisionReason: "负责人复核后调整定位",
   }, { database, userId: owner.id });
@@ -96,7 +88,7 @@ try {
   assert.equal(second.history.filter((item) => item.status === "active").length, 1);
   assert.ok(second.history.find((item) => item.status === "historical")?.effectiveTo);
 
-  const repeated = setConnectionBusinessPositioning("phase2a-connection", {
+  const repeated = setConnectionBusinessPositioning("phase2a-link", {
     positioningType: "balanced_sales",
     decisionReason: "重复提交验证",
   }, { database, userId: owner.id });

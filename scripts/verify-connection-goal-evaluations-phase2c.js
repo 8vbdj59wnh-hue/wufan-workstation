@@ -36,10 +36,8 @@ try {
   database.prepare(`INSERT INTO sales_links
     (id,shopId,platformGoodsId,title,identityStrength,originSource,enrichmentStatus,currentState,createdAt,updatedAt)
     VALUES ('phase2c-link','phase2c-shop','phase2c-goods','Phase 2C验证链接','strong','manual','complete','active',?,?)`).run(timestamp, timestamp);
-  database.prepare(`INSERT INTO connection_profiles
-    (id,salesLinkId,name,ownerId,status,level,originSource,createdAt,updatedAt)
-    VALUES ('phase2c-connection','phase2c-link','Phase 2C验证链接',?,'active','new','manual',?,?)`).run(owner.id, timestamp, timestamp);
-  setConnectionBusinessPositioning("phase2c-connection", {
+  database.prepare(`UPDATE sales_links SET displayName='Phase 2C验证链接',ownerId=?,managementStatus='active',managementLevel='new',managementOriginSource='manual' WHERE id='phase2c-link'`).run(owner.id);
+  setConnectionBusinessPositioning("phase2c-link", {
     positioningType: "sales_growth",
     decisionReason: "Phase 2C验证定位",
   }, { database, userId: owner.id });
@@ -59,51 +57,52 @@ try {
   const insertFact = database.prepare(`INSERT INTO connection_sku_sales_daily_facts
     (id,salesLinkId,salesLinkSkuId,erpSkuId,saleDate,quantity,salesAmount,costAmount,profitAmount,factType,sourceBatchId,sourceRowNumber,rawDataJson,createdAt,updatedAt)
     VALUES (?,?,?,?,?,1,100,90,10,'normal','phase2c-import',?,'{}',?,?)`);
-  for (let index = 1; index < 30; index += 1) {
+  for (let index = 0; index < 30; index += 1) {
+    if (index === 13) continue;
     insertFact.run(`phase2c-fact-${index}`, "phase2c-link", "phase2c-link-sku", "phase2c-erp-sku", dateAtOffset("2026-07-19", index), index + 1, timestamp, timestamp);
   }
 
-  const draft = createConnectionGoalSuggestion("phase2c-connection", { database, userId: owner.id });
+  const draft = createConnectionGoalSuggestion("phase2c-link", { database, userId: owner.id });
   assert.equal(draft.awaitingConfirmation.status, "draft");
-  const manual = confirmConnectionGoalPlan("phase2c-connection", draft.awaitingConfirmation.id, {
+  const manual = confirmConnectionGoalPlan("phase2c-link", draft.awaitingConfirmation.id, {
+    targetMonth: "2026-08",
     salesAmount: 1000,
-    profitAmount: 1000,
-    approvalReason: "数据不足时由负责人手工设置目标",
+    profitMargin: 100,
   }, { database, userId: owner.id });
-  const insufficient = evaluateConnectionGoal("phase2c-connection", { database, today: "2026-08-18" });
+  const insufficient = evaluateConnectionGoal("phase2c-link", { database, today: "2026-08-18" });
   assert.equal(insufficient.evaluationStatus, "pending");
   assert.equal(insufficient.reasonCode, "insufficient_data");
-  assert.equal(insufficient.coverageDays, 29);
+  assert.equal(insufficient.coverageDays, 16);
 
-  insertFact.run("phase2c-fact-0", "phase2c-link", "phase2c-link-sku", "phase2c-erp-sku", "2026-07-19", 1, timestamp, timestamp);
+  insertFact.run("phase2c-fact-13", "phase2c-link", "phase2c-link-sku", "phase2c-erp-sku", "2026-08-01", 14, timestamp, timestamp);
   const factCountBeforeEvaluation = database.prepare("SELECT COUNT(*) count FROM connection_sku_sales_daily_facts").get().count;
-  const protectedResult = evaluateConnectionGoal("phase2c-connection", { database, today: "2026-08-18" });
-  assert.equal(protectedResult.salesActual, 3000);
-  assert.equal(protectedResult.profitActual, 300);
-  assert.equal(protectedResult.salesAchievement, 3);
-  assert.equal(protectedResult.profitAchievement, 0.3);
-  assert.equal(protectedResult.totalAchievement, 1.14);
+  const protectedResult = evaluateConnectionGoal("phase2c-link", { database, today: "2026-08-18" });
+  assert.equal(protectedResult.salesActual, 1700);
+  assert.equal(protectedResult.profitActual, 170);
+  assert.equal(protectedResult.salesAchievement, 1.7);
+  assert.equal(protectedResult.profitAchievement, 0.17);
+  assert.equal(protectedResult.totalAchievement, 1.101);
   assert.equal(protectedResult.grade, "underperforming");
   assert.equal(database.prepare("SELECT COUNT(*) count FROM connection_sku_sales_daily_facts").get().count, factCountBeforeEvaluation);
-  const recalculated = evaluateConnectionGoal("phase2c-connection", { database, today: "2026-08-18" });
+  const recalculated = evaluateConnectionGoal("phase2c-link", { database, today: "2026-08-18" });
   assert.equal(recalculated.id, protectedResult.id);
   assert.equal(database.prepare("SELECT COUNT(*) count FROM connection_goal_evaluations WHERE goalPlanId=?").get(manual.current.id).count, 1);
 
-  const suggestion = createConnectionGoalSuggestion("phase2c-connection", { database, userId: owner.id });
-  const secondPlan = confirmConnectionGoalPlan("phase2c-connection", suggestion.awaitingConfirmation.id, {
-    salesAmount: 2000,
-    profitAmount: 200,
-    approvalReason: "验证150%完成率封顶",
+  const suggestion = createConnectionGoalSuggestion("phase2c-link", { database, userId: owner.id });
+  const secondPlan = confirmConnectionGoalPlan("phase2c-link", suggestion.awaitingConfirmation.id, {
+    targetMonth: "2026-08",
+    salesAmount: 1000,
+    profitMargin: 10,
   }, { database, userId: owner.id });
-  const excellent = evaluateConnectionGoal("phase2c-connection", { database, today: "2026-08-18" });
-  assert.equal(excellent.salesAchievement, 1.5);
-  assert.equal(excellent.profitAchievement, 1.5);
+  const excellent = evaluateConnectionGoal("phase2c-link", { database, today: "2026-08-18" });
+  assert.equal(excellent.salesAchievement, 1.7);
+  assert.equal(excellent.profitAchievement, 1.7);
   assert.equal(excellent.totalAchievement, 1.5);
   assert.equal(excellent.grade, "excellent");
   assert.equal(database.prepare("SELECT COUNT(*) count FROM connection_goal_plans WHERE status='active'").get().count, 1);
   assert.equal(secondPlan.history.filter((plan) => plan.status === "expired").length, 1);
 
-  const delayed = evaluateConnectionGoal("phase2c-connection", { database, today: "2026-08-20" });
+  const delayed = evaluateConnectionGoal("phase2c-link", { database, today: "2026-08-20" });
   assert.equal(delayed.evaluationStatus, "pending");
   assert.equal(delayed.reasonCode, "data_delayed");
   assert.equal(database.prepare("SELECT COUNT(*) count FROM connection_sku_sales_daily_facts").get().count, factCountBeforeEvaluation);

@@ -107,10 +107,9 @@ export function setConnectionBusinessPositioning(connectionId, input = {}, conte
     throw error;
   }
   const positioningType = clean(input.positioningType);
-  const decisionReason = clean(input.decisionReason);
+  const decisionReason = clean(input.decisionReason) || "人工修改经营定位";
   const decidedBy = clean(context.userId);
   if (!positioningTypes.has(positioningType)) throw new Error("经营定位类型无效。");
-  if (!decisionReason) throw new Error("修改经营定位必须填写原因。");
   if (decisionReason.length > 500) throw new Error("修改原因不能超过500个字符。");
   if (!decidedBy || !database.prepare("SELECT 1 FROM persons WHERE id=? AND status='active'").get(decidedBy)) throw new Error("操作人不存在或已停用。");
 

@@ -568,7 +568,10 @@ function renderGoalPilotMemberAction(item, batch) {
   if (!item.canManage || item.status === "excluded") return "—";
   if (!item.positioningType) return batch.status === "positioning" ? `<form class="goal-pilot-inline-form" data-goal-pilot-positioning data-member-id="${escapeHtml(item.id)}"><select name="positioningType" required><option value="">选择定位</option>${Object.entries(goalPositioningLabels).map(([value,label]) => `<option value="${value}">${label}</option>`).join("")}</select><input name="decisionReason" required maxlength="500" placeholder="确认原因" /><button type="submit" class="secondary-button">确认定位</button></form>` : `<small>等待进入定位确认阶段</small>`;
   if (!item.goalPlanId) return batch.status === "target_confirm" ? `<button type="button" class="secondary-button" data-goal-pilot-suggestion="${escapeHtml(item.id)}">生成目标建议</button>` : `<small>定位已确认，等待目标确认阶段</small>`;
-  if (item.goalStatus !== "active") return batch.status === "target_confirm" ? `<form class="goal-pilot-inline-form goal-pilot-target-form" data-goal-pilot-target data-member-id="${escapeHtml(item.id)}" data-plan-id="${escapeHtml(item.goalPlanId)}"><label>销售<input type="number" name="salesAmount" min="0" step="0.01" required value="${item.salesSuggested ?? ""}" /></label><label>利润<input type="number" name="profitAmount" step="0.01" required value="${item.profitSuggested ?? ""}" /></label><input name="approvalReason" maxlength="500" placeholder="调整时填写原因" /><button type="submit" class="primary-button">确认目标</button></form>` : `<small>等待进入目标确认阶段</small>`;
+  if (item.goalStatus !== "active") {
+    const suggestedMargin = Number(item.salesSuggested) ? (Number(item.profitSuggested || 0) / Number(item.salesSuggested) * 100).toFixed(2) : "";
+    return batch.status === "target_confirm" ? `<form class="goal-pilot-inline-form goal-pilot-target-form" data-goal-pilot-target data-member-id="${escapeHtml(item.id)}" data-plan-id="${escapeHtml(item.goalPlanId)}"><label>月份<input type="month" name="targetMonth" required value="${escapeHtml(currentGoalMonth())}" /></label><label>销售<input type="number" name="salesAmount" min="0" step="0.01" required value="${item.salesSuggested ?? ""}" /></label><label>毛利率<input type="number" name="profitMargin" min="-100" max="100" step="0.01" required value="${escapeHtml(suggestedMargin)}" /></label><label>利润<input type="number" name="profitAmount" data-goal-pilot-profit-target step="0.01" readonly value="${item.profitSuggested ?? ""}" /></label><button type="submit" class="primary-button">确认目标</button></form>` : `<small>等待进入目标确认阶段</small>`;
+  }
   return `<span class="status-pill status-active">已进入目标管理</span>${batch.status === "evaluation" ? `<small>等待现有评价流程计算</small>` : ""}`;
 }
 
@@ -1016,22 +1019,26 @@ function renderConnectionBusinessPositioning(core) {
   const metricText = metrics.map((metric) => `${metric.metricName} ${Math.round(Number(metric.weight || 0) * 100)}%`).join(" · ");
   return `<section class="connection-v3-panel connection-positioning-panel"><header><div><h3>经营定位</h3><p>定位由人工确认，系统不会根据销售数据自动判断。</p></div>${current ? `<span class="status-pill">${escapeHtml(current.positioningName)}</span>` : `<span class="status-pill">未设置</span>`}</header>
     <div class="connection-positioning-summary"><div><span>当前定位</span><strong>${escapeHtml(current?.positioningName || "未设置")}</strong></div><div><span>目标模板</span><strong>${escapeHtml(template?.name || "设置定位后自动关联")}</strong><small>${template ? `${template.windowDays}天 · V${template.version}` : "—"}</small></div><div><span>指标权重</span><strong>${escapeHtml(metricText || "—")}</strong></div></div>
-    ${model.permissions?.canEdit ? `<form class="connection-positioning-form" data-connection-positioning-form><label>经营定位<select name="positioningType" required><option value="">请选择</option>${model.options.map((option) => `<option value="${escapeHtml(option.value)}" ${current?.positioningType === option.value ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select></label><label>修改原因<textarea name="decisionReason" rows="2" maxlength="500" required placeholder="说明本次人工判断依据"></textarea></label><button type="submit" class="primary-button">保存定位</button></form>` : `<p class="form-note">普通运营可查看定位；仅管理员或当前链接负责人可以修改。</p>`}
+    ${model.permissions?.canEdit ? `<form class="connection-positioning-form" data-connection-positioning-form><label>经营定位<select name="positioningType" required><option value="">请选择</option>${model.options.map((option) => `<option value="${escapeHtml(option.value)}" ${current?.positioningType === option.value ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select></label><button type="submit" class="primary-button">保存定位</button></form>` : `<p class="form-note">普通运营可查看定位；仅管理员或当前链接负责人可以修改。</p>`}
     ${history.length ? `<details class="connection-positioning-history"><summary>定位历史（${history.length}）</summary><div class="connection-template-list">${history.map((row) => `<article><div><strong>${escapeHtml(row.positioningName)}</strong><span>${escapeHtml(row.status === "active" ? "当前生效" : `${row.effectiveFrom} 至 ${row.effectiveTo || "—"}`)}</span><small>${escapeHtml(row.decisionReason)} · ${escapeHtml(row.decidedByName || "未知操作人")}</small></div></article>`).join("")}</div></details>` : ""}
   </section>`;
 }
 function goalMetric(plan, code) { return plan?.metrics?.find((metric) => metric.metricCode === code) ?? null; }
+function currentGoalMonth() {
+  const value = new Date();
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}`;
+}
 function goalModeText(mode) { return ({ system_suggested: "系统建议", manual: "人工设置", hybrid: "人工调整" })[mode] || mode || "—"; }
 function goalStatusText(status) { return ({ draft: "待人工设置", pending_confirm: "待确认", active: "生效中", expired: "已到期", cancelled: "已取消" })[status] || status || "—"; }
 function goalGradeText(grade) { return ({ excellent: "优秀", good: "良好", on_target: "达标", underperforming: "不达标" })[grade] || "—"; }
 function renderConnectionGoalEvaluation(core) {
   const evaluation = core?.businessGoalEvaluation;
-  if (!evaluation) return `<div class="empty-state compact">正在计算近30天目标达成…</div>`;
+  if (!evaluation) return `<div class="empty-state compact">正在计算月度目标达成…</div>`;
   if (evaluation.evaluationStatus !== "evaluated") {
     const dataPeriod = evaluation.periodStart ? ` · 数据周期 ${evaluation.periodStart} 至 ${evaluation.periodEnd}` : "";
     return `<div class="connection-goal-evaluation pending"><strong>待评价</strong><span>${escapeHtml(evaluation.reason || "暂不满足评价条件")}${escapeHtml(dataPeriod)}</span></div>`;
   }
-  return `<div class="connection-goal-evaluation"><header><div><strong>近30天目标达成</strong><small>${escapeHtml(`${evaluation.periodStart} 至 ${evaluation.periodEnd}`)}</small></div><span class="status-pill goal-grade-${escapeHtml(evaluation.grade)}">${escapeHtml(goalGradeText(evaluation.grade))}</span></header><div class="connection-goal-evaluation-grid"><div><span>销售目标</span><strong>${coreMoney(evaluation.salesTarget)}</strong><small>实际 ${coreMoney(evaluation.salesActual)} · 完成 ${corePercent(evaluation.salesAchievement)}</small></div><div><span>利润目标</span><strong>${coreMoney(evaluation.profitTarget)}</strong><small>实际 ${coreMoney(evaluation.profitActual)} · 完成 ${corePercent(evaluation.profitAchievement)}</small></div><div><span>综合完成率</span><strong>${corePercent(evaluation.totalAchievement)}</strong><small>销售权重 ${corePercent(evaluation.salesWeight)} · 利润权重 ${corePercent(evaluation.profitWeight)}</small></div></div></div>`;
+  return `<div class="connection-goal-evaluation"><header><div><strong>月度目标达成</strong><small>${escapeHtml(`${evaluation.periodStart} 至 ${evaluation.periodEnd}`)}</small></div><span class="status-pill goal-grade-${escapeHtml(evaluation.grade)}">${escapeHtml(goalGradeText(evaluation.grade))}</span></header><div class="connection-goal-evaluation-grid"><div><span>销售目标</span><strong>${coreMoney(evaluation.salesTarget)}</strong><small>实际 ${coreMoney(evaluation.salesActual)} · 完成 ${corePercent(evaluation.salesAchievement)}</small></div><div><span>利润目标</span><strong>${coreMoney(evaluation.profitTarget)}</strong><small>实际 ${coreMoney(evaluation.profitActual)} · 完成 ${corePercent(evaluation.profitAchievement)}</small></div><div><span>综合完成率</span><strong>${corePercent(evaluation.totalAchievement)}</strong><small>销售权重 ${corePercent(evaluation.salesWeight)} · 利润权重 ${corePercent(evaluation.profitWeight)}</small></div></div></div>`;
 }
 function renderConnectionBusinessGoals(core) {
   const model = core?.businessGoals;
@@ -1043,14 +1050,16 @@ function renderConnectionBusinessGoals(core) {
   const profit = goalMetric(current, "profit_amount");
   const pendingSales = goalMetric(awaiting, "sales_amount");
   const pendingProfit = goalMetric(awaiting, "profit_amount");
+  const pendingMarginPercent = awaiting?.suggestedProfitMargin === null || awaiting?.suggestedProfitMargin === undefined ? "" : (Number(awaiting.suggestedProfitMargin) * 100).toFixed(2);
+  const targetMonth = awaiting?.targetMonth || currentGoalMonth();
   const period = current?.effectiveFrom ? `${current.effectiveFrom.slice(0, 10)} 至 ${current.effectiveTo.slice(0, 10)}` : "近30天";
-  return `<section class="connection-v3-panel connection-positioning-panel"><header><div><h3>经营目标</h3><p>目标建议来自销售日报事实的完整30天窗口，不计算完成率或评级。</p></div>${current ? `<span class="status-pill status-active">生效中</span>` : awaiting ? `<span class="status-pill">${escapeHtml(goalStatusText(awaiting.status))}</span>` : ""}</header>
-    ${current ? `<div class="connection-positioning-summary"><div><span>目标周期</span><strong>${escapeHtml(period)}</strong></div><div><span>销售目标</span><strong>${coreMoney(sales?.finalTargetValue)}</strong></div><div><span>利润目标</span><strong>${coreMoney(profit?.finalTargetValue)}</strong></div><div><span>目标来源</span><strong>${escapeHtml(goalModeText(current.targetMode))}</strong></div></div>` : ""}
+  return `<section class="connection-v3-panel connection-positioning-panel"><header><div><h3>经营目标</h3><p>按自然月设置；建议来自最近完整30天销售事实。</p></div>${current ? `<span class="status-pill status-active">生效中</span>` : awaiting ? `<span class="status-pill">${escapeHtml(goalStatusText(awaiting.status))}</span>` : ""}</header>
+    ${current ? `<div class="connection-positioning-summary"><div><span>目标月份</span><strong>${escapeHtml(current.targetMonth || period)}</strong></div><div><span>销售目标</span><strong>${coreMoney(sales?.finalTargetValue)}</strong></div><div><span>目标毛利率</span><strong>${corePercent(current.finalProfitMargin)}</strong></div><div><span>利润目标</span><strong>${coreMoney(profit?.finalTargetValue)}</strong></div><div><span>目标来源</span><strong>${escapeHtml(goalModeText(current.targetMode))}</strong></div></div>` : ""}
     ${renderConnectionGoalEvaluation(core)}
-    ${awaiting ? `<div class="connection-goal-pending"><div class="connection-positioning-summary"><div><span>状态</span><strong>${escapeHtml(goalStatusText(awaiting.status))}</strong></div><div><span>系统建议销售</span><strong>${coreMoney(pendingSales?.suggestedTargetValue)}</strong></div><div><span>系统建议利润</span><strong>${coreMoney(pendingProfit?.suggestedTargetValue)}</strong></div><div><span>基准周期</span><strong>${awaiting.baselineStart ? escapeHtml(`${awaiting.baselineStart} 至 ${awaiting.baselineEnd}`) : "数据不足30天"}</strong></div></div>
-      ${model.permissions?.canEdit ? `<form class="connection-positioning-form connection-goal-confirm-form" data-connection-goal-confirm-form data-plan-id="${escapeHtml(awaiting.id)}"><label>销售目标<input name="salesAmount" type="number" min="0" step="0.01" required value="${pendingSales?.suggestedTargetValue ?? ""}" /></label><label>利润目标<input name="profitAmount" type="number" step="0.01" required value="${pendingProfit?.suggestedTargetValue ?? ""}" /></label><label>调整原因<textarea name="approvalReason" rows="2" maxlength="500" placeholder="按建议确认可留空；修改建议必须填写"></textarea></label><button type="submit" class="primary-button">确认并生效</button></form>` : `<p class="form-note">等待管理员或当前链接负责人确认。</p>`}</div>` : ""}
+    ${awaiting ? `<div class="connection-goal-pending"><div class="connection-positioning-summary"><div><span>状态</span><strong>${escapeHtml(goalStatusText(awaiting.status))}</strong></div><div><span>系统建议销售</span><strong>${coreMoney(pendingSales?.suggestedTargetValue)}</strong></div><div><span>建议毛利率</span><strong>${corePercent(awaiting.suggestedProfitMargin)}</strong></div><div><span>系统建议利润</span><strong>${coreMoney(pendingProfit?.suggestedTargetValue)}</strong></div><div><span>基准周期</span><strong>${awaiting.baselineStart ? escapeHtml(`${awaiting.baselineStart} 至 ${awaiting.baselineEnd}`) : "数据不足30天"}</strong></div></div>
+      ${model.permissions?.canEdit ? `<form class="connection-positioning-form connection-goal-confirm-form" data-connection-goal-confirm-form data-plan-id="${escapeHtml(awaiting.id)}"><label>目标月份<input name="targetMonth" type="month" required value="${escapeHtml(targetMonth)}" /></label><label>销售目标<input name="salesAmount" type="number" min="0" step="0.01" required value="${pendingSales?.suggestedTargetValue ?? ""}" /></label><label>目标毛利率<input name="profitMargin" type="number" min="-100" max="100" step="0.01" required value="${escapeHtml(pendingMarginPercent)}" /><small>%</small></label><label>利润目标<input name="profitAmount" data-goal-profit-target type="number" step="0.01" readonly value="${pendingProfit?.suggestedTargetValue ?? ""}" /></label><button type="submit" class="primary-button">确认并生效</button></form>` : `<p class="form-note">等待管理员或当前链接负责人确认。</p>`}</div>` : ""}
     ${!awaiting && model.permissions?.canEdit ? `<button type="button" class="secondary-button" data-create-connection-goal>生成目标建议</button>` : !current && !awaiting ? `<div class="empty-state compact">当前没有目标计划</div>` : ""}
-    ${history.length ? `<details class="connection-positioning-history"><summary>目标历史（${history.length}）</summary><div class="connection-template-list">${history.map((plan) => `<article><div><strong>${escapeHtml(`${plan.positioningName} · ${goalStatusText(plan.status)}`)}</strong><span>${escapeHtml(`${plan.templateName} V${plan.templateVersion} · ${goalModeText(plan.targetMode)}`)}</span><small>销售 ${coreMoney(goalMetric(plan, "sales_amount")?.finalTargetValue ?? goalMetric(plan, "sales_amount")?.suggestedTargetValue)} · 利润 ${coreMoney(goalMetric(plan, "profit_amount")?.finalTargetValue ?? goalMetric(plan, "profit_amount")?.suggestedTargetValue)}${plan.approvalReason ? ` · ${escapeHtml(plan.approvalReason)}` : ""}</small></div></article>`).join("")}</div></details>` : ""}
+    ${history.length ? `<details class="connection-positioning-history"><summary>目标历史（${history.length}）</summary><div class="connection-template-list">${history.map((plan) => `<article><div><strong>${escapeHtml(`${plan.positioningName} · ${goalStatusText(plan.status)}`)}</strong><span>${escapeHtml(`${plan.targetMonth || "历史周期"} · ${plan.templateName} V${plan.templateVersion} · ${goalModeText(plan.targetMode)}`)}</span><small>销售 ${coreMoney(goalMetric(plan, "sales_amount")?.finalTargetValue ?? goalMetric(plan, "sales_amount")?.suggestedTargetValue)} · 毛利率 ${corePercent(plan.finalProfitMargin ?? plan.suggestedProfitMargin)} · 利润 ${coreMoney(goalMetric(plan, "profit_amount")?.finalTargetValue ?? goalMetric(plan, "profit_amount")?.suggestedTargetValue)}${plan.approvalReason ? ` · ${escapeHtml(plan.approvalReason)}` : ""}</small></div></article>`).join("")}</div></details>` : ""}
   </section>`;
 }
 function renderCorePlatform(core) {
@@ -1932,10 +1941,19 @@ export function bindConnectionCenterPageEvents(render) {
   root.querySelectorAll("[data-goal-pilot-suggestion]").forEach((button) => button.addEventListener("click", () => {
     void runGoalPilotOperation(render, () => createConnectionGoalPilotSuggestion(pageState.goalPilot.selectedBatchId, button.dataset.goalPilotSuggestion));
   }));
-  root.querySelectorAll("[data-goal-pilot-target]").forEach((form) => form.addEventListener("submit", (event) => {
-    event.preventDefault(); const input = { ...Object.fromEntries(new FormData(event.currentTarget)), planId: form.dataset.planId };
-    void runGoalPilotOperation(render, () => confirmConnectionGoalPilotTarget(pageState.goalPilot.selectedBatchId, form.dataset.memberId, input));
-  }));
+  root.querySelectorAll("[data-goal-pilot-target]").forEach((form) => {
+    const syncProfitTarget = () => {
+      const sales = Number(form.elements.salesAmount?.value);
+      const margin = Number(form.elements.profitMargin?.value);
+      const target = form.querySelector("[data-goal-pilot-profit-target]");
+      if (target) target.value = Number.isFinite(sales) && Number.isFinite(margin) ? (sales * margin / 100).toFixed(2) : "";
+    };
+    form.querySelectorAll('[name="salesAmount"], [name="profitMargin"]').forEach((input) => input.addEventListener("input", syncProfitTarget));
+    form.addEventListener("submit", (event) => {
+      event.preventDefault(); const input = { ...Object.fromEntries(new FormData(event.currentTarget)), planId: form.dataset.planId };
+      void runGoalPilotOperation(render, () => confirmConnectionGoalPilotTarget(pageState.goalPilot.selectedBatchId, form.dataset.memberId, input));
+    });
+  });
   root.querySelectorAll("[data-goal-pilot-exclude]").forEach((button) => button.addEventListener("click", () => {
     if (!window.confirm("确认从当前试点范围排除该链接？历史记录仍会保留。")) return;
     void runGoalPilotOperation(render, () => excludeConnectionGoalPilotMember(pageState.goalPilot.selectedBatchId, button.dataset.goalPilotExclude));
@@ -1973,7 +1991,16 @@ export function bindConnectionCenterPageEvents(render) {
       pageState.error = ""; render();
     } catch (error) { pageState.error = error.message; button.disabled = false; render(); }
   });
-  root.querySelector("[data-connection-goal-confirm-form]")?.addEventListener("submit", async (event) => {
+  const goalConfirmForm = root.querySelector("[data-connection-goal-confirm-form]");
+  const syncGoalProfitTarget = () => {
+    if (!goalConfirmForm) return;
+    const sales = Number(goalConfirmForm.elements.salesAmount?.value);
+    const margin = Number(goalConfirmForm.elements.profitMargin?.value);
+    const target = goalConfirmForm.querySelector("[data-goal-profit-target]");
+    if (target) target.value = Number.isFinite(sales) && Number.isFinite(margin) ? (sales * margin / 100).toFixed(2) : "";
+  };
+  goalConfirmForm?.querySelectorAll('[name="salesAmount"], [name="profitMargin"]').forEach((input) => input.addEventListener("input", syncGoalProfitTarget));
+  goalConfirmForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget; const button = form.querySelector("button[type='submit']");
     if (button) button.disabled = true;

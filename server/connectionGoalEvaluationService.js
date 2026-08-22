@@ -11,7 +11,8 @@ const pendingReasons = Object.freeze({
   missing_positioning: "尚未设置经营定位。",
   missing_goal_plan: "尚未确认生效目标。",
   no_sales_data: "当前没有可用于评价的销售日报事实。",
-  insufficient_data: "最近评价周期数据不足30个完整自然日。",
+  future_period: "目标月份尚未开始。",
+  insufficient_data: "目标月份当前应有日期的数据尚不完整。",
   data_delayed: "销售事实尚未更新到最新应到日期。",
   link_data_missing: "完整评价周期内未发现该链接的销售事实，未按0销售处理。",
   invalid_goal: "当前目标值或指标权重无法用于完成率计算。",
@@ -21,6 +22,11 @@ function addDays(dateText, days) {
   const value = new Date(`${dateText}T00:00:00.000Z`);
   value.setUTCDate(value.getUTCDate() + days);
   return value.toISOString().slice(0, 10);
+}
+
+function earlierDate(left, right) { return left < right ? left : right; }
+function daysBetween(startDate, endDate) {
+  return Math.round((new Date(`${endDate}T00:00:00.000Z`) - new Date(`${startDate}T00:00:00.000Z`)) / 86400000) + 1;
 }
 
 function shanghaiDate(value = new Date()) {
@@ -102,14 +108,19 @@ export function evaluateConnectionGoal(connectionId, context = {}) {
   if (!plan) return { connection: profile, currentGoal: null, positioningName: CONNECTION_POSITIONING_TYPES[positioning.positioningType], ...pending("missing_goal_plan") };
 
   const today = clean(context.today) || shanghaiDate();
-  const expectedThrough = addDays(today, -1);
+  const periodStart = clean(plan.effectiveFrom);
+  const targetPeriodEnd = clean(plan.effectiveTo);
+  const expectedThrough = earlierDate(addDays(today, -1), targetPeriodEnd);
+  if (expectedThrough < periodStart) {
+    return { connection: profile, currentGoal: plan, ...saveEvaluation(database, profile, plan, pending("future_period", { periodStart, periodEnd: null, expectedThrough })) };
+  }
   const periodEnd = database.prepare("SELECT MAX(saleDate) value FROM connection_sku_sales_daily_facts WHERE saleDate<=?").get(expectedThrough)?.value ?? null;
-  if (!periodEnd) return { connection: profile, currentGoal: plan, ...saveEvaluation(database, profile, plan, pending("no_sales_data", { periodStart: null, periodEnd: null, expectedThrough })) };
-  const periodStart = addDays(periodEnd, -29);
+  if (!periodEnd || periodEnd < periodStart) return { connection: profile, currentGoal: plan, ...saveEvaluation(database, profile, plan, pending("no_sales_data", { periodStart, periodEnd: null, expectedThrough })) };
+  if (periodEnd < expectedThrough) return { connection: profile, currentGoal: plan, ...saveEvaluation(database, profile, plan, pending("data_delayed", { periodStart, periodEnd, expectedThrough })) };
   const coverageDays = Number(database.prepare(`SELECT COUNT(DISTINCT saleDate) count FROM connection_sku_sales_daily_facts
     WHERE saleDate BETWEEN ? AND ?`).get(periodStart, periodEnd).count);
-  if (coverageDays < 30) return { connection: profile, currentGoal: plan, ...saveEvaluation(database, profile, plan, pending("insufficient_data", { periodStart, periodEnd, expectedThrough, coverageDays })) };
-  if (periodEnd < expectedThrough) return { connection: profile, currentGoal: plan, ...saveEvaluation(database, profile, plan, pending("data_delayed", { periodStart, periodEnd, expectedThrough, coverageDays })) };
+  const expectedDays = daysBetween(periodStart, expectedThrough);
+  if (coverageDays < expectedDays) return { connection: profile, currentGoal: plan, ...saveEvaluation(database, profile, plan, pending("insufficient_data", { periodStart, periodEnd, expectedThrough, coverageDays, expectedDays })) };
 
   const actual = database.prepare(`SELECT COUNT(*) factRows,SUM(salesAmount) salesActual,SUM(profitAmount) profitActual
     FROM connection_sku_sales_daily_facts WHERE salesLinkId=? AND saleDate BETWEEN ? AND ?`).get(profile.salesLinkId, periodStart, periodEnd);
