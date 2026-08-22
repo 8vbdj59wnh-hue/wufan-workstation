@@ -30,6 +30,7 @@ import {
   markPlatformSku,
   loadProductManagementOverview,
   loadProductBusinessDashboard,
+  loadProductSalesDistribution,
   loadProductHealthAnalysis,
   loadProductBusinessDiagnosis,
   loadProductInsightCenter,
@@ -67,6 +68,7 @@ import { renderUiModule } from "./uiModuleRegistry.js";
 import "./uiModules/productWorkspaceModules.js";
 import "./uiModules/productMarketingAsset.js";
 import "./uiModules/productDailySales.js";
+import "./uiModules/productSalesDistribution.js";
 
 const productStatuses = ["开发中", "上架", "成长期", "成熟期", "风险期", "淘汰", "待上架", "在售", "停售", "清仓", "已归档"];
 let filters = { query: "", brand: "", category: "", status: "", erpStatus: "", platform: "", stockStatus: "" };
@@ -103,6 +105,7 @@ let productSkuV2SearchTimer = 0;
 let productSkuV2MetadataLoading = false;
 let productWorkspaceState = { activeTab: "overview", sections: {}, marketingMode: "read", marketingNotice: "", dailySales: { data: null, loading: false, loaded: false, rangePreset: "30d", error: "" } };
 let productBusinessDashboardState = { readModel: null, loading: false, error: "" };
+let productSalesDistributionState = { range: { preset: "30d" }, includeHistorical: false, items: [], summary: {}, selectedGroup: 0, loading: false, loaded: false, error: "" };
 let productBusinessFilters = { query: "", brand: "", category: "", lifecycle: "", status: "", healthStatus: "", inventoryStatus: "", ownerId: "", includeHistorical: false, range: "30d", periodStart: "", periodEnd: "", sortBy: "updatedAt", sortDirection: "desc", page: 1, pageSize: 30 };
 let productBusinessVisibleMetrics = new Set(["sales", "structure", "inventory", "profit", "health", "diagnosis"]);
 
@@ -381,8 +384,10 @@ function renderProductWorkspaceTabs() {
   const isProductDetail = Boolean(getRouteProductId());
   const skuManagementActive = Boolean(getRouteErpSkuId())
     || (!isProductDetail && ["sku-management", "pending-skus", "combo-skus"].includes(productSubmodule));
+  const cockpitActive = !isProductDetail && !skuManagementActive && productSubmodule === "business-cockpit";
   return `<nav class="product-workspace-tabs" aria-label="产品中心视图">
-    <button type="button" data-action="product-workspace-view" data-view="business-dashboard" class="${skuManagementActive ? "" : "is-active"}">产品经营</button>
+    <button type="button" data-action="product-workspace-view" data-view="business-cockpit" class="${cockpitActive ? "is-active" : ""}">经营驾驶舱</button>
+    <button type="button" data-action="product-workspace-view" data-view="business-dashboard" class="${!cockpitActive && !skuManagementActive ? "is-active" : ""}">产品经营</button>
     <button type="button" data-action="product-workspace-view" data-view="sku-management" class="${skuManagementActive ? "is-active" : ""}">SKU管理</button>
   </nav>`;
 }
@@ -489,10 +494,20 @@ function renderProductBusinessDashboard() {
   </section>`;
 }
 
+function renderProductBusinessCockpit() {
+  return `<section class="product-center-page product-business-cockpit">
+    <div class="section-heading with-actions"><div><h1>产品经营驾驶舱</h1><p>从产品销售结构开始，看清核心产品、长尾产品与数据空白。</p></div></div>
+    ${renderProductWorkspaceTabs()}
+    <section class="product-business-cockpit-hero"><div><p class="eyebrow">产品经营分析</p><h2>产品销售结构</h2><p>读取销售日报事实、Sales Object 与产品映射；只读分析，不拆分组合装金额。</p></div></section>
+    ${renderUiModule("product_sales_distribution", { state: productSalesDistributionState, resolveUrl: resolveAssetUrl })}
+  </section>`;
+}
+
 function renderProductList() {
   if (productSubmodule === "pending-skus") return renderPendingSkuPage();
   if (productSubmodule === "combo-skus") return comboSkuState.detail ? renderComboSkuDetail() : renderComboSkuList();
   if (productSubmodule === "sku-management") return renderProductSkuV2List();
+  if (productSubmodule === "business-cockpit") return renderProductBusinessCockpit();
   return renderProductBusinessDashboard();
 }
 
@@ -2082,6 +2097,34 @@ async function refreshProductBusinessDashboard(rerender) {
   rerender();
 }
 
+async function refreshProductSalesDistribution(rerender) {
+  if (productSalesDistributionState.loading) return;
+  productSalesDistributionState = { ...productSalesDistributionState, loading: true, error: "" };
+  rerender();
+  try {
+    const result = await loadProductSalesDistribution({
+      preset: productSalesDistributionState.range?.preset || "30d",
+      startDate: productSalesDistributionState.range?.startDate || "",
+      endDate: productSalesDistributionState.range?.endDate || "",
+      includeHistorical: productSalesDistributionState.includeHistorical,
+    });
+    productSalesDistributionState = {
+      ...productSalesDistributionState,
+      range: result.range,
+      includeHistorical: Boolean(result.includeHistorical),
+      items: result.items || [],
+      summary: result.summary || {},
+      selectedGroup: 0,
+      loading: false,
+      loaded: true,
+      error: "",
+    };
+  } catch (error) {
+    productSalesDistributionState = { ...productSalesDistributionState, loading: false, loaded: true, error: error.message || "产品销售结构读取失败。" };
+  }
+  rerender();
+}
+
 async function refreshProductManagementDetail(productId, rerender) {
   if (!productId || productManagementState.loadingProductId === productId) return;
   productManagementState = { ...productManagementState, loadingProductId: productId, error: "" }; rerender();
@@ -2215,6 +2258,71 @@ async function refreshPlatformPreview(rerender, { page = 1, filters = importStat
   rerender();
 }
 
+function bindProductDistributionTooltips() {
+  const tooltip = document.querySelector("[data-product-distribution-tooltip]");
+  const chart = tooltip?.closest(".product-sales-distribution-chart");
+  if (!tooltip || !chart) return;
+  const fields = {
+    rank: tooltip.querySelector("[data-product-tooltip-rank]"),
+    name: tooltip.querySelector("[data-product-tooltip-name]"),
+    code: tooltip.querySelector("[data-product-tooltip-code]"),
+    image: tooltip.querySelector("[data-product-tooltip-image]"),
+    imagePlaceholder: tooltip.querySelector("[data-product-tooltip-image-placeholder]"),
+    sales: tooltip.querySelector("[data-product-tooltip-sales]"),
+    share: tooltip.querySelector("[data-product-tooltip-share]"),
+    physical: tooltip.querySelector("[data-product-tooltip-physical]"),
+  };
+  const showImagePlaceholder = () => {
+    fields.image.hidden = true;
+    fields.imagePlaceholder.hidden = false;
+  };
+  fields.image.addEventListener("error", showImagePlaceholder);
+  const positionTooltip = (bar, event) => {
+    const chartRect = chart.getBoundingClientRect();
+    const barRect = bar.getBoundingClientRect();
+    const pointerX = Number.isFinite(event?.clientX) ? event.clientX : barRect.left + barRect.width / 2;
+    const pointerY = Number.isFinite(event?.clientY) ? event.clientY : barRect.top;
+    const tooltipRect = tooltip.getBoundingClientRect();
+    const padding = 10;
+    const preferredLeft = pointerX - chartRect.left + 14;
+    const maxLeft = Math.max(padding, chartRect.width - tooltipRect.width - padding);
+    const left = Math.min(Math.max(padding, preferredLeft), maxLeft);
+    const above = pointerY - chartRect.top - tooltipRect.height - 14;
+    const below = pointerY - chartRect.top + 16;
+    const top = above >= padding ? above : Math.min(below, Math.max(padding, chartRect.height - tooltipRect.height - padding));
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+  };
+  const showTooltip = (bar, event) => {
+    fields.rank.textContent = bar.dataset.tooltipRank || "—";
+    fields.name.textContent = bar.dataset.tooltipName || "未命名产品";
+    fields.code.textContent = bar.dataset.tooltipCode || "暂无编码";
+    const imageUrl = bar.dataset.tooltipImage || "";
+    if (imageUrl) {
+      fields.image.src = imageUrl;
+      fields.image.alt = bar.dataset.tooltipName || "产品主图";
+      fields.image.hidden = false;
+      fields.imagePlaceholder.hidden = true;
+    } else {
+      fields.image.removeAttribute("src");
+      showImagePlaceholder();
+    }
+    fields.sales.textContent = bar.dataset.tooltipSales || "暂无数据";
+    fields.share.textContent = bar.dataset.tooltipShare || "暂无数据";
+    fields.physical.textContent = bar.dataset.tooltipPhysical || "暂无数据";
+    tooltip.hidden = false;
+    positionTooltip(bar, event);
+  };
+  const hideTooltip = () => { tooltip.hidden = true; };
+  document.querySelectorAll("[data-product-distribution-bar]").forEach((bar) => {
+    bar.addEventListener("pointerenter", (event) => showTooltip(bar, event));
+    bar.addEventListener("pointermove", (event) => positionTooltip(bar, event));
+    bar.addEventListener("pointerleave", hideTooltip);
+    bar.addEventListener("focus", () => showTooltip(bar));
+    bar.addEventListener("blur", hideTooltip);
+  });
+}
+
 export function bindProductCenterPageEvents(rerender) {
   if (isComboSkuRoute()) productSubmodule = "combo-skus";
   const routeErpSkuId = getRouteErpSkuId();
@@ -2223,6 +2331,7 @@ export function bindProductCenterPageEvents(rerender) {
   if (routeErpSkuId && productSkuV2State.detailId !== routeErpSkuId && !productSkuV2State.loading) void refreshProductSkuV2Detail(routeErpSkuId, rerender);
   if (routeProductId && !getProductManagementDetail(routeProductId) && productManagementState.loadingProductId !== routeProductId) void refreshProductManagementDetail(routeProductId, rerender);
   if (!routeProductId && !routeErpSkuId && productSubmodule === "business-dashboard" && !productBusinessDashboardState.readModel && !productBusinessDashboardState.loading) void refreshProductBusinessDashboard(rerender);
+  if (!routeProductId && !routeErpSkuId && productSubmodule === "business-cockpit" && !productSalesDistributionState.loaded && !productSalesDistributionState.loading) void refreshProductSalesDistribution(rerender);
   if (routeProductId && productDetailTab === "health-analysis" && (!getProductManagementDetail(routeProductId)?.healthAnalysis || !getProductManagementDetail(routeProductId)?.improvementCenter) && productManagementState.loadingProductId !== routeProductId) void refreshProductHealthAnalysis(routeProductId, rerender);
   if (routeProductId && productDetailTab === "business-improvement" && !getProductManagementDetail(routeProductId)?.improvementCenter && productManagementState.loadingProductId !== routeProductId) void refreshProductImprovementCenter(routeProductId, rerender);
   if (routeProductId && productDetailTab === "strategy" && !getProductManagementDetail(routeProductId)?.strategy && productManagementState.loadingProductId !== routeProductId) void refreshProductStrategy(routeProductId, rerender);
@@ -2255,6 +2364,39 @@ export function bindProductCenterPageEvents(rerender) {
     };
     void refreshProductBusinessDashboard(rerender);
   });
+  document.querySelector("[data-product-distribution-filter]")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    productSalesDistributionState = {
+      ...productSalesDistributionState,
+      range: { ...productSalesDistributionState.range, startDate: form.elements.startDate.value, endDate: form.elements.endDate.value },
+      includeHistorical: form.elements.includeHistorical.checked,
+      selectedGroup: 0,
+      loaded: false,
+    };
+    void refreshProductSalesDistribution(rerender);
+  });
+  document.querySelectorAll("[data-product-distribution-preset]").forEach((button) => button.addEventListener("click", () => {
+    const includeHistorical = document.querySelector("[data-product-distribution-filter] [name='includeHistorical']")?.checked ?? productSalesDistributionState.includeHistorical;
+    productSalesDistributionState = { ...productSalesDistributionState, range: { ...productSalesDistributionState.range, preset: button.dataset.productDistributionPreset }, includeHistorical, selectedGroup: 0, loaded: false };
+    if (button.dataset.productDistributionPreset === "custom") rerender();
+    else void refreshProductSalesDistribution(rerender);
+  }));
+  document.querySelectorAll("[data-product-distribution-group]").forEach((button) => {
+    const openGroup = () => { productSalesDistributionState = { ...productSalesDistributionState, selectedGroup: Number(button.dataset.productDistributionGroup || 0) }; rerender(); };
+    button.addEventListener("click", openGroup);
+    button.addEventListener("keydown", (event) => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); openGroup(); } });
+  });
+  document.querySelector("[data-product-distribution-back]")?.addEventListener("click", () => {
+    productSalesDistributionState = { ...productSalesDistributionState, selectedGroup: 0 };
+    rerender();
+  });
+  document.querySelectorAll("[data-product-distribution-product]").forEach((bar) => {
+    const openProduct = () => { window.location.hash = `products/${encodeURIComponent(bar.dataset.productDistributionProduct)}`; };
+    bar.addEventListener("click", openProduct);
+    bar.addEventListener("keydown", (event) => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); openProduct(); } });
+  });
+  bindProductDistributionTooltips();
   document.querySelectorAll("[data-product-business-metric]").forEach((checkbox) => checkbox.addEventListener("change", (event) => {
     const metric = event.currentTarget.dataset.productBusinessMetric;
     if (event.currentTarget.checked) productBusinessVisibleMetrics.add(metric);
@@ -2510,9 +2652,10 @@ export function bindProductCenterPageEvents(rerender) {
       return;
     }
     if (action === "product-workspace-view") {
-      productSubmodule = button.dataset.view === "sku-management" ? "sku-management" : "business-dashboard";
+      productSubmodule = ["sku-management", "business-cockpit"].includes(button.dataset.view) ? button.dataset.view : "business-dashboard";
       if (getRouteProductId() || getRouteErpSkuId()) window.location.hash = "products";
-      if (productSubmodule === "business-dashboard") void refreshProductBusinessDashboard(rerender);
+      if (productSubmodule === "business-cockpit") void refreshProductSalesDistribution(rerender);
+      else if (productSubmodule === "business-dashboard") void refreshProductBusinessDashboard(rerender);
       else if (!productSkuV2State.loaded && !productSkuV2State.loading) void refreshProductSkuV2List(rerender);
       else rerender();
       return;

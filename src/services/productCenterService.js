@@ -39,6 +39,7 @@ export {
   saveProductMarketingAsset,
   exportProductMarketingAsset,
   loadProductBusinessDashboard,
+  loadProductSalesDistribution,
   loadProductHealthAnalysis,
   loadProductBusinessDiagnosis,
   loadProductInsightCenter,

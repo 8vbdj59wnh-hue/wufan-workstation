@@ -321,6 +321,7 @@ import {
   recordProductImprovementResult,
 } from "./productManagementV2Service.js";
 import { getProductBusinessReadModel, getProductHealthAnalysis } from "./productBusinessReadModel.js";
+import { getProductSalesDistribution } from "./productSalesDistributionService.js";
 import { attachProductDiagnosisSummaries, getProductBusinessDiagnosis } from "./productBusinessDiagnosisService.js";
 import { getProductInsightCenter, importProductInsights, updateProductInsight } from "./productInsightService.js";
 import {
@@ -2922,6 +2923,18 @@ app.get("/api/product-management/business-dashboard", requirePermission("product
     });
   }
   catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "产品经营看板读取失败。" }); }
+});
+
+app.get("/api/product-management/sales-distribution", requirePermission("products.view"), (request, response) => {
+  try {
+    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
+    response.json({
+      success: true,
+      ...getProductSalesDistribution(request.query, { visibleProductIds: (scoped.products ?? []).map((product) => product.id) }),
+    });
+  } catch (error) {
+    response.status(error.statusCode || 400).json({ success: false, message: error.message || "产品销售结构读取失败。" });
+  }
 });
 
 app.get("/api/product-management/products/:id", requirePermission("products.view"), (request, response) => {

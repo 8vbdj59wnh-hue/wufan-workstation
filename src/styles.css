@@ -11090,6 +11090,53 @@ button.content-template-thumb {
 .distribution-range-actions strong { color: #173f34; }
 .distribution-range-actions small { color: #667085; }
 
+.product-business-cockpit { display: grid; gap: 16px; }
+.product-business-cockpit-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding: 18px 20px; border: 1px solid #d9e8e1; border-radius: 14px; background: linear-gradient(135deg, #f5fbf8, #fff); }
+.product-business-cockpit-hero h2, .product-business-cockpit-hero p { margin: 0; }
+.product-business-cockpit-hero > div { display: grid; gap: 5px; }
+.product-sales-distribution-module { display: grid; gap: 14px; padding: 18px; border: 1px solid var(--link-border, #eaecf0); border-radius: var(--link-radius, 14px); background: #fff; box-shadow: 0 2px 8px rgb(16 24 40 / 4%); }
+.product-sales-distribution-module > header { display: flex; align-items: start; justify-content: space-between; gap: 14px; }
+.product-sales-distribution-module > header > div { display: grid; gap: 4px; }
+.product-sales-distribution-module h3, .product-sales-distribution-module header p { margin: 0; }
+.product-sales-distribution-module h3 { color: #173f34; }
+.product-sales-distribution-module header p, .product-distribution-period, .product-distribution-hint { color: #667085; font-size: 12px; }
+.product-sales-distribution-module form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; padding: 10px 0; border-top: 1px solid #f2f4f7; border-bottom: 1px solid #f2f4f7; }
+.product-distribution-presets { display: flex; flex-wrap: wrap; gap: 7px; }
+.product-distribution-presets button { min-height: 36px; padding: 0 12px; border: 1px solid #d0d5dd; border-radius: 9px; background: #fff; color: #344054; font-weight: 600; cursor: pointer; }
+.product-distribution-presets button.is-active { border-color: #3f9474; background: #edf8f3; color: #19704f; }
+.product-distribution-custom-range { display: flex; align-items: flex-end; gap: 7px; }
+.product-distribution-custom-range.is-hidden { display: none; }
+.product-distribution-custom-range label { display: grid; gap: 3px; color: #667085; font-size: 11px; }
+.product-distribution-custom-range input { min-height: 36px; border: 1px solid #d0d5dd; border-radius: 8px; background: #fff; }
+.product-distribution-summary { display: flex; flex-wrap: wrap; gap: 8px; }
+.product-distribution-summary span { padding: 7px 10px; border-radius: 9px; background: #f7f9f8; color: #667085; font-size: 11px; }
+.product-distribution-summary strong { margin-left: 4px; color: #173f34; font-size: 13px; }
+.product-sales-distribution-chart { position: relative; display: grid; grid-template-columns: 86px minmax(0, 1fr); gap: 10px; min-height: 320px; padding: 16px 10px 10px; border-radius: 12px; background: linear-gradient(#fbfcfc, #fff); }
+.product-distribution-chart-scroll { min-width: 0; overflow-x: auto; overflow-y: hidden; padding-bottom: 8px; scrollbar-gutter: stable; }
+.product-sales-distribution-chart svg { display: block; width: 100%; height: 292px; overflow: visible; }
+.product-sales-distribution-chart rect { cursor: pointer; transition: opacity .15s ease; }
+.product-sales-distribution-chart rect:hover { opacity: 1; }
+.product-distribution-tooltip { position: absolute; z-index: 8; width: min(320px, calc(100% - 20px)); padding: 13px 14px 11px; border: 1px solid rgb(255 255 255 / 18%); border-radius: 11px; background: rgb(23 63 52 / 96%); color: #fff; box-shadow: 0 12px 28px rgb(16 24 40 / 22%); pointer-events: none; }
+.product-distribution-tooltip[hidden] { display: none; }
+.product-distribution-tooltip-main { display: flex; align-items: center; gap: 10px; }
+.product-distribution-tooltip-image { display: grid; flex: 0 0 58px; width: 58px; height: 58px; place-items: center; overflow: hidden; border: 1px solid rgb(255 255 255 / 14%); border-radius: 9px; background: rgb(255 255 255 / 9%); color: #b8d7cc; font-size: 10px; }
+.product-distribution-tooltip-image img { width: 100%; height: 100%; object-fit: cover; }
+.product-distribution-tooltip-image img[hidden], .product-distribution-tooltip-image span[hidden] { display: none; }
+.product-distribution-tooltip-copy { display: grid; flex: 1; min-width: 0; gap: 5px; }
+.product-distribution-tooltip-copy > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #d6eee5; font-size: 11px; }
+.product-distribution-tooltip-copy small { max-width: 120px; overflow: hidden; color: #b8d7cc; text-overflow: ellipsis; white-space: nowrap; }
+.product-distribution-tooltip h4 { margin: 0; display: -webkit-box; overflow: hidden; color: #fff; font-size: 14px; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.product-distribution-tooltip dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin: 0; }
+.product-distribution-tooltip dl div { display: grid; gap: 3px; min-width: 0; padding: 7px 8px; border-radius: 7px; background: rgb(255 255 255 / 8%); }
+.product-distribution-tooltip dt { color: #b8d7cc; font-size: 9px; white-space: nowrap; }
+.product-distribution-tooltip dd { margin: 0; overflow: hidden; color: #fff; font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.product-distribution-tooltip p { margin: 8px 0 0; color: #b8d7cc; font-size: 10px; }
+.product-distribution-y-label { display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; padding: 0 4px 28px 0; color: #98a2b3; font-size: 12px; font-weight: 600; }
+.product-distribution-group-legend { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+.product-distribution-group-legend button { display: grid; grid-template-columns: 8px auto; gap: 1px 6px; min-width: 126px; padding: 7px 9px; border: 1px solid #eaecf0; border-radius: 9px; background: #fff; color: #344054; text-align: left; cursor: pointer; }
+.product-distribution-group-legend i { grid-row: 1 / span 2; width: 7px; height: 100%; border-radius: 5px; }
+.product-distribution-group-legend small { color: #98a2b3; white-space: nowrap; }
+
 .my-links-workbench > header p { margin: 4px 0 0; color: var(--link-muted); }
 .link-data-status-stack { display: grid; gap: 12px; }
 .link-data-status-module { display: grid; grid-template-columns: minmax(190px, .7fr) minmax(0, 1.5fr); gap: 18px; align-items: center; padding: 15px 18px; border: 1px solid #dbeae4; border-radius: var(--link-radius); background: linear-gradient(135deg, #f5fbf8, #fff); }
@@ -11297,6 +11344,8 @@ button.content-template-thumb {
   .my-link-list-module > header { align-items: stretch; flex-direction: column; }
   .link-sales-distribution-chart { grid-template-columns: 48px minmax(0, 1fr); }
   .distribution-range-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .product-business-cockpit-hero, .product-sales-distribution-module > header { align-items: flex-start; flex-direction: column; }
+  .product-sales-distribution-chart { grid-template-columns: 52px minmax(0, 1fr); }
 }
 .publish-time-mode-panel {
   display: flex;
