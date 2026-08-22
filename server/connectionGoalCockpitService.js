@@ -1,6 +1,7 @@
 import { getDatabase } from "./db.js";
 import { CONNECTION_POSITIONING_TYPES } from "./connectionGoalFoundationService.js";
 import { buildLinkOperatingScope } from "./linkOperatingSetService.js";
+import { resolveConnectionCockpitDateWindow } from "./connectionCockpitDateRange.js";
 
 const clean = (value) => String(value ?? "").trim();
 const gradeCodes = ["excellent", "good", "on_target", "underperforming"];
@@ -9,10 +10,11 @@ function numeric(row = {}) {
   return Object.fromEntries(Object.entries(row).map(([key, value]) => [key, Number(value || 0)]));
 }
 
-export function readConnectionGoalCockpitSummary(context = {}) {
+export function readConnectionGoalCockpitSummary(input = {}, context = {}) {
   const database = context.database || getDatabase();
+  const dateWindow = resolveConnectionCockpitDateWindow(database, input);
   const operatingScope = buildLinkOperatingScope(database, { alias: "l", prefix: "connectionGoalCockpitOperating" });
-  const params = { ...operatingScope.params };
+  const params = { ...operatingScope.params, evaluationEndDate: dateWindow?.periodEnd || "9999-12-31" };
   const scopeWhere = context.isAdmin ? operatingScope.predicate : `${operatingScope.predicate} AND c.ownerId=@ownerId`;
   if (!context.isAdmin) params.ownerId = clean(context.userId);
   const ctes = `WITH active_positioning AS (
@@ -20,7 +22,11 @@ export function readConnectionGoalCockpitSummary(context = {}) {
     ), active_goals AS (
       SELECT id,connectionId FROM connection_goal_plans WHERE status='active'
     ), current_evaluations AS (
-      SELECT goalPlanId,evaluationStatus,grade,periodStart,periodEnd FROM connection_goal_evaluations
+      SELECT goalPlanId,evaluationStatus,grade,periodStart,periodEnd FROM (
+        SELECT goalPlanId,evaluationStatus,grade,periodStart,periodEnd,
+          ROW_NUMBER() OVER (PARTITION BY goalPlanId ORDER BY periodEnd DESC,createdAt DESC,id DESC) evaluationRank
+        FROM connection_goal_evaluations WHERE periodEnd<=@evaluationEndDate
+      ) WHERE evaluationRank=1
     ), scoped AS (
       SELECT c.id,bp.positioningType,gp.id goalPlanId,ge.evaluationStatus,ge.grade,ge.periodStart,ge.periodEnd
       FROM connection_profiles c
@@ -76,6 +82,7 @@ export function readConnectionGoalCockpitSummary(context = {}) {
       periodCount: Number(period?.periodCount || 0),
       windowDays: 30,
     },
+    selectedRange: dateWindow ? { preset: dateWindow.preset, startDate: dateWindow.periodStart, endDate: dateWindow.periodEnd } : null,
     scope: { isAdmin: Boolean(context.isAdmin), ownerId: context.isAdmin ? null : clean(context.userId) },
   };
 }

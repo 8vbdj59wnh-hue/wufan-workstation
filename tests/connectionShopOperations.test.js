@@ -11,7 +11,7 @@ function fixture() {
     CREATE TABLE connection_profiles(id TEXT PRIMARY KEY,salesLinkId TEXT,ownerId TEXT);
     CREATE TABLE connection_sku_sales_daily_facts(id TEXT PRIMARY KEY,salesLinkId TEXT,saleDate TEXT,salesAmount REAL,profitAmount REAL);
     CREATE TABLE connection_goal_plans(id TEXT PRIMARY KEY,connectionId TEXT,status TEXT);
-    CREATE TABLE connection_goal_evaluations(id TEXT PRIMARY KEY,goalPlanId TEXT,evaluationStatus TEXT,grade TEXT);
+    CREATE TABLE connection_goal_evaluations(id TEXT PRIMARY KEY,goalPlanId TEXT,evaluationStatus TEXT,grade TEXT,periodEnd TEXT,createdAt TEXT);
 
     INSERT INTO sales_shops VALUES('shop-a','天猫','甲店','甲店','active');
     INSERT INTO sales_shops VALUES('shop-b','京东','乙店','乙店','active');
@@ -40,10 +40,11 @@ function fixture() {
     INSERT INTO connection_goal_plans VALUES('plan-a2','profile-a2','active');
     INSERT INTO connection_goal_plans VALUES('plan-a3','profile-a3','active');
     INSERT INTO connection_goal_plans VALUES('plan-a4','profile-a4','active');
-    INSERT INTO connection_goal_evaluations VALUES('evaluation-a1','plan-a1','evaluated','excellent');
-    INSERT INTO connection_goal_evaluations VALUES('evaluation-a2','plan-a2','evaluated','good');
-    INSERT INTO connection_goal_evaluations VALUES('evaluation-a3','plan-a3','evaluated','on_target');
-    INSERT INTO connection_goal_evaluations VALUES('evaluation-a4','plan-a4','evaluated','underperforming');
+    INSERT INTO connection_goal_evaluations VALUES('evaluation-a1','plan-a1','evaluated','excellent','2026-08-20','2026-08-20T01:00:00Z');
+    INSERT INTO connection_goal_evaluations VALUES('evaluation-a1-old','plan-a1','evaluated','underperforming','2026-07-20','2026-07-20T01:00:00Z');
+    INSERT INTO connection_goal_evaluations VALUES('evaluation-a2','plan-a2','evaluated','good','2026-08-20','2026-08-20T01:00:00Z');
+    INSERT INTO connection_goal_evaluations VALUES('evaluation-a3','plan-a3','evaluated','on_target','2026-08-20','2026-08-20T01:00:00Z');
+    INSERT INTO connection_goal_evaluations VALUES('evaluation-a4','plan-a4','evaluated','underperforming','2026-08-20','2026-08-20T01:00:00Z');
   `);
   return database;
 }

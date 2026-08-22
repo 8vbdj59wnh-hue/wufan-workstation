@@ -1396,8 +1396,10 @@ export async function loadConnectionGoalWorkbench(filters = {}) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-goal-workbench?${query}`), "链接经营管理工作台读取失败。");
 }
 
-export async function loadConnectionGoalHealthSummary() {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-goal-health-summary`), "链接经营健康度读取失败。");
+export async function loadConnectionGoalHealthSummary(filters = {}) {
+  const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== "" && value !== undefined && value !== null));
+  const suffix = query.toString() ? `?${query}` : "";
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-goal-health-summary${suffix}`), "链接评级概览读取失败。");
 }
 
 export async function loadConnectionGoalPilotBatches(filters = {}) {
@@ -1719,8 +1721,10 @@ export async function loadConnectionManagementOverview() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-management/overview`), "链接经营概览读取失败。");
 }
 
-export async function loadConnectionBusinessCockpit() {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-business-cockpit`), "链接经营驾驶舱读取失败。");
+export async function loadConnectionBusinessCockpit(filters = {}) {
+  const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== "" && value !== undefined && value !== null));
+  const suffix = query.toString() ? `?${query}` : "";
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-business-cockpit${suffix}`), "链接经营驾驶舱读取失败。");
 }
 
 export async function loadConnectionHealthRecords(connectionId) {

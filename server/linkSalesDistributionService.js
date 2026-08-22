@@ -1,23 +1,10 @@
 import { getDatabase } from "./db.js";
 import { resolveLinkSalesRankingRange } from "./linkSalesRankingService.js";
 import { buildLinkOperatingScope } from "./linkOperatingSetService.js";
+import { latestCompleteSalesDate } from "./connectionCockpitDateRange.js";
 
 const scopes = new Set(["mine", "company"]);
 const text = (value) => String(value ?? "").trim();
-
-function latestCompleteSalesDate(database) {
-  const batchDate = database.prepare(`
-    SELECT b.periodEnd
-    FROM connection_import_batches b
-    WHERE b.sourceType='erp_sales_daily_preview'
-      AND b.status IN ('completed','completed_with_exceptions')
-      AND b.periodEnd IS NOT NULL
-      AND EXISTS (SELECT 1 FROM connection_sku_sales_daily_facts f WHERE f.sourceBatchId=b.id)
-    ORDER BY COALESCE(b.completedAt,b.updatedAt,b.createdAt) DESC,b.id DESC
-    LIMIT 1
-  `).get()?.periodEnd;
-  return batchDate || database.prepare("SELECT MAX(saleDate) periodEnd FROM connection_sku_sales_daily_facts").get()?.periodEnd || "";
-}
 
 export function getLinkSalesDistribution(input = {}, userId = "", isAdmin = false) {
   const scope = text(input.scope || "company");

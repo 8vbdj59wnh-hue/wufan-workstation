@@ -44,17 +44,17 @@ function renderRangeButtons(items) {
   return `<div class="distribution-range-actions">${[...ranges.values()].map((range) => `<button type="button" data-distribution-range="${range.start}-${range.end}" data-distribution-link-ids="${escapeHtml(range.ids.join(","))}"><span>第 ${range.start}–${range.end} 名</span><strong>${money(range.total)}</strong><small>查看经营数据 →</small></button>`).join("")}</div>`;
 }
 
-export function renderLinkSalesDistribution({ state = {}, canViewCompany = false } = {}) {
+export function renderLinkSalesDistribution({ state = {}, canViewCompany = false, globalRange = {} } = {}) {
   const items = state.items || [];
   const selectedGroup = Number(state.selectedGroup || 0);
   const groupItems = selectedGroup ? items.filter((item) => Number(item.groupIndex) === selectedGroup) : [];
-  const range = state.range || {};
+  const range = globalRange;
   if (state.drillTable) {
     return `<section class="link-sales-distribution-module" data-module-key="link_sales_distribution"><header><div><h3>链接经营数据</h3><small>来自第 ${state.selectedRange?.start || "—"}–${state.selectedRange?.end || "—"} 名区间</small></div><button type="button" class="secondary-button" data-distribution-back="group">返回分布</button></header>${renderUiModule("link_data_table", state.drillTable)}</section>`;
   }
   return `<section class="link-sales-distribution-module" data-module-key="link_sales_distribution">
     <header><div><h3>${selectedGroup ? `第 ${groupItems[0]?.rank || "—"}–${groupItems.at(-1)?.rank || "—"} 名` : "公司销售结构"}</h3></div>${selectedGroup ? `<button type="button" class="secondary-button" data-distribution-back="all">查看全部分布</button>` : ""}</header>
-    <form data-link-distribution-filter><select name="scope"><option value="mine" ${state.scope === "mine" ? "selected" : ""}>我的链接</option>${canViewCompany ? `<option value="company" ${state.scope !== "mine" ? "selected" : ""}>全部链接</option>` : ""}</select><select name="preset"><option value="7d" ${range.preset !== "30d" && range.preset !== "custom" ? "selected" : ""}>近7日</option><option value="30d" ${range.preset === "30d" ? "selected" : ""}>近30日</option><option value="custom" ${range.preset === "custom" ? "selected" : ""}>自定义</option></select><input type="date" name="startDate" value="${escapeHtml(range.startDate || "")}" aria-label="开始日期" /><input type="date" name="endDate" value="${escapeHtml(range.endDate || "")}" aria-label="结束日期" /><button type="submit" class="secondary-button">查看</button></form>
+    <form data-link-distribution-filter><label><span>链接范围</span><select name="scope"><option value="mine" ${state.scope === "mine" ? "selected" : ""}>我的链接</option>${canViewCompany ? `<option value="company" ${state.scope !== "mine" ? "selected" : ""}>全部链接</option>` : ""}</select></label><button type="submit" class="secondary-button">查看</button><small>${escapeHtml(`${range.startDate || "—"} 至 ${range.endDate || "—"}`)} · 时间范围由页面顶部统一控制</small></form>
     ${state.loading ? `<div class="empty-state">正在读取销售分布…</div>` : state.error ? `<div class="form-error">${escapeHtml(state.error)}</div>` : !state.summary?.hasData ? `<div class="empty-state"><strong>所选期间暂无销售事实</strong><p>${items.length ? `${items.length} 条链接均保留为“暂无数据”，不会显示为销售额 0。` : "当前范围没有可查看的链接。"}</p></div>` : `<div class="distribution-summary"><span>链接 <strong>${state.summary.totalLinks || 0}</strong></span><span>有销售事实 <strong>${state.summary.linksWithData || 0}</strong></span><span>暂无数据 <strong>${state.summary.linksWithoutData || 0}</strong></span><span>销售额 <strong>${money(state.summary.totalSalesAmount)}</strong></span></div>${renderChart(selectedGroup ? groupItems : items, selectedGroup ? "group" : "all")}${selectedGroup ? renderRangeButtons(groupItems) : renderGroupButtons(items)}`}
   </section>`;
 }
@@ -63,6 +63,6 @@ registerUiModule({
   moduleKey: "link_sales_distribution", name: "LinkSalesDistribution", domain: "business_links",
   description: "按销售额降序以每链接一个细柱展示整体销售结构，并支持100链接分组和10链接经营数据钻取。",
   render: renderLinkSalesDistribution,
-  configSchema: { scope: ["mine", "company"], preset: ["7d", "30d", "custom"], groupSize: 100, drillSize: 10 },
+  configSchema: { scope: ["mine", "company"], globalDateRange: true, groupSize: 100, drillSize: 10 },
   dependencies: ["BusinessLink", "ConnectionSkuSalesFact", "LinkSalesDistribution", "QueryLinkDataTable", "link_data_table"],
 });

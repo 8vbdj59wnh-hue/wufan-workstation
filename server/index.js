@@ -3207,11 +3207,11 @@ app.get("/api/connection-goal-workbench", requireLinkView, (request, response) =
 
 app.get("/api/connection-goal-health-summary", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, ...readConnectionGoalCockpitSummary({
+    response.json({ success: true, ...readConnectionGoalCockpitSummary(request.query, {
       userId: getUserPersonId(request.user), isAdmin: isAdminUser(request.user),
     }) });
   } catch (error) {
-    response.status(error.statusCode || 400).json({ success: false, message: error.message || "链接经营健康度读取失败。" });
+    response.status(error.statusCode || 400).json({ success: false, message: error.message || "链接评级概览读取失败。" });
   }
 });
 
@@ -3861,7 +3861,7 @@ app.get("/api/connection-management/overview", requireLinkView, (request, respon
 
 app.get("/api/connection-business-cockpit", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, ...getConnectionBusinessCockpit(getUserPersonId(request.user), isAdminUser(request.user)) });
+    response.json({ success: true, ...getConnectionBusinessCockpit(getUserPersonId(request.user), isAdminUser(request.user), request.query) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "链接经营驾驶舱读取失败。" });
   }
