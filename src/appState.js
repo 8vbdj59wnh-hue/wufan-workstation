@@ -825,6 +825,10 @@ export async function updateTaskWorkflow(taskId, action, item) {
   if (!response.ok || data.success !== true) {
     throw new Error(data.message ?? data.error ?? "任务流程操作失败，请检查本地数据库服务。");
   }
+  if (Array.isArray(data.processTasks)) {
+    const processTaskIds = new Set(data.processTasks.map((task) => task.id));
+    state.tasks = [...state.tasks.filter((task) => !processTaskIds.has(task.id)), ...data.processTasks];
+  }
   return data.task;
 }
 

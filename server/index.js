@@ -267,8 +267,8 @@ import {
   submitTaskWave,
   startProcessInstanceExecution,
   updateProcessTemplateNodeStatus,
-  updateTaskFromWorkflow,
 } from "./modules/tasks/index.js";
+import { updateTaskFromWorkflow } from "./taskProcessReadinessService.js";
 import {
   createToken,
   verifyPassword,
@@ -4409,8 +4409,8 @@ app.post("/api/tasks/:id/workflow", (request, response) => {
       rejectUnauthorizedTask(response, "你没有权限对该任务执行此操作。");
       return;
     }
-    const task = updateTaskFromWorkflow(request.params.id, action, request.body?.item ?? {});
-    response.json({ success: true, task });
+    const result = updateTaskFromWorkflow(request.params.id, action, request.body?.item ?? {});
+    response.json({ success: true, ...result });
   } catch (error) {
     console.error("任务流程操作失败", error);
     response.status(400).json({ success: false, message: error.message || "任务流程操作失败，请检查本地数据库服务。" });
