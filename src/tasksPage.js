@@ -116,6 +116,7 @@ import {
   renderBusinessHourOptions,
   renderBusinessMinuteOptions,
 } from "./businessTime.js";
+import { standardWorkAttachmentAccept, validateStandardWorkAttachmentFiles } from "./standardWorkAttachmentPolicy.js";
 
 function getTodayDateInShanghai() {
   return new Intl.DateTimeFormat("en-CA", {
@@ -136,8 +137,6 @@ const stores = state.stores;
 const standardWorkAttachmentsKey = "standardWorkAttachments";
 const returnRecordsKey = "returnRecords";
 const latestReturnReasonKey = "latestReturnReason";
-const spreadsheetAttachmentExts = new Set([".xlsx", ".xls", ".csv"]);
-const maxStandardWorkAttachmentSize = 20 * 1024 * 1024;
 
 let filters = {
   keyword: "",
@@ -1091,15 +1090,6 @@ function renderAttachmentPreviewList(files, emptyText = "暂无附件") {
   `;
 }
 
-function validateStandardWorkAttachmentFiles(files) {
-  for (const file of files) {
-    const ext = getFileExt(file.name);
-    if (!spreadsheetAttachmentExts.has(ext)) return "表格附件只支持 .xlsx、.xls、.csv。";
-    if (file.size > maxStandardWorkAttachmentSize) return "单个表格附件不能超过 20MB。";
-  }
-  return "";
-}
-
 function renderStandardWorkAttachmentList(attachments) {
   return renderAttachmentPreviewList(attachments);
 }
@@ -1108,10 +1098,10 @@ function renderStandardWorkAttachmentsField() {
   return `
     <div class="standard-work-attachments-field">
       <label>
-        <span>表格附件</span>
-        <input name="standardWorkAttachments" type="file" accept=".xlsx,.xls,.csv" multiple data-standard-work-attachments />
+        <span>附件</span>
+        <input name="standardWorkAttachments" type="file" accept="${standardWorkAttachmentAccept}" multiple data-standard-work-attachments />
       </label>
-      <p class="form-note">支持 .xlsx、.xls、.csv，单个文件不超过 20MB。未上传也可以发起关键行动。</p>
+      <p class="form-note">支持 .xlsx、.xls、.csv、.xmind，单个文件不超过 20MB。未上传也可以发起关键行动。</p>
       <div class="selected-attachment-list" data-selected-standard-work-attachments>
         <p class="form-note">暂无已选择附件</p>
       </div>
@@ -1123,7 +1113,7 @@ function renderStandardWorkAttachmentsBlock(customFields = {}) {
   const attachments = getStandardWorkAttachments(customFields);
   return `
     <div class="detail-block">
-      <h3>表格附件</h3>
+      <h3>附件</h3>
       ${renderStandardWorkAttachmentList(attachments)}
     </div>
   `;
@@ -4811,7 +4801,7 @@ async function saveTask(form, rerender) {
     try {
       uploadedAttachments = await uploadSelectedStandardWorkAttachments(form);
     } catch (error) {
-      return setModalError(error.message ?? "表格附件上传失败。", rerender);
+      return setModalError(error.message ?? "附件上传失败。", rerender);
     }
 
     const displayTitle = buildDisplayTitle(draft.template, draft.customFields);

@@ -65,6 +65,7 @@ import {
 } from "./workFormEditor.js";
 import { normalizePublicFormFields } from "./publicFormFields.js";
 import { bindActionProductSelectors, collectActionProductIds, renderActionProductSelector } from "./actionProductRelations.js";
+import { standardWorkAttachmentAccept, validateStandardWorkAttachmentFiles } from "./standardWorkAttachmentPolicy.js";
 
 const departments = state.departments;
 const categories = state.categories;
@@ -82,8 +83,6 @@ let goalKeyword = "";
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
 const standardWorkAttachmentsKey = "standardWorkAttachments";
-const spreadsheetAttachmentExts = new Set([".xlsx", ".xls", ".csv"]);
-const maxStandardWorkAttachmentSize = 20 * 1024 * 1024;
 const publishContentNoteTemplateId = "task-template-publish-content-note";
 const linkedActionTemplateIdsKey = "linkedTemplateIds";
 let selectedGoalId =
@@ -413,23 +412,14 @@ function getFileExt(filename = "") {
   return dotIndex === -1 ? "" : filename.slice(dotIndex).toLowerCase();
 }
 
-function validateStandardWorkAttachmentFiles(files) {
-  for (const file of files) {
-    const ext = getFileExt(file.name);
-    if (!spreadsheetAttachmentExts.has(ext)) return "表格附件只支持 .xlsx、.xls、.csv。";
-    if (file.size > maxStandardWorkAttachmentSize) return "单个表格附件不能超过 20MB。";
-  }
-  return "";
-}
-
 function renderStandardWorkAttachmentsField() {
   return `
     <div class="standard-work-attachments-field">
       <label>
-        <span>表格附件</span>
-        <input name="standardWorkAttachments" type="file" accept=".xlsx,.xls,.csv" multiple data-standard-work-attachments />
+        <span>附件</span>
+        <input name="standardWorkAttachments" type="file" accept="${standardWorkAttachmentAccept}" multiple data-standard-work-attachments />
       </label>
-      <p class="form-note">支持 .xlsx、.xls、.csv，单个文件不超过 20MB。未上传也可以发起关键行动。</p>
+      <p class="form-note">支持 .xlsx、.xls、.csv、.xmind，单个文件不超过 20MB。未上传也可以发起关键行动。</p>
       <div class="selected-attachment-list" data-selected-standard-work-attachments>
         <p class="form-note">暂无已选择附件</p>
       </div>
@@ -1656,7 +1646,7 @@ async function saveGoalTask(form, rerender) {
   try {
     uploadedAttachments = await uploadSelectedStandardWorkAttachments(form);
   } catch (uploadError) {
-    return setModalError(uploadError.message ?? "表格附件上传失败。", rerender);
+    return setModalError(uploadError.message ?? "附件上传失败。", rerender);
   }
 
   const displayTitle = buildDisplayTitle(draft.template, draft.customFields);

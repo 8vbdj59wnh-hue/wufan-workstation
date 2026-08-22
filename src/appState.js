@@ -595,7 +595,7 @@ export async function uploadStandardWorkAttachment(file) {
     body: formData,
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error ?? "表格附件上传失败。");
+  if (!response.ok) throw new Error(data.error ?? "附件上传失败。");
   return data;
 }
 
