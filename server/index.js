@@ -1696,6 +1696,7 @@ app.get("/api/task-center/tasks", (request, response) => {
     const data = {
       tasks: readResource("tasks"),
       processInstances: readResource("processInstances"),
+      workPlans: readResource("workPlans"),
       processTemplateNodes: readResource("processTemplateNodes"),
       taskTemplates: readResource("taskTemplates"),
       goals: keyword === "" ? [] : readResource("goals"),
@@ -1707,6 +1708,12 @@ app.get("/api/task-center/tasks", (request, response) => {
     const goalById = new Map(data.goals.map((item) => [item.id, item]));
     const departmentById = new Map(data.departments.map((item) => [item.id, item]));
     const personById = new Map(data.people.map((item) => [item.id, item]));
+    const improvementProcessInstanceIds = new Set(
+      data.workPlans
+        .filter((item) => item.workType === "rectification")
+        .map((item) => String(item.processInstanceId ?? "").trim())
+        .filter(Boolean),
+    );
     const isClearanceTask = (task) => {
       if (task.source === "clearance") return true;
       const instance = processInstanceById.get(task.processInstanceId);
@@ -1752,7 +1759,7 @@ app.get("/api/task-center/tasks", (request, response) => {
     }
     let items = filterTasksByScope(data.tasks, request.user, data).filter((task) => !isClearanceTask(task));
     items = items.filter((task) => {
-      if (!shouldShowTaskInTaskCenter(task, filters)) return false;
+      if (!shouldShowTaskInTaskCenter(task, filters, improvementProcessInstanceIds)) return false;
       const identifierMatch = (matchedTaskId !== null && task.id === matchedTaskId)
         || (matchedProcessInstanceId !== null && task.processInstanceId === matchedProcessInstanceId);
       const templateCodeMatch = matchedVisualTemplateProcessInstanceIds.has(task.processInstanceId);

@@ -57,6 +57,7 @@ import {
   TaskSource,
   TaskStatus,
   TaskTemplateStatus,
+  WorkType,
   WorkPlanStatus,
   RectificationWorkTemplate,
   taskSourceNames,
@@ -1396,7 +1397,13 @@ function matchesFilters(task, identifierTarget = null, isTemplateCodeSearch = fa
   ].join(" ").toLowerCase();
 
   if (!matchesTaskStatusFilter(task, filters.status)) return false;
-  if (!shouldShowTaskInTaskCenter(task, filters)) return false;
+  const improvementProcessInstanceIds = new Set(
+    state.workPlans
+      .filter((item) => item.workType === WorkType.Rectification)
+      .map((item) => String(item.processInstanceId ?? "").trim())
+      .filter(Boolean),
+  );
+  if (!shouldShowTaskInTaskCenter(task, filters, improvementProcessInstanceIds)) return false;
   if (!shouldShowDone && isDoneStatus(task.status)) return false;
   if (!shouldShowCanceled && isCanceledStatus(task.status)) return false;
   if (identifierTarget !== null && !taskMatchesIdentifierSearch(task, identifierTarget)) return false;
@@ -3169,7 +3176,7 @@ function renderFilters() {
         <select name="source">
           <option value="">全部类型</option>
           <option value="${TaskSource.Direct}" ${filters.source === TaskSource.Direct ? "selected" : ""}>普通任务</option>
-          <option value="${TaskSource.Process}" ${filters.source === TaskSource.Process ? "selected" : ""}>改善行动任务</option>
+          <option value="${TaskSource.Process}" ${filters.source === TaskSource.Process ? "selected" : ""}>关键行动任务</option>
         </select>
       </label>
       ${taskListView === "overdue" ? "" : overdueFilter}
@@ -6387,15 +6394,7 @@ export function bindTasksPageEvents(rerender) {
     updateFilters(filterForm);
     if (keywordInput !== null) keywordInput.dataset.pendingTaskSearch = "true";
   });
-  filterForm.addEventListener("change", (event) => {
-    const sourceSelect = filterForm.querySelector('select[name="source"]');
-    const improvementCheckbox = filterForm.querySelector('input[name="showImprovementTasks"]');
-    if (event.target === sourceSelect && sourceSelect?.value === TaskSource.Process && improvementCheckbox !== null) {
-      improvementCheckbox.checked = true;
-    }
-    if (event.target === improvementCheckbox && !improvementCheckbox.checked && sourceSelect?.value === TaskSource.Process) {
-      sourceSelect.value = "";
-    }
+  filterForm.addEventListener("change", () => {
     updateFilters(filterForm);
     void refreshTaskCenterList(rerender, { resetPage: true });
   });

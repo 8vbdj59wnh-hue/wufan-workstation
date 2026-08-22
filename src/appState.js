@@ -158,6 +158,19 @@ function replaceArray(target, items) {
   target.splice(0, target.length, ...(items ?? []).map(cloneItem));
 }
 
+function mergeArrayById(target, items) {
+  const merged = new Map(target.map((item) => [item.id, item]));
+  for (const item of items ?? []) merged.set(item.id, cloneItem(item));
+  target.splice(0, target.length, ...merged.values());
+}
+
+function mergeTaskProductContexts(target, items) {
+  const key = (item) => `${item.contextId || ""}|${item.productId || ""}|${item.erpSkuId || ""}`;
+  const merged = new Map(target.map((item) => [key(item), item]));
+  for (const item of items ?? []) merged.set(key(item), cloneItem(item));
+  target.splice(0, target.length, ...merged.values());
+}
+
 function normalizeDepartment(department) {
   return {
     ...department,
@@ -385,11 +398,11 @@ export async function loadTaskCenterTasks({ page = 1, pageSize = 50, view = "tod
   const response = await authFetch(`${apiBaseUrl}/api/task-center/tasks?${query}`);
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.success !== true) throw new Error(data.message ?? data.error ?? "任务列表读取失败。");
-  replaceArray(state.tasks, data.items ?? []);
-  replaceArray(state.processInstances, data.context?.processInstances ?? []);
-  replaceArray(state.workPlans, data.context?.workPlans ?? []);
-  replaceArray(state.taskProductContexts, data.context?.taskProductContexts ?? []);
-  replaceArray(state.taskWaves, data.context?.taskWaves ?? []);
+  mergeArrayById(state.tasks, data.items ?? []);
+  mergeArrayById(state.processInstances, data.context?.processInstances ?? []);
+  mergeArrayById(state.workPlans, data.context?.workPlans ?? []);
+  mergeTaskProductContexts(state.taskProductContexts, data.context?.taskProductContexts ?? []);
+  mergeArrayById(state.taskWaves, data.context?.taskWaves ?? []);
   return data;
 }
 
@@ -402,18 +415,11 @@ export async function loadTaskCenterTaskDetail(taskId) {
   for (const task of contextTasks) taskIndex.set(task.id, task);
   taskIndex.set(data.task.id, data.task);
   replaceArray(state.tasks, [...taskIndex.values()]);
-  const mergeById = (target, incoming) => replaceArray(target, [...new Map([...target, ...incoming].map((item) => [item.id, item])).values()]);
-  const mergeTaskProductContexts = (target, incoming) => replaceArray(target, [...new Map(
-    [...target, ...incoming].map((item) => [
-      `${item.contextId || ""}|${item.productId || ""}|${item.erpSkuId || ""}`,
-      item,
-    ]),
-  ).values()]);
-  mergeById(state.processInstances, data.context?.processInstances ?? []);
-  mergeById(state.workPlans, data.context?.workPlans ?? []);
-  mergeById(state.templates, data.context?.templates ?? []);
+  mergeArrayById(state.processInstances, data.context?.processInstances ?? []);
+  mergeArrayById(state.workPlans, data.context?.workPlans ?? []);
+  mergeArrayById(state.templates, data.context?.templates ?? []);
   mergeTaskProductContexts(state.taskProductContexts, data.context?.taskProductContexts ?? []);
-  mergeById(state.taskWaves, data.context?.taskWaves ?? []);
+  mergeArrayById(state.taskWaves, data.context?.taskWaves ?? []);
   return data.task;
 }
 

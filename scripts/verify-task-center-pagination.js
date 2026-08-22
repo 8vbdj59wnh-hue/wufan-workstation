@@ -33,6 +33,15 @@ try {
     if (!response.ok) throw new Error(`${response.status}: ${text}`);
     return { milliseconds: performance.now() - startedAt, bytes: Buffer.byteLength(text), data: JSON.parse(text) };
   };
+  const rectificationProcessIds = (result) => new Set(
+    (result.data.context?.workPlans ?? [])
+      .filter((item) => item.workType === "rectification")
+      .map((item) => item.processInstanceId),
+  );
+  const containsImprovementTask = (result) => {
+    const ids = rectificationProcessIds(result);
+    return result.data.items.some((item) => ids.has(item.processInstanceId));
+  };
   const bootstrap = await measure(`http://127.0.0.1:${port}/api/bootstrap?module=tasks`);
   const samples = [];
   for (let index = 0; index < 10; index += 1) {
@@ -40,20 +49,21 @@ try {
   }
   const ordered = samples.map((item) => item.milliseconds).sort((left, right) => left - right);
   const latest = samples.at(-1);
-  if (latest.data.items.some((item) => item.source === "process")) throw new Error("默认任务列表仍展示改善行动任务。");
+  if (containsImprovementTask(latest)) throw new Error("默认任务列表仍展示改善行动任务。");
   const directTasks = await measure(`http://127.0.0.1:${port}/api/task-center/tasks?page=1&pageSize=100&view=all&filters=${encodeURIComponent(JSON.stringify({ source: "direct", showDone: true, showCanceled: true }))}`);
   const hiddenImprovementTasks = await measure(`http://127.0.0.1:${port}/api/task-center/tasks?page=1&pageSize=100&view=all&filters=${encodeURIComponent(JSON.stringify({ source: "process", showDone: true, showCanceled: true }))}`);
   const improvementTasks = await measure(`http://127.0.0.1:${port}/api/task-center/tasks?page=1&pageSize=100&view=all&filters=${encodeURIComponent(JSON.stringify({ source: "process", showDone: true, showCanceled: true, showImprovementTasks: true }))}`);
   const allVisibleTasks = await measure(`http://127.0.0.1:${port}/api/task-center/tasks?page=1&pageSize=100&view=all&filters=${encodeURIComponent(JSON.stringify({ showDone: true, showCanceled: true, showImprovementTasks: true }))}`);
-  if (hiddenImprovementTasks.data.total !== 0) throw new Error("未勾选时仍可通过任务类型返回改善行动任务。");
+  if (containsImprovementTask(hiddenImprovementTasks)) throw new Error("未勾选时关键行动任务筛选仍返回改善行动任务。");
   if (directTasks.data.items.some((item) => item.source === "process")) throw new Error("普通任务类型筛选返回了改善行动任务。");
-  if (improvementTasks.data.items.some((item) => item.source !== "process")) throw new Error("改善行动任务类型筛选返回了普通任务。");
+  if (improvementTasks.data.items.some((item) => item.source !== "process")) throw new Error("关键行动任务类型筛选返回了普通任务。");
+  if (improvementTasks.data.total < hiddenImprovementTasks.data.total) throw new Error("显示改善行动后关键行动任务数量反而减少。");
   if (allVisibleTasks.data.total !== directTasks.data.total + improvementTasks.data.total) throw new Error("勾选后的任务总数与普通任务、改善行动任务数量不一致。");
   const viewResults = {};
   for (const view of ["today", "mine", "overdue", "all"]) {
     const hidden = await measure(`http://127.0.0.1:${port}/api/task-center/tasks?page=1&pageSize=100&view=${view}&filters=${encodeURIComponent(JSON.stringify({ showDone: true, showCanceled: true }))}`);
     const shown = await measure(`http://127.0.0.1:${port}/api/task-center/tasks?page=1&pageSize=100&view=${view}&filters=${encodeURIComponent(JSON.stringify({ showDone: true, showCanceled: true, showImprovementTasks: true }))}`);
-    if (hidden.data.items.some((item) => item.source === "process")) throw new Error(`${view}视图默认仍展示改善行动任务。`);
+    if (containsImprovementTask(hidden)) throw new Error(`${view}视图默认仍展示改善行动任务。`);
     if (shown.data.total < hidden.data.total) throw new Error(`${view}视图勾选后的数量反而减少。`);
     viewResults[view] = { hidden: hidden.data.total, shown: shown.data.total, added: shown.data.total - hidden.data.total };
   }
@@ -77,7 +87,8 @@ try {
     totalTasks: latest.data.total,
     returnedTasks: latest.data.items.length,
     directTaskCount: directTasks.data.total,
-    improvementTaskCount: improvementTasks.data.total,
+    keyActionTaskCount: improvementTasks.data.total,
+    improvementTaskCount: improvementTasks.data.total - hiddenImprovementTasks.data.total,
     improvementVisibilityByView: viewResults,
     doneTaskCount: doneTasks.data.total,
     canceledTaskCount: canceledTasks.data.total,
