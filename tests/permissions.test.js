@@ -32,11 +32,15 @@ test("前后端从共享权限层读取同一套定义", async () => {
   assert.doesNotMatch(`${databaseSource}\n${authSource}`, /src\/permissions\.js/);
 });
 
-test("权限清单包含独立链接和供应链权限域", () => {
+test("权限清单保留链接权限域并彻底移除已退役模块权限入口", () => {
   assert.deepEqual(groupKeys("links"), ["view", "manage", "import", "health", "manageHealth", "improve"]);
-  assert.deepEqual(groupKeys("supplyChain"), ["view", "manage", "purchase", "quality"]);
   assert(groupKeys("modules").includes("links"));
-  assert(groupKeys("modules").includes("supplyChain"));
+  assert.equal(groupKeys("modules").includes("supplyChain"), false);
+  assert.equal(groupKeys("modules").includes("customers"), false);
+  assert.equal(groupKeys("modules").includes("aiAssistant"), false);
+  assert.deepEqual(groupKeys("supplyChain"), []);
+  assert.deepEqual(groupKeys("customers"), []);
+  assert.deepEqual(groupKeys("aiAssistant"), []);
   assert.deepEqual(groupKeys("products"), ["view", "create", "edit", "archive"]);
 });
 
@@ -94,7 +98,7 @@ test("旧账号保留上传能力，显式上传权限边界不会回退", () =>
   assert.equal(explicitPermissions.uploads.standardWorkAttachment, false);
 });
 
-test("旧产品查看角色继续获得链接和供应链只读兼容权限", () => {
+test("旧产品查看角色继续获得链接只读兼容权限", () => {
   const permissions = normalizePermissions({
     modules: { products: true },
     products: { view: true, edit: false },
@@ -106,13 +110,11 @@ test("旧产品查看角色继续获得链接和供应链只读兼容权限", ()
   assert.equal(permissions.links.manageHealth, false);
   assert.equal(permissions.links.import, false);
   assert.equal(permissions.links.improve, false);
-  assert.equal(permissions.supplyChain.view, true);
-  assert.equal(permissions.supplyChain.manage, false);
-  assert.equal(permissions.supplyChain.purchase, false);
-  assert.equal(permissions.supplyChain.quality, false);
+  assert.equal(permissions.supplyChain, undefined);
+  assert.equal(permissions.customers, undefined);
 });
 
-test("旧产品编辑角色继续获得原有业务写权限", () => {
+test("旧产品编辑角色继续获得链接业务写权限", () => {
   const permissions = normalizePermissions({
     modules: { products: true },
     products: { view: true, edit: true },
@@ -120,9 +122,6 @@ test("旧产品编辑角色继续获得原有业务写权限", () => {
 
   for (const permissionKey of ["manage", "import", "health", "manageHealth", "improve"]) {
     assert.equal(permissions.links[permissionKey], true);
-  }
-  for (const permissionKey of ["manage", "purchase", "quality"]) {
-    assert.equal(permissions.supplyChain[permissionKey], true);
   }
 });
 
@@ -143,10 +142,11 @@ test("历史上手工写入的部分链接权限继续生效", () => {
 
 test("显式新权限域不会再回退到产品权限", () => {
   const productOnly = {
-    modules: { products: true, links: false, supplyChain: false },
+    modules: { products: true, links: false, supplyChain: true, customers: true },
     products: { view: true, edit: true },
     links: { view: false, manage: false, import: false, health: false, manageHealth: false, improve: false },
     supplyChain: { view: false, manage: false, purchase: false, quality: false },
+    customers: { view: true, manage: true, maintain: true, analyze: true },
   };
   const permissions = normalizePermissions(productOnly);
 
@@ -155,50 +155,42 @@ test("显式新权限域不会再回退到产品权限", () => {
   assert.equal(hasPermission(permissions, "links.view"), false);
   assert.equal(hasPermission(permissions, "links.manage"), false);
   assert.equal(hasPermission(permissions, "supplyChain.view"), false);
+  assert.equal(hasPermission(permissions, "customers.view"), false);
   assert.equal(canAccessModule(permissions, "products"), true);
   assert.equal(canAccessModule(permissions, "connectionCenter"), false);
   assert.equal(canAccessModule(permissions, "supplyChainCenter"), false);
+  assert.equal(canAccessModule(permissions, "customerCenter"), false);
 
   const roundTrip = JSON.parse(serializePermissions(productOnly));
   assert.equal(roundTrip.links.view, false);
-  assert.equal(roundTrip.supplyChain.view, false);
+  assert.equal(roundTrip.supplyChain, undefined);
+  assert.equal(roundTrip.customers, undefined);
 });
 
-test("链接角色和供应链角色可以独立授权", () => {
+test("退休模块不能通过历史权限负载重新授权", () => {
   const linkRole = normalizePermissions({
-    modules: { products: false, links: true, supplyChain: false },
+    modules: { products: false, links: true, supplyChain: true, customers: true },
     products: { view: false, edit: false },
     links: { view: true, manage: true, import: false, health: true, manageHealth: false, improve: false },
-    supplyChain: { view: false, manage: false, purchase: false, quality: false },
+    supplyChain: { view: true, manage: true, purchase: true, quality: true },
+    customers: { view: true, manage: true, maintain: true, analyze: true },
   });
   assert.equal(canAccessModule(linkRole, "connectionCenter"), true);
   assert.equal(canAccessModule(linkRole, "products"), false);
   assert.equal(canAccessModule(linkRole, "supplyChainCenter"), false);
+  assert.equal(canAccessModule(linkRole, "customerCenter"), false);
   assert.equal(hasPermission(linkRole, "links.manage"), true);
   assert.equal(hasPermission(linkRole, "links.import"), false);
-
-  const supplyRole = normalizePermissions({
-    modules: { products: false, links: false, supplyChain: true },
-    products: { view: false, edit: false },
-    links: { view: false, manage: false, import: false, health: false, manageHealth: false, improve: false },
-    supplyChain: { view: true, manage: false, purchase: true, quality: false },
-  });
-  assert.equal(canAccessModule(supplyRole, "supplyChainCenter"), true);
-  assert.equal(canAccessModule(supplyRole, "products"), false);
-  assert.equal(canAccessModule(supplyRole, "connectionCenter"), false);
-  assert.equal(hasPermission(supplyRole, "supplyChain.purchase"), true);
-  assert.equal(hasPermission(supplyRole, "supplyChain.manage"), false);
+  assert.equal(linkRole.supplyChain, undefined);
+  assert.equal(linkRole.customers, undefined);
 });
 
-test("前后端业务守卫不再直接拼接产品权限回退", () => {
+test("链接业务守卫不再直接拼接产品权限回退", () => {
   const serverSource = fs.readFileSync(new URL("../server/index.js", import.meta.url), "utf8");
   const linkPageSource = fs.readFileSync(new URL("../src/connectionCenterPage.js", import.meta.url), "utf8");
-  const supplyPageSource = fs.readFileSync(new URL("../src/supplyChainCenterPage.js", import.meta.url), "utf8");
 
   assert.match(serverSource, /const requireLinkView = requirePermission\("links\.view"\)/);
-  assert.match(serverSource, /const requireSupplyView = requirePermission\("supplyChain\.view"\)/);
   assert.doesNotMatch(serverSource, /requireAnyPermission\("links\.[^"]+", "products\.[^"]+"\)/);
-  assert.doesNotMatch(serverSource, /requireAnyPermission\("supplyChain\.[^"]+", "products\.[^"]+"\)/);
   assert.doesNotMatch(linkPageSource, /links\.[^"]+"\) \|\| hasPermission\([^\n]+products\./);
-  assert.doesNotMatch(supplyPageSource, /supplyChain\.[^"]+"\) \|\| hasPermission\([^\n]+products\./);
+  assert.doesNotMatch(serverSource, /\/api\/(?:supply-chain|customer-center)/);
 });

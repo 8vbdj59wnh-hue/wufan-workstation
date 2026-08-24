@@ -119,16 +119,9 @@
 | 财务分类规则 | `finance_rules` | 根据关键词建议流水类型和科目 | 名称、关键词、类型、科目、优先级、状态 |
 | 财务报表 | 查询结果，无独立报表事实表 | 聚合finance entries形成报表 | 周期、收入、退款、成本、费用及利润口径 |
 
-### 3.5 扩展业务体系
+> 客户中心和供应链中心已经正式退役。其专属客户、供应商、采购、供应商质量与评价表不再属于当前Schema；Product、ERP SKU、库存、成本、销售利润等共享资产继续由各自正式领域持有。
 
-| 业务对象 | 系统名称 | 作用 | 核心字段 |
-|---|---|---|---|
-| 供应商 | `suppliers` | 供应商主档 | 编码、名称、状态、联系人、结算与评级 |
-| 采购单 | purchase orders/items | 采购业务记录 | 单号、供应商、Product、数量、金额、状态 |
-| 质量问题 | `supplier_quality_issues` | 供应商质量事件 | 供应商、Product、问题、严重度、状态 |
-| 客户 | `customers` | 客户主档 | 身份、渠道、状态和标签 |
-| 客户行为 | consumptions/followups/tags | 消费、跟进与标签事实 | 客户、时间、金额、内容和标签 |
-| AI分析记录 | `ai_analysis_records` | AI分析请求、证据和确认结果 | 分析类型、对象、输入、输出、状态、确认信息 |
+> 独立“AI经营助手”已经正式退役。生产 `ai_analysis_records` 为0行且无反向外键，已退出正式Schema；迁移只删除空表，其他环境如存在历史记录则自动保留为 Legacy Read-Only。产品健康分析、产品用户洞察、链接趋势与链接诊断继续由对应业务模块独立持有。
 
 ## 4. 数据表资产目录
 
@@ -144,7 +137,6 @@
 | `sales_links`、`sales_link_skus` | Link与平台销售规格 | 链接 | 正式身份主数据 |
 | `connection_profiles` | Link经营扩展档案 | 链接 | 正式扩展主数据，不是Link身份 |
 | `sales_objects` | 平台销售对象 | 销售对象 | 正式主数据 |
-| `suppliers`、`customers` | 供应商和客户主档 | 供应链/客户 | 正式主数据 |
 
 ### 4.2 事实数据
 
@@ -159,7 +151,7 @@
 | `finance_entries` | 财务流水 | 财务 | 正式财务事实 |
 | `tasks` | 任务状态及工作结果 | 工作执行 | 正式操作事实 |
 | `weekly_reports`、`weekly_report_problems` | 周报及问题 | 工作执行 | 正式业务记录 |
-| content、health、diagnosis、improvement、lifecycle、issue、insight、purchase、customer相关业务表 | 各业务事件和结果 | 多领域 | 各领域正式业务记录 |
+| content、health、diagnosis、improvement、lifecycle、issue、insight相关业务表 | 各业务事件和结果 | 多领域 | 各领域正式业务记录 |
 
 ### 4.3 关系数据
 
@@ -173,7 +165,7 @@
 | `sales_link_sku_combo_groups`及components | 历史Combo审核资产 | 链接关系 | 治理历史/兼容，不是新真相源 |
 | `platform_sku_manual_bindings` | 历史平台SKU手工Product绑定 | 商品关系 | Legacy兼容 |
 | `platform_link_shop_mappings`、`wangdian_shop_mappings` | 外部店铺身份到系统店铺 | 同步关系 | 正式同步配置关系 |
-| `action_products`、`supplier_products`、客户标签关系、策略行动关系 | 领域对象关联 | 多领域 | 正式业务关系 |
+| `action_products`、策略行动关系 | 领域对象关联 | 多领域 | 正式业务关系 |
 
 ### 4.4 日志、批次与快照
 
@@ -210,7 +202,7 @@
 
 ### 5.2 工作执行、模板与内容（25）
 
-`weekly_reports`、`weekly_report_problems`、`goals`、`task_templates`、`tasks`、`execution_groups`、`task_waves`、`task_wave_items`、`wave_regeneration_runs`、`process_templates`、`process_template_nodes`、`process_instances`、`methodologies`、`templates`、`template_tag_categories`、`template_tags`、`standard_work_forms`、`template_asset_versions`、`issues_requirements`、`content_schedules`、`work_plans`、`action_products`、`product_strategy_versions`、`product_strategy_action_links`、`ai_analysis_records`。
+`weekly_reports`、`weekly_report_problems`、`goals`、`task_templates`、`tasks`、`execution_groups`、`task_waves`、`task_wave_items`、`wave_regeneration_runs`、`process_templates`、`process_template_nodes`、`process_instances`、`methodologies`、`templates`、`template_tag_categories`、`template_tags`、`standard_work_forms`、`template_asset_versions`、`issues_requirements`、`content_schedules`、`work_plans`、`action_products`、`product_strategy_versions`、`product_strategy_action_links`。
 
 ### 5.3 Product与ERP商品（20）
 
@@ -228,15 +220,11 @@
 
 `finance_import_batches`、`finance_rules`、`finance_entries`。
 
-### 5.7 供应链（6）
+### 5.7 已退役领域
 
-`suppliers`、`supplier_products`、`purchase_orders`、`purchase_order_items`、`supplier_quality_issues`、`supplier_evaluations`。
+供应链中心原6张专属表与客户中心原5张专属表已经退出正式Schema。任务价值链中的“供应链管理”“客户维护”仍是通用任务分类，不代表模块或专属数据模型复活。
 
-### 5.8 客户（5）
-
-`customers`、`customer_consumptions`、`customer_tags`、`customer_tag_relations`、`customer_followups`。
-
-以上领域小计合计125张。部分表横跨领域，本目录按主要业务用途唯一归类；数据库校验仍以Schema为准。
+以上在用领域小计合计114张。部分表横跨领域，本目录按主要业务用途唯一归类；数据库校验仍以Schema为准。
 
 ## 6. 数据关系目录
 
