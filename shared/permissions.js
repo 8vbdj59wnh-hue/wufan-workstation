@@ -23,10 +23,8 @@ export const permissionGroups = [
       { key: "settings", label: "可访问设置模块" },
       { key: "products", label: "可访问产品中心" },
       { key: "links", label: "可访问链接中心" },
-      { key: "supplyChain", label: "可访问供应链中心" },
       { key: "operations", label: "可查看经营驾驶舱" },
       { key: "finance", label: "可访问财务中心" },
-      { key: "customers", label: "可访问客户中心" },
       { key: "aiAssistant", label: "可访问AI经营助手" },
       { key: "templateCenter", label: "可访问模板中心" },
     ],
@@ -76,16 +74,6 @@ export const permissionGroups = [
     ],
   },
   {
-    key: "supplyChain",
-    title: "供应链中心权限",
-    permissions: [
-      { key: "view", label: "查看供应链数据" },
-      { key: "manage", label: "管理供应商与合作产品" },
-      { key: "purchase", label: "管理采购记录" },
-      { key: "quality", label: "管理品质问题" },
-    ],
-  },
-  {
     key: "operations",
     title: "经营权限",
     permissions: [
@@ -99,16 +87,6 @@ export const permissionGroups = [
       { key: "view", label: "查看财务数据" },
       { key: "manage", label: "导入和管理财务数据" },
       { key: "approve", label: "审核财务数据" },
-    ],
-  },
-  {
-    key: "customers",
-    title: "客户中心权限",
-    permissions: [
-      { key: "view", label: "查看客户（隐私信息脱敏）" },
-      { key: "manage", label: "管理客户档案与消费记录" },
-      { key: "maintain", label: "维护客户标签与跟进" },
-      { key: "analyze", label: "查看客户价值分析" },
     ],
   },
   {
@@ -327,15 +305,6 @@ const legacyBusinessPermissionMappings = {
       improve: "edit",
     },
   },
-  supplyChain: {
-    moduleKey: "supplyChain",
-    permissions: {
-      view: "view",
-      manage: "edit",
-      purchase: "edit",
-      quality: "edit",
-    },
-  },
 };
 
 function hasExplicitBusinessPermissionBoundary(source, groupKey, definition) {
@@ -524,8 +493,6 @@ export function canAccessModule(userOrPermissions, moduleId) {
     adminDataCenter: "settings",
     financeCenter: "finance",
     connectionCenter: "links",
-    supplyChainCenter: "supplyChain",
-    customerCenter: "customers",
     aiOperationAssistant: "aiAssistant",
   };
   const permissionKey = modulePermissionMap[moduleId] ?? moduleId;
@@ -544,12 +511,6 @@ export function canAccessModule(userOrPermissions, moduleId) {
   }
   if (moduleId === "connectionCenter") {
     return hasPermission(userOrPermissions, "links.view");
-  }
-  if (moduleId === "supplyChainCenter") {
-    return hasPermission(userOrPermissions, "supplyChain.view");
-  }
-  if (moduleId === "customerCenter") {
-    return hasPermission(userOrPermissions, "customers.view");
   }
   if (moduleId === "aiOperationAssistant") {
     return hasPermission(userOrPermissions, "aiAssistant.view");

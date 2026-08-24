@@ -1279,60 +1279,6 @@ export async function createProductStrategyAction(productId, itemId, payload) {
   }), "战略关键行动创建失败。");
 }
 
-export async function loadSupplyChainOverview() {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/overview`), "供应链概览读取失败。");
-}
-
-export async function loadSuppliers(filters = {}) {
-  const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== "" && value !== undefined));
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/suppliers${query.size ? `?${query}` : ""}`), "供应商列表读取失败。");
-}
-
-export async function loadSupplier(supplierId) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/suppliers/${encodeURIComponent(supplierId)}`), "供应商详情读取失败。");
-}
-
-export async function saveSupplierProfile(payload, supplierId = "") {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/suppliers${supplierId ? `/${encodeURIComponent(supplierId)}` : ""}`, {
-    method: supplierId ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
-  }), "供应商保存失败。");
-}
-
-export async function addSupplierProductRelation(supplierId, payload) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/suppliers/${encodeURIComponent(supplierId)}/products`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "供应产品关联失败。");
-}
-
-export async function deleteSupplierProductRelation(supplierId, relationId) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/suppliers/${encodeURIComponent(supplierId)}/products/${encodeURIComponent(relationId)}`, { method: "DELETE" }), "供应产品关系删除失败。");
-}
-
-export async function createSupplyPurchase(payload) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/purchases`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "采购记录创建失败。");
-}
-
-export async function updateSupplyPurchase(purchaseId, payload) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/purchases/${encodeURIComponent(purchaseId)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "采购状态更新失败。");
-}
-
-export async function createSupplyQualityIssue(payload) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/quality-issues`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "品质问题创建失败。");
-}
-
-export async function updateSupplyQualityIssue(issueId, payload) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/quality-issues/${encodeURIComponent(issueId)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "品质问题更新失败。");
-}
-
-export async function saveSupplyEvaluation(payload) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/supply-chain/evaluations`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), "供应商评价保存失败。");
-}
-
-export async function loadCustomerOverview(){return readApiJson(await authFetch(`${apiBaseUrl}/api/customer-center/overview`),"客户概览读取失败。");}
-export async function loadCustomers(filters={}){const query=new URLSearchParams(Object.entries(filters).filter(([,v])=>v!==""&&v!==undefined));return readApiJson(await authFetch(`${apiBaseUrl}/api/customer-center/customers${query.size?`?${query}`:""}`),"客户列表读取失败。");}
-export async function loadCustomer(customerId){return readApiJson(await authFetch(`${apiBaseUrl}/api/customer-center/customers/${encodeURIComponent(customerId)}`),"客户详情读取失败。");}
-export async function saveCustomerProfile(payload,customerId=""){return readApiJson(await authFetch(`${apiBaseUrl}/api/customer-center/customers${customerId?`/${encodeURIComponent(customerId)}`:""}`,{method:customerId?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),"客户保存失败。");}
-export async function addCustomerConsumption(customerId,payload){return readApiJson(await authFetch(`${apiBaseUrl}/api/customer-center/customers/${encodeURIComponent(customerId)}/consumptions`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),"消费记录保存失败。");}
-export async function addCustomerTag(customerId,payload){return readApiJson(await authFetch(`${apiBaseUrl}/api/customer-center/customers/${encodeURIComponent(customerId)}/tags`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),"客户标签保存失败。");}
-export async function addCustomerFollowup(customerId,payload){return readApiJson(await authFetch(`${apiBaseUrl}/api/customer-center/customers/${encodeURIComponent(customerId)}/followups`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),"客户跟进保存失败。");}
 export async function loadAiAnalyses(){return readApiJson(await authFetch(`${apiBaseUrl}/api/ai-operation/analyses`),"经营分析记录读取失败。");}
 export async function createAiAnalysis(payload){return readApiJson(await authFetch(`${apiBaseUrl}/api/ai-operation/analyses`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),"经营分析生成失败。");}
 export async function confirmAiAnalysis(id){return readApiJson(await authFetch(`${apiBaseUrl}/api/ai-operation/analyses/${encodeURIComponent(id)}/confirm`,{method:"POST"}),"经营分析确认失败。");}

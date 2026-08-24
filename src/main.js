@@ -6,8 +6,6 @@ import { bindScheduleBoardPageEvents, renderScheduleBoardPage } from "./schedule
 import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js";
 import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js";
 import { bindFinanceCenterPageEvents, renderFinanceCenterPage } from "./financeCenterPage.js";
-import { bindSupplyChainCenterPageEvents, renderSupplyChainCenterPage } from "./pages/supplyChainCenterPage.js";
-import { bindCustomerCenterPageEvents, renderCustomerCenterPage } from "./pages/customerCenterPage.js";
 import { bindAiOperationAssistantPageEvents, renderAiOperationAssistantPage } from "./pages/aiOperationAssistantPage.js";
 import { bindDashboardPageEvents, renderDashboardPage } from "./dashboardPage.js";
 import { bindProductPreviewEvents, closeProductPreview, openProductPreview, renderProductPreviewModal } from "./productPreview.js";
@@ -102,10 +100,6 @@ const moduleHashMap = {
   "finance-center": "financeCenter",
   connectionCenter: "connectionCenter",
   "connection-center": "connectionCenter",
-  supplyChainCenter: "supplyChainCenter",
-  "supply-chain-center": "supplyChainCenter",
-  customerCenter: "customerCenter",
-  "customer-center": "customerCenter",
   aiOperationAssistant: "aiOperationAssistant",
   "ai-operation-assistant": "aiOperationAssistant",
   "template-center": "templateCenter",
@@ -545,12 +539,6 @@ function renderPage() {
     content = renderFinanceCenterPage();
   }
 
-  if (canAccessActiveModule && activeModule.id === "supplyChainCenter") {
-    content = renderSupplyChainCenterPage();
-  }
-  if (canAccessActiveModule && activeModule.id === "customerCenter") {
-    content = renderCustomerCenterPage();
-  }
   if (canAccessActiveModule && activeModule.id === "aiOperationAssistant") {
     content = renderAiOperationAssistantPage();
   }
@@ -870,12 +858,6 @@ function render({ navigation = false } = {}) {
     getLoadedRouteModule("connectionCenter")?.bind(render);
   }
 
-  if (activeModuleId === "supplyChainCenter") {
-    bindSupplyChainCenterPageEvents(render);
-  }
-  if (activeModuleId === "customerCenter") {
-    bindCustomerCenterPageEvents(render);
-  }
   if (activeModuleId === "aiOperationAssistant") {
     bindAiOperationAssistantPageEvents(render);
   }

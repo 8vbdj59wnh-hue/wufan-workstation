@@ -280,20 +280,6 @@ import {
 } from "./modules/auth/index.js";
 import { normalizeProductSkuCode, splitProductSkuCodes } from "./modules/common/index.js";
 import { getOperationDashboard } from "./operationManagementService.js";
-import {
-  addSupplierProduct,
-  createPurchaseOrder,
-  createQualityIssue,
-  getSupplyChainOverview,
-  listSuppliers,
-  readSupplier,
-  removeSupplierProduct,
-  saveSupplier,
-  saveSupplierEvaluation,
-  updatePurchaseOrder,
-  updateQualityIssue,
-} from "./supplyChainService.js";
-import { addConsumption, addFollowup, addTag, getCustomer, listCustomers, overview as getCustomerOverview, saveCustomer } from "./customerService.js";
 import { confirmAnalysis,createAnalysis,createAnalysisAction,listAnalyses,readAnalysis } from "./aiOperationAssistantService.js";
 import {
   approveFinanceEntry,
@@ -617,19 +603,10 @@ const requireLinkImport = requirePermission("links.import");
 const requireLinkHealth = requirePermission("links.health");
 const requireLinkHealthManage = requirePermission("links.manageHealth");
 const requireLinkImprove = requirePermission("links.improve");
-const requireSupplyView = requirePermission("supplyChain.view");
-const requireSupplyManage = requirePermission("supplyChain.manage");
-const requireSupplyPurchase = requirePermission("supplyChain.purchase");
-const requireSupplyQuality = requirePermission("supplyChain.quality");
-const requireCustomerView = requirePermission("customers.view");
-const requireCustomerManage = requirePermission("customers.manage");
-const requireCustomerMaintain = requirePermission("customers.maintain");
 const requireAiView = requirePermission("aiAssistant.view");
 const requireAiAnalyze = requirePermission("aiAssistant.analyze");
 const requireAiConfirm = requirePermission("aiAssistant.confirm");
 const requireAiAction = requirePermission("aiAssistant.createAction");
-function customerScope(user,query={}){const scope=getDataScope(user);if(scope==="self")return{...query,ownerId:user.id};if(scope==="department")return{...query,departmentId:user.departmentId};return query;}
-function assertCustomerAccess(user,customerId){if(!listCustomers(customerScope(user,{id:customerId}),true).length)throw new Error("你无权操作该客户。");}
 
 function getRequestedActionTemplateIds(body = {}) {
   return [
@@ -2783,82 +2760,30 @@ app.delete("/api/finance/rules/:id", requirePermission("finance.manage"), (reque
   catch (error) { response.status(400).json({ success: false, message: error.message || "财务规则删除失败。" }); }
 });
 
-app.get("/api/supply-chain/overview", requireSupplyView, (request, response) => {
-  try {
-    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
-    response.json({ success: true, ...getSupplyChainOverview(), moduleData: {
-      products: scoped.products ?? [], productErpMappings: scoped.productErpMappings ?? [],
-    } });
-  }
-  catch (error) { response.status(400).json({ success: false, message: error.message || "供应链概览读取失败。" }); }
-});
-
-app.get("/api/supply-chain/suppliers", requireSupplyView, (request, response) => {
-  try { response.json({ success: true, items: listSuppliers(request.query) }); }
-  catch (error) { response.status(400).json({ success: false, message: error.message || "供应商列表读取失败。" }); }
-});
-
-app.get("/api/supply-chain/suppliers/:id", requireSupplyView, (request, response) => {
-  try { response.json({ success: true, detail: readSupplier(request.params.id) }); }
-  catch (error) { response.status(404).json({ success: false, message: error.message || "供应商不存在。" }); }
-});
-
-app.post("/api/supply-chain/suppliers", requireSupplyManage, (request, response) => {
-  try { response.status(201).json({ success: true, item: saveSupplier(request.body, request.user.id) }); }
-  catch (error) { response.status(400).json({ success: false, message: error.message || "供应商创建失败。" }); }
-});
-
-app.put("/api/supply-chain/suppliers/:id", requireSupplyManage, (request, response) => {
-  try { response.json({ success: true, item: saveSupplier(request.body, request.user.id, request.params.id) }); }
-  catch (error) { response.status(400).json({ success: false, message: error.message || "供应商更新失败。" }); }
-});
-
-app.post("/api/supply-chain/suppliers/:id/products", requireSupplyManage, (request, response) => {
-  try { response.status(201).json({ success: true, item: addSupplierProduct(request.params.id, request.body) }); }
-  catch (error) { response.status(400).json({ success: false, message: error.message || "供应产品关联失败。" }); }
-});
-
-app.delete("/api/supply-chain/suppliers/:id/products/:relationId", requireSupplyManage, (request, response) => {
-  try { response.json(removeSupplierProduct(request.params.id, request.params.relationId)); }
-  catch (error) { response.status(404).json({ success: false, message: error.message || "供应产品关系删除失败。" }); }
-});
-
-app.post("/api/supply-chain/purchases", requireSupplyPurchase, (request, response) => {
-  try { response.status(201).json({ success: true, item: createPurchaseOrder(request.body, request.user.id) }); }
-  catch (error) { response.status(400).json({ success: false, message: error.message || "采购记录创建失败。" }); }
-});
-
-app.put("/api/supply-chain/purchases/:id", requireSupplyPurchase, (request, response) => {
-  try { response.json({ success: true, item: updatePurchaseOrder(request.params.id, request.body) }); }
-  catch (error) { response.status(400).json({ success: false, message: error.message || "采购状态更新失败。" }); }
-});
-
-app.post("/api/supply-chain/quality-issues", requireSupplyQuality, (request, response) => {
-  try { response.status(201).json({ success: true, item: createQualityIssue(request.body) }); }
-  catch (error) { response.status(400).json({ success: false, message: error.message || "品质问题创建失败。" }); }
-});
-
-app.put("/api/supply-chain/quality-issues/:id", requireSupplyQuality, (request, response) => {
-  try { response.json({ success: true, item: updateQualityIssue(request.params.id, request.body) }); }
-  catch (error) { response.status(400).json({ success: false, message: error.message || "品质问题更新失败。" }); }
-});
-
-app.post("/api/supply-chain/evaluations", requireSupplyManage, (request, response) => {
-  try { response.status(201).json({ success: true, item: saveSupplierEvaluation(request.body, request.user.id) }); }
-  catch (error) { response.status(400).json({ success: false, message: error.message || "供应商评价保存失败。" }); }
-});
-
-app.get("/api/customer-center/overview", requireCustomerView, (request,response)=>{try{response.json({success:true,...getCustomerOverview(customerScope(request.user))});}catch(error){response.status(400).json({success:false,message:error.message||"客户概览读取失败。"});}});
-app.get("/api/customer-center/customers", requireCustomerView, (request,response)=>{try{response.json({success:true,items:listCustomers(customerScope(request.user,request.query),hasPermission(request.user,"customers.manage"))});}catch(error){response.status(400).json({success:false,message:error.message||"客户列表读取失败。"});}});
-app.get("/api/customer-center/customers/:id", requireCustomerView, (request,response)=>{try{if(!listCustomers(customerScope(request.user,{id:request.params.id}),true).length)return response.status(403).json({success:false,message:"你无权查看该客户。"});response.json({success:true,detail:getCustomer(request.params.id,hasPermission(request.user,"customers.manage"))});}catch(error){response.status(404).json({success:false,message:error.message||"客户不存在。"});}});
-app.post("/api/customer-center/customers", requireCustomerManage, (request,response)=>{try{const payload={...request.body,ownerId:request.body?.ownerId||request.user.id};response.status(201).json({success:true,item:saveCustomer(payload,request.user.id)});}catch(error){response.status(400).json({success:false,message:error.message||"客户创建失败。"});}});
-app.put("/api/customer-center/customers/:id", requireCustomerManage, (request,response)=>{try{assertCustomerAccess(request.user,request.params.id);const current=getCustomer(request.params.id,true).customer;response.json({success:true,item:saveCustomer({...request.body,ownerId:request.body?.ownerId||current.ownerId},request.user.id,request.params.id)});}catch(error){response.status(400).json({success:false,message:error.message||"客户更新失败。"});}});
-app.post("/api/customer-center/customers/:id/consumptions", requireCustomerManage, (request,response)=>{try{assertCustomerAccess(request.user,request.params.id);response.status(201).json({success:true,item:addConsumption(request.params.id,request.body)});}catch(error){response.status(400).json({success:false,message:error.message||"消费记录保存失败。"});}});
-app.post("/api/customer-center/customers/:id/tags", requireCustomerMaintain, (request,response)=>{try{assertCustomerAccess(request.user,request.params.id);response.status(201).json({success:true,item:addTag(request.params.id,request.body,request.user.id)});}catch(error){response.status(400).json({success:false,message:error.message||"客户标签保存失败。"});}});
-app.post("/api/customer-center/customers/:id/followups", requireCustomerMaintain, (request,response)=>{try{assertCustomerAccess(request.user,request.params.id);response.status(201).json({success:true,item:addFollowup(request.params.id,request.body,request.user.id)});}catch(error){response.status(400).json({success:false,message:error.message||"跟进记录保存失败。"});}});
-
 function aiEnterpriseKnowledge(){const db=getDatabase();const safe=(sql)=>{try{return db.prepare(sql).all();}catch{return[];}};return{actionStandards:safe("SELECT id,name FROM task_templates WHERE status='active' AND defaultProcessTemplateId IS NOT NULL ORDER BY updatedAt DESC LIMIT 30"),effectiveImprovements:[...safe("SELECT id,title,resultSummary,'connection' AS objectType FROM connection_improvements WHERE status='effective' ORDER BY updatedAt DESC LIMIT 15"),...safe("SELECT id,title,resultSummary,'product' AS objectType FROM product_improvements WHERE status='effective' ORDER BY updatedAt DESC LIMIT 15")]};}
-function aiEvidence(request){const type=String(request.body?.analysisType||"");let evidence;if(type==="company"){if(!hasPermission(request.user,"operations.view"))throw new Error("没有经营驾驶舱权限。");evidence=getOperationDashboard();}else if(type==="product"){if(!hasPermission(request.user,"products.view"))throw new Error("没有产品数据权限。");const scoped=filterDataByScope(readAllData({exclude:["salesLinks","salesLinkSkus"]}),request.user);const visibleProductIds=(scoped.products??[]).map(item=>item.id);if(!visibleProductIds.includes(request.body?.objectId))throw new Error("无权分析该产品。");evidence=getProductBusinessAnalysis(request.body.objectId,{includeInventoryCost:hasPermission(request.user,"finance.view"),visibleProductIds});}else if(type==="connection"){if(!hasPermission(request.user,"links.view"))throw new Error("没有连接数据权限。");evidence=getConnectionGrowthAnalysis(request.body.objectId);}else if(type==="finance"){if(!hasPermission(request.user,"finance.view"))throw new Error("没有财务数据权限。");evidence=getFinanceStatement(request.body||{});}else if(type==="supply"){if(!hasPermission(request.user,"supplyChain.view"))throw new Error("没有供应链数据权限。");evidence=getSupplyChainOverview();}else if(type==="customer"){if(!hasPermission(request.user,"customers.view"))throw new Error("没有客户数据权限。");evidence=getCustomerOverview(customerScope(request.user));}else throw new Error("分析类型无效。");return{...evidence,knowledge:aiEnterpriseKnowledge()};}
+function aiEvidence(request) {
+  const type = String(request.body?.analysisType || "");
+  let evidence;
+  if (type === "company") {
+    if (!hasPermission(request.user, "operations.view")) throw new Error("没有经营驾驶舱权限。");
+    evidence = getOperationDashboard();
+  } else if (type === "product") {
+    if (!hasPermission(request.user, "products.view")) throw new Error("没有产品数据权限。");
+    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
+    const visibleProductIds = (scoped.products ?? []).map((item) => item.id);
+    if (!visibleProductIds.includes(request.body?.objectId)) throw new Error("无权分析该产品。");
+    evidence = getProductBusinessAnalysis(request.body.objectId, {
+      includeInventoryCost: hasPermission(request.user, "finance.view"), visibleProductIds,
+    });
+  } else if (type === "connection") {
+    if (!hasPermission(request.user, "links.view")) throw new Error("没有连接数据权限。");
+    evidence = getConnectionGrowthAnalysis(request.body?.objectId);
+  } else if (type === "finance") {
+    if (!hasPermission(request.user, "finance.view")) throw new Error("没有财务数据权限。");
+    evidence = getFinanceStatement(request.body || {});
+  } else throw new Error("分析类型无效。");
+  return { ...evidence, knowledge: aiEnterpriseKnowledge() };
+}
 app.get("/api/ai-operation/analyses",requireAiView,(request,response)=>{try{response.json({success:true,items:listAnalyses(request.user.id,getDataScope(request.user)==="all")});}catch(error){response.status(400).json({success:false,message:error.message||"分析记录读取失败。"});}});
 app.get("/api/ai-operation/analyses/:id",requireAiView,(request,response)=>{try{const item=readAnalysis(request.params.id);if(getDataScope(request.user)!=="all"&&item.generatedBy!==request.user.id)return response.status(403).json({success:false,message:"无权查看该分析。"});response.json({success:true,item});}catch(error){response.status(404).json({success:false,message:error.message||"分析不存在。"});}});
 app.post("/api/ai-operation/analyses",requireAiAnalyze,(request,response)=>{try{response.status(201).json({success:true,item:createAnalysis(request.body,request.user.id,aiEvidence(request))});}catch(error){response.status(400).json({success:false,message:error.message||"经营分析失败。"});}});

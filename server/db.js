@@ -2562,6 +2562,61 @@ function readTaskTemplateCategoryId(templateId) {
   return row?.categoryId ?? null;
 }
 
+const retiredCustomerAndSupplyChainTables = [
+  "customer_tag_relations",
+  "customer_followups",
+  "customer_consumptions",
+  "customer_tags",
+  "customers",
+  "supplier_quality_issues",
+  "purchase_order_items",
+  "supplier_evaluations",
+  "supplier_products",
+  "purchase_orders",
+  "suppliers",
+];
+
+function withoutRetiredBusinessPermissions(value) {
+  if (typeof value !== "string" || value.trim() === "") return value;
+  let permissions;
+  try { permissions = JSON.parse(value); }
+  catch { return value; }
+  if (permissions === null || typeof permissions !== "object" || Array.isArray(permissions)) return value;
+  let changed = false;
+  for (const key of ["supplyChain", "customers"]) {
+    if (Object.hasOwn(permissions, key)) {
+      delete permissions[key];
+      changed = true;
+    }
+    if (permissions.modules !== null && typeof permissions.modules === "object" && Object.hasOwn(permissions.modules, key)) {
+      delete permissions.modules[key];
+      changed = true;
+    }
+  }
+  return changed ? JSON.stringify(permissions) : value;
+}
+
+function retireCustomerAndSupplyChainV1() {
+  const database = getDatabase();
+  database.transaction(() => {
+    for (const table of retiredCustomerAndSupplyChainTables) database.exec(`DROP TABLE IF EXISTS ${table}`);
+    for (const table of ["permission_templates", "persons"]) {
+      if (!tableExists(table)) continue;
+      const availableColumns = new Set(database.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name));
+      const columns = (table === "persons" ? ["permissions", "permissionOverrides"] : ["permissions"])
+        .filter((column) => availableColumns.has(column));
+      if (!availableColumns.has("id") || columns.length === 0) continue;
+      const rows = database.prepare(`SELECT id,${columns.join(",")} FROM ${table}`).all();
+      for (const row of rows) {
+        const updates = Object.fromEntries(columns.map((column) => [column, withoutRetiredBusinessPermissions(row[column])]));
+        if (columns.every((column) => updates[column] === row[column])) continue;
+        database.prepare(`UPDATE ${table} SET ${columns.map((column) => `${column}=@${column}`).join(",")} WHERE id=@id`)
+          .run({ id: row.id, ...updates });
+      }
+    }
+  })();
+}
+
 function runLightweightMigrations() {
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS task_waves (
@@ -2933,6 +2988,7 @@ function runLightweightMigrations() {
   migrateProductStructureApplicationApprovalsV1();
   migrateSalesDailyAnomalyGovernanceV1();
   migrateErpSkuBusinessUsagesV1();
+  retireCustomerAndSupplyChainV1();
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS platform_link_shop_mappings (
       id TEXT PRIMARY KEY,

@@ -20,7 +20,7 @@ function canViewManagement() {
 
 function renderHome() {
   return `<section class="dashboard-entry-grid">
-    <article class="dashboard-entry-card is-operation"><div class="dashboard-entry-icon">营</div><div><p class="eyebrow">老板与经营负责人</p><h2>经营驾驶舱</h2><p>查看销售、利润、产品、链接、客户、供应链和风险提醒。</p><strong>回答：公司经营怎么样？</strong></div><button class="primary-button" type="button" data-dashboard-view="operation" ${canViewOperation() ? "" : "disabled"}>进入经营视角</button></article>
+    <article class="dashboard-entry-card is-operation"><div class="dashboard-entry-icon">营</div><div><p class="eyebrow">老板与经营负责人</p><h2>经营驾驶舱</h2><p>查看销售、利润、产品、链接和风险提醒。</p><strong>回答：公司经营怎么样？</strong></div><button class="primary-button" type="button" data-dashboard-view="operation" ${canViewOperation() ? "" : "disabled"}>进入经营视角</button></article>
     <article class="dashboard-entry-card is-management"><div class="dashboard-entry-icon">管</div><div><p class="eyebrow">管理者与团队负责人</p><h2>管理驾驶舱</h2><p>查看目标、关键行动、任务、问题、改善项目与工作结果。</p><strong>回答：安排的事情有没有做好？</strong></div><button class="primary-button" type="button" data-dashboard-view="management" ${canViewManagement() ? "" : "disabled"}>进入管理视角</button></article>
   </section>`;
 }
