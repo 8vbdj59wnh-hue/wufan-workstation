@@ -306,6 +306,7 @@ import {
 } from "./productManagementV2Service.js";
 import { getProductBusinessReadModel, getProductHealthAnalysis } from "./productBusinessReadModel.js";
 import { getProductSalesDistribution } from "./productSalesDistributionService.js";
+import { getProductShopSandbox } from "./productShopSandboxService.js";
 import { attachProductDiagnosisSummaries, getProductBusinessDiagnosis } from "./productBusinessDiagnosisService.js";
 import { getProductInsightCenter, importProductInsights, updateProductInsight } from "./productInsightService.js";
 import {
@@ -2823,6 +2824,18 @@ app.get("/api/product-management/sales-distribution", requirePermission("product
     });
   } catch (error) {
     response.status(error.statusCode || 400).json({ success: false, message: error.message || "产品销售结构读取失败。" });
+  }
+});
+
+app.get("/api/product-management/shop-sandbox", requirePermission("products.view"), (request, response) => {
+  try {
+    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
+    response.json({
+      success: true,
+      ...getProductShopSandbox(request.query, { visibleProductIds: (scoped.products ?? []).map((product) => product.id) }),
+    });
+  } catch (error) {
+    response.status(error.statusCode || 400).json({ success: false, message: error.message || "产品沙盘读取失败。" });
   }
 });
 

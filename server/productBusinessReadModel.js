@@ -3,6 +3,7 @@ import { readProductInventorySupplyMap } from "./inventorySupplyQueryService.js"
 import { classifyProductBusinessZones } from "./productBusinessClassification.js";
 import { FORMAL_SALES_OBJECT_RESOLVER_SCOPES, resolveLinkSkuRelationsForRead } from "./capabilities/resolveLinkSkuRelationRead.js";
 import { queryProductContributions } from "./productContributionReadModel.js";
+import { latestCompleteSalesDate, resolveProductSalesDistributionRange } from "./productSalesDistributionService.js";
 
 export const productBusinessLifecycleStatuses = Object.freeze(["新品", "成长", "爆款", "稳定销售", "衰退", "清仓", "归档"]);
 export const productBusinessHealthStatuses = Object.freeze(["healthy", "attention", "risk", "no_data"]);
@@ -13,21 +14,15 @@ const completedTaskStatuses = new Set(["done", "completed", "canceled", "cancell
 
 function text(value) { return String(value ?? "").trim(); }
 function numeric(value) { return value === null || value === undefined ? null : Number(value); }
-function validDate(value) { return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00+08:00`)); }
-function shanghaiDate() { return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()); }
 function addDays(value, days) { const date = new Date(`${value}T00:00:00+08:00`); date.setUTCDate(date.getUTCDate() + days); return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(date); }
 function daysBetween(start, end) { return Math.round((Date.parse(`${end}T00:00:00+08:00`) - Date.parse(`${start}T00:00:00+08:00`)) / 86400000) + 1; }
 
-export function resolveProductBusinessPeriod(query = {}) {
-  const range = ["yesterday", "7d", "30d", "custom"].includes(text(query.range)) ? text(query.range) : "30d";
-  const today = shanghaiDate();
-  const periodEnd = range === "custom" ? text(query.periodEnd) : range === "yesterday" ? addDays(today, -1) : today;
-  const periodStart = range === "custom" ? text(query.periodStart) : range === "7d" ? addDays(periodEnd, -6) : range === "30d" ? addDays(periodEnd, -29) : periodEnd;
-  if (!validDate(periodStart) || !validDate(periodEnd) || periodStart > periodEnd || daysBetween(periodStart, periodEnd) > 366) {
-    const error = new Error("时间范围无效，请选择不超过366天的正确日期范围。");
-    error.statusCode = 400;
-    throw error;
-  }
+export function resolveProductBusinessPeriod(query = {}, database = getDatabase()) {
+  const requestedRange = text(query.range) || "30d";
+  const resolved = resolveProductSalesDistributionRange({ preset: requestedRange, startDate: query.periodStart, endDate: query.periodEnd }, requestedRange === "custom" ? "" : latestCompleteSalesDate(database));
+  const range = resolved.preset;
+  const periodStart = resolved.startDate;
+  const periodEnd = resolved.endDate;
   const periodDays = daysBetween(periodStart, periodEnd);
   const previousPeriodStart = addDays(periodStart, -periodDays);
   const previousPeriodEnd = addDays(periodStart, -1);
@@ -341,7 +336,7 @@ function operatingProductLifecycleMap(database) {
 
 export function getProductBusinessReadModel(query = {}, { includeInventoryCost = false, visibleProductIds = null, unpaged = false } = {}) {
   const database = getDatabase();
-  const period = resolveProductBusinessPeriod(query);
+  const period = resolveProductBusinessPeriod(query, database);
   const products = database.prepare(`SELECT p.*,owner.name ownerName FROM products p LEFT JOIN persons owner ON owner.id=p.ownerId ORDER BY p.updatedAt DESC,p.id`).all();
   const visible = visibleProductIds ? new Set(visibleProductIds) : null;
   const allScopedProducts = visible ? products.filter((product) => visible.has(product.id)) : products;
@@ -412,6 +407,7 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
         status: { code: healthRecord?.healthStatus ?? "no_data", label: ({ growth: "成长", stable: "稳定", attention: "关注", risk: "风险", no_data: "暂无数据" })[healthRecord?.healthStatus] ?? "暂无数据" }, evaluatedAt: healthRecord?.updatedAt ?? null },
       legacyHealth: { score: healthRecord?.healthScore === null || healthRecord?.healthScore === undefined ? null : Number(healthRecord.healthScore), evaluatedAt: healthRecord?.updatedAt ?? null },
       actions: { ...action, pendingCount: action.improvementCount + action.actionCount + action.taskCount },
+      createdAt: product.createdAt,
       updatedAt: product.updatedAt,
       _zone: businessZone(product, { salesAmount, salesQuantity }, inventorySummary),
       _previousSalesQuantity: numeric(priorContribution?.totalPhysicalContribution),
@@ -457,7 +453,8 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
     salesTrend: (item) => item.sales.trend.rate, skuCount: (item) => item.structure.skuCount, salesLinkCount: (item) => item.structure.salesLinkCount,
     inventoryQuantity: (item) => item.inventory.quantity, inventoryAmount: (item) => item.inventory.amount, grossMargin: (item) => item.profit.grossMargin,
     grossProfit: (item) => item.profit.grossProfit, healthStatus: (item) => ({ risk: 3, attention: 2, healthy: 1, no_data: 0 }[item.healthAnalysis.overall.code]),
-    healthScore: (item) => item.legacyHealth.score, pendingCount: (item) => item.actions.pendingCount, updatedAt: (item) => item.updatedAt };
+    healthScore: (item) => item.legacyHealth.score, pendingCount: (item) => item.actions.pendingCount,
+    createdAt: (item) => item.createdAt, updatedAt: (item) => item.updatedAt };
   const sortBy = sortFields[text(query.sortBy)] ? text(query.sortBy) : "updatedAt";
   const sortDirection = text(query.sortDirection) === "asc" ? "asc" : "desc";
   const collator = new Intl.Collator("zh-CN", { numeric: true, sensitivity: "base" });

@@ -99,21 +99,24 @@ export function queryProductContributions(input = {}, options = {}) {
   const periodStart = date(input.periodStart || input.startDate); const periodEnd = date(input.periodEnd || input.endDate);
   if (!periodStart || !periodEnd || periodStart > periodEnd) throw new Error("Product Contribution日期范围无效。");
   const requestedProductIds = [...new Set((input.productIds ?? []).map(text).filter(Boolean))];
+  const hasSalesLinkScope = Array.isArray(input.salesLinkIds);
+  const requestedSalesLinkIds = [...new Set((input.salesLinkIds ?? []).map(text).filter(Boolean))];
   const requestedProducts = new Set(requestedProductIds);
   const productPlaceholders = requestedProductIds.map(() => "?").join(",");
-  const facts = database.prepare(`SELECT f.id,f.saleDate,f.salesLinkId,f.salesLinkSkuId,f.quantity,f.salesAmount,f.costAmount,f.profitAmount,
+  const salesLinkPlaceholders = requestedSalesLinkIds.map(() => "?").join(",");
+  const facts = hasSalesLinkScope && !requestedSalesLinkIds.length ? [] : database.prepare(`SELECT f.id,f.saleDate,f.salesLinkId,f.salesLinkSkuId,f.quantity,f.salesAmount,f.costAmount,f.profitAmount,
       r.salesObjectId,o.objectCode,o.objectType
     FROM connection_sku_sales_daily_facts f
     JOIN sales_link_sku_sales_object_relations r ON r.linkSkuId=f.salesLinkSkuId AND r.status='active'
     JOIN sales_objects o ON o.id=r.salesObjectId AND o.status='active'
-    WHERE f.saleDate BETWEEN ? AND ?${requestedProductIds.length ? ` AND EXISTS (
+    WHERE f.saleDate BETWEEN ? AND ?${hasSalesLinkScope ? ` AND f.salesLinkId IN (${salesLinkPlaceholders})` : ""}${requestedProductIds.length ? ` AND EXISTS (
       SELECT 1 FROM sales_link_sku_sales_object_relations scoped_relation
       JOIN sales_object_structures scoped_structure ON scoped_structure.salesObjectId=scoped_relation.salesObjectId AND scoped_structure.status IN ('active','superseded')
       JOIN sales_object_structure_components scoped_component ON scoped_component.structureId=scoped_structure.id AND scoped_component.status='active'
       JOIN product_erp_mappings scoped_mapping ON scoped_mapping.erpSkuId=scoped_component.erpSkuId AND scoped_mapping.currentState='active'
       WHERE scoped_relation.linkSkuId=f.salesLinkSkuId AND scoped_relation.status='active' AND scoped_mapping.productId IN (${productPlaceholders})
     )` : ""}
-    ORDER BY f.saleDate,f.id`).all(periodStart, periodEnd, ...requestedProductIds);
+    ORDER BY f.saleDate,f.id`).all(periodStart, periodEnd, ...requestedSalesLinkIds, ...requestedProductIds);
   const context = loadContext(database, facts);
   const metrics = new Map(requestedProductIds.map((productId) => [productId, blank(productId)]));
   const daily = new Map(); const seenFacts = new Set();
@@ -186,6 +189,7 @@ export function queryProductContributions(input = {}, options = {}) {
       bundleContribution: "Daily Fact → Bundle Sales Object → BOM Component Quantity → Product",
       totalPhysicalContribution: "directSalesQuantity + bundleContributionQuantity",
       economics: "Product仅归属Single直接销售事实；Bundle金额和利润不分摊",
+      salesLinkScope: hasSalesLinkScope ? "仅统计指定Sales Link范围" : "全部Sales Link",
       historicalEvidence: "BOM证据等级只读Sales Object Structure版本和来源元数据，不读Legacy Product Structure",
     },
   };

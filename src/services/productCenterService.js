@@ -40,6 +40,7 @@ export {
   exportProductMarketingAsset,
   loadProductBusinessDashboard,
   loadProductSalesDistribution,
+  loadProductShopSandbox,
   loadProductHealthAnalysis,
   loadProductBusinessDiagnosis,
   loadProductInsightCenter,

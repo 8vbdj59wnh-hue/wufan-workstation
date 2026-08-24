@@ -1187,6 +1187,11 @@ export async function loadProductSalesDistribution(params = {}) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/sales-distribution${query.size ? `?${query}` : ""}`), "产品销售结构读取失败。");
 }
 
+export async function loadProductShopSandbox(params = {}) {
+  const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== "" && value !== undefined && value !== null));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/shop-sandbox${query.size ? `?${query}` : ""}`), "产品沙盘读取失败。");
+}
+
 export async function loadProductManagementDetail(productId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}`), "产品经营详情读取失败。");
 }

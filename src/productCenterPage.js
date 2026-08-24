@@ -31,6 +31,7 @@ import {
   loadProductManagementOverview,
   loadProductBusinessDashboard,
   loadProductSalesDistribution,
+  loadProductShopSandbox,
   loadProductHealthAnalysis,
   loadProductBusinessDiagnosis,
   loadProductInsightCenter,
@@ -68,7 +69,8 @@ import { renderUiModule } from "./uiModuleRegistry.js";
 import "./uiModules/productWorkspaceModules.js";
 import "./uiModules/productMarketingAsset.js";
 import "./uiModules/productDailySales.js";
-import "./uiModules/productSalesDistribution.js";
+import { renderProductSalesPresetButtons } from "./uiModules/productSalesDistribution.js";
+import "./uiModules/productShopSandbox.js";
 
 const productStatuses = ["开发中", "上架", "成长期", "成熟期", "风险期", "淘汰", "待上架", "在售", "停售", "清仓", "已归档"];
 let filters = { query: "", brand: "", category: "", status: "", erpStatus: "", platform: "", stockStatus: "" };
@@ -105,7 +107,11 @@ let productSkuV2SearchTimer = 0;
 let productSkuV2MetadataLoading = false;
 let productWorkspaceState = { activeTab: "overview", sections: {}, marketingMode: "read", marketingNotice: "", dailySales: { data: null, loading: false, loaded: false, rangePreset: "30d", error: "" } };
 let productBusinessDashboardState = { readModel: null, loading: false, error: "" };
+let productBusinessViewMode = "table";
+let productBusinessSearchTimer = 0;
+let productBusinessRefreshPending = false;
 let productSalesDistributionState = { range: { preset: "30d" }, includeHistorical: false, items: [], summary: {}, selectedGroup: 0, loading: false, loaded: false, error: "" };
+let productShopSandboxState = { range: { preset: "30d" }, shopId: "", shops: [], selectedShop: null, items: [], summary: {}, segment: "all", sortMode: "sales", loading: false, loaded: false, error: "" };
 let productBusinessFilters = { query: "", brand: "", category: "", lifecycle: "", status: "", healthStatus: "", inventoryStatus: "", ownerId: "", includeHistorical: false, range: "30d", periodStart: "", periodEnd: "", sortBy: "updatedAt", sortDirection: "desc", page: 1, pageSize: 30 };
 let productBusinessVisibleMetrics = new Set(["sales", "structure", "inventory", "profit", "health", "diagnosis"]);
 
@@ -385,9 +391,11 @@ function renderProductWorkspaceTabs() {
   const skuManagementActive = Boolean(getRouteErpSkuId())
     || (!isProductDetail && ["sku-management", "pending-skus", "combo-skus"].includes(productSubmodule));
   const cockpitActive = !isProductDetail && !skuManagementActive && productSubmodule === "business-cockpit";
+  const sandboxActive = !isProductDetail && !skuManagementActive && productSubmodule === "product-sandbox";
   return `<nav class="product-workspace-tabs" aria-label="产品中心视图">
     <button type="button" data-action="product-workspace-view" data-view="business-cockpit" class="${cockpitActive ? "is-active" : ""}">经营驾驶舱</button>
-    <button type="button" data-action="product-workspace-view" data-view="business-dashboard" class="${!cockpitActive && !skuManagementActive ? "is-active" : ""}">产品经营</button>
+    <button type="button" data-action="product-workspace-view" data-view="product-sandbox" class="${sandboxActive ? "is-active" : ""}">产品沙盘</button>
+    <button type="button" data-action="product-workspace-view" data-view="business-dashboard" class="${!cockpitActive && !sandboxActive && !skuManagementActive ? "is-active" : ""}">产品经营</button>
     <button type="button" data-action="product-workspace-view" data-view="sku-management" class="${skuManagementActive ? "is-active" : ""}">SKU管理</button>
   </nav>`;
 }
@@ -411,7 +419,6 @@ function renderBusinessSelect(values, selected, emptyLabel, readValue = (value) 
 
 function renderProductBusinessFilters(readModel) {
   const options = readModel?.options ?? {};
-  const custom = productBusinessFilters.range === "custom";
   const healthLabels = { healthy: "健康", attention: "关注", risk: "风险", no_data: "暂无数据" };
   const inventoryLabels = { healthy: "健康", attention: "关注", backlog: "积压风险", stockout: "缺货风险", no_data: "暂无数据" };
   return `<form class="product-business-filters" data-product-business-filter>
@@ -426,19 +433,30 @@ function renderProductBusinessFilters(readModel) {
       <select name="ownerId">${renderBusinessSelect(options.owners, productBusinessFilters.ownerId, "全部负责人", (value) => value.id, (value) => value.name)}</select>
       <label class="product-unarchived-toggle"><input type="checkbox" name="includeHistorical" ${productBusinessFilters.includeHistorical ? "checked" : ""}/><span>显示历史产品</span></label>
     </div>
-    <div class="product-business-period">
-      <span>销售周期</span>
-      ${[["yesterday", "昨日"], ["7d", "7日"], ["30d", "30日"], ["custom", "自定义"]].map(([value, label]) => `<button type="button" data-action="product-business-range" data-range="${value}" class="${productBusinessFilters.range === value ? "is-active" : ""}">${label}</button>`).join("")}
-      <label class="${custom ? "" : "is-hidden"}">开始<input type="date" name="periodStart" value="${escapeHtml(productBusinessFilters.periodStart)}" ${custom ? "required" : "disabled"} /></label>
-      <label class="${custom ? "" : "is-hidden"}">结束<input type="date" name="periodEnd" value="${escapeHtml(productBusinessFilters.periodEnd)}" ${custom ? "required" : "disabled"} /></label>
-      <button class="primary-button compact-button" type="submit">应用筛选</button>
-      <button class="text-button" type="button" data-action="clear-product-business-filters">清空</button>
-    </div>
+  </form>`;
+}
+
+function renderProductBusinessPeriodControl(readModel) {
+  const custom = productBusinessFilters.range === "custom";
+  const period = readModel?.period;
+  return `<form class="product-business-time-control" data-product-business-period-filter>
+    ${period ? `<span class="product-business-time-period">销售数据周期 ${escapeHtml(period.periodStart)} 至 ${escapeHtml(period.periodEnd)}</span>` : ""}
+    ${renderProductSalesPresetButtons({ preset: productBusinessFilters.range }, "data-product-business-range")}
+    <div class="product-distribution-custom-range ${custom ? "" : "is-hidden"}"><label>开始日期<input type="date" name="periodStart" value="${escapeHtml(productBusinessFilters.periodStart)}" ${custom ? "required" : "disabled"}/></label><span>→</span><label>结束日期<input type="date" name="periodEnd" value="${escapeHtml(productBusinessFilters.periodEnd)}" ${custom ? "required" : "disabled"}/></label></div>
+    <button type="submit" class="secondary-button">查看</button>
   </form>`;
 }
 
 function renderProductBusinessMetricSettings() {
   return `<details class="product-business-metric-settings"><summary>指标设置</summary><div>${productBusinessMetricGroups.map((group) => `<label><input type="checkbox" data-product-business-metric="${group.key}" ${businessMetricEnabled(group.key) ? "checked" : ""} />${group.label}</label>`).join("")}</div></details>`;
+}
+
+function renderProductBusinessOperatingSort() {
+  const options = [["updatedAt", "综合"], ["salesQuantity", "🔥销量"], ["inventoryQuantity", "📦库存"], ["inventoryAmount", "💰资金占用"], ["createdAt", "🆕新品"]];
+  return `<div class="product-business-sort" aria-label="产品经营排序"><span>经营排序：</span>${options.map(([value, label]) => {
+    const active = productBusinessFilters.sortBy === value && productBusinessFilters.sortDirection === "desc";
+    return `<button type="button" data-action="set-product-business-operating-sort" data-sort-by="${value}" class="${active ? "is-active" : ""}" aria-pressed="${active}">${label}</button>`;
+  }).join("")}</div>`;
 }
 
 function renderProductBusinessTable(readModel) {
@@ -472,6 +490,24 @@ function renderProductBusinessTable(readModel) {
   </table></div>`;
 }
 
+function renderProductBusinessCards(readModel) {
+  const rows = readModel?.items ?? [];
+  if (!rows.length) return `<div class="product-card-empty">当前筛选条件下暂无产品</div>`;
+  return `<div class="product-card-grid product-sku-v2-card-grid product-business-card-grid">${rows.map((item) => `<article class="product-archive-card product-business-card" data-action="view-product" data-direct-product-detail data-product-id="${escapeHtml(item.id)}" role="button" tabindex="0" aria-label="查看产品：${escapeHtml(item.name)}">
+    <div class="product-archive-card-media">${renderImage({ mainImage: item.image, name: item.name }, "product-card-image")}</div>
+    <div class="product-archive-card-body">
+      <div class="product-archive-card-heading"><h3 title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</h3>${businessStatus(item.healthAnalysis?.overall?.label, item.healthAnalysis?.overall?.code, "health")}</div>
+      <small class="product-card-listed-at">${escapeHtml(item.brand || "未设置品牌")} · ${escapeHtml(item.category || "未设置分类")} · ${escapeHtml(item.lifecycle || "未设置生命周期")} · ${escapeHtml(item.status || "未设置状态")}</small>
+      <div class="product-card-identities"><span>SKU <strong>${escapeHtml(item.sku || "—")}</strong></span><span>产品编码 <strong>${escapeHtml(item.productCode || "—")}</strong></span></div>
+      <div class="product-card-metrics">
+        <div><strong>${businessMoney(item.sales?.directAmount)}</strong><span>销售表现</span></div>
+        <div><strong>${businessMoney(item.profit?.grossProfit)}</strong><span>毛利润</span></div>
+        <div><strong>${businessValue(item.inventory?.quantity)}</strong><span>${Number(item.inventory?.quantity || 0) <= 0 ? "库存风险" : "当前库存"}</span></div>
+      </div>
+    </div>
+  </article>`).join("")}</div>`;
+}
+
 function renderProductBusinessPagination(readModel) {
   const pagination = readModel?.pagination;
   if (!pagination || pagination.pages <= 1) return "";
@@ -482,14 +518,13 @@ function renderProductBusinessDashboard() {
   const readModel = productBusinessDashboardState.readModel;
   const summary = readModel?.summary;
   return `<section class="product-center-page product-business-dashboard">
-    <div class="section-heading with-actions"><div><h1>产品中心</h1><p>产品主数据与经营分析</p></div></div>
     ${renderProductWorkspaceTabs()}
-    <section class="product-business-hero"><div><p class="eyebrow">产品经营分析</p><h2>全部产品经营数据表</h2><p>展示产品销售、库存、利润、生命周期及健康状态，帮助判断产品经营质量。</p></div>${readModel?.period ? `<small>销售数据周期 ${escapeHtml(readModel.period.periodStart)} 至 ${escapeHtml(readModel.period.periodEnd)}</small>` : ""}</section>
+    ${renderProductBusinessPeriodControl(readModel)}
     ${productBusinessDashboardState.error ? `<div class="form-error">${escapeHtml(productBusinessDashboardState.error)}</div>` : ""}
     ${summary ? `<section class="product-business-summary"><article><span>产品总数</span><strong>${businessValue(summary.totalProducts)}</strong><small>与产品库同源</small></article><article><span>筛选结果</span><strong>${businessValue(summary.filteredProducts)}</strong><small>当前筛选范围</small></article><article><span>直接销售额</span><strong>${businessMoney(summary.directSalesAmount)}</strong><small>仅Single直接事实</small></article><article><span>直接销量</span><strong>${businessValue(summary.directSalesQuantity)}</strong><small>Single直接销售</small></article><article><span>组合贡献销量</span><strong>${businessValue(summary.bundleContributionQuantity)}</strong><small>Bundle销量 × BOM数量</small></article><article><span>实际出货贡献</span><strong>${businessValue(summary.totalPhysicalContribution)}</strong><small>直接 + 组合贡献</small></article><article><span>库存数量</span><strong>${businessValue(summary.inventoryQuantity)}</strong><small>库存模块最新口径</small></article><article><span>风险产品</span><strong>${businessValue(summary.riskProducts)}</strong><small>健康或库存风险</small></article></section>` : ""}
     ${renderProductBusinessFilters(readModel)}
-    <div class="product-business-toolbar"><span>${productBusinessDashboardState.loading ? "正在读取产品经营数据…" : `共 ${summary?.filteredProducts ?? 0} 个产品`}</span>${renderProductBusinessMetricSettings()}</div>
-    ${productBusinessDashboardState.loading && !readModel ? `<div class="empty-state">正在读取销售、库存与经营数据…</div>` : renderProductBusinessTable(readModel)}
+    <div class="product-business-toolbar"><div class="product-business-toolbar-primary"><span>${productBusinessDashboardState.loading ? "正在读取产品经营数据…" : `共 ${summary?.filteredProducts ?? 0} 个产品`}</span>${renderProductBusinessOperatingSort()}</div><div class="product-business-toolbar-actions"><div class="product-view-switch" aria-label="产品经营视图"><button type="button" data-action="product-business-view" data-view="table" class="${productBusinessViewMode === "table" ? "is-active" : ""}" aria-pressed="${productBusinessViewMode === "table"}">列表</button><button type="button" data-action="product-business-view" data-view="card" class="${productBusinessViewMode === "card" ? "is-active" : ""}" aria-pressed="${productBusinessViewMode === "card"}">卡片</button></div>${renderProductBusinessMetricSettings()}</div></div>
+    ${productBusinessDashboardState.loading && !readModel ? `<div class="empty-state">正在读取销售、库存与经营数据…</div>` : productBusinessViewMode === "card" ? renderProductBusinessCards(readModel) : renderProductBusinessTable(readModel)}
     ${renderProductBusinessPagination(readModel)}
   </section>`;
 }
@@ -503,11 +538,19 @@ function renderProductBusinessCockpit() {
   </section>`;
 }
 
+function renderProductShopSandboxPage() {
+  return `<section class="product-center-page product-shop-sandbox-page">
+    ${renderProductWorkspaceTabs()}
+    ${renderUiModule("product_shop_sandbox", { state: productShopSandboxState, resolveUrl: resolveAssetUrl })}
+  </section>`;
+}
+
 function renderProductList() {
   if (productSubmodule === "pending-skus") return renderPendingSkuPage();
   if (productSubmodule === "combo-skus") return comboSkuState.detail ? renderComboSkuDetail() : renderComboSkuList();
   if (productSubmodule === "sku-management") return renderProductSkuV2List();
   if (productSubmodule === "business-cockpit") return renderProductBusinessCockpit();
+  if (productSubmodule === "product-sandbox") return renderProductShopSandboxPage();
   return renderProductBusinessDashboard();
 }
 
@@ -2084,9 +2127,14 @@ async function refreshProductManagementOverview(rerender) {
 }
 
 async function refreshProductBusinessDashboard(rerender) {
-  if (productBusinessDashboardState.loading) return;
+  if (productBusinessDashboardState.loading) {
+    productBusinessRefreshPending = true;
+    return;
+  }
+  productBusinessRefreshPending = false;
+  const hasReadModel = Boolean(productBusinessDashboardState.readModel);
   productBusinessDashboardState = { ...productBusinessDashboardState, loading: true, error: "" };
-  rerender();
+  if (!hasReadModel) rerender();
   try {
     const result = await loadProductBusinessDashboard(productBusinessFilters);
     productBusinessDashboardState = { readModel: result.readModel, loading: false, error: "" };
@@ -2095,6 +2143,7 @@ async function refreshProductBusinessDashboard(rerender) {
     productBusinessDashboardState = { ...productBusinessDashboardState, loading: false, error: error.message || "产品经营看板读取失败。" };
   }
   rerender();
+  if (productBusinessRefreshPending) void refreshProductBusinessDashboard(rerender);
 }
 
 async function refreshProductSalesDistribution(rerender) {
@@ -2121,6 +2170,35 @@ async function refreshProductSalesDistribution(rerender) {
     };
   } catch (error) {
     productSalesDistributionState = { ...productSalesDistributionState, loading: false, loaded: true, error: error.message || "产品销售结构读取失败。" };
+  }
+  rerender();
+}
+
+async function refreshProductShopSandbox(rerender) {
+  if (productShopSandboxState.loading) return;
+  productShopSandboxState = { ...productShopSandboxState, loading: true, error: "" };
+  rerender();
+  try {
+    const result = await loadProductShopSandbox({
+      preset: productShopSandboxState.range?.preset || "30d",
+      startDate: productShopSandboxState.range?.startDate || "",
+      endDate: productShopSandboxState.range?.endDate || "",
+      shopId: productShopSandboxState.shopId || "",
+    });
+    productShopSandboxState = {
+      ...productShopSandboxState,
+      range: result.range,
+      shopId: result.selectedShop?.id || "",
+      shops: result.shops || [],
+      selectedShop: result.selectedShop || null,
+      items: result.items || [],
+      summary: result.summary || {},
+      loading: false,
+      loaded: true,
+      error: "",
+    };
+  } catch (error) {
+    productShopSandboxState = { ...productShopSandboxState, loading: false, loaded: true, error: error.message || "产品沙盘读取失败。" };
   }
   rerender();
 }
@@ -2332,6 +2410,7 @@ export function bindProductCenterPageEvents(rerender) {
   if (routeProductId && !getProductManagementDetail(routeProductId) && productManagementState.loadingProductId !== routeProductId) void refreshProductManagementDetail(routeProductId, rerender);
   if (!routeProductId && !routeErpSkuId && productSubmodule === "business-dashboard" && !productBusinessDashboardState.readModel && !productBusinessDashboardState.loading) void refreshProductBusinessDashboard(rerender);
   if (!routeProductId && !routeErpSkuId && productSubmodule === "business-cockpit" && !productSalesDistributionState.loaded && !productSalesDistributionState.loading) void refreshProductSalesDistribution(rerender);
+  if (!routeProductId && !routeErpSkuId && productSubmodule === "product-sandbox" && !productShopSandboxState.loaded && !productShopSandboxState.loading) void refreshProductShopSandbox(rerender);
   if (routeProductId && productDetailTab === "health-analysis" && (!getProductManagementDetail(routeProductId)?.healthAnalysis || !getProductManagementDetail(routeProductId)?.improvementCenter) && productManagementState.loadingProductId !== routeProductId) void refreshProductHealthAnalysis(routeProductId, rerender);
   if (routeProductId && productDetailTab === "business-improvement" && !getProductManagementDetail(routeProductId)?.improvementCenter && productManagementState.loadingProductId !== routeProductId) void refreshProductImprovementCenter(routeProductId, rerender);
   if (routeProductId && productDetailTab === "strategy" && !getProductManagementDetail(routeProductId)?.strategy && productManagementState.loadingProductId !== routeProductId) void refreshProductStrategy(routeProductId, rerender);
@@ -2351,19 +2430,42 @@ export function bindProductCenterPageEvents(rerender) {
   }
   if (!routeProductId && !routeErpSkuId && productSubmodule === "combo-skus" && !comboSkuState.loaded && !comboSkuState.loading && !comboSkuState.detail) void refreshComboSkuList(rerender);
   document.querySelector("[data-combo-sku-search]")?.addEventListener("submit", (event) => { event.preventDefault(); comboSkuState = { ...comboSkuState, search: event.currentTarget.elements.search.value.trim(), includeHistorical: event.currentTarget.elements.includeHistorical.checked, page: 1, loaded: false, detail: null }; void refreshComboSkuList(rerender); });
-  document.querySelector("[data-product-business-filter]")?.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
+  const productBusinessFilterForm = document.querySelector("[data-product-business-filter]");
+  const applyProductBusinessFilters = (form) => {
     productBusinessFilters = {
       ...productBusinessFilters,
       query: form.elements.query.value.trim(), brand: form.elements.brand.value, category: form.elements.category.value,
       lifecycle: form.elements.lifecycle.value, status: form.elements.status.value, healthStatus: form.elements.healthStatus.value,
       inventoryStatus: form.elements.inventoryStatus.value, ownerId: form.elements.ownerId.value,
       includeHistorical: form.elements.includeHistorical.checked,
-      periodStart: form.elements.periodStart.value, periodEnd: form.elements.periodEnd.value, page: 1,
+      page: 1,
     };
     void refreshProductBusinessDashboard(rerender);
+  };
+  productBusinessFilterForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    window.clearTimeout(productBusinessSearchTimer);
+    applyProductBusinessFilters(event.currentTarget);
   });
+  productBusinessFilterForm?.querySelectorAll("select, input[type='checkbox']").forEach((field) => field.addEventListener("change", () => {
+    window.clearTimeout(productBusinessSearchTimer);
+    productBusinessSearchTimer = window.setTimeout(() => applyProductBusinessFilters(productBusinessFilterForm), 120);
+  }));
+  productBusinessFilterForm?.elements.query.addEventListener("input", () => {
+    window.clearTimeout(productBusinessSearchTimer);
+    productBusinessSearchTimer = window.setTimeout(() => applyProductBusinessFilters(productBusinessFilterForm), 450);
+  });
+  document.querySelector("[data-product-business-period-filter]")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    productBusinessFilters = { ...productBusinessFilters, periodStart: form.elements.periodStart?.value || "", periodEnd: form.elements.periodEnd?.value || "", page: 1 };
+    void refreshProductBusinessDashboard(rerender);
+  });
+  document.querySelectorAll("[data-product-business-range]").forEach((button) => button.addEventListener("click", () => {
+    productBusinessFilters = { ...productBusinessFilters, range: button.dataset.productBusinessRange || "30d", page: 1 };
+    if (button.dataset.productBusinessRange === "custom") rerender();
+    else void refreshProductBusinessDashboard(rerender);
+  }));
   document.querySelector("[data-product-distribution-filter]")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -2397,6 +2499,36 @@ export function bindProductCenterPageEvents(rerender) {
     bar.addEventListener("keydown", (event) => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); openProduct(); } });
   });
   bindProductDistributionTooltips();
+  document.querySelector("[data-product-sandbox-filter]")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    productShopSandboxState = {
+      ...productShopSandboxState,
+      range: { ...productShopSandboxState.range, startDate: form.elements.startDate.value, endDate: form.elements.endDate.value },
+      loaded: false,
+    };
+    void refreshProductShopSandbox(rerender);
+  });
+  document.querySelectorAll("[data-product-sandbox-preset]").forEach((button) => button.addEventListener("click", () => {
+    productShopSandboxState = { ...productShopSandboxState, range: { ...productShopSandboxState.range, preset: button.dataset.productSandboxPreset }, loaded: false };
+    if (button.dataset.productSandboxPreset === "custom") rerender();
+    else void refreshProductShopSandbox(rerender);
+  }));
+  document.querySelectorAll("[data-product-sandbox-shop]").forEach((button) => button.addEventListener("click", () => {
+    productShopSandboxState = { ...productShopSandboxState, shopId: button.dataset.productSandboxShop || "", loaded: false };
+    void refreshProductShopSandbox(rerender);
+  }));
+  document.querySelectorAll("[data-product-sandbox-segment]").forEach((button) => button.addEventListener("click", () => {
+    productShopSandboxState = { ...productShopSandboxState, segment: button.dataset.productSandboxSegment || "all" };
+    rerender();
+  }));
+  document.querySelectorAll("[data-product-sandbox-sort]").forEach((button) => button.addEventListener("click", () => {
+    productShopSandboxState = { ...productShopSandboxState, sortMode: button.dataset.productSandboxSort === "code_group" ? "code_group" : "sales" };
+    rerender();
+  }));
+  document.querySelectorAll("[data-product-sandbox-product]").forEach((button) => button.addEventListener("click", () => {
+    window.location.hash = `products/${encodeURIComponent(button.dataset.productSandboxProduct)}`;
+  }));
   document.querySelectorAll("[data-product-business-metric]").forEach((checkbox) => checkbox.addEventListener("change", (event) => {
     const metric = event.currentTarget.dataset.productBusinessMetric;
     if (event.currentTarget.checked) productBusinessVisibleMetrics.add(metric);
@@ -2652,18 +2784,24 @@ export function bindProductCenterPageEvents(rerender) {
       return;
     }
     if (action === "product-workspace-view") {
-      productSubmodule = ["sku-management", "business-cockpit"].includes(button.dataset.view) ? button.dataset.view : "business-dashboard";
+      productSubmodule = ["sku-management", "business-cockpit", "product-sandbox"].includes(button.dataset.view) ? button.dataset.view : "business-dashboard";
       if (getRouteProductId() || getRouteErpSkuId()) window.location.hash = "products";
       if (productSubmodule === "business-cockpit") void refreshProductSalesDistribution(rerender);
+      else if (productSubmodule === "product-sandbox") void refreshProductShopSandbox(rerender);
       else if (productSubmodule === "business-dashboard") void refreshProductBusinessDashboard(rerender);
       else if (!productSkuV2State.loaded && !productSkuV2State.loading) void refreshProductSkuV2List(rerender);
       else rerender();
       return;
     }
-    if (action === "product-business-range") {
-      productBusinessFilters = { ...productBusinessFilters, range: button.dataset.range, page: 1 };
-      if (button.dataset.range === "custom") rerender();
-      else void refreshProductBusinessDashboard(rerender);
+    if (action === "product-business-view") {
+      productBusinessViewMode = button.dataset.view === "card" ? "card" : "table";
+      rerender();
+      return;
+    }
+    if (action === "set-product-business-operating-sort") {
+      productBusinessFilters = { ...productBusinessFilters, sortBy: button.dataset.sortBy || "updatedAt", sortDirection: "desc", page: 1 };
+      void refreshProductBusinessDashboard(rerender);
+      return;
     }
     if (action === "product-business-sort") {
       const sortBy = button.dataset.sortBy;
@@ -2686,10 +2824,6 @@ export function bindProductCenterPageEvents(rerender) {
       productDetailTab = "business-diagnosis";
       window.location.hash = `products/${encodeURIComponent(button.dataset.productId)}`;
       rerender();
-    }
-    if (action === "clear-product-business-filters") {
-      productBusinessFilters = { ...productBusinessFilters, query: "", brand: "", category: "", lifecycle: "", status: "", healthStatus: "", inventoryStatus: "", ownerId: "", includeHistorical: false, range: "30d", periodStart: "", periodEnd: "", page: 1 };
-      void refreshProductBusinessDashboard(rerender);
     }
     if (action === "product-submodule") {
       productSubmodule = ["pending-skus", "combo-skus"].includes(button.dataset.submodule) ? button.dataset.submodule : "sku-management";

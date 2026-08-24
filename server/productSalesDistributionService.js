@@ -19,7 +19,7 @@ function dayCount(startDate, endDate) {
   return Math.round((Date.parse(`${endDate}T00:00:00Z`) - Date.parse(`${startDate}T00:00:00Z`)) / 86400000) + 1;
 }
 
-function latestCompleteSalesDate(database) {
+export function latestCompleteSalesDate(database) {
   if (database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='connection_import_batches'").get()) {
     const periodEnd = database.prepare(`
       SELECT b.periodEnd
