@@ -11,11 +11,15 @@ const {getSalesBusinessDashboard}=await import("../server/salesBusinessDashboard
 initializeDatabase();const database=getDatabase();
 const tables=["connection_sku_sales_daily_facts","sales_link_sku_erp_mappings","erp_sku_business_usages","product_erp_mappings"];
 const counts=()=>Object.fromEntries(tables.map((table)=>[table,database.prepare(`SELECT COUNT(*) count FROM ${table}`).get().count]));
-const before=counts();const seven=getSalesBusinessDashboard({preset:"7d"},{database});const thirty=getSalesBusinessDashboard({preset:"30d"},{database});
-assert.equal(seven.trend.items.length,7);assert.equal(thirty.trend.items.length,30);
+const before=counts();const seven=getSalesBusinessDashboard({preset:"7d"},{database});const fifteen=getSalesBusinessDashboard({preset:"15d"},{database});const thirty=getSalesBusinessDashboard({preset:"30d"},{database});const sixty=getSalesBusinessDashboard({preset:"60d"},{database});
+const custom=getSalesBusinessDashboard({preset:"custom",startDate:seven.startDate,endDate:seven.endDate},{database});
+assert.equal(seven.trend.items.length,7);assert.equal(fifteen.trend.items.length,15);assert.equal(thirty.trend.items.length,30);assert.equal(sixty.trend.items.length,60);assert.equal(custom.windowDays,7);
+assert.equal(seven.preset,"7d");assert.equal(seven.previousEndDate<seven.startDate,true);assert.equal(seven.summary.dataCoverage,seven.summary.dataDays/7);
 assert.ok(Math.abs(seven.summary.salesAmount-seven.trend.items.reduce((sum,item)=>sum+Number(item.salesAmount||0),0))<1e-7);
 assert.ok(Math.abs(thirty.summary.profitAmount-thirty.trend.items.reduce((sum,item)=>sum+Number(item.profitAmount||0),0))<1e-7);
-for(const list of [thirty.products.items,thirty.links.items])for(let index=1;index<list.length;index+=1)assert.ok(list[index-1].salesAmount>=list[index].salesAmount);
+for(let index=1;index<thirty.shops.items.length;index+=1)assert.ok(thirty.shops.items[index-1].currentSalesAmount>=thirty.shops.items[index].currentSalesAmount);
+for(const dimension of ["shop","link","product"]){assert.ok(Array.isArray(thirty.rankings[dimension].items));for(const item of thirty.rankings[dimension].items){assert.ok("salesGrowth" in item);assert.ok("profitGrowth" in item);}}
+assert.equal(thirty.summary.paidPromotionRatio,null);assert.equal(thirty.metricAvailability.paidPromotionAmount.available,false);
 assert.deepEqual(getSalesBusinessDashboard({preset:"30d"},{database}),thirty);assert.deepEqual(counts(),before);
 assert.equal(database.pragma("integrity_check",{simple:true}),"ok");assert.equal(database.pragma("foreign_key_check").length,0);
-console.log(JSON.stringify({success:true,isolatedDatabase:target,seven:{summary:seven.summary,noDataDays:seven.trend.items.filter((item)=>item.noData).length},thirty:{summary:thirty.summary,productRanking:thirty.products.items.length,linkRanking:thirty.links.items.length,noDataDays:thirty.trend.items.filter((item)=>item.noData).length},quality:thirty.quality.health,protected:before},null,2));closeDatabase();
+console.log(JSON.stringify({success:true,isolatedDatabase:target,seven:{summary:seven.summary,noDataDays:seven.trend.items.filter((item)=>item.noData).length},thirty:{summary:thirty.summary,shopRanking:thirty.rankings.shop.items.length,productRanking:thirty.rankings.product.items.length,linkRanking:thirty.rankings.link.items.length,noDataDays:thirty.trend.items.filter((item)=>item.noData).length},quality:thirty.quality.health,protected:before},null,2));closeDatabase();

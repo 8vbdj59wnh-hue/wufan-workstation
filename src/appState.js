@@ -1067,8 +1067,12 @@ export async function loadOperationDashboard() {
   return readApiJson(response, "经营驾驶舱读取失败。");
 }
 
-export async function loadSalesBusinessDashboard(preset = "30d") {
-  const response = await authFetch(`${apiBaseUrl}/api/sales-business-dashboard?preset=${encodeURIComponent(preset)}`);
+export async function loadSalesBusinessDashboard(range = { preset: "7d" }) {
+  const request = typeof range === "string" ? { preset: range } : range;
+  const params = new URLSearchParams({ preset: request.preset || "7d" });
+  if (request.startDate) params.set("startDate", request.startDate);
+  if (request.endDate) params.set("endDate", request.endDate);
+  const response = await authFetch(`${apiBaseUrl}/api/sales-business-dashboard?${params.toString()}`);
   return readApiJson(response, "销售经营驾驶舱读取失败。");
 }
 

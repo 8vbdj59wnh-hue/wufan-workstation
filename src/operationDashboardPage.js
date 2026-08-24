@@ -1,4 +1,4 @@
-import { getCurrentUser, loadBusinessAnomalies, loadOperationDashboard, loadSalesBusinessDashboard } from "./appState.js";
+import { getCurrentUser, loadBusinessAnomalies, loadOperationDashboard, loadSalesBusinessDashboard, resolveAssetUrl } from "./appState.js";
 import { hasPermission } from "../shared/permissions.js";
 import { renderUiModule } from "./uiModuleRegistry.js";
 import "./uiModules/salesBusinessDashboard.js";
@@ -10,7 +10,12 @@ let dashboard = null;
 let salesDashboard = null;
 let salesDashboardLoading = false;
 let salesDashboardError = "";
-let salesPreset = "30d";
+let salesRange = { preset: "7d", startDate: "", endDate: "" };
+let visibleMetricKeys = new Set(["salesAmount", "profitAmount", "profitMargin", "paidPromotionRatio", "dataCoverage"]);
+let chartMetric = "salesAmount";
+let rankingMetrics = { shop: "salesAmount", link: "salesAmount", product: "salesAmount" };
+let rankingModes = { shop: "ranking", link: "ranking", product: "ranking" };
+let shopShareSelectedId = "";
 let anomalies = null;
 let anomaliesLoading = false;
 let anomaliesError = "";
@@ -53,40 +58,11 @@ function trendBars(points) {
 }
 
 export function renderOperationDashboardPage() {
-  if (loading && !dashboard) return `<section class="operation-dashboard"><div class="form-note">正在汇总经营事实…</div></section>`;
-  if (error && !dashboard) return `<section class="operation-dashboard"><div class="form-error">${escapeHtml(error)}</div><button class="secondary-button" data-action="refresh-operation-dashboard">重新加载</button></section>`;
-  if (!dashboard) return `<section class="operation-dashboard"><div class="form-note">准备经营驾驶舱…</div></section>`;
-  const products = dashboard.company.products;
-  const connections = dashboard.company.connections;
-  const execution = dashboard.execution;
-  const improvements = dashboard.improvements.summary || dashboard.improvements;
-  return `<section class="operation-dashboard">
-    <div class="operation-hero"><div><p class="eyebrow">经营管理基础 V2.0</p><h1>经营驾驶舱</h1><p>统一查看经营事实、风险和改善执行。指标读取销售日报、Sales Object关系和库存事实，不补造利润或缺失数据。</p></div><button class="secondary-button" data-action="refresh-operation-dashboard">刷新数据</button></div>
-    ${renderUiModule("sales_business_dashboard", { state: { loading: salesDashboardLoading, error: salesDashboardError, data: salesDashboard } })}
-    ${renderUiModule("business_anomalies", { state: { loading: anomaliesLoading, error: anomaliesError, data: anomalies, selectedKey: selectedAnomalyKey, canLaunch: hasPermission(getCurrentUser(), "workPlans.launch") } })}
-    <div class="operation-metric-grid">
-      <article><span>产品近30天实际出货贡献</span><strong>${number(products.sales30d)}</strong><em class="${products.salesGrowth < 0 ? "is-risk" : ""}">${percent(products.salesGrowth)}</em><small>直接销量 + 组合贡献 · ${escapeHtml(products.latestBusinessDate || "—")}</small></article>
-      <article><span>库存资金占用</span><strong>${money(products.capitalOccupation)}</strong><em>${number(products.actualStock)} 件实际库存</em><small>成本完整率 ${percent(products.capitalCoverage)}</small></article>
-      <article><span>连接周期销售额</span><strong>${money(connections.payAmount)}</strong><em>${number(connections.connectionCount)} 条有经营数据连接</em><small>${connections.periodStart ? `${escapeHtml(connections.periodStart)}—${escapeHtml(connections.periodEnd)}` : "暂无周期数据"}</small></article>
-      <article><span>经营风险</span><strong>${dashboard.company.risks.connectionRisk + dashboard.company.risks.connectionAttention}</strong><em class="is-risk">风险 ${dashboard.company.risks.connectionRisk} · 关注 ${dashboard.company.risks.connectionAttention}</em><small>下滑产品 ${dashboard.company.risks.decliningProducts}</small></article>
-    </div>
-    <div class="operation-layout">
-      <article class="operation-panel operation-wide"><header><div><h2>产品实际出货趋势</h2><p>Single直接销量 + Bundle组件贡献；不分摊Bundle金额</p></div><button data-operation-target="products" class="text-button">进入产品中心</button></header>${trendBars(dashboard.trend)}</article>
-      <article class="operation-panel"><header><div><h2>产品实际出货排行</h2><p>直接销量 + 组合贡献销量</p></div></header>${ranking(dashboard.products.salesTop, "sales", "暂无产品出货事实")}</article>
-      <article class="operation-panel"><header><div><h2>成长产品</h2><p>相邻同长销售周期变化</p></div></header>${ranking(dashboard.products.growthTop, "growth", "暂无可比产品周期")}</article>
-      <article class="operation-panel"><header><div><h2>高增长连接</h2><p>最新两个经营周期</p></div><button data-operation-target="connectionCenter" class="text-button">进入连接中心</button></header>${ranking(dashboard.connections.topGrowth, "growth", "至少需要两个连接经营周期")}</article>
-      <article class="operation-panel"><header><div><h2>风险连接</h2><p>健康分低于60</p></div></header>${ranking(dashboard.connections.risks, "growth", "当前没有风险连接")}</article>
-    </div>
-    <div class="operation-execution">
-      <article><span>重点目标</span><strong>${execution.activeGoals}</strong><button data-operation-target="goals">查看目标</button></article>
-      <article><span>执行中关键行动</span><strong>${execution.runningActions}</strong><button data-operation-target="scheduleBoard">查看行动</button></article>
-      <article><span>进行中任务</span><strong>${execution.doingTasks}</strong><button data-operation-target="tasks">查看任务</button></article>
-      <article><span>逾期未完成任务</span><strong>${execution.overdueTasks}</strong><button data-operation-target="tasks">立即处理</button></article>
-      <article><span>改善项目</span><strong>${improvements.total || 0}</strong><small>有效 ${improvements.effective || 0} · 观察 ${improvements.observing || 0}</small></article>
-    </div>
-    <details class="operation-definitions"><summary>经营指标口径</summary><div>${Object.values(dashboard.definitions).map((definition) => `<article><strong>${escapeHtml(definition.label)}</strong><span>${escapeHtml(definition.aggregation)}</span><small>来源：${escapeHtml(definition.source)}</small></article>`).join("")}</div></details>
-    <div class="data-center-notice"><strong>利润指标尚未启用</strong><p>${escapeHtml(dashboard.finance.message)}</p></div>
-  </section>`;
+  return `<section class="operation-dashboard operation-dashboard-v2">${renderUiModule("sales_business_dashboard", { state: {
+    loading: salesDashboardLoading, error: salesDashboardError, data: salesDashboard, range: salesRange,
+    customStartDate: salesRange.startDate, customEndDate: salesRange.endDate, visibleMetricKeys,
+    chartMetric, rankingMetrics, rankingModes, shopShareSelectedId,
+  }, resolveUrl: resolveAssetUrl })}</section>`;
 }
 
 async function refresh(rerender) {
@@ -96,9 +72,12 @@ async function refresh(rerender) {
   loading = false; rerender();
 }
 
-async function refreshSales(rerender, preset = salesPreset) {
-  salesPreset = preset; salesDashboardLoading = true; salesDashboardError = ""; rerender();
-  try { salesDashboard = (await loadSalesBusinessDashboard(preset)).dashboard; }
+async function refreshSales(rerender, range = salesRange) {
+  salesRange = { ...range }; salesDashboardLoading = true; salesDashboardError = ""; rerender();
+  try {
+    salesDashboard = (await loadSalesBusinessDashboard(salesRange)).dashboard;
+    salesRange = { preset: salesDashboard.preset, startDate: salesDashboard.startDate, endDate: salesDashboard.endDate };
+  }
   catch (caught) { salesDashboardError = caught.message || "销售经营驾驶舱读取失败。"; }
   salesDashboardLoading = false; rerender();
 }
@@ -129,7 +108,39 @@ export function bindOperationDashboardPageEvents(rerender) {
     else window.location.hash = "connectionCenter/data_update";
   }));
   document.querySelectorAll("[data-sales-dashboard-target]").forEach((button) => button.addEventListener("click", () => { window.location.hash = button.dataset.salesDashboardTarget; }));
-  document.querySelectorAll("[data-sales-range]").forEach((button) => button.addEventListener("click", () => refreshSales(rerender, button.dataset.salesRange)));
+  document.querySelectorAll("[data-sales-range]").forEach((button) => button.addEventListener("click", () => {
+    const preset = button.dataset.salesRange;
+    if (preset === "custom") {
+      salesRange = { preset: "custom", startDate: salesDashboard?.startDate || "", endDate: salesDashboard?.endDate || "" };
+      rerender();
+    } else void refreshSales(rerender, { preset, startDate: "", endDate: "" });
+  }));
+  document.querySelector("[data-sales-custom-apply]")?.addEventListener("click", () => {
+    const startDate = document.querySelector("[data-sales-custom-start]")?.value || "";
+    const endDate = document.querySelector("[data-sales-custom-end]")?.value || "";
+    void refreshSales(rerender, { preset: "custom", startDate, endDate });
+  });
+  document.querySelectorAll("[data-sales-metric-field]").forEach((checkbox) => checkbox.addEventListener("change", () => {
+    if (checkbox.checked) visibleMetricKeys.add(checkbox.dataset.salesMetricField);
+    else if (visibleMetricKeys.size > 1) visibleMetricKeys.delete(checkbox.dataset.salesMetricField);
+    rerender();
+  }));
+  document.querySelectorAll("[data-sales-chart-metric]").forEach((button) => button.addEventListener("click", () => { chartMetric = button.dataset.salesChartMetric; rerender(); }));
+  document.querySelectorAll("[data-sales-ranking-metric]").forEach((button) => button.addEventListener("click", () => {
+    const dimension = button.dataset.salesRankingDimension;
+    if (dimension) rankingMetrics = { ...rankingMetrics, [dimension]: button.dataset.salesRankingMetric };
+    rerender();
+  }));
+  document.querySelectorAll("[data-sales-ranking-mode]").forEach((button) => button.addEventListener("click", () => {
+    const dimension = button.dataset.salesRankingDimension;
+    if (dimension) rankingModes = { ...rankingModes, [dimension]: button.dataset.salesRankingMode };
+    rerender();
+  }));
+  document.querySelectorAll("[data-sales-shop-share]").forEach((slice) => {
+    const selectShop = () => { shopShareSelectedId = slice.dataset.salesShopShare || ""; rerender(); };
+    slice.addEventListener("click", selectShop);
+    slice.addEventListener("keydown", (event) => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); selectShop(); } });
+  });
   document.querySelectorAll("[data-operation-target]").forEach((button) => button.addEventListener("click", () => { window.location.hash = button.dataset.operationTarget; }));
   document.querySelector("[data-action='refresh-operation-dashboard']")?.addEventListener("click", () => refresh(rerender));
 }

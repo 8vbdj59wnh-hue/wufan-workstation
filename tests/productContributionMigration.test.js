@@ -21,11 +21,14 @@ test("经营驾驶舱使用实际出货而非原始Bundle套数", () => {
 
 test("销售经营驾驶舱的产品排行不再分摊Bundle金额", () => {
   const service = source("server/salesBusinessDashboardService.js");
+  const capability = source("server/capabilities/queryDailySales.js");
   const page = source("src/uiModules/salesBusinessDashboard.js");
-  assert.match(service, /queryProductContributions/);
-  assert.match(service, /bundleAllocation: "none"/);
-  assert.match(service, /economics: "single_direct_only"/);
-  assert.match(page, /产品直接销售排行/);
+  assert.match(service, /queryDailySalesSummaryComparison/);
+  assert.match(service, /readComparison\("product"/);
+  assert.match(capability, /queryProductContributions/);
+  assert.match(capability, /metricContract: "product-contribution-v1"/);
+  assert.match(capability, /bundleAllocation: "none"/);
+  assert.match(page, /product: "产品"/);
 });
 
 test("链接驾驶舱停止Bundle组件金额分摊", () => {
