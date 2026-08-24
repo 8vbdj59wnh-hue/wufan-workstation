@@ -17,6 +17,7 @@ const METRICS = [
 ];
 const DEFAULT_METRICS = new Set(["salesAmount", "profitAmount", "profitMargin", "paidPromotionRatio", "dataCoverage"]);
 const DIMENSIONS = { shop: "店铺", link: "链接", product: "产品" };
+const RANKING_LIMIT = 30;
 
 const money = (value) => value === null || value === undefined ? "—" : `¥${Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 2 })}`;
 const number = (value) => value === null || value === undefined ? "—" : Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 2 });
@@ -123,8 +124,8 @@ function renderShopChart(data, metric) {
 function rankedItems(data, dimension, mode, metric) {
   const fields = comparisonFields(metric); const items = [...(data.rankings?.[dimension]?.items || [])];
   if (mode === "surge") return items.filter((item) => item[fields.status] === "comparable" && Number.isFinite(Number(item[fields.growth])))
-    .sort((left, right) => Number(right[fields.growth]) - Number(left[fields.growth]) || Number(right[fields.current]) - Number(left[fields.current])).slice(0, 30);
-  return items.sort((left, right) => Number(right[fields.current] || 0) - Number(left[fields.current] || 0)).slice(0, 30);
+    .sort((left, right) => Number(right[fields.growth]) - Number(left[fields.growth]) || Number(right[fields.current]) - Number(left[fields.current])).slice(0, RANKING_LIMIT);
+  return items.sort((left, right) => Number(right[fields.current] || 0) - Number(left[fields.current] || 0)).slice(0, RANKING_LIMIT);
 }
 
 function rankingTarget(item, dimension) {
@@ -154,7 +155,7 @@ function renderRankingPanel(data, dimension, mode, metric, resolveUrl, shopShare
   return `<article class="sales-business-panel sales-business-rank-panel sales-business-rank-card" data-ranking-dimension="${dimension}">
     <header><div><h3>${escapeHtml(label)}榜单</h3><p>${mode === "surge" ? "按较上周期增长百分比排序" : `按当前周期${metric === "profitAmount" ? "毛利" : "销售额"}排序`}</p></div><div class="segmented-control"><button type="button" data-sales-ranking-metric="salesAmount" data-sales-ranking-dimension="${dimension}" class="${metric === "salesAmount" ? "active" : ""}">销售额</button><button type="button" data-sales-ranking-metric="profitAmount" data-sales-ranking-dimension="${dimension}" class="${metric === "profitAmount" ? "active" : ""}">毛利</button></div></header>
     ${dimension === "shop" ? renderShopShareChart(data, metric, shopShareSelectedId) : ""}
-    <div class="sales-business-rank-toolbar"><strong>${escapeHtml(label)} TOP 30</strong><div class="sales-business-mode-tabs"><button type="button" data-sales-ranking-mode="ranking" data-sales-ranking-dimension="${dimension}" class="${mode === "ranking" ? "is-active" : ""}">排行榜</button><button type="button" data-sales-ranking-mode="surge" data-sales-ranking-dimension="${dimension}" class="${mode === "surge" ? "is-active" : ""}">飙升榜</button></div></div>
+    <div class="sales-business-rank-toolbar"><strong>${escapeHtml(label)} TOP ${RANKING_LIMIT}</strong><div class="sales-business-mode-tabs"><button type="button" data-sales-ranking-mode="ranking" data-sales-ranking-dimension="${dimension}" class="${mode === "ranking" ? "is-active" : ""}">排行榜</button><button type="button" data-sales-ranking-mode="surge" data-sales-ranking-dimension="${dimension}" class="${mode === "surge" ? "is-active" : ""}">飙升榜</button></div></div>
     ${renderRanking(data, dimension, mode, metric, resolveUrl)}
   </article>`;
 }

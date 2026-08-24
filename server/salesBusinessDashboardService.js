@@ -2,6 +2,7 @@ import { getDatabase } from "./db.js";
 import { queryDailySalesSummaryComparison, queryDailySalesTrend } from "./capabilities/queryDailySales.js";
 import { querySalesDailyDataQuality } from "./salesDailyDataQualityService.js";
 
+const DASHBOARD_CONTRACT_VERSION = "2.0";
 const PRESET_DAYS = Object.freeze({ yesterday: 1, "7d": 7, "15d": 15, "30d": 30, "45d": 45, "60d": 60 });
 
 function addDays(date, amount) {
@@ -107,7 +108,7 @@ function sorted(items, metric, direction = "desc") {
 export function getSalesBusinessDashboard(input = {}, options = {}) {
   const database = options.database || getDatabase();
   const quality = querySalesDailyDataQuality({ database });
-  if (!quality.hasData) return { capability: "SalesBusinessDashboard", contractVersion: "2.0", preset: "7d", hasData: false, quality };
+  if (!quality.hasData) return { capability: "SalesBusinessDashboard", contractVersion: DASHBOARD_CONTRACT_VERSION, preset: "7d", hasData: false, quality };
   const range = resolveRange(input, quality.batch.dateEnd); const queryOptions = { database };
   const summary = readExtendedSummary(database, range.startDate, range.endDate);
   const previousSummary = readExtendedSummary(database, range.previousStartDate, range.previousEndDate);
@@ -119,7 +120,7 @@ export function getSalesBusinessDashboard(input = {}, options = {}) {
   const summaryComparison = { salesGrowth: growth(summary.salesAmount, previousSummary.salesAmount), profitGrowth: growth(summary.profitAmount, previousSummary.profitAmount),
     salesComparisonStatus: comparisonStatus(summary.salesAmount, previousSummary.salesAmount), profitComparisonStatus: comparisonStatus(summary.profitAmount, previousSummary.profitAmount) };
   return {
-    capability: "SalesBusinessDashboard", contractVersion: "2.0", ...range, hasData: summary.dataCount > 0,
+    capability: "SalesBusinessDashboard", contractVersion: DASHBOARD_CONTRACT_VERSION, ...range, hasData: summary.dataCount > 0,
     comparisonLabel: `对比 ${range.previousStartDate} 至 ${range.previousEndDate}`,
     summary: { ...summary, dataCoverage }, previousSummary, summaryComparison, trend,
     shops: { items: sorted(shops, "currentSalesAmount").slice(0, 50), hasData: shops.length > 0 },
