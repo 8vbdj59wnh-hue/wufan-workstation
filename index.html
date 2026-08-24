@@ -9,10 +9,14 @@
   </head>
   <body>
     <div id="app">
-      <main class="startup-loading" aria-live="polite" aria-busy="true">
+      <main class="startup-loading app-loading-progress" aria-live="polite" aria-busy="true">
         <span class="brand-mark"></span>
         <p class="startup-loading-title">正在加载工作站…</p>
         <p class="startup-loading-note" data-startup-loading-note>正在连接服务器</p>
+        <span class="app-loading-progress-track" role="progressbar" aria-label="正在加载工作站" aria-valuemin="0" aria-valuemax="100" aria-valuenow="8">
+          <span class="app-loading-progress-fill" style="width: 8%"></span>
+        </span>
+        <span class="app-loading-progress-meta"><span class="app-loading-progress-percent">预计 8%</span><span>预计还需约 8 秒</span></span>
       </main>
     </div>
     <script type="module" src="./src/main.js"></script>

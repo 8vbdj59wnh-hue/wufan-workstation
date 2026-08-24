@@ -409,6 +409,81 @@ body {
   font-size: 13px;
 }
 
+.app-loading-progress {
+  display: grid !important;
+  align-content: center;
+  justify-items: stretch;
+  gap: 8px;
+  width: min(460px, calc(100% - 32px));
+  min-height: 150px;
+  margin: auto;
+  padding: 24px;
+  border: 1px solid #e4e7ec;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 10px 30px rgba(16, 24, 40, 0.06);
+  color: #344054;
+  text-align: left;
+}
+
+.app-loading-progress.is-compact {
+  min-height: 112px;
+  padding: 18px;
+}
+
+.app-loading-progress > .brand-mark {
+  justify-self: center;
+  margin-bottom: 4px;
+}
+
+.app-loading-progress-label {
+  color: #172b25;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.app-loading-progress-note {
+  color: #667085;
+  font-size: 12px;
+}
+
+.app-loading-progress-track {
+  display: block;
+  position: relative;
+  width: 100%;
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e7ecea;
+}
+
+.app-loading-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #17795d, #32aa7f);
+  box-shadow: 0 0 12px rgba(23, 121, 93, 0.24);
+  transition: width 480ms ease;
+}
+
+.app-loading-progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #667085;
+  font-size: 12px;
+}
+
+.app-loading-progress-percent {
+  color: #17795d;
+  font-weight: 700;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-loading-progress-fill { transition: none; }
+}
+
 .startup-page-loading {
   display: grid;
   place-content: center;

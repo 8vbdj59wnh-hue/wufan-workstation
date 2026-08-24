@@ -38,8 +38,11 @@ import {
   retryRouteModule,
 } from "./moduleLoader.js";
 import { invokeModuleAction } from "./moduleActions.js";
+import { installLoadingProgress } from "./loadingProgress.js";
 
 const app = document.querySelector("#app");
+
+installLoadingProgress();
 
 app.addEventListener("click", (event) => {
   const actionTarget = event.target.closest("[data-action]");
