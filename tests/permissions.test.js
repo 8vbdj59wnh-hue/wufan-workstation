@@ -32,13 +32,15 @@ test("前后端从共享权限层读取同一套定义", async () => {
   assert.doesNotMatch(`${databaseSource}\n${authSource}`, /src\/permissions\.js/);
 });
 
-test("权限清单保留链接权限域并彻底移除客户与供应链权限入口", () => {
+test("权限清单保留链接权限域并彻底移除已退役模块权限入口", () => {
   assert.deepEqual(groupKeys("links"), ["view", "manage", "import", "health", "manageHealth", "improve"]);
   assert(groupKeys("modules").includes("links"));
   assert.equal(groupKeys("modules").includes("supplyChain"), false);
   assert.equal(groupKeys("modules").includes("customers"), false);
+  assert.equal(groupKeys("modules").includes("aiAssistant"), false);
   assert.deepEqual(groupKeys("supplyChain"), []);
   assert.deepEqual(groupKeys("customers"), []);
+  assert.deepEqual(groupKeys("aiAssistant"), []);
   assert.deepEqual(groupKeys("products"), ["view", "create", "edit", "archive"]);
 });
 

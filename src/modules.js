@@ -34,11 +34,6 @@ export const modules = [
     hidden: true,
   },
   {
-    id: "aiOperationAssistant",
-    name: "AI经营助手",
-    status: "planned",
-  },
-  {
     id: "templateCenter",
     name: "模板中心",
   },

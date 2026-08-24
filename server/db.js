@@ -2576,14 +2576,14 @@ const retiredCustomerAndSupplyChainTables = [
   "suppliers",
 ];
 
-function withoutRetiredBusinessPermissions(value) {
+function withoutRetiredModulePermissions(value) {
   if (typeof value !== "string" || value.trim() === "") return value;
   let permissions;
   try { permissions = JSON.parse(value); }
   catch { return value; }
   if (permissions === null || typeof permissions !== "object" || Array.isArray(permissions)) return value;
   let changed = false;
-  for (const key of ["supplyChain", "customers"]) {
+  for (const key of ["supplyChain", "customers", "aiAssistant"]) {
     if (Object.hasOwn(permissions, key)) {
       delete permissions[key];
       changed = true;
@@ -2600,6 +2600,22 @@ function retireCustomerAndSupplyChainV1() {
   const database = getDatabase();
   database.transaction(() => {
     for (const table of retiredCustomerAndSupplyChainTables) database.exec(`DROP TABLE IF EXISTS ${table}`);
+  })();
+}
+
+function retireAiOperationAssistantV1() {
+  const database = getDatabase();
+  database.transaction(() => {
+    if (tableExists("ai_analysis_records")) {
+      const historicalRecordCount = Number(database.prepare("SELECT COUNT(*) count FROM ai_analysis_records").get().count);
+      if (historicalRecordCount === 0) database.exec("DROP TABLE ai_analysis_records");
+    }
+  })();
+}
+
+function retireStoredModulePermissionsV1() {
+  const database = getDatabase();
+  database.transaction(() => {
     for (const table of ["permission_templates", "persons"]) {
       if (!tableExists(table)) continue;
       const availableColumns = new Set(database.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name));
@@ -2608,7 +2624,7 @@ function retireCustomerAndSupplyChainV1() {
       if (!availableColumns.has("id") || columns.length === 0) continue;
       const rows = database.prepare(`SELECT id,${columns.join(",")} FROM ${table}`).all();
       for (const row of rows) {
-        const updates = Object.fromEntries(columns.map((column) => [column, withoutRetiredBusinessPermissions(row[column])]));
+        const updates = Object.fromEntries(columns.map((column) => [column, withoutRetiredModulePermissions(row[column])]));
         if (columns.every((column) => updates[column] === row[column])) continue;
         database.prepare(`UPDATE ${table} SET ${columns.map((column) => `${column}=@${column}`).join(",")} WHERE id=@id`)
           .run({ id: row.id, ...updates });
@@ -2989,6 +3005,8 @@ function runLightweightMigrations() {
   migrateSalesDailyAnomalyGovernanceV1();
   migrateErpSkuBusinessUsagesV1();
   retireCustomerAndSupplyChainV1();
+  retireAiOperationAssistantV1();
+  retireStoredModulePermissionsV1();
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS platform_link_shop_mappings (
       id TEXT PRIMARY KEY,

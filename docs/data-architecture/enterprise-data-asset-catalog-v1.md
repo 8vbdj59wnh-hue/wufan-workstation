@@ -119,13 +119,9 @@
 | 财务分类规则 | `finance_rules` | 根据关键词建议流水类型和科目 | 名称、关键词、类型、科目、优先级、状态 |
 | 财务报表 | 查询结果，无独立报表事实表 | 聚合finance entries形成报表 | 周期、收入、退款、成本、费用及利润口径 |
 
-### 3.5 扩展业务体系
-
-| 业务对象 | 系统名称 | 作用 | 核心字段 |
-|---|---|---|---|
-| AI分析记录 | `ai_analysis_records` | AI分析请求、证据和确认结果 | 分析类型、对象、输入、输出、状态、确认信息 |
-
 > 客户中心和供应链中心已经正式退役。其专属客户、供应商、采购、供应商质量与评价表不再属于当前Schema；Product、ERP SKU、库存、成本、销售利润等共享资产继续由各自正式领域持有。
+
+> 独立“AI经营助手”已经正式退役。生产 `ai_analysis_records` 为0行且无反向外键，已退出正式Schema；迁移只删除空表，其他环境如存在历史记录则自动保留为 Legacy Read-Only。产品健康分析、产品用户洞察、链接趋势与链接诊断继续由对应业务模块独立持有。
 
 ## 4. 数据表资产目录
 
@@ -206,7 +202,7 @@
 
 ### 5.2 工作执行、模板与内容（25）
 
-`weekly_reports`、`weekly_report_problems`、`goals`、`task_templates`、`tasks`、`execution_groups`、`task_waves`、`task_wave_items`、`wave_regeneration_runs`、`process_templates`、`process_template_nodes`、`process_instances`、`methodologies`、`templates`、`template_tag_categories`、`template_tags`、`standard_work_forms`、`template_asset_versions`、`issues_requirements`、`content_schedules`、`work_plans`、`action_products`、`product_strategy_versions`、`product_strategy_action_links`、`ai_analysis_records`。
+`weekly_reports`、`weekly_report_problems`、`goals`、`task_templates`、`tasks`、`execution_groups`、`task_waves`、`task_wave_items`、`wave_regeneration_runs`、`process_templates`、`process_template_nodes`、`process_instances`、`methodologies`、`templates`、`template_tag_categories`、`template_tags`、`standard_work_forms`、`template_asset_versions`、`issues_requirements`、`content_schedules`、`work_plans`、`action_products`、`product_strategy_versions`、`product_strategy_action_links`。
 
 ### 5.3 Product与ERP商品（20）
 

@@ -1279,11 +1279,6 @@ export async function createProductStrategyAction(productId, itemId, payload) {
   }), "战略关键行动创建失败。");
 }
 
-export async function loadAiAnalyses(){return readApiJson(await authFetch(`${apiBaseUrl}/api/ai-operation/analyses`),"经营分析记录读取失败。");}
-export async function createAiAnalysis(payload){return readApiJson(await authFetch(`${apiBaseUrl}/api/ai-operation/analyses`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),"经营分析生成失败。");}
-export async function confirmAiAnalysis(id){return readApiJson(await authFetch(`${apiBaseUrl}/api/ai-operation/analyses/${encodeURIComponent(id)}/confirm`,{method:"POST"}),"经营分析确认失败。");}
-export async function createAiAnalysisAction(id,payload){return readApiJson(await authFetch(`${apiBaseUrl}/api/ai-operation/analyses/${encodeURIComponent(id)}/action`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),"改善行动创建失败。");}
-
 export async function loadConnections(filters = {}) {
   const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== "" && value !== undefined));
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections${query.size ? `?${query}` : ""}`), "连接列表读取失败。");

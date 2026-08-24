@@ -2878,29 +2878,3 @@ CREATE TRIGGER IF NOT EXISTS trg_sales_object_component_protect_active_structure
   BEFORE DELETE ON sales_object_structure_components
   WHEN (SELECT status FROM sales_object_structures WHERE id=OLD.structureId)='active'
 BEGIN SELECT RAISE(ABORT,'active sales object structure components are immutable'); END;
-
-CREATE TABLE IF NOT EXISTS ai_analysis_records (
-  id TEXT PRIMARY KEY,
-  analysisType TEXT NOT NULL,
-  objectType TEXT,
-  objectId TEXT,
-  title TEXT NOT NULL,
-  question TEXT,
-  providerMode TEXT NOT NULL,
-  ruleVersion TEXT NOT NULL,
-  sourceSnapshotJson TEXT NOT NULL,
-  sourceReferencesJson TEXT NOT NULL,
-  findingsJson TEXT NOT NULL,
-  suggestionsJson TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'draft',
-  generatedBy TEXT NOT NULL,
-  confirmedBy TEXT,
-  confirmedAt TEXT,
-  actionId TEXT,
-  createdAt TEXT NOT NULL,
-  updatedAt TEXT NOT NULL,
-  FOREIGN KEY(generatedBy) REFERENCES persons(id),
-  FOREIGN KEY(confirmedBy) REFERENCES persons(id),
-  FOREIGN KEY(actionId) REFERENCES process_instances(id)
-);
-CREATE INDEX IF NOT EXISTS idx_ai_analysis_records_user_status ON ai_analysis_records(generatedBy,status,createdAt DESC);

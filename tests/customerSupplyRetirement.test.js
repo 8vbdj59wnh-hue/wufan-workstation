@@ -31,15 +31,6 @@ test("客户中心和供应链中心不再注册路由、页面或API", () => {
   assert.doesNotMatch(appState, /\/api\/(?:customer-center|supply-chain)/);
 });
 
-test("AI只保留历史记录展示，不再生成客户或供应链分析", () => {
-  const page = read("../src/aiOperationAssistantPage.js");
-  const service = read("../server/aiOperationAssistantService.js");
-  assert.doesNotMatch(page, /<option value="(?:supply|customer)">/);
-  assert.match(page, /供应链（历史）/);
-  assert.match(page, /客户经营（历史）/);
-  assert.match(service, /\["company","product","connection","finance"\]\.includes\(type\)/);
-});
-
 test("专属表退出Schema且迁移显式覆盖全部退役表", () => {
   const schema = read("../server/schema.sql");
   const database = read("../server/db.js");
@@ -67,8 +58,8 @@ test("共享产品、ERP、库存、销售利润和财务资产仍在正式Schem
 
 test("退役迁移同时清除历史权限负载中的模块授权", () => {
   const database = read("../server/db.js");
-  assert.match(database, /withoutRetiredBusinessPermissions/);
-  assert.match(database, /\["supplyChain", "customers"\]/);
+  assert.match(database, /withoutRetiredModulePermissions/);
+  assert.match(database, /\["supplyChain", "customers", "aiAssistant"\]/);
   assert.match(database, /permission_templates/);
   assert.match(database, /permissionOverrides/);
 });

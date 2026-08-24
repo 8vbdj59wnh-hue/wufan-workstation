@@ -280,7 +280,6 @@ import {
 } from "./modules/auth/index.js";
 import { normalizeProductSkuCode, splitProductSkuCodes } from "./modules/common/index.js";
 import { getOperationDashboard } from "./operationManagementService.js";
-import { confirmAnalysis,createAnalysis,createAnalysisAction,listAnalyses,readAnalysis } from "./aiOperationAssistantService.js";
 import {
   approveFinanceEntry,
   commitFinanceImportBatch,
@@ -302,7 +301,6 @@ import {
   getProductImprovementCenter,
   getProductV2Detail,
   getProductV2Overview,
-  getProductBusinessAnalysis,
   productLifecycleStatuses,
   recordProductImprovementResult,
 } from "./productManagementV2Service.js";
@@ -603,10 +601,6 @@ const requireLinkImport = requirePermission("links.import");
 const requireLinkHealth = requirePermission("links.health");
 const requireLinkHealthManage = requirePermission("links.manageHealth");
 const requireLinkImprove = requirePermission("links.improve");
-const requireAiView = requirePermission("aiAssistant.view");
-const requireAiAnalyze = requirePermission("aiAssistant.analyze");
-const requireAiConfirm = requirePermission("aiAssistant.confirm");
-const requireAiAction = requirePermission("aiAssistant.createAction");
 
 function getRequestedActionTemplateIds(body = {}) {
   return [
@@ -2759,36 +2753,6 @@ app.delete("/api/finance/rules/:id", requirePermission("finance.manage"), (reque
   try { removeFinanceRule(request.params.id); response.json({ success: true }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "财务规则删除失败。" }); }
 });
-
-function aiEnterpriseKnowledge(){const db=getDatabase();const safe=(sql)=>{try{return db.prepare(sql).all();}catch{return[];}};return{actionStandards:safe("SELECT id,name FROM task_templates WHERE status='active' AND defaultProcessTemplateId IS NOT NULL ORDER BY updatedAt DESC LIMIT 30"),effectiveImprovements:[...safe("SELECT id,title,resultSummary,'connection' AS objectType FROM connection_improvements WHERE status='effective' ORDER BY updatedAt DESC LIMIT 15"),...safe("SELECT id,title,resultSummary,'product' AS objectType FROM product_improvements WHERE status='effective' ORDER BY updatedAt DESC LIMIT 15")]};}
-function aiEvidence(request) {
-  const type = String(request.body?.analysisType || "");
-  let evidence;
-  if (type === "company") {
-    if (!hasPermission(request.user, "operations.view")) throw new Error("没有经营驾驶舱权限。");
-    evidence = getOperationDashboard();
-  } else if (type === "product") {
-    if (!hasPermission(request.user, "products.view")) throw new Error("没有产品数据权限。");
-    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
-    const visibleProductIds = (scoped.products ?? []).map((item) => item.id);
-    if (!visibleProductIds.includes(request.body?.objectId)) throw new Error("无权分析该产品。");
-    evidence = getProductBusinessAnalysis(request.body.objectId, {
-      includeInventoryCost: hasPermission(request.user, "finance.view"), visibleProductIds,
-    });
-  } else if (type === "connection") {
-    if (!hasPermission(request.user, "links.view")) throw new Error("没有连接数据权限。");
-    evidence = getConnectionGrowthAnalysis(request.body?.objectId);
-  } else if (type === "finance") {
-    if (!hasPermission(request.user, "finance.view")) throw new Error("没有财务数据权限。");
-    evidence = getFinanceStatement(request.body || {});
-  } else throw new Error("分析类型无效。");
-  return { ...evidence, knowledge: aiEnterpriseKnowledge() };
-}
-app.get("/api/ai-operation/analyses",requireAiView,(request,response)=>{try{response.json({success:true,items:listAnalyses(request.user.id,getDataScope(request.user)==="all")});}catch(error){response.status(400).json({success:false,message:error.message||"分析记录读取失败。"});}});
-app.get("/api/ai-operation/analyses/:id",requireAiView,(request,response)=>{try{const item=readAnalysis(request.params.id);if(getDataScope(request.user)!=="all"&&item.generatedBy!==request.user.id)return response.status(403).json({success:false,message:"无权查看该分析。"});response.json({success:true,item});}catch(error){response.status(404).json({success:false,message:error.message||"分析不存在。"});}});
-app.post("/api/ai-operation/analyses",requireAiAnalyze,(request,response)=>{try{response.status(201).json({success:true,item:createAnalysis(request.body,request.user.id,aiEvidence(request))});}catch(error){response.status(400).json({success:false,message:error.message||"经营分析失败。"});}});
-app.post("/api/ai-operation/analyses/:id/confirm",requireAiConfirm,(request,response)=>{try{const item=readAnalysis(request.params.id);if(getDataScope(request.user)!=="all"&&item.generatedBy!==request.user.id)return response.status(403).json({success:false,message:"无权确认该分析。"});response.json({success:true,item:confirmAnalysis(item.id,request.user.id)});}catch(error){response.status(400).json({success:false,message:error.message||"分析确认失败。"});}});
-app.post("/api/ai-operation/analyses/:id/action",requireAiAction,(request,response)=>{try{const item=readAnalysis(request.params.id);if(getDataScope(request.user)!=="all"&&item.generatedBy!==request.user.id)return response.status(403).json({success:false,message:"无权转化该分析。"});response.status(201).json({success:true,...createAnalysisAction(item.id,request.body,request.user.id)});}catch(error){response.status(400).json({success:false,message:error.message||"改善行动创建失败。"});}});
 
 app.get("/api/product-management/overview", requirePermission("products.view"), (request, response) => {
   try {

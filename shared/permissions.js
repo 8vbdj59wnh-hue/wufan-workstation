@@ -25,7 +25,6 @@ export const permissionGroups = [
       { key: "links", label: "可访问链接中心" },
       { key: "operations", label: "可查看经营驾驶舱" },
       { key: "finance", label: "可访问财务中心" },
-      { key: "aiAssistant", label: "可访问AI经营助手" },
       { key: "templateCenter", label: "可访问模板中心" },
     ],
   },
@@ -87,16 +86,6 @@ export const permissionGroups = [
       { key: "view", label: "查看财务数据" },
       { key: "manage", label: "导入和管理财务数据" },
       { key: "approve", label: "审核财务数据" },
-    ],
-  },
-  {
-    key: "aiAssistant",
-    title: "AI经营助手权限",
-    permissions: [
-      { key: "view", label: "查看AI经营分析" },
-      { key: "analyze", label: "生成可追溯经营分析" },
-      { key: "confirm", label: "人工确认分析建议" },
-      { key: "createAction", label: "将已确认建议转为关键行动" },
     ],
   },
   {
@@ -493,7 +482,6 @@ export function canAccessModule(userOrPermissions, moduleId) {
     adminDataCenter: "settings",
     financeCenter: "finance",
     connectionCenter: "links",
-    aiOperationAssistant: "aiAssistant",
   };
   const permissionKey = modulePermissionMap[moduleId] ?? moduleId;
   if (moduleId === "products") {
@@ -511,9 +499,6 @@ export function canAccessModule(userOrPermissions, moduleId) {
   }
   if (moduleId === "connectionCenter") {
     return hasPermission(userOrPermissions, "links.view");
-  }
-  if (moduleId === "aiOperationAssistant") {
-    return hasPermission(userOrPermissions, "aiAssistant.view");
   }
   return hasPermission(userOrPermissions, `modules.${permissionKey}`);
 }

@@ -6,7 +6,6 @@ import { bindScheduleBoardPageEvents, renderScheduleBoardPage } from "./schedule
 import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js";
 import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js";
 import { bindFinanceCenterPageEvents, renderFinanceCenterPage } from "./financeCenterPage.js";
-import { bindAiOperationAssistantPageEvents, renderAiOperationAssistantPage } from "./pages/aiOperationAssistantPage.js";
 import { bindDashboardPageEvents, renderDashboardPage } from "./dashboardPage.js";
 import { bindProductPreviewEvents, closeProductPreview, openProductPreview, renderProductPreviewModal } from "./productPreview.js";
 import { attachThumbnailHoverPreview } from "./thumbnailPreview.js";
@@ -100,8 +99,6 @@ const moduleHashMap = {
   "finance-center": "financeCenter",
   connectionCenter: "connectionCenter",
   "connection-center": "connectionCenter",
-  aiOperationAssistant: "aiOperationAssistant",
-  "ai-operation-assistant": "aiOperationAssistant",
   "template-center": "templateCenter",
   methods: "processes",
   settings: "settings",
@@ -539,10 +536,6 @@ function renderPage() {
     content = renderFinanceCenterPage();
   }
 
-  if (canAccessActiveModule && activeModule.id === "aiOperationAssistant") {
-    content = renderAiOperationAssistantPage();
-  }
-
   if (activeModule.id === "settings") {
     content = renderSettingsPage();
   }
@@ -858,9 +851,6 @@ function render({ navigation = false } = {}) {
     getLoadedRouteModule("connectionCenter")?.bind(render);
   }
 
-  if (activeModuleId === "aiOperationAssistant") {
-    bindAiOperationAssistantPageEvents(render);
-  }
   if (activeModuleId === "dashboard") {
     bindDashboardPageEvents(render);
   }
