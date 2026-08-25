@@ -197,23 +197,23 @@ function dateInRange(value, range) {
 
 function getScopedDepartments() {
   const user = getCurrentUser();
-  if (canCurrentUser("assessment.viewAll")) return state.departments;
-  if (canCurrentUser("assessment.viewDepartment")) return state.departments.filter((department) => department.id === user?.departmentId);
+  if (canCurrentUser("workResults.viewAll")) return state.departments;
+  if (canCurrentUser("workResults.viewDepartment")) return state.departments.filter((department) => department.id === user?.departmentId);
   return state.departments.filter((department) => department.id === user?.departmentId);
 }
 
 function getScopedPeople() {
   const user = getCurrentUser();
-  if (canCurrentUser("assessment.viewAll")) return state.people;
-  if (canCurrentUser("assessment.viewDepartment")) return state.people.filter((person) => person.departmentId === user?.departmentId || person.id === user?.id);
+  if (canCurrentUser("workResults.viewAll")) return state.people;
+  if (canCurrentUser("workResults.viewDepartment")) return state.people.filter((person) => person.departmentId === user?.departmentId || person.id === user?.id);
   return state.people.filter((person) => person.id === user?.id);
 }
 
 function isVisibleByAssessmentScope(item) {
   const user = getCurrentUser();
-  if (canCurrentUser("assessment.viewAll")) return true;
-  if (canCurrentUser("assessment.viewDepartment")) return item.departmentId === user?.departmentId || item.ownerId === user?.id || item.submitterId === user?.id;
-  if (canCurrentUser("assessment.viewSelf")) return item.ownerId === user?.id || item.submitterId === user?.id || item.id === user?.id;
+  if (canCurrentUser("workResults.viewAll")) return true;
+  if (canCurrentUser("workResults.viewDepartment")) return item.departmentId === user?.departmentId || item.ownerId === user?.id || item.submitterId === user?.id;
+  if (canCurrentUser("workResults.viewSelf")) return item.ownerId === user?.id || item.submitterId === user?.id || item.id === user?.id;
   const dataScope = getDataScope(user);
   if (dataScope === "all") return true;
   if (dataScope === "department") return item.departmentId === user?.departmentId;
@@ -1234,7 +1234,7 @@ function renderReportsPage() {
           <h2>目标推进周报</h2>
           <p class="form-note">周报不是为了写总结，也不是为了报工作量。它帮助部门负责人每周保持对目标、问题和效率的清晰感知。</p>
         </div>
-        ${canCurrentUser("assessment.fillWeeklyReport") ? `<button class="primary-button" type="button" data-assessment-action="fill-report">填写周报</button>` : ""}
+        ${canCurrentUser("workResults.submit") ? `<button class="primary-button" type="button" data-assessment-action="fill-report">填写周报</button>` : ""}
       </div>
       <div class="table-wrap"><table class="data-table">
         <thead><tr><th>周期</th><th>部门</th><th>提交人</th><th>提交状态</th><th>提交时间</th><th>关联目标</th><th>操作</th></tr></thead>
@@ -1249,8 +1249,8 @@ function renderReportsPage() {
               <td>${escapeHtml(getGoalNames(report.relatedGoalIds))}</td>
               <td><span class="row-actions">
                 <button class="text-button" type="button" data-assessment-action="view-report" data-report-id="${report.id}">查看</button>
-                ${canCurrentUser("assessment.editWeeklyReport") ? `<button class="text-button" type="button" data-assessment-action="edit-report" data-report-id="${report.id}">编辑</button>` : ""}
-                ${canCurrentUser("assessment.updateProblems") ? `<button class="text-button" type="button" data-assessment-action="add-problem-from-report" data-report-id="${report.id}">添加到问题汇总</button>` : ""}
+                ${canCurrentUser("workResults.manage") ? `<button class="text-button" type="button" data-assessment-action="edit-report" data-report-id="${report.id}">编辑</button>` : ""}
+                ${canCurrentUser("workResults.manage") ? `<button class="text-button" type="button" data-assessment-action="add-problem-from-report" data-report-id="${report.id}">添加到问题汇总</button>` : ""}
               </span></td>
             </tr>
           `).join("")}
@@ -1271,7 +1271,7 @@ function renderProblemsPage() {
     <section class="settings-section">
       <div class="section-heading with-actions">
         <h2>问题汇总</h2>
-        ${canCurrentUser("assessment.updateProblems") ? `<button class="primary-button" type="button" data-assessment-action="add-problem">新增问题</button>` : ""}
+        ${canCurrentUser("workResults.manage") ? `<button class="primary-button" type="button" data-assessment-action="add-problem">新增问题</button>` : ""}
       </div>
       <div class="table-wrap"><table class="data-table">
         <thead><tr><th>问题标题</th><th>来源部门</th><th>提交人</th><th>关联目标</th><th>问题类型</th><th>影响程度</th><th>当前状态</th><th>需要支持</th><th>下一步动作</th><th>期望解决日期</th><th>操作</th></tr></thead>
@@ -1290,7 +1290,7 @@ function renderProblemsPage() {
               <td>${problem.expectedResolveDate ?? "未设置"}</td>
               <td><span class="row-actions">
                 <button class="text-button" type="button" data-assessment-action="view-problem" data-problem-id="${problem.id}">查看</button>
-                ${canCurrentUser("assessment.updateProblems") ? `<button class="text-button" type="button" data-assessment-action="edit-problem" data-problem-id="${problem.id}">更新状态</button>` : ""}
+                ${canCurrentUser("workResults.manage") ? `<button class="text-button" type="button" data-assessment-action="edit-problem" data-problem-id="${problem.id}">更新状态</button>` : ""}
               </span></td>
             </tr>
           `).join("")}
@@ -1477,7 +1477,7 @@ function getProblem(problemId) {
 function getDefaultReportDraft(departmentId = "") {
   const user = getCurrentUser();
   const week = getWeekRange(reportFilters.weekStart);
-  const selectedDepartmentId = departmentId || (canCurrentUser("assessment.viewAll") ? reportFilters.departmentId : user?.departmentId) || "";
+  const selectedDepartmentId = departmentId || (canCurrentUser("workResults.viewAll") ? reportFilters.departmentId : user?.departmentId) || "";
   const existing = state.weeklyReports.find((report) => report.weekStart === week.weekStart && report.departmentId === selectedDepartmentId);
   if (existing !== undefined) return existing;
   return {
@@ -1515,7 +1515,7 @@ function renderReportModal() {
           <div class="form-note">周报不是工作流水账，也不是为了统计做了多少事。少写空话，多写事实；少写流水账，多写目标推进；少写表面完成，多写问题和解决动作。</div>
           <div class="form-grid">
             <label><span>周报周期</span><input name="weekStart" type="date" value="${escapeHtml(report.weekStart)}" ${readonly ? "disabled" : ""} /></label>
-            <label><span>部门</span><select name="departmentId" ${readonly || !canCurrentUser("assessment.viewAll") ? "disabled" : ""}>${renderOptions(getScopedDepartments(), report.departmentId, "请选择部门")}</select></label>
+            <label><span>部门</span><select name="departmentId" ${readonly || !canCurrentUser("workResults.viewAll") ? "disabled" : ""}>${renderOptions(getScopedDepartments(), report.departmentId, "请选择部门")}</select></label>
             <label><span>关联目标</span><select name="relatedGoalIds" multiple size="5" ${readonly ? "disabled" : ""}>${state.goals.map((goal) => `<option value="${goal.id}" ${(report.relatedGoalIds ?? []).includes(goal.id) ? "selected" : ""}>${escapeHtml(goal.name)}</option>`).join("")}</select></label>
           </div>
           ${Object.entries(weeklyReportQuestionLabels).map(([key, label]) => `
@@ -1991,7 +1991,7 @@ export function bindAssessmentPageEvents(rerender) {
 
 export function renderAssessmentPage() {
   syncAssessmentTabFromHash();
-  if (!canCurrentUser("assessment.view")) {
+  if (!canCurrentUser("workResults.view")) {
     return `<section class="placeholder"><h2>你没有权限访问管理驾驶舱</h2><p>请联系管理员调整账号权限。</p></section>`;
   }
   return `
@@ -2007,7 +2007,7 @@ export function renderAssessmentPage() {
         activeAssessmentTab === "reports"
           ? renderReportsPage()
           : activeAssessmentTab === "problems"
-            ? canCurrentUser("assessment.viewProblems") ? renderProblemsPage() : `<section class="settings-section"><div class="empty-detail">你没有权限查看问题汇总。</div></section>`
+            ? canCurrentUser("workResults.view") ? renderProblemsPage() : `<section class="settings-section"><div class="empty-detail">你没有权限查看问题汇总。</div></section>`
             : activeAssessmentTab === "rectifications"
               ? renderRectificationPage()
               : activeAssessmentTab === "personProfiles"

@@ -229,7 +229,7 @@ function renderTemplateList() {
           <input type="checkbox" data-show-inactive-processes ${showInactiveTemplates ? "checked" : ""} />
           <span>显示停用标准</span>
         </label>
-        ${canCurrentUser("processes.editTemplates") ? `<button class="primary-button" type="button" data-action="add-template">新增关键行动标准流程</button>` : ""}
+        ${canCurrentUser("actionStandards.manage") ? `<button class="primary-button" type="button" data-action="add-template">新增关键行动标准流程</button>` : ""}
       </div>
       <div class="standard-work-board-wrap">
         <div class="standard-work-board process-template-board">
@@ -293,18 +293,18 @@ function renderProcessTemplateCard(template, isUncategorized = false) {
       </div>
       <div class="standard-work-card-actions">
         <button class="text-button" type="button" data-action="select-template" data-template-id="${template.id}">查看标准</button>
-        ${canCurrentUser("processes.editSteps") ? `<button class="text-button" type="button" data-action="add-node" data-template-id="${template.id}" onclick="window.__handleProcessNodeAction?.(this, event)">编辑标准步骤</button>` : ""}
+        ${canCurrentUser("actionStandards.manage") ? `<button class="text-button" type="button" data-action="add-node" data-template-id="${template.id}" onclick="window.__handleProcessNodeAction?.(this, event)">编辑标准步骤</button>` : ""}
         ${
-          canCurrentUser("processes.editTemplates") && template.status === ProcessTemplateStatus.Inactive
+          canCurrentUser("actionStandards.manage") && template.status === ProcessTemplateStatus.Inactive
             ? `<button class="text-button" type="button" data-action="activate-template" data-template-id="${template.id}">启用标准</button>`
             : ""
         }
         ${
-          canCurrentUser("processes.editTemplates") && template.status !== ProcessTemplateStatus.Inactive
+          canCurrentUser("actionStandards.manage") && template.status !== ProcessTemplateStatus.Inactive
             ? `<button class="text-button danger-button" type="button" data-action="deactivate-template" data-template-id="${template.id}">停用标准</button>`
             : ""
         }
-        ${canCurrentUser("processes.editTemplates") ? `<button class="text-button danger-button" type="button" data-action="delete-template" data-template-id="${template.id}">删除标准</button>` : ""}
+        ${canCurrentUser("actionStandards.manage") ? `<button class="text-button danger-button" type="button" data-action="delete-template" data-template-id="${template.id}">删除标准</button>` : ""}
       </div>
     </article>
   `;
@@ -346,21 +346,21 @@ function renderTemplateNodes(templateId) {
                 </div>
                 <span class="row-actions">
                   <span class="status-pill ${node.status === ProcessTemplateNodeStatus.Inactive ? "is-inactive" : ""}">${processTemplateNodeStatusNames[node.status]}</span>
-                  ${canCurrentUser("processes.sortSteps") && index !== 0 ? `<button class="text-button" type="button" data-action="move-node-up" data-node-id="${node.id}" onclick="window.__handleProcessNodeAction?.(this, event)">上移</button>` : ""}
-                  ${canCurrentUser("processes.sortSteps") && index !== nodes.length - 1 ? `<button class="text-button" type="button" data-action="move-node-down" data-node-id="${node.id}" onclick="window.__handleProcessNodeAction?.(this, event)">下移</button>` : ""}
-                  ${canCurrentUser("processes.editSteps") ? `<button class="text-button" type="button" data-action="edit-node" data-node-id="${node.id}" onclick="window.__handleProcessNodeAction?.(this, event)">编辑</button>` : ""}
+                  ${canCurrentUser("actionStandards.manage") && index !== 0 ? `<button class="text-button" type="button" data-action="move-node-up" data-node-id="${node.id}" onclick="window.__handleProcessNodeAction?.(this, event)">上移</button>` : ""}
+                  ${canCurrentUser("actionStandards.manage") && index !== nodes.length - 1 ? `<button class="text-button" type="button" data-action="move-node-down" data-node-id="${node.id}" onclick="window.__handleProcessNodeAction?.(this, event)">下移</button>` : ""}
+                  ${canCurrentUser("actionStandards.manage") ? `<button class="text-button" type="button" data-action="edit-node" data-node-id="${node.id}" onclick="window.__handleProcessNodeAction?.(this, event)">编辑</button>` : ""}
                   ${getMethodologyLinkByNodeId(node.id)}
                   ${
-                    canCurrentUser("processes.editSteps") && node.status === ProcessTemplateNodeStatus.Inactive
+                    canCurrentUser("actionStandards.manage") && node.status === ProcessTemplateNodeStatus.Inactive
                       ? `<button class="text-button" type="button" data-action="activate-node" data-node-id="${node.id}" onclick="window.__handleProcessNodeAction?.(this, event)">启用</button>`
                       : ""
                   }
                   ${
-                    canCurrentUser("processes.editSteps") && node.status !== ProcessTemplateNodeStatus.Inactive
+                    canCurrentUser("actionStandards.manage") && node.status !== ProcessTemplateNodeStatus.Inactive
                       ? `<button class="text-button danger-button" type="button" data-action="deactivate-node" data-node-id="${node.id}" onclick="window.__handleProcessNodeAction?.(this, event)">停用</button>`
                       : ""
                   }
-                  ${canCurrentUser("processes.editSteps") ? `<button class="text-button danger-button" type="button" data-action="delete-node" data-node-id="${node.id}" onclick="window.__handleProcessNodeAction?.(this, event)">删除</button>` : ""}
+                  ${canCurrentUser("actionStandards.manage") ? `<button class="text-button danger-button" type="button" data-action="delete-node" data-node-id="${node.id}" onclick="window.__handleProcessNodeAction?.(this, event)">删除</button>` : ""}
                 </span>
               </div>
               <div class="process-node-meta">
@@ -435,19 +435,19 @@ function renderTemplateDetail() {
       <div class="section-heading with-actions">
         <h2>关键行动详情</h2>
         <div class="section-actions">
-          ${canCurrentUser("processes.editTemplates") ? `<button class="secondary-button" type="button" data-action="edit-template" data-template-id="${template.id}">编辑标准</button>` : ""}
+          ${canCurrentUser("actionStandards.manage") ? `<button class="secondary-button" type="button" data-action="edit-template" data-template-id="${template.id}">编辑标准</button>` : ""}
           ${
-            canCurrentUser("processes.editTemplates") && template.status === ProcessTemplateStatus.Inactive
+            canCurrentUser("actionStandards.manage") && template.status === ProcessTemplateStatus.Inactive
               ? `<button class="secondary-button" type="button" data-action="activate-template" data-template-id="${template.id}">启用标准</button>`
               : ""
           }
           ${
-            canCurrentUser("processes.editTemplates") && template.status !== ProcessTemplateStatus.Inactive
+            canCurrentUser("actionStandards.manage") && template.status !== ProcessTemplateStatus.Inactive
               ? `<button class="secondary-button danger-button" type="button" data-action="deactivate-template" data-template-id="${template.id}">停用标准</button>`
               : ""
           }
-          ${canCurrentUser("processes.editTemplates") ? `<button class="secondary-button danger-button" type="button" data-action="delete-template" data-template-id="${template.id}">删除标准</button>` : ""}
-          ${canCurrentUser("processes.editSteps") ? `<button class="secondary-button" type="button" data-action="add-node" data-template-id="${template.id}" onclick="window.__handleProcessNodeAction?.(this, event)">新增标准步骤</button>` : ""}
+          ${canCurrentUser("actionStandards.manage") ? `<button class="secondary-button danger-button" type="button" data-action="delete-template" data-template-id="${template.id}">删除标准</button>` : ""}
+          ${canCurrentUser("actionStandards.manage") ? `<button class="secondary-button" type="button" data-action="add-node" data-template-id="${template.id}" onclick="window.__handleProcessNodeAction?.(this, event)">新增标准步骤</button>` : ""}
         </div>
       </div>
       <p class="key-action-position-note">关键行动：部门长期实践验证有效、能够持续推进目标实现、可以反复发起工作事项的标准模板。</p>
@@ -590,7 +590,7 @@ function renderStartedProcesses() {
                     <td>
                       <span class="row-actions">
                         <button class="text-button" type="button" data-action="view-process-instance" data-instance-id="${instance.id}">查看</button>
-                        ${instance.status === ProcessInstanceStatus.Running && canCurrentUser("processes.editInstances") ? `<button class="text-button danger-button" type="button" data-action="stop-process" data-instance-id="${instance.id}">终止</button>` : ""}
+                        ${instance.status === ProcessInstanceStatus.Running && canCurrentUser("keyActions.manage") ? `<button class="text-button danger-button" type="button" data-action="stop-process" data-instance-id="${instance.id}">终止</button>` : ""}
                       </span>
                     </td>
                   </tr>
@@ -1312,24 +1312,24 @@ export function bindProcessesPageEvents(rerender) {
       }
       if (action === "add-task-template" || action === "edit-task-template" || action === "deactivate-task-template" || action === "remove-selected-standard-work-attachment" || action === "add-task-template-field" || action === "remove-task-template-field" || action === "move-task-template-field-up" || action === "move-task-template-field-down") return;
       if (action === "close-process-modal") modalState = null;
-      if (action === "add-template" && canCurrentUser("processes.editTemplates")) modalState = { kind: "template", error: "" };
+      if (action === "add-template" && canCurrentUser("actionStandards.manage")) modalState = { kind: "template", error: "" };
       if (action === "select-template") modalState = { kind: "workflowNodes", templateId: actionButton.dataset.templateId };
-      if (action === "edit-template" && canCurrentUser("processes.editTemplates")) modalState = { kind: "template", id: actionButton.dataset.templateId, error: "" };
+      if (action === "edit-template" && canCurrentUser("actionStandards.manage")) modalState = { kind: "template", id: actionButton.dataset.templateId, error: "" };
       if (action === "start-process" && canCurrentUserLaunchProcessTemplate(actionButton.dataset.templateId ?? "")) {
         modalState = { kind: "start", templateId: actionButton.dataset.templateId, error: "" };
       }
       if (action === "view-process-instance") selectedInstanceId = actionButton.dataset.instanceId;
-      if (action === "delete-template" && canCurrentUser("processes.editTemplates")) {
+      if (action === "delete-template" && canCurrentUser("actionStandards.manage")) {
         await deleteTemplate(actionButton.dataset.templateId, rerender);
         return;
       }
-      if (action === "activate-template" && canCurrentUser("processes.editTemplates")) {
+      if (action === "activate-template" && canCurrentUser("actionStandards.manage")) {
         await updateTemplateStatus(actionButton.dataset.templateId, ProcessTemplateStatus.Active);
       }
-      if (action === "deactivate-template" && canCurrentUser("processes.editTemplates")) {
+      if (action === "deactivate-template" && canCurrentUser("actionStandards.manage")) {
         await updateTemplateStatus(actionButton.dataset.templateId, ProcessTemplateStatus.Inactive);
       }
-      if (action === "stop-process" && canCurrentUser("processes.editInstances") && window.confirm("确定要终止该关键行动吗？未完成标准步骤任务将自动取消。")) {
+      if (action === "stop-process" && canCurrentUser("keyActions.manage") && window.confirm("确定要终止该关键行动吗？未完成标准步骤任务将自动取消。")) {
         stopProcess(actionButton.dataset.instanceId);
       }
       if (action === "select-process-task") {
@@ -1394,8 +1394,8 @@ export function bindProcessesPageEvents(rerender) {
 
 export function renderProcessesPage() {
   syncSelectedTemplateFromHash();
-  const canViewTemplates = canCurrentUser("processes.viewTemplates");
-  const canViewStandardWorks = canCurrentUser("settings.viewStandardWorks") || canViewTemplates;
+  const canViewTemplates = canCurrentUser("actionStandards.view");
+  const canViewStandardWorks = canCurrentUser("actionStandards.view") || canViewTemplates;
   return `
     <div class="processes-page">
       <div class="settings-tabs" aria-label="关键行动分区">

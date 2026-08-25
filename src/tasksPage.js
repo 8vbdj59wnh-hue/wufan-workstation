@@ -1769,7 +1769,7 @@ function getReturnableProcessTasks(task) {
 }
 
 function canReturnTask(task) {
-  if (!canCurrentUser("tasks.changeStatus")) return false;
+  if (!canCurrentUser("tasks.manage")) return false;
   if (task.source !== TaskSource.Process || task.processInstanceId === null) return false;
   if (isCanceledStatus(task.status)) return false;
   const instance = getTaskProcessInstance(task);
@@ -3083,7 +3083,7 @@ function canCancelTask(task) {
 }
 
 function canRestoreTask(task) {
-  return isCanceledStatus(task.status) && canCurrentUser("tasks.changeStatus");
+  return isCanceledStatus(task.status) && canCurrentUser("tasks.manage");
 }
 
 function renderFilters() {
@@ -3256,13 +3256,13 @@ function renderProcessActionButton(label, action, instanceId, variant = "") {
 function canCancelProcessInstance(instance) {
   return (
     instance !== null &&
-    canCurrentUser("processes.editInstances") &&
+    canCurrentUser("keyActions.manage") &&
     [ProcessInstanceStatus.Running, "active", "pending", "doing"].includes(instance.status)
   );
 }
 
 function canRelaunchProcessInstance(instance) {
-  return instance !== null && isCanceledStatus(instance.status) && canCurrentUser("workPlans.launch");
+  return instance !== null && isCanceledStatus(instance.status) && canCurrentUser("keyActions.launch");
 }
 
 function renderTemplateActionButton(label, action, templateId, variant = "") {
@@ -3371,12 +3371,12 @@ function renderTaskCardWorkflowAction(task) {
   }
   const businessStatus = getTaskBusinessStatus(task);
   if (businessStatus.technicalStatus === TaskStatus.Todo) {
-    return canCurrentUser("tasks.changeStatus")
+    return canCurrentUser("tasks.execute")
       ? renderActionButton("开始执行", "start-task", task.id, "primary-button")
       : "";
   }
   if (businessStatus.technicalStatus === TaskStatus.Doing) {
-    if (!canCurrentUser("tasks.submitResult")) return "";
+    if (!canCurrentUser("tasks.execute")) return "";
     const action = task.needAcceptance ? "submit-acceptance" : "submit-done";
     return renderActionButton("提交结果", action, task.id, "primary-button");
   }
@@ -3841,32 +3841,33 @@ function renderReturnRecordsContent(task) {
 }
 
 function renderStatusActions(task) {
-  if (!canCurrentUser("tasks.changeStatus")) return "";
+  if (!["tasks.execute", "tasks.manage", "tasks.accept", "tasks.cancel"].some(canCurrentUser)) return "";
   const activeWave = getActiveTaskWave(task.id);
   if (activeWave !== null) {
     return `<button class="text-button" type="button" data-action="view-task-wave" data-wave-id="${escapeHtml(activeWave.id)}">所属波次：${escapeHtml(activeWave.businessCode)}</button>`;
   }
   const returnAction = canReturnTask(task) ? renderActionButton("退回重做", "return-task", task.id) : "";
   if (task.status === TaskStatus.Waiting) {
-    if (canActivateWaitingProcessTask(task)) {
+    if (canCurrentUser("tasks.execute") && canActivateWaitingProcessTask(task)) {
       return `${renderActionButton("开始任务", "start-task", task.id)}${returnAction}`;
     }
     return `<span class="muted-action">等待前置任务完成</span>${returnAction}`;
   }
 
   if (task.status === TaskStatus.Todo) {
-    return `${renderActionButton("开始任务", "start-task", task.id)}${returnAction}`;
+    return `${canCurrentUser("tasks.execute") ? renderActionButton("开始任务", "start-task", task.id) : ""}${returnAction}`;
   }
 
   if (task.status === TaskStatus.Doing && task.needAcceptance) {
-    return `${renderActionButton("提交验收", "submit-acceptance", task.id)}${returnAction}`;
+    return `${canCurrentUser("tasks.execute") ? renderActionButton("提交验收", "submit-acceptance", task.id) : ""}${returnAction}`;
   }
 
   if (task.status === TaskStatus.Doing) {
-    return `${renderActionButton("提交完成", "submit-done", task.id)}${returnAction}`;
+    return `${canCurrentUser("tasks.execute") ? renderActionButton("提交完成", "submit-done", task.id) : ""}${returnAction}`;
   }
 
   if (task.status === TaskStatus.PendingAcceptance) {
+    if (!canCurrentUser("tasks.accept")) return returnAction;
     return `
       ${renderActionButton("验收通过", "accept-task", task.id)}
       ${renderActionButton("验收退回", "reject-task", task.id, "danger-button")}
@@ -3899,7 +3900,7 @@ function renderTaskSubmitResultDetail(task) {
       <div class="section-heading with-actions compact-heading">
         <h3>提交结果</h3>
         ${
-          requirement.submitType !== SubmitType.None && editable && canCurrentUser("tasks.submitResult")
+          requirement.submitType !== SubmitType.None && editable && canCurrentUser("tasks.execute")
             ? renderActionButton("填写提交结果", "submit-result", task.id)
             : ""
         }
@@ -4211,7 +4212,7 @@ function renderReviewTaskDetail(task) {
   const targetTask = getReviewTargetTask(task);
   const instance = getTaskProcessInstance(task);
   const canDecide =
-    canCurrentUser("tasks.changeStatus") &&
+    canCurrentUser("tasks.accept") &&
     [TaskStatus.Todo, TaskStatus.Doing].includes(task.status) &&
     (task.reviewStatus ?? "pending") === "pending";
   const targetFiles = getTaskSubmittedFiles(targetTask);
@@ -5073,7 +5074,7 @@ function parseSubmitLinks(value) {
 }
 
 async function saveResult(form, rerender) {
-  if (!canCurrentUser("tasks.submitResult")) return setModalError("你没有权限提交任务结果。", rerender);
+  if (!canCurrentUser("tasks.execute")) return setModalError("你没有权限提交任务结果。", rerender);
   const task = getTask(modalState.taskId);
   if (task === null) return;
   const resultText = getFormValue(form, "resultText");
@@ -5178,10 +5179,17 @@ async function saveResult(form, rerender) {
 }
 
 async function updateTaskStatus(taskId, status, rerender) {
-  if (!canCurrentUser("tasks.changeStatus")) return;
   let task = getTask(taskId);
 
   if (task === null) return;
+  const permission = status === TaskStatus.Canceled
+    ? "tasks.cancel"
+    : task.status === TaskStatus.PendingAcceptance
+      ? "tasks.accept"
+      : task.status === TaskStatus.Canceled
+        ? "tasks.manage"
+        : "tasks.execute";
+  if (!canCurrentUser(permission)) return;
 
   if (task.source === TaskSource.Process && task.status === TaskStatus.Waiting && status !== TaskStatus.Canceled) {
     try {
@@ -5288,8 +5296,8 @@ function getTaskStatusChangeError(task, status) {
 }
 
 async function bulkUpdateTaskStatus(status, rerender) {
-  if (status === TaskStatus.Done && !canCurrentUser("tasks.batchComplete")) return;
-  if (status === TaskStatus.Canceled && !canCurrentUser("tasks.batchCancel")) return;
+  if (status === TaskStatus.Done && !canCurrentUser("tasks.manage")) return;
+  if (status === TaskStatus.Canceled && !canCurrentUser("tasks.cancel")) return;
   const selectedTasks = [...selectedTaskIds].map(getTask).filter(Boolean);
   if (selectedTasks.length === 0) return;
   if (status === TaskStatus.Canceled && !window.confirm("确定要取消选中的任务吗？")) return;
@@ -5404,7 +5412,7 @@ async function relaunchProcessAsWorkPlan(instanceId, rerender) {
 }
 
 async function returnTaskToSelectedStep(form, rerender) {
-  if (!canCurrentUser("tasks.changeStatus")) return;
+  if (!canCurrentUser("tasks.manage")) return;
   const task = getTask(modalState.taskId);
   if (task === null) return;
   const returnableTasks = getReturnableProcessTasks(task);
@@ -5588,7 +5596,7 @@ async function handleTaskAction(action, taskId, rerender, actionButton = null) {
 }
 
 async function handleReviewDecision(form, submitter, rerender) {
-  if (!canCurrentUser("tasks.changeStatus")) return;
+  if (!canCurrentUser("tasks.accept")) return;
   const task = getTask(form.dataset.reviewTaskId);
   if (task === null || task.taskType !== "review") return;
   if (![TaskStatus.Todo, TaskStatus.Doing].includes(task.status) || (task.reviewStatus ?? "pending") !== "pending") {
@@ -6059,7 +6067,7 @@ export function bindTasksPageEvents(rerender) {
   }
   if (
     activeTaskTab === "task-waves" &&
-    canCurrentUser("processes.editSteps") &&
+    canCurrentUser("actionStandards.manage") &&
     taskWaveRegenerationPreview === null &&
     !taskWaveRegenerationPreviewLoading
   ) {
@@ -6720,7 +6728,7 @@ function renderTaskWaveList() {
     <section class="settings-section task-wave-page">
       <div class="section-heading task-wave-management-heading">
         <div><h2>任务波次</h2><p>按当前正式规则管理可执行任务组合</p></div>
-        ${canCurrentUser("processes.editSteps") ? `<button class="secondary-button" type="button" data-action="open-wave-regeneration" ${taskWaveRegenerationPreviewLoading || taskWaveRegenerating || taskWaveRegenerationPreview?.isRunning || taskWaveRegenerationPreview?.canRegenerate === false ? "disabled" : ""}>${taskWaveRegenerating ? "正在重新生成…" : "重新生成待执行波次"}</button>` : ""}
+        ${canCurrentUser("actionStandards.manage") ? `<button class="secondary-button" type="button" data-action="open-wave-regeneration" ${taskWaveRegenerationPreviewLoading || taskWaveRegenerating || taskWaveRegenerationPreview?.isRunning || taskWaveRegenerationPreview?.canRegenerate === false ? "disabled" : ""}>${taskWaveRegenerating ? "正在重新生成…" : "重新生成待执行波次"}</button>` : ""}
       </div>
       ${taskWaveRegenerationPreview?.canRegenerate === false ? `<p class="form-note">当前没有需要重新组合的任务</p>` : ""}
       <div class="task-wave-status-tabs">
@@ -6853,7 +6861,7 @@ function renderTaskWaveDetail() {
       <div class="task-wave-members">${members.map((entry) => renderTaskWaveMemberResult(entry, editable)).join("")}</div>
       ${taskWaveError ? `<div class="form-error">${escapeHtml(taskWaveError)}</div>` : ""}
       ${editable ? `<div class="task-wave-fixed-actions"><button class="secondary-button" type="button" data-action="save-task-wave-draft" data-wave-id="${escapeHtml(wave.id)}">保存草稿</button><button class="primary-button" type="button" data-action="submit-task-wave" data-wave-id="${escapeHtml(wave.id)}">完成并提交</button></div>` : ""}
-      ${wave.status === "waiting" && canCurrentUser("tasks.batchCancel") ? `<form class="task-wave-cancel-form"><label><span>取消原因</span><textarea name="cancelReason" required></textarea></label><button class="danger-button" type="submit">取消波次</button></form>` : ""}
+      ${wave.status === "waiting" && canCurrentUser("tasks.cancel") ? `<form class="task-wave-cancel-form"><label><span>取消原因</span><textarea name="cancelReason" required></textarea></label><button class="danger-button" type="submit">取消波次</button></form>` : ""}
     </section>
   `;
 }
@@ -6899,14 +6907,14 @@ export function renderTasksPage() {
   if (activeTaskTab === "task-list" && !canCurrentUser("tasks.view")) activeTaskTab = "task-list";
   if (activeTaskTab === "task-waves" && !canCurrentUser("tasks.view")) activeTaskTab = "task-list";
   if (activeTaskTab === "clearance" && !canCurrentUser("tasks.view")) activeTaskTab = "task-list";
-  if (activeTaskTab === "process-progress" && !canCurrentUser("tasks.viewProcessProgress")) {
+  if (activeTaskTab === "process-progress" && !canCurrentUser("keyActions.view")) {
     activeTaskTab = "task-list";
   }
   const canViewActiveTab =
     (activeTaskTab === "task-list" && canCurrentUser("tasks.view")) ||
     (activeTaskTab === "task-waves" && canCurrentUser("tasks.view")) ||
     (activeTaskTab === "clearance" && canCurrentUser("tasks.view")) ||
-    (activeTaskTab === "process-progress" && canCurrentUser("tasks.viewProcessProgress"));
+    (activeTaskTab === "process-progress" && canCurrentUser("keyActions.view"));
 
   return `
     <div class="tasks-page">

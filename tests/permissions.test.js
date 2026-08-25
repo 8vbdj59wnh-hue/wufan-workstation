@@ -3,194 +3,116 @@ import fs from "node:fs";
 import test from "node:test";
 
 import {
-  canAccessTemplateCenter,
+  PERMISSION_SCHEMA_VERSION,
   canAccessModule,
+  canAccessTemplateCenter,
+  createEmptyPermissions,
   hasPermission,
   normalizePermissions,
+  permissionCount,
   permissionGroups,
-  serializePermissions,
+  validatePermissionDependencies,
 } from "../shared/permissions.js";
 
 function groupKeys(groupKey) {
   return permissionGroups.find((group) => group.key === groupKey)?.permissions.map((item) => item.key) ?? [];
 }
 
-test("前后端从共享权限层读取同一套定义", async () => {
-  const compatibilityFacade = await import("../src/permissions.js");
-  assert.equal(compatibilityFacade.hasPermission, hasPermission);
-  assert.equal(compatibilityFacade.permissionGroups, permissionGroups);
-
-  const sharedSource = fs.readFileSync(new URL("../shared/permissions.js", import.meta.url), "utf8");
-  const databaseSource = fs.readFileSync(new URL("../server/db.js", import.meta.url), "utf8");
-  const authSource = fs.readFileSync(new URL("../server/modules/auth/index.js", import.meta.url), "utf8");
-  const frontendSource = fs.readFileSync(new URL("../src/main.js", import.meta.url), "utf8");
-
-  assert.doesNotMatch(sharedSource, /^import\s/m);
-  assert.match(databaseSource, /from "\.\.\/shared\/permissions\.js"/);
-  assert.match(authSource, /from "\.\.\/\.\.\/\.\.\/shared\/permissions\.js"/);
-  assert.match(frontendSource, /from "\.\.\/shared\/permissions\.js"/);
-  assert.doesNotMatch(`${databaseSource}\n${authSource}`, /src\/permissions\.js/);
-});
-
-test("权限清单保留链接权限域并彻底移除已退役模块权限入口", () => {
-  assert.deepEqual(groupKeys("links"), ["view", "manage", "import", "health", "manageHealth", "improve"]);
-  assert(groupKeys("modules").includes("links"));
-  assert.equal(groupKeys("modules").includes("supplyChain"), false);
-  assert.equal(groupKeys("modules").includes("customers"), false);
-  assert.equal(groupKeys("modules").includes("aiAssistant"), false);
-  assert.deepEqual(groupKeys("supplyChain"), []);
-  assert.deepEqual(groupKeys("customers"), []);
-  assert.deepEqual(groupKeys("aiAssistant"), []);
-  assert.deepEqual(groupKeys("products"), ["view", "create", "edit", "archive"]);
-});
-
-test("权限清单包含独立上传权限域", () => {
-  assert.deepEqual(groupKeys("uploads"), ["image", "file", "standardWorkAttachment"]);
-});
-
-test("模板中心使用角色或显式权限，不再按部门自动放行", () => {
-  assert(groupKeys("modules").includes("templateCenter"));
-  const deniedPermissions = normalizePermissions({
-    modules: { templateCenter: false },
-    settings: { viewStandardWorks: false },
-    processes: { viewTemplates: false },
-    methods: { view: false },
-  });
-
-  assert.equal(canAccessTemplateCenter({
-    role: "user",
-    departmentId: "dept-marketing",
-    departmentName: "视觉营销部",
-    permissions: deniedPermissions,
-  }), false);
-  assert.equal(canAccessTemplateCenter({
-    role: "user",
-    permissions: { ...deniedPermissions, modules: { ...deniedPermissions.modules, templateCenter: true } },
-  }), true);
-  assert.equal(canAccessTemplateCenter({ role: "company_manager", permissions: deniedPermissions }), true);
-  assert.equal(canAccessTemplateCenter({
-    role: "user",
-    permissions: { ...deniedPermissions, processes: { ...deniedPermissions.processes, viewTemplates: true } },
-  }), true);
-});
-
-test("模板中心运行时权限守卫不读取部门字段", () => {
-  const permissionSource = fs.readFileSync(new URL("../shared/permissions.js", import.meta.url), "utf8");
-  const guardSource = permissionSource.match(/export function canAccessTemplateCenter[\s\S]*?\n}/)?.[0] ?? "";
-  assert.notEqual(guardSource, "");
-  assert.doesNotMatch(guardSource, /department(?:Id|Name)?/i);
-});
-
-test("旧账号保留上传能力，显式上传权限边界不会回退", () => {
-  const legacyPermissions = normalizePermissions({
-    modules: { execution: true },
-    tasks: { view: true },
-  });
-  assert.equal(legacyPermissions.uploads.image, true);
-  assert.equal(legacyPermissions.uploads.file, true);
-  assert.equal(legacyPermissions.uploads.standardWorkAttachment, true);
-
-  const explicitPermissions = normalizePermissions({
-    uploads: { image: true, file: false, standardWorkAttachment: false },
-  });
-  assert.equal(explicitPermissions.uploads.image, true);
-  assert.equal(explicitPermissions.uploads.file, false);
-  assert.equal(explicitPermissions.uploads.standardWorkAttachment, false);
-});
-
-test("旧产品查看角色继续获得链接只读兼容权限", () => {
-  const permissions = normalizePermissions({
-    modules: { products: true },
-    products: { view: true, edit: false },
-  });
-
-  assert.equal(permissions.links.view, true);
-  assert.equal(permissions.links.health, true);
-  assert.equal(permissions.links.manage, false);
-  assert.equal(permissions.links.manageHealth, false);
-  assert.equal(permissions.links.import, false);
-  assert.equal(permissions.links.improve, false);
-  assert.equal(permissions.supplyChain, undefined);
-  assert.equal(permissions.customers, undefined);
-});
-
-test("旧产品编辑角色继续获得链接业务写权限", () => {
-  const permissions = normalizePermissions({
-    modules: { products: true },
-    products: { view: true, edit: true },
-  });
-
-  for (const permissionKey of ["manage", "import", "health", "manageHealth", "improve"]) {
-    assert.equal(permissions.links[permissionKey], true);
+test("V2 正式目录固定为 56 项且不暴露 Legacy 或退役模块", () => {
+  assert.equal(permissionCount, 56);
+  assert.equal(PERMISSION_SCHEMA_VERSION, 2);
+  assert.deepEqual(groupKeys("links"), ["view", "manage", "rating", "diagnosis", "improve", "import", "manageRelations"]);
+  assert.deepEqual(groupKeys("products"), ["view", "manage", "archive", "import"]);
+  assert.deepEqual(groupKeys("skus"), ["view", "manage"]);
+  assert.deepEqual(groupKeys("combos"), ["view"]);
+  for (const retiredGroup of ["modules", "supplyChain", "customers", "aiAssistant"]) assert.deepEqual(groupKeys(retiredGroup), []);
+  for (const legacyPermission of ["links.health", "links.manageHealth"]) {
+    const [group, key] = legacyPermission.split(".");
+    assert.equal(groupKeys(group).includes(key), false);
   }
 });
 
-test("历史上手工写入的部分链接权限继续生效", () => {
+test("前后端和数据库从同一份权限定义读取", async () => {
+  const compatibilityFacade = await import("../src/permissions.js");
+  assert.equal(compatibilityFacade.hasPermission, hasPermission);
+  assert.equal(compatibilityFacade.permissionGroups, permissionGroups);
+  const databaseSource = fs.readFileSync(new URL("../server/db.js", import.meta.url), "utf8");
+  const authSource = fs.readFileSync(new URL("../server/modules/auth/index.js", import.meta.url), "utf8");
+  const frontendSource = fs.readFileSync(new URL("../src/main.js", import.meta.url), "utf8");
+  assert.match(databaseSource, /from "\.\.\/shared\/permissions\.js"/);
+  assert.match(authSource, /from "\.\.\/\.\.\/\.\.\/shared\/permissions\.js"/);
+  assert.match(frontendSource, /from "\.\.\/shared\/permissions\.js"/);
+});
+
+test("V2 权限依赖阻止只有写权限而没有查看权限", () => {
+  const invalid = createEmptyPermissions();
+  invalid.templates.manage = true;
+  invalid.tasks.execute = true;
+  assert.deepEqual(validatePermissionDependencies(invalid), [
+    { permission: "tasks.execute", missing: ["tasks.view"] },
+    { permission: "templates.manage", missing: ["templates.view"] },
+  ]);
+});
+
+test("Legacy 映射保守收敛，不把歧义权限自动扩大", () => {
   const permissions = normalizePermissions({
-    modules: { products: true },
-    products: { view: true, edit: false },
-    links: { manage: true, health: true },
+    modules: { products: true, links: true },
+    products: { view: true, create: true, edit: true, archive: false },
+    links: { view: true, manage: true, improve: true, import: false, health: true, manageHealth: true },
+    tasks: { view: true, submitResult: true, changeStatus: false, batchComplete: true, batchCancel: false },
   });
-
-  assert.equal(permissions.links.view, true);
-  assert.equal(permissions.links.manage, true);
-  assert.equal(permissions.links.import, false);
-  assert.equal(permissions.links.health, true);
-  assert.equal(permissions.links.manageHealth, true);
-  assert.equal(permissions.links.improve, false);
+  assert.equal(permissions.permissionVersion, 2);
+  assert.equal(permissions.products.manage, true);
+  assert.equal(permissions.products.import, true);
+  assert.equal(permissions.skus.manage, false);
+  assert.equal(permissions.links.rating, false);
+  assert.equal(permissions.links.diagnosis, true);
+  assert.equal(permissions.links.improve, true);
+  assert.equal(permissions.links.manageRelations, false);
+  assert.equal(permissions.tasks.execute, false);
+  assert.equal(permissions.tasks.manage, false);
+  assert.equal(permissions.tasks.cancel, false);
+  assert.equal(permissions.links.health, undefined);
+  assert.equal(permissions.modules, undefined);
 });
 
-test("显式新权限域不会再回退到产品权限", () => {
-  const productOnly = {
-    modules: { products: true, links: false, supplyChain: true, customers: true },
-    products: { view: true, edit: true },
-    links: { view: false, manage: false, import: false, health: false, manageHealth: false, improve: false },
-    supplyChain: { view: false, manage: false, purchase: false, quality: false },
-    customers: { view: true, manage: true, maintain: true, analyze: true },
-  };
-  const permissions = normalizePermissions(productOnly);
-
-  assert.equal(hasPermission(permissions, "products.view"), true);
-  assert.equal(hasPermission(permissions, "products.edit"), true);
-  assert.equal(hasPermission(permissions, "links.view"), false);
-  assert.equal(hasPermission(permissions, "links.manage"), false);
-  assert.equal(hasPermission(permissions, "supplyChain.view"), false);
-  assert.equal(hasPermission(permissions, "customers.view"), false);
-  assert.equal(canAccessModule(permissions, "products"), true);
-  assert.equal(canAccessModule(permissions, "connectionCenter"), false);
-  assert.equal(canAccessModule(permissions, "supplyChainCenter"), false);
-  assert.equal(canAccessModule(permissions, "customerCenter"), false);
-
-  const roundTrip = JSON.parse(serializePermissions(productOnly));
-  assert.equal(roundTrip.links.view, false);
-  assert.equal(roundTrip.supplyChain, undefined);
-  assert.equal(roundTrip.customers, undefined);
+test("Legacy 中依赖不完整的写权限会被撤销而非补发查看权限", () => {
+  const permissions = normalizePermissions({ workPlans: { launch: true }, processes: { viewInstances: true, viewTemplates: false } });
+  assert.equal(permissions.keyActions.view, true);
+  assert.equal(permissions.actionStandards.view, false);
+  assert.equal(permissions.keyActions.launch, false);
+  assert.deepEqual(validatePermissionDependencies(permissions), []);
 });
 
-test("退休模块不能通过历史权限负载重新授权", () => {
-  const linkRole = normalizePermissions({
-    modules: { products: false, links: true, supplyChain: true, customers: true },
-    products: { view: false, edit: false },
-    links: { view: true, manage: true, import: false, health: true, manageHealth: false, improve: false },
-    supplyChain: { view: true, manage: true, purchase: true, quality: true },
-    customers: { view: true, manage: true, maintain: true, analyze: true },
-  });
-  assert.equal(canAccessModule(linkRole, "connectionCenter"), true);
-  assert.equal(canAccessModule(linkRole, "products"), false);
-  assert.equal(canAccessModule(linkRole, "supplyChainCenter"), false);
-  assert.equal(canAccessModule(linkRole, "customerCenter"), false);
-  assert.equal(hasPermission(linkRole, "links.manage"), true);
-  assert.equal(hasPermission(linkRole, "links.import"), false);
-  assert.equal(linkRole.supplyChain, undefined);
-  assert.equal(linkRole.customers, undefined);
+test("模板中心和产品中心按独立正式查看权限开放", () => {
+  const templateViewer = createEmptyPermissions();
+  templateViewer.templates.view = true;
+  assert.equal(canAccessTemplateCenter(templateViewer), true);
+  assert.equal(canAccessModule(templateViewer, "templateCenter"), true);
+  const skuViewer = createEmptyPermissions();
+  skuViewer.skus.view = true;
+  assert.equal(canAccessModule(skuViewer, "products"), true);
+  assert.equal(hasPermission(skuViewer, "products.view"), false);
+  const retiredPayload = normalizePermissions({ modules: { customers: true, supplyChain: true, aiAssistant: true }, customers: { view: true }, supplyChain: { view: true } });
+  assert.equal(canAccessModule(retiredPayload, "customerCenter"), false);
+  assert.equal(canAccessModule(retiredPayload, "supplyChainCenter"), false);
 });
 
-test("链接业务守卫不再直接拼接产品权限回退", () => {
+test("旧账号保留上传兼容，但 V2 新账号默认不获得上传权限", () => {
+  const legacy = normalizePermissions({ tasks: { view: true } });
+  assert.equal(legacy.uploads.image, true);
+  assert.equal(legacy.uploads.file, true);
+  const v2 = createEmptyPermissions();
+  assert.equal(v2.uploads.image, false);
+  assert.equal(v2.uploads.file, false);
+});
+
+test("权限门禁不再把 Legacy health 或产品权限作为链接授权依据", () => {
   const serverSource = fs.readFileSync(new URL("../server/index.js", import.meta.url), "utf8");
   const linkPageSource = fs.readFileSync(new URL("../src/connectionCenterPage.js", import.meta.url), "utf8");
-
-  assert.match(serverSource, /const requireLinkView = requirePermission\("links\.view"\)/);
+  assert.match(serverSource, /const requireLinkRating = requirePermission\("links\.rating"\)/);
+  assert.match(serverSource, /const requireLinkRelations = requirePermission\("links\.manageRelations"\)/);
   assert.doesNotMatch(serverSource, /requireAnyPermission\("links\.[^"]+", "products\.[^"]+"\)/);
   assert.doesNotMatch(linkPageSource, /links\.[^"]+"\) \|\| hasPermission\([^\n]+products\./);
-  assert.doesNotMatch(serverSource, /\/api\/(?:supply-chain|customer-center)/);
+  assert.doesNotMatch(serverSource, /requirePermission\("links\.(?:health|manageHealth)"\)/);
 });

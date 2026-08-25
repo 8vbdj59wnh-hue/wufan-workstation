@@ -58,14 +58,14 @@ function decorate(row) {
   return { ...row, content, useCount: usageCount(row.assetType, content) };
 }
 
-export function ensureInitialTemplateVersion(resource, item, userId = "") {
+export function ensureInitialTemplateVersion(resource, item, userId = "", { activate = true } = {}) {
   if (!versionedTemplateResources.has(resource) || !item?.id) return null;
   ensureTemplateVersionSchema();
   const assetType = assetTypes[resource];
   const existing = getDatabase().prepare("SELECT id FROM template_asset_versions WHERE assetType = ? AND assetId = ? LIMIT 1").get(assetType, item.id);
   if (existing) return existing;
   const createdAt = item.createdAt || now();
-  const row = { id: id(), assetType, assetId: item.id, versionNumber: "V1.0", majorVersion: 1, minorVersion: 0, status: "active", contentJson: json(item), changeSummary: "初始版本", createdBy: userId, createdAt, activatedAt: createdAt };
+  const row = { id: id(), assetType, assetId: item.id, versionNumber: "V1.0", majorVersion: 1, minorVersion: 0, status: activate ? "active" : "inactive", contentJson: json(item), changeSummary: "初始版本", createdBy: userId, createdAt, activatedAt: activate ? createdAt : null };
   getDatabase().prepare(`INSERT INTO template_asset_versions (id,assetType,assetId,versionNumber,majorVersion,minorVersion,status,contentJson,changeSummary,createdBy,createdAt,activatedAt) VALUES (@id,@assetType,@assetId,@versionNumber,@majorVersion,@minorVersion,@status,@contentJson,@changeSummary,@createdBy,@createdAt,@activatedAt)`).run(row);
   return decorate(row);
 }

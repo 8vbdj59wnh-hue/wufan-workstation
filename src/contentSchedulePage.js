@@ -880,7 +880,7 @@ function renderScheduleTable() {
             <label class="secondary-button content-import-button">批量导入<input type="file" accept=".xlsx,.xls,.csv,.tsv" data-content-file="import" hidden /></label>
             <button class="text-button" type="button" data-content-action="download-template">下载导入模板</button>
           ` : ""}
-          ${canCurrentUser("contentSchedules.export") ? `<button class="text-button" type="button" data-content-action="export-schedules">导出当前列表</button>` : ""}
+          ${canCurrentUser("contentNotes.export") ? `<button class="text-button" type="button" data-content-action="export-schedules">导出当前列表</button>` : ""}
         </div>
       </div>
       <div class="table-wrap">
@@ -1177,7 +1177,7 @@ function renderScheduleViewModal() {
         <div class="modal-header">
           <h2>排期详情</h2>
           <div class="modal-header-actions">
-            ${schedule.status !== ContentScheduleStatus.Canceled && canCurrentUser("contentSchedules.edit") ? `<button class="secondary-button" type="button" data-content-action="edit-schedule-from-view" data-schedule-id="${escapeAttribute(schedule.id)}">编辑</button>` : ""}
+            ${schedule.status !== ContentScheduleStatus.Canceled && canCurrentUser("contentNotes.manage") ? `<button class="secondary-button" type="button" data-content-action="edit-schedule-from-view" data-schedule-id="${escapeAttribute(schedule.id)}">编辑</button>` : ""}
             <button class="icon-button" type="button" data-content-action="close-content-modal" aria-label="关闭">×</button>
           </div>
         </div>
@@ -2433,7 +2433,7 @@ async function handleScheduleAction(action, scheduleId, rerender) {
     return;
   }
   if (action === "edit-schedule") {
-    if (!canCurrentUser("contentSchedules.edit")) return;
+    if (!canCurrentUser("contentNotes.manage")) return;
     modalState = {
       kind: "schedule",
       mode: "edit",
@@ -2446,17 +2446,17 @@ async function handleScheduleAction(action, scheduleId, rerender) {
     return;
   }
   if (action === "cancel-schedule") {
-    if (!canCurrentUser("contentSchedules.batchCancel")) return;
+    if (!canCurrentUser("contentNotes.manage")) return;
     await cancelSchedule(scheduleId, rerender);
     return;
   }
   if (action === "generate-task") {
-    if (!canCurrentUser("contentSchedules.addToFuture")) return;
+    if (!canCurrentUser("contentNotes.manage")) return;
     await generateTaskFromSchedule(scheduleId, rerender);
     return;
   }
   if (action === "start-content-process") {
-    if (!canCurrentUser("contentSchedules.addToThisWeek")) return;
+    if (!canCurrentUser("contentNotes.manage")) return;
     await startContentProcess(scheduleId, rerender);
   }
 }
@@ -2509,7 +2509,7 @@ export function bindContentScheduleEvents(rerender) {
     if (actionButton !== null) {
       const action = actionButton.dataset.contentAction;
       if (action === "add-schedule") {
-        if (!canCurrentUser("contentSchedules.create")) return;
+        if (!canCurrentUser("contentNotes.manage")) return;
         modalState = { kind: "schedule", mode: "add", productImage: "", templateId: "", error: "" };
         rerender();
         return;
@@ -2521,7 +2521,7 @@ export function bindContentScheduleEvents(rerender) {
       }
       if (action === "edit-schedule-from-view") {
         const schedule = getSchedule(actionButton.dataset.scheduleId);
-        if (schedule === null || !canCurrentUser("contentSchedules.edit")) return;
+        if (schedule === null || !canCurrentUser("contentNotes.manage")) return;
         modalState = {
           kind: "schedule",
           mode: "edit",
@@ -2604,7 +2604,7 @@ export function bindContentScheduleEvents(rerender) {
         return;
       }
       if (action === "export-schedules") {
-        if (!canCurrentUser("contentSchedules.export")) return;
+        if (!canCurrentUser("contentNotes.export")) return;
         exportSchedules();
         return;
       }
@@ -2657,13 +2657,13 @@ export function bindContentScheduleEvents(rerender) {
         return;
       }
       if (action === "bulk-create-work-plan") {
-        if (actionButton.dataset.status === WorkPlanStatus.Future && !canCurrentUser("contentSchedules.addToFuture")) return;
-        if (actionButton.dataset.status === WorkPlanStatus.ThisWeek && !canCurrentUser("contentSchedules.addToThisWeek")) return;
+        if (actionButton.dataset.status === WorkPlanStatus.Future && !canCurrentUser("contentNotes.manage")) return;
+        if (actionButton.dataset.status === WorkPlanStatus.ThisWeek && !canCurrentUser("contentNotes.manage")) return;
         await bulkCreateWorkPlansFromSchedules(actionButton.dataset.status, rerender);
         return;
       }
       if (action === "bulk-cancel-schedules") {
-        if (!canCurrentUser("contentSchedules.batchCancel")) return;
+        if (!canCurrentUser("contentNotes.manage")) return;
         await bulkCancelSchedules(rerender);
         return;
       }

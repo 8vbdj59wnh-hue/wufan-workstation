@@ -11,11 +11,11 @@ function currentView() {
 }
 
 function canViewOperation() {
-  return hasPermission(getCurrentUser(), "operations.view");
+  return hasPermission(getCurrentUser(), "cockpit.view");
 }
 
 function canViewManagement() {
-  return hasPermission(getCurrentUser(), "assessment.view");
+  return hasPermission(getCurrentUser(), "workResults.view");
 }
 
 function renderViewContent(view) {

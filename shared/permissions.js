@@ -1,4 +1,6 @@
-// Canonical permission definitions and guards shared by browser and server code.
+// Canonical V2 permission definitions and guards shared by browser and server code.
+export const PERMISSION_SCHEMA_VERSION = 2;
+
 export const dataScopeOptions = [
   { value: "self", label: "只看自己的数据" },
   { value: "department", label: "只看本部门数据" },
@@ -11,393 +13,347 @@ export const actionLaunchScopeOptions = [
 ];
 
 export const permissionGroups = [
-  {
-    key: "modules",
-    title: "模块访问权限",
-    permissions: [
-      { key: "goals", label: "可访问目标模块" },
-      { key: "execution", label: "可访问任务模块" },
-      { key: "processes", label: "可访问关键行动模块" },
-      { key: "assessment", label: "可访问工作结果模块" },
-      { key: "methods", label: "可访问关键行动方法论" },
-      { key: "settings", label: "可访问设置模块" },
-      { key: "products", label: "可访问产品中心" },
-      { key: "links", label: "可访问链接中心" },
-      { key: "operations", label: "可查看经营驾驶舱" },
-      { key: "finance", label: "可访问财务中心" },
-      { key: "templateCenter", label: "可访问模板中心" },
-    ],
-  },
-  {
-    key: "goals",
-    title: "目标权限",
-    permissions: [
-      { key: "view", label: "查看目标" },
-      { key: "create", label: "新增目标" },
-      { key: "edit", label: "编辑目标" },
-      { key: "delete", label: "停用 / 删除目标" },
-      { key: "viewDetail", label: "查看目标详情" },
-      { key: "dragAlign", label: "拖拽调整目标对齐" },
-      { key: "addWork", label: "在目标卡片发起关键行动" },
-      { key: "viewRelatedData", label: "查看目标关联数据" },
-    ],
-  },
-  {
-    key: "workPlans",
-    title: "关键行动发起权限",
-    permissions: [
-      { key: "launch", label: "发起关键行动" },
-      { key: "batchOperate", label: "批量操作关键行动" },
-    ],
-  },
-  {
-    key: "products",
-    title: "产品中心权限",
-    permissions: [
-      { key: "view", label: "查看产品" },
-      { key: "create", label: "新增产品" },
-      { key: "edit", label: "编辑产品" },
-      { key: "archive", label: "归档产品" },
-    ],
-  },
-  {
-    key: "links",
-    title: "链接中心权限",
-    permissions: [
-      { key: "view", label: "查看链接" },
-      { key: "manage", label: "管理链接档案与经营配置" },
-      { key: "import", label: "导入链接与经营数据" },
-      { key: "health", label: "查看链接体检" },
-      { key: "manageHealth", label: "创建和管理链接体检" },
-      { key: "improve", label: "发起和管理链接改善" },
-    ],
-  },
-  {
-    key: "operations",
-    title: "经营权限",
-    permissions: [
-      { key: "view", label: "查看经营驾驶舱" },
-    ],
-  },
-  {
-    key: "finance",
-    title: "财务中心权限",
-    permissions: [
-      { key: "view", label: "查看财务数据" },
-      { key: "manage", label: "导入和管理财务数据" },
-      { key: "approve", label: "审核财务数据" },
-    ],
-  },
-  {
-    key: "uploads",
-    title: "上传权限",
-    permissions: [
-      { key: "image", label: "上传图片" },
-      { key: "file", label: "上传通用文件" },
-      { key: "standardWorkAttachment", label: "上传关键行动表格附件" },
-    ],
-  },
-  {
-    key: "tasks",
-    title: "任务权限",
-    permissions: [
-      { key: "view", label: "查看任务" },
-      { key: "viewDetail", label: "查看任务详情" },
-      { key: "viewForm", label: "查看任务表单" },
-      { key: "submitResult", label: "提交任务结果" },
-      { key: "changeStatus", label: "修改任务状态" },
-      { key: "batchComplete", label: "批量完成任务" },
-      { key: "batchCancel", label: "批量取消任务" },
-      { key: "viewProcessProgress", label: "查看关键行动进度" },
-    ],
-  },
-  {
-    key: "processes",
-    title: "关键行动权限",
-    permissions: [
-      { key: "viewTemplates", label: "查看关键行动标准流程" },
-      { key: "editTemplates", label: "编辑关键行动标准流程" },
-      { key: "editSteps", label: "新增 / 编辑标准步骤" },
-      { key: "sortSteps", label: "调整标准步骤顺序" },
-      { key: "viewInstances", label: "查看已发起关键行动" },
-      { key: "editInstances", label: "编辑已发起关键行动" },
-      { key: "viewForm", label: "查看标准表单" },
-    ],
-  },
-  {
-    key: "contentSchedules",
-    title: "发布内容笔记权限",
-    permissions: [
-      { key: "view", label: "查看发布内容笔记" },
-      { key: "create", label: "单条发起发布内容笔记" },
-      { key: "edit", label: "编辑历史内容排期" },
-      { key: "import", label: "批量发起发布内容笔记" },
-      { key: "export", label: "导出发布内容笔记" },
-      { key: "addToFuture", label: "历史排期转待发起工作计划" },
-      { key: "addToThisWeek", label: "历史排期直接发起关键行动" },
-      { key: "batchCancel", label: "批量取消内容" },
-    ],
-  },
-  {
-    key: "assessment",
-    title: "工作结果权限",
-    permissions: [
-      { key: "view", label: "访问工作结果模块" },
-      { key: "viewAll", label: "查看全部工作结果数据" },
-      { key: "viewDepartment", label: "查看本部门工作结果数据" },
-      { key: "viewSelf", label: "查看自己的工作结果数据" },
-      { key: "fillWeeklyReport", label: "填写目标推进周报" },
-      { key: "editWeeklyReport", label: "编辑目标推进周报" },
-      { key: "viewProblems", label: "查看问题汇总" },
-      { key: "updateProblems", label: "更新问题状态" },
-    ],
-  },
-  {
-    key: "methods",
-    title: "方法论权限",
-    permissions: [
-      { key: "view", label: "查看方法论" },
-      { key: "create", label: "新增方法论" },
-      { key: "edit", label: "编辑方法论" },
-    ],
-  },
-  {
-    key: "settings",
-    title: "设置权限",
-    permissions: [
-      { key: "viewOrg", label: "查看组织架构" },
-      { key: "editOrg", label: "编辑组织架构" },
-      { key: "viewPeople", label: "查看人员管理" },
-      { key: "createPeople", label: "新增人员" },
-      { key: "editPeople", label: "编辑人员" },
-      { key: "disablePeople", label: "停用人员" },
-      { key: "manageAccounts", label: "管理账号" },
-      { key: "managePermissions", label: "管理权限" },
-      { key: "viewStandardWorks", label: "查看关键行动库" },
-      { key: "editStandardWorks", label: "编辑关键行动库" },
-      { key: "editStandardWorkForms", label: "配置关键行动表单" },
-      { key: "viewStores", label: "查看店铺管理" },
-      { key: "editStores", label: "编辑店铺管理" },
-      { key: "editCategories", label: "编辑分类设置" },
-      { key: "viewDataAssetMap", label: "查看数据资产地图" },
-      { key: "manageAdminDataCenter", label: "管理管理员数据中心" },
-    ],
-  },
+  { key: "cockpit", title: "经营驾驶舱", permissions: [{ key: "view", label: "查看经营驾驶舱" }] },
+  { key: "goals", title: "目标", permissions: [
+    { key: "view", label: "查看目标" },
+    { key: "manage", label: "管理目标" },
+    { key: "close", label: "停用或重新启用目标" },
+  ] },
+  { key: "keyActions", title: "关键行动", permissions: [
+    { key: "view", label: "查看关键行动" },
+    { key: "launch", label: "发起关键行动" },
+    { key: "manage", label: "管理关键行动" },
+  ] },
+  { key: "tasks", title: "任务", permissions: [
+    { key: "view", label: "查看任务" },
+    { key: "execute", label: "执行任务" },
+    { key: "manage", label: "管理任务" },
+    { key: "accept", label: "验收任务" },
+    { key: "cancel", label: "取消任务" },
+  ] },
+  { key: "workResults", title: "工作结果", permissions: [
+    { key: "view", label: "查看工作结果" },
+    { key: "submit", label: "提交工作结果" },
+    { key: "manage", label: "管理工作结果" },
+  ] },
+  { key: "actionStandards", title: "行动标准", permissions: [
+    { key: "view", label: "查看行动标准" },
+    { key: "manage", label: "管理行动标准" },
+    { key: "publish", label: "发布或停用行动标准" },
+  ] },
+  { key: "templates", title: "模板中心", permissions: [
+    { key: "view", label: "查看模板" },
+    { key: "manage", label: "管理模板" },
+    { key: "publish", label: "发布或停用模板" },
+  ] },
+  { key: "contentNotes", title: "发布内容笔记", permissions: [
+    { key: "view", label: "查看发布内容笔记" },
+    { key: "manage", label: "管理发布内容笔记" },
+    { key: "export", label: "导出发布内容笔记" },
+  ] },
+  { key: "products", title: "产品", permissions: [
+    { key: "view", label: "查看产品" },
+    { key: "manage", label: "管理产品" },
+    { key: "archive", label: "归档或恢复产品" },
+    { key: "import", label: "导入产品数据" },
+  ] },
+  { key: "skus", title: "SKU", permissions: [
+    { key: "view", label: "查看 SKU" },
+    { key: "manage", label: "管理 SKU 及关系" },
+  ] },
+  { key: "combos", title: "组合装", permissions: [{ key: "view", label: "查看组合装" }] },
+  { key: "links", title: "经营链接", permissions: [
+    { key: "view", label: "查看经营链接" },
+    { key: "manage", label: "管理链接档案与经营目标" },
+    { key: "rating", label: "刷新链接评级" },
+    { key: "diagnosis", label: "管理链接诊断" },
+    { key: "improve", label: "管理链接改善" },
+    { key: "import", label: "导入链接经营数据" },
+    { key: "manageRelations", label: "管理链接数据关系" },
+  ] },
+  { key: "finance", title: "财务中心", permissions: [
+    { key: "view", label: "查看财务数据" },
+    { key: "maintain", label: "维护财务数据" },
+    { key: "configureRules", label: "配置财务规则" },
+    { key: "approve", label: "审批财务数据" },
+  ] },
+  { key: "dataCenter", title: "数据中心", permissions: [
+    { key: "view", label: "查看数据同步状态" },
+    { key: "run", label: "执行数据同步或导入" },
+    { key: "manage", label: "管理数据同步配置" },
+  ] },
+  { key: "organization", title: "组织", permissions: [
+    { key: "view", label: "查看组织架构" },
+    { key: "manage", label: "管理组织架构" },
+  ] },
+  { key: "people", title: "人员", permissions: [
+    { key: "view", label: "查看人员" },
+    { key: "manage", label: "管理人员" },
+    { key: "manageAccounts", label: "管理登录账号" },
+  ] },
+  { key: "permissions", title: "权限", permissions: [{ key: "manage", label: "管理权限" }] },
+  { key: "dataAssets", title: "数据资产", permissions: [{ key: "view", label: "查看数据资产地图" }] },
+  { key: "systemSettings", title: "系统配置", permissions: [{ key: "manage", label: "管理系统业务配置" }] },
+  { key: "uploads", title: "上传", permissions: [
+    { key: "image", label: "上传图片" },
+    { key: "file", label: "上传通用文件" },
+    { key: "standardWorkAttachment", label: "上传行动标准附件" },
+  ] },
 ];
 
 export const permissionCount = permissionGroups.reduce((total, group) => total + group.permissions.length, 0);
 
-function createPermissionSkeleton(value = false, dataScope = "department") {
-  const permissions = { dataScope };
+export const permissionDependencies = {
+  "goals.manage": ["goals.view"],
+  "goals.close": ["goals.view"],
+  "keyActions.launch": ["keyActions.view", "actionStandards.view"],
+  "keyActions.manage": ["keyActions.view"],
+  "tasks.execute": ["tasks.view"],
+  "tasks.manage": ["tasks.view"],
+  "tasks.accept": ["tasks.view"],
+  "tasks.cancel": ["tasks.view"],
+  "workResults.submit": ["workResults.view"],
+  "workResults.manage": ["workResults.view"],
+  "actionStandards.manage": ["actionStandards.view"],
+  "actionStandards.publish": ["actionStandards.view"],
+  "templates.manage": ["templates.view"],
+  "templates.publish": ["templates.view"],
+  "contentNotes.manage": ["contentNotes.view"],
+  "contentNotes.export": ["contentNotes.view"],
+  "products.manage": ["products.view"],
+  "products.archive": ["products.view"],
+  "products.import": ["products.view"],
+  "skus.manage": ["skus.view"],
+  "links.manage": ["links.view"],
+  "links.rating": ["links.view"],
+  "links.diagnosis": ["links.view"],
+  "links.improve": ["links.view"],
+  "links.import": ["links.view"],
+  "links.manageRelations": ["links.view"],
+  "finance.maintain": ["finance.view"],
+  "finance.configureRules": ["finance.view"],
+  "finance.approve": ["finance.view"],
+  "dataCenter.run": ["dataCenter.view"],
+  "dataCenter.manage": ["dataCenter.view"],
+  "organization.manage": ["organization.view"],
+  "people.manage": ["people.view"],
+  "people.manageAccounts": ["people.view"],
+};
+
+function clone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function parsePermissions(rawPermissions) {
+  if (typeof rawPermissions !== "string") return rawPermissions;
+  if (rawPermissions.trim() === "") return null;
+  try { return JSON.parse(rawPermissions); } catch { return null; }
+}
+
+function createPermissionSkeleton(value = false, dataScope = "self") {
+  const permissions = { permissionVersion: PERMISSION_SCHEMA_VERSION, dataScope };
   for (const group of permissionGroups) {
     permissions[group.key] = Object.fromEntries(group.permissions.map((item) => [item.key, value]));
   }
-  permissions.workPlans.launchTemplateScope = value ? "all" : "selected";
-  permissions.workPlans.launchTemplateIds = [];
+  permissions.keyActions.launchTemplateScope = value ? "all" : "selected";
+  permissions.keyActions.launchTemplateIds = [];
   return permissions;
 }
 
 const superAdminPermissions = createPermissionSkeleton(true, "all");
 
-const employeePermissions = createPermissionSkeleton(false, "self");
-Object.assign(employeePermissions.modules, { execution: true, methods: true });
-Object.assign(employeePermissions.tasks, { view: true, viewDetail: true, viewForm: true, submitResult: true, changeStatus: true });
-Object.assign(employeePermissions.assessment, { viewSelf: true });
-Object.assign(employeePermissions.methods, { view: true });
-
-function clonePermissions(permissions) {
-  return JSON.parse(JSON.stringify(permissions));
-}
-
 export function createEmptyPermissions(dataScope = "self") {
   return createPermissionSkeleton(false, dataScope);
 }
 
-function getDefaultPermissions(role = "user") {
-  return clonePermissions(role === "admin" ? superAdminPermissions : employeePermissions);
+function isAdminRole(role) {
+  return ["admin", "system_admin"].includes(role);
 }
 
-function applyLegacyPermissionCompatibility(normalized, source) {
-  if (typeof source?.operations?.view !== "boolean") {
-    if (typeof source?.dataCenter?.view === "boolean") normalized.operations.view = source.dataCenter.view;
-    else if (typeof source?.modules?.dataCenter === "boolean") normalized.operations.view = source.modules.dataCenter;
-  }
-  if (typeof source?.modules?.operations !== "boolean" && typeof source?.modules?.dataCenter === "boolean") {
-    normalized.modules.operations = source.modules.dataCenter;
-  }
-  const isPermissionManager = source?.modules?.settings === true && source?.settings?.managePermissions === true;
-  if (!isPermissionManager) return;
-
-  if (typeof source.modules?.assessment !== "boolean") normalized.modules.assessment = true;
-  if (typeof source.modules?.methods !== "boolean") normalized.modules.methods = true;
-  if (typeof source.assessment !== "object" || source.assessment === null) {
-    Object.assign(normalized.assessment, {
-      view: true,
-      viewAll: true,
-      fillWeeklyReport: true,
-      editWeeklyReport: true,
-      viewProblems: true,
-      updateProblems: true,
-    });
-  }
-  if (typeof source.methods !== "object" || source.methods === null) {
-    Object.assign(normalized.methods, { view: true, create: true, edit: true });
-  }
-  if (typeof source.settings?.viewStores !== "boolean") normalized.settings.viewStores = true;
-  if (typeof source.settings?.editStores !== "boolean") normalized.settings.editStores = true;
+function readBoolean(source, path) {
+  const [group, key] = path.split(".");
+  return typeof source?.[group]?.[key] === "boolean" ? source[group][key] : undefined;
 }
 
-function canAutoGrantContentScheduleOperations(role) {
-  return ["admin", "system_admin", "company_manager"].includes(role);
+function anyLegacy(source, ...paths) {
+  return paths.some((path) => readBoolean(source, path) === true);
 }
 
-function applyContentSchedulePermissionCompatibility(normalized, source, role) {
-  if (source.contentSchedules?.view === true && canAutoGrantContentScheduleOperations(role)) {
-    Object.assign(normalized.contentSchedules, {
-      create: true,
-      edit: true,
-      import: true,
-      export: true,
-      addToFuture: true,
-      addToThisWeek: true,
-      batchCancel: true,
-    });
-  }
+function allLegacy(source, ...paths) {
+  return paths.every((path) => readBoolean(source, path) === true);
 }
 
-function applyLegacyUploadPermissionCompatibility(normalized, source) {
-  const hasExplicitUploadBoundary = ["image", "file", "standardWorkAttachment"]
-    .some((permissionKey) => typeof source?.uploads?.[permissionKey] === "boolean");
-  if (hasExplicitUploadBoundary) return;
-  Object.assign(normalized.uploads, {
-    image: true,
-    file: true,
-    standardWorkAttachment: true,
-  });
+function copyLaunchScope(target, source) {
+  const v2 = source?.keyActions;
+  const legacy = source?.workPlans;
+  const scope = [v2?.launchTemplateScope, legacy?.launchTemplateScope]
+    .find((value) => ["all", "selected"].includes(value));
+  target.keyActions.launchTemplateScope = scope ?? (target.keyActions.launch ? "all" : "selected");
+  const ids = Array.isArray(v2?.launchTemplateIds)
+    ? v2.launchTemplateIds
+    : Array.isArray(legacy?.launchTemplateIds)
+      ? legacy.launchTemplateIds
+      : [];
+  target.keyActions.launchTemplateIds = [...new Set(ids.map((item) => String(item ?? "").trim()).filter(Boolean))];
 }
 
-function normalizeProductCenterAccess(normalized) {
-  const canViewProducts = normalized.modules.products === true || normalized.products.view === true;
-  normalized.modules.products = canViewProducts;
-  normalized.products.view = canViewProducts;
-}
-
-const legacyBusinessPermissionMappings = {
-  links: {
-    moduleKey: "links",
-    permissions: {
-      view: "view",
-      manage: "edit",
-      import: "edit",
-      health: "view",
-      manageHealth: "edit",
-      improve: "edit",
-    },
-  },
-};
-
-function hasExplicitBusinessPermissionBoundary(source, groupKey, definition) {
-  return typeof source?.modules?.[definition.moduleKey] === "boolean" ||
-    typeof source?.[groupKey]?.view === "boolean";
-}
-
-function applyLegacyBusinessPermissionCompatibility(normalized, source) {
-  for (const [groupKey, definition] of Object.entries(legacyBusinessPermissionMappings)) {
-    if (hasExplicitBusinessPermissionBoundary(source, groupKey, definition)) continue;
-    normalized.modules[definition.moduleKey] = normalized.modules.products;
-    for (const [permissionKey, productPermissionKey] of Object.entries(definition.permissions)) {
-      if (typeof source?.[groupKey]?.[permissionKey] === "boolean") continue;
-      normalized[groupKey][permissionKey] = normalized.products[productPermissionKey] === true;
+function pruneUnsatisfiedDependencies(target) {
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [permissionKey, dependencies] of Object.entries(permissionDependencies)) {
+      const [group, key] = permissionKey.split(".");
+      if (target[group]?.[key] !== true) continue;
+      const dependenciesSatisfied = dependencies.every((dependencyKey) => {
+        const [dependencyGroup, dependency] = dependencyKey.split(".");
+        return target[dependencyGroup]?.[dependency] === true;
+      });
+      if (dependenciesSatisfied) continue;
+      target[group][key] = false;
+      changed = true;
     }
   }
-  if (typeof source?.links?.health === "boolean" && typeof source?.links?.manageHealth !== "boolean") {
-    normalized.links.manageHealth = source.links.health;
-  }
+  return target;
 }
 
-function normalizeBusinessModuleAccess(normalized) {
-  for (const [groupKey, definition] of Object.entries(legacyBusinessPermissionMappings)) {
-    const canView = normalized.modules[definition.moduleKey] === true || normalized[groupKey].view === true;
-    normalized.modules[definition.moduleKey] = canView;
-    normalized[groupKey].view = canView;
+function convertLegacyPermissions(source, role) {
+  if (isAdminRole(role)) return clone(superAdminPermissions);
+  const target = createEmptyPermissions(
+    ["self", "department", "all"].includes(source?.dataScope) ? source.dataScope : "self",
+  );
+  if (source === null || typeof source !== "object") return target;
+
+  const productView = anyLegacy(source, "products.view", "modules.products");
+  const explicitLinkBoundary = readBoolean(source, "links.view") !== undefined || readBoolean(source, "modules.links") !== undefined;
+  const linkView = explicitLinkBoundary ? anyLegacy(source, "links.view", "modules.links") : productView;
+  const standardsManager = allLegacy(
+    source,
+    "processes.editTemplates",
+    "processes.editSteps",
+    "processes.sortSteps",
+    "settings.editStandardWorks",
+    "settings.editStandardWorkForms",
+    "methods.create",
+    "methods.edit",
+  );
+
+  target.cockpit.view = anyLegacy(source, "operations.view", "modules.operations", "dataCenter.view", "modules.dataCenter");
+  target.goals.view = anyLegacy(source, "goals.view", "goals.viewDetail", "goals.viewRelatedData", "modules.goals");
+  target.goals.manage = allLegacy(source, "goals.create", "goals.edit", "goals.dragAlign");
+  target.goals.close = anyLegacy(source, "goals.delete");
+  target.keyActions.view = anyLegacy(source, "processes.viewInstances");
+  target.keyActions.launch = anyLegacy(source, "workPlans.launch");
+  target.keyActions.manage = anyLegacy(source, "processes.editInstances");
+  target.tasks.view = anyLegacy(source, "tasks.view", "tasks.viewDetail", "tasks.viewForm");
+  target.tasks.execute = allLegacy(source, "tasks.submitResult", "tasks.changeStatus");
+  target.tasks.manage = allLegacy(source, "tasks.changeStatus", "tasks.batchComplete");
+  target.tasks.accept = anyLegacy(source, "tasks.changeStatus");
+  target.tasks.cancel = anyLegacy(source, "tasks.batchCancel");
+  target.workResults.view = anyLegacy(source, "assessment.view", "modules.assessment", "assessment.viewProblems");
+  target.workResults.submit = anyLegacy(source, "assessment.fillWeeklyReport");
+  target.workResults.manage = allLegacy(source, "assessment.editWeeklyReport", "assessment.updateProblems");
+  target.actionStandards.view = anyLegacy(source, "processes.viewTemplates", "settings.viewStandardWorks", "methods.view", "modules.methods");
+  target.actionStandards.manage = standardsManager;
+  target.actionStandards.publish = standardsManager;
+  target.templates.view = anyLegacy(source, "modules.templateCenter", "settings.viewStandardWorks", "processes.viewTemplates", "methods.view");
+  target.templates.manage = standardsManager;
+  target.templates.publish = standardsManager;
+  target.contentNotes.view = anyLegacy(source, "contentSchedules.view");
+  target.contentNotes.manage = allLegacy(source, "contentSchedules.create", "contentSchedules.edit", "contentSchedules.addToFuture", "contentSchedules.addToThisWeek", "contentSchedules.batchCancel");
+  target.contentNotes.export = anyLegacy(source, "contentSchedules.export");
+  target.products.view = productView;
+  target.products.manage = allLegacy(source, "products.create", "products.edit");
+  target.products.archive = anyLegacy(source, "products.archive");
+  target.products.import = anyLegacy(source, "products.create");
+  target.skus.view = productView;
+  target.skus.manage = allLegacy(source, "products.create", "products.edit", "products.archive");
+  target.combos.view = productView;
+  target.links.view = linkView;
+  target.links.manage = anyLegacy(source, "links.manage");
+  target.links.rating = false;
+  target.links.diagnosis = anyLegacy(source, "links.improve");
+  target.links.improve = anyLegacy(source, "links.improve");
+  target.links.import = anyLegacy(source, "links.import");
+  target.links.manageRelations = allLegacy(source, "links.manage", "links.import");
+  target.finance.view = anyLegacy(source, "finance.view", "modules.finance");
+  target.finance.maintain = anyLegacy(source, "finance.manage");
+  target.finance.configureRules = anyLegacy(source, "finance.manage");
+  target.finance.approve = anyLegacy(source, "finance.approve");
+  const dataCenterManager = anyLegacy(source, "settings.manageAdminDataCenter");
+  target.dataCenter.view = dataCenterManager;
+  target.dataCenter.run = dataCenterManager;
+  target.dataCenter.manage = dataCenterManager;
+  target.organization.view = anyLegacy(source, "settings.viewOrg", "settings.editOrg");
+  target.organization.manage = anyLegacy(source, "settings.editOrg");
+  target.people.view = anyLegacy(source, "settings.viewPeople", "settings.editPeople", "settings.managePermissions");
+  target.people.manage = allLegacy(source, "settings.createPeople", "settings.editPeople", "settings.disablePeople");
+  target.people.manageAccounts = anyLegacy(source, "settings.manageAccounts");
+  target.permissions.manage = anyLegacy(source, "settings.managePermissions");
+  target.dataAssets.view = anyLegacy(source, "settings.viewDataAssetMap");
+  target.systemSettings.manage = allLegacy(source, "settings.editStores", "settings.editCategories", "settings.editStandardWorkForms");
+  const explicitUploads = ["image", "file", "standardWorkAttachment"].some((key) => readBoolean(source, `uploads.${key}`) !== undefined);
+  for (const key of ["image", "file", "standardWorkAttachment"]) {
+    target.uploads[key] = explicitUploads ? readBoolean(source, `uploads.${key}`) === true : true;
   }
+  copyLaunchScope(target, source);
+  return pruneUnsatisfiedDependencies(target);
 }
 
-function normalizeActionLaunchPermissions(normalized, source) {
-  const sourceWorkPlans = source?.workPlans;
-  const hasExplicitScope = ["all", "selected"].includes(sourceWorkPlans?.launchTemplateScope);
-  normalized.workPlans.launchTemplateScope = hasExplicitScope
-    ? sourceWorkPlans.launchTemplateScope
-    : normalized.workPlans.launch
-      ? "all"
-      : "selected";
-  normalized.workPlans.launchTemplateIds = Array.isArray(sourceWorkPlans?.launchTemplateIds)
-    ? [...new Set(sourceWorkPlans.launchTemplateIds.map((item) => String(item ?? "").trim()).filter(Boolean))]
-    : [];
+export function isV2Permissions(rawPermissions) {
+  return parsePermissions(rawPermissions)?.permissionVersion === PERMISSION_SCHEMA_VERSION;
 }
 
 export function normalizePermissions(rawPermissions, role = "user") {
-  let source = rawPermissions;
-  if (typeof rawPermissions === "string" && rawPermissions.trim() !== "") {
-    try {
-      source = JSON.parse(rawPermissions);
-    } catch {
-      source = null;
+  if (isAdminRole(role)) return clone(superAdminPermissions);
+  const source = parsePermissions(rawPermissions);
+  if (!isV2Permissions(source)) return convertLegacyPermissions(source, role);
+  const normalized = createEmptyPermissions(["self", "department", "all"].includes(source.dataScope) ? source.dataScope : "self");
+  for (const group of permissionGroups) {
+    for (const item of group.permissions) {
+      if (typeof source[group.key]?.[item.key] === "boolean") normalized[group.key][item.key] = source[group.key][item.key];
     }
   }
-
-  const normalized = getDefaultPermissions(role);
-  if (source !== null && typeof source === "object") {
-    for (const group of permissionGroups) {
-      for (const item of group.permissions) {
-        if (typeof source[group.key]?.[item.key] === "boolean") {
-          normalized[group.key][item.key] = source[group.key][item.key];
-        }
-      }
-    }
-    if (["self", "department", "all"].includes(source.dataScope)) normalized.dataScope = source.dataScope;
-    applyLegacyPermissionCompatibility(normalized, source);
-    applyContentSchedulePermissionCompatibility(normalized, source, role);
-  }
-  applyLegacyUploadPermissionCompatibility(normalized, source);
-  normalizeProductCenterAccess(normalized);
-  applyLegacyBusinessPermissionCompatibility(normalized, source);
-  normalizeBusinessModuleAccess(normalized);
-  normalizeActionLaunchPermissions(normalized, source);
-
+  copyLaunchScope(normalized, source);
   return normalized;
 }
 
-function applyPermissionOverrides(basePermissions, overrides) {
-  const merged = clonePermissions(basePermissions);
+function deepMergePermissionSource(base, overrides) {
+  const merged = clone(base !== null && typeof base === "object" ? base : {});
   if (overrides === null || typeof overrides !== "object") return merged;
-  if (["self", "department", "all"].includes(overrides.dataScope)) merged.dataScope = overrides.dataScope;
-  for (const group of permissionGroups) {
-    for (const item of group.permissions) {
-      if (typeof overrides[group.key]?.[item.key] === "boolean") {
-        merged[group.key][item.key] = overrides[group.key][item.key];
-      }
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+      merged[key] = deepMergePermissionSource(merged[key], value);
+    } else {
+      merged[key] = clone(value);
     }
-  }
-  const overrideWorkPlans = overrides.workPlans;
-  if (["all", "selected"].includes(overrideWorkPlans?.launchTemplateScope)) {
-    merged.workPlans.launchTemplateScope = overrideWorkPlans.launchTemplateScope;
-  }
-  if (Array.isArray(overrideWorkPlans?.launchTemplateIds)) {
-    merged.workPlans.launchTemplateIds = [...new Set(overrideWorkPlans.launchTemplateIds.map(String).filter(Boolean))];
   }
   return merged;
 }
 
+function applyV2Overrides(basePermissions, overrides) {
+  const merged = clone(basePermissions);
+  if (overrides === null || typeof overrides !== "object") return merged;
+  if (["self", "department", "all"].includes(overrides.dataScope)) merged.dataScope = overrides.dataScope;
+  for (const group of permissionGroups) {
+    for (const item of group.permissions) {
+      if (typeof overrides[group.key]?.[item.key] === "boolean") merged[group.key][item.key] = overrides[group.key][item.key];
+    }
+  }
+  copyLaunchScope(merged, { keyActions: { ...merged.keyActions, ...overrides.keyActions } });
+  return merged;
+}
+
 export function mergePermissionSources(templatePermissions, personalOverrides, role = "user") {
-  const basePermissions = normalizePermissions(templatePermissions, role);
-  return applyPermissionOverrides(basePermissions, personalOverrides);
+  const template = parsePermissions(templatePermissions);
+  const overrides = parsePermissions(personalOverrides);
+  if (!isV2Permissions(template)) return normalizePermissions(deepMergePermissionSource(template, overrides), role);
+  return applyV2Overrides(normalizePermissions(template, role), overrides);
 }
 
 export function createPermissionOverrides(templatePermissions, effectivePermissions, role = "user") {
   const base = normalizePermissions(templatePermissions, role);
   const effective = normalizePermissions(effectivePermissions, role);
-  const overrides = {};
+  const overrides = { permissionVersion: PERMISSION_SCHEMA_VERSION };
   if (base.dataScope !== effective.dataScope) overrides.dataScope = effective.dataScope;
   for (const group of permissionGroups) {
     for (const item of group.permissions) {
@@ -406,43 +362,55 @@ export function createPermissionOverrides(templatePermissions, effectivePermissi
       overrides[group.key][item.key] = effective[group.key][item.key];
     }
   }
-  const baseScope = base.workPlans.launchTemplateScope;
-  const effectiveScope = effective.workPlans.launchTemplateScope;
-  const baseIds = [...base.workPlans.launchTemplateIds].sort();
-  const effectiveIds = [...effective.workPlans.launchTemplateIds].sort();
+  const baseScope = base.keyActions.launchTemplateScope;
+  const effectiveScope = effective.keyActions.launchTemplateScope;
+  const baseIds = [...base.keyActions.launchTemplateIds].sort();
+  const effectiveIds = [...effective.keyActions.launchTemplateIds].sort();
   if (baseScope !== effectiveScope || JSON.stringify(baseIds) !== JSON.stringify(effectiveIds)) {
-    overrides.workPlans ??= {};
-    overrides.workPlans.launchTemplateScope = effectiveScope;
-    overrides.workPlans.launchTemplateIds = effectiveIds;
+    overrides.keyActions ??= {};
+    overrides.keyActions.launchTemplateScope = effectiveScope;
+    overrides.keyActions.launchTemplateIds = effectiveIds;
   }
   return overrides;
 }
 
-export function serializePermissions(permissions) {
-  return JSON.stringify(normalizePermissions(permissions));
+export function serializePermissions(permissions, role = "user") {
+  return JSON.stringify(normalizePermissions(permissions, role));
+}
+
+function permissionPayloadOf(userOrPermissions) {
+  if (isV2Permissions(userOrPermissions)) return userOrPermissions;
+  if (userOrPermissions?.permissions !== undefined && (userOrPermissions?.role !== undefined || userOrPermissions?.authRole !== undefined)) {
+    return userOrPermissions.permissions;
+  }
+  return userOrPermissions;
 }
 
 export function hasPermission(userOrPermissions, permissionPath) {
-  const permissions = userOrPermissions?.permissions ?? userOrPermissions;
+  const permissions = permissionPayloadOf(userOrPermissions);
   const normalized = normalizePermissions(permissions, userOrPermissions?.role ?? userOrPermissions?.authRole ?? "user");
   const [group, key] = permissionPath.split(".");
   return normalized[group]?.[key] === true;
 }
 
-function isAdminUser(userOrPermissions) {
-  const role = userOrPermissions?.role ?? userOrPermissions?.authRole ?? "";
-  return ["admin", "system_admin"].includes(role);
+export function validatePermissionDependencies(rawPermissions, role = "user") {
+  const permissions = normalizePermissions(rawPermissions, role);
+  const errors = [];
+  for (const [permission, dependencies] of Object.entries(permissionDependencies)) {
+    if (!hasPermission(permissions, permission)) continue;
+    const missing = dependencies.filter((dependency) => !hasPermission(permissions, dependency));
+    if (missing.length > 0) errors.push({ permission, missing });
+  }
+  return errors;
 }
 
 export function canLaunchActionTemplate(userOrPermissions, templateId) {
-  if (isAdminUser(userOrPermissions)) return true;
-  if (!hasPermission(userOrPermissions, "workPlans.launch")) return false;
-  const permissions = normalizePermissions(
-    userOrPermissions?.permissions ?? userOrPermissions,
-    userOrPermissions?.role ?? userOrPermissions?.authRole ?? "user",
-  );
-  if (permissions.workPlans.launchTemplateScope === "all") return true;
-  return permissions.workPlans.launchTemplateIds.includes(String(templateId ?? ""));
+  const role = userOrPermissions?.role ?? userOrPermissions?.authRole ?? "";
+  if (isAdminRole(role)) return true;
+  if (!hasPermission(userOrPermissions, "keyActions.launch")) return false;
+  const permissions = normalizePermissions(permissionPayloadOf(userOrPermissions), role || "user");
+  if (permissions.keyActions.launchTemplateScope === "all") return true;
+  return permissions.keyActions.launchTemplateIds.includes(String(templateId ?? ""));
 }
 
 export function canLaunchAnyActionTemplate(userOrPermissions, templates = []) {
@@ -450,61 +418,28 @@ export function canLaunchAnyActionTemplate(userOrPermissions, templates = []) {
 }
 
 export function canAccessTemplateCenter(userOrPermissions) {
-  if (userOrPermissions === null || userOrPermissions === undefined) return false;
-  const role = userOrPermissions.role ?? userOrPermissions.authRole ?? "user";
-  if (["admin", "system_admin", "company_manager"].includes(role)) return true;
-  if (hasPermission(userOrPermissions, "modules.templateCenter")) return true;
-  if (hasPermission(userOrPermissions, "settings.viewStandardWorks")) return true;
-  if (hasPermission(userOrPermissions, "processes.viewTemplates")) return true;
-  return hasPermission(userOrPermissions, "methods.view");
+  return hasPermission(userOrPermissions, "templates.view") || hasPermission(userOrPermissions, "actionStandards.view");
 }
 
 export function canAccessModule(userOrPermissions, moduleId) {
-  if (moduleId === "dashboard") {
-    return hasPermission(userOrPermissions, "operations.view") || hasPermission(userOrPermissions, "assessment.view");
-  }
-  if (moduleId === "templateCenter") return canAccessTemplateCenter(userOrPermissions);
-  if (moduleId === "processes") {
-    return hasPermission(userOrPermissions, "modules.processes") ||
-      hasPermission(userOrPermissions, "modules.methods") ||
-      hasPermission(userOrPermissions, "settings.viewStandardWorks");
-  }
-  const modulePermissionMap = {
-    goals: "goals",
-    tasks: "execution",
-    scheduleBoard: "execution",
-    processes: "processes",
-    assessment: "assessment",
-    methods: "methods",
-    settings: "settings",
-    products: "products",
-    operationDashboard: "operations",
-    adminDataCenter: "settings",
-    financeCenter: "finance",
-    connectionCenter: "links",
+  const modulePermissions = {
+    dashboard: ["cockpit.view", "workResults.view"],
+    goals: ["goals.view"],
+    scheduleBoard: ["keyActions.view", "contentNotes.view"],
+    tasks: ["tasks.view"],
+    connectionCenter: ["links.view"],
+    products: ["products.view", "skus.view", "combos.view"],
+    financeCenter: ["finance.view"],
+    adminDataCenter: ["dataCenter.view"],
+    templateCenter: ["templates.view", "actionStandards.view"],
+    processes: ["actionStandards.view"],
+    settings: ["organization.view", "people.view", "permissions.manage", "dataAssets.view", "systemSettings.manage"],
   };
-  const permissionKey = modulePermissionMap[moduleId] ?? moduleId;
-  if (moduleId === "products") {
-    return hasPermission(userOrPermissions, "products.view");
-  }
-  if (moduleId === "operationDashboard") {
-    return hasPermission(userOrPermissions, "operations.view");
-  }
-  if (moduleId === "adminDataCenter") {
-    const role = userOrPermissions?.role ?? userOrPermissions?.authRole ?? "";
-    return ["admin", "system_admin"].includes(role) && hasPermission(userOrPermissions, "settings.manageAdminDataCenter");
-  }
-  if (moduleId === "financeCenter") {
-    return hasPermission(userOrPermissions, "finance.view");
-  }
-  if (moduleId === "connectionCenter") {
-    return hasPermission(userOrPermissions, "links.view");
-  }
-  return hasPermission(userOrPermissions, `modules.${permissionKey}`);
+  return (modulePermissions[moduleId] ?? []).some((permission) => hasPermission(userOrPermissions, permission));
 }
 
 export function getDataScope(userOrPermissions) {
-  const permissions = userOrPermissions?.permissions ?? userOrPermissions;
+  const permissions = permissionPayloadOf(userOrPermissions);
   return normalizePermissions(permissions, userOrPermissions?.role ?? userOrPermissions?.authRole ?? "user").dataScope;
 }
 

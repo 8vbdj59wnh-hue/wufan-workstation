@@ -44,6 +44,7 @@ import {
   loadConnectionBusinessPositioning,
   loadConnectionBusinessGoals,
   loadConnectionBusinessGoalEvaluation,
+  refreshConnectionBusinessGoalEvaluation,
   loadConnectionGoalWorkbench,
   loadConnectionGoalHealthSummary,
   loadConnectionGoalPilotBatches,
@@ -291,15 +292,19 @@ function isAdmin() {
 }
 
 function canManageAdminDataCenter() {
-  return isAdmin() && hasPermission(getCurrentUser(), "settings.manageAdminDataCenter");
+  return isAdmin() && hasPermission(getCurrentUser(), "dataCenter.manage");
 }
 
 function canImportBusinessData() {
-  return canManage() || hasPermission(getCurrentUser(), "links.import");
+  return hasPermission(getCurrentUser(), "links.import");
+}
+
+function canManageRelations() {
+  return hasPermission(getCurrentUser(), "links.manageRelations");
 }
 
 function canOpenConnectionSection(section) {
-  if (["sales-relation-governance", "sales-data-quality-governance"].includes(section)) return canImportBusinessData();
+  if (["sales-relation-governance", "sales-data-quality-governance"].includes(section)) return canManageRelations();
   return CONNECTION_CENTER_SECTIONS.has(section);
 }
 
@@ -985,9 +990,9 @@ function renderConnectionGoalEvaluation(core) {
   if (!evaluation) return `<div class="empty-state compact">正在计算月度目标达成…</div>`;
   if (evaluation.evaluationStatus !== "evaluated") {
     const dataPeriod = evaluation.periodStart ? ` · 数据周期 ${evaluation.periodStart} 至 ${evaluation.periodEnd}` : "";
-    return `<div class="connection-goal-evaluation pending"><strong>待评价</strong><span>${escapeHtml(evaluation.reason || "暂不满足评价条件")}${escapeHtml(dataPeriod)}</span></div>`;
+    return `<div class="connection-goal-evaluation pending"><strong>待评价</strong><span>${escapeHtml(evaluation.reason || "暂不满足评价条件")}${escapeHtml(dataPeriod)}</span>${canRefreshRating() ? `<button class="secondary-button" type="button" data-refresh-link-rating>刷新评级</button>` : ""}</div>`;
   }
-  return `<div class="connection-goal-evaluation"><header><div><strong>月度目标达成</strong><small>${escapeHtml(`${evaluation.periodStart} 至 ${evaluation.periodEnd}`)}</small></div><span class="status-pill goal-grade-${escapeHtml(evaluation.grade)}">${escapeHtml(goalGradeText(evaluation.grade))}</span></header><div class="connection-goal-evaluation-grid"><div><span>销售目标</span><strong>${coreMoney(evaluation.salesTarget)}</strong><small>实际 ${coreMoney(evaluation.salesActual)} · 完成 ${corePercent(evaluation.salesAchievement)}</small></div><div><span>利润目标</span><strong>${coreMoney(evaluation.profitTarget)}</strong><small>实际 ${coreMoney(evaluation.profitActual)} · 完成 ${corePercent(evaluation.profitAchievement)}</small></div><div><span>综合完成率</span><strong>${corePercent(evaluation.totalAchievement)}</strong><small>销售权重 ${corePercent(evaluation.salesWeight)} · 利润权重 ${corePercent(evaluation.profitWeight)}</small></div></div></div>`;
+  return `<div class="connection-goal-evaluation"><header><div><strong>月度目标达成</strong><small>${escapeHtml(`${evaluation.periodStart} 至 ${evaluation.periodEnd}`)}</small></div><div>${canRefreshRating() ? `<button class="text-button" type="button" data-refresh-link-rating>刷新评级</button>` : ""}<span class="status-pill goal-grade-${escapeHtml(evaluation.grade)}">${escapeHtml(goalGradeText(evaluation.grade))}</span></div></header><div class="connection-goal-evaluation-grid"><div><span>销售目标</span><strong>${coreMoney(evaluation.salesTarget)}</strong><small>实际 ${coreMoney(evaluation.salesActual)} · 完成 ${corePercent(evaluation.salesAchievement)}</small></div><div><span>利润目标</span><strong>${coreMoney(evaluation.profitTarget)}</strong><small>实际 ${coreMoney(evaluation.profitActual)} · 完成 ${corePercent(evaluation.profitAchievement)}</small></div><div><span>综合完成率</span><strong>${corePercent(evaluation.totalAchievement)}</strong><small>销售权重 ${corePercent(evaluation.salesWeight)} · 利润权重 ${corePercent(evaluation.profitWeight)}</small></div></div></div>`;
 }
 function renderConnectionBusinessGoals(core) {
   const model = core?.businessGoals;
@@ -1975,6 +1980,19 @@ export function bindConnectionCenterPageEvents(render) {
       pageState.coreDetail = { ...pageState.coreDetail, businessGoals: result, businessGoalEvaluation };
       pageState.error = ""; render();
     } catch (error) { pageState.error = error.message; if (button) button.disabled = false; render(); }
+  });
+  root.querySelector("[data-refresh-link-rating]")?.addEventListener("click", async (event) => {
+    if (!canRefreshRating()) return;
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const businessGoalEvaluation = await refreshConnectionBusinessGoalEvaluation(pageState.selectedId);
+      pageState.coreDetail = { ...pageState.coreDetail, businessGoalEvaluation };
+      pageState.error = "";
+    } catch (error) {
+      pageState.error = error.message;
+    }
+    render();
   });
   root.querySelectorAll("[data-connection-tab]").forEach((button) => button.addEventListener("click", async () => {
     pageState.detailTab = button.dataset.connectionTab; render();

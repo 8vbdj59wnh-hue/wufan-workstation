@@ -20,9 +20,7 @@ const databaseModule = await import("../server/db.js");
 databaseModule.initializeDatabase({ reset: true });
 const database = databaseModule.getDatabase();
 const restrictedPermissions = createEmptyPermissions("department");
-restrictedPermissions.modules.goals = true;
 restrictedPermissions.goals.view = true;
-restrictedPermissions.goals.viewRelatedData = true;
 database.prepare(`UPDATE persons
   SET username = 'goal-reviewer', canLogin = 1, authRole = 'user', permissions = @permissions
   WHERE id = 'person-004'`).run({ permissions: JSON.stringify(restrictedPermissions) });

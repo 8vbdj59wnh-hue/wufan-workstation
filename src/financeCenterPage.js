@@ -20,7 +20,7 @@ function number(value, digits = 2) { return value === null || value === undefine
 function money(value) { return value === null || value === undefined ? "—" : `¥${number(value)}`; }
 function percent(value) { return value === null || value === undefined ? "—" : `${(Number(value) * 100).toFixed(1)}%`; }
 function typeName(type) { return ({ income: "收入", refund: "退款", cost: "成本", expense: "费用" })[type] || type; }
-function canManage() { return hasPermission(getCurrentUser(), "finance.manage"); }
+function canManage() { return hasPermission(getCurrentUser(), "finance.maintain"); }
 function canApprove() { return hasPermission(getCurrentUser(), "finance.approve"); }
 
 function summaryCards(summary = {}) {
