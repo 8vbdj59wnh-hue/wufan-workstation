@@ -511,21 +511,21 @@ function timestamp(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function latestDate(values) {
-  return values.filter(Boolean).sort((left, right) => timestamp(right) - timestamp(left))[0] ?? "";
+function getUsage(group, id) {
+  return state.templateCenterUsageSummary?.[group]?.[id] ?? { useCount: 0, lastUsedAt: "" };
 }
 
 function getActionAssets() {
   return (state.taskTemplates ?? []).map((item) => {
     const process = (state.processTemplates ?? []).find((candidate) => candidate.id === item.defaultProcessTemplateId);
     const nodes = (state.processTemplateNodes ?? []).filter((node) => node.templateId === process?.id);
-    const instances = (state.processInstances ?? []).filter((instance) => instance.taskTemplateId === item.id || instance.templateId === process?.id);
+    const usage = getUsage("actionByTaskTemplateId", item.id);
     return { id: item.id, category: "action", title: item.name, code: item.businessCode, description: item.description || item.completionStandard || "未填写说明", status: item.status,
       tags: [process ? `流程 v${process.version ?? 1}` : "未绑定流程", `${nodes.length}个标准节点`, item.needAcceptance ? "需要验收" : "无需验收"],
       content: process ? `${process.name}；${nodes.map((node) => node.name).join(" → ") || "尚未配置节点"}` : "尚未绑定关键行动标准流程",
       scene: process?.purpose || item.description || "用于创建关键行动并生成标准任务",
-      references: [`流程：${process?.name || "未绑定"}`, `节点：${nodes.length}`, `已发起关键行动：${instances.length}`],
-      useCount: instances.length, lastUsedAt: latestDate(instances.map((instance) => instance.startedAt || instance.createdAt)), updatedAt: item.updatedAt || item.createdAt,
+      references: [`流程：${process?.name || "未绑定"}`, `节点：${nodes.length}`, `已发起关键行动：${usage.useCount}`],
+      useCount: usage.useCount, lastUsedAt: usage.lastUsedAt, updatedAt: item.updatedAt || item.createdAt,
       href: "#processes" };
   });
 }
@@ -534,18 +534,18 @@ function getFormAssets() {
   const formal = (state.standardWorkForms ?? []).map((form) => {
     const action = (state.taskTemplates ?? []).find((item) => item.id === form.standardWorkId);
     const fields = form.formSchema?.fields ?? [];
-    const tasks = (state.tasks ?? []).filter((task) => task.standardWorkId === form.standardWorkId || task.taskTemplateId === form.standardWorkId);
+    const usage = getUsage("formByStandardWorkId", form.standardWorkId);
     return { id: form.id, category: "form", versionAssetType: "form", versionAssetId: form.id, title: `${action?.name || "关键行动"}表单`, code: action?.businessCode, description: "正式版本化公共表单", status: action?.status || "active", formType: "公共表单", fields,
       tags: ["公共表单", `${fields.length}个字段`], content: fields.map((field) => field.label || field.name).filter(Boolean).join("、") || "空表单",
-      scene: "用于关键行动、任务提交与工作结果记录", references: [`行动模板：${action?.name || form.standardWorkId}`, `任务引用：${tasks.length}`],
-      useCount: tasks.length, lastUsedAt: latestDate(tasks.map((task) => task.completedAt || task.updatedAt || task.createdAt)), updatedAt: form.updatedAt || form.createdAt, href: "#processes" };
+      scene: "用于关键行动、任务提交与工作结果记录", references: [`行动模板：${action?.name || form.standardWorkId}`, `任务引用：${usage.useCount}`],
+      useCount: usage.useCount, lastUsedAt: usage.lastUsedAt, updatedAt: form.updatedAt || form.createdAt, href: "#processes" };
   });
   const inline = (state.taskTemplates ?? []).filter((item) => Array.isArray(item.formFields) && item.formFields.length).map((item) => {
-    const tasks = (state.tasks ?? []).filter((task) => task.taskTemplateId === item.id);
+    const usage = getUsage("taskByTaskTemplateId", item.id);
     return { id: `inline-${item.id}`, category: "form", versionAssetType: "action", versionAssetId: item.id, title: `${item.name}任务表单`, code: item.businessCode, description: "关键行动内嵌业务表单", status: item.status, formType: "业务表单", fields: item.formFields,
       tags: ["任务表单", `${item.formFields.length}个字段`], content: item.formFields.map((field) => field.label || field.name).filter(Boolean).join("、"),
-      scene: "用于该行动模板生成任务后的提交与验收", references: [`行动模板：${item.name}`, `任务引用：${tasks.length}`], useCount: tasks.length,
-      lastUsedAt: latestDate(tasks.map((task) => task.completedAt || task.updatedAt || task.createdAt)), updatedAt: item.updatedAt || item.createdAt, href: "#processes" };
+      scene: "用于该行动模板生成任务后的提交与验收", references: [`行动模板：${item.name}`, `任务引用：${usage.useCount}`], useCount: usage.useCount,
+      lastUsedAt: usage.lastUsedAt, updatedAt: item.updatedAt || item.createdAt, href: "#processes" };
   });
   return [...formal, ...inline];
 }
@@ -554,26 +554,26 @@ function getStandardAssets() {
   const methodologyAssets = (state.methodologies ?? []).map((item) => {
     const action = (state.taskTemplates ?? []).find((candidate) => candidate.id === item.taskTemplateId || candidate.id === item.standardWorkId);
     const node = (state.processTemplateNodes ?? []).find((candidate) => candidate.id === item.processNodeId);
-    const tasks = (state.tasks ?? []).filter((task) => task.processNodeId === item.processNodeId || task.taskTemplateId === item.taskTemplateId);
+    const usage = getUsage("methodologyById", item.id);
     const steps = Array.isArray(item.steps) ? item.steps : [];
     return { id: item.id, category: "standard", title: item.title, description: item.description || "未填写说明", status: "active",
       tags: [node ? "节点作业标准" : "通用方法论", `${steps.length}个步骤`], content: steps.map((step) => step.title || step.name || step).join(" → ") || item.description || "暂无步骤",
       scene: action ? `适用于行动模板：${action.name}` : node ? `适用于标准节点：${node.name}` : "企业通用工作标准",
-      references: [`行动模板：${action?.name || "未绑定"}`, `标准节点：${node?.name || "未绑定"}`, `任务引用：${tasks.length}`], useCount: tasks.length,
-      lastUsedAt: latestDate(tasks.map((task) => task.completedAt || task.updatedAt || task.createdAt)), updatedAt: item.updatedAt || item.createdAt,
+      references: [`行动模板：${action?.name || "未绑定"}`, `标准节点：${node?.name || "未绑定"}`, `任务引用：${usage.useCount}`], useCount: usage.useCount,
+      lastUsedAt: usage.lastUsedAt, updatedAt: item.updatedAt || item.createdAt,
       href: `#methodology-${item.id}` };
   });
   const methodologyNodeIds = new Set((state.methodologies ?? []).map((item) => item.processNodeId).filter(Boolean));
   const nodeAssets = (state.processTemplateNodes ?? []).filter((node) => !methodologyNodeIds.has(node.id)).map((node) => {
     const process = (state.processTemplates ?? []).find((item) => item.id === node.templateId);
     const action = (state.taskTemplates ?? []).find((item) => item.defaultProcessTemplateId === node.templateId);
-    const tasks = (state.tasks ?? []).filter((task) => task.processNodeId === node.id);
+    const usage = getUsage("taskByProcessNodeId", node.id);
     const standards = [node.completionStandard, node.reviewStandard, node.outputRequirement].filter(Boolean);
     return { id: `node-${node.id}`, category: "standard", title: `${node.name}工作标准`, description: node.description || node.completionStandard || "流程节点作业标准", status: node.status,
       tags: [node.needAcceptance ? "检查标准" : "作业标准", node.submitType || "任务执行"], content: standards.join("；") || "尚未填写完成与检查标准",
       scene: `${process?.name || "关键行动流程"} · ${node.stageName || "标准步骤"}`,
-      references: [`行动模板：${action?.name || "未绑定"}`, `流程：${process?.name || node.templateId}`, `任务引用：${tasks.length}`], useCount: tasks.length,
-      lastUsedAt: latestDate(tasks.map((task) => task.completedAt || task.updatedAt || task.createdAt)), updatedAt: node.updatedAt || node.createdAt, href: "#processes" };
+      references: [`行动模板：${action?.name || "未绑定"}`, `流程：${process?.name || node.templateId}`, `任务引用：${usage.useCount}`], useCount: usage.useCount,
+      lastUsedAt: usage.lastUsedAt, updatedAt: node.updatedAt || node.createdAt, href: "#processes" };
   });
   return [...methodologyAssets, ...nodeAssets];
 }

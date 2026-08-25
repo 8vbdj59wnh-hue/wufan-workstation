@@ -7,7 +7,6 @@ export const goalCenterBootstrapResources = Object.freeze([
   "categories",
   "stores",
   "publishingAccounts",
-  "notifications",
   "goals",
   "tasks",
   "taskTemplates",

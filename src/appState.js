@@ -58,6 +58,7 @@ const pendingTemplateIterations = new Map();
 let taskWavesLoaded = false;
 let dashboardManagementLoaded = false;
 let dashboardManagementPromise = null;
+let notificationUnreadCount = 0;
 let persistenceStatus = {
   kind: "warning",
   message: "",
@@ -93,6 +94,7 @@ export const state = {
   issuesRequirements: initialIssuesRequirements.map((item) => ({ ...item })),
   standardWorkForms: initialStandardWorkForms.map((form) => ({ ...form })),
   templateAssetVersions: [],
+  templateCenterUsageSummary: {},
   products: [],
   actionProducts: [],
   taskProductContexts: [],
@@ -282,6 +284,7 @@ export function applyDataSnapshot(data, { preserveMissingResources = false } = {
   if (shouldReplace("templateTags")) replaceArray(state.templateTags, data.templateTags ?? initialTemplateTags);
   if (shouldReplace("issuesRequirements")) replaceArray(state.issuesRequirements, data.issuesRequirements ?? initialIssuesRequirements);
   if (shouldReplace("standardWorkForms")) replaceArray(state.standardWorkForms, data.standardWorkForms ?? initialStandardWorkForms);
+  if (shouldReplace("templateCenterUsageSummary")) state.templateCenterUsageSummary = cloneItem(data.templateCenterUsageSummary ?? {});
   if (shouldReplace("products")) replaceArray(state.products, data.products ?? []);
   if (shouldReplace("actionProducts")) replaceArray(state.actionProducts, data.actionProducts ?? []);
   if (shouldReplace("taskProductContexts")) replaceArray(state.taskProductContexts, data.taskProductContexts ?? []);
@@ -311,6 +314,9 @@ export async function loadPersistentData({ includeTaskWaves = null } = {}) {
       "tasks",
       "task-list",
       "scheduleBoard",
+      "processes",
+      "templateCenter",
+      "settings",
       "financeCenter",
       "finance-center",
       "adminDataCenter",
@@ -327,12 +333,17 @@ export async function loadPersistentData({ includeTaskWaves = null } = {}) {
     const shouldLoadTaskWaves =
       includeTaskWaves ??
       route === "task-waves";
-    const [response, waveResponse] = await Promise.all([
+    const [response, waveResponse, notificationResponse] = await Promise.all([
       authFetch(moduleDataEndpoint ?? (lightweightModules.has(route) ? `${apiBaseUrl}/api/bootstrap?module=${encodeURIComponent(bootstrapModule)}` : `${apiBaseUrl}/api/data`)),
       shouldLoadTaskWaves ? authFetch(`${apiBaseUrl}/api/task-waves`) : Promise.resolve(null),
+      authFetch(`${apiBaseUrl}/api/notifications/summary?limit=12`),
     ]);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     applyDataSnapshot(await response.json(), { preserveMissingResources: moduleDataEndpoint !== null });
+    const notificationData = await notificationResponse.json().catch(() => ({}));
+    if (!notificationResponse.ok || notificationData.success !== true) throw new Error(notificationData.message ?? `HTTP ${notificationResponse.status}`);
+    replaceArray(state.notifications, notificationData.items ?? []);
+    notificationUnreadCount = Number(notificationData.unreadCount || 0);
     if (waveResponse !== null) {
       const waveData = await waveResponse.json().catch(() => []);
       if (waveResponse.status === 403) {
@@ -546,6 +557,8 @@ export async function login(username, password) {
 export function logout() {
   setAuthToken("");
   currentUser = null;
+  notificationUnreadCount = 0;
+  replaceArray(state.notifications, []);
   taskWavesLoaded = false;
   loadedFromDatabase = false;
   persistenceAvailable = false;
@@ -1902,7 +1915,7 @@ export function getCurrentUserNotifications() {
 }
 
 export function getUnreadNotificationCount() {
-  return getCurrentUserNotifications().filter((notification) => notification.status === "unread").length;
+  return notificationUnreadCount;
 }
 
 export async function markNotificationRead(notificationId) {
@@ -1912,14 +1925,19 @@ export async function markNotificationRead(notificationId) {
   const updatedNotification = { ...notification, status: "read", readAt: now, updatedAt: now };
   await updatePersistentResource("notifications", notificationId, updatedNotification);
   state.notifications = state.notifications.map((item) => (item.id === notificationId ? updatedNotification : item));
+  notificationUnreadCount = Math.max(0, notificationUnreadCount - 1);
   return updatedNotification;
 }
 
 export async function markAllNotificationsRead() {
-  const unreadNotifications = getCurrentUserNotifications().filter((notification) => notification.status === "unread");
-  for (const notification of unreadNotifications) {
-    await markNotificationRead(notification.id);
-  }
+  const response = await authFetch(`${apiBaseUrl}/api/notifications/read-all`, { method: "POST" });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success !== true) throw new Error(data.message ?? "任务提醒批量已读失败。");
+  const readAt = data.readAt ?? getNow();
+  state.notifications = state.notifications.map((item) => item.status === "unread"
+    ? { ...item, status: "read", readAt, updatedAt: readAt }
+    : item);
+  notificationUnreadCount = 0;
 }
 
 export async function syncTaskNotificationsForCurrentUser() {
@@ -1936,6 +1954,7 @@ export async function syncTaskNotificationsForCurrentUser() {
     try {
       await createPersistentResource("notifications", reminder);
       state.notifications = [reminder, ...state.notifications];
+      notificationUnreadCount += 1;
     } catch (error) {
       console.error("任务提醒生成失败", error);
       return;

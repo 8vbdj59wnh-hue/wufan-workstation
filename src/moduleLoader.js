@@ -194,6 +194,16 @@ export function createRouteModuleLoader(initialDefinitions = {}) {
 }
 
 const defaultLoader = createRouteModuleLoader({
+  dashboard: {
+    loader: () => import("./dashboardPage.js"),
+    adapt: (module) => ({ moduleId: "dashboard", render: module.renderDashboardPage, bind: module.bindDashboardPageEvents, renderViewTabs: module.renderDashboardViewTabs }),
+    requiredExports: ["render", "bind", "renderViewTabs"],
+  },
+  goals: {
+    loader: () => import("./goalsPage.js"),
+    adapt: (module) => ({ moduleId: "goals", render: module.renderGoalsPage, bind: module.bindGoalsPageEvents }),
+    requiredExports: ["render", "bind"],
+  },
   tasks: {
     loader: () => import("./pages/tasksPage.js"),
     adapt: (module) => ({
@@ -204,6 +214,40 @@ const defaultLoader = createRouteModuleLoader({
       actions: { selectTask: module.selectTask },
     }),
     requiredExports: ["render", "bind", "selectTask"],
+  },
+  scheduleBoard: {
+    loader: () => import("./scheduleBoardPage.js"),
+    adapt: (module) => ({ moduleId: "scheduleBoard", render: module.renderScheduleBoardPage, bind: module.bindScheduleBoardPageEvents }),
+    requiredExports: ["render", "bind"],
+  },
+  processes: {
+    loader: () => Promise.all([import("./processesPage.js"), import("./methodologiesPage.js")]),
+    adapt: ([processes, methodologies]) => ({
+      moduleId: "processes",
+      render: (currentUser) => /^(#methods|#methodologies|#methodology-)/.test(window.location.hash)
+        ? methodologies.renderMethodologiesPage(currentUser)
+        : processes.renderProcessesPage(),
+      bind: (rerender) => {
+        processes.bindProcessesPageEvents(rerender);
+        if (document.querySelector(".methodologies-page") !== null) methodologies.bindMethodologiesPageEvents(rerender);
+      },
+    }),
+    requiredExports: ["render", "bind"],
+  },
+  templateCenter: {
+    loader: () => import("./templateCenterPage.js"),
+    adapt: (module) => ({ moduleId: "templateCenter", render: module.renderTemplateCenterPage, bind: module.bindTemplateCenterPageEvents }),
+    requiredExports: ["render", "bind"],
+  },
+  financeCenter: {
+    loader: () => import("./financeCenterPage.js"),
+    adapt: (module) => ({ moduleId: "financeCenter", render: module.renderFinanceCenterPage, bind: module.bindFinanceCenterPageEvents }),
+    requiredExports: ["render", "bind"],
+  },
+  settings: {
+    loader: () => import("./settingsPage.js"),
+    adapt: (module) => ({ moduleId: "settings", render: module.renderSettingsPage, bind: module.bindSettingsPageEvents }),
+    requiredExports: ["render", "bind"],
   },
   connectionCenter: {
     loader: () => import("./pages/connectionCenterPage.js"),

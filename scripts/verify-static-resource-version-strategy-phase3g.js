@@ -48,7 +48,7 @@ console.log(JSON.stringify({
   resourceReferences: [...references.values()].reduce((sum, urls) => sum + urls.size, 0),
   versionedReferences: versionedReferenceCount,
   duplicateResources: duplicateResources.length,
-  dynamicRoutes: ["tasks", "connectionCenter", "products"],
+  dynamicRoutes: ["dashboard", "goals", "tasks", "scheduleBoard", "processes", "templateCenter", "products", "financeCenter", "connectionCenter", "settings", "adminDataCenter"],
   assetCache: "ETag + must-revalidate",
   htmlCache: "no-store",
 }, null, 2));

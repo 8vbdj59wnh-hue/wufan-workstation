@@ -21,21 +21,19 @@ export function buildLinkOperatingScope(database, options = {}) {
 export function getLinkOperatingSummary(options = {}) {
   const database = options.database || getDatabase();
   const scope = buildLinkOperatingScope(database, { ...options, alias: "l", prefix: "linkOperatingSummary" });
-  const platformPredicate = scope.context.platformBatch?.id
-    ? `EXISTS (SELECT 1 FROM platform_goods_excel_import_rows r
-        WHERE r.batchId=@linkOperatingSummaryBatchId AND r.salesLinkId=l.id)`
-    : "0";
-  const params = scope.context.platformBatch?.id
-    ? { linkOperatingSummaryBatchId: scope.context.platformBatch.id }
-    : {};
   const row = database.prepare(`SELECT COUNT(*) historicalAssetCount,
-      SUM(CASE WHEN ${platformPredicate} THEN 1 ELSE 0 END) platformActiveCount,
       SUM(CASE WHEN ${scope.predicate} THEN 1 ELSE 0 END) operatingCount,
       SUM(CASE WHEN NOT (${scope.predicate}) THEN 1 ELSE 0 END) historicalCount
-    FROM sales_links l`).get(params);
+    FROM sales_links l`).get(scope.params);
+  const platformActiveCount = scope.context.platformBatch?.id
+    ? Number(database.prepare(`SELECT COUNT(DISTINCT r.salesLinkId) count
+        FROM platform_goods_excel_import_rows r
+        JOIN sales_links l ON l.id=r.salesLinkId
+        WHERE r.batchId=? AND r.salesLinkId IS NOT NULL AND trim(r.salesLinkId)<>''`).get(scope.context.platformBatch.id)?.count || 0)
+    : 0;
   return {
     historicalAssetCount: Number(row?.historicalAssetCount || 0),
-    platformActiveCount: Number(row?.platformActiveCount || 0),
+    platformActiveCount,
     operatingCount: Number(row?.operatingCount || 0),
     historicalCount: Number(row?.historicalCount || 0),
     platformBatch: scope.context.platformBatch,

@@ -160,6 +160,8 @@ import {
   pickGoalCenterBootstrapResources,
   readGoalCenterBootstrap,
 } from "./goalCenterBootstrapService.js";
+import { readTemplateCenterUsageSummary } from "./templateCenterBootstrapService.js";
+import { markAllUserNotificationsRead, readNotificationSummary } from "./notificationSummaryService.js";
 import {
   createConnectionAction,
   createConnectionDataMapping,
@@ -1496,6 +1498,25 @@ app.put("/api/me/avatar", (request, response) => {
   }
 });
 
+app.get("/api/notifications/summary", (request, response) => {
+  try {
+    const startedAt = performance.now();
+    const summary = readNotificationSummary(request.user.id, { limit: request.query.limit });
+    response.set("Server-Timing", `database;dur=${(performance.now() - startedAt).toFixed(1)}`);
+    response.json({ success: true, ...summary });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "任务提醒摘要读取失败。" });
+  }
+});
+
+app.post("/api/notifications/read-all", (request, response) => {
+  try {
+    response.json({ success: true, ...markAllUserNotificationsRead(request.user.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "任务提醒批量已读失败。" });
+  }
+});
+
 app.get("/api/data", (request, response) => {
   try {
     const startedAt = performance.now();
@@ -1532,11 +1553,16 @@ app.get("/api/goal-center/bootstrap", requirePermission("goals.view"), (request,
 
 app.get("/api/bootstrap", (request, response) => {
   try {
+    const startedAt = performance.now();
     const moduleName = String(request.query.module ?? "dashboard");
-    const defaultCommon = ["companies", "departments", "positions", "people", "permissionTemplates", "categories", "stores", "publishingAccounts", "notifications",
+    const defaultCommon = ["companies", "departments", "positions", "people", "permissionTemplates", "categories", "stores", "publishingAccounts",
       "taskTemplates", "processTemplates", "processTemplateNodes", "templates", "templateTagCategories", "templateTags", "issuesRequirements", "standardWorkForms"];
     const taskCommon = ["companies", "departments", "positions", "people", "permissionTemplates", "categories", "stores", "publishingAccounts",
       "taskTemplates", "processTemplates", "processTemplateNodes", "standardWorkForms"];
+    const settingsCommon = ["companies", "departments", "positions", "people", "permissionTemplates", "categories", "stores", "publishingAccounts",
+      "taskTemplates", "templateTagCategories", "templateTags", "issuesRequirements", "standardWorkForms"];
+    const templateCenterCommon = ["taskTemplates", "processTemplates", "processTemplateNodes", "methodologies", "templates", "templateTagCategories", "templateTags", "standardWorkForms"];
+    const processesCommon = ["categories", "departments", "goals", "methodologies", "people", "positions", "processInstances", "processTemplateNodes", "processTemplates", "taskTemplates", "tasks", "workPlans"];
     const moduleResources = {
       dashboard: [],
       dashboardManagement: ["goals", "tasks", "taskTemplates", "processInstances", "workPlans", "weeklyReports", "weeklyReportProblems"],
@@ -1545,6 +1571,9 @@ app.get("/api/bootstrap", (request, response) => {
       tasks: ["goals"],
       "task-list": ["goals"],
       scheduleBoard: ["goals", "tasks", "taskTemplates", "processTemplates", "processTemplateNodes", "processInstances", "workPlans", "contentSchedules", "actionProducts"],
+      processes: [],
+      templateCenter: [],
+      settings: [],
       financeCenter: [],
       adminDataCenter: [],
     };
@@ -1554,11 +1583,23 @@ app.get("/api/bootstrap", (request, response) => {
       response.status(403).json({ success: false, message: "你没有权限访问该模块。" });
       return;
     }
-    const common = ["tasks", "task-list"].includes(moduleName) ? taskCommon : defaultCommon;
+    const common = ["tasks", "task-list"].includes(moduleName)
+      ? taskCommon
+      : moduleName === "settings"
+        ? settingsCommon
+        : moduleName === "templateCenter"
+          ? templateCenterCommon
+          : moduleName === "processes"
+            ? processesCommon
+          : defaultCommon;
     const keys = [...new Set([...common, ...moduleResources[moduleName]])];
     const snapshot = Object.fromEntries(keys.map((key) => [key, readResource(key)]));
+    const readCompletedAt = performance.now();
     const scoped = filterDataByScope(snapshot, request.user);
+    const scopeCompletedAt = performance.now();
     if (moduleName === "scheduleBoard") scoped.taskProductContexts = readTaskProductContexts(scoped);
+    if (moduleName === "templateCenter") scoped.templateCenterUsageSummary = readTemplateCenterUsageSummary();
+    response.set("Server-Timing", `database;dur=${(readCompletedAt - startedAt).toFixed(1)}, scope;dur=${(scopeCompletedAt - readCompletedAt).toFixed(1)}, extras;dur=${(performance.now() - scopeCompletedAt).toFixed(1)}`);
     response.json(scoped);
   } catch (error) { response.status(400).json({ success: false, message: error.message || "轻量启动数据读取失败。" }); }
 });
@@ -2997,7 +3038,10 @@ app.post("/api/product-management/products/:id/strategy/next-steps/:itemId/actio
 
 app.get("/api/connections", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, ...listConnectionCoreProfilesPage(request.query, getUserPersonId(request.user), isAdminUser(request.user)) });
+    const startedAt = performance.now();
+    const page = listConnectionCoreProfilesPage(request.query, getUserPersonId(request.user), isAdminUser(request.user));
+    response.set("Server-Timing", `connection-list;dur=${(performance.now() - startedAt).toFixed(1)}`);
+    response.json({ success: true, ...page });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "连接列表读取失败。" });
   }
@@ -3005,7 +3049,10 @@ app.get("/api/connections", requireLinkView, (request, response) => {
 
 app.get("/api/connection-assets", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, ...listConnectionCoreProfilesPage(request.query, getUserPersonId(request.user), isAdminUser(request.user)) });
+    const startedAt = performance.now();
+    const page = listConnectionCoreProfilesPage(request.query, getUserPersonId(request.user), isAdminUser(request.user));
+    response.set("Server-Timing", `connection-list;dur=${(performance.now() - startedAt).toFixed(1)}`);
+    response.json({ success: true, ...page });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "链接资产读取失败。" });
   }
