@@ -685,7 +685,6 @@ export function renderTemplateCenterPage() {
 
   return `
     <section class="template-center-page">
-      <header class="template-center-hero"><div><h1>模板中心</h1><p>企业视觉、改善行动、业务表单与任务操作标准的统一入口</p></div></header>
       <nav class="template-asset-tabs" aria-label="模板分类">${assetCategories.map((item) => `<button class="${assetCategory === item.id ? "is-active" : ""}" type="button" data-template-asset-category="${item.id}"><strong>${item.name}</strong><span>${item.description}</span></button>`).join("")}</nav>
       ${assetCategory === "action" ? renderStandardWorkLibraryPage() : assetCategory === "standard" ? renderMethodologiesPage(getCurrentUser()) : showingFormDesigner ? `<div class="template-form-designer-header"><a class="text-button" href="#templateCenter">← 返回表单模板</a><h2>表单设计</h2><p class="form-note">继续使用原关键行动公共表单设计能力，保存后原业务引用立即生效。</p></div>${renderFormDesignSection()}` : assetCategory === "form" ? renderUnifiedLibrary() : `
       <div class="template-upload-taxonomy">

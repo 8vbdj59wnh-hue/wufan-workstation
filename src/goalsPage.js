@@ -1,6 +1,5 @@
 import {
   createPersistentResource,
-  getCompanySlogan,
   getCurrentUser,
   getProcessNodeStepOrder,
   getLatestStandardWorkFormFields,
@@ -706,9 +705,6 @@ function renderGoalTree() {
 
   return `
     <section class="settings-section">
-      <div class="section-heading">
-        <h2>目标对齐图</h2>
-      </div>
       ${renderInactiveGoalToggle()}
       <div class="goal-map-scroll">
         <div class="goal-map">
@@ -2205,7 +2201,6 @@ function consumeGoalTaskPrefill() {
 export function renderGoalsPage() {
   consumeGoalTaskPrefill();
   ensureSelectedGoalVisible();
-  const companySlogan = getCompanySlogan();
   const content =
     activeGoalTab === "list"
       ? `
@@ -2220,13 +2215,10 @@ export function renderGoalsPage() {
 
   return `
     <div class="goals-page">
-      <div class="section-heading page-toolbar with-actions goal-slogan-banner">
-        <p class="goal-slogan-copy">${escapeHtml(companySlogan)}</p>
-        <div class="section-actions">
-          ${canCurrentUser("goals.create") ? `<button class="primary-button" type="button" data-action="add-goal">新增目标</button>` : ""}
-        </div>
+      <div class="goal-page-controls">
+        ${renderGoalTabs()}
+        ${canCurrentUser("goals.create") ? `<button class="primary-button" type="button" data-action="add-goal">新增目标</button>` : ""}
       </div>
-      ${renderGoalTabs()}
       ${content}
       ${renderGoalModal()}
       ${renderCurrentValueModal()}

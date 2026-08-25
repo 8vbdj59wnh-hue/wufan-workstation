@@ -12,6 +12,7 @@ import { attachThumbnailHoverPreview } from "./thumbnailPreview.js";
 import {
   flushPersistentSave,
   ensureTaskWavesLoaded,
+  getCompanySlogan,
   getCurrentUser,
   getCurrentUserNotifications,
   getUnreadNotificationCount,
@@ -221,6 +222,15 @@ function escapeHtml(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function renderPageHeaderTitle(activeModule) {
+  if (activeModule.id === "dashboard") return renderDashboardViewTabs();
+  if (activeModule.id === "goals") {
+    return `<p class="page-header-goal-slogan">${escapeHtml(getCompanySlogan())}</p>`;
+  }
+  if (["tasks", "scheduleBoard", "connectionCenter", "products", "templateCenter"].includes(activeModule.id)) return "";
+  return `<h1>${activeModule.name}</h1>`;
 }
 
 function renderNotificationPanel() {
@@ -562,7 +572,7 @@ function renderPage() {
               `
               : ""
           }
-          ${activeModule.id === "dashboard" ? renderDashboardViewTabs() : ["connectionCenter", "products"].includes(activeModule.id) ? "" : `<h1>${activeModule.name}</h1>`}
+          ${renderPageHeaderTitle(activeModule)}
         </div>
         <div class="user-menu">
           ${renderNotificationButton()}
@@ -895,7 +905,7 @@ function renderAuthenticatedStartup() {
       ${renderSidebar()}
       <main class="page">
         <header class="page-header">
-          <div class="page-header-title">${getActiveModule().id === "dashboard" ? renderDashboardViewTabs() : ["connectionCenter", "products"].includes(getActiveModule().id) ? "" : `<h1>${getActiveModule().name}</h1>`}</div>
+          <div class="page-header-title">${renderPageHeaderTitle(getActiveModule())}</div>
           <div class="user-menu">${renderUserProfile(currentUser)}</div>
         </header>
         <section class="startup-page-loading" aria-live="polite" aria-busy="true">

@@ -880,7 +880,7 @@ function renderBusinessCockpit() {
   const trendRows=[...(cockpit.trends?.erp??[]).map((item)=>({...item,visitorCount:null,source:"ERP"})),...(cockpit.trends?.platform??[]).map((item)=>({...item,salesAmount:null,profitAmount:null,source:"平台"}))].filter((item)=>item.periodType===cockpit.periodType).sort((a,b)=>String(a.periodEnd).localeCompare(String(b.periodEnd))||a.source.localeCompare(b.source));
   const salesPeriodText = cockpitSalesPeriodText(summary);
   const windowDays = Number(summary.salesWindowDays || 0);
-  return `<section class="connection-business-cockpit"><header><div><h2>经营链接驾驶舱</h2></div></header>
+  return `<section class="connection-business-cockpit">
     ${renderCockpitGlobalRange()}
     ${renderUiModule("link_sales_distribution", { state: pageState.salesDistribution, canViewCompany: isAdmin(), globalRange: pageState.cockpitRange })}
     <section class="cockpit-summary"><div><span>当前经营 Link</span><strong>${summary.connectionCount||0}</strong><small>当前资产口径，不随日期变化</small></div><div class="is-sales"><span>当前周期ERP销售额</span><strong>${coreMoney(summary.salesAmount)}</strong><small>${escapeHtml(salesPeriodText)}</small><small>${summary.previousPeriodComplete ? `较上一同长度周期 ${growthText(summary.salesGrowth)}` : `上一同长度周期数据仅${summary.previousPeriodDateCount||0}/${windowDays}天，暂不比较`}</small></div><div><span>当前周期毛利</span><strong>${coreMoney(summary.profitAmount)}</strong><small>毛利率 ${corePercent(summary.profitMargin)}</small></div><div class="is-risk"><span>需要关注</span><strong>${summary.riskCount||0}</strong><small>按所选周期经营变化识别</small></div></section>
