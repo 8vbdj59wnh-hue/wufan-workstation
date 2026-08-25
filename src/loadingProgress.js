@@ -20,7 +20,7 @@ export function getEstimatedLoadingDuration(label = "") {
 export function getEstimatedLoadingProgress(elapsedMs, durationMs) {
   const safeDuration = Math.max(1000, Number(durationMs) || 8000);
   const elapsed = Math.max(0, Number(elapsedMs) || 0);
-  return Math.min(92, Math.max(8, Math.round(8 + (elapsed / safeDuration) * 84)));
+  return Math.min(100, Math.max(8, Math.round(8 + (elapsed / safeDuration) * 92)));
 }
 
 function getLoadingCopy(element) {
@@ -105,7 +105,7 @@ function updateLoadingProgress() {
     state.track.setAttribute("aria-valuenow", String(progress));
     state.percent.textContent = state.fixedProgress === null ? `预计 ${progress}%` : `${progress}%`;
     state.remaining.textContent = state.fixedProgress === null
-      ? (remainingSeconds > 0 ? `预计还需约 ${remainingSeconds} 秒` : "即将完成")
+      ? (remainingSeconds > 0 ? `预计还需约 ${remainingSeconds} 秒` : "加载完成")
       : "正在处理";
   });
 }
