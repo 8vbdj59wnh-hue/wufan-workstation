@@ -18,6 +18,24 @@ const stableId = (prefix, source) => `${prefix}-${crypto.createHash("sha256").up
 const NON_BUSINESS_SHOP_NAME = /^(?:无效|总计|合计|汇总)[:：]?$/u;
 const COMBO_GOODS_TYPES = new Set(["组合装", "组合商品", "套餐", "套装"]);
 const NO_ERP_RELATION_TYPES = new Set(["无", "无需", "非系统货品", "非商品"]);
+const EXCEPTION_REASON_LABELS = Object.freeze({
+  missing_shop_name: "店铺名称为空",
+  ambiguous_shop: "店铺名称匹配到多个店铺",
+  missing_platform_goods_id: "货品ID为空",
+  ambiguous_sales_link: "Link身份重复",
+  missing_platform_sku_id: "规格ID为空",
+  duplicate_platform_sku: "文件内平台SKU重复",
+  ambiguous_platform_sku: "Link SKU身份重复",
+  missing_erp_sku_code: "ERP SKU编码为空",
+  missing_erp_sku: "ERP SKU不存在",
+  ambiguous_erp_sku: "ERP SKU编码不唯一",
+  existing_erp_sku_conflict: "ERP关系与现有商品结构冲突",
+  missing_combo_sales_object_code: "组合规格编码为空",
+  missing_combo_sales_object: "组合商品对象不存在",
+  ambiguous_combo_sales_object: "组合商品对象编码不唯一",
+  existing_sales_object_conflict: "组合商品关系与现有结构冲突",
+  product_structure_pending: "组合商品结构待治理",
+});
 
 function sameValue(left, right) {
   if (left === null || left === undefined || left === "") return right === null || right === undefined || right === "";
@@ -236,6 +254,37 @@ function analyzeRows(rows) {
     mappings.push(mapping);
     activeMappingMap.set(mapping.salesLinkSkuId, mappings);
   }
+  const activeRelationMap = new Map();
+  for (const relation of db.prepare(`SELECT linkSkuId,salesObjectId
+    FROM sales_link_sku_sales_object_relations WHERE status='active' ORDER BY linkSkuId,id`).all()) {
+    const relations = activeRelationMap.get(relation.linkSkuId) || [];
+    relations.push(relation);
+    activeRelationMap.set(relation.linkSkuId, relations);
+  }
+  const bundleObjectMap = new Map();
+  for (const object of db.prepare(`SELECT o.id,o.objectCode,o.normalizedObjectCode,
+      (SELECT COUNT(*) FROM sales_object_structures s
+        WHERE s.salesObjectId=o.id AND s.status='active') activeStructureCount,
+      (SELECT COUNT(*) FROM sales_object_structures s
+        JOIN sales_object_structure_components c ON c.structureId=s.id AND c.status='active'
+        WHERE s.salesObjectId=o.id AND s.status='active') componentCount,
+      (SELECT COUNT(*) FROM sales_object_structures s
+        JOIN sales_object_structure_components c ON c.structureId=s.id AND c.status='active'
+        LEFT JOIN erp_skus e ON e.id=c.erpSkuId AND e.currentState='active'
+        WHERE s.salesObjectId=o.id AND s.status='active'
+          AND (c.erpSkuId IS NULL OR c.quantity IS NULL OR c.quantity<=0 OR e.id IS NULL)) invalidComponentCount
+    FROM sales_objects o WHERE o.status='active' AND o.objectType='bundle'`).all()) {
+    const key = lower(object.normalizedObjectCode || object.objectCode);
+    if (!key) continue;
+    const objects = bundleObjectMap.get(key) || [];
+    objects.push({
+      ...object,
+      structureComplete: Number(object.activeStructureCount) === 1
+        && Number(object.componentCount) > 0
+        && Number(object.invalidComponentCount) === 0,
+    });
+    bundleObjectMap.set(key, objects);
+  }
   const seenSkuIds = new Set();
   const evaluated = [];
 
@@ -305,14 +354,71 @@ function analyzeRows(rows) {
     const relationBase = { ...base, salesLinkId, salesLinkSkuId, linkAction, skuAction };
     const activeMappings = activeMappingMap.get(salesLinkSkuId) || [];
     if (COMBO_GOODS_TYPES.has(row.systemGoodsType)) {
-      if (activeMappings.length) {
-        evaluated.push(actionResult(row, { ...relationBase, relationAction: "existing", message: "组合商品已有生效的Product Structure，ERP组成关系完整。" }));
-      } else {
+      if (!row.merchantSkuCode) {
+        evaluated.push(actionResult(row, {
+          ...relationBase,
+          relationAction: "unresolved",
+          exceptionType: "missing_combo_sales_object_code",
+          message: "组合商品的平台规格编码为空，无法识别对应商品结构。",
+        }));
+        continue;
+      }
+      const matchedBundleObjects = bundleObjectMap.get(lower(row.merchantSkuCode)) || [];
+      if (!matchedBundleObjects.length) {
+        evaluated.push(actionResult(row, {
+          ...relationBase,
+          relationAction: "unresolved",
+          exceptionType: "missing_combo_sales_object",
+          message: "平台规格编码未匹配到组合Sales Object，需要先同步或确认组合商品档案。",
+        }));
+        continue;
+      }
+      if (matchedBundleObjects.length > 1) {
+        evaluated.push(actionResult(row, {
+          ...relationBase,
+          relationAction: "conflict",
+          exceptionType: "ambiguous_combo_sales_object",
+          message: "平台规格编码匹配到多个组合Sales Object，需要人工确认。",
+        }));
+        continue;
+      }
+      const bundleObject = matchedBundleObjects[0];
+      const activeRelations = activeRelationMap.get(salesLinkSkuId) || [];
+      const exactRelation = activeRelations.some((item) => item.salesObjectId === bundleObject.id);
+      const conflictingRelations = activeRelations.filter((item) => item.salesObjectId !== bundleObject.id);
+      if (conflictingRelations.length) {
+        evaluated.push(actionResult(row, {
+          ...relationBase,
+          relationAction: "conflict",
+          exceptionType: "existing_sales_object_conflict",
+          message: "Link SKU当前关联的组合商品对象与平台规格编码不一致，需要人工确认。",
+          rawData: {
+            ...row.rawData,
+            currentSalesObjectIds: conflictingRelations.map((item) => item.salesObjectId),
+            expectedSalesObjectId: bundleObject.id,
+          },
+        }));
+      } else if (!bundleObject.structureComplete) {
         evaluated.push(actionResult(row, {
           ...relationBase,
           relationAction: "governance",
           exceptionType: "product_structure_pending",
-          message: "组合商品需要建立或审核Product Structure，不属于ERP SKU缺失异常。",
+          message: "组合Sales Object已识别，但Product Structure尚未完整生效。",
+          rawData: { ...row.rawData, expectedSalesObjectId: bundleObject.id },
+        }));
+      } else if (exactRelation) {
+        evaluated.push(actionResult(row, {
+          ...relationBase,
+          relationAction: "existing",
+          message: "组合商品对象及Product Structure均已生效，组成关系完整。",
+          rawData: { ...row.rawData, expectedSalesObjectId: bundleObject.id },
+        }));
+      } else {
+        evaluated.push(actionResult(row, {
+          ...relationBase,
+          relationAction: "candidate",
+          message: "已精确匹配完整的组合商品结构，确认后生成关系候选，不直接修改正式关系。",
+          rawData: { ...row.rawData, expectedSalesObjectId: bundleObject.id },
         }));
       }
       continue;
@@ -358,18 +464,75 @@ function decodedRaw(row) {
   try { return JSON.parse(row.rawDataJson || "{}"); } catch { return {}; }
 }
 
+function exceptionReason(row) {
+  const code = text(row.exceptionType) || "unknown";
+  return { code, reason: EXCEPTION_REASON_LABELS[code] || text(row.message) || "需要人工确认" };
+}
+
 function summarizeDimension(rows, actionField, keyFor) {
-  const priorities = { new: 7, candidate: 7, update: 6, governance: 5, unchanged: 4, existing: 4, not_applicable: 3, exception: 2, conflict: 2, ignored: 1 };
+  const priorities = { exception: 9, conflict: 9, unresolved: 9, blocked: 9, governance: 8, new: 7, candidate: 7, update: 6, unchanged: 4, existing: 4, not_applicable: 3, ignored: 1 };
   const entities = new Map();
   for (const row of rows) {
     const action = text(row[actionField]);
     if (!action || action === "ignored") continue;
     const key = keyFor(row, decodedRaw(row));
     const current = entities.get(key);
-    if (!current || (priorities[action] || 0) > (priorities[current] || 0)) entities.set(key, action);
+    if (!current || (priorities[action] || 0) > (priorities[current.action] || 0)) entities.set(key, { action, row });
   }
-  const count = (action) => [...entities.values()].filter((value) => value === action).length;
-  return { total: entities.size, new: count("new"), updated: count("update"), unchanged: count("unchanged"), exception: count("exception") };
+  const values = [...entities.values()];
+  const count = (action) => values.filter((value) => value.action === action).length;
+  const reasons = new Map();
+  for (const value of values.filter((item) => item.action === "exception")) {
+    const item = exceptionReason(value.row);
+    const current = reasons.get(item.code) || { ...item, count: 0 };
+    current.count += 1;
+    reasons.set(item.code, current);
+  }
+  return {
+    total: entities.size,
+    new: count("new"),
+    updated: count("update"),
+    unchanged: count("unchanged"),
+    exception: count("exception"),
+    exceptionReasons: [...reasons.values()].sort((left, right) => right.count - left.count || left.reason.localeCompare(right.reason, "zh-CN")),
+  };
+}
+
+function summarizePlatformSkuCodeDimension(rows, kind) {
+  const priorities = { exception: 9, new: 7, update: 6, unchanged: 4 };
+  const entities = new Map();
+  for (const row of rows) {
+    const goodsType = text(row.systemGoodsType);
+    if (NO_ERP_RELATION_TYPES.has(goodsType)) continue;
+    const isCombo = COMBO_GOODS_TYPES.has(goodsType);
+    if ((kind === "combo") !== isCombo) continue;
+    const relationAction = text(row.relationAction);
+    if (!relationAction || ["ignored", "not_applicable"].includes(relationAction)) continue;
+    const action = relationAction === "candidate" ? "new"
+      : relationAction === "existing" ? "unchanged"
+        : "exception";
+    const key = text(row.salesLinkSkuId)
+      || `${text(row.shopId) || text(row.sourceShopName)}|${text(row.platformGoodsId)}|${text(row.platformSkuId) || row.rowNumber}`;
+    const current = entities.get(key);
+    if (!current || priorities[action] > priorities[current.action]) entities.set(key, { action, row });
+  }
+  const values = [...entities.values()];
+  const count = (action) => values.filter((value) => value.action === action).length;
+  const reasons = new Map();
+  for (const value of values.filter((item) => item.action === "exception")) {
+    const item = exceptionReason(value.row);
+    const current = reasons.get(item.code) || { ...item, count: 0 };
+    current.count += 1;
+    reasons.set(item.code, current);
+  }
+  return {
+    total: entities.size,
+    new: count("new"),
+    updated: count("update"),
+    unchanged: count("unchanged"),
+    exception: count("exception"),
+    exceptionReasons: [...reasons.values()].sort((left, right) => right.count - left.count || left.reason.localeCompare(right.reason, "zh-CN")),
+  };
 }
 
 function summaryFor(batch, rows) {
@@ -404,12 +567,16 @@ function summaryFor(batch, rows) {
     unresolved: relationCount("unresolved"),
     conflicts: relationCount("conflict"),
   };
+  const platformSkuCodes = {
+    single: summarizePlatformSkuCodeDimension(activeRows, "single"),
+    combo: summarizePlatformSkuCodeDimension(activeRows, "combo"),
+  };
   const exceptions = normalizedRows.filter((row) => row.action === "exception" || row.action === "partial" || ["unresolved", "conflict"].includes(row.relationAction));
   const types = Object.fromEntries([...new Set(exceptions.map((row) => row.exceptionType))].map((type) => [type, exceptions.filter((row) => row.exceptionType === type).length]));
   return {
     fileName: batch.fileName, fileHash: batch.scope?.sourceFileHash || batch.fileHash, parserVersion: batch.scope?.parserVersion || PARSER_VERSION, periodStart: batch.periodStart, periodEnd: batch.periodEnd,
     sourceRows: normalizedRows.length, totalPlatformSkus: activeRows.filter((row) => row.platformSkuId).length,
-    shops, links, linkSkus, erpRelations,
+    shops, links, linkSkus, platformSkuCodes, erpRelations,
     createdAssets: shops.new + links.new + linkSkus.new,
     updatedAssets: shops.updated + links.updated + linkSkus.updated,
     unchangedAssets: shops.unchanged + links.unchanged + linkSkus.unchanged,

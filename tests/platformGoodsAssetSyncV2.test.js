@@ -35,12 +35,17 @@ test("平台货品资产同步先生成Diff，确认后只同步资产和关系�
     database.prepare("INSERT INTO sales_object_structures(id,salesObjectId,version,structureHash,effectiveFrom,status,sourceType,sourceReferenceJson,createdAt,updatedAt) VALUES('structure-existing','sales-object-existing',1,'hash-existing',?,'draft','test','{}',?,?)").run(stamp, stamp, stamp);
     database.prepare("INSERT INTO sales_object_structure_components(id,structureId,salesObjectId,erpSkuId,quantity,sortOrder,status,sourceType,sourceReferenceJson,createdAt,updatedAt) VALUES('component-existing','structure-existing','sales-object-existing','erp-sku-1',1,1,'active','test','{}',?,?)").run(stamp, stamp);
     database.prepare("UPDATE sales_object_structures SET status='active',reviewedBy=?,reviewedAt=?,activatedAt=?,updatedAt=? WHERE id='structure-existing'").run(reviewer.id, stamp, stamp, stamp);
+    database.prepare("INSERT INTO sales_objects(id,objectCode,normalizedObjectCode,objectType,source,sourceType,sourceCode,status,firstSeenAt,lastSeenAt,createdAt,updatedAt) VALUES('sales-object-combo-ready','COMBO-READY','combo-ready','bundle','test','wangdian_suite_api','COMBO-READY','active',?,?,?,?)").run(stamp, stamp, stamp, stamp);
+    database.prepare("INSERT INTO sales_object_structures(id,salesObjectId,version,structureHash,effectiveFrom,status,sourceType,sourceReferenceJson,createdAt,updatedAt) VALUES('structure-combo-ready','sales-object-combo-ready',1,'hash-combo-ready',?,'draft','wangdian_suite_api','{}',?,?)").run(stamp, stamp, stamp);
+    database.prepare("INSERT INTO sales_object_structure_components(id,structureId,salesObjectId,erpSkuId,quantity,sortOrder,status,sourceType,sourceReferenceJson,createdAt,updatedAt) VALUES('component-combo-ready','structure-combo-ready','sales-object-combo-ready','erp-sku-1',2,1,'active','wangdian_suite_api','{}',?,?)").run(stamp, stamp);
+    database.prepare("UPDATE sales_object_structures SET status='active',reviewedBy=?,reviewedAt=?,activatedAt=?,updatedAt=? WHERE id='structure-combo-ready'").run(reviewer.id, stamp, stamp, stamp);
 
     const sourceRows = [
       { 店铺: "平台资产测试旧店20260820", 货品ID: "goods-existing", 规格ID: "sku-existing", 平台规格编码: "ERP-1", 系统货品: "单品", 货品名称: "新标题", 规格名称: "新规格", 价格: "99.00", 平台库存: "8", 平台商品链接: "https://item.taobao.com/item.htm?id=goods-existing" },
       { 店铺: "平台资产测试新店20260820", 货品ID: "goods-new", 规格ID: "sku-new", 平台规格编码: "ERP-1", 系统货品: "单品", 货品名称: "新链接", 规格名称: "新SKU", 平台商品链接: "https://www.xiaohongshu.com/goods-detail/goods-new" },
       { 店铺: "平台资产测试新店20260820", 货品ID: "goods-conflict", 规格ID: "sku-conflict", 平台规格编码: "ERP-NOT-FOUND", 系统货品: "单品", 货品名称: "关系冲突", 规格名称: "待治理SKU", 平台商品链接: "https://www.xiaohongshu.com/goods-detail/goods-conflict" },
       { 店铺: "平台资产测试新店20260820", 货品ID: "goods-combo", 规格ID: "sku-combo", 平台规格编码: "COMBO-NOT-ERP", 系统货品: "组合装", 货品名称: "组合商品", 规格名称: "结构待治理", 平台商品链接: "https://www.xiaohongshu.com/goods-detail/goods-combo" },
+      { 店铺: "平台资产测试新店20260820", 货品ID: "goods-combo-ready", 规格ID: "sku-combo-ready", 平台规格编码: "COMBO-READY", 系统货品: "组合装", 货品名称: "已具备组合结构", 规格名称: "组合结构候选", 平台商品链接: "https://www.xiaohongshu.com/goods-detail/goods-combo-ready" },
       { 店铺: "平台资产测试新店20260820", 货品ID: "goods-no-erp", 规格ID: "sku-no-erp", 平台规格编码: "", 系统货品: "无", 货品名称: "无需ERP关系", 规格名称: "平台规格", 平台商品链接: "https://www.xiaohongshu.com/goods-detail/goods-no-erp" },
       { 店铺: "总计:", 货品ID: "", 规格ID: "", 平台规格编码: "", 系统货品: "" },
     ];
@@ -54,10 +59,26 @@ test("平台货品资产同步先生成Diff，确认后只同步资产和关系�
       structures: database.prepare("SELECT COUNT(*) total FROM sales_object_structures").get().total,
     };
     const preview = previewPlatformGoodsExcelDataSync({ taskId: task.id, buffer, fileName: "历史平台货品.xlsx", createdBy: reviewer.id });
-    assert.deepEqual(preview.summary.shops, { total: 2, new: 1, updated: 0, unchanged: 1, exception: 0 });
-    assert.deepEqual(preview.summary.links, { total: 5, new: 4, updated: 1, unchanged: 0, exception: 0 });
-    assert.deepEqual(preview.summary.linkSkus, { total: 5, new: 4, updated: 1, unchanged: 0, exception: 0 });
-    assert.deepEqual(preview.summary.erpRelations, { total: 5, existing: 1, newCandidates: 1, governancePending: 1, notApplicable: 1, identityBlocked: 0, unresolved: 1, conflicts: 0 });
+    assert.deepEqual(preview.summary.shops, { total: 2, new: 1, updated: 0, unchanged: 1, exception: 0, exceptionReasons: [] });
+    assert.deepEqual(preview.summary.links, { total: 6, new: 5, updated: 1, unchanged: 0, exception: 0, exceptionReasons: [] });
+    assert.deepEqual(preview.summary.linkSkus, { total: 6, new: 5, updated: 1, unchanged: 0, exception: 0, exceptionReasons: [] });
+    assert.deepEqual(preview.summary.platformSkuCodes.single, {
+      total: 3,
+      new: 1,
+      updated: 0,
+      unchanged: 1,
+      exception: 1,
+      exceptionReasons: [{ code: "missing_erp_sku", reason: "ERP SKU不存在", count: 1 }],
+    });
+    assert.deepEqual(preview.summary.platformSkuCodes.combo, {
+      total: 2,
+      new: 1,
+      updated: 0,
+      unchanged: 0,
+      exception: 1,
+      exceptionReasons: [{ code: "missing_combo_sales_object", reason: "组合商品对象不存在", count: 1 }],
+    });
+    assert.deepEqual(preview.summary.erpRelations, { total: 6, existing: 1, newCandidates: 2, governancePending: 0, notApplicable: 1, identityBlocked: 0, unresolved: 2, conflicts: 0 });
     assert.equal(preview.summary.ignoredNonBusiness, 1);
     assert.deepEqual({
       shops: database.prepare("SELECT COUNT(*) total FROM sales_shops").get().total,
@@ -69,21 +90,21 @@ test("平台货品资产同步先生成Diff，确认后只同步资产和关系�
     assert.equal(committed.dataSyncBatch.status, "succeeded", "完整平台快照即使有关系治理项也应成功建立经营基线");
     assert.equal(committed.platformSnapshot.mode, "full");
     assert.equal(committed.operatingSet.platformBatch.id, preview.dataSyncBatch.id);
-    assert.equal(committed.operatingSet.operatingCount, 6);
+    assert.equal(committed.operatingSet.operatingCount, 7);
     assert.equal(committed.result.shops.created, 1);
-    assert.equal(committed.result.links.created, 4);
+    assert.equal(committed.result.links.created, 5);
     assert.equal(committed.result.links.updated, 1);
-    assert.equal(committed.result.linkSkus.created, 4);
+    assert.equal(committed.result.linkSkus.created, 5);
     assert.equal(committed.result.linkSkus.updated, 1);
-    assert.equal(committed.result.erpRelations.candidates, 1);
+    assert.equal(committed.result.erpRelations.candidates, 2);
     assert.equal(database.prepare("SELECT COUNT(*) total FROM product_structure_application_items WHERE approvalStatus='pending'").get().total, 0);
     assert.equal(database.prepare("SELECT matchMethod FROM sales_link_skus WHERE platformSkuId='sku-new'").get().matchMethod, "v3_auto_projection");
     assert.equal(database.prepare("SELECT title FROM sales_links WHERE id='link-existing'").get().title, "新标题");
     assert.equal(database.prepare("SELECT specificationName FROM sales_link_skus WHERE id='sku-existing'").get().specificationName, "新规格");
     assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_shops").get().total, before.shops + 1);
     assert.deepEqual(database.prepare("SELECT platform,shopName FROM sales_shops WHERE shopName='平台资产测试新店20260820'").get(), { platform: "小红书", shopName: "平台资产测试新店20260820" });
-    assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_links").get().total, before.links + 4);
-    assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_link_skus").get().total, before.skus + 4);
+    assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_links").get().total, before.links + 5);
+    assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_link_skus").get().total, before.skus + 5);
     assert.deepEqual(database.prepare("SELECT currentState FROM sales_links WHERE id='link-absent'").get(),
       { currentState: "active" }, "文件未出现的Link必须保持active，批次成员关系不得决定资产状态");
     assert.equal(database.prepare("SELECT COUNT(*) total FROM connection_sku_sales_daily_facts").get().total, before.dailyFacts);
@@ -96,7 +117,7 @@ test("平台货品资产同步先生成Diff，确认后只同步资产和关系�
     assert.equal(repeated.dataSyncBatch.id, preview.dataSyncBatch.id);
     assert.equal(repeated.history.length, 1);
     assert.equal(database.prepare("SELECT COUNT(*) total FROM platform_goods_excel_source_files").get().total, 1);
-    assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_links").get().total, before.links + 4);
+    assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_links").get().total, before.links + 5);
     assert.equal(database.prepare("SELECT COUNT(*) total FROM product_structure_application_items").get().total, 0);
     const repeatedInitialCommit = commitPlatformGoodsExcelDataSync(preview.dataSyncBatch.id);
     assert.equal(repeatedInitialCommit.idempotent, true);
@@ -107,10 +128,10 @@ test("平台货品资产同步先生成Diff，确认后只同步资产和关系�
     assert.equal(reanalyzed.reanalyzed, true);
     assert.notEqual(reanalyzed.dataSyncBatch.id, preview.dataSyncBatch.id);
     assert.equal(reanalyzed.history.length, 2);
-    assert.deepEqual(reanalyzed.summary.links, { total: 5, new: 0, updated: 0, unchanged: 5, exception: 0 });
-    assert.deepEqual(reanalyzed.summary.linkSkus, { total: 5, new: 0, updated: 0, unchanged: 5, exception: 0 });
-    assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_links").get().total, before.links + 4);
-    assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_link_skus").get().total, before.skus + 4);
+    assert.deepEqual(reanalyzed.summary.links, { total: 6, new: 0, updated: 0, unchanged: 6, exception: 0, exceptionReasons: [] });
+    assert.deepEqual(reanalyzed.summary.linkSkus, { total: 6, new: 0, updated: 0, unchanged: 6, exception: 0, exceptionReasons: [] });
+    assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_links").get().total, before.links + 5);
+    assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_link_skus").get().total, before.skus + 5);
 
     const recommitted = commitPlatformGoodsExcelDataSync(reanalyzed.dataSyncBatch.id);
     assert.equal(recommitted.result.links.created, 0);
@@ -119,8 +140,8 @@ test("平台货品资产同步先生成Diff，确认后只同步资产和关系�
     assert.equal(recommitted.result.linkSkus.updated, 0);
     const duplicateCommit = commitPlatformGoodsExcelDataSync(reanalyzed.dataSyncBatch.id);
     assert.equal(duplicateCommit.idempotent, true);
-    assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_links").get().total, before.links + 4);
-    assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_link_skus").get().total, before.skus + 4);
+    assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_links").get().total, before.links + 5);
+    assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_link_skus").get().total, before.skus + 5);
     assert.equal(database.prepare("SELECT COUNT(*) total FROM product_structure_application_items").get().total, 0);
     assert.equal(database.prepare("SELECT COUNT(*) total FROM connection_sku_sales_daily_facts").get().total, before.dailyFacts);
 

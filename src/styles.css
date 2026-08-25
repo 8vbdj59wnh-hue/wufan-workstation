@@ -108,6 +108,10 @@
 .connection-import-preview-grid { display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); gap: 10px; margin: 16px 0; }
 .connection-import-preview-grid span { display: grid; gap: 5px; padding: 11px; border-radius: 10px; background: #fff; color: #667085; font-size: 12px; }
 .connection-import-preview-grid strong { color: #101828; font-size: 14px; overflow-wrap: anywhere; }
+.connection-asset-preview-table th:last-child,
+.connection-asset-preview-table td:last-child { min-width: 260px; }
+.connection-asset-exception-reasons small { display: block; color: #667085; line-height: 1.55; white-space: normal; }
+.connection-asset-preview-note { margin: 10px 0 0; }
 .connection-foundation-panel { display: grid; gap: 12px; }
 .connection-foundation-template-form { display: grid; grid-template-columns: 1fr 1fr 1fr 2fr 1fr auto; gap: 10px; align-items: center; }
 .connection-template-list { display: grid; gap: 8px; }
