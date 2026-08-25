@@ -2,6 +2,7 @@ import {
   batchLinkActionTemplates,
   cancelProcessInstance,
   getCurrentUser,
+  loadScheduleBoardPage,
   loadTemplates,
   resolveAssetUrl,
   startProcessInstanceExecution,
@@ -113,6 +114,20 @@ const slotCardGap = 3;
 const schedulePreviewCloseDelay = 300;
 let schedulePreviewCloseTimer = null;
 let schedulePreviewAnchor = null;
+let schedulePageState = { page: 1, totalPages: 1, total: 0, loading: false, loaded: false };
+
+async function ensureSchedulePageLoaded(rerender, page = schedulePageState.page) {
+  if (schedulePageState.loading || (schedulePageState.loaded && page === schedulePageState.page)) return;
+  schedulePageState.loading = true;
+  try {
+    const payload = await loadScheduleBoardPage({ page, pageSize: 50 });
+    schedulePageState = { page: payload.page, totalPages: payload.totalPages, total: payload.total, loading: false, loaded: true };
+    rerender();
+  } catch (error) {
+    schedulePageState.loading = false;
+    console.error("关键行动排期分页读取失败", error);
+  }
+}
 
 function captureScheduleInnerScroll() {
   const pendingList = document.querySelector(".schedule-pending-list");
@@ -1583,11 +1598,17 @@ export function renderScheduleBoardPage() {
       }
       ${renderProcessDetailModal()}
       ${renderBatchActionTemplatePicker()}
+      <nav class="table-pagination" aria-label="关键行动分页">
+        <button class="secondary-button" type="button" data-schedule-page="${Math.max(1, schedulePageState.page - 1)}" ${schedulePageState.page <= 1 || schedulePageState.loading ? "disabled" : ""}>上一页</button>
+        <span>第 ${schedulePageState.page} / ${schedulePageState.totalPages} 页 · 共 ${schedulePageState.total} 条</span>
+        <button class="secondary-button" type="button" data-schedule-page="${Math.min(schedulePageState.totalPages, schedulePageState.page + 1)}" ${schedulePageState.page >= schedulePageState.totalPages || schedulePageState.loading ? "disabled" : ""}>下一页</button>
+      </nav>
     </section>
   `;
 }
 
 export function bindScheduleBoardPageEvents(rerender) {
+  ensureSchedulePageLoaded(rerender);
   hideSchedulePreview();
   if (actionCountdownTimer !== null) window.clearInterval(actionCountdownTimer);
   const refreshActionCountdowns = () => {
@@ -1619,6 +1640,10 @@ export function bindScheduleBoardPageEvents(rerender) {
     actionCountdownHashListenerBound = true;
   }
   const rerenderScheduleBoard = () => rerenderPreservingInnerScroll(rerender);
+  document.querySelectorAll("[data-schedule-page]").forEach((button) => button.addEventListener("click", () => {
+    schedulePageState.loaded = false;
+    ensureSchedulePageLoaded(rerenderScheduleBoard, Number(button.dataset.schedulePage));
+  }));
   bindContentNoteBatchEvents(document.querySelector(".schedule-board-page"), rerenderScheduleBoard);
   document.querySelectorAll(".linked-action-product, .schedule-action-product-names a").forEach((link) => {
     link.addEventListener("click", (event) => event.stopPropagation());

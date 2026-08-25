@@ -3,6 +3,7 @@ import {
   getCurrentUser,
   getProcessNodeStepOrder,
   getLatestStandardWorkFormFields,
+  loadGoalCenterDetail,
   launchWorkPlanAsProcess,
   resolveAssetUrl,
   state,
@@ -79,6 +80,8 @@ let activeGoalTab = "alignment";
 let isSavingGoal = false;
 let showInactiveGoals = false;
 let goalKeyword = "";
+const loadedGoalDetails = new Set();
+let loadingGoalId = null;
 const today = "2026-06-24";
 const plannedWeekPattern = /^\d{4}-W\d{2}$/;
 const standardWorkAttachmentsKey = "standardWorkAttachments";
@@ -1819,6 +1822,7 @@ function handleGoalClick(event, rerender) {
   if (action === "select-goal") {
     selectedGoalId = goalId;
     rerender();
+    ensureGoalDetailLoaded(goalId, rerender);
     return;
   }
 
@@ -1887,6 +1891,20 @@ function handleGoalClick(event, rerender) {
 
   if (action === "remove-selected-standard-work-attachment") {
     removeSelectedStandardWorkAttachment(button);
+  }
+}
+
+async function ensureGoalDetailLoaded(goalId, rerender) {
+  if (!goalId || loadedGoalDetails.has(goalId) || loadingGoalId === goalId) return;
+  loadingGoalId = goalId;
+  try {
+    await loadGoalCenterDetail(goalId);
+    loadedGoalDetails.add(goalId);
+    rerender();
+  } catch (error) {
+    console.error("目标详情按需读取失败", error);
+  } finally {
+    if (loadingGoalId === goalId) loadingGoalId = null;
   }
 }
 
@@ -2046,6 +2064,8 @@ export function bindGoalsPageEvents(rerender) {
   const goalTaskForm = document.querySelector(".goal-task-form");
 
   if (goalsPage === null) return;
+
+  ensureGoalDetailLoaded(selectedGoalId, rerender);
 
   bindGoalTabs(rerender);
   goalsPage.addEventListener("click", (event) => handleGoalClick(event, rerender));

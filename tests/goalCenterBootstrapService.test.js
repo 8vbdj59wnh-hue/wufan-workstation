@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   goalCenterBootstrapResources,
+  goalCenterInitialResources,
   pickGoalCenterBootstrapResources,
   readGoalCenterBootstrap,
 } from "../server/goalCenterBootstrapService.js";
@@ -14,11 +15,14 @@ test("goal center reads only its declared resources", () => {
     return [{ id: `${resource}-1` }];
   });
 
-  assert.deepEqual(reads, goalCenterBootstrapResources);
+  assert.deepEqual(reads, goalCenterInitialResources);
   assert.deepEqual(Object.keys(snapshot), goalCenterBootstrapResources);
   assert.equal(Object.hasOwn(snapshot, "erpGoods"), false);
   assert.equal(Object.hasOwn(snapshot, "salesLinks"), false);
   assert.equal(Object.hasOwn(snapshot, "weeklyReports"), false);
+  ["tasks", "processInstances", "workPlans", "products", "actionProducts", "productErpMappings"].forEach((resource) => {
+    assert.deepEqual(snapshot[resource], [], `${resource} must be loaded from the selected goal detail`);
+  });
 });
 
 test("goal center response cannot leak undeclared scoped resources", () => {

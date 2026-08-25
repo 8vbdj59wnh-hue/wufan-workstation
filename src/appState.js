@@ -108,6 +108,7 @@ export const state = {
   erpImportBatches: [],
   taskWaves: [],
   taskWaveDetails: {},
+  workResultDashboard: null,
 };
 
 export const defaultCompanySlogan = "做对的事，把事做对。\n尊重时间，尊重经营。";
@@ -296,6 +297,7 @@ export function applyDataSnapshot(data, { preserveMissingResources = false } = {
   if (shouldReplace("salesLinks")) replaceArray(state.salesLinks, data.salesLinks ?? []);
   if (shouldReplace("salesLinkSkus")) replaceArray(state.salesLinkSkus, data.salesLinkSkus ?? []);
   if (shouldReplace("erpImportBatches")) replaceArray(state.erpImportBatches, data.erpImportBatches ?? []);
+  if (shouldReplace("workResultDashboard")) state.workResultDashboard = cloneItem(data.workResultDashboard ?? null);
   isApplyingRemoteData = false;
   ensureTaskTemplatesHaveProcessTemplates();
   ensureDefaultStandardWorkLibrary();
@@ -432,6 +434,30 @@ export async function loadTaskCenterTaskDetail(taskId) {
   mergeTaskProductContexts(state.taskProductContexts, data.context?.taskProductContexts ?? []);
   mergeArrayById(state.taskWaves, data.context?.taskWaves ?? []);
   return data.task;
+}
+
+export async function loadGoalCenterDetail(goalId, { page = 1, pageSize = 50 } = {}) {
+  const response = await authFetch(`${apiBaseUrl}/api/goal-center/goals/${encodeURIComponent(goalId)}/detail?page=${page}&pageSize=${pageSize}`);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.success !== true) throw new Error(payload.message ?? "目标详情读取失败。");
+  applyDataSnapshot(payload.data ?? {}, { preserveMissingResources: true });
+  return payload;
+}
+
+export async function loadScheduleBoardPage({ page = 1, pageSize = 50 } = {}) {
+  const response = await authFetch(`${apiBaseUrl}/api/schedule-board/page?page=${page}&pageSize=${pageSize}`);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.success !== true) throw new Error(payload.message ?? "关键行动排期读取失败。");
+  applyDataSnapshot(payload.data ?? {}, { preserveMissingResources: true });
+  return payload;
+}
+
+export async function loadWorkResultsInitial(days = 30) {
+  const response = await authFetch(`${apiBaseUrl}/api/work-results/initial?days=${encodeURIComponent(days)}`);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.success !== true) throw new Error(payload.message ?? "工作结果摘要读取失败。");
+  applyDataSnapshot({ ...(payload.data ?? {}), workResultDashboard: payload.dashboard }, { preserveMissingResources: true });
+  return payload;
 }
 
 export async function ensureTaskWavesLoaded() {
@@ -618,6 +644,14 @@ export async function loadTemplates() {
   if (!response.ok) throw new Error(data.message ?? data.error ?? "模板列表读取失败，请检查本地数据库服务。");
   replaceArray(state.templates, data);
   return state.templates;
+}
+
+export async function loadTemplateCenterCategory(category) {
+  const response = await authFetch(`${apiBaseUrl}/api/template-center/library?category=${encodeURIComponent(category)}`);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.success !== true) throw new Error(payload.message ?? "模板分类读取失败。");
+  applyDataSnapshot(payload.data ?? {}, { preserveMissingResources: true });
+  return payload.data ?? {};
 }
 
 export async function createTemplate(template) {

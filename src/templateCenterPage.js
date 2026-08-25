@@ -4,6 +4,7 @@ import {
   getCurrentUser,
   loadPersistentData,
   loadTemplateAssetVersions,
+  loadTemplateCenterCategory,
   loadTemplates,
   resolveAssetUrl,
   prepareTemplateIteration,
@@ -50,6 +51,7 @@ let versionHistoryAsset = null;
 let versionsLoaded = false;
 let versionsLoading = false;
 let versionError = "";
+const loadedLibraryCategories = new Set();
 
 function canManageTemplateAsset(assetType) {
   return hasPermission(
@@ -753,7 +755,23 @@ export function bindTemplateCenterPageEvents(rerender) {
   const page = document.querySelector(".template-center-page");
   if (page === null) return;
 
-  page.querySelectorAll("[data-template-asset-category]").forEach((button) => button.addEventListener("click", () => { assetCategory = button.dataset.templateAssetCategory; unifiedDetail = null; if (window.location.hash === "#templateCenter/form-design") window.history.replaceState(null, "", "#templateCenter"); rerender(); }));
+  page.querySelectorAll("[data-template-asset-category]").forEach((button) => button.addEventListener("click", async () => {
+    assetCategory = button.dataset.templateAssetCategory;
+    unifiedDetail = null;
+    if (window.location.hash === "#templateCenter/form-design") window.history.replaceState(null, "", "#templateCenter");
+    if (!["visual"].includes(assetCategory) && !loadedLibraryCategories.has(assetCategory)) {
+      templateError = "正在读取当前模板分类…";
+      rerender();
+      try {
+        await loadTemplateCenterCategory(assetCategory);
+        loadedLibraryCategories.add(assetCategory);
+        templateError = "";
+      } catch (error) {
+        templateError = error.message ?? "模板分类读取失败。";
+      }
+    }
+    rerender();
+  }));
   if (assetCategory === "action") bindStandardWorkLibraryEvents(rerender, page);
   if (assetCategory === "standard") bindMethodologiesPageEvents(rerender);
   if (window.location.hash === "#templateCenter/form-design") bindSettingsPageEvents(rerender);

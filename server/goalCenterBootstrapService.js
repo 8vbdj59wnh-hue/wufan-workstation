@@ -24,11 +24,19 @@ export const goalCenterBootstrapResources = Object.freeze([
   "productErpMappings",
 ]);
 
+export const goalCenterInitialResources = Object.freeze([
+  "companies", "departments", "positions", "people", "permissionTemplates", "categories", "stores",
+  "publishingAccounts", "goals", "taskTemplates", "processTemplates", "processTemplateNodes", "templates",
+  "templateTagCategories", "templateTags", "issuesRequirements", "standardWorkForms",
+]);
+
 export function readGoalCenterBootstrap(readResource) {
   if (typeof readResource !== "function") throw new TypeError("readResource must be a function");
-  return Object.fromEntries(
-    goalCenterBootstrapResources.map((resource) => [resource, readResource(resource)]),
-  );
+  const initialResources = new Set(goalCenterInitialResources);
+  return Object.fromEntries(goalCenterBootstrapResources.map((resource) => [
+    resource,
+    initialResources.has(resource) ? readResource(resource) : [],
+  ]));
 }
 
 export function pickGoalCenterBootstrapResources(snapshot) {

@@ -14,6 +14,7 @@ export {
   initializeDatabase,
   readAllData,
   readResource,
+  readResourceItems,
   readProductImportBatch,
   previewProductSkuChange,
   readRouteResource,

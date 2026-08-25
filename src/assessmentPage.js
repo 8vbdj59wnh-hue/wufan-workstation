@@ -5,6 +5,7 @@ import {
   getNow,
   hasOpenRectificationWorkForSource,
   launchRectificationWorkForSource,
+  loadWorkResultsInitial,
   state,
   updatePersistentResource,
 } from "./appState.js";
@@ -70,6 +71,22 @@ let rectificationFilters = {
   sourceType: "",
   focus: "",
 };
+let workResultsLoading = false;
+let workResultsLoadedDays = 0;
+
+async function ensureWorkResultsLoaded(rerender, days = dashboardFilters.days) {
+  if (workResultsLoading || workResultsLoadedDays === days) return;
+  workResultsLoading = true;
+  try {
+    await loadWorkResultsInitial(days);
+    workResultsLoadedDays = days;
+    rerender();
+  } catch (error) {
+    console.error("工作结果摘要按需读取失败", error);
+  } finally {
+    workResultsLoading = false;
+  }
+}
 
 const tabHashMap = {
   "dashboard-management": "stats",
@@ -528,6 +545,9 @@ function renderDashboardMetricCard(label, current, previous, formatter = formatN
 }
 
 function getDashboardSummaries(days = dashboardFilters.days) {
+  if (state.workResultDashboard?.days === days) {
+    return { current: state.workResultDashboard.current, previous: state.workResultDashboard.previous };
+  }
   const current = getPeriodWorkResultSummary(state, { days });
   const previous = getPeriodWorkResultSummary(state, { days, offsetDays: days });
   return { current, previous };
@@ -1834,6 +1854,7 @@ function syncAssessmentTabFromHash() {
 export function bindAssessmentPageEvents(rerender) {
   const page = document.querySelector(".assessment-page");
   if (page === null) return;
+  ensureWorkResultsLoaded(rerender);
 
   document.querySelectorAll("[data-assessment-tab]").forEach((tab) => {
     tab.addEventListener("click", () => {
@@ -1855,6 +1876,7 @@ export function bindAssessmentPageEvents(rerender) {
   dashboardForm?.addEventListener("change", () => {
     updateDashboardFilters(dashboardForm);
     rerender();
+    ensureWorkResultsLoaded(rerender, dashboardFilters.days);
   });
 
   const reportForm = document.querySelector(".assessment-report-filters");
