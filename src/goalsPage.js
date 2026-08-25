@@ -228,7 +228,7 @@ function getActiveTaskTemplates() {
 
 function canCurrentUserLaunchGoalAction() {
   return (
-    canCurrentUser("goals.addWork") &&
+    canCurrentUser("keyActions.launch") &&
     canLaunchAnyActionTemplate(
       getCurrentUser(),
       state.taskTemplates.filter(
@@ -627,7 +627,7 @@ function renderGoalMapCard(goal) {
   return `
     <div
       class="goal-map-card ${goal.level === GoalLevel.Company ? "is-company" : "is-department"}${statusClass}${selectedClass}${draggingClass}${dragOverClass}"
-      draggable="${canCurrentUser("goals.dragAlign") ? "true" : "false"}"
+      draggable="${canCurrentUser("goals.manage") ? "true" : "false"}"
       data-goal-id="${goal.id}"
       data-goal-drag-id="${goal.id}"
       data-goal-drop-id="${goal.id}"
@@ -911,10 +911,10 @@ function renderGoalDetail() {
       <div class="section-heading with-actions">
         <h2>目标详情：${escapeHtml(goal.name)}</h2>
         <div class="section-actions">
-          ${canCurrentUser("goals.edit") ? `<button class="secondary-button" type="button" data-action="edit-goal" data-goal-id="${goal.id}">编辑目标</button>` : ""}
+          ${canCurrentUser("goals.manage") ? `<button class="secondary-button" type="button" data-action="edit-goal" data-goal-id="${goal.id}">编辑目标</button>` : ""}
           ${canCurrentUserLaunchGoalAction() && !isInactiveGoal(goal) ? `<button class="primary-button" type="button" data-action="add-goal-task" data-goal-id="${goal.id}">发起关键行动</button>` : ""}
-          ${canCurrentUser("goals.delete") && !isInactiveGoal(goal) ? `<button class="secondary-button danger-button" type="button" data-action="deactivate-goal" data-goal-id="${goal.id}">停用目标</button>` : ""}
-          ${canCurrentUser("goals.delete") && isInactiveGoal(goal) ? `<button class="secondary-button" type="button" data-action="activate-goal" data-goal-id="${goal.id}">重新启用</button>` : ""}
+          ${canCurrentUser("goals.close") && !isInactiveGoal(goal) ? `<button class="secondary-button danger-button" type="button" data-action="deactivate-goal" data-goal-id="${goal.id}">停用目标</button>` : ""}
+          ${canCurrentUser("goals.close") && isInactiveGoal(goal) ? `<button class="secondary-button" type="button" data-action="activate-goal" data-goal-id="${goal.id}">重新启用</button>` : ""}
         </div>
       </div>
       <div class="detail-block">
@@ -947,7 +947,7 @@ function renderGoalDetail() {
         <p>${escapeHtml(goal.description || "暂无说明")}</p>
       </div>
       ${
-        canCurrentUser("goals.viewRelatedData")
+        canCurrentUser("goals.view")
           ? `
             <div class="detail-block">
               <h3>目标下的任务</h3>
@@ -1018,14 +1018,14 @@ function renderGoalTable() {
                     <td>${renderStatus(goal)}</td>
                     <td>
                       <span class="row-actions">
-                        ${canCurrentUser("goals.edit") ? renderActionButton("编辑", "edit-goal", goal.id) : ""}
+                        ${canCurrentUser("goals.manage") ? renderActionButton("编辑", "edit-goal", goal.id) : ""}
                         ${
                           goal.type === GoalType.Period
                             ? renderActionButton("更新当前值", "update-current-value", goal.id)
                             : ""
                         }
-                        ${canCurrentUser("goals.delete") && !isInactiveGoal(goal) ? renderActionButton("停用目标", "deactivate-goal", goal.id, "danger-button") : ""}
-                        ${canCurrentUser("goals.delete") && isInactiveGoal(goal) ? renderActionButton("重新启用", "activate-goal", goal.id) : ""}
+                        ${canCurrentUser("goals.close") && !isInactiveGoal(goal) ? renderActionButton("停用目标", "deactivate-goal", goal.id, "danger-button") : ""}
+                        ${canCurrentUser("goals.close") && isInactiveGoal(goal) ? renderActionButton("重新启用", "activate-goal", goal.id) : ""}
                       </span>
                     </td>
                   </tr>
@@ -1810,7 +1810,7 @@ function handleGoalClick(event, rerender) {
   }
 
   if (action === "add-goal") {
-    if (!canCurrentUser("goals.create")) return;
+    if (!canCurrentUser("goals.manage")) return;
     modalState = { kind: "goal", mode: "add", error: "" };
     rerender();
     return;
@@ -1841,7 +1841,7 @@ function handleGoalClick(event, rerender) {
   }
 
   if (action === "edit-goal") {
-    if (!canCurrentUser("goals.edit")) return;
+    if (!canCurrentUser("goals.manage")) return;
     modalState = { kind: "goal", mode: "edit", goalId, error: "" };
     rerender();
     return;
@@ -1854,26 +1854,26 @@ function handleGoalClick(event, rerender) {
   }
 
   if (action === "deactivate-goal") {
-    if (!canCurrentUser("goals.delete")) return;
+    if (!canCurrentUser("goals.close")) return;
     modalState = { kind: "deactivateGoal", goalId };
     rerender();
     return;
   }
 
   if (action === "confirm-deactivate-goal") {
-    if (!canCurrentUser("goals.delete")) return;
+    if (!canCurrentUser("goals.close")) return;
     updateGoalStatus(goalId, GoalStatus.Inactive, rerender);
     return;
   }
 
   if (action === "activate-goal") {
-    if (!canCurrentUser("goals.delete")) return;
+    if (!canCurrentUser("goals.close")) return;
     updateGoalStatus(goalId, GoalStatus.Active, rerender);
     return;
   }
 
   if (action === "view-goal-process") {
-    if (!canCurrentUser("goals.viewRelatedData")) return;
+    if (!canCurrentUser("goals.view")) return;
     selectedGoalProcessInstanceId = button.dataset.instanceId;
     rerender();
     return;
@@ -1900,7 +1900,7 @@ function bindGoalTabs(rerender) {
 }
 
 function handleGoalDragStart(event) {
-  if (!canCurrentUser("goals.dragAlign")) {
+  if (!canCurrentUser("goals.manage")) {
     event.preventDefault();
     return;
   }
@@ -2217,7 +2217,7 @@ export function renderGoalsPage() {
     <div class="goals-page">
       <div class="goal-page-controls">
         ${renderGoalTabs()}
-        ${canCurrentUser("goals.create") ? `<button class="primary-button" type="button" data-action="add-goal">新增目标</button>` : ""}
+        ${canCurrentUser("goals.manage") ? `<button class="primary-button" type="button" data-action="add-goal">新增目标</button>` : ""}
       </div>
       ${content}
       ${renderGoalModal()}

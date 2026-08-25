@@ -1350,6 +1350,12 @@ export async function loadConnectionBusinessGoalEvaluation(connectionId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/business-goal-evaluation`), "经营目标评价读取失败。");
 }
 
+export async function refreshConnectionBusinessGoalEvaluation(connectionId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/business-goal-evaluation/refresh`, {
+    method: "POST",
+  }), "经营目标评价刷新失败。");
+}
+
 export async function loadConnectionGoalWorkbench(filters = {}) {
   const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== "" && value !== null && value !== undefined));
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-goal-workbench?${query}`), "链接经营管理工作台读取失败。");

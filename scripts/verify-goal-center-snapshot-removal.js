@@ -24,7 +24,7 @@ assert.match(
 );
 assert.match(
   server,
-  /app\.get\("\/api\/goal-center\/bootstrap",\s*requirePermission\("modules\.goals"\)/,
+  /app\.get\("\/api\/goal-center\/bootstrap",\s*requirePermission\("goals\.view"\)/,
   "服务端缺少受目标模块权限保护的独立读接口。",
 );
 assert.match(server, /app\.get\("\/api\/data"/, "渐进拆分期间不得删除旧 /api/data 接口。");

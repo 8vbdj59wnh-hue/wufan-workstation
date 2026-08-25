@@ -14,6 +14,7 @@ import {
 import { bindStandardWorkLibraryEvents, renderStandardWorkLibraryPage } from "./actionStandardsPage.js";
 import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js";
 import { bindSettingsPageEvents, renderFormDesignSection } from "./settingsPage.js";
+import { hasPermission } from "../shared/permissions.js";
 
 const materialTypeNames = {
   image: "图片",
@@ -49,6 +50,20 @@ let versionHistoryAsset = null;
 let versionsLoaded = false;
 let versionsLoading = false;
 let versionError = "";
+
+function canManageTemplateAsset(assetType) {
+  return hasPermission(
+    getCurrentUser(),
+    assetType === "visual" ? "templates.manage" : "actionStandards.manage",
+  );
+}
+
+function canPublishTemplateAsset(assetType) {
+  return hasPermission(
+    getCurrentUser(),
+    assetType === "visual" ? "templates.publish" : "actionStandards.publish",
+  );
+}
 
 function createEmptyTags() {
   return Object.fromEntries(getTemplateTagCategories({ includeInactive: true }).map((category) => [category.id, []]));
@@ -443,7 +458,7 @@ function renderMaterialCard(material) {
           <em aria-live="polite"></em>
         </div>
         <div class="template-material-actions">
-          <button class="secondary-button" type="button" data-template-iterate="visual" data-asset-id="${escapeHtml(material.id)}">迭代</button>
+          ${canManageTemplateAsset("visual") ? `<button class="secondary-button" type="button" data-template-iterate="visual" data-asset-id="${escapeHtml(material.id)}">迭代</button>` : ""}
           ${previewDownloadAction}
           ${sourceLinkAction}
         </div>
@@ -487,7 +502,8 @@ function summarizeVersionDifference(version, olderVersion) {
 function renderVersionHistoryModal() {
   if (!versionHistoryAsset) return "";
   const versions = getAssetVersions(versionHistoryAsset.assetType, versionHistoryAsset.assetId);
-  return `<div class="modal-backdrop" role="presentation"><div class="modal-panel wide-modal" role="dialog" aria-modal="true" aria-label="版本历史"><div class="modal-header"><div><h2>版本管理</h2><p class="form-note">历史内容只读保留；启用历史版本会恢复该版本为当前业务版本。</p></div><button class="icon-button" type="button" data-action="close-template-version-history">×</button></div>${versionError ? `<div class="form-error">${escapeHtml(versionError)}</div>` : ""}<div class="template-version-list">${versions.map((version, index) => `<article><div><strong>${escapeHtml(version.versionNumber)}</strong><span>${escapeHtml(versionStatusNames[version.status] || version.status)}</span></div><p>${escapeHtml(version.changeSummary || "未填写修改说明")}</p><p class="form-note">${escapeHtml(summarizeVersionDifference(version, versions[index + 1]))}</p><small>${escapeHtml(version.createdAt)} · 创建人 ${escapeHtml(version.createdBy || "系统迁移")} · 使用 ${version.useCount ?? 0} 次</small><details><summary>查看该版本内容</summary><pre>${escapeHtml(JSON.stringify(version.content, null, 2))}</pre></details><div class="toolbar-actions">${version.status !== "active" && version.status !== "archived" ? `<button class="secondary-button" type="button" data-template-version-action="activate" data-version-id="${escapeHtml(version.id)}">启用</button>` : ""}${version.status === "active" ? `<button class="secondary-button" type="button" data-template-version-action="deactivate" data-version-id="${escapeHtml(version.id)}">停用</button>` : ""}${version.status !== "archived" ? `<button class="text-button" type="button" data-template-version-action="archive" data-version-id="${escapeHtml(version.id)}">归档</button>` : ""}</div></article>`).join("") || `<div class="empty-state">暂无版本记录</div>`}</div><div class="modal-actions"><button class="primary-button" type="button" data-action="close-template-version-history">关闭</button></div></div></div>`;
+  const canPublish = canPublishTemplateAsset(versionHistoryAsset.assetType);
+  return `<div class="modal-backdrop" role="presentation"><div class="modal-panel wide-modal" role="dialog" aria-modal="true" aria-label="版本历史"><div class="modal-header"><div><h2>版本管理</h2><p class="form-note">历史内容只读保留；启用历史版本会恢复该版本为当前业务版本。</p></div><button class="icon-button" type="button" data-action="close-template-version-history">×</button></div>${versionError ? `<div class="form-error">${escapeHtml(versionError)}</div>` : ""}<div class="template-version-list">${versions.map((version, index) => `<article><div><strong>${escapeHtml(version.versionNumber)}</strong><span>${escapeHtml(versionStatusNames[version.status] || version.status)}</span></div><p>${escapeHtml(version.changeSummary || "未填写修改说明")}</p><p class="form-note">${escapeHtml(summarizeVersionDifference(version, versions[index + 1]))}</p><small>${escapeHtml(version.createdAt)} · 创建人 ${escapeHtml(version.createdBy || "系统迁移")} · 使用 ${version.useCount ?? 0} 次</small><details><summary>查看该版本内容</summary><pre>${escapeHtml(JSON.stringify(version.content, null, 2))}</pre></details>${canPublish ? `<div class="toolbar-actions">${version.status !== "active" && version.status !== "archived" ? `<button class="secondary-button" type="button" data-template-version-action="activate" data-version-id="${escapeHtml(version.id)}">启用</button>` : ""}${version.status === "active" ? `<button class="secondary-button" type="button" data-template-version-action="deactivate" data-version-id="${escapeHtml(version.id)}">停用</button>` : ""}${version.status !== "archived" ? `<button class="text-button" type="button" data-template-version-action="archive" data-version-id="${escapeHtml(version.id)}">归档</button>` : ""}</div>` : ""}</article>`).join("") || `<div class="empty-state">暂无版本记录</div>`}</div><div class="modal-actions"><button class="primary-button" type="button" data-action="close-template-version-history">关闭</button></div></div></div>`;
 }
 
 function timestamp(value) {
@@ -591,7 +607,7 @@ function renderUnifiedDetail() {
 function renderUnifiedLibrary() {
   const items = filteredUnifiedAssets();
   return `<div class="template-unified-library"><div class="section-heading"><div><h2>${escapeHtml(assetCategories.find((item) => item.id === assetCategory)?.name)}</h2><p class="form-note">统一查看内容、使用场景、使用记录和引用关系；底层数据与业务引用保持不变。</p></div><div class="template-unified-tools"><input type="search" data-unified-template-keyword value="${escapeHtml(unifiedKeyword)}" placeholder="搜索名称、编码、内容或标签"/><select data-unified-template-order><option value="recent-use" ${unifiedOrder === "recent-use" ? "selected" : ""}>最近使用</option><option value="recent-update" ${unifiedOrder === "recent-update" ? "selected" : ""}>最近更新</option><option value="name" ${unifiedOrder === "name" ? "selected" : ""}>名称</option></select></div></div>
-    <div class="template-asset-grid">${items.map((item) => `<article class="template-asset-card"><div class="template-asset-card-head"><span>${escapeHtml(assetCategories.find((category) => category.id === item.category)?.name)}</span><em>${escapeHtml(item.status || "—")}</em></div><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.description)}</p>${item.category === "form" ? `<dl class="template-form-card-meta"><div><dt>使用场景</dt><dd>${escapeHtml(item.scene)}</dd></div><div><dt>表单类型</dt><dd>${escapeHtml(item.formType || "业务表单")}</dd></div><div><dt>更新时间</dt><dd>${escapeHtml(item.updatedAt || "暂无记录")}</dd></div></dl>${renderVersionControls(item.versionAssetType, item.versionAssetId)}<div class="toolbar-actions"><button class="secondary-button" type="button" data-template-iterate="${item.versionAssetType}" data-asset-id="${escapeHtml(item.versionAssetId)}">迭代</button><button class="text-button" type="button" data-unified-template-detail="${escapeHtml(item.id)}">查看详情</button></div>` : `<div class="template-asset-tags">${item.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div><small>引用 ${item.useCount} 次 · ${escapeHtml(item.lastUsedAt ? `最近使用 ${item.lastUsedAt}` : "暂无使用记录")}</small><button class="secondary-button" type="button" data-unified-template-detail="${escapeHtml(item.id)}">查看详情</button>`}</article>`).join("") || `<div class="empty-state">没有符合条件的模板资产</div>`}</div>${renderUnifiedDetail()}</div>`;
+    <div class="template-asset-grid">${items.map((item) => `<article class="template-asset-card"><div class="template-asset-card-head"><span>${escapeHtml(assetCategories.find((category) => category.id === item.category)?.name)}</span><em>${escapeHtml(item.status || "—")}</em></div><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.description)}</p>${item.category === "form" ? `<dl class="template-form-card-meta"><div><dt>使用场景</dt><dd>${escapeHtml(item.scene)}</dd></div><div><dt>表单类型</dt><dd>${escapeHtml(item.formType || "业务表单")}</dd></div><div><dt>更新时间</dt><dd>${escapeHtml(item.updatedAt || "暂无记录")}</dd></div></dl>${renderVersionControls(item.versionAssetType, item.versionAssetId)}<div class="toolbar-actions">${canManageTemplateAsset(item.versionAssetType) ? `<button class="secondary-button" type="button" data-template-iterate="${item.versionAssetType}" data-asset-id="${escapeHtml(item.versionAssetId)}">迭代</button>` : ""}<button class="text-button" type="button" data-unified-template-detail="${escapeHtml(item.id)}">查看详情</button></div>` : `<div class="template-asset-tags">${item.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div><small>引用 ${item.useCount} 次 · ${escapeHtml(item.lastUsedAt ? `最近使用 ${item.lastUsedAt}` : "暂无使用记录")}</small><button class="secondary-button" type="button" data-unified-template-detail="${escapeHtml(item.id)}">查看详情</button>`}</article>`).join("") || `<div class="empty-state">没有符合条件的模板资产</div>`}</div>${renderUnifiedDetail()}</div>`;
 }
 
 function renderPreviewModal() {
@@ -631,6 +647,7 @@ function renderPreviewModal() {
 }
 
 function renderEditTagsModal() {
+  if (!canManageTemplateAsset("visual")) return "";
   const material = getMaterials().find((item) => item.id === editingTagsMaterialId);
   if (material === undefined) return "";
   const previewImage = getPreviewImage(material);
@@ -687,7 +704,7 @@ export function renderTemplateCenterPage() {
     <section class="template-center-page">
       <nav class="template-asset-tabs" aria-label="模板分类">${assetCategories.map((item) => `<button class="${assetCategory === item.id ? "is-active" : ""}" type="button" data-template-asset-category="${item.id}"><strong>${item.name}</strong><span>${item.description}</span></button>`).join("")}</nav>
       ${assetCategory === "action" ? renderStandardWorkLibraryPage() : assetCategory === "standard" ? renderMethodologiesPage(getCurrentUser()) : showingFormDesigner ? `<div class="template-form-designer-header"><a class="text-button" href="#templateCenter">← 返回表单模板</a><h2>表单设计</h2><p class="form-note">继续使用原关键行动公共表单设计能力，保存后原业务引用立即生效。</p></div>${renderFormDesignSection()}` : assetCategory === "form" ? renderUnifiedLibrary() : `
-      <div class="template-upload-taxonomy">
+      ${canManageTemplateAsset("visual") ? `<div class="template-upload-taxonomy">
         <div class="template-upload-line">
           <label class="template-file-picker">
             <span>预览图</span>
@@ -706,7 +723,7 @@ export function renderTemplateCenterPage() {
           scope: "upload",
           selectedTags: uploadTags,
         })}
-      </div>
+      </div>` : ""}
       <div class="template-center-layout">
         <aside class="template-filter-panel">
           <h2>筛选</h2>
@@ -769,6 +786,7 @@ export function bindTemplateCenterPageEvents(rerender) {
   page.querySelectorAll("[data-template-version-action]").forEach((button) => button.addEventListener("click", async (event) => {
     event.stopPropagation();
     if (!versionHistoryAsset) return;
+    if (!canPublishTemplateAsset(versionHistoryAsset.assetType)) return;
     const action = button.dataset.templateVersionAction;
     if (action === "archive" && !window.confirm("归档后将退出日常使用，但历史和引用仍会保留。确认归档？")) return;
     try {
@@ -786,6 +804,7 @@ export function bindTemplateCenterPageEvents(rerender) {
     event.stopPropagation();
     const assetType = button.dataset.templateIterate;
     const assetId = button.dataset.assetId;
+    if (!canManageTemplateAsset(assetType)) return;
     const changeSummary = window.prompt("请输入本次迭代说明：", "内容迭代");
     if (changeSummary === null) return;
     const bump = window.confirm("是否升级为大版本（例如 V1.1 → V2.0）？\n选择“取消”将生成小版本。") ? "major" : "minor";
@@ -908,6 +927,7 @@ export function bindTemplateCenterPageEvents(rerender) {
   }
 
   page.querySelector("[data-action='create-template-from-upload']")?.addEventListener("click", async () => {
+    if (!canManageTemplateAsset("visual")) return;
     if (!isValidTemplatePayload({
       previewImage: uploadDraft.previewFile,
       tags: uploadTags,
@@ -1097,6 +1117,7 @@ export function bindTemplateCenterPageEvents(rerender) {
 
   page.querySelector(".template-tags-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (!canManageTemplateAsset("visual")) return;
     const material = getMaterials().find((item) => item.id === editingTagsMaterialId);
     if (material === undefined) {
       editingTagsMaterialId = null;

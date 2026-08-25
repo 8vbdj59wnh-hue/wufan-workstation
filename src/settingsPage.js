@@ -9,6 +9,7 @@ import {
   normalizePermissions,
   permissionCount,
   permissionGroups,
+  validatePermissionDependencies,
 } from "../shared/permissions.js";
 import { rerenderPreservingInputFocus } from "./inputFocus.js";
 import { bindDataAssetMapEvents, renderDataAssetMap } from "./dataAssetMapPage.js";
@@ -288,7 +289,7 @@ function canCurrentUser(permissionPath) {
 function canManageAdminDataCenter() {
   const user = getCurrentUser();
   return (["admin", "system_admin"].includes(user?.role) || user?.authRole === "admin")
-    && canCurrentUser("settings.manageAdminDataCenter");
+    && canCurrentUser("dataCenter.view");
 }
 
 function getPersonPermissions(person) {
@@ -310,7 +311,7 @@ function hasManageablePermissionAdmin(peopleList = people) {
   return peopleList.some((person) =>
     person.canLogin === true &&
     person.status === Status.Active &&
-    getPersonPermissions(person).settings.managePermissions === true
+    getPersonPermissions(person).permissions.manage === true
   );
 }
 
@@ -319,7 +320,7 @@ function getPermissionStatus(person) {
   if (["admin", "system_admin"].includes(person.authRole)) return "系统管理员";
   const template = getCustomPermissionTemplate(person.permissionTemplateId);
   if (template !== null) return template.name;
-  return getPersonPermissions(person).settings.managePermissions ? "权限管理员" : "个人权限";
+  return getPersonPermissions(person).permissions.manage ? "权限管理员" : "个人权限";
 }
 
 function renderCategoryTypeOptions(selectedType) {
@@ -492,7 +493,7 @@ function renderDepartmentCard(department, visited = new Set()) {
         </div>
         <p>负责人：${escapeHtml(leaderName)}</p>
         <p>人员：${personCount} 人 · 排序：${department.sortOrder}</p>
-        ${canCurrentUser("settings.editOrg") ? `
+        ${canCurrentUser("organization.manage") ? `
           <div class="row-actions">
             ${renderActionButton("编辑", "edit", "department", department.id)}
             ${renderActionButton("停用", "deactivate", "department", department.id, "danger-button")}
@@ -592,8 +593,8 @@ function renderOrganizationList() {
                     </div>
                     <div class="row-actions">
                       ${renderStatus(department.status)}
-                      ${canCurrentUser("settings.editOrg") ? renderActionButton("编辑", "edit", "department", department.id) : ""}
-                      ${canCurrentUser("settings.editOrg") ? renderActionButton("停用", "deactivate", "department", department.id, "danger-button") : ""}
+                      ${canCurrentUser("organization.manage") ? renderActionButton("编辑", "edit", "department", department.id) : ""}
+                      ${canCurrentUser("organization.manage") ? renderActionButton("停用", "deactivate", "department", department.id, "danger-button") : ""}
                     </div>
                   </div>
                   ${renderDepartmentPeopleSummary(department)}
@@ -605,8 +606,8 @@ function renderOrganizationList() {
                             <span>${escapeHtml(position.name)} · 排序：${position.sortOrder}</span>
                             <span class="row-actions">
                               ${renderStatus(position.status)}
-                              ${canCurrentUser("settings.editOrg") ? renderActionButton("编辑", "edit", "position", position.id) : ""}
-                              ${canCurrentUser("settings.editOrg") ? renderActionButton("停用", "deactivate", "position", position.id, "danger-button") : ""}
+                              ${canCurrentUser("organization.manage") ? renderActionButton("编辑", "edit", "position", position.id) : ""}
+                              ${canCurrentUser("organization.manage") ? renderActionButton("停用", "deactivate", "position", position.id, "danger-button") : ""}
                             </span>
                           </li>
                         `,
@@ -631,7 +632,7 @@ function renderOrganizationSection() {
     <section class="settings-section" id="organization">
       <div class="section-heading with-actions">
         <h2>组织架构</h2>
-        ${canCurrentUser("settings.editOrg") ? `
+        ${canCurrentUser("organization.manage") ? `
           <div class="section-actions">
             <button class="primary-button" type="button" data-action="add" data-entity="department">新增部门</button>
             <button class="secondary-button" type="button" data-action="add" data-entity="position">新增岗位</button>
@@ -651,11 +652,11 @@ function renderOrganizationSection() {
               rows="2"
               maxlength="160"
               placeholder="${escapeHtml(defaultCompanySlogan)}"
-              ${canCurrentUser("settings.editOrg") ? "" : "readonly"}
+              ${canCurrentUser("organization.manage") ? "" : "readonly"}
             >${escapeHtml(companySlogan)}</textarea>
           </label>
           ${
-            canCurrentUser("settings.editOrg")
+            canCurrentUser("organization.manage")
               ? `<button class="primary-button" type="submit">保存口号</button>`
               : ""
           }
@@ -673,7 +674,7 @@ function renderPeopleSection() {
     <section class="settings-section" id="people">
       <div class="section-heading with-actions">
         <h2>人员管理</h2>
-        ${canCurrentUser("settings.createPeople") ? `<button class="primary-button" type="button" data-action="add" data-entity="person">新增人员</button>` : ""}
+        ${canCurrentUser("people.manage") ? `<button class="primary-button" type="button" data-action="add" data-entity="person">新增人员</button>` : ""}
       </div>
       <div class="table-wrap">
         <table class="data-table">
@@ -712,8 +713,8 @@ function renderPeopleSection() {
                     <td>${renderStatus(person.status)}</td>
                     <td>
                       <span class="row-actions">
-                        ${canCurrentUser("settings.editPeople") ? renderActionButton("编辑", "edit", "person", person.id) : ""}
-                        ${canCurrentUser("settings.disablePeople") ? renderActionButton("停用", "deactivate", "person", person.id, "danger-button") : ""}
+                        ${canCurrentUser("people.manage") ? renderActionButton("编辑", "edit", "person", person.id) : ""}
+                        ${canCurrentUser("people.manage") ? renderActionButton("停用", "deactivate", "person", person.id, "danger-button") : ""}
                       </span>
                     </td>
                   </tr>
@@ -800,14 +801,14 @@ function getTemplateTagsByCategory(categoryId) {
 }
 
 function renderTemplateTagStatusActions(entity, item) {
-  if (!canCurrentUser("settings.editStandardWorkForms")) return "";
+  if (!canCurrentUser("actionStandards.manage")) return "";
   return item.status === Status.Inactive
     ? `<button class="text-button" type="button" data-action="activate" data-entity="${entity}" data-id="${escapeHtml(item.id)}">启用</button>`
     : `<button class="text-button danger-text" type="button" data-action="deactivate" data-entity="${entity}" data-id="${escapeHtml(item.id)}">停用</button>`;
 }
 
 function renderTemplateTagManagementSection() {
-  const canEdit = canCurrentUser("settings.editStandardWorkForms");
+  const canEdit = canCurrentUser("actionStandards.manage");
   const categories = getSortedTemplateTagCategories();
 
   return `
@@ -893,7 +894,7 @@ function renderStoreSection() {
     <section class="settings-section" id="stores">
       <div class="section-heading with-actions">
         <h2>店铺管理</h2>
-        ${canCurrentUser("settings.editStores") ? `<button class="primary-button" type="button" data-action="add" data-entity="store">新增店铺</button>` : ""}
+        ${canCurrentUser("systemSettings.manage") ? `<button class="primary-button" type="button" data-action="add" data-entity="store">新增店铺</button>` : ""}
       </div>
       <form class="task-filters store-filters" aria-label="店铺筛选">
         <label>
@@ -944,14 +945,14 @@ function renderStoreSection() {
                           <td>${escapeHtml(store.remark || "-")}</td>
                           <td>
                             <span class="row-actions">
-                              ${canCurrentUser("settings.editStores") ? renderActionButton("编辑", "edit", "store", store.id) : ""}
+                              ${canCurrentUser("systemSettings.manage") ? renderActionButton("编辑", "edit", "store", store.id) : ""}
                               ${
-                                canCurrentUser("settings.editStores") && store.status === Status.Active
+                                canCurrentUser("systemSettings.manage") && store.status === Status.Active
                                   ? renderActionButton("停用", "deactivate", "store", store.id, "danger-button")
                                   : ""
                               }
                               ${
-                                canCurrentUser("settings.editStores") && store.status === Status.Inactive
+                                canCurrentUser("systemSettings.manage") && store.status === Status.Inactive
                                   ? renderActionButton("启用", "activate", "store", store.id)
                                   : ""
                               }
@@ -978,7 +979,7 @@ function getSortedPublishingAccounts() {
 }
 
 function renderPublishingAccountSection() {
-  const canEdit = canCurrentUser("settings.editStandardWorkForms");
+  const canEdit = canCurrentUser("actionStandards.manage");
   const accounts = getSortedPublishingAccounts();
   return `
     <section class="settings-section" id="publishing-accounts">
@@ -1119,7 +1120,7 @@ function renderIssueCommunicationRecords(item) {
 
 function renderIssuesRequirementsSection() {
   const items = getFilteredIssuesRequirements();
-  const canEdit = canCurrentUser("settings.editStandardWorkForms");
+  const canEdit = canCurrentUser("actionStandards.manage");
   return `
     <section class="settings-section" id="issues-requirements">
       <div class="section-heading with-actions">
@@ -1276,7 +1277,7 @@ function renderPermissionGroup(group, permissions) {
           `)
           .join("")}
       </div>
-      ${group.key === "workPlans" ? renderActionLaunchTemplatePermissions(permissions) : ""}
+      ${group.key === "keyActions" ? renderActionLaunchTemplatePermissions(permissions) : ""}
     </details>
   `;
 }
@@ -1305,7 +1306,7 @@ function togglePermissionGroup(permissionCard) {
 }
 
 function renderActionLaunchTemplatePermissions(permissions) {
-  const selectedIds = new Set(permissions.workPlans?.launchTemplateIds ?? []);
+  const selectedIds = new Set(permissions.keyActions?.launchTemplateIds ?? []);
   const templates = state.taskTemplates
     .filter((template) => template.status !== Status.Inactive || selectedIds.has(template.id))
     .slice()
@@ -1324,9 +1325,9 @@ function renderActionLaunchTemplatePermissions(permissions) {
               <label class="checkbox-line">
                 <input
                   type="radio"
-                  name="workPlans.launchTemplateScope"
+                  name="keyActions.launchTemplateScope"
                   value="${option.value}"
-                  ${permissions.workPlans?.launchTemplateScope === option.value ? "checked" : ""}
+                  ${permissions.keyActions?.launchTemplateScope === option.value ? "checked" : ""}
                 />
                 <span>${option.label}</span>
               </label>
@@ -1344,7 +1345,7 @@ function renderActionLaunchTemplatePermissions(permissions) {
                     <label class="checkbox-line">
                       <input
                         type="checkbox"
-                        name="workPlans.launchTemplateIds"
+                        name="keyActions.launchTemplateIds"
                         value="${escapeHtml(template.id)}"
                         ${selectedIds.has(template.id) ? "checked" : ""}
                       />
@@ -1403,7 +1404,7 @@ function renderPersonPermissionTemplateOptions(selectedTemplateId) {
 
 function renderPermissionEditor() {
   const person = getSelectedPermissionPerson();
-  if (!canCurrentUser("settings.managePermissions")) {
+  if (!canCurrentUser("permissions.manage")) {
     return `<div class="empty-detail">你没有权限管理权限。</div>`;
   }
   if (person === null) return `<div class="empty-detail">请选择一个人员。</div>`;
@@ -1656,7 +1657,7 @@ function renderPersonForm() {
     modalState.mode === "edit"
       ? people.find((item) => item.id === modalState.id)
       : null;
-  const canManageAccounts = canCurrentUser("settings.manageAccounts");
+  const canManageAccounts = canCurrentUser("people.manageAccounts");
 
   return `
     <label>
@@ -2345,7 +2346,7 @@ async function saveDepartment(form, rerender) {
 
 async function saveCompanySlogan(form, rerender) {
   const company = companies[0];
-  if (company === undefined || !canCurrentUser("settings.editOrg")) return;
+  if (company === undefined || !canCurrentUser("organization.manage")) return;
 
   const companySlogan = getFormValue(form, "companySlogan").trim();
   const item = {
@@ -2411,7 +2412,7 @@ async function savePerson(form, rerender) {
   const directManagerId = getFormValue(form, "directManagerId") || null;
   const role = getFormValue(form, "role");
   const editingPerson = modalState.mode === "edit" ? people.find((person) => person.id === modalState.id) : null;
-  const canManageAccounts = canCurrentUser("settings.manageAccounts");
+  const canManageAccounts = canCurrentUser("people.manageAccounts");
   const username = canManageAccounts ? getFormValue(form, "username") : editingPerson?.username ?? "";
   const password = canManageAccounts ? getFormValue(form, "password") : "";
   const canLogin = canManageAccounts ? new FormData(form).has("canLogin") : editingPerson?.canLogin ?? false;
@@ -2473,8 +2474,19 @@ async function savePerson(form, rerender) {
     permissions: _permissions,
     permissionTemplateId: _permissionTemplateId,
     permissionOverrides: _permissionOverrides,
-    ...item
+    ...itemWithAccountFields
   } = itemWithPermissions;
+  const item = canManageAccounts
+    ? itemWithAccountFields
+    : Object.fromEntries(Object.entries(itemWithAccountFields).filter(([key]) => ![
+        "username",
+        "password",
+        "passwordHash",
+        "canLogin",
+        "authRole",
+        "lastLoginAt",
+        "mustChangePassword",
+      ].includes(key)));
 
   const safeDraft = stripSensitivePersonFields(item);
   const nextPeople = upsertItem(people, safeDraft);
@@ -2914,7 +2926,7 @@ async function alignPersonToDepartment(personId, targetDepartmentId, rerender) {
 
   const now = getNow();
   const item = {
-    ...person,
+    id: person.id,
     departmentId: targetDepartmentId,
     updatedAt: now,
   };
@@ -2963,7 +2975,10 @@ async function deactivateEntity(entity, id, rerender) {
   }
 
   try {
-    const savedItem = await persistSettingsEntity(entity, nextItem);
+    const writeItem = entity === "person"
+      ? { id: nextItem.id, status: nextItem.status, updatedAt: nextItem.updatedAt }
+      : nextItem;
+    const savedItem = await persistSettingsEntity(entity, writeItem);
     const stateItem = entity === "person" ? stripSensitivePersonFields(savedItem) : savedItem;
     replaceByEntity[entity](upsertItem(collectionByEntity[entity], stateItem));
     rerender();
@@ -3129,22 +3144,28 @@ function collectPermissionDraft(form, currentPermissions) {
       permissions[group.key][item.key] = formData.has(`${group.key}.${item.key}`);
     }
   }
-  permissions.workPlans.launchTemplateScope =
-    formData.get("workPlans.launchTemplateScope") === "selected" ? "selected" : "all";
-  permissions.workPlans.launchTemplateIds = [...new Set(formData.getAll("workPlans.launchTemplateIds").map(String).filter(Boolean))];
+  permissions.keyActions.launchTemplateScope =
+    formData.get("keyActions.launchTemplateScope") === "selected" ? "selected" : "all";
+  permissions.keyActions.launchTemplateIds = [...new Set(formData.getAll("keyActions.launchTemplateIds").map(String).filter(Boolean))];
   return permissions;
 }
 
 async function savePermissions(form, rerender) {
   const person = getSelectedPermissionPerson();
   if (person === null) return;
-  if (!canCurrentUser("settings.managePermissions")) {
+  if (!canCurrentUser("permissions.manage")) {
     permissionSaveMessage = "你没有权限保存权限。";
     rerender();
     return;
   }
 
   const nextPermissions = collectPermissionDraft(form, getActivePermissionDraft(person));
+  const dependencyErrors = validatePermissionDependencies(nextPermissions, person.authRole ?? "user");
+  if (dependencyErrors.length > 0) {
+    permissionSaveMessage = `请先勾选必要的查看权限：${dependencyErrors.flatMap((item) => item.missing).join("、")}`;
+    rerender();
+    return;
+  }
   const permissionTemplateId = getFormValue(form, "permissionTemplateId");
   const template = getCustomPermissionTemplate(permissionTemplateId);
   if (permissionTemplateId !== "" && (template === null || template.status === Status.Inactive)) {
@@ -3170,7 +3191,13 @@ async function savePermissions(form, rerender) {
   }
 
   try {
-    const savedPerson = await persistSettingsEntity("person", nextPerson);
+    const savedPerson = await persistSettingsEntity("person", {
+      id: nextPerson.id,
+      permissions: nextPermissions,
+      permissionTemplateId: nextPerson.permissionTemplateId,
+      permissionOverrides,
+      updatedAt: nextPerson.updatedAt,
+    });
     replacePeople(upsertItem(people, stripSensitivePersonFields(savedPerson)));
     await loadPersistentData();
     permissionDraft = {
@@ -3187,7 +3214,7 @@ async function savePermissions(form, rerender) {
 }
 
 async function saveCustomPermissionTemplate(form, rerender) {
-  if (!canCurrentUser("settings.managePermissions")) return;
+  if (!canCurrentUser("permissions.manage")) return;
   const draft = getActiveCustomPermissionTemplateDraft();
   if (draft === null) return;
   const name = getFormValue(form, "permissionTemplateName");
@@ -3205,11 +3232,18 @@ async function saveCustomPermissionTemplate(form, rerender) {
     return;
   }
   const now = getNow();
+  const permissions = collectPermissionDraft(form, draft.permissions);
+  const dependencyErrors = validatePermissionDependencies(permissions);
+  if (dependencyErrors.length > 0) {
+    permissionTemplateSaveMessage = `请先勾选必要的查看权限：${dependencyErrors.flatMap((item) => item.missing).join("、")}`;
+    rerender();
+    return;
+  }
   const item = {
     id: draft.id,
     name,
     description: getFormValue(form, "permissionTemplateDescription"),
-    permissions: collectPermissionDraft(form, draft.permissions),
+    permissions,
     status: getFormValue(form, "permissionTemplateStatus") || Status.Active,
     createdAt: draft.createdAt ?? now,
     updatedAt: now,
@@ -3284,7 +3318,7 @@ function selectFormDesignerField(fieldId) {
 }
 
 async function saveStandardWorkForm(form, rerender) {
-  if (!canCurrentUser("settings.editStandardWorkForms")) return;
+  if (!canCurrentUser("actionStandards.manage")) return;
   const standardWorkId = form.dataset.standardWorkId ?? "";
   const standardWork = state.taskTemplates.find((template) => template.id === standardWorkId);
   if (standardWork === undefined) return;
@@ -3787,7 +3821,7 @@ function getSettingsSubmodules() {
       group: "公司设置",
       icon: "组",
       description: "维护部门层级、岗位和组织关系。",
-      canView: () => canCurrentUser("settings.viewOrg"),
+      canView: () => canCurrentUser("organization.view"),
       render: renderOrganizationSection,
     },
     {
@@ -3796,7 +3830,7 @@ function getSettingsSubmodules() {
       group: "组织人员",
       icon: "人",
       description: "维护员工账号、部门岗位和登录权限。",
-      canView: () => canCurrentUser("settings.viewPeople"),
+      canView: () => canCurrentUser("people.view"),
       render: renderPeopleSection,
     },
     {
@@ -3805,7 +3839,7 @@ function getSettingsSubmodules() {
       group: "权限管理",
       icon: "权",
       description: "配置人员可访问的模块和数据范围。",
-      canView: () => canCurrentUser("settings.managePermissions"),
+      canView: () => canCurrentUser("permissions.manage"),
       render: renderPermissionSection,
     },
     {
@@ -3814,7 +3848,7 @@ function getSettingsSubmodules() {
       group: "数据管理",
       icon: "店",
       description: "维护系统内可使用的店铺资料。",
-      canView: () => canCurrentUser("settings.viewStores"),
+      canView: () => canCurrentUser("systemSettings.manage"),
       render: renderStoreSection,
     },
     {
@@ -3832,7 +3866,7 @@ function getSettingsSubmodules() {
       group: "数据管理",
       icon: "发",
       description: "维护“发布内容笔记”可选择的发布账号。",
-      canView: () => canCurrentUser("settings.editStandardWorkForms"),
+      canView: () => canCurrentUser("actionStandards.manage"),
       render: renderPublishingAccountSection,
     },
     {
@@ -3841,7 +3875,7 @@ function getSettingsSubmodules() {
       group: "数据管理",
       icon: "图",
       description: "查看数据来源、业务对象、关系链与唯一真相源。",
-      canView: () => canCurrentUser("settings.viewDataAssetMap"),
+      canView: () => canCurrentUser("dataAssets.view"),
       render: renderDataAssetMap,
     },
     {
@@ -3859,7 +3893,7 @@ function getSettingsSubmodules() {
       group: "业务配置",
       icon: "表",
       description: "该表单在发起关键行动时填写，同一关键行动下所有任务共享。",
-      canView: () => canCurrentUser("settings.viewStandardWorks") || canCurrentUser("settings.editStandardWorkForms"),
+      canView: () => canCurrentUser("actionStandards.view") || canCurrentUser("actionStandards.manage"),
       render: renderFormDesignSection,
     },
     {
@@ -3868,7 +3902,7 @@ function getSettingsSubmodules() {
       group: "模板中心",
       icon: "签",
       description: "维护模板中心可选择的标签分类和标签。",
-      canView: () => canCurrentUser("settings.editStandardWorkForms"),
+      canView: () => canCurrentUser("actionStandards.manage"),
       render: renderTemplateTagManagementSection,
     },
     {
@@ -3877,7 +3911,7 @@ function getSettingsSubmodules() {
       group: "系统设置",
       icon: "需",
       description: "收集系统问题和优化需求，并跟进处理状态。",
-      canView: () => canCurrentUser("settings.editStandardWorkForms"),
+      canView: () => canCurrentUser("actionStandards.manage"),
       render: renderIssuesRequirementsSection,
     },
   ];

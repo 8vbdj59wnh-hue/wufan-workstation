@@ -104,15 +104,15 @@ function escapeHtml(value) {
 }
 
 function canView() {
-  return canCurrentUser("methods.view");
+  return canCurrentUser("actionStandards.view");
 }
 
 function canEdit() {
-  return canCurrentUser("methods.edit");
+  return canCurrentUser("actionStandards.manage");
 }
 
 function canCreate() {
-  return canCurrentUser("methods.create");
+  return canCurrentUser("actionStandards.manage");
 }
 
 function findName(items, id, fallback = "未关联") {
@@ -588,7 +588,7 @@ export function bindMethodologiesPageEvents(rerender) {
 export function renderMethodologiesPage(currentUser = null) {
   activeUser = currentUser;
   syncSelectedFromHash();
-  if (!hasPermission(currentUser, "methods.view")) {
+  if (!hasPermission(currentUser, "actionStandards.view")) {
     return `<div class="methodologies-page"><section class="placeholder"><h2>你没有权限访问任务操作说明书</h2></section></div>`;
   }
   return `

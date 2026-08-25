@@ -95,7 +95,7 @@ export function bindOperationDashboardPageEvents(rerender) {
   if (!anomalies && !anomaliesLoading) refreshAnomalies(rerender);
   document.querySelectorAll("[data-anomaly-select]").forEach((button) => button.addEventListener("click", () => { selectedAnomalyKey = button.dataset.anomalySelect; rerender(); }));
   document.querySelectorAll("[data-launch-anomaly-action]").forEach((button) => button.addEventListener("click", () => {
-    if (!hasPermission(getCurrentUser(), "workPlans.launch")) return;
+    if (!hasPermission(getCurrentUser(), "keyActions.launch")) return;
     const item = anomalies?.items?.find((entry) => [entry.anomalyType, entry.objectType, entry.objectId].join("|") === button.dataset.launchAnomalyAction);
     if (!item || !["salesLink", "product", "dataQuality"].includes(item.objectType)) return;
     const sourceContext = { source: "sales_anomaly", objectType: item.objectType, objectId: item.objectId, salesLinkId: item.objectType === "salesLink" ? item.objectId : null, productId: item.objectType === "product" ? item.objectId : null, anomalySnapshot: { anomalyType: item.anomalyType, metric: item.anomalyType === "profit_drop" ? "profitAmount" : "salesAmount", severity: item.severity, currentPeriod: item.currentPeriod, comparePeriod: item.comparePeriod, currentValue: item.currentValue, compareValue: item.compareValue, changeRate: item.changeRate, trendSummary: item.trendSummary || null }, baselineSnapshot: item.baselineSnapshot || null, recommendedActionStandard: item.recommendedActionStandard, recommendedActionTemplate: item.recommendedActionTemplate };

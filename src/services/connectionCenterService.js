@@ -52,6 +52,7 @@ export {
   loadConnectionBusinessPositioning,
   loadConnectionBusinessGoals,
   loadConnectionBusinessGoalEvaluation,
+  refreshConnectionBusinessGoalEvaluation,
   loadConnectionGoalWorkbench,
   loadConnectionGoalHealthSummary,
   loadConnectionGoalPilotBatches,

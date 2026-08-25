@@ -115,6 +115,20 @@ let productShopSandboxState = { range: { preset: "30d" }, shopId: "", shops: [],
 let productBusinessFilters = { query: "", brand: "", category: "", lifecycle: "", status: "", healthStatus: "", inventoryStatus: "", ownerId: "", includeHistorical: false, range: "30d", periodStart: "", periodEnd: "", sortBy: "updatedAt", sortDirection: "desc", page: 1, pageSize: 30 };
 let productBusinessVisibleMetrics = new Set(["sales", "structure", "inventory", "profit", "health", "diagnosis"]);
 
+function canViewProducts() { return hasPermission(getCurrentUser(), "products.view"); }
+function canViewSkus() { return hasPermission(getCurrentUser(), "skus.view"); }
+function canViewCombos() { return hasPermission(getCurrentUser(), "combos.view"); }
+
+function ensureAuthorizedProductSubmodule() {
+  const allowed = new Set([
+    ...(canViewProducts() ? ["business-dashboard", "business-cockpit", "product-sandbox"] : []),
+    ...(canViewSkus() ? ["sku-management", "pending-skus"] : []),
+    ...(canViewCombos() ? ["combo-skus"] : []),
+  ]);
+  if (!allowed.has(productSubmodule)) productSubmodule = allowed.values().next().value ?? "";
+  return allowed;
+}
+
 const productBusinessMetricGroups = [
   { key: "sales", label: "销售贡献", count: 5 },
   { key: "structure", label: "产品结构", count: 2 },
@@ -320,7 +334,7 @@ function renderFilterOptions(values, selected, emptyLabel) {
 function renderProductActions(product) {
   return `<div class="table-actions">
     <button class="text-button" type="button" data-action="view-product" data-product-id="${product.id}">查看</button>
-    ${hasPermission(getCurrentUser(), "products.edit") ? `<button class="text-button" type="button" data-action="edit-product" data-product-id="${product.id}">编辑</button>` : ""}
+    ${hasPermission(getCurrentUser(), "products.manage") ? `<button class="text-button" type="button" data-action="edit-product" data-product-id="${product.id}">编辑</button>` : ""}
     ${product.status !== "已归档" && hasPermission(getCurrentUser(), "products.archive") ? `<button class="text-button danger-text" type="button" data-action="archive-product" data-product-id="${product.id}">归档</button>` : ""}
   </div>`;
 }
@@ -387,16 +401,17 @@ function renderProductCards(products, index) {
 }
 
 function renderProductWorkspaceTabs() {
+  ensureAuthorizedProductSubmodule();
   const isProductDetail = Boolean(getRouteProductId());
   const skuManagementActive = Boolean(getRouteErpSkuId())
     || (!isProductDetail && ["sku-management", "pending-skus", "combo-skus"].includes(productSubmodule));
   const cockpitActive = !isProductDetail && !skuManagementActive && productSubmodule === "business-cockpit";
   const sandboxActive = !isProductDetail && !skuManagementActive && productSubmodule === "product-sandbox";
   return `<nav class="product-workspace-tabs" aria-label="产品中心视图">
-    <button type="button" data-action="product-workspace-view" data-view="business-cockpit" class="${cockpitActive ? "is-active" : ""}">经营驾驶舱</button>
+    ${canViewProducts() ? `<button type="button" data-action="product-workspace-view" data-view="business-cockpit" class="${cockpitActive ? "is-active" : ""}">经营驾驶舱</button>
     <button type="button" data-action="product-workspace-view" data-view="product-sandbox" class="${sandboxActive ? "is-active" : ""}">产品沙盘</button>
-    <button type="button" data-action="product-workspace-view" data-view="business-dashboard" class="${!cockpitActive && !sandboxActive && !skuManagementActive ? "is-active" : ""}">产品经营</button>
-    <button type="button" data-action="product-workspace-view" data-view="sku-management" class="${skuManagementActive ? "is-active" : ""}">SKU管理</button>
+    <button type="button" data-action="product-workspace-view" data-view="business-dashboard" class="${!cockpitActive && !sandboxActive && !skuManagementActive ? "is-active" : ""}">产品经营</button>` : ""}
+    ${canViewSkus() || canViewCombos() ? `<button type="button" data-action="product-workspace-view" data-view="sku-management" class="${skuManagementActive ? "is-active" : ""}">SKU管理</button>` : ""}
   </nav>`;
 }
 
@@ -558,7 +573,7 @@ function renderProductSkuV2List() {
   const { rows, summary, pagination, facets } = productSkuV2State;
   const totalPages = Math.max(1, Math.ceil(Number(pagination.total || 0) / productSkuV2State.pageSize));
   return `<section class="product-center-page product-sku-v2-page">
-    <div class="section-heading with-actions"><div><h1>产品中心</h1><p>查看每个 SKU 的经营表现与库存状态</p></div><details class="product-more-filters"><summary>更多</summary><div><button type="button" class="text-button" data-action="open-product-v2-import">数据同步</button></div></details></div>
+    <div class="section-heading with-actions"><div><h1>产品中心</h1><p>查看每个 SKU 的经营表现与库存状态</p></div>${hasPermission(getCurrentUser(), "products.import") ? `<details class="product-more-filters"><summary>更多</summary><div><button type="button" class="text-button" data-action="open-product-v2-import">数据同步</button></div></details>` : ""}</div>
     ${renderProductWorkspaceTabs()}
     ${renderProductSubmoduleTabs()}
     ${productSkuV2State.error ? `<div class="form-error">${escapeHtml(productSkuV2State.error)}</div>` : ""}
@@ -621,7 +636,7 @@ function renderProductSkuV2Cards(rows) {
           <div><strong>${formatMetric(item.stockNum)}</strong><span>${Number(item.stockNum || 0) <= 0 ? "库存风险" : "当前库存"}</span></div>
         </div>
         ${!item.productId ? `<small class="product-card-listed-at">未建立产品档案</small>` : ""}
-        ${!item.productId && hasPermission(getCurrentUser(), "products.create") ? `<button class="primary-button compact-button" type="button" data-action="create-product-v2-profile" data-erp-sku-id="${escapeHtml(item.erpSkuId)}">创建产品档案</button>` : ""}
+        ${!item.productId && hasPermission(getCurrentUser(), "skus.manage") ? `<button class="primary-button compact-button" type="button" data-action="create-product-v2-profile" data-erp-sku-id="${escapeHtml(item.erpSkuId)}">创建产品档案</button>` : ""}
         ${product ? `<div class="product-card-more"><button class="icon-button" type="button" data-action="toggle-product-menu" data-product-id="${escapeHtml(product.id)}" aria-label="产品操作">•••</button><div class="product-card-menu" data-product-menu="${escapeHtml(product.id)}" hidden>${renderProductActions(product)}</div></div>` : ""}
       </div>
     </article>`;
@@ -644,7 +659,7 @@ function renderProductSkuV2Detail() {
   const tabs = [["overview", "概览"], ["marketing", "营销资产"], ["sku", "SKU管理"], ["inventory", "库存记录"], ["sales", "销售记录"], ["operations", "操作记录"]];
   const activeTab = productWorkspaceState.activeTab;
   const marketing = section("marketing");
-  const canEditMarketing = hasPermission(getCurrentUser(), "products.edit");
+  const canEditMarketing = hasPermission(getCurrentUser(), "products.manage");
   const marketingSummary = !sku.productId
     ? `<section class="product-workspace-panel product-marketing-summary"><header><div><span>产品知识资产</span><h2>产品营销资产</h2></div></header><div class="empty-state compact">需先建立产品档案，才能维护产品营销资产。</div></section>`
     : marketing.loading ? `<section class="product-workspace-panel"><div class="empty-state compact">正在读取产品营销资产…</div></section>`
@@ -681,7 +696,7 @@ function renderProductSkuV2Detail() {
     <button class="text-button product-detail-back" type="button" data-action="back-products">← 返回SKU管理</button>
     ${renderProductWorkspaceTabs()}
     ${productSkuV2State.error ? `<div class="form-error">${escapeHtml(productSkuV2State.error)}</div>` : ""}
-    <div class="product-workspace-top">${businessZoneBadge(listRow?.businessZone)}<div class="product-workspace-hero">${renderUiModule("product_basic_info", moduleContext)}${renderUiModule("product_business_data", moduleContext)}</div><div class="product-workspace-actions">${!sku.productId && hasPermission(getCurrentUser(), "products.create") ? `<button class="primary-button" type="button" data-action="create-product-v2-profile" data-erp-sku-id="${escapeHtml(sku.id)}">创建产品档案</button>` : sku.productId ? `<a class="secondary-button" href="#products/${encodeURIComponent(sku.productId)}">查看关联产品档案 →</a>` : ""}</div></div>
+    <div class="product-workspace-top">${businessZoneBadge(listRow?.businessZone)}<div class="product-workspace-hero">${renderUiModule("product_basic_info", moduleContext)}${renderUiModule("product_business_data", moduleContext)}</div><div class="product-workspace-actions">${!sku.productId && hasPermission(getCurrentUser(), "skus.manage") ? `<button class="primary-button" type="button" data-action="create-product-v2-profile" data-erp-sku-id="${escapeHtml(sku.id)}">创建产品档案</button>` : sku.productId && canViewProducts() ? `<a class="secondary-button" href="#products/${encodeURIComponent(sku.productId)}">查看关联产品档案 →</a>` : ""}</div></div>
     <nav class="product-workspace-tabs" aria-label="Product Workspace">${tabs.map(([key,label])=>`<button type="button" data-action="product-workspace-tab" data-tab="${key}" class="${activeTab===key?"is-active":""}">${label}</button>`).join("")}</nav>
     <div class="product-workspace-content">${tabContent}</div>
   </section>`;
@@ -701,9 +716,9 @@ function renderProductWorkspaceRecords(scope, section) {
 
 function renderProductSubmoduleTabs() {
   return `<nav class="product-submodule-tabs" aria-label="产品中心子模块">
-    <button type="button" data-action="product-submodule" data-submodule="sku-management" class="${productSubmodule === "sku-management" ? "is-active" : ""}">SKU列表</button>
-    <button type="button" data-action="product-submodule" data-submodule="pending-skus" class="${productSubmodule === "pending-skus" ? "is-active" : ""}">待建立SKU</button>
-    <button type="button" data-action="product-submodule" data-submodule="combo-skus" class="${productSubmodule === "combo-skus" ? "is-active" : ""}">组合装管理</button>
+    ${canViewSkus() ? `<button type="button" data-action="product-submodule" data-submodule="sku-management" class="${productSubmodule === "sku-management" ? "is-active" : ""}">SKU列表</button>
+    <button type="button" data-action="product-submodule" data-submodule="pending-skus" class="${productSubmodule === "pending-skus" ? "is-active" : ""}">待建立SKU</button>` : ""}
+    ${canViewCombos() ? `<button type="button" data-action="product-submodule" data-submodule="combo-skus" class="${productSubmodule === "combo-skus" ? "is-active" : ""}">组合装管理</button>` : ""}
   </nav>`;
 }
 
@@ -743,7 +758,7 @@ function renderComboSkuDetail() {
 }
 
 function renderPendingSkuPage() {
-  const canCreate = hasPermission(getCurrentUser(), "products.create");
+  const canCreate = hasPermission(getCurrentUser(), "skus.manage");
   const selectedCount = selectedPendingSkuIds.size;
   const allSelected = pendingSkuState.rows.length > 0 && pendingSkuState.rows.every((item) => selectedPendingSkuIds.has(item.id));
   return `<section class="product-center-page">
@@ -1061,7 +1076,7 @@ function renderProductDetail(product) {
           <h1>${escapeHtml(product.name)}</h1>
           <p>${escapeHtml(product.category || "未设置分类")}</p>
         </div>
-        ${hasPermission(getCurrentUser(), "products.edit") ? `<button class="primary-button" type="button" data-action="edit-product" data-product-id="${product.id}">编辑产品</button>` : ""}
+        ${hasPermission(getCurrentUser(), "products.manage") ? `<button class="primary-button" type="button" data-action="edit-product" data-product-id="${product.id}">编辑产品</button>` : ""}
       </header>
       <nav class="product-detail-tabs" aria-label="产品详情">
         ${[
@@ -1142,7 +1157,7 @@ function renderProductBusinessTab(product) {
     <article><span>实际库存</span><strong>${formatMetric(analysis.inventory.actualStock)}</strong><small>${escapeHtml(analysis.inventory.risk)}</small></article>
     <article><span>库存周转</span><strong>${formatPercent(analysis.inventory.turnover)}</strong><small>库存效率</small></article>
     <article><span>健康状态</span><strong>${escapeHtml(detail.healthAnalysis?.overall?.label || healthLabel(latestHealth?.healthStatus))}</strong><small>详细原因请查看“产品健康分析”</small></article>
-  </div>${hasPermission(getCurrentUser(), "products.edit") ? `<button class="primary-button" type="button" data-action="evaluate-product-health" data-product-id="${escapeHtml(product.id)}">生成经营体检</button>` : ""}
+  </div>${hasPermission(getCurrentUser(), "products.manage") ? `<button class="primary-button" type="button" data-action="evaluate-product-health" data-product-id="${escapeHtml(product.id)}">生成经营体检</button>` : ""}
   <section class="product-problem-list"><h2>经营问题</h2>${detail.issues?.length ? detail.issues.map((issue) => `<article><span class="status-badge">${escapeHtml(issue.severity)}</span><strong>${escapeHtml(issue.title)}</strong><small>${escapeHtml(issue.status)}</small></article>`).join("") : `<p>暂未生成经营问题</p>`}</section></div>`;
 }
 
@@ -1166,7 +1181,7 @@ function renderProductHealthAnalysisTab(product) {
   const activeGoals = state.goals.filter((item) => item.status === "active");
   const actionTemplates = state.taskTemplates.filter((item) => item.status === "active" && item.defaultProcessTemplateId
     && state.processTemplates.some((process) => process.id === item.defaultProcessTemplateId));
-  const canCreate = hasPermission(getCurrentUser(), "products.edit");
+  const canCreate = hasPermission(getCurrentUser(), "products.manage");
   const center = detail?.improvementCenter;
   return `<div class="product-health-analysis">
     <header class="product-health-overall"><div><p class="eyebrow">产品健康</p><h2>综合状态：${escapeHtml(analysis.overall?.emoji || "⚪")} ${escapeHtml(analysis.overall?.label || "暂无数据")}</h2><p>基于现有销售、库存、利润、链接与生命周期数据的可解释规则分析。</p></div><span class="product-health-readonly">只读分析 · 不覆盖人工判断</span></header>
@@ -1186,7 +1201,7 @@ function renderProductBusinessImprovementTab(product) {
   const detail = getProductManagementDetail(product.id);
   const center = detail?.improvementCenter;
   if (!center) return `<div class="product-detail-empty">${productManagementState.loadingProductId === product.id ? "正在读取经营改善…" : "暂无经营改善数据"}</div>`;
-  const canEdit = hasPermission(getCurrentUser(), "products.edit");
+  const canEdit = hasPermission(getCurrentUser(), "products.manage");
   const resultItems = center.improvements.filter((item) => item.resultSummary);
   const issueGroups = [...new Map(center.issueTypes.map((item) => [item.category, center.issueTypes.filter((type) => type.category === item.category)])).entries()];
   return `<div class="product-business-improvement">
@@ -1227,7 +1242,7 @@ function renderProductStrategyTab(product) {
   if (!strategy) return `<div class="product-detail-empty">${productManagementState.loadingProductId === product.id ? "正在读取产品战略…" : "暂无产品战略数据"}</div>`;
   const current = strategy.current; const content = current?.content ?? { positioning: {}, competition: {}, goals: {}, management: {}, nextStrategies: [] };
   const { positioning, competition, goals, management, nextStrategies } = content;
-  const canEdit = hasPermission(getCurrentUser(), "products.edit");
+  const canEdit = hasPermission(getCurrentUser(), "products.manage");
   const activeGoals = state.goals.filter((item) => item.status === "active");
   const actionTemplates = state.taskTemplates.filter((item) => item.status === "active" && item.defaultProcessTemplateId
     && state.processTemplates.some((process) => process.id === item.defaultProcessTemplateId));
@@ -1280,7 +1295,7 @@ function productInsightMeta(item) {
 function renderProductInsightTab(product) {
   const center = getProductManagementDetail(product.id)?.insightCenter;
   if (!center) return `<div class="product-detail-empty">${productManagementState.loadingProductId === product.id ? "正在读取用户洞察…" : "暂无用户洞察数据"}</div>`;
-  const canEdit = hasPermission(getCurrentUser(), "products.edit"); const groups = center.groups;
+  const canEdit = hasPermission(getCurrentUser(), "products.manage"); const groups = center.groups;
   const improvementOptions = `<option value="">不关联</option>${center.relations.improvements.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.title)} · ${escapeHtml(item.actionName || item.actionId)}</option>`).join("")}`;
   const strategyOptions = `<option value="">不关联</option>${center.relations.strategies.map((item) => `<option value="${escapeHtml(item.id)}">V${item.version} · ${item.status === "current" ? "当前战略" : "历史战略"}</option>`).join("")}`;
   const actionOptions = `<option value="">不关联</option>${center.relations.actions.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)} · ${escapeHtml(productImprovementActionStatus(item.status))}</option>`).join("")}`;
@@ -1309,14 +1324,14 @@ function renderProductInsightTab(product) {
 
 function renderProductLifecycleTab(product) {
   const detail = getProductManagementDetail(product.id); const statuses = detail?.lifecycleStatuses || ["开发中","上架","成长期","成熟期","风险期","淘汰"];
-  return `<div class="product-lifecycle-panel">${hasPermission(getCurrentUser(), "products.edit") ? `<form data-product-lifecycle-form data-product-id="${escapeHtml(product.id)}"><select name="status">${statuses.map((status) => `<option value="${escapeHtml(status)}" ${product.status===status?"selected":""}>${escapeHtml(status)}</option>`).join("")}</select><input name="reason" placeholder="变更原因" required /><button class="primary-button">更新生命周期</button></form>` : ""}<div class="product-lifecycle-timeline">${detail?.lifecycle?.length ? detail.lifecycle.map((item) => `<article><strong>${escapeHtml(item.fromStatus || "未设置")} → ${escapeHtml(item.toStatus)}</strong><p>${escapeHtml(item.reason || "未填写原因")}</p><small>${formatDateTime(item.changedAt)}</small></article>`).join("") : `<p>暂无生命周期变更记录</p>`}</div></div>`;
+  return `<div class="product-lifecycle-panel">${hasPermission(getCurrentUser(), "products.archive") ? `<form data-product-lifecycle-form data-product-id="${escapeHtml(product.id)}"><select name="status">${statuses.map((status) => `<option value="${escapeHtml(status)}" ${product.status===status?"selected":""}>${escapeHtml(status)}</option>`).join("")}</select><input name="reason" placeholder="变更原因" required /><button class="primary-button">更新生命周期</button></form>` : ""}<div class="product-lifecycle-timeline">${detail?.lifecycle?.length ? detail.lifecycle.map((item) => `<article><strong>${escapeHtml(item.fromStatus || "未设置")} → ${escapeHtml(item.toStatus)}</strong><p>${escapeHtml(item.reason || "未填写原因")}</p><small>${formatDateTime(item.changedAt)}</small></article>`).join("") : `<p>暂无生命周期变更记录</p>`}</div></div>`;
 }
 
 function renderProductImprovementsTab(product) {
   const detail = getProductManagementDetail(product.id); if (!detail) return `<div class="product-detail-empty">正在读取改善记录…</div>`;
   const activeGoals = state.goals.filter((item) => item.status === "active");
   const actionTemplates = state.taskTemplates.filter((item) => item.status === "active" && item.defaultProcessTemplateId && state.processTemplates.some((process) => process.id === item.defaultProcessTemplateId));
-  return `<div class="product-improvement-panel"><section><h2>待改善问题</h2>${detail.issues?.filter((item) => item.status !== "closed").map((issue) => `<article class="product-improvement-issue"><strong>${escapeHtml(issue.title)}</strong><span>${escapeHtml(issue.status)}</span>${hasPermission(getCurrentUser(), "products.edit") ? `<form data-product-improvement-form data-issue-id="${escapeHtml(issue.id)}"><input name="title" value="改善${escapeHtml(product.name)}：${escapeHtml(issue.title)}" required /><select name="goalId" required><option value="">选择目标</option>${activeGoals.map((goal) => `<option value="${escapeHtml(goal.id)}">${escapeHtml(goal.name)}</option>`).join("")}</select><select name="taskTemplateId" required><option value="">选择行动标准</option>${actionTemplates.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join("")}</select><button class="primary-button">创建改善行动</button></form>` : ""}</article>`).join("") || `<p>暂无待改善问题，请先生成经营体检。</p>`}</section><section><h2>改善项目</h2>${detail.improvements?.length ? detail.improvements.map((item) => `<article class="product-improvement-record"><div><strong>${escapeHtml(item.title)}</strong><span class="status-badge">${escapeHtml(item.status)}</span></div><p>关键行动：${escapeHtml(item.actionName || item.actionId)} · ${escapeHtml(item.actionStatus || "—")}</p></article>`).join("") : `<p>暂无改善项目</p>`}</section></div>`;
+  return `<div class="product-improvement-panel"><section><h2>待改善问题</h2>${detail.issues?.filter((item) => item.status !== "closed").map((issue) => `<article class="product-improvement-issue"><strong>${escapeHtml(issue.title)}</strong><span>${escapeHtml(issue.status)}</span>${hasPermission(getCurrentUser(), "products.manage") ? `<form data-product-improvement-form data-issue-id="${escapeHtml(issue.id)}"><input name="title" value="改善${escapeHtml(product.name)}：${escapeHtml(issue.title)}" required /><select name="goalId" required><option value="">选择目标</option>${activeGoals.map((goal) => `<option value="${escapeHtml(goal.id)}">${escapeHtml(goal.name)}</option>`).join("")}</select><select name="taskTemplateId" required><option value="">选择行动标准</option>${actionTemplates.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join("")}</select><button class="primary-button">创建改善行动</button></form>` : ""}</article>`).join("") || `<p>暂无待改善问题，请先生成经营体检。</p>`}</section><section><h2>改善项目</h2>${detail.improvements?.length ? detail.improvements.map((item) => `<article class="product-improvement-record"><div><strong>${escapeHtml(item.title)}</strong><span class="status-badge">${escapeHtml(item.status)}</span></div><p>关键行动：${escapeHtml(item.actionName || item.actionId)} · ${escapeHtml(item.actionStatus || "—")}</p></article>`).join("") : `<p>暂无改善项目</p>`}</section></div>`;
 }
 
 function renderProductErpTab({ mapping, goods, stock }) {
@@ -1392,7 +1407,7 @@ function renderProductModal() {
   const item = product ?? { skuCode: "", name: "", mainImage: "", galleryImages: [], status: "开发中" };
   return `<div class="modal-backdrop"><section class="modal-panel product-modal"><header class="modal-header"><div><h2>${product ? "编辑产品" : "新增产品"}</h2><p>每个 SKU 仅维护一条产品记录</p></div><button class="icon-button" type="button" data-action="close-product-modal" aria-label="关闭">×</button></header>
     <form class="modal-body product-form" id="product-form"><div class="form-error" ${modalState.error ? "" : "hidden"}>${escapeHtml(modalState.error || "")}</div><div class="form-grid">
-      <label><span>SKU编码 *</span><input name="skuCode" required value="${escapeHtml(item.skuCode)}" ${product ? "readonly" : ""} />${product ? `<small>ERP关联关键字段，普通编辑不可修改。${hasPermission(getCurrentUser(), "products.archive") ? ` <button class="text-button" type="button" data-action="open-sku-change" data-product-id="${product.id}">使用SKU修改流程</button>` : ""}</small>` : ""}</label><label><span>产品名称 *</span><input name="name" required value="${escapeHtml(item.name)}" /></label>
+      <label><span>SKU编码 *</span><input name="skuCode" required value="${escapeHtml(item.skuCode)}" ${product ? "readonly" : ""} />${product ? `<small>ERP关联关键字段，普通编辑不可修改。${hasPermission(getCurrentUser(), "skus.manage") ? ` <button class="text-button" type="button" data-action="open-sku-change" data-product-id="${product.id}">使用SKU修改流程</button>` : ""}</small>` : ""}</label><label><span>产品名称 *</span><input name="name" required value="${escapeHtml(item.name)}" /></label>
       ${[["brand", "品牌"], ["category", "产品分类"], ["series", "产品系列"], ["material", "材质"], ["color", "颜色"], ["specification", "规格尺寸"]].map(([name, label]) => `<label><span>${label}</span><input name="${name}" value="${escapeHtml(item[name] || "")}" /></label>`).join("")}
       <label><span>产品状态</span><select name="status">${productStatuses.filter((status) => status !== "已归档" || item.status === "已归档" || hasPermission(getCurrentUser(), "products.archive")).map((status) => `<option ${status === item.status ? "selected" : ""}>${status}</option>`).join("")}</select></label>
       <label><span>产品负责人</span><select name="ownerId"><option value="">未设置</option>${state.people.filter((person) => person.status !== "inactive").map((person) => `<option value="${person.id}" ${person.id === item.ownerId ? "selected" : ""}>${escapeHtml(person.name)}</option>`).join("")}</select></label>
@@ -1904,10 +1919,13 @@ async function refreshErpSyncState(syncRunId = erpSyncState.active?.id) {
 }
 
 export function renderProductCenterPage() {
+  ensureAuthorizedProductSubmodule();
   if (isComboSkuRoute()) productSubmodule = "combo-skus";
   const erpSkuId = getRouteErpSkuId();
+  if (erpSkuId && !canViewSkus()) return `<section class="product-center-page"><div class="empty-state">你没有查看 SKU 的权限。</div></section>`;
   if (erpSkuId) return renderProductSkuV2Detail();
   const productId = getRouteProductId();
+  if (productId && !canViewProducts()) return `<section class="product-center-page"><div class="empty-state">你没有查看产品的权限。</div></section>`;
   const product = state.products.find((item) => item.id === productId) ?? getProductManagementDetail(productId)?.product;
   if (productId && !product) {
     const message = productManagementState.error || "正在读取产品详情…";
@@ -2402,6 +2420,7 @@ function bindProductDistributionTooltips() {
 }
 
 export function bindProductCenterPageEvents(rerender) {
+  ensureAuthorizedProductSubmodule();
   if (isComboSkuRoute()) productSubmodule = "combo-skus";
   const routeErpSkuId = getRouteErpSkuId();
   const routeProductId = getRouteProductId();
@@ -2609,6 +2628,7 @@ export function bindProductCenterPageEvents(rerender) {
   });
   document.querySelector("[data-product-lifecycle-form]")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const form=event.currentTarget; const productId=form.dataset.productId;
+    if (!hasPermission(getCurrentUser(), "products.archive")) return;
     try { await changeProductLifecycle(productId,{status:form.elements.status.value,reason:form.elements.reason.value.trim()}); const product=state.products.find((item)=>item.id===productId); if(product) product.status=form.elements.status.value; const details=new Map(productManagementState.details); details.delete(productId); productManagementState={...productManagementState,details,overview:null,notice:"生命周期已更新。"}; await refreshProductManagementDetail(productId,rerender); }
     catch(error){productManagementState={...productManagementState,error:error.message||"生命周期更新失败。"};rerender();}
   });
@@ -2771,6 +2791,7 @@ export function bindProductCenterPageEvents(rerender) {
       return;
     }
     if (action === "create-product-v2-profile") {
+      if (!hasPermission(getCurrentUser(), "skus.manage")) return;
       const erpSkuId = button.dataset.erpSkuId;
       if (!window.confirm("确认基于当前ERP SKU创建产品经营档案？")) return;
       button.disabled = true;
@@ -2784,6 +2805,9 @@ export function bindProductCenterPageEvents(rerender) {
       return;
     }
     if (action === "product-workspace-view") {
+      const requestedView = button.dataset.view;
+      if (["business-dashboard", "business-cockpit", "product-sandbox"].includes(requestedView) && !canViewProducts()) return;
+      if (requestedView === "sku-management" && !canViewSkus() && !canViewCombos()) return;
       productSubmodule = ["sku-management", "business-cockpit", "product-sandbox"].includes(button.dataset.view) ? button.dataset.view : "business-dashboard";
       if (getRouteProductId() || getRouteErpSkuId()) window.location.hash = "products";
       if (productSubmodule === "business-cockpit") void refreshProductSalesDistribution(rerender);
@@ -2826,6 +2850,8 @@ export function bindProductCenterPageEvents(rerender) {
       rerender();
     }
     if (action === "product-submodule") {
+      if (["sku-management", "pending-skus"].includes(button.dataset.submodule) && !canViewSkus()) return;
+      if (button.dataset.submodule === "combo-skus" && !canViewCombos()) return;
       productSubmodule = ["pending-skus", "combo-skus"].includes(button.dataset.submodule) ? button.dataset.submodule : "sku-management";
       rerender();
       return;
@@ -2839,6 +2865,7 @@ export function bindProductCenterPageEvents(rerender) {
       rerender();
     }
     if (action === "create-product-from-pending-sku") {
+      if (!hasPermission(getCurrentUser(), "skus.manage")) return;
       const skuCode = button.dataset.skuCode || "";
       if (!window.confirm(`确认以SKU ${skuCode} 建立产品档案并关联ERP货品？`)) return;
       button.disabled = true;
@@ -2932,10 +2959,12 @@ export function bindProductCenterPageEvents(rerender) {
     if (action === "new-product") { modalState = { kind: "create", error: "" }; rerender(); }
     if (action === "open-product-analysis") { productSubmodule = "business-dashboard"; window.location.hash = "products"; }
     if (action === "open-product-import") {
+      if (!hasPermission(getCurrentUser(), "products.import")) return;
       importState = { version: "v2", step: "upload", importType: "goods_info", loading: false, error: "" };
       rerender();
     }
     if (action === "open-product-v2-import") {
+      if (!hasPermission(getCurrentUser(), "products.import")) return;
       importState = { version: "v2", step: "sync", loading: false, error: "" };
       erpSyncState = { ...erpSyncState, loading: true, active: null, error: "" };
       rerender();
@@ -3043,6 +3072,7 @@ export function bindProductCenterPageEvents(rerender) {
     if (action === "edit-product") { modalState = { kind: "edit", id: button.dataset.productId, error: "" }; rerender(); }
     if (action === "close-product-modal") { modalState = null; rerender(); }
     if (action === "open-sku-change") {
+      if (!hasPermission(getCurrentUser(), "skus.manage")) return;
       const product = state.products.find((item) => item.id === button.dataset.productId);
       if (product) {
         modalState = null;

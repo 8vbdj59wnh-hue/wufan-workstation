@@ -301,7 +301,7 @@ function renderStandardWorkBoardView(visibleTemplates, selectedProcessTemplateId
 
 function renderStandardWorkCard(template, selectedProcessTemplateId = "") {
   const isSelected = template.defaultProcessTemplateId !== undefined && template.defaultProcessTemplateId === selectedProcessTemplateId;
-  const draggable = canCurrentUser("settings.editStandardWorks") ? ` draggable="true"` : "";
+  const draggable = canCurrentUser("actionStandards.manage") ? ` draggable="true"` : "";
   const departmentName = findName(departments, template.departmentId, "未设置");
   const processStepCount = template.defaultProcessTemplateId ? getStandardWorkProcessNodes(template.defaultProcessTemplateId).length : 0;
   const processStepLabel = processStepCount > 0 ? `${processStepCount}步` : "未配置";
@@ -353,7 +353,7 @@ function renderTaskTemplateTable(selectedProcessTemplateId = "") {
       .toLowerCase()
       .includes(normalizedKeyword);
   });
-  const canConfigureStandards = canCurrentUser("settings.editStandardWorks");
+  const canConfigureStandards = canCurrentUser("actionStandards.manage");
 
   return `
     <section class="settings-section">
@@ -363,7 +363,7 @@ function renderTaskTemplateTable(selectedProcessTemplateId = "") {
           <p class="form-note">关键行动是公司长期实践验证有效、能够持续推进目标实现，并沉淀下来的行动。关键行动不是普通关键行动，只有经过验证、值得长期保留、能够持续帮助公司实现目标的行动，才会沉淀为关键行动。</p>
         </div>
         <div class="toolbar-actions">
-          <button class="primary-button" type="button" data-action="add-task-template">新增关键行动</button>
+          ${canConfigureStandards ? `<button class="primary-button" type="button" data-action="add-task-template">新增关键行动</button>` : ""}
           ${canConfigureStandards ? `<label class="secondary-button file-button">导入模板<input type="file" data-standard-flow-file="import" accept=".xlsx,.xls,.xml,.csv,.tsv,.txt" /></label>` : ""}
           ${canConfigureStandards ? `<button class="secondary-button" type="button" data-action="download-standard-flow-template">导出待配置模板</button>` : ""}
         </div>
@@ -611,7 +611,7 @@ function renderTaskTemplateModal() {
             <label><span>固定负责部门</span><select name="departmentId">${renderOptions(departments, template?.departmentId ?? "", "请选择部门")}</select></label>
             <label><span>固定负责人</span><select name="ownerId">${renderOptions(people, template?.ownerId ?? "", "请选择负责人")}</select></label>
             <label><span>默认验收人</span><select name="accepterId">${renderOptions(people, template?.accepterId ?? "", "无")}</select></label>
-            ${isEdit ? `<label><span>状态</span><select name="status">${renderValueOptions(TaskTemplateStatus, template?.status ?? TaskTemplateStatus.Active, taskTemplateStatusNames, "请选择状态")}</select></label>` : ""}
+            ${isEdit && canCurrentUser("actionStandards.publish") ? `<label><span>状态</span><select name="status">${renderValueOptions(TaskTemplateStatus, template?.status ?? TaskTemplateStatus.Active, taskTemplateStatusNames, "请选择状态")}</select></label>` : ""}
             <label class="checkbox-label"><input name="needAcceptance" type="checkbox" ${template?.needAcceptance ? "checked" : ""} /><span>需要验收</span></label>
           </div>
           <label><span>标准任务说明</span><textarea name="description" rows="3">${escapeHtml(template?.description ?? "")}</textarea></label>
@@ -639,7 +639,9 @@ function buildTaskTemplateDraft(form) {
     completionStandard: getFormValue(form, "completionStandard"),
     needAcceptance: formData.has("needAcceptance"),
     accepterId: getFormValue(form, "accepterId") || null,
-    status: getFormValue(form, "status") || TaskTemplateStatus.Active,
+    status: getFormValue(form, "status") || (modalState.mode === "edit"
+      ? getTaskTemplate(modalState.templateId)?.status ?? TaskTemplateStatus.Inactive
+      : canCurrentUser("actionStandards.publish") ? TaskTemplateStatus.Active : TaskTemplateStatus.Inactive),
   };
 }
 
@@ -679,11 +681,12 @@ async function saveTaskTemplate(form, rerender) {
       now,
     });
     const defaultProcessTemplate = getProcessTemplateById(defaultProcessTemplateId);
+    if (defaultProcessTemplate !== null) defaultProcessTemplate.status = draft.status;
     const createdTemplate = {
       id: createId("task-template"),
       ...draft,
       defaultProcessTemplateId,
-      status: TaskTemplateStatus.Active,
+      status: draft.status,
       formFields,
       createdAt: now,
       updatedAt: now,
@@ -1175,7 +1178,7 @@ function handleTaskTemplateAction(action, templateId, rerender) {
 }
 
 async function moveStandardWorkToValueChain(templateId, categoryId, rerender) {
-  if (!canCurrentUser("settings.editStandardWorks")) {
+  if (!canCurrentUser("actionStandards.manage")) {
     window.alert("你没有权限调整关键行动的价值链模块。");
     return;
   }

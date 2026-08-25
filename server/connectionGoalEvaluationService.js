@@ -16,6 +16,7 @@ const pendingReasons = Object.freeze({
   data_delayed: "销售事实尚未更新到最新应到日期。",
   link_data_missing: "完整评价周期内未发现该链接的销售事实，未按0销售处理。",
   invalid_goal: "当前目标值或指标权重无法用于完成率计算。",
+  not_evaluated: "尚未刷新链接评级。",
 });
 
 function addDays(dateText, days) {
@@ -93,6 +94,37 @@ export function calculateConnectionGoalGrade(salesAchievement, profitAchievement
   if (totalAchievement >= 1) return "good";
   if (totalAchievement >= 0.8) return "on_target";
   return "underperforming";
+}
+
+export function readConnectionGoalEvaluation(connectionId, context = {}) {
+  const database = context.database || getDatabase();
+  const profile = loadProfile(database, connectionId);
+  if (!profile) {
+    const error = new Error("Link资产不存在。");
+    error.statusCode = 404;
+    throw error;
+  }
+  const positioning = database.prepare("SELECT id,positioningType FROM connection_business_profiles WHERE connectionId=? AND status='active'").get(profile.id);
+  if (!positioning) return { connection: profile, currentGoal: null, ...pending("missing_positioning") };
+  const plan = loadPlan(database, profile.id);
+  if (!plan) {
+    return {
+      connection: profile,
+      currentGoal: null,
+      positioningName: CONNECTION_POSITIONING_TYPES[positioning.positioningType],
+      ...pending("missing_goal_plan"),
+    };
+  }
+  const evaluation = database.prepare("SELECT * FROM connection_goal_evaluations WHERE goalPlanId=? LIMIT 1").get(plan.id);
+  if (!evaluation) {
+    return { connection: profile, currentGoal: plan, ...pending("not_evaluated") };
+  }
+  return {
+    connection: profile,
+    currentGoal: plan,
+    ...evaluation,
+    reason: evaluation.statusReason ?? null,
+  };
 }
 
 export function evaluateConnectionGoal(connectionId, context = {}) {
