@@ -6007,6 +6007,36 @@ button.content-template-thumb {
   background: #eff6ff;
 }
 
+.template-source-link-field {
+  display: grid;
+  align-content: center;
+  gap: 6px;
+  min-width: 0;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 10px 12px;
+}
+
+.template-source-link-field > span {
+  color: #111827;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.template-source-link-field input {
+  min-width: 0;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 8px 10px;
+}
+
+.template-source-link-field small {
+  color: #6b7280;
+  font-size: 12px;
+}
+
 .template-file-picker > span:first-child {
   color: #111827;
   font-size: 13px;

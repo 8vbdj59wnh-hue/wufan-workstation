@@ -190,16 +190,27 @@ function getTemplatePreviewImage(template) {
 
 function getTemplateSourceFile(template) {
   if (template?.sourceFile && typeof template.sourceFile === "object") return template.sourceFile;
-  return { fileName: "", fileUrl: "" };
+  return { fileName: "", fileUrl: "", sourceUrl: "" };
 }
 
-function getTemplateDownloadLinks(template) {
+function getTemplateSourceUrl(template) {
+  const sourceUrl = String(getTemplateSourceFile(template).sourceUrl ?? "").trim();
+  if (sourceUrl === "") return "";
+  try {
+    const parsed = new URL(sourceUrl);
+    return ["http:", "https:"].includes(parsed.protocol) ? parsed.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
+function getTemplateAssetLinks(template) {
   const previewImage = getTemplatePreviewImage(template);
-  const sourceFile = getTemplateSourceFile(template);
+  const sourceUrl = getTemplateSourceUrl(template);
   return `
     <div class="row-actions">
       ${previewImage.fileUrl ? `<a class="text-button" href="${escapeAttribute(resolveAssetUrl(previewImage.fileUrl))}" download="${escapeAttribute(previewImage.fileName || "template-preview")}">图片</a>` : ""}
-      ${sourceFile.fileUrl ? `<a class="text-button" href="${escapeAttribute(resolveAssetUrl(sourceFile.fileUrl))}" download="${escapeAttribute(sourceFile.fileName || "template-source")}">源文件</a>` : ""}
+      ${sourceUrl ? `<a class="text-button" href="${escapeAttribute(sourceUrl)}" target="_blank" rel="noreferrer">源文件链接</a>` : ""}
     </div>
   `;
 }
@@ -1130,7 +1141,7 @@ function renderViewScheduleTemplate(schedule) {
       </button>
       <div class="content-template-meta">
         <strong>${escapeHtml(getTemplateName(template))}</strong>
-        ${getTemplateDownloadLinks(template)}
+        ${getTemplateAssetLinks(template)}
       </div>
     </div>
   `;

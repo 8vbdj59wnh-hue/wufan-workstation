@@ -370,7 +370,12 @@ function getVisualTemplatePreviewImage(template) {
 
 function getVisualTemplateSourceFile(template) {
   if (template?.sourceFile && typeof template.sourceFile === "object") return template.sourceFile;
-  return { fileName: "", fileUrl: "" };
+  return { fileName: "", fileUrl: "", sourceUrl: "" };
+}
+
+function getVisualTemplateSourceUrl(template) {
+  const sourceUrl = String(getVisualTemplateSourceFile(template).sourceUrl ?? "").trim();
+  return sourceUrl !== "" && isValidUrl(sourceUrl) ? new URL(sourceUrl).toString() : "";
 }
 
 function getVisualTemplateFilterTags() {
@@ -4050,6 +4055,12 @@ function renderVisualTemplateDownloadLink(label, file, variant = "") {
   `;
 }
 
+function renderVisualTemplateSourceLink(template) {
+  const sourceUrl = getVisualTemplateSourceUrl(template);
+  if (sourceUrl === "") return `<span class="muted-action">源文件链接</span>`;
+  return `<a class="text-button" href="${escapeAttribute(sourceUrl)}" target="_blank" rel="noreferrer">源文件链接</a>`;
+}
+
 function renderTaskLinkedTemplateSummary(templateId, mode = "form") {
   const template = getVisualTemplateById(templateId);
   const previewImage = getVisualTemplatePreviewImage(template);
@@ -4071,7 +4082,7 @@ function renderTaskLinkedTemplateSummary(templateId, mode = "form") {
           mode === "detail"
             ? `<div class="row-actions">
                 ${renderVisualTemplateDownloadLink("下载图片", previewImage)}
-                ${renderVisualTemplateDownloadLink("下载源文件", getVisualTemplateSourceFile(template))}
+                ${renderVisualTemplateSourceLink(template)}
               </div>`
             : ""
         }
@@ -4112,7 +4123,7 @@ function renderTaskLinkedTemplatePreviewModal() {
         </div>
         <div class="row-actions">
           ${renderVisualTemplateDownloadLink("下载图片", previewImage)}
-          ${renderVisualTemplateDownloadLink("下载源文件", getVisualTemplateSourceFile(previewTemplate))}
+          ${renderVisualTemplateSourceLink(previewTemplate)}
         </div>
       </div>
     </div>

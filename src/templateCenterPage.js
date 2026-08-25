@@ -9,7 +9,6 @@ import {
   prepareTemplateIteration,
   state,
   updateTemplate,
-  uploadGenericFile,
   uploadImageFile,
 } from "./appState.js";
 import { bindStandardWorkLibraryEvents, renderStandardWorkLibraryPage } from "./actionStandardsPage.js";
@@ -24,24 +23,6 @@ const materialTypeNames = {
   zip: "压缩包",
 };
 const templateVideoExts = new Set(["mp4", "mov", "m4v", "webm"]);
-const templateSourceFileAccept = [
-  ".psd",
-  ".psb",
-  ".ai",
-  ".fig",
-  ".pdf",
-  ".zip",
-  ".mp4",
-  ".mov",
-  ".m4v",
-  ".webm",
-  "application/pdf",
-  "application/zip",
-  "video/mp4",
-  "video/quicktime",
-  "video/x-m4v",
-  "video/webm",
-].join(",");
 
 let filters = {
   keyword: "",
@@ -54,7 +35,7 @@ let uploadTagQuery = "";
 let editingTagQuery = "";
 let uploadDraft = {
   previewFile: null,
-  sourceFile: null,
+  sourceUrl: "",
 };
 let templatesLoaded = false;
 let templatesLoading = false;
@@ -94,6 +75,27 @@ function getFileExt(fileName) {
   return String(fileName ?? "").split(".").pop()?.toLowerCase() ?? "";
 }
 
+function normalizeExternalSourceUrl(value) {
+  const candidate = String(value ?? "").trim();
+  if (candidate === "") return "";
+  try {
+    const url = new URL(candidate);
+    return ["http:", "https:"].includes(url.protocol) ? url.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
+function getSourceUrlFileName(value) {
+  const sourceUrl = normalizeExternalSourceUrl(value);
+  if (sourceUrl === "") return "";
+  try {
+    return decodeURIComponent(new URL(sourceUrl).pathname.split("/").filter(Boolean).pop() ?? "");
+  } catch {
+    return "";
+  }
+}
+
 function detectFileType(file) {
   const ext = getFileExt(file.name);
   if (file.type.startsWith("image/") || ["jpg", "jpeg", "png", "webp"].includes(ext)) return "image";
@@ -104,9 +106,9 @@ function detectFileType(file) {
   return null;
 }
 
-function detectSourceFileType(file) {
-  const ext = getFileExt(file.name);
-  if (file.type.startsWith("video/") || templateVideoExts.has(ext)) return "video";
+function detectSourceUrlType(sourceUrl) {
+  const ext = getFileExt(getSourceUrlFileName(sourceUrl));
+  if (templateVideoExts.has(ext)) return "video";
   if (["psd", "psb", "ai", "fig"].includes(ext)) return "design";
   if (ext === "pdf") return "pdf";
   if (ext === "zip") return "zip";
@@ -252,14 +254,17 @@ function getPreviewImage(material) {
 
 function getSourceFile(material) {
   if (material.sourceFile && typeof material.sourceFile === "object") {
+    const sourceUrl = normalizeExternalSourceUrl(material.sourceFile.sourceUrl);
     return {
-      fileName: material.sourceFile.fileName ?? "",
+      fileName: material.sourceFile.fileName ?? getSourceUrlFileName(sourceUrl),
       fileUrl: material.sourceFile.fileUrl ?? "",
+      sourceUrl,
     };
   }
   return {
     fileName: material.fileName ?? "",
     fileUrl: material.fileUrl ?? "",
+    sourceUrl: "",
   };
 }
 
@@ -322,7 +327,7 @@ function getFilteredMaterials() {
     const materialTags = getMaterialTags(material);
     const flatTags = getFlatTags(materialTags);
     const sourceFile = getSourceFile(material);
-    const searchableText = `${material.businessCode ?? ""} ${getMaterialName(material)} ${sourceFile.fileName} ${flatTags.join(" ")}`.toLowerCase();
+    const searchableText = `${material.businessCode ?? ""} ${getMaterialName(material)} ${sourceFile.fileName} ${sourceFile.sourceUrl} ${flatTags.join(" ")}`.toLowerCase();
 
     if (keyword !== "" && !searchableText.includes(keyword)) return false;
 
@@ -412,9 +417,9 @@ function renderMaterialCard(material) {
   const previewDownloadAction = previewImage.fileUrl === ""
     ? `<button class="text-button" type="button" disabled>图片</button>`
     : `<a class="text-button" href="${escapeHtml(resolveAssetUrl(previewImage.fileUrl))}" download="${escapeHtml(previewImage.fileName)}">图片</a>`;
-  const sourceDownloadAction = sourceFile.fileUrl === ""
-    ? `<button class="text-button" type="button" disabled>源文件</button>`
-    : `<a class="text-button" href="${escapeHtml(resolveAssetUrl(sourceFile.fileUrl))}" download="${escapeHtml(sourceFile.fileName)}">源文件</a>`;
+  const sourceLinkAction = sourceFile.sourceUrl === ""
+    ? `<button class="text-button" type="button" disabled>源文件链接</button>`
+    : `<a class="text-button" href="${escapeHtml(sourceFile.sourceUrl)}" target="_blank" rel="noreferrer">源文件链接</a>`;
   return `
     <article class="template-material-card">
       <div class="template-material-body">
@@ -440,7 +445,7 @@ function renderMaterialCard(material) {
         <div class="template-material-actions">
           <button class="secondary-button" type="button" data-template-iterate="visual" data-asset-id="${escapeHtml(material.id)}">迭代</button>
           ${previewDownloadAction}
-          ${sourceDownloadAction}
+          ${sourceLinkAction}
         </div>
         <p class="template-material-time">${escapeHtml(getMaterialFileTypeLabel(material))} · ${escapeHtml(getMaterialUploadTime(material))}</p>
       </div>
@@ -648,10 +653,10 @@ function renderEditTagsModal() {
               ${renderUploadFileState(null, previewImage.fileName)}
               <input data-template-edit-preview-upload type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" />
             </label>
-            <label class="template-file-picker">
-              <span>替换源文件</span>
-              ${renderUploadFileState(null, sourceFile.fileName)}
-              <input data-template-edit-source-upload type="file" accept="${templateSourceFileAccept}" />
+            <label class="template-source-link-field">
+              <span>源文件链接</span>
+              <input data-template-edit-source-url type="url" value="${escapeHtml(sourceFile.sourceUrl)}" placeholder="粘贴私有云中的源文件链接" autocomplete="off" />
+              <small>${sourceFile.fileUrl && !sourceFile.sourceUrl ? "历史源文件已停止下载，可填写私有云链接替换" : "仅支持 http:// 或 https:// 链接"}</small>
             </label>
           </div>
           ${renderTagSelector({
@@ -675,7 +680,6 @@ export function renderTemplateCenterPage() {
   const visibleMaterials = getFilteredMaterials();
   const canCreateTemplate = !templateUploading && isValidTemplatePayload({
     previewImage: uploadDraft.previewFile,
-    sourceFile: uploadDraft.sourceFile,
     tags: uploadTags,
   });
 
@@ -691,12 +695,12 @@ export function renderTemplateCenterPage() {
             ${renderUploadFileState(uploadDraft.previewFile, "")}
             <input data-template-preview-upload type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" />
           </label>
-          <label class="template-file-picker">
-            <span>源文件（选填）</span>
-            ${renderUploadFileState(uploadDraft.sourceFile, "")}
-            <input data-template-source-upload type="file" accept="${templateSourceFileAccept}" />
+          <label class="template-source-link-field">
+            <span>源文件链接（选填）</span>
+            <input data-template-source-url type="url" value="${escapeHtml(uploadDraft.sourceUrl)}" placeholder="粘贴私有云中的源文件链接" autocomplete="off" />
+            <small>源文件统一存放在私有云，仅保存访问链接</small>
           </label>
-          <button class="primary-button template-upload-submit" type="button" data-action="create-template-from-upload" ${canCreateTemplate ? "" : "disabled"}>上传模板</button>
+          <button class="primary-button template-upload-submit" type="button" data-action="create-template-from-upload" ${canCreateTemplate ? "" : "disabled"}>创建模板</button>
         </div>
         ${templateError === "" ? "" : `<div class="form-error">${escapeHtml(templateError)}</div>`}
         ${renderTagSelector({
@@ -883,14 +887,8 @@ export function bindTemplateCenterPageEvents(rerender) {
     rerender();
   });
 
-  page.querySelector("[data-template-source-upload]")?.addEventListener("change", (event) => {
-    const file = event.currentTarget.files?.[0] ?? null;
-    if (file !== null && detectSourceFileType(file) === null) {
-      event.currentTarget.value = "";
-      return;
-    }
-    uploadDraft = { ...uploadDraft, sourceFile: file };
-    rerender();
+  page.querySelector("[data-template-source-url]")?.addEventListener("input", (event) => {
+    uploadDraft = { ...uploadDraft, sourceUrl: event.currentTarget.value };
   });
 
   if (!templatesLoaded && !templatesLoading) {
@@ -915,9 +913,14 @@ export function bindTemplateCenterPageEvents(rerender) {
       previewImage: uploadDraft.previewFile,
       tags: uploadTags,
     })) return;
-    const sourceFileType = uploadDraft.sourceFile === null
-      ? detectFileType(uploadDraft.previewFile)
-      : detectSourceFileType(uploadDraft.sourceFile);
+    const rawSourceUrl = uploadDraft.sourceUrl.trim();
+    const sourceUrl = normalizeExternalSourceUrl(rawSourceUrl);
+    if (rawSourceUrl !== "" && sourceUrl === "") {
+      templateError = "源文件链接无效，请填写以 http:// 或 https:// 开头的私有云链接。";
+      rerender();
+      return;
+    }
+    const sourceFileType = detectSourceUrlType(sourceUrl) ?? detectFileType(uploadDraft.previewFile);
     if (sourceFileType === null) return;
     const tags = normalizeMaterialTags(uploadTags);
     if (!isValidTemplatePayload({
@@ -935,14 +938,6 @@ export function bindTemplateCenterPageEvents(rerender) {
       } catch (error) {
         throw new Error(`预览图上传失败：${normalizeTemplateUploadError(error, { fileKind: "preview" })}`);
       }
-      let sourceUpload = null;
-      if (uploadDraft.sourceFile !== null) {
-        try {
-          sourceUpload = await uploadGenericFile(uploadDraft.sourceFile);
-        } catch (error) {
-          throw new Error(`源文件上传失败：${normalizeTemplateUploadError(error, { fileKind: "source" })}`);
-        }
-      }
       const now = new Date().toISOString();
       try {
         await createTemplate({
@@ -952,12 +947,7 @@ export function bindTemplateCenterPageEvents(rerender) {
             fileName: uploadDraft.previewFile.name,
             fileUrl: previewUpload.url,
           },
-          sourceFile: sourceUpload === null
-            ? {}
-            : {
-                fileName: sourceUpload.originalName ?? uploadDraft.sourceFile.name,
-                fileUrl: sourceUpload.url,
-              },
+          sourceFile: sourceUrl === "" ? {} : { sourceUrl },
           fileType: sourceFileType,
           tags,
           createdAt: now,
@@ -968,7 +958,7 @@ export function bindTemplateCenterPageEvents(rerender) {
       }
       uploadDraft = {
         previewFile: null,
-        sourceFile: null,
+        sourceUrl: "",
       };
       uploadTags = createEmptyTags();
       uploadTagQuery = "";
@@ -1011,41 +1001,6 @@ export function bindTemplateCenterPageEvents(rerender) {
       })
       .catch((error) => {
         console.error("模板预览图更新失败", error);
-        templateError = "模板保存失败，请检查本地数据库服务。";
-        rerender();
-      });
-  });
-
-  page.querySelector("[data-template-edit-source-upload]")?.addEventListener("change", (event) => {
-    if (editingTagsMaterialId === null) return;
-    const file = event.currentTarget.files?.[0] ?? null;
-    if (file === null) return;
-    const sourceFileType = detectSourceFileType(file);
-    if (sourceFileType === null) {
-      event.currentTarget.value = "";
-      return;
-    }
-    uploadGenericFile(file)
-      .then((uploaded) => {
-        const material = getMaterials().find((item) => item.id === editingTagsMaterialId);
-        if (material === undefined) return;
-        return updateTemplate(material.id, {
-          ...material,
-          sourceFile: {
-            fileName: uploaded.originalName ?? file.name,
-            fileUrl: uploaded.url,
-          },
-          fileType: sourceFileType,
-          updatedAt: new Date().toISOString(),
-        });
-      })
-      .then(() => loadTemplates())
-      .then(() => {
-        templatesLoaded = true;
-        rerender();
-      })
-      .catch((error) => {
-        console.error("模板源文件更新失败", error);
         templateError = "模板保存失败，请检查本地数据库服务。";
         rerender();
       });
@@ -1152,9 +1107,23 @@ export function bindTemplateCenterPageEvents(rerender) {
     }
     try {
       const tags = getMaterialTags(material);
+      const sourceUrlInput = page.querySelector("[data-template-edit-source-url]");
+      const rawSourceUrl = sourceUrlInput?.value.trim() ?? "";
+      const sourceUrl = normalizeExternalSourceUrl(rawSourceUrl);
+      if (rawSourceUrl !== "" && sourceUrl === "") {
+        throw new Error("源文件链接无效，请填写以 http:// 或 https:// 开头的私有云链接。");
+      }
+      const currentSourceFile = getSourceFile(material);
+      const nextSourceFile = sourceUrl !== ""
+        ? { sourceUrl }
+        : currentSourceFile.sourceUrl !== ""
+          ? {}
+          : material.sourceFile ?? {};
       await updateTemplate(material.id, {
         ...material,
         name: generateTemplateName(tags),
+        sourceFile: nextSourceFile,
+        fileType: detectSourceUrlType(sourceUrl) ?? material.fileType,
         tags,
         updatedAt: new Date().toISOString(),
       });
@@ -1165,7 +1134,7 @@ export function bindTemplateCenterPageEvents(rerender) {
       templateError = "";
     } catch (error) {
       console.error("模板标签保存失败", error);
-      templateError = "模板保存失败，请检查本地数据库服务。";
+      templateError = getTemplateErrorText(error) || "模板保存失败，请检查本地数据库服务。";
     }
     rerender();
   });
