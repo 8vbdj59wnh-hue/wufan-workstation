@@ -74,10 +74,10 @@ test("产品经营读取层复用销售、库存、SKU、健康与行动事实",
       .run("shop-board-1", "测试平台", "测试店铺", "测试店铺", "测试店铺", "active", now, now);
     database.prepare("INSERT INTO sales_links(id,shopId,platformGoodsId,title,identityStrength,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?)")
       .run("link-board-1", "shop-board-1", "goods-board-1", "测试链接", "strong", "active", now, now);
-    database.prepare("INSERT INTO sales_link_skus(id,salesLinkId,productId,erpSkuId,platformSkuId,matchStatus,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)")
-      .run("link-sku-board-1", "link-board-1", "product-board-1", "erp-sku-board-1", "platform-sku-board-1", "matched", "active", now, now);
-    database.prepare("INSERT INTO sales_link_skus(id,salesLinkId,productId,erpSkuId,platformSkuId,matchStatus,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)")
-      .run("link-sku-board-decline", "link-board-1", "product-board-decline", null, "platform-sku-board-decline", "matched", "active", now, now);
+    database.prepare("INSERT INTO sales_link_skus(id,salesLinkId,platformSkuId,matchStatus,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?)")
+      .run("link-sku-board-1", "link-board-1", "platform-sku-board-1", "matched", "active", now, now);
+    database.prepare("INSERT INTO sales_link_skus(id,salesLinkId,platformSkuId,matchStatus,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?)")
+      .run("link-sku-board-decline", "link-board-1", "platform-sku-board-decline", "matched", "active", now, now);
     const reviewerId = database.prepare("SELECT id FROM persons ORDER BY id LIMIT 1").get().id;
     for (const [suffix, linkSkuId, erpSkuId] of [
       ["board-1", "link-sku-board-1", "erp-sku-board-1"],

@@ -32,7 +32,7 @@ const assets = () => ({
   links: count("sales_links"), linkSkus: count("sales_link_skus"), dailyFacts: count("connection_sku_sales_daily_facts"),
   inventoryFacts: count("erp_sku_inventory_daily_summaries"), legacyMappings: count("sales_link_sku_erp_mappings"),
   productStructures: count("sales_link_sku_product_structures"), productStructureComponents: count("sales_link_sku_product_structure_components"),
-  manualBindings: count("platform_sku_manual_bindings"), applicationItems: count("product_structure_application_items"),
+  applicationItems: count("product_structure_application_items"),
 });
 const platformSummary = (batchId) => db.prepare(`SELECT COUNT(*) linkSkus,
   SUM(CASE WHEN trim(COALESCE(NULLIF(normalizedPlatformSkuCode,''),platformSkuCode,''))<>'' THEN 1 ELSE 0 END) coded,
@@ -81,12 +81,10 @@ const output = {
     legacyAddedByPlatformImport: {
       legacyMappings: legacyAfterPlatform.legacyMappings - before.assets.legacyMappings,
       productStructures: legacyAfterPlatform.productStructures - before.assets.productStructures,
-      manualBindings: legacyAfterPlatform.manualBindings - before.assets.manualBindings,
     },
     legacyAddedByProjection: {
       legacyMappings: afterFirst.assets.legacyMappings - beforeProjection.assets.legacyMappings,
       productStructures: afterFirst.assets.productStructures - beforeProjection.assets.productStructures,
-      manualBindings: afterFirst.assets.manualBindings - beforeProjection.assets.manualBindings,
       applicationItems: afterFirst.assets.applicationItems - beforeProjection.assets.applicationItems,
     },
     factsUnchanged: JSON.stringify(beforeProjection.financial) === JSON.stringify(afterFirst.financial),

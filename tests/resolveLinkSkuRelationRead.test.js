@@ -72,7 +72,7 @@ test("正式关系读取仅执行Sales Object Resolver，Shadow Compare独立诊
     assert.equal(shadowOldQueries, 0, "新数据库不存在Legacy Schema时诊断不得执行旧Resolver");
     assert.deepEqual(shadow.results["link-sku-single-read"], formalResult,
       "诊断比较不得改变正式业务结果");
-    assert.equal(shadow.diagnostics.mode, "legacy_unavailable");
+    assert.equal(shadow.diagnostics.mode, "legacy_archived");
     assert.equal(shadow.diagnostics.total, 0);
     assert.equal(database.pragma("integrity_check", { simple: true }), "ok");
     assert.equal(database.pragma("foreign_key_check").length, 0);

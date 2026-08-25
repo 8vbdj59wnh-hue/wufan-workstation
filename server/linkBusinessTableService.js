@@ -1,9 +1,9 @@
 import { getDatabase } from "./db.js";
 import { listConnectionGrowthAnalysesByConnectionIds } from "./connectionGrowthService.js";
-import { getConnectionHospitalStages } from "./connectionHospitalService.js";
 import { resolveConnectionGrowthDirection } from "./connectionService.js";
 import { buildLinkOperatingScope, getLinkOperatingSummary } from "./linkOperatingSetService.js";
 import { resolveLinkSalesDateRanges } from "./linkSalesRankingService.js";
+import { LINK_ASSET_SELECT_SQL } from "./linkAssetSql.js";
 
 export const LINK_BUSINESS_FIELDS = new Set([
   "image", "name", "platform", "shop", "goodsId", "owner", "url", "category", "platformStatus", "periodStart", "periodEnd",
@@ -14,7 +14,7 @@ export const LINK_BUSINESS_FIELDS = new Set([
   "conversionRate", "payNewBuyerCount", "payOldBuyerCount", "oldBuyerPayAmount", "juHuaSuanPayAmount", "visitorValue",
   "competitionScore", "annualPayAmount", "monthlyPayAmount", "monthlyPayQuantity", "searchPayConversionRate",
   "searchVisitorCount", "searchPayBuyerCount", "structuredDetailConversionRate", "structuredDetailTransactionShare",
-  "growthStatus", "healthStatus", "hospitalStatus", "archiveStatus",
+  "growthStatus", "archiveStatus",
 ]);
 
 const scopes = new Set(["mine", "company"]);
@@ -27,7 +27,7 @@ const sortFields = new Set([
   "conversionRate", "payNewBuyerCount", "payOldBuyerCount", "oldBuyerPayAmount", "juHuaSuanPayAmount", "visitorValue",
   "competitionScore", "annualPayAmount", "monthlyPayAmount", "monthlyPayQuantity", "searchPayConversionRate",
   "searchVisitorCount", "searchPayBuyerCount", "structuredDetailConversionRate", "structuredDetailTransactionShare",
-  "growthStatus", "healthStatus", "hospitalStatus", "archiveStatus",
+  "growthStatus", "archiveStatus",
 ]);
 
 function text(value) { return String(value ?? "").trim(); }
@@ -98,7 +98,7 @@ function sortValue(item, field) {
     structuredDetailConversionRate: item.platformMetrics.structuredDetailConversionRate.value,
     structuredDetailTransactionShare: item.platformMetrics.structuredDetailTransactionShare.value,
     growthStatus: item.growthRate,
-    healthStatus: item.healthScore, hospitalStatus: item.hospitalStatus, archiveStatus: item.archiveStatus,
+    archiveStatus: item.archiveStatus,
   })[field];
 }
 
@@ -239,15 +239,14 @@ export function queryLinkBusinessTable(raw = {}, userId = "", isAdmin = false) {
       pa.structuredDetailConversionRate,pa.structuredDetailConversionRateRows,
       pa.structuredDetailTransactionShare,pa.structuredDetailTransactionShareRows
     FROM sales_links l JOIN sales_shops sh ON sh.id=l.shopId
-    LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
+    LEFT JOIN ${LINK_ASSET_SELECT_SQL} c ON c.salesLinkId=l.id
     LEFT JOIN persons p ON p.id=c.ownerId LEFT JOIN fact_aggregate fa ON fa.salesLinkId=l.id
     LEFT JOIN platform_aggregate pa ON pa.salesLinkId=l.id WHERE ${where.join(" AND ")}
   `).all(params);
   const ids = rows.map((row) => row.connectionProfileId).filter(Boolean);
   const analyses = new Map(listConnectionGrowthAnalysesByConnectionIds(ids).map((item) => [item.connectionId, item]));
-  const hospitals = getConnectionHospitalStages(ids);
   let items = rows.map((row) => {
-    const analysis = (row.connectionProfileId ? analyses.get(row.connectionProfileId) : null) ?? { comparable: false, healthStatus: "no_data", healthScore: null, salesGrowth: null };
+    const analysis = (row.connectionProfileId ? analyses.get(row.connectionProfileId) : null) ?? { comparable: false, salesGrowth: null };
     const profitMargin = Number(row.salesCount || 0) > 0 && Number(row.salesAmount) !== 0
       ? metric(Number(row.profitAmount || 0) / Number(row.salesAmount), 1) : metric(null, 0);
     return {
@@ -281,14 +280,10 @@ export function queryLinkBusinessTable(raw = {}, userId = "", isAdmin = false) {
         structuredDetailConversionRate: metric(row.structuredDetailConversionRate, row.structuredDetailConversionRateRows),
         structuredDetailTransactionShare: metric(row.structuredDetailTransactionShare, row.structuredDetailTransactionShareRows) },
       growthStatus: analysis.comparable ? resolveConnectionGrowthDirection(analysis) : "no_data", growthRate: analysis.salesGrowth ?? null,
-      healthStatus: analysis.healthStatus || "no_data", healthScore: analysis.healthScore ?? null,
-      hospitalStatus: row.connectionProfileId ? hospitals.get(row.connectionProfileId) || "none" : "none",
       hasBusinessProfile: Boolean(row.connectionProfileId),
     };
   });
   if (text(options.growthStatus)) items = items.filter((item) => item.growthStatus === text(options.growthStatus));
-  if (text(options.healthStatus)) items = items.filter((item) => item.healthStatus === text(options.healthStatus));
-  if (text(options.hospitalStatus)) items = items.filter((item) => item.hospitalStatus === text(options.hospitalStatus));
   items.sort((left, right) => compareNullable(sortValue(left, options.sortField), sortValue(right, options.sortField), options.sortDirection)
     || left.id.localeCompare(right.id));
   const total = items.length;
@@ -296,9 +291,9 @@ export function queryLinkBusinessTable(raw = {}, userId = "", isAdmin = false) {
   const optionScope = includeHistorical ? "1=1" : operatingScope.predicate;
   const optionWhere = options.scope === "mine" ? `WHERE ${optionScope} AND c.ownerId=@scopeOwnerId` : `WHERE ${optionScope}`;
   const optionRows = database.prepare(`SELECT DISTINCT sh.id shopId,sh.platform,COALESCE(sh.displayName,sh.shopName) shopName
-    FROM sales_links l JOIN sales_shops sh ON sh.id=l.shopId LEFT JOIN connection_profiles c ON c.salesLinkId=l.id ${optionWhere}
+    FROM sales_links l JOIN sales_shops sh ON sh.id=l.shopId LEFT JOIN ${LINK_ASSET_SELECT_SQL} c ON c.salesLinkId=l.id ${optionWhere}
     ORDER BY sh.platform,shopName,sh.id`).all(params);
-  const owners = database.prepare(`SELECT DISTINCT p.id,p.name FROM connection_profiles c JOIN persons p ON p.id=c.ownerId
+  const owners = database.prepare(`SELECT DISTINCT p.id,p.name FROM ${LINK_ASSET_SELECT_SQL} c JOIN persons p ON p.id=c.ownerId
     ${options.scope === "mine" ? "WHERE c.ownerId=@scopeOwnerId" : ""} ORDER BY p.name,p.id`).all(params);
   const sources = {
     erp: database.prepare("SELECT MIN(saleDate) minDate,MAX(saleDate) maxDate FROM connection_sku_sales_daily_facts").get(),

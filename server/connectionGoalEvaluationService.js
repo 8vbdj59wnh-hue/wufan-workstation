@@ -41,7 +41,8 @@ function shanghaiDate(value = new Date()) {
 }
 
 function loadProfile(database, connectionId) {
-  return database.prepare("SELECT id,salesLinkId,name,ownerId,status FROM connection_profiles WHERE id=?").get(clean(connectionId)) || null;
+  return database.prepare(`SELECT id,id salesLinkId,COALESCE(NULLIF(displayName,''),NULLIF(title,''),platformGoodsId) name,
+    ownerId,managementStatus status FROM sales_links WHERE id=?`).get(clean(connectionId)) || null;
 }
 
 function pending(reasonCode, extra = {}) {

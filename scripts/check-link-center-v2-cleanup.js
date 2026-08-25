@@ -16,7 +16,7 @@ const legacyRuntimeTables = [
 const allowedLegacyFactFiles = new Set(["server/db.js"]);
 const allowedLegacyProfileWriterFiles = new Set(["server/db.js"]);
 const allowedMappingWriterFiles = new Set(["server/db.js"]);
-const allowedComboWriterFiles = new Set(["server/db.js"]);
+const allowedComboWriterFiles = new Set();
 const allowedLegacyStructureWriterFiles = new Set(["server/db.js", "server/productStructureSchema.js"]);
 const allowedLegacyRelationReadFiles = new Set([
   "server/db.js",
@@ -26,7 +26,7 @@ const allowedLegacyRelationReadFiles = new Set([
   "server/capabilities/resolveLinkSkuErpRelation.js",
   "server/capabilities/resolveLinkSkuRelationRead.js",
 ]);
-const allowedLegacyDiagnosticFiles = new Set(["server/v3ShadowObservationService.js"]);
+const allowedLegacyDiagnosticFiles = new Set();
 const allowedLegacySalesReadFiles = new Set(["server/db.js", "server/dataAssetMapService.js"]);
 
 function files(directory) {
@@ -56,8 +56,9 @@ if (legacyProfileTable) {
     type: "legacy_connection_profile_table_create",
   });
 }
-if (!/CREATE\s+VIEW\s+IF\s+NOT\s+EXISTS\s+connection_profiles\b/iu.test(schemaSource)) {
-  findings.push({ file: "server/schema.sql", line: 1, type: "missing_link_asset_compatibility_view" });
+const legacyProfileView = /CREATE\s+VIEW\s+IF\s+NOT\s+EXISTS\s+connection_profiles\b/iu.exec(schemaSource);
+if (legacyProfileView) {
+  findings.push({ file: "server/schema.sql", line: lineAt(schemaSource, legacyProfileView.index), type: "retired_link_asset_compatibility_view" });
 }
 for (const tableName of legacyRuntimeTables) {
   const createPattern = new RegExp(`CREATE\\s+TABLE\\s+IF\\s+NOT\\s+EXISTS\\s+${tableName}\\b`, "iu");
@@ -65,12 +66,30 @@ for (const tableName of legacyRuntimeTables) {
   if (match) findings.push({ file: "server/schema.sql", line: lineAt(schemaSource, match.index), type: "legacy_schema_auto_create", tableName });
 }
 const databaseSource = fs.readFileSync(path.join(root, "server/db.js"), "utf8");
-const migrationStart = databaseSource.indexOf("export function runLightweightMigrations");
+const retirementStart = databaseSource.indexOf("export function retireLinkCenterLegacyRelationsPhase2");
+const retirementEnd = databaseSource.indexOf("\nfunction runLightweightMigrations", retirementStart + 1);
+const activeDatabaseSource = retirementStart >= 0 && retirementEnd > retirementStart
+  ? `${databaseSource.slice(0, retirementStart)}${databaseSource.slice(retirementEnd)}`
+  : databaseSource;
+const migrationStart = databaseSource.indexOf("function runLightweightMigrations");
 const migrationEnd = databaseSource.indexOf("\nexport function ", migrationStart + 1);
 const activeMigrationSource = migrationStart >= 0 ? databaseSource.slice(migrationStart, migrationEnd >= 0 ? migrationEnd : undefined) : "";
 for (const migrationName of ["migrateSalesLinkSkuComboGroupsV1", "migrateSalesLinkSkuProductStructuresV1"]) {
   const match = new RegExp(`\\b${migrationName}\\s*\\(`, "u").exec(activeMigrationSource);
   if (match) findings.push({ file: "server/db.js", line: lineAt(databaseSource, migrationStart + match.index), type: "legacy_schema_startup_migration", migrationName });
+}
+for (const pattern of [
+  { regex: /\bcomboGroupId\b/u, type: "retired_combo_group_mapping_field" },
+  { regex: /\bsales_link_sku_combo_(?:groups|group_components)\b/u, type: "retired_combo_runtime_model" },
+  { regex: /\bplatform_sku_manual_bindings\b/u, type: "retired_manual_binding_runtime_model" },
+]) {
+  const match = pattern.regex.exec(activeDatabaseSource);
+  if (match) findings.push({ file: "server/db.js", line: lineAt(activeDatabaseSource, match.index), type: pattern.type });
+}
+const linkSkuSchema = /CREATE TABLE IF NOT EXISTS sales_link_skus\s*\(([\s\S]*?)\n\);/u.exec(schemaSource)?.[1] || "";
+for (const column of ["productId", "erpSkuId"]) {
+  const match = new RegExp(`\\b${column}\\b`, "u").exec(linkSkuSchema);
+  if (match) findings.push({ file: "server/schema.sql", line: lineAt(schemaSource, schemaSource.indexOf(linkSkuSchema) + match.index), type: "retired_link_sku_schema_field", column });
 }
 for (const file of files(serverRoot)) {
   const relative = path.relative(root, file);
@@ -175,7 +194,7 @@ const result = {
   check: "link center V2 cleanup gate",
   protectedRules: [
     "经营档案实体已并入Link资产，禁止生产代码写入旧connection_profiles",
-    "新环境只允许创建由sales_links派生的connection_profiles只读兼容视图",
+    "经营档案兼容视图已退役，生产Schema不得重新创建connection_profiles",
     "旧周期销售事实禁止生产写入",
     "旧关系字段禁止业务读取（由check:legacy-relations检查）",
     "正式业务Resolver禁止回退旧结果",
@@ -187,6 +206,8 @@ const result = {
     "新关系审批只写Sales Object结构，不新增Legacy Mapping或Link Product Structure",
     "产品关系建议只生成Sales Object关系审批，正式服务不得读写platform_sku_manual_bindings",
     "禁止新生成combo_goods和bundle_sku异常",
+    "productId、erpSkuId、comboGroupId仅允许出现在幂等退役迁移中，不得回到运行Schema",
+    "Combo Group和旧人工绑定仅允许由幂等退役迁移删除，不得存在运行时读写或初始化创建",
   ],
   riskCount: findings.length,
   status: findings.length ? "risk_detected" : "none",

@@ -18,7 +18,6 @@ const snapshot = (database) => ({
   legacyMappings: count(database, "sales_link_sku_erp_mappings"),
   legacyProductStructures: count(database, "sales_link_sku_product_structures"),
   legacyProductStructureComponents: count(database, "sales_link_sku_product_structure_components"),
-  legacyManualBindings: count(database, "platform_sku_manual_bindings"),
   salesObjects: count(database, "sales_objects"),
   salesObjectRelations: count(database, "sales_link_sku_sales_object_relations"),
   salesObjectStructures: count(database, "sales_object_structures"),
@@ -65,7 +64,6 @@ try {
   assert.equal(afterApply.legacyMappings, before.legacyMappings);
   assert.equal(afterApply.legacyProductStructures, before.legacyProductStructures);
   assert.equal(afterApply.legacyProductStructureComponents, before.legacyProductStructureComponents);
-  assert.equal(afterApply.legacyManualBindings, before.legacyManualBindings);
   assert.equal(afterApply.dailyFacts, before.dailyFacts);
   assert.equal(afterApply.salesObjects, before.salesObjects + 1);
   assert.equal(afterApply.salesObjectRelations, before.salesObjectRelations + 1);

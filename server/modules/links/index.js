@@ -12,8 +12,6 @@ export {
   listConnectionDataMappings,
   listConnectionProfiles,
   assertConnectionVisible,
-  readHealthRecordConnectionId,
-  readImprovementConnectionId,
   getMyConnectionWorkbench,
   setConnectionFollow,
   readConnectionProfile,
@@ -30,19 +28,6 @@ export {
 } from "../../connectionImportService.js";
 export { createConnectionPeriodSnapshots, listConnectionPeriodSnapshots } from "../../connectionPeriodSnapshots.js";
 export { getConnectionGrowthAnalysis, getConnectionManagementOverview, listConnectionGrowthRankings } from "../../connectionGrowthService.js";
-export {
-  createConnectionHealthRecord,
-  createImprovementAction,
-  listAttentionConnectionHealthRecords,
-  listConnectionHealthRecords,
-} from "../../connectionHealthService.js";
-export {
-  createConnectionImprovement,
-  getConnectionImprovementSummary,
-  listConnectionImprovements,
-  updateConnectionImprovement,
-} from "../../connectionImprovementService.js";
-export { getConnectionHospital, joinConnectionDiagnosis } from "../../connectionHospitalService.js";
 export { getLinkSalesRanking, resolveLinkSalesRankingRange } from "../../linkSalesRankingService.js";
 export { getLinkDataStatus } from "../../linkDataStatusService.js";
 export {

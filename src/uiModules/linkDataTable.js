@@ -7,16 +7,14 @@ export const LINK_DATA_COLUMNS = [
   { key: "goodsId", label: "商品ID" }, { key: "owner", label: "负责人" },
   { key: "yesterdaySales", label: "昨日销售", sortable: true }, { key: "sales7d", label: "7日销售", sortable: true },
   { key: "sales30d", label: "30日销售", sortable: true }, { key: "selectedSales", label: "所选周期销售", sortable: true },
-  { key: "growthStatus", label: "增长状态" }, { key: "healthStatus", label: "健康状态" },
-  { key: "hospitalStatus", label: "问题状态" }, { key: "archiveStatus", label: "档案状态", sortable: true },
+  { key: "growthStatus", label: "增长状态" }, { key: "archiveStatus", label: "档案状态", sortable: true },
 ];
-export const DEFAULT_MINE_LINK_FIELDS = ["image", "name", "platform", "shop", "yesterdaySales", "sales7d", "sales30d", "growthStatus", "healthStatus", "hospitalStatus"];
+export const DEFAULT_MINE_LINK_FIELDS = ["image", "name", "platform", "shop", "yesterdaySales", "sales7d", "sales30d", "growthStatus"];
 
 const money = (metric) => metric?.noData ? "暂无数据" : `¥${Number(metric?.value || 0).toLocaleString("zh-CN", { maximumFractionDigits: 2 })}`;
 const statusLabel = {
   better: "增长", stable: "稳定", worse: "下滑", no_data: "暂无数据", insufficient_data: "数据不足",
-  growing: "健康", attention: "需关注", risk: "风险", healthy: "健康",
-  diagnosis: "待诊断", treatment: "改善中", observation: "观察中", none: "无待处理问题",
+  growing: "向好", attention: "需关注", risk: "风险",
   active: "正常", paused: "暂停", archived: "归档",
 };
 function status(value, type) {
@@ -35,8 +33,7 @@ export function renderLinkDataTable({ items = [], pagination = {}, fields = DEFA
     owner: escapeHtml(item.ownerName || "未分配"), yesterdaySales: money(item.sales?.yesterday), sales7d: money(item.sales?.sevenDays),
     sales30d: money(item.sales?.thirtyDays), selectedSales: money(item.sales?.selected),
     growthStatus: `${status(item.growthStatus, "growth")}${item.growthRate == null ? "" : `<small>${Number(item.growthRate * 100).toFixed(1)}%</small>`}`,
-    healthStatus: `${status(item.healthStatus, "health")}${item.healthScore == null ? "" : `<small>${Number(item.healthScore)}分</small>`}`,
-    hospitalStatus: status(item.hospitalStatus, "hospital"), archiveStatus: status(item.archiveStatus, "archive"),
+    archiveStatus: status(item.archiveStatus, "archive"),
   })[key] ?? "—";
   const headers = visible.map((key) => { const column = definitions.get(key); if (!column) return "";
     const active = sort.field === key; return `<th>${column.sortable ? `<button type="button" data-link-table-sort="${escapeHtml(key)}">${escapeHtml(column.label)}${active ? (sort.direction === "asc" ? " ↑" : " ↓") : " ↕"}</button>` : escapeHtml(column.label)}</th>`; }).join("");

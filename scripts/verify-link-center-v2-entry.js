@@ -9,7 +9,6 @@ process.env.WUFAN_DB_PATH = databasePath;
 const { closeDatabase, getDatabase, initializeDatabase } = await import("../server/db.js");
 const { listConnectionImportTemplates, previewConnectionDataImport } = await import("../server/connectionDataFoundationService.js");
 const { commitPlatformGoodsExcelDataSync, previewPlatformGoodsExcelDataSync } = await import("../server/platformGoodsExcelDataSyncAdapter.js");
-const { confirmPlatformLinkShopMappings, previewPlatformLinkShopMappings } = await import("../server/platformLinkShopMappingImportService.js");
 
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 const workbookBuffer = (rows, sheetName = "Sheet1") => {
@@ -55,8 +54,7 @@ try {
     (SELECT COUNT(*) FROM erp_skus) erpSkus,
     (SELECT COUNT(*) FROM products) products,
     (SELECT shopId FROM sales_links WHERE id='link-1') linkShopId,
-    (SELECT COUNT(*) FROM connection_sku_sales_facts) facts,
-    (SELECT erpSkuId FROM sales_link_skus WHERE id='link-sku-1') legacyErpSkuId`).get();
+    (SELECT COUNT(*) FROM connection_sku_sales_facts) facts`).get();
 
   const relationFile = workbookBuffer([
     { 店铺: "点意旗舰店-天猫-公司", 货品ID: "1001", 规格ID: "sku-1", 平台规格编码: "ERP-001", 系统货品: "单品" },
@@ -79,14 +77,6 @@ try {
   const importedMapping = db.prepare("SELECT * FROM sales_link_sku_erp_mappings WHERE salesLinkSkuId='link-sku-taobao' AND erpSkuId='erp-sku-2'").get();
   assert(importedMapping?.mappingType === "single" && importedMapping.quantity === 1 && importedMapping.sourceType === "platform_goods_excel", "新店铺V2映射字段不符合要求。");
   assert(db.prepare("SELECT COUNT(*) total FROM sales_link_sku_erp_mappings WHERE sourceType='platform_goods_excel'").get().total === 1, "多店铺映射数量错误。");
-  assert(db.prepare("SELECT erpSkuId FROM sales_link_skus WHERE id='link-sku-1'").get().erpSkuId === protectedBefore.legacyErpSkuId, "旧erpSkuId字段被修改。");
-
-  const shopFile = workbookBuffer([{ 平台: "天猫", 平台商品ID: "1001", 系统店铺: "shop-tmall" }]);
-  const shopPreview = previewPlatformLinkShopMappings({ buffer: shopFile, fileName: "店铺匹配.xlsx", createdBy: "" });
-  assert(shopPreview.summary.valid === 1 && shopPreview.summary.errors === 0, "店铺匹配预览失败。");
-  const shopCommit = confirmPlatformLinkShopMappings(shopPreview.batch.id);
-  assert(shopCommit.created === 1, "店铺匹配未创建。");
-  assert(db.prepare("SELECT shopId FROM platform_link_shop_mappings WHERE platform='tmall' AND platformGoodsId='1001'").get().shopId === "shop-tmall", "店铺匹配结果错误。");
 
   const platformFile = workbookBuffer([
     ["说明"], ["说明"], ["说明"], ["说明"],
@@ -115,8 +105,7 @@ try {
     (SELECT COUNT(*) FROM erp_skus) erpSkus,
     (SELECT COUNT(*) FROM products) products,
     (SELECT shopId FROM sales_links WHERE id='link-1') linkShopId,
-    (SELECT COUNT(*) FROM connection_sku_sales_facts) facts,
-    (SELECT erpSkuId FROM sales_link_skus WHERE id='link-sku-1') legacyErpSkuId`).get();
+    (SELECT COUNT(*) FROM connection_sku_sales_facts) facts`).get();
   assert(protectedAfter.links === protectedBefore.links, "预览修改了链接数量。");
   assert(protectedAfter.facts === protectedBefore.facts, "预览修改了销售事实。");
   assert(protectedAfter.linkSkus === protectedBefore.linkSkus && protectedAfter.erpSkus === protectedBefore.erpSkus && protectedAfter.products === protectedBefore.products, "导入修改了受保护的SKU或产品数量。");

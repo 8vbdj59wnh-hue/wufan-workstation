@@ -3,12 +3,12 @@ import XLSX from "xlsx";
 import { getDatabase } from "./db.js";
 import { ensureSingleLinkSkuErpMapping, inspectSingleLinkSkuErpMapping, resolveUniqueProductErpSku } from "./linkSkuErpMappingService.js";
 import { normalizeUploadedFileName } from "./uploadFileName.js";
+import { LINK_ASSET_SELECT_SQL } from "./linkAssetSql.js";
 
 export const connectionImportTypes = [
   "platform_link_operations",
   "erp_sales",
   "erp_product_relations",
-  "erp_inventory",
 ];
 export const PLATFORM_LINK_OPERATION_PARSER_VERSION = "platform-link-id-date-v4";
 
@@ -28,11 +28,6 @@ const typeDefinitions = {
     label: "ERP产品关系导入",
     required: ["platform", "shop", "platformGoodsId", "skuCode"],
     fields: ["platform", "shop", "platformGoodsId", "platformSkuId", "skuCode", "specificationName"],
-  },
-  erp_inventory: {
-    label: "ERP库存导入",
-    required: ["skuCode", "businessDate"],
-    fields: ["skuCode", "businessDate", "currentStock", "availableStock", "unitCost", "salesVelocity"],
   },
 };
 
@@ -373,7 +368,7 @@ function ensureLink(database, row, batchId, resolvedLink = null) {
   if (!link) throw Object.assign(new Error("平台经营数据未匹配到已有链接，请先通过平台货品导入建立链接身份。"), { type: "missing_link" });
   const createdAt = now();
   // 经营数据只补充经营展示信息，不得覆盖平台货品资产批次身份。
-  database.prepare(`UPDATE sales_links SET title=COALESCE(NULLIF(?,''),title),canonicalUrl=COALESCE(NULLIF(?,''),canonicalUrl),rawUrl=COALESCE(NULLIF(?,''),rawUrl),category=COALESCE(NULLIF(?,''),category),status=COALESCE(NULLIF(?,''),status),updatedAt=? WHERE id=?`).run(text(row.title), text(row.url), text(row.url), text(row.category), text(row.status), createdAt, link.id);
+  database.prepare(`UPDATE sales_links SET title=COALESCE(NULLIF(?,''),title),canonicalUrl=COALESCE(NULLIF(?,''),canonicalUrl),category=COALESCE(NULLIF(?,''),category),status=COALESCE(NULLIF(?,''),status),updatedAt=? WHERE id=?`).run(text(row.title), text(row.url), text(row.category), text(row.status), createdAt, link.id);
   link = database.prepare("SELECT * FROM sales_links WHERE id=?").get(link.id);
   database.prepare(`UPDATE sales_links SET
     displayName=COALESCE(NULLIF(?,''),displayName,title,platformGoodsId),
@@ -383,7 +378,7 @@ function ensureLink(database, row, batchId, resolvedLink = null) {
     managementOriginImportBatchId=COALESCE(managementOriginImportBatchId,?),
     managementIdentifiedAt=COALESCE(managementIdentifiedAt,?),updatedAt=? WHERE id=?`)
     .run(text(row.title), text(row.mainImage), text(row.mainImage), batchId, createdAt, createdAt, link.id);
-  const profile = database.prepare("SELECT * FROM connection_profiles WHERE id=?").get(link.id);
+  const profile = database.prepare(`SELECT * FROM ${LINK_ASSET_SELECT_SQL} WHERE id=?`).get(link.id);
   return { link, profile, created: false };
 }
 
@@ -419,7 +414,7 @@ function applyRow(database, importType, row, batchId, raw) {
   }
   if (importType === "platform_links") return ensureLink(database, row, batchId);
   if (importType === "platform_operations") {
-    const link = requireLink(database, row); const profile = database.prepare("SELECT * FROM connection_profiles WHERE salesLinkId=?").get(link.id); if (!profile) throw Object.assign(new Error("链接档案不存在。"), { type: "missing_connection_profile" }); const mapping = ensurePlatformMapping(database, row, link, profile, raw); insertPlatformSnapshot(database, row, raw, batchId, link, profile, mapping); return { link, profile };
+    const link = requireLink(database, row); const profile = database.prepare(`SELECT * FROM ${LINK_ASSET_SELECT_SQL} WHERE salesLinkId=?`).get(link.id); if (!profile) throw Object.assign(new Error("链接资产不存在。"), { type: "missing_link_asset" }); const mapping = ensurePlatformMapping(database, row, link, profile, raw); insertPlatformSnapshot(database, row, raw, batchId, link, profile, mapping); return { link, profile };
   }
   if (importType === "erp_sales") {
     throw Object.assign(new Error("旧周期销售事实已进入只读状态，请使用销售日报导入。"), { code: "legacy_read_only", type: "legacy_read_only" });
@@ -437,10 +432,6 @@ function applyRow(database, importType, row, batchId, raw) {
     database.prepare("UPDATE sales_link_skus SET matchStatus=?,matchMethod='product_structure_application',matchReason=?,updatedAt=? WHERE id=?")
       .run(pending ? "pending_relation" : "erp_linked", pending ? relation.reason : "ERP产品关系与已审核Product Structure一致", createdAt, sku.id);
     return { link, product, sku, mapping: relation.mapping || null, governancePending: pending, applicationBatchId: relation.applicationBatchId || null };
-  }
-  if (importType === "erp_inventory") {
-    const skus = database.prepare("SELECT * FROM sales_link_skus WHERE LOWER(COALESCE(normalizedPlatformSkuCode,platformSkuCode,''))=LOWER(?)").all(text(row.skuCode)); if (!skus.length) throw Object.assign(new Error("SKU不存在。"), { type: "missing_sku" });
-    for (const sku of skus) database.prepare(`INSERT OR IGNORE INTO connection_sku_inventory_facts (id,batchId,salesLinkSkuId,skuCode,businessDate,currentStock,availableStock,unitCost,salesVelocity,rawDataJson,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(id("connection-sku-inventory"), batchId, sku.id, text(row.skuCode), text(row.businessDate), row.currentStock, row.availableStock, row.unitCost, row.salesVelocity, JSON.stringify(raw), createdAt); return { skus };
   }
   throw new Error("导入类型无效。");
 }

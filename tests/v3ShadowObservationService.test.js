@@ -18,14 +18,15 @@ function fixture() {
     CREATE TABLE sales_link_sku_sales_object_relations(id TEXT PRIMARY KEY);
     CREATE TABLE sales_link_sku_erp_mappings(id TEXT PRIMARY KEY);
     CREATE TABLE sales_link_sku_product_structures(id TEXT PRIMARY KEY);
-    CREATE TABLE platform_sku_manual_bindings(id TEXT PRIMARY KEY);
     CREATE TABLE products(id TEXT PRIMARY KEY);
     CREATE TABLE sales_links(id TEXT PRIMARY KEY);
     CREATE TABLE erp_skus(id TEXT PRIMARY KEY);
     CREATE TABLE connection_sku_sales_daily_facts(id TEXT PRIMARY KEY,salesAmount REAL,costAmount REAL,profitAmount REAL);
     INSERT INTO connection_sku_sales_daily_facts VALUES('fact',100,40,60);
-    CREATE TABLE sales_link_skus(id TEXT PRIMARY KEY,currentState TEXT,lastSeenBatchId TEXT,normalizedPlatformSkuCode TEXT,platformSkuCode TEXT,systemGoodsType TEXT);
-    INSERT INTO sales_link_skus VALUES('missing','active','batch','','','单品');
+    CREATE TABLE sales_link_skus(id TEXT PRIMARY KEY,currentState TEXT,normalizedPlatformSkuCode TEXT,platformSkuCode TEXT,systemGoodsType TEXT);
+    INSERT INTO sales_link_skus VALUES('missing','active','','','单品');
+    CREATE TABLE platform_goods_excel_import_rows(batchId TEXT,salesLinkSkuId TEXT);
+    INSERT INTO platform_goods_excel_import_rows VALUES('batch','missing');
     CREATE TABLE operating_erp_identity_observations(normalizedCode TEXT PRIMARY KEY,identityStatus TEXT,resolvedIdentityType TEXT,goodsStatus TEXT,suiteStatus TEXT,detailJson TEXT);
     INSERT INTO operating_erp_identity_observations VALUES('missing-code','erp_not_found','unresolved','not_found','not_found','{}');
     CREATE TABLE v3_relation_shadow_runs (

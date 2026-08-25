@@ -4,6 +4,7 @@ import { readConnectionV3Metrics, readConnectionV3MetricsMap } from "./connectio
 import { FORMAL_SALES_OBJECT_RESOLVER_SCOPES, resolveLinkSkuRelationsForRead } from "./capabilities/resolveLinkSkuRelationRead.js";
 import { readConnectionInventorySupply } from "./inventorySupplyQueryService.js";
 import { buildLinkOperatingScope, getLinkOperatingSummary } from "./linkOperatingSetService.js";
+import { LINK_ASSET_SELECT_SQL } from "./linkAssetSql.js";
 
 function text(value) { return String(value ?? "").trim(); }
 function parseJson(value, fallback = {}) { try { return JSON.parse(value || ""); } catch { return fallback; } }
@@ -136,13 +137,13 @@ export function listConnectionCoreProfilesPage(rawOptions = {}, userId = "", isA
   if (options.skuCount === "single") where.push(`${skuCount}=1`);
   if (options.skuCount === "multiple") where.push(`${skuCount}>1`);
   const whereSql = where.join(" AND ");
-  const total = Number(database.prepare(`SELECT COUNT(*) count FROM sales_links l JOIN sales_shops sh ON sh.id=l.shopId LEFT JOIN connection_profiles c ON c.salesLinkId=l.id WHERE ${whereSql}`).get(params)?.count || 0);
+  const total = Number(database.prepare(`SELECT COUNT(*) count FROM sales_links l JOIN sales_shops sh ON sh.id=l.shopId LEFT JOIN ${LINK_ASSET_SELECT_SQL} c ON c.salesLinkId=l.id WHERE ${whereSql}`).get(params)?.count || 0);
   const sortField = connectionSortColumns[text(options.sortField)] || connectionSortColumns.default;
   const sortDirection = String(options.sortDirection).toLowerCase() === "asc" ? "ASC" : "DESC";
   const rows = database.prepare(`
     WITH candidates AS (
       SELECT COALESCE(c.id,l.id) id,l.id salesLinkId,${sortField} sortValue
-      FROM sales_links l JOIN sales_shops sh ON sh.id=l.shopId LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
+      FROM sales_links l JOIN sales_shops sh ON sh.id=l.shopId LEFT JOIN ${LINK_ASSET_SELECT_SQL} c ON c.salesLinkId=l.id
       LEFT JOIN persons p ON p.id=c.ownerId WHERE ${whereSql}
       ORDER BY sortValue ${sortDirection},l.id ${sortDirection} LIMIT @limit OFFSET @offset
     )
@@ -156,10 +157,11 @@ export function listConnectionCoreProfilesPage(rawOptions = {}, userId = "", isA
         COALESCE((SELECT SUM(f.salesAmount) FROM connection_sku_sales_daily_facts f WHERE f.salesLinkId=l.id),0) salesAmount,
         COALESCE((SELECT SUM(f.profitAmount) FROM connection_sku_sales_daily_facts f WHERE f.salesLinkId=l.id),0) profitAmount,
         (SELECT MAX(ps.periodEnd) FROM connection_period_snapshots ps WHERE ps.salesLinkId=l.id) latestPeriodEnd,
-        (SELECT ps.payAmount FROM connection_period_snapshots ps WHERE ps.salesLinkId=l.id ORDER BY ps.periodEnd DESC,ps.periodStart DESC,ps.createdAt DESC LIMIT 1) latestPayAmount,
+        (SELECT SUM(f.salesAmount) FROM connection_sku_sales_daily_facts f WHERE f.salesLinkId=l.id
+          AND f.saleDate=(SELECT MAX(f2.saleDate) FROM connection_sku_sales_daily_facts f2 WHERE f2.salesLinkId=l.id)) latestPayAmount,
         (SELECT COUNT(*) FROM sales_link_skus sx WHERE sx.salesLinkId=l.id AND COALESCE(sx.currentState,'active')='active') skuCount,q.sortValue
       FROM candidates q JOIN sales_links l ON l.id=q.salesLinkId JOIN sales_shops sh ON sh.id=l.shopId
-      LEFT JOIN connection_profiles c ON c.salesLinkId=l.id LEFT JOIN persons p ON p.id=c.ownerId
+      LEFT JOIN ${LINK_ASSET_SELECT_SQL} c ON c.salesLinkId=l.id LEFT JOIN persons p ON p.id=c.ownerId
       ORDER BY q.sortValue ${sortDirection},l.id ${sortDirection}
   `).all({ ...operatingScope.params, ...params, limit: options.pageSize, offset: options.offset });
   const ids = rows.map((row) => row.salesLinkId);
@@ -188,12 +190,12 @@ export function listConnectionCoreProfiles(userId = "", isAdmin = false) {
 
 export function getConnectionCoreDetail(connectionId, userId = "", isAdmin = false) {
   const database = getDatabase();
-  const profileRow = database.prepare("SELECT id FROM connection_profiles WHERE id=?").get(text(connectionId));
+  const profileRow = database.prepare("SELECT id FROM sales_links WHERE id=?").get(text(connectionId));
   const profile = profileRow ? { ...readConnectionProfile(connectionId), connectionProfileId: profileRow.id, hasBusinessProfile: true } : database.prepare(`
     SELECT l.id,l.id salesLinkId,NULL connectionProfileId,
       COALESCE(NULLIF(l.title,''),l.platformGoodsId) name,NULL mainImage,NULL imageSource,NULL ownerId,
       COALESCE(l.currentState,'active') status,'unmanaged' level,NULL notes,l.originSource,
-      l.createdAt,l.updatedAt,l.title salesLinkTitle,l.canonicalUrl,l.rawUrl,l.platformGoodsId,l.platformGoodsCode,
+      l.createdAt,l.updatedAt,l.title salesLinkTitle,l.canonicalUrl,l.platformGoodsId,l.platformGoodsCode,
       l.currentState salesLinkState,s.id shopId,s.platform,s.displayName shopDisplayName,s.shopName,NULL ownerName
     FROM sales_links l JOIN sales_shops s ON s.id=l.shopId WHERE l.id=?
   `).get(text(connectionId));

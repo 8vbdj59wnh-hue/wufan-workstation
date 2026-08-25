@@ -67,16 +67,15 @@ export const LINK_BUSINESS_COLUMN_GROUPS = [
     { key: "competitionScore", label: "竞争力评分", sortable: true },
   ] },
   { key: "status", label: "经营状态", columns: [
-    { key: "growthStatus", label: "增长状态", sortable: true }, { key: "healthStatus", label: "健康状态", sortable: true },
-    { key: "hospitalStatus", label: "医院状态", sortable: true }, { key: "archiveStatus", label: "档案状态", sortable: true },
+    { key: "growthStatus", label: "增长状态", sortable: true }, { key: "archiveStatus", label: "档案状态", sortable: true },
   ] },
 ];
 
 export const LINK_BUSINESS_COLUMNS = LINK_BUSINESS_COLUMN_GROUPS.flatMap((group) => group.columns.map((column) => ({ ...column, group: group.key })));
-export const DEFAULT_LINK_BUSINESS_FIELDS = ["image", "name", "platform", "shop", "salesAmount", "quantity", "profitAmount", "profitMargin", "growthStatus", "healthStatus", "archiveStatus"];
+export const DEFAULT_LINK_BUSINESS_FIELDS = ["image", "name", "platform", "shop", "salesAmount", "quantity", "profitAmount", "profitMargin", "growthStatus", "archiveStatus"];
 
 const LEFT_ALIGNED_FIELDS = new Set(["name", "platform", "shop", "goodsId", "url", "category", "platformStatus", "productType", "productStatus", "productTags", "owner"]);
-const CENTER_ALIGNED_FIELDS = new Set(["image", "statisticsDate", "periodStart", "periodEnd", "growthStatus", "healthStatus", "hospitalStatus", "archiveStatus"]);
+const CENTER_ALIGNED_FIELDS = new Set(["image", "statisticsDate", "periodStart", "periodEnd", "growthStatus", "archiveStatus"]);
 function fieldAlignment(field) {
   if (LEFT_ALIGNED_FIELDS.has(field)) return "left";
   if (CENTER_ALIGNED_FIELDS.has(field) || field === "actions") return "center";
@@ -84,7 +83,7 @@ function fieldAlignment(field) {
 }
 
 const statusNames = { better: "增长", stable: "稳定", worse: "下滑", no_data: "暂无数据", insufficient_data: "数据不足",
-  growing: "健康", attention: "需关注", risk: "风险", healthy: "健康", diagnosis: "待诊断", treatment: "改善中",
+  growing: "向好", attention: "需关注", risk: "风险",
   observation: "观察中", none: "无问题", active: "正常", paused: "暂停", archived: "归档", historical: "历史/退出经营" };
 function status(value, type) { const normalized = value || "no_data"; return `<span class="link-table-status is-${escapeHtml(normalized)}" data-status-type="${escapeHtml(type)}">${escapeHtml(statusNames[normalized] || normalized)}</span>`; }
 function number(metric) { return metric?.noData ? "暂无数据" : Number(metric?.value || 0).toLocaleString("zh-CN", { maximumFractionDigits: 2 }); }
@@ -132,8 +131,7 @@ export function renderLinkBusinessTable({ items = [], pagination = {}, fields = 
     structuredDetailTransactionShare: percent(item.platformMetrics?.structuredDetailTransactionShare),
     competitionScore: number(item.platformMetrics?.competitionScore),
     growthStatus: `${status(item.growthStatus, "growth")}${item.growthRate == null ? "" : `<small>${(Number(item.growthRate) * 100).toFixed(1)}%</small>`}`,
-    healthStatus: `${status(item.healthStatus, "health")}${item.healthScore == null ? "" : `<small>${Number(item.healthScore)}分</small>`}`,
-    hospitalStatus: status(item.hospitalStatus, "hospital"), archiveStatus: status(item.archiveStatus, "archive"),
+    archiveStatus: status(item.archiveStatus, "archive"),
   })[key] ?? "—";
   const headers = visible.map((key) => { const column = definitions.get(key); const active = sort.field === key;
     return `<th data-field="${escapeHtml(key)}" data-align="${fieldAlignment(key)}">${column.sortable ? `<button type="button" data-link-business-sort="${escapeHtml(key)}">${escapeHtml(column.label)}${active ? (sort.direction === "asc" ? " ↑" : " ↓") : " ↕"}</button>` : escapeHtml(column.label)}</th>`; }).join("");

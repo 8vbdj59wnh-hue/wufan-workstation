@@ -159,8 +159,9 @@ export function calculateOperatingErpSet(options = {}) {
     });
   };
 
-  const platformSkus = database.prepare(`SELECT id,salesLinkId,platformSkuCode,normalizedPlatformSkuCode,erpSkuId,createdAt,updatedAt
-    FROM sales_link_skus WHERE lastSeenBatchId=?`).all(platformBatch.id);
+  const platformSkus = database.prepare(`SELECT DISTINCT s.id,s.salesLinkId,s.platformSkuCode,s.normalizedPlatformSkuCode,s.createdAt,s.updatedAt
+    FROM platform_goods_excel_import_rows r JOIN sales_link_skus s ON s.id=r.salesLinkSkuId
+    WHERE r.batchId=?`).all(platformBatch.id);
   for (const sku of platformSkus) {
     const code = displayCode(sku.normalizedPlatformSkuCode || sku.platformSkuCode);
     if (!code) {
@@ -169,7 +170,7 @@ export function calculateOperatingErpSet(options = {}) {
     }
     const relation = relationByLinkSku.get(sku.id);
     const salesObject = relation ? salesObjectById.get(relation.salesObjectId) : salesObjectByCode.get(normalizeCode(code));
-    const erpSku = erpByCode.get(normalizeCode(code)) || (sku.erpSkuId ? erpById.get(sku.erpSkuId) : null);
+    const erpSku = erpByCode.get(normalizeCode(code)) || null;
     const resolvedErpSku = salesObject?.objectType === "single"
       ? (componentsByObject.get(salesObject.id)?.map((item) => erpById.get(item.erpSkuId)).find(Boolean) || erpSku)
       : erpSku;

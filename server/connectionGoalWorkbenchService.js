@@ -2,6 +2,7 @@ import { getDatabase } from "./db.js";
 import { setConnectionBusinessPositioning } from "./connectionGoalFoundationService.js";
 import { confirmConnectionGoalPlan, createConnectionGoalSuggestion } from "./connectionGoalPlanService.js";
 import { buildLinkOperatingScope } from "./linkOperatingSetService.js";
+import { LINK_ASSET_SELECT_SQL } from "./linkAssetSql.js";
 
 const clean = (value) => String(value ?? "").trim();
 const positioningTypes = new Set(["sales_growth", "balanced_sales", "long_tail", "profit_contribution"]);
@@ -73,7 +74,7 @@ export function readConnectionGoalWorkbench(rawOptions = {}, context = {}) {
   const ctes = baseCtes(periodStart, periodEnd);
   const scope = buildWhere({}, context.userId, context.isAdmin, operatingScope);
   const filtered = buildWhere(options, context.userId, context.isAdmin, operatingScope);
-  const joins = `FROM connection_profiles c
+  const joins = `FROM ${LINK_ASSET_SELECT_SQL} c
     JOIN sales_links l ON l.id=c.salesLinkId
     JOIN sales_shops sh ON sh.id=l.shopId
     LEFT JOIN persons p ON p.id=c.ownerId
@@ -117,7 +118,7 @@ function normalizedIds(input = {}) {
 }
 
 function assertManageable(database, ids, context) {
-  const rows = database.prepare(`SELECT id,ownerId FROM connection_profiles WHERE id IN (${ids.map(() => "?").join(",")})`).all(...ids);
+  const rows = database.prepare(`SELECT id,ownerId FROM sales_links WHERE id IN (${ids.map(() => "?").join(",")})`).all(...ids);
   if (rows.length !== ids.length) fail("部分链接档案不存在。", 404);
   const unauthorized = rows.filter((row) => !context.isAdmin && clean(row.ownerId) !== clean(context.userId));
   if (unauthorized.length) fail("只能管理自己负责的链接。", 403);

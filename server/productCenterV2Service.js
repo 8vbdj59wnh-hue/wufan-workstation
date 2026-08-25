@@ -2,6 +2,7 @@ import { createProductFromErpSku } from "./erpSkuService.js";
 import { getDatabase } from "./db.js";
 import { resolveErpSkuSalesObjectLinks } from "./capabilities/resolveLinkSkuRelationRead.js";
 import { classifyErpSkuUsages } from "./erpSkuUsageProfileService.js";
+import { LINK_ASSET_SELECT_SQL } from "./linkAssetSql.js";
 
 const text = (value) => String(value ?? "").trim();
 const number = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
@@ -110,7 +111,7 @@ function salesObjectLinkContext(database, erpSkuIds) {
   const identities = linkSkuIds.length ? database.prepare(`SELECT x.id salesLinkSkuId,x.salesLinkId,x.platformSkuId,x.platformSkuCode,x.specificationName platformSpecification,
       l.platformGoodsId,l.title,sh.platform,sh.displayName shopName,c.id connectionId
     FROM sales_link_skus x JOIN sales_links l ON l.id=x.salesLinkId JOIN sales_shops sh ON sh.id=l.shopId
-    LEFT JOIN connection_profiles c ON c.salesLinkId=l.id WHERE x.id IN (${linkSkuIds.map(() => "?").join(",")})`).all(...linkSkuIds) : [];
+    LEFT JOIN ${LINK_ASSET_SELECT_SQL} c ON c.salesLinkId=l.id WHERE x.id IN (${linkSkuIds.map(() => "?").join(",")})`).all(...linkSkuIds) : [];
   const identityBySku = new Map(identities.map((row) => [row.salesLinkSkuId, row]));
   return new Map(erpSkuIds.map((erpSkuId) => [erpSkuId, (reverse[erpSkuId] || []).map((relation) => ({ ...identityBySku.get(relation.salesLinkSkuId), relation })).filter((row) => row.salesLinkSkuId)]));
 }

@@ -149,8 +149,8 @@ export function createProductStructureApplicationBatch({ batchCode, sourceType, 
       (id,batchCode,sourceType,sourceFileHashesJson,status,createdBy,createdAt,updatedAt)
       VALUES (?,?,?,?, 'pending_review',?,?,?)`).run(batchId, code, clean(sourceType), JSON.stringify(sourceFileHashes), clean(createdBy) || null, timestamp, timestamp);
     const insertItem = database.prepare(`INSERT INTO product_structure_application_items
-      (id,applicationBatchId,productStructureId,salesLinkSkuId,classification,approvalStatus,relationshipShape,sourceTypesJson,currentMappingsJson,targetComponentsJson,componentDiffJson,impactSalesAmount,impactProfitAmount,createdAt,updatedAt)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+      (id,applicationBatchId,salesLinkSkuId,classification,approvalStatus,relationshipShape,sourceTypesJson,currentMappingsJson,targetComponentsJson,componentDiffJson,impactSalesAmount,impactProfitAmount,createdAt,updatedAt)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
     for (const item of previewItems) {
       const classification = classifyStructureApplication(item.previewStatus);
       const components = canonical(item.components);
@@ -160,7 +160,7 @@ export function createProductStructureApplicationBatch({ batchCode, sourceType, 
       }
       const current = canonical(item.currentMappings);
       const diff = buildComponentDiff(current, components);
-      insertItem.run(`product-structure-application-item-${stableId(batchId, item.salesLinkSkuId)}`, batchId, null, item.salesLinkSkuId, classification, defaultApprovalStatus(classification), item.relationshipShape || deriveProductStructureShape(components), JSON.stringify([...new Set(item.components.map((component) => component.sourceType).filter(Boolean))]), JSON.stringify(current), JSON.stringify(components), JSON.stringify(diff), Number(item.impactSalesAmount || 0), Number(item.impactProfitAmount || 0), timestamp, timestamp);
+      insertItem.run(`product-structure-application-item-${stableId(batchId, item.salesLinkSkuId)}`, batchId, item.salesLinkSkuId, classification, defaultApprovalStatus(classification), item.relationshipShape || deriveProductStructureShape(components), JSON.stringify([...new Set(item.components.map((component) => component.sourceType).filter(Boolean))]), JSON.stringify(current), JSON.stringify(components), JSON.stringify(diff), Number(item.impactSalesAmount || 0), Number(item.impactProfitAmount || 0), timestamp, timestamp);
       itemCount += 1;
     }
     if (itemCount === 0) database.prepare("UPDATE product_structure_application_batches SET status='closed',updatedAt=? WHERE id=?").run(timestamp, batchId);
@@ -266,8 +266,8 @@ function executeApprovedProductStructureApplication(itemId, { appliedBy, failAft
     database.prepare(`UPDATE product_structure_application_items SET salesObjectStructureId=?,structureVersion=?,updatedAt=? WHERE id=?`)
       .run(liveSalesObject.structure.id, Number(liveSalesObject.structure.version), timestamp, item.id);
     database.prepare(`INSERT INTO product_structure_application_audits
-      (id,applicationItemId,productStructureId,salesObjectStructureId,structureVersion,executionMode,outcome,oldMappingsSnapshotJson,generatedMappingsJson,appliedBy,appliedAt,createdAt)
-      VALUES (?,?,?,?,?,?,'idempotent',?,?,?,?,?)`).run(auditId, item.id, item.productStructureId || null, liveSalesObject.structure.id, Number(liveSalesObject.structure.version), executionMode, JSON.stringify(currentSnapshot), JSON.stringify({ ...currentSnapshot, components: generated }), actor, timestamp, timestamp);
+      (id,applicationItemId,salesObjectStructureId,structureVersion,executionMode,outcome,oldMappingsSnapshotJson,generatedMappingsJson,appliedBy,appliedAt,createdAt)
+      VALUES (?,?,?,?,?,'idempotent',?,?,?,?,?)`).run(auditId, item.id, liveSalesObject.structure.id, Number(liveSalesObject.structure.version), executionMode, JSON.stringify(currentSnapshot), JSON.stringify({ ...currentSnapshot, components: generated }), actor, timestamp, timestamp);
     return { itemId: item.id, outcome: "idempotent", oldMappingCount: liveSalesObject.components.length, oldComponentCount: liveSalesObject.components.length, generatedMappingCount: 0, generatedComponentCount: 0, salesObjectId: liveSalesObject.relation.salesObjectId, salesObjectStructureId: liveSalesObject.structure.id, salesObjectStructureVersion: Number(liveSalesObject.structure.version), auditId };
   }
   if (JSON.stringify(liveSalesObject.components) !== JSON.stringify(frozenCurrent)) throw new Error("当前Sales Object结构已变化，请重新生成审批预览。");
@@ -286,14 +286,14 @@ function executeApprovedProductStructureApplication(itemId, { appliedBy, failAft
       database.prepare("UPDATE product_structure_application_items SET salesObjectStructureId=?,structureVersion=?,updatedAt=? WHERE id=?")
         .run(appliedSalesObject.structureId, appliedSalesObject.structureVersion, timestamp, item.id);
       database.prepare(`INSERT INTO product_structure_application_audits
-        (id,applicationItemId,productStructureId,salesObjectStructureId,structureVersion,executionMode,outcome,oldMappingsSnapshotJson,generatedMappingsJson,appliedBy,appliedAt,createdAt)
-        VALUES (?,?,?,?,?,?,'applied',?,?,?,?,?)`).run(auditId, item.id, item.productStructureId || null, appliedSalesObject.structureId, appliedSalesObject.structureVersion, executionMode, JSON.stringify(currentSnapshot), JSON.stringify({ source: "sales_object", salesObjectId: appliedSalesObject.salesObjectId, salesObjectStructureId: appliedSalesObject.structureId, salesObjectStructureVersion: appliedSalesObject.structureVersion, components: generated }), actor, timestamp, timestamp);
+        (id,applicationItemId,salesObjectStructureId,structureVersion,executionMode,outcome,oldMappingsSnapshotJson,generatedMappingsJson,appliedBy,appliedAt,createdAt)
+        VALUES (?,?,?,?,?,'applied',?,?,?,?,?)`).run(auditId, item.id, appliedSalesObject.structureId, appliedSalesObject.structureVersion, executionMode, JSON.stringify(currentSnapshot), JSON.stringify({ source: "sales_object", salesObjectId: appliedSalesObject.salesObjectId, salesObjectStructureId: appliedSalesObject.structureId, salesObjectStructureVersion: appliedSalesObject.structureVersion, components: generated }), actor, timestamp, timestamp);
     })();
     return { itemId: item.id, outcome: "applied", oldMappingCount: liveSalesObject.components.length, oldComponentCount: liveSalesObject.components.length, generatedMappingCount: 0, generatedComponentCount: target.length, salesObjectId: appliedSalesObject.salesObjectId, salesObjectStructureId: appliedSalesObject.structureId, salesObjectStructureVersion: appliedSalesObject.structureVersion, auditId };
   } catch (error) {
     database.prepare(`INSERT INTO product_structure_application_audits
-      (id,applicationItemId,productStructureId,salesObjectStructureId,structureVersion,executionMode,outcome,oldMappingsSnapshotJson,generatedMappingsJson,errorMessage,appliedBy,appliedAt,createdAt)
-      VALUES (?,?,?,?,?,?,'rolled_back',?,?,?,?,?,?)`).run(auditId, item.id, item.productStructureId || null, currentSnapshot.salesObjectStructureId, currentSnapshot.salesObjectStructureVersion, executionMode, JSON.stringify(currentSnapshot), JSON.stringify({ source: "sales_object", components: generated }), String(error.message), actor, timestamp, timestamp);
+      (id,applicationItemId,salesObjectStructureId,structureVersion,executionMode,outcome,oldMappingsSnapshotJson,generatedMappingsJson,errorMessage,appliedBy,appliedAt,createdAt)
+      VALUES (?,?,?,?,?,'rolled_back',?,?,?,?,?,?)`).run(auditId, item.id, currentSnapshot.salesObjectStructureId, currentSnapshot.salesObjectStructureVersion, executionMode, JSON.stringify(currentSnapshot), JSON.stringify({ source: "sales_object", components: generated }), String(error.message), actor, timestamp, timestamp);
     return { itemId: item.id, outcome: "rolled_back", error: String(error.message), auditId };
   }
 }

@@ -1,15 +1,13 @@
 import { getDatabase } from "./db.js";
 import { listConnectionGrowthRankings } from "./connectionGrowthService.js";
-import { listAttentionConnectionHealthRecords } from "./connectionHealthService.js";
-import { getConnectionImprovementSummary } from "./connectionImprovementService.js";
 import { getProductBusinessReadModel } from "./productBusinessReadModel.js";
 
 export const operationMetricDefinitions = Object.freeze({
   productSales: { key: "product.totalPhysicalContribution30d", label: "产品近30天实际出货贡献", source: "Daily Facts + Sales Object BOM", aggregation: "Single直接销量 + Bundle销售套数×BOM组件数量；Bundle金额不分摊" },
   stock: { key: "inventory.actualStock", label: "实际库存", source: "erp_sku_inventory_daily_summaries.stockNum", aggregation: "每个ERP SKU最新库存事实按产品汇总" },
   capital: { key: "inventory.capitalOccupation", label: "库存资金占用", source: "erp_sku_inventory_daily_summaries.inventoryCostAmount", aggregation: "每个ERP SKU最新库存金额按产品汇总；缺失字段不估算" },
-  connectionSales: { key: "connection.payAmount", label: "连接周期销售额", source: "connection_period_snapshots.payAmount", aggregation: "最新经营周期按销售连接求和" },
-  connectionGrowth: { key: "connection.salesGrowth", label: "连接销售增长率", source: "connection_period_snapshots.payAmount", aggregation: "(当前周期-上一周期)/上一周期" },
+  connectionSales: { key: "connection.salesAmount", label: "链接周期销售额", source: "connection_sku_sales_daily_facts.salesAmount", aggregation: "正式日报事实按链接求和" },
+  connectionGrowth: { key: "connection.salesGrowth", label: "链接销售增长率", source: "connection_sku_sales_daily_facts.salesAmount", aggregation: "当前周期与前一等长周期比较" },
 });
 
 function number(value) {
@@ -51,14 +49,15 @@ function executionSummary(database) {
 }
 
 function latestConnectionSummary(database) {
-  const latestPeriod = database.prepare(`SELECT periodStart,periodEnd FROM connection_period_snapshots ORDER BY periodEnd DESC,periodStart DESC LIMIT 1`).get();
-  if (!latestPeriod) return { periodStart: null, periodEnd: null, payAmount: null, visitorCount: null, conversionRate: null, connectionCount: 0 };
+  const latestDate = database.prepare("SELECT MAX(saleDate) value FROM connection_sku_sales_daily_facts").get()?.value;
+  if (!latestDate) return { periodStart: null, periodEnd: null, payAmount: null, visitorCount: null, conversionRate: null, connectionCount: 0 };
+  const start = new Date(`${latestDate}T00:00:00Z`); start.setUTCDate(start.getUTCDate() - 29);
+  const latestPeriod = { periodStart: start.toISOString().slice(0, 10), periodEnd: latestDate };
   const row = database.prepare(`
-    SELECT COUNT(DISTINCT salesLinkId) AS connectionCount,SUM(payAmount) AS payAmount,SUM(visitorCount) AS visitorCount,
-      CASE WHEN SUM(visitorCount)>0 THEN SUM(conversionRate * visitorCount)/SUM(visitorCount) ELSE NULL END AS conversionRate
-    FROM connection_period_snapshots WHERE periodStart=? AND periodEnd=?
+    SELECT COUNT(DISTINCT salesLinkId) AS connectionCount,SUM(salesAmount) AS payAmount
+    FROM connection_sku_sales_daily_facts WHERE saleDate BETWEEN ? AND ?
   `).get(latestPeriod.periodStart, latestPeriod.periodEnd);
-  return { ...latestPeriod, connectionCount: Number(row.connectionCount || 0), payAmount: number(row.payAmount), visitorCount: number(row.visitorCount), conversionRate: number(row.conversionRate) };
+  return { ...latestPeriod, connectionCount: Number(row.connectionCount || 0), payAmount: number(row.payAmount), visitorCount: null, conversionRate: null };
 }
 
 export function getOperationDashboard() {
@@ -66,20 +65,19 @@ export function getOperationDashboard() {
   const product = readProductDashboard(database);
   const productAnalysis = product.rankings;
   const connectionRankings = listConnectionGrowthRankings("overview", 10, "", true);
-  const attention = listAttentionConnectionHealthRecords("", true);
   return {
     generatedAt: new Date().toISOString(),
     definitions: operationMetricDefinitions,
     company: {
       products: product.summary,
       connections: latestConnectionSummary(database),
-      risks: { connectionRisk: attention.counts.risk, connectionAttention: attention.counts.attention, decliningProducts: productAnalysis.risks.length },
+      risks: { connectionRisk: 0, connectionAttention: 0, decliningProducts: productAnalysis.risks.length },
     },
     trend: product.trend,
     products: productAnalysis,
     connections: { topGrowth: connectionRankings.topGrowth, risks: connectionRankings.risks, salesTop: connectionRankings.salesTop },
     execution: executionSummary(database),
-    improvements: getConnectionImprovementSummary("", true),
+    improvements: { retired: true },
     finance: { available: false, message: "财务基础数据尚未接入；利润指标不作估算。" },
   };
 }

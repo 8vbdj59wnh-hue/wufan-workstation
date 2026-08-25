@@ -28,8 +28,6 @@ const objects = [
   { id: "goal", name: "目标", definition: "企业经营目标。", type: "master", truthStatus: "source_of_truth", tables: ["goals"], sources: ["workstation-work"], upstream: ["workstation-work"], downstream: ["key-action"] },
   { id: "key-action", name: "关键行动", definition: "承接目标的关键行动实例。", type: "master", truthStatus: "source_of_truth", tables: ["process_instances"], sources: ["workstation-work"], upstream: ["goal"], downstream: ["task"] },
   { id: "task", name: "任务", definition: "关键行动执行任务。", type: "fact", truthStatus: "source_of_truth", tables: ["tasks"], sources: ["workstation-work"], upstream: ["key-action"], downstream: ["work-result"] },
-  { id: "legacy-sales-fact", name: "旧周期销售事实", definition: "历史兼容销售事实，只读保留。", type: "fact", truthStatus: "legacy", tables: ["connection_sku_sales_facts"], sources: [], upstream: [], downstream: [] },
-  { id: "legacy-link-structure", name: "旧 Link Product Structure", definition: "Sales Object 上线前的链接结构兼容资产。", type: "relation", truthStatus: "legacy", tables: ["sales_link_sku_product_structures", "sales_link_sku_product_structure_components"], sources: [], upstream: ["link-sku"], downstream: ["erp-sku"] },
 ];
 
 const fieldMappings = {

@@ -1,5 +1,6 @@
 import { getDatabase } from "./db.js";
 import { FORMAL_SALES_OBJECT_RESOLVER_SCOPES, resolveLinkSkuRelationsForRead } from "./capabilities/resolveLinkSkuRelationRead.js";
+import { LINK_ASSET_SELECT_SQL } from "./linkAssetSql.js";
 
 const BATCH_SIZE = 500;
 
@@ -81,15 +82,15 @@ function readLinkSkuRows(database, salesLinkSkuIds) {
         x.id,x.salesLinkId,x.platformSkuId,x.platformSkuCode,x.normalizedPlatformSkuCode,
         x.specificationName,x.normalizedSpecificationName,x.price,x.platformStock,x.occupiedStock,
         x.systemGoodsType,x.syncEnabled,x.lastSyncedStock,x.lastSyncedAt,x.stopSyncReason,
-        x.matchStatus,x.matchMethod,x.matchReason,x.lastSeenBatchId,x.createdAt,x.updatedAt,
+        x.matchStatus,x.matchMethod,x.matchReason,x.createdAt,x.updatedAt,
         x.currentState,x.missingAt,
-        l.shopId,l.platformGoodsId,l.platformGoodsCode,l.title,l.rawUrl,l.canonicalUrl,
+        l.shopId,l.platformGoodsId,l.platformGoodsCode,l.title,l.canonicalUrl,
         l.status linkStatus,l.activityStatus,l.category,l.identityStrength,
         s.platform,s.shopName,s.displayName,c.id connectionProfileId
       FROM sales_link_skus x
       JOIN sales_links l ON l.id=x.salesLinkId
       JOIN sales_shops s ON s.id=l.shopId
-      LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
+      LEFT JOIN ${LINK_ASSET_SELECT_SQL} c ON c.salesLinkId=l.id
       WHERE x.id IN (${placeholders(batch)})
         AND COALESCE(x.currentState,'active')='active'
         AND COALESCE(l.currentState,'active')='active'
@@ -110,9 +111,9 @@ export function queryUnmatchedPlatformSkus(options = {}, context = {}) {
       x.id,x.salesLinkId,x.platformSkuId,x.platformSkuCode,x.normalizedPlatformSkuCode,
       x.specificationName,x.normalizedSpecificationName,x.price,x.platformStock,x.occupiedStock,
       x.systemGoodsType,x.syncEnabled,x.lastSyncedStock,x.lastSyncedAt,x.stopSyncReason,
-      x.matchStatus,x.matchMethod,x.matchReason,x.lastSeenBatchId,x.createdAt,x.updatedAt,
+      x.matchStatus,x.matchMethod,x.matchReason,x.createdAt,x.updatedAt,
       x.currentState,x.missingAt,
-      l.shopId,l.platformGoodsId,l.platformGoodsCode,l.title,l.rawUrl,l.canonicalUrl,
+      l.shopId,l.platformGoodsId,l.platformGoodsCode,l.title,l.canonicalUrl,
       s.platform,s.shopName,s.displayName,
       g.id possibleErpGoodsId,g.goodsCode possibleErpGoodsCode,g.goodsName possibleErpGoodsName
     FROM sales_link_skus x

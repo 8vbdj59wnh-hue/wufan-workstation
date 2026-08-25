@@ -382,20 +382,19 @@ export function commitWangdianPlatformGoodsSync(logId) {
         matchStatus: row.hasProductMapping ? "matched_auto" : "erp_linked",
         matchMethod: "wangdian_merchant_no",
         matchReason: row.hasProductMapping ? "旺店通merchant_no精确建立V2 ERP SKU关系，ERP SKU已有产品映射" : "旺店通merchant_no精确建立V2 ERP SKU关系，产品映射待建立",
-        lastSeenBatchId: logId,
         createdAt: current?.createdAt ?? now,
         updatedAt: now,
       };
       database.prepare(`INSERT INTO sales_link_skus
-        (id,salesLinkId,platformSkuId,platformSkuCode,normalizedPlatformSkuCode,specificationName,normalizedSpecificationName,price,platformStock,occupiedStock,systemGoodsType,syncEnabled,lastSyncedStock,lastSyncedAt,stopSyncReason,matchStatus,matchMethod,matchReason,lastSeenBatchId,currentState,missingAt,createdAt,updatedAt)
-        VALUES (@id,@salesLinkId,@platformSkuId,@platformSkuCode,@normalizedPlatformSkuCode,@specificationName,@normalizedSpecificationName,@price,@platformStock,@occupiedStock,@systemGoodsType,0,NULL,NULL,NULL,@matchStatus,@matchMethod,@matchReason,@lastSeenBatchId,'active',NULL,@createdAt,@updatedAt)
+        (id,salesLinkId,platformSkuId,platformSkuCode,normalizedPlatformSkuCode,specificationName,normalizedSpecificationName,price,platformStock,occupiedStock,systemGoodsType,syncEnabled,lastSyncedStock,lastSyncedAt,stopSyncReason,matchStatus,matchMethod,matchReason,currentState,missingAt,createdAt,updatedAt)
+        VALUES (@id,@salesLinkId,@platformSkuId,@platformSkuCode,@normalizedPlatformSkuCode,@specificationName,@normalizedSpecificationName,@price,@platformStock,@occupiedStock,@systemGoodsType,0,NULL,NULL,NULL,@matchStatus,@matchMethod,@matchReason,'active',NULL,@createdAt,@updatedAt)
         ON CONFLICT(id) DO UPDATE SET platformSkuCode=excluded.platformSkuCode,normalizedPlatformSkuCode=excluded.normalizedPlatformSkuCode,
           specificationName=excluded.specificationName,normalizedSpecificationName=excluded.normalizedSpecificationName,price=excluded.price,
           platformStock=excluded.platformStock,occupiedStock=excluded.occupiedStock,systemGoodsType=excluded.systemGoodsType,
           matchStatus=CASE WHEN sales_link_skus.matchMethod='manual' OR sales_link_skus.matchStatus='matched_manual' THEN sales_link_skus.matchStatus ELSE excluded.matchStatus END,
           matchMethod=CASE WHEN sales_link_skus.matchMethod='manual' OR sales_link_skus.matchStatus='matched_manual' THEN sales_link_skus.matchMethod ELSE excluded.matchMethod END,
           matchReason=CASE WHEN sales_link_skus.matchMethod='manual' OR sales_link_skus.matchStatus='matched_manual' THEN sales_link_skus.matchReason ELSE excluded.matchReason END,
-          lastSeenBatchId=excluded.lastSeenBatchId,currentState='active',missingAt=NULL,updatedAt=excluded.updatedAt`).run(skuRow);
+          currentState='active',missingAt=NULL,updatedAt=excluded.updatedAt`).run(skuRow);
       const relation = ensureSingleLinkSkuErpMapping(database, { salesLinkSkuId: id, erpSkuId: row.erpSkuId, sourceType: "wangdian_platform_goods", sourceBatchId: logId, timestamp: now });
       if (relation.outcome === "governance_pending") {
         governancePending += 1;

@@ -5,10 +5,7 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const serverRoot = path.join(root, "server");
 const legacyColumns = new Set(["erpskuid", "productid"]);
-const compatibilityReadRules = [
-  { file: "server/db.js", marker: "legacy_migration", reason: "显式一次性旧关系迁移" },
-  { file: "server/db.js", marker: "connection_sku_sales_facts_v2", reason: "旧销售事实表结构升级" },
-];
+const compatibilityReadRules = [];
 const platformAssetWriters = new Set([
   "server/productV2Import.js",
   "server/platformGoodsExcelDataSyncAdapter.js",
@@ -89,11 +86,26 @@ function inspectFile(file) {
 const inspections = listJavaScriptFiles(serverRoot).map(inspectFile);
 const findings = inspections.flatMap((item) => item.findings);
 const compatibilityReads = inspections.flatMap((item) => item.compatibilityReads);
+const schemaSource = fs.readFileSync(path.join(root, "server/schema.sql"), "utf8");
+const linkSkuSchema = /CREATE TABLE IF NOT EXISTS sales_link_skus\s*\(([\s\S]*?)\n\);/u.exec(schemaSource)?.[1] || "";
+for (const column of ["productId", "erpSkuId"]) {
+  const match = new RegExp(`\\b${column}\\b`, "u").exec(linkSkuSchema);
+  if (match) findings.push({
+    file: "server/schema.sql",
+    line: lineFor(schemaSource, schemaSource.indexOf(linkSkuSchema) + match.index),
+    type: "legacy_link_sku_schema_column",
+    columns: [column],
+  });
+}
 const result = {
   check: "legacy relation write risk",
   scope: "server/**/*.js",
   protectedColumns: ["sales_link_skus.erpSkuId", "sales_link_skus.productId"],
-  protectedReads: ["生产业务SQL不得直接读取sales_link_skus.erpSkuId", "生产业务SQL不得直接读取sales_link_skus.productId"],
+  protectedReads: [
+    "生产业务SQL不得直接读取sales_link_skus.erpSkuId",
+    "生产业务SQL不得直接读取sales_link_skus.productId",
+    "初始化Schema不得重新创建sales_link_skus.erpSkuId或sales_link_skus.productId",
+  ],
   protectedIdentityRules: ["经营数据不创建sales_links", "ERP关系导入不创建sales_link_skus", "URL不作为链接身份", "新链接只由平台货品导入创建"],
   riskCount: findings.length,
   status: findings.length ? "risk_detected" : "none",

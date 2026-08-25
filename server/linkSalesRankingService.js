@@ -1,5 +1,6 @@
 import { getDatabase } from "./db.js";
 import { linkTimeRangeDays } from "../shared/linkTimeRange.js";
+import { LINK_ASSET_SELECT_SQL } from "./linkAssetSql.js";
 
 const allowedScopes = new Set(["mine", "company"]);
 
@@ -65,7 +66,7 @@ export function getLinkSalesRanking(input = {}, userId = "", isAdmin = false) {
       COUNT(DISTINCT f.id) AS factCount,
       MIN(f.saleDate) AS firstDataDate,
       MAX(f.saleDate) AS lastDataDate
-    FROM connection_profiles c
+    FROM ${LINK_ASSET_SELECT_SQL} c
     JOIN sales_links l ON l.id=c.salesLinkId
     JOIN sales_shops s ON s.id=l.shopId
     LEFT JOIN persons p ON p.id=c.ownerId

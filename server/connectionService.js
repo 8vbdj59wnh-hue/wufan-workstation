@@ -4,6 +4,7 @@ import { listConnectionGrowthAnalyses } from "./connectionGrowthService.js";
 import { readConnectionV3MetricsMap } from "./connectionV3MetricsService.js";
 import { FORMAL_SALES_OBJECT_RESOLVER_SCOPES, resolveLinkSkuRelationsForRead } from "./capabilities/resolveLinkSkuRelationRead.js";
 import { buildLinkOperatingScope } from "./linkOperatingSetService.js";
+import { LINK_ASSET_SELECT_SQL } from "./linkAssetSql.js";
 
 const profileStatuses = new Set(["active", "paused", "archived"]);
 const profileLevels = new Set(["new", "growing", "mature", "priority"]);
@@ -75,15 +76,15 @@ const connectionSelect = `
   SELECT c.id, c.salesLinkId, c.name, c.mainImage, c.imageSource, c.ownerId, c.status, c.level, c.notes,
          c.originSource, c.originImportBatchId, c.identifiedAt, c.createdBy, c.createdAt, c.updatedAt,
          (SELECT name FROM persons WHERE id=c.ownerId) AS ownerName,
-         l.title AS salesLinkTitle, l.canonicalUrl, l.rawUrl, l.platformGoodsId, l.platformGoodsCode, l.currentState AS salesLinkState,
+         l.title AS salesLinkTitle, l.canonicalUrl, l.platformGoodsId, l.platformGoodsCode, l.currentState AS salesLinkState,
          s.id AS shopId, s.platform, s.displayName AS shopDisplayName, s.shopName,
          (SELECT periodEnd FROM connection_period_snapshots ps WHERE ps.salesLinkId=c.salesLinkId
           ORDER BY periodEnd DESC,periodStart DESC,createdAt DESC LIMIT 1) AS latestPeriodEnd,
-         (SELECT payAmount FROM connection_period_snapshots ps WHERE ps.salesLinkId=c.salesLinkId
-          ORDER BY periodEnd DESC,periodStart DESC,createdAt DESC LIMIT 1) AS latestPayAmount
+         (SELECT SUM(f.salesAmount) FROM connection_sku_sales_daily_facts f WHERE f.salesLinkId=c.salesLinkId
+          AND f.saleDate=(SELECT MAX(f2.saleDate) FROM connection_sku_sales_daily_facts f2 WHERE f2.salesLinkId=c.salesLinkId)) AS latestPayAmount
          ,(SELECT COUNT(*) FROM connection_benchmark_targets b WHERE b.connectionId=c.id) AS benchmarkCount
          ,(SELECT b.title FROM connection_benchmark_targets b WHERE b.connectionId=c.id ORDER BY b.createdAt,b.id LIMIT 1) AS firstBenchmarkName
-  FROM connection_profiles c
+  FROM ${LINK_ASSET_SELECT_SQL} c
   JOIN sales_links l ON l.id=c.salesLinkId
   JOIN sales_shops s ON s.id=l.shopId
 `;
@@ -102,7 +103,7 @@ export function resolveConnectionGrowthDirection(analysis) {
     || Number(analysis.conversionChange) <= -0.01 || Number(analysis.profitGrowth) <= -0.2;
   const decliningCount = changes.filter((item) => item < 0).length;
   const growingCount = changes.filter((item) => item > 0).length;
-  if (severeDecline || ["attention", "risk"].includes(analysis.healthStatus) || decliningCount >= 2) return "worse";
+  if (severeDecline || decliningCount >= 2) return "worse";
   if (growingCount > decliningCount) return "better";
   return "stable";
 }
@@ -118,7 +119,7 @@ export function getMyConnectionWorkbench(userId, isAdmin = false, filter = "all"
   const yesterday = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" })
     .format(new Date(Date.now() - 86400000));
   const yesterdaySales = getDatabase().prepare(`SELECT SUM(COALESCE(f.salesAmount,0)) amount,COUNT(*) factCount
-    FROM connection_sku_sales_daily_facts f JOIN connection_profiles c ON c.salesLinkId=f.salesLinkId
+    FROM connection_sku_sales_daily_facts f JOIN ${LINK_ASSET_SELECT_SQL} c ON c.salesLinkId=f.salesLinkId
     WHERE f.saleDate BETWEEN ? AND ? ${isAdmin ? "" : "AND c.ownerId=?"}`)
     .get(...(isAdmin ? [yesterday, yesterday] : [yesterday, yesterday, personId]));
   const allItems = profiles.map((profile) => {
@@ -135,12 +136,10 @@ export function getMyConnectionWorkbench(userId, isAdmin = false, filter = "all"
     return { ...profile, followed, trend, riskPriority, erpSales: v3.current,
       currentPayAmount: v3.current.salesAmount ?? analysis.currentPeriod?.payAmount ?? null,
       salesGrowth: combined.salesGrowth ?? null, visitorGrowth: analysis.visitorGrowth ?? null,
-      conversionChange: analysis.conversionChange ?? null, profitGrowth: combined.profitGrowth ?? null,
-      healthScore: analysis.healthScore ?? null, healthStatus: analysis.healthStatus ?? "no_data" };
+      conversionChange: analysis.conversionChange ?? null, profitGrowth: combined.profitGrowth ?? null };
   });
   const items = allItems.filter((item) => filter === "all" || (filter === "followed" ? item.followed : item.trend === filter))
     .sort((left, right) => left.riskPriority - right.riskPriority
-      || Number(left.healthScore ?? 101) - Number(right.healthScore ?? 101)
       || Number(left.salesGrowth ?? 0) - Number(right.salesGrowth ?? 0));
   return { items, isAdmin: Boolean(isAdmin), summary: {
     total: profiles.length,
@@ -156,7 +155,7 @@ export function getMyConnectionWorkbench(userId, isAdmin = false, filter = "all"
 
 export function setConnectionFollow(connectionId, userId, followed, isAdmin = false) {
   const id = value(connectionId); const personId = value(userId); const database = getDatabase();
-  const profile = database.prepare("SELECT ownerId FROM connection_profiles WHERE id=?").get(id);
+  const profile = database.prepare("SELECT ownerId FROM sales_links WHERE id=?").get(id);
   if (!profile) throw new Error("未找到连接档案。");
   if (!isAdmin && profile.ownerId !== personId) throw new Error("只能关注自己负责的链接。");
   if (!database.prepare("SELECT 1 FROM persons WHERE id=? AND status='active'").get(personId)) throw new Error("无法识别当前登录人员。");
@@ -191,18 +190,6 @@ export function assertConnectionVisible(id, userId = "", isAdmin = false) {
   return profile;
 }
 
-export function readHealthRecordConnectionId(id) {
-  const row = getDatabase().prepare("SELECT connectionId FROM connection_health_records WHERE id=?").get(value(id));
-  if (!row) throw new Error("体检记录不存在。");
-  return row.connectionId;
-}
-
-export function readImprovementConnectionId(id) {
-  const row = getDatabase().prepare("SELECT connectionId FROM connection_improvements WHERE id=?").get(value(id));
-  if (!row) throw new Error("改善项目不存在。");
-  return row.connectionId;
-}
-
 export function listAvailableSalesLinks(filters = {}) {
   const normalizedFilters = typeof filters === "string" ? { search: filters } : filters;
   const query = value(normalizedFilters.search).toLowerCase();
@@ -218,7 +205,7 @@ export function listAvailableSalesLinks(filters = {}) {
     SELECT COUNT(*) AS total,
            SUM(CASE WHEN c.id IS NOT NULL THEN 1 ELSE 0 END) AS existing,
            SUM(CASE WHEN c.id IS NULL THEN 1 ELSE 0 END) AS pending
-    FROM sales_links l LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
+    FROM sales_links l LEFT JOIN ${LINK_ASSET_SELECT_SQL} c ON c.salesLinkId=l.id
     WHERE ${operatingScope.predicate}
   `).get(operatingScope.params);
   const optionRows = database.prepare(`
@@ -235,7 +222,7 @@ export function listAvailableSalesLinks(filters = {}) {
            c.id AS connectionId
     FROM sales_links l
     JOIN sales_shops s ON s.id=l.shopId
-    LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
+    LEFT JOIN ${LINK_ASSET_SELECT_SQL} c ON c.salesLinkId=l.id
     WHERE ${operatingScope.predicate}
       AND (@connectionStatus='all' OR (@connectionStatus='pending' AND c.id IS NULL) OR (@connectionStatus='existing' AND c.id IS NOT NULL))
       AND (@platform='' OR s.platform=@platform)
@@ -313,7 +300,7 @@ export function listConnectionMappingRepairCandidates() {
     FROM connection_data_mappings m
     JOIN sales_links l ON l.id=m.salesLinkId
     JOIN sales_shops s ON s.id=l.shopId
-    LEFT JOIN connection_profiles c ON c.salesLinkId=m.salesLinkId
+    LEFT JOIN ${LINK_ASSET_SELECT_SQL} c ON c.salesLinkId=m.salesLinkId
     WHERE m.sourceType='business_advisor' AND m.matchStatus='matched'
       AND m.connectionId IS NULL AND m.deletedAt IS NULL
     ORDER BY m.createdAt,m.id
@@ -353,7 +340,7 @@ export function createConnectionAction(connectionProfileId, input, userId) {
   if (!actionStatuses.has(status)) throw new Error("经营动作状态无效。");
   const database = getDatabase();
   const create = database.transaction(() => {
-    if (!database.prepare("SELECT 1 FROM connection_profiles WHERE id=?").get(profileId)) throw new Error("未找到连接档案。");
+    if (!database.prepare("SELECT 1 FROM sales_links WHERE id=?").get(profileId)) throw new Error("未找到链接资产。");
     if (ownerId && !database.prepare("SELECT 1 FROM persons WHERE id=? AND status='active'").get(ownerId)) throw new Error("负责人不存在或已停用。");
     const now = new Date().toISOString();
     const id = `connection-action-${crypto.randomUUID()}`;
@@ -387,7 +374,7 @@ function normalizeExternalData(raw) {
 
 function readConnectionRelation(connectionId) {
   if (!connectionId) return null;
-  const row = getDatabase().prepare("SELECT id, salesLinkId FROM connection_profiles WHERE id=?").get(connectionId);
+  const row = getDatabase().prepare("SELECT id,id salesLinkId FROM sales_links WHERE id=?").get(connectionId);
   if (!row) throw new Error("所选连接档案不存在。");
   return row;
 }
@@ -396,7 +383,7 @@ function readSalesLinkRelation(salesLinkId) {
   if (!salesLinkId) return null;
   const row = getDatabase().prepare(`
     SELECT l.id AS salesLinkId, c.id AS connectionId
-    FROM sales_links l LEFT JOIN connection_profiles c ON c.salesLinkId=l.id WHERE l.id=?
+    FROM sales_links l LEFT JOIN ${LINK_ASSET_SELECT_SQL} c ON c.salesLinkId=l.id WHERE l.id=?
   `).get(salesLinkId);
   if (!row) throw new Error("所选销售连接不存在。");
   return row;
@@ -417,7 +404,7 @@ const mappingSelect = `
          c.name AS connectionName, c.status AS connectionStatus,
          l.title AS salesLinkTitle, s.platform, s.displayName AS shopDisplayName, s.shopName
   FROM connection_data_mappings m
-  LEFT JOIN connection_profiles c ON c.id=m.connectionId
+  LEFT JOIN ${LINK_ASSET_SELECT_SQL} c ON c.id=m.connectionId
   LEFT JOIN sales_links l ON l.id=m.salesLinkId
   LEFT JOIN sales_shops s ON s.id=l.shopId
 `;

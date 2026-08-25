@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import XLSX from "xlsx";
 import { getDatabase } from "./db.js";
+import { LINK_ASSET_SELECT_SQL } from "./linkAssetSql.js";
 
 const IMPORT_TYPE = "connection_owner_assignments";
 const PARSER_VERSION = "connection-owner-v4-link-id-owner-selection";
@@ -149,7 +150,7 @@ export function previewConnectionOwnerImport({ buffer, fileName, userId, ownerId
   const links = database.prepare(`SELECT sl.id salesLinkId,sl.platformGoodsId,sl.title,sh.platform,
       COALESCE(NULLIF(sh.displayName,''),sh.shopName) shopName,cp.id connectionId,cp.name connectionName,cp.ownerId
     FROM sales_links sl JOIN sales_shops sh ON sh.id=sl.shopId
-    LEFT JOIN connection_profiles cp ON cp.salesLinkId=sl.id
+    LEFT JOIN ${LINK_ASSET_SELECT_SQL} cp ON cp.salesLinkId=sl.id
     WHERE sl.currentState='active' AND sh.status='active'`).all();
 
   const rows = sourceRows.map((row) => {
@@ -251,7 +252,7 @@ export function confirmConnectionOwnerImport(batchId, userId, { confirmOverwrite
   database.transaction(() => {
     for (const row of rows) {
       const data = json(row.normalizedDataJson);
-      const profile = database.prepare("SELECT id,ownerId FROM connection_profiles WHERE id=? AND salesLinkId=?").get(data.connectionId, data.salesLinkId);
+      const profile = database.prepare("SELECT id,ownerId FROM sales_links WHERE id=? AND id=?").get(data.connectionId, data.salesLinkId);
       const owner = database.prepare("SELECT id FROM persons WHERE id=? AND status='active'").get(data.newOwnerId);
       if (!profile || !owner || text(profile.ownerId) !== text(data.currentOwnerId)) throw new Error(`第${row.rowNumber}行的链接、负责人或现有数据已变化，请重新生成预览。`);
       if (profile.ownerId === owner.id) unchanged += 1;

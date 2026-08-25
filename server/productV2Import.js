@@ -1584,7 +1584,7 @@ function commitPlatform(batch, staging, shopMappings) {
       const linkValues = {
         id: linkId, shopId: shop.id, platformGoodsId: first.platformGoodsId,
         platformGoodsCode: first.platformGoodsCode || null, title: first.title || null,
-        canonicalUrl: first.canonicalUrl || null, rawUrl: first.rawUrl || null,
+        canonicalUrl: first.canonicalUrl || canonicalizeSalesUrl(first.rawUrl) || null,
         status: value(staging.records.find((item) => item.rowNumber === first.rowNumber)?.record["状态"]) || null,
         activityStatus: value(staging.records.find((item) => item.rowNumber === first.rowNumber)?.record["活动状态"]) || null,
         category: value(staging.records.find((item) => item.rowNumber === first.rowNumber)?.record["平台类目"]) || null,
@@ -1592,22 +1592,22 @@ function commitPlatform(batch, staging, shopMappings) {
         originSource: link?.originSource && link.originSource !== "legacy_unknown" ? link.originSource : "erp_platform_goods",
         enrichmentStatus: "complete",
         lastModifiedAt: value(staging.records.find((item) => item.rowNumber === first.rowNumber)?.record["最后修改时间"]) || null,
-        lastSeenBatchId: batch.id, currentState: "active", missingAt: null,
+        currentState: "active", missingAt: null,
         lastImportedAt: now, createdAt: link?.createdAt ?? now, updatedAt: now,
       };
       database.prepare(`
         INSERT INTO sales_links (
-          id,shopId,platformGoodsId,platformGoodsCode,title,canonicalUrl,rawUrl,status,activityStatus,category,
-          identityStrength,originSource,enrichmentStatus,lastModifiedAt,lastSeenBatchId,currentState,missingAt,lastImportedAt,createdAt,updatedAt
+          id,shopId,platformGoodsId,platformGoodsCode,title,canonicalUrl,status,activityStatus,category,
+          identityStrength,originSource,enrichmentStatus,lastModifiedAt,currentState,missingAt,lastImportedAt,createdAt,updatedAt
         ) VALUES (
-          @id,@shopId,@platformGoodsId,@platformGoodsCode,@title,@canonicalUrl,@rawUrl,@status,@activityStatus,@category,
-          @identityStrength,@originSource,@enrichmentStatus,@lastModifiedAt,@lastSeenBatchId,@currentState,@missingAt,@lastImportedAt,@createdAt,@updatedAt
+          @id,@shopId,@platformGoodsId,@platformGoodsCode,@title,@canonicalUrl,@status,@activityStatus,@category,
+          @identityStrength,@originSource,@enrichmentStatus,@lastModifiedAt,@currentState,@missingAt,@lastImportedAt,@createdAt,@updatedAt
         )
         ON CONFLICT(id) DO UPDATE SET platformGoodsCode=excluded.platformGoodsCode,title=excluded.title,canonicalUrl=excluded.canonicalUrl,
-          rawUrl=excluded.rawUrl,status=excluded.status,activityStatus=excluded.activityStatus,category=excluded.category,
+          status=excluded.status,activityStatus=excluded.activityStatus,category=excluded.category,
           originSource=CASE WHEN sales_links.originSource IS NULL OR sales_links.originSource='' OR sales_links.originSource='legacy_unknown'
             THEN excluded.originSource ELSE sales_links.originSource END,enrichmentStatus='complete',
-          lastModifiedAt=excluded.lastModifiedAt,lastSeenBatchId=excluded.lastSeenBatchId,currentState='active',
+          lastModifiedAt=excluded.lastModifiedAt,currentState='active',
           missingAt=NULL,lastImportedAt=excluded.lastImportedAt,updatedAt=excluded.updatedAt
       `).run(linkValues);
       if (!link) stats.created += 1;
@@ -1627,9 +1627,9 @@ function commitPlatform(batch, staging, shopMappings) {
           INSERT INTO sales_link_skus (
             id,salesLinkId,platformSkuId,platformSkuCode,normalizedPlatformSkuCode,specificationName,
             normalizedSpecificationName,price,platformStock,occupiedStock,systemGoodsType,syncEnabled,lastSyncedStock,
-            lastSyncedAt,stopSyncReason,matchStatus,matchMethod,matchReason,lastSeenBatchId,createdAt,updatedAt,
+            lastSyncedAt,stopSyncReason,matchStatus,matchMethod,matchReason,createdAt,updatedAt,
             currentState,missingAt
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           ON CONFLICT(id) DO UPDATE SET platformSkuCode=excluded.platformSkuCode,
             normalizedPlatformSkuCode=excluded.normalizedPlatformSkuCode,specificationName=excluded.specificationName,
             normalizedSpecificationName=excluded.normalizedSpecificationName,price=excluded.price,platformStock=excluded.platformStock,
@@ -1638,13 +1638,13 @@ function commitPlatform(batch, staging, shopMappings) {
             matchStatus=CASE WHEN sales_link_skus.matchMethod='manual' OR sales_link_skus.matchStatus='matched_manual' THEN sales_link_skus.matchStatus ELSE excluded.matchStatus END,
             matchMethod=CASE WHEN sales_link_skus.matchMethod='manual' OR sales_link_skus.matchStatus='matched_manual' THEN sales_link_skus.matchMethod ELSE excluded.matchMethod END,
             matchReason=CASE WHEN sales_link_skus.matchMethod='manual' OR sales_link_skus.matchStatus='matched_manual' THEN sales_link_skus.matchReason ELSE excluded.matchReason END,
-            lastSeenBatchId=excluded.lastSeenBatchId,currentState='active',missingAt=NULL,updatedAt=excluded.updatedAt
+            currentState='active',missingAt=NULL,updatedAt=excluded.updatedAt
         `).run(
           skuId, linkId, row.platformSkuId || null, row.platformSkuCode || null, lower(row.platformSkuCode),
           row.specificationName || null, lower(row.specificationName), numberValue(source["价格"]), numberValue(source["平台库存"]),
           numberValue(source["占用库存"]), row.systemGoodsType || null, value(source["是否需要同步"]) === "是" ? 1 : 0,
           numberValue(source["最后同步库存"]), value(source["最后同步时间"]) || null, value(source["停止同步原因"]) || null,
-          matchStatus, matchMethod, row.matchReason, batch.id, sku?.createdAt ?? now, now, "active", null,
+          matchStatus, matchMethod, row.matchReason, sku?.createdAt ?? now, now, "active", null,
         );
         if (row.erpSku?.id) {
           const relation = ensureSingleLinkSkuErpMapping(database, { salesLinkSkuId: skuId, erpSkuId: row.erpSku.id, sourceType: "erp_platform_goods", sourceBatchId: batch.id, timestamp: now });

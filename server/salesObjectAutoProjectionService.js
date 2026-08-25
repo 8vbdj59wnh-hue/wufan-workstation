@@ -177,8 +177,9 @@ export function compareV3ProjectionResolver(options = {}) {
     if (object && object.objectType === candidate.resolvedIdentityType) projectedByCode.set(code, object.id);
     else if (!object) projectedByCode.set(code, stableId("sales-object-v3", candidate.resolvedIdentityType, code));
   }
-  const rows = database.prepare(`SELECT id,COALESCE(NULLIF(normalizedPlatformSkuCode,''),platformSkuCode,'') sourceCode
-    FROM sales_link_skus WHERE lastSeenBatchId=? ORDER BY id`).all(batch.id);
+  const rows = database.prepare(`SELECT DISTINCT s.id,COALESCE(NULLIF(s.normalizedPlatformSkuCode,''),s.platformSkuCode,'') sourceCode
+    FROM platform_goods_excel_import_rows r JOIN sales_link_skus s ON s.id=r.salesLinkSkuId
+    WHERE r.batchId=? ORDER BY s.id`).all(batch.id);
   const summary = { total: rows.length, same: 0, v3_missing_current: 0, current_missing_v3: 0, relation_conflict: 0, type_conflict: 0, source_conflict: 0, unresolved: 0 };
   const details = [];
   const detailLimit = Math.max(0, Number(options.detailLimit ?? 200));
@@ -263,8 +264,9 @@ export function projectOperatingSalesObjects(options = {}) {
       result.componentsCreated += Number(projected.componentCount || 0);
       if (options.failAfterCode && code === normalized(options.failAfterCode)) throw new Error("isolated_sales_object_projection_failure");
   });
-  const linkSkus = database.prepare(`SELECT id,COALESCE(NULLIF(normalizedPlatformSkuCode,''),platformSkuCode,'') sourceCode
-    FROM sales_link_skus WHERE lastSeenBatchId=? ORDER BY id`).all(batch.id);
+  const linkSkus = database.prepare(`SELECT DISTINCT s.id,COALESCE(NULLIF(s.normalizedPlatformSkuCode,''),s.platformSkuCode,'') sourceCode
+    FROM platform_goods_excel_import_rows r JOIN sales_link_skus s ON s.id=r.salesLinkSkuId
+    WHERE r.batchId=? ORDER BY s.id`).all(batch.id);
   const insert = database.prepare(`INSERT INTO sales_link_sku_sales_object_relations
       (id,linkSkuId,salesObjectId,effectiveFrom,status,sourceType,sourceBatchId,sourceReferenceJson,reviewedBy,reviewedAt,createdAt,updatedAt)
       VALUES (?,?,?,?,'active',?,?,?,?,?,?,?)`);

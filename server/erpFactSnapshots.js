@@ -178,7 +178,7 @@ export function buildErpSnapshotRows(facts, snapshot, run) {
       platformStock: nullableSum(linkSkus, "platformStock"),
       occupiedStock: nullableSum(linkSkus, "occupiedStock"),
       firstSeenAt: link.createdAt ?? null,
-      lastSeenBatchId: link.lastSeenBatchId ?? null,
+      lastSeenBatchId: run.platformGoodsBatchId ?? null,
       sourceBatchId: run.platformGoodsBatchId,
       createdAt: snapshot.createdAt,
     };
@@ -200,7 +200,7 @@ export function buildErpSnapshotRows(facts, snapshot, run) {
       platformPrice: sku.price ?? null,
       platformStock: sku.platformStock ?? null,
       occupiedStock: sku.occupiedStock ?? null,
-      sourceBatchId: sku.lastSeenBatchId ?? run.platformGoodsBatchId,
+      sourceBatchId: run.platformGoodsBatchId,
       createdAt: snapshot.createdAt,
     };
   });

@@ -5,6 +5,7 @@ import XLSX from "xlsx";
 import { getDatabase, uploadsDir } from "./db.js";
 import { createConnectionDataMapping, ensureBusinessAdvisorConnection } from "./connectionService.js";
 import { normalizeUploadedFileName } from "./uploadFileName.js";
+import { LINK_ASSET_SELECT_SQL } from "./linkAssetSql.js";
 
 const importStatuses = new Set(["draft", "parsed", "validated", "completed", "failed"]);
 const stagingDir = path.resolve(process.env.CONNECTION_IMPORT_DIR || path.join(uploadsDir, "connection-imports"));
@@ -88,7 +89,7 @@ function buildMatchIndexes(shopId = "") {
            c.id AS connectionId,c.name AS connectionName,s.platform,s.displayName AS shopDisplayName,s.shopName
     FROM sales_links l
     JOIN sales_shops s ON s.id=l.shopId
-    LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
+    LEFT JOIN ${LINK_ASSET_SELECT_SQL} c ON c.salesLinkId=l.id
     WHERE COALESCE(l.currentState,'active')='active' AND (?='' OR l.shopId=?)
   `).all(text(shopId), text(shopId));
   const byGoodsId = new Map();
@@ -186,7 +187,7 @@ export function previewConnectionImportBatch(id) {
     SELECT m.externalId,m.matchStatus,m.matchMethod,m.connectionId,m.salesLinkId,
            c.name AS connectionName,l.title AS salesLinkTitle
     FROM connection_data_mappings m
-    LEFT JOIN connection_profiles c ON c.id=m.connectionId
+    LEFT JOIN ${LINK_ASSET_SELECT_SQL} c ON c.id=m.connectionId
     LEFT JOIN sales_links l ON l.id=m.salesLinkId
     WHERE m.sourceType=? AND m.externalShopId=? AND m.deletedAt IS NULL
   `).all(batch.sourceType, batch.externalShopId);

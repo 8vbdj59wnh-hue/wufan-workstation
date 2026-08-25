@@ -79,6 +79,7 @@ function placeholders(values) {
   return values.map(() => "?").join(",");
 }
 
+// Legacy archive comparison only. Current business code must use resolveLinkSkuRelationRead.js.
 function loadRelationData(database, salesLinkSkuIds, onQuery = null) {
   const queryAll = (sql, params = []) => {
     onQuery?.(sql, params);
@@ -93,7 +94,12 @@ function loadRelationData(database, salesLinkSkuIds, onQuery = null) {
   const idsSql = placeholders(salesLinkSkuIds);
   const linkSkus = queryAll(`SELECT id,salesLinkId FROM sales_link_skus WHERE id IN (${idsSql})`, salesLinkSkuIds);
   const mappings = queryAll(`
-    SELECT id mappingId,salesLinkSkuId,erpSkuId,quantity,mappingType,sourceType,sourceBatchId,currentState,productStructureId
+    SELECT id mappingId,salesLinkSkuId,erpSkuId,quantity,mappingType,sourceType,sourceBatchId,currentState,
+      (SELECT archived.legacyStructureId
+       FROM legacy_link_product_structure_sales_object_map archived
+       WHERE archived.salesLinkSkuId=sales_link_sku_erp_mappings.salesLinkSkuId
+         AND archived.salesObjectStructureId=sales_link_sku_erp_mappings.salesObjectStructureId
+       ORDER BY archived.legacyStructureId LIMIT 1) productStructureId
     FROM sales_link_sku_erp_mappings
     WHERE salesLinkSkuId IN (${idsSql}) AND currentState='active'
   `, salesLinkSkuIds);
@@ -116,10 +122,10 @@ function loadRelationData(database, salesLinkSkuIds, onQuery = null) {
     structureConditions.push(`id IN (${placeholders(mappingStructureIds)})`);
     structureParams.push(...mappingStructureIds);
   }
-  const structures = queryAll(`SELECT * FROM sales_link_sku_product_structures WHERE ${structureConditions.join(" OR ")}`, structureParams);
+  const structures = queryAll(`SELECT * FROM legacy_link_product_structures WHERE ${structureConditions.join(" OR ")}`, structureParams);
   const structureIds = [...new Set(structures.map((row) => row.id))];
   const structureComponents = structureIds.length
-    ? queryAll(`SELECT * FROM sales_link_sku_product_structure_components WHERE productStructureId IN (${placeholders(structureIds)})`, structureIds)
+    ? queryAll(`SELECT * FROM legacy_link_product_structure_components WHERE productStructureId IN (${placeholders(structureIds)})`, structureIds)
     : [];
   const candidates = queryAll(`
     SELECT salesLinkSkuId,candidateType,COUNT(*) count

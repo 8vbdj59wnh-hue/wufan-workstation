@@ -47,9 +47,6 @@ export function readV3ShadowProtectedSnapshot(options = {}) {
     relationsHash: tableDigest(database, "sales_link_sku_sales_object_relations"),
     legacyMappings: count(database, "sales_link_sku_erp_mappings"),
     legacyMappingsHash: tableDigest(database, "sales_link_sku_erp_mappings"),
-    productStructures: count(database, "sales_link_sku_product_structures"),
-    productStructuresHash: tableDigest(database, "sales_link_sku_product_structures"),
-    manualBindings: count(database, "platform_sku_manual_bindings"),
     comboAssets: count(database, "sales_combo_groups") + count(database, "sales_combo_group_items"),
     products: count(database, "products"),
     links: count(database, "sales_links"),
@@ -69,10 +66,11 @@ function protectedChanges(before, after, projectionEnabled) {
 
 function trueMissingCodeCount(database, batchId) {
   if (!batchId) return 0;
-  return Number(database.prepare(`SELECT COUNT(*) total FROM sales_link_skus
-    WHERE currentState='active' AND lastSeenBatchId=?
-      AND trim(COALESCE(NULLIF(normalizedPlatformSkuCode,''),platformSkuCode,''))=''
-      AND lower(trim(COALESCE(systemGoodsType,''))) NOT IN ('无','无需','非系统货品','非商品')`).get(batchId).total);
+  return Number(database.prepare(`SELECT COUNT(DISTINCT s.id) total
+    FROM platform_goods_excel_import_rows r JOIN sales_link_skus s ON s.id=r.salesLinkSkuId
+    WHERE r.batchId=? AND s.currentState='active'
+      AND trim(COALESCE(NULLIF(s.normalizedPlatformSkuCode,''),s.platformSkuCode,''))=''
+      AND lower(trim(COALESCE(s.systemGoodsType,''))) NOT IN ('无','无需','非系统货品','非商品')`).get(batchId).total);
 }
 
 function identityCount(database, status) {

@@ -1,10 +1,10 @@
 import { getDatabase } from "./db.js";
 import { listConnectionGrowthAnalysesByConnectionIds } from "./connectionGrowthService.js";
-import { getConnectionHospitalStages } from "./connectionHospitalService.js";
 import { readConnectionV3MetricsMap } from "./connectionV3MetricsService.js";
 import { resolveLinkSalesDateRanges } from "./linkSalesRankingService.js";
 import { resolveConnectionGrowthDirection } from "./connectionService.js";
 import { buildLinkOperatingScope } from "./linkOperatingSetService.js";
+import { LINK_ASSET_SELECT_SQL } from "./linkAssetSql.js";
 
 const scopes = new Set(["mine", "company"]);
 const sortColumns = {
@@ -20,7 +20,7 @@ const sortColumns = {
 };
 const allowedFields = new Set([
   "image", "name", "platform", "shop", "goodsId", "owner", "yesterdaySales", "sales7d", "sales30d",
-  "selectedSales", "growthStatus", "healthStatus", "hospitalStatus", "archiveStatus",
+  "selectedSales", "growthStatus", "archiveStatus",
 ]);
 
 function text(value) { return String(value ?? "").trim(); }
@@ -84,7 +84,7 @@ export function queryLinkDataTable(raw = {}, userId = "", isAdmin = false) {
       AND saleDate<=MAX(@thirtyEnd,@selectedEnd,@yesterdayEnd)
     GROUP BY salesLinkId`;
   const total = Number(database.prepare(`SELECT COUNT(*) count FROM sales_links l
-    JOIN sales_shops sh ON sh.id=l.shopId LEFT JOIN connection_profiles c ON c.salesLinkId=l.id WHERE ${whereSql}`).get(params)?.count || 0);
+    JOIN sales_shops sh ON sh.id=l.shopId LEFT JOIN ${LINK_ASSET_SELECT_SQL} c ON c.salesLinkId=l.id WHERE ${whereSql}`).get(params)?.count || 0);
   const orderBy = sortColumns[options.sortField];
   const rows = database.prepare(`WITH sales_aggregate AS (${salesAggregate})
     SELECT COALESCE(c.id,l.id) id,c.id connectionProfileId,l.id salesLinkId,
@@ -93,16 +93,15 @@ export function queryLinkDataTable(raw = {}, userId = "", isAdmin = false) {
       l.platformGoodsId,l.canonicalUrl,sh.id shopId,sh.platform,COALESCE(sh.displayName,sh.shopName) shopName,
       p.name ownerName,sa.yesterdaySales,sa.yesterdayCount,sa.sales7d,sa.count7d,sa.sales30d,sa.count30d,sa.selectedSales,sa.selectedCount
     FROM sales_links l JOIN sales_shops sh ON sh.id=l.shopId
-    LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
+    LEFT JOIN ${LINK_ASSET_SELECT_SQL} c ON c.salesLinkId=l.id
     LEFT JOIN persons p ON p.id=c.ownerId LEFT JOIN sales_aggregate sa ON sa.salesLinkId=l.id
     WHERE ${whereSql} ORDER BY ${orderBy} ${options.sortDirection},l.id ${options.sortDirection}
     LIMIT @limit OFFSET @offset`).all({ ...params, limit: options.pageSize, offset: options.offset });
   const connectionIds = rows.map((item) => item.connectionProfileId).filter(Boolean);
   const analyses = new Map(listConnectionGrowthAnalysesByConnectionIds(connectionIds).map((item) => [item.connectionId, item]));
   const v3 = readConnectionV3MetricsMap(rows.map((item) => item.salesLinkId));
-  const hospital = getConnectionHospitalStages(connectionIds);
   const items = rows.map((row) => {
-    const baseAnalysis = (row.connectionProfileId ? analyses.get(row.connectionProfileId) : null) ?? { comparable: false, healthStatus: "no_data", healthScore: null };
+    const baseAnalysis = (row.connectionProfileId ? analyses.get(row.connectionProfileId) : null) ?? { comparable: false };
     const v3Metric = v3.get(row.salesLinkId);
     const analysis = { ...baseAnalysis, salesGrowth: v3Metric?.salesGrowth ?? baseAnalysis.salesGrowth,
       profitGrowth: v3Metric?.profitGrowth ?? baseAnalysis.profitGrowth };
@@ -113,8 +112,7 @@ export function queryLinkDataTable(raw = {}, userId = "", isAdmin = false) {
         thirtyDays: metric(row.sales30d, row.count30d), selected: metric(row.selectedSales, row.selectedCount) },
       growthStatus: analysis.comparable ? resolveConnectionGrowthDirection(analysis) : "no_data",
       growthRate: analysis.salesGrowth ?? null,
-      healthStatus: analysis.healthStatus || "no_data", healthScore: analysis.healthScore ?? null,
-      hospitalStatus: row.connectionProfileId ? hospital.get(row.connectionProfileId) || "none" : "none", archiveStatus: row.archiveStatus,
+      archiveStatus: row.archiveStatus,
       hasBusinessProfile: Boolean(row.connectionProfileId),
     };
   });
@@ -122,7 +120,7 @@ export function queryLinkDataTable(raw = {}, userId = "", isAdmin = false) {
     FROM connection_sku_sales_daily_facts`).get();
   const optionWhere = options.scope === "mine" ? `WHERE ${operatingScope.predicate} AND c.ownerId=@ownerId` : `WHERE ${operatingScope.predicate}`;
   const filterRows = database.prepare(`SELECT DISTINCT sh.id shopId,sh.platform,COALESCE(sh.displayName,sh.shopName) shopName
-    FROM sales_links l JOIN sales_shops sh ON sh.id=l.shopId LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
+    FROM sales_links l JOIN sales_shops sh ON sh.id=l.shopId LEFT JOIN ${LINK_ASSET_SELECT_SQL} c ON c.salesLinkId=l.id
     ${optionWhere} ORDER BY sh.platform,shopName,sh.id`).all(params);
   return { scope: options.scope, range: ranges.selected, ranges, fields: options.fields, items,
     pagination: { page: options.page, pageSize: options.pageSize, total, totalPages: Math.max(1, Math.ceil(total / options.pageSize)) },

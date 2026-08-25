@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { getDatabase } from "./db.js";
 import { CONNECTION_POSITIONING_TYPES, setConnectionBusinessPositioning } from "./connectionGoalFoundationService.js";
 import { confirmConnectionGoalPlan, createConnectionGoalSuggestion } from "./connectionGoalPlanService.js";
+import { LINK_ASSET_SELECT_SQL } from "./linkAssetSql.js";
 
 const BATCH_STATUSES = ["draft", "positioning", "target_confirm", "evaluation", "completed"];
 const LINK_STATUSES = new Set(["selected", "positioning_pending", "target_pending", "active", "excluded"]);
@@ -36,7 +37,7 @@ function loadBatch(database, batchId) {
 
 function loadMember(database, batchId, memberId) {
   const member = database.prepare(`SELECT bl.*,c.ownerId,c.salesLinkId,c.name connectionName
-    FROM connection_goal_init_batch_links bl JOIN connection_profiles c ON c.id=bl.connectionId
+    FROM connection_goal_init_batch_links bl JOIN ${LINK_ASSET_SELECT_SQL} c ON c.id=bl.connectionId
     WHERE bl.batchId=? AND bl.id=?`).get(clean(batchId), clean(memberId));
   if (!member) fail("试点链接不存在或不属于当前批次。", 404);
   return member;
@@ -76,7 +77,7 @@ function progressForBatch(database, batchId, context = {}) {
       SUM(CASE WHEN bl.status<>'excluded' AND ge.id IS NOT NULL THEN 1 ELSE 0 END) evaluationLinks,
       SUM(CASE WHEN bl.status<>'excluded' AND ge.evaluationStatus='evaluated' THEN 1 ELSE 0 END) evaluatedLinks
     FROM connection_goal_init_batch_links bl
-    JOIN connection_profiles c ON c.id=bl.connectionId
+    JOIN ${LINK_ASSET_SELECT_SQL} c ON c.id=bl.connectionId
     LEFT JOIN connection_business_profiles bp ON bp.connectionId=c.id AND bp.status='active'
     LEFT JOIN connection_goal_plans gp ON gp.id=(SELECT id FROM connection_goal_plans x WHERE x.connectionId=c.id
       AND x.status IN ('draft','pending_confirm','active') ORDER BY CASE x.status WHEN 'active' THEN 0 ELSE 1 END,x.createdAt DESC LIMIT 1)
@@ -97,7 +98,7 @@ export function readConnectionGoalPilotBatches(options = {}, context = {}) {
   const params = {};
   if (clean(options.status) && BATCH_STATUSES.includes(clean(options.status))) { where.push("b.status=@status"); params.status = clean(options.status); }
   if (!context.isAdmin) {
-    where.push(`EXISTS (SELECT 1 FROM connection_goal_init_batch_links bl JOIN connection_profiles c ON c.id=bl.connectionId
+    where.push(`EXISTS (SELECT 1 FROM connection_goal_init_batch_links bl JOIN ${LINK_ASSET_SELECT_SQL} c ON c.id=bl.connectionId
       WHERE bl.batchId=b.id AND c.ownerId=@scopeOwnerId)`);
     params.scopeOwnerId = clean(context.userId);
   }
@@ -174,11 +175,11 @@ export function readConnectionGoalPilotCandidates(options = {}, context = {}) {
   const candidateCte = `${recentFactsCte()}, candidate_rank AS (
     SELECT salesLinkId,ROW_NUMBER() OVER (ORDER BY salesAmount DESC,salesLinkId) salesRank FROM recent WHERE factRows>0
   )`;
-  const from = `FROM connection_profiles c JOIN recent r ON r.salesLinkId=c.salesLinkId
+  const from = `FROM ${LINK_ASSET_SELECT_SQL} c JOIN recent r ON r.salesLinkId=c.salesLinkId
     JOIN candidate_rank cr ON cr.salesLinkId=c.salesLinkId
     JOIN sales_links sl ON sl.id=c.salesLinkId JOIN sales_shops sh ON sh.id=sl.shopId LEFT JOIN persons p ON p.id=c.ownerId`;
   const whereSql = where.join(" AND ");
-  const total = Number(database.prepare(`${recentFactsCte()} SELECT COUNT(*) count FROM connection_profiles c JOIN recent r ON r.salesLinkId=c.salesLinkId
+  const total = Number(database.prepare(`${recentFactsCte()} SELECT COUNT(*) count FROM ${LINK_ASSET_SELECT_SQL} c JOIN recent r ON r.salesLinkId=c.salesLinkId
     JOIN sales_links sl ON sl.id=c.salesLinkId JOIN sales_shops sh ON sh.id=sl.shopId WHERE ${whereSql}`).get(params).count);
   const items = database.prepare(`${candidateCte} SELECT c.id,c.name,c.ownerId,p.name ownerName,sl.platformGoodsId,sh.platform,
       COALESCE(sh.displayName,sh.shopName) shopName,r.factRows,r.activeDays,r.salesAmount,r.profitAmount,cr.salesRank
@@ -189,7 +190,7 @@ export function readConnectionGoalPilotCandidates(options = {}, context = {}) {
       tags: [`销售排名 #${Number(row.salesRank || 0)}`, Number(row.activeDays) >= 20 ? "销售稳定" : "", Number(row.profitAmount) > 0 ? "利润贡献为正" : "利润需关注"].filter(Boolean),
     }));
   const period = database.prepare("SELECT date(MAX(saleDate),'-29 days') startDate,MAX(saleDate) endDate FROM connection_sku_sales_daily_facts").get();
-  const owners = database.prepare(`SELECT DISTINCT p.id,p.name FROM connection_profiles c JOIN persons p ON p.id=c.ownerId
+  const owners = database.prepare(`SELECT DISTINCT p.id,p.name FROM ${LINK_ASSET_SELECT_SQL} c JOIN persons p ON p.id=c.ownerId
     JOIN connection_sku_sales_daily_facts f ON f.salesLinkId=c.salesLinkId ORDER BY p.name,p.id`).all();
   return { items, period, filters: { owners }, pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) } };
 }
@@ -202,7 +203,7 @@ export function addConnectionGoalPilotLinks(batchId, input = {}, context = {}) {
   const ids = [...new Set((Array.isArray(input.connectionIds) ? input.connectionIds : []).map(clean).filter(Boolean))];
   if (!ids.length || ids.length > 500) fail("请选择1至500个候选链接。");
   const placeholders = ids.map(() => "?").join(",");
-  const valid = database.prepare(`${recentFactsCte()} SELECT c.id FROM connection_profiles c JOIN recent r ON r.salesLinkId=c.salesLinkId
+  const valid = database.prepare(`${recentFactsCte()} SELECT c.id FROM ${LINK_ASSET_SELECT_SQL} c JOIN recent r ON r.salesLinkId=c.salesLinkId
     WHERE c.id IN (${placeholders}) AND c.ownerId IS NOT NULL AND TRIM(c.ownerId)<>'' AND r.factRows>0`).all(...ids).map((row) => row.id);
   if (valid.length !== ids.length) fail("候选链接必须同时具备负责人和近30天销售数据。", 409);
   const insert = database.prepare(`INSERT OR IGNORE INTO connection_goal_init_batch_links
@@ -227,7 +228,7 @@ export function readConnectionGoalPilotMembers(batchId, options = {}, context = 
   const params = { batchId: batch.id, ...scope.params };
   if (clean(options.status) && LINK_STATUSES.has(clean(options.status))) { where.push("bl.status=@status"); params.status = clean(options.status); }
   if (clean(options.keyword)) { where.push("(c.name LIKE @keyword OR sl.platformGoodsId LIKE @keyword)"); params.keyword = `%${clean(options.keyword)}%`; }
-  const base = `FROM connection_goal_init_batch_links bl JOIN connection_profiles c ON c.id=bl.connectionId
+  const base = `FROM connection_goal_init_batch_links bl JOIN ${LINK_ASSET_SELECT_SQL} c ON c.id=bl.connectionId
     JOIN sales_links sl ON sl.id=c.salesLinkId JOIN sales_shops sh ON sh.id=sl.shopId LEFT JOIN persons p ON p.id=c.ownerId
     LEFT JOIN recent r ON r.salesLinkId=c.salesLinkId
     LEFT JOIN connection_business_profiles bp ON bp.connectionId=c.id AND bp.status='active'
@@ -238,7 +239,7 @@ export function readConnectionGoalPilotMembers(batchId, options = {}, context = 
     LEFT JOIN connection_goal_evaluations ge ON ge.goalPlanId=gp.id`;
   const whereSql = where.join(" AND ");
   const total = Number(database.prepare(`${recentFactsCte()} SELECT COUNT(*) count FROM connection_goal_init_batch_links bl
-    JOIN connection_profiles c ON c.id=bl.connectionId JOIN sales_links sl ON sl.id=c.salesLinkId WHERE ${whereSql}`).get(params).count);
+    JOIN ${LINK_ASSET_SELECT_SQL} c ON c.id=bl.connectionId JOIN sales_links sl ON sl.id=c.salesLinkId WHERE ${whereSql}`).get(params).count);
   const rows = database.prepare(`${recentFactsCte()} SELECT bl.id,bl.batchId,bl.connectionId,bl.status,bl.createdAt,bl.updatedAt,c.name,c.ownerId,p.name ownerName,
       sl.platformGoodsId,sh.platform,COALESCE(sh.displayName,sh.shopName) shopName,r.activeDays,r.salesAmount,r.profitAmount,
       bp.positioningType,gp.id goalPlanId,gp.status goalStatus,gp.baselineStart,gp.baselineEnd,gp.targetMode,

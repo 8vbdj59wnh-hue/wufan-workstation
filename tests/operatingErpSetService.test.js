@@ -23,8 +23,11 @@ function fixture() {
       id TEXT PRIMARY KEY,objectCode TEXT,normalizedObjectCode TEXT,objectType TEXT,status TEXT,firstSeenAt TEXT,lastSeenAt TEXT
     );
     CREATE TABLE sales_link_skus (
-      id TEXT PRIMARY KEY,salesLinkId TEXT,platformSkuCode TEXT,normalizedPlatformSkuCode TEXT,erpSkuId TEXT,
-      lastSeenBatchId TEXT,createdAt TEXT,updatedAt TEXT
+      id TEXT PRIMARY KEY,salesLinkId TEXT,platformSkuCode TEXT,normalizedPlatformSkuCode TEXT,
+      createdAt TEXT,updatedAt TEXT
+    );
+    CREATE TABLE platform_goods_excel_import_rows (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,batchId TEXT,salesLinkSkuId TEXT
     );
     CREATE TABLE sales_link_sku_sales_object_relations (
       id TEXT PRIMARY KEY,linkSkuId TEXT,salesObjectId TEXT,effectiveFrom TEXT,effectiveTo TEXT,status TEXT,sourceBatchId TEXT
@@ -77,14 +80,16 @@ function fixture() {
   insertStructure.run("st-bundle", "so-bundle", 1, "active", "wangdian_suite_api", "active");
   insertComponent.run("sc-bundle-b", "st-bundle", "so-bundle", "erp-B", 2, "active");
   insertComponent.run("sc-bundle-h", "st-bundle", "so-bundle", "erp-H", 1, "active");
-  const insertSku = db.prepare("INSERT INTO sales_link_skus VALUES (?,?,?,?,?,?,?,?)");
-  insertSku.run("ls-A", "link-A", "A", "a", "erp-A", "batch-current", "2026-01-01", now);
-  insertSku.run("ls-H", "link-H", "H", "h", "erp-H", "batch-current", "2026-01-01", now);
-  insertSku.run("ls-bundle", "link-bundle", "BUNDLE-1", "bundle-1", null, "batch-current", "2026-01-01", now);
-  insertSku.run("ls-C", "link-C", "C", "c", "erp-C", "batch-old", "2026-01-01", now);
-  insertSku.run("ls-F", "link-F", "F", "f", "erp-F", "batch-old", "2026-01-01", now);
-  insertSku.run("ls-G", "link-G", "G", "g", "erp-G", "batch-old", "2026-01-01", now);
-  insertSku.run("ls-D", "link-D", "D", "d", "erp-D", "batch-old", "2026-01-01", now);
+  const insertSku = db.prepare("INSERT INTO sales_link_skus VALUES (?,?,?,?,?,?)");
+  insertSku.run("ls-A", "link-A", "A", "a", "2026-01-01", now);
+  insertSku.run("ls-H", "link-H", "H", "h", "2026-01-01", now);
+  insertSku.run("ls-bundle", "link-bundle", "BUNDLE-1", "bundle-1", "2026-01-01", now);
+  insertSku.run("ls-C", "link-C", "C", "c", "2026-01-01", now);
+  insertSku.run("ls-F", "link-F", "F", "f", "2026-01-01", now);
+  insertSku.run("ls-G", "link-G", "G", "g", "2026-01-01", now);
+  insertSku.run("ls-D", "link-D", "D", "d", "2026-01-01", now);
+  const insertPlatformMember = db.prepare("INSERT INTO platform_goods_excel_import_rows(batchId,salesLinkSkuId) VALUES(?,?)");
+  for (const linkSkuId of ["ls-A", "ls-H", "ls-bundle"]) insertPlatformMember.run("batch-current", linkSkuId);
   const insertRelation = db.prepare("INSERT INTO sales_link_sku_sales_object_relations VALUES (?,?,?,?,?,?,?)");
   for (const code of ["A", "H", "C", "F", "G"]) insertRelation.run(`rel-${code}`, `ls-${code}`, `so-${code}`, "2026-01-01", null, "active", "batch-current");
   insertRelation.run("rel-bundle", "ls-bundle", "so-bundle", "2026-01-01", null, "active", "batch-current");

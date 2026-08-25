@@ -47,7 +47,8 @@ function median(values) {
 }
 
 function loadProfile(database, connectionId) {
-  const profile = database.prepare("SELECT id,salesLinkId,name,ownerId,status FROM connection_profiles WHERE id=?").get(clean(connectionId));
+  const profile = database.prepare(`SELECT id,id salesLinkId,COALESCE(NULLIF(displayName,''),NULLIF(title,''),platformGoodsId) name,
+    ownerId,managementStatus status FROM sales_links WHERE id=?`).get(clean(connectionId));
   if (!profile) fail("Link资产不存在。", 404);
   return profile;
 }

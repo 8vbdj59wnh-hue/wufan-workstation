@@ -35,7 +35,7 @@ export function getConnectionDailySalesPerformance(input = {}, options = {}) {
   const connectionId = clean(input.connectionId);
   if (!connectionId) throw new Error("链接档案不能为空。");
   const database = options.database || getDatabase();
-  const connection = database.prepare("SELECT id,salesLinkId FROM connection_profiles WHERE id=?").get(connectionId);
+  const connection = database.prepare("SELECT id,id salesLinkId FROM sales_links WHERE id=?").get(connectionId);
   if (!connection) throw new Error("链接档案不存在。");
   const range = dateRange(input);
   const capabilityOptions = { database };

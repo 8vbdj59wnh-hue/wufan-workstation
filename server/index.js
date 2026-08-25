@@ -124,7 +124,6 @@ import { getSalesBusinessDashboard } from "./salesBusinessDashboardService.js";
 import { queryBusinessAnomalies } from "./capabilities/queryBusinessAnomalies.js";
 import { queryBusinessImprovementResult } from "./capabilities/queryBusinessImprovementResult.js";
 import { commitPlatformGoodsExcelDataSync, previewPlatformGoodsExcelDataSync, readPlatformGoodsExcelDataSyncPreview, reanalyzePlatformGoodsExcelDataSync } from "./platformGoodsExcelDataSyncAdapter.js";
-import { listPlatformLinkShopMappings } from "./platformLinkShopMappingImportService.js";
 import {
   confirmConnectionBulkPlatformImport,
   createConnectionBulkPlatformImport,
@@ -176,8 +175,6 @@ import {
   getMyConnectionWorkbench,
   setConnectionFollow,
   assertConnectionVisible,
-  readHealthRecordConnectionId,
-  readImprovementConnectionId,
   readConnectionProfile,
   updateConnectionProfile,
   updateConnectionDataMapping,
@@ -192,16 +189,6 @@ import {
   getConnectionGrowthAnalysis,
   getConnectionManagementOverview,
   listConnectionGrowthRankings,
-  createConnectionHealthRecord,
-  createImprovementAction,
-  listAttentionConnectionHealthRecords,
-  listConnectionHealthRecords,
-  createConnectionImprovement,
-  getConnectionImprovementSummary,
-  listConnectionImprovements,
-  updateConnectionImprovement,
-  getConnectionHospital,
-  joinConnectionDiagnosis,
   getLinkSalesRanking,
   getLinkDataStatus,
   listConnectionBenchmarkTargets,
@@ -663,8 +650,6 @@ function requireVisibleConnection(resolveConnectionId = (request) => request.par
 }
 
 const requireConnectionAccess = requireVisibleConnection();
-const requireHealthRecordAccess = requireVisibleConnection((request) => readHealthRecordConnectionId(request.params.id));
-const requireImprovementAccess = requireVisibleConnection((request) => readImprovementConnectionId(request.params.id));
 const requireBodyConnectionAccess = requireVisibleConnection((request) => request.body?.connectionId);
 const requireOptionalBenchmarkConnectionAccess = (request, response, next) => {
   if (request.body?.targetType !== "internal" || !request.body?.internalConnectionId) { next(); return; }
@@ -3681,19 +3666,6 @@ app.post("/api/connection-data-foundation/sales-relation-candidates/:id/confirm"
   } catch (error) { response.status(error.code === "combo_not_allowed" ? 400 : 409).json({ success: false, message: error.message || "销售单品关系确认失败。" }); }
 });
 
-app.get("/api/connection-data-foundation/shop-mappings", requireLinkView, (request, response) => {
-  try { response.json({ success: true, migrated: true, message: "该功能已迁移至管理员店铺治理。", items: listPlatformLinkShopMappings(request.query.limit) }); }
-  catch (error) { response.status(400).json({ success: false, message: error.message || "店铺匹配配置读取失败。" }); }
-});
-
-app.post("/api/connection-data-foundation/shop-mappings/preview", requireLinkImport, (_request, response) => {
-  response.status(410).json({ success: false, migrated: true, message: "该功能已迁移至管理员店铺治理。" });
-});
-
-app.post("/api/connection-data-foundation/shop-mappings/:id/confirm", requireLinkImport, (_request, response) => {
-  response.status(410).json({ success: false, migrated: true, message: "该功能已迁移至管理员店铺治理。" });
-});
-
 app.get("/api/connection-import-batches", requireLinkView, (_request, response) => {
   try {
     response.json({ success: true, items: listConnectionImportBatches() });
@@ -3779,90 +3751,6 @@ app.get("/api/connection-business-cockpit", requireLinkView, (request, response)
     response.json({ success: true, ...getConnectionBusinessCockpit(getUserPersonId(request.user), isAdminUser(request.user), request.query) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "链接经营驾驶舱读取失败。" });
-  }
-});
-
-app.get("/api/connections/:id/health-records", requireLinkHealth, requireConnectionAccess, (request, response) => {
-  try {
-    response.json({ success: true, items: listConnectionHealthRecords(request.params.id) });
-  } catch (error) {
-    response.status(400).json({ success: false, message: error.message || "连接体检记录读取失败。" });
-  }
-});
-
-app.post("/api/connections/:id/health-records", requireLinkHealthManage, requireConnectionAccess, (request, response) => {
-  try {
-    response.status(201).json({ success: true, ...createConnectionHealthRecord(request.params.id, request.body?.snapshotId) });
-  } catch (error) {
-    response.status(400).json({ success: false, message: error.message || "连接体检生成失败。" });
-  }
-});
-
-app.get("/api/connection-health-records/attention", requireLinkHealth, (request, response) => {
-  try {
-    response.json({ success: true, ...listAttentionConnectionHealthRecords(getUserPersonId(request.user), isAdminUser(request.user)) });
-  } catch (error) {
-    response.status(400).json({ success: false, message: error.message || "待关注连接读取失败。" });
-  }
-});
-
-app.post("/api/connection-health-records/:id/improvement-action", requireLinkImprove, requireHealthRecordAccess, (request, response) => {
-  if (!hasPermission(request.user, "workPlans.launch")) {
-    response.status(403).json({ success: false, message: "你没有权限创建改善行动。" });
-    return;
-  }
-  try {
-    response.status(201).json({ success: true, ...createImprovementAction(request.params.id, request.body, request.user?.id) });
-  } catch (error) {
-    response.status(400).json({ success: false, message: error.message || "改善行动创建失败。" });
-  }
-});
-
-app.get("/api/connection-improvements", requireLinkView, (request, response) => {
-  try {
-    response.json({ success: true, items: listConnectionImprovements(request.query, getUserPersonId(request.user), isAdminUser(request.user)) });
-  } catch (error) {
-    response.status(400).json({ success: false, message: error.message || "连接改善记录读取失败。" });
-  }
-});
-
-app.get("/api/connection-improvements/summary", requireLinkView, (request, response) => {
-  try {
-    response.json({ success: true, summary: getConnectionImprovementSummary(getUserPersonId(request.user), isAdminUser(request.user)) });
-  } catch (error) {
-    response.status(400).json({ success: false, message: error.message || "连接改善概览读取失败。" });
-  }
-});
-
-app.get("/api/connection-hospital", requireLinkHealth, (request, response) => {
-  try {
-    response.json({ success: true, ...getConnectionHospital(getUserPersonId(request.user), isAdminUser(request.user)) });
-  } catch (error) {
-    response.status(400).json({ success: false, message: error.message || "链接医院读取失败。" });
-  }
-});
-
-app.post("/api/connections/:id/diagnosis-entry", requireLinkImprove, requireConnectionAccess, (request, response) => {
-  try {
-    response.status(201).json({ success: true, item: joinConnectionDiagnosis(request.params.id, request.body, getUserPersonId(request.user), isAdminUser(request.user)) });
-  } catch (error) {
-    response.status(400).json({ success: false, message: error.message || "加入诊断失败。" });
-  }
-});
-
-app.post("/api/connection-improvements", requireLinkImprove, requireBodyConnectionAccess, (request, response) => {
-  try {
-    response.status(201).json({ success: true, ...createConnectionImprovement(request.body ?? {}, request.user?.id) });
-  } catch (error) {
-    response.status(400).json({ success: false, message: error.message || "连接改善项目创建失败。" });
-  }
-});
-
-app.put("/api/connection-improvements/:id", requireLinkImprove, requireImprovementAccess, (request, response) => {
-  try {
-    response.json({ success: true, item: updateConnectionImprovement(request.params.id, request.body ?? {}) });
-  } catch (error) {
-    response.status(400).json({ success: false, message: error.message || "连接改善结果保存失败。" });
   }
 });
 

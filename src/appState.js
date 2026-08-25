@@ -1686,43 +1686,6 @@ export async function loadConnectionBusinessCockpit(filters = {}) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-business-cockpit${suffix}`), "链接经营驾驶舱读取失败。");
 }
 
-export async function loadConnectionHealthRecords(connectionId) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/health-records`), "连接体检记录读取失败。");
-}
-
-export async function createConnectionHealthRecord(connectionId, snapshotId) {
-  const response = await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/health-records`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ snapshotId }),
-  });
-  return readApiJson(response, "连接体检生成失败。");
-}
-
-export async function loadAttentionConnectionHealthRecords() {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-health-records/attention`), "待关注连接读取失败。");
-}
-
-export async function createConnectionImprovementAction(healthRecordId, payload) {
-  const response = await authFetch(`${apiBaseUrl}/api/connection-health-records/${encodeURIComponent(healthRecordId)}/improvement-action`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
-  });
-  return readApiJson(response, "改善行动创建失败。");
-}
-
-export async function loadConnectionImprovements(filters = {}) {
-  const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== "" && value !== undefined));
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-improvements${query.size ? `?${query}` : ""}`), "连接改善记录读取失败。");
-}
-
-export async function loadConnectionHospital() {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-hospital`), "链接医院读取失败。");
-}
-
-export async function joinConnectionDiagnosis(connectionId, payload = {}) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/diagnosis-entry`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
-  }), "加入诊断失败。");
-}
-
 export async function loadConnectionBenchmarks(connectionId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/benchmarks`), "对标链接读取失败。");
 }
@@ -1749,17 +1712,6 @@ export async function removeConnectionBenchmark(connectionId, targetId) {
 
 export async function loadConnectionBenchmarkComparison(connectionId, targetId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/benchmarks/${encodeURIComponent(targetId)}/comparison`), "对标分析读取失败。");
-}
-
-export async function loadConnectionImprovementSummary() {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-improvements/summary`), "连接改善概览读取失败。");
-}
-
-export async function updateConnectionImprovement(improvementId, payload) {
-  const response = await authFetch(`${apiBaseUrl}/api/connection-improvements/${encodeURIComponent(improvementId)}`, {
-    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
-  });
-  return readApiJson(response, "连接改善结果保存失败。");
 }
 
 export async function validateProductV2Import(batchId, options = {}) {

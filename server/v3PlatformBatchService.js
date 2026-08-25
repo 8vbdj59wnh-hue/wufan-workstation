@@ -35,7 +35,11 @@ function dataSyncBatch(database) {
 
 function hasMaterializedCoverage(database, batch) {
   if (!batch || !tableExists(database, "sales_link_skus")) return true;
-  const covered = Number(database.prepare("SELECT COUNT(*) total FROM sales_link_skus WHERE lastSeenBatchId=?").get(batch.id)?.total || 0);
+  const covered = tableExists(database, "platform_goods_excel_import_rows")
+    ? Number(database.prepare(`SELECT COUNT(DISTINCT salesLinkSkuId) total
+        FROM platform_goods_excel_import_rows
+        WHERE batchId=? AND salesLinkSkuId IS NOT NULL AND trim(salesLinkSkuId)<>''`).get(batch.id)?.total || 0)
+    : 0;
   if (covered > 0) return true;
   return batch.source === "data_sync_batches" && Number(batch.totalCount || 0) === 0;
 }

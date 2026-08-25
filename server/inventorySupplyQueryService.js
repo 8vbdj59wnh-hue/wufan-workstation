@@ -168,58 +168,13 @@ function wangdianRowsForLinks(salesLinkIds, database) {
   return { byLink, availabilityByLink, components };
 }
 
-function legacyRowsForLinks(salesLinkIds, database, resolvedComponents = []) {
-  const ids = [...new Set(salesLinkIds.filter(Boolean))];
-  const byLink = new Map(ids.map((id) => [id, []]));
-  const componentsByLinkSku = new Map();
-  for (const component of resolvedComponents) {
-    const rows = componentsByLinkSku.get(component.salesLinkSkuId) ?? [];
-    rows.push(component); componentsByLinkSku.set(component.salesLinkSkuId, rows);
-  }
-  for (const group of chunk(ids)) {
-    const marks = group.map(() => "?").join(",");
-    const rows = database.prepare(`
-      SELECT s.salesLinkId,i.salesLinkSkuId,i.skuCode,i.businessDate,i.currentStock,i.availableStock,i.unitCost,i.salesVelocity,
-        s.specificationName
-      FROM connection_sku_inventory_facts i
-      JOIN sales_link_skus s ON s.id=i.salesLinkSkuId
-      WHERE s.salesLinkId IN (${marks})
-        AND i.businessDate=(SELECT MAX(latest.businessDate) FROM connection_sku_inventory_facts latest WHERE latest.salesLinkSkuId=i.salesLinkSkuId)
-    `).all(...group);
-    for (const row of rows) {
-      const salesMonth = numeric(row.salesVelocity) * 30;
-      const products = [...new Map((componentsByLinkSku.get(row.salesLinkSkuId) ?? []).flatMap((component) => component.products).map((item) => [item.productId, item])).values()];
-      byLink.get(row.salesLinkId)?.push({
-        ...row,
-        erpSkuId: null,
-        productId: products.length === 1 ? products[0].productId : null,
-        productName: products.map((item) => item.productName).filter(Boolean).join("、") || null,
-        productIds: products.map((item) => item.productId),
-        productNames: products.map((item) => item.productName).filter(Boolean),
-        warehouseCount: 0,
-        stockNum: numeric(row.currentStock),
-        availableSendStock: numeric(row.availableStock),
-        costPrice: row.unitCost,
-        inventoryCostAmount: row.unitCost === null || row.unitCost === undefined ? null : numeric(row.currentStock) * numeric(row.unitCost),
-        sales7d: null,
-        salesMonth,
-        sales90d: null,
-        ...risk(row.currentStock, row.availableStock, salesMonth),
-      });
-    }
-  }
-  return byLink;
-}
-
 export function readConnectionInventorySupplyMap(salesLinkIds, { includeCost = false, database = getDatabase() } = {}) {
   const ids = [...new Set(salesLinkIds.map(text).filter(Boolean))];
   const wangdian = wangdianRowsForLinks(ids, database);
-  const missingIds = ids.filter((id) => !(wangdian.byLink.get(id)?.length));
-  const legacy = legacyRowsForLinks(missingIds, database, wangdian.components);
   return new Map(ids.map((id) => {
-    const source = wangdian.byLink.get(id)?.length ? "wangdian" : legacy.get(id)?.length ? "legacy_excel" : "none";
-    const rawRows = source === "wangdian" ? wangdian.byLink.get(id) : source === "legacy_excel" ? legacy.get(id) : [];
-    const rows = rawRows.map((row) => ({ ...row, costPrice: includeCost ? row.costPrice : null, inventoryCostAmount: includeCost ? row.inventoryCostAmount : null, costVisible: includeCost, source, sourceLabel: source === "wangdian" ? "旺店通" : "历史Excel" }));
+    const source = wangdian.byLink.get(id)?.length ? "wangdian" : "none";
+    const rawRows = source === "wangdian" ? wangdian.byLink.get(id) : [];
+    const rows = rawRows.map((row) => ({ ...row, costPrice: includeCost ? row.costPrice : null, inventoryCostAmount: includeCost ? row.inventoryCostAmount : null, costVisible: includeCost, source, sourceLabel: "旺店通" }));
     return [id, { summary: aggregate(rows, source, includeCost), rows, linkSkuAvailability: source === "wangdian" ? wangdian.availabilityByLink.get(id) ?? [] : [] }];
   }));
 }

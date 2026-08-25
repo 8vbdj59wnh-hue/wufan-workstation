@@ -31,10 +31,10 @@ test("产品链接接口仅按V2关系解析产品归属", async () => {
       .run("shop-v2", "测试平台", "测试店铺", "测试店铺", "测试店铺", "active", now, now);
     database.prepare("INSERT INTO sales_links(id,shopId,platformGoodsId,title,identityStrength,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?)")
       .run("link-v2", "shop-v2", "goods-v2", "V2测试链接", "strong", "active", now, now);
-    database.prepare("INSERT INTO sales_link_skus(id,salesLinkId,productId,erpSkuId,platformSkuId,platformSkuCode,matchStatus,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?)")
-      .run("link-sku-v2", "link-v2", "product-legacy", null, "platform-sku-v2", "PLATFORM-SKU-V2", "matched_manual", "active", now, now);
-    database.prepare("INSERT INTO sales_link_skus(id,salesLinkId,productId,erpSkuId,platformSkuId,platformSkuCode,matchStatus,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?)")
-      .run("link-sku-unmatched", "link-v2", "product-legacy", null, "platform-sku-unmatched", "PLATFORM-SKU-UNMATCHED", "pending", "active", now, now);
+    database.prepare("INSERT INTO sales_link_skus(id,salesLinkId,platformSkuId,platformSkuCode,matchStatus,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?)")
+      .run("link-sku-v2", "link-v2", "platform-sku-v2", "PLATFORM-SKU-V2", "matched_manual", "active", now, now);
+    database.prepare("INSERT INTO sales_link_skus(id,salesLinkId,platformSkuId,platformSkuCode,matchStatus,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?)")
+      .run("link-sku-unmatched", "link-v2", "platform-sku-unmatched", "PLATFORM-SKU-UNMATCHED", "pending", "active", now, now);
     const reviewerId = database.prepare("SELECT id FROM persons ORDER BY id LIMIT 1").get().id;
     database.prepare("INSERT INTO sales_objects(id,objectCode,normalizedObjectCode,objectType,source,sourceType,sourceCode,status,firstSeenAt,lastSeenAt,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,'active',?,?,?,?)")
       .run("sales-object-v2", "SO-V2", "so-v2", "single", "test", "product_structure", "link-sku-v2", now, now, now, now);

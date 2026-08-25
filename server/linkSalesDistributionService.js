@@ -2,6 +2,7 @@ import { getDatabase } from "./db.js";
 import { resolveLinkSalesRankingRange } from "./linkSalesRankingService.js";
 import { buildLinkOperatingScope } from "./linkOperatingSetService.js";
 import { latestCompleteSalesDate } from "./connectionCockpitDateRange.js";
+import { LINK_ASSET_SELECT_SQL } from "./linkAssetSql.js";
 
 const scopes = new Set(["mine", "company"]);
 const text = (value) => String(value ?? "").trim();
@@ -32,7 +33,7 @@ export function getLinkSalesDistribution(input = {}, userId = "", isAdmin = fals
       COALESCE(selected_sales.factCount,0) factCount
     FROM sales_links l
     JOIN sales_shops sh ON sh.id=l.shopId
-    LEFT JOIN connection_profiles c ON c.salesLinkId=l.id
+    LEFT JOIN ${LINK_ASSET_SELECT_SQL} c ON c.salesLinkId=l.id
     LEFT JOIN selected_sales ON selected_sales.salesLinkId=l.id
     WHERE ${operatingScope.predicate} ${ownerWhere}
     ORDER BY CASE WHEN selected_sales.factCount IS NULL THEN 1 ELSE 0 END,

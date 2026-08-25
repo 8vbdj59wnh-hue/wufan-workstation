@@ -22,7 +22,8 @@ export function getLinkOperatingSummary(options = {}) {
   const database = options.database || getDatabase();
   const scope = buildLinkOperatingScope(database, { ...options, alias: "l", prefix: "linkOperatingSummary" });
   const platformPredicate = scope.context.platformBatch?.id
-    ? "l.lastSeenBatchId=@linkOperatingSummaryBatchId"
+    ? `EXISTS (SELECT 1 FROM platform_goods_excel_import_rows r
+        WHERE r.batchId=@linkOperatingSummaryBatchId AND r.salesLinkId=l.id)`
     : "0";
   const params = scope.context.platformBatch?.id
     ? { linkOperatingSummaryBatchId: scope.context.platformBatch.id }

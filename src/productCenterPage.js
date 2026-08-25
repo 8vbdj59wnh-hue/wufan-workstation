@@ -951,7 +951,7 @@ function renderProductSalesGroups(rows) {
       platformGoodsId: row.platformGoodsId,
       platformGoodsCode: row.platformGoodsCode,
       connectionProfileId: row.connectionProfileId,
-      rawUrl: row.rawUrl,
+      canonicalUrl: row.canonicalUrl,
       status: row.linkStatus,
       skus: [],
     };
@@ -970,7 +970,7 @@ function renderProductSalesGroups(rows) {
             <span>平台商品ID：${escapeHtml(link.platformGoodsId || "—")}</span>
             <span>平台货品编号：${escapeHtml(link.platformGoodsCode || "—")}</span>
             <span>状态：${escapeHtml(link.status || "—")}</span>
-            ${link.rawUrl ? `<a class="text-button" href="${escapeHtml(link.rawUrl)}" target="_blank" rel="noopener noreferrer">打开链接</a>` : ""}
+            ${link.canonicalUrl ? `<a class="text-button" href="${escapeHtml(link.canonicalUrl)}" target="_blank" rel="noopener noreferrer">打开链接</a>` : ""}
             ${link.connectionProfileId ? `<a class="text-button" href="#connectionCenter/${encodeURIComponent(link.connectionProfileId)}">进入经营链接详情</a>` : ""}
           </div>
           <div class="table-wrap"><table class="data-table"><thead><tr><th>平台SKU编码</th><th>产品编码</th><th>产品名称</th><th>规格名称</th><th>价格</th><th>平台库存</th><th>关联时间</th><th>关联状态</th><th>匹配方式</th><th>操作</th></tr></thead>
@@ -995,7 +995,7 @@ function renderUnmatchedPlatformSkus() {
     <div class="table-wrap"><table class="data-table"><thead><tr><th>平台</th><th>店铺</th><th>商品链接</th><th>平台货品编号</th><th>平台SKU</th><th>规格</th><th>可能ERP货品</th><th>原因</th><th>绑定产品</th><th>操作</th></tr></thead>
       <tbody>${rows.slice(0, 200).map((sku) => {
         return `<tr><td>${escapeHtml(sku.platform || "-")}</td><td>${escapeHtml(sku.displayName || sku.shopName || "-")}</td>
-          <td>${sku.rawUrl ? `<a class="text-button" href="${escapeHtml(sku.rawUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(sku.title || "打开链接")}</a>` : escapeHtml(sku.title || "-")}</td>
+          <td>${sku.canonicalUrl ? `<a class="text-button" href="${escapeHtml(sku.canonicalUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(sku.title || "打开链接")}</a>` : escapeHtml(sku.title || "-")}</td>
           <td>${escapeHtml(sku.platformGoodsCode || "-")}</td><td>${escapeHtml(sku.platformSkuCode || sku.platformSkuId || "-")}</td>
           <td>${escapeHtml(sku.specificationName || "-")}</td><td>${escapeHtml(sku.possibleErpGoodsCode ? `${sku.possibleErpGoodsCode} · ${sku.possibleErpGoodsName || ""}` : "—")}</td><td>${escapeHtml(sku.matchReason || sku.matchStatus || "-")}</td>
           <td><button class="secondary-button compact-button" type="button" data-action="open-platform-product-link" data-sku-id="${escapeHtml(sku.id)}">搜索并关联</button></td>

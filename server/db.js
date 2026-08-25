@@ -542,19 +542,19 @@ const resourceConfigs = {
   salesLinks: {
     table: "sales_links",
     columns: [
-      "id", "shopId", "platformGoodsId", "platformGoodsCode", "title", "canonicalUrl", "rawUrl",
+      "id", "shopId", "platformGoodsId", "platformGoodsCode", "title", "canonicalUrl",
       "status", "activityStatus", "category", "identityStrength", "originSource", "enrichmentStatus",
-      "lastModifiedAt", "lastSeenBatchId",
+      "lastModifiedAt",
       "currentState", "missingAt", "lastImportedAt", "createdAt", "updatedAt",
     ],
   },
   salesLinkSkus: {
     table: "sales_link_skus",
     columns: [
-      "id", "salesLinkId", "productId", "platformSkuId", "platformSkuCode", "normalizedPlatformSkuCode",
+      "id", "salesLinkId", "platformSkuId", "platformSkuCode", "normalizedPlatformSkuCode",
       "specificationName", "normalizedSpecificationName", "price", "platformStock", "occupiedStock",
       "systemGoodsType", "syncEnabled", "lastSyncedStock", "lastSyncedAt", "stopSyncReason",
-      "matchStatus", "matchMethod", "matchReason", "lastSeenBatchId", "currentState", "missingAt", "createdAt", "updatedAt",
+      "matchStatus", "matchMethod", "matchReason", "currentState", "missingAt", "createdAt", "updatedAt",
     ],
     booleanFields: ["syncEnabled"],
   },
@@ -1271,26 +1271,6 @@ function migrateConnectionProfilesIntoSalesLinksV1() {
       }
 
       database.exec(`ALTER TABLE connection_profiles RENAME TO legacy_connection_profiles`);
-      database.exec(`
-        CREATE TRIGGER legacy_connection_profiles_read_only_insert BEFORE INSERT ON legacy_connection_profiles BEGIN
-          SELECT RAISE(ABORT,'legacy connection profiles are read only');
-        END;
-        CREATE TRIGGER legacy_connection_profiles_read_only_update BEFORE UPDATE ON legacy_connection_profiles BEGIN
-          SELECT RAISE(ABORT,'legacy connection profiles are read only');
-        END;
-        CREATE TRIGGER legacy_connection_profiles_read_only_delete BEFORE DELETE ON legacy_connection_profiles BEGIN
-          SELECT RAISE(ABORT,'legacy connection profiles are read only');
-        END;
-      `);
-      database.exec(`
-        CREATE VIEW connection_profiles AS
-        SELECT id,id AS salesLinkId,COALESCE(NULLIF(displayName,''),NULLIF(title,''),platformGoodsId) AS name,
-               mainImage,imageSource,ownerId,managementStatus AS status,managementLevel AS level,
-               managementNotes AS notes,managementOriginSource AS originSource,
-               managementOriginImportBatchId AS originImportBatchId,managementIdentifiedAt AS identifiedAt,
-               managementCreatedBy AS createdBy,createdAt,updatedAt
-        FROM sales_links
-      `);
     })();
   } finally {
     database.pragma("foreign_keys = ON");
@@ -1373,82 +1353,6 @@ function migrateProductErpMappingsV2() {
       ON product_erp_mappings(currentState,sourceBatchId);
     CREATE INDEX IF NOT EXISTS idx_product_erp_mappings_inventory_seen
       ON product_erp_mappings(inventoryCurrentState,lastSeenInventoryBatchId);
-  `);
-}
-
-// Explicit one-time compatibility migration. Runtime initialization must never
-// call this function, otherwise later legacy-field changes become active V2 relations.
-export function migrateLegacySalesLinkSkuErpRelationsV2Once() {
-  const database = getDatabase();
-  const migratedAt = new Date().toISOString();
-  return database.prepare(`
-    INSERT OR IGNORE INTO sales_link_sku_erp_mappings
-      (id,salesLinkSkuId,erpSkuId,mappingType,quantity,currentState,sourceType,sourceBatchId,createdAt,updatedAt)
-    SELECT 'sales-link-sku-erp-map-' || lower(hex(randomblob(16))),s.id,s.erpSkuId,'single',1,'active','legacy_migration',s.lastSeenBatchId,
-      COALESCE(NULLIF(s.updatedAt,''),NULLIF(s.createdAt,''),?),COALESCE(NULLIF(s.updatedAt,''),NULLIF(s.createdAt,''),?)
-    FROM sales_link_skus s
-    JOIN erp_skus e ON e.id=s.erpSkuId
-    WHERE s.erpSkuId IS NOT NULL AND s.erpSkuId<>'' AND COALESCE(s.systemGoodsType,'') NOT LIKE '%组合%'
-  `).run(migratedAt, migratedAt).changes;
-}
-
-function migrateConnectionSkuSalesFactsV2() {
-  const database = getDatabase();
-  const table = database.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='connection_sku_sales_facts'").get();
-  if (!table) return;
-  const sql = String(table?.sql || "");
-  const hasErpSkuId = database.prepare("PRAGMA table_info(connection_sku_sales_facts)").all().some((item) => item.name === "erpSkuId");
-  const hasLegacyIdentity = /UNIQUE\s*\(\s*salesLinkSkuId\s*,\s*periodStart\s*,\s*periodEnd\s*\)/i.test(sql);
-  if (!hasErpSkuId || hasLegacyIdentity) {
-    database.transaction(() => {
-      database.exec("DROP TABLE IF EXISTS connection_sku_sales_facts_v2");
-      database.exec(`
-        CREATE TABLE connection_sku_sales_facts_v2 (
-          id TEXT PRIMARY KEY,
-          batchId TEXT NOT NULL,
-          salesLinkId TEXT NOT NULL,
-          salesLinkSkuId TEXT NOT NULL,
-          erpSkuId TEXT,
-          platformGoodsId TEXT NOT NULL,
-          skuCode TEXT NOT NULL,
-          periodStart TEXT NOT NULL,
-          periodEnd TEXT NOT NULL,
-          shippedQuantity REAL,
-          salesAmount REAL,
-          costAmount REAL,
-          profitAmount REAL,
-          rawDataJson TEXT NOT NULL DEFAULT '{}',
-          createdAt TEXT NOT NULL,
-          FOREIGN KEY(batchId) REFERENCES connection_import_batches(id),
-          FOREIGN KEY(salesLinkId) REFERENCES sales_links(id),
-          FOREIGN KEY(salesLinkSkuId) REFERENCES sales_link_skus(id),
-          FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id)
-        )
-      `);
-      database.exec(`
-        INSERT INTO connection_sku_sales_facts_v2
-          (id,batchId,salesLinkId,salesLinkSkuId,erpSkuId,platformGoodsId,skuCode,periodStart,periodEnd,shippedQuantity,salesAmount,costAmount,profitAmount,rawDataJson,createdAt)
-        SELECT f.id,f.batchId,f.salesLinkId,f.salesLinkSkuId,
-          ${hasErpSkuId ? "COALESCE(f.erpSkuId,s.erpSkuId,(SELECT e.id FROM erp_skus e WHERE LOWER(e.merchantSkuCode)=LOWER(f.skuCode) LIMIT 1))" : "COALESCE(s.erpSkuId,(SELECT e.id FROM erp_skus e WHERE LOWER(e.merchantSkuCode)=LOWER(f.skuCode) LIMIT 1))"},
-          f.platformGoodsId,f.skuCode,f.periodStart,f.periodEnd,f.shippedQuantity,f.salesAmount,f.costAmount,f.profitAmount,f.rawDataJson,f.createdAt
-        FROM connection_sku_sales_facts f
-        LEFT JOIN sales_link_skus s ON s.id=f.salesLinkSkuId
-      `);
-      database.exec("DROP TABLE connection_sku_sales_facts");
-      database.exec("ALTER TABLE connection_sku_sales_facts_v2 RENAME TO connection_sku_sales_facts");
-    })();
-  }
-  database.exec(`
-    CREATE INDEX IF NOT EXISTS idx_connection_sku_sales_link_period
-      ON connection_sku_sales_facts(salesLinkId,periodEnd DESC,periodStart DESC);
-    CREATE INDEX IF NOT EXISTS idx_connection_sku_sales_erp_period
-      ON connection_sku_sales_facts(erpSkuId,periodEnd DESC,periodStart DESC);
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_sku_sales_v2_identity
-      ON connection_sku_sales_facts(salesLinkSkuId,erpSkuId,periodStart,periodEnd)
-      WHERE erpSkuId IS NOT NULL;
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_sku_sales_legacy_identity
-      ON connection_sku_sales_facts(salesLinkSkuId,periodStart,periodEnd)
-      WHERE erpSkuId IS NULL;
   `);
 }
 
@@ -1594,246 +1498,6 @@ export function migrateSalesRelationCandidatesV1() {
     `))();
     database.pragma("foreign_keys = ON");
   }
-}
-
-export function migrateSalesLinkSkuComboGroupsV1() {
-  const database = getDatabase();
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS sales_link_sku_combo_groups (
-      id TEXT PRIMARY KEY,
-      salesLinkSkuId TEXT NOT NULL,
-      groupCode TEXT NOT NULL UNIQUE,
-      status TEXT NOT NULL DEFAULT 'pending',
-      sourceType TEXT NOT NULL,
-      sourceBatchId TEXT,
-      sourceFileHash TEXT,
-      sourceCandidateIdsJson TEXT NOT NULL DEFAULT '[]',
-      reviewedBy TEXT,
-      reviewedAt TEXT,
-      reviewNote TEXT,
-      approvedAt TEXT,
-      invalidatedAt TEXT,
-      replacedGroupId TEXT,
-      createdBy TEXT,
-      createdAt TEXT NOT NULL,
-      updatedAt TEXT NOT NULL,
-      FOREIGN KEY(salesLinkSkuId) REFERENCES sales_link_skus(id),
-      FOREIGN KEY(sourceBatchId) REFERENCES connection_import_batches(id),
-      FOREIGN KEY(reviewedBy) REFERENCES persons(id),
-      FOREIGN KEY(replacedGroupId) REFERENCES sales_link_sku_combo_groups(id),
-      FOREIGN KEY(createdBy) REFERENCES persons(id),
-      CHECK(status IN ('pending','approved','rejected','inactive','conflict')),
-      CHECK(status <> 'approved' OR (reviewedBy IS NOT NULL AND reviewedAt IS NOT NULL AND approvedAt IS NOT NULL))
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_link_sku_combo_groups_one_approved
-      ON sales_link_sku_combo_groups(salesLinkSkuId) WHERE status='approved';
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_link_sku_combo_groups_batch_sku
-      ON sales_link_sku_combo_groups(sourceBatchId,salesLinkSkuId) WHERE sourceBatchId IS NOT NULL;
-    CREATE INDEX IF NOT EXISTS idx_sales_link_sku_combo_groups_status_updated
-      ON sales_link_sku_combo_groups(status,updatedAt DESC);
-    CREATE INDEX IF NOT EXISTS idx_sales_link_sku_combo_groups_batch
-      ON sales_link_sku_combo_groups(sourceBatchId,status);
-
-    CREATE TABLE IF NOT EXISTS sales_link_sku_combo_group_components (
-      id TEXT PRIMARY KEY,
-      comboGroupId TEXT NOT NULL,
-      erpSkuId TEXT NOT NULL,
-      quantity REAL,
-      quantitySource TEXT,
-      sourceType TEXT NOT NULL DEFAULT 'sales_daily_preview',
-      sortOrder INTEGER NOT NULL DEFAULT 0,
-      status TEXT NOT NULL DEFAULT 'included',
-      sourceCandidateId TEXT,
-      decisionNote TEXT,
-      createdAt TEXT NOT NULL,
-      updatedAt TEXT NOT NULL,
-      FOREIGN KEY(comboGroupId) REFERENCES sales_link_sku_combo_groups(id),
-      FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),
-      FOREIGN KEY(sourceCandidateId) REFERENCES sales_link_sku_erp_mapping_candidates(id),
-      UNIQUE(comboGroupId,erpSkuId),
-      CHECK(quantity IS NULL OR quantity > 0),
-      CHECK(quantitySource IS NULL OR quantitySource='manual_confirmation'),
-      CHECK(status IN ('included','excluded'))
-    );
-  `);
-  const componentColumns = database.prepare("PRAGMA table_info(sales_link_sku_combo_group_components)").all();
-  const quantityColumn = componentColumns.find((column) => column.name === "quantity");
-  const requiresComponentV11 = quantityColumn?.notnull === 1 || !componentColumns.some((column) => column.name === "quantitySource");
-  if (requiresComponentV11) {
-    database.pragma("foreign_keys = OFF");
-    try {
-      database.transaction(() => {
-        database.exec("DROP TRIGGER IF EXISTS trg_combo_component_approved_insert");
-        database.exec("DROP TRIGGER IF EXISTS trg_combo_component_approved_update");
-        database.exec("DROP TABLE IF EXISTS sales_link_sku_combo_group_components_v11");
-        database.exec(`
-          CREATE TABLE sales_link_sku_combo_group_components_v11 (
-            id TEXT PRIMARY KEY,
-            comboGroupId TEXT NOT NULL,
-            erpSkuId TEXT NOT NULL,
-            quantity REAL,
-            quantitySource TEXT,
-            sourceType TEXT NOT NULL DEFAULT 'sales_daily_preview',
-            sortOrder INTEGER NOT NULL DEFAULT 0,
-            status TEXT NOT NULL DEFAULT 'included',
-            sourceCandidateId TEXT,
-            decisionNote TEXT,
-            createdAt TEXT NOT NULL,
-            updatedAt TEXT NOT NULL,
-            FOREIGN KEY(comboGroupId) REFERENCES sales_link_sku_combo_groups(id),
-            FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),
-            FOREIGN KEY(sourceCandidateId) REFERENCES sales_link_sku_erp_mapping_candidates(id),
-            UNIQUE(comboGroupId,erpSkuId),
-            CHECK(quantity IS NULL OR quantity > 0),
-            CHECK(quantitySource IS NULL OR quantitySource='manual_confirmation'),
-            CHECK(status IN ('included','excluded'))
-          );
-          INSERT INTO sales_link_sku_combo_group_components_v11
-            (id,comboGroupId,erpSkuId,quantity,quantitySource,sourceType,sortOrder,status,sourceCandidateId,decisionNote,createdAt,updatedAt)
-          SELECT id,comboGroupId,erpSkuId,quantity,NULL,'sales_daily_preview',sortOrder,status,sourceCandidateId,decisionNote,createdAt,updatedAt
-          FROM sales_link_sku_combo_group_components;
-          DROP TABLE sales_link_sku_combo_group_components;
-          ALTER TABLE sales_link_sku_combo_group_components_v11 RENAME TO sales_link_sku_combo_group_components;
-        `);
-      })();
-    } finally {
-      database.pragma("foreign_keys = ON");
-    }
-  }
-  ensureColumn("sales_link_sku_combo_group_components", "sourceType", "TEXT NOT NULL DEFAULT 'sales_daily_preview'");
-  database.exec(`
-    CREATE INDEX IF NOT EXISTS idx_sales_link_sku_combo_components_group_order
-      ON sales_link_sku_combo_group_components(comboGroupId,status,sortOrder,id);
-    CREATE INDEX IF NOT EXISTS idx_sales_link_sku_combo_components_erp
-      ON sales_link_sku_combo_group_components(erpSkuId,status);
-    CREATE TRIGGER IF NOT EXISTS trg_combo_component_approved_insert
-      BEFORE INSERT ON sales_link_sku_combo_group_components
-      WHEN NEW.status='included'
-        AND EXISTS (SELECT 1 FROM sales_link_sku_combo_groups g WHERE g.id=NEW.comboGroupId AND g.status='approved')
-        AND (NEW.quantity IS NULL OR COALESCE(NEW.quantitySource,'')<>'manual_confirmation')
-      BEGIN
-        SELECT RAISE(ABORT,'approved combo group requires manually confirmed component quantity');
-      END;
-    CREATE TRIGGER IF NOT EXISTS trg_combo_component_approved_update
-      BEFORE UPDATE ON sales_link_sku_combo_group_components
-      WHEN NEW.status='included'
-        AND EXISTS (SELECT 1 FROM sales_link_sku_combo_groups g WHERE g.id=NEW.comboGroupId AND g.status='approved')
-        AND (NEW.quantity IS NULL OR COALESCE(NEW.quantitySource,'')<>'manual_confirmation')
-      BEGIN
-        SELECT RAISE(ABORT,'approved combo group requires manually confirmed component quantity');
-      END;
-    CREATE TRIGGER IF NOT EXISTS trg_combo_group_approval_insert
-      BEFORE INSERT ON sales_link_sku_combo_groups
-      WHEN NEW.status='approved'
-        AND (
-          NOT EXISTS (SELECT 1 FROM sales_link_sku_combo_group_components c WHERE c.comboGroupId=NEW.id AND c.status='included')
-          OR EXISTS (SELECT 1 FROM sales_link_sku_combo_group_components c WHERE c.comboGroupId=NEW.id AND c.status='included' AND (c.quantity IS NULL OR COALESCE(c.quantitySource,'')<>'manual_confirmation'))
-        )
-      BEGIN
-        SELECT RAISE(ABORT,'combo group cannot be approved before all included quantities are manually confirmed');
-      END;
-    CREATE TRIGGER IF NOT EXISTS trg_combo_group_approval_update
-      BEFORE UPDATE OF status ON sales_link_sku_combo_groups
-      WHEN NEW.status='approved'
-        AND (
-          NOT EXISTS (SELECT 1 FROM sales_link_sku_combo_group_components c WHERE c.comboGroupId=NEW.id AND c.status='included')
-          OR EXISTS (SELECT 1 FROM sales_link_sku_combo_group_components c WHERE c.comboGroupId=NEW.id AND c.status='included' AND (c.quantity IS NULL OR COALESCE(c.quantitySource,'')<>'manual_confirmation'))
-        )
-      BEGIN
-        SELECT RAISE(ABORT,'combo group cannot be approved before all included quantities are manually confirmed');
-      END;
-  `);
-  if (tableExists("sales_link_sku_erp_mappings")) {
-    ensureColumn("sales_link_sku_erp_mappings", "comboGroupId", "TEXT REFERENCES sales_link_sku_combo_groups(id)");
-    database.exec(`CREATE INDEX IF NOT EXISTS idx_sales_link_sku_erp_mapping_combo_group
-      ON sales_link_sku_erp_mappings(comboGroupId) WHERE comboGroupId IS NOT NULL`);
-  }
-}
-
-export function migrateSalesLinkSkuProductStructuresV1() {
-  const database = getDatabase();
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS sales_link_sku_product_structures (
-      id TEXT PRIMARY KEY,
-      salesLinkSkuId TEXT NOT NULL,
-      structureCode TEXT NOT NULL UNIQUE,
-      structureHash TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'draft',
-      sourceType TEXT NOT NULL,
-      sourceBatchId TEXT,
-      sourceFileHash TEXT,
-      sourceReferenceJson TEXT NOT NULL DEFAULT '{}',
-      reviewedBy TEXT,
-      reviewedAt TEXT,
-      reviewNote TEXT,
-      activatedAt TEXT,
-      invalidatedAt TEXT,
-      replacedStructureId TEXT,
-      createdBy TEXT,
-      createdAt TEXT NOT NULL,
-      updatedAt TEXT NOT NULL,
-      FOREIGN KEY(salesLinkSkuId) REFERENCES sales_link_skus(id),
-      FOREIGN KEY(sourceBatchId) REFERENCES connection_import_batches(id),
-      FOREIGN KEY(reviewedBy) REFERENCES persons(id),
-      FOREIGN KEY(replacedStructureId) REFERENCES sales_link_sku_product_structures(id),
-      FOREIGN KEY(createdBy) REFERENCES persons(id),
-      CHECK(status IN ('draft','pending_review','active','inactive','conflict')),
-      CHECK(status <> 'active' OR (reviewedBy IS NOT NULL AND reviewedAt IS NOT NULL AND activatedAt IS NOT NULL))
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_link_sku_product_structures_one_active
-      ON sales_link_sku_product_structures(salesLinkSkuId) WHERE status='active';
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_link_sku_product_structures_batch_sku_hash
-      ON sales_link_sku_product_structures(sourceBatchId,salesLinkSkuId,structureHash)
-      WHERE sourceBatchId IS NOT NULL;
-    CREATE INDEX IF NOT EXISTS idx_sales_link_sku_product_structures_status_updated
-      ON sales_link_sku_product_structures(status,updatedAt DESC);
-
-    CREATE TABLE IF NOT EXISTS sales_link_sku_product_structure_components (
-      id TEXT PRIMARY KEY,
-      productStructureId TEXT NOT NULL,
-      erpSkuId TEXT NOT NULL,
-      quantity REAL NOT NULL,
-      sortOrder INTEGER NOT NULL DEFAULT 0,
-      sourceType TEXT NOT NULL,
-      sourceReferenceJson TEXT NOT NULL DEFAULT '{}',
-      createdAt TEXT NOT NULL,
-      updatedAt TEXT NOT NULL,
-      FOREIGN KEY(productStructureId) REFERENCES sales_link_sku_product_structures(id),
-      FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),
-      UNIQUE(productStructureId,erpSkuId),
-      CHECK(quantity > 0)
-    );
-    CREATE INDEX IF NOT EXISTS idx_sales_link_sku_product_structure_components_order
-      ON sales_link_sku_product_structure_components(productStructureId,sortOrder,id);
-    CREATE INDEX IF NOT EXISTS idx_sales_link_sku_product_structure_components_erp
-      ON sales_link_sku_product_structure_components(erpSkuId);
-
-    CREATE TRIGGER IF NOT EXISTS trg_product_structure_activation_insert
-      BEFORE INSERT ON sales_link_sku_product_structures
-      WHEN NEW.status='active'
-        AND NOT EXISTS (
-          SELECT 1 FROM sales_link_sku_product_structure_components c
-          WHERE c.productStructureId=NEW.id
-        )
-      BEGIN
-        SELECT RAISE(ABORT,'product structure cannot be active without components');
-      END;
-    CREATE TRIGGER IF NOT EXISTS trg_product_structure_activation_update
-      BEFORE UPDATE OF status ON sales_link_sku_product_structures
-      WHEN NEW.status='active'
-        AND NOT EXISTS (
-          SELECT 1 FROM sales_link_sku_product_structure_components c
-          WHERE c.productStructureId=NEW.id
-        )
-      BEGIN
-        SELECT RAISE(ABORT,'product structure cannot be active without components');
-      END;
-  `);
-  ensureColumn("sales_link_sku_erp_mappings", "productStructureId", "TEXT REFERENCES sales_link_sku_product_structures(id)");
-  database.exec(`
-    CREATE INDEX IF NOT EXISTS idx_sales_link_sku_erp_mapping_product_structure
-      ON sales_link_sku_erp_mappings(productStructureId) WHERE productStructureId IS NOT NULL;
-  `);
 }
 
 export function migrateSalesObjectsV1() {
@@ -2114,6 +1778,8 @@ export function migrateProductStructureApplicationApprovalsV1() {
   const auditSql = String(database.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='product_structure_application_audits'").get()?.sql || "");
   const needsRebuild = /REFERENCES\s+sales_link_sku_product_structures/i.test(itemSql)
     || /REFERENCES\s+sales_link_sku_product_structures/i.test(auditSql)
+    || /\bproductStructureId\b/i.test(itemSql)
+    || /\bproductStructureId\b/i.test(auditSql)
     || (itemSql && !/salesObjectStructureId/i.test(itemSql))
     || (auditSql && !/salesObjectStructureId/i.test(auditSql));
 
@@ -2126,7 +1792,6 @@ export function migrateProductStructureApplicationApprovalsV1() {
         CREATE TABLE product_structure_application_items_v2 (
           id TEXT PRIMARY KEY,
           applicationBatchId TEXT NOT NULL,
-          productStructureId TEXT,
           salesObjectStructureId TEXT,
           structureVersion INTEGER,
           salesLinkSkuId TEXT NOT NULL,
@@ -2155,13 +1820,12 @@ export function migrateProductStructureApplicationApprovalsV1() {
           CHECK(approvalStatus NOT IN ('approved','rejected') OR (reviewedBy IS NOT NULL AND reviewedAt IS NOT NULL))
         );
         INSERT INTO product_structure_application_items_v2
-          (id,applicationBatchId,productStructureId,salesLinkSkuId,classification,approvalStatus,relationshipShape,sourceTypesJson,currentMappingsJson,targetComponentsJson,componentDiffJson,impactSalesAmount,impactProfitAmount,reviewedBy,reviewedAt,reviewNote,createdAt,updatedAt)
-        SELECT id,applicationBatchId,productStructureId,salesLinkSkuId,classification,approvalStatus,relationshipShape,sourceTypesJson,currentMappingsJson,targetComponentsJson,componentDiffJson,impactSalesAmount,impactProfitAmount,reviewedBy,reviewedAt,reviewNote,createdAt,updatedAt
+          (id,applicationBatchId,salesObjectStructureId,structureVersion,salesLinkSkuId,classification,approvalStatus,relationshipShape,sourceTypesJson,currentMappingsJson,targetComponentsJson,componentDiffJson,impactSalesAmount,impactProfitAmount,reviewedBy,reviewedAt,reviewNote,createdAt,updatedAt)
+        SELECT id,applicationBatchId,salesObjectStructureId,structureVersion,salesLinkSkuId,classification,approvalStatus,relationshipShape,sourceTypesJson,currentMappingsJson,targetComponentsJson,componentDiffJson,impactSalesAmount,impactProfitAmount,reviewedBy,reviewedAt,reviewNote,createdAt,updatedAt
         FROM product_structure_application_items;
         CREATE TABLE product_structure_application_audits_v2 (
           id TEXT PRIMARY KEY,
           applicationItemId TEXT NOT NULL,
-          productStructureId TEXT,
           salesObjectStructureId TEXT,
           structureVersion INTEGER,
           executionMode TEXT NOT NULL,
@@ -2179,8 +1843,8 @@ export function migrateProductStructureApplicationApprovalsV1() {
           CHECK(outcome IN ('applied','idempotent','failed','rolled_back'))
         );
         INSERT INTO product_structure_application_audits_v2
-          (id,applicationItemId,productStructureId,executionMode,outcome,oldMappingsSnapshotJson,generatedMappingsJson,errorMessage,appliedBy,appliedAt,createdAt)
-        SELECT id,applicationItemId,productStructureId,executionMode,outcome,oldMappingsSnapshotJson,generatedMappingsJson,errorMessage,appliedBy,appliedAt,createdAt
+          (id,applicationItemId,salesObjectStructureId,structureVersion,executionMode,outcome,oldMappingsSnapshotJson,generatedMappingsJson,errorMessage,appliedBy,appliedAt,createdAt)
+        SELECT id,applicationItemId,salesObjectStructureId,structureVersion,executionMode,outcome,oldMappingsSnapshotJson,generatedMappingsJson,errorMessage,appliedBy,appliedAt,createdAt
         FROM product_structure_application_audits;
         DROP TABLE product_structure_application_audits;
         DROP TABLE product_structure_application_items;
@@ -2207,7 +1871,6 @@ export function migrateProductStructureApplicationApprovalsV1() {
     CREATE TABLE IF NOT EXISTS product_structure_application_items (
       id TEXT PRIMARY KEY,
       applicationBatchId TEXT NOT NULL,
-      productStructureId TEXT,
       salesObjectStructureId TEXT,
       structureVersion INTEGER,
       salesLinkSkuId TEXT NOT NULL,
@@ -2242,7 +1905,6 @@ export function migrateProductStructureApplicationApprovalsV1() {
     CREATE TABLE IF NOT EXISTS product_structure_application_audits (
       id TEXT PRIMARY KEY,
       applicationItemId TEXT NOT NULL,
-      productStructureId TEXT,
       salesObjectStructureId TEXT,
       structureVersion INTEGER,
       executionMode TEXT NOT NULL,
@@ -2633,6 +2295,490 @@ function retireStoredModulePermissionsV1() {
   })();
 }
 
+export function retireLinkCenterLegacyRelationsPhase2() {
+  const database = getDatabase();
+  const columnsFor = (table) => tableExists(table)
+    ? new Set(database.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name))
+    : new Set();
+  const rowCount = (table, where = "1=1") => tableExists(table)
+    ? Number(database.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE ${where}`).get()?.count || 0)
+    : 0;
+
+  const skuColumns = columnsFor("sales_link_skus");
+  const mappingColumns = columnsFor("sales_link_sku_erp_mappings");
+  const needsSkuRebuild = skuColumns.has("productId") || skuColumns.has("erpSkuId");
+  const needsMappingRebuild = mappingColumns.has("comboGroupId");
+  const legacyTables = [
+    "sales_link_sku_combo_group_components",
+    "sales_link_sku_combo_groups",
+    "platform_sku_manual_bindings",
+  ].filter(tableExists);
+
+  if (!needsSkuRebuild && !needsMappingRebuild && legacyTables.length === 0) {
+    return { changed: false, rebuiltTables: 0, retiredTables: 0 };
+  }
+
+  const unsafeLegacyData = {
+    comboGroupMappings: mappingColumns.has("comboGroupId")
+      ? rowCount("sales_link_sku_erp_mappings", "comboGroupId IS NOT NULL")
+      : 0,
+    comboGroups: rowCount("sales_link_sku_combo_groups"),
+    comboComponents: rowCount("sales_link_sku_combo_group_components"),
+    manualBindings: rowCount("platform_sku_manual_bindings"),
+  };
+  const populatedLegacyObjects = Object.entries(unsafeLegacyData).filter(([, count]) => count > 0);
+  if (populatedLegacyObjects.length > 0) {
+    throw new Error(`链接中心Phase 2退役中止：旧结构仍有数据 ${JSON.stringify(Object.fromEntries(populatedLegacyObjects))}`);
+  }
+
+  const foreignKeysEnabled = Number(database.pragma("foreign_keys", { simple: true })) === 1;
+  if (foreignKeysEnabled) database.pragma("foreign_keys = OFF");
+  try {
+    database.transaction(() => {
+      if (needsSkuRebuild) {
+        database.exec(`
+          DROP TABLE IF EXISTS sales_link_skus_phase2_clean;
+          CREATE TABLE sales_link_skus_phase2_clean (
+            id TEXT PRIMARY KEY,
+            salesLinkId TEXT NOT NULL,
+            platformSkuId TEXT,
+            platformSkuCode TEXT,
+            normalizedPlatformSkuCode TEXT,
+            specificationName TEXT,
+            normalizedSpecificationName TEXT,
+            price REAL,
+            platformStock REAL,
+            occupiedStock REAL,
+            systemGoodsType TEXT,
+            syncEnabled INTEGER NOT NULL DEFAULT 0,
+            lastSyncedStock REAL,
+            lastSyncedAt TEXT,
+            stopSyncReason TEXT,
+            matchStatus TEXT NOT NULL,
+            matchMethod TEXT,
+            matchReason TEXT,
+            currentState TEXT NOT NULL DEFAULT 'active',
+            missingAt TEXT,
+            createdAt TEXT,
+            updatedAt TEXT,
+            FOREIGN KEY(salesLinkId) REFERENCES sales_links(id)
+          );
+          INSERT INTO sales_link_skus_phase2_clean (
+            id,salesLinkId,platformSkuId,platformSkuCode,normalizedPlatformSkuCode,
+            specificationName,normalizedSpecificationName,price,platformStock,occupiedStock,
+            systemGoodsType,syncEnabled,lastSyncedStock,lastSyncedAt,stopSyncReason,
+            matchStatus,matchMethod,matchReason,currentState,missingAt,createdAt,updatedAt
+          ) SELECT
+            id,salesLinkId,platformSkuId,platformSkuCode,normalizedPlatformSkuCode,
+            specificationName,normalizedSpecificationName,price,platformStock,occupiedStock,
+            systemGoodsType,syncEnabled,lastSyncedStock,lastSyncedAt,stopSyncReason,
+            matchStatus,matchMethod,matchReason,currentState,missingAt,createdAt,updatedAt
+          FROM sales_link_skus;
+          DROP TABLE sales_link_skus;
+          ALTER TABLE sales_link_skus_phase2_clean RENAME TO sales_link_skus;
+          CREATE UNIQUE INDEX idx_sales_link_skus_platform_id
+            ON sales_link_skus(salesLinkId,platformSkuId)
+            WHERE platformSkuId IS NOT NULL AND platformSkuId<>'';
+          CREATE UNIQUE INDEX idx_sales_link_skus_fallback
+            ON sales_link_skus(salesLinkId,normalizedPlatformSkuCode,normalizedSpecificationName)
+            WHERE platformSkuId IS NULL OR platformSkuId='';
+          CREATE INDEX idx_sales_link_skus_current_state
+            ON sales_link_skus(currentState);
+          CREATE INDEX idx_sales_link_skus_link_state
+            ON sales_link_skus(salesLinkId,currentState);
+        `);
+      }
+
+      if (needsMappingRebuild) {
+        database.exec(`
+          DROP TABLE IF EXISTS sales_link_sku_erp_mappings_phase2_clean;
+          CREATE TABLE sales_link_sku_erp_mappings_phase2_clean (
+            id TEXT PRIMARY KEY,
+            salesLinkSkuId TEXT NOT NULL,
+            erpSkuId TEXT NOT NULL,
+            mappingType TEXT NOT NULL DEFAULT 'single',
+            quantity REAL NOT NULL DEFAULT 1,
+            currentState TEXT NOT NULL DEFAULT 'active',
+            sourceType TEXT NOT NULL DEFAULT 'legacy_migration',
+            sourceBatchId TEXT,
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL,
+            invalidatedAt TEXT,
+            productStructureId TEXT REFERENCES sales_link_sku_product_structures(id),
+            FOREIGN KEY(salesLinkSkuId) REFERENCES sales_link_skus(id),
+            FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),
+            UNIQUE(salesLinkSkuId,erpSkuId),
+            CHECK(mappingType IN ('single','combo')),
+            CHECK(quantity > 0),
+            CHECK(currentState IN ('active','inactive'))
+          );
+          INSERT INTO sales_link_sku_erp_mappings_phase2_clean (
+            id,salesLinkSkuId,erpSkuId,mappingType,quantity,currentState,sourceType,
+            sourceBatchId,createdAt,updatedAt,invalidatedAt,productStructureId
+          ) SELECT
+            id,salesLinkSkuId,erpSkuId,mappingType,quantity,currentState,sourceType,
+            sourceBatchId,createdAt,updatedAt,invalidatedAt,productStructureId
+          FROM sales_link_sku_erp_mappings;
+          DROP TABLE sales_link_sku_erp_mappings;
+          ALTER TABLE sales_link_sku_erp_mappings_phase2_clean RENAME TO sales_link_sku_erp_mappings;
+          CREATE INDEX idx_sales_link_sku_erp_mapping_link_state
+            ON sales_link_sku_erp_mappings(salesLinkSkuId,currentState);
+          CREATE INDEX idx_sales_link_sku_erp_mapping_erp_state
+            ON sales_link_sku_erp_mappings(erpSkuId,currentState);
+          CREATE INDEX idx_sales_link_sku_erp_mapping_batch
+            ON sales_link_sku_erp_mappings(sourceBatchId);
+          CREATE INDEX idx_sales_link_sku_erp_mapping_product_structure
+            ON sales_link_sku_erp_mappings(productStructureId) WHERE productStructureId IS NOT NULL;
+        `);
+      }
+
+      database.exec(`
+        DROP TABLE IF EXISTS platform_sku_manual_bindings;
+        DROP TABLE IF EXISTS sales_link_sku_combo_group_components;
+        DROP TABLE IF EXISTS sales_link_sku_combo_groups;
+      `);
+      const foreignKeyViolations = database.pragma("foreign_key_check");
+      if (foreignKeyViolations.length > 0) {
+        throw new Error(`链接中心Phase 2退役后外键检查失败：${JSON.stringify(foreignKeyViolations.slice(0, 10))}`);
+      }
+    })();
+  } finally {
+    if (foreignKeysEnabled) database.pragma("foreign_keys = ON");
+  }
+
+  console.log("[db:migrate] retired Link Center Phase 2 legacy relation fields and empty models");
+  return {
+    changed: true,
+    rebuiltTables: Number(needsSkuRebuild) + Number(needsMappingRebuild),
+    retiredTables: legacyTables.length,
+  };
+}
+
+function canonicalizeRetiredRawUrl(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    url.hash = "";
+    for (const key of [...url.searchParams.keys()]) {
+      if (/^(?:spm|scm|utm_|share|source|track)/i.test(key)) url.searchParams.delete(key);
+    }
+    return url.toString();
+  } catch {
+    return raw;
+  }
+}
+
+export function retireLinkCenterLegacyStructuresPhase3() {
+  const database = getDatabase();
+  const objectExists = (name, type = null) => Boolean(database.prepare(`SELECT 1 FROM sqlite_master
+    WHERE name=? ${type ? "AND type=?" : ""}`).get(...(type ? [name, type] : [name])));
+  const columnsFor = (table) => objectExists(table, "table")
+    ? new Set(database.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name))
+    : new Set();
+  const count = (table) => objectExists(table, "table")
+    ? Number(database.prepare(`SELECT COUNT(*) count FROM ${table}`).get()?.count || 0)
+    : 0;
+  const linkColumns = columnsFor("sales_links");
+  const skuColumns = columnsFor("sales_link_skus");
+  const needsLinks = linkColumns.has("lastSeenBatchId") || linkColumns.has("rawUrl");
+  const needsSkus = skuColumns.has("lastSeenBatchId");
+  const emptyOnlyTables = ["connection_sku_inventory_facts", "platform_link_shop_mappings",
+    "platform_link_shop_mapping_import_batches", "platform_link_shop_mapping_import_rows",
+    "connection_health_records", "connection_improvements"];
+  const populated = Object.fromEntries(emptyOnlyTables.filter((table) => objectExists(table, "table") && count(table) > 0)
+    .map((table) => [table, count(table)]));
+  if (Object.keys(populated).length) throw new Error(`链接中心Phase 3退役中止：应为空的旧结构仍有数据 ${JSON.stringify(populated)}`);
+
+  if (linkColumns.has("rawUrl")) {
+    const update = database.prepare("UPDATE sales_links SET canonicalUrl=? WHERE id=?");
+    for (const row of database.prepare(`SELECT id,rawUrl FROM sales_links
+      WHERE (canonicalUrl IS NULL OR trim(canonicalUrl)='') AND rawUrl IS NOT NULL AND trim(rawUrl)<>''`).all()) {
+      update.run(canonicalizeRetiredRawUrl(row.rawUrl), row.id);
+    }
+  }
+
+  const foreignKeysEnabled = Number(database.pragma("foreign_keys", { simple: true })) === 1;
+  if (foreignKeysEnabled) database.pragma("foreign_keys = OFF");
+  try {
+    database.transaction(() => {
+      database.exec(`
+        DROP VIEW IF EXISTS connection_profiles;
+        DROP TRIGGER IF EXISTS legacy_connection_profiles_read_only_insert;
+        DROP TRIGGER IF EXISTS legacy_connection_profiles_read_only_update;
+        DROP TRIGGER IF EXISTS legacy_connection_profiles_read_only_delete;
+      `);
+      for (const index of database.prepare(`SELECT name FROM sqlite_master
+        WHERE type='index' AND tbl_name='legacy_connection_profiles' AND name NOT LIKE 'sqlite_autoindex_%'`).all()) {
+        database.exec(`DROP INDEX IF EXISTS "${String(index.name).replaceAll('"', '""')}"`);
+      }
+      if (objectExists("connection_diagnosis_entries", "table")) {
+        if (objectExists("legacy_connection_diagnosis_entries", "table")) throw new Error("旧诊断归档表已存在，无法安全合并。");
+        database.exec("ALTER TABLE connection_diagnosis_entries RENAME TO legacy_connection_diagnosis_entries");
+      }
+      for (const table of emptyOnlyTables) database.exec(`DROP TABLE IF EXISTS ${table}`);
+
+      if (needsLinks) database.exec(`
+        DROP TABLE IF EXISTS sales_links_phase3_clean;
+        CREATE TABLE sales_links_phase3_clean (
+          id TEXT PRIMARY KEY,shopId TEXT NOT NULL,platformGoodsId TEXT,platformGoodsCode TEXT,title TEXT,canonicalUrl TEXT,
+          status TEXT,activityStatus TEXT,category TEXT,displayName TEXT,ownerId TEXT,managementStatus TEXT NOT NULL DEFAULT 'active',
+          managementNotes TEXT,mainImage TEXT,imageSource TEXT,managementLevel TEXT NOT NULL DEFAULT 'new',
+          managementOriginSource TEXT NOT NULL DEFAULT 'asset_native',managementOriginImportBatchId TEXT,managementIdentifiedAt TEXT,
+          managementCreatedBy TEXT,identityStrength TEXT NOT NULL,originSource TEXT NOT NULL DEFAULT 'legacy_unknown',
+          enrichmentStatus TEXT NOT NULL DEFAULT 'complete',lastModifiedAt TEXT,currentState TEXT NOT NULL DEFAULT 'active',
+          missingAt TEXT,lastImportedAt TEXT,createdAt TEXT,updatedAt TEXT,
+          FOREIGN KEY(shopId) REFERENCES sales_shops(id),FOREIGN KEY(ownerId) REFERENCES persons(id),
+          FOREIGN KEY(managementOriginImportBatchId) REFERENCES connection_import_batches(id),
+          FOREIGN KEY(managementCreatedBy) REFERENCES persons(id)
+        );
+        INSERT INTO sales_links_phase3_clean (
+          id,shopId,platformGoodsId,platformGoodsCode,title,canonicalUrl,status,activityStatus,category,displayName,ownerId,
+          managementStatus,managementNotes,mainImage,imageSource,managementLevel,managementOriginSource,
+          managementOriginImportBatchId,managementIdentifiedAt,managementCreatedBy,identityStrength,originSource,enrichmentStatus,
+          lastModifiedAt,currentState,missingAt,lastImportedAt,createdAt,updatedAt
+        ) SELECT id,shopId,platformGoodsId,platformGoodsCode,title,canonicalUrl,status,activityStatus,category,displayName,ownerId,
+          managementStatus,managementNotes,mainImage,imageSource,managementLevel,managementOriginSource,
+          managementOriginImportBatchId,managementIdentifiedAt,managementCreatedBy,identityStrength,originSource,enrichmentStatus,
+          lastModifiedAt,currentState,missingAt,lastImportedAt,createdAt,updatedAt FROM sales_links;
+        DROP TABLE sales_links;
+        ALTER TABLE sales_links_phase3_clean RENAME TO sales_links;
+        CREATE UNIQUE INDEX idx_sales_links_goods_identity ON sales_links(shopId,platformGoodsId)
+          WHERE platformGoodsId IS NOT NULL AND platformGoodsId<>'';
+        CREATE UNIQUE INDEX idx_sales_links_url_identity ON sales_links(shopId,canonicalUrl)
+          WHERE (platformGoodsId IS NULL OR platformGoodsId='') AND canonicalUrl IS NOT NULL AND canonicalUrl<>'';
+        CREATE INDEX idx_sales_links_current_state ON sales_links(currentState);
+        CREATE INDEX idx_sales_links_owner_management_status ON sales_links(ownerId,managementStatus);
+      `);
+      if (needsSkus) database.exec(`
+        DROP TABLE IF EXISTS sales_link_skus_phase3_clean;
+        CREATE TABLE sales_link_skus_phase3_clean (
+          id TEXT PRIMARY KEY,salesLinkId TEXT NOT NULL,platformSkuId TEXT,platformSkuCode TEXT,normalizedPlatformSkuCode TEXT,
+          specificationName TEXT,normalizedSpecificationName TEXT,price REAL,platformStock REAL,occupiedStock REAL,
+          systemGoodsType TEXT,syncEnabled INTEGER NOT NULL DEFAULT 0,lastSyncedStock REAL,lastSyncedAt TEXT,stopSyncReason TEXT,
+          matchStatus TEXT NOT NULL,matchMethod TEXT,matchReason TEXT,currentState TEXT NOT NULL DEFAULT 'active',missingAt TEXT,
+          createdAt TEXT,updatedAt TEXT,FOREIGN KEY(salesLinkId) REFERENCES sales_links(id)
+        );
+        INSERT INTO sales_link_skus_phase3_clean SELECT id,salesLinkId,platformSkuId,platformSkuCode,normalizedPlatformSkuCode,
+          specificationName,normalizedSpecificationName,price,platformStock,occupiedStock,systemGoodsType,syncEnabled,
+          lastSyncedStock,lastSyncedAt,stopSyncReason,matchStatus,matchMethod,matchReason,currentState,missingAt,createdAt,updatedAt
+          FROM sales_link_skus;
+        DROP TABLE sales_link_skus;
+        ALTER TABLE sales_link_skus_phase3_clean RENAME TO sales_link_skus;
+        CREATE UNIQUE INDEX idx_sales_link_skus_platform_id ON sales_link_skus(salesLinkId,platformSkuId)
+          WHERE platformSkuId IS NOT NULL AND platformSkuId<>'';
+        CREATE UNIQUE INDEX idx_sales_link_skus_fallback ON sales_link_skus(salesLinkId,normalizedPlatformSkuCode,normalizedSpecificationName)
+          WHERE platformSkuId IS NULL OR platformSkuId='';
+        CREATE INDEX idx_sales_link_skus_current_state ON sales_link_skus(currentState);
+        CREATE INDEX idx_sales_link_skus_link_state ON sales_link_skus(salesLinkId,currentState);
+      `);
+    })();
+  } finally {
+    if (foreignKeysEnabled) database.pragma("foreign_keys = ON");
+  }
+  const violations = database.pragma("foreign_key_check");
+  if (violations.length) throw new Error(`链接中心Phase 3退役后外键检查失败：${JSON.stringify(violations.slice(0, 10))}`);
+  console.log("[db:migrate] retired Link Center Phase 3 legacy fields and runtime models");
+  return { changed: needsLinks || needsSkus, rebuiltTables: Number(needsLinks) + Number(needsSkus), retiredTables: emptyOnlyTables.length,
+    archivedTables: objectExists("legacy_connection_diagnosis_entries", "table") ? 1 : 0 };
+}
+
+function createLegacyArchiveReadOnlyTriggers(database, tableName) {
+  const safeTable = String(tableName).replace(/[^a-zA-Z0-9_]/g, "");
+  if (!safeTable) throw new Error("Legacy归档表名无效");
+  database.exec(`
+    CREATE TRIGGER IF NOT EXISTS trg_${safeTable}_archive_insert
+      BEFORE INSERT ON ${safeTable} BEGIN SELECT RAISE(ABORT,'legacy archive is read only'); END;
+    CREATE TRIGGER IF NOT EXISTS trg_${safeTable}_archive_update
+      BEFORE UPDATE ON ${safeTable} BEGIN SELECT RAISE(ABORT,'legacy archive is read only'); END;
+    CREATE TRIGGER IF NOT EXISTS trg_${safeTable}_archive_delete
+      BEFORE DELETE ON ${safeTable} BEGIN SELECT RAISE(ABORT,'legacy archive is read only'); END;
+  `);
+}
+
+export function archiveLinkCenterLegacyStructuresPhase4() {
+  const database = getDatabase();
+  const objectExists = (name, type = null) => Boolean(database.prepare(`SELECT 1 FROM sqlite_master
+    WHERE name=? ${type ? "AND type=?" : ""}`).get(...(type ? [name, type] : [name])));
+  const columnsFor = (table) => objectExists(table, "table")
+    ? new Set(database.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name))
+    : new Set();
+  const rowCount = (table) => objectExists(table, "table")
+    ? Number(database.prepare(`SELECT COUNT(*) count FROM ${table}`).get()?.count || 0)
+    : 0;
+  const oldStructuresExist = objectExists("sales_link_sku_product_structures", "table");
+  const oldComponentsExist = objectExists("sales_link_sku_product_structure_components", "table");
+  const oldFactsExist = objectExists("connection_sku_sales_facts", "table");
+  const archivedStructuresExist = objectExists("legacy_link_product_structures", "table");
+  const archivedComponentsExist = objectExists("legacy_link_product_structure_components", "table");
+  const archivedFactsExist = objectExists("legacy_connection_sku_sales_facts", "table");
+  if (oldStructuresExist !== oldComponentsExist) throw new Error("链接中心Phase 4归档中止：旧Structure主表与组件表不完整。");
+  if (oldStructuresExist && (archivedStructuresExist || archivedComponentsExist)) {
+    throw new Error("链接中心Phase 4归档中止：运行表与归档表同时存在，需人工核对。");
+  }
+  if (oldFactsExist && archivedFactsExist) throw new Error("链接中心Phase 4归档中止：旧周期事实运行表与归档表同时存在。");
+
+  const mappingColumns = columnsFor("sales_link_sku_erp_mappings");
+  const mappingsExist = objectExists("sales_link_sku_erp_mappings", "table");
+  const needsMappingRebuild = mappingsExist
+    && (mappingColumns.has("productStructureId") || !mappingColumns.has("salesObjectStructureId"));
+  const before = {
+    oldStructures: rowCount(oldStructuresExist ? "sales_link_sku_product_structures" : "legacy_link_product_structures"),
+    oldComponents: rowCount(oldComponentsExist ? "sales_link_sku_product_structure_components" : "legacy_link_product_structure_components"),
+    oldFacts: rowCount(oldFactsExist ? "connection_sku_sales_facts" : "legacy_connection_sku_sales_facts"),
+    mappings: rowCount("sales_link_sku_erp_mappings"),
+  };
+  const changed = oldStructuresExist || oldFactsExist || needsMappingRebuild;
+  const foreignKeysEnabled = Number(database.pragma("foreign_keys", { simple: true })) === 1;
+  if (foreignKeysEnabled) database.pragma("foreign_keys = OFF");
+  try {
+    database.transaction(() => {
+      if (oldStructuresExist || archivedStructuresExist || needsMappingRebuild) database.exec(`
+        CREATE TABLE IF NOT EXISTS legacy_link_product_structure_sales_object_map (
+          legacyStructureId TEXT PRIMARY KEY,
+          salesLinkSkuId TEXT NOT NULL,
+          salesObjectRelationId TEXT NOT NULL,
+          salesObjectId TEXT NOT NULL,
+          salesObjectStructureId TEXT NOT NULL,
+          salesObjectStructureVersion INTEGER NOT NULL,
+          archivedAt TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_legacy_structure_map_link_sku
+          ON legacy_link_product_structure_sales_object_map(salesLinkSkuId);
+      `);
+      if (oldStructuresExist) {
+        database.exec(`
+          INSERT OR IGNORE INTO legacy_link_product_structure_sales_object_map (
+            legacyStructureId,salesLinkSkuId,salesObjectRelationId,salesObjectId,
+            salesObjectStructureId,salesObjectStructureVersion,archivedAt
+          )
+          SELECT legacy.id,legacy.salesLinkSkuId,relation.id,relation.salesObjectId,
+            structure.id,structure.version,datetime('now')
+          FROM sales_link_sku_product_structures legacy
+          JOIN sales_link_sku_sales_object_relations relation
+            ON relation.linkSkuId=legacy.salesLinkSkuId AND relation.status='active'
+          JOIN sales_object_structures structure
+            ON structure.salesObjectId=relation.salesObjectId AND structure.status='active';
+        `);
+        const mapped = rowCount("legacy_link_product_structure_sales_object_map");
+        if (mapped !== before.oldStructures) {
+          throw new Error(`链接中心Phase 4归档中止：旧Structure对照不完整 ${mapped}/${before.oldStructures}`);
+        }
+      }
+
+      if (needsMappingRebuild) {
+        const unresolvedMappings = mappingColumns.has("productStructureId")
+          ? Number(database.prepare(`SELECT COUNT(*) count FROM sales_link_sku_erp_mappings mapping
+              LEFT JOIN legacy_link_product_structure_sales_object_map archived
+                ON archived.legacyStructureId=mapping.productStructureId
+              LEFT JOIN sales_link_sku_sales_object_relations relation
+                ON relation.linkSkuId=mapping.salesLinkSkuId AND relation.status='active'
+              LEFT JOIN sales_object_structures structure
+                ON structure.salesObjectId=relation.salesObjectId AND structure.status='active'
+              WHERE COALESCE(archived.salesObjectStructureId,structure.id) IS NULL`).get()?.count || 0)
+          : 0;
+        if (unresolvedMappings) throw new Error(`链接中心Phase 4归档中止：${unresolvedMappings}条Mapping无法迁移到Sales Object Structure。`);
+        const structureExpression = mappingColumns.has("productStructureId")
+          ? `COALESCE((SELECT archived.salesObjectStructureId FROM legacy_link_product_structure_sales_object_map archived
+                WHERE archived.legacyStructureId=sales_link_sku_erp_mappings.productStructureId),
+              (SELECT structure.id FROM sales_link_sku_sales_object_relations relation
+                JOIN sales_object_structures structure ON structure.salesObjectId=relation.salesObjectId AND structure.status='active'
+                WHERE relation.linkSkuId=sales_link_sku_erp_mappings.salesLinkSkuId AND relation.status='active'
+                ORDER BY structure.version DESC,structure.id DESC LIMIT 1))`
+          : "salesObjectStructureId";
+        database.exec(`
+          DROP TABLE IF EXISTS sales_link_sku_erp_mappings_phase4_clean;
+          CREATE TABLE sales_link_sku_erp_mappings_phase4_clean (
+            id TEXT PRIMARY KEY,
+            salesLinkSkuId TEXT NOT NULL,
+            erpSkuId TEXT NOT NULL,
+            mappingType TEXT NOT NULL DEFAULT 'single',
+            quantity REAL NOT NULL DEFAULT 1,
+            currentState TEXT NOT NULL DEFAULT 'active',
+            sourceType TEXT NOT NULL DEFAULT 'legacy_migration',
+            sourceBatchId TEXT,
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL,
+            invalidatedAt TEXT,
+            salesObjectStructureId TEXT NOT NULL,
+            FOREIGN KEY(salesLinkSkuId) REFERENCES sales_link_skus(id),
+            FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),
+            FOREIGN KEY(salesObjectStructureId) REFERENCES sales_object_structures(id),
+            UNIQUE(salesLinkSkuId,erpSkuId),
+            CHECK(mappingType IN ('single','combo')),
+            CHECK(quantity > 0),
+            CHECK(currentState IN ('active','inactive'))
+          );
+          INSERT INTO sales_link_sku_erp_mappings_phase4_clean (
+            id,salesLinkSkuId,erpSkuId,mappingType,quantity,currentState,sourceType,
+            sourceBatchId,createdAt,updatedAt,invalidatedAt,salesObjectStructureId
+          ) SELECT id,salesLinkSkuId,erpSkuId,mappingType,quantity,currentState,sourceType,
+            sourceBatchId,createdAt,updatedAt,invalidatedAt,${structureExpression}
+          FROM sales_link_sku_erp_mappings;
+          DROP TABLE sales_link_sku_erp_mappings;
+          ALTER TABLE sales_link_sku_erp_mappings_phase4_clean RENAME TO sales_link_sku_erp_mappings;
+          CREATE INDEX idx_sales_link_sku_erp_mapping_link_state
+            ON sales_link_sku_erp_mappings(salesLinkSkuId,currentState);
+          CREATE INDEX idx_sales_link_sku_erp_mapping_erp_state
+            ON sales_link_sku_erp_mappings(erpSkuId,currentState);
+          CREATE INDEX idx_sales_link_sku_erp_mapping_batch
+            ON sales_link_sku_erp_mappings(sourceBatchId);
+          CREATE INDEX idx_sales_link_sku_erp_mapping_sales_object_structure
+            ON sales_link_sku_erp_mappings(salesObjectStructureId);
+        `);
+      }
+
+      if (oldStructuresExist) {
+        database.exec(`
+          DROP TRIGGER IF EXISTS trg_product_structure_activation_insert;
+          DROP TRIGGER IF EXISTS trg_product_structure_activation_update;
+          DROP INDEX IF EXISTS idx_sales_link_sku_product_structures_one_active;
+          DROP INDEX IF EXISTS idx_sales_link_sku_product_structures_batch_sku_hash;
+          DROP INDEX IF EXISTS idx_sales_link_sku_product_structures_status_updated;
+          DROP INDEX IF EXISTS idx_sales_link_sku_product_structure_components_order;
+          DROP INDEX IF EXISTS idx_sales_link_sku_product_structure_components_erp;
+          ALTER TABLE sales_link_sku_product_structures RENAME TO legacy_link_product_structures;
+          ALTER TABLE sales_link_sku_product_structure_components RENAME TO legacy_link_product_structure_components;
+        `);
+      }
+      if (oldFactsExist) {
+        database.exec(`
+          DROP INDEX IF EXISTS idx_connection_sku_sales_link_period;
+          DROP INDEX IF EXISTS idx_connection_sku_sales_erp_period;
+          DROP INDEX IF EXISTS idx_connection_sku_sales_v2_identity;
+          DROP INDEX IF EXISTS idx_connection_sku_sales_legacy_identity;
+          ALTER TABLE connection_sku_sales_facts RENAME TO legacy_connection_sku_sales_facts;
+        `);
+      }
+      for (const table of [
+        "legacy_link_product_structures",
+        "legacy_link_product_structure_components",
+        "legacy_link_product_structure_sales_object_map",
+        "legacy_connection_sku_sales_facts",
+        "legacy_connection_profiles",
+        "legacy_connection_diagnosis_entries",
+      ]) {
+        if (objectExists(table, "table")) createLegacyArchiveReadOnlyTriggers(database, table);
+      }
+    })();
+  } finally {
+    if (foreignKeysEnabled) database.pragma("foreign_keys = ON");
+  }
+  const after = {
+    oldStructures: rowCount("legacy_link_product_structures"),
+    oldComponents: rowCount("legacy_link_product_structure_components"),
+    oldFacts: rowCount("legacy_connection_sku_sales_facts"),
+    mappings: rowCount("sales_link_sku_erp_mappings"),
+  };
+  if (JSON.stringify(after) !== JSON.stringify(before)) {
+    throw new Error(`链接中心Phase 4归档数量不一致：${JSON.stringify({ before, after })}`);
+  }
+  const violations = database.pragma("foreign_key_check");
+  if (violations.length) throw new Error(`链接中心Phase 4归档后外键检查失败：${JSON.stringify(violations.slice(0, 10))}`);
+  if (changed) console.log("[db:migrate] archived Link Center Phase 4 legacy structures and period facts");
+  return { changed, archivedTables: Number(oldStructuresExist) * 2 + Number(oldFactsExist), before, after };
+}
+
 function runLightweightMigrations() {
   getDatabase().exec(`
     CREATE TABLE IF NOT EXISTS task_waves (
@@ -2990,14 +3136,11 @@ function runLightweightMigrations() {
   ensureColumn("sales_links", "missingAt", "TEXT");
   ensureColumn("sales_link_skus", "currentState", "TEXT NOT NULL DEFAULT 'active'");
   ensureColumn("sales_link_skus", "missingAt", "TEXT");
-  ensureColumn("sales_link_skus", "erpSkuId", "TEXT");
-  getDatabase().exec("CREATE INDEX IF NOT EXISTS idx_sales_link_skus_erp_sku ON sales_link_skus(erpSkuId)");
   ensureColumn("erp_skus", "mainImage", "TEXT");
   ensureColumn("erp_skus", "galleryImages", "TEXT");
   ensureColumn("erp_skus", "sourceUpdatedAt", "TEXT");
   ensureColumn("erp_skus", "rawSourceData", "TEXT NOT NULL DEFAULT '{}'");
   migrateProductErpMappingsV2();
-  migrateConnectionSkuSalesFactsV2();
   migrateConnectionSkuSalesDailyFactsV1();
   migrateSalesRelationCandidatesV1();
   migrateSalesObjectsV1();
@@ -3007,61 +3150,6 @@ function runLightweightMigrations() {
   retireCustomerAndSupplyChainV1();
   retireAiOperationAssistantV1();
   retireStoredModulePermissionsV1();
-  getDatabase().exec(`
-    CREATE TABLE IF NOT EXISTS platform_link_shop_mappings (
-      id TEXT PRIMARY KEY,
-      platform TEXT NOT NULL,
-      platformGoodsId TEXT NOT NULL,
-      shopId TEXT NOT NULL,
-      currentState TEXT NOT NULL DEFAULT 'active',
-      sourceType TEXT NOT NULL DEFAULT 'excel_import',
-      sourceBatchId TEXT,
-      createdBy TEXT,
-      createdAt TEXT NOT NULL,
-      updatedAt TEXT NOT NULL,
-      invalidatedAt TEXT,
-      FOREIGN KEY(shopId) REFERENCES sales_shops(id),
-      UNIQUE(platform,platformGoodsId),
-      CHECK(currentState IN ('active','inactive'))
-    );
-    CREATE INDEX IF NOT EXISTS idx_platform_link_shop_mappings_shop
-      ON platform_link_shop_mappings(shopId,currentState);
-    CREATE TABLE IF NOT EXISTS platform_link_shop_mapping_import_batches (
-      id TEXT PRIMARY KEY,
-      fileName TEXT NOT NULL,
-      fileHash TEXT NOT NULL UNIQUE,
-      sheetName TEXT,
-      status TEXT NOT NULL,
-      totalRows INTEGER NOT NULL DEFAULT 0,
-      validRows INTEGER NOT NULL DEFAULT 0,
-      existingRows INTEGER NOT NULL DEFAULT 0,
-      errorRows INTEGER NOT NULL DEFAULT 0,
-      summaryJson TEXT NOT NULL DEFAULT '{}',
-      createdBy TEXT,
-      createdAt TEXT NOT NULL,
-      updatedAt TEXT NOT NULL,
-      committedAt TEXT
-    );
-    CREATE TABLE IF NOT EXISTS platform_link_shop_mapping_import_rows (
-      id TEXT PRIMARY KEY,
-      batchId TEXT NOT NULL,
-      rowNumber INTEGER NOT NULL,
-      platform TEXT,
-      platformGoodsId TEXT,
-      systemShopText TEXT,
-      shopId TEXT,
-      status TEXT NOT NULL,
-      errorType TEXT,
-      message TEXT,
-      rawDataJson TEXT NOT NULL DEFAULT '{}',
-      createdAt TEXT NOT NULL,
-      FOREIGN KEY(batchId) REFERENCES platform_link_shop_mapping_import_batches(id) ON DELETE CASCADE,
-      FOREIGN KEY(shopId) REFERENCES sales_shops(id),
-      UNIQUE(batchId,rowNumber)
-    );
-    CREATE INDEX IF NOT EXISTS idx_platform_link_shop_mapping_rows_status
-      ON platform_link_shop_mapping_import_rows(batchId,status);
-  `);
   ensureColumn("wangdian_goods_sync_logs", "importBatchId", "TEXT");
   ensureColumn("wangdian_goods_sync_logs", "successCount", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn("wangdian_goods_sync_logs", "failedCount", "INTEGER NOT NULL DEFAULT 0");
@@ -3314,12 +3402,10 @@ function runLightweightMigrations() {
       ON product_erp_mappings(currentState,sourceBatchId);
     CREATE INDEX IF NOT EXISTS idx_product_erp_mappings_inventory_seen
       ON product_erp_mappings(inventoryCurrentState,lastSeenInventoryBatchId);
-    CREATE INDEX IF NOT EXISTS idx_sales_links_current_seen
-      ON sales_links(currentState,lastSeenBatchId);
-    CREATE INDEX IF NOT EXISTS idx_sales_link_skus_current_seen
-      ON sales_link_skus(currentState,lastSeenBatchId);
-    CREATE INDEX IF NOT EXISTS idx_sales_link_skus_product_current
-      ON sales_link_skus(productId,currentState,matchStatus);
+    CREATE INDEX IF NOT EXISTS idx_sales_links_current_state
+      ON sales_links(currentState);
+    CREATE INDEX IF NOT EXISTS idx_sales_link_skus_current_state
+      ON sales_link_skus(currentState);
   `);
   ensureColumn("product_erp_daily_snapshots", "unitCost", "REAL");
   ensureColumn("task_waves", "unitDurationMinutes", "INTEGER");
@@ -3460,6 +3546,9 @@ function runLightweightMigrations() {
   `);
   backfillExplicitTemplateCenterPermissions();
   ensureStandardWorkValueChainCategories();
+  retireLinkCenterLegacyRelationsPhase2();
+  retireLinkCenterLegacyStructuresPhase3();
+  archiveLinkCenterLegacyStructuresPhase4();
 }
 
 const legacyTemplateCenterDepartmentIds = new Set([

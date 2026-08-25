@@ -1259,7 +1259,6 @@ CREATE TABLE IF NOT EXISTS sales_links (
   platformGoodsCode TEXT,
   title TEXT,
   canonicalUrl TEXT,
-  rawUrl TEXT,
   status TEXT,
   activityStatus TEXT,
   category TEXT,
@@ -1278,7 +1277,6 @@ CREATE TABLE IF NOT EXISTS sales_links (
   originSource TEXT NOT NULL DEFAULT 'legacy_unknown',
   enrichmentStatus TEXT NOT NULL DEFAULT 'complete',
   lastModifiedAt TEXT,
-  lastSeenBatchId TEXT,
   currentState TEXT NOT NULL DEFAULT 'active',
   missingAt TEXT,
   lastImportedAt TEXT,
@@ -1298,8 +1296,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_links_url_identity
 CREATE TABLE IF NOT EXISTS sales_link_skus (
   id TEXT PRIMARY KEY,
   salesLinkId TEXT NOT NULL,
-  productId TEXT,
-  erpSkuId TEXT,
   platformSkuId TEXT,
   platformSkuCode TEXT,
   normalizedPlatformSkuCode TEXT,
@@ -1316,14 +1312,11 @@ CREATE TABLE IF NOT EXISTS sales_link_skus (
   matchStatus TEXT NOT NULL,
   matchMethod TEXT,
   matchReason TEXT,
-  lastSeenBatchId TEXT,
   currentState TEXT NOT NULL DEFAULT 'active',
   missingAt TEXT,
   createdAt TEXT,
   updatedAt TEXT,
-  FOREIGN KEY(salesLinkId) REFERENCES sales_links(id),
-  FOREIGN KEY(productId) REFERENCES products(id),
-  FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id)
+  FOREIGN KEY(salesLinkId) REFERENCES sales_links(id)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_link_skus_platform_id
@@ -1331,62 +1324,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_link_skus_platform_id
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_link_skus_fallback
   ON sales_link_skus(salesLinkId, normalizedPlatformSkuCode, normalizedSpecificationName)
   WHERE platformSkuId IS NULL OR platformSkuId = '';
-
-CREATE TABLE IF NOT EXISTS platform_link_shop_mappings (
-  id TEXT PRIMARY KEY,
-  platform TEXT NOT NULL,
-  platformGoodsId TEXT NOT NULL,
-  shopId TEXT NOT NULL,
-  currentState TEXT NOT NULL DEFAULT 'active',
-  sourceType TEXT NOT NULL DEFAULT 'excel_import',
-  sourceBatchId TEXT,
-  createdBy TEXT,
-  createdAt TEXT NOT NULL,
-  updatedAt TEXT NOT NULL,
-  invalidatedAt TEXT,
-  FOREIGN KEY(shopId) REFERENCES sales_shops(id),
-  UNIQUE(platform,platformGoodsId),
-  CHECK(currentState IN ('active','inactive'))
-);
-CREATE INDEX IF NOT EXISTS idx_platform_link_shop_mappings_shop
-  ON platform_link_shop_mappings(shopId,currentState);
-
-CREATE TABLE IF NOT EXISTS platform_link_shop_mapping_import_batches (
-  id TEXT PRIMARY KEY,
-  fileName TEXT NOT NULL,
-  fileHash TEXT NOT NULL UNIQUE,
-  sheetName TEXT,
-  status TEXT NOT NULL,
-  totalRows INTEGER NOT NULL DEFAULT 0,
-  validRows INTEGER NOT NULL DEFAULT 0,
-  existingRows INTEGER NOT NULL DEFAULT 0,
-  errorRows INTEGER NOT NULL DEFAULT 0,
-  summaryJson TEXT NOT NULL DEFAULT '{}',
-  createdBy TEXT,
-  createdAt TEXT NOT NULL,
-  updatedAt TEXT NOT NULL,
-  committedAt TEXT
-);
-
-CREATE TABLE IF NOT EXISTS platform_link_shop_mapping_import_rows (
-  id TEXT PRIMARY KEY,
-  batchId TEXT NOT NULL,
-  rowNumber INTEGER NOT NULL,
-  platform TEXT,
-  platformGoodsId TEXT,
-  systemShopText TEXT,
-  shopId TEXT,
-  status TEXT NOT NULL,
-  errorType TEXT,
-  message TEXT,
-  rawDataJson TEXT NOT NULL DEFAULT '{}',
-  createdAt TEXT NOT NULL,
-  FOREIGN KEY(batchId) REFERENCES platform_link_shop_mapping_import_batches(id) ON DELETE CASCADE,
-  FOREIGN KEY(shopId) REFERENCES sales_shops(id),
-  UNIQUE(batchId,rowNumber)
-);
-CREATE INDEX IF NOT EXISTS idx_platform_link_shop_mapping_rows_status
-  ON platform_link_shop_mapping_import_rows(batchId,status);
 
 CREATE TABLE IF NOT EXISTS wangdian_shop_mappings (
   id TEXT PRIMARY KEY,
@@ -1579,14 +1516,6 @@ CREATE TABLE IF NOT EXISTS erp_sku_inventory_daily_summaries (
 CREATE INDEX IF NOT EXISTS idx_erp_sku_inventory_summary_date ON erp_sku_inventory_daily_summaries(businessDate,erpSkuId);
 CREATE INDEX IF NOT EXISTS idx_erp_sku_inventory_summary_sku_date ON erp_sku_inventory_daily_summaries(erpSkuId,businessDate DESC,updatedAt DESC);
 CREATE INDEX IF NOT EXISTS idx_sales_link_skus_link_state ON sales_link_skus(salesLinkId,currentState);
-
-CREATE VIEW IF NOT EXISTS connection_profiles AS
-SELECT id,id AS salesLinkId,COALESCE(NULLIF(displayName,''),NULLIF(title,''),platformGoodsId) AS name,
-       mainImage,imageSource,ownerId,managementStatus AS status,managementLevel AS level,
-       managementNotes AS notes,managementOriginSource AS originSource,
-       managementOriginImportBatchId AS originImportBatchId,managementIdentifiedAt AS identifiedAt,
-       managementCreatedBy AS createdBy,createdAt,updatedAt
-FROM sales_links;
 
 CREATE TABLE IF NOT EXISTS connection_business_profiles (
   id TEXT PRIMARY KEY,
@@ -2124,7 +2053,6 @@ CREATE TABLE IF NOT EXISTS product_structure_application_batches (
 CREATE TABLE IF NOT EXISTS product_structure_application_items (
   id TEXT PRIMARY KEY,
   applicationBatchId TEXT NOT NULL,
-  productStructureId TEXT,
   salesObjectStructureId TEXT,
   structureVersion INTEGER,
   salesLinkSkuId TEXT NOT NULL,
@@ -2159,7 +2087,6 @@ CREATE INDEX IF NOT EXISTS idx_product_structure_application_items_sku
 CREATE TABLE IF NOT EXISTS product_structure_application_audits (
   id TEXT PRIMARY KEY,
   applicationItemId TEXT NOT NULL,
-  productStructureId TEXT,
   salesObjectStructureId TEXT,
   structureVersion INTEGER,
   executionMode TEXT NOT NULL,
@@ -2207,26 +2134,6 @@ CREATE TABLE IF NOT EXISTS sales_daily_anomaly_governance_decisions (
 CREATE INDEX IF NOT EXISTS idx_sales_daily_anomaly_governance_queue
   ON sales_daily_anomaly_governance_decisions(sourceBatchId,anomalyType,status,updatedAt DESC);
 
-CREATE TABLE IF NOT EXISTS connection_sku_inventory_facts (
-  id TEXT PRIMARY KEY,
-  batchId TEXT NOT NULL,
-  salesLinkSkuId TEXT NOT NULL,
-  skuCode TEXT NOT NULL,
-  businessDate TEXT NOT NULL,
-  currentStock REAL,
-  availableStock REAL,
-  unitCost REAL,
-  salesVelocity REAL,
-  rawDataJson TEXT NOT NULL DEFAULT '{}',
-  createdAt TEXT NOT NULL,
-  FOREIGN KEY(batchId) REFERENCES connection_import_batches(id),
-  FOREIGN KEY(salesLinkSkuId) REFERENCES sales_link_skus(id),
-  UNIQUE(salesLinkSkuId,businessDate)
-);
-
-CREATE INDEX IF NOT EXISTS idx_connection_sku_inventory_sku_date
-  ON connection_sku_inventory_facts(salesLinkSkuId,businessDate DESC);
-
 CREATE TABLE IF NOT EXISTS connection_period_snapshots (
   id TEXT PRIMARY KEY,
   connectionId TEXT,
@@ -2265,69 +2172,6 @@ CREATE INDEX IF NOT EXISTS idx_connection_period_snapshots_connection_period
 
 CREATE INDEX IF NOT EXISTS idx_connection_period_snapshots_sales_link_period
   ON connection_period_snapshots(salesLinkId, periodEnd DESC, periodStart DESC);
-
-CREATE TABLE IF NOT EXISTS connection_health_records (
-  id TEXT PRIMARY KEY,
-  connectionId TEXT NOT NULL,
-  snapshotId TEXT NOT NULL,
-  healthScore REAL NOT NULL,
-  healthStatus TEXT NOT NULL,
-  problemsJson TEXT NOT NULL DEFAULT '[]',
-  suggestionsJson TEXT NOT NULL DEFAULT '[]',
-  createdAt TEXT NOT NULL,
-  updatedAt TEXT NOT NULL,
-  FOREIGN KEY(connectionId) REFERENCES sales_links(id),
-  FOREIGN KEY(snapshotId) REFERENCES connection_period_snapshots(id),
-  UNIQUE(connectionId, snapshotId)
-);
-
-CREATE INDEX IF NOT EXISTS idx_connection_health_records_status_created
-  ON connection_health_records(healthStatus, createdAt DESC);
-
-CREATE INDEX IF NOT EXISTS idx_connection_health_records_connection_created
-  ON connection_health_records(connectionId, createdAt DESC);
-
-CREATE TABLE IF NOT EXISTS connection_diagnosis_entries (
-  id TEXT PRIMARY KEY,
-  connectionId TEXT NOT NULL,
-  initiatedBy TEXT,
-  joinedAt TEXT NOT NULL,
-  anomalyReasonsJson TEXT NOT NULL DEFAULT '[]',
-  notes TEXT,
-  status TEXT NOT NULL DEFAULT 'active',
-  createdAt TEXT NOT NULL,
-  updatedAt TEXT NOT NULL,
-  FOREIGN KEY(connectionId) REFERENCES sales_links(id) ON DELETE CASCADE,
-  FOREIGN KEY(initiatedBy) REFERENCES persons(id),
-  CHECK(status IN ('active','closed'))
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_diagnosis_entries_active
-  ON connection_diagnosis_entries(connectionId) WHERE status='active';
-
-CREATE INDEX IF NOT EXISTS idx_connection_diagnosis_entries_joined
-  ON connection_diagnosis_entries(status, joinedAt DESC);
-
-CREATE TABLE IF NOT EXISTS connection_improvements (
-  id TEXT PRIMARY KEY,
-  connectionId TEXT NOT NULL,
-  healthRecordId TEXT NOT NULL,
-  actionId TEXT NOT NULL,
-  title TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'planned',
-  beforeMetricsJson TEXT NOT NULL DEFAULT '{}',
-  afterMetricsJson TEXT NOT NULL DEFAULT '{}',
-  resultSummary TEXT,
-  createdAt TEXT NOT NULL,
-  updatedAt TEXT NOT NULL,
-  FOREIGN KEY(connectionId) REFERENCES sales_links(id),
-  FOREIGN KEY(healthRecordId) REFERENCES connection_health_records(id),
-  FOREIGN KEY(actionId) REFERENCES process_instances(id),
-  UNIQUE(healthRecordId, actionId)
-);
-
-CREATE INDEX IF NOT EXISTS idx_connection_improvements_connection_status
-  ON connection_improvements(connectionId, status, updatedAt DESC);
 
 CREATE TABLE IF NOT EXISTS finance_import_batches (
   id TEXT PRIMARY KEY,

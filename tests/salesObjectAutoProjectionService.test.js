@@ -21,7 +21,8 @@ function fixture() {
     CREATE TABLE sales_object_structure_components(id TEXT PRIMARY KEY,structureId TEXT,salesObjectId TEXT,erpSkuId TEXT,quantity REAL,sortOrder INTEGER,status TEXT,sourceType TEXT,sourceReferenceJson TEXT,createdAt TEXT,updatedAt TEXT);
     CREATE TABLE sales_object_structure_effective_periods(id TEXT PRIMARY KEY,structureId TEXT,salesObjectId TEXT,validFrom TEXT,validTo TEXT,sourceState TEXT,validityBasis TEXT,sourceUpdatedAt TEXT,firstVerifiedAt TEXT,lastVerifiedAt TEXT,syncedAt TEXT,sourceReferenceJson TEXT,createdAt TEXT,updatedAt TEXT,FOREIGN KEY(structureId,salesObjectId) REFERENCES sales_object_structures(id,salesObjectId));
     CREATE UNIQUE INDEX one_open ON sales_object_structure_effective_periods(salesObjectId) WHERE validTo IS NULL AND sourceState='active';
-    CREATE TABLE sales_link_skus(id TEXT PRIMARY KEY,lastSeenBatchId TEXT,normalizedPlatformSkuCode TEXT,platformSkuCode TEXT);
+    CREATE TABLE sales_link_skus(id TEXT PRIMARY KEY,normalizedPlatformSkuCode TEXT,platformSkuCode TEXT);
+    CREATE TABLE platform_goods_excel_import_rows(id INTEGER PRIMARY KEY AUTOINCREMENT,batchId TEXT,salesLinkSkuId TEXT);
     CREATE TABLE sales_link_sku_sales_object_relations(id TEXT PRIMARY KEY,linkSkuId TEXT,salesObjectId TEXT,effectiveFrom TEXT,effectiveTo TEXT,status TEXT,sourceType TEXT,sourceBatchId TEXT,sourceReferenceJson TEXT,reviewedBy TEXT,reviewedAt TEXT,createdAt TEXT,updatedAt TEXT);
     CREATE UNIQUE INDEX one_relation ON sales_link_sku_sales_object_relations(linkSkuId) WHERE status='active';
     CREATE TABLE operating_erp_identity_observations(normalizedCode TEXT PRIMARY KEY,merchantSkuCode TEXT,inOperatingObjectSet INTEGER,resolvedIdentityType TEXT,identityStatus TEXT,goodsErpSkuId TEXT,suiteSalesObjectId TEXT,sourceMode TEXT,sourceCheckedAt TEXT,sourceUpdatedAt TEXT,detailJson TEXT);
@@ -48,7 +49,11 @@ function addCandidate(db, { code = "SINGLE", type = "single", status = "confirme
   if (erpSkuId) db.prepare("INSERT OR IGNORE INTO erp_skus VALUES (?,?,'active')").run(erpSkuId, code);
   db.prepare("INSERT INTO operating_erp_identity_observations VALUES (?,?,1,?,?,?,NULL,'materialized','2026-08-20','2026-08-20','{}')").run(normalizedCode, code, type, status, type === "single" ? erpSkuId : null);
   db.prepare("INSERT INTO operating_erp_identity_shadow_comparisons VALUES (?,NULL,?,?,?)").run(normalizedCode, type === "bundle" ? "complete" : "not_applicable", productMappingStatus, status === "confirmed" ? "v3_fill" : status);
-  for (let index = 0; index < linkCount; index += 1) db.prepare("INSERT INTO sales_link_skus VALUES (?,'batch',?,?)").run(`${normalizedCode}-link-${index}`, normalizedCode, code);
+  for (let index = 0; index < linkCount; index += 1) {
+    const linkSkuId = `${normalizedCode}-link-${index}`;
+    db.prepare("INSERT INTO sales_link_skus VALUES (?,?,?)").run(linkSkuId, normalizedCode, code);
+    db.prepare("INSERT INTO platform_goods_excel_import_rows(batchId,salesLinkSkuId) VALUES('batch',?)").run(linkSkuId);
+  }
 }
 
 function addExistingProjection(db, { code = "BUNDLE", type = "bundle", componentId = "erp-part", quantity = 2, sourceType = type === "bundle" ? "wangdian_suite_api" : "wangdian_goods_api" } = {}) {

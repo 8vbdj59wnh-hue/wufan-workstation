@@ -54,7 +54,8 @@ function loadTemplates(database) {
 }
 
 function loadProfile(database, connectionId) {
-  const profile = database.prepare("SELECT id,salesLinkId,name,ownerId,status FROM connection_profiles WHERE id=?").get(connectionId);
+  const profile = database.prepare(`SELECT id,id salesLinkId,COALESCE(NULLIF(displayName,''),NULLIF(title,''),platformGoodsId) name,
+    ownerId,managementStatus status FROM sales_links WHERE id=?`).get(connectionId);
   if (!profile) {
     const error = new Error("Link资产不存在。");
     error.statusCode = 404;

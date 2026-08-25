@@ -25,7 +25,7 @@ test("平台货品资产同步先生成Diff，确认后只同步资产和关系�
     const reviewer = database.prepare("SELECT id FROM persons WHERE status='active' ORDER BY id LIMIT 1").get();
     database.prepare("INSERT INTO sales_shops(id,platform,shopName,normalizedShopName,displayName,status,createdAt,updatedAt) VALUES('shop-existing','淘宝','平台资产测试旧店20260820','平台资产测试旧店20260820','平台资产测试旧店20260820','active',?,?)").run(stamp, stamp);
     database.prepare("INSERT INTO sales_links(id,shopId,platformGoodsId,title,identityStrength,currentState,originSource,enrichmentStatus,createdAt,updatedAt) VALUES('link-existing','shop-existing','goods-existing','旧标题','strong','active','platform_goods_excel','complete',?,?)").run(stamp, stamp);
-    database.prepare("INSERT INTO sales_links(id,shopId,platformGoodsId,title,identityStrength,currentState,originSource,enrichmentStatus,lastSeenBatchId,createdAt,updatedAt) VALUES('link-absent','shop-existing','goods-absent','本次文件未出现的历史资产','strong','active','platform_goods_excel','complete','older-platform-batch',?,?)").run(stamp, stamp);
+    database.prepare("INSERT INTO sales_links(id,shopId,platformGoodsId,title,identityStrength,currentState,originSource,enrichmentStatus,createdAt,updatedAt) VALUES('link-absent','shop-existing','goods-absent','本次文件未出现的历史资产','strong','active','platform_goods_excel','complete',?,?)").run(stamp, stamp);
     database.prepare("INSERT INTO sales_link_skus(id,salesLinkId,platformSkuId,platformSkuCode,specificationName,matchStatus,currentState,createdAt,updatedAt) VALUES('sku-existing','link-existing','sku-existing','ERP-1','旧规格','erp_linked','active',?,?)").run(stamp, stamp);
     database.prepare("INSERT INTO erp_import_batches(id,importType,originalFilename,fileHash,status,createdAt) VALUES('erp-batch-assets','goods_info','erp.xlsx','erp-assets','completed',?)").run(stamp);
     database.prepare("INSERT INTO erp_goods(id,goodsCode,goodsName,rawSourceData,currentState,createdAt,updatedAt) VALUES('erp-goods-assets','ERP-GOODS','ERP商品','{}','active',?,?)").run(stamp, stamp);
@@ -84,8 +84,8 @@ test("平台货品资产同步先生成Diff，确认后只同步资产和关系�
     assert.deepEqual(database.prepare("SELECT platform,shopName FROM sales_shops WHERE shopName='平台资产测试新店20260820'").get(), { platform: "小红书", shopName: "平台资产测试新店20260820" });
     assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_links").get().total, before.links + 4);
     assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_link_skus").get().total, before.skus + 4);
-    assert.deepEqual(database.prepare("SELECT currentState,lastSeenBatchId FROM sales_links WHERE id='link-absent'").get(),
-      { currentState: "active", lastSeenBatchId: "older-platform-batch" }, "文件未出现的Link必须保持active且不得被改写资产批次");
+    assert.deepEqual(database.prepare("SELECT currentState FROM sales_links WHERE id='link-absent'").get(),
+      { currentState: "active" }, "文件未出现的Link必须保持active，批次成员关系不得决定资产状态");
     assert.equal(database.prepare("SELECT COUNT(*) total FROM connection_sku_sales_daily_facts").get().total, before.dailyFacts);
     assert.equal(database.prepare("SELECT COUNT(*) total FROM sales_object_structures").get().total, before.structures);
 
@@ -134,8 +134,10 @@ test("平台货品资产同步先生成Diff，确认后只同步资产和关系�
     const singleShopCommit = commitPlatformGoodsExcelDataSync(singleShopPreview.dataSyncBatch.id);
     assert.equal(singleShopCommit.dataSyncBatch.status, "partial");
     assert.equal(singleShopCommit.operatingSet.platformBatch.id, reanalyzed.dataSyncBatch.id, "单店文件不能替换完整平台批次");
-    assert.equal(database.prepare("SELECT lastSeenBatchId FROM sales_links WHERE id='link-existing'").get().lastSeenBatchId, reanalyzed.dataSyncBatch.id,
-      "单店文件不能把当前经营Link移出完整批次基线");
+    assert.equal(database.prepare("SELECT COUNT(*) total FROM platform_goods_excel_import_rows WHERE batchId=? AND salesLinkId='link-existing'").get(reanalyzed.dataSyncBatch.id).total, 1,
+      "完整平台批次应通过导入成员关系保留Link覆盖证据");
+    assert.equal(database.prepare("SELECT currentState FROM sales_links WHERE id='link-existing'").get().currentState, "active",
+      "单店文件不能把当前经营Link移出有效资产范围");
     assert.equal(database.pragma("integrity_check", { simple: true }), "ok");
     assert.equal(database.pragma("foreign_key_check").length, 0);
   } finally {

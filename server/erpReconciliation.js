@@ -87,11 +87,8 @@ export function reconcileErpSyncRun(syncRunId, { failAfterStage = "" } = {}) {
         // Link转为missing必须由明确的业务生命周期动作触发。
         result.links.missing = 0;
         result.links.missingPolicy = "explicit_business_action_only";
-        result.platformSkus.missing = database.prepare(`
-          UPDATE sales_link_skus
-          SET currentState='missing',missingAt=COALESCE(missingAt,@now),updatedAt=@now
-          WHERE COALESCE(lastSeenBatchId,'')<>@batchId AND currentState='active'
-        `).run({ batchId: run.platformGoodsBatchId, now }).changes;
+        result.platformSkus.missing = 0;
+        result.platformSkus.missingPolicy = "explicit_business_action_only";
         if (failAfterStage === "relations") throw new Error("测试注入：销售关系对账后回滚");
       }
 

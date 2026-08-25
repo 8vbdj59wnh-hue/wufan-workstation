@@ -152,7 +152,7 @@ function linkNeedsUpdate(link, row) {
   const canonicalUrl = canonicalizeSalesUrl(row.rawUrl);
   return [
     [row.platformGoodsCode, link.platformGoodsCode], [row.title, link.title],
-    [canonicalUrl, link.canonicalUrl], [row.rawUrl, link.rawUrl], [row.status, link.status],
+    [canonicalUrl, link.canonicalUrl], [row.status, link.status],
     [row.activityStatus, link.activityStatus], [row.category, link.category],
     [row.sourceModifiedAt, link.lastModifiedAt],
   ].some(([source, current]) => text(source) && !sameValue(source, current));
@@ -620,19 +620,19 @@ export function commitPlatformGoodsExcelDataSync(batchId) {
         id: row.salesLinkId, shopId: row.shopId, platformGoodsId: row.platformGoodsId,
         platformGoodsCode: text(source["平台货品编号"]) || null,
         title: text(source["货品名称"]) || null,
-        canonicalUrl: canonicalizeSalesUrl(rawUrl) || null, rawUrl: rawUrl || null,
+        canonicalUrl: canonicalizeSalesUrl(rawUrl) || null,
         status: text(source["状态"]) || null, activityStatus: text(source["活动状态"]) || null,
         category: text(source["平台类目"]) || null, lastModifiedAt: text(source["最后修改时间"]) || null,
-        lastSeenBatchId: batchId, lastImportedAt: committedAt, createdAt: committedAt, updatedAt: committedAt,
+        lastImportedAt: committedAt, createdAt: committedAt, updatedAt: committedAt,
       };
       db.prepare(`INSERT INTO sales_links
-        (id,shopId,platformGoodsId,platformGoodsCode,title,canonicalUrl,rawUrl,status,activityStatus,category,identityStrength,lastModifiedAt,lastSeenBatchId,lastImportedAt,createdAt,updatedAt,currentState,missingAt,originSource,enrichmentStatus)
-        VALUES (@id,@shopId,@platformGoodsId,@platformGoodsCode,@title,@canonicalUrl,@rawUrl,@status,@activityStatus,@category,'strong',@lastModifiedAt,@lastSeenBatchId,@lastImportedAt,@createdAt,@updatedAt,'active',NULL,'platform_goods_excel','complete')
+        (id,shopId,platformGoodsId,platformGoodsCode,title,canonicalUrl,status,activityStatus,category,identityStrength,lastModifiedAt,lastImportedAt,createdAt,updatedAt,currentState,missingAt,originSource,enrichmentStatus)
+        VALUES (@id,@shopId,@platformGoodsId,@platformGoodsCode,@title,@canonicalUrl,@status,@activityStatus,@category,'strong',@lastModifiedAt,@lastImportedAt,@createdAt,@updatedAt,'active',NULL,'platform_goods_excel','complete')
         ON CONFLICT(id) DO UPDATE SET
           platformGoodsCode=COALESCE(excluded.platformGoodsCode,sales_links.platformGoodsCode),
-          title=COALESCE(excluded.title,sales_links.title),canonicalUrl=COALESCE(excluded.canonicalUrl,sales_links.canonicalUrl),rawUrl=COALESCE(excluded.rawUrl,sales_links.rawUrl),
+          title=COALESCE(excluded.title,sales_links.title),canonicalUrl=COALESCE(excluded.canonicalUrl,sales_links.canonicalUrl),
           status=COALESCE(excluded.status,sales_links.status),activityStatus=COALESCE(excluded.activityStatus,sales_links.activityStatus),category=COALESCE(excluded.category,sales_links.category),
-          identityStrength='strong',lastModifiedAt=COALESCE(excluded.lastModifiedAt,sales_links.lastModifiedAt),lastSeenBatchId=CASE WHEN ${isCompleteSnapshot ? 1 : 0}=1 THEN excluded.lastSeenBatchId ELSE sales_links.lastSeenBatchId END,
+          identityStrength='strong',lastModifiedAt=COALESCE(excluded.lastModifiedAt,sales_links.lastModifiedAt),
           lastImportedAt=excluded.lastImportedAt,updatedAt=excluded.updatedAt,currentState='active',missingAt=NULL,
           originSource=CASE WHEN sales_links.originSource IS NULL OR sales_links.originSource='' OR sales_links.originSource='legacy_unknown' THEN excluded.originSource ELSE sales_links.originSource END,
           enrichmentStatus='complete'`).run(values);
@@ -644,8 +644,8 @@ export function commitPlatformGoodsExcelDataSync(batchId) {
       const source = raw(row);
       const relationReady = row.relationAction === "existing";
       db.prepare(`INSERT INTO sales_link_skus
-        (id,salesLinkId,platformSkuId,platformSkuCode,normalizedPlatformSkuCode,specificationName,normalizedSpecificationName,price,platformStock,occupiedStock,systemGoodsType,syncEnabled,lastSyncedStock,lastSyncedAt,stopSyncReason,matchStatus,matchMethod,matchReason,lastSeenBatchId,createdAt,updatedAt,currentState,missingAt)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active',NULL)
+        (id,salesLinkId,platformSkuId,platformSkuCode,normalizedPlatformSkuCode,specificationName,normalizedSpecificationName,price,platformStock,occupiedStock,systemGoodsType,syncEnabled,lastSyncedStock,lastSyncedAt,stopSyncReason,matchStatus,matchMethod,matchReason,createdAt,updatedAt,currentState,missingAt)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active',NULL)
         ON CONFLICT(id) DO UPDATE SET
           platformSkuCode=COALESCE(excluded.platformSkuCode,sales_link_skus.platformSkuCode),normalizedPlatformSkuCode=COALESCE(excluded.normalizedPlatformSkuCode,sales_link_skus.normalizedPlatformSkuCode),
           specificationName=COALESCE(excluded.specificationName,sales_link_skus.specificationName),normalizedSpecificationName=COALESCE(excluded.normalizedSpecificationName,sales_link_skus.normalizedSpecificationName),
@@ -655,13 +655,13 @@ export function commitPlatformGoodsExcelDataSync(batchId) {
           matchStatus=CASE WHEN sales_link_skus.matchMethod='manual' OR sales_link_skus.matchStatus='matched_manual' THEN sales_link_skus.matchStatus ELSE excluded.matchStatus END,
           matchMethod=CASE WHEN sales_link_skus.matchMethod='manual' OR sales_link_skus.matchStatus='matched_manual' THEN sales_link_skus.matchMethod ELSE excluded.matchMethod END,
           matchReason=CASE WHEN sales_link_skus.matchMethod='manual' OR sales_link_skus.matchStatus='matched_manual' THEN sales_link_skus.matchReason ELSE excluded.matchReason END,
-          lastSeenBatchId=CASE WHEN ${isCompleteSnapshot ? 1 : 0}=1 THEN excluded.lastSeenBatchId ELSE sales_link_skus.lastSeenBatchId END,updatedAt=excluded.updatedAt,currentState='active',missingAt=NULL`).run(
+          updatedAt=excluded.updatedAt,currentState='active',missingAt=NULL`).run(
         row.salesLinkSkuId, row.salesLinkId, row.platformSkuId, row.merchantSkuCode || null, lower(row.merchantSkuCode) || null,
         text(source["规格名称"]) || null, lower(source["规格名称"]) || null,
         numberValue(source["价格"]), numberValue(source["平台库存"]), numberValue(source["占用库存"]), row.systemGoodsType || null,
         text(source["是否需要同步"]) === "是" ? 1 : 0, numberValue(source["最后同步库存"]), text(source["最后同步时间"]) || null,
         text(source["停止同步原因"]) || null, relationReady ? "erp_linked" : "pending_relation", relationReady ? "sales_object" : "product_structure_application",
-        relationReady ? "Product Structure关系已存在" : row.message, batchId, committedAt, committedAt,
+        relationReady ? "Product Structure关系已存在" : row.message, committedAt, committedAt,
       );
     }
 

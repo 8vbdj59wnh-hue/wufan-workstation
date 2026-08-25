@@ -112,12 +112,15 @@ export function structureMetrics(database, relationContext) {
 
 export function linkPerformanceMetrics(database, periodStart, periodEnd, relationContext) {
   const rows = database.prepare(`
-    SELECT salesLinkId,SUM(payAmount) payAmount,SUM(visitorCount) visitorCount,
+    SELECT ps.salesLinkId,
+      (SELECT SUM(f.salesAmount) FROM connection_sku_sales_daily_facts f
+       WHERE f.salesLinkId=ps.salesLinkId AND f.saleDate BETWEEN ? AND ?) payAmount,
+      SUM(ps.visitorCount) visitorCount,
       CASE WHEN SUM(visitorCount)>0 THEN SUM(conversionRate*visitorCount)/SUM(visitorCount) ELSE NULL END conversionRate
-    FROM connection_period_snapshots
-    WHERE periodStart>=? AND periodEnd<=?
-    GROUP BY salesLinkId
-  `).all(periodStart, periodEnd);
+    FROM connection_period_snapshots ps
+    WHERE ps.periodStart>=? AND ps.periodEnd<=?
+    GROUP BY ps.salesLinkId
+  `).all(periodStart, periodEnd, periodStart, periodEnd);
   const snapshotsByLink = new Map(rows.map((row) => [row.salesLinkId, row]));
   const result = new Map();
   for (const [productId, links] of relationContext.linksByProduct) {

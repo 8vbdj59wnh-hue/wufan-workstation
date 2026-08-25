@@ -91,7 +91,7 @@ export function createConnectionPeriodSnapshots(importBatchId, input = {}) {
 }
 
 export function listConnectionPeriodSnapshots(connectionId) {
-  const profile = getDatabase().prepare("SELECT id,salesLinkId FROM connection_profiles WHERE id=?").get(text(connectionId));
+  const profile = getDatabase().prepare("SELECT id,id salesLinkId FROM sales_links WHERE id=?").get(text(connectionId));
   if (!profile) throw new Error("未找到连接档案。");
   return getDatabase().prepare(`
     SELECT id,connectionId,salesLinkId,mappingId,importBatchId,sourceType,externalId,periodStart,periodEnd,periodType,

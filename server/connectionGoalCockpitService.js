@@ -2,6 +2,7 @@ import { getDatabase } from "./db.js";
 import { CONNECTION_POSITIONING_TYPES } from "./connectionGoalFoundationService.js";
 import { buildLinkOperatingScope } from "./linkOperatingSetService.js";
 import { resolveConnectionCockpitDateWindow } from "./connectionCockpitDateRange.js";
+import { LINK_ASSET_SELECT_SQL } from "./linkAssetSql.js";
 
 const clean = (value) => String(value ?? "").trim();
 const gradeCodes = ["excellent", "good", "on_target", "underperforming"];
@@ -29,7 +30,7 @@ export function readConnectionGoalCockpitSummary(input = {}, context = {}) {
       ) WHERE evaluationRank=1
     ), scoped AS (
       SELECT c.id,bp.positioningType,gp.id goalPlanId,ge.evaluationStatus,ge.grade,ge.periodStart,ge.periodEnd
-      FROM connection_profiles c
+      FROM ${LINK_ASSET_SELECT_SQL} c
       JOIN sales_links l ON l.id=c.salesLinkId
       LEFT JOIN active_positioning bp ON bp.connectionId=c.id
       LEFT JOIN active_goals gp ON gp.connectionId=c.id
