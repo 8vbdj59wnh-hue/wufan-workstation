@@ -2407,6 +2407,29 @@ CREATE INDEX IF NOT EXISTS idx_product_insights_improvement
 CREATE INDEX IF NOT EXISTS idx_product_insights_action
   ON product_insights(relatedActionId) WHERE relatedActionId IS NOT NULL;
 
+CREATE TABLE IF NOT EXISTS product_clearance_plans (
+  id TEXT PRIMARY KEY,
+  productId TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  startDate TEXT NOT NULL,
+  targetDays INTEGER NOT NULL,
+  targetEndDate TEXT NOT NULL,
+  initialInventoryQuantity REAL,
+  targetInventoryQuantity REAL NOT NULL DEFAULT 0,
+  note TEXT,
+  createdBy TEXT,
+  completedAt TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(productId) REFERENCES products(id),
+  FOREIGN KEY(createdBy) REFERENCES persons(id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_product_clearance_plans_active
+  ON product_clearance_plans(productId) WHERE status='active';
+CREATE INDEX IF NOT EXISTS idx_product_clearance_plans_status_end
+  ON product_clearance_plans(status, targetEndDate, updatedAt DESC);
+
 CREATE TABLE IF NOT EXISTS sales_objects (
   id TEXT PRIMARY KEY,
   objectCode TEXT NOT NULL,

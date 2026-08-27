@@ -32,6 +32,9 @@ import {
   loadProductBusinessDashboard,
   loadProductSalesDistribution,
   loadProductShopSandbox,
+  loadProductClearancePlans,
+  saveProductClearancePlan,
+  updateProductClearancePlan,
   loadProductHealthAnalysis,
   loadProductBusinessDiagnosis,
   loadProductInsightCenter,
@@ -71,6 +74,7 @@ import "./uiModules/productMarketingAsset.js";
 import "./uiModules/productDailySales.js";
 import { renderProductSalesPresetButtons } from "./uiModules/productSalesDistribution.js";
 import "./uiModules/productShopSandbox.js";
+import "./productClearancePlan.css";
 
 const productStatuses = ["开发中", "上架", "成长期", "成熟期", "风险期", "淘汰", "待上架", "在售", "停售", "清仓", "已归档"];
 let filters = { query: "", brand: "", category: "", status: "", erpStatus: "", platform: "", stockStatus: "" };
@@ -112,6 +116,8 @@ let productBusinessSearchTimer = 0;
 let productBusinessRefreshPending = false;
 let productSalesDistributionState = { range: { preset: "30d" }, includeHistorical: false, items: [], summary: {}, selectedGroup: 0, loading: false, loaded: false, error: "" };
 let productShopSandboxState = { range: { preset: "30d" }, shopId: "", shops: [], selectedShop: null, items: [], summary: {}, segment: "all", sortMode: "sales", loading: false, loaded: false, error: "" };
+let productClearancePlanState = { range: "30d", periodStart: "", periodEnd: "", status: "active", center: null, loading: false, loaded: false, error: "", notice: "" };
+let productClearancePlanModalState = null;
 let productBusinessFilters = { query: "", brand: "", category: "", lifecycle: "", status: "", healthStatus: "", inventoryStatus: "", ownerId: "", includeHistorical: false, range: "30d", periodStart: "", periodEnd: "", sortBy: "updatedAt", sortDirection: "desc", page: 1, pageSize: 30 };
 let productBusinessVisibleMetrics = new Set(["sales", "structure", "inventory", "profit", "health", "diagnosis"]);
 
@@ -407,10 +413,12 @@ function renderProductWorkspaceTabs() {
     || (!isProductDetail && ["sku-management", "pending-skus", "combo-skus"].includes(productSubmodule));
   const cockpitActive = !isProductDetail && !skuManagementActive && productSubmodule === "business-cockpit";
   const sandboxActive = !isProductDetail && !skuManagementActive && productSubmodule === "product-sandbox";
+  const clearanceActive = !isProductDetail && !skuManagementActive && productSubmodule === "clearance-plans";
   return `<nav class="product-workspace-tabs" aria-label="产品中心视图">
     ${canViewProducts() ? `<button type="button" data-action="product-workspace-view" data-view="business-cockpit" class="${cockpitActive ? "is-active" : ""}">经营驾驶舱</button>
     <button type="button" data-action="product-workspace-view" data-view="product-sandbox" class="${sandboxActive ? "is-active" : ""}">产品沙盘</button>
-    <button type="button" data-action="product-workspace-view" data-view="business-dashboard" class="${!cockpitActive && !sandboxActive && !skuManagementActive ? "is-active" : ""}">产品经营</button>` : ""}
+    <button type="button" data-action="product-workspace-view" data-view="business-dashboard" class="${!cockpitActive && !sandboxActive && !clearanceActive && !skuManagementActive ? "is-active" : ""}">产品经营</button>
+    <button type="button" data-action="product-workspace-view" data-view="clearance-plans" class="${clearanceActive ? "is-active" : ""}">清仓计划</button>` : ""}
     ${canViewSkus() || canViewCombos() ? `<button type="button" data-action="product-workspace-view" data-view="sku-management" class="${skuManagementActive ? "is-active" : ""}">SKU管理</button>` : ""}
   </nav>`;
 }
@@ -500,7 +508,7 @@ function renderProductBusinessTable(readModel) {
       ${businessMetricEnabled("health") ? `<td><button type="button" class="product-health-summary-button" data-action="open-product-health" data-product-id="${escapeHtml(item.id)}"><span>${escapeHtml(item.healthAnalysis?.overall?.emoji || "⚪")}</span>${businessStatus(item.healthAnalysis?.overall?.label, item.healthAnalysis?.overall?.code, "health")}<small>查看原因</small></button></td>` : ""}
       ${businessMetricEnabled("diagnosis") ? `<td><button type="button" class="product-health-summary-button product-diagnosis-summary-button" data-action="open-product-diagnosis" data-product-id="${escapeHtml(item.id)}"><span>${escapeHtml(item.diagnosis?.status?.emoji || "⚪")}</span>${businessStatus(item.diagnosis?.status?.label, item.diagnosis?.status?.code, "diagnosis")}<small>查看诊断</small></button></td>` : ""}
       <td>${item.actions.pendingCount ? `<div class="product-business-actions"><strong>${item.actions.pendingCount}</strong><small>改善 ${item.actions.improvementCount} · 行动 ${item.actions.actionCount} · 任务 ${item.actions.taskCount}</small></div>` : `<span class="business-no-data">暂无行动</span>`}</td>
-      <td><button type="button" class="text-button" data-action="view-product" data-direct-product-detail data-product-id="${escapeHtml(item.id)}">产品档案 →</button></td>
+      <td><div class="product-business-row-actions"><button type="button" class="text-button" data-action="view-product" data-direct-product-detail data-product-id="${escapeHtml(item.id)}">产品档案 →</button>${hasPermission(getCurrentUser(), "products.edit") ? `<button type="button" class="text-button is-clearance" data-action="open-product-clearance-plan" data-product-id="${escapeHtml(item.id)}">加入清仓</button>` : ""}</div></td>
     </tr>`).join("") : `<tr><td colspan="${totalColumns}" class="empty-cell">当前筛选条件下暂无产品</td></tr>`}</tbody>
   </table></div>`;
 }
@@ -519,6 +527,7 @@ function renderProductBusinessCards(readModel) {
         <div><strong>${businessMoney(item.profit?.grossProfit)}</strong><span>毛利润</span></div>
         <div><strong>${businessValue(item.inventory?.quantity)}</strong><span>${Number(item.inventory?.quantity || 0) <= 0 ? "库存风险" : "当前库存"}</span></div>
       </div>
+      ${hasPermission(getCurrentUser(), "products.edit") ? `<div class="product-business-card-actions"><button type="button" class="secondary-button" data-action="open-product-clearance-plan" data-product-id="${escapeHtml(item.id)}">加入清仓计划</button></div>` : ""}
     </div>
   </article>`).join("")}</div>`;
 }
@@ -534,6 +543,7 @@ function renderProductBusinessDashboard() {
   const summary = readModel?.summary;
   return `<section class="product-center-page product-business-dashboard">
     ${renderProductWorkspaceTabs()}
+    ${productClearancePlanState.notice ? `<div class="form-success">${escapeHtml(productClearancePlanState.notice)}</div>` : ""}
     ${renderProductBusinessPeriodControl(readModel)}
     ${productBusinessDashboardState.error ? `<div class="form-error">${escapeHtml(productBusinessDashboardState.error)}</div>` : ""}
     ${summary ? `<section class="product-business-summary"><article><span>产品总数</span><strong>${businessValue(summary.totalProducts)}</strong><small>与产品库同源</small></article><article><span>筛选结果</span><strong>${businessValue(summary.filteredProducts)}</strong><small>当前筛选范围</small></article><article><span>直接销售额</span><strong>${businessMoney(summary.directSalesAmount)}</strong><small>仅Single直接事实</small></article><article><span>直接销量</span><strong>${businessValue(summary.directSalesQuantity)}</strong><small>Single直接销售</small></article><article><span>组合贡献销量</span><strong>${businessValue(summary.bundleContributionQuantity)}</strong><small>Bundle销量 × BOM数量</small></article><article><span>实际出货贡献</span><strong>${businessValue(summary.totalPhysicalContribution)}</strong><small>直接 + 组合贡献</small></article><article><span>库存数量</span><strong>${businessValue(summary.inventoryQuantity)}</strong><small>库存模块最新口径</small></article><article><span>风险产品</span><strong>${businessValue(summary.riskProducts)}</strong><small>健康或库存风险</small></article></section>` : ""}
@@ -560,12 +570,100 @@ function renderProductShopSandboxPage() {
   </section>`;
 }
 
+function clearancePercent(value) {
+  return value === null || value === undefined ? null : Math.round(Math.max(0, Math.min(1, Number(value))) * 100);
+}
+
+function clearanceMetricText(value) {
+  return value === null || value === undefined ? "暂无数据" : Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 2 });
+}
+
+function clearanceStatusLabel(status) {
+  return ({ active: "进行中", completed: "已完成", cancelled: "已取消" })[status] || status;
+}
+
+function renderProductClearancePeriodControl(center) {
+  const custom = productClearancePlanState.range === "custom";
+  return `<form class="product-clearance-period" data-product-clearance-period>
+    ${center?.period ? `<span>销售周期 ${escapeHtml(center.period.startDate)} 至 ${escapeHtml(center.period.endDate)}</span>` : ""}
+    ${renderProductSalesPresetButtons({ preset: productClearancePlanState.range }, "data-product-clearance-range")}
+    <div class="product-distribution-custom-range ${custom ? "" : "is-hidden"}"><label>开始日期<input type="date" name="periodStart" value="${escapeHtml(productClearancePlanState.periodStart)}" ${custom ? "required" : "disabled"}/></label><span>→</span><label>结束日期<input type="date" name="periodEnd" value="${escapeHtml(productClearancePlanState.periodEnd)}" ${custom ? "required" : "disabled"}/></label></div>
+    ${custom ? `<button type="submit" class="secondary-button">查看</button>` : ""}
+  </form>`;
+}
+
+function renderClearanceProgress(label, value, detail, tone = "inventory") {
+  const percent = clearancePercent(value);
+  return `<div class="product-clearance-progress is-${tone}"><div><span>${escapeHtml(label)}</span><strong>${percent === null ? "暂无数据" : `${percent}%`}</strong></div><span class="product-clearance-progress-track"><i style="width:${percent ?? 0}%"></i></span><small>${escapeHtml(detail)}</small></div>`;
+}
+
+function renderProductClearanceCards(center) {
+  const items = center?.items ?? [];
+  if (!items.length) return `<div class="product-card-empty">当前范围暂无清仓计划。</div>`;
+  return `<div class="product-card-grid product-clearance-card-grid">${items.map((item) => {
+    const inventoryDetail = item.currentInventoryQuantity === null
+      ? "现有库存读取不到，未推算进度"
+      : `初始 ${clearanceMetricText(item.initialInventoryQuantity)} · 当前 ${clearanceMetricText(item.currentInventoryQuantity)} · 目标 ${clearanceMetricText(item.targetInventoryQuantity)}`;
+    const timeDetail = item.overdue ? `已逾期 ${item.overdueDays} 天` : `已进行 ${item.elapsedDays} 天 · ${item.remainingDays} 天到期`;
+    return `<article class="product-clearance-card ${item.overdue ? "is-overdue" : ""}">
+      <button type="button" class="product-clearance-card-product" data-action="view-product" data-direct-product-detail data-product-id="${escapeHtml(item.productId)}">
+        <div class="product-clearance-card-media">${renderImage({ mainImage: item.mainImage, name: item.productName }, "product-card-image")}</div>
+        <div><span>${escapeHtml(item.brand || "未设置品牌")} · ${escapeHtml(item.skuCode || "—")}</span><h3>${escapeHtml(item.productName)}</h3></div>
+      </button>
+      <div class="product-clearance-card-body">
+        <div class="product-clearance-plan-meta"><span class="product-clearance-status is-${escapeHtml(item.status)}">${escapeHtml(clearanceStatusLabel(item.status))}</span><span>${escapeHtml(item.startDate)} → ${escapeHtml(item.targetEndDate)}</span></div>
+        <div class="product-clearance-sales"><div><span>周期销售额</span><strong>${businessMoney(item.sales.periodAmount)}</strong></div><div><span>周期销量</span><strong>${businessValue(item.sales.periodQuantity)}</strong></div><div><span>计划累计销量</span><strong>${businessValue(item.sales.sinceStartQuantity)}</strong></div></div>
+        ${renderClearanceProgress("库存清仓进度", item.inventoryProgress, inventoryDetail)}
+        ${renderClearanceProgress("计划时间进度", item.timeProgress, timeDetail, "time")}
+        ${item.note ? `<p class="product-clearance-note">${escapeHtml(item.note)}</p>` : ""}
+        ${hasPermission(getCurrentUser(), "products.edit") && item.status === "active" ? `<div class="product-clearance-card-actions"><button type="button" class="secondary-button" data-action="open-product-clearance-plan" data-product-id="${escapeHtml(item.productId)}" data-plan-id="${escapeHtml(item.id)}">调整计划</button><button type="button" class="primary-button" data-action="complete-product-clearance-plan" data-plan-id="${escapeHtml(item.id)}">标记完成</button></div>` : ""}
+      </div>
+    </article>`;
+  }).join("")}</div>`;
+}
+
+function renderProductClearancePage() {
+  const center = productClearancePlanState.center;
+  const summary = center?.summary;
+  return `<section class="product-center-page product-clearance-page">
+    ${renderProductWorkspaceTabs()}
+    <header class="product-clearance-heading"><div><p class="eyebrow">CLEARANCE PLAN</p><h1>清仓计划</h1><p>设置清仓周期，跟踪真实销售与库存消化进度；不会自动修改产品状态或完成计划。</p></div></header>
+    ${productClearancePlanState.notice ? `<div class="form-success">${escapeHtml(productClearancePlanState.notice)}</div>` : ""}
+    ${productClearancePlanState.error ? `<div class="form-error">${escapeHtml(productClearancePlanState.error)}</div>` : ""}
+    ${summary ? `<section class="product-clearance-daily"><header><div><h2>每日清仓总览</h2><p>销售数据日期 ${escapeHtml(center.dataDate || "暂无")}</p></div><span>只读销售与库存事实</span></header><div>
+      <article><span>进行中计划</span><strong>${businessValue(summary.activePlanCount)}</strong><small>已完成 ${businessValue(summary.completedPlanCount)}</small></article>
+      <article><span>当日清仓销量</span><strong>${businessValue(summary.dailySalesQuantity)}</strong><small>直接 + 组合贡献</small></article>
+      <article><span>当日直接销售额</span><strong>${businessMoney(summary.dailySalesAmount)}</strong><small>组合装金额不拆分</small></article>
+      <article><span>剩余库存</span><strong>${businessValue(summary.remainingInventoryQuantity)}</strong><small>库存模块最新口径</small></article>
+      <article><span>平均清仓进度</span><strong>${summary.averageInventoryProgress === null ? `<span class="business-no-data">暂无数据</span>` : `${clearancePercent(summary.averageInventoryProgress)}%`}</strong><small>按库存消化进度</small></article>
+      <article class="${summary.overduePlanCount ? "is-risk" : ""}"><span>逾期计划</span><strong>${businessValue(summary.overduePlanCount)}</strong><small>仅提示，不自动完成</small></article>
+    </div></section>` : ""}
+    <section class="product-clearance-controls"><div class="product-clearance-status-filter" aria-label="清仓计划状态">${[["active", "进行中"], ["completed", "已完成"], ["all", "全部"]].map(([value, label]) => `<button type="button" data-action="product-clearance-status" data-status="${value}" class="${productClearancePlanState.status === value ? "is-active" : ""}">${label}</button>`).join("")}</div>${renderProductClearancePeriodControl(center)}</section>
+    ${productClearancePlanState.loading && !center ? `<div class="empty-state">正在读取清仓计划与经营数据…</div>` : renderProductClearanceCards(center)}
+  </section>`;
+}
+
+function renderProductClearancePlanModal() {
+  if (!productClearancePlanModalState) return "";
+  const businessItem = (productBusinessDashboardState.readModel?.items ?? []).find((item) => item.id === productClearancePlanModalState.productId);
+  const existing = (productClearancePlanState.center?.items ?? []).find((item) => item.productId === productClearancePlanModalState.productId && item.status === "active");
+  const product = state.products.find((item) => item.id === productClearancePlanModalState.productId) || businessItem || existing;
+  const startDate = existing?.startDate || new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  return `<div class="modal-backdrop"><section class="modal-panel product-clearance-modal"><header class="modal-header"><div><h2>${existing ? "调整清仓计划" : "加入清仓计划"}</h2><p>记录计划目标，不修改产品、销售或库存事实。</p></div><button class="icon-button" type="button" data-action="close-product-clearance-plan" aria-label="关闭">×</button></header>
+    <form class="modal-body" id="product-clearance-plan-form" data-product-clearance-plan-form data-product-id="${escapeHtml(productClearancePlanModalState.productId)}">
+      ${productClearancePlanModalState.error ? `<div class="form-error">${escapeHtml(productClearancePlanModalState.error)}</div>` : ""}
+      <div class="product-clearance-modal-product">${renderImage({ mainImage: product?.mainImage || product?.image, name: product?.name || product?.productName }, "product-business-image")}<div><strong>${escapeHtml(product?.name || product?.productName || "当前产品")}</strong><small>${escapeHtml(product?.skuCode || product?.sku || "—")}</small></div></div>
+      <div class="form-grid"><label><span>计划开始日期</span><input type="date" name="startDate" value="${escapeHtml(startDate)}" required /></label><label><span>计划清仓天数</span><input type="number" name="targetDays" min="1" max="3650" value="${escapeHtml(existing?.targetDays || 30)}" required /></label><label><span>目标库存</span><input type="number" name="targetInventoryQuantity" min="0" step="0.01" value="${escapeHtml(existing?.targetInventoryQuantity ?? 0)}" required /><small>通常设为 0；进度按加入时库存计算。</small></label><label class="span-2"><span>计划说明</span><textarea name="note" rows="3" placeholder="例如：30天完成库存消化">${escapeHtml(existing?.note || "")}</textarea></label></div>
+    </form><footer class="modal-footer"><button class="secondary-button" type="button" data-action="close-product-clearance-plan">取消</button><button class="primary-button" type="submit" form="product-clearance-plan-form">保存计划</button></footer></section></div>`;
+}
+
 function renderProductList() {
   if (productSubmodule === "pending-skus") return renderPendingSkuPage();
   if (productSubmodule === "combo-skus") return comboSkuState.detail ? renderComboSkuDetail() : renderComboSkuList();
   if (productSubmodule === "sku-management") return renderProductSkuV2List();
   if (productSubmodule === "business-cockpit") return renderProductBusinessCockpit();
   if (productSubmodule === "product-sandbox") return renderProductShopSandboxPage();
+  if (productSubmodule === "clearance-plans") return renderProductClearancePage();
   return renderProductBusinessDashboard();
 }
 
@@ -1931,7 +2029,7 @@ export function renderProductCenterPage() {
     const message = productManagementState.error || "正在读取产品详情…";
     return `<section class="product-center-page product-detail-page"><button class="text-button product-detail-back" type="button" data-action="back-products">← 返回产品列表</button><div class="product-detail-empty">${escapeHtml(message)}</div></section>${renderPlatformProductLinkModal()}`;
   }
-  return `${product ? renderProductDetail(product) : renderProductList()}${renderPlatformProductLinkModal()}`;
+  return `${product ? renderProductDetail(product) : renderProductList()}${renderPlatformProductLinkModal()}${renderProductClearancePlanModal()}`;
 }
 
 async function refreshProductSkuV2List(rerender) {
@@ -2221,6 +2319,20 @@ async function refreshProductShopSandbox(rerender) {
   rerender();
 }
 
+async function refreshProductClearancePlans(rerender) {
+  if (productClearancePlanState.loading) return;
+  productClearancePlanState = { ...productClearancePlanState, loading: true, error: "" };
+  rerender();
+  try {
+    const result = await loadProductClearancePlans({ range: productClearancePlanState.range, periodStart: productClearancePlanState.periodStart,
+      periodEnd: productClearancePlanState.periodEnd, status: productClearancePlanState.status });
+    productClearancePlanState = { ...productClearancePlanState, center: result.center, loading: false, loaded: true, error: "" };
+  } catch (error) {
+    productClearancePlanState = { ...productClearancePlanState, loading: false, loaded: true, error: error.message || "清仓计划读取失败。" };
+  }
+  rerender();
+}
+
 async function refreshProductManagementDetail(productId, rerender) {
   if (!productId || productManagementState.loadingProductId === productId) return;
   productManagementState = { ...productManagementState, loadingProductId: productId, error: "" }; rerender();
@@ -2430,6 +2542,7 @@ export function bindProductCenterPageEvents(rerender) {
   if (!routeProductId && !routeErpSkuId && productSubmodule === "business-dashboard" && !productBusinessDashboardState.readModel && !productBusinessDashboardState.loading) void refreshProductBusinessDashboard(rerender);
   if (!routeProductId && !routeErpSkuId && productSubmodule === "business-cockpit" && !productSalesDistributionState.loaded && !productSalesDistributionState.loading) void refreshProductSalesDistribution(rerender);
   if (!routeProductId && !routeErpSkuId && productSubmodule === "product-sandbox" && !productShopSandboxState.loaded && !productShopSandboxState.loading) void refreshProductShopSandbox(rerender);
+  if (!routeProductId && !routeErpSkuId && productSubmodule === "clearance-plans" && !productClearancePlanState.loaded && !productClearancePlanState.loading) void refreshProductClearancePlans(rerender);
   if (routeProductId && productDetailTab === "health-analysis" && (!getProductManagementDetail(routeProductId)?.healthAnalysis || !getProductManagementDetail(routeProductId)?.improvementCenter) && productManagementState.loadingProductId !== routeProductId) void refreshProductHealthAnalysis(routeProductId, rerender);
   if (routeProductId && productDetailTab === "business-improvement" && !getProductManagementDetail(routeProductId)?.improvementCenter && productManagementState.loadingProductId !== routeProductId) void refreshProductImprovementCenter(routeProductId, rerender);
   if (routeProductId && productDetailTab === "strategy" && !getProductManagementDetail(routeProductId)?.strategy && productManagementState.loadingProductId !== routeProductId) void refreshProductStrategy(routeProductId, rerender);
@@ -2484,6 +2597,17 @@ export function bindProductCenterPageEvents(rerender) {
     productBusinessFilters = { ...productBusinessFilters, range: button.dataset.productBusinessRange || "30d", page: 1 };
     if (button.dataset.productBusinessRange === "custom") rerender();
     else void refreshProductBusinessDashboard(rerender);
+  }));
+  document.querySelector("[data-product-clearance-period]")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    productClearancePlanState = { ...productClearancePlanState, periodStart: form.elements.periodStart?.value || "", periodEnd: form.elements.periodEnd?.value || "", loaded: false };
+    void refreshProductClearancePlans(rerender);
+  });
+  document.querySelectorAll("[data-product-clearance-range]").forEach((button) => button.addEventListener("click", () => {
+    productClearancePlanState = { ...productClearancePlanState, range: button.dataset.productClearanceRange || "30d", loaded: false };
+    if (button.dataset.productClearanceRange === "custom") rerender();
+    else void refreshProductClearancePlans(rerender);
   }));
   document.querySelector("[data-product-distribution-filter]")?.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -2723,6 +2847,24 @@ export function bindProductCenterPageEvents(rerender) {
       await refreshProductInsightCenter(form.dataset.productId, rerender);
     } catch (error) { productManagementState = { ...productManagementState, error: error.message || "用户洞察更新失败。" }; rerender(); }
   }));
+  document.querySelector("[data-product-clearance-plan-form]")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    try {
+      await saveProductClearancePlan(form.dataset.productId, Object.fromEntries(new FormData(form)));
+      productClearancePlanModalState = null;
+      productClearancePlanState = { ...productClearancePlanState, loaded: false, notice: "清仓计划已保存；产品状态和经营事实未改变。", error: "" };
+      if (productSubmodule === "clearance-plans") await refreshProductClearancePlans(rerender);
+      else rerender();
+    } catch (error) {
+      productClearancePlanModalState = { ...productClearancePlanModalState, error: error.message || "清仓计划保存失败。" };
+      rerender();
+    }
+  });
+  document.querySelectorAll('[data-action="close-product-clearance-plan"]').forEach((button) => button.addEventListener("click", () => {
+    productClearancePlanModalState = null;
+    rerender();
+  }));
   const page = document.querySelector(".product-center-page");
   page?.addEventListener("keydown", (event) => {
     const card = event.target.closest(".product-archive-card");
@@ -2806,15 +2948,35 @@ export function bindProductCenterPageEvents(rerender) {
     }
     if (action === "product-workspace-view") {
       const requestedView = button.dataset.view;
-      if (["business-dashboard", "business-cockpit", "product-sandbox"].includes(requestedView) && !canViewProducts()) return;
+      if (["business-dashboard", "business-cockpit", "product-sandbox", "clearance-plans"].includes(requestedView) && !canViewProducts()) return;
       if (requestedView === "sku-management" && !canViewSkus() && !canViewCombos()) return;
-      productSubmodule = ["sku-management", "business-cockpit", "product-sandbox"].includes(button.dataset.view) ? button.dataset.view : "business-dashboard";
+      productSubmodule = ["sku-management", "business-cockpit", "product-sandbox", "clearance-plans"].includes(button.dataset.view) ? button.dataset.view : "business-dashboard";
       if (getRouteProductId() || getRouteErpSkuId()) window.location.hash = "products";
       if (productSubmodule === "business-cockpit") void refreshProductSalesDistribution(rerender);
       else if (productSubmodule === "product-sandbox") void refreshProductShopSandbox(rerender);
+      else if (productSubmodule === "clearance-plans") void refreshProductClearancePlans(rerender);
       else if (productSubmodule === "business-dashboard") void refreshProductBusinessDashboard(rerender);
       else if (!productSkuV2State.loaded && !productSkuV2State.loading) void refreshProductSkuV2List(rerender);
       else rerender();
+      return;
+    }
+    if (action === "open-product-clearance-plan") {
+      productClearancePlanModalState = { productId: button.dataset.productId, planId: button.dataset.planId || "", error: "" };
+      rerender();
+      return;
+    }
+    if (action === "complete-product-clearance-plan") {
+      if (!window.confirm("确认手工标记该清仓计划已完成？这不会修改产品状态。")) return;
+      try {
+        await updateProductClearancePlan(button.dataset.planId, { status: "completed" });
+        productClearancePlanState = { ...productClearancePlanState, loaded: false, notice: "清仓计划已标记完成，产品状态未改变。", error: "" };
+        await refreshProductClearancePlans(rerender);
+      } catch (error) { productClearancePlanState = { ...productClearancePlanState, error: error.message || "清仓计划更新失败。" }; rerender(); }
+      return;
+    }
+    if (action === "product-clearance-status") {
+      productClearancePlanState = { ...productClearancePlanState, status: button.dataset.status || "active", loaded: false };
+      void refreshProductClearancePlans(rerender);
       return;
     }
     if (action === "product-business-view") {

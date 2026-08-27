@@ -1284,6 +1284,23 @@ export async function loadProductShopSandbox(params = {}) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/shop-sandbox${query.size ? `?${query}` : ""}`), "产品沙盘读取失败。");
 }
 
+export async function loadProductClearancePlans(params = {}) {
+  const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== "" && value !== undefined && value !== null));
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/clearance-plans${query.size ? `?${query}` : ""}`), "清仓计划读取失败。");
+}
+
+export async function saveProductClearancePlan(productId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}/clearance-plan`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  }), "清仓计划保存失败。");
+}
+
+export async function updateProductClearancePlan(planId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/clearance-plans/${encodeURIComponent(planId)}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  }), "清仓计划更新失败。");
+}
+
 export async function loadProductManagementDetail(productId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}`), "产品经营详情读取失败。");
 }

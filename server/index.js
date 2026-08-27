@@ -303,6 +303,7 @@ import {
 import { getProductBusinessReadModel, getProductHealthAnalysis } from "./productBusinessReadModel.js";
 import { getProductSalesDistribution } from "./productSalesDistributionService.js";
 import { getProductShopSandbox } from "./productShopSandboxService.js";
+import { getProductClearancePlanCenter, saveProductClearancePlan, updateProductClearancePlan } from "./productClearancePlanService.js";
 import { attachProductDiagnosisSummaries, getProductBusinessDiagnosis } from "./productBusinessDiagnosisService.js";
 import { getProductInsightCenter, importProductInsights, updateProductInsight } from "./productInsightService.js";
 import {
@@ -2989,6 +2990,27 @@ app.get("/api/product-management/shop-sandbox", requirePermission("products.view
   } catch (error) {
     response.status(error.statusCode || 400).json({ success: false, message: error.message || "产品沙盘读取失败。" });
   }
+});
+
+app.get("/api/product-management/clearance-plans", requirePermission("products.view"), (request, response) => {
+  try {
+    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
+    response.json({ success: true, center: getProductClearancePlanCenter(request.query, { visibleProductIds: (scoped.products ?? []).map((product) => product.id) }) });
+  } catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "清仓计划读取失败。" }); }
+});
+
+app.post("/api/product-management/products/:id/clearance-plan", requirePermission("products.edit"), (request, response) => {
+  try { requireScopedProduct(request, request.params.id); response.status(201).json({ success: true, plan: saveProductClearancePlan(request.params.id, request.body, getUserPersonId(request.user)) }); }
+  catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "清仓计划保存失败。" }); }
+});
+
+app.put("/api/product-management/clearance-plans/:id", requirePermission("products.edit"), (request, response) => {
+  try {
+    const plan = getDatabase().prepare("SELECT productId FROM product_clearance_plans WHERE id=?").get(request.params.id);
+    if (!plan) throw new Error("清仓计划不存在。");
+    requireScopedProduct(request, plan.productId);
+    response.json({ success: true, plan: updateProductClearancePlan(request.params.id, request.body) });
+  } catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "清仓计划更新失败。" }); }
 });
 
 app.get("/api/product-management/products/:id", requirePermission("products.view"), (request, response) => {

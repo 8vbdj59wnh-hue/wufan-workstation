@@ -1,0 +1,85 @@
+.product-business-row-actions,
+.product-business-card-actions,
+.product-clearance-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.product-business-row-actions { flex-wrap: wrap; min-width: 112px; }
+.product-business-row-actions .is-clearance { color: #b54708; }
+.product-business-card-actions { justify-content: flex-end; margin-top: 4px; }
+.product-business-card-actions .secondary-button { width: 100%; color: #b54708; }
+
+.product-clearance-page { display: grid; gap: 18px; }
+.product-clearance-heading { padding: 22px 24px; border: 1px solid #f0d8b7; border-radius: 16px; background: linear-gradient(135deg, #fffaf2, #fff 60%); }
+.product-clearance-heading h1 { margin: 3px 0 5px; color: #3b2f24; }
+.product-clearance-heading p { margin: 0; color: #667085; }
+
+.product-clearance-daily { overflow: hidden; border: 1px solid #eadfce; border-radius: 16px; background: #fff; }
+.product-clearance-daily > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 18px; border-bottom: 1px solid #f0ebe3; background: #fffcf7; }
+.product-clearance-daily > header h2,
+.product-clearance-daily > header p { margin: 0; }
+.product-clearance-daily > header p,
+.product-clearance-daily > header span { color: #667085; font-size: 12px; }
+.product-clearance-daily > div { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.product-clearance-daily article { display: grid; gap: 5px; min-width: 0; padding: 16px 18px; border-right: 1px solid #f0ebe3; }
+.product-clearance-daily article:last-child { border-right: 0; }
+.product-clearance-daily article > span,
+.product-clearance-daily article small { color: #667085; font-size: 12px; }
+.product-clearance-daily article strong { color: #244c40; font-size: 23px; }
+.product-clearance-daily article.is-risk strong { color: #b42318; }
+
+.product-clearance-controls { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 12px 14px; border: 1px solid #e4e7ec; border-radius: 12px; background: #fff; }
+.product-clearance-status-filter { display: flex; gap: 4px; padding: 3px; border-radius: 10px; background: #f2f4f7; }
+.product-clearance-status-filter button { padding: 8px 13px; border: 0; border-radius: 8px; background: transparent; color: #667085; cursor: pointer; }
+.product-clearance-status-filter button.is-active { background: #fff; color: #7a4b11; box-shadow: 0 1px 3px rgba(16, 24, 40, .12); font-weight: 700; }
+.product-clearance-period { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; }
+.product-clearance-period > span { color: #667085; font-size: 12px; }
+
+.product-clearance-card-grid { grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 16px; }
+.product-clearance-card { overflow: hidden; border: 1px solid #e4e7ec; border-radius: 14px; background: #fff; box-shadow: 0 4px 14px rgba(16, 24, 40, .04); }
+.product-clearance-card.is-overdue { border-color: #fda29b; }
+.product-clearance-card-product { display: grid; grid-template-columns: 88px 1fr; align-items: center; gap: 12px; width: 100%; padding: 12px; border: 0; border-bottom: 1px solid #f0f2f4; background: #fffcf8; color: inherit; text-align: left; cursor: pointer; }
+.product-clearance-card-media { width: 88px; height: 88px; overflow: hidden; border-radius: 10px; background: #f2f4f7; }
+.product-clearance-card-product h3 { margin: 5px 0 0; font-size: 17px; }
+.product-clearance-card-product span { color: #667085; font-size: 12px; }
+.product-clearance-card-body { display: grid; gap: 14px; padding: 14px; }
+.product-clearance-plan-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #667085; font-size: 12px; }
+.product-clearance-status { padding: 4px 8px; border-radius: 999px; background: #fff4e5; color: #b54708; font-weight: 700; }
+.product-clearance-status.is-completed { background: #ecfdf3; color: #027a48; }
+.product-clearance-status.is-cancelled { background: #f2f4f7; color: #667085; }
+.product-clearance-sales { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.product-clearance-sales > div { display: grid; gap: 3px; min-width: 0; padding: 9px; border-radius: 9px; background: #f8faf9; }
+.product-clearance-sales span { color: #667085; font-size: 11px; }
+.product-clearance-sales strong { overflow: hidden; color: #244c40; font-size: 14px; text-overflow: ellipsis; }
+.product-clearance-progress { display: grid; gap: 6px; }
+.product-clearance-progress > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; }
+.product-clearance-progress > div strong { color: #b54708; }
+.product-clearance-progress.is-time > div strong { color: #175cd3; }
+.product-clearance-progress-track { display: block; height: 9px; overflow: hidden; border-radius: 999px; background: #f2f4f7; }
+.product-clearance-progress-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #f79009, #fdb022); }
+.product-clearance-progress.is-time .product-clearance-progress-track i { background: linear-gradient(90deg, #2e90fa, #84caff); }
+.product-clearance-progress small { color: #667085; font-size: 11px; }
+.product-clearance-note { margin: 0; padding: 9px 10px; border-left: 3px solid #fdb022; background: #fffaeb; color: #69410a; font-size: 12px; }
+.product-clearance-card-actions { justify-content: flex-end; padding-top: 2px; }
+
+.product-clearance-modal { width: min(620px, calc(100vw - 32px)); }
+.product-clearance-modal-product { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 10px; border-radius: 10px; background: #f8faf9; }
+.product-clearance-modal-product .product-business-image { width: 58px; height: 58px; border-radius: 8px; }
+.product-clearance-modal-product > div { display: grid; gap: 4px; }
+.product-clearance-modal-product small { color: #667085; }
+
+@media (max-width: 1100px) {
+  .product-clearance-daily > div { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .product-clearance-daily article:nth-child(3) { border-right: 0; }
+  .product-clearance-controls { align-items: stretch; flex-direction: column; }
+  .product-clearance-period { justify-content: flex-start; }
+}
+
+@media (max-width: 680px) {
+  .product-clearance-daily > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .product-clearance-daily article:nth-child(3) { border-right: 1px solid #f0ebe3; }
+  .product-clearance-daily article:nth-child(2n) { border-right: 0; }
+  .product-clearance-sales { grid-template-columns: 1fr; }
+}
