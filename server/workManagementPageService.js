@@ -60,9 +60,17 @@ export function readScheduleBoardPage(options = {}) {
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const from = `FROM work_plans wp LEFT JOIN process_instances pi ON pi.id=wp.processInstanceId`;
   const total = Number(database.prepare(`SELECT COUNT(*) count ${from} ${whereSql}`).get(params)?.count || 0);
-  const plans = database.prepare(`SELECT ${qualifiedPlanColumns} ${from} ${whereSql}
+  const pagedPlans = database.prepare(`SELECT ${qualifiedPlanColumns} ${from} ${whereSql}
     ORDER BY CASE WHEN wp.dueDate IS NULL OR wp.dueDate='' THEN 1 ELSE 0 END,wp.dueDate,wp.createdAt DESC LIMIT @pageSize OFFSET @offset`)
     .all(params).map(compactWorkPlan);
+  // The calendar is rendered from the same response as the paginated list. Keep every
+  // currently active action in that response so an old completed first page cannot
+  // leave the calendar empty while the paginator still reports historical records.
+  const activeWhere = [...where, `pi.id IS NOT NULL`, `pi.status NOT IN ('done','completed','canceled','cancelled','stopped','terminated')`];
+  const activePlans = database.prepare(`SELECT ${qualifiedPlanColumns} ${from} WHERE ${activeWhere.join(" AND ")}
+    ORDER BY CASE WHEN wp.dueDate IS NULL OR wp.dueDate='' THEN 1 ELSE 0 END,wp.dueDate,wp.createdAt DESC`)
+    .all(params).map(compactWorkPlan);
+  const plans = [...new Map([...activePlans, ...pagedPlans].map((item) => [item.id, item])).values()];
   const processIds = [...new Set(plans.map((item) => item.processInstanceId).filter(Boolean))];
   const processInstances = rowsForIds(database, "process_instances", instanceColumns, processIds, compactInstance);
   const tasks = taskRowsForProcessIds(database, processIds);
