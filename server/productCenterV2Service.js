@@ -104,6 +104,18 @@ function sortRows(rows, sort = "updated-desc") {
 }
 
 let productListMetadataCache = null;
+const productListPageCache = new Map();
+const productListPageCacheTtlMs = 10_000;
+
+function productListPageCacheKey(options) {
+  return JSON.stringify(Object.keys(options).sort().map((key) => [key, options[key]]));
+}
+
+function rememberProductListPage(key, value) {
+  productListPageCache.set(key, { value, expiresAt: Date.now() + productListPageCacheTtlMs });
+  while (productListPageCache.size > 30) productListPageCache.delete(productListPageCache.keys().next().value);
+  return value;
+}
 
 function salesObjectLinkContext(database, erpSkuIds) {
   const reverse = resolveErpSkuSalesObjectLinks({ erpSkuIds }, { database, scope: "productAssociations", salesObjectOnly: true }).results;
@@ -157,6 +169,10 @@ export function getProductCenterV2Metadata() {
 }
 
 export function listProductCenterV2Skus(options = {}) {
+  const cacheKey = productListPageCacheKey(options);
+  const cached = productListPageCache.get(cacheKey);
+  if (cached?.expiresAt > Date.now()) return cached.value;
+  if (cached) productListPageCache.delete(cacheKey);
   const database = getDatabase(); const limit = Math.min(200, Math.max(20, number(options.limit, 50))); const offset = Math.max(0, number(options.offset, 0));
   const lifecycleReady = operatingLifecycleReady(database);
   const metadata = text(options.businessZone) && options.businessZone !== "all" ? productListMetadata(database) : null; const conditions = ["s.currentState='active'"]; const params = {};
@@ -216,7 +232,7 @@ export function listProductCenterV2Skus(options = {}) {
       classificationStatus: usage.classificationStatus, confidence: usage.confidence, usageConflict: usage.usageConflict } : null }; });
   const profileCounts = database.prepare(`SELECT COUNT(*) total,SUM(p.id IS NOT NULL) profiled,SUM(p.id IS NULL) unprofiled ${from} WHERE s.currentState='active' ${lifecycleReady ? "AND om.lifecycleStatus IN ('active','active_dependency','sales_active')" : ""}`).get();
   const historical = lifecycleReady ? Number(database.prepare("SELECT COUNT(*) total FROM operating_erp_set_members WHERE erpSkuId IS NOT NULL AND lifecycleStatus IN ('archived','external_unused')").get()?.total || 0) : 0;
-  return { rows: hydrated, pagination: { total, limit, offset }, summary: { total: Number(profileCounts.total || 0), profiled: Number(profileCounts.profiled || 0), unprofiled: Number(profileCounts.unprofiled || 0), historical, lifecycleReady } };
+  return rememberProductListPage(cacheKey, { rows: hydrated, pagination: { total, limit, offset }, summary: { total: Number(profileCounts.total || 0), profiled: Number(profileCounts.profiled || 0), unprofiled: Number(profileCounts.unprofiled || 0), historical, lifecycleReady } });
 }
 
 export function getProductCenterV2SkuDetail(erpSkuId, { scope = "full" } = {}) {
@@ -262,5 +278,7 @@ export function getProductCenterV2SkuDetail(erpSkuId, { scope = "full" } = {}) {
 }
 
 export function createProductProfileForErpSku(erpSkuId) {
+  productListPageCache.clear();
+  productListMetadataCache = null;
   return createProductFromErpSku(text(erpSkuId));
 }

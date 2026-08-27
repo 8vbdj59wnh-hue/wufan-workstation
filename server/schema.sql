@@ -268,6 +268,14 @@ CREATE TABLE IF NOT EXISTS tasks (
   completedAt TEXT
 );
 
+CREATE INDEX IF NOT EXISTS idx_tasks_status_due ON tasks(status,dueDate,id);
+CREATE INDEX IF NOT EXISTS idx_tasks_executor_status_due ON tasks(executorId,status,dueDate,id);
+CREATE INDEX IF NOT EXISTS idx_tasks_department_status_due ON tasks(departmentId,status,dueDate,id);
+CREATE INDEX IF NOT EXISTS idx_tasks_process_instance ON tasks(processInstanceId,id);
+CREATE INDEX IF NOT EXISTS idx_tasks_goal ON tasks(goalId,id);
+CREATE INDEX IF NOT EXISTS idx_tasks_template_usage ON tasks(taskTemplateId,updatedAt,id);
+CREATE INDEX IF NOT EXISTS idx_tasks_process_node_usage ON tasks(processNodeId,updatedAt,id);
+
 CREATE TABLE IF NOT EXISTS execution_groups (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -446,6 +454,10 @@ CREATE TABLE IF NOT EXISTS process_instances (
   updatedAt TEXT
 );
 
+CREATE INDEX IF NOT EXISTS idx_process_instances_goal_created ON process_instances(goalId,createdAt DESC,id);
+CREATE INDEX IF NOT EXISTS idx_process_instances_task_template ON process_instances(taskTemplateId,createdAt,id);
+CREATE INDEX IF NOT EXISTS idx_process_instances_template ON process_instances(templateId,createdAt,id);
+
 CREATE TABLE IF NOT EXISTS methodologies (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
@@ -596,6 +608,8 @@ CREATE TABLE IF NOT EXISTS work_plans (
   launchedAt TEXT,
   canceledAt TEXT
 );
+
+CREATE INDEX IF NOT EXISTS idx_work_plans_process_type ON work_plans(processInstanceId,workType,id);
 
 CREATE TABLE IF NOT EXISTS products (
   id TEXT PRIMARY KEY,

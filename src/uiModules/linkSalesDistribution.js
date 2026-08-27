@@ -6,17 +6,38 @@ const percent = (value) => value == null ? "暂无数据" : `${(Number(value) * 
 const color = (groupIndex) => `hsl(${(Number(groupIndex || 1) * 47 + 190) % 360} 48% 54%)`;
 
 function renderChart(items, level) {
-  const width = Math.max(items.length, 1);
+  const chartItems = level === "all"
+    ? [...items.reduce((groups, item) => {
+        const groupIndex = Number(item.groupIndex || 1);
+        const current = groups.get(groupIndex) || {
+          groupIndex,
+          start: Number(item.rank || 0),
+          end: Number(item.rank || 0),
+          salesAmount: 0,
+          hasData: false,
+          noData: true,
+        };
+        current.end = Number(item.rank || current.end);
+        if (item.hasData) {
+          current.salesAmount += Number(item.salesAmount || 0);
+          current.hasData = true;
+          current.noData = false;
+        }
+        groups.set(groupIndex, current);
+        return groups;
+      }, new Map()).values()]
+    : items;
+  const width = Math.max(chartItems.length, 1);
   const minimumWidth = level === "all" ? Math.max(1400, Math.ceil(width * 1.4)) : Math.max(900, Math.ceil(width * 8));
-  const max = Math.max(...items.filter((item) => item.hasData).map((item) => Number(item.salesAmount || 0)), 1);
-  const bars = items.map((item, index) => {
+  const max = Math.max(...chartItems.filter((item) => item.hasData).map((item) => Number(item.salesAmount || 0)), 1);
+  const bars = chartItems.map((item, index) => {
     const height = item.noData ? 2 : Math.max(2, Number(item.salesAmount || 0) / max * 136);
     const y = 146 - height;
     const tooltipLabel = `第${item.rank}名 · ${item.linkName} · ${money(item.salesAmount)} · 占比 ${percent(item.salesPercentage)}${item.noData ? " · 暂无销售事实" : ""}`;
     if (level === "all") {
       return `<rect x="${index}" y="${y}" width=".88" height="${height}" rx=".12" fill="${item.noData ? "#d0d5dd" : color(item.groupIndex)}" opacity="${item.noData ? ".45" : ".92"}"
         data-distribution-group="${item.groupIndex}" tabindex="0" role="button"
-        aria-label="${escapeHtml(`查看第${(Number(item.groupIndex) - 1) * 100 + 1}–${Number(item.groupIndex) * 100}名分段`)}"></rect>`;
+        aria-label="${escapeHtml(`第${item.start}–${item.end}名链接销售额合计${money(item.salesAmount)}，点击查看分段`)}"></rect>`;
     }
     return `<rect x="${index}" y="${y}" width=".88" height="${height}" rx=".12" fill="${item.noData ? "#d0d5dd" : color(item.groupIndex)}" opacity="${item.noData ? ".45" : ".92"}"
       data-distribution-bar data-open-connection="${escapeHtml(item.linkId)}" data-return-section="cockpit"
@@ -25,7 +46,8 @@ function renderChart(items, level) {
       data-sales-label="${escapeHtml(money(item.salesAmount))}" data-percentage-label="${escapeHtml(percent(item.salesPercentage))}"
       tabindex="0" role="link" aria-label="${escapeHtml(`${tooltipLabel}，点击进入链接详情`)}"></rect>`;
   }).join("");
-  return `<div class="link-sales-distribution-chart" role="group" aria-label="每个细柱代表一个链接的销售额分布"><div class="distribution-y-label"><span>${money(max)}</span><span>销售额</span><span>0</span></div><div class="distribution-chart-scroll"><svg viewBox="0 0 ${width} 154" preserveAspectRatio="none" style="min-width:${minimumWidth}px">${bars}<line x1="0" y1="147" x2="${width}" y2="147" stroke="#d0d5dd" stroke-width=".5" /></svg></div></div>`;
+  const chartLabel = level === "all" ? "每个细柱代表一个100链接分段的销售额合计" : "每个细柱代表一个链接的销售额分布";
+  return `<div class="link-sales-distribution-chart" role="group" aria-label="${chartLabel}"><div class="distribution-y-label"><span>${money(max)}</span><span>销售额</span><span>0</span></div><div class="distribution-chart-scroll"><svg viewBox="0 0 ${width} 154" preserveAspectRatio="none" style="min-width:${minimumWidth}px">${bars}<line x1="0" y1="147" x2="${width}" y2="147" stroke="#d0d5dd" stroke-width=".5" /></svg></div></div>`;
 }
 
 function renderGroupButtons(items) {

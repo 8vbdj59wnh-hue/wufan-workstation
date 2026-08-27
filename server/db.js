@@ -3519,6 +3519,19 @@ function runLightweightMigrations() {
   ensureColumn("sales_links", "managementIdentifiedAt", "TEXT");
   ensureColumn("sales_links", "managementCreatedBy", "TEXT");
   db.exec("CREATE INDEX IF NOT EXISTS idx_sales_links_owner_management_status ON sales_links(ownerId,managementStatus)");
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_tasks_status_due ON tasks(status,dueDate,id);
+    CREATE INDEX IF NOT EXISTS idx_tasks_executor_status_due ON tasks(executorId,status,dueDate,id);
+    CREATE INDEX IF NOT EXISTS idx_tasks_department_status_due ON tasks(departmentId,status,dueDate,id);
+    CREATE INDEX IF NOT EXISTS idx_tasks_process_instance ON tasks(processInstanceId,id);
+    CREATE INDEX IF NOT EXISTS idx_tasks_goal ON tasks(goalId,id);
+    CREATE INDEX IF NOT EXISTS idx_tasks_template_usage ON tasks(taskTemplateId,updatedAt,id);
+    CREATE INDEX IF NOT EXISTS idx_tasks_process_node_usage ON tasks(processNodeId,updatedAt,id);
+    CREATE INDEX IF NOT EXISTS idx_process_instances_goal_created ON process_instances(goalId,createdAt DESC,id);
+    CREATE INDEX IF NOT EXISTS idx_process_instances_task_template ON process_instances(taskTemplateId,createdAt,id);
+    CREATE INDEX IF NOT EXISTS idx_process_instances_template ON process_instances(templateId,createdAt,id);
+    CREATE INDEX IF NOT EXISTS idx_work_plans_process_type ON work_plans(processInstanceId,workType,id);
+  `);
   ensureColumn("product_improvements", "improvementMeasures", "TEXT");
   ensureColumn("product_improvements", "completedAt", "TEXT");
   if (tableExists("connection_profiles")) {
@@ -3727,6 +3740,21 @@ export function readResource(resourceKey) {
     .all()
     .map((row) => decodeRow(row, config));
   return resourceKey === "people" ? items.map(resolvePersonPermissionView) : items;
+}
+
+export function readResourceItems(resourceKey, ids = []) {
+  const config = resourceConfigs[resourceKey];
+  if (config === undefined) throw new Error(`Unknown resource: ${resourceKey}`);
+  const normalizedIds = [...new Set(ids.map((id) => String(id ?? "").trim()).filter(Boolean))];
+  if (normalizedIds.length === 0) return [];
+  const columns = config.columns.join(", ");
+  const rows = getDatabase()
+    .prepare(`SELECT ${columns} FROM ${config.table} WHERE id IN (${normalizedIds.map(() => "?").join(", ")})`)
+    .all(...normalizedIds)
+    .map((row) => decodeRow(row, config));
+  const rowById = new Map(rows.map((row) => [row.id, row]));
+  const ordered = normalizedIds.map((id) => rowById.get(id)).filter(Boolean);
+  return resourceKey === "people" ? ordered.map(resolvePersonPermissionView) : ordered;
 }
 
 export function readAllData({ exclude = [] } = {}) {

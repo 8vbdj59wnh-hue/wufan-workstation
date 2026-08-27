@@ -25,12 +25,31 @@ export function getSelectablePublishingAccounts(accounts = []) {
     });
 }
 
-export function getPublishingAccountFieldOptions(accounts = []) {
-  return getSelectablePublishingAccounts(accounts).map((account) => ({
+function normalizeFallbackOptions(options = []) {
+  return options
+    .map((option) => {
+      if (option !== null && typeof option === "object") {
+        const value = String(option.value ?? option.name ?? option.label ?? "").trim();
+        return value === "" ? null : { value, label: String(option.label ?? option.name ?? value) };
+      }
+      const value = String(option ?? "").trim();
+      return value === "" ? null : { value, label: value };
+    })
+    .filter(Boolean);
+}
+
+export function getPublishingAccountFieldOptions(accounts = [], fallbackOptions = [], selectedValue = "") {
+  const managedOptions = getSelectablePublishingAccounts(accounts).map((account) => ({
     id: account.id,
     value: account.name,
     label: account.platform ? `${account.name}（${account.platform}）` : account.name,
   }));
+  const options = managedOptions.length > 0 ? managedOptions : normalizeFallbackOptions(fallbackOptions);
+  const selected = String(selectedValue ?? "").trim();
+  if (selected !== "" && !options.some((option) => option.value === selected)) {
+    options.push({ value: selected, label: selected });
+  }
+  return options;
 }
 
 export function getPublishingAccountNames(accounts = []) {

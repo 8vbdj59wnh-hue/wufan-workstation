@@ -5,6 +5,7 @@ import path from "node:path";
 import multer from "multer";
 import * as XLSX from "xlsx";
 import { shouldShowTaskInTaskCenter } from "../shared/taskCenterVisibility.js";
+import { configureApiCachePolicy } from "./apiCachePolicy.js";
 import {
   closeDatabase,
   createResource,
@@ -21,6 +22,7 @@ import {
   initializeDatabase,
   readAllData,
   readResource,
+  readResourceItems,
   readProductImportBatch,
   previewProductSkuChange,
   readRouteResource,
@@ -160,6 +162,9 @@ import {
   pickGoalCenterBootstrapResources,
   readGoalCenterBootstrap,
 } from "./goalCenterBootstrapService.js";
+import { readTemplateCenterUsageSummary } from "./templateCenterBootstrapService.js";
+import { readScheduleBoardPage, readWorkResultsInitial, selectLinkedVisualTemplates } from "./workManagementPageService.js";
+import { markAllUserNotificationsRead, readNotificationSummary } from "./notificationSummaryService.js";
 import {
   createConnectionAction,
   createConnectionDataMapping,
@@ -325,6 +330,7 @@ import {
 } from "./templateVersionService.js";
 
 const app = express();
+configureApiCachePolicy(app);
 const host = process.env.HOST ?? "0.0.0.0";
 const port = Number(process.env.PORT ?? 3001);
 const applicationVersion = (() => {
@@ -952,6 +958,7 @@ function canUsePublishingAccountOptions(user) {
     hasPermission(user, "actionStandards.manage") ||
     hasPermission(user, "keyActions.launch") ||
     hasPermission(user, "keyActions.launch") ||
+    hasPermission(user, "tasks.execute") ||
     hasPermission(user, "contentNotes.view") ||
     hasPermission(user, "contentNotes.manage") ||
     hasPermission(user, "contentNotes.manage")
@@ -1496,6 +1503,25 @@ app.put("/api/me/avatar", (request, response) => {
   }
 });
 
+app.get("/api/notifications/summary", (request, response) => {
+  try {
+    const startedAt = performance.now();
+    const summary = readNotificationSummary(request.user.id, { limit: request.query.limit });
+    response.set("Server-Timing", `database;dur=${(performance.now() - startedAt).toFixed(1)}`);
+    response.json({ success: true, ...summary });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "任务提醒摘要读取失败。" });
+  }
+});
+
+app.post("/api/notifications/read-all", (request, response) => {
+  try {
+    response.json({ success: true, ...markAllUserNotificationsRead(request.user.id) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "任务提醒批量已读失败。" });
+  }
+});
+
 app.get("/api/data", (request, response) => {
   try {
     const startedAt = performance.now();
@@ -1530,21 +1556,78 @@ app.get("/api/goal-center/bootstrap", requirePermission("goals.view"), (request,
   }
 });
 
+app.get("/api/goal-center/goals/:id/detail", requirePermission("goals.view"), (request, response) => {
+  try {
+    const startedAt = performance.now();
+    const database = getDatabase();
+    const goal = database.prepare("SELECT id,departmentId,ownerId FROM goals WHERE id=?").get(request.params.id);
+    if (!goal) { response.status(404).json({ success: false, message: "目标不存在。" }); return; }
+    const visibleGoal = filterDataByScope({ goals: [goal] }, request.user).goals ?? [];
+    if (!isAdminUser(request.user) && getDataScope(request.user) !== "all" && visibleGoal.length === 0) {
+      response.status(403).json({ success: false, message: "你没有权限查看该目标。" }); return;
+    }
+    const page = normalizeTaskListPage(request.query.page, 1);
+    const pageSize = normalizeTaskListPage(request.query.pageSize, 50, 100);
+    const instanceRows = database.prepare("SELECT id FROM process_instances WHERE goalId=? ORDER BY createdAt DESC,id DESC LIMIT ? OFFSET ?")
+      .all(goal.id, pageSize, (page - 1) * pageSize);
+    const instanceIds = instanceRows.map((row) => row.id);
+    const taskIds = database.prepare("SELECT id FROM tasks WHERE goalId=? ORDER BY COALESCE(dueDate,'9999-12-31'),id LIMIT ? OFFSET ?")
+      .all(goal.id, pageSize, (page - 1) * pageSize).map((row) => row.id);
+    const workPlanIds = database.prepare("SELECT id FROM work_plans WHERE goalId=? ORDER BY createdAt DESC,id DESC LIMIT ? OFFSET ?")
+      .all(goal.id, pageSize, (page - 1) * pageSize).map((row) => row.id);
+    const actionProductIds = instanceIds.length === 0 ? [] : database.prepare(`SELECT id FROM action_products WHERE actionId IN (${instanceIds.map(() => "?").join(",")})`).all(...instanceIds).map((row) => row.id);
+    const scoped = filterDataByScope({
+      tasks: readResourceItems("tasks", taskIds),
+      processInstances: readResourceItems("processInstances", instanceIds),
+      workPlans: readResourceItems("workPlans", workPlanIds),
+      actionProducts: readResourceItems("actionProducts", actionProductIds),
+    }, request.user);
+    const totals = {
+      tasks: Number(database.prepare("SELECT COUNT(*) count FROM tasks WHERE goalId=?").get(goal.id)?.count || 0),
+      processInstances: Number(database.prepare("SELECT COUNT(*) count FROM process_instances WHERE goalId=?").get(goal.id)?.count || 0),
+      workPlans: Number(database.prepare("SELECT COUNT(*) count FROM work_plans WHERE goalId=?").get(goal.id)?.count || 0),
+    };
+    const payload = { success: true, page, pageSize, totals, data: scoped };
+    const text = JSON.stringify(payload);
+    response.set("Server-Timing", `goal-detail;dur=${(performance.now() - startedAt).toFixed(1)}`);
+    response.type("application/json").send(text);
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "目标详情读取失败。" });
+  }
+});
+
 app.get("/api/bootstrap", (request, response) => {
   try {
+    const startedAt = performance.now();
     const moduleName = String(request.query.module ?? "dashboard");
-    const defaultCommon = ["companies", "departments", "positions", "people", "permissionTemplates", "categories", "stores", "publishingAccounts", "notifications",
+    const defaultCommon = ["companies", "departments", "positions", "people", "permissionTemplates", "categories", "stores", "publishingAccounts",
       "taskTemplates", "processTemplates", "processTemplateNodes", "templates", "templateTagCategories", "templateTags", "issuesRequirements", "standardWorkForms"];
     const taskCommon = ["companies", "departments", "positions", "people", "permissionTemplates", "categories", "stores", "publishingAccounts",
       "taskTemplates", "processTemplates", "processTemplateNodes", "standardWorkForms"];
+    const settingsCommon = ["companies", "departments", "positions", "people", "permissionTemplates", "categories", "stores", "publishingAccounts",
+      "taskTemplates", "templateTagCategories", "templateTags", "issuesRequirements", "standardWorkForms"];
+    const templateCenterCommon = ["templates", "templateTagCategories", "templateTags"];
+    const processesCommon = ["categories", "departments", "goals", "methodologies", "people", "positions", "processTemplateNodes", "processTemplates", "taskTemplates"];
+    // The action detail editor renders fields from the latest published form and
+    // resolves publishing-account selects from the managed account directory.
+    // Omitting either resource makes imported values look empty even though they
+    // are present in process_instances.customFields.
+    const scheduleBoardCommon = [
+      "categories", "departments", "people", "publishingAccounts",
+      "taskTemplates", "processTemplates", "standardWorkForms",
+    ];
+    const workResultsCommon = ["departments", "people", "positions", "goals", "taskTemplates"];
     const moduleResources = {
       dashboard: [],
-      dashboardManagement: ["goals", "tasks", "taskTemplates", "processInstances", "workPlans", "weeklyReports", "weeklyReportProblems"],
+      dashboardManagement: ["goals", "weeklyReports", "weeklyReportProblems"],
       products: [],
       connectionCenter: ["goals", "taskTemplates", "processTemplates", "processTemplateNodes"],
       tasks: ["goals"],
       "task-list": ["goals"],
-      scheduleBoard: ["goals", "tasks", "taskTemplates", "processTemplates", "processTemplateNodes", "processInstances", "workPlans", "contentSchedules", "actionProducts"],
+      scheduleBoard: ["goals"],
+      processes: [],
+      templateCenter: [],
+      settings: [],
       financeCenter: [],
       adminDataCenter: [],
     };
@@ -1554,13 +1637,100 @@ app.get("/api/bootstrap", (request, response) => {
       response.status(403).json({ success: false, message: "你没有权限访问该模块。" });
       return;
     }
-    const common = ["tasks", "task-list"].includes(moduleName) ? taskCommon : defaultCommon;
+    const common = ["tasks", "task-list"].includes(moduleName)
+      ? taskCommon
+      : moduleName === "scheduleBoard"
+        ? scheduleBoardCommon
+      : moduleName === "dashboardManagement"
+        ? workResultsCommon
+      : moduleName === "settings"
+        ? settingsCommon
+        : moduleName === "templateCenter"
+          ? templateCenterCommon
+          : moduleName === "processes"
+            ? processesCommon
+          : defaultCommon;
     const keys = [...new Set([...common, ...moduleResources[moduleName]])];
     const snapshot = Object.fromEntries(keys.map((key) => [key, readResource(key)]));
+    const readCompletedAt = performance.now();
     const scoped = filterDataByScope(snapshot, request.user);
+    const scopeCompletedAt = performance.now();
     if (moduleName === "scheduleBoard") scoped.taskProductContexts = readTaskProductContexts(scoped);
+    if (moduleName === "processes") scoped.templateCenterUsageSummary = readTemplateCenterUsageSummary();
+    response.set("Server-Timing", `database;dur=${(readCompletedAt - startedAt).toFixed(1)}, scope;dur=${(scopeCompletedAt - readCompletedAt).toFixed(1)}, extras;dur=${(performance.now() - scopeCompletedAt).toFixed(1)}`);
     response.json(scoped);
   } catch (error) { response.status(400).json({ success: false, message: error.message || "轻量启动数据读取失败。" }); }
+});
+
+app.get("/api/schedule-board/page", requirePermission("keyActions.view"), (request, response) => {
+  try {
+    const startedAt = performance.now();
+    const dataScope = getDataScope(request.user);
+    const page = readScheduleBoardPage({
+      ...request.query,
+      actorId: isAdminUser(request.user) || dataScope === "all" ? "" : getUserPersonId(request.user),
+      departmentId: request.user?.departmentId,
+      scope: dataScope,
+    });
+    const scoped = filterDataByScope(page.data, request.user);
+    // A linked visual template is part of the visible action detail. Return only
+    // those referenced assets even when the user cannot browse the template center.
+    scoped.templates = selectLinkedVisualTemplates(scoped, page.data.templates);
+    scoped.taskProductContexts = readTaskProductContexts(scoped);
+    const payload = { success: true, ...page, data: scoped };
+    const text = JSON.stringify(payload);
+    response.set("Server-Timing", `schedule-page;dur=${(performance.now() - startedAt).toFixed(1)}`);
+    response.type("application/json").send(text);
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "关键行动排期读取失败。" });
+  }
+});
+
+app.get("/api/work-results/initial", requirePermission("workResults.view"), (request, response) => {
+  try {
+    const startedAt = performance.now();
+    const result = readWorkResultsInitial({ days: request.query.days });
+    result.data = filterDataByScope(result.data, request.user);
+    const payload = { success: true, ...result };
+    const text = JSON.stringify(payload);
+    response.set("Server-Timing", `work-results;dur=${(performance.now() - startedAt).toFixed(1)}`);
+    response.type("application/json").send(text);
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "工作结果摘要读取失败。" });
+  }
+});
+
+app.get("/api/template-center/library", (request, response) => {
+  try {
+    const startedAt = performance.now();
+    const category = String(request.query.category ?? "action");
+    const categoryResources = {
+      action: ["taskTemplates", "processTemplates", "processTemplateNodes", "standardWorkForms"],
+      form: ["taskTemplates", "standardWorkForms"],
+      standard: ["taskTemplates", "processTemplates", "processTemplateNodes", "methodologies"],
+    };
+    const requiredPermission = category === "action" || category === "standard" ? "actionStandards.view" : "templates.view";
+    if (!hasPermission(request.user, requiredPermission)) {
+      response.status(403).json({ success: false, message: "你没有权限查看该模板分类。" });
+      return;
+    }
+    if (!(category in categoryResources)) {
+      response.status(400).json({ success: false, message: "未知模板分类。" });
+      return;
+    }
+    const snapshot = Object.fromEntries(categoryResources[category].map((key) => [key, readResource(key)]));
+    const readCompletedAt = performance.now();
+    const scoped = filterDataByScope(snapshot, request.user);
+    const scopeCompletedAt = performance.now();
+    scoped.templateCenterUsageSummary = readTemplateCenterUsageSummary();
+    const payload = { success: true, category, data: scoped };
+    const payloadText = JSON.stringify(payload);
+    const serializedAt = performance.now();
+    response.set("Server-Timing", `database;dur=${(readCompletedAt - startedAt).toFixed(1)}, scope;dur=${(scopeCompletedAt - readCompletedAt).toFixed(1)}, usage;dur=${(serializedAt - scopeCompletedAt).toFixed(1)}`);
+    response.type("application/json").send(payloadText);
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "模板分类读取失败。" });
+  }
 });
 
 function normalizeTaskListPage(value, fallback, maximum = Number.POSITIVE_INFINITY) {
@@ -1683,135 +1853,83 @@ app.get("/api/task-center/tasks", (request, response) => {
     const keyword = String(request.query.keyword ?? "").trim().toLowerCase();
     const filters = parseTaskListFilters(request.query.filters);
     const sort = String(request.query.sort ?? "remaining");
-    const data = {
-      tasks: readResource("tasks"),
-      processInstances: readResource("processInstances"),
-      workPlans: readResource("workPlans"),
-      processTemplateNodes: readResource("processTemplateNodes"),
-      taskTemplates: readResource("taskTemplates"),
-      goals: keyword === "" ? [] : readResource("goals"),
-      departments: keyword === "" ? [] : readResource("departments"),
-      people: keyword === "" ? [] : readResource("people"),
-    };
-    const taskTemplateById = new Map(data.taskTemplates.map((item) => [item.id, item]));
-    const processInstanceById = new Map(data.processInstances.map((item) => [item.id, item]));
-    const goalById = new Map(data.goals.map((item) => [item.id, item]));
-    const departmentById = new Map(data.departments.map((item) => [item.id, item]));
-    const personById = new Map(data.people.map((item) => [item.id, item]));
-    const improvementProcessInstanceIds = new Set(
-      data.workPlans
-        .filter((item) => item.workType === "rectification")
-        .map((item) => String(item.processInstanceId ?? "").trim())
-        .filter(Boolean),
-    );
-    const isClearanceTask = (task) => {
-      if (task.source === "clearance") return true;
-      const instance = processInstanceById.get(task.processInstanceId);
-      const templateId = task.taskTemplateId ?? task.standardWorkId
-        ?? instance?.taskTemplateId ?? instance?.standardWorkId;
-      if (taskTemplateById.get(templateId)?.name === "库存清仓") return true;
-      return [instance?.standardWorkName, instance?.taskTemplateName, instance?.displayTitle, instance?.name]
-        .filter(Boolean)
-        .some((value) => String(value).includes("库存清仓"));
-    };
+    const database = getDatabase();
     const actorId = String(request.user?.personId ?? request.user?.id ?? "");
     const today = getTaskListBusinessDate();
-    const matchedTaskId = keyword === "" ? null : data.tasks.find(
-      (task) => String(task.businessCode ?? "").trim().toLowerCase() === keyword,
-    )?.id ?? null;
-    const matchedProcessInstanceId = keyword === "" ? null : data.processInstances.find(
-      (instance) => String(instance.businessCode ?? "").trim().toLowerCase() === keyword,
-    )?.id ?? null;
-    let searchWorkPlans = null;
-    const matchedVisualTemplateIds = new Set();
-    const matchedVisualTemplateProcessInstanceIds = new Set();
-    if (keyword.startsWith("mb-")) {
-      readResource("templates").forEach((template) => {
-        if (String(template.businessCode ?? "").trim().toLowerCase().includes(keyword)) matchedVisualTemplateIds.add(template.id);
-      });
-      if (matchedVisualTemplateIds.size > 0) {
-        searchWorkPlans = readResource("workPlans");
-        const workPlanByProcessInstanceId = new Map(
-          searchWorkPlans
-            .filter((workPlan) => String(workPlan.processInstanceId ?? "").trim() !== "")
-            .map((workPlan) => [workPlan.processInstanceId, workPlan]),
-        );
-        data.processInstances.forEach((instance) => {
-          const linkedTemplateIds = new Set([
-            ...getLinkedTaskTemplateIds(instance),
-            ...getLinkedTaskTemplateIds(workPlanByProcessInstanceId.get(instance.id)),
-          ]);
-          if ([...linkedTemplateIds].some((templateId) => matchedVisualTemplateIds.has(templateId))) {
-            matchedVisualTemplateProcessInstanceIds.add(instance.id);
-          }
-        });
-      }
+    const conditions = [
+      "t.source <> 'clearance'",
+      "COALESCE(tt.name,'') <> '库存清仓'",
+      "COALESCE(pi.name,'') NOT LIKE '%库存清仓%'",
+      "COALESCE(pi.displayTitle,'') NOT LIKE '%库存清仓%'",
+    ];
+    const params = { actorId, departmentId: String(request.user?.departmentId ?? ""), today, keyword: `%${keyword}%`, keywordExact: keyword };
+    const specialSearch = keyword === "" ? "" : `(
+      lower(COALESCE(t.businessCode,''))=@keywordExact OR lower(COALESCE(pi.businessCode,''))=@keywordExact
+      OR EXISTS (SELECT 1 FROM templates svt WHERE lower(COALESCE(svt.businessCode,'')) LIKE @keyword AND (
+        EXISTS (SELECT 1 FROM json_each(COALESCE(pi.customFields,'{}'),'$.linkedTemplateIds') WHERE value=svt.id)
+        OR EXISTS (SELECT 1 FROM work_plans ssw,json_each(COALESCE(ssw.customFields,'{}'),'$.linkedTemplateIds') WHERE ssw.processInstanceId=t.processInstanceId AND value=svt.id)
+      ))
+    )`;
+    const dataScope = getDataScope(request.user);
+    if (!isAdminUser(request.user) && dataScope !== "all") {
+      const owned = "(@actorId IN (t.ownerId,t.executorId,t.accepterId,t.reviewerId,t.initiatorId,t.submittedBy) OR pn.ownerId=@actorId OR tt.ownerId=@actorId OR EXISTS (SELECT 1 FROM tasks rt WHERE rt.taskType='review' AND rt.reviewTargetTaskId=t.id AND @actorId IN (rt.executorId,rt.accepterId,rt.reviewerId)))";
+      conditions.push(dataScope === "department" ? `(t.departmentId=@departmentId OR ${owned})` : owned);
     }
-    let items = filterTasksByScope(data.tasks, request.user, data).filter((task) => !isClearanceTask(task));
-    items = items.filter((task) => {
-      if (!shouldShowTaskInTaskCenter(task, filters, improvementProcessInstanceIds)) return false;
-      const identifierMatch = (matchedTaskId !== null && task.id === matchedTaskId)
-        || (matchedProcessInstanceId !== null && task.processInstanceId === matchedProcessInstanceId);
-      const templateCodeMatch = matchedVisualTemplateProcessInstanceIds.has(task.processInstanceId);
-      const specialSearchMatch = identifierMatch || templateCodeMatch;
-      const showDone = specialSearchMatch || filters.showDone || filters.status === "done";
-      const showCanceled = specialSearchMatch || filters.showCanceled || filters.status === "canceled";
-      if (!specialSearchMatch) {
-        if (view === "mine" && task.executorId !== actorId) return false;
-        if (view === "overdue" && !isTaskListOverdue(task, today)) return false;
-        if (view === "today") {
-          const date = getTaskListDatePart(task.dueDate ?? task.startDate);
-          const terminalDate = getTaskListDatePart(task.completedAt ?? task.updatedAt);
-          if (date !== today && task.status !== "doing" && terminalDate !== today) return false;
-        }
-      }
-      if (!showDone && isTaskListDone(task)) return false;
-      if (!showCanceled && isTaskListCanceled(task)) return false;
-      if (filters.status && task.status !== filters.status) return false;
-      if (!matchesTaskListSourceFilter(task, filters.source)) return false;
-      if (filters.departmentId && task.departmentId !== filters.departmentId) return false;
-      if (filters.ownerId && task.ownerId !== filters.ownerId) return false;
-      if (filters.executorId && task.executorId !== filters.executorId) return false;
-      if (filters.overdue === "yes" && !isTaskListOverdue(task, today)) return false;
-      if (filters.overdue === "no" && isTaskListOverdue(task, today)) return false;
-      if (keyword !== "") {
-        const instance = processInstanceById.get(task.processInstanceId);
-        const template = taskTemplateById.get(task.taskTemplateId ?? instance?.taskTemplateId);
-        const goal = goalById.get(task.goalId);
-        const department = departmentById.get(task.departmentId);
-        const owner = personById.get(task.ownerId);
-        const executor = personById.get(task.executorId);
-        const haystack = [
-          task.name,
-          task.businessCode,
-          task.customFields?.actionCode,
-          instance?.businessCode,
-          instance?.displayTitle,
-          instance?.name,
-          template?.businessCode,
-          template?.name,
-          goal?.businessCode,
-          goal?.name,
-          department?.name,
-          owner?.name,
-          executor?.name,
-        ].join(" ").toLowerCase();
-        if (!templateCodeMatch && !haystack.includes(keyword)) return false;
-      }
-      return true;
-    });
-    items.sort((left, right) => {
-      if (sort === "name") return String(left.name ?? "").localeCompare(String(right.name ?? ""), "zh-Hans-CN");
-      const leftDue = String(left.dueDate ?? "9999-12-31");
-      const rightDue = String(right.dueDate ?? "9999-12-31");
-      return leftDue.localeCompare(rightDue) || String(left.id).localeCompare(String(right.id));
-    });
-    const total = items.length;
-    const pageItems = items.slice((page - 1) * pageSize, page * pageSize);
+    if (filters.showImprovementTasks !== true) conditions.push("NOT EXISTS (SELECT 1 FROM work_plans iw WHERE iw.processInstanceId=t.processInstanceId AND iw.workType='rectification')");
+    if (!(filters.showDone || filters.status === "done")) conditions.push(specialSearch ? `(${specialSearch} OR t.status NOT IN ('done','completed'))` : "t.status NOT IN ('done','completed')");
+    if (!(filters.showCanceled || filters.status === "canceled")) conditions.push(specialSearch ? `(${specialSearch} OR t.status NOT IN ('canceled','cancelled'))` : "t.status NOT IN ('canceled','cancelled')");
+    if (filters.status) { conditions.push("t.status=@status"); params.status = filters.status; }
+    if (filters.source) {
+      if (["direct", "normal", "manual"].includes(filters.source)) conditions.push("t.source <> 'process'");
+      else { conditions.push("t.source=@source"); params.source = filters.source === "process" ? "process" : filters.source; }
+    }
+    for (const field of ["departmentId", "ownerId", "executorId"]) if (filters[field]) { conditions.push(`t.${field}=@filter_${field}`); params[`filter_${field}`] = filters[field]; }
+    const dueBusinessDate = "date(COALESCE(t.dueDate,t.startDate),'+8 hours')";
+    const terminalBusinessDate = "date(COALESCE(t.completedAt,t.updatedAt),'+8 hours')";
+    const overdue = `${dueBusinessDate}<@today AND t.status NOT IN ('done','completed','canceled','cancelled')`;
+    if (view === "mine") conditions.push(specialSearch ? `(${specialSearch} OR t.executorId=@actorId)` : "t.executorId=@actorId");
+    if (view === "overdue") conditions.push(specialSearch ? `(${specialSearch} OR ${overdue})` : overdue);
+    if (view === "today") {
+      const todayCondition = `(${dueBusinessDate}=@today OR t.status='doing' OR ${terminalBusinessDate}=@today)`;
+      conditions.push(specialSearch ? `(${specialSearch} OR ${todayCondition})` : todayCondition);
+    }
+    if (filters.overdue === "yes") conditions.push(overdue);
+    if (filters.overdue === "no") conditions.push(`NOT (${overdue})`);
+    if (keyword !== "") conditions.push(`(
+      lower(COALESCE(t.name,'')) LIKE @keyword OR lower(COALESCE(t.businessCode,'')) LIKE @keyword
+      OR lower(COALESCE(json_extract(t.customFields,'$.actionCode'),'')) LIKE @keyword
+      OR lower(COALESCE(pi.businessCode,'')) LIKE @keyword OR lower(COALESCE(pi.displayTitle,'')) LIKE @keyword OR lower(COALESCE(pi.name,'')) LIKE @keyword
+      OR lower(COALESCE(tt.businessCode,'')) LIKE @keyword OR lower(COALESCE(tt.name,'')) LIKE @keyword
+      OR lower(COALESCE(g.businessCode,'')) LIKE @keyword OR lower(COALESCE(g.name,'')) LIKE @keyword
+      OR lower(COALESCE(d.name,'')) LIKE @keyword OR lower(COALESCE(po.name,'')) LIKE @keyword OR lower(COALESCE(pe.name,'')) LIKE @keyword
+      OR EXISTS (SELECT 1 FROM templates vt WHERE lower(COALESCE(vt.businessCode,'')) LIKE @keyword AND (
+        EXISTS (SELECT 1 FROM json_each(COALESCE(pi.customFields,'{}'),'$.linkedTemplateIds') WHERE value=vt.id)
+        OR EXISTS (SELECT 1 FROM work_plans sw,json_each(COALESCE(sw.customFields,'{}'),'$.linkedTemplateIds') WHERE sw.processInstanceId=t.processInstanceId AND value=vt.id)
+      ))
+    )`);
+    const fromSql = `FROM tasks t
+      LEFT JOIN process_instances pi ON pi.id=t.processInstanceId
+      LEFT JOIN task_templates tt ON tt.id=COALESCE(t.taskTemplateId,pi.taskTemplateId)
+      LEFT JOIN process_template_nodes pn ON pn.id=t.processNodeId
+      LEFT JOIN goals g ON g.id=t.goalId LEFT JOIN departments d ON d.id=t.departmentId
+      LEFT JOIN persons po ON po.id=t.ownerId LEFT JOIN persons pe ON pe.id=t.executorId`;
+    const whereSql = conditions.join(" AND ");
+    const scopeCompletedAt = performance.now();
+    const total = Number(database.prepare(`SELECT COUNT(*) total ${fromSql} WHERE ${whereSql}`).get(params)?.total || 0);
+    const countCompletedAt = performance.now();
+    const orderSql = sort === "name" ? "t.name COLLATE NOCASE,t.id" : "COALESCE(t.dueDate,'9999-12-31'),t.id";
+    const pageIds = database.prepare(`SELECT t.id ${fromSql} WHERE ${whereSql} ORDER BY ${orderSql} LIMIT @pageSize OFFSET @offset`)
+      .all({ ...params, pageSize, offset: (page - 1) * pageSize }).map((row) => row.id);
+    const pageQueryCompletedAt = performance.now();
+    const pageItems = readResourceItems("tasks", pageIds);
+    const hydrationCompletedAt = performance.now();
     const processInstanceIds = new Set(pageItems.map((item) => item.processInstanceId).filter(Boolean));
-    const workPlans = (searchWorkPlans ?? readResource("workPlans")).filter((item) => processInstanceIds.has(item.processInstanceId));
-    const processInstances = data.processInstances.filter((item) => processInstanceIds.has(item.id));
-    const actionProducts = readResource("actionProducts").filter((item) => processInstanceIds.has(item.actionId));
+    const processIds = [...processInstanceIds];
+    const processInstances = readResourceItems("processInstances", processIds);
+    const workPlanIds = processIds.length === 0 ? [] : database.prepare(`SELECT id FROM work_plans WHERE processInstanceId IN (${processIds.map(() => "?").join(",")})`).all(...processIds).map((row) => row.id);
+    const workPlans = readResourceItems("workPlans", workPlanIds);
+    const actionProductIds = processIds.length === 0 ? [] : database.prepare(`SELECT id FROM action_products WHERE actionId IN (${processIds.map(() => "?").join(",")})`).all(...processIds).map((row) => row.id);
+    const actionProducts = readResourceItems("actionProducts", actionProductIds);
     const taskProductContexts = readTaskProductContexts({
       tasks: pageItems,
       processInstances,
@@ -1819,9 +1937,8 @@ app.get("/api/task-center/tasks", (request, response) => {
       actionProducts,
     });
     const waveItems = readTaskWavesForTaskIds(pageItems.map((item) => item.id));
-    const elapsed = performance.now() - startedAt;
-    response.set("Server-Timing", `task-list;dur=${elapsed.toFixed(1)}`);
-    response.json({
+    const contextCompletedAt = performance.now();
+    const payload = {
       success: true,
       page,
       pageSize,
@@ -1829,7 +1946,18 @@ app.get("/api/task-center/tasks", (request, response) => {
       totalPages: Math.max(1, Math.ceil(total / pageSize)),
       items: pageItems.map(createTaskListSummary),
       context: { processInstances, workPlans, taskProductContexts, taskWaves: waveItems },
-    });
+    };
+    const payloadText = JSON.stringify(payload);
+    const serializationCompletedAt = performance.now();
+    response.set("Server-Timing", [
+      `scope;dur=${(scopeCompletedAt - startedAt).toFixed(1)}`,
+      `count;dur=${(countCompletedAt - scopeCompletedAt).toFixed(1)}`,
+      `query;dur=${(pageQueryCompletedAt - countCompletedAt).toFixed(1)}`,
+      `hydrate;dur=${(hydrationCompletedAt - pageQueryCompletedAt).toFixed(1)}`,
+      `context;dur=${(contextCompletedAt - hydrationCompletedAt).toFixed(1)}`,
+      `serialize;dur=${(serializationCompletedAt - contextCompletedAt).toFixed(1)}`,
+    ].join(", "));
+    response.type("application/json").send(payloadText);
   } catch (error) {
     console.error("任务中心分页读取失败", error);
     response.status(400).json({ success: false, message: error.message || "任务列表读取失败。" });
@@ -2785,7 +2913,14 @@ app.get("/api/product-management/overview", requirePermission("products.view"), 
 });
 
 app.get("/api/product-center-v2/skus", requirePermission("skus.view"), (request, response) => {
-  try { response.json({ success: true, ...listProductCenterV2Skus(request.query) }); }
+  try {
+    const startedAt = performance.now();
+    const result = listProductCenterV2Skus(request.query);
+    const queriedAt = performance.now();
+    const text = JSON.stringify({ success: true, ...result });
+    response.set("Server-Timing", `product-list;dur=${(queriedAt - startedAt).toFixed(1)}, serialize;dur=${(performance.now() - queriedAt).toFixed(1)}`);
+    response.type("application/json").send(text);
+  }
   catch (error) { response.status(400).json({ success: false, message: error.message || "ERP SKU列表读取失败。" }); }
 });
 
@@ -2997,7 +3132,10 @@ app.post("/api/product-management/products/:id/strategy/next-steps/:itemId/actio
 
 app.get("/api/connections", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, ...listConnectionCoreProfilesPage(request.query, getUserPersonId(request.user), isAdminUser(request.user)) });
+    const startedAt = performance.now();
+    const page = listConnectionCoreProfilesPage(request.query, getUserPersonId(request.user), isAdminUser(request.user));
+    response.set("Server-Timing", `connection-list;dur=${(performance.now() - startedAt).toFixed(1)}`);
+    response.json({ success: true, ...page });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "连接列表读取失败。" });
   }
@@ -3005,7 +3143,10 @@ app.get("/api/connections", requireLinkView, (request, response) => {
 
 app.get("/api/connection-assets", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, ...listConnectionCoreProfilesPage(request.query, getUserPersonId(request.user), isAdminUser(request.user)) });
+    const startedAt = performance.now();
+    const page = listConnectionCoreProfilesPage(request.query, getUserPersonId(request.user), isAdminUser(request.user));
+    response.set("Server-Timing", `connection-list;dur=${(performance.now() - startedAt).toFixed(1)}`);
+    response.json({ success: true, ...page });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "链接资产读取失败。" });
   }

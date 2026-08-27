@@ -307,11 +307,12 @@ function renderStandardWorkCard(template, selectedProcessTemplateId = "") {
   const processStepLabel = processStepCount > 0 ? `${processStepCount}步` : "未配置";
   const versions = (state.templateAssetVersions ?? []).filter((item) => item.assetType === "action" && item.assetId === template.id);
   const currentVersion = versions.find((item) => item.status === "active") ?? versions.sort((left, right) => right.majorVersion - left.majorVersion || right.minorVersion - left.minorVersion)[0];
-  const launchCount = (state.processInstances ?? []).filter((instance) =>
+  const loadedLaunchCount = (state.processInstances ?? []).filter((instance) =>
     instance.taskTemplateId === template.id ||
     instance.standardWorkId === template.id ||
     (template.defaultProcessTemplateId && instance.templateId === template.defaultProcessTemplateId),
   ).length;
+  const launchCount = state.templateCenterUsageSummary?.actionByTaskTemplateId?.[template.id]?.useCount ?? loadedLaunchCount;
   const description = String(template.description ?? template.completionStandard ?? "").trim() || "用于创建关键行动并生成标准步骤任务";
   return `
     <article class="standard-work-card ${isSelected ? "is-selected" : ""}"${draggable} data-standard-work-template-id="${escapeAttribute(template.id)}" data-process-template-id="${escapeAttribute(template.defaultProcessTemplateId ?? "")}">
@@ -763,7 +764,7 @@ function getStoreOptionLabel(store) {
 }
 
 function getDynamicFieldOptions(field) {
-  if (isPublishingAccountField(field)) return getPublishingAccountFieldOptions(publishingAccounts);
+  if (isPublishingAccountField(field)) return getPublishingAccountFieldOptions(publishingAccounts, field.options);
   if ((field.options ?? []).length > 0) return field.options.map((option) => ({ value: option, label: option }));
   if (field.key === "departmentId" || field.type === "department") {
     return departments.filter((department) => department.status === "active").map((department) => ({ value: department.id, label: department.name }));

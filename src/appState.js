@@ -58,6 +58,12 @@ const pendingTemplateIterations = new Map();
 let taskWavesLoaded = false;
 let dashboardManagementLoaded = false;
 let dashboardManagementPromise = null;
+let notificationUnreadCount = 0;
+let storeOptionsRequest = null;
+let storeOptionsLoadState = {
+  status: initialStores.some((store) => store.status === "active") ? "ready" : "idle",
+  message: "",
+};
 let persistenceStatus = {
   kind: "warning",
   message: "",
@@ -93,6 +99,7 @@ export const state = {
   issuesRequirements: initialIssuesRequirements.map((item) => ({ ...item })),
   standardWorkForms: initialStandardWorkForms.map((form) => ({ ...form })),
   templateAssetVersions: [],
+  templateCenterUsageSummary: {},
   products: [],
   actionProducts: [],
   taskProductContexts: [],
@@ -106,6 +113,7 @@ export const state = {
   erpImportBatches: [],
   taskWaves: [],
   taskWaveDetails: {},
+  workResultDashboard: null,
 };
 
 export const defaultCompanySlogan = "做对的事，把事做对。\n尊重时间，尊重经营。";
@@ -147,7 +155,47 @@ export async function authFetch(url, options = {}) {
   const token = getAuthToken();
   if (token !== "") headers.set("Authorization", `Bearer ${token}`);
   if (!headers.has("X-Wufan-API-Source")) headers.set("X-Wufan-API-Source", getApiUsageSource());
-  return fetch(url, { ...options, headers });
+  return fetch(url, { ...options, cache: "no-store", headers });
+}
+
+export function getStoreOptionsLoadState() {
+  return { ...storeOptionsLoadState };
+}
+
+export async function ensureStoreOptionsLoaded({ force = false } = {}) {
+  if (storeOptionsRequest !== null) return storeOptionsRequest;
+  if (!force && state.stores.some((store) => store.status === "active")) {
+    storeOptionsLoadState = { status: "ready", message: "" };
+    return state.stores;
+  }
+
+  storeOptionsLoadState = { status: "loading", message: "" };
+  storeOptionsRequest = (async () => {
+    const response = await authFetch(`${apiBaseUrl}/api/stores`);
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      if (response.status === 403) {
+        throw new Error("当前账号没有读取店铺的权限，请联系管理员检查“发起关键行动”权限。");
+      }
+      throw new Error(payload?.message ?? payload?.error ?? "店铺加载失败，请稍后重试。");
+    }
+    if (!Array.isArray(payload)) throw new Error("店铺数据格式异常，请联系管理员。");
+    replaceArray(state.stores, payload);
+    storeOptionsLoadState = { status: "ready", message: "" };
+    return state.stores;
+  })()
+    .catch((error) => {
+      storeOptionsLoadState = {
+        status: "error",
+        message: error?.message || "店铺加载失败，请稍后重试。",
+      };
+      throw error;
+    })
+    .finally(() => {
+      storeOptionsRequest = null;
+    });
+
+  return storeOptionsRequest;
 }
 
 function cloneItem(item) {
@@ -282,6 +330,7 @@ export function applyDataSnapshot(data, { preserveMissingResources = false } = {
   if (shouldReplace("templateTags")) replaceArray(state.templateTags, data.templateTags ?? initialTemplateTags);
   if (shouldReplace("issuesRequirements")) replaceArray(state.issuesRequirements, data.issuesRequirements ?? initialIssuesRequirements);
   if (shouldReplace("standardWorkForms")) replaceArray(state.standardWorkForms, data.standardWorkForms ?? initialStandardWorkForms);
+  if (shouldReplace("templateCenterUsageSummary")) state.templateCenterUsageSummary = cloneItem(data.templateCenterUsageSummary ?? {});
   if (shouldReplace("products")) replaceArray(state.products, data.products ?? []);
   if (shouldReplace("actionProducts")) replaceArray(state.actionProducts, data.actionProducts ?? []);
   if (shouldReplace("taskProductContexts")) replaceArray(state.taskProductContexts, data.taskProductContexts ?? []);
@@ -293,6 +342,7 @@ export function applyDataSnapshot(data, { preserveMissingResources = false } = {
   if (shouldReplace("salesLinks")) replaceArray(state.salesLinks, data.salesLinks ?? []);
   if (shouldReplace("salesLinkSkus")) replaceArray(state.salesLinkSkus, data.salesLinkSkus ?? []);
   if (shouldReplace("erpImportBatches")) replaceArray(state.erpImportBatches, data.erpImportBatches ?? []);
+  if (shouldReplace("workResultDashboard")) state.workResultDashboard = cloneItem(data.workResultDashboard ?? null);
   isApplyingRemoteData = false;
   ensureTaskTemplatesHaveProcessTemplates();
   ensureDefaultStandardWorkLibrary();
@@ -311,6 +361,9 @@ export async function loadPersistentData({ includeTaskWaves = null } = {}) {
       "tasks",
       "task-list",
       "scheduleBoard",
+      "processes",
+      "templateCenter",
+      "settings",
       "financeCenter",
       "finance-center",
       "adminDataCenter",
@@ -327,12 +380,17 @@ export async function loadPersistentData({ includeTaskWaves = null } = {}) {
     const shouldLoadTaskWaves =
       includeTaskWaves ??
       route === "task-waves";
-    const [response, waveResponse] = await Promise.all([
+    const [response, waveResponse, notificationResponse] = await Promise.all([
       authFetch(moduleDataEndpoint ?? (lightweightModules.has(route) ? `${apiBaseUrl}/api/bootstrap?module=${encodeURIComponent(bootstrapModule)}` : `${apiBaseUrl}/api/data`)),
       shouldLoadTaskWaves ? authFetch(`${apiBaseUrl}/api/task-waves`) : Promise.resolve(null),
+      authFetch(`${apiBaseUrl}/api/notifications/summary?limit=12`),
     ]);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     applyDataSnapshot(await response.json(), { preserveMissingResources: moduleDataEndpoint !== null });
+    const notificationData = await notificationResponse.json().catch(() => ({}));
+    if (!notificationResponse.ok || notificationData.success !== true) throw new Error(notificationData.message ?? `HTTP ${notificationResponse.status}`);
+    replaceArray(state.notifications, notificationData.items ?? []);
+    notificationUnreadCount = Number(notificationData.unreadCount || 0);
     if (waveResponse !== null) {
       const waveData = await waveResponse.json().catch(() => []);
       if (waveResponse.status === 403) {
@@ -421,6 +479,30 @@ export async function loadTaskCenterTaskDetail(taskId) {
   mergeTaskProductContexts(state.taskProductContexts, data.context?.taskProductContexts ?? []);
   mergeArrayById(state.taskWaves, data.context?.taskWaves ?? []);
   return data.task;
+}
+
+export async function loadGoalCenterDetail(goalId, { page = 1, pageSize = 50 } = {}) {
+  const response = await authFetch(`${apiBaseUrl}/api/goal-center/goals/${encodeURIComponent(goalId)}/detail?page=${page}&pageSize=${pageSize}`);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.success !== true) throw new Error(payload.message ?? "目标详情读取失败。");
+  applyDataSnapshot(payload.data ?? {}, { preserveMissingResources: true });
+  return payload;
+}
+
+export async function loadScheduleBoardPage({ page = 1, pageSize = 50 } = {}) {
+  const response = await authFetch(`${apiBaseUrl}/api/schedule-board/page?page=${page}&pageSize=${pageSize}`);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.success !== true) throw new Error(payload.message ?? "关键行动排期读取失败。");
+  applyDataSnapshot(payload.data ?? {}, { preserveMissingResources: true });
+  return payload;
+}
+
+export async function loadWorkResultsInitial(days = 30) {
+  const response = await authFetch(`${apiBaseUrl}/api/work-results/initial?days=${encodeURIComponent(days)}`);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.success !== true) throw new Error(payload.message ?? "工作结果摘要读取失败。");
+  applyDataSnapshot({ ...(payload.data ?? {}), workResultDashboard: payload.dashboard }, { preserveMissingResources: true });
+  return payload;
 }
 
 export async function ensureTaskWavesLoaded() {
@@ -546,6 +628,8 @@ export async function login(username, password) {
 export function logout() {
   setAuthToken("");
   currentUser = null;
+  notificationUnreadCount = 0;
+  replaceArray(state.notifications, []);
   taskWavesLoaded = false;
   loadedFromDatabase = false;
   persistenceAvailable = false;
@@ -605,6 +689,14 @@ export async function loadTemplates() {
   if (!response.ok) throw new Error(data.message ?? data.error ?? "模板列表读取失败，请检查本地数据库服务。");
   replaceArray(state.templates, data);
   return state.templates;
+}
+
+export async function loadTemplateCenterCategory(category) {
+  const response = await authFetch(`${apiBaseUrl}/api/template-center/library?category=${encodeURIComponent(category)}`);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.success !== true) throw new Error(payload.message ?? "模板分类读取失败。");
+  applyDataSnapshot(payload.data ?? {}, { preserveMissingResources: true });
+  return payload.data ?? {};
 }
 
 export async function createTemplate(template) {
@@ -1902,7 +1994,7 @@ export function getCurrentUserNotifications() {
 }
 
 export function getUnreadNotificationCount() {
-  return getCurrentUserNotifications().filter((notification) => notification.status === "unread").length;
+  return notificationUnreadCount;
 }
 
 export async function markNotificationRead(notificationId) {
@@ -1912,14 +2004,19 @@ export async function markNotificationRead(notificationId) {
   const updatedNotification = { ...notification, status: "read", readAt: now, updatedAt: now };
   await updatePersistentResource("notifications", notificationId, updatedNotification);
   state.notifications = state.notifications.map((item) => (item.id === notificationId ? updatedNotification : item));
+  notificationUnreadCount = Math.max(0, notificationUnreadCount - 1);
   return updatedNotification;
 }
 
 export async function markAllNotificationsRead() {
-  const unreadNotifications = getCurrentUserNotifications().filter((notification) => notification.status === "unread");
-  for (const notification of unreadNotifications) {
-    await markNotificationRead(notification.id);
-  }
+  const response = await authFetch(`${apiBaseUrl}/api/notifications/read-all`, { method: "POST" });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success !== true) throw new Error(data.message ?? "任务提醒批量已读失败。");
+  const readAt = data.readAt ?? getNow();
+  state.notifications = state.notifications.map((item) => item.status === "unread"
+    ? { ...item, status: "read", readAt, updatedAt: readAt }
+    : item);
+  notificationUnreadCount = 0;
 }
 
 export async function syncTaskNotificationsForCurrentUser() {
@@ -1936,6 +2033,7 @@ export async function syncTaskNotificationsForCurrentUser() {
     try {
       await createPersistentResource("notifications", reminder);
       state.notifications = [reminder, ...state.notifications];
+      notificationUnreadCount += 1;
     } catch (error) {
       console.error("任务提醒生成失败", error);
       return;

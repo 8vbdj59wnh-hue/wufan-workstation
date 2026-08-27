@@ -427,8 +427,8 @@ function renderTemplateDetail() {
     instance.taskTemplateId === standardWork?.id ||
     instance.standardWorkId === standardWork?.id
   );
-  const launchCount = relatedInstances.length;
-  const improvementCount = rectificationRecords.length;
+  const launchCount = state.templateCenterUsageSummary?.actionByTaskTemplateId?.[standardWork?.id]?.useCount ?? relatedInstances.length;
+  const improvementCount = state.templateCenterUsageSummary?.rectificationByTaskTemplateId?.[standardWork?.id]?.useCount ?? rectificationRecords.length;
 
   return `
     <section class="settings-section process-detail">

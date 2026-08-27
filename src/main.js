@@ -1,12 +1,4 @@
 import { modules } from "./modules.js";
-import { bindGoalsPageEvents, renderGoalsPage } from "./goalsPage.js";
-import { bindProcessesPageEvents, renderProcessesPage } from "./processesPage.js";
-import { bindSettingsPageEvents, renderSettingsPage } from "./settingsPage.js";
-import { bindScheduleBoardPageEvents, renderScheduleBoardPage } from "./scheduleBoardPage.js";
-import { bindMethodologiesPageEvents, renderMethodologiesPage } from "./methodologiesPage.js";
-import { bindTemplateCenterPageEvents, renderTemplateCenterPage } from "./templateCenterPage.js";
-import { bindFinanceCenterPageEvents, renderFinanceCenterPage } from "./financeCenterPage.js";
-import { bindDashboardPageEvents, renderDashboardPage, renderDashboardViewTabs } from "./dashboardPage.js";
 import { bindProductPreviewEvents, closeProductPreview, openProductPreview, renderProductPreviewModal } from "./productPreview.js";
 import { attachThumbnailHoverPreview } from "./thumbnailPreview.js";
 import {
@@ -196,7 +188,7 @@ let plannedModulesExpanded = modules.some(
 
 async function prepareRouteModule(moduleId, { showLoading = false } = {}) {
   const revision = beginRouteNavigation(moduleId);
-  if (!["tasks", "connectionCenter", "products", "adminDataCenter"].includes(moduleId)) return { revision, loaded: true };
+  if (!["dashboard", "goals", "tasks", "scheduleBoard", "processes", "templateCenter", "products", "financeCenter", "connectionCenter", "settings", "adminDataCenter"].includes(moduleId)) return { revision, loaded: true };
   try {
     const modulePromise = loadRouteModule(moduleId, { navigationRevision: revision });
     if (showLoading && getLoadedRouteModule(moduleId) === null) render({ navigation: true });
@@ -225,7 +217,7 @@ function escapeHtml(value) {
 }
 
 function renderPageHeaderTitle(activeModule) {
-  if (activeModule.id === "dashboard") return renderDashboardViewTabs();
+  if (activeModule.id === "dashboard") return getLoadedRouteModule("dashboard")?.renderViewTabs() ?? "";
   if (activeModule.id === "goals") {
     return `<p class="page-header-goal-slogan">${escapeHtml(getCompanySlogan())}</p>`;
   }
@@ -442,6 +434,16 @@ function renderSidebar() {
   `;
 }
 
+function renderLazyPageModule(moduleId, label, ...args) {
+  const routeModule = getLoadedRouteModule(moduleId);
+  const status = getRouteModuleStatus(moduleId);
+  if (routeModule !== null) return routeModule.render(...args);
+  if (status.status === "error") {
+    return `<section class="placeholder route-module-error" role="alert"><h2>${label}加载失败</h2><p>该页面模块没有成功加载，其他模块不受影响。</p><div class="button-row"><button class="primary-button" type="button" data-action="retry-route-module" data-module-id="${moduleId}">重新加载</button><button class="secondary-button" type="button" data-action="return-dashboard">返回驾驶舱</button></div></section>`;
+  }
+  return `<section class="placeholder route-module-loading" aria-live="polite" aria-busy="true"><h2>正在加载${label}…</h2></section>`;
+}
+
 function renderPage() {
   const activeModule = getActiveModule();
   const currentUser = getCurrentUser();
@@ -456,11 +458,11 @@ function renderPage() {
   if (!canAccessActiveModule) {
     content = `<section class="placeholder"><h2>你没有权限访问该页面</h2><p>请联系管理员调整账号权限。</p></section>`;
   } else if (activeModule.id === "goals") {
-    content = renderGoalsPage();
+    content = renderLazyPageModule("goals", "目标中心");
   }
 
   if (canAccessActiveModule && activeModule.id === "dashboard") {
-    content = renderDashboardPage();
+    content = renderLazyPageModule("dashboard", "驾驶舱");
   }
 
   if (canAccessActiveModule && activeModule.id === "tasks") {
@@ -504,17 +506,15 @@ function renderPage() {
   }
 
   if (activeModule.id === "scheduleBoard") {
-    content = renderScheduleBoardPage();
+    content = renderLazyPageModule("scheduleBoard", "关键行动");
   }
 
   if (activeModule.id === "processes") {
-    content = /^(#methods|#methodologies|#methodology-)/.test(window.location.hash)
-      ? renderMethodologiesPage(currentUser)
-      : renderProcessesPage();
+    content = renderLazyPageModule("processes", "行动标准", currentUser);
   }
 
   if (activeModule.id === "templateCenter") {
-    content = renderTemplateCenterPage();
+    content = renderLazyPageModule("templateCenter", "模板中心");
   }
 
   if (canAccessActiveModule && activeModule.id === "products") {
@@ -546,11 +546,11 @@ function renderPage() {
   }
 
   if (canAccessActiveModule && activeModule.id === "financeCenter") {
-    content = renderFinanceCenterPage();
+    content = renderLazyPageModule("financeCenter", "财务中心");
   }
 
   if (activeModule.id === "settings") {
-    content = renderSettingsPage();
+    content = renderLazyPageModule("settings", "设置");
   }
 
   return `
@@ -779,7 +779,7 @@ function render({ navigation = false } = {}) {
 
   document.querySelector('[data-action="retry-route-module"]')?.addEventListener("click", async (event) => {
     const moduleId = event.currentTarget.dataset.moduleId;
-    if (!["tasks", "connectionCenter", "products", "adminDataCenter"].includes(moduleId)) return;
+    if (!["dashboard", "goals", "tasks", "scheduleBoard", "processes", "templateCenter", "products", "financeCenter", "connectionCenter", "settings", "adminDataCenter"].includes(moduleId)) return;
     const retryPromise = retryRouteModule(moduleId);
     render();
     try {
@@ -824,28 +824,8 @@ function render({ navigation = false } = {}) {
     });
   });
 
-  if (activeModuleId === "settings") {
-    bindSettingsPageEvents(render);
-  }
-
-  if (activeModuleId === "goals") {
-    bindGoalsPageEvents(render);
-  }
-
-  if (activeModuleId === "tasks") {
-    getLoadedRouteModule("tasks")?.bind(render);
-  }
-
-  if (activeModuleId === "scheduleBoard") {
-    bindScheduleBoardPageEvents(render);
-  }
-
-  if (activeModuleId === "processes" || document.querySelector(".processes-page") !== null) {
-    bindProcessesPageEvents(render);
-  }
-
-  if (activeModuleId === "templateCenter") {
-    bindTemplateCenterPageEvents(render);
+  if (["dashboard", "goals", "tasks", "scheduleBoard", "processes", "templateCenter", "financeCenter", "settings"].includes(activeModuleId)) {
+    getLoadedRouteModule(activeModuleId)?.bind(render);
   }
 
   if (activeModuleId === "products") {
@@ -856,20 +836,8 @@ function render({ navigation = false } = {}) {
     getLoadedRouteModule("adminDataCenter")?.bind(render);
   }
 
-  if (activeModuleId === "financeCenter") {
-    bindFinanceCenterPageEvents(render);
-  }
-
   if (activeModuleId === "connectionCenter") {
     getLoadedRouteModule("connectionCenter")?.bind(render);
-  }
-
-  if (activeModuleId === "dashboard") {
-    bindDashboardPageEvents(render);
-  }
-
-  if (document.querySelector(".methodologies-page") !== null) {
-    bindMethodologiesPageEvents(render);
   }
 
   attachThumbnailHoverPreview();

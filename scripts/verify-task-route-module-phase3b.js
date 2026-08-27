@@ -24,7 +24,7 @@ const {
 
 const mainSource = await fs.readFile(new URL("../src/main.js", import.meta.url), "utf8");
 assert(!/import\s+\{[^}]*renderTasksPage[^}]*\}\s+from\s+["'][^"']*tasksPage/.test(mainSource), "main.js仍静态导入任务中心。");
-assert(mainSource.includes('["tasks", "connectionCenter", "products"].includes(moduleId)'), "任务路由未接入动态加载器。");
+assert(/prepareRouteModule[\s\S]*?includes\(moduleId\)/u.test(mainSource) && mainSource.includes('"tasks"'), "任务路由未接入动态加载器。");
 assert(mainSource.includes('invokeModuleAction("tasks", "selectTask", taskId)'), "通知点击未通过动态模块动作选择任务。");
 assert(mainSource.includes("route-module-error"), "任务模块加载失败页面未接入。");
 

@@ -14,6 +14,7 @@ function fixture() {
     CREATE TABLE erp_import_batches(id TEXT,importType TEXT,status TEXT,importMode TEXT,businessDate TEXT,completedAt TEXT,createdAt TEXT,originalFilename TEXT);
     CREATE TABLE data_sync_tasks(id TEXT,taskCode TEXT);
     CREATE TABLE data_sync_batches(id TEXT,taskId TEXT,status TEXT,syncMode TEXT,periodEnd TEXT,completedAt TEXT,createdAt TEXT,fileName TEXT,fileHash TEXT,totalCount INTEGER,scopeJson TEXT);
+    CREATE TABLE platform_goods_excel_import_rows(batchId TEXT,rowNumber INTEGER,salesLinkId TEXT,salesLinkSkuId TEXT,PRIMARY KEY(batchId,rowNumber));
     CREATE TABLE sales_links(id TEXT PRIMARY KEY,lastSeenBatchId TEXT,currentState TEXT);
     CREATE TABLE sales_link_skus(id TEXT PRIMARY KEY,salesLinkId TEXT,lastSeenBatchId TEXT);
     CREATE TABLE connection_sku_sales_daily_facts(id TEXT PRIMARY KEY,salesLinkId TEXT,salesLinkSkuId TEXT,erpSkuId TEXT,saleDate TEXT,sourceBatchId TEXT);
@@ -23,6 +24,7 @@ function fixture() {
     INSERT INTO sales_links VALUES('recent-sales-link','older-batch','active');
     INSERT INTO sales_links VALUES('historical-link','older-batch','missing');
     INSERT INTO sales_link_skus VALUES('platform-sku','platform-link','latest-batch');
+    INSERT INTO platform_goods_excel_import_rows VALUES('latest-batch',1,'platform-link','platform-sku');
     INSERT INTO connection_sku_sales_daily_facts VALUES('recent-fact','recent-sales-link','recent-sku','erp-recent','2026-08-17','sales-batch-latest');
     INSERT INTO connection_sku_sales_daily_facts VALUES('old-fact','historical-link','old-sku','erp-old','2026-07-01','sales-batch-old');
   `);
