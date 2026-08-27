@@ -33,6 +33,7 @@ import {
   loadProductSalesDistribution,
   loadProductShopSandbox,
   loadProductClearancePlans,
+  loadProductNewDevelopmentActions,
   saveProductClearancePlan,
   updateProductClearancePlan,
   loadProductHealthAnalysis,
@@ -84,7 +85,17 @@ function ensureProductClearancePlanStyles() {
   document.head.append(stylesheet);
 }
 
+function ensureProductNewDevelopmentStyles() {
+  if (document.querySelector('link[data-product-new-development-styles]')) return;
+  const stylesheet = document.createElement("link");
+  stylesheet.rel = "stylesheet";
+  stylesheet.href = new URL("./productNewDevelopment.css", import.meta.url).href;
+  stylesheet.dataset.productNewDevelopmentStyles = "true";
+  document.head.append(stylesheet);
+}
+
 ensureProductClearancePlanStyles();
+ensureProductNewDevelopmentStyles();
 
 const productStatuses = ["开发中", "上架", "成长期", "成熟期", "风险期", "淘汰", "待上架", "在售", "停售", "清仓", "已归档"];
 let filters = { query: "", brand: "", category: "", status: "", erpStatus: "", platform: "", stockStatus: "" };
@@ -128,6 +139,7 @@ let productSalesDistributionState = { range: { preset: "30d" }, includeHistorica
 let productShopSandboxState = { range: { preset: "30d" }, shopId: "", shops: [], selectedShop: null, items: [], summary: {}, segment: "all", sortMode: "sales", loading: false, loaded: false, error: "" };
 let productClearancePlanState = { range: "30d", periodStart: "", periodEnd: "", status: "active", center: null, loading: false, loaded: false, error: "", notice: "" };
 let productClearancePlanModalState = null;
+let productNewDevelopmentState = { status: "all", center: null, loading: false, loaded: false, error: "", selectedActionId: "" };
 let productBusinessFilters = { query: "", brand: "", category: "", lifecycle: "", status: "", healthStatus: "", inventoryStatus: "", ownerId: "", includeHistorical: false, range: "30d", periodStart: "", periodEnd: "", sortBy: "updatedAt", sortDirection: "desc", page: 1, pageSize: 30 };
 let productBusinessVisibleMetrics = new Set(["sales", "structure", "inventory", "profit", "health", "diagnosis"]);
 
@@ -424,10 +436,12 @@ function renderProductWorkspaceTabs() {
   const cockpitActive = !isProductDetail && !skuManagementActive && productSubmodule === "business-cockpit";
   const sandboxActive = !isProductDetail && !skuManagementActive && productSubmodule === "product-sandbox";
   const clearanceActive = !isProductDetail && !skuManagementActive && productSubmodule === "clearance-plans";
+  const newDevelopmentActive = !isProductDetail && !skuManagementActive && productSubmodule === "new-product-development";
   return `<nav class="product-workspace-tabs" aria-label="产品中心视图">
     ${canViewProducts() ? `<button type="button" data-action="product-workspace-view" data-view="business-cockpit" class="${cockpitActive ? "is-active" : ""}">经营驾驶舱</button>
     <button type="button" data-action="product-workspace-view" data-view="product-sandbox" class="${sandboxActive ? "is-active" : ""}">产品沙盘</button>
-    <button type="button" data-action="product-workspace-view" data-view="business-dashboard" class="${!cockpitActive && !sandboxActive && !clearanceActive && !skuManagementActive ? "is-active" : ""}">产品经营</button>
+    <button type="button" data-action="product-workspace-view" data-view="business-dashboard" class="${!cockpitActive && !sandboxActive && !clearanceActive && !newDevelopmentActive && !skuManagementActive ? "is-active" : ""}">产品经营</button>
+    <button type="button" data-action="product-workspace-view" data-view="new-product-development" class="${newDevelopmentActive ? "is-active" : ""}">新品开发</button>
     <button type="button" data-action="product-workspace-view" data-view="clearance-plans" class="${clearanceActive ? "is-active" : ""}">清仓计划</button>` : ""}
     ${canViewSkus() || canViewCombos() ? `<button type="button" data-action="product-workspace-view" data-view="sku-management" class="${skuManagementActive ? "is-active" : ""}">SKU管理</button>` : ""}
   </nav>`;
@@ -580,6 +594,71 @@ function renderProductShopSandboxPage() {
   </section>`;
 }
 
+function newDevelopmentStatusLabel(status) {
+  return ({ all: "全部行动", pending: "待执行", running: "执行中", done: "已完成" })[status] || status;
+}
+
+function newDevelopmentDate(value) {
+  if (!value) return "未设置";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value).slice(0, 10);
+  return new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(parsed);
+}
+
+function renderProductNewDevelopmentCards(center) {
+  const items = (center?.items ?? []).filter((item) => productNewDevelopmentState.status === "all" || item.status?.code === productNewDevelopmentState.status);
+  if (!items.length) {
+    const scopeLabel = productNewDevelopmentState.status === "all" ? "" : `${newDevelopmentStatusLabel(productNewDevelopmentState.status)}状态的`;
+    return `<div class="product-card-empty">当前范围暂无${escapeHtml(scopeLabel)}新品开发关键行动。</div>`;
+  }
+  return `<div class="product-new-development-grid">${items.map((item) => {
+    const linkedProduct = item.linkedProducts?.[0];
+    const image = linkedProduct?.mainImage || item.coverImageUrl;
+    const progress = Math.max(0, Math.min(100, Number(item.progress?.percentage || 0)));
+    return `<article class="product-new-development-card">
+      <button type="button" class="product-new-development-card-main" data-action="open-product-new-development" data-action-id="${escapeHtml(item.id)}">
+        <div class="product-new-development-media">${renderImage({ mainImage: image, name: item.productName || linkedProduct?.name || item.name }, "product-card-image")}</div>
+        <div class="product-new-development-body">
+          <div class="product-new-development-card-heading"><span class="product-new-development-status is-${escapeHtml(item.status?.code)}">${escapeHtml(item.status?.label)}</span><small>${escapeHtml(item.standardName || "新品开发")}</small></div>
+          <h3>${escapeHtml(item.name)}</h3>
+          <p>${escapeHtml(item.productName || item.productDirection || linkedProduct?.name || item.description || "未填写新品方向")}</p>
+          <div class="product-new-development-progress"><div><span>任务进度</span><strong>${item.progress?.completed ?? 0}/${item.progress?.total ?? 0}</strong></div><span><i style="width:${progress}%"></i></span></div>
+          <dl><div><dt>负责人</dt><dd>${escapeHtml(item.owner?.name || "未设置")}</dd></div><div><dt>截止日期</dt><dd>${escapeHtml(newDevelopmentDate(item.dueDate))}</dd></div></dl>
+        </div>
+      </button>
+      <footer><span>${item.linkedProducts?.length ? `关联 ${item.linkedProducts.length} 个产品` : "暂未关联产品档案"}</span><button type="button" class="text-button" data-action="open-product-new-development" data-action-id="${escapeHtml(item.id)}">查看详情 →</button></footer>
+    </article>`;
+  }).join("")}</div>`;
+}
+
+function renderProductNewDevelopmentPage() {
+  const center = productNewDevelopmentState.center;
+  const summary = center?.summary;
+  return `<section class="product-center-page product-new-development-page">
+    ${renderProductWorkspaceTabs()}
+    <header class="product-new-development-hero"><div><p class="eyebrow">NEW PRODUCT DEVELOPMENT</p><h1>新品开发</h1><p>集中查看已发起的新品开发关键行动，进度与负责人均来自现有关键行动。</p></div><span>只读视图 · 不创建任务</span></header>
+    ${productNewDevelopmentState.error ? `<div class="form-error">${escapeHtml(productNewDevelopmentState.error)}</div>` : ""}
+    ${summary ? `<section class="product-new-development-summary">${[["all", "全部行动", summary.total], ["pending", "待执行", summary.pending], ["running", "执行中", summary.running], ["done", "已完成", summary.done]].map(([value, label, count]) => `<button type="button" data-action="filter-product-new-development" data-status="${value}" class="${productNewDevelopmentState.status === value ? "is-active" : ""}"><span>${label}</span><strong>${Number(count || 0).toLocaleString("zh-CN")}</strong></button>`).join("")}</section>` : ""}
+    ${productNewDevelopmentState.loading && !center ? `<div class="empty-state">正在读取新品开发关键行动…</div>` : renderProductNewDevelopmentCards(center)}
+  </section>`;
+}
+
+function renderProductNewDevelopmentModal() {
+  const item = (productNewDevelopmentState.center?.items ?? []).find((candidate) => candidate.id === productNewDevelopmentState.selectedActionId);
+  if (!item) return "";
+  const progress = Math.max(0, Math.min(100, Number(item.progress?.percentage || 0)));
+  return `<div class="modal-backdrop"><section class="modal-panel product-new-development-modal" role="dialog" aria-modal="true" aria-label="新品开发行动详情">
+    <header class="modal-header"><div><p class="eyebrow">${escapeHtml(item.standardName || "新品开发")}</p><h2>${escapeHtml(item.name)}</h2><span class="product-new-development-status is-${escapeHtml(item.status?.code)}">${escapeHtml(item.status?.label)}</span></div><button type="button" class="icon-button" data-action="close-product-new-development" aria-label="关闭">×</button></header>
+    <div class="modal-body product-new-development-modal-body">
+      <p>${escapeHtml(item.description || item.productDirection || "暂未填写行动说明。")}</p>
+      <section><h3>行动信息</h3><dl><div><dt>负责人</dt><dd>${escapeHtml(item.owner?.name || "未设置")}</dd></div><div><dt>发起人</dt><dd>${escapeHtml(item.initiatorName || "未设置")}</dd></div><div><dt>关联目标</dt><dd>${escapeHtml(item.goal?.name || "未关联目标")}</dd></div><div><dt>截止日期</dt><dd>${escapeHtml(newDevelopmentDate(item.dueDate))}</dd></div><div><dt>创建时间</dt><dd>${escapeHtml(newDevelopmentDate(item.createdAt))}</dd></div><div><dt>行动编号</dt><dd>${escapeHtml(item.businessCode || item.id)}</dd></div></dl></section>
+      <section><h3>任务进度</h3><div class="product-new-development-progress is-large"><div><span>已完成 ${item.progress?.completed ?? 0} / ${item.progress?.total ?? 0}</span><strong>${progress}%</strong></div><span><i style="width:${progress}%"></i></span></div></section>
+      <section><h3>关联产品</h3>${item.linkedProducts?.length ? `<div class="product-new-development-products">${item.linkedProducts.map((product) => `<button type="button" data-action="view-product" data-direct-product-detail data-product-id="${escapeHtml(product.id)}">${renderImage({ mainImage: product.mainImage, name: product.name }, "product-business-image")}<span><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(product.skuCode || "暂无编码")}</small></span></button>`).join("")}</div>` : `<div class="product-detail-empty">当前行动暂未关联产品档案。</div>`}</section>
+    </div>
+    <footer class="modal-footer"><button type="button" class="secondary-button" data-action="close-product-new-development">关闭</button><button type="button" class="primary-button" data-action="go-product-new-development-action">前往关键行动</button></footer>
+  </section></div>`;
+}
+
 function clearancePercent(value) {
   return value === null || value === undefined ? null : Math.round(Math.max(0, Math.min(1, Number(value))) * 100);
 }
@@ -673,6 +752,7 @@ function renderProductList() {
   if (productSubmodule === "sku-management") return renderProductSkuV2List();
   if (productSubmodule === "business-cockpit") return renderProductBusinessCockpit();
   if (productSubmodule === "product-sandbox") return renderProductShopSandboxPage();
+  if (productSubmodule === "new-product-development") return renderProductNewDevelopmentPage();
   if (productSubmodule === "clearance-plans") return renderProductClearancePage();
   return renderProductBusinessDashboard();
 }
@@ -2039,7 +2119,7 @@ export function renderProductCenterPage() {
     const message = productManagementState.error || "正在读取产品详情…";
     return `<section class="product-center-page product-detail-page"><button class="text-button product-detail-back" type="button" data-action="back-products">← 返回产品列表</button><div class="product-detail-empty">${escapeHtml(message)}</div></section>${renderPlatformProductLinkModal()}`;
   }
-  return `${product ? renderProductDetail(product) : renderProductList()}${renderPlatformProductLinkModal()}${renderProductClearancePlanModal()}`;
+  return `${product ? renderProductDetail(product) : renderProductList()}${renderPlatformProductLinkModal()}${renderProductClearancePlanModal()}${renderProductNewDevelopmentModal()}`;
 }
 
 async function refreshProductSkuV2List(rerender) {
@@ -2343,6 +2423,19 @@ async function refreshProductClearancePlans(rerender) {
   rerender();
 }
 
+async function refreshProductNewDevelopmentActions(rerender) {
+  if (productNewDevelopmentState.loading) return;
+  productNewDevelopmentState = { ...productNewDevelopmentState, loading: true, error: "" };
+  rerender();
+  try {
+    const result = await loadProductNewDevelopmentActions();
+    productNewDevelopmentState = { ...productNewDevelopmentState, center: result.center, loading: false, loaded: true, error: "" };
+  } catch (error) {
+    productNewDevelopmentState = { ...productNewDevelopmentState, loading: false, loaded: true, error: error.message || "新品开发行动读取失败。" };
+  }
+  rerender();
+}
+
 async function refreshProductManagementDetail(productId, rerender) {
   if (!productId || productManagementState.loadingProductId === productId) return;
   productManagementState = { ...productManagementState, loadingProductId: productId, error: "" }; rerender();
@@ -2552,6 +2645,7 @@ export function bindProductCenterPageEvents(rerender) {
   if (!routeProductId && !routeErpSkuId && productSubmodule === "business-dashboard" && !productBusinessDashboardState.readModel && !productBusinessDashboardState.loading) void refreshProductBusinessDashboard(rerender);
   if (!routeProductId && !routeErpSkuId && productSubmodule === "business-cockpit" && !productSalesDistributionState.loaded && !productSalesDistributionState.loading) void refreshProductSalesDistribution(rerender);
   if (!routeProductId && !routeErpSkuId && productSubmodule === "product-sandbox" && !productShopSandboxState.loaded && !productShopSandboxState.loading) void refreshProductShopSandbox(rerender);
+  if (!routeProductId && !routeErpSkuId && productSubmodule === "new-product-development" && !productNewDevelopmentState.loaded && !productNewDevelopmentState.loading) void refreshProductNewDevelopmentActions(rerender);
   if (!routeProductId && !routeErpSkuId && productSubmodule === "clearance-plans" && !productClearancePlanState.loaded && !productClearancePlanState.loading) void refreshProductClearancePlans(rerender);
   if (routeProductId && productDetailTab === "health-analysis" && (!getProductManagementDetail(routeProductId)?.healthAnalysis || !getProductManagementDetail(routeProductId)?.improvementCenter) && productManagementState.loadingProductId !== routeProductId) void refreshProductHealthAnalysis(routeProductId, rerender);
   if (routeProductId && productDetailTab === "business-improvement" && !getProductManagementDetail(routeProductId)?.improvementCenter && productManagementState.loadingProductId !== routeProductId) void refreshProductImprovementCenter(routeProductId, rerender);
@@ -2875,6 +2969,19 @@ export function bindProductCenterPageEvents(rerender) {
     productClearancePlanModalState = null;
     rerender();
   }));
+  document.querySelectorAll('[data-action="close-product-new-development"]').forEach((button) => button.addEventListener("click", () => {
+    productNewDevelopmentState = { ...productNewDevelopmentState, selectedActionId: "" };
+    rerender();
+  }));
+  document.querySelector('[data-action="go-product-new-development-action"]')?.addEventListener("click", () => {
+    productNewDevelopmentState = { ...productNewDevelopmentState, selectedActionId: "" };
+    window.location.hash = "schedule-board";
+  });
+  document.querySelectorAll('.product-new-development-modal [data-action="view-product"]').forEach((button) => button.addEventListener("click", () => {
+    productNewDevelopmentState = { ...productNewDevelopmentState, selectedActionId: "" };
+    productSubmodule = "business-dashboard";
+    window.location.hash = `products/${encodeURIComponent(button.dataset.productId)}`;
+  }));
   const page = document.querySelector(".product-center-page");
   page?.addEventListener("keydown", (event) => {
     const card = event.target.closest(".product-archive-card");
@@ -2958,16 +3065,37 @@ export function bindProductCenterPageEvents(rerender) {
     }
     if (action === "product-workspace-view") {
       const requestedView = button.dataset.view;
-      if (["business-dashboard", "business-cockpit", "product-sandbox", "clearance-plans"].includes(requestedView) && !canViewProducts()) return;
+      if (["business-dashboard", "business-cockpit", "product-sandbox", "new-product-development", "clearance-plans"].includes(requestedView) && !canViewProducts()) return;
       if (requestedView === "sku-management" && !canViewSkus() && !canViewCombos()) return;
-      productSubmodule = ["sku-management", "business-cockpit", "product-sandbox", "clearance-plans"].includes(button.dataset.view) ? button.dataset.view : "business-dashboard";
+      productSubmodule = ["sku-management", "business-cockpit", "product-sandbox", "new-product-development", "clearance-plans"].includes(button.dataset.view) ? button.dataset.view : "business-dashboard";
       if (getRouteProductId() || getRouteErpSkuId()) window.location.hash = "products";
       if (productSubmodule === "business-cockpit") void refreshProductSalesDistribution(rerender);
       else if (productSubmodule === "product-sandbox") void refreshProductShopSandbox(rerender);
+      else if (productSubmodule === "new-product-development") void refreshProductNewDevelopmentActions(rerender);
       else if (productSubmodule === "clearance-plans") void refreshProductClearancePlans(rerender);
       else if (productSubmodule === "business-dashboard") void refreshProductBusinessDashboard(rerender);
       else if (!productSkuV2State.loaded && !productSkuV2State.loading) void refreshProductSkuV2List(rerender);
       else rerender();
+      return;
+    }
+    if (action === "filter-product-new-development") {
+      productNewDevelopmentState = { ...productNewDevelopmentState, status: ["pending", "running", "done"].includes(button.dataset.status) ? button.dataset.status : "all" };
+      rerender();
+      return;
+    }
+    if (action === "open-product-new-development") {
+      productNewDevelopmentState = { ...productNewDevelopmentState, selectedActionId: button.dataset.actionId || "" };
+      rerender();
+      return;
+    }
+    if (action === "close-product-new-development") {
+      productNewDevelopmentState = { ...productNewDevelopmentState, selectedActionId: "" };
+      rerender();
+      return;
+    }
+    if (action === "go-product-new-development-action") {
+      productNewDevelopmentState = { ...productNewDevelopmentState, selectedActionId: "" };
+      window.location.hash = "schedule-board";
       return;
     }
     if (action === "open-product-clearance-plan") {

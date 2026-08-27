@@ -304,6 +304,7 @@ import { getProductBusinessReadModel, getProductHealthAnalysis } from "./product
 import { getProductSalesDistribution } from "./productSalesDistributionService.js";
 import { getProductShopSandbox } from "./productShopSandboxService.js";
 import { getProductClearancePlanCenter, saveProductClearancePlan, updateProductClearancePlan } from "./productClearancePlanService.js";
+import { getProductNewDevelopmentCenter } from "./productNewDevelopmentService.js";
 import { attachProductDiagnosisSummaries, getProductBusinessDiagnosis } from "./productBusinessDiagnosisService.js";
 import { getProductInsightCenter, importProductInsights, updateProductInsight } from "./productInsightService.js";
 import {
@@ -2997,6 +2998,26 @@ app.get("/api/product-management/clearance-plans", requirePermission("products.v
     const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
     response.json({ success: true, center: getProductClearancePlanCenter(request.query, { visibleProductIds: (scoped.products ?? []).map((product) => product.id) }) });
   } catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "清仓计划读取失败。" }); }
+});
+
+app.get("/api/product-management/new-product-actions", requirePermission("products.view"), (request, response) => {
+  try {
+    const snapshot = {
+      processInstances: readResource("processInstances"),
+      workPlans: readResource("workPlans"),
+      tasks: readResource("tasks"),
+      taskTemplates: readResource("taskTemplates"),
+      processTemplates: readResource("processTemplates"),
+      people: readResource("people"),
+      goals: readResource("goals"),
+      products: readResource("products"),
+      actionProducts: readResource("actionProducts"),
+    };
+    const scoped = filterDataByScope(snapshot, request.user);
+    response.json({ success: true, center: getProductNewDevelopmentCenter(scoped) });
+  } catch (error) {
+    response.status(error.statusCode || 400).json({ success: false, message: error.message || "新品开发行动读取失败。" });
+  }
 });
 
 app.post("/api/product-management/products/:id/clearance-plan", requirePermission("products.edit"), (request, response) => {

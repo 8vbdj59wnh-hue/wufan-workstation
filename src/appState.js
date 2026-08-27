@@ -1289,6 +1289,10 @@ export async function loadProductClearancePlans(params = {}) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/clearance-plans${query.size ? `?${query}` : ""}`), "清仓计划读取失败。");
 }
 
+export async function loadProductNewDevelopmentActions() {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/new-product-actions`), "新品开发行动读取失败。");
+}
+
 export async function saveProductClearancePlan(productId, payload) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/products/${encodeURIComponent(productId)}/clearance-plan`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),

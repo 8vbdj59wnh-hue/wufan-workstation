@@ -42,6 +42,7 @@ export {
   loadProductSalesDistribution,
   loadProductShopSandbox,
   loadProductClearancePlans,
+  loadProductNewDevelopmentActions,
   saveProductClearancePlan,
   updateProductClearancePlan,
   loadProductHealthAnalysis,
