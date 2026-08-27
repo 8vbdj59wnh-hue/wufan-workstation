@@ -59,6 +59,11 @@ let taskWavesLoaded = false;
 let dashboardManagementLoaded = false;
 let dashboardManagementPromise = null;
 let notificationUnreadCount = 0;
+let storeOptionsRequest = null;
+let storeOptionsLoadState = {
+  status: initialStores.some((store) => store.status === "active") ? "ready" : "idle",
+  message: "",
+};
 let persistenceStatus = {
   kind: "warning",
   message: "",
@@ -151,6 +156,46 @@ export async function authFetch(url, options = {}) {
   if (token !== "") headers.set("Authorization", `Bearer ${token}`);
   if (!headers.has("X-Wufan-API-Source")) headers.set("X-Wufan-API-Source", getApiUsageSource());
   return fetch(url, { ...options, headers });
+}
+
+export function getStoreOptionsLoadState() {
+  return { ...storeOptionsLoadState };
+}
+
+export async function ensureStoreOptionsLoaded({ force = false } = {}) {
+  if (storeOptionsRequest !== null) return storeOptionsRequest;
+  if (!force && state.stores.some((store) => store.status === "active")) {
+    storeOptionsLoadState = { status: "ready", message: "" };
+    return state.stores;
+  }
+
+  storeOptionsLoadState = { status: "loading", message: "" };
+  storeOptionsRequest = (async () => {
+    const response = await authFetch(`${apiBaseUrl}/api/stores`);
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      if (response.status === 403) {
+        throw new Error("当前账号没有读取店铺的权限，请联系管理员检查“发起关键行动”权限。");
+      }
+      throw new Error(payload?.message ?? payload?.error ?? "店铺加载失败，请稍后重试。");
+    }
+    if (!Array.isArray(payload)) throw new Error("店铺数据格式异常，请联系管理员。");
+    replaceArray(state.stores, payload);
+    storeOptionsLoadState = { status: "ready", message: "" };
+    return state.stores;
+  })()
+    .catch((error) => {
+      storeOptionsLoadState = {
+        status: "error",
+        message: error?.message || "店铺加载失败，请稍后重试。",
+      };
+      throw error;
+    })
+    .finally(() => {
+      storeOptionsRequest = null;
+    });
+
+  return storeOptionsRequest;
 }
 
 function cloneItem(item) {

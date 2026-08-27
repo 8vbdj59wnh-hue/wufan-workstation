@@ -1,4 +1,4 @@
-import { resolveAssetUrl, state, uploadImageFile } from "./appState.js";
+import { getStoreOptionsLoadState, resolveAssetUrl, state, uploadImageFile } from "./appState.js";
 import {
   collectBusinessDateTime,
   getBusinessDatePart,
@@ -39,6 +39,14 @@ function getFormValue(form, name) {
 
 function getStoreOptionLabel(store) {
   return store.platform ? `${store.name}（${store.platform}）` : store.name;
+}
+
+function getEmptyStoreOptionLabel() {
+  const loadState = getStoreOptionsLoadState();
+  if (loadState.status === "loading") return "正在读取可选店铺…";
+  if (loadState.status === "error") return loadState.message || "店铺加载失败，请稍后重试。";
+  if (loadState.status === "ready") return "暂无启用店铺，请到系统设置 → 店铺管理中启用或新增店铺。";
+  return "暂无可选店铺，正在尝试重新读取。";
 }
 
 function getDynamicFieldOptions(field) {
@@ -89,7 +97,7 @@ export function renderPublicFormFieldInput(field, customFields = {}) {
       <label>
         <span>${escapeHtml(field.label)}${requiredMark}</span>
         <select name="custom__${escapeHtml(field.key)}">
-          <option value="">${field.key === "storeId" && options.length === 0 ? "暂无可选店铺，请确认账号有店铺选择权限，或先到设置 → 店铺管理中新增店铺。" : "请选择"}</option>
+          <option value="">${field.key === "storeId" && options.length === 0 ? escapeHtml(getEmptyStoreOptionLabel()) : "请选择"}</option>
           ${options.map((option) => `<option value="${escapeHtml(option.value)}" ${option.value === value ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
         </select>
       </label>

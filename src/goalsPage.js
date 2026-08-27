@@ -1,5 +1,6 @@
 import {
   createPersistentResource,
+  ensureStoreOptionsLoaded,
   getCurrentUser,
   getProcessNodeStepOrder,
   getLatestStandardWorkFormFields,
@@ -1840,6 +1841,14 @@ function handleGoalClick(event, rerender) {
       launchImmediately: true,
       error: "",
     };
+    void ensureStoreOptionsLoaded()
+      .then(() => {
+        if (modalState?.kind === "goalTask") rerender();
+      })
+      .catch((error) => {
+        console.error("店铺选项加载失败", error);
+        if (modalState?.kind === "goalTask") rerender();
+      });
     rerender();
     return;
   }
