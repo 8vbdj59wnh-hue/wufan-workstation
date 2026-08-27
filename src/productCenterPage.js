@@ -149,7 +149,7 @@ function canViewCombos() { return hasPermission(getCurrentUser(), "combos.view")
 
 function ensureAuthorizedProductSubmodule() {
   const allowed = new Set([
-    ...(canViewProducts() ? ["business-dashboard", "business-cockpit", "product-sandbox"] : []),
+    ...(canViewProducts() ? ["business-dashboard", "business-cockpit", "product-sandbox", "new-product-development", "clearance-plans"] : []),
     ...(canViewSkus() ? ["sku-management", "pending-skus"] : []),
     ...(canViewCombos() ? ["combo-skus"] : []),
   ]);

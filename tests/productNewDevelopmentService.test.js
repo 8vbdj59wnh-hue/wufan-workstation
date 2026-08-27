@@ -45,6 +45,7 @@ test("产品中心提供新品开发入口、状态筛选、行动卡片和原�
   assert.match(source, /product-new-development-grid/);
   assert.match(source, /data-action="filter-product-new-development"/);
   assert.match(source, /data-action="open-product-new-development"/);
+  assert.match(source, /canViewProducts\(\) \? \["business-dashboard", "business-cockpit", "product-sandbox", "new-product-development", "clearance-plans"\]/);
   assert.match(source, /前往关键行动/);
   assert.match(source, /window\.location\.hash = "schedule-board"/);
   assert.doesNotMatch(source, /import\s+["']\.\/productNewDevelopment\.css["']/);
