@@ -422,7 +422,10 @@ CHECK_DATABASE_DIR=""
 
 STAGE="service-restart"
 [[ "$REQUIRES_CLIENT_RESTART" != "true" ]] || pm2 restart wufan-client
-[[ "$REQUIRES_SERVER_RESTART" != "true" ]] || pm2 restart wufan-server
+if [[ "$BOOTSTRAP_SERVER_STOPPED" == true || "$REQUIRES_SERVER_RESTART" == "true" ]]; then
+  pm2 restart wufan-server
+  BOOTSTRAP_SERVER_STOPPED=false
+fi
 
 STAGE="service-stabilization"
 if [[ "$REQUIRES_CLIENT_RESTART" == "true" ]]; then
