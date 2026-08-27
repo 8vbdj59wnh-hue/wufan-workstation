@@ -810,6 +810,10 @@ export function commitPlatformGoodsExcelDataSync(batchId) {
     for (const row of skuRows.values()) {
       const source = raw(row);
       const relationReady = row.relationAction === "existing";
+      const relationNotApplicable = row.relationAction === "not_applicable";
+      const matchStatus = relationReady ? "erp_linked" : relationNotApplicable ? "not_applicable" : "pending_relation";
+      const matchMethod = relationReady ? "sales_object" : relationNotApplicable ? "business_rule" : "product_structure_application";
+      const matchReason = relationReady ? "Product Structure关系已存在" : relationNotApplicable ? "平台货品明确标记无需ERP关系" : row.message;
       db.prepare(`INSERT INTO sales_link_skus
         (id,salesLinkId,platformSkuId,platformSkuCode,normalizedPlatformSkuCode,specificationName,normalizedSpecificationName,price,platformStock,occupiedStock,systemGoodsType,syncEnabled,lastSyncedStock,lastSyncedAt,stopSyncReason,matchStatus,matchMethod,matchReason,createdAt,updatedAt,currentState,missingAt)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active',NULL)
@@ -827,8 +831,8 @@ export function commitPlatformGoodsExcelDataSync(batchId) {
         text(source["规格名称"]) || null, lower(source["规格名称"]) || null,
         numberValue(source["价格"]), numberValue(source["平台库存"]), numberValue(source["占用库存"]), row.systemGoodsType || null,
         text(source["是否需要同步"]) === "是" ? 1 : 0, numberValue(source["最后同步库存"]), text(source["最后同步时间"]) || null,
-        text(source["停止同步原因"]) || null, relationReady ? "erp_linked" : "pending_relation", relationReady ? "sales_object" : "product_structure_application",
-        relationReady ? "Product Structure关系已存在" : row.message, committedAt, committedAt,
+        text(source["停止同步原因"]) || null, matchStatus, matchMethod,
+        matchReason, committedAt, committedAt,
       );
     }
 

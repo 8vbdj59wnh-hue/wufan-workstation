@@ -27,6 +27,9 @@ export function resolveWangdianIdentityContract(input = {}) {
   if (goodsStatus === "source_unavailable" || suiteStatus === "source_unavailable") {
     return { goodsStatus, suiteStatus, resolvedIdentityType: "unresolved", identityStatus: "source_unavailable" };
   }
+  if (goodsStatus === "found" && suiteStatus === "found" && input.preferBundle === true) {
+    return { goodsStatus, suiteStatus, resolvedIdentityType: "bundle", identityStatus: "confirmed" };
+  }
   if (goodsStatus === "found" && suiteStatus === "found") {
     return { goodsStatus, suiteStatus, resolvedIdentityType: "conflict", identityStatus: "sku_type_conflict" };
   }
@@ -92,6 +95,12 @@ export function calculateOperatingErpIdentityShadow(options = {}) {
   const componentsByObject = new Map();
   for (const item of componentRows) componentsByObject.set(item.salesObjectId, [...(componentsByObject.get(item.salesObjectId) || []), item]);
   const productMappedIds = new Set(database.prepare("SELECT erpSkuId FROM product_erp_mappings WHERE currentState='active' AND erpSkuId IS NOT NULL").all().map((item) => item.erpSkuId));
+  const latestCompletePlatformBatchId = database.prepare(`SELECT id FROM data_sync_batches
+    WHERE taskId='sync-task-platform-goods-excel' AND syncMode='full' AND status='succeeded'
+    ORDER BY completedAt DESC,id DESC LIMIT 1`).get()?.id || null;
+  const platformBundleCodes = new Set(latestCompletePlatformBatchId ? database.prepare(`SELECT DISTINCT lower(trim(merchantSkuCode)) code
+    FROM platform_goods_excel_import_rows
+    WHERE batchId=? AND systemGoodsType='组合装' AND trim(COALESCE(merchantSkuCode,''))<>''`).all(latestCompletePlatformBatchId).map((item) => item.code) : []);
 
   const observations = [];
   const comparisons = [];
@@ -105,8 +114,12 @@ export function calculateOperatingErpIdentityShadow(options = {}) {
     const materializedSuiteAuthoritative = salesObject?.objectType === "bundle" && salesObject.sourceType === "wangdian_suite_api";
     const goodsFound = liveItem?.goodsChecked ? Boolean(liveItem.goods) : Boolean(erpSku);
     const suiteFound = liveItem?.suiteChecked ? Boolean(liveItem.suite) : materializedSuiteAuthoritative;
+    const preferBundle = goodsFound && suiteFound && platformBundleCodes.has(code)
+      && salesObject?.objectType === "bundle" && Boolean(structureByObject.get(salesObject.id))
+      && (componentsByObject.get(salesObject.id) || []).length > 0;
     const contract = resolveWangdianIdentityContract({
       goodsFound, suiteFound,
+      preferBundle,
       goodsChecked: liveItem?.goodsChecked ?? Boolean(erpSku),
       suiteChecked: liveItem?.suiteChecked ?? materializedSuiteAuthoritative,
       goodsError: liveItem?.goodsError,

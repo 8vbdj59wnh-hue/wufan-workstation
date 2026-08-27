@@ -122,7 +122,7 @@ export function queryUnmatchedPlatformSkus(options = {}, context = {}) {
     LEFT JOIN erp_goods g ON lower(g.goodsCode)=lower(l.platformGoodsCode)
     WHERE COALESCE(x.currentState,'active')='active'
       AND COALESCE(l.currentState,'active')='active'
-      AND COALESCE(x.matchStatus,'pending') NOT IN ('ignored','combination')
+      AND COALESCE(x.matchStatus,'pending') NOT IN ('ignored','combination','not_applicable')
       AND NOT EXISTS (
         SELECT 1
         FROM sales_link_sku_sales_object_relations relation

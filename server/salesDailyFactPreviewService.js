@@ -5,6 +5,7 @@ import { FORMAL_SALES_OBJECT_RESOLVER_SCOPES, resolveLinkSkuRelationsForRead } f
 import { resolveErpSkuBusinessUsages } from "./capabilities/resolveErpSkuBusinessUsage.js";
 import { normalizeSalesDetailLine } from "./capabilities/salesDetailNormalizer.js";
 import { classifySalesDetailLine } from "./capabilities/classifySalesDetailLine.js";
+import { resolveHistoricalRelationForFact } from "./salesObjectRelationHistoryService.js";
 
 const IMPORT_TYPE = "erp_sales_daily_preview";
 const PARSER_VERSION = "sales-daily-preview-v3-current-v2";
@@ -122,7 +123,7 @@ function identifyRow(database, item, cache = null) {
   return { category: "identity_ready", errorType: null, message: "身份精确匹配完成，等待统一关系解析。", ...identity };
 }
 
-export function classifyResolvedRelationForSalesDaily(item, relation) {
+export function classifyResolvedRelationForSalesDaily(item, relation, { database = null } = {}) {
   if (item.result.category === "error") return item;
   const targetErpSkuId = item.result.erpSku.id;
   const mapping = relation?.mappings?.find((row) => row.erpSkuId === targetErpSkuId) || null;
@@ -130,10 +131,27 @@ export function classifyResolvedRelationForSalesDaily(item, relation) {
     ...item.result, category: "ready", errorType: null, message: "统一关系解析完整，可进入日报写入候选。",
     mapping: { id: mapping.mappingId, ...mapping }, relationshipShape: relation.relationshipShape,
   } };
-  if (relation?.relationStatus === "active_complete") return { ...item, result: {
-    ...item.result, category: "relation_conflict", errorType: "target_erp_not_in_relation",
-    message: "当前ERP SKU不在该链接SKU的完整active关系中，禁止进入日报。", relationshipShape: relation.relationshipShape,
-  } };
+  if (relation?.relationStatus === "active_complete") {
+    const historical = database ? resolveHistoricalRelationForFact(database, {
+      linkSkuId: item.result.salesLinkSku?.id,
+      erpSkuId: targetErpSkuId,
+      businessDate: item.normalized?.saleDate,
+    }) : null;
+    if (historical?.classification === "historical_relation_change") return { ...item, result: {
+      ...item.result,
+      category: "ready",
+      errorType: null,
+      message: "销售事实符合销售日期当时有效的历史关系；当前关系已按最新权威主数据生效。",
+      mapping: { id: null, erpSkuId: historical.erpSkuId, quantity: historical.quantity, salesObjectId: historical.salesObjectId, salesObjectStructureId: historical.structureId },
+      relationshipShape: Number(historical.quantity) === 1 ? "single_unit" : "single_multi_quantity",
+      relationClassification: "historical_relation_change",
+      historicalRelation: historical,
+    } };
+    return { ...item, result: {
+      ...item.result, category: "relation_conflict", errorType: "target_erp_not_in_relation",
+      message: "销售事实ERP不属于销售日期当时有效的正式关系。", relationshipShape: relation.relationshipShape,
+    } };
+  }
   if (relation?.relationStatus === "pending") return { ...item, result: {
     ...item.result, category: "pending_relation", errorType: "relation_pending", message: "链接SKU与ERP SKU关系尚未确认。",
   } };
@@ -217,7 +235,7 @@ export function classifySalesDailyPreviewRows(database, items, {
       classification,
       usage,
     } };
-    const resolved = classifyResolvedRelationForSalesDaily(item, relation);
+    const resolved = classifyResolvedRelationForSalesDaily(item, relation, { database });
     resolved.result.businessClassification = "product_sale";
     resolved.result.classification = classification;
     resolved.result.usage = usage;

@@ -3,6 +3,7 @@ import { getDatabase } from "./db.js";
 import { calculateBomStructureHash, canonicalizeBomComponents, openBomEffectivePeriod } from "./wangdianBomAuthorityService.js";
 import { getLatestCompletePlatformBatch } from "./v3PlatformBatchService.js";
 import { V3_RELATION_SOURCE_TYPE } from "./v3RelationFeatureFlags.js";
+import { analyzeAuthoritativeRelationChange, applyAuthoritativeRelationChange } from "./salesObjectRelationHistoryService.js";
 
 const clean = (value) => String(value ?? "").trim();
 const normalized = (value) => clean(value).replace(/\.0+$/u, "").toLowerCase();
@@ -179,8 +180,8 @@ export function compareV3ProjectionResolver(options = {}) {
   }
   const rows = database.prepare(`SELECT DISTINCT s.id,COALESCE(NULLIF(s.normalizedPlatformSkuCode,''),s.platformSkuCode,'') sourceCode
     FROM platform_goods_excel_import_rows r JOIN sales_link_skus s ON s.id=r.salesLinkSkuId
-    WHERE r.batchId=? ORDER BY s.id`).all(batch.id);
-  const summary = { total: rows.length, same: 0, v3_missing_current: 0, current_missing_v3: 0, relation_conflict: 0, type_conflict: 0, source_conflict: 0, unresolved: 0 };
+    WHERE r.batchId=? AND COALESCE(s.matchStatus,'pending')<>'not_applicable' ORDER BY s.id`).all(batch.id);
+  const summary = { total: rows.length, same: 0, historical_relation_change: 0, v3_missing_current: 0, current_missing_v3: 0, relation_conflict: 0, type_conflict: 0, source_conflict: 0, unresolved: 0 };
   const details = [];
   const detailLimit = Math.max(0, Number(options.detailLimit ?? 200));
   for (const row of rows) {
@@ -195,7 +196,10 @@ export function compareV3ProjectionResolver(options = {}) {
     else if (targetId && current === targetId) status = "same";
     else if (targetId && !current) status = "v3_missing_current";
     else if (!targetId && current) status = "current_missing_v3";
-    else if (targetId && current !== targetId) status = "relation_conflict";
+    else if (targetId && current !== targetId) {
+      const analysis = analyzeAuthoritativeRelationChange(database, { linkSkuId: row.id, currentSalesObjectId: current, targetSalesObjectId: targetId });
+      status = analysis.classification === "historical_relation_change" ? "historical_relation_change" : "relation_conflict";
+    }
     summary[status] += 1;
     if (status !== "same" && details.length < detailLimit) details.push({ linkSkuId: row.id, sourceCode: clean(row.sourceCode), status, currentSalesObjectId: current, projectedSalesObjectId: targetId });
   }
@@ -213,7 +217,8 @@ export function projectOperatingSalesObjects(options = {}) {
   const result = {
     candidateCount: rows.length, confirmedCount: 0, singleCount: 0, bundleCount: 0,
     objectsCreated: 0, objectsUpdated: 0, structuresCreated: 0, structuresUpdated: 0, structuresSuperseded: 0, componentsCreated: 0, relationsCreated: 0,
-    relationsWouldCreate: 0, relationsProvenanceUpdated: 0, relationsUnchanged: 0, relationConflicts: 0, productMappingGovernance: 0,
+    relationsWouldCreate: 0, relationsProvenanceUpdated: 0, relationsUnchanged: 0, relationsSuperseded: 0,
+    historicalRelationChanges: 0, relationConflicts: 0, productMappingGovernance: 0,
     exceptions: [], projectedByCode: new Map(),
     engineering: { writeBatchSize: 0, batchCount: 0, longestTransactionMs: 0 },
   };
@@ -266,7 +271,7 @@ export function projectOperatingSalesObjects(options = {}) {
   });
   const linkSkus = database.prepare(`SELECT DISTINCT s.id,COALESCE(NULLIF(s.normalizedPlatformSkuCode,''),s.platformSkuCode,'') sourceCode
     FROM platform_goods_excel_import_rows r JOIN sales_link_skus s ON s.id=r.salesLinkSkuId
-    WHERE r.batchId=? ORDER BY s.id`).all(batch.id);
+    WHERE r.batchId=? AND COALESCE(s.matchStatus,'pending')<>'not_applicable' ORDER BY s.id`).all(batch.id);
   const insert = database.prepare(`INSERT INTO sales_link_sku_sales_object_relations
       (id,linkSkuId,salesObjectId,effectiveFrom,status,sourceType,sourceBatchId,sourceReferenceJson,reviewedBy,reviewedAt,createdAt,updatedAt)
       VALUES (?,?,?,?,'active',?,?,?,?,?,?,?)`);
@@ -297,8 +302,35 @@ export function projectOperatingSalesObjects(options = {}) {
         return;
       }
       if (current) {
+        const analysis = analyzeAuthoritativeRelationChange(database, {
+          linkSkuId: linkSku.id,
+          currentSalesObjectId: current.salesObjectId,
+          targetSalesObjectId: targetId,
+        });
+        if (analysis.classification === "historical_relation_change") {
+          if (options.relationWriteEnabled === false) {
+            result.historicalRelationChanges += 1;
+            result.relationsWouldCreate += 1;
+            return;
+          }
+          applyAuthoritativeRelationChange(database, {
+            linkSkuId: linkSku.id,
+            currentRelation: current,
+            targetSalesObjectId: targetId,
+            targetSourceType: V3_RELATION_SOURCE_TYPE,
+            targetSourceBatchId: batch.id,
+            targetSourceReference: JSON.parse(evidence),
+            actor,
+            timestamp,
+            analysis,
+          });
+          result.historicalRelationChanges += 1;
+          result.relationsSuperseded += 1;
+          result.relationsCreated += 1;
+          return;
+        }
         result.relationConflicts += 1;
-        result.exceptions.push({ code, linkSkuId: linkSku.id, type: "relation_conflict", currentSalesObjectId: current.salesObjectId, targetSalesObjectId: targetId });
+        result.exceptions.push({ code, linkSkuId: linkSku.id, type: "relation_conflict", reason: analysis.reason, currentSalesObjectId: current.salesObjectId, targetSalesObjectId: targetId });
         return;
       }
       if (options.relationWriteEnabled === false) { result.relationsWouldCreate += 1; return; }
