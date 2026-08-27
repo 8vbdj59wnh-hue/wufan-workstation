@@ -11,6 +11,8 @@ let salesDashboard = null;
 let salesDashboardLoading = false;
 let salesDashboardError = "";
 let salesRange = { preset: "7d", startDate: "", endDate: "" };
+const salesDashboardCache = new Map();
+let salesDashboardRequestVersion = 0;
 let visibleMetricKeys = new Set(["salesAmount", "profitAmount", "profitMargin", "paidPromotionRatio", "dataCoverage"]);
 let chartMetric = "salesAmount";
 let rankingMetrics = { shop: "salesAmount", link: "salesAmount", product: "salesAmount" };
@@ -73,13 +75,36 @@ async function refresh(rerender) {
 }
 
 async function refreshSales(rerender, range = salesRange) {
-  salesRange = { ...range }; salesDashboardLoading = true; salesDashboardError = ""; rerender();
-  try {
-    salesDashboard = (await loadSalesBusinessDashboard(salesRange)).dashboard;
-    salesRange = { preset: salesDashboard.preset, startDate: salesDashboard.startDate, endDate: salesDashboard.endDate };
+  const requestedRange = { preset: range.preset || "7d", startDate: range.startDate || "", endDate: range.endDate || "" };
+  const cacheKey = [requestedRange.preset, requestedRange.startDate, requestedRange.endDate].join("|");
+  const requestVersion = ++salesDashboardRequestVersion;
+  salesRange = requestedRange;
+  salesDashboardError = "";
+  const cachedDashboard = salesDashboardCache.get(cacheKey);
+  if (cachedDashboard) {
+    salesDashboard = cachedDashboard;
+    salesRange = { preset: cachedDashboard.preset, startDate: cachedDashboard.startDate, endDate: cachedDashboard.endDate };
+    salesDashboardLoading = false;
+    rerender();
+    return;
   }
-  catch (caught) { salesDashboardError = caught.message || "销售经营驾驶舱读取失败。"; }
-  salesDashboardLoading = false; rerender();
+  salesDashboardLoading = true;
+  rerender();
+  try {
+    const nextDashboard = (await loadSalesBusinessDashboard(requestedRange)).dashboard;
+    if (requestVersion !== salesDashboardRequestVersion) return;
+    salesDashboard = nextDashboard;
+    salesDashboardCache.set(cacheKey, nextDashboard);
+    salesDashboardCache.set([nextDashboard.preset, nextDashboard.startDate, nextDashboard.endDate].join("|"), nextDashboard);
+    salesRange = { preset: nextDashboard.preset, startDate: nextDashboard.startDate, endDate: nextDashboard.endDate };
+  }
+  catch (caught) {
+    if (requestVersion !== salesDashboardRequestVersion) return;
+    salesDashboardError = caught.message || "销售经营驾驶舱读取失败。";
+  }
+  if (requestVersion !== salesDashboardRequestVersion) return;
+  salesDashboardLoading = false;
+  rerender();
 }
 
 async function refreshAnomalies(rerender) {

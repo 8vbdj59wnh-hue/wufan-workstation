@@ -10,18 +10,22 @@ import {
 } from "./appState.js";
 import { getDataScope, hasPermission } from "../shared/permissions.js";
 import {
+  inferValueModuleIdFromText,
   ProcessInstanceStatus,
   TaskStatus,
   WorkPlanStatus,
   WorkType,
   processInstanceStatusNames,
   taskStatusNames,
+  valueModuleList,
 } from "./data/modelOptions.js";
 import { hasTaskOverdueRecord, isCanceledStatus, isDoneStatus, isTaskOverdue } from "./data/taskUtils.js";
 import {
   getCurrentExecutor as selectCurrentExecutor,
   getCurrentProcessTask as selectCurrentProcessTask,
+  getProcessInstanceBusinessStatus as selectProcessInstanceBusinessStatus,
   getProcessInstanceOwner as selectProcessInstanceOwner,
+  getProcessProgress as selectProcessProgress,
   isTaskExecutionStarted,
 } from "./data/processInstanceSelectors.js";
 import {
@@ -50,7 +54,6 @@ let statsFilters = {
 let dashboardFilters = {
   days: 30,
 };
-let showAllTodayEvents = false;
 let activeTodayOverview = "startedActions";
 let reportFilters = {
   weekStart: "",
@@ -76,7 +79,7 @@ const tabHashMap = {
   assessment: "stats",
   "assessment-stats": "stats",
   "assessment-reports": "reports",
-  "assessment-problems": "problems",
+  "assessment-problems": "stats",
   "assessment-rectifications": "rectifications",
   "assessment-person-profiles": "personProfiles",
 };
@@ -482,7 +485,6 @@ function renderAssessmentTabs() {
   const tabs = [
     ["stats", "今日概览", "assessment-stats"],
     ["reports", "目标推进周报", "assessment-reports"],
-    ["problems", "问题汇总", "assessment-problems"],
     ["rectifications", "改善工作", "assessment-rectifications"],
     ["personProfiles", "人员档案", "assessment-person-profiles"],
   ];
@@ -549,10 +551,6 @@ function getVisibleRectificationRows() {
   return getRectificationRows().filter((row) => isVisibleByAssessmentScope({ ...row.workPlan, ownerId: row.ownerId, submitterId: row.executorId }));
 }
 
-function getTodayCompletedTasks() {
-  return state.tasks.filter((task) => isTaskVisibleForStatistics(task) && isVisibleByAssessmentScope(task) && isDoneStatus(task.status) && isTodayValue(task.completedAt));
-}
-
 function getTodayExceptionTasks() {
   return state.tasks.filter((task) => {
     if (!isTaskVisibleForStatistics(task)) return false;
@@ -565,157 +563,6 @@ function getTodayExceptionTasks() {
       || rejectRecords.some((record) => isTodayValue(getTaskRecordDate(record, task.updatedAt)))
     );
   });
-}
-
-function getTodayManagementSummary() {
-  const rows = getVisibleRectificationRows();
-  return {
-    completedTasks: getTodayCompletedTasks().length,
-    todayExceptions: getTodayExceptionTasks().length,
-    todayRectifications: rows.filter((row) => matchesRectificationFocus(row, "todayException")).length,
-    todayDoneRectifications: rows.filter((row) => matchesRectificationFocus(row, "todayDone")).length,
-  };
-}
-
-function getHighestRiskDepartment(events) {
-  const counts = new Map();
-  events
-    .filter((event) => event.severity >= 2)
-    .forEach((event) => {
-      const departmentName = event.departmentName ?? "";
-      if (departmentName === "") return;
-      counts.set(departmentName, (counts.get(departmentName) ?? 0) + 1);
-    });
-  return [...counts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] ?? "";
-}
-
-function getTodayWorkResultSummaryText(events) {
-  const summary = getTodayManagementSummary();
-  const focusIssues = getFocusIssues().length;
-  const riskDepartment = getHighestRiskDepartment(events);
-  if (summary.todayExceptions === 0 && focusIssues === 0) {
-    if (summary.todayDoneRectifications > 0) return `今日整体运行平稳，暂无重点异常，${summary.todayDoneRectifications} 个改善完成验证。`;
-    return "今日整体运行平稳，暂无重点异常。";
-  }
-  const parts = [`今日新增异常 ${summary.todayExceptions} 条`];
-  if (focusIssues > 0) parts.push(`${focusIssues} 个重点问题需要管理层关注`);
-  if (summary.todayDoneRectifications > 0) parts.push(`${summary.todayDoneRectifications} 个改善完成验证`);
-  if (riskDepartment !== "") parts.push(`当前${riskDepartment}风险最高`);
-  return `${parts.join("，")}。`;
-}
-
-function getTodayWorkResultEvents() {
-  const events = [];
-  getTodayExceptionTasks().forEach((task) => {
-    const returnRecords = getTaskReturnRecords(task);
-    const rejectRecords = getTaskReviewRejectRecords(task);
-    const standardWork = getTaskStandardWork(task);
-    const reason = isTaskAssessmentOverdue(task)
-      ? "任务已逾期"
-      : rejectRecords.length > 0
-        ? "验收退回"
-        : returnRecords.length > 0
-          ? "发生返工"
-          : "任务异常";
-    events.push({
-      level: "critical",
-      severity: 3,
-      label: "今日新增异常",
-      title: `${findName(state.departments, getTaskDepartmentId(task), "未归属部门")}：${task.name}`,
-      departmentName: findName(state.departments, getTaskDepartmentId(task), "未归属部门"),
-      description: `${reason}，来源关键行动：${standardWork?.name ?? "未关联关键行动"}`,
-      owner: findName(state.people, task.ownerId ?? task.executorId, "未设置"),
-      handling: hasOpenRectificationWorkForTask(task.id) ? "已发起改善" : "待确认是否发起改善",
-      action: hasOpenRectificationWorkForTask(task.id) ? "查看改善" : "查看异常",
-      focus: hasOpenRectificationWorkForTask(task.id) ? "active" : "todayException",
-      date: task.updatedAt ?? task.dueDate ?? "",
-    });
-  });
-  getVisibleRectificationRows()
-    .filter((row) => matchesRectificationFocus(row, "todayException"))
-    .forEach((row) => {
-      events.push({
-        level: "warning",
-        severity: 2,
-        label: "今日新增改善",
-        title: row.processInstance?.name ?? row.workPlan.title ?? "未命名改善",
-        departmentName: findName(state.departments, getRowDepartmentId(row), "未归属部门"),
-        description: `来源：${rectificationSourceTypeNames[row.sourceType] ?? row.sourceType}，当前步骤：${row.currentTask?.name ?? row.statusLabel}`,
-        owner: findName(state.people, row.ownerId, "未设置"),
-        handling: "改善已启动",
-        action: "查看改善",
-        processInstanceId: row.processInstance?.id ?? "",
-        focus: "active",
-        date: getRectificationStartAt(row),
-      });
-    });
-  getVisibleRectificationRows()
-    .filter((row) => matchesRectificationFocus(row, "todayDone"))
-    .forEach((row) => {
-      events.push({
-        level: "success",
-        severity: 1,
-        label: "今日验证成功",
-        title: row.processInstance?.name ?? row.workPlan.title ?? "未命名改善",
-        departmentName: findName(state.departments, getRowDepartmentId(row), "未归属部门"),
-        description: `来源关键行动：${row.sourceStandardWork?.name ?? "未关联关键行动"}`,
-        owner: findName(state.people, row.ownerId, "未设置"),
-        handling: "已完成验证",
-        action: "查看改善",
-        processInstanceId: row.processInstance?.id ?? "",
-        focus: "todayDone",
-        date: getRectificationDoneAt(row),
-      });
-    });
-  return events
-    .sort((left, right) => {
-      if (right.severity !== left.severity) return right.severity - left.severity;
-      return String(right.date).localeCompare(String(left.date));
-    });
-}
-
-function renderEventAction(event) {
-  if (event.processInstanceId) {
-    return `<button class="text-button" type="button" data-assessment-action="view-rectification" data-process-instance-id="${escapeHtml(event.processInstanceId)}">${escapeHtml(event.action)}</button>`;
-  }
-  return `<button class="text-button" type="button" data-assessment-action="open-rectification-focus" data-focus="${escapeHtml(event.focus)}">${escapeHtml(event.action)}</button>`;
-}
-
-function renderTodayWorkResultStream() {
-  const events = getTodayWorkResultEvents();
-  const visibleEvents = showAllTodayEvents ? events : events.slice(0, 5);
-  const summaryText = getTodayWorkResultSummaryText(events);
-  return `
-    <section class="settings-section work-result-section-primary">
-      <div class="section-heading">
-        <h2>今日工作结果</h2>
-        <div class="work-result-summary">
-          <span>今日工作摘要</span>
-          <strong>${escapeHtml(summaryText)}</strong>
-        </div>
-        <p class="form-note">先看今天真正发生的关键事件，按需要介入的程度排序。</p>
-      </div>
-      <div class="work-result-event-list">
-        ${events.length === 0 ? `<div class="empty-detail">今天暂无需要管理层介入的异常或已形成闭环的改善。</div>` : visibleEvents.map((event) => `
-          <article class="work-result-event-card is-${event.level}">
-            <div>
-              <span>${escapeHtml(event.label)}</span>
-              <strong>${escapeHtml(event.title)}</strong>
-              <p>${escapeHtml(event.description)}</p>
-            </div>
-            <dl>
-              <div><dt>负责人</dt><dd>${escapeHtml(event.owner)}</dd></div>
-              <div><dt>当前处理</dt><dd>${escapeHtml(event.handling)}</dd></div>
-            </dl>
-            ${renderEventAction(event)}
-          </article>
-        `).join("")}
-        ${events.length > 5 && !showAllTodayEvents ? `
-          <button class="secondary-button work-result-more-button" type="button" data-assessment-action="show-all-today-events">查看更多</button>
-        ` : ""}
-      </div>
-    </section>
-  `;
 }
 
 function getActionOwnerName(instance) {
@@ -809,6 +656,195 @@ function renderTodayOverviewList(key, rows) {
   return `<div class="table-wrap assessment-today-overview-list"><table class="data-table"><thead><tr><th>改善项目名称</th><th>负责人</th><th>完成时间</th><th>改善结果</th></tr></thead><tbody>${rows.length ? rows.map((row) => `<tr><td><strong>${escapeHtml(row.processInstance?.displayTitle ?? row.processInstance?.name ?? row.workPlan.title ?? "未命名改善")}</strong></td><td>${escapeHtml(findName(state.people, row.ownerId, "未设置"))}</td><td>${escapeHtml(formatBusinessDateTime(getRectificationDoneAt(row), "未记录"))}</td><td>${escapeHtml(getRectificationVerificationResult(row) || "已完成验证")}</td></tr>`).join("") : `<tr><td colspan="4">${emptyLabels[key]}</td></tr>`}</tbody></table></div>`;
 }
 
+const keyActionTerminalStatuses = new Set([
+  ProcessInstanceStatus.Done,
+  ProcessInstanceStatus.Stopped,
+  "completed",
+  "canceled",
+  "cancelled",
+  "terminated",
+]);
+
+function getKeyActionTemplate(instance, tasks) {
+  const templateId = instance.taskTemplateId ?? instance.standardWorkId ?? tasks.find((task) => task.taskTemplateId)?.taskTemplateId ?? "";
+  return (state.taskTemplates ?? []).find((template) => template.id === templateId) ?? null;
+}
+
+function getKeyActionModuleId(instance, template) {
+  const category = (state.categories ?? []).find((item) => item.id === template?.categoryId) ?? null;
+  const namedModule = valueModuleList.find((item) => item.name === category?.name);
+  if (namedModule !== undefined) return namedModule.id;
+  return inferValueModuleIdFromText(`${category?.name ?? ""} ${template?.name ?? ""} ${instance.displayTitle ?? instance.name ?? ""}`);
+}
+
+function parseKeyActionDeadline(value) {
+  const rawValue = String(value ?? "").trim();
+  if (rawValue === "") return Number.NaN;
+  return new Date(rawValue.length === 10 ? `${rawValue}T23:59:59+08:00` : rawValue).getTime();
+}
+
+function getKeyActionDueDate(instance, tasks) {
+  if (String(instance.dueDate ?? "").trim() !== "") return instance.dueDate;
+  return tasks
+    .map((task) => task.dueDate)
+    .filter((dueDate) => Number.isFinite(parseKeyActionDeadline(dueDate)))
+    .sort((left, right) => parseKeyActionDeadline(right) - parseKeyActionDeadline(left))[0] ?? "";
+}
+
+function formatKeyActionRemainingTime(dueDate, nowTime) {
+  const dueTime = parseKeyActionDeadline(dueDate);
+  if (!Number.isFinite(dueTime)) return { label: "未设置截止时间", overdue: false, dueTime: Number.MAX_SAFE_INTEGER };
+
+  const overdue = dueTime < nowTime;
+  const totalMinutes = Math.max(1, Math.ceil(Math.abs(dueTime - nowTime) / 60000));
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  const duration = days > 0
+    ? `${days}天${hours > 0 ? `${hours}小时` : ""}`
+    : hours > 0
+      ? `${hours}小时${minutes > 0 ? `${minutes}分钟` : ""}`
+      : `${minutes}分钟`;
+  return { label: `${overdue ? "逾期" : "剩余"}${duration}`, overdue, dueTime };
+}
+
+function getIncompleteKeyActionRows() {
+  const nowTime = new Date(getNow()).getTime();
+  const rectificationProcessIds = new Set(
+    (state.workPlans ?? [])
+      .filter((workPlan) => workPlan.workType === WorkType.Rectification)
+      .map((workPlan) => workPlan.processInstanceId)
+      .filter(Boolean),
+  );
+  return (state.processInstances ?? [])
+    .filter((instance) => !rectificationProcessIds.has(instance.id))
+    .filter((instance) => !keyActionTerminalStatuses.has(instance.status))
+    .filter((instance) => selectProcessInstanceBusinessStatus(instance.id, state).status !== "done")
+    .map((instance) => {
+      const tasks = (state.tasks ?? []).filter((task) => task.processInstanceId === instance.id);
+      const template = getKeyActionTemplate(instance, tasks);
+      const ownerId = selectProcessInstanceOwner(instance.id, state).userId;
+      const owner = (state.people ?? []).find((person) => person.id === ownerId) ?? null;
+      const departmentId = instance.departmentId ?? template?.departmentId ?? tasks.find((task) => task.departmentId)?.departmentId ?? owner?.departmentId ?? "";
+      const due = formatKeyActionRemainingTime(getKeyActionDueDate(instance, tasks), nowTime);
+      return {
+        instance,
+        moduleId: getKeyActionModuleId(instance, template),
+        ownerId,
+        departmentId,
+        initiatorId: instance.initiatorId ?? instance.createdBy ?? "",
+        progress: selectProcessProgress(instance.id, state),
+        due,
+      };
+    })
+    .filter((row) => isVisibleByAssessmentScope({
+      ...row.instance,
+      departmentId: row.departmentId,
+      ownerId: row.ownerId,
+      submitterId: row.initiatorId,
+    }))
+    .sort((left, right) => {
+      if (left.due.overdue !== right.due.overdue) return left.due.overdue ? -1 : 1;
+      if (left.due.dueTime !== right.due.dueTime) return left.due.dueTime - right.due.dueTime;
+      return String(right.instance.createdAt ?? "").localeCompare(String(left.instance.createdAt ?? ""));
+    });
+}
+
+function getIncompleteImprovementActionRows() {
+  const nowTime = new Date(getNow()).getTime();
+  return getVisibleRectificationRows()
+    .filter((row) => row.processInstance !== null)
+    .filter((row) => row.status !== "done" && row.status !== "canceled")
+    .filter((row) => selectProcessInstanceBusinessStatus(row.processInstance.id, state).status !== "done")
+    .map((row) => {
+      const template = row.sourceStandardWork ?? getKeyActionTemplate(row.processInstance, row.tasks);
+      const ownerId = row.ownerId || selectProcessInstanceOwner(row.processInstance.id, state).userId;
+      return {
+        instance: row.processInstance,
+        moduleId: getKeyActionModuleId(row.processInstance, template),
+        ownerId,
+        initiatorId: row.processInstance.initiatorId ?? row.workPlan.createdBy ?? "",
+        progress: selectProcessProgress(row.processInstance.id, state),
+        due: formatKeyActionRemainingTime(getKeyActionDueDate(row.processInstance, row.tasks), nowTime),
+      };
+    })
+    .sort((left, right) => {
+      if (left.due.overdue !== right.due.overdue) return left.due.overdue ? -1 : 1;
+      if (left.due.dueTime !== right.due.dueTime) return left.due.dueTime - right.due.dueTime;
+      return String(right.instance.createdAt ?? "").localeCompare(String(left.instance.createdAt ?? ""));
+    });
+}
+
+function renderActionBoardCard(row, { action, itemLabel }) {
+  const actionName = row.instance.displayTitle ?? row.instance.name ?? `未命名${itemLabel}`;
+  const progressLabel = row.progress.total > 0 ? `${row.progress.completed}/${row.progress.total} 步` : "尚未配置步骤";
+  return `
+    <button class="assessment-key-action-card ${row.due.overdue ? "is-overdue" : ""}" type="button" data-assessment-action="${escapeHtml(action)}" data-process-instance-id="${escapeHtml(row.instance.id)}" aria-label="查看${escapeHtml(itemLabel)}：${escapeHtml(actionName)}">
+      <span class="assessment-key-action-card-top">
+        <strong>${escapeHtml(actionName)}</strong>
+        <em class="assessment-key-action-time ${row.due.overdue ? "is-overdue" : ""}">${escapeHtml(row.due.label)}</em>
+      </span>
+      <span class="assessment-key-action-people">
+        <span><small>发起人</small><b>${escapeHtml(findName(state.people, row.initiatorId, "未设置"))}</b></span>
+        <span><small>负责人</small><b>${escapeHtml(findName(state.people, row.ownerId, "未设置"))}</b></span>
+      </span>
+      <span class="assessment-key-action-progress">
+        <span><small>步骤进度</small><b>${escapeHtml(progressLabel)}</b></span>
+        <span class="assessment-key-action-progress-track" role="progressbar" aria-label="步骤进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${row.progress.percentage}"><i style="width: ${row.progress.percentage}%"></i></span>
+      </span>
+    </button>
+  `;
+}
+
+function renderCategorizedActionBoard({ rows, title, description, action, itemLabel, modifier = "" }) {
+  const rowsByModule = new Map(valueModuleList.map((module) => [module.id, []]));
+  rows.forEach((row) => rowsByModule.get(row.moduleId)?.push(row));
+  return `
+    <div class="assessment-key-action-board-block ${modifier}">
+      <div class="assessment-key-action-board-heading">
+        <div><h3>${escapeHtml(title)}</h3><p>${escapeHtml(description)}</p></div>
+        <span>${rows.length} 个未完成</span>
+      </div>
+      <div class="assessment-key-action-board-scroll">
+        <div class="assessment-key-action-board">
+          ${valueModuleList.map((module) => {
+            const moduleRows = rowsByModule.get(module.id) ?? [];
+            return `
+              <section class="assessment-key-action-column is-${module.id.replaceAll("_", "-")}">
+                <header><h4>${escapeHtml(module.name)}</h4><span>${moduleRows.length} 项</span></header>
+                <div class="assessment-key-action-list">
+                  ${moduleRows.length ? moduleRows.map((row) => renderActionBoardCard(row, { action, itemLabel })).join("") : `<div class="assessment-key-action-empty">暂无未完成${escapeHtml(itemLabel)}</div>`}
+                </div>
+              </section>
+            `;
+          }).join("")}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderKeyActionBoard() {
+  return renderCategorizedActionBoard({
+    rows: getIncompleteKeyActionRows(),
+    title: "关键行动看板",
+    description: "按七个价值链分类展示当前未完成的关键行动。",
+    action: "view-key-action",
+    itemLabel: "关键行动",
+  });
+}
+
+function renderImprovementActionBoard() {
+  return renderCategorizedActionBoard({
+    rows: getIncompleteImprovementActionRows(),
+    title: "改善行动看板",
+    description: "按七个价值链分类展示当前未完成的改善行动。",
+    action: "view-rectification",
+    itemLabel: "改善行动",
+    modifier: "is-improvement",
+  });
+}
+
 function renderTodayOverview() {
   const sections = getTodayOverviewSections();
   const items = [
@@ -831,6 +867,7 @@ function renderTodayOverview() {
         `).join("")}
       </div>
       ${renderTodayOverviewList(activeItem[0], sections[activeItem[0]])}
+      ${renderKeyActionBoard()}
     </section>
   `;
 }
@@ -1198,7 +1235,6 @@ function renderDepartmentStatsTable(tasks, processes) {
 
 function renderStatsPage() {
   return `
-    ${renderTodayWorkResultStream()}
     ${renderTodayOverview()}
     ${renderFocusIssues()}
     ${renderImprovementProgress()}
@@ -1323,6 +1359,7 @@ function renderRectificationPage() {
         <h2>改善工作</h2>
         <p class="form-note">只展示由工作结果或异常来源发起的改善工作，详情继续复用已发起关键行动详情。</p>
       </div>
+      ${renderImprovementActionBoard()}
       ${renderRectificationFilters()}
       ${focusLabel === "" ? "" : `<div class="inline-alert">当前来自今日重点筛选：${escapeHtml(focusLabel)}。调整上方筛选后会自动退出该快捷筛选。</div>`}
       <div class="table-wrap"><table class="data-table">
@@ -1949,13 +1986,13 @@ export function bindAssessmentPageEvents(rerender) {
       rerender();
       return;
     }
-    if (action === "show-all-today-events") {
-      showAllTodayEvents = true;
+    if (action === "view-rectification") {
+      modalState = { kind: "rectificationDetail", processInstanceId: button.dataset.processInstanceId };
       rerender();
       return;
     }
-    if (action === "view-rectification") {
-      modalState = { kind: "rectificationDetail", processInstanceId: button.dataset.processInstanceId };
+    if (action === "view-key-action") {
+      modalState = { kind: "personProfileProcessDetail", processInstanceId: button.dataset.processInstanceId };
       rerender();
       return;
     }
@@ -1996,23 +2033,15 @@ export function renderAssessmentPage() {
   }
   return `
     <div class="assessment-page">
-      <div class="section-heading with-actions page-toolbar">
-        <div>
-          <h2>管理驾驶舱</h2>
-          <p class="form-note">公司的每日管理入口，优先回答今天发生了什么、哪些事情需要介入、哪些经验已经沉淀为新的标准。</p>
-        </div>
-      </div>
       ${renderAssessmentTabs()}
       ${
         activeAssessmentTab === "reports"
           ? renderReportsPage()
-          : activeAssessmentTab === "problems"
-            ? canCurrentUser("workResults.view") ? renderProblemsPage() : `<section class="settings-section"><div class="empty-detail">你没有权限查看问题汇总。</div></section>`
-            : activeAssessmentTab === "rectifications"
-              ? renderRectificationPage()
-              : activeAssessmentTab === "personProfiles"
-                ? renderPersonProfilesPage()
-                : renderStatsPage()
+          : activeAssessmentTab === "rectifications"
+            ? renderRectificationPage()
+            : activeAssessmentTab === "personProfiles"
+              ? renderPersonProfilesPage()
+              : renderStatsPage()
       }
       ${renderModals()}
     </div>

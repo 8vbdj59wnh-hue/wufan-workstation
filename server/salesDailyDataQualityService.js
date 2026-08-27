@@ -3,6 +3,7 @@ import { classifySalesDailyPreviewRows } from "./salesDailyFactPreviewService.js
 
 const parseJson = (value, fallback = {}) => { try { return JSON.parse(value || ""); } catch { return fallback; } };
 const number = (value) => Number(value || 0);
+const qualityCacheByDatabase = new WeakMap();
 
 function metric() { return { rows: 0, salesAmount: 0, profitAmount: 0 }; }
 function add(target, data = {}) {
@@ -33,6 +34,9 @@ export function querySalesDailyDataQuality(options = {}) {
   const database = options.database || getDatabase();
   const batch = latestCommittedBatch(database);
   if (!batch) return { capability: "QuerySalesDailyDataQuality", contractVersion: "1.0", hasData: false, health: { status: "error", reasons: ["NO_COMMITTED_BATCH"] } };
+  const cacheTtlMs = Math.max(0, Number(options.cacheTtlMs || 0));
+  const cached = qualityCacheByDatabase.get(database);
+  if (cacheTtlMs > 0 && cached?.batchId === batch.id && Date.now() - cached.createdAt < cacheTtlMs) return cached.value;
   const summary = parseJson(batch.previewSummaryJson);
   const factCommit = commitAudit(summary) || {};
   const storedRows = database.prepare("SELECT rowNumber,rawDataJson FROM connection_import_rows WHERE batchId=? ORDER BY rowNumber").all(batch.id)
@@ -69,7 +73,7 @@ export function querySalesDailyDataQuality(options = {}) {
   if (categories.missing_relation.rows || categories.pending_relation.rows) reasons.push("RELATION_PENDING");
   if (categories.identity_error.rows) reasons.push("IDENTITY_ERROR");
   if ((salesCoverage ?? 0) < 0.95) reasons.push("LOW_AMOUNT_COVERAGE");
-  return {
+  const result = {
     capability: "QuerySalesDailyDataQuality", contractVersion: "1.1", hasData: true,
     batch: { id: batch.id, fileName: batch.fileName, dateStart: batch.periodStart, dateEnd: batch.periodEnd, status: batch.status, importedAt: batch.createdAt, confirmedAt: factCommit.confirmedAt || batch.completedAt, factCount: facts.length },
     coverage: { totalRows: Number(batch.totalRows || storedRows.length), atomicRows: storedRows.length - categories.excluded.rows, productRows: productRowTotal, factRows: facts.length, rowCoverage, categories },
@@ -88,6 +92,8 @@ export function querySalesDailyDataQuality(options = {}) {
     health: { status: healthStatus, reasons, exceptionCount, lastUpdatedAt: factCommit.confirmedAt || batch.completedAt || batch.updatedAt },
     source: "sales_daily_batch_and_facts_v2",
   };
+  if (cacheTtlMs > 0) qualityCacheByDatabase.set(database, { batchId: batch.id, createdAt: Date.now(), value: result });
+  return result;
 }
 
 export default querySalesDailyDataQuality;

@@ -107,7 +107,7 @@ function sorted(items, metric, direction = "desc") {
 
 export function getSalesBusinessDashboard(input = {}, options = {}) {
   const database = options.database || getDatabase();
-  const quality = querySalesDailyDataQuality({ database });
+  const quality = querySalesDailyDataQuality({ database, cacheTtlMs: 30_000 });
   if (!quality.hasData) return { capability: "SalesBusinessDashboard", contractVersion: DASHBOARD_CONTRACT_VERSION, preset: "7d", hasData: false, quality };
   const range = resolveRange(input, quality.batch.dateEnd); const queryOptions = { database };
   const summary = readExtendedSummary(database, range.startDate, range.endDate);
