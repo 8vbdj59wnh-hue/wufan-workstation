@@ -5,6 +5,7 @@ import path from "node:path";
 import multer from "multer";
 import * as XLSX from "xlsx";
 import { shouldShowTaskInTaskCenter } from "../shared/taskCenterVisibility.js";
+import { configureApiCachePolicy } from "./apiCachePolicy.js";
 import {
   closeDatabase,
   createResource,
@@ -329,6 +330,7 @@ import {
 } from "./templateVersionService.js";
 
 const app = express();
+configureApiCachePolicy(app);
 const host = process.env.HOST ?? "0.0.0.0";
 const port = Number(process.env.PORT ?? 3001);
 const applicationVersion = (() => {

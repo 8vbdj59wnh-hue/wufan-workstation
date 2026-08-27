@@ -155,7 +155,7 @@ export async function authFetch(url, options = {}) {
   const token = getAuthToken();
   if (token !== "") headers.set("Authorization", `Bearer ${token}`);
   if (!headers.has("X-Wufan-API-Source")) headers.set("X-Wufan-API-Source", getApiUsageSource());
-  return fetch(url, { ...options, headers });
+  return fetch(url, { ...options, cache: "no-store", headers });
 }
 
 export function getStoreOptionsLoadState() {

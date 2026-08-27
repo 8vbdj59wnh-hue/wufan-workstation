@@ -33,9 +33,10 @@ test("partial module snapshots preserve undeclared state resources", () => {
 test("empty store options are reloaded once and shared by concurrent callers", async () => {
   const originalFetch = globalThis.fetch;
   let requestCount = 0;
-  globalThis.fetch = async (url) => {
+  globalThis.fetch = async (url, options) => {
     requestCount += 1;
     assert.match(String(url), /\/api\/stores$/);
+    assert.equal(options.cache, "no-store");
     return new Response(JSON.stringify([
       { id: "store-active", name: "测试店铺", platform: "天猫", status: "active" },
     ]), {

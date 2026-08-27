@@ -2,11 +2,46 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  apiNoStoreHeaders,
+  configureApiCachePolicy,
+} from "../server/apiCachePolicy.js";
+import {
   goalCenterBootstrapResources,
   goalCenterInitialResources,
   pickGoalCenterBootstrapResources,
   readGoalCenterBootstrap,
 } from "../server/goalCenterBootstrapService.js";
+
+test("API cache policy disables conditional responses and marks every API response as no-store", () => {
+  const calls = [];
+  const app = {
+    disable(setting) {
+      calls.push(["disable", setting]);
+    },
+    use(path, middleware) {
+      calls.push(["use", path, middleware]);
+    },
+  };
+
+  configureApiCachePolicy(app);
+
+  assert.deepEqual(calls.slice(0, 1), [["disable", "etag"]]);
+  assert.equal(calls[1][0], "use");
+  assert.equal(calls[1][1], "/api");
+
+  const headers = {};
+  let nextCalls = 0;
+  calls[1][2]({}, {
+    setHeader(name, value) {
+      headers[name] = value;
+    },
+  }, () => {
+    nextCalls += 1;
+  });
+
+  assert.deepEqual(headers, apiNoStoreHeaders);
+  assert.equal(nextCalls, 1);
+});
 
 test("goal center reads only its declared resources", () => {
   const reads = [];
