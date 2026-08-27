@@ -48,10 +48,12 @@ function batchResult(database, batchId) {
   const summary = files.reduce((result, file) => {
     const item = file.summary || {};
     result.rawRows += Number(item.rawRows || 0); result.filteredRows += Number(item.filteredRows || 0);
+    result.validOperationRows += Number(item.validOperationRows || 0);
+    result.ignoredDelistedLinks += Number(item.ignoredDelistedLinks || 0);
     result.newLinks += Number(item.newLinks || 0); result.updatedLinks += Number(item.updatedLinks || 0);
     result.operationFacts += Number(item.operationFacts || 0); result.errors += Number(item.errors || 0);
     return result;
-  }, { rawRows: 0, filteredRows: 0, newLinks: 0, updatedLinks: 0, operationFacts: 0, errors: 0 });
+  }, { rawRows: 0, filteredRows: 0, validOperationRows: 0, ignoredDelistedLinks: 0, newLinks: 0, updatedLinks: 0, operationFacts: 0, errors: 0 });
   return { batch, files, summary };
 }
 

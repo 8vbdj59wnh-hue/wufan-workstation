@@ -10,7 +10,7 @@ export const connectionImportTypes = [
   "erp_sales",
   "erp_product_relations",
 ];
-export const PLATFORM_LINK_OPERATION_PARSER_VERSION = "platform-link-id-date-v4";
+export const PLATFORM_LINK_OPERATION_PARSER_VERSION = "platform-link-id-date-v5";
 
 const typeDefinitions = {
   platform_link_operations: {
@@ -64,6 +64,12 @@ function text(value) { const result = String(value ?? "").trim(); return result 
 function number(value) { if (text(value) === "") return null; const parsed = Number(String(value).replaceAll(",", "").replace("%", "")); return Number.isFinite(parsed) ? parsed : null; }
 function json(value, fallback) { try { return JSON.parse(value || ""); } catch { return fallback; } }
 function normalized(value) { return text(value).toLowerCase(); }
+function isDelistedPlatformOperation(row) {
+  const status = normalized(row?.status).replaceAll(/\s+/g, "");
+  return ["delisted", "offline", "off_sale", "offsale", "inactive"].includes(status)
+    || /^(?:已)?下架(?:商品|货品)?$/.test(status)
+    || ["已失效", "已删除", "停售"].includes(status);
+}
 function id(prefix) { return `${prefix}-${crypto.randomUUID()}`; }
 function now() { return new Date().toISOString(); }
 function normalizeDate(value) {
@@ -171,15 +177,16 @@ function platformTemplateConfigs() {
     "商品支付转化率": "conversionRate", "成功退款金额": "refundAmount", "竞争力评分": "competitionScore",
   };
   return [
-    { name: "天猫-点意旗舰店链接经营模板", platform: "tmall", shop: "点意旗舰店", shopLookup: ["点意旗舰店"], mapping: businessMapping, rules: { headerRow: 5, sheetNameContains: "生意参谋平台", dateRule: { type: "field", field: "统计日期" }, statusMap: { 当前在线: "active" } } },
-    { name: "淘宝-半然链接经营模板", platform: "taobao", shop: "半然", shopLookup: ["Banran半然", "半然"], mapping: businessMapping, rules: { headerRow: 5, sheetNameContains: "生意参谋平台", dateRule: { type: "field", field: "统计日期" }, statusMap: { 当前在线: "active" } } },
-    { name: "小红书-半然链接经营模板", platform: "xiaohongshu", shop: "半然", shopLookup: ["半然-小红书", "半然"], mapping: { "商品ID": "platformGoodsId", "商品NAME": "title", "一级品类": "category", "商品访客数": "visitorCount", "商品浏览量": "viewCount", "新增加入心愿单人数": "favoriteCount", "新增加购人数": "cartCount", "支付买家数": "payBuyerCount", "支付件数": "payQuantity", "支付金额": "payAmount", "支付转化率": "conversionRate", "退款金额（支付时间）": "refundAmount" }, rules: { headerRow: 1, sheetNameContains: "商品明细数据下载", dateRule: { type: "sheet_name" }, rowFilters: [{ field: "经营方式", value: "全部" }, { field: "载体", value: "全部" }] } },
-    { name: "京东-点意链接经营模板", platform: "jd", shop: "点意", shopLookup: ["点意旗舰店", "点意"], mapping: { "SPU": "platformGoodsId", "SPU名称": "title", "一级类目": "category", "时间": "periodStart", "商品访客数": "visitorCount", "商品浏览量": "viewCount", "加购客户数": "cartCount", "成交客户数": "payBuyerCount", "成交商品件数": "payQuantity", "成交金额": "payAmount", "成交转化率": "conversionRate", "取消及售后退款金额": "refundAmount" }, rules: { headerRow: 1, sheetNameContains: "商品明细", dateRule: { type: "field", field: "时间" }, rowFilters: [{ field: "SPU", operator: "not_equals", value: "合计" }] } },
+    { name: "天猫-点意旗舰店链接经营模板", platform: "tmall", shop: "点意旗舰店", shopLookup: ["点意旗舰店"], mapping: businessMapping, rules: { headerRow: 5, sheetNameContains: "生意参谋平台", dateRule: { type: "field", field: "统计日期" }, statusMap: { 当前在线: "active", 已下架: "delisted", 下架: "delisted" } } },
+    { name: "淘宝-半然链接经营模板", platform: "taobao", shop: "半然", shopLookup: ["Banran半然", "半然"], mapping: businessMapping, rules: { headerRow: 5, sheetNameContains: "生意参谋平台", dateRule: { type: "field", field: "统计日期" }, statusMap: { 当前在线: "active", 已下架: "delisted", 下架: "delisted" } } },
+    { name: "小红书-半然链接经营模板", platform: "xiaohongshu", shop: "半然", shopLookup: ["半然-小红书", "半然"], mapping: { "商品ID": "platformGoodsId", "商品NAME": "title", "一级品类": "category", "商品状态": "status", "状态": "status", "商品访客数": "visitorCount", "商品浏览量": "viewCount", "新增加入心愿单人数": "favoriteCount", "新增加购人数": "cartCount", "支付买家数": "payBuyerCount", "支付件数": "payQuantity", "支付金额": "payAmount", "支付转化率": "conversionRate", "退款金额（支付时间）": "refundAmount" }, rules: { headerRow: 1, sheetNameContains: "商品明细数据下载", dateRule: { type: "sheet_name" }, statusMap: { 在售: "active", 当前在线: "active", 已下架: "delisted", 下架: "delisted" }, rowFilters: [{ field: "经营方式", value: "全部" }, { field: "载体", value: "全部" }] } },
+    { name: "京东-点意链接经营模板", platform: "jd", shop: "点意", shopLookup: ["点意旗舰店", "点意"], mapping: { "SPU": "platformGoodsId", "SPU名称": "title", "一级类目": "category", "时间": "periodStart", "商品状态": "status", "状态": "status", "商品访客数": "visitorCount", "商品浏览量": "viewCount", "加购客户数": "cartCount", "成交客户数": "payBuyerCount", "成交商品件数": "payQuantity", "成交金额": "payAmount", "成交转化率": "conversionRate", "取消及售后退款金额": "refundAmount" }, rules: { headerRow: 1, sheetNameContains: "商品明细", dateRule: { type: "field", field: "时间" }, statusMap: { 在售: "active", 在线: "active", 已下架: "delisted", 下架: "delisted" }, rowFilters: [{ field: "SPU", operator: "not_equals", value: "合计" }] } },
   ];
 }
 
 const douyinBusinessMapping = {
   "商品ID": "platformGoodsId", "商品名称": "title", "商品标题": "title", "日期": "periodStart", "统计日期": "periodStart",
+  "商品状态": "status", "状态": "status",
   "商品访客数": "visitorCount", "商品浏览量": "viewCount", "点击量": "clickCount", "收藏数": "favoriteCount",
   "加购数": "cartCount", "支付买家数": "payBuyerCount", "支付件数": "payQuantity", "支付金额": "payAmount", "支付转化率": "conversionRate",
 };
@@ -207,7 +214,7 @@ export function ensurePlatformLinkOperationTemplates() {
       configs.push({
         name: `抖音-${shop.displayName || shop.shopName}链接经营模板`, platform: "douyin", shop: shop.displayName || shop.shopName,
         shopLookup: [shop.id, shop.shopName, shop.displayName].filter(Boolean), mapping: douyinBusinessMapping,
-        rules: { headerRow: 1, dateRule: { type: "field", field: "统计日期" }, statusMap: { 在线: "active" } },
+        rules: { headerRow: 1, dateRule: { type: "field", field: "统计日期" }, statusMap: { 在线: "active", 在售: "active", 已下架: "delisted", 下架: "delisted" } },
       });
     }
     for (const config of configs) {
@@ -242,7 +249,7 @@ function platformLinkParserConfigs() {
     name: "抖音链接经营格式",
     platform: "douyin",
     mapping: douyinBusinessMapping,
-    rules: { headerRow: 1, dateRule: { type: "field", field: "统计日期" }, statusMap: { 在线: "active" } },
+    rules: { headerRow: 1, dateRule: { type: "field", field: "统计日期" }, statusMap: { 在线: "active", 在售: "active", 已下架: "delisted", 下架: "delisted" } },
   }];
   const unique = new Map();
   for (const config of configs) {
@@ -473,6 +480,23 @@ export function previewConnectionDataImport({ buffer, fileName, importType, temp
   const rows = normalizedRows.filter((item) => !(isSalesFactParser
     && (/^合计[:：]?$/.test(text(item.data.shop)) || normalized(item.data.platformGoodsId) === "na")));
   for (const item of rows) {
+    if (importType === "platform_link_operations" && isDelistedPlatformOperation(item.data)) {
+      try {
+        if (!findPlatformOperationLink(database, item.data)) {
+          Object.assign(item, {
+            status: "ignored",
+            errorType: null,
+            errorMessage: null,
+            resolutionType: "normal_business",
+            resolutionNote: "平台显示已下架且系统无生效Link，保留导入审计并忽略。",
+          });
+          continue;
+        }
+      } catch (error) {
+        Object.assign(item, { status: "error", errorType: error.type || "missing_shop", errorMessage: error.message });
+        continue;
+      }
+    }
     const missing = definition.required.filter((field) => text(item.data[field]) === "");
     const invalidNumbers = Object.entries(mapping).filter(([source, target]) => numericFields.has(target) && text(item.raw[source]) !== "" && item.data[target] === null).map(([, target]) => target);
     if (missing.length) Object.assign(item, { status: "error", errorType: missing.some((field) => dateFields.has(field)) ? "missing_period" : "missing_field", errorMessage: `缺少必填字段：${missing.join("、")}` });
@@ -522,7 +546,7 @@ export function previewConnectionDataImport({ buffer, fileName, importType, temp
   const duplicateKeys = new Set(); const seen = new Set();
   for (const item of rows.filter((row) => row.status === "validated")) { const key = duplicateKey(item.data); if (seen.has(key)) duplicateKeys.add(key); seen.add(key); }
   for (const item of rows.filter((row) => duplicateKeys.has(duplicateKey(row.data)))) Object.assign(item, { status: "error", errorType: "duplicate_identity", errorMessage: importType === "erp_sales" ? "同一平台SKU、ERP SKU及周期存在重复销售数据，已隔离。" : importType === "platform_link_operations" ? "同一链接ID及数据日期存在重复，已阻断本批次确认。" : "过滤后同一商品ID存在重复，已阻断本批次确认。" });
-  const counts = previewSummary(database, rows, importType); const errorRows = rows.filter((item) => item.status === "error").length; const governanceRows = rows.filter((item) => item.status === "pending_relation").length; const validRows = rows.filter((item) => item.status === "validated").length;
+  const counts = previewSummary(database, rows, importType); const errorRows = rows.filter((item) => item.status === "error").length; const governanceRows = rows.filter((item) => item.status === "pending_relation").length; const validRows = rows.filter((item) => item.status === "validated").length; const ignoredDelistedLinks = rows.filter((item) => item.status === "ignored" && isDelistedPlatformOperation(item.data)).length;
   const periods = [...new Set(rows.filter((item) => item.status === "validated").map((item) => `${item.data.periodStart}|${item.data.periodEnd}`))];
   const periodStarts = periods.map((item) => item.split("|")[0]).filter(Boolean).sort();
   const periodEnds = periods.map((item) => item.split("|")[1]).filter(Boolean).sort();
@@ -531,12 +555,12 @@ export function previewConnectionDataImport({ buffer, fileName, importType, temp
   const resolvedPlatforms = [...new Set(rows.filter((item) => item.status === "validated").map((item) => text(item.data.platform)).filter(Boolean))];
   const resolvedShopIds = [...new Set(rows.filter((item) => item.status === "validated").map((item) => text(item.data.shopId)).filter(Boolean))];
   const resolvedShops = [...new Set(rows.filter((item) => item.status === "validated").map((item) => text(item.data.shop)).filter(Boolean))];
-  const preview = { parserVersion: effectiveParserVersion, sourceFileHash, templateName: version?.templateName || "自动字段映射", detectedAutomatically: importType === "platform_link_operations", platform: resolvedPlatforms.length === 1 ? resolvedPlatforms[0] : resolvedPlatforms.length > 1 ? "mixed" : "", shopId: resolvedShopIds.length === 1 ? resolvedShopIds[0] : "", shop: resolvedShops.length === 1 ? resolvedShops[0] : resolvedShops.length > 1 ? "多店铺" : "", resolvedShopCount: resolvedShopIds.length, shopInference: inferredFileShop, sheetName: workbook.sheetName, periodStart: previewPeriodStart, periodEnd: previewPeriodEnd, rawRows: workbook.rawRows.length, filteredRows: rows.length, ignoredSummaryRows: normalizedRows.length - rows.length, newLinks: counts.createLinks, updatedLinks: counts.updateLinks, operationFacts: counts.facts, errors: errorRows, governancePending: governanceRows, duplicateGoodsIds: [...new Set([...duplicateKeys].map((key) => key.split("|")[0]))] };
+  const preview = { parserVersion: effectiveParserVersion, sourceFileHash, templateName: version?.templateName || "自动字段映射", detectedAutomatically: importType === "platform_link_operations", platform: resolvedPlatforms.length === 1 ? resolvedPlatforms[0] : resolvedPlatforms.length > 1 ? "mixed" : "", shopId: resolvedShopIds.length === 1 ? resolvedShopIds[0] : "", shop: resolvedShops.length === 1 ? resolvedShops[0] : resolvedShops.length > 1 ? "多店铺" : "", resolvedShopCount: resolvedShopIds.length, shopInference: inferredFileShop, sheetName: workbook.sheetName, periodStart: previewPeriodStart, periodEnd: previewPeriodEnd, rawRows: workbook.rawRows.length, filteredRows: rows.length, validOperationRows: validRows, ignoredDelistedLinks, ignoredSummaryRows: normalizedRows.length - rows.length, newLinks: counts.createLinks, updatedLinks: counts.updateLinks, operationFacts: counts.facts, errors: errorRows, governancePending: governanceRows, duplicateGoodsIds: [...new Set([...duplicateKeys].map((key) => key.split("|")[0]))] };
   const batchId = id("connection-import"); const createdAt = now(); const batchStatus = duplicateKeys.size && !isSalesFactParser ? "blocked" : "validated";
   database.transaction(() => {
     database.prepare(`INSERT INTO connection_import_batches (id,sourceType,externalShopId,fileName,fileHash,businessDate,periodStart,periodEnd,periodType,status,totalRows,matchedRows,pendingRows,errorRows,createdBy,createdAt,updatedAt,importType,templateVersionId,sourcePlatform,previewSummaryJson) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(batchId, importType, preview.shopId || "", text(fileName) || "链接数据.xlsx", hash, preview.periodEnd || createdAt.slice(0, 10), preview.periodStart || null, preview.periodEnd || null, text(matchRules.periodType) || null, batchStatus, rows.length, 0, validRows + governanceRows, errorRows, text(userId) || null, createdAt, createdAt, importType, null, preview.platform, JSON.stringify(preview));
-    const insert = database.prepare(`INSERT INTO connection_import_rows (id,batchId,rowNumber,externalKey,rawDataJson,normalizedDataJson,status,errorType,errorMessage,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?)`);
-    for (const item of rows) insert.run(id("connection-import-row"), batchId, item.rowNumber, text(item.data.platformGoodsId || item.data.skuCode), JSON.stringify(item.raw), JSON.stringify(item.data), item.status, item.errorType, item.errorMessage, createdAt);
+    const insert = database.prepare(`INSERT INTO connection_import_rows (id,batchId,rowNumber,externalKey,rawDataJson,normalizedDataJson,status,errorType,errorMessage,resolutionType,resolutionNote,resolvedAt,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+    for (const item of rows) insert.run(id("connection-import-row"), batchId, item.rowNumber, text(item.data.platformGoodsId || item.data.skuCode), JSON.stringify(item.raw), JSON.stringify(item.data), item.status, item.errorType, item.errorMessage, item.resolutionType || null, item.resolutionNote || null, item.status === "ignored" ? createdAt : null, createdAt);
     const insertCandidate = database.prepare(`INSERT OR IGNORE INTO sales_link_sku_erp_mapping_candidates
       (id,salesLinkSkuId,erpSkuId,candidateType,suggestedQuantity,sourceType,sourceBatchId,sourceFileHash,sourceRowNumber,evidenceJson,affectedRowCount,status,createdAt,updatedAt)
       VALUES (?,?,?,'single',1,'erp_product_relations',?,?,?,?,1,'pending',?,?)`);
