@@ -958,6 +958,7 @@ function canUsePublishingAccountOptions(user) {
     hasPermission(user, "actionStandards.manage") ||
     hasPermission(user, "keyActions.launch") ||
     hasPermission(user, "keyActions.launch") ||
+    hasPermission(user, "tasks.execute") ||
     hasPermission(user, "contentNotes.view") ||
     hasPermission(user, "contentNotes.manage") ||
     hasPermission(user, "contentNotes.manage")
@@ -1607,7 +1608,14 @@ app.get("/api/bootstrap", (request, response) => {
       "taskTemplates", "templateTagCategories", "templateTags", "issuesRequirements", "standardWorkForms"];
     const templateCenterCommon = ["templates", "templateTagCategories", "templateTags"];
     const processesCommon = ["categories", "departments", "goals", "methodologies", "people", "positions", "processTemplateNodes", "processTemplates", "taskTemplates"];
-    const scheduleBoardCommon = ["categories", "departments", "people", "taskTemplates", "processTemplates"];
+    // The action detail editor renders fields from the latest published form and
+    // resolves publishing-account selects from the managed account directory.
+    // Omitting either resource makes imported values look empty even though they
+    // are present in process_instances.customFields.
+    const scheduleBoardCommon = [
+      "categories", "departments", "people", "publishingAccounts",
+      "taskTemplates", "processTemplates", "standardWorkForms",
+    ];
     const workResultsCommon = ["departments", "people", "positions", "goals", "taskTemplates"];
     const moduleResources = {
       dashboard: [],

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 
 globalThis.window = {
@@ -16,6 +17,7 @@ const {
   getStoreOptionsLoadState,
   state,
 } = await import("../src/appState.js");
+const { renderPublicFormFieldInput } = await import("../src/workFormEditor.js");
 
 test("partial module snapshots preserve undeclared state resources", () => {
   state.methodologies.splice(0, state.methodologies.length, { id: "method-existing", name: "其他模块数据" });
@@ -82,4 +84,43 @@ test("store option permission failures expose an actionable message", async () =
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("content-note account fields keep managed choices and the imported selected value", () => {
+  state.publishingAccounts.splice(0, state.publishingAccounts.length);
+  const html = renderPublicFormFieldInput({
+    key: "account",
+    label: "发布账号",
+    type: "select",
+    options: ["阿柚", "小茉"],
+  }, { account: "南屿" });
+
+  assert.match(html, /<option value="阿柚"/);
+  assert.match(html, /<option value="南屿" selected>南屿<\/option>/);
+});
+
+test("content-note titles render values saved under the latest form field id", () => {
+  const fieldKey = "form-field-1784949354980-8r2oar";
+  const html = renderPublicFormFieldInput({
+    fieldId: fieldKey,
+    key: fieldKey,
+    label: "标题",
+    type: "text",
+    placeholder: "请输入笔记标题",
+  }, { [fieldKey]: "南屿｜阳光、花和一个喜欢的角落" });
+
+  assert.match(html, /value="南屿｜阳光、花和一个喜欢的角落"/);
+});
+
+test("schedule board bootstrap includes content-note form and publishing-account resources", () => {
+  const serverSource = fs.readFileSync(new URL("../server/index.js", import.meta.url), "utf8");
+  const declaration = serverSource.match(/const scheduleBoardCommon = \[[\s\S]*?\];/)?.[0] ?? "";
+  assert.match(declaration, /"publishingAccounts"/);
+  assert.match(declaration, /"standardWorkForms"/);
+});
+
+test("task executors can read publishing-account choices used by their forms", () => {
+  const serverSource = fs.readFileSync(new URL("../server/index.js", import.meta.url), "utf8");
+  const authorization = serverSource.match(/function canUsePublishingAccountOptions\(user\) \{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.match(authorization, /hasPermission\(user, "tasks\.execute"\)/);
 });

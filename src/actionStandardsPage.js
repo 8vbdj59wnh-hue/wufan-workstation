@@ -764,7 +764,7 @@ function getStoreOptionLabel(store) {
 }
 
 function getDynamicFieldOptions(field) {
-  if (isPublishingAccountField(field)) return getPublishingAccountFieldOptions(publishingAccounts);
+  if (isPublishingAccountField(field)) return getPublishingAccountFieldOptions(publishingAccounts, field.options);
   if ((field.options ?? []).length > 0) return field.options.map((option) => ({ value: option, label: option }));
   if (field.key === "departmentId" || field.type === "department") {
     return departments.filter((department) => department.status === "active").map((department) => ({ value: department.id, label: department.name }));

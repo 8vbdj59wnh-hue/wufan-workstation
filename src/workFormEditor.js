@@ -49,8 +49,10 @@ function getEmptyStoreOptionLabel() {
   return "暂无可选店铺，正在尝试重新读取。";
 }
 
-function getDynamicFieldOptions(field) {
-  if (isPublishingAccountField(field)) return getPublishingAccountFieldOptions(state.publishingAccounts);
+function getDynamicFieldOptions(field, selectedValue = "") {
+  if (isPublishingAccountField(field)) {
+    return getPublishingAccountFieldOptions(state.publishingAccounts, field.options, selectedValue);
+  }
   if ((field.options ?? []).length > 0) return field.options.map((option) => ({ value: option, label: option }));
   if (field.key === "departmentId" || field.type === "department") {
     return state.departments.filter((department) => department.status === "active").map((department) => ({ value: department.id, label: department.name }));
@@ -92,7 +94,7 @@ export function renderPublicFormFieldInput(field, customFields = {}) {
   }
 
   if (field.type === "select" || field.type === "person" || field.type === "department") {
-    const options = getDynamicFieldOptions(field);
+    const options = getDynamicFieldOptions(field, value);
     return `
       <label>
         <span>${escapeHtml(field.label)}${requiredMark}</span>
