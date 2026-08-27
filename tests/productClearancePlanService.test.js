@@ -50,6 +50,8 @@ test("清仓计划独立保存并只读组合销售库存事实", async () => {
 
 test("产品经营列表与卡片均提供清仓入口，清仓中心提供每日总览和进度条", () => {
   const source = fs.readFileSync(new URL("../src/productCenterPage.js", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /import\s+["']\.\/productClearancePlan\.css["']/);
+  assert.match(source, /data-product-clearance-plan-styles/);
   assert.match(source, /data-view="clearance-plans"[^>]*>清仓计划<\/button>/);
   assert.ok((source.match(/data-action="open-product-clearance-plan"/g) || []).length >= 3);
   assert.match(source, /每日清仓总览/);

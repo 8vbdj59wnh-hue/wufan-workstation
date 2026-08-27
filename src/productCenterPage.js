@@ -74,7 +74,17 @@ import "./uiModules/productMarketingAsset.js";
 import "./uiModules/productDailySales.js";
 import { renderProductSalesPresetButtons } from "./uiModules/productSalesDistribution.js";
 import "./uiModules/productShopSandbox.js";
-import "./productClearancePlan.css";
+
+function ensureProductClearancePlanStyles() {
+  if (document.querySelector('link[data-product-clearance-plan-styles]')) return;
+  const stylesheet = document.createElement("link");
+  stylesheet.rel = "stylesheet";
+  stylesheet.href = new URL("./productClearancePlan.css", import.meta.url).href;
+  stylesheet.dataset.productClearancePlanStyles = "true";
+  document.head.append(stylesheet);
+}
+
+ensureProductClearancePlanStyles();
 
 const productStatuses = ["开发中", "上架", "成长期", "成熟期", "风险期", "淘汰", "待上架", "在售", "停售", "清仓", "已归档"];
 let filters = { query: "", brand: "", category: "", status: "", erpStatus: "", platform: "", stockStatus: "" };
