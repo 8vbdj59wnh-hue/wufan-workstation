@@ -23,6 +23,15 @@ function compactWorkPlan(row) {
   return { ...row, customFields: parseJson(row.customFields, {}) };
 }
 
+function compactTemplate(row) {
+  return {
+    ...row,
+    previewImage: parseJson(row.previewImage, {}),
+    sourceFile: parseJson(row.sourceFile, {}),
+    tags: parseJson(row.tags, {}),
+  };
+}
+
 const taskColumns = `id,businessCode,taskType,name,goalId,taskTemplateId,templateId,source,processInstanceId,processNodeId,
   categoryId,departmentId,ownerId,executorId,initiatorId,startDate,readyAt,dueDate,accepterId,status,submittedAt,submittedBy,
   reviewTargetTaskId,reviewStatus,reviewerId,createdAt,updatedAt,completedAt,customFields,submitFormData`;
@@ -30,6 +39,7 @@ const instanceColumns = `id,businessCode,templateId,taskTemplateId,templateVersi
   stoppedAt,canceledAt,dueDate,displayTitle,coverImageUrl,createdAt,updatedAt,customFields`;
 const planColumns = `id,goalId,departmentId,taskTemplateId,title,workType,status,plannedWeek,dueDate,processInstanceId,createdAt,updatedAt,
   launchedAt,canceledAt,customFields,coverImageUrl`;
+const templateColumns = `id,businessCode,name,previewImage,sourceFile,tags,fileType,createdAt,updatedAt`;
 const qualifiedPlanColumns = planColumns.split(",").map((column) => `wp.${column.trim()}`).join(",");
 
 function rowsForIds(database, table, columns, ids, mapper) {
@@ -42,6 +52,18 @@ function taskRowsForProcessIds(database, processIds) {
   if (processIds.length === 0) return [];
   return database.prepare(`SELECT ${taskColumns} FROM tasks WHERE processInstanceId IN (${processIds.map(() => "?").join(",")})`)
     .all(...processIds).map(compactTask);
+}
+
+function linkedVisualTemplateIds(snapshot) {
+  return [...new Set([...(snapshot.workPlans ?? []), ...(snapshot.processInstances ?? [])].flatMap((item) => {
+    const ids = item.customFields?.linkedTemplateIds;
+    return Array.isArray(ids) ? ids.map((id) => String(id ?? "").trim()).filter(Boolean) : [];
+  }))];
+}
+
+export function selectLinkedVisualTemplates(snapshot, templates) {
+  const linkedIds = new Set(linkedVisualTemplateIds(snapshot));
+  return (templates ?? []).filter((template) => linkedIds.has(template.id));
 }
 
 export function readScheduleBoardPage(options = {}) {
@@ -74,9 +96,11 @@ export function readScheduleBoardPage(options = {}) {
   const processIds = [...new Set(plans.map((item) => item.processInstanceId).filter(Boolean))];
   const processInstances = rowsForIds(database, "process_instances", instanceColumns, processIds, compactInstance);
   const tasks = taskRowsForProcessIds(database, processIds);
+  const linkedTemplateIds = linkedVisualTemplateIds({ workPlans: plans, processInstances });
+  const templates = rowsForIds(database, "templates", templateColumns, linkedTemplateIds, compactTemplate);
   const actionProducts = processIds.length === 0 ? [] : database.prepare(`SELECT * FROM action_products WHERE actionId IN (${processIds.map(() => "?").join(",")})`).all(...processIds);
   const contentSchedules = processIds.length === 0 ? [] : database.prepare(`SELECT * FROM content_schedules WHERE processInstanceId IN (${processIds.map(() => "?").join(",")})`).all(...processIds);
-  return { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)), data: { tasks, processInstances, workPlans: plans, actionProducts, contentSchedules } };
+  return { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)), data: { tasks, processInstances, workPlans: plans, templates, actionProducts, contentSchedules } };
 }
 
 function periodSummary(database, days, offsetDays = 0) {

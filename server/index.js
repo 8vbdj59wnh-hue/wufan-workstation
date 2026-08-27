@@ -162,7 +162,7 @@ import {
   readGoalCenterBootstrap,
 } from "./goalCenterBootstrapService.js";
 import { readTemplateCenterUsageSummary } from "./templateCenterBootstrapService.js";
-import { readScheduleBoardPage, readWorkResultsInitial } from "./workManagementPageService.js";
+import { readScheduleBoardPage, readWorkResultsInitial, selectLinkedVisualTemplates } from "./workManagementPageService.js";
 import { markAllUserNotificationsRead, readNotificationSummary } from "./notificationSummaryService.js";
 import {
   createConnectionAction,
@@ -1663,6 +1663,9 @@ app.get("/api/schedule-board/page", requirePermission("keyActions.view"), (reque
       scope: dataScope,
     });
     const scoped = filterDataByScope(page.data, request.user);
+    // A linked visual template is part of the visible action detail. Return only
+    // those referenced assets even when the user cannot browse the template center.
+    scoped.templates = selectLinkedVisualTemplates(scoped, page.data.templates);
     scoped.taskProductContexts = readTaskProductContexts(scoped);
     const payload = { success: true, ...page, data: scoped };
     const text = JSON.stringify(payload);

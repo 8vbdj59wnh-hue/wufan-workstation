@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import Database from "better-sqlite3";
 
-import { readScheduleBoardPage } from "../server/workManagementPageService.js";
+import { readScheduleBoardPage, selectLinkedVisualTemplates } from "../server/workManagementPageService.js";
 
 function createDatabase() {
   const database = new Database(":memory:");
@@ -28,6 +28,10 @@ function createDatabase() {
     );
     CREATE TABLE action_products (id TEXT PRIMARY KEY, actionId TEXT);
     CREATE TABLE content_schedules (id TEXT PRIMARY KEY, processInstanceId TEXT);
+    CREATE TABLE templates (
+      id TEXT PRIMARY KEY, businessCode TEXT, name TEXT, previewImage TEXT, sourceFile TEXT,
+      tags TEXT, fileType TEXT, createdAt TEXT, updatedAt TEXT
+    );
   `);
   return database;
 }
@@ -45,8 +49,12 @@ test("关键行动分页首屏始终携带全部未结束行动供时间格子�
     insertInstance.run(id, id, "done", dueDate, dueDate, dueDate, "{}");
     insertPlan.run(`plan-${id}`, id, "done", dueDate, id, dueDate, dueDate, "{}");
   }
+  database.prepare(`INSERT INTO templates
+    (id,name,previewImage,sourceFile,tags,fileType,createdAt) VALUES (?,?,?,?,?,?,?)`)
+    .run("visual-1", "花瓶视觉模板", JSON.stringify({ fileUrl: "/uploads/images/visual-1.jpg" }), "{}", JSON.stringify({ scene: ["家居"] }), "image", "2026-08-20");
   for (const [id, dueDate] of [["running-a", "2026-08-27"], ["running-b", "2026-08-28"]]) {
-    insertInstance.run(id, id, "running", dueDate, dueDate, dueDate, "{}");
+    const customFields = id === "running-a" ? JSON.stringify({ linkedTemplateIds: ["visual-1"] }) : "{}";
+    insertInstance.run(id, id, "running", dueDate, dueDate, dueDate, customFields);
     insertPlan.run(`plan-${id}`, id, "running", dueDate, id, dueDate, dueDate, "{}");
   }
 
@@ -58,5 +66,29 @@ test("关键行动分页首屏始终携带全部未结束行动供时间格子�
     result.data.processInstances.filter((item) => item.status === "running").map((item) => item.id).sort(),
     ["running-a", "running-b"],
   );
+  assert.deepEqual(result.data.templates, [{
+    id: "visual-1",
+    businessCode: null,
+    name: "花瓶视觉模板",
+    previewImage: { fileUrl: "/uploads/images/visual-1.jpg" },
+    sourceFile: {},
+    tags: { scene: ["家居"] },
+    fileType: "image",
+    createdAt: "2026-08-20",
+    updatedAt: null,
+  }]);
   database.close();
+});
+
+test("关键行动详情只返回当前可见行动引用的视觉模板", () => {
+  const visible = {
+    processInstances: [{ customFields: { linkedTemplateIds: ["visual-visible"] } }],
+    workPlans: [],
+  };
+  const templates = [
+    { id: "visual-visible", name: "可见模板" },
+    { id: "visual-hidden", name: "其他行动模板" },
+  ];
+
+  assert.deepEqual(selectLinkedVisualTemplates(visible, templates), [templates[0]]);
 });
