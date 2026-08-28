@@ -59,6 +59,7 @@ import {
   TaskTemplateStatus,
   WorkType,
   WorkPlanStatus,
+  RectificationGenerationEnabled,
   RectificationWorkTemplate,
   taskSourceNames,
   submitTypeNames,
@@ -1568,6 +1569,7 @@ function didRecordTaskOverdue(previousTask, nextTask) {
 }
 
 async function triggerRectificationForTaskException(task, sourceType, problemSummary) {
+  if (!RectificationGenerationEnabled) return null;
   if (task === null || task === undefined) return null;
   if (hasOpenRectificationWorkForSource({ sourceTaskId: task.id, sourceProcessInstanceId: task.processInstanceId ?? null, sourceType })) return null;
   try {

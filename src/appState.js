@@ -39,6 +39,7 @@ import {
   TaskSource,
   TaskStatus,
   TaskTemplateStatus,
+  RectificationGenerationEnabled,
   RectificationWorkTemplate,
   WorkType,
   WorkPlanStatus,
@@ -3606,6 +3607,9 @@ const rectificationSourceLabels = {
 };
 
 export async function launchRectificationWorkForSource({ sourceTaskId = null, sourceProcessInstanceId = null, sourceType = "manual", problemSummary = "" } = {}) {
+  if (!RectificationGenerationEnabled) {
+    throw new Error("改善行动生成已暂停，待行动标准确认后再开启。");
+  }
   const sourceTask = sourceTaskId ? state.tasks.find((task) => task.id === sourceTaskId) ?? null : null;
   const sourceProcessInstance = getRectificationSourceProcessInstance(sourceTask, sourceProcessInstanceId);
   if (sourceTask === null && sourceProcessInstance === null) throw new Error("未找到改善来源。");

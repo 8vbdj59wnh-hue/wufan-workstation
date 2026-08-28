@@ -170,6 +170,10 @@ export const RectificationWorkTemplate = Object.freeze({
   ProcessTemplateId: "process-template-rectification-work",
 });
 
+// 改善行动标准尚未确认，暂停所有改善行动生成入口。
+// 标准确认后只需将此开关改为 true，无需恢复已清理的历史异常。
+export const RectificationGenerationEnabled = false;
+
 export const SubmitType = Object.freeze({
   None: "none",
   Form: "form",

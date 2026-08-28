@@ -5,6 +5,11 @@ import path from "node:path";
 import multer from "multer";
 import * as XLSX from "xlsx";
 import { shouldShowTaskInTaskCenter } from "../shared/taskCenterVisibility.js";
+import {
+  RectificationGenerationEnabled,
+  RectificationWorkTemplate,
+  WorkType,
+} from "../src/data/modelOptions.js";
 import { configureApiCachePolicy } from "./apiCachePolicy.js";
 import {
   closeDatabase,
@@ -622,6 +627,25 @@ function rejectUnauthorizedActionTemplateLaunch(user, body, response, trustedTem
     canLaunchActionTemplate(user, templateIds[0])
   ) return false;
   response.status(403).json({ success: false, message: "你没有权限发起该关键行动" });
+  return true;
+}
+
+function rejectPausedRectificationLaunch(resource, body, response, trustedTemplateId = "") {
+  if (RectificationGenerationEnabled) return false;
+  if (!new Set(["work-plans", "process-instances"]).has(resource)) return false;
+  const requestedTemplateIds = new Set([
+    String(trustedTemplateId ?? "").trim(),
+    ...getRequestedActionTemplateIds(body),
+  ]);
+  const isRectification =
+    body?.workType === WorkType.Rectification ||
+    body?.workPlan?.workType === WorkType.Rectification ||
+    requestedTemplateIds.has(RectificationWorkTemplate.TaskTemplateId);
+  if (!isRectification) return false;
+  response.status(409).json({
+    success: false,
+    message: "改善行动生成已暂停，待行动标准确认后再开启。",
+  });
   return true;
 }
 
@@ -4255,6 +4279,14 @@ app.post("/api/work-plans/:id/launch", requirePermission("keyActions.launch"), (
     }
     const existingWorkPlan = readAllData().workPlans.find((item) => item.id === request.params.id);
     if (
+      rejectPausedRectificationLaunch(
+        "work-plans",
+        request.body ?? {},
+        response,
+        existingWorkPlan?.taskTemplateId ?? "",
+      )
+    ) return;
+    if (
       rejectUnauthorizedActionTemplateLaunch(
         request.user,
         request.body ?? {},
@@ -4280,6 +4312,16 @@ app.post("/api/work-plans/batch-launch", requirePermission("keyActions.launch"),
       response.status(403).json({ success: false, message: "你没有权限关联产品。" });
       return;
     }
+    if (
+      rows.some((row) =>
+        rejectPausedRectificationLaunch(
+          "work-plans",
+          row?.workPlan ?? {},
+          response,
+          row?.workPlan?.taskTemplateId ?? "",
+        ),
+      )
+    ) return;
     if (
       rows.some((row) =>
         rejectUnauthorizedActionTemplateLaunch(
@@ -4708,6 +4750,7 @@ app.get("/api/:resource", (request, response) => {
 app.post("/api/:resource", (request, response) => {
   try {
     if (rejectLegacyContentScheduleWrite(request.params.resource, response)) return;
+    if (rejectPausedRectificationLaunch(request.params.resource, request.body ?? {}, response)) return;
     const context = getResourceAuthorizationContext(
       request.params.resource,
       "POST",
