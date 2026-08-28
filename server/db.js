@@ -1348,6 +1348,37 @@ function backfillProductBusinessProfiles() {
     ON CONFLICT(erpSkuId) DO NOTHING`).run(timestamp, timestamp);
 }
 
+function ensureProductBusinessLegacyIndexes() {
+  getDatabase().exec(`
+    CREATE INDEX IF NOT EXISTS idx_product_marketing_assets_product
+      ON product_marketing_assets(productId);
+    CREATE INDEX IF NOT EXISTS idx_action_products_action ON action_products(actionId);
+    CREATE INDEX IF NOT EXISTS idx_action_products_product ON action_products(productId);
+    CREATE INDEX IF NOT EXISTS idx_product_lifecycle_events_product_time
+      ON product_lifecycle_events(productId, changedAt DESC);
+    CREATE INDEX IF NOT EXISTS idx_product_health_records_status_time
+      ON product_health_records(healthStatus, updatedAt DESC);
+    CREATE INDEX IF NOT EXISTS idx_product_issues_product_status
+      ON product_issues(productId, status, updatedAt DESC);
+    CREATE INDEX IF NOT EXISTS idx_product_improvements_product_status
+      ON product_improvements(productId, status, updatedAt DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_product_strategy_current
+      ON product_strategy_versions(productId) WHERE status='current';
+    CREATE INDEX IF NOT EXISTS idx_product_strategy_history
+      ON product_strategy_versions(productId, version DESC);
+    CREATE INDEX IF NOT EXISTS idx_product_insights_product_type
+      ON product_insights(productId, insightType, updatedAt DESC);
+    CREATE INDEX IF NOT EXISTS idx_product_insights_improvement
+      ON product_insights(relatedImprovementId) WHERE relatedImprovementId IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_product_insights_action
+      ON product_insights(relatedActionId) WHERE relatedActionId IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_product_clearance_plans_active
+      ON product_clearance_plans(productId) WHERE status='active';
+    CREATE INDEX IF NOT EXISTS idx_product_clearance_plans_status_end
+      ON product_clearance_plans(status, targetEndDate, updatedAt DESC);
+  `);
+}
+
 export function runProductBusinessExtensionMigration() {
   rebuildProductBusinessDualIdentityTables();
   for (const table of productBusinessDualIdentityTables) if (tableExists(table)) ensureColumn(table, "erpSkuId", "TEXT");
@@ -1364,6 +1395,10 @@ export function runProductBusinessExtensionMigration() {
     CREATE INDEX IF NOT EXISTS idx_product_insights_erp_sku_type ON product_insights(erpSkuId,insightType,updatedAt DESC);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_product_clearance_plans_active_erp_sku ON product_clearance_plans(erpSkuId) WHERE status='active' AND erpSkuId IS NOT NULL;
   `);
+  // The Phase B table rebuild drops indexes together with the replaced tables.
+  // Restore the Legacy productId compatibility indexes in the same initialization
+  // pass so the first and every subsequent migration produce identical schemas.
+  ensureProductBusinessLegacyIndexes();
   backfillProductBusinessProfiles();
 }
 
