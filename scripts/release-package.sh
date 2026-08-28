@@ -84,6 +84,7 @@ git -C "$PROJECT_DIR" archive "$TOOLING_COMMIT" \
   scripts/release-maintenance-mode.mjs \
   scripts/release-classify.sh \
   scripts/release-health-check.sh \
+  scripts/release-wait-for-health.sh \
   scripts/release-migration-preview.sh \
   scripts/release-migration-runner.mjs \
   server/releaseMaintenanceService.js \

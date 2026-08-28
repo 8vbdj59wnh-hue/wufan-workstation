@@ -72,6 +72,7 @@ REQUIRED_FILES=(
   scripts/release-maintenance-mode.mjs
   scripts/release-classify.sh
   scripts/release-health-check.sh
+  scripts/release-wait-for-health.sh
   scripts/release-migration-preview.sh
   scripts/release-migration-runner.mjs
   server/releaseMaintenanceService.js
@@ -429,17 +430,19 @@ fi
 
 STAGE="service-stabilization"
 if [[ "$REQUIRES_CLIENT_RESTART" == "true" ]]; then
-  for attempt in {1..10}; do
-    curl --fail --silent http://127.0.0.1:5173/ >/dev/null && break
-    [[ "$attempt" -lt 10 ]]
-    sleep 2
-  done
+  "$PACKAGE_DIR/scripts/release-wait-for-health.sh" \
+    --url http://127.0.0.1:5173/ \
+    --label frontend \
+    --total-seconds 60 \
+    --interval-seconds 2 \
+    --request-timeout-seconds 5
 fi
-for attempt in {1..10}; do
-  curl --fail --silent -H 'x-wufan-api-source: system:release' http://127.0.0.1:3001/api/health >/dev/null && break
-  [[ "$attempt" -lt 10 ]]
-  sleep 2
-done
+"$PACKAGE_DIR/scripts/release-wait-for-health.sh" \
+  --url http://127.0.0.1:3001/api/health \
+  --label backend \
+  --total-seconds 180 \
+  --interval-seconds 3 \
+  --request-timeout-seconds 8
 
 STAGE="health-after"
 "$PACKAGE_DIR/scripts/release-health-check.sh" \
