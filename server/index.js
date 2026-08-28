@@ -3019,12 +3019,12 @@ app.get("/api/product-management/new-product-actions", requirePermission("produc
   }
 });
 
-app.post("/api/product-management/products/:id/clearance-plan", requirePermission("products.edit"), (request, response) => {
+app.post("/api/product-management/products/:id/clearance-plan", requirePermission("products.manage"), (request, response) => {
   try { requireScopedProduct(request, request.params.id); response.status(201).json({ success: true, plan: saveProductClearancePlan(request.params.id, request.body, getUserPersonId(request.user)) }); }
   catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "清仓计划保存失败。" }); }
 });
 
-app.put("/api/product-management/clearance-plans/:id", requirePermission("products.edit"), (request, response) => {
+app.put("/api/product-management/clearance-plans/:id", requirePermission("products.manage"), (request, response) => {
   try {
     const plan = getDatabase().prepare("SELECT productId FROM product_clearance_plans WHERE id=?").get(request.params.id);
     if (!plan) throw new Error("清仓计划不存在。");

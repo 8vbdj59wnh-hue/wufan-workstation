@@ -41,6 +41,7 @@ test("新品开发中心只读识别已发起的新品关键行动", () => {
 
 test("产品中心提供新品开发入口、状态筛选、行动卡片和原关键行动跳转", () => {
   const source = fs.readFileSync(new URL("../src/productCenterPage.js", import.meta.url), "utf8");
+  const serverSource = fs.readFileSync(new URL("../server/index.js", import.meta.url), "utf8");
   assert.match(source, /data-view="new-product-development"[^>]*>新品开发<\/button>/);
   assert.match(source, /product-new-development-grid/);
   assert.match(source, /data-action="filter-product-new-development"/);
@@ -50,4 +51,8 @@ test("产品中心提供新品开发入口、状态筛选、行动卡片和原�
   assert.match(source, /window\.location\.hash = "schedule-board"/);
   assert.doesNotMatch(source, /import\s+["']\.\/productNewDevelopment\.css["']/);
   assert.match(source, /data-product-new-development-styles/);
+  assert.doesNotMatch(source, /hasPermission\(getCurrentUser\(\), "products\.edit"\)/);
+  assert.ok((source.match(/hasPermission\(getCurrentUser\(\), "products\.manage"\)/g) || []).length >= 3);
+  assert.match(serverSource, /products\/:id\/clearance-plan", requirePermission\("products\.manage"\)/);
+  assert.match(serverSource, /clearance-plans\/:id", requirePermission\("products\.manage"\)/);
 });

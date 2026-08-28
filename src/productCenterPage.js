@@ -532,7 +532,7 @@ function renderProductBusinessTable(readModel) {
       ${businessMetricEnabled("health") ? `<td><button type="button" class="product-health-summary-button" data-action="open-product-health" data-product-id="${escapeHtml(item.id)}"><span>${escapeHtml(item.healthAnalysis?.overall?.emoji || "⚪")}</span>${businessStatus(item.healthAnalysis?.overall?.label, item.healthAnalysis?.overall?.code, "health")}<small>查看原因</small></button></td>` : ""}
       ${businessMetricEnabled("diagnosis") ? `<td><button type="button" class="product-health-summary-button product-diagnosis-summary-button" data-action="open-product-diagnosis" data-product-id="${escapeHtml(item.id)}"><span>${escapeHtml(item.diagnosis?.status?.emoji || "⚪")}</span>${businessStatus(item.diagnosis?.status?.label, item.diagnosis?.status?.code, "diagnosis")}<small>查看诊断</small></button></td>` : ""}
       <td>${item.actions.pendingCount ? `<div class="product-business-actions"><strong>${item.actions.pendingCount}</strong><small>改善 ${item.actions.improvementCount} · 行动 ${item.actions.actionCount} · 任务 ${item.actions.taskCount}</small></div>` : `<span class="business-no-data">暂无行动</span>`}</td>
-      <td><div class="product-business-row-actions"><button type="button" class="text-button" data-action="view-product" data-direct-product-detail data-product-id="${escapeHtml(item.id)}">产品档案 →</button>${hasPermission(getCurrentUser(), "products.edit") ? `<button type="button" class="text-button is-clearance" data-action="open-product-clearance-plan" data-product-id="${escapeHtml(item.id)}">加入清仓</button>` : ""}</div></td>
+      <td><div class="product-business-row-actions"><button type="button" class="text-button" data-action="view-product" data-direct-product-detail data-product-id="${escapeHtml(item.id)}">产品档案 →</button>${hasPermission(getCurrentUser(), "products.manage") ? `<button type="button" class="text-button is-clearance" data-action="open-product-clearance-plan" data-product-id="${escapeHtml(item.id)}">加入清仓</button>` : ""}</div></td>
     </tr>`).join("") : `<tr><td colspan="${totalColumns}" class="empty-cell">当前筛选条件下暂无产品</td></tr>`}</tbody>
   </table></div>`;
 }
@@ -551,7 +551,7 @@ function renderProductBusinessCards(readModel) {
         <div><strong>${businessMoney(item.profit?.grossProfit)}</strong><span>毛利润</span></div>
         <div><strong>${businessValue(item.inventory?.quantity)}</strong><span>${Number(item.inventory?.quantity || 0) <= 0 ? "库存风险" : "当前库存"}</span></div>
       </div>
-      ${hasPermission(getCurrentUser(), "products.edit") ? `<div class="product-business-card-actions"><button type="button" class="secondary-button" data-action="open-product-clearance-plan" data-product-id="${escapeHtml(item.id)}">加入清仓计划</button></div>` : ""}
+      ${hasPermission(getCurrentUser(), "products.manage") ? `<div class="product-business-card-actions"><button type="button" class="secondary-button" data-action="open-product-clearance-plan" data-product-id="${escapeHtml(item.id)}">加入清仓计划</button></div>` : ""}
     </div>
   </article>`).join("")}</div>`;
 }
@@ -705,7 +705,7 @@ function renderProductClearanceCards(center) {
         ${renderClearanceProgress("库存清仓进度", item.inventoryProgress, inventoryDetail)}
         ${renderClearanceProgress("计划时间进度", item.timeProgress, timeDetail, "time")}
         ${item.note ? `<p class="product-clearance-note">${escapeHtml(item.note)}</p>` : ""}
-        ${hasPermission(getCurrentUser(), "products.edit") && item.status === "active" ? `<div class="product-clearance-card-actions"><button type="button" class="secondary-button" data-action="open-product-clearance-plan" data-product-id="${escapeHtml(item.productId)}" data-plan-id="${escapeHtml(item.id)}">调整计划</button><button type="button" class="primary-button" data-action="complete-product-clearance-plan" data-plan-id="${escapeHtml(item.id)}">标记完成</button></div>` : ""}
+        ${hasPermission(getCurrentUser(), "products.manage") && item.status === "active" ? `<div class="product-clearance-card-actions"><button type="button" class="secondary-button" data-action="open-product-clearance-plan" data-product-id="${escapeHtml(item.productId)}" data-plan-id="${escapeHtml(item.id)}">调整计划</button><button type="button" class="primary-button" data-action="complete-product-clearance-plan" data-plan-id="${escapeHtml(item.id)}">标记完成</button></div>` : ""}
       </div>
     </article>`;
   }).join("")}</div>`;
