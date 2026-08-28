@@ -96,7 +96,7 @@ export function getProductSalesDistribution(input = {}, options = {}) {
     periodStart: range.startDate,
     periodEnd: range.endDate,
     erpSkuIds: products.map((product) => product.erpSkuId),
-  }, { database }) : { items: [] };
+  }, { database, bypassCache: options.bypassCache === true }) : { items: [] };
   const contributionByProduct = new Map(contributions.items.map((item) => [item.erpSkuId, item]));
   const collator = new Intl.Collator("zh-CN", { numeric: true, sensitivity: "base" });
   const rows = products.map((product) => {
@@ -143,10 +143,14 @@ export function getProductSalesDistribution(input = {}, options = {}) {
   }));
   const productsWithSalesAmount = items.filter((item) => item.hasSalesAmountData).length;
   const productsWithPhysicalContribution = items.filter((item) => item.hasPhysicalContribution).length;
+  const limit = Math.min(200, Math.max(20, Number(input.limit) || 100));
+  const offset = Math.max(0, Number(input.offset) || 0);
+  const pageItems = items.slice(offset, offset + limit);
   return {
     range,
     includeHistorical,
-    items,
+    items: pageItems,
+    pagination: { total: items.length, limit, offset, hasMore: offset + pageItems.length < items.length },
     summary: {
       totalProducts: items.length,
       productsWithSalesAmount,
@@ -164,6 +168,7 @@ export function getProductSalesDistribution(input = {}, options = {}) {
       identity: "ERP SKU",
       productScope: includeHistorical ? "全部 ERP SKU 资产" : "当前经营 ERP SKU",
       dataSource: "connection_sku_sales_daily_facts + Sales Object + ERP SKU",
+      detailScope: `按直接销售额排序分批返回，每批最多${limit}个产品`,
       readOnly: true,
     },
   };

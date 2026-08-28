@@ -63,6 +63,7 @@ let notificationUnreadCount = 0;
 let storeOptionsRequest = null;
 const storeOptions = [];
 let persistentDataLoadGeneration = 0;
+let productDataRevision = 0;
 let storeOptionsLoadState = {
   // Mock data is only a rendering fallback and must never be treated as an
   // authoritative store directory loaded from the server.
@@ -73,6 +74,9 @@ let persistenceStatus = {
   kind: "warning",
   message: "",
 };
+
+export function getProductDataRevision() { return productDataRevision; }
+function markProductDataChanged() { productDataRevision += 1; }
 let saveTimer = null;
 let isApplyingRemoteData = false;
 let hasPendingPersistentChanges = false;
@@ -1143,7 +1147,9 @@ export async function loadPlatformGoodsDataSyncPreview(batchId) {
 }
 
 export async function commitPlatformGoodsDataSync(batchId) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/batches/${encodeURIComponent(batchId)}/platform-goods/commit`, { method: "POST" }), "平台SKU关系同步提交失败。");
+  const result = await readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/batches/${encodeURIComponent(batchId)}/platform-goods/commit`, { method: "POST" }), "平台SKU关系同步提交失败。");
+  markProductDataChanged();
+  return result;
 }
 
 export async function previewInventoryDataSync(taskId, options = {}) {
@@ -1155,7 +1161,9 @@ export async function loadInventoryDataSyncPreview(batchId) {
 }
 
 export async function commitInventoryDataSync(batchId) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/batches/${encodeURIComponent(batchId)}/inventory/commit`, { method: "POST" }), "库存同步提交失败。");
+  const result = await readApiJson(await authFetch(`${apiBaseUrl}/api/data-sync-center/batches/${encodeURIComponent(batchId)}/inventory/commit`, { method: "POST" }), "库存同步提交失败。");
+  markProductDataChanged();
+  return result;
 }
 
 export async function previewPlatformGoodsExcelDataSync(taskId, { file }) {
@@ -1760,7 +1768,9 @@ export async function recalculateConnectionSalesDailyPreview(batchId) {
 }
 
 export async function confirmConnectionSalesDailyFacts(batchId) {
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-daily/${encodeURIComponent(batchId)}/confirm`, { method: "POST" }), "销售日报事实写入失败。");
+  const result = await readApiJson(await authFetch(`${apiBaseUrl}/api/connection-data-foundation/sales-daily/${encodeURIComponent(batchId)}/confirm`, { method: "POST" }), "销售日报事实写入失败。");
+  markProductDataChanged();
+  return result;
 }
 
 export async function loadErpSkuUsageGovernance(options = {}) {

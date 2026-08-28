@@ -6,6 +6,7 @@ import { resolveErpSkuBusinessUsages } from "./capabilities/resolveErpSkuBusines
 import { normalizeSalesDetailLine } from "./capabilities/salesDetailNormalizer.js";
 import { classifySalesDetailLine } from "./capabilities/classifySalesDetailLine.js";
 import { resolveHistoricalRelationForFact } from "./salesObjectRelationHistoryService.js";
+import { invalidateProductContributionCache } from "./productContributionReadModel.js";
 
 const IMPORT_TYPE = "erp_sales_daily_preview";
 const PARSER_VERSION = "sales-daily-preview-v3-current-v2";
@@ -696,6 +697,7 @@ export function commitSalesDailyFacts(batchId, { confirmedBy = "", database = ge
     database.prepare("UPDATE connection_import_batches SET status=?,matchedRows=?,pendingRows=?,errorRows=?,completedAt=?,updatedAt=?,previewSummaryJson=? WHERE id=?")
       .run(finalStatus, result.insertedCount + result.skippedCount, result.pendingCount + result.updatePendingCount, result.errorCount, createdAt, createdAt, JSON.stringify(summary), id);
   })();
+  if (inserts.length) invalidateProductContributionCache(database);
   return {
     batch: database.prepare("SELECT * FROM connection_import_batches WHERE id=?").get(id),
     result: { ...result, idempotent: inserts.length === 0 && updatePending.length === 0 && skips.length > 0 && skips.length === eligible.length },

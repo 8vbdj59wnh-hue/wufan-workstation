@@ -88,6 +88,7 @@ test("产品沙盘按店铺隔离产品销量且不修改销售事实", () => {
   assert.equal(first.summary.productsWithoutSales, 2);
   assert.equal(first.summary.slowMovingProducts, 2);
   assert.equal(first.summary.outOfStockProducts, 1);
+  assert.deepEqual(first.pagination, { total: 4, limit: 100, offset: 0, hasMore: false });
   assert.deepEqual(database.prepare("SELECT COUNT(*) count,SUM(quantity) quantity FROM connection_sku_sales_daily_facts").get(), before);
   database.close();
 });
@@ -116,6 +117,9 @@ test("产品沙盘卡片只展示主图和销量角标并复用时间档位", ()
   assert.ok(groupedHtml.indexOf('data-product-sandbox-product="erp-b"') < groupedHtml.indexOf('data-product-sandbox-product="erp-c"'));
   assert.ok(groupedHtml.indexOf('data-product-sandbox-product="erp-c"') < groupedHtml.indexOf('data-product-sandbox-product="erp-d"'));
   assert.match(html, /http:\/\/127\.0\.0\.1:3001\/uploads\/a\.jpg/u);
+  const incrementalHtml = renderProductShopSandbox({ state: { ...state, pagination: { total: 104, limit: 100, offset: 0, hasMore: true } }, resolveUrl: (value) => value });
+  assert.match(incrementalHtml, /data-product-sandbox-more/u);
+  assert.match(incrementalHtml, /已显示 4\/104/u);
   database.close();
 });
 

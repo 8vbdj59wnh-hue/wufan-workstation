@@ -78,7 +78,7 @@ export function getProductShopSandbox(input = {}, options = {}) {
     periodEnd: range.endDate,
     erpSkuIds: products.map((product) => product.erpSkuId),
     salesLinkIds,
-  }, { database }) : { items: [] };
+  }, { database, bypassCache: options.bypassCache === true }) : { items: [] };
   const contributionByProduct = new Map(contribution.items.map((item) => [item.erpSkuId, item]));
   const inventoryByProduct = readErpSkuInventorySupplyMap(products.map((product) => product.erpSkuId), { database });
   const items = products.map((product) => {
@@ -101,12 +101,16 @@ export function getProductShopSandbox(input = {}, options = {}) {
     };
   }).sort((left, right) => Number(right.salesQuantity) - Number(left.salesQuantity)
       || String(left.skuCode || left.productName).localeCompare(String(right.skuCode || right.productName), "zh-CN", { numeric: true }));
+  const limit = Math.min(200, Math.max(20, Number(input.limit) || 100));
+  const offset = Math.max(0, Number(input.offset) || 0);
+  const pageItems = items.slice(offset, offset + limit);
 
   return {
     range,
     shops,
     selectedShop,
-    items,
+    items: pageItems,
+    pagination: { total: items.length, limit, offset, hasMore: offset + pageItems.length < items.length },
     summary: {
       productCount: items.length,
       productsWithSales: items.filter((item) => item.hasSales).length,

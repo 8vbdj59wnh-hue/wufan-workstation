@@ -3025,6 +3025,7 @@ app.get("/api/product-management/business-dashboard", requirePermission("product
   try {
     const readModel = getProductBusinessReadModel(request.query, {
       includeInventoryCost: hasPermission(request.user, "finance.view"),
+      bypassCache: ["1", "true"].includes(String(request.query.refresh || "").toLowerCase()),
     });
     response.json({
       success: true,
@@ -3038,7 +3039,7 @@ app.get("/api/product-management/sales-distribution", requirePermission("product
   try {
     response.json({
       success: true,
-      ...getProductSalesDistribution(request.query),
+      ...getProductSalesDistribution(request.query, { bypassCache: ["1", "true"].includes(String(request.query.refresh || "").toLowerCase()) }),
     });
   } catch (error) {
     response.status(error.statusCode || 400).json({ success: false, message: error.message || "产品销售结构读取失败。" });
@@ -3049,7 +3050,7 @@ app.get("/api/product-management/shop-sandbox", requirePermission("products.view
   try {
     response.json({
       success: true,
-      ...getProductShopSandbox(request.query),
+      ...getProductShopSandbox(request.query, { bypassCache: ["1", "true"].includes(String(request.query.refresh || "").toLowerCase()) }),
     });
   } catch (error) {
     response.status(error.statusCode || 400).json({ success: false, message: error.message || "产品沙盘读取失败。" });

@@ -77,6 +77,7 @@ test("产品销售结构按直接销售额排序且不拆分组合装金额", ()
   assert.equal(result.summary.totalPhysicalContribution, 20);
   assert.equal(result.summary.productsWithSalesAmount, 2);
   assert.equal(result.summary.productsWithPhysicalContribution, 3);
+  assert.deepEqual(result.pagination, { total: 3, limit: 100, offset: 0, hasMore: false });
   assert.deepEqual(database.prepare("SELECT COUNT(*) facts,SUM(salesAmount) sales FROM connection_sku_sales_daily_facts").get(), before);
   database.close();
 });
@@ -134,7 +135,9 @@ test("产品中心提供经营驾驶舱入口并通过只读接口加载柱形�
   const server = fs.readFileSync(path.join(root, "server/index.js"), "utf8");
   assert.match(page, /data-view="business-cockpit"[^>]*>经营驾驶舱</u);
   assert.match(page, /renderUiModule\("product_sales_distribution"/u);
+  assert.match(page, /productModuleMemoryCache = new Map\(\)/u);
+  assert.match(page, /root\.innerHTML = renderProductCenterPageContent\(\)/u);
   assert.match(appState, /\/api\/product-management\/sales-distribution/u);
   assert.match(server, /app\.get\("\/api\/product-management\/sales-distribution"/u);
-  assert.match(server, /\.\.\.getProductSalesDistribution\(request\.query\)/u);
+  assert.match(server, /\.\.\.getProductSalesDistribution\(request\.query, \{ bypassCache:/u);
 });

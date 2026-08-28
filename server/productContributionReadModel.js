@@ -1,11 +1,64 @@
 import { getDatabase } from "./db.js";
+import { createHash } from "node:crypto";
 
 const EVIDENCE_LEVELS = ["exact", "legacy_evidence", "inferred", "unknown"];
+let contributionCaches = new WeakMap();
+const contributionCacheTtlMs = 60_000;
+const broadIdentityScopeThreshold = 500;
 
 function text(value) { return String(value ?? "").trim(); }
 function number(value) { return value === null || value === undefined ? null : Number(value); }
 function date(value) { const result = text(value).slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(result) ? result : ""; }
 function add(metric, field, value) { if (value !== null && value !== undefined) metric[field] += Number(value); }
+
+function contributionCacheKey(identityField, periodStart, periodEnd, identityIds = [], salesLinkIds = null) {
+  const scope = JSON.stringify({ identityIds: [...identityIds].sort(), salesLinkIds: salesLinkIds === null ? null : [...salesLinkIds].sort() });
+  return `${identityField}|${periodStart}|${periodEnd}|${createHash("sha256").update(scope).digest("hex")}`;
+}
+
+function cachesFor(database) {
+  let caches = contributionCaches.get(database);
+  if (!caches) {
+    caches = { results: new Map(), facts: new Map() };
+    contributionCaches.set(database, caches);
+  }
+  return caches;
+}
+
+export function invalidateProductContributionCache(database = null) {
+  if (database) contributionCaches.delete(database);
+  else contributionCaches = new WeakMap();
+}
+
+function readCachedContribution(database, key) {
+  const cache = cachesFor(database).results;
+  const cached = cache.get(key);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) { cache.delete(key); return null; }
+  return cached.value;
+}
+
+function rememberContribution(database, key, value) {
+  const cache = cachesFor(database).results;
+  cache.set(key, { value, expiresAt: Date.now() + contributionCacheTtlMs });
+  while (cache.size > 12) cache.delete(cache.keys().next().value);
+  return value;
+}
+
+function readCachedFacts(database, key) {
+  const cache = cachesFor(database).facts;
+  const cached = cache.get(key);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) { cache.delete(key); return null; }
+  return cached.value;
+}
+
+function rememberFacts(database, key, value) {
+  const cache = cachesFor(database).facts;
+  cache.set(key, { value, expiresAt: Date.now() + contributionCacheTtlMs });
+  while (cache.size > 6) cache.delete(cache.keys().next().value);
+  return value;
+}
 function blank(identityId, identityField = "productId") {
   return {
     [identityField]: identityId, directSalesQuantity: 0, bundleContributionQuantity: 0, totalPhysicalContribution: 0,
@@ -101,23 +154,47 @@ function queryContributions(input = {}, options = {}, identityField = "productId
   const requestedIdentityIds = [...new Set(((identityField === "erpSkuId" ? input.erpSkuIds : input.productIds) ?? []).map(text).filter(Boolean))];
   const hasSalesLinkScope = Array.isArray(input.salesLinkIds);
   const requestedSalesLinkIds = [...new Set((input.salesLinkIds ?? []).map(text).filter(Boolean))];
+  const cacheable = requestedIdentityIds.length === 0 || requestedIdentityIds.length >= broadIdentityScopeThreshold;
+  const cacheKey = cacheable ? contributionCacheKey(identityField, periodStart, periodEnd, requestedIdentityIds, hasSalesLinkScope ? requestedSalesLinkIds : null) : "";
+  if (cacheable && options.bypassCache !== true) {
+    const cached = readCachedContribution(database, cacheKey);
+    if (cached) return cached;
+  }
   const requestedIdentities = new Set(requestedIdentityIds);
   const identityPlaceholders = requestedIdentityIds.map(() => "?").join(",");
   const salesLinkPlaceholders = requestedSalesLinkIds.map(() => "?").join(",");
-  const facts = hasSalesLinkScope && !requestedSalesLinkIds.length ? [] : database.prepare(`SELECT f.id,f.saleDate,f.salesLinkId,f.salesLinkSkuId,f.quantity,f.salesAmount,f.costAmount,f.profitAmount,
+  const queryBroadScope = requestedIdentityIds.length >= broadIdentityScopeThreshold;
+  const broadFactCacheKey = requestedIdentityIds.length === 0
+    ? `${periodStart}|${periodEnd}|links:${hasSalesLinkScope ? [...requestedSalesLinkIds].sort().join(",") : "all"}`
+    : "";
+  const cachedFacts = broadFactCacheKey && options.bypassCache !== true ? readCachedFacts(database, broadFactCacheKey) : null;
+  const broadScopeCte = queryBroadScope ? `WITH requested_identity_ids(identityId) AS (SELECT value FROM json_each(?)),
+    scoped_link_skus(linkSkuId) AS (
+      SELECT DISTINCT scoped_relation.linkSkuId
+      FROM sales_link_sku_sales_object_relations scoped_relation
+      JOIN sales_object_structures scoped_structure ON scoped_structure.salesObjectId=scoped_relation.salesObjectId AND scoped_structure.status IN ('active','superseded')
+      JOIN sales_object_structure_components scoped_component ON scoped_component.structureId=scoped_structure.id AND scoped_component.status='active'
+      ${identityField === "productId" ? "JOIN product_erp_mappings scoped_mapping ON scoped_mapping.erpSkuId=scoped_component.erpSkuId AND scoped_mapping.currentState='active'" : ""}
+      JOIN requested_identity_ids requested ON requested.identityId=${identityField === "productId" ? "scoped_mapping.productId" : "scoped_component.erpSkuId"}
+      WHERE scoped_relation.status='active'
+    )` : "";
+  const facts = cachedFacts?.facts ?? (hasSalesLinkScope && !requestedSalesLinkIds.length ? [] : database.prepare(`${broadScopeCte}
+    SELECT f.id,f.saleDate,f.salesLinkId,f.salesLinkSkuId,f.quantity,f.salesAmount,f.costAmount,f.profitAmount,
       r.salesObjectId,o.objectCode,o.objectType
     FROM connection_sku_sales_daily_facts f
     JOIN sales_link_sku_sales_object_relations r ON r.linkSkuId=f.salesLinkSkuId AND r.status='active'
     JOIN sales_objects o ON o.id=r.salesObjectId AND o.status='active'
-    WHERE f.saleDate BETWEEN ? AND ?${hasSalesLinkScope ? ` AND f.salesLinkId IN (${salesLinkPlaceholders})` : ""}${requestedIdentityIds.length ? ` AND EXISTS (
+    ${queryBroadScope ? "JOIN scoped_link_skus scoped ON scoped.linkSkuId=f.salesLinkSkuId" : ""}
+    WHERE f.saleDate BETWEEN ? AND ?${hasSalesLinkScope ? ` AND f.salesLinkId IN (${salesLinkPlaceholders})` : ""}${requestedIdentityIds.length && !queryBroadScope ? ` AND EXISTS (
       SELECT 1 FROM sales_link_sku_sales_object_relations scoped_relation
       JOIN sales_object_structures scoped_structure ON scoped_structure.salesObjectId=scoped_relation.salesObjectId AND scoped_structure.status IN ('active','superseded')
       JOIN sales_object_structure_components scoped_component ON scoped_component.structureId=scoped_structure.id AND scoped_component.status='active'
       ${identityField === "productId" ? "JOIN product_erp_mappings scoped_mapping ON scoped_mapping.erpSkuId=scoped_component.erpSkuId AND scoped_mapping.currentState='active'" : ""}
       WHERE scoped_relation.linkSkuId=f.salesLinkSkuId AND scoped_relation.status='active' AND ${identityField === "productId" ? "scoped_mapping.productId" : "scoped_component.erpSkuId"} IN (${identityPlaceholders})
     )` : ""}
-    ORDER BY f.saleDate,f.id`).all(periodStart, periodEnd, ...requestedSalesLinkIds, ...requestedIdentityIds);
-  const context = loadContext(database, facts);
+    ORDER BY f.saleDate,f.id`).all(...(queryBroadScope ? [JSON.stringify(requestedIdentityIds)] : []), periodStart, periodEnd, ...requestedSalesLinkIds, ...(queryBroadScope ? [] : requestedIdentityIds)));
+  const context = cachedFacts?.context ?? loadContext(database, facts);
+  if (broadFactCacheKey && !cachedFacts) rememberFacts(database, broadFactCacheKey, { facts, context });
   const metrics = new Map(requestedIdentityIds.map((identityId) => [identityId, blank(identityId, identityField)]));
   const daily = new Map(); const seenFacts = new Set();
   const unallocated = { contributionQuantity: 0, records: [], productMappingMissingCount: 0, relationConflictCount: 0, structureUnknownFactCount: 0 };
@@ -182,7 +259,7 @@ function queryContributions(input = {}, options = {}, identityField = "productId
   for (const metric of metrics.values()) metric.totalPhysicalContribution = metric.directSalesQuantity + metric.bundleContributionQuantity;
   const items = [...metrics.values()].map((metric) => publicMetric(metric, identityField)).sort((left, right) => left[identityField].localeCompare(right[identityField]));
   const dailyItems = [...daily.entries()].map(([key, metric]) => ({ date: key.slice(key.lastIndexOf("|") + 1), ...publicMetric(metric, identityField) })).sort((left, right) => left.date.localeCompare(right.date) || left[identityField].localeCompare(right[identityField]));
-  return {
+  const result = {
     capability: "QueryProductContribution", contractVersion: "1.0", periodStart, periodEnd,
     items, dailyItems, unallocatedContribution: unallocated, companyFacts,
     definitions: {
@@ -194,6 +271,7 @@ function queryContributions(input = {}, options = {}, identityField = "productId
       historicalEvidence: "BOM证据等级只读Sales Object Structure版本和来源元数据，不读Legacy Product Structure",
     },
   };
+  return cacheable ? rememberContribution(database, cacheKey, result) : result;
 }
 
 export function queryProductContributions(input = {}, options = {}) {

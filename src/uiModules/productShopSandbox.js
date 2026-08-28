@@ -56,12 +56,13 @@ export function renderProductShopSandbox({ state = {}, resolveUrl = (value) => v
         : items;
   const visibleItems = sortProductCards(filteredItems, sortMode);
   const selectedShop = state.selectedShop || null;
+  const pagination = state.pagination || { total: items.length, hasMore: false };
   return `<section class="product-shop-sandbox-module" data-module-key="product_shop_sandbox">
     ${selectedShop ? `<header class="is-summary-only"><span>${escapeHtml(selectedShop.name)} · ${visibleItems.length}${segment !== "all" ? ` / ${items.length}` : ""} 个产品</span></header>` : ""}
     ${shops.length ? renderShopTabs(shops, selectedShop?.id || "") : ""}
     <form data-product-sandbox-filter>${renderProductSalesPresetButtons(range, "data-product-sandbox-preset")}<div class="product-distribution-custom-range ${range.preset === "custom" ? "" : "is-hidden"}"><label>开始日期<input type="date" name="startDate" value="${escapeHtml(range.startDate || "")}" ${range.preset === "custom" ? "required" : "disabled"}/></label><span>→</span><label>结束日期<input type="date" name="endDate" value="${escapeHtml(range.endDate || "")}" ${range.preset === "custom" ? "required" : "disabled"}/></label></div><button type="submit" class="secondary-button">查看</button>${renderSortControl(sortMode)}${renderProductSummary(state.summary, segment)}</form>
     ${range.startDate && range.endDate ? `<div class="product-sandbox-period">${escapeHtml(range.startDate)} 至 ${escapeHtml(range.endDate)}</div>` : ""}
-    ${state.loading && !state.loaded ? `<div class="empty-state">正在读取店铺产品…</div>` : state.error ? `<div class="form-error">${escapeHtml(state.error)}</div>` : !shops.length ? `<div class="empty-state"><strong>暂无可用店铺</strong><p>当前没有关联销售链接的在用店铺。</p></div>` : !items.length ? `<div class="empty-state"><strong>暂无关联产品</strong><p>该店铺当前没有可归属到产品档案的有效销售关系。</p></div>` : visibleItems.length ? renderProductCards(visibleItems, resolveUrl) : `<div class="empty-state"><strong>当前关联产品均无销量</strong><p>取消“隐藏无销量”即可查看全部关联产品。</p></div>`}
+    ${state.loading && !state.loaded ? `<div class="empty-state">正在读取店铺产品…</div>` : state.error ? `<div class="form-error">${escapeHtml(state.error)}</div>` : !shops.length ? `<div class="empty-state"><strong>暂无可用店铺</strong><p>当前没有关联销售链接的在用店铺。</p></div>` : !items.length ? `<div class="empty-state"><strong>暂无关联产品</strong><p>该店铺当前没有可归属到产品档案的有效销售关系。</p></div>` : visibleItems.length ? `${renderProductCards(visibleItems, resolveUrl)}${pagination.hasMore ? `<div class="product-sandbox-load-more"><button type="button" class="secondary-button" data-product-sandbox-more ${state.loading ? "disabled" : ""}>${state.loading ? "正在加载…" : `加载更多（已显示 ${items.length}/${pagination.total}）`}</button></div>` : ""}` : `<div class="empty-state"><strong>当前已加载范围没有符合条件的产品</strong><p>可以继续加载更多产品或切换筛选条件。</p></div>`}
   </section>`;
 }
 

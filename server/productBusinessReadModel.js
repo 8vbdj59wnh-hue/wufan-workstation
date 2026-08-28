@@ -11,6 +11,8 @@ export const productBusinessInventoryStatuses = Object.freeze(["healthy", "atten
 
 const terminalActionStatuses = new Set(["done", "completed", "canceled", "cancelled", "stopped", "terminated"]);
 const completedTaskStatuses = new Set(["done", "completed", "canceled", "cancelled"]);
+const relationContextCacheTtlMs = 60_000;
+let relationContextCaches = new WeakMap();
 
 function text(value) { return String(value ?? "").trim(); }
 function numeric(value) { return value === null || value === undefined ? null : Number(value); }
@@ -30,7 +32,14 @@ export function resolveProductBusinessPeriod(query = {}, database = getDatabase(
     earlierPeriodStart: addDays(previousPeriodStart, -periodDays), earlierPeriodEnd: addDays(previousPeriodStart, -1), periodDays };
 }
 
-export function readProductBusinessRelationContext(database) {
+export function invalidateProductBusinessReadCache(database = null) {
+  if (database) relationContextCaches.delete(database);
+  else relationContextCaches = new WeakMap();
+}
+
+export function readProductBusinessRelationContext(database, { bypassCache = false } = {}) {
+  const cached = relationContextCaches.get(database);
+  if (!bypassCache && cached?.expiresAt > Date.now()) return cached.value;
   const linkSkus = database.prepare(`
     SELECT s.id salesLinkSkuId,s.salesLinkId
     FROM sales_link_skus s JOIN sales_links l ON l.id=s.salesLinkId
@@ -65,7 +74,9 @@ export function readProductBusinessRelationContext(database) {
       links.add(sku.salesLinkId); linksByErpSku.set(attribution.erpSkuId, links);
     }
   }
-  return { attributionsBySku, linksByProduct: linksByErpSku, linksByErpSku, resolvedLinkSkuCount: attributionsBySku.size };
+  const value = { attributionsBySku, linksByProduct: linksByErpSku, linksByErpSku, resolvedLinkSkuCount: attributionsBySku.size };
+  relationContextCaches.set(database, { value, expiresAt: Date.now() + relationContextCacheTtlMs });
+  return value;
 }
 
 export function erpSkuSalesMetrics(database, periodStart, periodEnd) {
@@ -334,7 +345,7 @@ function operatingProductLifecycleMap(database) {
   return result;
 }
 
-export function getProductBusinessReadModel(query = {}, { includeInventoryCost = false, visibleErpSkuIds = null, unpaged = false } = {}) {
+export function getProductBusinessReadModel(query = {}, { includeInventoryCost = false, visibleErpSkuIds = null, unpaged = false, bypassCache = false } = {}) {
   const database = getDatabase();
   const period = resolveProductBusinessPeriod(query, database);
   const products = database.prepare(`
@@ -368,11 +379,11 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
       ? allScopedProducts.filter((product) => [...(productLifecycle.get(product.erpSkuId)?.statuses || [])].some((status) => ["active", "active_dependency", "sales_active"].includes(status)))
       : allScopedProducts;
   const erpSkuIds = scopedProducts.map((product) => product.erpSkuId);
-  const relationContext = readProductBusinessRelationContext(database);
+  const relationContext = readProductBusinessRelationContext(database, { bypassCache });
   const currentSales = erpSkuSalesMetrics(database, period.periodStart, period.periodEnd);
   const previousSales = erpSkuSalesMetrics(database, period.previousPeriodStart, period.previousPeriodEnd);
   const earlierSales = erpSkuSalesMetrics(database, period.earlierPeriodStart, period.earlierPeriodEnd);
-  const contributionOptions = { database };
+  const contributionOptions = { database, bypassCache };
   const currentContributionResult = queryErpSkuContributions({ periodStart: period.periodStart, periodEnd: period.periodEnd, erpSkuIds }, contributionOptions);
   const currentContribution = new Map(currentContributionResult.items.map((item) => [item.erpSkuId, item]));
   const previousContribution = new Map(queryErpSkuContributions({ periodStart: period.previousPeriodStart, periodEnd: period.previousPeriodEnd, erpSkuIds }, contributionOptions).items.map((item) => [item.erpSkuId, item]));

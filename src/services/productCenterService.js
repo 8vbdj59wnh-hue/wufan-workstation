@@ -9,6 +9,7 @@ export {
   createErpSyncRun,
   bindPlatformSku,
   getNow,
+  getProductDataRevision,
   loadProductSalesLinks,
   loadProductSalesSummaries,
   loadPendingErpSkus,

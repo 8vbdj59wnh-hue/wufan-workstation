@@ -9,6 +9,7 @@ import {
   createErpSyncRun,
   bindPlatformSku,
   getNow,
+  getProductDataRevision,
   loadProductSalesLinks,
   loadProductSalesSummaries,
   loadPendingErpSkus,
@@ -74,6 +75,7 @@ import { canAccessModule, hasPermission } from "../shared/permissions.js";
 import { normalizeProductSkuCode } from "./data/productSku.js";
 import { escapeHtml } from "./utils/html.js";
 import { renderUiModule } from "./uiModuleRegistry.js";
+import { attachThumbnailHoverPreview } from "./thumbnailPreview.js";
 import "./uiModules/productWorkspaceModules.js";
 import "./uiModules/productMarketingAsset.js";
 import "./uiModules/productDailySales.js";
@@ -136,17 +138,53 @@ let productSkuV2RequestId = 0;
 let productSkuV2SearchTimer = 0;
 let productSkuV2MetadataLoading = false;
 let productWorkspaceState = { activeTab: "overview", sections: {}, marketingMode: "read", marketingNotice: "", dailySales: { data: null, loading: false, loaded: false, rangePreset: "30d", error: "" } };
-let productBusinessDashboardState = { readModel: null, loading: false, error: "" };
+let productBusinessDashboardState = { readModel: null, loading: false, cacheKey: "", error: "" };
 let productBusinessViewMode = "table";
 let productBusinessSearchTimer = 0;
 let productBusinessRefreshPending = false;
-let productSalesDistributionState = { range: { preset: "30d" }, includeHistorical: false, items: [], summary: {}, selectedGroup: 0, loading: false, loaded: false, error: "" };
-let productShopSandboxState = { range: { preset: "30d" }, shopId: "", shops: [], selectedShop: null, items: [], summary: {}, segment: "all", sortMode: "sales", loading: false, loaded: false, error: "" };
-let productClearancePlanState = { range: "30d", periodStart: "", periodEnd: "", status: "active", center: null, loading: false, loaded: false, error: "", notice: "" };
+let productSalesDistributionState = { range: { preset: "30d" }, includeHistorical: false, items: [], summary: {}, pagination: { total: 0, limit: 100, offset: 0, hasMore: false }, selectedGroup: 0, loading: false, loaded: false, cacheKey: "", error: "" };
+let productShopSandboxState = { range: { preset: "30d" }, shopId: "", shops: [], selectedShop: null, items: [], summary: {}, pagination: { total: 0, limit: 100, offset: 0, hasMore: false }, segment: "all", sortMode: "sales", loading: false, loaded: false, cacheKey: "", error: "" };
+let productClearancePlanState = { range: "30d", periodStart: "", periodEnd: "", status: "active", center: null, loading: false, loaded: false, cacheKey: "", error: "", notice: "" };
 let productClearancePlanModalState = null;
-let productNewDevelopmentState = { status: "all", center: null, loading: false, loaded: false, error: "", selectedActionId: "" };
+let productNewDevelopmentState = { status: "all", center: null, loading: false, loaded: false, cacheKey: "", error: "", selectedActionId: "" };
 let productBusinessFilters = { query: "", brand: "", category: "", lifecycle: "", status: "", healthStatus: "", inventoryStatus: "", ownerId: "", includeHistorical: false, range: "30d", periodStart: "", periodEnd: "", sortBy: "updatedAt", sortDirection: "desc", page: 1, pageSize: 30 };
 let productBusinessVisibleMetrics = new Set(["sales", "structure", "inventory", "profit", "health", "diagnosis"]);
+const productModuleMemoryCache = new Map();
+const productModuleMemoryCacheLimit = 30;
+
+function productModuleCacheKey(module, input = {}) {
+  return JSON.stringify([module, getProductDataRevision(), ...Object.keys(input).sort().map((key) => [key, input[key]])]);
+}
+
+function productBusinessDashboardCacheKey() { return productModuleCacheKey("business-dashboard", productBusinessFilters); }
+function productSalesDistributionCacheKey() { return productModuleCacheKey("business-cockpit", { ...productSalesDistributionState.range, includeHistorical: productSalesDistributionState.includeHistorical }); }
+function productShopSandboxCacheKey() { return productModuleCacheKey("product-sandbox", { ...productShopSandboxState.range, shopId: productShopSandboxState.shopId }); }
+function productClearanceCacheKey() { return productModuleCacheKey("clearance-plans", { range: productClearancePlanState.range, periodStart: productClearancePlanState.periodStart, periodEnd: productClearancePlanState.periodEnd, status: productClearancePlanState.status }); }
+
+function readProductModuleCache(cacheKey) {
+  const cached = productModuleMemoryCache.get(cacheKey);
+  if (!cached) return null;
+  productModuleMemoryCache.delete(cacheKey);
+  productModuleMemoryCache.set(cacheKey, cached);
+  return cached.value;
+}
+
+function rememberProductModuleCache(module, cacheKey, value) {
+  productModuleMemoryCache.delete(cacheKey);
+  productModuleMemoryCache.set(cacheKey, { module, value });
+  while (productModuleMemoryCache.size > productModuleMemoryCacheLimit) productModuleMemoryCache.delete(productModuleMemoryCache.keys().next().value);
+}
+
+function invalidateProductModuleCaches(...modules) {
+  const targets = new Set(modules.length ? modules : ["business-dashboard", "business-cockpit", "product-sandbox", "new-product-development", "clearance-plans", "sku-management"]);
+  for (const [cacheKey, cached] of productModuleMemoryCache) if (targets.has(cached.module)) productModuleMemoryCache.delete(cacheKey);
+  if (targets.has("business-dashboard")) productBusinessDashboardState = { ...productBusinessDashboardState, cacheKey: "" };
+  if (targets.has("business-cockpit")) productSalesDistributionState = { ...productSalesDistributionState, cacheKey: "" };
+  if (targets.has("product-sandbox")) productShopSandboxState = { ...productShopSandboxState, cacheKey: "" };
+  if (targets.has("new-product-development")) productNewDevelopmentState = { ...productNewDevelopmentState, cacheKey: "" };
+  if (targets.has("clearance-plans")) productClearancePlanState = { ...productClearancePlanState, cacheKey: "" };
+  if (targets.has("sku-management")) productSkuV2State = { ...productSkuV2State, loaded: false };
+}
 
 function canViewProducts() { return hasPermission(getCurrentUser(), "products.view"); }
 function canViewSkus() { return hasPermission(getCurrentUser(), "skus.view"); }
@@ -452,6 +490,7 @@ function renderProductWorkspaceTabs() {
     <button type="button" data-action="product-workspace-view" data-view="new-product-development" class="${newDevelopmentActive ? "is-active" : ""}">新品开发</button>
     <button type="button" data-action="product-workspace-view" data-view="clearance-plans" class="${clearanceActive ? "is-active" : ""}">清仓计划</button>` : ""}
     ${canViewSkus() || canViewCombos() ? `<button type="button" data-action="product-workspace-view" data-view="sku-management" class="${skuManagementActive ? "is-active" : ""}">SKU管理</button>` : ""}
+    <button type="button" class="product-workspace-refresh" data-action="refresh-product-module" title="忽略页面缓存并重新读取当前模块">刷新</button>
   </nav>`;
 }
 
@@ -2157,7 +2196,7 @@ async function refreshErpSyncState(syncRunId = erpSyncState.active?.id) {
   return erpSyncState;
 }
 
-export function renderProductCenterPage() {
+function renderProductCenterPageContent() {
   ensureAuthorizedProductSubmodule();
   if (isComboSkuRoute()) productSubmodule = "combo-skus";
   const erpSkuId = getRouteErpSkuId();
@@ -2178,6 +2217,10 @@ export function renderProductCenterPage() {
     return `<section class="product-center-page product-detail-page"><button class="text-button product-detail-back" type="button" data-action="back-products">← 返回产品列表</button><div class="product-detail-empty">${escapeHtml(message)}</div></section>${renderPlatformProductLinkModal()}`;
   }
   return `${product ? renderProductDetail(product) : renderProductList()}${renderPlatformProductLinkModal()}${renderProductClearancePlanModal()}${renderProductNewDevelopmentModal()}`;
+}
+
+export function renderProductCenterPage() {
+  return `<div data-product-center-root>${renderProductCenterPageContent()}</div>`;
 }
 
 async function refreshProductSkuV2List(rerender) {
@@ -2295,6 +2338,7 @@ async function submitProductMarketing(form, rerender) {
     sellingPoints: splitMarketingLines(data.get("sellingPoints")).map((text, index) => ({ text, sortOrder: index + 1 })) };
   try {
     const result = await saveProductMarketingAsset(productId, payload);
+    invalidateProductModuleCaches("business-dashboard");
     productWorkspaceState = { ...productWorkspaceState, marketingMode: "read", marketingNotice: "产品营销信息已保存。", sections: { ...productWorkspaceState.sections, marketing: { loading: false, loaded: true, asset: result.asset, error: "" } } };
   } catch (error) {
     productWorkspaceState = { ...productWorkspaceState, sections: { ...productWorkspaceState.sections, marketing: { ...productWorkspaceState.sections.marketing, error: error.message || "产品营销资产保存失败。" } } };
@@ -2429,7 +2473,16 @@ async function refreshProductManagementOverview(rerender) {
   rerender();
 }
 
-async function refreshProductBusinessDashboard(rerender) {
+async function refreshProductBusinessDashboard(rerender, { force = false } = {}) {
+  const cacheKey = productBusinessDashboardCacheKey();
+  if (!force && productBusinessDashboardState.readModel && productBusinessDashboardState.cacheKey === cacheKey) { rerender(); return; }
+  const cached = !force ? readProductModuleCache(cacheKey) : null;
+  if (cached) {
+    productBusinessDashboardState = { readModel: cached.readModel, loading: false, cacheKey, error: "" };
+    if (cached.readModel?.pagination) productBusinessFilters.page = cached.readModel.pagination.page;
+    rerender();
+    return;
+  }
   if (productBusinessDashboardState.loading) {
     productBusinessRefreshPending = true;
     return;
@@ -2439,9 +2492,11 @@ async function refreshProductBusinessDashboard(rerender) {
   productBusinessDashboardState = { ...productBusinessDashboardState, loading: true, error: "" };
   if (!hasReadModel) rerender();
   try {
-    const result = await loadProductBusinessDashboard(productBusinessFilters);
-    productBusinessDashboardState = { readModel: result.readModel, loading: false, error: "" };
+    const result = await loadProductBusinessDashboard({ ...productBusinessFilters, refresh: force ? "1" : "" });
     if (result.readModel?.pagination) productBusinessFilters.page = result.readModel.pagination.page;
+    const resolvedCacheKey = productBusinessDashboardCacheKey();
+    productBusinessDashboardState = { readModel: result.readModel, loading: false, cacheKey: resolvedCacheKey, error: "" };
+    rememberProductModuleCache("business-dashboard", resolvedCacheKey, { readModel: result.readModel });
   } catch (error) {
     productBusinessDashboardState = { ...productBusinessDashboardState, loading: false, error: error.message || "产品经营看板读取失败。" };
   }
@@ -2449,7 +2504,11 @@ async function refreshProductBusinessDashboard(rerender) {
   if (productBusinessRefreshPending) void refreshProductBusinessDashboard(rerender);
 }
 
-async function refreshProductSalesDistribution(rerender) {
+async function refreshProductSalesDistribution(rerender, { force = false } = {}) {
+  const cacheKey = productSalesDistributionCacheKey();
+  if (!force && productSalesDistributionState.loaded && productSalesDistributionState.cacheKey === cacheKey) { rerender(); return; }
+  const cached = !force ? readProductModuleCache(cacheKey) : null;
+  if (cached) { productSalesDistributionState = { ...productSalesDistributionState, ...cached, loading: false, loaded: true, cacheKey, error: "" }; rerender(); return; }
   if (productSalesDistributionState.loading) return;
   productSalesDistributionState = { ...productSalesDistributionState, loading: true, error: "" };
   rerender();
@@ -2459,6 +2518,9 @@ async function refreshProductSalesDistribution(rerender) {
       startDate: productSalesDistributionState.range?.startDate || "",
       endDate: productSalesDistributionState.range?.endDate || "",
       includeHistorical: productSalesDistributionState.includeHistorical,
+      refresh: force ? "1" : "",
+      limit: 100,
+      offset: 0,
     });
     productSalesDistributionState = {
       ...productSalesDistributionState,
@@ -2466,18 +2528,31 @@ async function refreshProductSalesDistribution(rerender) {
       includeHistorical: Boolean(result.includeHistorical),
       items: result.items || [],
       summary: result.summary || {},
+      pagination: result.pagination || { total: (result.items || []).length, limit: 100, offset: 0, hasMore: false },
       selectedGroup: 0,
       loading: false,
       loaded: true,
+      cacheKey: "",
       error: "",
     };
+    const resolvedCacheKey = productSalesDistributionCacheKey();
+    productSalesDistributionState = { ...productSalesDistributionState, cacheKey: resolvedCacheKey };
+    rememberProductModuleCache("business-cockpit", resolvedCacheKey, {
+      range: productSalesDistributionState.range, includeHistorical: productSalesDistributionState.includeHistorical,
+      items: productSalesDistributionState.items, summary: productSalesDistributionState.summary,
+      pagination: productSalesDistributionState.pagination, selectedGroup: 0,
+    });
   } catch (error) {
     productSalesDistributionState = { ...productSalesDistributionState, loading: false, loaded: true, error: error.message || "产品销售结构读取失败。" };
   }
   rerender();
 }
 
-async function refreshProductShopSandbox(rerender) {
+async function refreshProductShopSandbox(rerender, { force = false, append = false } = {}) {
+  const cacheKey = productShopSandboxCacheKey();
+  if (!force && !append && productShopSandboxState.loaded && productShopSandboxState.cacheKey === cacheKey) { rerender(); return; }
+  const cached = !force && !append ? readProductModuleCache(cacheKey) : null;
+  if (cached) { productShopSandboxState = { ...productShopSandboxState, ...cached, loading: false, loaded: true, cacheKey, error: "" }; rerender(); return; }
   if (productShopSandboxState.loading) return;
   productShopSandboxState = { ...productShopSandboxState, loading: true, error: "" };
   rerender();
@@ -2487,6 +2562,9 @@ async function refreshProductShopSandbox(rerender) {
       startDate: productShopSandboxState.range?.startDate || "",
       endDate: productShopSandboxState.range?.endDate || "",
       shopId: productShopSandboxState.shopId || "",
+      refresh: force ? "1" : "",
+      limit: 100,
+      offset: append ? productShopSandboxState.items.length : 0,
     });
     productShopSandboxState = {
       ...productShopSandboxState,
@@ -2494,39 +2572,58 @@ async function refreshProductShopSandbox(rerender) {
       shopId: result.selectedShop?.id || "",
       shops: result.shops || [],
       selectedShop: result.selectedShop || null,
-      items: result.items || [],
+      items: append ? [...productShopSandboxState.items, ...(result.items || [])] : (result.items || []),
       summary: result.summary || {},
+      pagination: result.pagination || { total: (result.items || []).length, limit: 100, offset: 0, hasMore: false },
       loading: false,
       loaded: true,
+      cacheKey: "",
       error: "",
     };
+    const resolvedCacheKey = productShopSandboxCacheKey();
+    productShopSandboxState = { ...productShopSandboxState, cacheKey: resolvedCacheKey };
+    rememberProductModuleCache("product-sandbox", resolvedCacheKey, {
+      range: productShopSandboxState.range, shopId: productShopSandboxState.shopId, shops: productShopSandboxState.shops,
+      selectedShop: productShopSandboxState.selectedShop, items: productShopSandboxState.items,
+      summary: productShopSandboxState.summary, pagination: productShopSandboxState.pagination,
+    });
   } catch (error) {
     productShopSandboxState = { ...productShopSandboxState, loading: false, loaded: true, error: error.message || "产品沙盘读取失败。" };
   }
   rerender();
 }
 
-async function refreshProductClearancePlans(rerender) {
+async function refreshProductClearancePlans(rerender, { force = false } = {}) {
+  const cacheKey = productClearanceCacheKey();
+  if (!force && productClearancePlanState.loaded && productClearancePlanState.cacheKey === cacheKey) { rerender(); return; }
+  const cached = !force ? readProductModuleCache(cacheKey) : null;
+  if (cached) { productClearancePlanState = { ...productClearancePlanState, ...cached, loading: false, loaded: true, cacheKey, error: "" }; rerender(); return; }
   if (productClearancePlanState.loading) return;
   productClearancePlanState = { ...productClearancePlanState, loading: true, error: "" };
   rerender();
   try {
     const result = await loadProductClearancePlans({ range: productClearancePlanState.range, periodStart: productClearancePlanState.periodStart,
       periodEnd: productClearancePlanState.periodEnd, status: productClearancePlanState.status });
-    productClearancePlanState = { ...productClearancePlanState, center: result.center, loading: false, loaded: true, error: "" };
+    productClearancePlanState = { ...productClearancePlanState, center: result.center, loading: false, loaded: true, cacheKey, error: "" };
+    rememberProductModuleCache("clearance-plans", cacheKey, { center: result.center });
   } catch (error) {
     productClearancePlanState = { ...productClearancePlanState, loading: false, loaded: true, error: error.message || "清仓计划读取失败。" };
   }
   rerender();
 }
 
-async function refreshProductNewDevelopmentActions(rerender) {
+async function refreshProductNewDevelopmentActions(rerender, { force = false } = {}) {
+  const cacheKey = productModuleCacheKey("new-product-development");
+  if (!force && productNewDevelopmentState.loaded && productNewDevelopmentState.cacheKey === cacheKey) { rerender(); return; }
+  const cached = !force ? readProductModuleCache(cacheKey) : null;
+  if (cached) { productNewDevelopmentState = { ...productNewDevelopmentState, ...cached, loading: false, loaded: true, cacheKey, error: "" }; rerender(); return; }
   if (productNewDevelopmentState.loading) return;
   productNewDevelopmentState = { ...productNewDevelopmentState, loading: true, error: "" };
   rerender();
   try {
     const result = await loadProductNewDevelopmentActions();
-    productNewDevelopmentState = { ...productNewDevelopmentState, center: result.center, loading: false, loaded: true, error: "" };
+    productNewDevelopmentState = { ...productNewDevelopmentState, center: result.center, loading: false, loaded: true, cacheKey, error: "" };
+    rememberProductModuleCache("new-product-development", cacheKey, { center: result.center });
   } catch (error) {
     productNewDevelopmentState = { ...productNewDevelopmentState, loading: false, loaded: true, error: error.message || "新品开发行动读取失败。" };
   }
@@ -2743,6 +2840,14 @@ function bindProductDistributionTooltips() {
 }
 
 export function bindProductCenterPageEvents(rerender) {
+  const rerenderApp = rerender;
+  rerender = () => {
+    const root = document.querySelector("[data-product-center-root]");
+    if (!root) { rerenderApp(); return; }
+    root.innerHTML = renderProductCenterPageContent();
+    bindProductCenterPageEvents(rerenderApp);
+    attachThumbnailHoverPreview();
+  };
   ensureAuthorizedProductSubmodule();
   if (isComboSkuRoute()) productSubmodule = "combo-skus";
   const routeErpSkuId = getRouteErpSkuId();
@@ -2887,6 +2992,9 @@ export function bindProductCenterPageEvents(rerender) {
   document.querySelectorAll("[data-product-sandbox-product]").forEach((button) => button.addEventListener("click", () => {
     window.location.hash = `products/sku/${encodeURIComponent(button.dataset.productSandboxProduct)}`;
   }));
+  document.querySelector("[data-product-sandbox-more]")?.addEventListener("click", () => {
+    void refreshProductShopSandbox(rerender, { append: true });
+  });
   document.querySelectorAll("[data-product-business-metric]").forEach((checkbox) => checkbox.addEventListener("change", (event) => {
     const metric = event.currentTarget.dataset.productBusinessMetric;
     if (event.currentTarget.checked) productBusinessVisibleMetrics.add(metric);
@@ -2964,12 +3072,12 @@ export function bindProductCenterPageEvents(rerender) {
   document.querySelector("[data-product-lifecycle-form]")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const form=event.currentTarget; const productId=form.dataset.productId;
     if (!hasPermission(getCurrentUser(), "products.archive")) return;
-    try { await changeProductLifecycle(productId,{status:form.elements.status.value,reason:form.elements.reason.value.trim()}); const product=state.products.find((item)=>item.id===productId); if(product) product.status=form.elements.status.value; const details=new Map(productManagementState.details); details.delete(productId); productManagementState={...productManagementState,details,overview:null,notice:"生命周期已更新。"}; await refreshProductManagementDetail(productId,rerender); }
+    try { await changeProductLifecycle(productId,{status:form.elements.status.value,reason:form.elements.reason.value.trim()}); invalidateProductModuleCaches("business-dashboard", "business-cockpit", "product-sandbox", "sku-management"); const product=state.products.find((item)=>item.id===productId); if(product) product.status=form.elements.status.value; const details=new Map(productManagementState.details); details.delete(productId); productManagementState={...productManagementState,details,overview:null,notice:"生命周期已更新。"}; await refreshProductManagementDetail(productId,rerender); }
     catch(error){productManagementState={...productManagementState,error:error.message||"生命周期更新失败。"};rerender();}
   });
   document.querySelectorAll("[data-product-improvement-form]").forEach((form)=>form.addEventListener("submit",async(event)=>{
     event.preventDefault(); const payload=Object.fromEntries(new FormData(form));
-    try { const result=await createProductImprovementAction(form.dataset.issueId,payload); if(result.instance) state.processInstances=[result.instance,...state.processInstances.filter((item)=>item.id!==result.instance.id)]; if(result.actionProduct) state.actionProducts=[result.actionProduct,...state.actionProducts.filter((item)=>item.id!==result.actionProduct.id)]; const details=new Map(productManagementState.details); details.delete(routeProductId); productManagementState={...productManagementState,details,notice:"改善行动草稿已创建。"}; await refreshProductManagementDetail(routeProductId,rerender); }
+    try { const result=await createProductImprovementAction(form.dataset.issueId,payload); invalidateProductModuleCaches("business-dashboard", "new-product-development"); if(result.instance) state.processInstances=[result.instance,...state.processInstances.filter((item)=>item.id!==result.instance.id)]; if(result.actionProduct) state.actionProducts=[result.actionProduct,...state.actionProducts.filter((item)=>item.id!==result.actionProduct.id)]; const details=new Map(productManagementState.details); details.delete(routeProductId); productManagementState={...productManagementState,details,notice:"改善行动草稿已创建。"}; await refreshProductManagementDetail(routeProductId,rerender); }
     catch(error){productManagementState={...productManagementState,error:error.message||"改善行动创建失败。"};rerender();}
   }));
   document.querySelectorAll("[data-product-health-action-form]").forEach((form) => form.addEventListener("submit", async (event) => {
@@ -2978,6 +3086,7 @@ export function bindProductCenterPageEvents(rerender) {
     payload.recommendationCode = form.dataset.recommendationCode;
     try {
       const result = await createProductHealthAction(form.dataset.productId, payload);
+      invalidateProductModuleCaches("business-dashboard", "new-product-development");
       if (result.instance) state.processInstances = [result.instance, ...state.processInstances.filter((item) => item.id !== result.instance.id)];
       if (result.actionProduct) state.actionProducts = [result.actionProduct, ...state.actionProducts.filter((item) => item.id !== result.actionProduct.id)];
       const details = new Map(productManagementState.details); const current = { ...(details.get(form.dataset.productId) ?? {}) }; delete current.businessDiagnosis; delete current.insightCenter; details.set(form.dataset.productId, current);
@@ -2993,6 +3102,7 @@ export function bindProductCenterPageEvents(rerender) {
     const payload = Object.fromEntries(new FormData(form));
     try {
       await recordProductImprovementResult(form.dataset.improvementId, payload);
+      invalidateProductModuleCaches("business-dashboard");
       const details = new Map(productManagementState.details);
       const { improvementCenter: _staleImprovementCenter, ...current } = details.get(routeProductId) ?? {};
       details.set(routeProductId, current);
@@ -3006,6 +3116,7 @@ export function bindProductCenterPageEvents(rerender) {
     event.preventDefault(); const payload = Object.fromEntries(new FormData(form));
     try {
       await saveProductStrategySection(form.dataset.productId, form.dataset.productStrategySection, payload);
+      invalidateProductModuleCaches("business-dashboard");
       const details = new Map(productManagementState.details); const current = { ...(details.get(form.dataset.productId) ?? {}) }; delete current.strategy; delete current.businessDiagnosis; delete current.insightCenter; details.set(form.dataset.productId, current);
       productManagementState = { ...productManagementState, details, notice: "产品战略已保存，上一版已转入历史。", error: "" };
       await refreshProductStrategy(form.dataset.productId, rerender);
@@ -3015,6 +3126,7 @@ export function bindProductCenterPageEvents(rerender) {
     event.preventDefault();
     try {
       await addProductStrategyStep(form.dataset.productId, Object.fromEntries(new FormData(form)));
+      invalidateProductModuleCaches("business-dashboard");
       const details = new Map(productManagementState.details); const current = { ...(details.get(form.dataset.productId) ?? {}) }; delete current.strategy; delete current.businessDiagnosis; delete current.insightCenter; details.set(form.dataset.productId, current);
       productManagementState = { ...productManagementState, details, notice: "下一步策略已新增，未生成任务。", error: "" };
       await refreshProductStrategy(form.dataset.productId, rerender);
@@ -3024,6 +3136,7 @@ export function bindProductCenterPageEvents(rerender) {
     event.preventDefault();
     try {
       await updateProductStrategyStep(form.dataset.productId, form.dataset.itemId, Object.fromEntries(new FormData(form)));
+      invalidateProductModuleCaches("business-dashboard");
       const details = new Map(productManagementState.details); const current = { ...(details.get(form.dataset.productId) ?? {}) }; delete current.strategy; delete current.businessDiagnosis; delete current.insightCenter; details.set(form.dataset.productId, current);
       productManagementState = { ...productManagementState, details, notice: "策略状态已保存，不会自动变更任务或产品状态。", error: "" };
       await refreshProductStrategy(form.dataset.productId, rerender);
@@ -3033,6 +3146,7 @@ export function bindProductCenterPageEvents(rerender) {
     event.preventDefault();
     try {
       const result = await createProductStrategyAction(form.dataset.productId, form.dataset.itemId, Object.fromEntries(new FormData(form)));
+      invalidateProductModuleCaches("business-dashboard", "new-product-development");
       if (result.instance) state.processInstances = [result.instance, ...state.processInstances.filter((item) => item.id !== result.instance.id)];
       if (result.actionProduct) state.actionProducts = [result.actionProduct, ...state.actionProducts.filter((item) => item.id !== result.actionProduct.id)];
       const details = new Map(productManagementState.details); const current = { ...(details.get(form.dataset.productId) ?? {}) }; delete current.businessDiagnosis; delete current.insightCenter; details.set(form.dataset.productId, current);
@@ -3044,6 +3158,7 @@ export function bindProductCenterPageEvents(rerender) {
     event.preventDefault();
     try {
       await createProductInsight(form.dataset.productId, Object.fromEntries(new FormData(form)));
+      invalidateProductModuleCaches("business-dashboard");
       const details = new Map(productManagementState.details); const current = { ...(details.get(form.dataset.productId) ?? {}) }; delete current.insightCenter; details.set(form.dataset.productId, current);
       productManagementState = { ...productManagementState, details, notice: "用户洞察已保存，未修改产品或自动生成任务。", error: "" };
       await refreshProductInsightCenter(form.dataset.productId, rerender);
@@ -3053,6 +3168,7 @@ export function bindProductCenterPageEvents(rerender) {
     event.preventDefault();
     try {
       await updateProductInsight(form.dataset.productId, form.dataset.insightId, Object.fromEntries(new FormData(form)));
+      invalidateProductModuleCaches("business-dashboard");
       const details = new Map(productManagementState.details); const current = { ...(details.get(form.dataset.productId) ?? {}) }; delete current.insightCenter; details.set(form.dataset.productId, current);
       productManagementState = { ...productManagementState, details, notice: "用户洞察状态已更新。", error: "" };
       await refreshProductInsightCenter(form.dataset.productId, rerender);
@@ -3063,6 +3179,7 @@ export function bindProductCenterPageEvents(rerender) {
     const form = event.currentTarget;
     try {
       await saveProductClearancePlan(form.dataset.productId, Object.fromEntries(new FormData(form)));
+      invalidateProductModuleCaches("business-dashboard", "clearance-plans");
       productClearancePlanModalState = null;
       productClearancePlanState = { ...productClearancePlanState, loaded: false, notice: "清仓计划已保存；产品状态和经营事实未改变。", error: "" };
       if (productSubmodule === "clearance-plans") await refreshProductClearancePlans(rerender);
@@ -3191,6 +3308,15 @@ export function bindProductCenterPageEvents(rerender) {
       else rerender();
       return;
     }
+    if (action === "refresh-product-module") {
+      if (productSubmodule === "business-cockpit") void refreshProductSalesDistribution(rerender, { force: true });
+      else if (productSubmodule === "product-sandbox") void refreshProductShopSandbox(rerender, { force: true });
+      else if (productSubmodule === "new-product-development") void refreshProductNewDevelopmentActions(rerender, { force: true });
+      else if (productSubmodule === "clearance-plans") void refreshProductClearancePlans(rerender, { force: true });
+      else if (productSubmodule === "business-dashboard") void refreshProductBusinessDashboard(rerender, { force: true });
+      else { productSkuV2State = { ...productSkuV2State, loaded: false }; void refreshProductSkuV2List(rerender); }
+      return;
+    }
     if (action === "filter-product-new-development") {
       productNewDevelopmentState = { ...productNewDevelopmentState, status: ["pending", "running", "done"].includes(button.dataset.status) ? button.dataset.status : "all" };
       rerender();
@@ -3220,6 +3346,7 @@ export function bindProductCenterPageEvents(rerender) {
       if (!window.confirm("确认手工标记该清仓计划已完成？这不会修改产品状态。")) return;
       try {
         await updateProductClearancePlan(button.dataset.planId, { status: "completed" });
+        invalidateProductModuleCaches("business-dashboard", "clearance-plans");
         productClearancePlanState = { ...productClearancePlanState, loaded: false, notice: "清仓计划已标记完成，产品状态未改变。", error: "" };
         await refreshProductClearancePlans(rerender);
       } catch (error) { productClearancePlanState = { ...productClearancePlanState, error: error.message || "清仓计划更新失败。" }; rerender(); }
@@ -3393,7 +3520,7 @@ export function bindProductCenterPageEvents(rerender) {
       rerender();
     }
     if (action === "evaluate-product-health") {
-      try { await evaluateProductManagementHealth(button.dataset.productId); const details=new Map(productManagementState.details); details.delete(button.dataset.productId); productManagementState={...productManagementState,details,overview:null,notice:"产品经营体检已生成。"}; await refreshProductManagementDetail(button.dataset.productId,rerender); }
+      try { await evaluateProductManagementHealth(button.dataset.productId); invalidateProductModuleCaches("business-dashboard"); const details=new Map(productManagementState.details); details.delete(button.dataset.productId); productManagementState={...productManagementState,details,overview:null,notice:"产品经营体检已生成。"}; await refreshProductManagementDetail(button.dataset.productId,rerender); }
       catch(error){productManagementState={...productManagementState,error:error.message||"产品经营体检失败。"};rerender();}
     }
     if (action === "new-product") { modalState = { kind: "create", error: "" }; rerender(); }
@@ -3621,6 +3748,7 @@ export function bindProductCenterPageEvents(rerender) {
       rerender();
       try {
         const result = await commitProductV2Import(batchId, { shopMappings: submittedShopMappings });
+        invalidateProductModuleCaches();
         importState = { ...importState, step: "complete", loading: false, result, syncRun: result.syncRun || importState.syncRun };
         unmatchedSkuState = { loading: false, loaded: false, rows: [], total: 0, query: "", error: "" };
         rerender();
@@ -3678,6 +3806,7 @@ export function bindProductCenterPageEvents(rerender) {
     try {
       const activeTab = productWorkspaceState.activeTab;
       await saveProductBusinessProfile(form.dataset.erpSkuId, Object.fromEntries(new FormData(form)));
+      invalidateProductModuleCaches("business-dashboard", "business-cockpit", "product-sandbox", "sku-management");
       const details = new Map(productManagementState.details); details.delete(form.dataset.erpSkuId);
       productManagementState = { ...productManagementState, details, notice: "经营资料已保存。", error: "" };
       productSkuV2State = { ...productSkuV2State, detailId: "" };
