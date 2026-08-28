@@ -33,6 +33,8 @@ export {
   loadProductCenterV2Skus,
   loadProductCenterV2Metadata,
   loadProductCenterV2SkuDetail,
+  loadProductBusinessProfile,
+  saveProductBusinessProfile,
   loadProductComboSkus,
   loadProductComboSkuDetail,
   createProductProfileForErpSku,

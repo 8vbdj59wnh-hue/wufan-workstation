@@ -13,6 +13,9 @@ function fixture() {
   const database = new Database(":memory:");
   database.exec(`
     CREATE TABLE products(id TEXT PRIMARY KEY,name TEXT,skuCode TEXT,mainImage TEXT,brand TEXT,category TEXT,status TEXT,ownerId TEXT);
+    CREATE TABLE erp_goods(id TEXT PRIMARY KEY,goodsCode TEXT,goodsName TEXT,brand TEXT,category TEXT);
+    CREATE TABLE erp_skus(id TEXT PRIMARY KEY,erpGoodsId TEXT,merchantSkuCode TEXT,specificationName TEXT,mainImage TEXT,currentState TEXT);
+    CREATE TABLE product_business_profiles(id TEXT PRIMARY KEY,erpSkuId TEXT,displayNameOverride TEXT,brandOverride TEXT,categoryOverride TEXT,businessStatus TEXT,ownerId TEXT);
     CREATE TABLE persons(id TEXT PRIMARY KEY,name TEXT);
     CREATE TABLE product_erp_mappings(id TEXT PRIMARY KEY,productId TEXT,erpSkuId TEXT,currentState TEXT,updatedAt TEXT);
     CREATE TABLE operating_erp_set_members(erpSkuId TEXT,lifecycleStatus TEXT);
@@ -28,6 +31,12 @@ function fixture() {
       ('product-b','花瓶B','B','','半然','花瓶','在售',NULL),
       ('product-c','组合贡献产品','C','','半然','花材','在售',NULL),
       ('product-d','历史产品','D','','半然','花瓶','已归档',NULL);
+    INSERT INTO erp_goods VALUES
+      ('goods-a','A','花瓶A','半然','花瓶'),('goods-b','B','花瓶B','半然','花瓶'),
+      ('goods-c','C','组合贡献产品','半然','花材'),('goods-d','D','历史产品','半然','花瓶');
+    INSERT INTO erp_skus VALUES
+      ('erp-a','goods-a','A','A款','/uploads/a.jpg','active'),('erp-b','goods-b','B','B款','','active'),
+      ('erp-c','goods-c','C','C款','','active'),('erp-d','goods-d','D','D款','','inactive');
     INSERT INTO product_erp_mappings VALUES
       ('map-a','product-a','erp-a','active','2026-08-20'),
       ('map-b','product-b','erp-b','active','2026-08-20'),
@@ -59,7 +68,7 @@ test("产品销售结构按直接销售额排序且不拆分组合装金额", ()
   const database = fixture();
   const before = database.prepare("SELECT COUNT(*) facts,SUM(salesAmount) sales FROM connection_sku_sales_daily_facts").get();
   const result = getProductSalesDistribution({ preset: "custom", startDate: "2026-08-20", endDate: "2026-08-20" }, { database });
-  assert.deepEqual(result.items.map((item) => item.productId), ["product-a", "product-b", "product-c"]);
+  assert.deepEqual(result.items.map((item) => item.erpSkuId), ["erp-a", "erp-b", "erp-c"]);
   assert.equal(result.items[0].directSalesAmount, 100);
   assert.equal(result.items[1].directSalesAmount, 40);
   assert.equal(result.items[2].directSalesAmount, null);
@@ -76,9 +85,22 @@ test("产品销售结构默认排除历史产品且可显式查看", () => {
   const database = fixture();
   const current = getProductSalesDistribution({ preset: "custom", startDate: "2026-08-20", endDate: "2026-08-20" }, { database });
   const all = getProductSalesDistribution({ preset: "custom", startDate: "2026-08-20", endDate: "2026-08-20", includeHistorical: true }, { database });
-  assert.equal(current.items.some((item) => item.productId === "product-d"), false);
-  assert.equal(all.items.some((item) => item.productId === "product-d"), true);
-  assert.equal(all.items.find((item) => item.productId === "product-d").noData, true);
+  assert.equal(current.items.some((item) => item.erpSkuId === "erp-d"), false);
+  assert.equal(all.items.some((item) => item.erpSkuId === "erp-d"), true);
+  assert.equal(all.items.find((item) => item.erpSkuId === "erp-d").noData, true);
+  database.close();
+});
+
+test("产品销售结构不依赖 Legacy Product 映射", () => {
+  const database = fixture();
+  database.prepare("INSERT INTO erp_goods VALUES(?,?,?,?,?)").run("goods-direct", "DIRECT", "直连 ERP 产品", "半然", "花瓶");
+  database.prepare("INSERT INTO erp_skus VALUES(?,?,?,?,?,?)").run("erp-direct", "goods-direct", "DIRECT001", "默认规格", "", "active");
+  database.prepare("INSERT INTO operating_erp_set_members VALUES(?,?)").run("erp-direct", "active");
+  const result = getProductSalesDistribution({ preset: "custom", startDate: "2026-08-20", endDate: "2026-08-20" }, { database });
+  const direct = result.items.find((item) => item.erpSkuId === "erp-direct");
+  assert.equal(direct.productId, null);
+  assert.equal(direct.productName, "直连 ERP 产品");
+  assert.equal(direct.noData, true);
   database.close();
 });
 
@@ -97,7 +119,7 @@ test("产品柱形图展示真实口径并提供分组和产品档案下钻", ()
   assert.doesNotMatch(html, /data-product-distribution-bar/u);
   assert.doesNotMatch(html, /data-product-distribution-tooltip/u);
   const zoomed = renderProductSalesDistribution({ state: { ...state, selectedGroup: 1 }, resolveUrl: (value) => `http://127.0.0.1:3001${value}` });
-  assert.match(zoomed, /data-product-distribution-product="product-a"/u);
+  assert.match(zoomed, /data-product-distribution-product="erp-a"/u);
   assert.match(zoomed, /data-product-distribution-bar/u);
   assert.match(zoomed, /data-product-distribution-tooltip/u);
   assert.match(zoomed, /data-tooltip-name="花瓶A"/u);
@@ -114,5 +136,5 @@ test("产品中心提供经营驾驶舱入口并通过只读接口加载柱形�
   assert.match(page, /renderUiModule\("product_sales_distribution"/u);
   assert.match(appState, /\/api\/product-management\/sales-distribution/u);
   assert.match(server, /app\.get\("\/api\/product-management\/sales-distribution"/u);
-  assert.match(server, /visibleProductIds/u);
+  assert.match(server, /\.\.\.getProductSalesDistribution\(request\.query\)/u);
 });

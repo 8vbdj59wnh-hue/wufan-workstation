@@ -25,7 +25,8 @@ test("新品开发中心只读识别已发起的新品关键行动", () => {
     ],
     goals: [{ id: "goal-growth", name: "建立新品增长曲线" }],
     products: [{ id: "product-new", name: "双耳新品花瓶", skuCode: "NEW-001", mainImage: "/uploads/new.jpg" }],
-    actionProducts: [{ actionId: "action-standard", productId: "product-new" }],
+    actionProducts: [{ actionId: "action-standard", productId: "product-new" }, { actionId: "action-standard", erpSkuId: "erp-new-direct" }],
+    productOptions: [{ erpSkuId: "erp-new-direct", productId: null, name: "无Legacy新品", skuCode: "NEW-DIRECT-1", mainImage: "/uploads/direct.jpg", status: "unmaintained" }],
   });
 
   assert.deepEqual(center.summary, { total: 2, pending: 1, running: 1, done: 0 });
@@ -34,6 +35,7 @@ test("新品开发中心只读识别已发起的新品关键行动", () => {
   assert.deepEqual(center.items[0].progress, { total: 2, completed: 1, percentage: 50 });
   assert.equal(center.items[0].owner.name, "产品负责人");
   assert.equal(center.items[0].linkedProducts[0].id, "product-new");
+  assert.equal(center.items[0].linkedProducts[1].erpSkuId, "erp-new-direct");
   assert.equal(center.definitions.source, "existing_key_actions");
   assert.equal(center.definitions.automaticActionCreation, false);
   assert.equal(center.definitions.automaticTaskCreation, false);

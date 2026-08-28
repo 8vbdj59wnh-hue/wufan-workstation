@@ -1,8 +1,8 @@
 import { getDatabase } from "./db.js";
-import { readProductInventorySupplyMap } from "./inventorySupplyQueryService.js";
+import { readErpSkuInventorySupplyMap } from "./inventorySupplyQueryService.js";
 import { classifyProductBusinessZones } from "./productBusinessClassification.js";
 import { FORMAL_SALES_OBJECT_RESOLVER_SCOPES, resolveLinkSkuRelationsForRead } from "./capabilities/resolveLinkSkuRelationRead.js";
-import { queryProductContributions } from "./productContributionReadModel.js";
+import { queryErpSkuContributions } from "./productContributionReadModel.js";
 import { latestCompleteSalesDate, resolveProductSalesDistributionRange } from "./productSalesDistributionService.js";
 
 export const productBusinessLifecycleStatuses = Object.freeze(["新品", "成长", "爆款", "稳定销售", "衰退", "清仓", "归档"]);
@@ -47,66 +47,64 @@ export function readProductBusinessRelationContext(database) {
       enabledScopes: FORMAL_SALES_OBJECT_RESOLVER_SCOPES, logDifference: () => {},
     }).results);
   }
-  const productByErpSku = new Map(database.prepare(`
-    SELECT m.erpSkuId,m.productId
-    FROM product_erp_mappings m
-    WHERE m.currentState='active' AND m.erpSkuId IS NOT NULL AND m.productId IS NOT NULL
-    ORDER BY m.updatedAt,m.id
-  `).all().map((row) => [row.erpSkuId, row.productId]));
   const attributionsBySku = new Map();
-  const linksByProduct = new Map();
+  const linksByErpSku = new Map();
   for (const sku of linkSkus) {
     const relation = relations[sku.salesLinkSkuId];
     if (!relation?.isUsable) continue;
-    const quantityByProduct = new Map();
+    const quantityByErpSku = new Map();
     for (const mapping of relation.mappings) {
-      const productId = productByErpSku.get(mapping.erpSkuId);
-      if (!productId) continue;
-      quantityByProduct.set(productId, (quantityByProduct.get(productId) || 0) + Number(mapping.quantity || 0));
+      if (!mapping.erpSkuId) continue;
+      quantityByErpSku.set(mapping.erpSkuId, (quantityByErpSku.get(mapping.erpSkuId) || 0) + Number(mapping.quantity || 0));
     }
-    const attributions = [...quantityByProduct].map(([productId, quantity]) => ({ productId, quantity }));
+    const attributions = [...quantityByErpSku].map(([erpSkuId, quantity]) => ({ erpSkuId, quantity }));
     if (!attributions.length) continue;
     attributionsBySku.set(sku.salesLinkSkuId, attributions);
     for (const attribution of attributions) {
-      const links = linksByProduct.get(attribution.productId) ?? new Set();
-      links.add(sku.salesLinkId); linksByProduct.set(attribution.productId, links);
+      const links = linksByErpSku.get(attribution.erpSkuId) ?? new Set();
+      links.add(sku.salesLinkId); linksByErpSku.set(attribution.erpSkuId, links);
     }
   }
-  return { attributionsBySku, linksByProduct, resolvedLinkSkuCount: attributionsBySku.size };
+  return { attributionsBySku, linksByProduct: linksByErpSku, linksByErpSku, resolvedLinkSkuCount: attributionsBySku.size };
 }
 
-export function salesMetrics(database, periodStart, periodEnd) {
+export function erpSkuSalesMetrics(database, periodStart, periodEnd) {
   const rows = database.prepare(`
-    SELECT f.id,m.productId,f.salesAmount,f.quantity,f.profitAmount
+    SELECT f.id,f.erpSkuId,f.salesAmount,f.quantity,f.profitAmount
     FROM connection_sku_sales_daily_facts f
-    JOIN product_erp_mappings m ON m.erpSkuId=f.erpSkuId AND m.currentState='active'
     WHERE f.saleDate>=? AND f.saleDate<=?
   `).all(periodStart, periodEnd);
   const result = new Map();
   for (const fact of rows) {
-    const metric = result.get(fact.productId) ?? { productId: fact.productId, factCount: 0, salesAmount: 0, salesQuantity: 0, grossProfit: 0, salesAmountFactCount: 0, salesQuantityFactCount: 0, profitFactCount: 0 };
+    const metric = result.get(fact.erpSkuId) ?? { erpSkuId: fact.erpSkuId, factCount: 0, salesAmount: 0, salesQuantity: 0, grossProfit: 0, salesAmountFactCount: 0, salesQuantityFactCount: 0, profitFactCount: 0 };
     metric.factCount += 1;
     if (fact.salesAmount !== null) { metric.salesAmount += Number(fact.salesAmount); metric.salesAmountFactCount += 1; }
     if (fact.quantity !== null) { metric.salesQuantity += Number(fact.quantity); metric.salesQuantityFactCount += 1; }
     if (fact.profitAmount !== null) { metric.grossProfit += Number(fact.profitAmount); metric.profitFactCount += 1; }
-    result.set(fact.productId, metric);
+    result.set(fact.erpSkuId, metric);
+  }
+  return result;
+}
+
+// Legacy compatibility for callers that still address extension records by productId.
+export function salesMetrics(database, periodStart, periodEnd) {
+  const result = new Map();
+  const mappings = database.prepare("SELECT erpSkuId,productId FROM product_erp_mappings WHERE currentState='active'").all();
+  const productByErpSku = new Map(mappings.map((row) => [row.erpSkuId, row.productId]));
+  for (const metric of erpSkuSalesMetrics(database, periodStart, periodEnd).values()) {
+    const productId = productByErpSku.get(metric.erpSkuId); if (!productId) continue;
+    const target = result.get(productId) ?? { productId, factCount: 0, salesAmount: 0, salesQuantity: 0, grossProfit: 0, salesAmountFactCount: 0, salesQuantityFactCount: 0, profitFactCount: 0 };
+    for (const field of ["factCount", "salesAmount", "salesQuantity", "grossProfit", "salesAmountFactCount", "salesQuantityFactCount", "profitFactCount"]) target[field] += Number(metric[field] || 0);
+    result.set(productId, target);
   }
   return result;
 }
 
 export function structureMetrics(database, relationContext) {
-  const skuRows = database.prepare(`
-    SELECT productId,
-      COUNT(DISTINCT CASE WHEN trim(m.merchantSkuCode)<>'' THEN lower(trim(m.merchantSkuCode)) ELSE m.id END) skuCount,
-      GROUP_CONCAT(DISTINCT g.goodsCode) productCodes
-    FROM product_erp_mappings m
-    LEFT JOIN erp_goods g ON g.id=m.erpGoodsId
-    WHERE productId IS NOT NULL AND COALESCE(m.currentState,'active')='active'
-    GROUP BY productId
-  `).all();
+  const skuRows = database.prepare(`SELECT s.id erpSkuId,g.goodsCode productCode FROM erp_skus s LEFT JOIN erp_goods g ON g.id=s.erpGoodsId`).all();
   return {
-    skus: new Map(skuRows.map((row) => [row.productId, { skuCount: Number(row.skuCount || 0), productCodes: text(row.productCodes).split(",").filter(Boolean) }])),
-    links: new Map([...relationContext.linksByProduct].map(([productId, links]) => [productId, links.size])),
+    skus: new Map(skuRows.map((row) => [row.erpSkuId, { skuCount: 1, productCodes: [row.productCode].filter(Boolean) }])),
+    links: new Map([...relationContext.linksByErpSku].map(([erpSkuId, links]) => [erpSkuId, links.size])),
   };
 }
 
@@ -123,7 +121,7 @@ export function linkPerformanceMetrics(database, periodStart, periodEnd, relatio
   `).all(periodStart, periodEnd, periodStart, periodEnd);
   const snapshotsByLink = new Map(rows.map((row) => [row.salesLinkId, row]));
   const result = new Map();
-  for (const [productId, links] of relationContext.linksByProduct) {
+  for (const [erpSkuId, links] of relationContext.linksByErpSku) {
     let payAmount = 0; let payAmountCount = 0; let visitorCount = 0; let visitorCountCount = 0;
     let weightedConversion = 0; let conversionVisitors = 0; let measuredLinkCount = 0;
     for (const salesLinkId of links) {
@@ -136,7 +134,7 @@ export function linkPerformanceMetrics(database, periodStart, periodEnd, relatio
         conversionVisitors += Number(snapshot.visitorCount);
       }
     }
-    result.set(productId, { linkCount: links.size, payAmount: payAmountCount ? payAmount : null,
+    result.set(erpSkuId, { linkCount: links.size, payAmount: payAmountCount ? payAmount : null,
       visitorCount: visitorCountCount ? visitorCount : null, conversionRate: conversionVisitors ? weightedConversion / conversionVisitors : null, measuredLinkCount });
   }
   return result;
@@ -144,39 +142,40 @@ export function linkPerformanceMetrics(database, periodStart, periodEnd, relatio
 
 function latestHealth(database) {
   const rows = database.prepare(`
-    SELECT productId,healthScore,healthStatus,updatedAt
+    SELECT erpSkuId,healthScore,healthStatus,updatedAt
     FROM (
-      SELECT productId,healthScore,healthStatus,updatedAt,id,
-        ROW_NUMBER() OVER (PARTITION BY productId ORDER BY updatedAt DESC,id DESC) position
-      FROM product_health_records
-    ) WHERE position=1
+      SELECT COALESCE(record.erpSkuId,mapping.erpSkuId) erpSkuId,record.healthScore,record.healthStatus,record.updatedAt,record.id,
+        ROW_NUMBER() OVER (PARTITION BY COALESCE(record.erpSkuId,mapping.erpSkuId) ORDER BY record.updatedAt DESC,record.id DESC) position
+      FROM product_health_records record LEFT JOIN product_erp_mappings mapping ON mapping.productId=record.productId AND mapping.currentState='active'
+    ) WHERE position=1 AND erpSkuId IS NOT NULL
   `).all();
-  return new Map(rows.map((row) => [row.productId, row]));
+  return new Map(rows.map((row) => [row.erpSkuId, row]));
 }
 
 function actionMetrics(database) {
   const actions = database.prepare(`
     WITH product_actions AS (
-      SELECT productId,actionId FROM action_products
-      UNION SELECT productId,actionId FROM product_improvements
+      SELECT COALESCE(relation.erpSkuId,mapping.erpSkuId) erpSkuId,relation.actionId FROM action_products relation LEFT JOIN product_erp_mappings mapping ON mapping.productId=relation.productId AND mapping.currentState='active'
+      UNION SELECT COALESCE(relation.erpSkuId,mapping.erpSkuId) erpSkuId,relation.actionId FROM product_improvements relation LEFT JOIN product_erp_mappings mapping ON mapping.productId=relation.productId AND mapping.currentState='active'
     )
-    SELECT a.productId,a.actionId,p.status
+    SELECT a.erpSkuId,a.actionId,p.status
     FROM product_actions a LEFT JOIN process_instances p ON p.id=a.actionId
   `).all();
   const tasks = database.prepare(`
     WITH product_actions AS (
-      SELECT productId,actionId FROM action_products
-      UNION SELECT productId,actionId FROM product_improvements
+      SELECT COALESCE(relation.erpSkuId,mapping.erpSkuId) erpSkuId,relation.actionId FROM action_products relation LEFT JOIN product_erp_mappings mapping ON mapping.productId=relation.productId AND mapping.currentState='active'
+      UNION SELECT COALESCE(relation.erpSkuId,mapping.erpSkuId) erpSkuId,relation.actionId FROM product_improvements relation LEFT JOIN product_erp_mappings mapping ON mapping.productId=relation.productId AND mapping.currentState='active'
     )
-    SELECT a.productId,t.id,t.status
+    SELECT a.erpSkuId,t.id,t.status
     FROM product_actions a JOIN tasks t ON t.processInstanceId=a.actionId
   `).all();
-  const improvements = database.prepare("SELECT productId,id,status FROM product_improvements").all();
+  const improvements = database.prepare(`SELECT COALESCE(relation.erpSkuId,mapping.erpSkuId) erpSkuId,relation.id,relation.status
+    FROM product_improvements relation LEFT JOIN product_erp_mappings mapping ON mapping.productId=relation.productId AND mapping.currentState='active'`).all();
   const result = new Map();
-  const entry = (productId) => { if (!result.has(productId)) result.set(productId, { improvementCount: 0, actionCount: 0, taskCount: 0 }); return result.get(productId); };
-  for (const item of improvements) if (!terminalActionStatuses.has(text(item.status))) entry(item.productId).improvementCount += 1;
-  for (const item of actions) if (!terminalActionStatuses.has(text(item.status))) entry(item.productId).actionCount += 1;
-  for (const item of tasks) if (!completedTaskStatuses.has(text(item.status))) entry(item.productId).taskCount += 1;
+  const entry = (erpSkuId) => { if (!result.has(erpSkuId)) result.set(erpSkuId, { improvementCount: 0, actionCount: 0, taskCount: 0 }); return result.get(erpSkuId); };
+  for (const item of improvements) if (item.erpSkuId && !terminalActionStatuses.has(text(item.status))) entry(item.erpSkuId).improvementCount += 1;
+  for (const item of actions) if (item.erpSkuId && !terminalActionStatuses.has(text(item.status))) entry(item.erpSkuId).actionCount += 1;
+  for (const item of tasks) if (item.erpSkuId && !completedTaskStatuses.has(text(item.status))) entry(item.erpSkuId).taskCount += 1;
   return result;
 }
 
@@ -323,62 +322,80 @@ function compareNullable(left, right, direction, collator) {
 
 // ERP经营生命周期只控制默认展示，Product战略生命周期保持独立。
 function operatingProductLifecycleMap(database) {
-  const rows = database.prepare(`SELECT pm.productId,m.lifecycleStatus
-    FROM operating_erp_set_members m JOIN product_erp_mappings pm ON pm.erpSkuId=m.erpSkuId AND pm.currentState='active'
-    WHERE m.erpSkuId IS NOT NULL`).all();
+  const rows = database.prepare(`SELECT m.erpSkuId,m.lifecycleStatus FROM operating_erp_set_members m WHERE m.erpSkuId IS NOT NULL`).all();
   const priority = { active: 0, active_dependency: 1, sales_active: 2, archived: 3, external_unused: 4, unresolved: 5 };
   const result = new Map();
   for (const row of rows) {
-    const current = result.get(row.productId) || { statuses: new Set(), primaryStatus: row.lifecycleStatus };
+    const current = result.get(row.erpSkuId) || { statuses: new Set(), primaryStatus: row.lifecycleStatus };
     current.statuses.add(row.lifecycleStatus);
     if ((priority[row.lifecycleStatus] ?? 99) < (priority[current.primaryStatus] ?? 99)) current.primaryStatus = row.lifecycleStatus;
-    result.set(row.productId, current);
+    result.set(row.erpSkuId, current);
   }
   return result;
 }
 
-export function getProductBusinessReadModel(query = {}, { includeInventoryCost = false, visibleProductIds = null, unpaged = false } = {}) {
+export function getProductBusinessReadModel(query = {}, { includeInventoryCost = false, visibleErpSkuIds = null, unpaged = false } = {}) {
   const database = getDatabase();
   const period = resolveProductBusinessPeriod(query, database);
-  const products = database.prepare(`SELECT p.*,owner.name ownerName FROM products p LEFT JOIN persons owner ON owner.id=p.ownerId ORDER BY p.updatedAt DESC,p.id`).all();
-  const visible = visibleProductIds ? new Set(visibleProductIds) : null;
-  const allScopedProducts = visible ? products.filter((product) => visible.has(product.id)) : products;
+  const products = database.prepare(`
+    SELECT s.id erpSkuId,s.merchantSkuCode,s.specificationName,s.mainImage,s.erpStatus,s.currentState,s.createdAt,s.updatedAt,
+      g.goodsCode,g.goodsName,g.brand,g.category,
+      m.productId legacyProductId,p.name legacyProductName,p.status legacyProductStatus,
+      profile.id businessProfileId,profile.businessStatus,profile.lifecycle profileLifecycle,profile.ownerId profileOwnerId,
+      profile.brandOverride,profile.categoryOverride,profile.displayNameOverride,profile.updatedAt profileUpdatedAt,
+      COALESCE(profile.ownerId,p.ownerId) ownerId,owner.name ownerName,
+      EXISTS(SELECT 1 FROM product_strategy_versions value WHERE value.erpSkuId=s.id OR (value.erpSkuId IS NULL AND value.productId=m.productId)) hasStrategy,
+      EXISTS(SELECT 1 FROM product_marketing_assets value WHERE value.erpSkuId=s.id OR (value.erpSkuId IS NULL AND value.productId=m.productId)) hasMarketing,
+      EXISTS(SELECT 1 FROM product_insights value WHERE value.erpSkuId=s.id OR (value.erpSkuId IS NULL AND value.productId=m.productId)) hasInsight
+    FROM erp_skus s
+    LEFT JOIN erp_goods g ON g.id=s.erpGoodsId
+    LEFT JOIN product_erp_mappings m ON m.id=(SELECT pm.id FROM product_erp_mappings pm WHERE pm.erpSkuId=s.id AND pm.currentState='active' ORDER BY pm.updatedAt DESC,pm.id DESC LIMIT 1)
+    LEFT JOIN products p ON p.id=m.productId
+    LEFT JOIN product_business_profiles profile ON profile.erpSkuId=s.id
+    LEFT JOIN persons owner ON owner.id=COALESCE(profile.ownerId,p.ownerId)
+    ORDER BY s.updatedAt DESC,s.id
+  `).all();
+  const visible = visibleErpSkuIds ? new Set(visibleErpSkuIds) : null;
+  const allScopedProducts = visible ? products.filter((product) => visible.has(product.erpSkuId)) : products;
   const productLifecycle = operatingProductLifecycleMap(database);
   const lifecycleReady = productLifecycle.size > 0;
   const showHistorical = query.includeHistorical === true || text(query.includeHistorical).toLowerCase() === "true" || text(query.includeHistorical) === "1";
-  const defaultOperatingView = lifecycleReady && !showHistorical && !text(query.productId);
-  const scopedProducts = defaultOperatingView
-    ? allScopedProducts.filter((product) => [...(productLifecycle.get(product.id)?.statuses || [])].some((status) => ["active", "active_dependency", "sales_active"].includes(status)))
-    : allScopedProducts;
-  const productIds = scopedProducts.map((product) => product.id);
+  const requestedErpSkuId = text(query.erpSkuId) || (text(query.productId) ? text(database.prepare("SELECT erpSkuId FROM product_erp_mappings WHERE productId=? AND currentState='active' ORDER BY updatedAt DESC,id DESC LIMIT 1").get(text(query.productId))?.erpSkuId) : "");
+  const defaultOperatingView = lifecycleReady && !showHistorical && !requestedErpSkuId;
+  const scopedProducts = requestedErpSkuId
+    ? allScopedProducts.filter((product) => product.erpSkuId === requestedErpSkuId)
+    : defaultOperatingView
+      ? allScopedProducts.filter((product) => [...(productLifecycle.get(product.erpSkuId)?.statuses || [])].some((status) => ["active", "active_dependency", "sales_active"].includes(status)))
+      : allScopedProducts;
+  const erpSkuIds = scopedProducts.map((product) => product.erpSkuId);
   const relationContext = readProductBusinessRelationContext(database);
-  const currentSales = salesMetrics(database, period.periodStart, period.periodEnd);
-  const previousSales = salesMetrics(database, period.previousPeriodStart, period.previousPeriodEnd);
-  const earlierSales = salesMetrics(database, period.earlierPeriodStart, period.earlierPeriodEnd);
+  const currentSales = erpSkuSalesMetrics(database, period.periodStart, period.periodEnd);
+  const previousSales = erpSkuSalesMetrics(database, period.previousPeriodStart, period.previousPeriodEnd);
+  const earlierSales = erpSkuSalesMetrics(database, period.earlierPeriodStart, period.earlierPeriodEnd);
   const contributionOptions = { database };
-  const currentContributionResult = queryProductContributions({ periodStart: period.periodStart, periodEnd: period.periodEnd, productIds }, contributionOptions);
-  const currentContribution = new Map(currentContributionResult.items.map((item) => [item.productId, item]));
-  const previousContribution = new Map(queryProductContributions({ periodStart: period.previousPeriodStart, periodEnd: period.previousPeriodEnd, productIds }, contributionOptions).items.map((item) => [item.productId, item]));
-  const earlierContribution = new Map(queryProductContributions({ periodStart: period.earlierPeriodStart, periodEnd: period.earlierPeriodEnd, productIds }, contributionOptions).items.map((item) => [item.productId, item]));
+  const currentContributionResult = queryErpSkuContributions({ periodStart: period.periodStart, periodEnd: period.periodEnd, erpSkuIds }, contributionOptions);
+  const currentContribution = new Map(currentContributionResult.items.map((item) => [item.erpSkuId, item]));
+  const previousContribution = new Map(queryErpSkuContributions({ periodStart: period.previousPeriodStart, periodEnd: period.previousPeriodEnd, erpSkuIds }, contributionOptions).items.map((item) => [item.erpSkuId, item]));
+  const earlierContribution = new Map(queryErpSkuContributions({ periodStart: period.earlierPeriodStart, periodEnd: period.earlierPeriodEnd, erpSkuIds }, contributionOptions).items.map((item) => [item.erpSkuId, item]));
   const structures = structureMetrics(database, relationContext);
   const linkPerformance = linkPerformanceMetrics(database, period.periodStart, period.periodEnd, relationContext);
   const health = latestHealth(database);
   const actions = actionMetrics(database);
-  const inventory = readProductInventorySupplyMap(productIds, { includeCost: includeInventoryCost });
+  const inventory = readErpSkuInventorySupplyMap(erpSkuIds, { includeCost: includeInventoryCost, database });
   let items = scopedProducts.map((product) => {
-    const current = currentSales.get(product.id);
-    const prior = previousSales.get(product.id);
-    const earlier = earlierSales.get(product.id);
-    const contribution = currentContribution.get(product.id);
-    const priorContribution = previousContribution.get(product.id);
-    const earlierContributionItem = earlierContribution.get(product.id);
+    const current = currentSales.get(product.erpSkuId);
+    const prior = previousSales.get(product.erpSkuId);
+    const earlier = earlierSales.get(product.erpSkuId);
+    const contribution = currentContribution.get(product.erpSkuId);
+    const priorContribution = previousContribution.get(product.erpSkuId);
+    const earlierContributionItem = earlierContribution.get(product.erpSkuId);
     const legacyTrend = salesTrend(current, prior, earlier);
     const trend = physicalContributionTrend(contribution, priorContribution, earlierContributionItem);
-    const inventorySummary = inventory.get(product.id)?.summary;
+    const inventorySummary = inventory.get(product.erpSkuId)?.summary;
     const stockStatus = inventoryStatus(inventorySummary);
-    const healthRecord = health.get(product.id);
-    const structure = structures.skus.get(product.id) ?? { skuCount: 0, productCodes: [] };
-    const action = actions.get(product.id) ?? { improvementCount: 0, actionCount: 0, taskCount: 0 };
+    const healthRecord = health.get(product.erpSkuId) ?? null;
+    const structure = structures.skus.get(product.erpSkuId) ?? { skuCount: 1, productCodes: [] };
+    const action = actions.get(product.erpSkuId) ?? { improvementCount: 0, actionCount: 0, taskCount: 0 };
     const salesAmount = numeric(contribution?.directSalesAmount);
     const salesQuantity = numeric(contribution?.totalPhysicalContribution);
     const legacySalesAmount = current?.salesAmountFactCount ? numeric(current.salesAmount) : null;
@@ -386,11 +403,14 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
     const grossProfit = numeric(contribution?.directProfit);
     const grossMargin = grossProfit !== null && salesAmount !== null && salesAmount !== 0 ? grossProfit / salesAmount : null;
     return {
-      id: product.id, name: product.name, sku: product.skuCode, productCode: structure.productCodes.join(" / ") || null,
-      image: product.mainImage, brand: product.brand || null, category: product.category || null, ownerId: product.ownerId || null,
-      ownerName: product.ownerName || "未分配", status: product.status, lifecycle: null,
-      operatingLifecycle: { primaryStatus: productLifecycle.get(product.id)?.primaryStatus || null,
-        statuses: [...(productLifecycle.get(product.id)?.statuses || [])].sort(), current: [...(productLifecycle.get(product.id)?.statuses || [])].some((status) => ["active", "active_dependency", "sales_active"].includes(status)) },
+      id: product.erpSkuId, erpSkuId: product.erpSkuId, legacyProductId: product.legacyProductId || null, hasLegacyProfile: Boolean(product.legacyProductId),
+      extensionStatus: product.businessProfileId || product.hasStrategy || product.hasMarketing || product.hasInsight ? "maintained" : "unmaintained",
+      operatingCompleteness: { basic: Boolean(product.businessProfileId), strategy: Boolean(product.hasStrategy), marketing: Boolean(product.hasMarketing), insight: Boolean(product.hasInsight) },
+      name: product.displayNameOverride || product.legacyProductName || product.goodsName || product.specificationName || product.merchantSkuCode, sku: product.merchantSkuCode, productCode: product.goodsCode || structure.productCodes.join(" / ") || null,
+      image: product.mainImage, brand: product.brandOverride || product.brand || null, category: product.categoryOverride || product.category || null, ownerId: product.ownerId || null,
+      ownerName: product.ownerName || "未分配", status: product.businessStatus || product.legacyProductStatus || product.erpStatus || product.currentState || "资料未维护", lifecycle: product.profileLifecycle || null,
+      operatingLifecycle: { primaryStatus: productLifecycle.get(product.erpSkuId)?.primaryStatus || null,
+        statuses: [...(productLifecycle.get(product.erpSkuId)?.statuses || [])].sort(), current: [...(productLifecycle.get(product.erpSkuId)?.statuses || [])].some((status) => ["active", "active_dependency", "sales_active"].includes(status)) },
       sales: { amount: legacySalesAmount, quantity: legacySalesQuantity, directAmount: salesAmount, directCost: numeric(contribution?.directCost), directProfit: grossProfit,
         directQuantity: numeric(contribution?.directSalesQuantity), bundleContributionQuantity: numeric(contribution?.bundleContributionQuantity), totalPhysicalContribution: salesQuantity,
         previousAmount: numeric(priorContribution?.directSalesAmount), earlierAmount: numeric(earlierContributionItem?.directSalesAmount),
@@ -401,18 +421,18 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
         legacy: { amount: legacySalesAmount, quantity: legacySalesQuantity,
           profit: current?.profitFactCount ? numeric(current.grossProfit) : null, previousAmount: prior?.salesAmountFactCount ? numeric(prior.salesAmount) : null,
           previousQuantity: prior?.salesQuantityFactCount ? numeric(prior.salesQuantity) : null, trend: legacyTrend } },
-      structure: { skuCount: structure.skuCount, salesLinkCount: structures.links.get(product.id) ?? 0 },
+      structure: { skuCount: structure.skuCount, salesLinkCount: structures.links.get(product.erpSkuId) ?? 0 },
       inventory: { quantity: numeric(inventorySummary?.stockNum), availableQuantity: numeric(inventorySummary?.availableSendStock), amount: includeInventoryCost ? numeric(inventorySummary?.inventoryCostAmount) : null,
         coverageDays: numeric(inventorySummary?.stockDays), stockRisk: inventorySummary?.stockRisk ?? "no_data", status: stockStatus, businessDate: inventorySummary?.businessDate ?? null },
       profit: { grossMargin, grossProfit, status: profitStatus(grossProfit) },
-      linkPerformance: linkPerformance.get(product.id) ?? { linkCount: structures.links.get(product.id) ?? 0, payAmount: null, visitorCount: null, conversionRate: null, measuredLinkCount: 0 },
+      linkPerformance: linkPerformance.get(product.erpSkuId) ?? { linkCount: structures.links.get(product.erpSkuId) ?? 0, payAmount: null, visitorCount: null, conversionRate: null, measuredLinkCount: 0 },
       health: { score: healthRecord?.healthScore === null || healthRecord?.healthScore === undefined ? null : Number(healthRecord.healthScore),
         status: { code: healthRecord?.healthStatus ?? "no_data", label: ({ growth: "成长", stable: "稳定", attention: "关注", risk: "风险", no_data: "暂无数据" })[healthRecord?.healthStatus] ?? "暂无数据" }, evaluatedAt: healthRecord?.updatedAt ?? null },
       legacyHealth: { score: healthRecord?.healthScore === null || healthRecord?.healthScore === undefined ? null : Number(healthRecord.healthScore), evaluatedAt: healthRecord?.updatedAt ?? null },
       actions: { ...action, pendingCount: action.improvementCount + action.actionCount + action.taskCount },
       createdAt: product.createdAt,
-      updatedAt: product.updatedAt,
-      _zone: businessZone(product, { salesAmount, salesQuantity }, inventorySummary),
+      updatedAt: product.profileUpdatedAt || product.updatedAt,
+      _zone: businessZone({ status: product.profileLifecycle || product.businessStatus || product.legacyProductStatus || product.erpStatus || product.currentState }, { salesAmount, salesQuantity }, inventorySummary),
       _previousSalesQuantity: numeric(priorContribution?.totalPhysicalContribution),
     };
   });
@@ -428,7 +448,7 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
   })));
   const zoneByProduct = new Map(classifiedZones.items.map((item) => [item.id, item.businessZone]));
   items = items.map((item) => {
-    const lifecycle = mapProductBusinessLifecycle(item.status, zoneByProduct.get(item.id) ?? item._zone, item.sales.trend.code);
+    const lifecycle = item.lifecycle || mapProductBusinessLifecycle(item.status, zoneByProduct.get(item.id) ?? item._zone, item.sales.trend.code);
     const { _zone, _previousSalesQuantity, ...publicItem } = item;
     return { ...publicItem, lifecycle };
   });
@@ -447,7 +467,7 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
 
   const queryText = text(query.query).toLowerCase();
   const matches = (value, selected) => !text(selected) || text(value) === text(selected);
-  items = items.filter((item) => matches(item.id, query.productId) && (!queryText || `${item.name} ${item.sku} ${item.productCode || ""}`.toLowerCase().includes(queryText))
+  items = items.filter((item) => matches(item.erpSkuId, requestedErpSkuId) && (!queryText || `${item.name} ${item.sku} ${item.productCode || ""}`.toLowerCase().includes(queryText))
     && matches(item.brand, query.brand) && matches(item.category, query.category) && matches(item.lifecycle, query.lifecycle)
     && matches(item.status, query.status) && matches(item.healthAnalysis.overall.code, query.healthStatus)
     && matches(item.ownerId, query.ownerId) && matches(item.inventory.status.code, query.inventoryStatus));
@@ -471,15 +491,16 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
   const pageItems = items.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const allItems = scopedProducts.length;
   const sum = (read) => { const values = items.map(read).filter((value) => value !== null && value !== undefined); return values.length ? values.reduce((totalValue, value) => totalValue + Number(value), 0) : null; };
-  const options = (key) => [...new Set(scopedProducts.map((item) => text(item[key])).filter(Boolean))].sort(collator.compare);
+  const options = (key) => [...new Set(scopedProducts.map((item) => text(key === "status" ? (item.legacyProductStatus || item.erpStatus || item.currentState) : item[key])).filter(Boolean))].sort(collator.compare);
   const physicalTrendByDate = new Map();
   for (const item of currentContributionResult.dailyItems) {
-    if (visible && !visible.has(item.productId)) continue;
+    if (visible && !visible.has(item.erpSkuId)) continue;
     physicalTrendByDate.set(item.date, (physicalTrendByDate.get(item.date) || 0) + Number(item.totalPhysicalContribution || 0));
   }
   return {
     generatedAt: new Date().toISOString(), period,
-    summary: { totalProducts: allItems, currentProductAssets: allScopedProducts.length, historicalProducts: Math.max(0, allScopedProducts.length - allItems), lifecycleReady,
+    summary: { totalProducts: allScopedProducts.length, currentProductAssets: allItems, historicalProducts: Math.max(0, allScopedProducts.length - allItems), lifecycleReady,
+      profiledProducts: allScopedProducts.filter((item) => item.legacyProductId).length, unprofiledProducts: allScopedProducts.filter((item) => !item.legacyProductId).length,
       filteredProducts: total, directSalesAmount: sum((item) => item.sales.directAmount), directSalesQuantity: sum((item) => item.sales.directQuantity),
       bundleContributionQuantity: sum((item) => item.sales.bundleContributionQuantity), totalPhysicalContribution: sum((item) => item.sales.totalPhysicalContribution),
       salesAmount: sum((item) => item.sales.legacy.amount), salesQuantity: sum((item) => item.sales.legacy.quantity), inventoryQuantity: sum((item) => item.inventory.quantity), riskProducts: items.filter((item) => ["attention", "risk"].includes(item.healthAnalysis.overall.code)).length },
@@ -490,7 +511,8 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
       healthStatuses: productBusinessHealthStatuses, inventoryStatuses: productBusinessInventoryStatuses,
       owners: [...new Map(scopedProducts.filter((item) => item.ownerId).map((item) => [item.ownerId, { id: item.ownerId, name: item.ownerName || "未分配" }])).values()].sort((left, right) => collator.compare(left.name, right.name)) },
     sort: { sortBy, sortDirection },
-    definitions: { sales: "connection_sku_sales_daily_facts + Sales Object + BOM + Product Mapping", salesContractVersion: "product-contribution-v1",
+    definitions: { identity: "ERP SKU", extensions: "ProductBusinessProfile及各经营扩展资料按 ERP SKU 读取",
+      sales: "connection_sku_sales_daily_facts + Sales Object + BOM → ERP SKU", salesContractVersion: "erp-sku-contribution-v2",
       productEconomics: "Single直接事实；Bundle金额/利润不分摊", physicalQuantity: "Direct Sales Quantity + Bundle Contribution Quantity",
       legacyFields: "summary.salesAmount/summary.salesQuantity与item.sales.legacy仅用于兼容旧调用方", operatingView: "Active + Active Dependency + Sales Active；Product战略生命周期保持独立",
       inventory: "现有库存供应查询", health: "ProductBusinessReadModel 规则分析", actions: "product_improvements + action_products + tasks", readOnly: true },
@@ -498,12 +520,20 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
 }
 
 export function getProductHealthAnalysis(productId, options = {}) {
-  const result = getProductBusinessReadModel({ range: "30d", productId: text(productId), page: 1, pageSize: 1 }, options);
+  const requestedId = text(productId);
+  const database = getDatabase();
+  const resolvedErpSkuId = database.prepare("SELECT id FROM erp_skus WHERE id=?").get(requestedId)?.id
+    || database.prepare("SELECT erpSkuId FROM product_erp_mappings WHERE productId=? AND currentState='active' ORDER BY updatedAt DESC,id DESC LIMIT 1").get(requestedId)?.erpSkuId;
+  const legacyProductId = resolvedErpSkuId ? database.prepare("SELECT productId FROM product_erp_mappings WHERE erpSkuId=? AND currentState='active' ORDER BY updatedAt DESC,id DESC LIMIT 1").get(resolvedErpSkuId)?.productId : null;
+  if (Array.isArray(options.visibleProductIds) && legacyProductId && !options.visibleProductIds.includes(legacyProductId)) {
+    const error = new Error("产品不存在或无权查看。"); error.statusCode = 404; throw error;
+  }
+  const result = getProductBusinessReadModel({ range: "30d", erpSkuId: text(resolvedErpSkuId), page: 1, pageSize: 1 }, options);
   const item = result.items[0];
-  if (!item || item.id !== text(productId)) {
+  if (!item || item.erpSkuId !== text(resolvedErpSkuId)) {
     const error = new Error("产品不存在或无权查看。");
     error.statusCode = 404;
     throw error;
   }
-  return { productId: item.id, productName: item.name, ...item.healthAnalysis };
+  return { erpSkuId: item.erpSkuId, productId: item.legacyProductId, productName: item.name, ...item.healthAnalysis };
 }

@@ -6,9 +6,9 @@ function text(value) { return String(value ?? "").trim(); }
 function number(value) { return value === null || value === undefined ? null : Number(value); }
 function date(value) { const result = text(value).slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(result) ? result : ""; }
 function add(metric, field, value) { if (value !== null && value !== undefined) metric[field] += Number(value); }
-function blank(productId) {
+function blank(identityId, identityField = "productId") {
   return {
-    productId, directSalesQuantity: 0, bundleContributionQuantity: 0, totalPhysicalContribution: 0,
+    [identityField]: identityId, directSalesQuantity: 0, bundleContributionQuantity: 0, totalPhysicalContribution: 0,
     directSalesAmount: 0, directCost: 0, directProfit: 0,
     directFactCount: 0, bundleParticipationCount: 0, contributingBundleCount: 0,
     bomEvidenceLevel: null, bomEvidence: { exact: 0, legacy_evidence: 0, inferred: 0, unknown: 0 },
@@ -19,11 +19,11 @@ function evidenceLevel(counts) {
   for (let index = EVIDENCE_LEVELS.length - 1; index >= 0; index -= 1) if (counts[EVIDENCE_LEVELS[index]]) return EVIDENCE_LEVELS[index];
   return null;
 }
-function publicMetric(metric) {
+function publicMetric(metric, identityField = "productId") {
   const hasDirect = metric.directFactCount > 0;
   const hasBundle = metric.bundleParticipationCount > 0;
   const result = {
-    productId: metric.productId,
+    [identityField]: metric[identityField],
     directSalesQuantity: metric.directFieldCounts.quantity ? metric.directSalesQuantity : null,
     bundleContributionQuantity: hasBundle ? metric.bundleContributionQuantity : null,
     totalPhysicalContribution: hasDirect || hasBundle ? metric.directSalesQuantity + metric.bundleContributionQuantity : null,
@@ -94,38 +94,38 @@ function structureForFact(fact, context) {
   return { structure: active, evidence: active.sourceType === "combo_master_excel" ? "legacy_evidence" : "inferred" };
 }
 
-export function queryProductContributions(input = {}, options = {}) {
+function queryContributions(input = {}, options = {}, identityField = "productId") {
   const database = options.database || getDatabase();
   const periodStart = date(input.periodStart || input.startDate); const periodEnd = date(input.periodEnd || input.endDate);
   if (!periodStart || !periodEnd || periodStart > periodEnd) throw new Error("Product Contribution日期范围无效。");
-  const requestedProductIds = [...new Set((input.productIds ?? []).map(text).filter(Boolean))];
+  const requestedIdentityIds = [...new Set(((identityField === "erpSkuId" ? input.erpSkuIds : input.productIds) ?? []).map(text).filter(Boolean))];
   const hasSalesLinkScope = Array.isArray(input.salesLinkIds);
   const requestedSalesLinkIds = [...new Set((input.salesLinkIds ?? []).map(text).filter(Boolean))];
-  const requestedProducts = new Set(requestedProductIds);
-  const productPlaceholders = requestedProductIds.map(() => "?").join(",");
+  const requestedIdentities = new Set(requestedIdentityIds);
+  const identityPlaceholders = requestedIdentityIds.map(() => "?").join(",");
   const salesLinkPlaceholders = requestedSalesLinkIds.map(() => "?").join(",");
   const facts = hasSalesLinkScope && !requestedSalesLinkIds.length ? [] : database.prepare(`SELECT f.id,f.saleDate,f.salesLinkId,f.salesLinkSkuId,f.quantity,f.salesAmount,f.costAmount,f.profitAmount,
       r.salesObjectId,o.objectCode,o.objectType
     FROM connection_sku_sales_daily_facts f
     JOIN sales_link_sku_sales_object_relations r ON r.linkSkuId=f.salesLinkSkuId AND r.status='active'
     JOIN sales_objects o ON o.id=r.salesObjectId AND o.status='active'
-    WHERE f.saleDate BETWEEN ? AND ?${hasSalesLinkScope ? ` AND f.salesLinkId IN (${salesLinkPlaceholders})` : ""}${requestedProductIds.length ? ` AND EXISTS (
+    WHERE f.saleDate BETWEEN ? AND ?${hasSalesLinkScope ? ` AND f.salesLinkId IN (${salesLinkPlaceholders})` : ""}${requestedIdentityIds.length ? ` AND EXISTS (
       SELECT 1 FROM sales_link_sku_sales_object_relations scoped_relation
       JOIN sales_object_structures scoped_structure ON scoped_structure.salesObjectId=scoped_relation.salesObjectId AND scoped_structure.status IN ('active','superseded')
       JOIN sales_object_structure_components scoped_component ON scoped_component.structureId=scoped_structure.id AND scoped_component.status='active'
-      JOIN product_erp_mappings scoped_mapping ON scoped_mapping.erpSkuId=scoped_component.erpSkuId AND scoped_mapping.currentState='active'
-      WHERE scoped_relation.linkSkuId=f.salesLinkSkuId AND scoped_relation.status='active' AND scoped_mapping.productId IN (${productPlaceholders})
+      ${identityField === "productId" ? "JOIN product_erp_mappings scoped_mapping ON scoped_mapping.erpSkuId=scoped_component.erpSkuId AND scoped_mapping.currentState='active'" : ""}
+      WHERE scoped_relation.linkSkuId=f.salesLinkSkuId AND scoped_relation.status='active' AND ${identityField === "productId" ? "scoped_mapping.productId" : "scoped_component.erpSkuId"} IN (${identityPlaceholders})
     )` : ""}
-    ORDER BY f.saleDate,f.id`).all(periodStart, periodEnd, ...requestedSalesLinkIds, ...requestedProductIds);
+    ORDER BY f.saleDate,f.id`).all(periodStart, periodEnd, ...requestedSalesLinkIds, ...requestedIdentityIds);
   const context = loadContext(database, facts);
-  const metrics = new Map(requestedProductIds.map((productId) => [productId, blank(productId)]));
+  const metrics = new Map(requestedIdentityIds.map((identityId) => [identityId, blank(identityId, identityField)]));
   const daily = new Map(); const seenFacts = new Set();
   const unallocated = { contributionQuantity: 0, records: [], productMappingMissingCount: 0, relationConflictCount: 0, structureUnknownFactCount: 0 };
   const companyFacts = { factCount: facts.length, salesAmount: 0, costAmount: 0, profitAmount: 0 };
-  const metricFor = (productId) => { if (!metrics.has(productId)) metrics.set(productId, blank(productId)); return metrics.get(productId); };
-  const dailyFor = (productId, saleDate) => {
-    const key = `${productId}|${saleDate}`;
-    if (!daily.has(key)) daily.set(key, blank(productId));
+  const metricFor = (identityId) => { if (!metrics.has(identityId)) metrics.set(identityId, blank(identityId, identityField)); return metrics.get(identityId); };
+  const dailyFor = (identityId, saleDate) => {
+    const key = `${identityId}|${saleDate}`;
+    if (!daily.has(key)) daily.set(key, blank(identityId, identityField));
     return daily.get(key);
   };
   for (const fact of facts) {
@@ -135,52 +135,53 @@ export function queryProductContributions(input = {}, options = {}) {
     const resolved = structureForFact(fact, context);
     if (!resolved.structure?.components?.length) { unallocated.structureUnknownFactCount += 1; continue; }
     if (fact.objectType === "single") {
-      const component = resolved.structure.components[0]; const productIds = context.productsByErp.get(component.erpSkuId) ?? [];
-      if (productIds.length !== 1) { unallocated.relationConflictCount += productIds.length > 1 ? 1 : 0; unallocated.productMappingMissingCount += productIds.length ? 0 : 1; continue; }
-      if (requestedProducts.size && !requestedProducts.has(productIds[0])) continue;
-      for (const metric of [metricFor(productIds[0]), dailyFor(productIds[0], fact.saleDate)]) {
+      const component = resolved.structure.components[0];
+      const identityIds = identityField === "erpSkuId" ? [component.erpSkuId] : (context.productsByErp.get(component.erpSkuId) ?? []);
+      if (identityIds.length !== 1) { unallocated.relationConflictCount += identityIds.length > 1 ? 1 : 0; unallocated.productMappingMissingCount += identityIds.length ? 0 : 1; continue; }
+      if (requestedIdentities.size && !requestedIdentities.has(identityIds[0])) continue;
+      for (const metric of [metricFor(identityIds[0]), dailyFor(identityIds[0], fact.saleDate)]) {
         metric.directFactCount += 1;
         if (fact.quantity !== null) { metric.directSalesQuantity += Number(fact.quantity); metric.directFieldCounts.quantity += 1; }
         if (fact.salesAmount !== null) { metric.directSalesAmount += Number(fact.salesAmount); metric.directFieldCounts.amount += 1; }
         if (fact.costAmount !== null) { metric.directCost += Number(fact.costAmount); metric.directFieldCounts.cost += 1; }
         if (fact.profitAmount !== null) { metric.directProfit += Number(fact.profitAmount); metric.directFieldCounts.profit += 1; }
       }
-      const link = metricFor(productIds[0]).directLinks.get(fact.salesLinkId) ?? { salesLinkId: fact.salesLinkId, quantity: 0, salesAmount: 0, costAmount: 0, profitAmount: 0, factCount: 0 };
+      const link = metricFor(identityIds[0]).directLinks.get(fact.salesLinkId) ?? { salesLinkId: fact.salesLinkId, quantity: 0, salesAmount: 0, costAmount: 0, profitAmount: 0, factCount: 0 };
       link.factCount += 1; add(link, "quantity", fact.quantity); add(link, "salesAmount", fact.salesAmount); add(link, "costAmount", fact.costAmount); add(link, "profitAmount", fact.profitAmount);
-      metricFor(productIds[0]).directLinks.set(fact.salesLinkId, link);
+      metricFor(identityIds[0]).directLinks.set(fact.salesLinkId, link);
       continue;
     }
-    const touchedProducts = new Set();
+    const touchedIdentities = new Set();
     for (const component of resolved.structure.components) {
       const contribution = Number(fact.quantity || 0) * Number(component.quantity);
-      const productIds = context.productsByErp.get(component.erpSkuId) ?? [];
-      if (productIds.length !== 1) {
-        if (requestedProducts.size) continue;
-        if (productIds.length > 1) unallocated.relationConflictCount += 1; else unallocated.productMappingMissingCount += 1;
+      const identityIds = identityField === "erpSkuId" ? [component.erpSkuId] : (context.productsByErp.get(component.erpSkuId) ?? []);
+      if (identityIds.length !== 1) {
+        if (requestedIdentities.size) continue;
+        if (identityIds.length > 1) unallocated.relationConflictCount += 1; else unallocated.productMappingMissingCount += 1;
         unallocated.contributionQuantity += contribution;
-        unallocated.records.push({ factId: fact.id, saleDate: fact.saleDate, salesObjectId: fact.salesObjectId, bundleCode: fact.objectCode, erpSkuId: component.erpSkuId, componentQuantity: component.quantity, bundleSalesQuantity: number(fact.quantity), contributionQuantity: contribution, reason: productIds.length ? "product_mapping_conflict" : "product_mapping_missing", bomEvidenceLevel: resolved.evidence });
+        unallocated.records.push({ factId: fact.id, saleDate: fact.saleDate, salesObjectId: fact.salesObjectId, bundleCode: fact.objectCode, erpSkuId: component.erpSkuId, componentQuantity: component.quantity, bundleSalesQuantity: number(fact.quantity), contributionQuantity: contribution, reason: identityIds.length ? "product_mapping_conflict" : "product_mapping_missing", bomEvidenceLevel: resolved.evidence });
         continue;
       }
-      const productId = productIds[0];
-      if (requestedProducts.size && !requestedProducts.has(productId)) continue;
-      touchedProducts.add(productId);
-      for (const metric of [metricFor(productId), dailyFor(productId, fact.saleDate)]) {
+      const identityId = identityIds[0];
+      if (requestedIdentities.size && !requestedIdentities.has(identityId)) continue;
+      touchedIdentities.add(identityId);
+      for (const metric of [metricFor(identityId), dailyFor(identityId, fact.saleDate)]) {
         metric.bundleContributionQuantity += contribution;
         metric.bomEvidence[resolved.evidence] += 1;
       }
-      const bundle = metricFor(productId).contributingBundles.get(fact.salesObjectId) ?? { salesObjectId: fact.salesObjectId, bundleCode: fact.objectCode, componentQuantityByErp: new Map(), bundleSalesQuantity: 0, contributionQuantity: 0, factCount: 0, bomEvidence: { exact: 0, legacy_evidence: 0, inferred: 0, unknown: 0 } };
+      const bundle = metricFor(identityId).contributingBundles.get(fact.salesObjectId) ?? { salesObjectId: fact.salesObjectId, bundleCode: fact.objectCode, componentQuantityByErp: new Map(), bundleSalesQuantity: 0, contributionQuantity: 0, factCount: 0, bomEvidence: { exact: 0, legacy_evidence: 0, inferred: 0, unknown: 0 } };
       if (!bundle.componentQuantityByErp.has(component.erpSkuId)) bundle.componentQuantityByErp.set(component.erpSkuId, Number(component.quantity));
       bundle.bundleSalesQuantity += Number(fact.quantity || 0); bundle.contributionQuantity += contribution; bundle.factCount += 1; bundle.bomEvidence[resolved.evidence] += 1;
-      metricFor(productId).contributingBundles.set(fact.salesObjectId, bundle);
+      metricFor(identityId).contributingBundles.set(fact.salesObjectId, bundle);
     }
-    for (const productId of touchedProducts) {
-      metricFor(productId).bundleParticipationCount += 1;
-      dailyFor(productId, fact.saleDate).bundleParticipationCount += 1;
+    for (const identityId of touchedIdentities) {
+      metricFor(identityId).bundleParticipationCount += 1;
+      dailyFor(identityId, fact.saleDate).bundleParticipationCount += 1;
     }
   }
   for (const metric of metrics.values()) metric.totalPhysicalContribution = metric.directSalesQuantity + metric.bundleContributionQuantity;
-  const items = [...metrics.values()].map(publicMetric).sort((left, right) => left.productId.localeCompare(right.productId));
-  const dailyItems = [...daily.entries()].map(([key, metric]) => ({ date: key.slice(key.lastIndexOf("|") + 1), ...publicMetric(metric) })).sort((left, right) => left.date.localeCompare(right.date) || left.productId.localeCompare(right.productId));
+  const items = [...metrics.values()].map((metric) => publicMetric(metric, identityField)).sort((left, right) => left[identityField].localeCompare(right[identityField]));
+  const dailyItems = [...daily.entries()].map(([key, metric]) => ({ date: key.slice(key.lastIndexOf("|") + 1), ...publicMetric(metric, identityField) })).sort((left, right) => left.date.localeCompare(right.date) || left[identityField].localeCompare(right[identityField]));
   return {
     capability: "QueryProductContribution", contractVersion: "1.0", periodStart, periodEnd,
     items, dailyItems, unallocatedContribution: unallocated, companyFacts,
@@ -195,10 +196,35 @@ export function queryProductContributions(input = {}, options = {}) {
   };
 }
 
+export function queryProductContributions(input = {}, options = {}) {
+  return queryContributions(input, options, "productId");
+}
+
+export function queryErpSkuContributions(input = {}, options = {}) {
+  const result = queryContributions(input, options, "erpSkuId");
+  return {
+    ...result,
+    capability: "QueryErpSkuContribution",
+    contractVersion: "2.0",
+    definitions: {
+      ...result.definitions,
+      directQuantity: "Daily Fact → Single Sales Object → ERP SKU",
+      bundleContribution: "Daily Fact → Bundle Sales Object → BOM Component ERP SKU Quantity",
+      economics: "ERP SKU仅归属Single直接销售事实；Bundle金额和利润不分摊",
+    },
+  };
+}
+
 export function queryProductContribution(productId, input = {}, options = {}) {
   const id = text(productId); if (!id) throw new Error("产品不能为空。");
   const result = queryProductContributions({ ...input, productIds: [id] }, options);
   return { ...result, item: result.items.find((row) => row.productId === id) ?? publicMetric(blank(id)) };
+}
+
+export function queryErpSkuContribution(erpSkuId, input = {}, options = {}) {
+  const id = text(erpSkuId); if (!id) throw new Error("ERP SKU不能为空。");
+  const result = queryErpSkuContributions({ ...input, erpSkuIds: [id] }, options);
+  return { ...result, item: result.items.find((row) => row.erpSkuId === id) ?? publicMetric(blank(id, "erpSkuId"), "erpSkuId") };
 }
 
 export default queryProductContributions;

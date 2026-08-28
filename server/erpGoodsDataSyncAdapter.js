@@ -13,7 +13,7 @@ import {
   startDataSyncBatch,
 } from "./dataSyncCenterService.js";
 import { commitErpV2Import, parseWangdianGoodsImport, readErpV2Import, validateErpV2Import } from "./productV2Import.js";
-import { autoCreateProductProfilesForImportBatch } from "./erpSkuService.js";
+import { autoCreateProductProfilesForImportBatch, getProductAutoProfileSettings } from "./erpSkuService.js";
 
 function requestRange(task, syncMode, requestStart, requestEnd) {
   const end = requestEnd || new Date().toISOString();
@@ -99,18 +99,25 @@ export function commitErpGoodsDataSync(batchId) {
   try {
     const result = commitErpV2Import(batch.sourceBatchId);
     const summary = result.summary ?? {};
-    let autoProfile;
-    try {
-      autoProfile = autoCreateProductProfilesForImportBatch(batch.sourceBatchId);
-    } catch (error) {
-      autoProfile = {
-        enabled: true,
-        attemptedCount: 0,
-        createdCount: 0,
-        failedCount: 1,
-        created: [],
-        failures: [{ merchantSkuCode: null, message: error.message || "自动建档执行失败。" }],
-      };
+    // Legacy / Deprecated: ERP SKU is now the product identity. Keep the old
+    // auto-profile path only for an explicitly enabled rollback configuration;
+    // normal ERP synchronization no longer invokes it.
+    const legacyAutoProfileEnabled = getProductAutoProfileSettings().enabled === true;
+    let autoProfile = { enabled: false, deprecated: true, attemptedCount: 0, createdCount: 0, failedCount: 0, created: [], failures: [] };
+    if (legacyAutoProfileEnabled) {
+      try {
+        autoProfile = { ...autoCreateProductProfilesForImportBatch(batch.sourceBatchId), deprecated: true };
+      } catch (error) {
+        autoProfile = {
+          enabled: true,
+          deprecated: true,
+          attemptedCount: 0,
+          createdCount: 0,
+          failedCount: 1,
+          created: [],
+          failures: [{ merchantSkuCode: null, message: error.message || "Legacy 自动建档执行失败。" }],
+        };
+      }
     }
     const status = Number(summary.skipped || 0) > 0 ? "partial" : "succeeded";
     const dataSyncBatch = completeDataSyncBatch(batch.id, {

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import Database from "better-sqlite3";
-import { queryProductContributions } from "../server/productContributionReadModel.js";
+import { queryErpSkuContributions, queryProductContributions } from "../server/productContributionReadModel.js";
 import { queryDailySalesSummary, queryDailySalesSummaryComparison, queryDailySalesSummaryRanking, queryDailySalesTrend } from "../server/capabilities/queryDailySales.js";
 
 function fixture() {
@@ -106,6 +106,20 @@ test("Product Mapping缺失只进未分配贡献，不丢失Bundle事实", () =>
   assert.equal(result.unallocatedContribution.contributionQuantity, 6);
   assert.equal(result.unallocatedContribution.records[0].reason, "product_mapping_missing");
   assert.deepEqual(result.companyFacts, { factCount: 1, salesAmount: 70, costAmount: 40, profitAmount: 30 });
+});
+
+test("ERP SKU直连贡献不依赖Product Mapping且保留Bundle规则", () => {
+  const db = fixture();
+  const before = db.prepare("SELECT COUNT(*) facts,SUM(salesAmount) sales FROM connection_sku_sales_daily_facts").get();
+  const result = queryErpSkuContributions({ periodStart: "2026-08-01", periodEnd: "2026-08-04" }, { database: db });
+  assert.equal(result.items.find((row) => row.erpSkuId === "erp-a").directSalesQuantity, 10);
+  assert.equal(result.items.find((row) => row.erpSkuId === "erp-a").bundleContributionQuantity, 14);
+  assert.equal(result.items.find((row) => row.erpSkuId === "erp-b").bundleContributionQuantity, 4);
+  assert.equal(result.items.find((row) => row.erpSkuId === "erp-c").bundleContributionQuantity, 2);
+  assert.equal(result.items.find((row) => row.erpSkuId === "erp-missing").bundleContributionQuantity, 6);
+  assert.equal(result.unallocatedContribution.productMappingMissingCount, 0);
+  assert.equal(result.companyFacts.salesAmount, 300);
+  assert.deepEqual(db.prepare("SELECT COUNT(*) facts,SUM(salesAmount) sales FROM connection_sku_sales_daily_facts").get(), before);
 });
 
 test("有效期BOM版本按销售日期选择并保留exact证据", () => {

@@ -87,6 +87,9 @@ export function getProductNewDevelopmentCenter(data = {}) {
   const goals = new Map((data.goals ?? []).map((item) => [item.id, item]));
   const products = new Map((data.products ?? []).map((item) => [item.id, item]));
   const actionProducts = data.actionProducts ?? [];
+  const productOptions = data.productOptions ?? [];
+  const optionsByErpSku = new Map(productOptions.map((item) => [item.erpSkuId, item]));
+  const optionsByLegacyProduct = new Map(productOptions.filter((item) => item.productId).map((item) => [item.productId, item]));
 
   const items = processInstances
     .filter((instance) => !TERMINAL_CANCELLED.has(text(instance.status)))
@@ -102,9 +105,17 @@ export function getProductNewDevelopmentCenter(data = {}) {
       const ownerId = text(instance.ownerId || taskTemplate?.ownerId || instance.initiatorId);
       const linkedProducts = actionProducts
         .filter((item) => item.actionId === instance.id)
-        .map((item) => products.get(item.productId))
+        .map((item) => optionsByErpSku.get(item.erpSkuId) || optionsByLegacyProduct.get(item.productId) || products.get(item.productId))
         .filter(Boolean)
-        .map((product) => ({ id: product.id, name: product.name, skuCode: product.skuCode, mainImage: product.mainImage }));
+        .map((product) => ({
+          id: product.erpSkuId || product.id,
+          erpSkuId: product.erpSkuId || null,
+          legacyProductId: product.productId || (!product.erpSkuId ? product.id : null),
+          name: product.name,
+          skuCode: product.skuCode,
+          mainImage: product.mainImage,
+          businessStatus: product.status || null,
+        }));
       return {
         id: instance.id,
         businessCode: text(instance.businessCode),

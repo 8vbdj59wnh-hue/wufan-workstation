@@ -1,5 +1,5 @@
 import { getDatabase } from "./db.js";
-import { queryProductContributions } from "./productContributionReadModel.js";
+import { queryErpSkuContributions } from "./productContributionReadModel.js";
 
 const presetDays = Object.freeze({ yesterday: 1, "7d": 7, "15d": 15, "30d": 30, "45d": 45, "60d": 60, "90d": 90 });
 const currentOperatingStatuses = new Set(["active", "active_dependency", "sales_active"]);
@@ -52,49 +52,63 @@ export function resolveProductSalesDistributionRange(input = {}, anchorDate = ""
   return { preset, startDate: addDays(endDate, -(days - 1)), endDate };
 }
 
-function currentOperatingProductIds(database) {
+function currentOperatingErpSkuIds(database) {
   if (!database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='operating_erp_set_members'").get()) return null;
   const rows = database.prepare(`
-    SELECT pm.productId,m.lifecycleStatus
+    SELECT m.erpSkuId,m.lifecycleStatus
     FROM operating_erp_set_members m
-    JOIN product_erp_mappings pm ON pm.erpSkuId=m.erpSkuId AND pm.currentState='active'
-    WHERE pm.productId IS NOT NULL
+    WHERE m.erpSkuId IS NOT NULL
   `).all();
   if (!rows.length) return null;
-  const productIds = new Set();
-  for (const row of rows) if (currentOperatingStatuses.has(text(row.lifecycleStatus))) productIds.add(row.productId);
-  return productIds;
+  const erpSkuIds = new Set();
+  for (const row of rows) if (currentOperatingStatuses.has(text(row.lifecycleStatus))) erpSkuIds.add(row.erpSkuId);
+  return erpSkuIds;
 }
 
 export function getProductSalesDistribution(input = {}, options = {}) {
   const database = options.database || getDatabase();
   const range = resolveProductSalesDistributionRange(input, latestCompleteSalesDate(database));
-  const visible = options.visibleProductIds ? new Set(options.visibleProductIds.map(text).filter(Boolean)) : null;
+  const visible = options.visibleErpSkuIds ? new Set(options.visibleErpSkuIds.map(text).filter(Boolean)) : null;
   const includeHistorical = input.includeHistorical === true || ["1", "true"].includes(text(input.includeHistorical).toLowerCase());
-  const operatingProductIds = includeHistorical ? null : currentOperatingProductIds(database);
+  const operatingErpSkuIds = includeHistorical ? null : currentOperatingErpSkuIds(database);
   const products = database.prepare(`
-    SELECT p.id,p.name,p.skuCode,p.mainImage,p.brand,p.category,p.status,p.ownerId,
+    SELECT s.id erpSkuId,m.productId,
+      COALESCE(NULLIF(profile.displayNameOverride,''),NULLIF(p.name,''),NULLIF(g.goodsName,''),s.merchantSkuCode) name,
+      s.merchantSkuCode skuCode,COALESCE(NULLIF(s.mainImage,''),NULLIF(p.mainImage,'')) mainImage,
+      COALESCE(NULLIF(profile.brandOverride,''),NULLIF(p.brand,''),g.brand) brand,
+      COALESCE(NULLIF(profile.categoryOverride,''),NULLIF(p.category,''),g.category) category,
+      COALESCE(NULLIF(profile.businessStatus,''),NULLIF(p.status,''),s.currentState) status,
+      COALESCE(profile.ownerId,p.ownerId) ownerId,
       COALESCE(NULLIF(owner.name,''),'未分配') ownerName
-    FROM products p
-    LEFT JOIN persons owner ON owner.id=p.ownerId
-    ORDER BY p.id
-  `).all().filter((product) => (!visible || visible.has(product.id)) && (!operatingProductIds || operatingProductIds.has(product.id)));
-  const contributions = products.length ? queryProductContributions({
+    FROM erp_skus s
+    JOIN erp_goods g ON g.id=s.erpGoodsId
+    LEFT JOIN product_business_profiles profile ON profile.erpSkuId=s.id
+    LEFT JOIN product_erp_mappings m ON m.id=(
+      SELECT candidate.id FROM product_erp_mappings candidate
+      WHERE candidate.erpSkuId=s.id AND candidate.currentState='active'
+      ORDER BY candidate.updatedAt DESC,candidate.id DESC LIMIT 1
+    )
+    LEFT JOIN products p ON p.id=m.productId
+    LEFT JOIN persons owner ON owner.id=COALESCE(profile.ownerId,p.ownerId)
+    ORDER BY s.id
+  `).all().filter((product) => (!visible || visible.has(product.erpSkuId)) && (!operatingErpSkuIds || operatingErpSkuIds.has(product.erpSkuId)));
+  const contributions = products.length ? queryErpSkuContributions({
     periodStart: range.startDate,
     periodEnd: range.endDate,
-    productIds: products.map((product) => product.id),
+    erpSkuIds: products.map((product) => product.erpSkuId),
   }, { database }) : { items: [] };
-  const contributionByProduct = new Map(contributions.items.map((item) => [item.productId, item]));
+  const contributionByProduct = new Map(contributions.items.map((item) => [item.erpSkuId, item]));
   const collator = new Intl.Collator("zh-CN", { numeric: true, sensitivity: "base" });
   const rows = products.map((product) => {
-    const contribution = contributionByProduct.get(product.id);
+    const contribution = contributionByProduct.get(product.erpSkuId);
     const directSalesAmount = contribution?.directSalesAmount ?? null;
     const hasPhysicalContribution = contribution?.directSalesQuantity !== null && contribution?.directSalesQuantity !== undefined
       || contribution?.bundleContributionQuantity !== null && contribution?.bundleContributionQuantity !== undefined;
     const totalPhysicalContribution = hasPhysicalContribution ? contribution?.totalPhysicalContribution ?? 0 : null;
     const hasSalesAmountData = directSalesAmount !== null;
     return {
-      productId: product.id,
+      erpSkuId: product.erpSkuId,
+      productId: product.productId || null,
       productName: product.name,
       skuCode: product.skuCode,
       mainImage: product.mainImage || "",
@@ -147,8 +161,9 @@ export function getProductSalesDistribution(input = {}, options = {}) {
     definitions: {
       salesAmount: "Product仅归属Single直接销售事实；Bundle金额不分摊",
       physicalContribution: "Direct Sales Quantity + Bundle Contribution Quantity",
-      productScope: includeHistorical ? "全部可见产品资产" : "当前经营Product",
-      dataSource: "connection_sku_sales_daily_facts + Sales Object + Product Mapping",
+      identity: "ERP SKU",
+      productScope: includeHistorical ? "全部 ERP SKU 资产" : "当前经营 ERP SKU",
+      dataSource: "connection_sku_sales_daily_facts + Sales Object + ERP SKU",
       readOnly: true,
     },
   };

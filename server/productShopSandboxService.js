@@ -1,7 +1,6 @@
 import { getDatabase } from "./db.js";
-import { readConnectionProductsBySalesLinkIds } from "./connectionService.js";
-import { readProductInventorySupplyMap } from "./inventorySupplyQueryService.js";
-import { queryProductContributions } from "./productContributionReadModel.js";
+import { readErpSkuInventorySupplyMap } from "./inventorySupplyQueryService.js";
+import { queryErpSkuContributions } from "./productContributionReadModel.js";
 import { latestCompleteSalesDate, resolveProductSalesDistributionRange } from "./productSalesDistributionService.js";
 
 const text = (value) => String(value ?? "").trim();
@@ -46,30 +45,49 @@ export function getProductShopSandbox(input = {}, options = {}) {
   }
 
   const salesLinkIds = database.prepare("SELECT id FROM sales_links WHERE shopId=? ORDER BY id").all(selectedShop.id).map((row) => row.id);
-  const linkedProductsByLink = readConnectionProductsBySalesLinkIds(database, salesLinkIds);
-  const linkedProductIds = new Set([...linkedProductsByLink.values()].flat().map((product) => product.id));
-  const visible = options.visibleProductIds === undefined
+  const linkedErpSkuIds = new Set(database.prepare(`
+    SELECT DISTINCT component.erpSkuId
+    FROM sales_links link
+    JOIN sales_link_skus linkSku ON linkSku.salesLinkId=link.id AND COALESCE(linkSku.currentState,'active')='active'
+    JOIN sales_link_sku_sales_object_relations relation ON relation.linkSkuId=linkSku.id AND relation.status='active'
+    JOIN sales_object_structures structure ON structure.salesObjectId=relation.salesObjectId AND structure.status='active'
+    JOIN sales_object_structure_components component ON component.structureId=structure.id AND component.status='active'
+    WHERE link.shopId=? AND COALESCE(link.currentState,'active')='active'
+  `).all(selectedShop.id).map((row) => row.erpSkuId));
+  const visible = options.visibleErpSkuIds === undefined
     ? null
-    : new Set((options.visibleProductIds || []).map(text).filter(Boolean));
+    : new Set((options.visibleErpSkuIds || []).map(text).filter(Boolean));
   const products = database.prepare(`
-    SELECT id,name,skuCode,mainImage,status
-    FROM products
-    ORDER BY id
-  `).all().filter((product) => linkedProductIds.has(product.id) && (!visible || visible.has(product.id)));
-  const contribution = products.length ? queryProductContributions({
+    SELECT sku.id erpSkuId,mapping.productId,
+      COALESCE(NULLIF(profile.displayNameOverride,''),NULLIF(product.name,''),NULLIF(goods.goodsName,''),sku.merchantSkuCode) name,
+      sku.merchantSkuCode skuCode,COALESCE(NULLIF(sku.mainImage,''),NULLIF(product.mainImage,'')) mainImage,
+      COALESCE(NULLIF(profile.businessStatus,''),NULLIF(product.status,''),sku.currentState) status
+    FROM erp_skus sku
+    JOIN erp_goods goods ON goods.id=sku.erpGoodsId
+    LEFT JOIN product_business_profiles profile ON profile.erpSkuId=sku.id
+    LEFT JOIN product_erp_mappings mapping ON mapping.id=(
+      SELECT candidate.id FROM product_erp_mappings candidate
+      WHERE candidate.erpSkuId=sku.id AND candidate.currentState='active'
+      ORDER BY candidate.updatedAt DESC,candidate.id DESC LIMIT 1
+    )
+    LEFT JOIN products product ON product.id=mapping.productId
+    ORDER BY sku.id
+  `).all().filter((product) => linkedErpSkuIds.has(product.erpSkuId) && (!visible || visible.has(product.erpSkuId)));
+  const contribution = products.length ? queryErpSkuContributions({
     periodStart: range.startDate,
     periodEnd: range.endDate,
-    productIds: products.map((product) => product.id),
+    erpSkuIds: products.map((product) => product.erpSkuId),
     salesLinkIds,
   }, { database }) : { items: [] };
-  const contributionByProduct = new Map(contribution.items.map((item) => [item.productId, item]));
-  const inventoryByProduct = readProductInventorySupplyMap(products.map((product) => product.id), { database });
+  const contributionByProduct = new Map(contribution.items.map((item) => [item.erpSkuId, item]));
+  const inventoryByProduct = readErpSkuInventorySupplyMap(products.map((product) => product.erpSkuId), { database });
   const items = products.map((product) => {
-    const metric = contributionByProduct.get(product.id);
-    const inventory = inventoryByProduct.get(product.id)?.summary;
+    const metric = contributionByProduct.get(product.erpSkuId);
+    const inventory = inventoryByProduct.get(product.erpSkuId)?.summary;
     const inventoryQuantity = inventory?.stockNum ?? null;
     return {
-      productId: product.id,
+      erpSkuId: product.erpSkuId,
+      productId: product.productId || null,
       productName: product.name,
       skuCode: product.skuCode,
       mainImage: product.mainImage || "",
@@ -99,10 +117,11 @@ export function getProductShopSandbox(input = {}, options = {}) {
     },
     definitions: {
       salesQuantity: "Direct Sales Quantity + Bundle Contribution Quantity",
-      productScope: "店铺全部在用Sales Link关联的当前有效产品",
+      identity: "ERP SKU",
+      productScope: "店铺全部在用 Sales Link 通过 Sales Object 关联的 ERP SKU",
       slowMovingProduct: "所选周期销量为0且当前库存大于0",
       outOfStockProduct: "存在库存事实且当前库存小于等于0",
-      shopScope: "Sales Shop → Sales Link → Daily Sales Fact → Sales Object → Product Mapping",
+      shopScope: "Sales Shop → Sales Link → Daily Sales Fact → Sales Object → ERP SKU",
       readOnly: true,
     },
   };

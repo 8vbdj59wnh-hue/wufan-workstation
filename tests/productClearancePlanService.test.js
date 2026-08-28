@@ -17,6 +17,12 @@ test("清仓计划独立保存并只读组合销售库存事实", async () => {
     const timestamp = "2026-08-27T08:00:00.000Z";
     database.prepare("INSERT INTO products(id,skuCode,name,status,createdAt,updatedAt) VALUES(?,?,?,?,?,?)")
       .run("product-clearance-test", "CLEARANCE-001", "清仓计划测试产品", "成熟期", timestamp, timestamp);
+    database.prepare("INSERT INTO erp_goods(id,goodsCode,goodsName,rawSourceData,lastSeenBatchId,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?)")
+      .run("erp-goods-clearance-test", "CLEARANCE", "清仓计划测试产品", "{}", "batch-clearance", "active", timestamp, timestamp);
+    database.prepare("INSERT INTO erp_skus(id,merchantSkuCode,erpGoodsId,rawSourceData,firstSeenBatchId,lastSeenBatchId,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)")
+      .run("erp-sku-clearance-test", "CLEARANCE-001", "erp-goods-clearance-test", "{}", "batch-clearance", "batch-clearance", "active", timestamp, timestamp);
+    database.prepare("INSERT INTO product_erp_mappings(id,productId,erpGoodsId,erpSkuId,merchantSkuCode,matchMethod,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)")
+      .run("mapping-clearance-test", "product-clearance-test", "erp-goods-clearance-test", "erp-sku-clearance-test", "CLEARANCE-001", "exact_sku", "active", timestamp, timestamp);
     const productBefore = database.prepare("SELECT * FROM products WHERE id=?").get("product-clearance-test");
     const salesFactCountBefore = database.prepare("SELECT COUNT(*) count FROM connection_sku_sales_daily_facts").get().count;
     const inventoryFactCountBefore = database.prepare("SELECT COUNT(*) count FROM erp_sku_inventory_daily_summaries").get().count;
