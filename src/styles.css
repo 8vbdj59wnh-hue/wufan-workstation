@@ -6665,16 +6665,65 @@ button.content-template-thumb {
 .schedule-board-summary {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 12px;
+  align-items: end;
   color: #6b7280;
   font-size: 13px;
 }
 
-.schedule-board-summary span {
-  padding: 4px 8px;
+.schedule-quick-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.schedule-summary-filter {
+  min-height: 32px;
+  padding: 4px 10px;
   border: 1px solid #e5e7eb;
   border-radius: 6px;
   background: #ffffff;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.schedule-summary-filter:hover {
+  border-color: #bfdbfe;
+  background: #f8fbff;
+  color: #2563eb;
+}
+
+.schedule-summary-filter.is-selected {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+  box-shadow: 0 0 0 1px rgb(147 197 253 / 35%);
+}
+
+.schedule-sort-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: end;
+}
+
+.schedule-sort-controls label {
+  display: grid;
+  gap: 4px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.schedule-sort-controls select {
+  width: fit-content;
+  min-width: 112px;
+  min-height: 32px;
+  padding: 4px 30px 4px 10px;
+}
+
+.schedule-sort-controls label:last-child select {
+  min-width: 88px;
 }
 
 .schedule-process-modal {

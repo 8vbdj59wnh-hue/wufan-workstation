@@ -72,6 +72,12 @@ const hiddenProcessStatuses = new Set([
 const completedProcessStatuses = new Set([ProcessInstanceStatus.Done, "done", "completed"]);
 const canceledProcessStatuses = new Set([ProcessInstanceStatus.Canceled, "canceled", "cancelled"]);
 const publishContentNoteTemplateId = "task-template-publish-content-note";
+const scheduleQuickFilterAll = "all";
+const scheduleQuickFilterNoDueDate = "no-due-date";
+const scheduleQuickFilterBeyondThirtyDays = "beyond-thirty-days";
+const scheduleSortRemainingTime = "remaining-time";
+const scheduleSortInitiatedAt = "initiated-at";
+const scheduleSortDueDate = "due-date";
 
 const filters = {
   scope: "mine",
@@ -83,10 +89,12 @@ const filters = {
   initiatorId: "",
   status: "",
   overdue: "",
-  noDueDateOnly: false,
+  dueRange: scheduleQuickFilterAll,
 };
 
 let activeScheduleView = "board";
+let activeScheduleSort = "";
+let activeScheduleSortDirection = "asc";
 let activeActionSubmodule =
   typeof window !== "undefined" && ["content-schedule", "contentSchedule", "contentSchedules", "schedule-board/content-note"].includes(window.location.hash.replace(/^#/, ""))
     ? "publish-content-note"
@@ -576,12 +584,50 @@ function buildActionOverviewRows() {
   });
 }
 
-function isDueDateInBoard(row, dayKeys) {
-  return row.processInstance !== null && row.dueDateKey !== "" && dayKeys.has(row.dueDateKey);
-}
-
 function isNoDueDate(row) {
   return row.processInstance !== null && row.dueDateKey === "";
+}
+
+function getScheduleTimestamp(value, { endOfDay = false } = {}) {
+  const text = String(value ?? "").trim();
+  if (text === "") return null;
+  const normalized = endOfDay && /^\d{4}-\d{2}-\d{2}$/.test(text) ? `${text}T23:59:59+08:00` : text;
+  const timestamp = new Date(normalized).getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function isBeyondThirtyDays(row, now = Date.now()) {
+  const dueTimestamp = getScheduleTimestamp(row.dueDate, { endOfDay: true });
+  return dueTimestamp !== null && dueTimestamp - now > 30 * dayMs;
+}
+
+function rowMatchesQuickFilter(row) {
+  if (filters.dueRange === scheduleQuickFilterNoDueDate) return isNoDueDate(row);
+  if (filters.dueRange === scheduleQuickFilterBeyondThirtyDays) return isBeyondThirtyDays(row);
+  return true;
+}
+
+function getScheduleSortTimestamp(row) {
+  if (activeScheduleSort === scheduleSortInitiatedAt) return getScheduleTimestamp(row.startDate);
+  if (activeScheduleSort === scheduleSortRemainingTime || activeScheduleSort === scheduleSortDueDate) {
+    return getScheduleTimestamp(row.dueDate, { endOfDay: true });
+  }
+  return null;
+}
+
+function sortScheduleRows(rows, defaultComparator = null) {
+  const sortedRows = [...rows];
+  if (activeScheduleSort === "") return defaultComparator === null ? sortedRows : sortedRows.sort(defaultComparator);
+
+  const direction = activeScheduleSortDirection === "desc" ? -1 : 1;
+  return sortedRows.sort((left, right) => {
+    const leftTimestamp = getScheduleSortTimestamp(left);
+    const rightTimestamp = getScheduleSortTimestamp(right);
+    if (leftTimestamp === null && rightTimestamp === null) return 0;
+    if (leftTimestamp === null) return 1;
+    if (rightTimestamp === null) return -1;
+    return (leftTimestamp - rightTimestamp) * direction;
+  });
 }
 
 function getSearchText(row) {
@@ -625,7 +671,7 @@ function rowMatchesBaseFilters(row, identifierTarget = null) {
   return true;
 }
 
-function launchedRowMatchesFilters(row) {
+function launchedRowMatchesFilters(row, { includeQuickFilter = true } = {}) {
   const identifierTarget = getActionIdentifierSearchTarget();
   if (!rowMatchesBaseFilters(row, identifierTarget)) return false;
   if (
@@ -637,7 +683,7 @@ function launchedRowMatchesFilters(row) {
   }
   if (filters.initiatorId !== "" && row.processInstance?.initiatorId !== filters.initiatorId) return false;
   if (filters.status !== "" && row.statusValue !== filters.status) return false;
-  if (filters.noDueDateOnly && !isNoDueDate(row)) return false;
+  if (includeQuickFilter && !rowMatchesQuickFilter(row)) return false;
   if (filters.overdue === "yes" && !isProcessRowOverdue(row)) return false;
   if (filters.overdue === "no" && isProcessRowOverdue(row)) return false;
   return true;
@@ -722,7 +768,7 @@ function renderFilters() {
         <select name="overdue">${renderOptions([{ id: "yes", name: "已超时" }, { id: "no", name: "未超时" }], filters.overdue, "全部")}</select>
       </label>
       <label class="inline-checkbox">
-        <input type="checkbox" name="noDueDateOnly" ${filters.noDueDateOnly ? "checked" : ""} />
+        <input type="checkbox" name="noDueDateOnly" ${filters.dueRange === scheduleQuickFilterNoDueDate ? "checked" : ""} />
         <span>只看无截止时间</span>
       </label>
     </section>
@@ -1117,6 +1163,15 @@ function renderNoDueDateColumn(rows) {
   `;
 }
 
+function renderBeyondThirtyDaysColumn(rows) {
+  const beyondThirtyDaysRows = rows.filter((row) => isBeyondThirtyDays(row));
+  return `
+    <div class="schedule-board-cell is-unscheduled">
+      ${beyondThirtyDaysRows.length === 0 ? `<span class="empty-cell">无</span>` : beyondThirtyDaysRows.map(renderProcessBlock).join("")}
+    </div>
+  `;
+}
+
 function renderBoardRows(rows, days) {
   if (rows.length === 0) {
     return `
@@ -1127,17 +1182,24 @@ function renderBoardRows(rows, days) {
     `;
   }
 
-  const slotHeights = buildSlotHeightMap(rows, days);
+  const sortedRows = sortScheduleRows(rows);
+  const slotHeights = buildSlotHeightMap(sortedRows, days);
 
   return `
     <div class="schedule-board-row schedule-calendar-row">
-      ${filters.noDueDateOnly ? renderNoDueDateColumn(rows) : days.map((day) => renderDateColumn(rows, day, slotHeights)).join("")}
+      ${
+        filters.dueRange === scheduleQuickFilterNoDueDate
+          ? renderNoDueDateColumn(sortedRows)
+          : filters.dueRange === scheduleQuickFilterBeyondThirtyDays
+            ? renderBeyondThirtyDaysColumn(sortedRows)
+            : days.map((day) => renderDateColumn(sortedRows, day, slotHeights)).join("")
+      }
     </div>
   `;
 }
 
 function renderPendingProcessList(rows) {
-  const sortedRows = [...rows].sort((left, right) =>
+  const sortedRows = sortScheduleRows(rows, (left, right) =>
     String(left.dueDate ?? "").localeCompare(String(right.dueDate ?? "")) ||
     String(right.processInstance?.createdAt ?? "").localeCompare(String(left.processInstance?.createdAt ?? "")),
   );
@@ -1155,9 +1217,11 @@ function renderPendingProcessList(rows) {
 }
 
 function renderBoardHeader(days) {
-  const dayHeaders = filters.noDueDateOnly
+  const dayHeaders = filters.dueRange === scheduleQuickFilterNoDueDate
     ? `<div class="schedule-day-header is-unscheduled">无截止时间</div>`
-    : days
+    : filters.dueRange === scheduleQuickFilterBeyondThirtyDays
+      ? `<div class="schedule-day-header is-unscheduled">剩余时间超过30天</div>`
+      : days
         .map(
           (day) => `
             <div class="schedule-day-header ${day.isToday ? "is-today" : ""} ${day.isWeekend ? "is-weekend" : ""}">
@@ -1174,15 +1238,40 @@ function renderBoardHeader(days) {
   `;
 }
 
-function renderSummary(launchedRows, days) {
-  const dayKeys = new Set(days.map((day) => day.key));
+function renderSummary(launchedRows) {
   const noDueDateCount = launchedRows.filter(isNoDueDate).length;
-  const outOfRangeCount = launchedRows.filter((row) => row.processInstance !== null && row.dueDateKey !== "" && !isDueDateInBoard(row, dayKeys)).length;
+  const beyondThirtyDaysCount = launchedRows.filter((row) => isBeyondThirtyDays(row)).length;
+  const quickFilters = [
+    [scheduleQuickFilterAll, "关键行动", launchedRows.length],
+    [scheduleQuickFilterNoDueDate, "无截止时间", noDueDateCount],
+    [scheduleQuickFilterBeyondThirtyDays, "超出30天", beyondThirtyDaysCount],
+  ];
   return `
-    <div class="schedule-board-summary">
-      <span>关键行动 ${launchedRows.length}</span>
-      <span>无截止时间 ${noDueDateCount}</span>
-      <span>超出30天 ${outOfRangeCount}</span>
+    <div class="schedule-board-summary" aria-label="关键行动快捷筛选与排序">
+      <div class="schedule-quick-filters" role="group" aria-label="快捷筛选">
+        ${quickFilters.map(([value, label, count]) => {
+          const selected = filters.dueRange === value;
+          return `<button type="button" class="schedule-summary-filter ${selected ? "is-selected" : ""}" data-schedule-quick-filter="${value}" aria-pressed="${selected}">${label} ${count}</button>`;
+        }).join("")}
+      </div>
+      <div class="schedule-sort-controls">
+        <label>
+          <span>排序</span>
+          <select data-schedule-sort>
+            <option value="" ${activeScheduleSort === "" ? "selected" : ""}>默认排序</option>
+            <option value="${scheduleSortRemainingTime}" ${activeScheduleSort === scheduleSortRemainingTime ? "selected" : ""}>剩余时间</option>
+            <option value="${scheduleSortInitiatedAt}" ${activeScheduleSort === scheduleSortInitiatedAt ? "selected" : ""}>发起时间</option>
+            <option value="${scheduleSortDueDate}" ${activeScheduleSort === scheduleSortDueDate ? "selected" : ""}>截止时间</option>
+          </select>
+        </label>
+        <label>
+          <span>排序方向</span>
+          <select data-schedule-sort-direction ${activeScheduleSort === "" ? "disabled" : ""} aria-label="排序方向">
+            <option value="asc" ${activeScheduleSortDirection === "asc" ? "selected" : ""}>正序</option>
+            <option value="desc" ${activeScheduleSortDirection === "desc" ? "selected" : ""}>倒序</option>
+          </select>
+        </label>
+      </div>
     </div>
   `;
 }
@@ -1313,7 +1402,7 @@ function renderActionOverviewCard(row) {
 }
 
 function renderActionOverviewCards(rows) {
-  const sortedRows = [...rows].sort((left, right) =>
+  const sortedRows = sortScheduleRows(rows, (left, right) =>
     String(right.processInstance?.createdAt ?? "").localeCompare(String(left.processInstance?.createdAt ?? "")),
   );
   return `
@@ -1357,7 +1446,7 @@ function renderLaunchedActionBatchBar(selectedCount) {
 }
 
 function renderLaunchedActionList(rows) {
-  const sortedRows = [...rows].sort((left, right) =>
+  const sortedRows = sortScheduleRows(rows, (left, right) =>
     String(right.startDate ?? "").localeCompare(String(left.startDate ?? "")) ||
     String(right.processInstance?.createdAt ?? "").localeCompare(String(left.processInstance?.createdAt ?? "")),
   );
@@ -1561,20 +1650,23 @@ export function renderScheduleBoardPage() {
     }
   }
   const days = buildBoardDays();
-  const launchedRows = buildLaunchedRows().filter(launchedRowMatchesFilters);
+  const summaryRows = buildLaunchedRows().filter((row) => launchedRowMatchesFilters(row, { includeQuickFilter: false }));
+  const launchedRows = summaryRows.filter(rowMatchesQuickFilter);
   const pendingRows = launchedRows.filter((row) => row.statusValue === keyActionPendingStatusFilter && !isImprovementActionRow(row));
   const scheduledRows = launchedRows.filter(
-    (row) => row.statusValue === keyActionRunningStatusFilter && !isNoDueDate(row),
+    (row) =>
+      row.statusValue === keyActionRunningStatusFilter &&
+      (filters.dueRange === scheduleQuickFilterAll ? !isNoDueDate(row) : true),
   );
   const launchedListRows = buildLaunchedListRows().filter(launchedRowMatchesFilters);
   const actionOverviewRows = buildActionOverviewRows().filter(launchedRowMatchesFilters);
   const contentNoteRows = actionOverviewRows.filter((row) => row.workPlan.taskTemplateId === publishContentNoteTemplateId);
-  const columnCount = filters.noDueDateOnly ? 1 : boardDayCount + boardPastDayCount;
+  const columnCount = filters.dueRange === scheduleQuickFilterAll ? boardDayCount + boardPastDayCount : 1;
   return `
     <section class="schedule-board-page" style="--schedule-day-count: ${columnCount};">
       ${renderActionSubmoduleTabs()}
       ${renderFilters()}
-      ${renderSummary(launchedRows, days)}
+      ${renderSummary(summaryRows)}
       ${activeActionSubmodule === "all" ? renderScheduleViewTabs() : ""}
       ${
         activeActionSubmodule === "publish-content-note"
@@ -1653,7 +1745,7 @@ export function bindScheduleBoardPageEvents(rerender) {
     const target = event.target;
     if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLSelectElement)) return;
     if (target.name === "noDueDateOnly") {
-      filters[target.name] = target.checked;
+      filters.dueRange = target.checked ? scheduleQuickFilterNoDueDate : scheduleQuickFilterAll;
     } else if (Object.prototype.hasOwnProperty.call(filters, target.name)) {
       filters[target.name] = target.value;
     }
@@ -1674,6 +1766,29 @@ export function bindScheduleBoardPageEvents(rerender) {
 
   document.querySelector("[data-schedule-scope-toggle]")?.addEventListener("click", () => {
     filters.scope = filters.scope === "mine" ? "all" : "mine";
+    rerenderScheduleBoard();
+  });
+
+  document.querySelectorAll("[data-schedule-quick-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextFilter = button.dataset.scheduleQuickFilter;
+      filters.dueRange = [scheduleQuickFilterNoDueDate, scheduleQuickFilterBeyondThirtyDays].includes(nextFilter)
+        ? nextFilter
+        : scheduleQuickFilterAll;
+      rerenderScheduleBoard();
+    });
+  });
+
+  document.querySelector("[data-schedule-sort]")?.addEventListener("change", (event) => {
+    const nextSort = event.target.value;
+    activeScheduleSort = [scheduleSortRemainingTime, scheduleSortInitiatedAt, scheduleSortDueDate].includes(nextSort)
+      ? nextSort
+      : "";
+    rerenderScheduleBoard();
+  });
+
+  document.querySelector("[data-schedule-sort-direction]")?.addEventListener("change", (event) => {
+    activeScheduleSortDirection = event.target.value === "desc" ? "desc" : "asc";
     rerenderScheduleBoard();
   });
 

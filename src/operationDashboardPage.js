@@ -8,7 +8,8 @@ let loading = false;
 let error = "";
 let dashboard = null;
 let salesDashboard = null;
-let salesDashboardLoading = false;
+let salesDashboardLoading = true;
+let salesDashboardRequested = false;
 let salesDashboardError = "";
 let salesRange = { preset: "7d", startDate: "", endDate: "" };
 const salesDashboardCache = new Map();
@@ -74,7 +75,7 @@ async function refresh(rerender) {
   loading = false; rerender();
 }
 
-async function refreshSales(rerender, range = salesRange) {
+async function refreshSales(rerender, range = salesRange, { renderLoading = true } = {}) {
   const requestedRange = { preset: range.preset || "7d", startDate: range.startDate || "", endDate: range.endDate || "" };
   const cacheKey = [requestedRange.preset, requestedRange.startDate, requestedRange.endDate].join("|");
   const requestVersion = ++salesDashboardRequestVersion;
@@ -85,11 +86,11 @@ async function refreshSales(rerender, range = salesRange) {
     salesDashboard = cachedDashboard;
     salesRange = { preset: cachedDashboard.preset, startDate: cachedDashboard.startDate, endDate: cachedDashboard.endDate };
     salesDashboardLoading = false;
-    rerender();
+    if (renderLoading && document.querySelector(".operation-dashboard") !== null) rerender();
     return;
   }
   salesDashboardLoading = true;
-  rerender();
+  if (renderLoading) rerender();
   try {
     const nextDashboard = (await loadSalesBusinessDashboard(requestedRange)).dashboard;
     if (requestVersion !== salesDashboardRequestVersion) return;
@@ -104,7 +105,7 @@ async function refreshSales(rerender, range = salesRange) {
   }
   if (requestVersion !== salesDashboardRequestVersion) return;
   salesDashboardLoading = false;
-  rerender();
+  if (document.querySelector(".operation-dashboard") !== null) rerender();
 }
 
 async function refreshAnomalies(rerender) {
@@ -115,9 +116,10 @@ async function refreshAnomalies(rerender) {
 }
 
 export function bindOperationDashboardPageEvents(rerender) {
-  if (!dashboard && !loading) refresh(rerender);
-  if (!salesDashboard && !salesDashboardLoading) refreshSales(rerender);
-  if (!anomalies && !anomaliesLoading) refreshAnomalies(rerender);
+  if (!salesDashboard && !salesDashboardRequested) {
+    salesDashboardRequested = true;
+    void refreshSales(rerender, salesRange, { renderLoading: false });
+  }
   document.querySelectorAll("[data-anomaly-select]").forEach((button) => button.addEventListener("click", () => { selectedAnomalyKey = button.dataset.anomalySelect; rerender(); }));
   document.querySelectorAll("[data-launch-anomaly-action]").forEach((button) => button.addEventListener("click", () => {
     if (!hasPermission(getCurrentUser(), "keyActions.launch")) return;
