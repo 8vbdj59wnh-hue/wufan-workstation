@@ -18,6 +18,7 @@ const {
   state,
 } = await import("../src/appState.js");
 const { renderPublicFormFieldInput } = await import("../src/workFormEditor.js");
+const { buildContentNoteImportPreview } = await import("../src/contentSchedulePage.js");
 
 test("partial module snapshots preserve undeclared state resources", () => {
   state.methodologies.splice(0, state.methodologies.length, { id: "method-existing", name: "其他模块数据" });
@@ -112,11 +113,43 @@ test("content-note titles render values saved under the latest form field id", (
   assert.match(html, /value="南屿｜阳光、花和一个喜欢的角落"/);
 });
 
-test("schedule board bootstrap includes content-note form and publishing-account resources", () => {
+test("schedule board bootstrap includes all resources required by content-note import", () => {
   const serverSource = fs.readFileSync(new URL("../server/index.js", import.meta.url), "utf8");
   const declaration = serverSource.match(/const scheduleBoardCommon = \[[\s\S]*?\];/)?.[0] ?? "";
   assert.match(declaration, /"publishingAccounts"/);
+  assert.match(declaration, /"processTemplateNodes"/);
   assert.match(declaration, /"standardWorkForms"/);
+});
+
+test("content-note import accepts blank row goals after a batch goal is selected", () => {
+  const template = state.taskTemplates.find((item) => item.id === "task-template-publish-content-note");
+  assert.ok(template);
+  const originalNodes = state.processTemplateNodes.map((item) => ({ ...item }));
+  state.processTemplateNodes.splice(0, state.processTemplateNodes.length, {
+    id: "content-note-import-node",
+    templateId: template.defaultProcessTemplateId,
+    name: "制作并发布内容笔记",
+    stepType: "execution",
+    ownerRule: "initiator",
+    ownerId: "",
+    status: "active",
+  });
+
+  try {
+    const [row] = buildContentNoteImportPreview([{
+      对齐目标: "",
+      关键行动名称: "测试批量发布内容笔记",
+      产品编码: "",
+      模板编码: "",
+      完成日期: "",
+      完成时间: "",
+    }], "goal-partial");
+    assert.deepEqual(row.errors, []);
+    assert.equal(row.goal.id, "goal-partial");
+    assert.equal(row.selected, true);
+  } finally {
+    state.processTemplateNodes.splice(0, state.processTemplateNodes.length, ...originalNodes);
+  }
 });
 
 test("task executors can read publishing-account choices used by their forms", () => {

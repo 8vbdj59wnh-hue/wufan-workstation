@@ -1425,6 +1425,9 @@ function renderImportModal() {
   const previewErrorCount = modalState.rows.filter((row) => row.errors.length > 0 && row.duplicateType !== "file").length;
   const previewDuplicateCount = modalState.rows.filter((row) => row.duplicateType !== "").length;
   const previewSelectedCount = modalState.rows.filter((row) => row.selected || row.forceDuplicate).length;
+  const missingBatchGoalCount = modalState.batchGoalId === ""
+    ? modalState.rows.filter((row) => String(row.data?.对齐目标 ?? "").trim() === "").length
+    : 0;
 
   return `
     <div class="modal-backdrop" role="presentation">
@@ -1437,11 +1440,12 @@ function renderImportModal() {
           <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${modalState.error}</div>
           <p class="form-note">${escapeHtml(modalState.fileName)}，共 ${modalState.rows.length} 行。附件和产品图片不会通过本次 Excel 导入创建。</p>
           <label class="content-note-batch-goal">
-            <span>本批次对齐目标</span>
+            <span>本批次对齐目标${missingBatchGoalCount > 0 ? "（必选）" : ""}</span>
             <select data-content-note-batch-goal>
-              <option value="">请选择；仅用于行内目标为空的数据</option>
+              <option value="">${missingBatchGoalCount > 0 ? `请选择目标；Excel 中有 ${missingBatchGoalCount} 行未填写` : "请选择；仅用于行内目标为空的数据"}</option>
               ${getActiveGoals().map((goal) => `<option value="${escapeAttribute(goal.id)}" ${modalState.batchGoalId === goal.id ? "selected" : ""}>${escapeHtml(goal.businessCode ? `${goal.businessCode}｜${goal.name}` : goal.name)}</option>`).join("")}
             </select>
+            ${missingBatchGoalCount > 0 ? `<small class="warning-text">请先选择一个目标，系统会自动为这 ${missingBatchGoalCount} 行重新校验。</small>` : ""}
           </label>
           <div class="import-preview-summary">
             <span>总行数：${modalState.rows.length}</span>

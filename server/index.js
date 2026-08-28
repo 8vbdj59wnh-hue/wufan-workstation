@@ -1610,13 +1610,12 @@ app.get("/api/bootstrap", (request, response) => {
       "taskTemplates", "templateTagCategories", "templateTags", "issuesRequirements", "standardWorkForms"];
     const templateCenterCommon = ["templates", "templateTagCategories", "templateTags"];
     const processesCommon = ["categories", "departments", "goals", "methodologies", "people", "positions", "processTemplateNodes", "processTemplates", "taskTemplates"];
-    // The action detail editor renders fields from the latest published form and
-    // resolves publishing-account selects from the managed account directory.
-    // Omitting either resource makes imported values look empty even though they
-    // are present in process_instances.customFields.
+    // The schedule board also launches and batch-imports actions. Its editors need
+    // the latest form, managed account directory, and process nodes. Omitting these
+    // resources makes saved fields look empty or a valid flow look unconfigured.
     const scheduleBoardCommon = [
       "categories", "departments", "people", "publishingAccounts",
-      "taskTemplates", "processTemplates", "standardWorkForms",
+      "taskTemplates", "processTemplates", "processTemplateNodes", "standardWorkForms",
     ];
     const workResultsCommon = ["departments", "people", "positions", "goals", "taskTemplates"];
     const moduleResources = {
