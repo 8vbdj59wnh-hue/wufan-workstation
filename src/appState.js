@@ -61,6 +61,7 @@ let dashboardManagementLoaded = false;
 let dashboardManagementPromise = null;
 let notificationUnreadCount = 0;
 let storeOptionsRequest = null;
+const storeOptions = [];
 let persistentDataLoadGeneration = 0;
 let storeOptionsLoadState = {
   // Mock data is only a rendering fallback and must never be treated as an
@@ -166,16 +167,21 @@ export function getStoreOptionsLoadState() {
   return { ...storeOptionsLoadState };
 }
 
+export function getStoreOptions() {
+  return storeOptions.map(cloneItem);
+}
+
 export async function ensureStoreOptionsLoaded({ force = false } = {}) {
   if (storeOptionsRequest !== null) return storeOptionsRequest;
-  if (!force && state.stores.some((store) => store.status === "active")) {
+  if (!force && storeOptions.length > 0) {
     storeOptionsLoadState = { status: "ready", message: "" };
-    return state.stores;
+    return getStoreOptions();
   }
 
   storeOptionsLoadState = { status: "loading", message: "" };
+  replaceArray(storeOptions, []);
   storeOptionsRequest = (async () => {
-    const response = await authFetch(`${apiBaseUrl}/api/stores`);
+    const response = await authFetch(`${apiBaseUrl}/api/store-options`);
     const payload = await response.json().catch(() => null);
     if (!response.ok) {
       if (response.status === 403) {
@@ -183,10 +189,12 @@ export async function ensureStoreOptionsLoaded({ force = false } = {}) {
       }
       throw new Error(payload?.message ?? payload?.error ?? "店铺加载失败，请稍后重试。");
     }
-    if (!Array.isArray(payload)) throw new Error("店铺数据格式异常，请联系管理员。");
-    replaceArray(state.stores, payload);
+    if (payload?.success !== true || !Array.isArray(payload.items)) {
+      throw new Error("店铺选项数据格式异常，请联系管理员。");
+    }
+    replaceArray(storeOptions, payload.items);
     storeOptionsLoadState = { status: "ready", message: "" };
-    return state.stores;
+    return getStoreOptions();
   })()
     .catch((error) => {
       storeOptionsLoadState = {
@@ -310,7 +318,6 @@ export function applyDataSnapshot(data, { preserveMissingResources = false } = {
   if (shouldReplace("categories")) replaceArray(state.categories, data.categories);
   if (shouldReplace("stores")) {
     replaceArray(state.stores, data.stores);
-    storeOptionsLoadState = { status: "ready", message: "" };
   }
   if (shouldReplace("publishingAccounts")) replaceArray(state.publishingAccounts, data.publishingAccounts ?? initialPublishingAccounts);
   if (shouldReplace("goals")) replaceArray(state.goals, data.goals);

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
+import { buildActiveStoreOptions } from "../server/storeOptionsService.js";
 
 globalThis.window = {
   location: { protocol: "http:", hostname: "127.0.0.1", hash: "#goals" },
@@ -14,6 +15,7 @@ globalThis.window = {
 const {
   applyDataSnapshot,
   ensureStoreOptionsLoaded,
+  getStoreOptions,
   getStoreOptionsLoadState,
   loadPersistentData,
   state,
@@ -34,16 +36,26 @@ test("partial module snapshots preserve undeclared state resources", () => {
   assert.deepEqual(state.methodologies, existingMethodologies);
 });
 
+test("action store options contain only valid active stores", () => {
+  assert.deepEqual(buildActiveStoreOptions([
+    { id: "active-1", name: "启用店铺", platform: "天猫", status: "active", remark: "不应暴露" },
+    { id: "inactive-1", name: "停用店铺", platform: "淘宝", status: "inactive" },
+    { id: "", name: "无编号店铺", platform: "京东", status: "active" },
+  ]), [
+    { id: "active-1", name: "启用店铺", platform: "天猫", status: "active" },
+  ]);
+});
+
 test("empty store options are reloaded once and shared by concurrent callers", async () => {
   const originalFetch = globalThis.fetch;
   let requestCount = 0;
   globalThis.fetch = async (url, options) => {
     requestCount += 1;
-    assert.match(String(url), /\/api\/stores$/);
+    assert.match(String(url), /\/api\/store-options$/);
     assert.equal(options.cache, "no-store");
-    return new Response(JSON.stringify([
+    return new Response(JSON.stringify({ success: true, items: [
       { id: "store-active", name: "测试店铺", platform: "天猫", status: "active" },
-    ]), {
+    ] }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
@@ -56,9 +68,9 @@ test("empty store options are reloaded once and shared by concurrent callers", a
       ensureStoreOptionsLoaded(),
     ]);
     assert.equal(requestCount, 1);
-    assert.equal(first, state.stores);
-    assert.equal(second, state.stores);
-    assert.deepEqual(state.stores, [
+    assert.deepEqual(first, getStoreOptions());
+    assert.deepEqual(second, getStoreOptions());
+    assert.deepEqual(getStoreOptions(), [
       { id: "store-active", name: "测试店铺", platform: "天猫", status: "active" },
     ]);
     assert.deepEqual(getStoreOptionsLoadState(), { status: "ready", message: "" });
@@ -76,17 +88,20 @@ test("forced store refresh replaces a stale active directory", async () => {
     platform: "淘宝",
     status: "active",
   });
-  globalThis.fetch = async () => new Response(JSON.stringify([
+  globalThis.fetch = async () => new Response(JSON.stringify({ success: true, items: [
     { id: "store-current", name: "最新启用店铺", platform: "天猫", status: "active" },
-  ]), {
+  ] }), {
     status: 200,
     headers: { "Content-Type": "application/json" },
   });
 
   try {
     await ensureStoreOptionsLoaded({ force: true });
-    assert.deepEqual(state.stores, [
+    assert.deepEqual(getStoreOptions(), [
       { id: "store-current", name: "最新启用店铺", platform: "天猫", status: "active" },
+    ]);
+    assert.deepEqual(state.stores, [
+      { id: "store-stale", name: "旧店铺快照", platform: "淘宝", status: "active" },
     ]);
   } finally {
     globalThis.fetch = originalFetch;
@@ -201,6 +216,33 @@ test("store option permission failures expose an actionable message", async () =
       status: "error",
       message: "当前账号没有读取店铺的权限，请联系管理员检查“发起关键行动”权限。",
     });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("module snapshots cannot erase the dedicated action store directory", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ success: true, items: [
+    { id: "store-isolated", name: "独立店铺选项", platform: "天猫", status: "active" },
+  ] }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+
+  try {
+    await ensureStoreOptionsLoaded({ force: true });
+    applyDataSnapshot({ stores: [] }, { preserveMissingResources: true });
+    assert.deepEqual(state.stores, []);
+    assert.deepEqual(getStoreOptions(), [
+      { id: "store-isolated", name: "独立店铺选项", platform: "天猫", status: "active" },
+    ]);
+    assert.match(renderPublicFormFieldInput({
+      key: "storeId",
+      label: "上架店铺",
+      type: "select",
+      options: [],
+    }), /独立店铺选项（天猫）/);
   } finally {
     globalThis.fetch = originalFetch;
   }

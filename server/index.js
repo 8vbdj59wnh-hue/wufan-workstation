@@ -169,6 +169,7 @@ import {
   pickGoalCenterBootstrapResources,
   readGoalCenterBootstrap,
 } from "./goalCenterBootstrapService.js";
+import { buildActiveStoreOptions } from "./storeOptionsService.js";
 import { readTemplateCenterUsageSummary } from "./templateCenterBootstrapService.js";
 import { readScheduleBoardPage, readWorkResultsInitial, selectLinkedVisualTemplates } from "./workManagementPageService.js";
 import { markAllUserNotificationsRead, readNotificationSummary } from "./notificationSummaryService.js";
@@ -1430,6 +1431,21 @@ app.get("/api/auth/me", requireAuth, (request, response) => {
 });
 
 app.use("/api", requireAuth);
+
+app.get("/api/store-options", (request, response) => {
+  if (!canUseStoreOptions(request.user)) {
+    response.status(403).json({ success: false, message: "你没有权限读取关键行动的店铺选项。" });
+    return;
+  }
+  try {
+    response.json({
+      success: true,
+      items: buildActiveStoreOptions(readRouteResource("stores")),
+    });
+  } catch (error) {
+    response.status(500).json({ success: false, message: error.message || "店铺选项读取失败。" });
+  }
+});
 
 function isMultipartUpload(request) {
   return Boolean(request.is("multipart/form-data"));

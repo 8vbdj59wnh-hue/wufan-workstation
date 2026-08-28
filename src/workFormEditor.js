@@ -1,4 +1,4 @@
-import { getStoreOptionsLoadState, resolveAssetUrl, state, uploadImageFile } from "./appState.js";
+import { getStoreOptions, getStoreOptionsLoadState, resolveAssetUrl, state, uploadImageFile } from "./appState.js";
 import {
   collectBusinessDateTime,
   getBusinessDatePart,
@@ -61,7 +61,7 @@ function getDynamicFieldOptions(field, selectedValue = "") {
     return state.people.filter((person) => person.status === "active").map((person) => ({ value: person.id, label: person.name }));
   }
   if (field.key === "storeId") {
-    return state.stores.filter((store) => store.status === "active").map((store) => ({ value: store.id, label: getStoreOptionLabel(store) }));
+    return getStoreOptions().map((store) => ({ value: store.id, label: getStoreOptionLabel(store) }));
   }
   return [];
 }
@@ -174,7 +174,7 @@ export function collectPublicFormFields(form, fields = []) {
       result[field.key] = getFormValue(form, `custom__${field.key}`);
     }
     if (field.key === "storeId") {
-      const store = state.stores.find((item) => item.id === result.storeId);
+      const store = getStoreOptions().find((item) => item.id === result.storeId);
       result.storeName = store?.name ?? "";
     }
     return result;
