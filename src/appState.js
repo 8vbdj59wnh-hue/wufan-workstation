@@ -47,6 +47,7 @@ import {
   inferValueModuleIdFromText,
 } from "./data/modelOptions.js";
 import { getPrimaryImageUrl } from "./data/taskUtils.js";
+import { resolvePersistentDataRoute } from "./persistentDataRouting.js";
 
 const apiPort = "3001";
 const apiBaseUrl = `${window.location.protocol}//${window.location.hostname}:${apiPort}`;
@@ -367,11 +368,13 @@ export function applyDataSnapshot(data, { preserveMissingResources = false } = {
   ensureDefaultStandardWorkLibrary();
 }
 
-export async function loadPersistentData({ includeTaskWaves = null } = {}) {
+const loadedPersistentDataRoutes = new Set();
+
+export async function loadPersistentData({ includeTaskWaves = null, useCache = false } = {}) {
   const loadGeneration = ++persistentDataLoadGeneration;
   try {
-    const fullRoute = window.location.hash.replace(/^#\/?/u, "");
-    const route = fullRoute === "settings/admin-data-center" ? "adminDataCenter" : fullRoute.split("/")[0];
+    const fullRoute = window.location.hash.replace(/^#/, "");
+    const route = resolvePersistentDataRoute(fullRoute);
     const lightweightModules = new Set([
       "",
       "dashboard",
@@ -388,11 +391,7 @@ export async function loadPersistentData({ includeTaskWaves = null } = {}) {
       "finance-center",
       "adminDataCenter",
     ]);
-    const bootstrapModuleAliases = {
-      "dashboard-management": "dashboardManagement",
-      "finance-center": "financeCenter",
-    };
-    const bootstrapModule = bootstrapModuleAliases[route] ?? (route || "dashboard");
+    const bootstrapModule = route || "dashboard";
     const moduleDataEndpoints = {
       goals: `${apiBaseUrl}/api/goal-center/bootstrap`,
     };
@@ -400,7 +399,10 @@ export async function loadPersistentData({ includeTaskWaves = null } = {}) {
     const usesPartialSnapshot = moduleDataEndpoint !== null || lightweightModules.has(route);
     const shouldLoadTaskWaves =
       includeTaskWaves ??
-      route === "task-waves";
+      fullRoute.split("/")[0] === "task-waves";
+    const currentUser = getCurrentUser();
+    const cacheKey = `${currentUser?.personId ?? currentUser?.id ?? "anonymous"}:${bootstrapModule}`;
+    if (useCache && loadedPersistentDataRoutes.has(cacheKey) && (!shouldLoadTaskWaves || taskWavesLoaded)) return false;
     const [response, waveResponse, notificationResponse] = await Promise.all([
       authFetch(moduleDataEndpoint ?? (lightweightModules.has(route) ? `${apiBaseUrl}/api/bootstrap?module=${encodeURIComponent(bootstrapModule)}` : `${apiBaseUrl}/api/data`)),
       shouldLoadTaskWaves ? authFetch(`${apiBaseUrl}/api/task-waves`) : Promise.resolve(null),
@@ -422,6 +424,7 @@ export async function loadPersistentData({ includeTaskWaves = null } = {}) {
     // snapshot used to erase stores (and other directories) that the module did
     // not declare. Only /api/data is allowed to replace the entire client state.
     applyDataSnapshot(snapshot, { preserveMissingResources: usesPartialSnapshot });
+    if (bootstrapModule === "dashboardManagement") dashboardManagementLoaded = true;
     replaceArray(state.notifications, notificationData.items ?? []);
     notificationUnreadCount = Number(notificationData.unreadCount || 0);
     if (waveResponse !== null) {
@@ -438,6 +441,7 @@ export async function loadPersistentData({ includeTaskWaves = null } = {}) {
       kind: "success",
       message: "当前数据已连接本地数据库。",
     };
+    loadedPersistentDataRoutes.add(cacheKey);
     return true;
   } catch (error) {
     if (loadGeneration !== persistentDataLoadGeneration) return false;
@@ -660,6 +664,9 @@ export async function login(username, password) {
 export function logout() {
   setAuthToken("");
   currentUser = null;
+  loadedPersistentDataRoutes.clear();
+  dashboardManagementLoaded = false;
+  dashboardManagementPromise = null;
   notificationUnreadCount = 0;
   replaceArray(state.notifications, []);
   taskWavesLoaded = false;
@@ -1855,7 +1862,27 @@ export async function loadConnectionManagementOverview() {
 export async function loadConnectionBusinessCockpit(filters = {}) {
   const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== "" && value !== undefined && value !== null));
   const suffix = query.toString() ? `?${query}` : "";
-  return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-business-cockpit${suffix}`), "链接经营驾驶舱读取失败。");
+  const startedAt = performance.now();
+  const response = await authFetch(`${apiBaseUrl}/api/connection-business-cockpit${suffix}`);
+  const headersAt = performance.now();
+  const responseText = await response.text();
+  const bodyAt = performance.now();
+  let body = {};
+  try { body = JSON.parse(responseText || "{}"); } catch {}
+  const parsedAt = performance.now();
+  if (!response.ok) throw new Error(body.message || body.error || "链接经营驾驶舱读取失败。");
+  Object.defineProperty(body, "_clientTiming", {
+    value: {
+      fetchHeaders: Number((headersAt - startedAt).toFixed(1)),
+      bodyRead: Number((bodyAt - headersAt).toFixed(1)),
+      jsonParse: Number((parsedAt - bodyAt).toFixed(1)),
+      total: Number((parsedAt - startedAt).toFixed(1)),
+      bytes: new Blob([responseText]).size,
+      serverTiming: response.headers.get("server-timing") || "",
+    },
+    enumerable: false,
+  });
+  return body;
 }
 
 export async function loadConnectionBenchmarks(connectionId) {

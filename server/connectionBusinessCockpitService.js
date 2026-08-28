@@ -1,4 +1,5 @@
 import { getDatabase } from "./db.js";
+import { performance } from "node:perf_hooks";
 import { FORMAL_SALES_OBJECT_RESOLVER_SCOPES, resolveLinkSkuRelationsForRead } from "./capabilities/resolveLinkSkuRelationRead.js";
 import { buildLinkOperatingScope } from "./linkOperatingSetService.js";
 import { resolveConnectionCockpitDateWindow } from "./connectionCockpitDateRange.js";
@@ -10,7 +11,15 @@ function periodType(start, end) { const days = Math.round((Date.parse(end) - Dat
 function serializeRange(window) { return window ? { preset: window.preset, startDate: window.periodStart, endDate: window.periodEnd,
   previousStartDate: window.previousStart, previousEndDate: window.previousEnd, windowDays: window.windowDays } : null; }
 
-function readCockpitMetricsMap(database, salesLinkIds, window) {
+function elapsed(startedAt) { return Number((performance.now() - startedAt).toFixed(1)); }
+function withTimings(payload, timings, totalStartedAt) {
+  Object.defineProperty(payload, "_timings", {
+    value: { ...timings, total: elapsed(totalStartedAt) }, enumerable: false,
+  });
+  return payload;
+}
+
+function readCockpitMetricsMap(database, salesLinkIds, window, { includePlatform = true } = {}) {
   if (!salesLinkIds.length) return new Map();
   const placeholders = salesLinkIds.map(() => "?").join(",");
   const currentWhere = window.batchId ? "sourceBatchId=?" : "saleDate BETWEEN ? AND ?";
@@ -29,7 +38,9 @@ function readCockpitMetricsMap(database, salesLinkIds, window) {
     profitMargin: Number(row.salesAmount) ? Number(row.profitAmount || 0) / Number(row.salesAmount) : null }]));
   const previousByLink = new Map(previousRows.map((row) => [row.salesLinkId, { ...row, periodStart: window.previousStart, periodEnd: window.previousEnd,
     profitMargin: Number(row.salesAmount) ? Number(row.profitAmount || 0) / Number(row.salesAmount) : null }]));
-  const platformRows = database.prepare(`SELECT * FROM connection_period_snapshots WHERE salesLinkId IN (${placeholders}) ORDER BY salesLinkId,periodEnd DESC,periodStart DESC,createdAt DESC`).all(...salesLinkIds);
+  const platformRows = includePlatform
+    ? database.prepare(`SELECT * FROM connection_period_snapshots WHERE salesLinkId IN (${placeholders}) ORDER BY salesLinkId,periodEnd DESC,periodStart DESC,createdAt DESC`).all(...salesLinkIds)
+    : [];
   const platformByLink = new Map(); for (const row of platformRows) if (!platformByLink.has(row.salesLinkId)) platformByLink.set(row.salesLinkId, row);
   const empty = { periodStart: null, periodEnd: null, shippedQuantity: null, salesAmount: null, costAmount: null, profitAmount: null, profitMargin: null };
   return new Map(salesLinkIds.map((id) => { const current = currentByLink.get(id) ?? empty; const previous = previousByLink.get(id) ?? null; return [id, {
@@ -191,11 +202,70 @@ function readProductAttributionContext(database, salesLinkIds) {
   };
 }
 
+function readProductChannels(database, salesLinkIds, salesWindow, productAttribution) {
+  if (!salesWindow || salesLinkIds.length === 0) return [];
+  const linkPlaceholders = salesLinkIds.map(() => "?").join(",");
+  const factRows = database.prepare(`
+    SELECT f.salesLinkId,f.salesLinkSkuId,f.saleDate periodStart,f.saleDate periodEnd,
+      f.salesAmount,f.profitAmount,sh.platform
+    FROM connection_sku_sales_daily_facts f
+    JOIN sales_links l ON l.id=f.salesLinkId
+    JOIN sales_shops sh ON sh.id=l.shopId
+    WHERE ${salesWindow.batchId ? "f.sourceBatchId=?" : "f.saleDate BETWEEN ? AND ?"}
+      AND f.salesLinkId IN (${linkPlaceholders})
+  `).all(...(salesWindow.batchId ? [salesWindow.batchId] : [salesWindow.periodStart, salesWindow.periodEnd]), ...salesLinkIds);
+  const productChannelMap = new Map();
+  for (const row of factRows) {
+    const attributions = (productAttribution.attributionsBySku.get(row.salesLinkSkuId) ?? [])
+      .filter((item) => item.salesObjectType === "single");
+    if (attributions.length !== 1) continue;
+    const attribution = attributions[0];
+    const key = `${attribution.productId}|${row.platform}`;
+    const current = productChannelMap.get(key) ?? {
+      productId: attribution.productId, platform: row.platform,
+      directSalesAmount: 0, directProfitAmount: 0, linkIds: new Set(),
+    };
+    current.directSalesAmount += Number(row.salesAmount || 0);
+    current.directProfitAmount += Number(row.profitAmount || 0);
+    current.linkIds.add(row.salesLinkId);
+    productChannelMap.set(key, current);
+  }
+  const totalsByProduct = new Map();
+  for (const row of productChannelMap.values()) {
+    totalsByProduct.set(row.productId, (totalsByProduct.get(row.productId) || 0) + row.directSalesAmount);
+  }
+  return [...productChannelMap.values()].map((row) => ({
+    productId: row.productId,
+    ...productAttribution.productMeta.get(row.productId),
+    platform: row.platform,
+    directSalesAmount: row.directSalesAmount,
+    directProfitAmount: row.directProfitAmount,
+    salesAmount: row.directSalesAmount,
+    profitAmount: row.directProfitAmount,
+    linkCount: row.linkIds.size,
+    contribution: totalsByProduct.get(row.productId)
+      ? row.directSalesAmount / totalsByProduct.get(row.productId)
+      : 0,
+    metricContract: "single_direct_only",
+    bundleAllocation: "none",
+  })).sort((a, b) => b.directSalesAmount - a.directSalesAmount).slice(0, 30);
+}
+
 export function getConnectionBusinessCockpit(userId = "", isAdmin = false, input = {}) {
+  const totalStartedAt = performance.now();
+  const timings = {};
+  const requestedScope = ["core", "product-channels"].includes(text(input.scope)) ? text(input.scope) : "full";
+  let stageStartedAt = performance.now();
   const database = getDatabase(); const personId = text(userId);
   const operatingScope = buildLinkOperatingScope(database, { alias: "l", prefix: "connectionCockpitOperating" });
   const salesWindow = resolveConnectionCockpitDateWindow(database, input);
-  const shopOperations = readShopOperations(database, salesWindow, operatingScope, personId, isAdmin);
+  timings.range = elapsed(stageStartedAt);
+  stageStartedAt = performance.now();
+  const shopOperations = requestedScope === "product-channels"
+    ? []
+    : readShopOperations(database, salesWindow, operatingScope, personId, isAdmin);
+  timings.shops = elapsed(stageStartedAt);
+  stageStartedAt = performance.now();
   const profiles = database.prepare(`
     SELECT COALESCE(c.id,l.id) id,c.id connectionProfileId,l.id salesLinkId,
       COALESCE(NULLIF(c.name,''),NULLIF(l.title,''),l.platformGoodsId) name,c.mainImage,c.ownerId,
@@ -208,10 +278,33 @@ export function getConnectionBusinessCockpit(userId = "", isAdmin = false, input
     WHERE ${operatingScope.predicate} ${isAdmin ? "" : "AND c.ownerId=@scopeOwnerId"}
     ORDER BY COALESCE(c.updatedAt,l.updatedAt) DESC,l.id DESC
   `).all({ ...operatingScope.params, ...(isAdmin ? {} : { scopeOwnerId: personId }) });
+  timings.profiles = elapsed(stageStartedAt);
   const connectionIds = profiles.map((item) => item.connectionProfileId).filter(Boolean); const salesLinkIds = profiles.map((item) => item.salesLinkId);
-  if (!profiles.length) return emptyCockpit(shopOperations, salesWindow);
+  if (!profiles.length) {
+    const empty = requestedScope === "product-channels"
+      ? { range: serializeRange(salesWindow), productChannels: [], scope: { isAdmin: Boolean(isAdmin), ownerId: isAdmin ? null : personId } }
+      : emptyCockpit(shopOperations, salesWindow);
+    return withTimings(empty, timings, totalStartedAt);
+  }
+  if (requestedScope === "product-channels") {
+    stageStartedAt = performance.now();
+    const productAttribution = readProductAttributionContext(database, salesLinkIds);
+    timings.productRelations = elapsed(stageStartedAt);
+    stageStartedAt = performance.now();
+    const productChannels = readProductChannels(database, salesLinkIds, salesWindow, productAttribution);
+    timings.productChannels = elapsed(stageStartedAt);
+    return withTimings({
+      range: serializeRange(salesWindow), productChannels,
+      scope: { isAdmin: Boolean(isAdmin), ownerId: isAdmin ? null : personId },
+    }, timings, totalStartedAt);
+  }
   const placeholders = connectionIds.map(() => "?").join(","); const linkPlaceholders = salesLinkIds.map(() => "?").join(",");
-  const metrics = salesWindow ? readCockpitMetricsMap(database, salesLinkIds, salesWindow) : new Map(salesLinkIds.map((id) => [id, { current: {}, previous: null, salesGrowth: null, profitGrowth: null, platform: null }]));
+  stageStartedAt = performance.now();
+  const metrics = salesWindow
+    ? readCockpitMetricsMap(database, salesLinkIds, salesWindow, { includePlatform: requestedScope === "full" })
+    : new Map(salesLinkIds.map((id) => [id, { current: {}, previous: null, salesGrowth: null, profitGrowth: null, platform: null }]));
+  timings.salesAndProfit = elapsed(stageStartedAt);
+  stageStartedAt = performance.now();
   const evaluationRows = connectionIds.length && salesWindow ? database.prepare(`
     SELECT connectionId,grade FROM (
       SELECT p.connectionId,e.grade,
@@ -222,8 +315,27 @@ export function getConnectionBusinessCockpit(userId = "", isAdmin = false, input
     ) WHERE evaluationRank=1
   `).all(salesWindow.periodEnd, ...connectionIds) : [];
   const evaluationByConnection = new Map(evaluationRows.map((row) => [row.connectionId, row.grade]));
-  const productAttribution = readProductAttributionContext(database, salesLinkIds);
-  const items = profiles.map((profile) => { const v3 = metrics.get(profile.salesLinkId); const salesGrowth = v3.salesGrowth; const profitGrowth = v3.profitGrowth; const grade = profile.connectionProfileId ? evaluationByConnection.get(profile.connectionProfileId) : null; const risk = grade === "underperforming" || Number(salesGrowth) < -0.2 || Number(profitGrowth) < -0.2; return { ...profile, products: productAttribution.productsByConnection.get(profile.salesLinkId) ?? [], erpSales: v3.current, previousErpSales: v3.previous, platformPerformance: v3.platform, salesGrowth, profitGrowth, visitorGrowth:null, conversionChange:null, evaluationGrade:grade||null, operationStage:"normal", risk }; });
+  timings.ratings = elapsed(stageStartedAt);
+  stageStartedAt = performance.now();
+  const productAttribution = requestedScope === "full"
+    ? readProductAttributionContext(database, salesLinkIds)
+    : { attributionsBySku: new Map(), productMeta: new Map(), productsByConnection: new Map() };
+  timings.productRelations = elapsed(stageStartedAt);
+  stageStartedAt = performance.now();
+  const items = profiles.map((profile) => {
+    const v3 = metrics.get(profile.salesLinkId);
+    const salesGrowth = v3.salesGrowth; const profitGrowth = v3.profitGrowth;
+    const grade = profile.connectionProfileId ? evaluationByConnection.get(profile.connectionProfileId) : null;
+    const risk = grade === "underperforming" || Number(salesGrowth) < -0.2 || Number(profitGrowth) < -0.2;
+    return {
+      ...profile,
+      products: productAttribution.productsByConnection.get(profile.salesLinkId) ?? [],
+      erpSales: v3.current, previousErpSales: v3.previous,
+      platformPerformance: v3.platform, salesGrowth, profitGrowth,
+      visitorGrowth: null, conversionChange: null,
+      evaluationGrade: grade || null, operationStage: "normal", risk,
+    };
+  });
   const totalSales = items.reduce((sum, item) => sum + Number(item.erpSales.salesAmount || 0), 0); const totalProfit = items.reduce((sum, item) => sum + Number(item.erpSales.profitAmount || 0), 0); const previousSales = items.reduce((sum, item) => sum + Number(item.previousErpSales?.salesAmount || 0), 0); const quantity = items.reduce((sum, item) => sum + Number(item.erpSales.shippedQuantity ?? item.erpSales.quantity ?? 0), 0);
   const salesPeriodStart = salesWindow?.periodStart ?? null;
   const salesPeriodEnd = salesWindow?.periodEnd ?? null;
@@ -238,14 +350,22 @@ export function getConnectionBusinessCockpit(userId = "", isAdmin = false, input
   const coreLinks = items.filter((item) => item.erpSales.periodEnd).sort((a,b) => Number(b.erpSales.salesAmount||0)-Number(a.erpSales.salesAmount||0) || Number(b.erpSales.profitAmount||0)-Number(a.erpSales.profitAmount||0) || Number(b.erpSales.quantity||0)-Number(a.erpSales.quantity||0)).slice(0,10);
   const riskLinks = items.filter((item) => item.risk).sort((a,b) => Number(a.salesGrowth??0)-Number(b.salesGrowth??0)).slice(0,10).map((item) => ({ ...item, anomalyTypes: [item.evaluationGrade==="underperforming"?"经营评价不达标":"",Number(item.salesGrowth)<-0.2?"销售下降":"",Number(item.profitGrowth)<-0.2?"利润下降":""].filter(Boolean) }));
   const growthLinks = items.map((item) => ({ ...item, growthMetric: Math.max(...[item.salesGrowth,item.profitGrowth].filter((value) => value !== null).map(Number), -Infinity) })).filter((item) => Number.isFinite(item.growthMetric) && item.growthMetric > 0).sort((a,b) => b.growthMetric-a.growthMetric).slice(0,10);
+  timings.riskAndGrowth = elapsed(stageStartedAt);
+  stageStartedAt = performance.now();
   const platformMap = new Map(); for (const item of items) { const row=platformMap.get(item.platform)??{platform:item.platform,connectionCount:0,salesAmount:0,profitAmount:0,riskCount:0,excellentOrGoodCount:0}; row.connectionCount++; row.salesAmount+=Number(item.erpSales.salesAmount||0); row.profitAmount+=Number(item.erpSales.profitAmount||0); if(item.risk)row.riskCount++; if(["excellent","good"].includes(item.evaluationGrade)&&!item.risk)row.excellentOrGoodCount++; platformMap.set(item.platform,row); }
   const platforms=[...platformMap.values()].map((row)=>({...row,profitMargin:row.salesAmount?row.profitAmount/row.salesAmount:null,excellentOrGoodRate:row.connectionCount?row.excellentOrGoodCount/row.connectionCount:0})).sort((a,b)=>b.salesAmount-a.salesAmount);
   const ownerMap = new Map(); for (const item of items) { const ownerId=item.ownerId||"unassigned"; const row=ownerMap.get(ownerId)??{ownerId,ownerName:item.ownerName||"未分配",connectionCount:0,salesAmount:0,profitAmount:0,growthTotal:0,growthCount:0,riskCount:0}; row.connectionCount+=1; row.salesAmount+=Number(item.erpSales.salesAmount||0); row.profitAmount+=Number(item.erpSales.profitAmount||0); if(item.salesGrowth!==null){row.growthTotal+=Number(item.salesGrowth);row.growthCount+=1;} if(item.risk)row.riskCount+=1; ownerMap.set(ownerId,row); } const ownerOperations=[...ownerMap.values()].map((row)=>({...row,averageGrowth:row.growthCount?row.growthTotal/row.growthCount:null,profitMargin:row.salesAmount?row.profitAmount/row.salesAmount:null})).sort((a,b)=>b.salesAmount-a.salesAmount||b.profitAmount-a.profitAmount);
-  const factRows=salesWindow?database.prepare(`SELECT f.salesLinkId,f.salesLinkSkuId,f.saleDate periodStart,f.saleDate periodEnd,f.salesAmount,f.profitAmount,sh.platform FROM connection_sku_sales_daily_facts f JOIN sales_links l ON l.id=f.salesLinkId JOIN sales_shops sh ON sh.id=l.shopId WHERE ${salesWindow.batchId ? "f.sourceBatchId=?" : "f.saleDate BETWEEN ? AND ?"} AND f.salesLinkId IN (${linkPlaceholders})`).all(...(salesWindow.batchId?[salesWindow.batchId]:[salesWindow.periodStart,salesWindow.periodEnd]),...salesLinkIds):[];
-  const productChannelMap=new Map(); for(const row of factRows){const attributions=(productAttribution.attributionsBySku.get(row.salesLinkSkuId)??[]).filter((item)=>item.salesObjectType==="single");if(attributions.length!==1)continue;const attribution=attributions[0];const key=`${attribution.productId}|${row.platform}`;const current=productChannelMap.get(key)??{productId:attribution.productId,platform:row.platform,directSalesAmount:0,directProfitAmount:0,linkIds:new Set()};current.directSalesAmount+=Number(row.salesAmount||0);current.directProfitAmount+=Number(row.profitAmount||0);current.linkIds.add(row.salesLinkId);productChannelMap.set(key,current);} const totalsByProduct=new Map(); for(const row of productChannelMap.values())totalsByProduct.set(row.productId,(totalsByProduct.get(row.productId)||0)+row.directSalesAmount); const productChannels=[...productChannelMap.values()].map((row)=>({productId:row.productId,...productAttribution.productMeta.get(row.productId),platform:row.platform,directSalesAmount:row.directSalesAmount,directProfitAmount:row.directProfitAmount,salesAmount:row.directSalesAmount,profitAmount:row.directProfitAmount,linkCount:row.linkIds.size,contribution:totalsByProduct.get(row.productId)?row.directSalesAmount/totalsByProduct.get(row.productId):0,metricContract:"single_direct_only",bundleAllocation:"none"})).sort((a,b)=>b.directSalesAmount-a.directSalesAmount).slice(0,30);
+  timings.ownerAndPlatform = elapsed(stageStartedAt);
+  stageStartedAt = performance.now();
+  const productChannels = requestedScope === "full"
+    ? readProductChannels(database, salesLinkIds, salesWindow, productAttribution)
+    : [];
+  timings.productChannels = elapsed(stageStartedAt);
+  stageStartedAt = performance.now();
   const erpTrend=salesWindow?database.prepare(`SELECT saleDate periodStart,saleDate periodEnd,SUM(COALESCE(quantity,0)) quantity,SUM(COALESCE(salesAmount,0)) salesAmount,SUM(COALESCE(profitAmount,0)) profitAmount FROM connection_sku_sales_daily_facts WHERE saleDate BETWEEN ? AND ? AND salesLinkId IN (${linkPlaceholders}) GROUP BY saleDate ORDER BY saleDate`).all(salesWindow.periodStart,salesWindow.periodEnd,...salesLinkIds).map((row)=>({...row,periodType:periodType(row.periodStart,row.periodEnd)})):[];
   const platformTrend=salesWindow?database.prepare(`SELECT periodStart,periodEnd,SUM(COALESCE(visitorCount,0)) visitorCount,SUM(COALESCE(viewCount,0)) viewCount FROM connection_period_snapshots WHERE periodStart>=? AND periodEnd<=? AND salesLinkId IN (${linkPlaceholders}) GROUP BY periodStart,periodEnd ORDER BY periodEnd,periodStart`).all(salesWindow.periodStart,salesWindow.periodEnd,...salesLinkIds).map((row)=>({...row,periodType:periodType(row.periodStart,row.periodEnd)})):[];
-  return { range:serializeRange(salesWindow),summary:{connectionCount:items.length,managedConnectionCount:items.filter((item)=>item.connectionProfileId).length,unmanagedConnectionCount:items.filter((item)=>!item.connectionProfileId).length,normalCount:items.filter((item)=>!item.risk).length,riskCount:items.filter((item)=>item.risk).length,quantity,salesAmount:totalSales,salesGrowth:salesWindow?.previousPeriodComplete?ratio(totalSales,previousSales):null,salesPeriodStart,salesPeriodEnd,salesPeriodAligned:true,salesPeriodCount:salesWindow?.currentDateCount||0,salesWindowDays:salesWindow?.windowDays||0,currentPeriodDateCount:salesWindow?.currentDateCount||0,previousPeriodDateCount:salesWindow?.previousDateCount||0,previousPeriodComplete:Boolean(salesWindow?.previousPeriodComplete),salesUpdatedAt,profitAmount:totalProfit,profitMargin:totalSales?totalProfit/totalSales:null,highProfitCount:items.filter((item)=>Number(item.erpSales.profitMargin)>=0.2).length,profitRiskCount:items.filter((item)=>Number(item.erpSales.profitAmount)<0||Number(item.profitGrowth)<-0.2).length},ratingSummary,shopOperations,ownerOperations,coreLinks,riskLinks,growthLinks,platforms,productChannels,trends:{erp:erpTrend,platform:platformTrend},scope:{isAdmin:Boolean(isAdmin),ownerId:isAdmin?null:personId}};
+  timings.trends = elapsed(stageStartedAt);
+  return withTimings({ range:serializeRange(salesWindow),summary:{connectionCount:items.length,managedConnectionCount:items.filter((item)=>item.connectionProfileId).length,unmanagedConnectionCount:items.filter((item)=>!item.connectionProfileId).length,normalCount:items.filter((item)=>!item.risk).length,riskCount:items.filter((item)=>item.risk).length,quantity,salesAmount:totalSales,salesGrowth:salesWindow?.previousPeriodComplete?ratio(totalSales,previousSales):null,salesPeriodStart,salesPeriodEnd,salesPeriodAligned:true,salesPeriodCount:salesWindow?.currentDateCount||0,salesWindowDays:salesWindow?.windowDays||0,currentPeriodDateCount:salesWindow?.currentDateCount||0,previousPeriodDateCount:salesWindow?.previousDateCount||0,previousPeriodComplete:Boolean(salesWindow?.previousPeriodComplete),salesUpdatedAt,profitAmount:totalProfit,profitMargin:totalSales?totalProfit/totalSales:null,highProfitCount:items.filter((item)=>Number(item.erpSales.profitMargin)>=0.2).length,profitRiskCount:items.filter((item)=>Number(item.erpSales.profitAmount)<0||Number(item.profitGrowth)<-0.2).length},ratingSummary,shopOperations,ownerOperations,coreLinks,riskLinks,growthLinks,platforms,productChannels,trends:{erp:erpTrend,platform:platformTrend},scope:{isAdmin:Boolean(isAdmin),ownerId:isAdmin?null:personId}}, timings, totalStartedAt);
 }
 
 function emptyCockpit(shopOperations=[],salesWindow=null){return{range:serializeRange(salesWindow),summary:{salesPeriodStart:salesWindow?.periodStart||null,salesPeriodEnd:salesWindow?.periodEnd||null,salesWindowDays:salesWindow?.windowDays||0},ratingSummary:{excellentOrGood:0,onTarget:0,underperforming:0,notEvaluated:0},shopOperations,ownerOperations:[],coreLinks:[],riskLinks:[],growthLinks:[],platforms:[],productChannels:[],trends:{erp:[],platform:[]},scope:{}};}

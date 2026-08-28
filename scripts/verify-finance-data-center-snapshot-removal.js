@@ -7,6 +7,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), "utf8");
 
 const appState = read("src/appState.js");
+const persistentDataRouting = read("src/persistentDataRouting.js");
 const server = read("server/index.js");
 const financePage = read("src/financeCenterPage.js");
 const dataCenterPage = read("src/dataCenterPage.js");
@@ -16,7 +17,7 @@ assert.match(
   /const lightweightModules = new Set\(\[[\s\S]*?"financeCenter"[\s\S]*?"finance-center"[\s\S]*?"adminDataCenter"[\s\S]*?\]\);/,
   "财务中心和管理员同步中心必须通过轻量模块启动，不能回落到 /api/data。",
 );
-assert.match(appState, /"finance-center":\s*"financeCenter"/, "财务中心兼容路由必须映射到轻量模块名。");
+assert.match(persistentDataRouting, /"finance-center":\s*"financeCenter"/, "财务中心兼容路由必须映射到轻量模块名。");
 assert.match(server, /financeCenter:\s*\[\]/, "服务端必须注册财务中心轻量 bootstrap。");
 assert.match(server, /adminDataCenter:\s*\[\]/, "服务端必须注册管理员同步中心轻量 bootstrap。");
 

@@ -178,7 +178,6 @@ function getModuleIdFromHash() {
 let activeModuleId = getModuleIdFromHash();
 let lastRenderedRouteHash = null;
 let loginError = "";
-let loadedDataModuleId = "";
 let notificationPanelOpen = false;
 let sidebarMode = "fixed";
 let sidebarDrawerOpen = false;
@@ -641,10 +640,9 @@ function renderLoginPage() {
     window.location.hash = firstAccessibleModule?.id ?? "goals";
     const firstModuleId = firstAccessibleModule?.id ?? "goals";
     await Promise.all([
-      loadPersistentData(),
+      loadPersistentData({ useCache: true }),
       prepareRouteModule(firstModuleId),
     ]);
-    loadedDataModuleId = getModuleIdFromHash();
     window.clearTimeout(loadingNoticeTimer);
     render();
     void syncTaskNotificationsForCurrentUser().catch((error) => console.error("任务提醒同步失败", error));
@@ -903,9 +901,8 @@ window.addEventListener("hashchange", async () => {
   normalizeRetiredDataCenterRoute();
   const nextModuleId = getModuleIdFromHash();
   const { revision } = await prepareRouteModule(nextModuleId, { showLoading: true });
-  if (nextModuleId !== loadedDataModuleId && isNavigationCurrent(revision, nextModuleId)) {
-    await loadPersistentData().catch((error) => console.error("模块数据按需加载失败", error));
-    loadedDataModuleId = nextModuleId;
+  if (isNavigationCurrent(revision, nextModuleId)) {
+    await loadPersistentData({ useCache: true }).catch((error) => console.error("模块数据按需加载失败", error));
   }
   if (isNavigationCurrent(revision, nextModuleId) && getRouteHash() === "task-waves") {
     await ensureTaskWavesLoaded().catch((error) => console.error("任务波次按需加载失败", error));
@@ -953,7 +950,7 @@ try {
   } else {
     renderAuthenticatedStartup();
     const startupModuleId = getModuleIdFromHash();
-    await Promise.all([loadPersistentData(), prepareRouteModule(startupModuleId)]); loadedDataModuleId = startupModuleId;
+    await Promise.all([loadPersistentData({ useCache: true }), prepareRouteModule(startupModuleId)]);
     window.clearTimeout(loadingNoticeTimer);
     render();
     void syncTaskNotificationsForCurrentUser().catch((error) => console.error("任务提醒同步失败", error));

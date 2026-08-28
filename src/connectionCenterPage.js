@@ -143,6 +143,8 @@ const pageState = {
   cockpitShopShareMetric: "salesAmount",
   cockpitShopShareSelectedId: "",
   cockpitExpanded: false,
+  cockpitProductChannels: { loading: false, loaded: false, error: "" },
+  cockpitGoalHealthLoading: false,
   goalHealth: { totalLinks: 0, positionedLinks: 0, unpositionedLinks: 0, activeGoalLinks: 0, pendingGoalLinks: 0, evaluatedLinks: 0, pendingEvaluationLinks: 0, gradeSummary: {}, positioningSummary: [], evaluationPeriod: {} },
   section: initialConnectionSection(),
   dataCenterTab: "data-foundation",
@@ -181,6 +183,31 @@ const pageState = {
 };
 let connectionListRequestId = 0;
 let connectionSearchTimer = 0;
+let cockpitRequestId = 0;
+
+function recordCockpitPerformance(kind, detail = {}) {
+  if (typeof window === "undefined") return;
+  const store = window.__wufanCockpitPerformance ?? {
+    startedAt: new Date().toISOString(), fetches: [], renders: [], interactive: [], renderCount: 0,
+  };
+  window.__wufanCockpitPerformance = store;
+  if (kind === "render") { store.renderCount += 1; store.renders.push({ at: performance.now(), ...detail }); }
+  else if (kind === "interactive") store.interactive.push({ at: performance.now(), ...detail });
+  else store.fetches.push({ kind, at: performance.now(), ...detail });
+}
+
+function scheduleCockpitInteractiveMeasurement(label, startedAt) {
+  if (typeof window === "undefined") return;
+  window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+    const root = document.querySelector(".connection-business-cockpit");
+    recordCockpitPerformance("interactive", {
+      label,
+      elapsedMs: Number((performance.now() - startedAt).toFixed(1)),
+      domNodes: root?.querySelectorAll("*").length ?? 0,
+      distributionBars: root?.querySelectorAll("[data-distribution-group],[data-distribution-bar]").length ?? 0,
+    });
+  }));
+}
 
 const listConfigKey = "connection-center-list-config-v2";
 const myLinkTableConfigKey = "my-link-data-table-config-v1";
@@ -802,6 +829,7 @@ function cockpitSalesPeriodText(summary) {
   return summary.salesPeriodAligned ? `统计周期 ${range}` : `各链接最新周期 ${range}（共 ${summary.salesPeriodCount || 0} 个周期）`;
 }
 function renderGoalHealthCockpit() {
+  if (pageState.cockpitGoalHealthLoading) return `<section class="cockpit-panel connection-goal-health-cockpit cockpit-module-skeleton" aria-busy="true"><header><div><h3>链接评级概览</h3><span>正在按需读取评级汇总…</span></div></header><div class="cockpit-skeleton-lines"><i></i><i></i><i></i></div></section>`;
   const model = pageState.goalHealth || {}; const grades = model.gradeSummary || {}; const period = model.evaluationPeriod || {};
   const selectedEnd = pageState.cockpitRange.endDate;
   const periodText = period.periodEnd ? `截至 ${selectedEnd || period.periodEnd} 的最新滚动30天评价${Number(period.periodCount || 0) > 1 ? ` · ${period.periodCount}个评价周期` : ""}` : `截至 ${selectedEnd || "所选日期"} 暂无已完成评价`;
@@ -815,6 +843,17 @@ function renderGoalHealthCockpit() {
 function renderCockpitGlobalRange() {
   const range = pageState.cockpitRange || {};
   return `<form class="cockpit-global-range" data-cockpit-global-range><div class="cockpit-global-presets">${LINK_TIME_RANGE_OPTIONS.map(({ value, label }) => `<button type="button" data-cockpit-range-preset="${value}" class="${range.preset === value ? "active" : ""}" ${range.loading ? "disabled" : ""}>${label}</button>`).join("")}</div><div class="cockpit-global-dates"><label><span>开始日期</span><input type="date" name="startDate" value="${escapeHtml(range.startDate || "")}" ${range.loading ? "disabled" : ""} /></label><i>→</i><label><span>结束日期</span><input type="date" name="endDate" value="${escapeHtml(range.endDate || "")}" ${range.loading ? "disabled" : ""} /></label></div>${range.loading ? `<small>正在更新全页面经营数据…</small>` : `<small>全页面统一时间范围</small>`}</form>`;
+}
+function renderCockpitSkeleton() {
+  return `<section class="connection-business-cockpit cockpit-loading-shell" aria-busy="true">
+    ${renderCockpitGlobalRange()}
+    <section class="cockpit-summary cockpit-summary-skeleton">${Array.from({ length: 4 }, () => `<div><span></span><strong></strong><small></small></div>`).join("")}</section>
+    <section class="cockpit-panel cockpit-module-skeleton"><header><h3>店铺经营摘要</h3><span>正在读取当前经营事实…</span></header><div class="cockpit-skeleton-lines"><i></i><i></i><i></i></div></section>
+  </section>`;
+}
+function renderCockpitCoreTrend(cockpit) {
+  const rows = (cockpit.trends?.erp ?? []).filter((item) => item.periodType === "day").slice(-14);
+  return `<section class="cockpit-panel cockpit-core-trend"><header><div><h3>核心经营趋势</h3><span>最近14个ERP经营日</span></div></header><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>日期</th><th>销售额</th><th>毛利</th><th>毛利率</th></tr></thead><tbody>${rows.map((item) => `<tr><td>${escapeHtml(item.periodEnd || item.periodStart || "—")}</td><td>${coreMoney(item.salesAmount)}</td><td>${coreMoney(item.profitAmount)}</td><td>${corePercent(item.salesAmount ? Number(item.profitAmount || 0) / Number(item.salesAmount) : null)}</td></tr>`).join("") || `<tr><td colspan="4">当前周期暂无ERP趋势数据</td></tr>`}</tbody></table></div></section>`;
 }
 function shopOperationTrend(shop, summary) {
   if (!summary.previousPeriodComplete) return { className: "stable", text: "上一周期数据不完整，暂不比较" };
@@ -885,6 +924,8 @@ function renderShopPerformanceShare(cockpit) {
 }
 
 function renderBusinessCockpit() {
+  const renderStartedAt = performance.now(); const moduleTimings = {};
+  const measured = (name, callback) => { const startedAt = performance.now(); const value = callback(); moduleTimings[name] = Number((performance.now() - startedAt).toFixed(1)); return value; };
   const cockpit=pageState.cockpit; const summary=cockpit.summary??{}; const ratings=cockpit.ratingSummary??{};
   const totalRatings=Number(ratings.excellentOrGood||0)+Number(ratings.onTarget||0)+Number(ratings.underperforming||0)+Number(ratings.notEvaluated||0);
   const ratingRate=(value)=>totalRatings?`${(Number(value||0)/totalRatings*100).toFixed(1)}%`:"—";
@@ -892,23 +933,31 @@ function renderBusinessCockpit() {
   const trendRows=[...(cockpit.trends?.erp??[]).map((item)=>({...item,visitorCount:null,source:"ERP"})),...(cockpit.trends?.platform??[]).map((item)=>({...item,salesAmount:null,profitAmount:null,source:"平台"}))].filter((item)=>item.periodType===cockpit.periodType).sort((a,b)=>String(a.periodEnd).localeCompare(String(b.periodEnd))||a.source.localeCompare(b.source));
   const salesPeriodText = cockpitSalesPeriodText(summary);
   const windowDays = Number(summary.salesWindowDays || 0);
-  return `<section class="connection-business-cockpit">
-    ${renderCockpitGlobalRange()}
-    ${renderUiModule("link_sales_distribution", { state: pageState.salesDistribution, canViewCompany: isAdmin(), globalRange: pageState.cockpitRange })}
+  const rangeHtml = measured("range", renderCockpitGlobalRange);
+  const shopHtml = measured("shops", () => renderShopOperations(cockpit));
+  const coreTrendHtml = measured("coreTrend", () => renderCockpitCoreTrend(cockpit));
+  const goalHtml = measured("goalHealth", renderGoalHealthCockpit);
+  const distributionHtml = measured("salesDistribution", () => renderUiModule("link_sales_distribution", { state: pageState.salesDistribution, canViewCompany: isAdmin(), globalRange: pageState.cockpitRange }));
+  const html = `<section class="connection-business-cockpit">
+    ${rangeHtml}
     <section class="cockpit-summary"><div><span>当前经营 Link</span><strong>${summary.connectionCount||0}</strong><small>当前资产口径，不随日期变化</small></div><div class="is-sales"><span>当前周期ERP销售额</span><strong>${coreMoney(summary.salesAmount)}</strong><small>${escapeHtml(salesPeriodText)}</small><small>${summary.previousPeriodComplete ? `较上一同长度周期 ${growthText(summary.salesGrowth)}` : `上一同长度周期数据仅${summary.previousPeriodDateCount||0}/${windowDays}天，暂不比较`}</small></div><div><span>当前周期毛利</span><strong>${coreMoney(summary.profitAmount)}</strong><small>毛利率 ${corePercent(summary.profitMargin)}</small></div><div class="is-risk"><span>需要关注</span><strong>${summary.riskCount||0}</strong><small>按所选周期经营变化识别</small></div></section>
-    ${renderShopOperations(cockpit)}
+    ${shopHtml}
+    ${coreTrendHtml}
     <section class="cockpit-health"><header><h3>链接评级分布</h3><span>沿用正式目标评价结果</span></header><div><span>优秀/良好 <b>${ratings.excellentOrGood||0}</b><em>${ratingRate(ratings.excellentOrGood)}</em></span><span>达标 <b>${ratings.onTarget||0}</b><em>${ratingRate(ratings.onTarget)}</em></span><span>不达标 <b>${ratings.underperforming||0}</b><em>${ratingRate(ratings.underperforming)}</em></span><span>待评级 <b>${ratings.notEvaluated||0}</b><em>${ratingRate(ratings.notEvaluated)}</em></span></div></section>
-    ${renderGoalHealthCockpit()}
+    ${goalHtml}
+    ${distributionHtml}
     ${pageState.cockpitExpanded ? `
       ${renderOwnerContribution(cockpit)}
       <div class="cockpit-two-columns"><section class="cockpit-panel"><header><h3>核心链接</h3><span>按ERP销售额、利润排序</span></header>${cockpit.coreLinks?.length?cockpit.coreLinks.slice(0,20).map((item)=>linkCard(item,`销量 ${coreNumber(item.erpSales?.shippedQuantity)}`)).join(""):`<div class="empty-state compact">暂无ERP销售事实</div>`}</section>${renderShopPerformanceShare(cockpit)}</div>
       <section class="cockpit-panel"><header><h3>增长链接</h3></header><div class="cockpit-growth-grid">${cockpit.growthLinks?.length?cockpit.growthLinks.slice(0,20).map((item)=>linkCard(item,`最快增长 ${growthText(item.growthMetric)}`)).join(""):`<div class="empty-state compact">尚无可比较的增长链接</div>`}</div></section>
       <section class="cockpit-panel"><header><h3>平台渠道分析</h3><span>ERP销售和利润按平台汇总</span></header><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>平台</th><th>链接数</th><th>销售额</th><th>利润</th><th>利润率</th><th>优秀/良好率</th></tr></thead><tbody>${cockpit.platforms?.map((item)=>`<tr><td><strong>${escapeHtml(item.platform)}</strong></td><td>${item.connectionCount}</td><td>${coreMoney(item.salesAmount)}</td><td>${coreMoney(item.profitAmount)}</td><td>${corePercent(item.profitMargin)}</td><td>${corePercent(item.excellentOrGoodRate)}</td></tr>`).join("")||`<tr><td colspan="6">暂无平台经营事实</td></tr>`}</tbody></table></div></section>
-      <section class="cockpit-panel"><header><h3>产品直接销售渠道</h3><span>仅Single直接销售额；Bundle金额不分摊</span></header><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>产品编码</th><th>产品</th><th>平台</th><th>链接数</th><th>直接销售额</th><th>占产品直接销售</th></tr></thead><tbody>${cockpit.productChannels?.slice(0,50).map((item)=>`<tr><td><a href="#products/${encodeURIComponent(item.productId)}">${escapeHtml(item.skuCode)}</a></td><td>${escapeHtml(item.name)}</td><td>${escapeHtml(item.platform)}</td><td>${item.linkCount}</td><td>${coreMoney(item.directSalesAmount)}</td><td>${corePercent(item.contribution)}</td></tr>`).join("")||`<tr><td colspan="6">暂无产品直接销售事实</td></tr>`}</tbody></table></div></section>
+      <section class="cockpit-panel"><header><h3>产品直接销售渠道</h3><span>仅Single直接销售额；Bundle金额不分摊</span></header>${pageState.cockpitProductChannels.loading ? `<div class="empty-state compact">正在按需读取产品渠道分析…</div>` : pageState.cockpitProductChannels.error ? `<div class="form-error">${escapeHtml(pageState.cockpitProductChannels.error)}</div>` : `<div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>产品编码</th><th>产品</th><th>平台</th><th>链接数</th><th>直接销售额</th><th>占产品直接销售</th></tr></thead><tbody>${cockpit.productChannels?.slice(0,50).map((item)=>`<tr><td><a href="#products/${encodeURIComponent(item.productId)}">${escapeHtml(item.skuCode)}</a></td><td>${escapeHtml(item.name)}</td><td>${escapeHtml(item.platform)}</td><td>${item.linkCount}</td><td>${coreMoney(item.directSalesAmount)}</td><td>${corePercent(item.contribution)}</td></tr>`).join("")||`<tr><td colspan="6">暂无产品直接销售事实</td></tr>`}</tbody></table></div>`}</section>
       <section class="cockpit-panel"><header><div><h3>经营趋势</h3><span>ERP销售/利润与平台流量分开呈现</span></div><div class="segmented-control">${[["day","日"],["week","周"],["month","月"]].map(([id,label])=>`<button type="button" data-cockpit-period="${id}" class="${cockpit.periodType===id?"active":""}">${label}</button>`).join("")}</div></header><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>周期</th><th>来源</th><th>销售额</th><th>利润</th><th>访客</th></tr></thead><tbody>${trendRows.slice(-90).map((item)=>`<tr><td>${escapeHtml(`${item.periodStart} ~ ${item.periodEnd}`)}</td><td>${item.source}</td><td>${item.salesAmount==null?"—":coreMoney(item.salesAmount)}</td><td>${item.profitAmount==null?"—":coreMoney(item.profitAmount)}</td><td>${item.visitorCount==null?"—":coreNumber(item.visitorCount)}</td></tr>`).join("")||`<tr><td colspan="5">当前粒度暂无趋势数据</td></tr>`}</tbody></table></div></section>
       <button class="secondary-button" type="button" data-collapse-cockpit>收起扩展分析</button>
     ` : `<section class="cockpit-panel cockpit-lazy-entry"><button class="primary-button" type="button" data-expand-cockpit>展开负责人、核心链接、渠道与趋势分析</button><p>首屏只渲染当前核心经营判断，扩展分析按需生成。</p></section>`}
   </section>`;
+  recordCockpitPerformance("render", { totalMs: Number((performance.now() - renderStartedAt).toFixed(1)), modules: moduleTimings, expanded: pageState.cockpitExpanded, htmlBytes: new TextEncoder().encode(html).byteLength });
+  return html;
 }
 
 function renderList() {
@@ -1103,8 +1152,9 @@ function renderBenchmarkModal() {
 }
 
 export function renderConnectionCenterPage() {
-  const pageContent = pageState.section === "cockpit" ? renderBusinessCockpit() : pageState.section === "my-links" ? renderMyLinksWorkbench() : pageState.section === "goal-management" ? renderGoalManagement() : pageState.section === "data-import" ? renderDataUpdateWorkspace() : pageState.section === "sales-relation-governance" ? renderSalesRelationGovernance() : pageState.section === "sales-data-quality-governance" ? renderSalesDataQualityGovernance() : renderConnectionAssets();
-  return `<section class="connection-center-page">${pageState.error ? `<div class="form-error">${escapeHtml(pageState.error)}</div>` : ""}${pageState.loading ? `<div class="empty-state">正在读取链接…</div>` : pageState.selectedId ? renderDetail() : `${renderSectionNavigation()}${pageContent}`}${renderBenchmarkModal()}</section>`;
+  const pageContent = pageState.loading ? "" : pageState.section === "cockpit" ? renderBusinessCockpit() : pageState.section === "my-links" ? renderMyLinksWorkbench() : pageState.section === "goal-management" ? renderGoalManagement() : pageState.section === "data-import" ? renderDataUpdateWorkspace() : pageState.section === "sales-relation-governance" ? renderSalesRelationGovernance() : pageState.section === "sales-data-quality-governance" ? renderSalesDataQualityGovernance() : renderConnectionAssets();
+  const loadingContent = pageState.section === "cockpit" ? `${renderSectionNavigation()}${renderCockpitSkeleton()}` : `<div class="empty-state">正在读取链接…</div>`;
+  return `<section class="connection-center-page">${pageState.error ? `<div class="form-error">${escapeHtml(pageState.error)}</div>` : ""}${pageState.loading ? loadingContent : pageState.selectedId ? renderDetail() : `${renderSectionNavigation()}${pageContent}`}${renderBenchmarkModal()}</section>`;
 }
 
 async function loadMyLinks(render, filter = pageState.myWorkbench.filter) {
@@ -1295,43 +1345,102 @@ async function runGoalWorkbenchBatch(render, operation) {
   }
 }
 
-async function loadBusinessCockpitPage(render) {
+function cockpitRangeRequest() {
   const range = pageState.cockpitRange || { preset: "30d" };
-  const request = { preset: range.preset || "30d", startDate: range.startDate || "", endDate: range.endDate || "" };
-  pageState.cockpitRange = { ...range, loading: true }; render();
+  return { preset: range.preset || "30d", startDate: range.startDate || "", endDate: range.endDate || "" };
+}
+
+function recordCockpitFetchResult(kind, result, startedAt) {
+  recordCockpitPerformance(kind, { elapsedMs: Number((performance.now() - startedAt).toFixed(1)), ...(result?._clientTiming || {}) });
+}
+
+async function loadCockpitSecondaryData(render, request, requestId) {
+  const goalStartedAt = performance.now();
+  void loadConnectionGoalHealthSummary(request).then((goalHealth) => {
+    if (requestId !== cockpitRequestId) return;
+    const { selectedRange: _selectedRange, ...goalHealthData } = goalHealth;
+    pageState.goalHealth = goalHealthData; pageState.cockpitGoalHealthLoading = false;
+    recordCockpitFetchResult("goalHealth", goalHealth, goalStartedAt); render();
+  }).catch((error) => {
+    if (requestId !== cockpitRequestId) return;
+    pageState.cockpitGoalHealthLoading = false; pageState.error = error.message; render();
+  });
+
+  const distributionStartedAt = performance.now();
+  void loadLinkSalesDistribution({ scope: pageState.salesDistribution.scope || (isAdmin() ? "company" : "mine"), ...request }).then((distribution) => {
+    if (requestId !== cockpitRequestId) return;
+    const { range: _resolvedRange, ...distributionData } = distribution;
+    pageState.salesDistribution = { ...pageState.salesDistribution, ...distributionData, selectedGroup: 0, selectedRange: null,
+      drillTable: null, loaded: true, loading: false, error: "" };
+    recordCockpitFetchResult("salesDistribution", distribution, distributionStartedAt); render();
+  }).catch((error) => {
+    if (requestId !== cockpitRequestId) return;
+    pageState.salesDistribution = { ...pageState.salesDistribution, loaded: true, loading: false, error: error.message }; render();
+  });
+}
+
+async function loadCockpitProductChannels(render, requestId = cockpitRequestId) {
+  if (pageState.cockpitProductChannels.loading || pageState.cockpitProductChannels.loaded) return;
+  const request = cockpitRangeRequest(); const startedAt = performance.now();
+  pageState.cockpitProductChannels = { loading: true, loaded: false, error: "" }; render();
   try {
-    const [cockpit, managementOverview, distribution, goalHealth] = await Promise.all([
-      loadConnectionBusinessCockpit(request), loadConnectionManagementOverview(),
-      loadLinkSalesDistribution({ scope: pageState.salesDistribution.scope || (isAdmin() ? "company" : "mine"), ...request }),
-      loadConnectionGoalHealthSummary(request),
-    ]);
-    const { range: resolvedRange, ...cockpitData } = cockpit; const { selectedRange: _goalRange, ...goalHealthData } = goalHealth; const { range: _distributionRange, ...distributionData } = distribution;
-    pageState.cockpit = { ...pageState.cockpit, ...cockpitData };
-    pageState.cockpitRange = { ...(resolvedRange || request), loading: false };
-    pageState.managementOverview = managementOverview; pageState.goalHealth = goalHealthData;
-    pageState.salesDistribution = { ...pageState.salesDistribution, ...distributionData, selectedGroup: 0, selectedRange: null, drillTable: null, loaded: true, loading: false, error: "" };
-    pageState.error = "";
+    const result = await loadConnectionBusinessCockpit({ ...request, scope: "product-channels" });
+    if (requestId !== cockpitRequestId) return;
+    pageState.cockpit = { ...pageState.cockpit, productChannels: result.productChannels || [] };
+    pageState.cockpitProductChannels = { loading: false, loaded: true, error: "" };
+    recordCockpitFetchResult("productChannels", result, startedAt);
+  } catch (error) {
+    if (requestId !== cockpitRequestId) return;
+    pageState.cockpitProductChannels = { loading: false, loaded: false, error: error.message };
   }
-  catch (error) { pageState.error = error.message; pageState.cockpitRange = { ...pageState.cockpitRange, loading: false }; }
   render();
 }
 
-async function loadPage(render) {
-  pageState.loading = true; pageState.error = ""; render();
+async function loadBusinessCockpitPage(render) {
+  const request = cockpitRangeRequest(); const requestId = ++cockpitRequestId; const startedAt = performance.now();
+  pageState.cockpitRange = { ...pageState.cockpitRange, loading: true };
+  pageState.cockpitProductChannels = { loading: false, loaded: false, error: "" };
+  pageState.cockpitGoalHealthLoading = true;
+  pageState.salesDistribution = { ...pageState.salesDistribution, loaded: false, loading: true, error: "" };
+  render();
   try {
-    const request = { preset: pageState.cockpitRange.preset || "30d", startDate: pageState.cockpitRange.startDate || "", endDate: pageState.cockpitRange.endDate || "" };
-    const [cockpit, managementOverview, distribution, goalHealth] = await Promise.all([loadConnectionBusinessCockpit(request), loadConnectionManagementOverview(), loadLinkSalesDistribution({ scope: isAdmin() ? "company" : "mine", ...request }), loadConnectionGoalHealthSummary(request)]);
-    const { range: resolvedRange, ...cockpitData } = cockpit; const { selectedRange: _goalRange, ...goalHealthData } = goalHealth; const { range: _distributionRange, ...distributionData } = distribution;
-    pageState.cockpit = { ...pageState.cockpit, ...cockpitData };
+    const cockpit = await loadConnectionBusinessCockpit({ ...request, scope: "core" });
+    if (requestId !== cockpitRequestId) return;
+    const { range: resolvedRange, ...cockpitData } = cockpit;
+    pageState.cockpit = { ...pageState.cockpit, ...cockpitData, productChannels: [] };
     pageState.cockpitRange = { ...(resolvedRange || request), loading: false };
-    pageState.managementOverview = managementOverview;
-    pageState.goalHealth = goalHealthData;
-    pageState.salesDistribution = { ...pageState.salesDistribution, ...distributionData, loaded: true, loading: false, error: "" };
-    pageState.loadedSections.add("cockpit");
-    pageState.loaded = true;
+    pageState.error = ""; recordCockpitFetchResult("core", cockpit, startedAt); render();
+    scheduleCockpitInteractiveMeasurement("core", startedAt);
+    void loadCockpitSecondaryData(render, request, requestId);
+    if (pageState.cockpitExpanded) void loadCockpitProductChannels(render, requestId);
+  } catch (error) {
+    if (requestId !== cockpitRequestId) return;
+    pageState.error = error.message; pageState.cockpitRange = { ...pageState.cockpitRange, loading: false };
+    pageState.cockpitGoalHealthLoading = false; pageState.salesDistribution = { ...pageState.salesDistribution, loading: false }; render();
+  }
+}
+
+async function loadPage(render) {
+  const requestId = ++cockpitRequestId; const request = cockpitRangeRequest(); const startedAt = performance.now();
+  pageState.loading = true; pageState.error = ""; pageState.cockpitGoalHealthLoading = true;
+  pageState.salesDistribution = { ...pageState.salesDistribution, loaded: false, loading: true, error: "" };
+  render();
+  try {
+    const cockpit = await loadConnectionBusinessCockpit({ ...request, scope: "core" });
+    if (requestId !== cockpitRequestId) return;
+    const { range: resolvedRange, ...cockpitData } = cockpit;
+    pageState.cockpit = { ...pageState.cockpit, ...cockpitData, productChannels: [] };
+    pageState.cockpitRange = { ...(resolvedRange || request), loading: false };
+    pageState.loadedSections.add("cockpit"); pageState.loaded = true;
     pageState.loadedUserId = String(getCurrentUser()?.personId ?? getCurrentUser()?.id ?? "");
-  } catch (error) { pageState.error = error.message; }
-  pageState.loading = false; render();
+    pageState.loading = false; recordCockpitFetchResult("core", cockpit, startedAt); render();
+    scheduleCockpitInteractiveMeasurement("core", startedAt);
+    void loadCockpitSecondaryData(render, request, requestId);
+  } catch (error) {
+    if (requestId !== cockpitRequestId) return;
+    pageState.error = error.message; pageState.loading = false; pageState.cockpitGoalHealthLoading = false;
+    pageState.salesDistribution = { ...pageState.salesDistribution, loading: false }; render();
+  }
 }
 
 async function openConnection(id, render) {
@@ -2035,7 +2144,9 @@ export function bindConnectionCenterPageEvents(render) {
     void loadBusinessCockpitPage(render);
   });
   root.querySelectorAll("[data-cockpit-period]").forEach((button) => button.addEventListener("click", () => { pageState.cockpit.periodType = button.dataset.cockpitPeriod; render(); }));
-  root.querySelector("[data-expand-cockpit]")?.addEventListener("click", () => { pageState.cockpitExpanded = true; render(); });
+  root.querySelector("[data-expand-cockpit]")?.addEventListener("click", () => {
+    pageState.cockpitExpanded = true; render(); void loadCockpitProductChannels(render);
+  });
   root.querySelector("[data-collapse-cockpit]")?.addEventListener("click", () => { pageState.cockpitExpanded = false; render(); });
   root.querySelectorAll("[data-shop-share-metric]").forEach((button) => button.addEventListener("click", () => {
     pageState.cockpitShopShareMetric = button.dataset.shopShareMetric === "profitAmount" ? "profitAmount" : "salesAmount";

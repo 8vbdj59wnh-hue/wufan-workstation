@@ -4030,7 +4030,16 @@ app.get("/api/connection-management/overview", requireLinkView, (request, respon
 
 app.get("/api/connection-business-cockpit", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, ...getConnectionBusinessCockpit(getUserPersonId(request.user), isAdminUser(request.user), request.query) });
+    const startedAt = performance.now();
+    const result = getConnectionBusinessCockpit(getUserPersonId(request.user), isAdminUser(request.user), request.query);
+    const computedAt = performance.now();
+    const payloadText = JSON.stringify({ success: true, ...result });
+    const serializedAt = performance.now();
+    const stages = Object.entries(result._timings ?? {})
+      .map(([name, duration]) => `${name.replaceAll(/[^a-zA-Z0-9_-]/g, "-")};dur=${Number(duration).toFixed(1)}`);
+    stages.push(`service;dur=${(computedAt - startedAt).toFixed(1)}`, `serialize;dur=${(serializedAt - computedAt).toFixed(1)}`);
+    response.set("Server-Timing", stages.join(", "));
+    response.type("application/json").send(payloadText);
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "链接经营驾驶舱读取失败。" });
   }

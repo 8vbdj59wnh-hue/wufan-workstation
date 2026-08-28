@@ -348,6 +348,16 @@
 }
 
 .connection-business-cockpit { display: grid; gap: 16px; }
+.cockpit-loading-shell { min-height: 420px; }
+.cockpit-summary-skeleton span, .cockpit-summary-skeleton strong, .cockpit-summary-skeleton small,
+.cockpit-skeleton-lines i { display: block; min-height: 12px; border-radius: 999px; background: linear-gradient(90deg,#edf3f0 25%,#f8fbfa 50%,#edf3f0 75%); background-size: 200% 100%; animation: cockpit-skeleton-pulse 1.2s ease-in-out infinite; }
+.cockpit-summary-skeleton strong { width: 62%; min-height: 27px; }
+.cockpit-summary-skeleton small { width: 78%; }
+.cockpit-module-skeleton { min-height: 132px; }
+.cockpit-skeleton-lines { display: grid; gap: 12px; }
+.cockpit-skeleton-lines i:nth-child(2) { width: 86%; }
+.cockpit-skeleton-lines i:nth-child(3) { width: 68%; }
+@keyframes cockpit-skeleton-pulse { to { background-position: -200% 0; } }
 .connection-business-cockpit > header h2, .connection-business-cockpit > header p { margin: 0; }
 .connection-business-cockpit .cockpit-data-note { margin-top: 5px; color: #667085; font-size: 12px; line-height: 1.5; }
 .cockpit-global-range { display: flex; align-items: end; gap: 14px; padding: 14px 16px; border: 1px solid #dce9e4; border-radius: 15px; background: linear-gradient(145deg,#f7fbf9,#fff); }
