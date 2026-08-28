@@ -143,7 +143,7 @@ let productBusinessViewMode = "table";
 let productBusinessSearchTimer = 0;
 let productBusinessRefreshPending = false;
 let productSalesDistributionState = { range: { preset: "30d" }, includeHistorical: false, items: [], summary: {}, pagination: { total: 0, limit: 100, offset: 0, hasMore: false }, selectedGroup: 0, loading: false, loaded: false, cacheKey: "", error: "" };
-let productShopSandboxState = { range: { preset: "30d" }, shopId: "", shops: [], selectedShop: null, items: [], summary: {}, pagination: { total: 0, limit: 100, offset: 0, hasMore: false }, segment: "all", sortMode: "sales", loading: false, loaded: false, cacheKey: "", error: "" };
+let productShopSandboxState = { range: { preset: "30d" }, shopId: "", shops: [], selectedShop: null, items: [], summary: {}, pagination: { total: 0, limit: 100, offset: 0, hasMore: false }, segment: "all", sortMode: "sales", visibleCount: 100, loading: false, loaded: false, cacheKey: "", error: "" };
 let productClearancePlanState = { range: "30d", periodStart: "", periodEnd: "", status: "active", center: null, loading: false, loaded: false, cacheKey: "", error: "", notice: "" };
 let productClearancePlanModalState = null;
 let productNewDevelopmentState = { status: "all", center: null, loading: false, loaded: false, cacheKey: "", error: "", selectedActionId: "" };
@@ -953,7 +953,7 @@ function renderProductSkuV2Detail() {
     <button class="text-button product-detail-back" type="button" data-action="back-products">← 返回产品中心</button>
     ${renderProductWorkspaceTabs()}
     ${productSkuV2State.error ? `<div class="form-error">${escapeHtml(productSkuV2State.error)}</div>` : ""}
-    <div class="product-workspace-top">${businessZoneBadge(listRow?.businessZone)}<div class="product-workspace-hero">${renderUiModule("product_basic_info", moduleContext)}${renderUiModule("product_business_data", moduleContext)}</div><div class="product-workspace-actions"><span class="status-badge">${escapeHtml(extensionAvailability.message || "资料未维护")}</span></div></div>
+    <div class="product-workspace-top">${businessZoneBadge(listRow?.businessZone)}<div class="product-workspace-hero">${renderUiModule("product_basic_info", moduleContext)}${renderUiModule("product_business_data", moduleContext)}</div><div class="product-workspace-actions"><span class="status-badge">${escapeHtml(extensionAvailability.message || "资料未维护")}</span>${hasPermission(getCurrentUser(), "products.manage") ? `<button class="primary-button" type="button" data-action="edit-product-business-profile">编辑产品</button>` : ""}</div></div>
     <nav class="product-workspace-tabs" aria-label="Product Workspace">${tabs.map(([key,label])=>`<button type="button" data-action="product-workspace-tab" data-tab="${key}" class="${activeTab===key?"is-active":""}">${label}</button>`).join("")}</nav>
     <div class="product-workspace-content">${tabContent}</div>
   </section>`;
@@ -1597,6 +1597,9 @@ function renderProductBusinessProfileForm(product, profile) {
   const stageLabels = { basic: "基础经营资料", strategy: "战略", marketing: "营销资料", insight: "用户洞察" };
   if (!canEdit) return `<div class="product-detail-grid"><article><small>经营状态</small><strong>${escapeHtml(profile?.profile?.businessStatus || "未维护")}</strong></article><article><small>负责人</small><strong>${escapeHtml(findName(state.people, profile?.profile?.ownerId))}</strong></article><article><small>资料范围</small><strong>${escapeHtml(stages.map((item) => stageLabels[item] || item).join("、") || "资料未维护")}</strong></article></div>`;
   return `<form class="product-business-profile-form" data-product-business-profile-form data-erp-sku-id="${escapeHtml(product.erpSkuId || product.id)}">
+    <label>经营名称<input name="displayNameOverride" value="${escapeHtml(profile?.profile?.displayNameOverride || "")}" placeholder="留空则使用ERP货品名称" /></label>
+    <label>经营品牌<input name="brandOverride" value="${escapeHtml(profile?.profile?.brandOverride || "")}" placeholder="留空则使用ERP品牌" /></label>
+    <label>经营分类<input name="categoryOverride" value="${escapeHtml(profile?.profile?.categoryOverride || "")}" placeholder="留空则使用ERP分类" /></label>
     <label>经营状态<select name="businessStatus">${[["active","经营中"],["paused","暂停经营"],["clearance","清仓"],["archived","归档"]].map(([value,label]) => `<option value="${value}" ${profile?.profile?.businessStatus===value?"selected":""}>${label}</option>`).join("")}</select></label>
     <label>生命周期<select name="lifecycle"><option value="">未维护</option>${["开发中","上架","成长期","成熟期","风险期","淘汰"].map((status) => `<option value="${escapeHtml(status)}" ${profile?.profile?.lifecycle===status?"selected":""}>${escapeHtml(status)}</option>`).join("")}</select></label>
     <label>负责人<select name="ownerId"><option value="">未设置</option>${state.people.filter((person) => person.status === "active").map((person) => `<option value="${escapeHtml(person.id)}" ${profile?.profile?.ownerId===person.id?"selected":""}>${escapeHtml(person.name)}</option>`).join("")}</select></label>
@@ -2575,6 +2578,9 @@ async function refreshProductShopSandbox(rerender, { force = false, append = fal
       items: append ? [...productShopSandboxState.items, ...(result.items || [])] : (result.items || []),
       summary: result.summary || {},
       pagination: result.pagination || { total: (result.items || []).length, limit: 100, offset: 0, hasMore: false },
+      visibleCount: append
+        ? Number(productShopSandboxState.visibleCount || 100) + (result.items || []).length
+        : 100,
       loading: false,
       loaded: true,
       cacheKey: "",
@@ -2969,26 +2975,31 @@ export function bindProductCenterPageEvents(rerender) {
       ...productShopSandboxState,
       range: { ...productShopSandboxState.range, startDate: form.elements.startDate.value, endDate: form.elements.endDate.value },
       loaded: false,
+      visibleCount: 100,
     };
     void refreshProductShopSandbox(rerender);
   });
   document.querySelectorAll("[data-product-sandbox-preset]").forEach((button) => button.addEventListener("click", () => {
-    productShopSandboxState = { ...productShopSandboxState, range: { ...productShopSandboxState.range, preset: button.dataset.productSandboxPreset }, loaded: false };
+    productShopSandboxState = { ...productShopSandboxState, range: { ...productShopSandboxState.range, preset: button.dataset.productSandboxPreset }, loaded: false, visibleCount: 100 };
     if (button.dataset.productSandboxPreset === "custom") rerender();
     else void refreshProductShopSandbox(rerender);
   }));
   document.querySelectorAll("[data-product-sandbox-shop]").forEach((button) => button.addEventListener("click", () => {
-    productShopSandboxState = { ...productShopSandboxState, shopId: button.dataset.productSandboxShop || "", loaded: false };
+    productShopSandboxState = { ...productShopSandboxState, shopId: button.dataset.productSandboxShop || "", loaded: false, visibleCount: 100 };
     void refreshProductShopSandbox(rerender);
   }));
   document.querySelectorAll("[data-product-sandbox-segment]").forEach((button) => button.addEventListener("click", () => {
-    productShopSandboxState = { ...productShopSandboxState, segment: button.dataset.productSandboxSegment || "all" };
+    productShopSandboxState = { ...productShopSandboxState, segment: button.dataset.productSandboxSegment || "all", visibleCount: 100 };
     rerender();
   }));
   document.querySelectorAll("[data-product-sandbox-sort]").forEach((button) => button.addEventListener("click", () => {
-    productShopSandboxState = { ...productShopSandboxState, sortMode: button.dataset.productSandboxSort === "code_group" ? "code_group" : "sales" };
+    productShopSandboxState = { ...productShopSandboxState, sortMode: button.dataset.productSandboxSort === "code_group" ? "code_group" : "sales", visibleCount: 100 };
     rerender();
   }));
+  document.querySelector('[data-action="product-sandbox-load-more"]')?.addEventListener("click", () => {
+    productShopSandboxState = { ...productShopSandboxState, visibleCount: Number(productShopSandboxState.visibleCount || 100) + 100 };
+    rerender();
+  });
   document.querySelectorAll("[data-product-sandbox-product]").forEach((button) => button.addEventListener("click", () => {
     window.location.hash = `products/sku/${encodeURIComponent(button.dataset.productSandboxProduct)}`;
   }));
@@ -3236,6 +3247,12 @@ export function bindProductCenterPageEvents(rerender) {
       if (tab === "extensions") void loadProductExtensionWorkspace(rerender);
       return;
     }
+    if (action === "edit-product-business-profile") {
+      productWorkspaceState = { ...productWorkspaceState, activeTab: "extensions", marketingNotice: "" };
+      rerender();
+      void loadProductExtensionWorkspace(rerender);
+      return;
+    }
     if (action === "product-daily-sales-range") { void loadProductDailySalesSection(rerender, button.dataset.range); return; }
     if (action === "view-product-marketing") {
       productWorkspaceState = { ...productWorkspaceState, activeTab: "marketing", marketingMode: "read", marketingNotice: "" };
@@ -3299,11 +3316,11 @@ export function bindProductCenterPageEvents(rerender) {
       if (requestedView === "sku-management" && !canViewSkus() && !canViewCombos()) return;
       productSubmodule = ["sku-management", "business-cockpit", "product-sandbox", "new-product-development", "clearance-plans"].includes(button.dataset.view) ? button.dataset.view : "business-dashboard";
       if (getRouteProductId() || getRouteErpSkuId()) window.location.hash = "products";
-      if (productSubmodule === "business-cockpit") void refreshProductSalesDistribution(rerender);
-      else if (productSubmodule === "product-sandbox") void refreshProductShopSandbox(rerender);
-      else if (productSubmodule === "new-product-development") void refreshProductNewDevelopmentActions(rerender);
-      else if (productSubmodule === "clearance-plans") void refreshProductClearancePlans(rerender);
-      else if (productSubmodule === "business-dashboard") void refreshProductBusinessDashboard(rerender);
+      if (productSubmodule === "business-cockpit" && !productSalesDistributionState.loaded) void refreshProductSalesDistribution(rerender);
+      else if (productSubmodule === "product-sandbox" && !productShopSandboxState.loaded) void refreshProductShopSandbox(rerender);
+      else if (productSubmodule === "new-product-development" && !productNewDevelopmentState.loaded) void refreshProductNewDevelopmentActions(rerender);
+      else if (productSubmodule === "clearance-plans" && !productClearancePlanState.loaded) void refreshProductClearancePlans(rerender);
+      else if (productSubmodule === "business-dashboard" && !productBusinessDashboardState.readModel) void refreshProductBusinessDashboard(rerender);
       else if (!productSkuV2State.loaded && !productSkuV2State.loading) void refreshProductSkuV2List(rerender);
       else rerender();
       return;
@@ -3809,7 +3826,8 @@ export function bindProductCenterPageEvents(rerender) {
       invalidateProductModuleCaches("business-dashboard", "business-cockpit", "product-sandbox", "sku-management");
       const details = new Map(productManagementState.details); details.delete(form.dataset.erpSkuId);
       productManagementState = { ...productManagementState, details, notice: "经营资料已保存。", error: "" };
-      productSkuV2State = { ...productSkuV2State, detailId: "" };
+      productBusinessDashboardState = { readModel: null, loading: false, error: "" };
+      productSkuV2State = { ...productSkuV2State, loaded: false, detailId: "" };
       await refreshProductSkuV2Detail(form.dataset.erpSkuId, rerender);
       productWorkspaceState = { ...productWorkspaceState, activeTab };
       await loadProductExtensionWorkspace(rerender);

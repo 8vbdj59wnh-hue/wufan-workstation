@@ -35,7 +35,8 @@ test("未建立 Legacy Product 的 ERP SKU 可直接维护全部经营扩展且�
 
     assert.equal(getProductBusinessProfile("erp-sku-phase-b").profile, null);
     assert.equal(listProductCenterV2Skus({ search: "DBCL004" }).rows[0].erpSkuId, "erp-sku-phase-b");
-    upsertProductBusinessProfile("erp-sku-phase-b", { businessStatus: "active", lifecycle: "成长期", ownerId: userId }, userId);
+    upsertProductBusinessProfile("erp-sku-phase-b", { businessStatus: "active", lifecycle: "成长期", ownerId: userId, displayNameOverride: "DBCL004经营名称" }, userId);
+    assert.equal(listProductCenterV2Skus({ search: "DBCL004" }).rows[0].displayNameOverride, "DBCL004经营名称");
     saveProductMarketingAsset("erp-sku-phase-b", { positioning: "测试定位", targetAudience: "测试用户", usageScenarios: ["客厅"], sellingPoints: [{ text: "设计感" }], keywords: ["花器"] }, userId);
     saveProductStrategySection("erp-sku-phase-b", "positioning", { targetUsers: "家居用户", positioning: "场景花器", productRole: "核心产品" }, userId);
     importProductInsights("erp-sku-phase-b", { insightType: "attention", content: "设计感", importance: 5, source: "人工访谈" }, userId);

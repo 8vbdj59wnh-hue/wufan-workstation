@@ -373,7 +373,7 @@ const loadedPersistentDataRoutes = new Set();
 export async function loadPersistentData({ includeTaskWaves = null, useCache = false } = {}) {
   const loadGeneration = ++persistentDataLoadGeneration;
   try {
-    const fullRoute = window.location.hash.replace(/^#/, "");
+    const fullRoute = window.location.hash.replace(/^#\/?/u, "");
     const route = resolvePersistentDataRoute(fullRoute);
     const lightweightModules = new Set([
       "",

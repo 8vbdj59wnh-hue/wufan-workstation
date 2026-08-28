@@ -33,8 +33,8 @@ test("销售经营驾驶舱的产品排行不再分摊Bundle金额", () => {
 
 test("链接驾驶舱停止Bundle组件金额分摊", () => {
   const service = source("server/connectionBusinessCockpitService.js");
-  assert.match(service, /salesObjectType==="single"/);
-  assert.match(service, /bundleAllocation:"none"/);
+  assert.match(service, /salesObjectType\s*===\s*"single"/);
+  assert.match(service, /bundleAllocation\s*:\s*"none"/);
   assert.doesNotMatch(service, /salesAmount\s*\*\s*attribution\.share/);
 });
 

@@ -123,6 +123,26 @@ test("产品沙盘卡片只展示主图和销量角标并复用时间档位", ()
   database.close();
 });
 
+test("产品沙盘首屏最多渲染100张卡片并按100张增量展示", () => {
+  const items = Array.from({ length: 245 }, (_, index) => ({
+    erpSkuId: `erp-${index + 1}`,
+    productName: `产品${index + 1}`,
+    mainImage: `/uploads/${index + 1}.jpg`,
+    salesQuantity: 245 - index,
+    hasSales: true,
+    hasInventoryData: true,
+    inventoryQuantity: 1,
+  }));
+  const baseState = { items, shops: [{ id: "shop", name: "测试店铺" }], selectedShop: { id: "shop", name: "测试店铺" }, summary: {}, visibleCount: 100 };
+  const initialHtml = renderProductShopSandbox({ state: baseState });
+  assert.equal((initialHtml.match(/class="product-sandbox-card"/gu) || []).length, 100);
+  assert.equal((initialHtml.match(/<img /gu) || []).length, 100);
+  assert.match(initialHtml, /data-action="product-sandbox-load-more"/u);
+  const nextHtml = renderProductShopSandbox({ state: { ...baseState, visibleCount: 200 } });
+  assert.equal((nextHtml.match(/class="product-sandbox-card"/gu) || []).length, 200);
+  assert.equal((nextHtml.match(/<img /gu) || []).length, 200);
+});
+
 test("产品中心提供产品沙盘入口和只读查询接口", () => {
   const page = fs.readFileSync(path.join(root, "src/productCenterPage.js"), "utf8");
   const appState = fs.readFileSync(path.join(root, "src/appState.js"), "utf8");

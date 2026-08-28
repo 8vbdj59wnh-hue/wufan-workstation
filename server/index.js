@@ -1666,6 +1666,9 @@ app.get("/api/bootstrap", (request, response) => {
       "taskTemplates", "processTemplates", "processTemplateNodes", "standardWorkForms",
     ];
     const workResultsCommon = ["departments", "people", "positions", "goals", "taskTemplates"];
+    // The ERP-SKU product center reads its list and detail data from dedicated
+    // paginated endpoints. Only the owner directory is needed at module start.
+    const productsCommon = ["people"];
     const moduleResources = {
       dashboard: [],
       dashboardManagement: ["goals", "weeklyReports", "weeklyReportProblems"],
@@ -1692,6 +1695,8 @@ app.get("/api/bootstrap", (request, response) => {
         ? scheduleBoardCommon
       : moduleName === "dashboardManagement"
         ? workResultsCommon
+      : moduleName === "products"
+        ? productsCommon
       : moduleName === "settings"
         ? settingsCommon
         : moduleName === "templateCenter"

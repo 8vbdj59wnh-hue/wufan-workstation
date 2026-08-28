@@ -108,6 +108,11 @@ let productListMetadataCache = null;
 const productListPageCache = new Map();
 const productListPageCacheTtlMs = 10_000;
 
+export function invalidateProductCenterV2Caches() {
+  productListPageCache.clear();
+  productListMetadataCache = null;
+}
+
 function productListPageCacheKey(options) {
   return JSON.stringify(Object.keys(options).sort().map((key) => [key, options[key]]));
 }
@@ -378,7 +383,6 @@ export function getProductCenterV2SkuDetail(erpSkuId, { scope = "full" } = {}) {
 }
 
 export function createProductProfileForErpSku(erpSkuId) {
-  productListPageCache.clear();
-  productListMetadataCache = null;
+  invalidateProductCenterV2Caches();
   return createProductFromErpSku(text(erpSkuId));
 }

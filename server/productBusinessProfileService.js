@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { getDatabase } from "./db.js";
+import { invalidateProductCenterV2Caches } from "./productCenterV2Service.js";
 
 const text = (value) => String(value ?? "").trim();
 const now = () => new Date().toISOString();
@@ -105,6 +106,7 @@ export function upsertProductBusinessProfile(identifier, input = {}, userId = ""
     .run(current?.id || `product-business-profile-${crypto.randomUUID()}`, product.erpSkuId, value.businessStatus, value.lifecycle, value.ownerId,
       value.brandOverride, value.categoryOverride, value.businessRole, value.displayNameOverride, current?.createdBy || actorId,
       actorId, current?.createdAt || timestamp, timestamp);
+  invalidateProductCenterV2Caches();
   return getProductBusinessProfile(product.erpSkuId, { database });
 }
 
