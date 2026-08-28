@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-test("产品中心默认进入产品经营并保留SKU管理与产品档案入口", () => {
+test("产品中心默认进入产品经营并统一到 ERP SKU 详情", () => {
   const source = fs.readFileSync(new URL("../src/productCenterPage.js", import.meta.url), "utf8");
   const listRenderer = source.slice(source.indexOf("function renderProductList()"), source.indexOf("function renderProductSkuV2List()"));
   const skuRenderer = source.slice(source.indexOf("function renderProductSkuV2List()"), source.indexOf("function renderProductSkuV2Cards("));
@@ -17,7 +17,11 @@ test("产品中心默认进入产品经营并保留SKU管理与产品档案入�
   assert.match(listRenderer, /return renderProductBusinessDashboard\(\);/);
   assert.match(skuRenderer, /renderProductWorkspaceTabs\(\)/);
   assert.match(skuRenderer, /renderProductSubmoduleTabs\(\)/);
-  assert.match(source, /查看关联产品档案 →/);
+  assert.doesNotMatch(source, /查看关联产品档案 →/);
+  assert.match(source, /state\.productErpMappings\.find\(\(item\) => item\.productId === productId/);
+  assert.match(source, /window\.location\.hash = `products\/sku\/\$\{encodeURIComponent\(mappedErpSkuId\)\}`/);
+  assert.match(source, /data-action="view-product-business-sku" data-erp-sku-id=/);
+  assert.match(source, /products\/sku\/\$\{encodeURIComponent\(button\.dataset\.erpSkuId\)\}/);
   assert.match(detailRenderer, /\["strategy", "产品战略"\]/);
   assert.match(detailRenderer, /\["business-diagnosis", "经营诊断"\]/);
   assert.match(detailRenderer, /\["user-insights", "用户洞察"\]/);
@@ -35,6 +39,7 @@ test("产品经营读取层复用销售、库存、SKU、健康与行动事实",
   const { getConnectionCoreDetail, listConnectionCoreProfilesPage } = await import("../server/connectionCorePageService.js");
   const { buildErpSnapshotRows, collectErpSnapshotFacts } = await import("../server/erpFactSnapshots.js");
   const { createProductHealthAction, getProductImprovementCenter, productIssueTypeCatalog, recordProductImprovementResult } = await import("../server/productManagementV2Service.js");
+  const { getProductCenterV2SkuDetail } = await import("../server/productCenterV2Service.js");
   const { addProductStrategyStep, createProductStrategyAction, getProductStrategy, saveProductStrategySection, updateProductStrategyStep } = await import("../server/productStrategyService.js");
   const { attachProductDiagnosisSummaries, getProductBusinessDiagnosis } = await import("../server/productBusinessDiagnosisService.js");
   const { getProductInsightCenter, importProductInsights, updateProductInsight } = await import("../server/productInsightService.js");
@@ -62,10 +67,16 @@ test("产品经营读取层复用销售、库存、SKU、健康与行动事实",
       .run("erp-sku-board-1", "ERP-SKU-BOARD-1", "erp-goods-board-1", "{}", "erp-batch-board-1", "erp-batch-board-1", "active", now, now);
     database.prepare("INSERT INTO erp_skus(id,merchantSkuCode,erpGoodsId,rawSourceData,firstSeenBatchId,lastSeenBatchId,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)")
       .run("erp-sku-board-decline", "ERP-SKU-DECLINE", "erp-goods-board-1", "{}", "erp-batch-board-1", "erp-batch-board-1", "active", now, now);
+    database.prepare("INSERT INTO erp_skus(id,merchantSkuCode,erpGoodsId,rawSourceData,firstSeenBatchId,lastSeenBatchId,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)")
+      .run("erp-sku-board-no-data", "ERP-SKU-NO-DATA", "erp-goods-board-1", "{}", "erp-batch-board-1", "erp-batch-board-1", "active", now, now);
+    database.prepare("INSERT INTO erp_skus(id,merchantSkuCode,erpGoodsId,rawSourceData,firstSeenBatchId,lastSeenBatchId,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)")
+      .run("erp-sku-board-unprofiled", "ERP-SKU-UNPROFILED", "erp-goods-board-1", "{}", "erp-batch-board-1", "erp-batch-board-1", "active", now, now);
     database.prepare("INSERT INTO product_erp_mappings(id,productId,erpGoodsId,erpSkuId,merchantSkuCode,matchMethod,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)")
       .run("mapping-board-1", "product-board-1", "erp-goods-board-1", "erp-sku-board-1", "ERP-SKU-BOARD-1", "exact_sku", "active", now, now);
     database.prepare("INSERT INTO product_erp_mappings(id,productId,erpGoodsId,erpSkuId,merchantSkuCode,matchMethod,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)")
       .run("mapping-board-decline", "product-board-decline", "erp-goods-board-1", "erp-sku-board-decline", "ERP-SKU-DECLINE", "exact_sku", "active", now, now);
+    database.prepare("INSERT INTO product_erp_mappings(id,productId,erpGoodsId,erpSkuId,merchantSkuCode,matchMethod,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)")
+      .run("mapping-board-no-data", "product-board-no-data", "erp-goods-board-1", "erp-sku-board-no-data", "ERP-SKU-NO-DATA", "exact_sku", "active", now, now);
     database.prepare("INSERT INTO wangdian_inventory_sync_batches(id,importMode,businessDate,requestJson,status,startedAt) VALUES(?,?,?,?,?,?)")
       .run("inventory-batch-board-1", "incremental", "2026-08-08", "{}", "completed", now);
     database.prepare("INSERT INTO erp_sku_inventory_daily_summaries(id,businessDate,erpSkuId,warehouseCount,stockNum,availableSendStock,costPrice,inventoryCostAmount,sales7d,salesMonth,sales90d,syncBatchId,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
@@ -120,9 +131,25 @@ test("产品经营读取层复用销售、库存、SKU、健康与行动事实",
       .run("task-board-1", "测试任务", "goal-board-1", "process", "action-board-1", "department-board-1", "person-board-1", "person-board-1", "doing", now, now);
 
     const result = getProductBusinessReadModel({ range: "custom", periodStart: "2026-08-01", periodEnd: "2026-08-07" }, { includeInventoryCost: true });
-    const item = result.items.find((entry) => entry.id === "product-board-1");
+    const item = result.items.find((entry) => entry.erpSkuId === "erp-sku-board-1");
     assert.ok(item);
-    assert.equal(result.summary.totalProducts, database.prepare("SELECT COUNT(*) count FROM products").get().count);
+    assert.equal(item.legacyProductId, "product-board-1");
+    assert.equal(result.summary.totalProducts, database.prepare("SELECT COUNT(*) count FROM erp_skus").get().count);
+    const unprofiled = result.items.find((entry) => entry.erpSkuId === "erp-sku-board-unprofiled");
+    assert.ok(unprofiled);
+    assert.equal(unprofiled.legacyProductId, null);
+    assert.equal(unprofiled.extensionStatus, "unmaintained");
+    const unprofiledDetail = getProductCenterV2SkuDetail("erp-sku-board-unprofiled", { scope: "summary" });
+    assert.equal(unprofiledDetail.sku.productId, null);
+    assert.equal(unprofiledDetail.business.erpSkuId, "erp-sku-board-unprofiled");
+    assert.equal(unprofiledDetail.extensionAvailability.status, "unmaintained");
+    const mappedDetail = getProductCenterV2SkuDetail("erp-sku-board-1", { scope: "summary" });
+    assert.equal(mappedDetail.sku.productId, "product-board-1");
+    assert.equal(mappedDetail.business.legacyProductId, "product-board-1");
+    assert.equal(mappedDetail.extensionAvailability.status, "unmaintained");
+    const legacyResolved = getProductBusinessReadModel({ range: "custom", periodStart: "2026-08-01", periodEnd: "2026-08-07", productId: "product-board-1" });
+    assert.equal(legacyResolved.items[0].erpSkuId, "erp-sku-board-1");
+    assert.equal(legacyResolved.items[0].legacyProductId, "product-board-1");
     assert.equal(item.sales.amount, 1000);
     assert.equal(item.sales.quantity, 10);
     assert.equal(item.sales.trend.code, "up");
@@ -146,11 +173,11 @@ test("产品经营读取层复用销售、库存、SKU、健康与行动事实",
     assert.equal(item.actions.taskCount, 1);
     assert.equal(item.actions.pendingCount, 2);
     assert.equal(result.definitions.readOnly, true);
-    const noDataItem = result.items.find((entry) => entry.id === "product-board-no-data");
+    const noDataItem = result.items.find((entry) => entry.erpSkuId === "erp-sku-board-no-data");
     assert.equal(noDataItem.healthAnalysis.overall.code, "no_data");
     assert.equal(noDataItem.healthAnalysis.dimensions.sales.code, "no_data");
     assert.equal(noDataItem.healthAnalysis.dimensions.profit.code, "no_data");
-    const declineItem = result.items.find((entry) => entry.id === "product-board-decline");
+    const declineItem = result.items.find((entry) => entry.erpSkuId === "erp-sku-board-decline");
     assert.equal(declineItem.healthAnalysis.dimensions.sales.code, "down");
     assert.equal(declineItem.healthAnalysis.dimensions.sales.evidence.sustained, true);
     assert.equal(declineItem.healthAnalysis.overall.code, "attention");
@@ -264,7 +291,7 @@ test("产品经营读取层复用销售、库存、SKU、健康与行动事实",
     assert.equal(declineDiagnosis.sourceSummary.strategyVersion, 2);
     assert.deepEqual(getProductBusinessDiagnosis("product-board-decline", diagnosisOptions), declineDiagnosis);
     const diagnosisDashboard = attachProductDiagnosisSummaries(getProductBusinessReadModel({ range: "custom", periodStart: "2026-08-01", periodEnd: "2026-08-07" }));
-    assert.equal(diagnosisDashboard.items.find((entry) => entry.id === "product-board-1").diagnosis.provider.id, "rule");
+    assert.equal(diagnosisDashboard.items.find((entry) => entry.legacyProductId === "product-board-1").diagnosis.provider.id, "rule");
     assert.deepEqual({
       tasks: database.prepare("SELECT COUNT(*) count FROM tasks").get().count,
       actions: database.prepare("SELECT COUNT(*) count FROM process_instances").get().count,
@@ -384,7 +411,7 @@ test("产品经营读取层复用销售、库存、SKU、健康与行动事实",
       mapProductBusinessLifecycle("清仓", null, "stable"),
       mapProductBusinessLifecycle("已归档", null, "stable"),
     ], ["新品", "成长", "爆款", "稳定销售", "衰退", "清仓", "归档"]);
-    assert.deepEqual(database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'product_business%'").all(), []);
+    assert.deepEqual(database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'product_business%' ORDER BY name").all(), [{ name: "product_business_profiles" }]);
   } catch (error) {
     assert.fail(error?.stack || error?.message || String(error));
   } finally {

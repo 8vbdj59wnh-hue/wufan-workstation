@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { getDatabase } from "./db.js";
+import { productBusinessIdentityParams, productBusinessIdentityPredicate, resolveProductBusinessIdentity, upsertProductBusinessProfile } from "./productBusinessProfileService.js";
 
 const text = (value) => String(value ?? "").trim();
 const now = () => new Date().toISOString();
@@ -23,9 +24,12 @@ function normalizeSellingPoints(value) {
 }
 
 function readProduct(productId) {
-  const product = getDatabase().prepare("SELECT id,name,skuCode,mainImage,galleryImages,brand,category,series,material,color,specification,status FROM products WHERE id=?").get(text(productId));
-  if (!product) throw new Error("产品档案不存在。");
-  return product;
+  const product = resolveProductBusinessIdentity(productId);
+  const legacyRequest = text(productId) === product.legacyProductId;
+  return { ...product, id: product.erpSkuId,
+    mainImage: legacyRequest ? product.legacyMainImage || product.mainImage : product.mainImage,
+    galleryImages: product.legacyGalleryImages || "[]", series: product.legacySeries, material: product.legacyMaterial,
+    color: product.legacyColor, specification: product.legacySpecification };
 }
 
 function mapAsset(row) {
@@ -35,17 +39,18 @@ function mapAsset(row) {
 
 export function getProductMarketingAsset(productId) {
   const product = readProduct(productId);
-  const asset = mapAsset(getDatabase().prepare("SELECT * FROM product_marketing_assets WHERE productId=?").get(product.id));
+  const asset = mapAsset(getDatabase().prepare(`SELECT * FROM product_marketing_assets record WHERE ${productBusinessIdentityPredicate("record")}`).get(productBusinessIdentityParams(product)));
   return { product, asset };
 }
 
 export function saveProductMarketingAsset(productId, input, userId) {
   const product = readProduct(productId);
   const database = getDatabase();
-  const current = database.prepare("SELECT * FROM product_marketing_assets WHERE productId=?").get(product.id);
+  const current = database.prepare(`SELECT * FROM product_marketing_assets record WHERE ${productBusinessIdentityPredicate("record")}`).get(productBusinessIdentityParams(product));
   const timestamp = now();
+  upsertProductBusinessProfile(product.erpSkuId, {}, userId, { database });
   const asset = {
-    id: current?.id || id(), productId: product.id,
+    id: current?.id || id(), productId: product.legacyProductId, erpSkuId: product.erpSkuId,
     positioning: text(input?.positioning) || null,
     targetAudience: text(input?.targetAudience) || null,
     usageScenariosJson: JSON.stringify(normalizeList(input?.usageScenarios)),
@@ -58,12 +63,12 @@ export function saveProductMarketingAsset(productId, input, userId) {
     updatedAt: timestamp,
   };
   database.prepare(`INSERT INTO product_marketing_assets
-      (id,productId,positioning,targetAudience,usageScenariosJson,sellingPointsJson,productStory,keywordsJson,createdBy,updatedBy,createdAt,updatedAt)
-    VALUES (@id,@productId,@positioning,@targetAudience,@usageScenariosJson,@sellingPointsJson,@productStory,@keywordsJson,@createdBy,@updatedBy,@createdAt,@updatedAt)
-    ON CONFLICT(productId) DO UPDATE SET positioning=excluded.positioning,targetAudience=excluded.targetAudience,
+      (id,productId,erpSkuId,positioning,targetAudience,usageScenariosJson,sellingPointsJson,productStory,keywordsJson,createdBy,updatedBy,createdAt,updatedAt)
+    VALUES (@id,@productId,@erpSkuId,@positioning,@targetAudience,@usageScenariosJson,@sellingPointsJson,@productStory,@keywordsJson,@createdBy,@updatedBy,@createdAt,@updatedAt)
+    ON CONFLICT(erpSkuId) WHERE erpSkuId IS NOT NULL DO UPDATE SET positioning=excluded.positioning,targetAudience=excluded.targetAudience,
       usageScenariosJson=excluded.usageScenariosJson,sellingPointsJson=excluded.sellingPointsJson,productStory=excluded.productStory,
       keywordsJson=excluded.keywordsJson,updatedBy=excluded.updatedBy,updatedAt=excluded.updatedAt`).run(asset);
-  return getProductMarketingAsset(product.id).asset;
+  return getProductMarketingAsset(product.erpSkuId).asset;
 }
 
 function field(label, value) { return `${label}：${text(value) || "未维护"}`; }
@@ -80,5 +85,5 @@ export function exportProductMarketingAsset(productId) {
   ];
   const images = [...new Set([product.mainImage, ...parseArray(product.galleryImages)].filter(Boolean))];
   return { formatVersion: "product-ai-export-v1", fileName: `${product.skuCode || product.name}-AI资料.txt`, text: lines.join("\n"), images,
-    packageManifest: { formatVersion: "product-marketing-package-v1", productId: product.id, textFile: `${product.skuCode || product.name}-营销信息.txt`, imageCount: images.length } };
+    packageManifest: { formatVersion: "product-marketing-package-v1", productId: product.legacyProductId, erpSkuId: product.erpSkuId, textFile: `${product.skuCode || product.name}-营销信息.txt`, imageCount: images.length } };
 }

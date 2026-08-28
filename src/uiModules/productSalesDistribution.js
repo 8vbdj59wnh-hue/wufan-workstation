@@ -20,7 +20,7 @@ function renderChart(items, level, resolveUrl) {
     const rangeEnd = Math.min(rangeStart + 99, lastRank || rangeStart + 99);
     const action = level === "all"
       ? `data-product-distribution-group="${item.groupIndex}"`
-      : `data-product-distribution-product="${escapeHtml(item.productId)}"`;
+      : `data-product-distribution-product="${escapeHtml(item.erpSkuId || item.productId)}"`;
     const fill = salesAmount < 0 ? "#d92d20" : item.hasSalesAmountData ? color(item.groupIndex) : item.hasPhysicalContribution ? "#f79009" : "#d0d5dd";
     const description = item.hasSalesAmountData
       ? `${money(item.directSalesAmount)} · 占直接销售额 ${percent(item.salesPercentage)}`
@@ -72,5 +72,5 @@ registerUiModule({
   description: "按产品直接销售额降序展示公司产品销售结构，支持100产品分组与产品档案下钻。",
   render: renderProductSalesDistribution,
   configSchema: { presets: ["yesterday", "7d", "15d", "30d", "45d", "60d", "90d", "custom"], groupSize: 100 },
-  dependencies: ["Product", "QueryProductContribution", "ConnectionSkuSalesDailyFact"],
+  dependencies: ["ERP SKU", "QueryErpSkuContribution", "ConnectionSkuSalesDailyFact"],
 });

@@ -187,6 +187,30 @@ export function readProductInventorySupply(productId, { includeCost = false, dat
   return readProductInventorySupplyMap([productId], { includeCost, database }).get(text(productId));
 }
 
+export function readErpSkuInventorySupplyMap(erpSkuIds, { includeCost = false, database = getDatabase() } = {}) {
+  const ids = [...new Set(erpSkuIds.map(text).filter(Boolean))];
+  const summaries = latestSummaries(ids, database);
+  return new Map(ids.map((id) => {
+    const summary = summaries.get(id);
+    if (!summary) return [id, { summary: aggregate([], "none", includeCost), rows: [] }];
+    const row = {
+      ...summary,
+      skuCode: summary.merchantSkuCode,
+      costPrice: includeCost ? summary.costPrice : null,
+      inventoryCostAmount: includeCost ? summary.inventoryCostAmount : null,
+      costVisible: includeCost,
+      source: "wangdian",
+      sourceLabel: "旺店通",
+      ...risk(summary.stockNum, summary.availableSendStock, summary.salesMonth),
+    };
+    return [id, { summary: aggregate([row], "wangdian", includeCost), rows: [row] }];
+  }));
+}
+
+export function readErpSkuInventorySupply(erpSkuId, options = {}) {
+  return readErpSkuInventorySupplyMap([erpSkuId], options).get(text(erpSkuId));
+}
+
 export function readProductInventorySupplyMap(productIds, { includeCost = false, database = getDatabase() } = {}) {
   const ids = [...new Set(productIds.map(text).filter(Boolean))];
   if (!ids.length) return new Map();

@@ -658,7 +658,8 @@ CREATE TABLE IF NOT EXISTS products (
 
 CREATE TABLE IF NOT EXISTS product_marketing_assets (
   id TEXT PRIMARY KEY,
-  productId TEXT NOT NULL UNIQUE,
+  productId TEXT,
+  erpSkuId TEXT,
   positioning TEXT,
   targetAudience TEXT,
   usageScenariosJson TEXT NOT NULL DEFAULT '[]',
@@ -671,18 +672,44 @@ CREATE TABLE IF NOT EXISTS product_marketing_assets (
   updatedAt TEXT NOT NULL,
   FOREIGN KEY(productId) REFERENCES products(id),
   FOREIGN KEY(createdBy) REFERENCES persons(id),
-  FOREIGN KEY(updatedBy) REFERENCES persons(id)
+  FOREIGN KEY(updatedBy) REFERENCES persons(id),
+  FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_product_marketing_assets_product
   ON product_marketing_assets(productId);
 
+CREATE TABLE IF NOT EXISTS product_business_profiles (
+  id TEXT PRIMARY KEY,
+  erpSkuId TEXT NOT NULL UNIQUE,
+  businessStatus TEXT,
+  lifecycle TEXT,
+  ownerId TEXT,
+  brandOverride TEXT,
+  categoryOverride TEXT,
+  businessRole TEXT,
+  displayNameOverride TEXT,
+  createdBy TEXT,
+  updatedBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),
+  FOREIGN KEY(ownerId) REFERENCES persons(id),
+  FOREIGN KEY(createdBy) REFERENCES persons(id),
+  FOREIGN KEY(updatedBy) REFERENCES persons(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_business_profiles_owner_status
+  ON product_business_profiles(ownerId,businessStatus,updatedAt DESC);
+
 CREATE TABLE IF NOT EXISTS action_products (
   id TEXT PRIMARY KEY,
   actionId TEXT NOT NULL,
-  productId TEXT NOT NULL,
+  productId TEXT,
+  erpSkuId TEXT,
   createdAt TEXT,
-  UNIQUE(actionId, productId)
+  UNIQUE(actionId, productId),
+  FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_action_products_action ON action_products(actionId);
@@ -2263,14 +2290,16 @@ CREATE INDEX IF NOT EXISTS idx_finance_entries_link_date
 
 CREATE TABLE IF NOT EXISTS product_lifecycle_events (
   id TEXT PRIMARY KEY,
-  productId TEXT NOT NULL,
+  productId TEXT,
+  erpSkuId TEXT,
   fromStatus TEXT,
   toStatus TEXT NOT NULL,
   reason TEXT,
   changedBy TEXT,
   changedAt TEXT NOT NULL,
   FOREIGN KEY(productId) REFERENCES products(id),
-  FOREIGN KEY(changedBy) REFERENCES persons(id)
+  FOREIGN KEY(changedBy) REFERENCES persons(id),
+  FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_product_lifecycle_events_product_time
@@ -2278,7 +2307,8 @@ CREATE INDEX IF NOT EXISTS idx_product_lifecycle_events_product_time
 
 CREATE TABLE IF NOT EXISTS product_health_records (
   id TEXT PRIMARY KEY,
-  productId TEXT NOT NULL,
+  productId TEXT,
+  erpSkuId TEXT,
   snapshotKey TEXT NOT NULL,
   healthScore REAL,
   healthStatus TEXT NOT NULL,
@@ -2288,7 +2318,8 @@ CREATE TABLE IF NOT EXISTS product_health_records (
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
   FOREIGN KEY(productId) REFERENCES products(id),
-  UNIQUE(productId, snapshotKey)
+  UNIQUE(productId, snapshotKey),
+  FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_product_health_records_status_time
@@ -2296,7 +2327,8 @@ CREATE INDEX IF NOT EXISTS idx_product_health_records_status_time
 
 CREATE TABLE IF NOT EXISTS product_issues (
   id TEXT PRIMARY KEY,
-  productId TEXT NOT NULL,
+  productId TEXT,
+  erpSkuId TEXT,
   healthRecordId TEXT NOT NULL,
   issueType TEXT NOT NULL,
   title TEXT NOT NULL,
@@ -2307,7 +2339,8 @@ CREATE TABLE IF NOT EXISTS product_issues (
   updatedAt TEXT NOT NULL,
   FOREIGN KEY(productId) REFERENCES products(id),
   FOREIGN KEY(healthRecordId) REFERENCES product_health_records(id),
-  UNIQUE(healthRecordId, issueType)
+  UNIQUE(healthRecordId, issueType),
+  FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_product_issues_product_status
@@ -2315,7 +2348,8 @@ CREATE INDEX IF NOT EXISTS idx_product_issues_product_status
 
 CREATE TABLE IF NOT EXISTS product_improvements (
   id TEXT PRIMARY KEY,
-  productId TEXT NOT NULL,
+  productId TEXT,
+  erpSkuId TEXT,
   issueId TEXT NOT NULL,
   actionId TEXT NOT NULL,
   title TEXT NOT NULL,
@@ -2330,7 +2364,8 @@ CREATE TABLE IF NOT EXISTS product_improvements (
   FOREIGN KEY(productId) REFERENCES products(id),
   FOREIGN KEY(issueId) REFERENCES product_issues(id),
   FOREIGN KEY(actionId) REFERENCES process_instances(id),
-  UNIQUE(issueId, actionId)
+  UNIQUE(issueId, actionId),
+  FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_product_improvements_product_status
@@ -2338,7 +2373,8 @@ CREATE INDEX IF NOT EXISTS idx_product_improvements_product_status
 
 CREATE TABLE IF NOT EXISTS product_strategy_versions (
   id TEXT PRIMARY KEY,
-  productId TEXT NOT NULL,
+  productId TEXT,
+  erpSkuId TEXT,
   version INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'current',
   effectiveAt TEXT NOT NULL,
@@ -2348,7 +2384,8 @@ CREATE TABLE IF NOT EXISTS product_strategy_versions (
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
   UNIQUE(productId, version),
-  FOREIGN KEY(productId) REFERENCES products(id)
+  FOREIGN KEY(productId) REFERENCES products(id),
+  FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_product_strategy_current
@@ -2374,7 +2411,8 @@ CREATE INDEX IF NOT EXISTS idx_product_strategy_action_action
 
 CREATE TABLE IF NOT EXISTS product_insights (
   id TEXT PRIMARY KEY,
-  productId TEXT NOT NULL,
+  productId TEXT,
+  erpSkuId TEXT,
   insightType TEXT NOT NULL,
   content TEXT NOT NULL,
   source TEXT NOT NULL,
@@ -2397,7 +2435,8 @@ CREATE TABLE IF NOT EXISTS product_insights (
   FOREIGN KEY(productId) REFERENCES products(id),
   FOREIGN KEY(relatedStrategyVersionId) REFERENCES product_strategy_versions(id),
   FOREIGN KEY(relatedImprovementId) REFERENCES product_improvements(id),
-  FOREIGN KEY(relatedActionId) REFERENCES process_instances(id)
+  FOREIGN KEY(relatedActionId) REFERENCES process_instances(id),
+  FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_product_insights_product_type
@@ -2409,7 +2448,8 @@ CREATE INDEX IF NOT EXISTS idx_product_insights_action
 
 CREATE TABLE IF NOT EXISTS product_clearance_plans (
   id TEXT PRIMARY KEY,
-  productId TEXT NOT NULL,
+  productId TEXT,
+  erpSkuId TEXT,
   status TEXT NOT NULL DEFAULT 'active',
   startDate TEXT NOT NULL,
   targetDays INTEGER NOT NULL,
@@ -2422,7 +2462,8 @@ CREATE TABLE IF NOT EXISTS product_clearance_plans (
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
   FOREIGN KEY(productId) REFERENCES products(id),
-  FOREIGN KEY(createdBy) REFERENCES persons(id)
+  FOREIGN KEY(createdBy) REFERENCES persons(id),
+  FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_product_clearance_plans_active

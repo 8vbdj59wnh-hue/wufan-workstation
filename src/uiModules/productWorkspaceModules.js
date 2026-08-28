@@ -8,10 +8,10 @@ registerUiModule({
   moduleKey: "product_basic_info",
   name: "ProductBasicInfo",
   domain: "product",
-  description: "ERP SKU 与可选产品经营档案的基础信息。",
+  description: "ERP SKU 与可选经营资料的基础信息。",
   render: ({ sku, ownerName, resolveUrl }) => `<section class="product-workspace-basic">
     <div class="product-workspace-cover">${renderProductImage({ src: sku.productImage, fallbackSrc: sku.mainImage, alt: sku.productName || sku.goodsName || sku.merchantSkuCode, className: "product-workspace-main-image", resolveUrl })}</div>
-    <div class="product-workspace-identity"><div class="product-workspace-eyebrow"><span class="status-badge">${sku.productId ? "已建立产品档案" : "未建立产品档案"}</span><span>${escapeHtml(value(sku.erpStatus))}</span></div>
+    <div class="product-workspace-identity"><div class="product-workspace-eyebrow"><span class="status-badge">${sku.businessProfileId ? "经营资料已维护" : "经营资料未维护"}</span><span>${escapeHtml(value(sku.erpStatus))}</span></div>
       <h1>${escapeHtml(sku.productName || sku.goodsName || sku.specificationName || sku.merchantSkuCode)}</h1>
       <p>${escapeHtml(sku.specificationName || sku.shortName || "暂无规格说明")}</p>
       <dl><div><dt>SKU</dt><dd>${escapeHtml(value(sku.merchantSkuCode))}</dd></div><div><dt>品牌</dt><dd>${escapeHtml(value(sku.brand || sku.erpBrand))}</dd></div><div><dt>类目</dt><dd>${escapeHtml(value(sku.category || sku.erpCategory))}</dd></div><div><dt>负责人</dt><dd>${escapeHtml(value(ownerName))}</dd></div><div><dt>生命周期</dt><dd>${escapeHtml(value(sku.lifecycleStatus))}</dd></div></dl>
@@ -41,7 +41,7 @@ registerUiModule({
   domain: "product",
   description: "展示现有产品生命周期和负责人信息，不生成新的策略数据。",
   render: ({ sku, ownerName }) => `<section class="product-workspace-panel product-workspace-strategy"><header><div><span>经营管理</span><h2>生命周期与策略</h2></div></header><dl>
-    <div><dt>当前生命周期</dt><dd>${escapeHtml(sku.productId ? value(sku.lifecycleStatus) : "未维护")}</dd></div>
+    <div><dt>当前生命周期</dt><dd>${escapeHtml(value(sku.businessLifecycle || sku.lifecycleStatus || "未维护"))}</dd></div>
     <div><dt>当前策略</dt><dd>未维护</dd></div>
     <div><dt>下一步动作</dt><dd>未维护</dd></div>
     <div><dt>负责人</dt><dd>${escapeHtml(sku.productId ? value(ownerName) : "未维护")}</dd></div>

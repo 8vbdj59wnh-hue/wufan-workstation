@@ -1,8 +1,9 @@
 import crypto from "node:crypto";
 import { getDatabase } from "./db.js";
-import { readProductInventorySupplyMap } from "./inventorySupplyQueryService.js";
-import { queryProductContributions } from "./productContributionReadModel.js";
+import { readErpSkuInventorySupplyMap } from "./inventorySupplyQueryService.js";
+import { queryErpSkuContributions } from "./productContributionReadModel.js";
 import { latestCompleteSalesDate, resolveProductSalesDistributionRange } from "./productSalesDistributionService.js";
+import { productBusinessIdentityParams, productBusinessIdentityPredicate, resolveProductBusinessIdentity, upsertProductBusinessProfile } from "./productBusinessProfileService.js";
 
 export const productClearancePlanStatuses = Object.freeze(["active", "completed", "cancelled"]);
 
@@ -27,21 +28,16 @@ function normalizePlanInput(input = {}, fallback = {}) {
   return { startDate, targetDays, targetEndDate: addDays(startDate, targetDays - 1), targetInventoryQuantity, note: text(input.note ?? fallback.note) || null };
 }
 
-function ensureProduct(database, productId) {
-  const product = database.prepare("SELECT id,name,skuCode,mainImage,brand,category,status FROM products WHERE id=?").get(text(productId));
-  if (!product) throw new Error("产品不存在。");
-  return product;
-}
-
-function currentInventoryQuantity(productId) {
-  const summary = readProductInventorySupplyMap([productId], { includeCost: false }).get(productId)?.summary;
+function currentInventoryQuantity(erpSkuId, database) {
+  const summary = readErpSkuInventorySupplyMap([erpSkuId], { includeCost: false, database }).get(erpSkuId)?.summary;
   return summary?.stockNum === null || summary?.stockNum === undefined ? null : Number(summary.stockNum);
 }
 
 export function saveProductClearancePlan(productId, input = {}, userId = "") {
   const database = getDatabase();
-  const product = ensureProduct(database, productId);
-  const existing = database.prepare("SELECT * FROM product_clearance_plans WHERE productId=? AND status='active' ORDER BY updatedAt DESC LIMIT 1").get(product.id);
+  const product = resolveProductBusinessIdentity(productId, { database });
+  upsertProductBusinessProfile(product.erpSkuId, {}, userId, { database });
+  const existing = database.prepare(`SELECT * FROM product_clearance_plans record WHERE ${productBusinessIdentityPredicate("record")} AND status='active' ORDER BY updatedAt DESC LIMIT 1`).get(productBusinessIdentityParams(product));
   const normalized = normalizePlanInput(input, existing || {});
   const timestamp = now();
   if (existing) {
@@ -51,9 +47,9 @@ export function saveProductClearancePlan(productId, input = {}, userId = "") {
   }
   const id = `product-clearance-plan-${crypto.randomUUID()}`;
   database.prepare(`INSERT INTO product_clearance_plans
-    (id,productId,status,startDate,targetDays,targetEndDate,initialInventoryQuantity,targetInventoryQuantity,note,createdBy,completedAt,createdAt,updatedAt)
-    VALUES (?,?,'active',?,?,?,?,?,?,?,NULL,?,?)`)
-    .run(id, product.id, normalized.startDate, normalized.targetDays, normalized.targetEndDate, currentInventoryQuantity(product.id), normalized.targetInventoryQuantity, normalized.note, text(userId) || null, timestamp, timestamp);
+    (id,productId,erpSkuId,status,startDate,targetDays,targetEndDate,initialInventoryQuantity,targetInventoryQuantity,note,createdBy,completedAt,createdAt,updatedAt)
+    VALUES (?,?,?,'active',?,?,?,?,?,?,?,NULL,?,?)`)
+    .run(id, product.legacyProductId, product.erpSkuId, normalized.startDate, normalized.targetDays, normalized.targetEndDate, currentInventoryQuantity(product.erpSkuId, database), normalized.targetInventoryQuantity, normalized.note, text(userId) || null, timestamp, timestamp);
   return database.prepare("SELECT * FROM product_clearance_plans WHERE id=?").get(id);
 }
 
@@ -71,10 +67,10 @@ export function updateProductClearancePlan(planId, input = {}) {
   return database.prepare("SELECT * FROM product_clearance_plans WHERE id=?").get(existing.id);
 }
 
-function contributionMap(database, productIds, range) {
-  if (!productIds.length) return new Map();
-  const result = queryProductContributions({ periodStart: range.startDate, periodEnd: range.endDate, productIds }, { database });
-  return new Map(result.items.map((item) => [item.productId, item]));
+function contributionMap(database, erpSkuIds, range) {
+  if (!erpSkuIds.length) return new Map();
+  const result = queryErpSkuContributions({ periodStart: range.startDate, periodEnd: range.endDate, erpSkuIds }, { database });
+  return new Map(result.items.map((item) => [item.erpSkuId, item]));
 }
 
 function nullableSum(values) {
@@ -86,18 +82,22 @@ export function getProductClearancePlanCenter(input = {}, { visibleProductIds = 
   const database = getDatabase();
   const visible = visibleProductIds ? new Set(visibleProductIds.map(text)) : null;
   const statusFilter = productClearancePlanStatuses.includes(text(input.status)) ? text(input.status) : "active";
-  const plans = database.prepare(`SELECT plan.*,product.name productName,product.skuCode,product.mainImage,product.brand,product.category,product.status productStatus,
-      creator.name createdByName FROM product_clearance_plans plan JOIN products product ON product.id=plan.productId
+  const plans = database.prepare(`SELECT plan.*,COALESCE(profile.displayNameOverride,product.name,goods.goodsName,sku.specificationName,sku.merchantSkuCode) productName,
+      sku.merchantSkuCode skuCode,COALESCE(sku.mainImage,product.mainImage) mainImage,COALESCE(profile.brandOverride,goods.brand,product.brand) brand,
+      COALESCE(profile.categoryOverride,goods.category,product.category) category,COALESCE(profile.businessStatus,product.status) productStatus,
+      creator.name createdByName FROM product_clearance_plans plan JOIN erp_skus sku ON sku.id=plan.erpSkuId
+      LEFT JOIN erp_goods goods ON goods.id=sku.erpGoodsId LEFT JOIN products product ON product.id=plan.productId
+      LEFT JOIN product_business_profiles profile ON profile.erpSkuId=plan.erpSkuId
       LEFT JOIN persons creator ON creator.id=plan.createdBy ORDER BY CASE plan.status WHEN 'active' THEN 0 WHEN 'completed' THEN 1 ELSE 2 END,plan.targetEndDate,plan.updatedAt DESC`).all()
-    .filter((plan) => !visible || visible.has(plan.productId));
+    .filter((plan) => !visible || !plan.productId || visible.has(plan.productId));
   const activePlans = plans.filter((plan) => plan.status === "active");
-  const productIds = [...new Set(plans.map((plan) => plan.productId))];
+  const erpSkuIds = [...new Set(plans.map((plan) => plan.erpSkuId))];
   const anchorDate = latestCompleteSalesDate(database);
   const range = resolveProductSalesDistributionRange({ preset: text(input.range) || "30d", startDate: input.periodStart, endDate: input.periodEnd }, anchorDate);
   const dailyRange = resolveProductSalesDistributionRange({ preset: "yesterday" }, anchorDate);
-  const periodContributions = contributionMap(database, productIds, range);
-  const dailyContributions = contributionMap(database, activePlans.map((plan) => plan.productId), dailyRange);
-  const inventory = readProductInventorySupplyMap(productIds, { includeCost: false });
+  const periodContributions = contributionMap(database, erpSkuIds, range);
+  const dailyContributions = contributionMap(database, activePlans.map((plan) => plan.erpSkuId), dailyRange);
+  const inventory = readErpSkuInventorySupplyMap(erpSkuIds, { includeCost: true, database });
   const todayDate = today();
   const sinceStartByPlan = new Map();
   const plansByStartDate = new Map();
@@ -108,11 +108,11 @@ export function getProductClearancePlanCenter(input = {}, { visibleProductIds = 
   }
   for (const [startDate, groupedPlans] of plansByStartDate) {
     const endDate = anchorDate && anchorDate >= startDate ? anchorDate : startDate;
-    const groupedContributions = contributionMap(database, [...new Set(groupedPlans.map((plan) => plan.productId))], { startDate, endDate });
-    for (const plan of groupedPlans) sinceStartByPlan.set(plan.id, groupedContributions.get(plan.productId));
+    const groupedContributions = contributionMap(database, [...new Set(groupedPlans.map((plan) => plan.erpSkuId))], { startDate, endDate });
+    for (const plan of groupedPlans) sinceStartByPlan.set(plan.id, groupedContributions.get(plan.erpSkuId));
   }
   const decorated = plans.map((plan) => {
-    const currentInventory = inventory.get(plan.productId)?.summary?.stockNum;
+    const currentInventory = inventory.get(plan.erpSkuId)?.summary?.stockNum;
     const inventoryQuantity = currentInventory === null || currentInventory === undefined ? null : Number(currentInventory);
     const initialInventory = plan.initialInventoryQuantity === null || plan.initialInventoryQuantity === undefined ? null : Number(plan.initialInventoryQuantity);
     const targetInventory = Number(plan.targetInventoryQuantity || 0);
@@ -124,7 +124,7 @@ export function getProductClearancePlanCenter(input = {}, { visibleProductIds = 
     const elapsedDays = Math.max(0, differenceDays(plan.startDate, todayDate) + 1);
     const timeProgress = clamp(elapsedDays / Number(plan.targetDays));
     const overdueDays = plan.status === "active" && todayDate > plan.targetEndDate ? Math.max(1, differenceDays(plan.targetEndDate, todayDate)) : 0;
-    const periodContribution = periodContributions.get(plan.productId);
+    const periodContribution = periodContributions.get(plan.erpSkuId);
     const sinceStart = sinceStartByPlan.get(plan.id);
     return { ...plan, initialInventoryQuantity: initialInventory, targetInventoryQuantity: targetInventory, currentInventoryQuantity: inventoryQuantity,
       inventoryReducedQuantity: inventoryQuantity === null || initialInventory === null ? null : Math.max(0, initialInventory - inventoryQuantity),
@@ -134,7 +134,7 @@ export function getProductClearancePlanCenter(input = {}, { visibleProductIds = 
         directQuantity: periodContribution?.directSalesQuantity ?? null, bundleContributionQuantity: periodContribution?.bundleContributionQuantity ?? null,
         sinceStartAmount: sinceStart?.directSalesAmount ?? null, sinceStartQuantity: sinceStart?.totalPhysicalContribution ?? null } };
   });
-  const dailyRows = activePlans.map((plan) => dailyContributions.get(plan.productId));
+  const dailyRows = activePlans.map((plan) => dailyContributions.get(plan.erpSkuId));
   const knownProgress = decorated.filter((plan) => plan.status === "active" && plan.inventoryProgress !== null).map((plan) => plan.inventoryProgress);
   const activeDecorated = decorated.filter((plan) => plan.status === "active");
   const filteredItems = text(input.status) === "all" ? decorated : decorated.filter((plan) => plan.status === statusFilter);

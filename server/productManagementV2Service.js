@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { createResource, getDatabase } from "./db.js";
 import { getProductBusinessReadModel } from "./productBusinessReadModel.js";
+import { productBusinessIdentityParams, productBusinessIdentityPredicate, resolveProductBusinessIdentity, upsertProductBusinessProfile } from "./productBusinessProfileService.js";
 export { classifyProductBusinessZones } from "./productBusinessClassification.js";
 
 export const productLifecycleStatuses = ["开发中", "上架", "成长期", "成熟期", "风险期", "淘汰"];
@@ -15,7 +16,8 @@ function analysisFromReadModelItem(item, period) {
   const grossProfit = item.profit.grossProfit;
   const revenue = item.sales.directAmount;
   return {
-    product: { id: item.id, name: item.name, skuCode: item.sku, status: item.status, mainImage: item.image, updatedAt: item.updatedAt },
+    product: { id: item.legacyProductId || item.erpSkuId, erpSkuId: item.erpSkuId, legacyProductId: item.legacyProductId,
+      name: item.name, skuCode: item.sku, status: item.status, mainImage: item.image, updatedAt: item.updatedAt },
     snapshotKey: `product-contribution:${period.periodStart}:${period.periodEnd}:${item.healthAnalysis.ruleVersion}`,
     sales: { businessDate: period.periodEnd, periodStart: period.periodStart, periodEnd: period.periodEnd,
       sales30d: salesQuantity, directSalesQuantity: item.sales.directQuantity, bundleContributionQuantity: item.sales.bundleContributionQuantity,
@@ -40,9 +42,12 @@ function analysisFromReadModelItem(item, period) {
 }
 
 export function getProductBusinessAnalysis(productId, options = {}) {
-  const readModel = getProductBusinessReadModel({ range: "30d", productId: text(productId), page: 1, pageSize: 1 }, options);
+  const database = options.database || getDatabase();
+  const product = resolveProductBusinessIdentity(productId, { database });
+  if (Array.isArray(options.visibleProductIds) && product.legacyProductId && !options.visibleProductIds.includes(product.legacyProductId)) throw new Error("产品不存在或无权查看。");
+  const readModel = getProductBusinessReadModel({ range: "30d", erpSkuId: product.erpSkuId, page: 1, pageSize: 1 }, { ...options, database });
   const item = readModel.items[0];
-  if (!item || item.id !== text(productId)) throw new Error("产品不存在或无权查看。");
+  if (!item || item.erpSkuId !== product.erpSkuId) throw new Error("产品不存在或无权查看。");
   return analysisFromReadModelItem(item, readModel.period);
 }
 
@@ -67,7 +72,7 @@ function parseProductProfile(row) {
 }
 
 export function evaluateProductHealth(productId, options = {}) {
-  const database = getDatabase(); const analysis = getProductBusinessAnalysis(productId, options); const health = analysis.healthAnalysis; const timestamp = now();
+  const database = getDatabase(); const product = resolveProductBusinessIdentity(productId, { database }); const analysis = getProductBusinessAnalysis(product.erpSkuId, options); const health = analysis.healthAnalysis; const timestamp = now();
   const issueProfiles = {
     sales_decline: { type: "sales_decline", title: "销售下降" },
     inventory_backlog: { type: "inventory_backlog", title: "库存积压" },
@@ -83,27 +88,30 @@ export function evaluateProductHealth(productId, options = {}) {
   });
   const suggestions = (health.recommendations ?? []).map((item) => ({ title: item.title, reason: item.reason, code: item.code }));
   const save = database.transaction(() => {
-    const existing = database.prepare("SELECT id,createdAt FROM product_health_records WHERE productId=? AND snapshotKey=?").get(text(productId), analysis.snapshotKey);
+    const existing = database.prepare(`SELECT id,createdAt FROM product_health_records record WHERE ${productBusinessIdentityPredicate("record")} AND snapshotKey=@snapshotKey`).get({ ...productBusinessIdentityParams(product), snapshotKey: analysis.snapshotKey });
     const id = existing?.id ?? `product-health-${crypto.randomUUID()}`;
-    database.prepare(`INSERT INTO product_health_records (id,productId,snapshotKey,healthScore,healthStatus,metricsJson,problemsJson,suggestionsJson,createdAt,updatedAt)
-      VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(productId,snapshotKey) DO UPDATE SET healthScore=excluded.healthScore,healthStatus=excluded.healthStatus,
+    database.prepare(`INSERT INTO product_health_records (id,productId,erpSkuId,snapshotKey,healthScore,healthStatus,metricsJson,problemsJson,suggestionsJson,createdAt,updatedAt)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(erpSkuId,snapshotKey) WHERE erpSkuId IS NOT NULL DO UPDATE SET healthScore=excluded.healthScore,healthStatus=excluded.healthStatus,
       metricsJson=excluded.metricsJson,problemsJson=excluded.problemsJson,suggestionsJson=excluded.suggestionsJson,updatedAt=excluded.updatedAt`)
-      .run(id, text(productId), analysis.snapshotKey, null, health.overall.code, JSON.stringify(analysis), JSON.stringify(problems), JSON.stringify(suggestions), existing?.createdAt ?? timestamp, timestamp);
-    const issue = database.prepare(`INSERT INTO product_issues (id,productId,healthRecordId,issueType,title,severity,detailJson,status,createdAt,updatedAt)
-      VALUES (?,?,?,?,?,?,?,'open',?,?) ON CONFLICT(healthRecordId,issueType) DO UPDATE SET title=excluded.title,severity=excluded.severity,detailJson=excluded.detailJson,updatedAt=excluded.updatedAt`);
-    for (const problem of problems) issue.run(`product-issue-${crypto.randomUUID()}`, text(productId), id, problem.type, problem.title, problem.severity, JSON.stringify(problem), timestamp, timestamp);
+      .run(id, product.legacyProductId, product.erpSkuId, analysis.snapshotKey, null, health.overall.code, JSON.stringify(analysis), JSON.stringify(problems), JSON.stringify(suggestions), existing?.createdAt ?? timestamp, timestamp);
+    const issue = database.prepare(`INSERT INTO product_issues (id,productId,erpSkuId,healthRecordId,issueType,title,severity,detailJson,status,createdAt,updatedAt)
+      VALUES (?,?,?,?,?,?,?,?,'open',?,?) ON CONFLICT(healthRecordId,issueType) DO UPDATE SET title=excluded.title,severity=excluded.severity,detailJson=excluded.detailJson,updatedAt=excluded.updatedAt`);
+    for (const problem of problems) issue.run(`product-issue-${crypto.randomUUID()}`, product.legacyProductId, product.erpSkuId, id, problem.type, problem.title, problem.severity, JSON.stringify(problem), timestamp, timestamp);
     return id;
   });
   const id = save(); return parseHealth(database.prepare("SELECT * FROM product_health_records WHERE id=?").get(id));
 }
 
 export function getProductV2Detail(productId, options = {}) {
-  const database = getDatabase(); const analysis = getProductBusinessAnalysis(productId, options);
-  const product = parseProductProfile(database.prepare("SELECT * FROM products WHERE id=?").get(text(productId)));
-  const lifecycle = database.prepare("SELECT * FROM product_lifecycle_events WHERE productId=? ORDER BY changedAt DESC").all(text(productId));
-  const healthRecords = database.prepare("SELECT * FROM product_health_records WHERE productId=? ORDER BY updatedAt DESC LIMIT 20").all(text(productId)).map(parseHealth);
-  const issues = database.prepare("SELECT * FROM product_issues WHERE productId=? ORDER BY updatedAt DESC").all(text(productId)).map((row) => ({ ...row, detail: parseJson(row.detailJson, {}) }));
-  const improvements = database.prepare(`SELECT i.*,p.name actionName,p.status actionStatus FROM product_improvements i JOIN process_instances p ON p.id=i.actionId WHERE i.productId=? ORDER BY i.updatedAt DESC`).all(text(productId)).map((row) => ({ ...row, beforeMetrics: parseJson(row.beforeMetricsJson, {}), afterMetrics: parseJson(row.afterMetricsJson, {}) }));
+  const database = getDatabase(); const identity = resolveProductBusinessIdentity(productId, { database }); const analysis = getProductBusinessAnalysis(identity.erpSkuId, options);
+  const legacy = identity.legacyProductId ? parseProductProfile(database.prepare("SELECT * FROM products WHERE id=?").get(identity.legacyProductId)) : null;
+  const product = { ...(legacy || {}), ...identity, id: identity.erpSkuId, legacyProductId: identity.legacyProductId, skuCode: identity.skuCode,
+    name: identity.name, mainImage: identity.mainImage, brand: identity.brand, category: identity.category, status: identity.lifecycle || identity.status };
+  const params = productBusinessIdentityParams(identity);
+  const lifecycle = database.prepare(`SELECT * FROM product_lifecycle_events record WHERE ${productBusinessIdentityPredicate("record")} ORDER BY changedAt DESC`).all(params);
+  const healthRecords = database.prepare(`SELECT * FROM product_health_records record WHERE ${productBusinessIdentityPredicate("record")} ORDER BY updatedAt DESC LIMIT 20`).all(params).map(parseHealth);
+  const issues = database.prepare(`SELECT * FROM product_issues record WHERE ${productBusinessIdentityPredicate("record")} ORDER BY updatedAt DESC`).all(params).map((row) => ({ ...row, detail: parseJson(row.detailJson, {}) }));
+  const improvements = database.prepare(`SELECT i.*,p.name actionName,p.status actionStatus FROM product_improvements i JOIN process_instances p ON p.id=i.actionId WHERE ${productBusinessIdentityPredicate("i")} ORDER BY i.updatedAt DESC`).all(params).map((row) => ({ ...row, beforeMetrics: parseJson(row.beforeMetricsJson, {}), afterMetrics: parseJson(row.afterMetricsJson, {}) }));
   return { product, analysis, lifecycle, healthRecords, issues, improvements };
 }
 
@@ -121,22 +129,25 @@ export function getProductV2Overview() {
 
 export function changeProductLifecycle(productId, input, userId) {
   const toStatus = text(input?.status); if (!productLifecycleStatuses.includes(toStatus)) throw new Error("产品生命周期状态无效。");
-  const database = getDatabase(); const product = database.prepare("SELECT id,status FROM products WHERE id=?").get(text(productId)); if (!product) throw new Error("产品不存在。");
-  if (product.status === toStatus) throw new Error("产品已经处于该生命周期状态。"); const timestamp = now();
-  return database.transaction(() => { database.prepare("UPDATE products SET status=?,updatedAt=? WHERE id=?").run(toStatus,timestamp,product.id);
-    const event = { id:`product-lifecycle-${crypto.randomUUID()}`,productId:product.id,fromStatus:product.status,toStatus,reason:text(input?.reason),changedBy:userId||null,changedAt:timestamp };
-    database.prepare("INSERT INTO product_lifecycle_events (id,productId,fromStatus,toStatus,reason,changedBy,changedAt) VALUES (@id,@productId,@fromStatus,@toStatus,@reason,@changedBy,@changedAt)").run(event); return event; })();
+  const database = getDatabase(); const product = resolveProductBusinessIdentity(productId, { database });
+  if (product.lifecycle === toStatus) throw new Error("产品已经处于该生命周期状态。"); const timestamp = now();
+  return database.transaction(() => {
+    upsertProductBusinessProfile(product.erpSkuId, { lifecycle: toStatus }, userId, { database });
+    const event = { id:`product-lifecycle-${crypto.randomUUID()}`,productId:product.legacyProductId,erpSkuId:product.erpSkuId,fromStatus:product.lifecycle,toStatus,reason:text(input?.reason),changedBy:userId||null,changedAt:timestamp };
+    database.prepare("INSERT INTO product_lifecycle_events (id,productId,erpSkuId,fromStatus,toStatus,reason,changedBy,changedAt) VALUES (@id,@productId,@erpSkuId,@fromStatus,@toStatus,@reason,@changedBy,@changedAt)").run(event); return event; })();
 }
 
 export function createProductImprovementAction(issueId, input, userId) {
-  const database = getDatabase(); const issue = database.prepare("SELECT i.*,p.name productName FROM product_issues i JOIN products p ON p.id=i.productId WHERE i.id=?").get(text(issueId)); if (!issue) throw new Error("产品经营问题不存在。");
+  const database = getDatabase(); const issue = database.prepare(`SELECT i.*,COALESCE(profile.displayNameOverride,p.name,g.goodsName,s.specificationName,s.merchantSkuCode) productName
+    FROM product_issues i JOIN erp_skus s ON s.id=i.erpSkuId LEFT JOIN erp_goods g ON g.id=s.erpGoodsId LEFT JOIN products p ON p.id=i.productId
+    LEFT JOIN product_business_profiles profile ON profile.erpSkuId=i.erpSkuId WHERE i.id=?`).get(text(issueId)); if (!issue) throw new Error("产品经营问题不存在。");
   const goal = database.prepare("SELECT id,status FROM goals WHERE id=?").get(text(input?.goalId)); if (!goal || goal.status !== "active") throw new Error("请选择有效目标。");
   const template = database.prepare(`SELECT t.id,t.name,t.defaultProcessTemplateId,p.version FROM task_templates t JOIN process_templates p ON p.id=t.defaultProcessTemplateId WHERE t.id=? AND t.status='active'`).get(text(input?.taskTemplateId));
   if (!template) throw new Error("请选择已绑定标准流程的启用关键行动。"); const title = text(input?.title) || `改善${issue.productName}：${issue.title}`;
-  return database.transaction(() => { const timestamp=now(); const instance=createResource("process-instances",{id:`process-instance-${crypto.randomUUID()}`,templateId:template.defaultProcessTemplateId,taskTemplateId:template.id,templateVersion:template.version,name:title,displayTitle:title,goalId:goal.id,initiatorId:text(userId),description:`来源：产品经营问题；产品：${issue.productName}；问题：${issue.title}`,status:"draft",customFields:{source:"product_health",productId:issue.productId,productIssueId:issue.id,healthRecordId:issue.healthRecordId},createdAt:timestamp,updatedAt:timestamp});
+  return database.transaction(() => { const timestamp=now(); const instance=createResource("process-instances",{id:`process-instance-${crypto.randomUUID()}`,templateId:template.defaultProcessTemplateId,taskTemplateId:template.id,templateVersion:template.version,name:title,displayTitle:title,goalId:goal.id,initiatorId:text(userId),description:`来源：产品经营问题；产品：${issue.productName}；问题：${issue.title}`,status:"draft",customFields:{source:"product_health",productId:issue.productId,erpSkuId:issue.erpSkuId,productIssueId:issue.id,healthRecordId:issue.healthRecordId},createdAt:timestamp,updatedAt:timestamp});
     const id=`product-improvement-${crypto.randomUUID()}`; const health=database.prepare("SELECT metricsJson FROM product_health_records WHERE id=?").get(issue.healthRecordId);
-    database.prepare(`INSERT INTO product_improvements (id,productId,issueId,actionId,title,status,beforeMetricsJson,afterMetricsJson,createdAt,updatedAt) VALUES (?,?,?,?,?,'planned',?,'{}',?,?)`).run(id,issue.productId,issue.id,instance.id,title,health?.metricsJson||"{}",timestamp,timestamp);
-    const actionProduct=createResource("action-products",{id:`action-product-${crypto.randomUUID()}`,actionId:instance.id,productId:issue.productId,createdAt:timestamp});
+    database.prepare(`INSERT INTO product_improvements (id,productId,erpSkuId,issueId,actionId,title,status,beforeMetricsJson,afterMetricsJson,createdAt,updatedAt) VALUES (?,?,?,?,?,?,'planned',?,'{}',?,?)`).run(id,issue.productId,issue.erpSkuId,issue.id,instance.id,title,health?.metricsJson||"{}",timestamp,timestamp);
+    const actionProduct=createResource("action-products",{id:`action-product-${crypto.randomUUID()}`,actionId:instance.id,productId:issue.productId,erpSkuId:issue.erpSkuId,createdAt:timestamp});
     database.prepare("UPDATE product_issues SET status='improving',updatedAt=? WHERE id=?").run(timestamp,issue.id); return { instance, actionProduct, improvement: database.prepare("SELECT * FROM product_improvements WHERE id=?").get(id) }; })();
 }
 
@@ -184,31 +195,31 @@ function healthIssueView(recommendation, analysis, persistedIssues = []) {
 
 export function getProductImprovementCenter(productId, healthAnalysis) {
   const database = getDatabase();
-  const product = database.prepare("SELECT id,name FROM products WHERE id=?").get(text(productId));
-  if (!product) throw new Error("产品不存在。");
-  const persistedIssues = database.prepare("SELECT * FROM product_issues WHERE productId=? ORDER BY updatedAt DESC").all(product.id).map((row) => ({ ...row, detail: parseJson(row.detailJson, {}) }));
+  const product = resolveProductBusinessIdentity(productId, { database });
+  const params = productBusinessIdentityParams(product);
+  const persistedIssues = database.prepare(`SELECT * FROM product_issues record WHERE ${productBusinessIdentityPredicate("record")} ORDER BY updatedAt DESC`).all(params).map((row) => ({ ...row, detail: parseJson(row.detailJson, {}) }));
   const rows = database.prepare(`SELECT i.*,q.issueType,q.title issueTitle,q.detailJson,p.name actionName,p.displayTitle,p.status actionStatus,
       p.startedAt,p.createdAt actionCreatedAt,p.completedAt actionCompletedAt,t.ownerId,owner.name ownerName,
       (SELECT COUNT(*) FROM tasks task WHERE task.processInstanceId=p.id) taskCount,
       (SELECT COUNT(*) FROM tasks task WHERE task.processInstanceId=p.id AND task.status IN ('done','completed')) doneTaskCount
     FROM product_improvements i JOIN product_issues q ON q.id=i.issueId JOIN process_instances p ON p.id=i.actionId
     LEFT JOIN task_templates t ON t.id=p.taskTemplateId LEFT JOIN persons owner ON owner.id=t.ownerId
-    WHERE i.productId=? ORDER BY i.updatedAt DESC,i.createdAt DESC`).all(product.id);
+    WHERE ${productBusinessIdentityPredicate("i")} ORDER BY i.updatedAt DESC,i.createdAt DESC`).all(params);
   const improvements = rows.map((row) => {
     const item = parseImprovement(row); const type = productIssueTypeByCode.get(item.issueType);
     return { ...item, issueTypeLabel: type?.label ?? item.issueTitle, issueCategory: type?.category ?? "其他问题",
       actionName: item.displayTitle || item.actionName, ownerName: item.ownerName || "未设置", startAt: item.startedAt || item.actionCreatedAt,
       completedAt: item.completedAt || item.actionCompletedAt || null, canRecordResult: ["done", "completed"].includes(item.actionStatus) };
   });
-  return { product: { id: product.id, name: product.name }, issueTypes: productIssueTypeCatalog,
+  return { product: { id: product.erpSkuId, erpSkuId: product.erpSkuId, legacyProductId: product.legacyProductId, name: product.name }, issueTypes: productIssueTypeCatalog,
     currentIssues: (healthAnalysis?.recommendations ?? []).map((item) => healthIssueView(item, healthAnalysis, persistedIssues)).filter(Boolean),
     improvements, readOnlyFacts: true };
 }
 
 export function createProductHealthAction(productId, input, userId, healthAnalysis = null) {
   const database = getDatabase();
-  const product = database.prepare("SELECT id,name FROM products WHERE id=?").get(text(productId));
-  if (!product) throw new Error("产品不存在。");
+  const product = resolveProductBusinessIdentity(productId, { database });
+  upsertProductBusinessProfile(product.erpSkuId, {}, userId, { database });
   const recommendationCode = text(input?.recommendationCode);
   const recommendation = productHealthRecommendations[recommendationCode];
   if (!recommendation) throw new Error("改善行动类型无效。");
@@ -221,21 +232,21 @@ export function createProductHealthAction(productId, input, userId, healthAnalys
   const title = text(input?.title) || `${recommendation.title}：${product.name}`;
   return database.transaction(() => {
     const timestamp = now();
-    let issue = database.prepare("SELECT * FROM product_issues WHERE productId=? AND issueType=? AND status<>'closed' ORDER BY updatedAt DESC LIMIT 1").get(product.id, recommendation.issueType);
+    let issue = database.prepare(`SELECT * FROM product_issues record WHERE ${productBusinessIdentityPredicate("record")} AND issueType=@issueType AND status<>'closed' ORDER BY updatedAt DESC LIMIT 1`).get({ ...productBusinessIdentityParams(product), issueType: recommendation.issueType });
     const matchedRecommendation = healthAnalysis?.recommendations?.find((item) => item.code === recommendationCode);
     const problemDescription = matchedRecommendation?.reason || recommendation.issue;
     const issueType = productIssueTypeByCode.get(recommendation.issueType);
     if (!issue) {
       const healthRecordId = `product-health-improvement-${crypto.randomUUID()}`;
-      database.prepare(`INSERT INTO product_health_records (id,productId,snapshotKey,healthScore,healthStatus,metricsJson,problemsJson,suggestionsJson,createdAt,updatedAt)
-        VALUES (?,?,?,NULL,?,?,?,?,?,?)`).run(healthRecordId, product.id, `improvement:${crypto.randomUUID()}`, healthAnalysis?.overall?.code || "no_data",
+      database.prepare(`INSERT INTO product_health_records (id,productId,erpSkuId,snapshotKey,healthScore,healthStatus,metricsJson,problemsJson,suggestionsJson,createdAt,updatedAt)
+        VALUES (?,?,?,?,NULL,?,?,?,?,?,?)`).run(healthRecordId, product.legacyProductId, product.erpSkuId, `improvement:${crypto.randomUUID()}`, healthAnalysis?.overall?.code || "no_data",
         JSON.stringify(healthAnalysis || {}), JSON.stringify([{ issueType: recommendation.issueType, problemDescription }]), JSON.stringify([{ title: recommendation.title }]), timestamp, timestamp);
       const issueId = `product-issue-${crypto.randomUUID()}`;
       const detail = { standardIssueType: recommendation.issueType, category: issueType?.category, problemDescription,
         improvementGoal: recommendation.improvementGoal, suggestedDirection: recommendation.suggestedDirection,
         sourceRecommendationCode: recommendationCode, evidence: healthAnalysis?.dimensions?.[recommendation.dimension]?.evidence ?? {} };
-      database.prepare(`INSERT INTO product_issues (id,productId,healthRecordId,issueType,title,severity,detailJson,status,createdAt,updatedAt)
-        VALUES (?,?,?,?,?,?,?,'open',?,?)`).run(issueId, product.id, healthRecordId, recommendation.issueType, recommendation.problemTitle,
+      database.prepare(`INSERT INTO product_issues (id,productId,erpSkuId,healthRecordId,issueType,title,severity,detailJson,status,createdAt,updatedAt)
+        VALUES (?,?,?,?,?,?,?,?,'open',?,?)`).run(issueId, product.legacyProductId, product.erpSkuId, healthRecordId, recommendation.issueType, recommendation.problemTitle,
         healthAnalysis?.dimensions?.[recommendation.dimension]?.severity === "risk" ? "high" : "medium", JSON.stringify(detail), timestamp, timestamp);
       issue = database.prepare("SELECT * FROM product_issues WHERE id=?").get(issueId);
     }
@@ -243,16 +254,16 @@ export function createProductHealthAction(productId, input, userId, healthAnalys
       id: `process-instance-${crypto.randomUUID()}`, templateId: template.defaultProcessTemplateId, taskTemplateId: template.id,
       templateVersion: template.version, name: title, displayTitle: title, goalId: goal.id, initiatorId: text(userId),
       description: `来源：产品健康分析；产品：${product.name}；问题：${problemDescription}；改善目标：${recommendation.improvementGoal}；建议方向：${recommendation.suggestedDirection}。`, status: "draft",
-      customFields: { source: "product_health_analysis", productId: product.id, productIssueId: issue.id, problemType: recommendation.issueType,
+      customFields: { source: "product_health_analysis", productId: product.legacyProductId, erpSkuId: product.erpSkuId, productIssueId: issue.id, problemType: recommendation.issueType,
         problemTypeLabel: issueType?.label, problemDescription, improvementGoal: recommendation.improvementGoal,
         suggestedDirection: recommendation.suggestedDirection, recommendationCode }, createdAt: timestamp, updatedAt: timestamp,
     });
-    const actionProduct = createResource("action-products", { id: `action-product-${crypto.randomUUID()}`, actionId: instance.id, productId: product.id, createdAt: timestamp });
+    const actionProduct = createResource("action-products", { id: `action-product-${crypto.randomUUID()}`, actionId: instance.id, productId: product.legacyProductId, erpSkuId: product.erpSkuId, createdAt: timestamp });
     const improvementId = `product-improvement-${crypto.randomUUID()}`;
     const beforeMetrics = { summary: problemDescription, healthStatus: healthAnalysis?.overall ?? null,
       dimension: healthAnalysis?.dimensions?.[recommendation.dimension] ?? null, capturedAt: timestamp };
-    database.prepare(`INSERT INTO product_improvements (id,productId,issueId,actionId,title,status,beforeMetricsJson,afterMetricsJson,createdAt,updatedAt)
-      VALUES (?,?,?,?,?,'planned',?,'{}',?,?)`).run(improvementId, product.id, issue.id, instance.id, title, JSON.stringify(beforeMetrics), timestamp, timestamp);
+    database.prepare(`INSERT INTO product_improvements (id,productId,erpSkuId,issueId,actionId,title,status,beforeMetricsJson,afterMetricsJson,createdAt,updatedAt)
+      VALUES (?,?,?,?,?,?,'planned',?,'{}',?,?)`).run(improvementId, product.legacyProductId, product.erpSkuId, issue.id, instance.id, title, JSON.stringify(beforeMetrics), timestamp, timestamp);
     database.prepare("UPDATE product_issues SET status='improving',updatedAt=? WHERE id=?").run(timestamp, issue.id);
     const savedIssue = database.prepare("SELECT * FROM product_issues WHERE id=?").get(issue.id);
     return { instance, actionProduct, issue: { ...savedIssue, detail: parseJson(savedIssue.detailJson, {}) }, improvement: parseImprovement(database.prepare("SELECT * FROM product_improvements WHERE id=?").get(improvementId)) };
@@ -264,7 +275,7 @@ export function recordProductImprovementResult(improvementId, input, { visiblePr
   const current = database.prepare(`SELECT i.*,p.status actionStatus,p.completedAt actionCompletedAt FROM product_improvements i
     JOIN process_instances p ON p.id=i.actionId WHERE i.id=?`).get(text(improvementId));
   if (!current) throw new Error("产品改善记录不存在。");
-  if (visibleProductIds && !new Set(visibleProductIds).has(current.productId)) {
+  if (visibleProductIds && current.productId && !new Set(visibleProductIds).has(current.productId)) {
     const error = new Error("无权修改该产品的改善记录。"); error.statusCode = 403; throw error;
   }
   if (!["done", "completed"].includes(current.actionStatus)) throw new Error("关键行动完成后才能记录改善结果。");

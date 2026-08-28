@@ -1,4 +1,4 @@
-import { resolveAssetUrl, state } from "./appState.js";
+import { loadActionProductOptions, resolveAssetUrl, state } from "./appState.js";
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -8,16 +8,57 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
+const selectorTimers = new WeakMap();
 let indexedActionProducts = null;
-let indexedProducts = null;
 let indexedActionProductCount = -1;
-let indexedProductCount = -1;
 let indexedTaskProductContexts = null;
 let indexedTaskProductContextCount = -1;
 let indexedTaskProductContextSignature = "";
 let productIdsByActionId = new Map();
-let productsById = new Map();
 let taskProductsByContextId = new Map();
+
+function identityOf(product) {
+  return String(product?.erpSkuId || product?.id || product?.productId || "").trim();
+}
+
+function optionStatusLabel(product) {
+  const status = String(product?.status || product?.businessStatus || "").trim();
+  if (status === "unmaintained") return "经营资料未维护";
+  if (status === "active") return "经营中";
+  if (status === "paused") return "暂停经营";
+  if (status === "clearance") return "清仓";
+  if (status === "archived") return "归档";
+  return status || (product?.erpSkuId ? "经营资料未维护" : "Legacy 兼容关联");
+}
+
+function normalizeLegacyProduct(product) {
+  const mapping = (state.productErpMappings ?? []).find((item) => item.productId === product.id && item.currentState === "active");
+  return {
+    ...product,
+    legacyProductId: product.id,
+    erpSkuId: mapping?.erpSkuId || "",
+    erpSkuCode: mapping?.merchantSkuCode || product.skuCode || "",
+    hasBusinessProfile: Boolean(mapping?.erpSkuId),
+  };
+}
+
+function normalizeTaskContext(context) {
+  const erpSkuId = context.erpSkuId || "";
+  const legacyProductId = context.productId || "";
+  return {
+    id: erpSkuId || legacyProductId,
+    erpSkuId,
+    legacyProductId,
+    name: context.productName || context.erpSkuName || context.erpGoodsName || context.erpSkuCode || "ERP SKU",
+    skuCode: context.erpSkuCode || context.productSkuCode || "",
+    erpSkuCode: context.erpSkuCode || "",
+    mainImage: context.erpSkuImage || context.productImage || "",
+    productImage: context.productImage || "",
+    erpSkuImage: context.erpSkuImage || "",
+    status: context.businessStatus || (context.businessProfileId ? "active" : (erpSkuId ? "unmaintained" : context.productStatus || "")),
+    hasBusinessProfile: Boolean(context.businessProfileId),
+  };
+}
 
 function ensureProductRelationIndexes() {
   if (indexedActionProducts !== state.actionProducts || indexedActionProductCount !== state.actionProducts.length) {
@@ -25,51 +66,40 @@ function ensureProductRelationIndexes() {
     indexedActionProductCount = state.actionProducts.length;
     productIdsByActionId = new Map();
     [...state.actionProducts]
-      .sort(
-        (left, right) =>
-          String(left.createdAt ?? "").localeCompare(String(right.createdAt ?? "")) ||
-          String(left.id ?? "").localeCompare(String(right.id ?? "")),
-      )
+      .sort((left, right) => String(left.createdAt ?? "").localeCompare(String(right.createdAt ?? "")) || String(left.id ?? "").localeCompare(String(right.id ?? "")))
       .forEach((item) => {
-        const productIds = productIdsByActionId.get(item.actionId) ?? [];
-        productIds.push(item.productId);
-        productIdsByActionId.set(item.actionId, productIds);
+        const identities = productIdsByActionId.get(item.actionId) ?? [];
+        const identity = String(item.erpSkuId || item.productId || "").trim();
+        if (identity) identities.push(identity);
+        productIdsByActionId.set(item.actionId, identities);
       });
   }
-  if (indexedProducts !== state.products || indexedProductCount !== state.products.length) {
-    indexedProducts = state.products;
-    indexedProductCount = state.products.length;
-    productsById = new Map(state.products.map((product) => [product.id, product]));
-  }
-  const taskProductContextSignature = (state.taskProductContexts ?? [])
-    .map((item) => [item.contextId, item.productId, item.erpSkuId, item.productImage, item.erpSkuImage].join("|"))
+  const signature = (state.taskProductContexts ?? [])
+    .map((item) => [item.contextId, item.productId, item.erpSkuId, item.productImage, item.erpSkuImage, item.businessProfileId].join("|"))
     .join("\n");
-  if (
-    indexedTaskProductContexts !== state.taskProductContexts
-    || indexedTaskProductContextCount !== state.taskProductContexts.length
-    || indexedTaskProductContextSignature !== taskProductContextSignature
-  ) {
+  if (indexedTaskProductContexts !== state.taskProductContexts || indexedTaskProductContextCount !== state.taskProductContexts.length || indexedTaskProductContextSignature !== signature) {
     indexedTaskProductContexts = state.taskProductContexts;
     indexedTaskProductContextCount = state.taskProductContexts.length;
-    indexedTaskProductContextSignature = taskProductContextSignature;
+    indexedTaskProductContextSignature = signature;
     taskProductsByContextId = new Map();
     for (const context of state.taskProductContexts ?? []) {
       const rows = taskProductsByContextId.get(context.contextId) ?? [];
-      rows.push({
-        id: context.productId || "",
-        erpSkuId: context.erpSkuId || "",
-        name: context.productName || context.erpSkuName || context.erpGoodsName || context.erpSkuCode || "ERP SKU",
-        skuCode: context.productSkuCode || context.erpSkuCode || "",
-        erpSkuCode: context.erpSkuCode || "",
-        mainImage: context.productImage || context.erpSkuImage || "",
-        productImage: context.productImage || "",
-        erpSkuImage: context.erpSkuImage || "",
-        status: context.productStatus || context.erpStatus || "",
-        hasProductProfile: Boolean(context.productId),
-      });
+      rows.push(normalizeTaskContext(context));
       taskProductsByContextId.set(context.contextId, rows);
     }
   }
+}
+
+function allKnownProducts() {
+  const options = state.actionProductOptions ?? [];
+  const contexts = [...taskProductsByContextId.values()].flat();
+  const legacy = (state.products ?? []).map(normalizeLegacyProduct);
+  return [...new Map([...legacy, ...contexts, ...options].map((product) => [identityOf(product), product])).values()];
+}
+
+function findKnownProduct(identity) {
+  const id = String(identity ?? "").trim();
+  return allKnownProducts().find((product) => identityOf(product) === id || product.legacyProductId === id);
 }
 
 export function getActionProductIds(actionId) {
@@ -79,8 +109,9 @@ export function getActionProductIds(actionId) {
 
 export function getActionProducts(actionId) {
   ensureProductRelationIndexes();
-  const products = getActionProductIds(actionId).map((productId) => productsById.get(productId)).filter(Boolean);
-  return products.length > 0 ? products : [...(taskProductsByContextId.get(actionId) ?? [])];
+  const contextual = [...(taskProductsByContextId.get(actionId) ?? [])];
+  if (contextual.length > 0) return contextual;
+  return getActionProductIds(actionId).map(findKnownProduct).filter(Boolean);
 }
 
 export function getPrimaryActionProduct(actionId) {
@@ -93,18 +124,8 @@ export function getActionProductImageUrls(actionId) {
 
 export function getActionDisplayImages(actionId, fallbackImages = []) {
   const products = getActionProducts(actionId);
-  if (products.length > 0) {
-    return {
-      images: products.slice(0, 9).map((product) => String(product.mainImage ?? "").trim()),
-      linkedProducts: products,
-      usesLinkedProducts: true,
-    };
-  }
-  return {
-    images: Array.isArray(fallbackImages) ? fallbackImages : [],
-    linkedProducts: [],
-    usesLinkedProducts: false,
-  };
+  if (products.length > 0) return { images: products.slice(0, 9).map((product) => String(product.mainImage ?? "").trim()), linkedProducts: products, usesLinkedProducts: true };
+  return { images: Array.isArray(fallbackImages) ? fallbackImages : [], linkedProducts: [], usesLinkedProducts: false };
 }
 
 function renderProductThumb(product) {
@@ -118,15 +139,11 @@ export function getTaskContextProducts(contextId) {
   return [...(taskProductsByContextId.get(contextId) ?? [])];
 }
 
-function relationSkuCodes(productId) {
-  return (state.productErpMappings ?? []).filter((item) => item.productId === productId)
-    .flatMap((item) => [item.merchantSkuCode, item.barcode]).filter(Boolean);
-}
-
 function normalizeCode(value) { return String(value ?? "").trim().toLowerCase(); }
 
-function relationCreatedAt(actionId, productId) {
-  return state.actionProducts.find((item) => item.actionId === actionId && item.productId === productId)?.createdAt ?? "";
+function relationCreatedAt(actionId, product) {
+  const identity = identityOf(product);
+  return state.actionProducts.find((item) => item.actionId === actionId && (item.erpSkuId === identity || item.productId === identity || item.productId === product.legacyProductId))?.createdAt ?? "";
 }
 
 function formatRelationTime(value) {
@@ -137,70 +154,85 @@ function formatRelationTime(value) {
 
 function renderSelectedProducts(products, actionId = "") {
   if (products.length === 0) return `<p class="form-note">尚未选择关联产品</p>`;
-  return products
-    .map(
-      (product) => `
-        <div class="action-product-selected-item">
-          ${renderProductThumb(product)}
-          <span><strong>${escapeHtml(product.name)}</strong><small>产品编码：${escapeHtml(product.skuCode)}</small><small>ERP SKU：${escapeHtml(product.erpSkuCode || relationSkuCodes(product.id).join("、") || product.skuCode)}</small><small>关联时间：${escapeHtml(formatRelationTime(relationCreatedAt(actionId, product.id)))}</small>${product.hasProductProfile === false ? `<small>未建立产品档案</small>` : ""}</span>
-          ${product.id ? `<button class="icon-button" type="button" data-action="remove-action-product" data-product-id="${escapeHtml(product.id)}" aria-label="移除${escapeHtml(product.name)}">×</button>` : ""}
-        </div>
-      `,
-    )
-    .join("");
+  return products.map((product) => {
+    const identity = identityOf(product);
+    return `<div class="action-product-selected-item">
+      ${renderProductThumb(product)}
+      <span><strong>${escapeHtml(product.name)}</strong><small>ERP SKU：${escapeHtml(product.erpSkuCode || product.skuCode || "—")}</small><small>经营状态：${escapeHtml(optionStatusLabel(product))}</small><small>关联时间：${escapeHtml(formatRelationTime(relationCreatedAt(actionId, product)))}</small></span>
+      ${identity ? `<button class="icon-button" type="button" data-action="remove-action-product" data-product-id="${escapeHtml(identity)}" aria-label="移除${escapeHtml(product.name)}">×</button>` : ""}
+    </div>`;
+  }).join("");
+}
+
+function renderOption(product, selected) {
+  const identity = identityOf(product);
+  return `<article class="action-product-option" data-product-id="${escapeHtml(identity)}" data-product-code="${escapeHtml(normalizeCode(product.erpSkuCode || product.skuCode))}">
+    <input type="checkbox" name="actionProductId" value="${escapeHtml(identity)}" ${selected.has(identity) ? "checked" : ""} hidden />
+    ${renderProductThumb(product)}
+    <span><strong>${escapeHtml(product.name)}</strong><small>ERP SKU：${escapeHtml(product.erpSkuCode || product.skuCode || "—")}</small><small>经营状态：${escapeHtml(optionStatusLabel(product))}</small></span>
+    <button class="text-button" type="button" data-action="choose-action-product" data-product-id="${escapeHtml(identity)}">${selected.has(identity) ? "已关联" : "选择"}</button>
+  </article>`;
 }
 
 export function renderActionProductSelector(selectedIds = [], { label = "关联产品", actionId = "" } = {}) {
-  const selected = new Set(selectedIds);
-  const selectedProducts = getActionProducts(actionId).filter((product) => product.id === "" || selected.has(product.id));
-  const products = state.products.filter((product) => product.status !== "已归档" || selected.has(product.id))
-    .sort((left, right) => String(left.skuCode ?? "").localeCompare(String(right.skuCode ?? ""), "zh-CN", { numeric: true }));
-  const availableProductIds = new Set(products.map((product) => product.id));
-  const preservedSelectedInputs = selectedIds
-    .filter((productId) => !availableProductIds.has(productId))
-    .map((productId) => `<input type="checkbox" name="actionProductId" value="${escapeHtml(productId)}" checked hidden data-preserved-action-product />`)
-    .join("");
-  return `
-    <div class="action-product-selector" data-action-product-selector data-action-id="${escapeHtml(actionId)}">
-      <span class="field-label">${escapeHtml(label)}</span>
-      ${preservedSelectedInputs}
-      <div class="action-product-selected" data-action-product-selected>${renderSelectedProducts(selectedProducts, actionId)}</div>
-      <div class="action-product-quick-link">
-        <strong>手动关联</strong>
-        <div class="action-product-search-row"><input class="action-product-search" type="search" placeholder="输入完整产品编码" data-action-product-quick-code autocomplete="off" /><button class="primary-button" type="button" data-action="quick-link-action-product">关联</button></div>
-        <p class="form-note" data-action-product-quick-message>输入准确产品编码后直接关联，可连续添加多个产品。</p>
-      </div>
-      <details class="action-product-search-section" data-action-product-search-details>
-        <summary>搜索关联</summary>
-        <div class="action-product-search-content">
-          <input class="action-product-search" type="search" placeholder="搜索产品编码、SKU编码或产品名称" data-action-product-search autocomplete="off" />
-          <p class="form-note" data-action-product-search-message>输入关键词查看匹配产品。</p>
-          <div class="action-product-confirm" data-action-product-confirm hidden></div>
-          <div class="action-product-options" data-action-product-options>
-            ${products.length === 0 ? `<p class="form-note">产品中心暂无可选产品</p>` : products.map((product) => `
-              <article class="action-product-option" data-product-id="${escapeHtml(product.id)}" data-product-code="${escapeHtml(normalizeCode(product.skuCode))}" data-search="${escapeHtml(`${product.skuCode} ${product.name} ${relationSkuCodes(product.id).join(" ")}`.toLowerCase())}" hidden>
-                <input type="checkbox" name="actionProductId" value="${escapeHtml(product.id)}" ${selected.has(product.id) ? "checked" : ""} hidden />
-                ${renderProductThumb(product)}
-                <span><strong>${escapeHtml(product.name)}</strong><small>产品编码：${escapeHtml(product.skuCode)}</small><small>SKU：${escapeHtml(relationSkuCodes(product.id).join("、") || product.skuCode)}</small></span>
-                <button class="text-button" type="button" data-action="choose-action-product" data-product-id="${escapeHtml(product.id)}">${selected.has(product.id) ? "已关联" : "选择"}</button>
-              </article>
-            `).join("")}
-          </div>
-        </div>
-      </details>
+  const selected = new Set(selectedIds.map(String).filter(Boolean));
+  const selectedProducts = [...new Map([...getActionProducts(actionId), ...selectedIds.map(findKnownProduct).filter(Boolean)].map((product) => [identityOf(product), product])).values()]
+    .filter((product) => selected.size === 0 ? Boolean(actionId) : selected.has(identityOf(product)) || selected.has(product.legacyProductId));
+  const preserved = [...selected].map((identity) => `<input type="checkbox" name="actionProductId" value="${escapeHtml(identity)}" checked hidden data-preserved-action-product />`).join("");
+  return `<div class="action-product-selector" data-action-product-selector data-action-id="${escapeHtml(actionId)}">
+    <span class="field-label">${escapeHtml(label)}</span>${preserved}
+    <div class="action-product-selected" data-action-product-selected>${renderSelectedProducts(selectedProducts, actionId)}</div>
+    <div class="action-product-quick-link"><strong>按 ERP SKU 关联</strong>
+      <div class="action-product-search-row"><input class="action-product-search" type="search" placeholder="输入完整 ERP SKU 编码" data-action-product-quick-code autocomplete="off" /><button class="primary-button" type="button" data-action="quick-link-action-product">关联</button></div>
+      <p class="form-note" data-action-product-quick-message>无需建立 Legacy 产品档案，ERP SKU 可直接关联。</p>
     </div>
-  `;
+    <details class="action-product-search-section" data-action-product-search-details><summary>搜索关联</summary>
+      <div class="action-product-search-content"><input class="action-product-search" type="search" placeholder="搜索 ERP SKU 编码或产品名称" data-action-product-search autocomplete="off" />
+        <p class="form-note" data-action-product-search-message>输入关键词搜索 ERP SKU。</p>
+        <div class="action-product-confirm" data-action-product-confirm hidden></div>
+        <div class="action-product-options" data-action-product-options></div>
+      </div>
+    </details>
+  </div>`;
+}
+
+function mergeKnownOptions(rows) {
+  const merged = new Map((state.actionProductOptions ?? []).map((product) => [identityOf(product), product]));
+  for (const product of rows) merged.set(identityOf(product), product);
+  state.actionProductOptions = [...merged.values()];
+}
+
+function renderOptions(selector, rows) {
+  const selected = new Set(collectActionProductIds(selector));
+  const host = selector.querySelector("[data-action-product-options]");
+  if (host) host.innerHTML = rows.length ? rows.map((product) => renderOption(product, selected)).join("") : `<p class="form-note">未找到匹配的 ERP SKU</p>`;
+}
+
+async function searchOptions(selector, query) {
+  const requestId = String(Date.now()) + Math.random();
+  selector.dataset.productRequestId = requestId;
+  const message = selector.querySelector("[data-action-product-search-message]");
+  if (message) message.textContent = "正在搜索 ERP SKU…";
+  try {
+    const result = await loadActionProductOptions(query);
+    if (selector.dataset.productRequestId !== requestId) return [];
+    const rows = result.rows ?? [];
+    mergeKnownOptions(rows);
+    renderOptions(selector, rows);
+    if (message) message.textContent = query ? `找到 ${rows.length} 个匹配 ERP SKU` : "请输入 ERP SKU 编码或产品名称。";
+    refreshSelected(selector);
+    return rows;
+  } catch (error) {
+    if (message) message.textContent = error.message || "ERP SKU 搜索失败。";
+    return [];
+  }
 }
 
 function refreshSelected(selector) {
-  const selectedIds = collectActionProductIds(selector);
-  const contextProducts = getTaskContextProducts(selector.dataset.actionId);
-  const contextByProductId = new Map(contextProducts.filter((product) => product.id).map((product) => [product.id, product]));
-  const selectedProducts = selectedIds
-    .map((productId) => state.products.find((product) => product.id === productId) ?? contextByProductId.get(productId))
-    .filter(Boolean);
+  ensureProductRelationIndexes();
+  const selectedProducts = collectActionProductIds(selector).map(findKnownProduct).filter(Boolean);
   const host = selector.querySelector("[data-action-product-selected]");
-  if (host !== null) host.innerHTML = renderSelectedProducts(selectedProducts, selector.dataset.actionId);
+  if (host) host.innerHTML = renderSelectedProducts(selectedProducts, selector.dataset.actionId);
   selector.querySelectorAll(".action-product-option").forEach((option) => {
     const checked = option.querySelector('[name="actionProductId"]')?.checked === true;
     const button = option.querySelector('[data-action="choose-action-product"]');
@@ -209,118 +241,76 @@ function refreshSelected(selector) {
 }
 
 function renderProductConfirmation(product, isSelected = false) {
-  return `${renderProductThumb(product)}<span><strong>${escapeHtml(product.name)}</strong><small>产品编码：${escapeHtml(product.skuCode)}</small><small>SKU：${escapeHtml(relationSkuCodes(product.id).join("、") || product.skuCode)}</small></span><button class="primary-button" type="button" data-action="confirm-action-product" data-product-id="${escapeHtml(product.id)}" ${isSelected ? "disabled" : ""}>${isSelected ? "已关联" : "确认关联"}</button>`;
-}
-
-function filterProductOptions(selector, query) {
-  const normalized = normalizeCode(query); const options = [...selector.querySelectorAll(".action-product-option")];
-  const matches = options.filter((option) => normalized && option.dataset.search.includes(normalized));
-  matches.sort((left, right) => Number(right.dataset.productCode === normalized) - Number(left.dataset.productCode === normalized));
-  options.forEach((option) => { option.hidden = !matches.includes(option); });
-  const host = selector.querySelector("[data-action-product-options]"); matches.forEach((option) => host?.append(option));
-  return matches;
+  const identity = identityOf(product);
+  return `${renderProductThumb(product)}<span><strong>${escapeHtml(product.name)}</strong><small>ERP SKU：${escapeHtml(product.erpSkuCode || product.skuCode || "—")}</small><small>经营状态：${escapeHtml(optionStatusLabel(product))}</small></span><button class="primary-button" type="button" data-action="confirm-action-product" data-product-id="${escapeHtml(identity)}" ${isSelected ? "disabled" : ""}>${isSelected ? "已关联" : "确认关联"}</button>`;
 }
 
 export function bindActionProductSelectors(root = document) {
   root.querySelectorAll("[data-action-product-selector]").forEach((selector) => {
     selector.addEventListener("input", (event) => {
       if (!event.target.matches("[data-action-product-search]")) return;
-      const matches = filterProductOptions(selector, event.target.value);
-      const message = selector.querySelector("[data-action-product-search-message]");
-      if (message) message.textContent = event.target.value.trim() ? `找到 ${matches.length} 个匹配产品` : "输入关键词查看匹配产品。";
+      window.clearTimeout(selectorTimers.get(selector));
+      const query = event.target.value.trim();
+      if (!query) { renderOptions(selector, []); return; }
+      selectorTimers.set(selector, window.setTimeout(() => { void searchOptions(selector, query); }, 250));
     });
     selector.addEventListener("keydown", (event) => {
       if (!event.target.matches("[data-action-product-quick-code]") || event.key !== "Enter") return;
       event.preventDefault();
       selector.querySelector('[data-action="quick-link-action-product"]')?.click();
     });
-    selector.addEventListener("click", (event) => {
+    selector.addEventListener("click", async (event) => {
       const action = event.target.closest("[data-action]")?.dataset.action;
       if (action === "quick-link-action-product") {
         const query = selector.querySelector("[data-action-product-quick-code]")?.value.trim() ?? "";
-        const matches = [...selector.querySelectorAll(".action-product-option")]
-          .filter((option) => option.dataset.productCode === normalizeCode(query));
-        selector.querySelectorAll(".action-product-option").forEach((option) => { option.hidden = !matches.includes(option); });
         const message = selector.querySelector("[data-action-product-quick-message]");
-        if (!query || !matches.length) {
-          if (message) message.textContent = !query ? "请输入产品编码。" : "未找到对应产品。";
+        if (!query) { if (message) message.textContent = "请输入 ERP SKU 编码。"; return; }
+        const rows = await searchOptions(selector, query);
+        const matches = rows.filter((product) => normalizeCode(product.erpSkuCode || product.skuCode) === normalizeCode(query));
+        if (matches.length !== 1) {
+          if (message) message.textContent = matches.length ? "存在多个同编码 ERP SKU，请在搜索结果中选择。" : "未找到对应 ERP SKU。";
+          selector.querySelector("[data-action-product-search-details]").open = true;
           return;
         }
-        if (matches.length > 1) {
-          const details = selector.querySelector("[data-action-product-search-details]");
-          if (details) details.open = true;
-          const searchMessage = selector.querySelector("[data-action-product-search-message]");
-          if (searchMessage) searchMessage.textContent = `存在 ${matches.length} 个同编码产品，请选择。`;
-          if (message) message.textContent = "存在多个匹配产品，已进入搜索选择模式。";
-          return;
-        }
-        const input = matches[0].querySelector('[name="actionProductId"]');
-        if (input?.checked) {
-          if (message) message.textContent = "该产品已关联。";
-          return;
-        }
+        const identity = identityOf(matches[0]);
+        const input = selector.querySelector(`[name="actionProductId"][value="${CSS.escape(identity)}"]`);
         if (input) input.checked = true;
-        const quickInput = selector.querySelector("[data-action-product-quick-code]");
-        if (quickInput) quickInput.value = "";
-        if (message) message.textContent = "关联成功，可继续输入下一个产品编码。";
-        refreshSelected(selector);
-        return;
+        if (message) message.textContent = "关联成功，可继续输入下一个 ERP SKU。";
+        const quick = selector.querySelector("[data-action-product-quick-code]"); if (quick) quick.value = "";
+        refreshSelected(selector); return;
       }
       if (action === "choose-action-product") {
-        const option = event.target.closest(".action-product-option");
-        const product = state.products.find((item) => item.id === option?.dataset.productId);
-        const confirm = selector.querySelector("[data-action-product-confirm]");
-        if (confirm && product) {
-          confirm.innerHTML = renderProductConfirmation(product, option?.querySelector('[name="actionProductId"]')?.checked === true);
-          confirm.hidden = false;
-        }
+        const identity = event.target.closest("[data-product-id]")?.dataset.productId || "";
+        const product = findKnownProduct(identity); const confirm = selector.querySelector("[data-action-product-confirm]");
+        const input = selector.querySelector(`[name="actionProductId"][value="${CSS.escape(identity)}"]`);
+        if (confirm && product) { confirm.innerHTML = renderProductConfirmation(product, input?.checked === true); confirm.hidden = false; }
         return;
       }
       if (action === "confirm-action-product") {
-        const productId = event.target.closest("[data-product-id]")?.dataset.productId ?? "";
-        const input = selector.querySelector(`[name="actionProductId"][value="${CSS.escape(productId)}"]`);
-        const message = selector.querySelector("[data-action-product-quick-message]");
-        if (input?.checked) {
-          if (message) message.textContent = "该产品已经关联，无需重复添加。";
-          return;
-        }
-        if (input) input.checked = true;
-        const confirm = selector.querySelector("[data-action-product-confirm]");
-        if (confirm) confirm.hidden = true;
-        const quickInput = selector.querySelector("[data-action-product-quick-code]");
-        if (quickInput) quickInput.value = "";
-        const searchInput = selector.querySelector("[data-action-product-search]");
-        if (searchInput) searchInput.value = "";
-        filterProductOptions(selector, "");
-        if (message) message.textContent = "已添加关联产品，可继续输入下一个产品编码。";
-        refreshSelected(selector);
-        return;
+        const identity = event.target.closest("[data-product-id]")?.dataset.productId || "";
+        selector.querySelectorAll(`[name="actionProductId"][value="${CSS.escape(identity)}"]`).forEach((input) => { input.checked = true; });
+        const confirm = selector.querySelector("[data-action-product-confirm]"); if (confirm) confirm.hidden = true;
+        refreshSelected(selector); return;
       }
-      const button = event.target.closest("[data-action='remove-action-product']");
-      if (button === null) return;
-      const input = selector.querySelector(`[name="actionProductId"][value="${CSS.escape(button.dataset.productId)}"]`);
-      if (input !== null) input.checked = false;
-      refreshSelected(selector);
+      if (action === "remove-action-product") {
+        const identity = event.target.closest("[data-product-id]")?.dataset.productId || "";
+        selector.querySelectorAll(`[name="actionProductId"][value="${CSS.escape(identity)}"]`).forEach((input) => { input.checked = false; });
+        refreshSelected(selector);
+      }
     });
   });
 }
 
 export function collectActionProductIds(root) {
-  return [...root.querySelectorAll('[name="actionProductId"]:checked')].map((input) => input.value);
+  return [...new Set([...root.querySelectorAll('[name="actionProductId"]:checked')].map((input) => input.value).filter(Boolean))];
 }
 
 export function renderLinkedActionProducts(actionId, { compact = false } = {}) {
   const products = getActionProducts(actionId);
   if (products.length === 0) return `<p class="form-note">未关联产品</p>`;
-  return `
-    <div class="linked-action-products ${compact ? "is-compact" : ""}">
-      ${products.map((product) => {
-        const href = product.erpSkuId ? `#products/sku/${encodeURIComponent(product.erpSkuId)}` : (product.id ? `#products/${encodeURIComponent(product.id)}` : "");
-        const content = `
-          ${renderProductThumb(product)}
-          <span><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(product.skuCode)}</small>${product.hasProductProfile === false ? `<small>未建立产品档案</small>` : ""}${compact ? "" : `<small>关联时间：${escapeHtml(formatRelationTime(relationCreatedAt(actionId, product.id)))}</small>`}</span>`;
-        return href ? `<a class="linked-action-product" href="${href}">${content}</a>` : `<div class="linked-action-product">${content}</div>`;
-      }).join("")}
-    </div>
-  `;
+  return `<div class="linked-action-products ${compact ? "is-compact" : ""}">${products.map((product) => {
+    const href = product.erpSkuId ? `#products/sku/${encodeURIComponent(product.erpSkuId)}` : (product.legacyProductId ? `#products/${encodeURIComponent(product.legacyProductId)}` : "");
+    const content = `${renderProductThumb(product)}<span><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(product.erpSkuCode || product.skuCode || "—")}</small><small>${escapeHtml(optionStatusLabel(product))}</small>${compact ? "" : `<small>关联时间：${escapeHtml(formatRelationTime(relationCreatedAt(actionId, product)))}</small>`}</span>`;
+    return href ? `<a class="linked-action-product" href="${href}">${content}</a>` : `<div class="linked-action-product">${content}</div>`;
+  }).join("")}</div>`;
 }

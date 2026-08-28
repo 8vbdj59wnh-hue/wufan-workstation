@@ -1,6 +1,7 @@
 import { getProductBusinessReadModel } from "./productBusinessReadModel.js";
 import { getProductImprovementCenter } from "./productManagementV2Service.js";
 import { getProductStrategy } from "./productStrategyService.js";
+import { resolveProductBusinessIdentity } from "./productBusinessProfileService.js";
 
 const terminalActionStatuses = new Set(["done", "completed", "canceled", "cancelled", "stopped", "terminated"]);
 const strategyGrowthPattern = /扩大|增长|提升销售|提高销量|拓展|扩张|增加销量|增加销售/;
@@ -88,12 +89,13 @@ export function diagnoseProductBusinessContext(context, provider = ruleProductDi
 
 export function getProductBusinessDiagnosis(productId, options = {}, provider = ruleProductDiagnosisProvider) {
   const { periodQuery = null, ...readOptions } = options;
-  const result = getProductBusinessReadModel({ range: "30d", ...(periodQuery ?? {}), productId, page: 1, pageSize: 1 }, readOptions);
+  const product = resolveProductBusinessIdentity(productId, { database: readOptions.database });
+  const result = getProductBusinessReadModel({ range: "30d", ...(periodQuery ?? {}), erpSkuId: product.erpSkuId, page: 1, pageSize: 1 }, readOptions);
   const business = result.items[0];
-  if (!business || business.id !== String(productId ?? "").trim()) { const error = new Error("产品不存在或无权查看。"); error.statusCode = 404; throw error; }
-  const strategy = getProductStrategy(productId, { visibleProductIds: readOptions.visibleProductIds ?? null });
-  const improvement = getProductImprovementCenter(productId, business.healthAnalysis);
-  return provider.diagnose({ business, health: business.healthAnalysis, strategy, improvement, period: result.period });
+  if (!business || business.erpSkuId !== product.erpSkuId) { const error = new Error("产品不存在或无权查看。"); error.statusCode = 404; throw error; }
+  const strategy = getProductStrategy(product.erpSkuId, { visibleProductIds: readOptions.visibleProductIds ?? null });
+  const improvement = getProductImprovementCenter(product.erpSkuId, business.healthAnalysis);
+  return provider.diagnose({ business: { ...business, id: business.erpSkuId }, health: business.healthAnalysis, strategy, improvement, period: result.period });
 }
 
 export function attachProductDiagnosisSummaries(readModel, provider = ruleProductDiagnosisProvider) {

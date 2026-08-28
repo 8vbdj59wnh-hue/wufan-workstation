@@ -52,7 +52,8 @@ test("旧字段保留在明确Legacy兼容区而不静默改义", () => {
   const model = source("server/productBusinessReadModel.js");
   assert.match(model, /legacyFields/);
   assert.match(model, /item\.sales\.legacy/);
-  assert.match(model, /salesContractVersion: "product-contribution-v1"/);
+  assert.match(model, /identity: "ERP SKU"/);
+  assert.match(model, /salesContractVersion: "erp-sku-contribution-v2"/);
 });
 
 test("新口径仅读Daily Facts、Sales Object BOM和Product Mapping", () => {

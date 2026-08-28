@@ -501,7 +501,7 @@ const resourceConfigs = {
   },
   actionProducts: {
     table: "action_products",
-    columns: ["id", "actionId", "productId", "createdAt"],
+    columns: ["id", "actionId", "productId", "erpSkuId", "createdAt"],
   },
   productImportBatches: {
     table: "product_import_batches",
@@ -1209,6 +1209,162 @@ function ensureColumn(table, column, definition) {
 
 function tableExists(table) {
   return Boolean(getDatabase().prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table));
+}
+
+const productBusinessDualIdentityTables = Object.freeze([
+  "product_marketing_assets", "action_products", "product_lifecycle_events", "product_health_records",
+  "product_issues", "product_improvements", "product_strategy_versions", "product_insights", "product_clearance_plans",
+]);
+
+function productBusinessErpBackfillExpression(alias = "legacy") {
+  return `COALESCE(${alias}.erpSkuId,(SELECT mapping.erpSkuId FROM product_erp_mappings mapping
+    WHERE mapping.productId=${alias}.productId AND mapping.currentState='active'
+      AND (SELECT COUNT(*) FROM product_erp_mappings product_mapping WHERE product_mapping.productId=${alias}.productId AND product_mapping.currentState='active')=1
+      AND (SELECT COUNT(*) FROM product_erp_mappings erp_mapping WHERE erp_mapping.erpSkuId=mapping.erpSkuId AND erp_mapping.currentState='active')=1
+    ORDER BY mapping.updatedAt DESC,mapping.id DESC LIMIT 1))`;
+}
+
+function rebuildProductBusinessDualIdentityTables() {
+  const database = getDatabase();
+  for (const table of productBusinessDualIdentityTables) if (tableExists(table)) ensureColumn(table, "erpSkuId", "TEXT");
+  const needsRebuild = productBusinessDualIdentityTables.some((table) => tableExists(table)
+    && database.prepare(`PRAGMA table_info(${table})`).all().some((column) => column.name === "productId" && Number(column.notnull) === 1));
+  if (!needsRebuild) return;
+  const erp = productBusinessErpBackfillExpression();
+  database.pragma("foreign_keys = OFF");
+  try {
+    database.transaction(() => {
+      database.exec(`
+        DROP TABLE IF EXISTS product_marketing_assets_phase_b;
+        CREATE TABLE product_marketing_assets_phase_b (
+          id TEXT PRIMARY KEY,productId TEXT,erpSkuId TEXT,positioning TEXT,targetAudience TEXT,
+          usageScenariosJson TEXT NOT NULL DEFAULT '[]',sellingPointsJson TEXT NOT NULL DEFAULT '[]',productStory TEXT,
+          keywordsJson TEXT NOT NULL DEFAULT '[]',createdBy TEXT,updatedBy TEXT,createdAt TEXT NOT NULL,updatedAt TEXT NOT NULL,
+          FOREIGN KEY(productId) REFERENCES products(id),FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),
+          FOREIGN KEY(createdBy) REFERENCES persons(id),FOREIGN KEY(updatedBy) REFERENCES persons(id)
+        );
+        INSERT INTO product_marketing_assets_phase_b
+          SELECT id,productId,${erp},positioning,targetAudience,usageScenariosJson,sellingPointsJson,productStory,keywordsJson,createdBy,updatedBy,createdAt,updatedAt FROM product_marketing_assets legacy;
+
+        DROP TABLE IF EXISTS action_products_phase_b;
+        CREATE TABLE action_products_phase_b (
+          id TEXT PRIMARY KEY,actionId TEXT NOT NULL,productId TEXT,erpSkuId TEXT,createdAt TEXT,
+          UNIQUE(actionId,productId),FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id)
+        );
+        INSERT INTO action_products_phase_b SELECT id,actionId,productId,${erp},createdAt FROM action_products legacy;
+
+        DROP TABLE IF EXISTS product_lifecycle_events_phase_b;
+        CREATE TABLE product_lifecycle_events_phase_b (
+          id TEXT PRIMARY KEY,productId TEXT,erpSkuId TEXT,fromStatus TEXT,toStatus TEXT NOT NULL,reason TEXT,changedBy TEXT,changedAt TEXT NOT NULL,
+          FOREIGN KEY(productId) REFERENCES products(id),FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),FOREIGN KEY(changedBy) REFERENCES persons(id)
+        );
+        INSERT INTO product_lifecycle_events_phase_b SELECT id,productId,${erp},fromStatus,toStatus,reason,changedBy,changedAt FROM product_lifecycle_events legacy;
+
+        DROP TABLE IF EXISTS product_health_records_phase_b;
+        CREATE TABLE product_health_records_phase_b (
+          id TEXT PRIMARY KEY,productId TEXT,erpSkuId TEXT,snapshotKey TEXT NOT NULL,healthScore REAL,healthStatus TEXT NOT NULL,
+          metricsJson TEXT NOT NULL DEFAULT '{}',problemsJson TEXT NOT NULL DEFAULT '[]',suggestionsJson TEXT NOT NULL DEFAULT '[]',createdAt TEXT NOT NULL,updatedAt TEXT NOT NULL,
+          FOREIGN KEY(productId) REFERENCES products(id),FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),UNIQUE(productId,snapshotKey)
+        );
+        INSERT INTO product_health_records_phase_b SELECT id,productId,${erp},snapshotKey,healthScore,healthStatus,metricsJson,problemsJson,suggestionsJson,createdAt,updatedAt FROM product_health_records legacy;
+
+        DROP TABLE IF EXISTS product_issues_phase_b;
+        CREATE TABLE product_issues_phase_b (
+          id TEXT PRIMARY KEY,productId TEXT,erpSkuId TEXT,healthRecordId TEXT NOT NULL,issueType TEXT NOT NULL,title TEXT NOT NULL,severity TEXT NOT NULL,
+          detailJson TEXT NOT NULL DEFAULT '{}',status TEXT NOT NULL DEFAULT 'open',createdAt TEXT NOT NULL,updatedAt TEXT NOT NULL,
+          FOREIGN KEY(productId) REFERENCES products(id),FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),FOREIGN KEY(healthRecordId) REFERENCES product_health_records(id),UNIQUE(healthRecordId,issueType)
+        );
+        INSERT INTO product_issues_phase_b SELECT id,productId,${erp},healthRecordId,issueType,title,severity,detailJson,status,createdAt,updatedAt FROM product_issues legacy;
+
+        DROP TABLE IF EXISTS product_improvements_phase_b;
+        CREATE TABLE product_improvements_phase_b (
+          id TEXT PRIMARY KEY,productId TEXT,erpSkuId TEXT,issueId TEXT NOT NULL,actionId TEXT NOT NULL,title TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'planned',
+          beforeMetricsJson TEXT NOT NULL DEFAULT '{}',afterMetricsJson TEXT NOT NULL DEFAULT '{}',improvementMeasures TEXT,resultSummary TEXT,completedAt TEXT,createdAt TEXT NOT NULL,updatedAt TEXT NOT NULL,
+          FOREIGN KEY(productId) REFERENCES products(id),FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),FOREIGN KEY(issueId) REFERENCES product_issues(id),FOREIGN KEY(actionId) REFERENCES process_instances(id),UNIQUE(issueId,actionId)
+        );
+        INSERT INTO product_improvements_phase_b SELECT id,productId,${erp},issueId,actionId,title,status,beforeMetricsJson,afterMetricsJson,improvementMeasures,resultSummary,completedAt,createdAt,updatedAt FROM product_improvements legacy;
+
+        DROP TABLE IF EXISTS product_strategy_versions_phase_b;
+        CREATE TABLE product_strategy_versions_phase_b (
+          id TEXT PRIMARY KEY,productId TEXT,erpSkuId TEXT,version INTEGER NOT NULL,status TEXT NOT NULL DEFAULT 'current',effectiveAt TEXT NOT NULL,endedAt TEXT,changedBy TEXT,
+          contentJson TEXT NOT NULL DEFAULT '{}',createdAt TEXT NOT NULL,updatedAt TEXT NOT NULL,UNIQUE(productId,version),
+          FOREIGN KEY(productId) REFERENCES products(id),FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id)
+        );
+        INSERT INTO product_strategy_versions_phase_b SELECT id,productId,${erp},version,status,effectiveAt,endedAt,changedBy,contentJson,createdAt,updatedAt FROM product_strategy_versions legacy;
+
+        DROP TABLE IF EXISTS product_insights_phase_b;
+        CREATE TABLE product_insights_phase_b (
+          id TEXT PRIMARY KEY,productId TEXT,erpSkuId TEXT,insightType TEXT NOT NULL,content TEXT NOT NULL,source TEXT NOT NULL,importance INTEGER,description TEXT,frequencyText TEXT,note TEXT,
+          impactLevel TEXT,handlingStatus TEXT,opportunityType TEXT,priority TEXT,status TEXT,relatedStrategyVersionId TEXT,relatedImprovementId TEXT,relatedActionId TEXT,
+          providerId TEXT NOT NULL DEFAULT 'manual',createdBy TEXT,createdAt TEXT NOT NULL,updatedAt TEXT NOT NULL,
+          FOREIGN KEY(productId) REFERENCES products(id),FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),FOREIGN KEY(relatedStrategyVersionId) REFERENCES product_strategy_versions(id),
+          FOREIGN KEY(relatedImprovementId) REFERENCES product_improvements(id),FOREIGN KEY(relatedActionId) REFERENCES process_instances(id)
+        );
+        INSERT INTO product_insights_phase_b SELECT id,productId,${erp},insightType,content,source,importance,description,frequencyText,note,impactLevel,handlingStatus,opportunityType,priority,status,relatedStrategyVersionId,relatedImprovementId,relatedActionId,providerId,createdBy,createdAt,updatedAt FROM product_insights legacy;
+
+        DROP TABLE IF EXISTS product_clearance_plans_phase_b;
+        CREATE TABLE product_clearance_plans_phase_b (
+          id TEXT PRIMARY KEY,productId TEXT,erpSkuId TEXT,status TEXT NOT NULL DEFAULT 'active',startDate TEXT NOT NULL,targetDays INTEGER NOT NULL,targetEndDate TEXT NOT NULL,
+          initialInventoryQuantity REAL,targetInventoryQuantity REAL NOT NULL DEFAULT 0,note TEXT,createdBy TEXT,completedAt TEXT,createdAt TEXT NOT NULL,updatedAt TEXT NOT NULL,
+          FOREIGN KEY(productId) REFERENCES products(id),FOREIGN KEY(erpSkuId) REFERENCES erp_skus(id),FOREIGN KEY(createdBy) REFERENCES persons(id)
+        );
+        INSERT INTO product_clearance_plans_phase_b SELECT id,productId,${erp},status,startDate,targetDays,targetEndDate,initialInventoryQuantity,targetInventoryQuantity,note,createdBy,completedAt,createdAt,updatedAt FROM product_clearance_plans legacy;
+
+        DROP TABLE product_insights; DROP TABLE product_improvements; DROP TABLE product_issues; DROP TABLE product_health_records;
+        DROP TABLE product_strategy_versions; DROP TABLE product_marketing_assets; DROP TABLE product_lifecycle_events; DROP TABLE product_clearance_plans; DROP TABLE action_products;
+        ALTER TABLE product_health_records_phase_b RENAME TO product_health_records;
+        ALTER TABLE product_issues_phase_b RENAME TO product_issues;
+        ALTER TABLE product_improvements_phase_b RENAME TO product_improvements;
+        ALTER TABLE product_strategy_versions_phase_b RENAME TO product_strategy_versions;
+        ALTER TABLE product_insights_phase_b RENAME TO product_insights;
+        ALTER TABLE product_marketing_assets_phase_b RENAME TO product_marketing_assets;
+        ALTER TABLE product_lifecycle_events_phase_b RENAME TO product_lifecycle_events;
+        ALTER TABLE product_clearance_plans_phase_b RENAME TO product_clearance_plans;
+        ALTER TABLE action_products_phase_b RENAME TO action_products;
+      `);
+    })();
+  } finally {
+    database.pragma("foreign_keys = ON");
+  }
+  console.log("[db:migrate] product business extension tables now support ERP SKU identity");
+}
+
+function backfillProductBusinessProfiles() {
+  const database = getDatabase();
+  const timestamp = new Date().toISOString();
+  database.prepare(`INSERT INTO product_business_profiles
+      (id,erpSkuId,businessStatus,lifecycle,ownerId,brandOverride,categoryOverride,displayNameOverride,createdAt,updatedAt)
+    SELECT 'product-business-profile-' || lower(hex(randomblob(16))),mapping.erpSkuId,
+      CASE product.status WHEN '已归档' THEN 'archived' WHEN '清仓' THEN 'clearance' WHEN '停售' THEN 'paused' ELSE 'active' END,
+      product.status,product.ownerId,
+      CASE WHEN trim(COALESCE(product.brand,''))<>'' AND trim(COALESCE(product.brand,''))<>trim(COALESCE(goods.brand,'')) THEN product.brand END,
+      CASE WHEN trim(COALESCE(product.category,''))<>'' AND trim(COALESCE(product.category,''))<>trim(COALESCE(goods.category,'')) THEN product.category END,
+      CASE WHEN trim(COALESCE(product.name,''))<>'' AND trim(COALESCE(product.name,'')) NOT IN (trim(COALESCE(goods.goodsName,'')),trim(COALESCE(sku.specificationName,'')),trim(COALESCE(sku.merchantSkuCode,''))) THEN product.name END,
+      COALESCE(product.createdAt,?),COALESCE(product.updatedAt,?)
+    FROM products product JOIN product_erp_mappings mapping ON mapping.productId=product.id AND mapping.currentState='active'
+    JOIN erp_skus sku ON sku.id=mapping.erpSkuId LEFT JOIN erp_goods goods ON goods.id=sku.erpGoodsId
+    WHERE (SELECT COUNT(*) FROM product_erp_mappings value WHERE value.productId=product.id AND value.currentState='active')=1
+      AND (SELECT COUNT(*) FROM product_erp_mappings value WHERE value.erpSkuId=mapping.erpSkuId AND value.currentState='active')=1
+    ON CONFLICT(erpSkuId) DO NOTHING`).run(timestamp, timestamp);
+}
+
+export function runProductBusinessExtensionMigration() {
+  rebuildProductBusinessDualIdentityTables();
+  for (const table of productBusinessDualIdentityTables) if (tableExists(table)) ensureColumn(table, "erpSkuId", "TEXT");
+  const database = getDatabase();
+  database.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_product_marketing_assets_erp_sku ON product_marketing_assets(erpSkuId) WHERE erpSkuId IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_action_products_erp_sku ON action_products(actionId,erpSkuId) WHERE erpSkuId IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_product_lifecycle_events_erp_sku_time ON product_lifecycle_events(erpSkuId,changedAt DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_product_health_records_erp_snapshot ON product_health_records(erpSkuId,snapshotKey) WHERE erpSkuId IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_product_issues_erp_sku_status ON product_issues(erpSkuId,status,updatedAt DESC);
+    CREATE INDEX IF NOT EXISTS idx_product_improvements_erp_sku_status ON product_improvements(erpSkuId,status,updatedAt DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_product_strategy_current_erp_sku ON product_strategy_versions(erpSkuId) WHERE status='current' AND erpSkuId IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_product_strategy_history_erp_sku ON product_strategy_versions(erpSkuId,version) WHERE erpSkuId IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_product_insights_erp_sku_type ON product_insights(erpSkuId,insightType,updatedAt DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_product_clearance_plans_active_erp_sku ON product_clearance_plans(erpSkuId) WHERE status='active' AND erpSkuId IS NOT NULL;
+  `);
+  backfillProductBusinessProfiles();
 }
 
 function migrateConnectionProfilesIntoSalesLinksV1() {
@@ -2479,6 +2635,18 @@ export function retireLinkCenterLegacyStructuresPhase3() {
   const count = (table) => objectExists(table, "table")
     ? Number(database.prepare(`SELECT COUNT(*) count FROM ${table}`).get()?.count || 0)
     : 0;
+  // Phase 3 originally required this retired runtime table to be empty. One historic
+  // health snapshot can exist in older databases, so preserve it as a read-only
+  // Legacy archive before applying the original empty-table retirement gate.
+  if (objectExists("connection_health_records", "table") && count("connection_health_records") > 0) {
+    if (objectExists("legacy_connection_health_records", "table")) {
+      throw new Error("链接中心Phase 3退役中止：健康记录运行表与Legacy归档表同时存在。");
+    }
+    database.exec("ALTER TABLE connection_health_records RENAME TO legacy_connection_health_records");
+    createLegacyArchiveReadOnlyTriggers(database, "legacy_connection_health_records");
+  } else if (objectExists("legacy_connection_health_records", "table")) {
+    createLegacyArchiveReadOnlyTriggers(database, "legacy_connection_health_records");
+  }
   const linkColumns = columnsFor("sales_links");
   const skuColumns = columnsFor("sales_link_skus");
   const needsLinks = linkColumns.has("lastSeenBatchId") || linkColumns.has("rawUrl");
@@ -2580,7 +2748,8 @@ export function retireLinkCenterLegacyStructuresPhase3() {
   if (violations.length) throw new Error(`链接中心Phase 3退役后外键检查失败：${JSON.stringify(violations.slice(0, 10))}`);
   console.log("[db:migrate] retired Link Center Phase 3 legacy fields and runtime models");
   return { changed: needsLinks || needsSkus, rebuiltTables: Number(needsLinks) + Number(needsSkus), retiredTables: emptyOnlyTables.length,
-    archivedTables: objectExists("legacy_connection_diagnosis_entries", "table") ? 1 : 0 };
+    archivedTables: Number(objectExists("legacy_connection_diagnosis_entries", "table"))
+      + Number(objectExists("legacy_connection_health_records", "table")) };
 }
 
 function createLegacyArchiveReadOnlyTriggers(database, tableName) {
@@ -3534,6 +3703,7 @@ function runLightweightMigrations() {
   `);
   ensureColumn("product_improvements", "improvementMeasures", "TEXT");
   ensureColumn("product_improvements", "completedAt", "TEXT");
+  runProductBusinessExtensionMigration();
   if (tableExists("connection_profiles")) {
     ensureColumn("connection_profiles", "mainImage", "TEXT");
     ensureColumn("connection_profiles", "imageSource", "TEXT");
@@ -5796,19 +5966,31 @@ function normalizeProductIds(productIds = []) {
 function replaceActionProductsInTransaction(actionId, productIds, createdAt = new Date().toISOString()) {
   const ids = normalizeProductIds(productIds);
   const existingIds = new Set(
-    getDatabase().prepare("SELECT productId FROM action_products WHERE actionId = @actionId").all({ actionId }).map((item) => item.productId),
+    getDatabase().prepare("SELECT productId,erpSkuId FROM action_products WHERE actionId = @actionId").all({ actionId })
+      .flatMap((item) => [item.productId, item.erpSkuId]).filter(Boolean),
   );
-  ids.forEach((productId) => {
-    const product = readExistingItem("products", productId);
-    if (product === null) throw new Error("存在未找到的关联产品。");
-    if (product.status === "已归档" && !existingIds.has(productId)) throw new Error("已归档产品不能新增关联。");
+  const identities = ids.map((identifier) => {
+    const identity = getDatabase().prepare(`SELECT sku.id erpSkuId,mapping.productId,profile.businessStatus,product.status productStatus
+      FROM erp_skus sku
+      LEFT JOIN product_erp_mappings mapping ON mapping.id=(SELECT value.id FROM product_erp_mappings value
+        WHERE value.erpSkuId=sku.id AND value.currentState='active' ORDER BY value.updatedAt DESC,value.id DESC LIMIT 1)
+      LEFT JOIN products product ON product.id=mapping.productId
+      LEFT JOIN product_business_profiles profile ON profile.erpSkuId=sku.id
+      WHERE sku.id=? OR mapping.productId=? ORDER BY CASE WHEN sku.id=? THEN 0 ELSE 1 END LIMIT 1`).get(identifier, identifier, identifier)
+      || getDatabase().prepare("SELECT id productId,NULL erpSkuId,status productStatus,NULL businessStatus FROM products WHERE id=?").get(identifier);
+    if (!identity) throw new Error("存在未找到的关联产品。");
+    if ((identity.businessStatus === "archived" || identity.productStatus === "已归档") && !existingIds.has(identity.erpSkuId) && !existingIds.has(identity.productId)) {
+      throw new Error("已归档产品不能新增关联。");
+    }
+    return identity;
   });
   getDatabase().prepare("DELETE FROM action_products WHERE actionId = @actionId").run({ actionId });
-  ids.forEach((productId, index) => {
+  identities.forEach((identity, index) => {
     insertItem("actionProducts", {
       id: `action-product-${actionId}-${index}-${Date.now()}`,
       actionId,
-      productId,
+      productId: identity.productId || null,
+      erpSkuId: identity.erpSkuId || null,
       createdAt,
     });
   });

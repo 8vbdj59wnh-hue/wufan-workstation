@@ -107,6 +107,7 @@ export const state = {
   templateCenterUsageSummary: {},
   products: [],
   actionProducts: [],
+  actionProductOptions: [],
   taskProductContexts: [],
   productImportBatches: [],
   erpGoods: [],
@@ -1262,6 +1263,11 @@ export async function loadProductCenterV2Skus({ search = "", includeUnarchived =
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-center-v2/skus?${query}`), "ERP SKU列表读取失败。");
 }
 
+export async function loadActionProductOptions(search = "") {
+  const query = new URLSearchParams({ search: String(search ?? "").trim(), limit: "100" });
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/key-actions/product-options?${query}`), "ERP SKU关联选项读取失败。");
+}
+
 export async function loadProductCenterV2Metadata() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-center-v2/metadata`), "ERP SKU筛选摘要读取失败。");
 }
@@ -1278,6 +1284,16 @@ export async function loadProductComboSkuDetail(salesObjectId) {
 export async function loadProductCenterV2SkuDetail(erpSkuId, scope = "") {
   const query = scope ? `?scope=${encodeURIComponent(scope)}` : "";
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-center-v2/skus/${encodeURIComponent(erpSkuId)}${query}`), "ERP SKU详情读取失败。");
+}
+
+export async function loadProductBusinessProfile(erpSkuId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-center-v2/skus/${encodeURIComponent(erpSkuId)}/business-profile`), "产品经营资料读取失败。");
+}
+
+export async function saveProductBusinessProfile(erpSkuId, payload) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-center-v2/skus/${encodeURIComponent(erpSkuId)}/business-profile`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  }), "产品经营资料保存失败。");
 }
 
 export async function createProductProfileForErpSku(erpSkuId) {

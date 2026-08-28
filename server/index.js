@@ -326,10 +326,13 @@ import {
   createProductProfileForErpSku,
   getProductCenterV2Metadata,
   getProductCenterV2SkuDetail,
+  listActionProductOptions,
   listProductCenterV2Skus,
+  resolveActionProductOptions,
 } from "./productCenterV2Service.js";
 import { getSalesObjectComboSkuDetail, listSalesObjectComboSkus } from "./salesObjectComboSkuReadService.js";
 import { exportProductMarketingAsset, getProductMarketingAsset, saveProductMarketingAsset } from "./productMarketingAssetService.js";
+import { getProductBusinessMigrationReport, getProductBusinessProfile, resolveProductBusinessIdentity, upsertProductBusinessProfile } from "./productBusinessProfileService.js";
 import {
   bootstrapTemplateVersions,
   changeTemplateVersionStatus,
@@ -1266,7 +1269,7 @@ function filterDataByScope(data, user) {
   const visibleProductIds = new Set(products.map((product) => product.id));
   if (dataScope === "all") {
     const actionProducts = productsWereLoaded
-      ? (data.actionProducts ?? []).filter((item) => visibleProductIds.has(item.productId))
+      ? (data.actionProducts ?? []).filter((item) => item.erpSkuId || !item.productId || visibleProductIds.has(item.productId))
       : (data.actionProducts ?? []);
     return applyPermissionResourceBoundary(
       { ...data, stores, publishingAccounts, permissionTemplates, products, actionProducts, productImportBatches, ...productV2Data },
@@ -1279,7 +1282,7 @@ function filterDataByScope(data, user) {
   const scopedProcessInstances = filterByScope(data.processInstances ?? [], user);
   const scopedProcessInstanceIds = new Set(scopedProcessInstances.map((instance) => instance.id));
   const scopedActionProducts = (data.actionProducts ?? []).filter((item) =>
-    scopedProcessInstanceIds.has(item.actionId) && (!productsWereLoaded || visibleProductIds.has(item.productId))
+    scopedProcessInstanceIds.has(item.actionId) && (!productsWereLoaded || item.erpSkuId || !item.productId || visibleProductIds.has(item.productId))
   );
   const scopedGoals = filterByScope(data.goals ?? [], user);
   const scopedContentSchedules = filterByScope(data.contentSchedules ?? [], user);
@@ -1343,15 +1346,16 @@ function readTaskProductContexts(snapshot) {
   if (actionIds.length > 0) {
     const placeholders = actionIds.map(() => "?").join(",");
     rows.push(...database.prepare(`
-      SELECT a.actionId contextId,a.actionId,a.productId,m.erpSkuId,
+      SELECT a.actionId contextId,a.actionId,a.productId,COALESCE(a.erpSkuId,m.erpSkuId) erpSkuId,
         p.name productName,p.skuCode productSkuCode,p.mainImage productImage,p.status productStatus,
         s.merchantSkuCode erpSkuCode,s.specificationName erpSkuName,s.mainImage erpSkuImage,s.erpStatus,
-        g.goodsName erpGoodsName
+        g.goodsName erpGoodsName,profile.id businessProfileId,profile.businessStatus
       FROM action_products a
       LEFT JOIN products p ON p.id=a.productId
       LEFT JOIN product_erp_mappings m ON m.productId=a.productId AND m.currentState='active'
-      LEFT JOIN erp_skus s ON s.id=m.erpSkuId
+      LEFT JOIN erp_skus s ON s.id=COALESCE(a.erpSkuId,m.erpSkuId)
       LEFT JOIN erp_goods g ON g.id=s.erpGoodsId
+      LEFT JOIN product_business_profiles profile ON profile.erpSkuId=s.id
       WHERE a.actionId IN (${placeholders})
       ORDER BY a.createdAt,a.id,m.createdAt,m.id
     `).all(...actionIds));
@@ -1361,11 +1365,13 @@ function readTaskProductContexts(snapshot) {
     const placeholders = uniqueDirectIds.map(() => "?").join(",");
     const skuById = new Map(database.prepare(`
       SELECT s.id erpSkuId,s.merchantSkuCode erpSkuCode,s.specificationName erpSkuName,s.mainImage erpSkuImage,s.erpStatus,
-        g.goodsName erpGoodsName,m.productId,p.name productName,p.skuCode productSkuCode,p.mainImage productImage,p.status productStatus
+        g.goodsName erpGoodsName,m.productId,p.name productName,p.skuCode productSkuCode,p.mainImage productImage,p.status productStatus,
+        profile.id businessProfileId,profile.businessStatus
       FROM erp_skus s
       LEFT JOIN erp_goods g ON g.id=s.erpGoodsId
       LEFT JOIN product_erp_mappings m ON m.erpSkuId=s.id AND m.currentState='active'
       LEFT JOIN products p ON p.id=m.productId
+      LEFT JOIN product_business_profiles profile ON profile.erpSkuId=s.id
       WHERE s.id IN (${placeholders})
     `).all(...uniqueDirectIds).map((row) => [row.erpSkuId, row]));
     for (const reference of directRefs) {
@@ -2972,6 +2978,11 @@ app.get("/api/product-center-v2/metadata", requirePermission("products.view"), (
   catch (error) { response.status(400).json({ success: false, message: error.message || "ERP SKU筛选摘要读取失败。" }); }
 });
 
+app.get("/api/key-actions/product-options", requirePermission("keyActions.view"), (request, response) => {
+  try { response.json({ success: true, ...listActionProductOptions(request.query) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "ERP SKU关联选项读取失败。" }); }
+});
+
 app.get("/api/product-center-v2/combo-skus", requirePermission("combos.view"), (request, response) => {
   try { response.json({ success: true, ...listSalesObjectComboSkus(request.query) }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "组合SKU列表读取失败。" }); }
@@ -2987,6 +2998,21 @@ app.get("/api/product-center-v2/skus/:id", requirePermission("skus.view"), (requ
   catch (error) { response.status(404).json({ success: false, message: error.message || "ERP SKU详情读取失败。" }); }
 });
 
+app.get("/api/product-center-v2/skus/:id/business-profile", requirePermission("products.view"), (request, response) => {
+  try { response.json({ success: true, ...getProductBusinessProfile(request.params.id) }); }
+  catch (error) { response.status(404).json({ success: false, message: error.message || "产品经营资料读取失败。" }); }
+});
+
+app.put("/api/product-center-v2/skus/:id/business-profile", requirePermission("products.manage"), (request, response) => {
+  try { response.json({ success: true, ...upsertProductBusinessProfile(request.params.id, request.body, getUserPersonId(request.user)) }); }
+  catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "产品经营资料保存失败。" }); }
+});
+
+app.get("/api/product-center-v2/business-extension-migration-report", requirePermission("products.view"), (_request, response) => {
+  try { response.json({ success: true, report: getProductBusinessMigrationReport() }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "经营扩展迁移报告读取失败。" }); }
+});
+
 app.post("/api/product-center-v2/skus/:id/product-profile", requirePermission("skus.manage"), (request, response) => {
   try { response.status(201).json({ success: true, ...createProductProfileForErpSku(request.params.id) }); }
   catch (error) {
@@ -2997,10 +3023,8 @@ app.post("/api/product-center-v2/skus/:id/product-profile", requirePermission("s
 
 app.get("/api/product-management/business-dashboard", requirePermission("products.view"), (request, response) => {
   try {
-    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
     const readModel = getProductBusinessReadModel(request.query, {
       includeInventoryCost: hasPermission(request.user, "finance.view"),
-      visibleProductIds: (scoped.products ?? []).map((product) => product.id),
     });
     response.json({
       success: true,
@@ -3012,10 +3036,9 @@ app.get("/api/product-management/business-dashboard", requirePermission("product
 
 app.get("/api/product-management/sales-distribution", requirePermission("products.view"), (request, response) => {
   try {
-    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
     response.json({
       success: true,
-      ...getProductSalesDistribution(request.query, { visibleProductIds: (scoped.products ?? []).map((product) => product.id) }),
+      ...getProductSalesDistribution(request.query),
     });
   } catch (error) {
     response.status(error.statusCode || 400).json({ success: false, message: error.message || "产品销售结构读取失败。" });
@@ -3024,10 +3047,9 @@ app.get("/api/product-management/sales-distribution", requirePermission("product
 
 app.get("/api/product-management/shop-sandbox", requirePermission("products.view"), (request, response) => {
   try {
-    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
     response.json({
       success: true,
-      ...getProductShopSandbox(request.query, { visibleProductIds: (scoped.products ?? []).map((product) => product.id) }),
+      ...getProductShopSandbox(request.query),
     });
   } catch (error) {
     response.status(error.statusCode || 400).json({ success: false, message: error.message || "产品沙盘读取失败。" });
@@ -3036,8 +3058,7 @@ app.get("/api/product-management/shop-sandbox", requirePermission("products.view
 
 app.get("/api/product-management/clearance-plans", requirePermission("products.view"), (request, response) => {
   try {
-    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
-    response.json({ success: true, center: getProductClearancePlanCenter(request.query, { visibleProductIds: (scoped.products ?? []).map((product) => product.id) }) });
+    response.json({ success: true, center: getProductClearancePlanCenter(request.query) });
   } catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "清仓计划读取失败。" }); }
 });
 
@@ -3055,7 +3076,8 @@ app.get("/api/product-management/new-product-actions", requirePermission("produc
       actionProducts: readResource("actionProducts"),
     };
     const scoped = filterDataByScope(snapshot, request.user);
-    response.json({ success: true, center: getProductNewDevelopmentCenter(scoped) });
+    const productOptions = resolveActionProductOptions(scoped.actionProducts ?? []);
+    response.json({ success: true, center: getProductNewDevelopmentCenter({ ...scoped, productOptions }) });
   } catch (error) {
     response.status(error.statusCode || 400).json({ success: false, message: error.message || "新品开发行动读取失败。" });
   }
@@ -3068,15 +3090,15 @@ app.post("/api/product-management/products/:id/clearance-plan", requirePermissio
 
 app.put("/api/product-management/clearance-plans/:id", requirePermission("products.manage"), (request, response) => {
   try {
-    const plan = getDatabase().prepare("SELECT productId FROM product_clearance_plans WHERE id=?").get(request.params.id);
+    const plan = getDatabase().prepare("SELECT productId,erpSkuId FROM product_clearance_plans WHERE id=?").get(request.params.id);
     if (!plan) throw new Error("清仓计划不存在。");
-    requireScopedProduct(request, plan.productId);
+    requireScopedProduct(request, plan.erpSkuId || plan.productId);
     response.json({ success: true, plan: updateProductClearancePlan(request.params.id, request.body) });
   } catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "清仓计划更新失败。" }); }
 });
 
 app.get("/api/product-management/products/:id", requirePermission("products.view"), (request, response) => {
-  try { const scoped=filterDataByScope(readAllData({exclude:["salesLinks","salesLinkSkus"]}),request.user); response.json({ success: true, detail: getProductV2Detail(request.params.id,{includeInventoryCost:hasPermission(request.user,"finance.view"),visibleProductIds:(scoped.products??[]).map((product)=>product.id)}), lifecycleStatuses: productLifecycleStatuses }); }
+  try { response.json({ success: true, detail: getProductV2Detail(request.params.id,{includeInventoryCost:hasPermission(request.user,"finance.view")}), lifecycleStatuses: productLifecycleStatuses }); }
   catch (error) { response.status(404).json({ success: false, message: error.message || "产品经营详情读取失败。" }); }
 });
 
@@ -3102,10 +3124,8 @@ app.get("/api/product-management/products/:id/marketing-asset/export", requirePe
 
 app.get("/api/product-management/products/:id/health-analysis", requirePermission("products.view"), (request, response) => {
   try {
-    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
     response.json({ success: true, analysis: getProductHealthAnalysis(request.params.id, {
       includeInventoryCost: hasPermission(request.user, "finance.view"),
-      visibleProductIds: (scoped.products ?? []).map((product) => product.id),
     }) });
   }
   catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "产品健康分析读取失败。" }); }
@@ -3113,18 +3133,15 @@ app.get("/api/product-management/products/:id/health-analysis", requirePermissio
 
 app.get("/api/product-management/products/:id/business-diagnosis", requirePermission("products.view"), (request, response) => {
   try {
-    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
     response.json({ success: true, diagnosis: getProductBusinessDiagnosis(request.params.id, {
       includeInventoryCost: hasPermission(request.user, "finance.view"),
-      visibleProductIds: (scoped.products ?? []).map((product) => product.id),
     }) });
   } catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "产品经营诊断读取失败。" }); }
 });
 
 app.get("/api/product-management/products/:id/improvement-center", requirePermission("products.view"), (request, response) => {
   try {
-    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
-    const options = { includeInventoryCost: false, visibleProductIds: (scoped.products ?? []).map((product) => product.id) };
+    const options = { includeInventoryCost: false };
     const healthAnalysis = getProductHealthAnalysis(request.params.id, options);
     response.json({ success: true, center: getProductImprovementCenter(request.params.id, healthAnalysis) });
   }
@@ -3137,14 +3154,13 @@ app.post("/api/product-management/products/:id/lifecycle", requirePermission("pr
 });
 
 app.post("/api/product-management/products/:id/evaluate", requirePermission("products.manage"), (request, response) => {
-  try { const scoped=filterDataByScope(readAllData({exclude:["salesLinks","salesLinkSkus"]}),request.user); response.json({ success: true, healthRecord: evaluateProductHealth(request.params.id,{includeInventoryCost:false,visibleProductIds:(scoped.products??[]).map((product)=>product.id)}) }); }
+  try { response.json({ success: true, healthRecord: evaluateProductHealth(request.params.id,{includeInventoryCost:false}) }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "产品经营评价失败。" }); }
 });
 
 app.post("/api/product-management/products/:id/health-action", requirePermission("products.manage"), (request, response) => {
   try {
-    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
-    const analysis = getProductHealthAnalysis(request.params.id, { includeInventoryCost: false, visibleProductIds: (scoped.products ?? []).map((product) => product.id) });
+    const analysis = getProductHealthAnalysis(request.params.id, { includeInventoryCost: false });
     if (!analysis.recommendations.some((item) => item.code === String(request.body?.recommendationCode ?? "").trim())) throw new Error("该改善建议已不适用，请刷新健康分析。");
     response.status(201).json({ success: true, ...createProductHealthAction(request.params.id, request.body, request.user.id, analysis) });
   }
@@ -3158,22 +3174,22 @@ app.post("/api/product-management/issues/:id/improvement-action", requirePermiss
 
 app.put("/api/product-management/improvements/:id/result", requirePermission("products.manage"), (request, response) => {
   try {
-    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
-    response.json({ success: true, improvement: recordProductImprovementResult(request.params.id, request.body, { visibleProductIds: (scoped.products ?? []).map((product) => product.id) }) });
+    response.json({ success: true, improvement: recordProductImprovementResult(request.params.id, request.body) });
   }
   catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "产品改善结果保存失败。" }); }
 });
 
 function requireScopedProduct(request, productId) {
   const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
-  if (!(scoped.products ?? []).some((product) => product.id === productId)) { const error = new Error("无权操作该产品。"); error.statusCode = 403; throw error; }
-  return scoped;
+  const identity = resolveProductBusinessIdentity(productId);
+  if (identity.legacyProductId && !(scoped.products ?? []).some((product) => product.id === identity.legacyProductId)) { const error = new Error("无权操作该产品。"); error.statusCode = 403; throw error; }
+  return { ...scoped, productIdentity: identity };
 }
 
 app.get("/api/product-management/products/:id/user-insights", requirePermission("products.view"), (request, response) => {
   try {
-    const scoped = requireScopedProduct(request, request.params.id);
-    response.json({ success: true, center: getProductInsightCenter(request.params.id, { visibleProductIds: (scoped.products ?? []).map((product) => product.id) }) });
+    requireScopedProduct(request, request.params.id);
+    response.json({ success: true, center: getProductInsightCenter(request.params.id) });
   } catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "用户洞察读取失败。" }); }
 });
 
@@ -3189,8 +3205,8 @@ app.put("/api/product-management/products/:id/user-insights/:insightId", require
 
 app.get("/api/product-management/products/:id/strategy", requirePermission("products.view"), (request, response) => {
   try {
-    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
-    response.json({ success: true, strategy: getProductStrategy(request.params.id, { visibleProductIds: (scoped.products ?? []).map((product) => product.id) }) });
+    requireScopedProduct(request, request.params.id);
+    response.json({ success: true, strategy: getProductStrategy(request.params.id) });
   } catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "产品战略读取失败。" }); }
 });
 

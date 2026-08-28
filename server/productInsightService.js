@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { getDatabase } from "./db.js";
+import { productBusinessIdentityParams, productBusinessIdentityPredicate, resolveProductBusinessIdentity, upsertProductBusinessProfile } from "./productBusinessProfileService.js";
 
 export const productInsightTypes = Object.freeze(["attention", "satisfaction", "dissatisfaction", "opportunity"]);
 export const productInsightImportanceLevels = Object.freeze([1, 2, 3, 4, 5]);
@@ -41,16 +42,14 @@ export class ManualProductInsightProvider extends ProductInsightProvider {
 
 export const manualProductInsightProvider = new ManualProductInsightProvider();
 
-function ensureProduct(database, productId) {
-  const product = database.prepare("SELECT id,name FROM products WHERE id=?").get(text(productId)); if (!product) throw new Error("产品不存在。"); return product;
-}
-
-function ensureRelations(database, productId, value) {
-  if (value.relatedStrategyVersionId && !database.prepare("SELECT id FROM product_strategy_versions WHERE id=? AND productId=?").get(value.relatedStrategyVersionId, productId)) throw new Error("关联战略不属于当前产品。");
-  if (value.relatedImprovementId && !database.prepare("SELECT id FROM product_improvements WHERE id=? AND productId=?").get(value.relatedImprovementId, productId)) throw new Error("关联改善行动不属于当前产品。");
+function ensureRelations(database, product, value) {
+  const params = { ...productBusinessIdentityParams(product), relationId: value.relatedStrategyVersionId };
+  if (value.relatedStrategyVersionId && !database.prepare(`SELECT id FROM product_strategy_versions record WHERE id=@relationId AND ${productBusinessIdentityPredicate("record")}`).get(params)) throw new Error("关联战略不属于当前产品。");
+  if (value.relatedImprovementId && !database.prepare(`SELECT id FROM product_improvements record WHERE id=@relationId AND ${productBusinessIdentityPredicate("record")}`).get({ ...params, relationId: value.relatedImprovementId })) throw new Error("关联改善行动不属于当前产品。");
   if (value.relatedActionId && !database.prepare(`SELECT actionId FROM (
-    SELECT actionId FROM action_products WHERE productId=? UNION SELECT actionId FROM product_improvements WHERE productId=?
-  ) WHERE actionId=?`).get(productId, productId, value.relatedActionId)) throw new Error("关联关键行动不属于当前产品。");
+    SELECT actionId FROM action_products record WHERE ${productBusinessIdentityPredicate("record")}
+    UNION SELECT actionId FROM product_improvements record WHERE ${productBusinessIdentityPredicate("record")}
+  ) WHERE actionId=@actionId`).get({ ...productBusinessIdentityParams(product), actionId: value.relatedActionId })) throw new Error("关联关键行动不属于当前产品。");
 }
 
 function readInsight(database, insightId) {
@@ -63,43 +62,46 @@ function readInsight(database, insightId) {
     WHERE insight.id=?`).get(insightId);
 }
 
-function saveNormalized(database, productId, normalized, userId, existing = null, provider = manualProductInsightProvider) {
-  ensureRelations(database, productId, normalized); const timestamp = now(); const id = existing?.id ?? `product-insight-${crypto.randomUUID()}`;
-  database.prepare(`INSERT INTO product_insights (id,productId,insightType,content,source,importance,description,frequencyText,note,impactLevel,handlingStatus,
+function saveNormalized(database, product, normalized, userId, existing = null, provider = manualProductInsightProvider) {
+  upsertProductBusinessProfile(product.erpSkuId, {}, userId, { database });
+  ensureRelations(database, product, normalized); const timestamp = now(); const id = existing?.id ?? `product-insight-${crypto.randomUUID()}`;
+  database.prepare(`INSERT INTO product_insights (id,productId,erpSkuId,insightType,content,source,importance,description,frequencyText,note,impactLevel,handlingStatus,
     opportunityType,priority,status,relatedStrategyVersionId,relatedImprovementId,relatedActionId,providerId,createdBy,createdAt,updatedAt)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET content=excluded.content,source=excluded.source,importance=excluded.importance,
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET content=excluded.content,source=excluded.source,importance=excluded.importance,
     description=excluded.description,frequencyText=excluded.frequencyText,note=excluded.note,impactLevel=excluded.impactLevel,handlingStatus=excluded.handlingStatus,
     opportunityType=excluded.opportunityType,priority=excluded.priority,status=excluded.status,relatedStrategyVersionId=excluded.relatedStrategyVersionId,
     relatedImprovementId=excluded.relatedImprovementId,relatedActionId=excluded.relatedActionId,providerId=excluded.providerId,updatedAt=excluded.updatedAt`)
-    .run(id, productId, normalized.insightType, normalized.content, normalized.source, normalized.importance, normalized.description, normalized.frequencyText,
+    .run(id, product.legacyProductId, product.erpSkuId, normalized.insightType, normalized.content, normalized.source, normalized.importance, normalized.description, normalized.frequencyText,
       normalized.note, normalized.impactLevel, normalized.handlingStatus, normalized.opportunityType, normalized.priority, normalized.status,
       normalized.relatedStrategyVersionId, normalized.relatedImprovementId, normalized.relatedActionId, provider.id, text(userId) || null, existing?.createdAt ?? timestamp, timestamp);
   return readInsight(database, id);
 }
 
 export function importProductInsights(productId, inputs, userId, provider = manualProductInsightProvider) {
-  const database = getDatabase(); const product = ensureProduct(database, productId); const records = Array.isArray(inputs) ? inputs : [inputs];
+  const database = getDatabase(); const product = resolveProductBusinessIdentity(productId, { database }); const records = Array.isArray(inputs) ? inputs : [inputs];
   if (!records.length) throw new Error("请提供至少一条用户洞察。");
-  return database.transaction(() => records.map((input) => saveNormalized(database, product.id, provider.normalize(input), userId, null, provider)))();
+  return database.transaction(() => records.map((input) => saveNormalized(database, product, provider.normalize(input), userId, null, provider)))();
 }
 
 export function updateProductInsight(productId, insightId, input, userId, provider = manualProductInsightProvider) {
-  const database = getDatabase(); const product = ensureProduct(database, productId);
-  const existing = database.prepare("SELECT * FROM product_insights WHERE id=? AND productId=?").get(text(insightId), product.id); if (!existing) throw new Error("用户洞察不存在。");
+  const database = getDatabase(); const product = resolveProductBusinessIdentity(productId, { database });
+  const existing = database.prepare(`SELECT * FROM product_insights record WHERE id=@insightId AND ${productBusinessIdentityPredicate("record")}`).get({ ...productBusinessIdentityParams(product), insightId: text(insightId) }); if (!existing) throw new Error("用户洞察不存在。");
   const merged = { ...existing, ...(input ?? {}), insightType: existing.insightType };
-  return database.transaction(() => saveNormalized(database, product.id, provider.normalize(merged), userId, existing, provider))();
+  return database.transaction(() => saveNormalized(database, product, provider.normalize(merged), userId, existing, provider))();
 }
 
 export function getProductInsightCenter(productId, { visibleProductIds = null } = {}) {
-  const database = getDatabase(); const product = ensureProduct(database, productId);
-  if (visibleProductIds && !new Set(visibleProductIds).has(product.id)) { const error = new Error("无权查看该产品的用户洞察。"); error.statusCode = 403; throw error; }
-  const items = database.prepare("SELECT id FROM product_insights WHERE productId=? ORDER BY updatedAt DESC,createdAt DESC").all(product.id).map((row) => readInsight(database, row.id));
-  const strategies = database.prepare("SELECT id,version,status,effectiveAt,endedAt FROM product_strategy_versions WHERE productId=? ORDER BY version DESC").all(product.id);
+  const database = getDatabase(); const product = resolveProductBusinessIdentity(productId, { database });
+  if (visibleProductIds && product.legacyProductId && !new Set(visibleProductIds).has(product.legacyProductId)) { const error = new Error("无权查看该产品的用户洞察。"); error.statusCode = 403; throw error; }
+  const params = productBusinessIdentityParams(product);
+  const items = database.prepare(`SELECT id FROM product_insights record WHERE ${productBusinessIdentityPredicate("record")} ORDER BY updatedAt DESC,createdAt DESC`).all(params).map((row) => readInsight(database, row.id));
+  const strategies = database.prepare(`SELECT id,version,status,effectiveAt,endedAt FROM product_strategy_versions record WHERE ${productBusinessIdentityPredicate("record")} ORDER BY version DESC`).all(params);
   const improvements = database.prepare(`SELECT improvement.id,improvement.title,improvement.status,improvement.actionId,COALESCE(action.displayTitle,action.name) actionName,action.status actionStatus
-    FROM product_improvements improvement JOIN process_instances action ON action.id=improvement.actionId WHERE improvement.productId=? ORDER BY improvement.updatedAt DESC`).all(product.id);
+    FROM product_improvements improvement JOIN process_instances action ON action.id=improvement.actionId WHERE ${productBusinessIdentityPredicate("improvement")} ORDER BY improvement.updatedAt DESC`).all(params);
   const actions = database.prepare(`SELECT DISTINCT action.id,COALESCE(action.displayTitle,action.name) name,action.status FROM process_instances action JOIN (
-    SELECT actionId FROM action_products WHERE productId=? UNION SELECT actionId FROM product_improvements WHERE productId=?
-  ) relation ON relation.actionId=action.id ORDER BY action.updatedAt DESC`).all(product.id, product.id);
+    SELECT actionId FROM action_products record WHERE ${productBusinessIdentityPredicate("record")}
+    UNION SELECT actionId FROM product_improvements record WHERE ${productBusinessIdentityPredicate("record")}
+  ) relation ON relation.actionId=action.id ORDER BY action.updatedAt DESC`).all(params);
   return { product, items, groups: Object.fromEntries(productInsightTypes.map((type) => [type, items.filter((item) => item.insightType === type)])),
     relations: { strategies, improvements, actions }, options: { importanceLevels: productInsightImportanceLevels, impactLevels: productInsightImpactLevels,
       handlingStatuses: productInsightHandlingStatuses, opportunityTypes: productOpportunityTypes, opportunityPriorities: productOpportunityPriorities,

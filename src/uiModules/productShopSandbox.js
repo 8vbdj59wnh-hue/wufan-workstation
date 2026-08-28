@@ -7,7 +7,7 @@ const natural = (left, right) => String(left || "").localeCompare(String(right |
 
 function skuCodeGroup(item) {
   const code = String(item.skuCode || "").trim();
-  return code ? code.split("-")[0].trim() || code : `未编码-${item.productId}`;
+  return code ? code.split("-")[0].trim() || code : `未编码-${item.erpSkuId || item.productId}`;
 }
 
 function sortProductCards(items, sortMode) {
@@ -31,7 +31,7 @@ function renderShopTabs(shops, selectedShopId) {
 function renderProductCards(items, resolveUrl) {
   return `<div class="product-sandbox-grid">${items.map((item) => {
     const label = `${item.productName || "未命名产品"}，销量 ${number(item.salesQuantity)}`;
-    return `<button type="button" class="product-sandbox-card" data-product-sandbox-product="${escapeHtml(item.productId)}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">${item.mainImage ? `<img src="${escapeHtml(resolveUrl(item.mainImage))}" alt="${escapeHtml(item.productName || "产品主图")}" loading="lazy" />` : `<span class="product-sandbox-image-placeholder" aria-hidden="true">无图</span>`}<span class="product-sandbox-quantity" aria-hidden="true"><strong>${number(item.salesQuantity)}</strong></span></button>`;
+    return `<button type="button" class="product-sandbox-card" data-product-sandbox-product="${escapeHtml(item.erpSkuId || item.productId)}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">${item.mainImage ? `<img src="${escapeHtml(resolveUrl(item.mainImage))}" alt="${escapeHtml(item.productName || "产品主图")}" loading="lazy" />` : `<span class="product-sandbox-image-placeholder" aria-hidden="true">无图</span>`}<span class="product-sandbox-quantity" aria-hidden="true"><strong>${number(item.salesQuantity)}</strong></span></button>`;
   }).join("")}</div>`;
 }
 
@@ -72,5 +72,5 @@ registerUiModule({
   description: "按店铺与销售周期展示产品主图和实际销量的只读产品沙盘。",
   render: renderProductShopSandbox,
   configSchema: { shopSwitch: true, quantityMetric: "totalPhysicalContribution" },
-  dependencies: ["Product", "SalesShop", "SalesLink", "QueryProductContribution"],
+  dependencies: ["ERP SKU", "SalesShop", "SalesLink", "Sales Object", "QueryErpSkuContribution"],
 });
