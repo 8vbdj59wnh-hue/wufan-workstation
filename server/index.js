@@ -973,9 +973,9 @@ function rejectUnauthorizedTask(response, message = "你没有权限操作该任
 function canUseStoreOptions(user) {
   return (
     hasPermission(user, "systemSettings.manage") ||
-    hasPermission(user, "systemSettings.manage") ||
     hasPermission(user, "keyActions.launch") ||
-    hasPermission(user, "keyActions.launch")
+    hasPermission(user, "tasks.execute") ||
+    hasPermission(user, "actionStandards.manage")
   );
 }
 
@@ -1638,7 +1638,7 @@ app.get("/api/bootstrap", (request, response) => {
     // the latest form, managed account directory, and process nodes. Omitting these
     // resources makes saved fields look empty or a valid flow look unconfigured.
     const scheduleBoardCommon = [
-      "categories", "departments", "people", "publishingAccounts",
+      "categories", "departments", "people", "stores", "publishingAccounts",
       "taskTemplates", "processTemplates", "processTemplateNodes", "standardWorkForms",
     ];
     const workResultsCommon = ["departments", "people", "positions", "goals", "taskTemplates"];

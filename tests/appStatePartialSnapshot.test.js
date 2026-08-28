@@ -15,6 +15,7 @@ const {
   applyDataSnapshot,
   ensureStoreOptionsLoaded,
   getStoreOptionsLoadState,
+  loadPersistentData,
   state,
 } = await import("../src/appState.js");
 const { renderPublicFormFieldInput } = await import("../src/workFormEditor.js");
@@ -63,6 +64,124 @@ test("empty store options are reloaded once and shared by concurrent callers", a
     assert.deepEqual(getStoreOptionsLoadState(), { status: "ready", message: "" });
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("forced store refresh replaces a stale active directory", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalStores = state.stores.map((item) => ({ ...item }));
+  state.stores.splice(0, state.stores.length, {
+    id: "store-stale",
+    name: "旧店铺快照",
+    platform: "淘宝",
+    status: "active",
+  });
+  globalThis.fetch = async () => new Response(JSON.stringify([
+    { id: "store-current", name: "最新启用店铺", platform: "天猫", status: "active" },
+  ]), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+
+  try {
+    await ensureStoreOptionsLoaded({ force: true });
+    assert.deepEqual(state.stores, [
+      { id: "store-current", name: "最新启用店铺", platform: "天猫", status: "active" },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    state.stores.splice(0, state.stores.length, ...originalStores);
+  }
+});
+
+test("slash-prefixed module bootstrap preserves stores outside its partial contract", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalHash = window.location.hash;
+  const originalGoals = state.goals.map((item) => ({ ...item }));
+  const originalStores = state.stores.map((item) => ({ ...item }));
+  const requestedUrls = [];
+  state.stores.splice(0, state.stores.length, {
+    id: "store-kept",
+    name: "必须保留的店铺",
+    platform: "淘宝",
+    status: "active",
+  });
+  window.location.hash = "#/scheduleBoard";
+  globalThis.fetch = async (url) => {
+    requestedUrls.push(String(url));
+    if (String(url).includes("/api/notifications/summary")) {
+      return new Response(JSON.stringify({ success: true, items: [], unreadCount: 0 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({ goals: [{ id: "goal-from-schedule-board" }] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  try {
+    assert.equal(await loadPersistentData(), true);
+    assert.equal(requestedUrls.some((url) => url.includes("module=scheduleBoard")), true);
+    assert.equal(requestedUrls.some((url) => url.includes("module=dashboard")), false);
+    assert.deepEqual(state.stores, [{
+      id: "store-kept",
+      name: "必须保留的店铺",
+      platform: "淘宝",
+      status: "active",
+    }]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    window.location.hash = originalHash;
+    state.goals.splice(0, state.goals.length, ...originalGoals);
+    state.stores.splice(0, state.stores.length, ...originalStores);
+  }
+});
+
+test("a slower previous route cannot erase the current route store directory", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalHash = window.location.hash;
+  const originalStores = state.stores.map((item) => ({ ...item }));
+  let resolveStaleBootstrap;
+  const staleBootstrap = new Promise((resolve) => { resolveStaleBootstrap = resolve; });
+  globalThis.fetch = async (url) => {
+    const requestUrl = String(url);
+    if (requestUrl.includes("/api/notifications/summary")) {
+      return new Response(JSON.stringify({ success: true, items: [], unreadCount: 0 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (requestUrl.includes("module=scheduleBoard")) return staleBootstrap;
+    if (requestUrl.includes("/api/goal-center/bootstrap")) {
+      return new Response(JSON.stringify({
+        stores: [{ id: "store-current-route", name: "当前页面店铺", platform: "天猫", status: "active" }],
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    throw new Error(`unexpected request: ${requestUrl}`);
+  };
+
+  try {
+    window.location.hash = "#/scheduleBoard";
+    const staleLoad = loadPersistentData();
+    window.location.hash = "#/goals";
+    assert.equal(await loadPersistentData(), true);
+    resolveStaleBootstrap(new Response(JSON.stringify({ stores: [] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    assert.equal(await staleLoad, false);
+    assert.deepEqual(state.stores, [
+      { id: "store-current-route", name: "当前页面店铺", platform: "天猫", status: "active" },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    window.location.hash = originalHash;
+    state.stores.splice(0, state.stores.length, ...originalStores);
   }
 });
 
@@ -116,9 +235,15 @@ test("content-note titles render values saved under the latest form field id", (
 test("schedule board bootstrap includes all resources required by content-note import", () => {
   const serverSource = fs.readFileSync(new URL("../server/index.js", import.meta.url), "utf8");
   const declaration = serverSource.match(/const scheduleBoardCommon = \[[\s\S]*?\];/)?.[0] ?? "";
+  assert.match(declaration, /"stores"/);
   assert.match(declaration, /"publishingAccounts"/);
   assert.match(declaration, /"processTemplateNodes"/);
   assert.match(declaration, /"standardWorkForms"/);
+});
+
+test("goal action launch always refreshes store options", () => {
+  const goalsPageSource = fs.readFileSync(new URL("../src/goalsPage.js", import.meta.url), "utf8");
+  assert.match(goalsPageSource, /ensureStoreOptionsLoaded\(\{ force: true \}\)/);
 });
 
 test("content-note import accepts blank row goals after a batch goal is selected", () => {

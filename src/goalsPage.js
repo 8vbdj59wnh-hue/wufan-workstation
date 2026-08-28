@@ -1841,7 +1841,10 @@ function handleGoalClick(event, rerender) {
       launchImmediately: true,
       error: "",
     };
-    void ensureStoreOptionsLoaded()
+    // Always refresh the directory at launch time. A store may have been
+    // enabled/disabled since the page bootstrap and launch forms must not rely
+    // on an earlier module snapshot.
+    void ensureStoreOptionsLoaded({ force: true })
       .then(() => {
         if (modalState?.kind === "goalTask") rerender();
       })

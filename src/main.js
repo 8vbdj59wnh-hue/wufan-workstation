@@ -138,7 +138,7 @@ const moduleHashMap = {
 };
 
 function normalizeRetiredDataCenterRoute() {
-  const hash = window.location.hash.replace(/^#/, "");
+  const hash = window.location.hash.replace(/^#\/?/u, "");
   if (!/^(?:dataCenter|data-center)(?:\/|$)/.test(hash)) return false;
   const target = /\/(?:sync|platform-goods-excel)(?:\/|$)/.test(hash) ? "settings/admin-data-center" : "products";
   window.history.replaceState(null, "", `#${target}`);
@@ -147,12 +147,12 @@ function normalizeRetiredDataCenterRoute() {
 
 normalizeRetiredDataCenterRoute();
 
-if (["content-schedule", "contentSchedule", "contentSchedules"].includes(window.location.hash.replace(/^#/, ""))) {
+if (["content-schedule", "contentSchedule", "contentSchedules"].includes(window.location.hash.replace(/^#\/?/u, ""))) {
   window.history.replaceState(null, "", "#schedule-board/content-note");
 }
 
 function getRouteHash() {
-  return window.location.hash.replace(/^#/, "");
+  return window.location.hash.replace(/^#\/?/u, "");
 }
 
 function scrollToCurrentHashSection() {
@@ -907,7 +907,7 @@ window.addEventListener("hashchange", async () => {
     await loadPersistentData().catch((error) => console.error("模块数据按需加载失败", error));
     loadedDataModuleId = nextModuleId;
   }
-  if (isNavigationCurrent(revision, nextModuleId) && window.location.hash.replace(/^#/, "") === "task-waves") {
+  if (isNavigationCurrent(revision, nextModuleId) && getRouteHash() === "task-waves") {
     await ensureTaskWavesLoaded().catch((error) => console.error("任务波次按需加载失败", error));
   }
   if (isNavigationCurrent(revision, nextModuleId)) render({ navigation: true });

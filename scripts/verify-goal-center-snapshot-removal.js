@@ -19,8 +19,13 @@ assert.match(
 );
 assert.match(
   appState,
-  /preserveMissingResources:\s*moduleDataEndpoint !== null/,
-  "模块响应不得清空未声明的其他模块状态。",
+  /const usesPartialSnapshot = moduleDataEndpoint !== null \|\| lightweightModules\.has\(route\)/,
+  "每个轻量模块响应都必须标记为局部快照。",
+);
+assert.match(
+  appState,
+  /preserveMissingResources:\s*usesPartialSnapshot/,
+  "局部模块响应不得清空未声明的其他模块状态。",
 );
 assert.match(
   server,

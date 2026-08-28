@@ -61,8 +61,11 @@ let dashboardManagementLoaded = false;
 let dashboardManagementPromise = null;
 let notificationUnreadCount = 0;
 let storeOptionsRequest = null;
+let persistentDataLoadGeneration = 0;
 let storeOptionsLoadState = {
-  status: initialStores.some((store) => store.status === "active") ? "ready" : "idle",
+  // Mock data is only a rendering fallback and must never be treated as an
+  // authoritative store directory loaded from the server.
+  status: "idle",
   message: "",
 };
 let persistenceStatus = {
@@ -305,7 +308,10 @@ export function applyDataSnapshot(data, { preserveMissingResources = false } = {
   if (shouldReplace("people", "persons")) replaceArray(state.people, data.people ?? data.persons);
   if (shouldReplace("permissionTemplates")) replaceArray(state.permissionTemplates, data.permissionTemplates ?? []);
   if (shouldReplace("categories")) replaceArray(state.categories, data.categories);
-  if (shouldReplace("stores")) replaceArray(state.stores, data.stores);
+  if (shouldReplace("stores")) {
+    replaceArray(state.stores, data.stores);
+    storeOptionsLoadState = { status: "ready", message: "" };
+  }
   if (shouldReplace("publishingAccounts")) replaceArray(state.publishingAccounts, data.publishingAccounts ?? initialPublishingAccounts);
   if (shouldReplace("goals")) replaceArray(state.goals, data.goals);
   if (shouldReplace("taskTemplates")) replaceArray(state.taskTemplates, data.taskTemplates);
@@ -350,8 +356,9 @@ export function applyDataSnapshot(data, { preserveMissingResources = false } = {
 }
 
 export async function loadPersistentData({ includeTaskWaves = null } = {}) {
+  const loadGeneration = ++persistentDataLoadGeneration;
   try {
-    const fullRoute = window.location.hash.replace(/^#/, "");
+    const fullRoute = window.location.hash.replace(/^#\/?/u, "");
     const route = fullRoute === "settings/admin-data-center" ? "adminDataCenter" : fullRoute.split("/")[0];
     const lightweightModules = new Set([
       "",
@@ -378,6 +385,7 @@ export async function loadPersistentData({ includeTaskWaves = null } = {}) {
       goals: `${apiBaseUrl}/api/goal-center/bootstrap`,
     };
     const moduleDataEndpoint = moduleDataEndpoints[route] ?? null;
+    const usesPartialSnapshot = moduleDataEndpoint !== null || lightweightModules.has(route);
     const shouldLoadTaskWaves =
       includeTaskWaves ??
       route === "task-waves";
@@ -386,18 +394,27 @@ export async function loadPersistentData({ includeTaskWaves = null } = {}) {
       shouldLoadTaskWaves ? authFetch(`${apiBaseUrl}/api/task-waves`) : Promise.resolve(null),
       authFetch(`${apiBaseUrl}/api/notifications/summary?limit=12`),
     ]);
+    if (loadGeneration !== persistentDataLoadGeneration) return false;
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    applyDataSnapshot(await response.json(), { preserveMissingResources: moduleDataEndpoint !== null });
-    const notificationData = await notificationResponse.json().catch(() => ({}));
+    const [snapshot, notificationData, waveData] = await Promise.all([
+      response.json(),
+      notificationResponse.json().catch(() => ({})),
+      waveResponse === null ? Promise.resolve(null) : waveResponse.json().catch(() => []),
+    ]);
+    if (loadGeneration !== persistentDataLoadGeneration) return false;
     if (!notificationResponse.ok || notificationData.success !== true) throw new Error(notificationData.message ?? `HTTP ${notificationResponse.status}`);
+    if (waveResponse?.status !== 403 && waveResponse !== null && !waveResponse.ok) {
+      throw new Error(waveData.message ?? waveData.error ?? "任务波次读取失败。");
+    }
+    // Module bootstraps are partial by contract. Applying them as a full
+    // snapshot used to erase stores (and other directories) that the module did
+    // not declare. Only /api/data is allowed to replace the entire client state.
+    applyDataSnapshot(snapshot, { preserveMissingResources: usesPartialSnapshot });
     replaceArray(state.notifications, notificationData.items ?? []);
     notificationUnreadCount = Number(notificationData.unreadCount || 0);
     if (waveResponse !== null) {
-      const waveData = await waveResponse.json().catch(() => []);
       if (waveResponse.status === 403) {
         replaceArray(state.taskWaves, []);
-      } else if (!waveResponse.ok) {
-        throw new Error(waveData.message ?? waveData.error ?? "任务波次读取失败。");
       } else {
         replaceArray(state.taskWaves, Array.isArray(waveData) ? waveData : []);
       }
@@ -409,7 +426,9 @@ export async function loadPersistentData({ includeTaskWaves = null } = {}) {
       kind: "success",
       message: "当前数据已连接本地数据库。",
     };
+    return true;
   } catch (error) {
+    if (loadGeneration !== persistentDataLoadGeneration) return false;
     persistenceAvailable = false;
     loadedFromDatabase = false;
     persistenceStatus = {
@@ -426,7 +445,7 @@ export async function ensureDashboardManagementLoaded() {
   dashboardManagementPromise = (async () => {
     const response = await authFetch(`${apiBaseUrl}/api/bootstrap?module=dashboardManagement`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    applyDataSnapshot(await response.json()); dashboardManagementLoaded = true; return true;
+    applyDataSnapshot(await response.json(), { preserveMissingResources: true }); dashboardManagementLoaded = true; return true;
   })().finally(() => { dashboardManagementPromise = null; });
   return dashboardManagementPromise;
 }
