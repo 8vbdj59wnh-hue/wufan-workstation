@@ -51,6 +51,7 @@ import {
   listErpFactSnapshots,
   listPendingErpSkus,
   listProductFactSnapshots,
+  getProductAutoProfileSettings,
   markPlatformSku,
   parseProductWorkbook,
   parseErpV2Import,
@@ -65,6 +66,7 @@ import {
   proposePlatformSkuProductRelation,
   validateProductImport,
   validateErpV2Import,
+  updateProductAutoProfileSettings,
 } from "./modules/products/index.js";
 import {
   createManualDataSyncBatch,
@@ -4077,6 +4079,23 @@ app.get("/api/products/pending-skus", requirePermission("skus.view"), (request, 
     });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "待建立SKU读取失败。" });
+  }
+});
+
+app.get("/api/products/auto-profile-settings", requirePermission("skus.view"), (request, response) => {
+  try {
+    response.json({ success: true, settings: getProductAutoProfileSettings() });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "自动建档设置读取失败。" });
+  }
+});
+
+app.put("/api/products/auto-profile-settings", requirePermission("skus.manage"), requireAdminUser, (request, response) => {
+  try {
+    const updatedBy = request.user?.id || request.user?.account || request.user?.name || "admin";
+    response.json({ success: true, settings: updateProductAutoProfileSettings({ enabled: request.body?.enabled }, updatedBy) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "自动建档设置保存失败。" });
   }
 });
 

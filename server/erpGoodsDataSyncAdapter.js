@@ -13,6 +13,7 @@ import {
   startDataSyncBatch,
 } from "./dataSyncCenterService.js";
 import { commitErpV2Import, parseWangdianGoodsImport, readErpV2Import, validateErpV2Import } from "./productV2Import.js";
+import { autoCreateProductProfilesForImportBatch } from "./erpSkuService.js";
 
 function requestRange(task, syncMode, requestStart, requestEnd) {
   const end = requestEnd || new Date().toISOString();
@@ -98,6 +99,19 @@ export function commitErpGoodsDataSync(batchId) {
   try {
     const result = commitErpV2Import(batch.sourceBatchId);
     const summary = result.summary ?? {};
+    let autoProfile;
+    try {
+      autoProfile = autoCreateProductProfilesForImportBatch(batch.sourceBatchId);
+    } catch (error) {
+      autoProfile = {
+        enabled: true,
+        attemptedCount: 0,
+        createdCount: 0,
+        failedCount: 1,
+        created: [],
+        failures: [{ merchantSkuCode: null, message: error.message || "自动建档执行失败。" }],
+      };
+    }
     const status = Number(summary.skipped || 0) > 0 ? "partial" : "succeeded";
     const dataSyncBatch = completeDataSyncBatch(batch.id, {
       status,
@@ -107,8 +121,9 @@ export function commitErpGoodsDataSync(batchId) {
       invalidatedCount: summary.missingGoods || 0,
       exceptionCount: summary.skipped || 0,
       exceptions: [],
+      autoProfile,
     });
-    return { ...result, dataSyncBatch };
+    return { ...result, autoProfile, dataSyncBatch };
   } catch (error) {
     completeDataSyncBatch(batch.id, { status: "failed", errorMessage: error.message, exceptions: [{ exceptionType: "commit_error", message: error.message }] });
     throw error;

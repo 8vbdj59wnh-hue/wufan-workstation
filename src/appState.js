@@ -1931,6 +1931,20 @@ export async function loadPendingErpSkus(search = "") {
   return readApiJson(response, "待建立SKU读取失败。");
 }
 
+export async function loadProductAutoProfileSettings() {
+  const response = await authFetch(`${apiBaseUrl}/api/products/auto-profile-settings`);
+  return readApiJson(response, "自动建档设置读取失败。");
+}
+
+export async function saveProductAutoProfileSettings(enabled) {
+  const response = await authFetch(`${apiBaseUrl}/api/products/auto-profile-settings`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled: Boolean(enabled) }),
+  });
+  return readApiJson(response, "自动建档设置保存失败。");
+}
+
 export async function createProductFromPendingErpSku(erpSkuId) {
   const response = await authFetch(
     `${apiBaseUrl}/api/products/pending-skus/${encodeURIComponent(erpSkuId)}/create-product`,
