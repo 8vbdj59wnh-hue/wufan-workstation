@@ -9,6 +9,43 @@ function normalizeSku(value) {
   return String(value ?? "").trim().toLocaleLowerCase("en-US");
 }
 
+const autoProfileTaskCode = "erp_goods";
+const autoProfileConfigKey = "autoCreateProductProfiles";
+
+function parseJson(value, fallback = {}) {
+  try { return JSON.parse(value || "{}"); } catch { return fallback; }
+}
+
+export function getProductAutoProfileSettings() {
+  const task = getDatabase().prepare("SELECT configJson,updatedAt FROM data_sync_tasks WHERE taskCode=?").get(autoProfileTaskCode);
+  const config = parseJson(task?.configJson);
+  const setting = config?.[autoProfileConfigKey] || {};
+  return {
+    enabled: setting.enabled === true,
+    mode: "new_active_skus",
+    updatedAt: setting.updatedAt || task?.updatedAt || null,
+    updatedBy: setting.updatedBy || null,
+  };
+}
+
+export function updateProductAutoProfileSettings({ enabled } = {}, updatedBy = "") {
+  if (typeof enabled !== "boolean") throw new Error("自动建档开关参数无效。");
+  const database = getDatabase();
+  const task = database.prepare("SELECT id,configJson FROM data_sync_tasks WHERE taskCode=?").get(autoProfileTaskCode);
+  if (!task) throw new Error("ERP货品同步任务不存在。");
+  const updatedAt = new Date().toISOString();
+  const config = parseJson(task.configJson);
+  config[autoProfileConfigKey] = {
+    enabled,
+    mode: "new_active_skus",
+    updatedAt,
+    updatedBy: String(updatedBy ?? "").trim() || null,
+  };
+  database.prepare("UPDATE data_sync_tasks SET configJson=?,updatedAt=? WHERE id=?")
+    .run(JSON.stringify(config), updatedAt, task.id);
+  return getProductAutoProfileSettings();
+}
+
 export function listPendingErpSkus(search = "") {
   const query = String(search ?? "").trim();
   const like = `%${query}%`;
@@ -84,7 +121,7 @@ function prepareProductFromErpSku(database, erpSkuId) {
   return { sku, normalizedSku };
 }
 
-function insertProductFromPreparedErpSku({ sku, normalizedSku }) {
+function insertProductFromPreparedErpSku({ sku, normalizedSku }, { matchMethod = "pending_sku_create", sourceSystem = "ERP待建立SKU" } = {}) {
   let galleryImages = [];
   try {
     const parsedGallery = JSON.parse(sku.galleryImages || "[]");
@@ -104,7 +141,7 @@ function insertProductFromPreparedErpSku({ sku, normalizedSku }) {
       category: sku.category || null,
       specification: sku.specificationName || null,
       status: "开发中",
-      sourceSystem: "ERP待建立SKU",
+      sourceSystem,
       createdAt: now,
       updatedAt: now,
   });
@@ -118,7 +155,7 @@ function insertProductFromPreparedErpSku({ sku, normalizedSku }) {
       unit: sku.unit || null,
       barcode: sku.barcode || null,
       erpStatus: sku.erpStatus || null,
-      matchMethod: "pending_sku_create",
+      matchMethod,
       sourceBatchId: sku.lastSeenBatchId,
       latestStateJson: "{}",
       currentState: "active",
@@ -146,10 +183,10 @@ function insertProductFromPreparedErpSku({ sku, normalizedSku }) {
   };
 }
 
-export function createProductFromErpSku(erpSkuId) {
+export function createProductFromErpSku(erpSkuId, options = {}) {
   const database = getDatabase();
   return database.transaction(() => (
-    insertProductFromPreparedErpSku(prepareProductFromErpSku(database, erpSkuId))
+    insertProductFromPreparedErpSku(prepareProductFromErpSku(database, erpSkuId), options)
   ))();
 }
 
@@ -173,4 +210,45 @@ export function createProductsFromErpSkus(erpSkuIds) {
       createdCount: created.length,
     };
   })();
+}
+
+export function autoCreateProductProfilesForImportBatch(importBatchId) {
+  const settings = getProductAutoProfileSettings();
+  if (!settings.enabled) return { enabled: false, attemptedCount: 0, createdCount: 0, failedCount: 0, created: [], failures: [] };
+  const database = getDatabase();
+  const candidates = database.prepare(`
+    SELECT s.id,s.merchantSkuCode
+    FROM erp_skus s
+    WHERE s.firstSeenBatchId=? AND s.currentState='active'
+      AND NOT EXISTS (
+        SELECT 1 FROM product_erp_mappings m
+        WHERE m.erpSkuId=s.id AND m.currentState='active'
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM products p
+        WHERE lower(trim(p.skuCode))=lower(trim(s.merchantSkuCode))
+      )
+    ORDER BY lower(s.merchantSkuCode),s.id
+  `).all(String(importBatchId ?? "").trim());
+  const created = [];
+  const failures = [];
+  for (const candidate of candidates) {
+    try {
+      const result = createProductFromErpSku(candidate.id, {
+        matchMethod: "erp_sync_auto_profile",
+        sourceSystem: "旺店通ERP自动建档",
+      });
+      created.push({ erpSkuId: candidate.id, merchantSkuCode: candidate.merchantSkuCode, productId: result.product.id });
+    } catch (error) {
+      failures.push({ erpSkuId: candidate.id, merchantSkuCode: candidate.merchantSkuCode, message: error.message || "自动建档失败。" });
+    }
+  }
+  return {
+    enabled: true,
+    attemptedCount: candidates.length,
+    createdCount: created.length,
+    failedCount: failures.length,
+    created,
+    failures,
+  };
 }

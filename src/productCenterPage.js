@@ -12,6 +12,7 @@ import {
   loadProductSalesLinks,
   loadProductSalesSummaries,
   loadPendingErpSkus,
+  loadProductAutoProfileSettings,
   loadErpSyncRun,
   loadProductV2Import,
   loadProductV2Preview,
@@ -55,6 +56,7 @@ import {
   createProductProfileForErpSku,
   loadProductMarketingAsset,
   saveProductMarketingAsset,
+  saveProductAutoProfileSettings,
   exportProductMarketingAsset,
   createProductHealthAction,
   recordProductImprovementResult,
@@ -122,6 +124,7 @@ let unmatchedSkuState = { loading: false, loaded: false, rows: [], total: 0, que
 let platformProductLinkState = { skuId: "", query: "", selectedProductId: "", error: "" };
 let productSubmodule = "business-dashboard";
 let pendingSkuState = { loading: false, loaded: false, rows: [], query: "", error: "", notice: "" };
+let productAutoProfileState = { loading: false, loaded: false, enabled: false, updatedAt: null, updatedBy: null, error: "", notice: "" };
 let comboSkuState = { loading: false, loaded: false, rows: [], detail: null, search: "", includeHistorical: false, viewMode: "card", page: 1, pageSize: 20, pagination: { total: 0 }, error: "" };
 let selectedPendingSkuIds = new Set();
 let platformPreviewRequestId = 0;
@@ -146,6 +149,10 @@ let productBusinessVisibleMetrics = new Set(["sales", "structure", "inventory", 
 function canViewProducts() { return hasPermission(getCurrentUser(), "products.view"); }
 function canViewSkus() { return hasPermission(getCurrentUser(), "skus.view"); }
 function canViewCombos() { return hasPermission(getCurrentUser(), "combos.view"); }
+function canConfigureProductAutoProfile() {
+  const user = getCurrentUser();
+  return hasPermission(user, "skus.manage") && [user?.role, user?.authRole].some((role) => ["admin", "system_admin"].includes(role));
+}
 
 function ensureAuthorizedProductSubmodule() {
   const allowed = new Set([
@@ -955,6 +962,14 @@ function renderPendingSkuPage() {
     </div>
     ${renderProductWorkspaceTabs()}
     ${renderProductSubmoduleTabs()}
+    <section class="product-workspace-panel product-auto-profile-panel">
+      <header><div><span>ERP同步联动</span><h2>新 SKU 自动建档</h2><p>开启后，只为后续旺店通同步首次发现的有效 SKU 创建产品档案并建立 ERP 映射；不会补建历史 SKU。</p></div>
+        <div>${productAutoProfileState.loading ? `<span class="status-badge">读取中</span>` : `<span class="status-badge ${productAutoProfileState.enabled ? "is-success" : ""}">${productAutoProfileState.enabled ? "已开启" : "未开启"}</span>`}
+        ${canConfigureProductAutoProfile() ? `<button class="${productAutoProfileState.enabled ? "secondary-button" : "primary-button"}" type="button" data-action="toggle-product-auto-profile" data-enabled="${productAutoProfileState.enabled ? "false" : "true"}" ${productAutoProfileState.loading ? "disabled" : ""}>${productAutoProfileState.enabled ? "关闭自动建档" : "开启自动建档"}</button>` : ""}</div></header>
+      ${productAutoProfileState.error ? `<div class="form-error">${escapeHtml(productAutoProfileState.error)}</div>` : ""}
+      ${productAutoProfileState.notice ? `<div class="form-success">${escapeHtml(productAutoProfileState.notice)}</div>` : ""}
+      <small>自动建档失败不会阻断 ERP 主数据同步；历史待建立 SKU 仍可在下方人工选择并批量创建。</small>
+    </section>
     <form class="filter-bar pending-sku-filter-bar" data-pending-sku-search>
       <input type="search" name="query" value="${escapeHtml(pendingSkuState.query)}" placeholder="搜索SKU、货品名称或ERP货品编码" />
       <button class="secondary-button" type="submit">搜索</button>
@@ -2320,6 +2335,27 @@ async function refreshPendingErpSkus(rerender, query = pendingSkuState.query) {
   rerender();
 }
 
+async function refreshProductAutoProfileSettings(rerender) {
+  if (productAutoProfileState.loading) return;
+  productAutoProfileState = { ...productAutoProfileState, loading: true, error: "" };
+  rerender();
+  try {
+    const result = await loadProductAutoProfileSettings();
+    productAutoProfileState = {
+      loading: false,
+      loaded: true,
+      enabled: result.settings?.enabled === true,
+      updatedAt: result.settings?.updatedAt || null,
+      updatedBy: result.settings?.updatedBy || null,
+      error: "",
+      notice: productAutoProfileState.notice,
+    };
+  } catch (error) {
+    productAutoProfileState = { ...productAutoProfileState, loading: false, loaded: true, error: error.message || "自动建档设置读取失败。" };
+  }
+  rerender();
+}
+
 async function refreshProductManagementOverview(rerender) {
   if (productManagementState.loadingOverview) return;
   productManagementState = { ...productManagementState, loadingOverview: true, error: "" }; rerender();
@@ -2663,6 +2699,9 @@ export function bindProductCenterPageEvents(rerender) {
   }
   if (!routeProductId && productSubmodule === "pending-skus" && !pendingSkuState.loaded && !pendingSkuState.loading) {
     void refreshPendingErpSkus(rerender);
+  }
+  if (!routeProductId && productSubmodule === "pending-skus" && !productAutoProfileState.loaded && !productAutoProfileState.loading) {
+    void refreshProductAutoProfileSettings(rerender);
   }
   if (!routeProductId && !routeErpSkuId && productSubmodule === "combo-skus" && !comboSkuState.loaded && !comboSkuState.loading && !comboSkuState.detail) void refreshComboSkuList(rerender);
   document.querySelector("[data-combo-sku-search]")?.addEventListener("submit", (event) => { event.preventDefault(); comboSkuState = { ...comboSkuState, search: event.currentTarget.elements.search.value.trim(), includeHistorical: event.currentTarget.elements.includeHistorical.checked, page: 1, loaded: false, detail: null }; void refreshComboSkuList(rerender); });
@@ -3163,6 +3202,33 @@ export function bindProductCenterPageEvents(rerender) {
     if (action === "clear-pending-sku-search") {
       pendingSkuState = { ...pendingSkuState, query: "", loaded: false, error: "", notice: "" };
       rerender();
+    }
+    if (action === "toggle-product-auto-profile") {
+      if (!canConfigureProductAutoProfile()) return;
+      const enabled = button.dataset.enabled === "true";
+      const confirmed = window.confirm(enabled
+        ? "确认开启新 SKU 自动建档？开启后，仅对后续旺店通同步首次发现的有效 SKU 自动创建产品档案。"
+        : "确认关闭新 SKU 自动建档？已创建的产品档案不会删除。"
+      );
+      if (!confirmed) return;
+      productAutoProfileState = { ...productAutoProfileState, loading: true, error: "", notice: "" };
+      rerender();
+      try {
+        const result = await saveProductAutoProfileSettings(enabled);
+        productAutoProfileState = {
+          loading: false,
+          loaded: true,
+          enabled: result.settings?.enabled === true,
+          updatedAt: result.settings?.updatedAt || null,
+          updatedBy: result.settings?.updatedBy || null,
+          error: "",
+          notice: enabled ? "自动建档已开启，将从后续新同步 SKU 开始生效。" : "自动建档已关闭。",
+        };
+      } catch (error) {
+        productAutoProfileState = { ...productAutoProfileState, loading: false, loaded: true, error: error.message || "自动建档设置保存失败。" };
+      }
+      rerender();
+      return;
     }
     if (action === "create-product-from-pending-sku") {
       if (!hasPermission(getCurrentUser(), "skus.manage")) return;

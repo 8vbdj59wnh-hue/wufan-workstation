@@ -26,4 +26,11 @@ export {
   listProductFactSnapshots,
   readErpFactSnapshot,
 } from "../../erpFactSnapshots.js";
-export { createProductFromErpSku, createProductsFromErpSkus, listPendingErpSkus } from "../../erpSkuService.js";
+export {
+  autoCreateProductProfilesForImportBatch,
+  createProductFromErpSku,
+  createProductsFromErpSkus,
+  getProductAutoProfileSettings,
+  listPendingErpSkus,
+  updateProductAutoProfileSettings,
+} from "../../erpSkuService.js";
