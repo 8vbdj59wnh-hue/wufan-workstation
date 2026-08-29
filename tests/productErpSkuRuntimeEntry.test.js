@@ -39,6 +39,13 @@ test("Phase C 以 ERP SKU 作为产品中心与关键行动的运行身份", () 
   const insertDiscontinuedSku = database.prepare("INSERT INTO erp_skus(id,merchantSkuCode,erpGoodsId,specificationName,erpStatus,rawSourceData,firstSeenBatchId,lastSeenBatchId,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?)");
   insertDiscontinuedSku.run("erp-sku-wdt-prop7", "WDT-DOWN-PROP7", "goods-wdt-discontinued", "字段标记", "active", JSON.stringify({ prop7: "已下架" }), "sync-phase-c", "sync-phase-c", "active", now, now);
   insertDiscontinuedSku.run("erp-sku-wdt-label", "WDT-DOWN-LABEL", "goods-wdt-discontinued", "标签标记", "active", JSON.stringify({ goods_label: "义乌仓,已同步,已下架" }), "sync-phase-c", "sync-phase-c", "active", now, now);
+  database.prepare("INSERT INTO erp_goods(id,goodsCode,goodsName,rawSourceData,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?)")
+    .run("goods-wdt-in-sale", "WDT-IN-SALE", "旺店通在售货品", "{}", "active", now, now);
+  insertDiscontinuedSku.run("erp-sku-wdt-in-sale", "WDT-IN-SALE", "goods-wdt-in-sale", "在售规格", "active", JSON.stringify({ prop7: "在售" }), "sync-phase-c", "sync-phase-c", "active", now, now);
+  database.prepare(`INSERT INTO operating_erp_set_members
+    (normalizedCode,merchantSkuCode,erpSkuId,salesObjectId,lifecycleStatus,sourceCount,firstSeenAt,lastSeenAt,calculatedAt,updatedAt)
+    VALUES(?,?,?,NULL,?,?,?,?,?,?)`)
+    .run("wdt-in-sale", "WDT-IN-SALE", "erp-sku-wdt-in-sale", "external_unused", 0, now, now, now, now);
 
   database.prepare("INSERT INTO erp_goods(id,goodsCode,goodsName,rawSourceData,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?)")
     .run("goods-phase-c-legacy", "LEGACY", "Legacy 兼容货品", "{}", "active", now, now);
@@ -65,6 +72,8 @@ test("Phase C 以 ERP SKU 作为产品中心与关键行动的运行身份", () 
   assert.equal(resolveActionProductOptions([{ erpSkuId: "erp-sku-phase-c-direct" }])[0].erpSkuId, "erp-sku-phase-c-direct");
   assert.equal(listProductCenterV2Skus({ search: "WDT-DOWN", includeHistorical: true }).rows.length, 0);
   assert.equal(listActionProductOptions({ search: "WDT-DOWN" }).rows.length, 0);
+  assert.equal(listProductCenterV2Skus({ search: "WDT-IN-SALE" }).rows[0].erpSkuId, "erp-sku-wdt-in-sale");
+  assert.equal(getProductBusinessReadModel({ range: "30d", query: "WDT-IN-SALE" }, { unpaged: true, bypassCache: true }).items[0].erpSkuId, "erp-sku-wdt-in-sale");
   const businessRows = getProductBusinessReadModel({ range: "30d", includeHistorical: true }, { unpaged: true, bypassCache: true }).items;
   assert.equal(businessRows.some((item) => item.erpSkuId === "erp-sku-wdt-prop7" || item.erpSkuId === "erp-sku-wdt-label"), false);
   assert.equal(businessRows.some((item) => item.erpSkuId === "erp-sku-phase-c-direct"), true);

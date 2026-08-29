@@ -4,7 +4,7 @@ import { classifyProductBusinessZones } from "./productBusinessClassification.js
 import { FORMAL_SALES_OBJECT_RESOLVER_SCOPES, resolveLinkSkuRelationsForRead } from "./capabilities/resolveLinkSkuRelationRead.js";
 import { queryErpSkuContributions } from "./productContributionReadModel.js";
 import { latestCompleteSalesDate, resolveProductSalesDistributionRange } from "./productSalesDistributionService.js";
-import { wangdianOperatingSkuPredicate } from "./wangdianProductStatus.js";
+import { isWangdianInSaleRawSource, wangdianOperatingSkuPredicate } from "./wangdianProductStatus.js";
 
 export const productBusinessLifecycleStatuses = Object.freeze(["新品", "成长", "爆款", "稳定销售", "衰退", "清仓", "归档"]);
 export const productBusinessHealthStatuses = Object.freeze(["healthy", "attention", "risk", "no_data"]);
@@ -351,7 +351,7 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
   const period = resolveProductBusinessPeriod(query, database);
   const requestedErpSkuId = text(query.erpSkuId) || (text(query.productId) ? text(database.prepare("SELECT erpSkuId FROM product_erp_mappings WHERE productId=? AND currentState='active' ORDER BY updatedAt DESC,id DESC LIMIT 1").get(text(query.productId))?.erpSkuId) : "");
   const products = database.prepare(`
-    SELECT s.id erpSkuId,s.merchantSkuCode,s.specificationName,s.mainImage,s.erpStatus,s.currentState,s.createdAt,s.updatedAt,
+    SELECT s.id erpSkuId,s.merchantSkuCode,s.specificationName,s.mainImage,s.erpStatus,s.currentState,s.rawSourceData,s.createdAt,s.updatedAt,
       g.goodsCode,g.goodsName,g.brand,g.category,
       m.productId legacyProductId,p.name legacyProductName,p.status legacyProductStatus,
       profile.id businessProfileId,profile.businessStatus,profile.lifecycle profileLifecycle,profile.ownerId profileOwnerId,
@@ -378,7 +378,8 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
   const scopedProducts = requestedErpSkuId
     ? allScopedProducts.filter((product) => product.erpSkuId === requestedErpSkuId)
     : defaultOperatingView
-      ? allScopedProducts.filter((product) => [...(productLifecycle.get(product.erpSkuId)?.statuses || [])].some((status) => ["active", "active_dependency", "sales_active"].includes(status)))
+      ? allScopedProducts.filter((product) => isWangdianInSaleRawSource(product.rawSourceData)
+        || [...(productLifecycle.get(product.erpSkuId)?.statuses || [])].some((status) => ["active", "active_dependency", "sales_active"].includes(status)))
       : allScopedProducts;
   const erpSkuIds = scopedProducts.map((product) => product.erpSkuId);
   const relationContext = readProductBusinessRelationContext(database, { bypassCache });
@@ -423,7 +424,8 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
       image: product.mainImage, brand: product.brandOverride || product.brand || null, category: product.categoryOverride || product.category || null, ownerId: product.ownerId || null,
       ownerName: product.ownerName || "未分配", status: product.businessStatus || product.legacyProductStatus || product.erpStatus || product.currentState || "资料未维护", lifecycle: product.profileLifecycle || null,
       operatingLifecycle: { primaryStatus: productLifecycle.get(product.erpSkuId)?.primaryStatus || null,
-        statuses: [...(productLifecycle.get(product.erpSkuId)?.statuses || [])].sort(), current: [...(productLifecycle.get(product.erpSkuId)?.statuses || [])].some((status) => ["active", "active_dependency", "sales_active"].includes(status)) },
+        statuses: [...(productLifecycle.get(product.erpSkuId)?.statuses || [])].sort(), current: isWangdianInSaleRawSource(product.rawSourceData)
+          || [...(productLifecycle.get(product.erpSkuId)?.statuses || [])].some((status) => ["active", "active_dependency", "sales_active"].includes(status)) },
       sales: { amount: legacySalesAmount, quantity: legacySalesQuantity, directAmount: salesAmount, directCost: numeric(contribution?.directCost), directProfit: grossProfit,
         directQuantity: numeric(contribution?.directSalesQuantity), bundleContributionQuantity: numeric(contribution?.bundleContributionQuantity), totalPhysicalContribution: salesQuantity,
         previousAmount: numeric(priorContribution?.directSalesAmount), earlierAmount: numeric(earlierContributionItem?.directSalesAmount),
@@ -527,7 +529,7 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
     definitions: { identity: "ERP SKU", extensions: "ProductBusinessProfile及各经营扩展资料按 ERP SKU 读取",
       sales: "connection_sku_sales_daily_facts + Sales Object + BOM → ERP SKU", salesContractVersion: "erp-sku-contribution-v2",
       productEconomics: "Single直接事实；Bundle金额/利润不分摊", physicalQuantity: "Direct Sales Quantity + Bundle Contribution Quantity",
-      legacyFields: "summary.salesAmount/summary.salesQuantity与item.sales.legacy仅用于兼容旧调用方", operatingView: "Active + Active Dependency + Sales Active；Product战略生命周期保持独立",
+      legacyFields: "summary.salesAmount/summary.salesQuantity与item.sales.legacy仅用于兼容旧调用方", operatingView: "Active + Active Dependency + Sales Active + 旺店通在售；Product战略生命周期保持独立",
       inventory: "现有库存供应查询", health: "ProductBusinessReadModel 规则分析", actions: "product_improvements + action_products + tasks", readOnly: true },
   };
 }

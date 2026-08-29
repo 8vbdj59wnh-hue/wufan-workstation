@@ -95,6 +95,17 @@ test("产品销售结构默认排除历史产品且可显式查看", () => {
   database.close();
 });
 
+test("产品销售结构默认包含旺店通明确在售但旧经营集合未命中的SKU", () => {
+  const database = fixture();
+  database.prepare("INSERT INTO erp_goods VALUES(?,?,?,?,?)").run("goods-wdt-active", "WDT-ACTIVE", "旺店通在售产品", "半然", "花瓶");
+  database.prepare("INSERT INTO erp_skus VALUES(?,?,?,?,?,?,?)").run("erp-wdt-active", "goods-wdt-active", "WDT-ACTIVE-1", "默认规格", "", "active", JSON.stringify({ prop7: "在售" }));
+  database.prepare("INSERT INTO operating_erp_set_members VALUES(?,?)").run("erp-wdt-active", "external_unused");
+  const result = getProductSalesDistribution({ preset: "custom", startDate: "2026-08-20", endDate: "2026-08-20" }, { database });
+  assert.equal(result.items.some((item) => item.erpSkuId === "erp-wdt-active"), true);
+  assert.equal(result.items.some((item) => item.erpSkuId === "erp-down"), false);
+  database.close();
+});
+
 test("产品销售结构不依赖 Legacy Product 映射", () => {
   const database = fixture();
   database.prepare("INSERT INTO erp_goods VALUES(?,?,?,?,?)").run("goods-direct", "DIRECT", "直连 ERP 产品", "半然", "花瓶");

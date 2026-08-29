@@ -4,7 +4,7 @@ import { resolveErpSkuSalesObjectLinks } from "./capabilities/resolveLinkSkuRela
 import { classifyErpSkuUsages } from "./erpSkuUsageProfileService.js";
 import { LINK_ASSET_SELECT_SQL } from "./linkAssetSql.js";
 import { getProductBusinessReadModel } from "./productBusinessReadModel.js";
-import { wangdianOperatingSkuPredicate } from "./wangdianProductStatus.js";
+import { currentProductOperatingSkuPredicate, wangdianInSaleSkuPredicate, wangdianOperatingSkuPredicate } from "./wangdianProductStatus.js";
 
 const text = (value) => String(value ?? "").trim();
 const number = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
@@ -138,8 +138,8 @@ function salesObjectLinkContext(database, erpSkuIds) {
 function productListMetadata(database) {
   if (productListMetadataCache?.expiresAt > Date.now()) return productListMetadataCache.value;
   const lifecycleReady = operatingLifecycleReady(database);
-  const lifecycleJoin = lifecycleReady ? "JOIN operating_erp_set_members om ON om.erpSkuId=s.id" : "";
-  const lifecycleWhere = lifecycleReady ? "AND om.lifecycleStatus IN ('active','active_dependency','sales_active')" : "";
+  const lifecycleJoin = lifecycleReady ? "LEFT JOIN operating_erp_set_members om ON om.erpSkuId=s.id" : "";
+  const lifecycleWhere = lifecycleReady ? `AND ${currentProductOperatingSkuPredicate(database, "s", "om")}` : "";
   const operatingSourceWhere = `AND ${wangdianOperatingSkuPredicate(database, "s")}`;
   const rows = database.prepare(`SELECT s.id erpSkuId,COALESCE(profile.lifecycle,p.status) lifecycleStatus,
       COALESCE(f.quantity,0) quantity,COALESCE(f.salesAmount,0) salesAmount,f.firstPeriod,
@@ -166,7 +166,7 @@ function productListMetadata(database) {
       JOIN sales_link_skus x ON x.id=r.linkSkuId JOIN sales_links l ON l.id=x.salesLinkId JOIN sales_shops sh ON sh.id=l.shopId
       WHERE r.status='active' ORDER BY sh.platform,sh.displayName`).all(),
   };
-  const historical = lifecycleReady ? Number(database.prepare(`SELECT COUNT(*) total FROM operating_erp_set_members om JOIN erp_skus s ON s.id=om.erpSkuId WHERE om.erpSkuId IS NOT NULL AND om.lifecycleStatus IN ('archived','external_unused') AND ${wangdianOperatingSkuPredicate(database, "s")}`).get()?.total || 0) : 0;
+  const historical = lifecycleReady ? Number(database.prepare(`SELECT COUNT(*) total FROM operating_erp_set_members om JOIN erp_skus s ON s.id=om.erpSkuId WHERE om.erpSkuId IS NOT NULL AND om.lifecycleStatus IN ('archived','external_unused') AND NOT ${wangdianInSaleSkuPredicate(database, "s")} AND ${wangdianOperatingSkuPredicate(database, "s")}`).get()?.total || 0) : 0;
   const value = { summary: { total: Number(summary.total || 0), profiled: Number(summary.profiled || 0), unprofiled: Number(summary.unprofiled || 0), historical,
     lifecycleReady, businessZones: zones.counts, businessZoneRules: zones.rules }, zoneById: new Map(zones.items.map((row) => [row.erpSkuId, row.businessZone])), facets };
   productListMetadataCache = { expiresAt: Date.now() + 30_000, value }; return value;
@@ -262,7 +262,7 @@ export function listProductCenterV2Skus(options = {}) {
   const database = getDatabase(); const limit = Math.min(200, Math.max(20, number(options.limit, 50))); const offset = Math.max(0, number(options.offset, 0));
   const lifecycleReady = operatingLifecycleReady(database);
   const metadata = text(options.businessZone) && options.businessZone !== "all" ? productListMetadata(database) : null; const conditions = ["s.currentState='active'", wangdianOperatingSkuPredicate(database, "s")]; const params = {};
-  if (lifecycleReady && !includeHistorical(options.includeHistorical)) conditions.push("om.lifecycleStatus IN ('active','active_dependency','sales_active')");
+  if (lifecycleReady && !includeHistorical(options.includeHistorical)) conditions.push(currentProductOperatingSkuPredicate(database, "s", "om"));
   if (lifecycleReady && text(options.operatingLifecycleStatus)) { conditions.push("om.lifecycleStatus=@operatingLifecycleStatus"); params.operatingLifecycleStatus = text(options.operatingLifecycleStatus); }
   if (text(options.search)) { conditions.push("(s.merchantSkuCode LIKE @search OR COALESCE(s.specificationName,'') LIKE @search OR COALESCE(g.goodsName,'') LIKE @search OR COALESCE(g.goodsCode,'') LIKE @search OR COALESCE(profile.displayNameOverride,'') LIKE @search OR COALESCE(p.name,'') LIKE @search)"); params.search = `%${text(options.search)}%`; }
   if (options.profileStatus === "profiled") conditions.push("profile.id IS NOT NULL");
@@ -284,7 +284,7 @@ export function listProductCenterV2Skus(options = {}) {
     const ids = [...metadata.zoneById].filter(([, zone]) => zone === options.businessZone).map(([id]) => id);
     if (!ids.length) conditions.push("0"); else { conditions.push(`s.id IN (${ids.map(() => "?").join(",")})`); params.zoneIds = ids; }
   }
-  const from = `FROM erp_skus s JOIN erp_goods g ON g.id=s.erpGoodsId ${lifecycleReady ? "JOIN operating_erp_set_members om ON om.erpSkuId=s.id" : "LEFT JOIN operating_erp_set_members om ON om.erpSkuId=s.id"} LEFT JOIN product_erp_mappings m ON m.erpSkuId=s.id AND m.currentState='active' LEFT JOIN products p ON p.id=m.productId LEFT JOIN product_business_profiles profile ON profile.erpSkuId=s.id`;
+  const from = `FROM erp_skus s JOIN erp_goods g ON g.id=s.erpGoodsId LEFT JOIN operating_erp_set_members om ON om.erpSkuId=s.id LEFT JOIN product_erp_mappings m ON m.erpSkuId=s.id AND m.currentState='active' LEFT JOIN products p ON p.id=m.productId LEFT JOIN product_business_profiles profile ON profile.erpSkuId=s.id`;
   const bindParams = { ...params }; const zoneIds = bindParams.zoneIds || []; delete bindParams.zoneIds; const positional = [...zoneIds];
   const whereSql = conditions.join(" AND ");
   const total = Number(database.prepare(`SELECT COUNT(*) count ${from} WHERE ${whereSql}`).get(...positional, bindParams)?.count || 0);
@@ -322,8 +322,8 @@ export function listProductCenterV2Skus(options = {}) {
     displayBrand: text(row.brandOverride) || text(row.brand) || text(row.erpBrand), displayCategory: text(row.categoryOverride) || text(row.category) || text(row.erpCategory), platforms: [...new Set(links.map((item) => item.platform).filter(Boolean))], businessZone: metadata?.zoneById.get(row.erpSkuId) || "",
     erpUsage: usage ? { primaryUsage: usage.primaryUsage, saleGoods: usage.saleGoods, bundleComponent: usage.bundleComponent,
       classificationStatus: usage.classificationStatus, confidence: usage.confidence, usageConflict: usage.usageConflict } : null }; });
-  const profileCounts = database.prepare(`SELECT COUNT(*) total,SUM(profile.id IS NOT NULL) profiled,SUM(profile.id IS NULL) unprofiled ${from} WHERE s.currentState='active' AND ${wangdianOperatingSkuPredicate(database, "s")} ${lifecycleReady ? "AND om.lifecycleStatus IN ('active','active_dependency','sales_active')" : ""}`).get();
-  const historical = lifecycleReady ? Number(database.prepare(`SELECT COUNT(*) total FROM operating_erp_set_members om JOIN erp_skus s ON s.id=om.erpSkuId WHERE om.erpSkuId IS NOT NULL AND om.lifecycleStatus IN ('archived','external_unused') AND ${wangdianOperatingSkuPredicate(database, "s")}`).get()?.total || 0) : 0;
+  const profileCounts = database.prepare(`SELECT COUNT(*) total,SUM(profile.id IS NOT NULL) profiled,SUM(profile.id IS NULL) unprofiled ${from} WHERE s.currentState='active' AND ${wangdianOperatingSkuPredicate(database, "s")} ${lifecycleReady ? `AND ${currentProductOperatingSkuPredicate(database, "s", "om")}` : ""}`).get();
+  const historical = lifecycleReady ? Number(database.prepare(`SELECT COUNT(*) total FROM operating_erp_set_members om JOIN erp_skus s ON s.id=om.erpSkuId WHERE om.erpSkuId IS NOT NULL AND om.lifecycleStatus IN ('archived','external_unused') AND NOT ${wangdianInSaleSkuPredicate(database, "s")} AND ${wangdianOperatingSkuPredicate(database, "s")}`).get()?.total || 0) : 0;
   return rememberProductListPage(cacheKey, { rows: hydrated, pagination: { total, limit, offset }, summary: { total: Number(profileCounts.total || 0), profiled: Number(profileCounts.profiled || 0), unprofiled: Number(profileCounts.unprofiled || 0), historical, lifecycleReady } });
 }
 
