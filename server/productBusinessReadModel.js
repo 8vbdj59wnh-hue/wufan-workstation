@@ -4,6 +4,7 @@ import { classifyProductBusinessZones } from "./productBusinessClassification.js
 import { FORMAL_SALES_OBJECT_RESOLVER_SCOPES, resolveLinkSkuRelationsForRead } from "./capabilities/resolveLinkSkuRelationRead.js";
 import { queryErpSkuContributions } from "./productContributionReadModel.js";
 import { latestCompleteSalesDate, resolveProductSalesDistributionRange } from "./productSalesDistributionService.js";
+import { wangdianOperatingSkuPredicate } from "./wangdianProductStatus.js";
 
 export const productBusinessLifecycleStatuses = Object.freeze(["新品", "成长", "爆款", "稳定销售", "衰退", "清仓", "归档"]);
 export const productBusinessHealthStatuses = Object.freeze(["healthy", "attention", "risk", "no_data"]);
@@ -348,6 +349,7 @@ function operatingProductLifecycleMap(database) {
 export function getProductBusinessReadModel(query = {}, { includeInventoryCost = false, visibleErpSkuIds = null, unpaged = false, bypassCache = false } = {}) {
   const database = getDatabase();
   const period = resolveProductBusinessPeriod(query, database);
+  const requestedErpSkuId = text(query.erpSkuId) || (text(query.productId) ? text(database.prepare("SELECT erpSkuId FROM product_erp_mappings WHERE productId=? AND currentState='active' ORDER BY updatedAt DESC,id DESC LIMIT 1").get(text(query.productId))?.erpSkuId) : "");
   const products = database.prepare(`
     SELECT s.id erpSkuId,s.merchantSkuCode,s.specificationName,s.mainImage,s.erpStatus,s.currentState,s.createdAt,s.updatedAt,
       g.goodsCode,g.goodsName,g.brand,g.category,
@@ -364,14 +366,14 @@ export function getProductBusinessReadModel(query = {}, { includeInventoryCost =
     LEFT JOIN products p ON p.id=m.productId
     LEFT JOIN product_business_profiles profile ON profile.erpSkuId=s.id
     LEFT JOIN persons owner ON owner.id=COALESCE(profile.ownerId,p.ownerId)
+    WHERE (${wangdianOperatingSkuPredicate(database, "s")} OR s.id=@requestedErpSkuId)
     ORDER BY s.updatedAt DESC,s.id
-  `).all();
+  `).all({ requestedErpSkuId });
   const visible = visibleErpSkuIds ? new Set(visibleErpSkuIds) : null;
   const allScopedProducts = visible ? products.filter((product) => visible.has(product.erpSkuId)) : products;
   const productLifecycle = operatingProductLifecycleMap(database);
   const lifecycleReady = productLifecycle.size > 0;
   const showHistorical = query.includeHistorical === true || text(query.includeHistorical).toLowerCase() === "true" || text(query.includeHistorical) === "1";
-  const requestedErpSkuId = text(query.erpSkuId) || (text(query.productId) ? text(database.prepare("SELECT erpSkuId FROM product_erp_mappings WHERE productId=? AND currentState='active' ORDER BY updatedAt DESC,id DESC LIMIT 1").get(text(query.productId))?.erpSkuId) : "");
   const defaultOperatingView = lifecycleReady && !showHistorical && !requestedErpSkuId;
   const scopedProducts = requestedErpSkuId
     ? allScopedProducts.filter((product) => product.erpSkuId === requestedErpSkuId)

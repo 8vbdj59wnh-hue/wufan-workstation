@@ -2,6 +2,7 @@ import { getDatabase } from "./db.js";
 import { readErpSkuInventorySupplyMap } from "./inventorySupplyQueryService.js";
 import { queryErpSkuContributions } from "./productContributionReadModel.js";
 import { latestCompleteSalesDate, resolveProductSalesDistributionRange } from "./productSalesDistributionService.js";
+import { wangdianOperatingSkuPredicate } from "./wangdianProductStatus.js";
 
 const text = (value) => String(value ?? "").trim();
 
@@ -71,6 +72,7 @@ export function getProductShopSandbox(input = {}, options = {}) {
       ORDER BY candidate.updatedAt DESC,candidate.id DESC LIMIT 1
     )
     LEFT JOIN products product ON product.id=mapping.productId
+    WHERE ${wangdianOperatingSkuPredicate(database, "sku")}
     ORDER BY sku.id
   `).all().filter((product) => linkedErpSkuIds.has(product.erpSkuId) && (!visible || visible.has(product.erpSkuId)));
   const contribution = products.length ? queryErpSkuContributions({

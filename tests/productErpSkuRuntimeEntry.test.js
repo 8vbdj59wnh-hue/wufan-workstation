@@ -12,6 +12,7 @@ process.env.WUFAN_DB_PATH = path.join(directory, "workstation.db");
 const { closeDatabase, getDatabase, initializeDatabase, replaceActionProducts, retireLinkCenterLegacyStructuresPhase3 } = await import("../server/db.js");
 const { getProductAutoProfileSettings } = await import("../server/erpSkuService.js");
 const { getProductCenterV2SkuDetail, listActionProductOptions, listProductCenterV2Skus, resolveActionProductOptions } = await import("../server/productCenterV2Service.js");
+const { getProductBusinessReadModel } = await import("../server/productBusinessReadModel.js");
 const { getProductDailySalesPerformance } = await import("../server/productDailySalesService.js");
 
 initializeDatabase({ reset: true });
@@ -32,6 +33,12 @@ test("Phase C 以 ERP SKU 作为产品中心与关键行动的运行身份", () 
     .run("goods-phase-c-direct", "DBCL", "无 Legacy 产品的真实 ERP 货品", "{}", "active", now, now);
   database.prepare("INSERT INTO erp_skus(id,merchantSkuCode,erpGoodsId,specificationName,erpStatus,rawSourceData,firstSeenBatchId,lastSeenBatchId,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
     .run("erp-sku-phase-c-direct", "DBCL004", "goods-phase-c-direct", "默认规格", "active", "{}", "sync-phase-c", "sync-phase-c", "active", now, now);
+
+  database.prepare("INSERT INTO erp_goods(id,goodsCode,goodsName,rawSourceData,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?)")
+    .run("goods-wdt-discontinued", "WDT-DOWN", "旺店通已下架货品", "{}", "active", now, now);
+  const insertDiscontinuedSku = database.prepare("INSERT INTO erp_skus(id,merchantSkuCode,erpGoodsId,specificationName,erpStatus,rawSourceData,firstSeenBatchId,lastSeenBatchId,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?)");
+  insertDiscontinuedSku.run("erp-sku-wdt-prop7", "WDT-DOWN-PROP7", "goods-wdt-discontinued", "字段标记", "active", JSON.stringify({ prop7: "已下架" }), "sync-phase-c", "sync-phase-c", "active", now, now);
+  insertDiscontinuedSku.run("erp-sku-wdt-label", "WDT-DOWN-LABEL", "goods-wdt-discontinued", "标签标记", "active", JSON.stringify({ goods_label: "义乌仓,已同步,已下架" }), "sync-phase-c", "sync-phase-c", "active", now, now);
 
   database.prepare("INSERT INTO erp_goods(id,goodsCode,goodsName,rawSourceData,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?)")
     .run("goods-phase-c-legacy", "LEGACY", "Legacy 兼容货品", "{}", "active", now, now);
@@ -56,6 +63,16 @@ test("Phase C 以 ERP SKU 作为产品中心与关键行动的运行身份", () 
   assert.equal(directOption.status, "unmaintained");
   assert.equal(directOption.productId, null);
   assert.equal(resolveActionProductOptions([{ erpSkuId: "erp-sku-phase-c-direct" }])[0].erpSkuId, "erp-sku-phase-c-direct");
+  assert.equal(listProductCenterV2Skus({ search: "WDT-DOWN", includeHistorical: true }).rows.length, 0);
+  assert.equal(listActionProductOptions({ search: "WDT-DOWN" }).rows.length, 0);
+  const businessRows = getProductBusinessReadModel({ range: "30d", includeHistorical: true }, { unpaged: true, bypassCache: true }).items;
+  assert.equal(businessRows.some((item) => item.erpSkuId === "erp-sku-wdt-prop7" || item.erpSkuId === "erp-sku-wdt-label"), false);
+  assert.equal(businessRows.some((item) => item.erpSkuId === "erp-sku-phase-c-direct"), true);
+  assert.equal(getProductCenterV2SkuDetail("erp-sku-wdt-prop7", { scope: "summary" }).sku.id, "erp-sku-wdt-prop7");
+  assert.deepEqual(resolveActionProductOptions([
+    { erpSkuId: "erp-sku-wdt-prop7" },
+    { erpSkuId: "erp-sku-wdt-label" },
+  ]).map((item) => item.erpSkuId), ["erp-sku-wdt-label", "erp-sku-wdt-prop7"]);
   const dailySales = getProductDailySalesPerformance({ erpSkuId: "erp-sku-phase-c-direct", startDate: "2026-08-01", endDate: "2026-08-28" });
   assert.equal(dailySales.erpSkuId, "erp-sku-phase-c-direct");
   assert.equal(dailySales.productId, null);

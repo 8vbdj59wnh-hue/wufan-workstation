@@ -1,5 +1,6 @@
 import { getDatabase } from "./db.js";
 import { queryErpSkuContributions } from "./productContributionReadModel.js";
+import { wangdianOperatingSkuPredicate } from "./wangdianProductStatus.js";
 
 const presetDays = Object.freeze({ yesterday: 1, "7d": 7, "15d": 15, "30d": 30, "45d": 45, "60d": 60, "90d": 90 });
 const currentOperatingStatuses = new Set(["active", "active_dependency", "sales_active"]);
@@ -90,6 +91,7 @@ export function getProductSalesDistribution(input = {}, options = {}) {
     )
     LEFT JOIN products p ON p.id=m.productId
     LEFT JOIN persons owner ON owner.id=COALESCE(profile.ownerId,p.ownerId)
+    WHERE ${wangdianOperatingSkuPredicate(database, "s")}
     ORDER BY s.id
   `).all().filter((product) => (!visible || visible.has(product.erpSkuId)) && (!operatingErpSkuIds || operatingErpSkuIds.has(product.erpSkuId)));
   const contributions = products.length ? queryErpSkuContributions({

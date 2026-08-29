@@ -4,6 +4,7 @@ import { resolveErpSkuSalesObjectLinks } from "./capabilities/resolveLinkSkuRela
 import { classifyErpSkuUsages } from "./erpSkuUsageProfileService.js";
 import { LINK_ASSET_SELECT_SQL } from "./linkAssetSql.js";
 import { getProductBusinessReadModel } from "./productBusinessReadModel.js";
+import { wangdianOperatingSkuPredicate } from "./wangdianProductStatus.js";
 
 const text = (value) => String(value ?? "").trim();
 const number = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
@@ -139,6 +140,7 @@ function productListMetadata(database) {
   const lifecycleReady = operatingLifecycleReady(database);
   const lifecycleJoin = lifecycleReady ? "JOIN operating_erp_set_members om ON om.erpSkuId=s.id" : "";
   const lifecycleWhere = lifecycleReady ? "AND om.lifecycleStatus IN ('active','active_dependency','sales_active')" : "";
+  const operatingSourceWhere = `AND ${wangdianOperatingSkuPredicate(database, "s")}`;
   const rows = database.prepare(`SELECT s.id erpSkuId,COALESCE(profile.lifecycle,p.status) lifecycleStatus,
       COALESCE(f.quantity,0) quantity,COALESCE(f.salesAmount,0) salesAmount,f.firstPeriod,
       COALESCE(i.salesMonth,0) salesMonth,COALESCE(i.stockNum,0) stockNum
@@ -146,17 +148,17 @@ function productListMetadata(database) {
     LEFT JOIN products p ON p.id=m.productId LEFT JOIN product_business_profiles profile ON profile.erpSkuId=s.id
     LEFT JOIN erp_sku_inventory_daily_summaries i ON i.erpSkuId=s.id
     LEFT JOIN (SELECT erpSkuId,SUM(quantity) quantity,SUM(salesAmount) salesAmount,MIN(saleDate) firstPeriod FROM connection_sku_sales_daily_facts WHERE erpSkuId IS NOT NULL GROUP BY erpSkuId) f ON f.erpSkuId=s.id
-    WHERE s.currentState='active' ${lifecycleWhere}`).all().map((row) => ({ ...row, salesMetric: Number(row.quantity || 0) > 0 ? Number(row.quantity) : Number(row.salesMonth || 0) }));
+    WHERE s.currentState='active' ${operatingSourceWhere} ${lifecycleWhere}`).all().map((row) => ({ ...row, salesMetric: Number(row.quantity || 0) > 0 ? Number(row.quantity) : Number(row.salesMonth || 0) }));
   const zones = classifyBusinessZones(rows);
   const summary = database.prepare(`SELECT COUNT(*) total,SUM(profile.id IS NOT NULL) profiled,SUM(profile.id IS NULL) unprofiled
     FROM erp_skus s ${lifecycleJoin} LEFT JOIN product_business_profiles profile ON profile.erpSkuId=s.id
-    WHERE s.currentState='active' ${lifecycleWhere}`).get();
+    WHERE s.currentState='active' ${operatingSourceWhere} ${lifecycleWhere}`).get();
   const distinct = (sql) => database.prepare(sql).all().map((row) => text(row.value)).filter(Boolean);
   const facets = {
-    brands: distinct(`SELECT DISTINCT COALESCE(NULLIF(profile.brandOverride,''),NULLIF(p.brand,''),g.brand) value FROM erp_skus s ${lifecycleJoin} JOIN erp_goods g ON g.id=s.erpGoodsId LEFT JOIN product_erp_mappings m ON m.erpSkuId=s.id AND m.currentState='active' LEFT JOIN products p ON p.id=m.productId LEFT JOIN product_business_profiles profile ON profile.erpSkuId=s.id WHERE s.currentState='active' ${lifecycleWhere} ORDER BY value`),
-    categories: distinct(`SELECT DISTINCT COALESCE(NULLIF(profile.categoryOverride,''),NULLIF(p.category,''),g.category) value FROM erp_skus s ${lifecycleJoin} JOIN erp_goods g ON g.id=s.erpGoodsId LEFT JOIN product_erp_mappings m ON m.erpSkuId=s.id AND m.currentState='active' LEFT JOIN products p ON p.id=m.productId LEFT JOIN product_business_profiles profile ON profile.erpSkuId=s.id WHERE s.currentState='active' ${lifecycleWhere} ORDER BY value`),
-    lifecycleStatuses: distinct(`SELECT DISTINCT COALESCE(profile.lifecycle,p.status) value FROM erp_skus s ${lifecycleJoin} LEFT JOIN product_erp_mappings m ON m.erpSkuId=s.id AND m.currentState='active' LEFT JOIN products p ON p.id=m.productId LEFT JOIN product_business_profiles profile ON profile.erpSkuId=s.id WHERE s.currentState='active' ${lifecycleWhere} ORDER BY value`),
-    operatingLifecycleStatuses: lifecycleReady ? database.prepare("SELECT lifecycleStatus value,COUNT(*) total FROM operating_erp_set_members WHERE erpSkuId IS NOT NULL GROUP BY lifecycleStatus ORDER BY CASE lifecycleStatus WHEN 'active' THEN 0 WHEN 'active_dependency' THEN 1 WHEN 'sales_active' THEN 2 WHEN 'archived' THEN 3 ELSE 4 END").all() : [],
+    brands: distinct(`SELECT DISTINCT COALESCE(NULLIF(profile.brandOverride,''),NULLIF(p.brand,''),g.brand) value FROM erp_skus s ${lifecycleJoin} JOIN erp_goods g ON g.id=s.erpGoodsId LEFT JOIN product_erp_mappings m ON m.erpSkuId=s.id AND m.currentState='active' LEFT JOIN products p ON p.id=m.productId LEFT JOIN product_business_profiles profile ON profile.erpSkuId=s.id WHERE s.currentState='active' ${operatingSourceWhere} ${lifecycleWhere} ORDER BY value`),
+    categories: distinct(`SELECT DISTINCT COALESCE(NULLIF(profile.categoryOverride,''),NULLIF(p.category,''),g.category) value FROM erp_skus s ${lifecycleJoin} JOIN erp_goods g ON g.id=s.erpGoodsId LEFT JOIN product_erp_mappings m ON m.erpSkuId=s.id AND m.currentState='active' LEFT JOIN products p ON p.id=m.productId LEFT JOIN product_business_profiles profile ON profile.erpSkuId=s.id WHERE s.currentState='active' ${operatingSourceWhere} ${lifecycleWhere} ORDER BY value`),
+    lifecycleStatuses: distinct(`SELECT DISTINCT COALESCE(profile.lifecycle,p.status) value FROM erp_skus s ${lifecycleJoin} LEFT JOIN product_erp_mappings m ON m.erpSkuId=s.id AND m.currentState='active' LEFT JOIN products p ON p.id=m.productId LEFT JOIN product_business_profiles profile ON profile.erpSkuId=s.id WHERE s.currentState='active' ${operatingSourceWhere} ${lifecycleWhere} ORDER BY value`),
+    operatingLifecycleStatuses: lifecycleReady ? database.prepare(`SELECT om.lifecycleStatus value,COUNT(*) total FROM operating_erp_set_members om JOIN erp_skus s ON s.id=om.erpSkuId WHERE om.erpSkuId IS NOT NULL AND ${wangdianOperatingSkuPredicate(database, "s")} GROUP BY om.lifecycleStatus ORDER BY CASE om.lifecycleStatus WHEN 'active' THEN 0 WHEN 'active_dependency' THEN 1 WHEN 'sales_active' THEN 2 WHEN 'archived' THEN 3 ELSE 4 END`).all() : [],
     platforms: distinct(`SELECT DISTINCT sh.platform value FROM sales_link_sku_sales_object_relations r
       JOIN sales_link_skus x ON x.id=r.linkSkuId JOIN sales_links l ON l.id=x.salesLinkId JOIN sales_shops sh ON sh.id=l.shopId
       WHERE r.status='active' ORDER BY sh.platform`),
@@ -164,7 +166,7 @@ function productListMetadata(database) {
       JOIN sales_link_skus x ON x.id=r.linkSkuId JOIN sales_links l ON l.id=x.salesLinkId JOIN sales_shops sh ON sh.id=l.shopId
       WHERE r.status='active' ORDER BY sh.platform,sh.displayName`).all(),
   };
-  const historical = lifecycleReady ? Number(database.prepare("SELECT COUNT(*) total FROM operating_erp_set_members WHERE erpSkuId IS NOT NULL AND lifecycleStatus IN ('archived','external_unused')").get()?.total || 0) : 0;
+  const historical = lifecycleReady ? Number(database.prepare(`SELECT COUNT(*) total FROM operating_erp_set_members om JOIN erp_skus s ON s.id=om.erpSkuId WHERE om.erpSkuId IS NOT NULL AND om.lifecycleStatus IN ('archived','external_unused') AND ${wangdianOperatingSkuPredicate(database, "s")}`).get()?.total || 0) : 0;
   const value = { summary: { total: Number(summary.total || 0), profiled: Number(summary.profiled || 0), unprofiled: Number(summary.unprofiled || 0), historical,
     lifecycleReady, businessZones: zones.counts, businessZoneRules: zones.rules }, zoneById: new Map(zones.items.map((row) => [row.erpSkuId, row.businessZone])), facets };
   productListMetadataCache = { expiresAt: Date.now() + 30_000, value }; return value;
@@ -196,7 +198,8 @@ export function listActionProductOptions({ search = "", limit = 100 } = {}) {
     )
     LEFT JOIN products p ON p.id=m.productId
     LEFT JOIN product_business_profiles profile ON profile.erpSkuId=s.id
-    WHERE (@query='' OR s.merchantSkuCode LIKE @like OR COALESCE(g.goodsName,'') LIKE @like
+    WHERE ${wangdianOperatingSkuPredicate(database, "s")}
+      AND (@query='' OR s.merchantSkuCode LIKE @like OR COALESCE(g.goodsName,'') LIKE @like
       OR COALESCE(g.goodsCode,'') LIKE @like OR COALESCE(s.specificationName,'') LIKE @like
       OR COALESCE(profile.displayNameOverride,'') LIKE @like)
     ORDER BY CASE WHEN lower(s.merchantSkuCode)=lower(@query) THEN 0 ELSE 1 END,
@@ -258,7 +261,7 @@ export function listProductCenterV2Skus(options = {}) {
   if (cached) productListPageCache.delete(cacheKey);
   const database = getDatabase(); const limit = Math.min(200, Math.max(20, number(options.limit, 50))); const offset = Math.max(0, number(options.offset, 0));
   const lifecycleReady = operatingLifecycleReady(database);
-  const metadata = text(options.businessZone) && options.businessZone !== "all" ? productListMetadata(database) : null; const conditions = ["s.currentState='active'"]; const params = {};
+  const metadata = text(options.businessZone) && options.businessZone !== "all" ? productListMetadata(database) : null; const conditions = ["s.currentState='active'", wangdianOperatingSkuPredicate(database, "s")]; const params = {};
   if (lifecycleReady && !includeHistorical(options.includeHistorical)) conditions.push("om.lifecycleStatus IN ('active','active_dependency','sales_active')");
   if (lifecycleReady && text(options.operatingLifecycleStatus)) { conditions.push("om.lifecycleStatus=@operatingLifecycleStatus"); params.operatingLifecycleStatus = text(options.operatingLifecycleStatus); }
   if (text(options.search)) { conditions.push("(s.merchantSkuCode LIKE @search OR COALESCE(s.specificationName,'') LIKE @search OR COALESCE(g.goodsName,'') LIKE @search OR COALESCE(g.goodsCode,'') LIKE @search OR COALESCE(profile.displayNameOverride,'') LIKE @search OR COALESCE(p.name,'') LIKE @search)"); params.search = `%${text(options.search)}%`; }
@@ -319,8 +322,8 @@ export function listProductCenterV2Skus(options = {}) {
     displayBrand: text(row.brandOverride) || text(row.brand) || text(row.erpBrand), displayCategory: text(row.categoryOverride) || text(row.category) || text(row.erpCategory), platforms: [...new Set(links.map((item) => item.platform).filter(Boolean))], businessZone: metadata?.zoneById.get(row.erpSkuId) || "",
     erpUsage: usage ? { primaryUsage: usage.primaryUsage, saleGoods: usage.saleGoods, bundleComponent: usage.bundleComponent,
       classificationStatus: usage.classificationStatus, confidence: usage.confidence, usageConflict: usage.usageConflict } : null }; });
-  const profileCounts = database.prepare(`SELECT COUNT(*) total,SUM(profile.id IS NOT NULL) profiled,SUM(profile.id IS NULL) unprofiled ${from} WHERE s.currentState='active' ${lifecycleReady ? "AND om.lifecycleStatus IN ('active','active_dependency','sales_active')" : ""}`).get();
-  const historical = lifecycleReady ? Number(database.prepare("SELECT COUNT(*) total FROM operating_erp_set_members WHERE erpSkuId IS NOT NULL AND lifecycleStatus IN ('archived','external_unused')").get()?.total || 0) : 0;
+  const profileCounts = database.prepare(`SELECT COUNT(*) total,SUM(profile.id IS NOT NULL) profiled,SUM(profile.id IS NULL) unprofiled ${from} WHERE s.currentState='active' AND ${wangdianOperatingSkuPredicate(database, "s")} ${lifecycleReady ? "AND om.lifecycleStatus IN ('active','active_dependency','sales_active')" : ""}`).get();
+  const historical = lifecycleReady ? Number(database.prepare(`SELECT COUNT(*) total FROM operating_erp_set_members om JOIN erp_skus s ON s.id=om.erpSkuId WHERE om.erpSkuId IS NOT NULL AND om.lifecycleStatus IN ('archived','external_unused') AND ${wangdianOperatingSkuPredicate(database, "s")}`).get()?.total || 0) : 0;
   return rememberProductListPage(cacheKey, { rows: hydrated, pagination: { total, limit, offset }, summary: { total: Number(profileCounts.total || 0), profiled: Number(profileCounts.profiled || 0), unprofiled: Number(profileCounts.unprofiled || 0), historical, lifecycleReady } });
 }
 
