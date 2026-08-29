@@ -179,7 +179,7 @@ export function renderActionProductSelector(selectedIds = [], { label = "关联�
   const selectedProducts = [...new Map([...getActionProducts(actionId), ...selectedIds.map(findKnownProduct).filter(Boolean)].map((product) => [identityOf(product), product])).values()]
     .filter((product) => selected.size === 0 ? Boolean(actionId) : selected.has(identityOf(product)) || selected.has(product.legacyProductId));
   const preserved = [...selected].map((identity) => `<input type="checkbox" name="actionProductId" value="${escapeHtml(identity)}" checked hidden data-preserved-action-product />`).join("");
-  return `<div class="action-product-selector" data-action-product-selector data-action-id="${escapeHtml(actionId)}">
+  return `<div class="action-product-selector" data-action-product-selector data-action-id="${escapeHtml(actionId)}" data-selected-product-ids="${escapeHtml(JSON.stringify([...selected]))}">
     <span class="field-label">${escapeHtml(label)}</span>${preserved}
     <div class="action-product-selected" data-action-product-selected>${renderSelectedProducts(selectedProducts, actionId)}</div>
     <div class="action-product-quick-link"><strong>按 ERP SKU 关联</strong>
@@ -200,6 +200,27 @@ function mergeKnownOptions(rows) {
   const merged = new Map((state.actionProductOptions ?? []).map((product) => [identityOf(product), product]));
   for (const product of rows) merged.set(identityOf(product), product);
   state.actionProductOptions = [...merged.values()];
+}
+
+function getStoredActionProductIds(selector) {
+  try {
+    const ids = JSON.parse(selector?.dataset?.selectedProductIds || "[]");
+    return Array.isArray(ids) ? ids.map(String).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function setActionProductSelection(selector, identity, selected) {
+  const normalizedIdentity = String(identity ?? "").trim();
+  if (!normalizedIdentity) return;
+  const ids = new Set(getStoredActionProductIds(selector));
+  if (selected) ids.add(normalizedIdentity);
+  else ids.delete(normalizedIdentity);
+  selector.dataset.selectedProductIds = JSON.stringify([...ids]);
+  selector.querySelectorAll(`[name="actionProductId"][value="${CSS.escape(normalizedIdentity)}"]`).forEach((input) => {
+    input.checked = selected;
+  });
 }
 
 function renderOptions(selector, rows) {
@@ -273,8 +294,7 @@ export function bindActionProductSelectors(root = document) {
           return;
         }
         const identity = identityOf(matches[0]);
-        const input = selector.querySelector(`[name="actionProductId"][value="${CSS.escape(identity)}"]`);
-        if (input) input.checked = true;
+        setActionProductSelection(selector, identity, true);
         if (message) message.textContent = "关联成功，可继续输入下一个 ERP SKU。";
         const quick = selector.querySelector("[data-action-product-quick-code]"); if (quick) quick.value = "";
         refreshSelected(selector); return;
@@ -288,13 +308,13 @@ export function bindActionProductSelectors(root = document) {
       }
       if (action === "confirm-action-product") {
         const identity = event.target.closest("[data-product-id]")?.dataset.productId || "";
-        selector.querySelectorAll(`[name="actionProductId"][value="${CSS.escape(identity)}"]`).forEach((input) => { input.checked = true; });
+        setActionProductSelection(selector, identity, true);
         const confirm = selector.querySelector("[data-action-product-confirm]"); if (confirm) confirm.hidden = true;
         refreshSelected(selector); return;
       }
       if (action === "remove-action-product") {
         const identity = event.target.closest("[data-product-id]")?.dataset.productId || "";
-        selector.querySelectorAll(`[name="actionProductId"][value="${CSS.escape(identity)}"]`).forEach((input) => { input.checked = false; });
+        setActionProductSelection(selector, identity, false);
         refreshSelected(selector);
       }
     });
@@ -302,7 +322,12 @@ export function bindActionProductSelectors(root = document) {
 }
 
 export function collectActionProductIds(root) {
-  return [...new Set([...root.querySelectorAll('[name="actionProductId"]:checked')].map((input) => input.value).filter(Boolean))];
+  const selector = root.matches?.("[data-action-product-selector]") ? root : root.querySelector?.("[data-action-product-selector]");
+  const storedIds = selector === null || selector === undefined ? [] : getStoredActionProductIds(selector);
+  return [...new Set([
+    ...storedIds,
+    ...[...root.querySelectorAll('[name="actionProductId"]:checked')].map((input) => input.value).filter(Boolean),
+  ])];
 }
 
 export function renderLinkedActionProducts(actionId, { compact = false } = {}) {
