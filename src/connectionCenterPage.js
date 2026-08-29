@@ -287,6 +287,10 @@ function canManage() {
   return hasPermission(getCurrentUser(), "links.manage");
 }
 
+function canRefreshRating() {
+  return hasPermission(getCurrentUser(), "links.rating");
+}
+
 function isAdmin() {
   const user = getCurrentUser();
   return ["admin", "system_admin"].includes(user?.role) || user?.authRole === "admin";
@@ -977,7 +981,7 @@ function renderCoreOperatingOverview(item, core) {
 function renderConnectionBusinessPositioning(core) {
   const model = core?.businessPositioning;
   if (!model) return `<section class="connection-v3-panel"><h3>经营定位</h3><div class="empty-state compact">正在读取经营定位…</div></section>`;
-  if (model.loadError) return `<section class="connection-v3-panel"><h3>经营定位</h3><div class="empty-state compact">${escapeHtml(model.loadError)}</div></section>`;
+  if (model.loadError) return `<section class="connection-v3-panel"><h3>经营定位</h3><div class="empty-state compact">${escapeHtml(model.loadError)}<button type="button" class="secondary-button" data-retry-connection-goal-module="businessPositioning">重试</button></div></section>`;
   const current = model.current;
   const template = model.currentTemplate;
   const metrics = template?.metrics ?? [];
@@ -1009,7 +1013,7 @@ function renderConnectionGoalEvaluation(core) {
 function renderConnectionBusinessGoals(core) {
   const model = core?.businessGoals;
   if (!model) return `<section class="connection-v3-panel connection-positioning-panel"><h3>经营目标</h3><div class="empty-state compact">正在读取经营目标…</div></section>`;
-  if (model.loadError) return `<section class="connection-v3-panel connection-positioning-panel"><h3>经营目标</h3><div class="empty-state compact">${escapeHtml(model.loadError)}</div></section>`;
+  if (model.loadError) return `<section class="connection-v3-panel connection-positioning-panel"><h3>经营目标</h3><div class="empty-state compact">${escapeHtml(model.loadError)}<button type="button" class="secondary-button" data-retry-connection-goal-module="businessGoals">重试</button></div></section>`;
   const current = model.current;
   const awaiting = model.awaitingConfirmation;
   const history = model.history ?? [];
@@ -1345,6 +1349,43 @@ function withConnectionDetailTimeout(request, label, timeoutMs = 20000) {
   return Promise.race([request, timeout]).finally(() => window.clearTimeout(timeoutId));
 }
 
+const connectionGoalModuleLoaders = Object.freeze({
+  businessPositioning: { label: "经营定位", load: loadConnectionBusinessPositioning },
+  businessGoals: { label: "经营目标", load: loadConnectionBusinessGoals },
+  businessGoalEvaluation: { label: "经营评价", load: loadConnectionBusinessGoalEvaluation },
+});
+
+function connectionGoalLoadError(error, label) {
+  if (error?.message === "Failed to fetch") return `${label}暂时无法读取：开发版后端服务未连接。`;
+  return error?.message || `${label}暂时无法读取。`;
+}
+
+async function loadConnectionGoalModule(id, key, render) {
+  const config = connectionGoalModuleLoaders[key];
+  if (!config || pageState.selectedId !== id || !pageState.coreDetail) return;
+  pageState.coreDetail = { ...pageState.coreDetail, [key]: null };
+  render();
+  try {
+    // 目标管理是轻量读取；单个模块独立完成，不再被其他模块的慢请求阻塞。
+    const result = await withConnectionDetailTimeout(config.load(id), config.label, 5000);
+    if (pageState.selectedId !== id || !pageState.coreDetail) return;
+    pageState.coreDetail = { ...pageState.coreDetail, [key]: result };
+  } catch (error) {
+    if (pageState.selectedId !== id || !pageState.coreDetail) return;
+    pageState.coreDetail = {
+      ...pageState.coreDetail,
+      [key]: { loadError: connectionGoalLoadError(error, config.label) },
+    };
+  }
+  render();
+}
+
+function loadConnectionGoalModules(id, render) {
+  Object.keys(connectionGoalModuleLoaders).forEach((key) => {
+    void loadConnectionGoalModule(id, key, render);
+  });
+}
+
 async function openConnection(id, render) {
   if (window.location.hash !== `#connectionCenter/${encodeURIComponent(id)}`) window.history.replaceState(null, "", `#connectionCenter/${encodeURIComponent(id)}`);
   pageState.selectedId = id; pageState.detailTab = "business"; pageState.detailLoaded = new Set(["business"]); pageState.coreDetail = null; pageState.coreDetailLoading = true; pageState.dailySales = { data: null, loading: false, loaded: false, rangePreset: "30d", startDate: "", endDate: "", error: "" }; pageState.actions = []; pageState.periodSnapshots = []; pageState.growthAnalysis = null; pageState.benchmarks = { items: [], candidates: [], comparison: null, comparisonId: "", loading: false }; render();
@@ -1366,28 +1407,7 @@ async function openConnection(id, render) {
       return;
     }
 
-    const auxiliary = await Promise.allSettled([
-      withConnectionDetailTimeout(loadConnectionBusinessPositioning(id), "经营定位", 12000),
-      withConnectionDetailTimeout(loadConnectionBusinessGoals(id), "经营目标", 12000),
-      withConnectionDetailTimeout(loadConnectionBusinessGoalEvaluation(id), "经营评价", 12000),
-    ]);
-    if (pageState.selectedId !== id) return;
-    const [positioningResult, goalsResult, evaluationResult] = auxiliary;
-    pageState.coreDetail = {
-      ...pageState.coreDetail,
-      businessPositioning: positioningResult.status === "fulfilled" ? positioningResult.value : {
-        current: null, currentTemplate: null, history: [], options: [], permissions: { canEdit: false },
-        loadError: positioningResult.reason?.message || "经营定位暂时无法读取。",
-      },
-      businessGoals: goalsResult.status === "fulfilled" ? goalsResult.value : {
-        current: null, awaitingConfirmation: null, history: [], permissions: { canEdit: false },
-        loadError: goalsResult.reason?.message || "经营目标暂时无法读取。",
-      },
-      businessGoalEvaluation: evaluationResult.status === "fulfilled" ? evaluationResult.value : {
-        evaluationStatus: "pending", reason: evaluationResult.reason?.message || "经营评价暂时无法读取。",
-      },
-    };
-    render();
+    loadConnectionGoalModules(id, render);
   }
   catch (error) {
     if (pageState.selectedId !== id) return;
@@ -1991,6 +2011,9 @@ export function bindConnectionCenterPageEvents(render) {
     element.addEventListener("keydown", (event) => { if (["Enter", " "].includes(event.key)) open(); });
   });
   root.querySelector('[data-action="back-connections"]')?.addEventListener("click", () => { selectConnectionSection(pageState.detailReturnSection || "connections"); render(); });
+  root.querySelectorAll("[data-retry-connection-goal-module]").forEach((button) => button.addEventListener("click", () => {
+    void loadConnectionGoalModule(pageState.selectedId, button.dataset.retryConnectionGoalModule, render);
+  }));
   root.querySelector("[data-connection-profile-form]")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
