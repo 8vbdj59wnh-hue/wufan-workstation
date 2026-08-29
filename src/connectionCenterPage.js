@@ -397,7 +397,8 @@ export function matchesConnectionAssetSearch(item, query) {
 }
 
 function productNames(item) {
-  return item.products?.length ? item.products.map((product) => product.name || product.skuCode).join("、") : "未关联产品";
+  const names = [...new Set((item.products ?? []).map((product) => product.name || product.skuCode).filter(Boolean))];
+  return names.length ? names.join("、") : "未关联产品";
 }
 
 function imageHtml(item) {
@@ -976,6 +977,7 @@ function renderCoreOperatingOverview(item, core) {
 function renderConnectionBusinessPositioning(core) {
   const model = core?.businessPositioning;
   if (!model) return `<section class="connection-v3-panel"><h3>经营定位</h3><div class="empty-state compact">正在读取经营定位…</div></section>`;
+  if (model.loadError) return `<section class="connection-v3-panel"><h3>经营定位</h3><div class="empty-state compact">${escapeHtml(model.loadError)}</div></section>`;
   const current = model.current;
   const template = model.currentTemplate;
   const metrics = template?.metrics ?? [];
@@ -1007,6 +1009,7 @@ function renderConnectionGoalEvaluation(core) {
 function renderConnectionBusinessGoals(core) {
   const model = core?.businessGoals;
   if (!model) return `<section class="connection-v3-panel connection-positioning-panel"><h3>经营目标</h3><div class="empty-state compact">正在读取经营目标…</div></section>`;
+  if (model.loadError) return `<section class="connection-v3-panel connection-positioning-panel"><h3>经营目标</h3><div class="empty-state compact">${escapeHtml(model.loadError)}</div></section>`;
   const current = model.current;
   const awaiting = model.awaitingConfirmation;
   const history = model.history ?? [];
@@ -1069,7 +1072,7 @@ function renderDetail() {
   });
   else if (pageState.detailTab === "inventory") body = renderUiModule("link_inventory_summary", { productsHtml: renderCoreProducts(pageState.coreDetail), inventoryHtml: renderInventory(pageState.coreDetail) });
   else body = `<div class="link-workspace-stack">${renderCoreBasic(item, pageState.coreDetail)}${renderBenchmarkPanel(item)}</div>`;
-  const header = renderUiModule("link_detail_header", { item, imageHtml: imageHtml(item), channel: `${item.platform} · ${shopName(item)}`, productSummary: productNames(item), operationHtml: renderConnectionOperationBar(item) });
+  const header = renderUiModule("link_detail_header", { item, imageHtml: imageHtml(item), channel: `${item.platform} · ${shopName(item)}`, productSummary: pageState.coreDetailLoading ? "正在读取关联产品…" : productNames(item), operationHtml: renderConnectionOperationBar(item) });
   return `<section class="connection-detail link-detail-workspace">${header}<nav class="connection-tabs link-workspace-tabs">${tabs.map(([id, label]) => `<button type="button" class="${pageState.detailTab === id ? "active" : ""}" data-connection-tab="${id}">${label}</button>`).join("")}</nav>${body}</section>`;
 }
 
@@ -1334,18 +1337,62 @@ async function loadPage(render) {
   pageState.loading = false; render();
 }
 
+function withConnectionDetailTimeout(request, label, timeoutMs = 20000) {
+  let timeoutId = null;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = window.setTimeout(() => reject(new Error(`${label}读取超时，请稍后重试。`)), timeoutMs);
+  });
+  return Promise.race([request, timeout]).finally(() => window.clearTimeout(timeoutId));
+}
+
 async function openConnection(id, render) {
   if (window.location.hash !== `#connectionCenter/${encodeURIComponent(id)}`) window.history.replaceState(null, "", `#connectionCenter/${encodeURIComponent(id)}`);
   pageState.selectedId = id; pageState.detailTab = "business"; pageState.detailLoaded = new Set(["business"]); pageState.coreDetail = null; pageState.coreDetailLoading = true; pageState.dailySales = { data: null, loading: false, loaded: false, rangePreset: "30d", startDate: "", endDate: "", error: "" }; pageState.actions = []; pageState.periodSnapshots = []; pageState.growthAnalysis = null; pageState.benchmarks = { items: [], candidates: [], comparison: null, comparisonId: "", loading: false }; render();
   try {
-    const detail = await loadConnectionCoreDetail(id);
-    const [businessPositioning, businessGoals, businessGoalEvaluation] = detail.profile?.hasBusinessProfile
-      ? await Promise.all([loadConnectionBusinessPositioning(id), loadConnectionBusinessGoals(id), loadConnectionBusinessGoalEvaluation(id)])
-      : [{ current: null, template: null, history: [] }, { current: null, pending: null, history: [] }, { current: null, history: [] }];
-    pageState.coreDetail = { ...detail, businessPositioning, businessGoals, businessGoalEvaluation }; pageState.error = "";
+    const detail = await withConnectionDetailTimeout(loadConnectionCoreDetail(id), "链接经营详情");
+    if (pageState.selectedId !== id) return;
+
+    // 核心身份、产品关系、销售与库存先完成首屏，不再等待目标管理的附加接口。
+    // 任何附加接口超时或失败，都不能让整个链接详情永久停留在加载状态。
+    pageState.coreDetail = { ...detail }; pageState.coreDetailLoading = false; pageState.error = ""; render();
+    if (!detail.profile?.hasBusinessProfile) {
+      pageState.coreDetail = {
+        ...pageState.coreDetail,
+        businessPositioning: { current: null, currentTemplate: null, history: [], options: [], permissions: { canEdit: false } },
+        businessGoals: { current: null, awaitingConfirmation: null, history: [], permissions: { canEdit: false } },
+        businessGoalEvaluation: { evaluationStatus: "pending", reason: "当前链接尚未进入经营目标管理。" },
+      };
+      render();
+      return;
+    }
+
+    const auxiliary = await Promise.allSettled([
+      withConnectionDetailTimeout(loadConnectionBusinessPositioning(id), "经营定位", 12000),
+      withConnectionDetailTimeout(loadConnectionBusinessGoals(id), "经营目标", 12000),
+      withConnectionDetailTimeout(loadConnectionBusinessGoalEvaluation(id), "经营评价", 12000),
+    ]);
+    if (pageState.selectedId !== id) return;
+    const [positioningResult, goalsResult, evaluationResult] = auxiliary;
+    pageState.coreDetail = {
+      ...pageState.coreDetail,
+      businessPositioning: positioningResult.status === "fulfilled" ? positioningResult.value : {
+        current: null, currentTemplate: null, history: [], options: [], permissions: { canEdit: false },
+        loadError: positioningResult.reason?.message || "经营定位暂时无法读取。",
+      },
+      businessGoals: goalsResult.status === "fulfilled" ? goalsResult.value : {
+        current: null, awaitingConfirmation: null, history: [], permissions: { canEdit: false },
+        loadError: goalsResult.reason?.message || "经营目标暂时无法读取。",
+      },
+      businessGoalEvaluation: evaluationResult.status === "fulfilled" ? evaluationResult.value : {
+        evaluationStatus: "pending", reason: evaluationResult.reason?.message || "经营评价暂时无法读取。",
+      },
+    };
+    render();
   }
-  catch (error) { pageState.error = error.message; }
-  pageState.coreDetailLoading = false; render();
+  catch (error) {
+    if (pageState.selectedId !== id) return;
+    pageState.error = error.message; pageState.coreDetailLoading = false; render();
+  }
 }
 
 async function loadDailySales(render, rangePreset = pageState.dailySales.rangePreset, customRange = {}) {
