@@ -1833,6 +1833,149 @@ CREATE TABLE IF NOT EXISTS connection_actions (
 CREATE INDEX IF NOT EXISTS idx_connection_actions_profile_created
   ON connection_actions(connectionProfileId, createdAt DESC);
 
+CREATE TABLE IF NOT EXISTS connection_inspection_templates (
+  id TEXT PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  currentVersionId TEXT,
+  createdBy TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  CHECK(status IN ('active','inactive','archived'))
+);
+
+CREATE TABLE IF NOT EXISTS connection_inspections (
+  id TEXT PRIMARY KEY,
+  salesLinkId TEXT NOT NULL,
+  inspectorId TEXT NOT NULL,
+  templateVersionId TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft',
+  startedAt TEXT NOT NULL,
+  completedAt TEXT,
+  gradeACount INTEGER NOT NULL DEFAULT 0,
+  gradeBCount INTEGER NOT NULL DEFAULT 0,
+  gradeCCount INTEGER NOT NULL DEFAULT 0,
+  gradeDCount INTEGER NOT NULL DEFAULT 0,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(salesLinkId) REFERENCES sales_links(id) ON DELETE CASCADE,
+  FOREIGN KEY(inspectorId) REFERENCES persons(id),
+  FOREIGN KEY(templateVersionId) REFERENCES template_asset_versions(id),
+  CHECK(status IN ('draft','completed')),
+  CHECK(gradeACount >= 0 AND gradeBCount >= 0 AND gradeCCount >= 0 AND gradeDCount >= 0)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_inspections_single_draft
+  ON connection_inspections(salesLinkId) WHERE status='draft';
+CREATE INDEX IF NOT EXISTS idx_connection_inspections_link_completed
+  ON connection_inspections(salesLinkId,completedAt DESC,createdAt DESC);
+
+CREATE TABLE IF NOT EXISTS connection_inspection_results (
+  id TEXT PRIMARY KEY,
+  inspectionId TEXT NOT NULL,
+  itemCode TEXT NOT NULL,
+  itemNameSnapshot TEXT NOT NULL,
+  itemDescriptionSnapshot TEXT NOT NULL DEFAULT '',
+  itemSortOrder INTEGER NOT NULL,
+  criterionCode TEXT NOT NULL,
+  criterionNameSnapshot TEXT NOT NULL,
+  criterionDescriptionSnapshot TEXT NOT NULL DEFAULT '',
+  criterionSortOrder INTEGER NOT NULL,
+  grade TEXT,
+  note TEXT NOT NULL DEFAULT '',
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(inspectionId) REFERENCES connection_inspections(id) ON DELETE CASCADE,
+  CHECK(grade IS NULL OR grade IN ('A','B','C','D')),
+  UNIQUE(inspectionId,criterionCode)
+);
+
+CREATE INDEX IF NOT EXISTS idx_connection_inspection_results_inspection
+  ON connection_inspection_results(inspectionId,itemSortOrder,criterionSortOrder);
+
+CREATE TABLE IF NOT EXISTS connection_inspection_issues (
+  id TEXT PRIMARY KEY,
+  inspectionId TEXT NOT NULL,
+  inspectionResultId TEXT NOT NULL UNIQUE,
+  salesLinkId TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'candidate',
+  itemNameSnapshot TEXT NOT NULL,
+  criterionNameSnapshot TEXT NOT NULL,
+  gradeSnapshot TEXT NOT NULL,
+  noteSnapshot TEXT NOT NULL DEFAULT '',
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(inspectionId) REFERENCES connection_inspections(id) ON DELETE CASCADE,
+  FOREIGN KEY(inspectionResultId) REFERENCES connection_inspection_results(id) ON DELETE CASCADE,
+  FOREIGN KEY(salesLinkId) REFERENCES sales_links(id) ON DELETE CASCADE,
+  CHECK(status IN ('candidate','action_created','awaiting_reinspection','closed')),
+  CHECK(gradeSnapshot IN ('B','C','D'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_connection_inspection_issues_link_status
+  ON connection_inspection_issues(salesLinkId,status,createdAt DESC);
+
+CREATE TABLE IF NOT EXISTS connection_inspection_issue_actions (
+  id TEXT PRIMARY KEY,
+  inspectionIssueId TEXT NOT NULL,
+  actionId TEXT NOT NULL,
+  sourceGrade TEXT NOT NULL,
+  sourceNote TEXT NOT NULL DEFAULT '',
+  createdAt TEXT NOT NULL,
+  FOREIGN KEY(inspectionIssueId) REFERENCES connection_inspection_issues(id) ON DELETE CASCADE,
+  FOREIGN KEY(actionId) REFERENCES connection_actions(id) ON DELETE CASCADE,
+  CHECK(sourceGrade IN ('B','C','D')),
+  UNIQUE(inspectionIssueId,actionId)
+);
+
+CREATE TABLE IF NOT EXISTS connection_action_tasks (
+  id TEXT PRIMARY KEY,
+  actionId TEXT NOT NULL,
+  taskId TEXT NOT NULL UNIQUE,
+  createdAt TEXT NOT NULL,
+  FOREIGN KEY(actionId) REFERENCES connection_actions(id) ON DELETE CASCADE,
+  FOREIGN KEY(taskId) REFERENCES tasks(id) ON DELETE CASCADE,
+  UNIQUE(actionId,taskId)
+);
+
+CREATE TABLE IF NOT EXISTS connection_inspection_schedules (
+  id TEXT PRIMARY KEY,
+  salesLinkId TEXT NOT NULL UNIQUE,
+  assigneeId TEXT NOT NULL,
+  cadenceType TEXT NOT NULL DEFAULT 'manual',
+  intervalDays INTEGER,
+  enabled INTEGER NOT NULL DEFAULT 0,
+  lastInspectionAt TEXT,
+  nextInspectionAt TEXT,
+  createdBy TEXT NOT NULL,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY(salesLinkId) REFERENCES sales_links(id) ON DELETE CASCADE,
+  FOREIGN KEY(assigneeId) REFERENCES persons(id),
+  FOREIGN KEY(createdBy) REFERENCES persons(id),
+  CHECK(cadenceType IN ('manual','days_30','days_60','days_90','custom')),
+  CHECK(enabled IN (0,1)),
+  CHECK((cadenceType='manual' AND intervalDays IS NULL AND enabled=0) OR
+    (cadenceType<>'manual' AND intervalDays IS NOT NULL AND intervalDays>0))
+);
+
+CREATE INDEX IF NOT EXISTS idx_connection_inspection_schedules_due
+  ON connection_inspection_schedules(enabled,nextInspectionAt);
+
+CREATE TABLE IF NOT EXISTS connection_inspection_schedule_tasks (
+  id TEXT PRIMARY KEY,
+  scheduleId TEXT NOT NULL,
+  dueDate TEXT NOT NULL,
+  taskId TEXT NOT NULL UNIQUE,
+  inspectionId TEXT,
+  createdAt TEXT NOT NULL,
+  FOREIGN KEY(scheduleId) REFERENCES connection_inspection_schedules(id) ON DELETE CASCADE,
+  FOREIGN KEY(taskId) REFERENCES tasks(id) ON DELETE CASCADE,
+  FOREIGN KEY(inspectionId) REFERENCES connection_inspections(id) ON DELETE SET NULL,
+  UNIQUE(scheduleId,dueDate)
+);
+
 CREATE TABLE IF NOT EXISTS connection_data_mappings (
   id TEXT PRIMARY KEY,
   sourceType TEXT NOT NULL,

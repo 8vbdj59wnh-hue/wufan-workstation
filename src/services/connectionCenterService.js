@@ -49,6 +49,8 @@ export {
   cancelConnectionOwnerImport,
   loadConnections,
   loadConnectionCoreDetail,
+  loadConnectionInspection,
+  loadConnectionInspections,
   loadConnectionBusinessPositioning,
   loadConnectionBusinessGoals,
   loadConnectionBusinessGoalEvaluation,
@@ -68,7 +70,13 @@ export {
   updateConnectionFollow,
   removeConnectionAction,
   updateConnection,
+  updateConnectionAction,
   updateConnectionBusinessPositioning,
+  startConnectionInspection,
+  saveConnectionInspectionDraft,
+  completeConnectionInspection,
+  createConnectionInspectionAction,
+  saveConnectionInspectionSchedule,
   createConnectionBusinessGoalSuggestion,
   confirmConnectionBusinessGoal,
   batchSetConnectionGoalPositioning,
@@ -87,4 +95,4 @@ export {
   createConnectionFoundationTemplate,
   iterateConnectionFoundationTemplate,
   resolveAssetUrl,
-} from "../appState.js";
+} from "../appState.js?v=inspection-v1";

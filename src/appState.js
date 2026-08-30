@@ -1501,6 +1501,50 @@ export async function loadConnectionCoreDetail(connectionId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/core-detail`), "链接经营详情读取失败。");
 }
 
+export async function loadConnectionInspections(connectionId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/inspections`), "链接体检读取失败。");
+}
+
+export async function updateConnectionAction(connectionId, actionId, input) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/actions/${encodeURIComponent(actionId)}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
+  }), "链接优化行动更新失败。");
+}
+
+export async function startConnectionInspection(connectionId, input = {}) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/inspections/start`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
+  }), "链接体检创建失败。");
+}
+
+export async function saveConnectionInspectionDraft(connectionId, inspectionId, results) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/inspections/${encodeURIComponent(inspectionId)}/draft`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ results }),
+  }), "体检草稿保存失败。");
+}
+
+export async function completeConnectionInspection(connectionId, inspectionId, results) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/inspections/${encodeURIComponent(inspectionId)}/complete`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ results }),
+  }), "体检完成失败。");
+}
+
+export async function loadConnectionInspection(connectionId, inspectionId) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/inspections/${encodeURIComponent(inspectionId)}`), "体检历史读取失败。");
+}
+
+export async function createConnectionInspectionAction(connectionId, input) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/inspection-actions`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
+  }), "链接优化行动创建失败。");
+}
+
+export async function saveConnectionInspectionSchedule(connectionId, input) {
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/inspection-schedule`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
+  }), "定期体检设置失败。");
+}
+
 export async function loadConnectionBusinessPositioning(connectionId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/business-positioning`), "链接经营定位读取失败。");
 }

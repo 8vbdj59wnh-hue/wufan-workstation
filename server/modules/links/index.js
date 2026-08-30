@@ -15,6 +15,7 @@ export {
   getMyConnectionWorkbench,
   setConnectionFollow,
   readConnectionProfile,
+  updateConnectionAction,
   updateConnectionProfile,
   updateConnectionDataMapping,
 } from "../../connectionService.js";

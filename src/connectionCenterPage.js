@@ -41,6 +41,8 @@ import {
   rebuildConnectionOwnerImportPreview,
   cancelConnectionOwnerImport,
   loadConnectionCoreDetail,
+  loadConnectionInspection,
+  loadConnectionInspections,
   loadConnectionBusinessPositioning,
   loadConnectionBusinessGoals,
   loadConnectionBusinessGoalEvaluation,
@@ -58,7 +60,13 @@ import {
   loadLinkDataStatus,
   removeConnectionAction,
   updateConnection,
+  updateConnectionAction,
   updateConnectionBusinessPositioning,
+  startConnectionInspection,
+  saveConnectionInspectionDraft,
+  completeConnectionInspection,
+  createConnectionInspectionAction,
+  saveConnectionInspectionSchedule,
   createConnectionBusinessGoalSuggestion,
   confirmConnectionBusinessGoal,
   batchSetConnectionGoalPositioning,
@@ -78,7 +86,7 @@ import {
   createConnectionFoundationTemplate,
   iterateConnectionFoundationTemplate,
   resolveAssetUrl,
-} from "./services/connectionCenterService.js";
+} from "./services/connectionCenterService.js?v=inspection-v1";
 import { getCurrentUser, state } from "./appState.js";
 import { hasPermission } from "../shared/permissions.js";
 import { escapeHtml } from "./utils/html.js";
@@ -123,6 +131,7 @@ const pageState = {
   loadedSections: new Set(),
   importShops: [],
   selectedId: "",
+  inspectionTaskId: "",
   detailReturnSection: "connections",
   view: "list",
   sort: "default",
@@ -176,6 +185,7 @@ const pageState = {
   salesDataQualityGovernance: { items: [], summary: { byType: {} }, pagination: {}, filters: { anomalyType: "", keyword: "" }, selected: null, loading: false, saving: false, loaded: false },
   coreDetail: null,
   coreDetailLoading: false,
+  inspection: { data: null, active: null, historyDetail: null, loading: false, error: "", mode: "summary", selectedIssues: new Set() },
   dailySales: { data: null, loading: false, loaded: false, rangePreset: "30d", startDate: "", endDate: "", error: "" },
   ownerImport: { loading: false, result: null, showCompletion: false, detailKind: "", detailRows: [], detailPagination: null },
   salesPeriodType: "month",
@@ -1009,7 +1019,7 @@ function renderActions(item) {
       <input name="dueDate" type="date" />
       <button class="primary-button" type="submit">新增</button>
     </form>` : ""}
-    <div class="connection-action-list">${pageState.actions.length ? pageState.actions.map((action) => `<article class="connection-action-item"><div><strong>${escapeHtml(action.title)}</strong><p>${escapeHtml(personName(action.ownerId))}${action.dueDate ? ` · ${escapeHtml(action.dueDate)}` : ""}</p></div><div><span class="status-pill status-${escapeHtml(action.status)}">${escapeHtml(statusText(action.status))}</span>${canManage() ? `<button class="text-button danger" type="button" data-delete-connection-action="${escapeHtml(action.id)}">删除</button>` : ""}</div></article>`).join("") : `<div class="empty-state compact">暂无经营动作</div>`}</div>
+    <div class="connection-action-list">${pageState.actions.length ? pageState.actions.map((action) => `<article class="connection-action-item"><div><strong>${escapeHtml(action.title)}</strong><p>${escapeHtml(personName(action.ownerId))}${action.dueDate ? ` · ${escapeHtml(action.dueDate)}` : ""}</p></div><div>${canManage() ? `<select data-connection-action-status="${escapeHtml(action.id)}">${[["pending","待处理"],["in_progress","进行中"],["completed","已完成"],["canceled","已取消"]].map(([value,label]) => `<option value="${value}" ${action.status === value ? "selected" : ""}>${label}</option>`).join("")}</select>` : `<span class="status-pill status-${escapeHtml(action.status)}">${escapeHtml(statusText(action.status))}</span>`}${canManage() ? `<button class="text-button danger" type="button" data-delete-connection-action="${escapeHtml(action.id)}">删除</button>` : ""}</div></article>`).join("") : `<div class="empty-state compact">暂无经营动作</div>`}</div>
   </div>`;
 }
 
@@ -1100,6 +1110,49 @@ function renderConnectionOperationBar(item) {
   return `<section class="connection-operation-bar"><div><span>当前运营状态</span><strong>${followed ? "关注" : "正常"}</strong><small>${anomalies.length ? escapeHtml(anomalies.map((problem) => problem.title).join("、")) : "当前无已识别异常"}</small></div></section>`;
 }
 
+function inspectionDate(value) {
+  if (!value) return "—";
+  return new Date(value).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false });
+}
+
+function renderInspectionGradeSummary(inspection) {
+  return `<div class="connection-inspection-grades">${["A", "B", "C", "D"].map((grade) => `<div class="grade-${grade.toLowerCase()}"><span>${grade}</span><strong>${Number(inspection?.[`grade${grade}Count`] || 0)}</strong><small>项</small></div>`).join("")}</div>`;
+}
+
+function groupInspectionResults(results = []) {
+  const groups = [];
+  for (const result of results) {
+    let group = groups.find((item) => item.code === result.itemCode);
+    if (!group) { group = { code: result.itemCode, name: result.itemNameSnapshot, description: result.itemDescriptionSnapshot, sortOrder: result.itemSortOrder, results: [] }; groups.push(group); }
+    group.results.push(result);
+  }
+  return groups.sort((left, right) => left.sortOrder - right.sortOrder);
+}
+
+function renderInspectionResults(inspection, editable = false) {
+  return `<div class="connection-inspection-groups">${groupInspectionResults(inspection?.results).map((group) => `<section><header><div><h4>${escapeHtml(group.name)}</h4><p>${escapeHtml(group.description)}</p></div></header>${group.results.map((result) => `<div class="connection-inspection-criterion"><div><strong>${escapeHtml(result.criterionNameSnapshot)}</strong>${result.criterionDescriptionSnapshot ? `<small>${escapeHtml(result.criterionDescriptionSnapshot)}</small>` : ""}</div>${editable ? `<fieldset aria-label="${escapeHtml(result.criterionNameSnapshot)}评分">${["A", "B", "C", "D"].map((grade) => `<label class="grade-${grade.toLowerCase()}"><input type="radio" name="grade-${escapeHtml(result.id)}" value="${grade}" ${result.grade === grade ? "checked" : ""} /><span>${grade}</span></label>`).join("")}</fieldset><textarea name="note-${escapeHtml(result.id)}" rows="2" placeholder="备注（选填）">${escapeHtml(result.note || "")}</textarea>` : `<span class="inspection-grade grade-${escapeHtml(String(result.grade || "").toLowerCase())}">${escapeHtml(result.grade || "未评分")}</span><p>${escapeHtml(result.note || "无备注")}</p>`}</div>`).join("")}</section>`).join("")}</div>`;
+}
+
+function renderConnectionInspection(item) {
+  const stateModel = pageState.inspection;
+  if (stateModel.loading) return `<section class="connection-v3-panel connection-inspection-panel"><h3>链接体检</h3><div class="empty-state compact">正在读取链接体检…</div></section>`;
+  if (stateModel.error) return `<section class="connection-v3-panel connection-inspection-panel"><h3>链接体检</h3><div class="empty-state compact">${escapeHtml(stateModel.error)}</div></section>`;
+  const data = stateModel.data || {};
+  const active = stateModel.active;
+  if (stateModel.mode === "edit" && active) return `<section class="connection-v3-panel connection-inspection-panel"><header><div><h3>链接体检</h3><p>${escapeHtml(active.templateVersion)} · 10个项目 · 30个核心标准</p></div><button type="button" class="text-button" data-inspection-cancel>返回概览</button></header><form data-connection-inspection-form data-inspection-id="${escapeHtml(active.id)}">${renderInspectionResults(active, true)}<footer class="connection-inspection-form-actions"><button type="button" class="secondary-button" data-inspection-save-draft>保存草稿</button><button type="button" class="primary-button" data-inspection-complete>完成体检</button></footer></form></section>`;
+  if (stateModel.historyDetail) return `<section class="connection-v3-panel connection-inspection-panel"><header><div><h3>历史体检</h3><p>${escapeHtml(`${inspectionDate(stateModel.historyDetail.completedAt)} · ${stateModel.historyDetail.inspectorName} · ${stateModel.historyDetail.templateVersion}`)}</p></div><button type="button" class="text-button" data-inspection-history-back>返回概览</button></header>${renderInspectionGradeSummary(stateModel.historyDetail)}${renderInspectionResults(stateModel.historyDetail, false)}</section>`;
+  const latest = data.latest;
+  const schedule = data.schedule;
+  const issues = latest?.issues || [];
+  const selected = stateModel.selectedIssues;
+  return `<section class="connection-v3-panel connection-inspection-panel"><header><div><h3>链接体检</h3><p>基础建设质量评价，与经营目标评级相互独立。</p></div><div>${canManage() ? `<button type="button" class="primary-button" data-inspection-start>${data.draft ? "继续体检" : "开始体检"}</button>` : ""}<button type="button" class="secondary-button" data-inspection-history-toggle>历史体检</button><button type="button" class="secondary-button" data-inspection-schedule-toggle>定期体检</button></div></header>
+    ${latest ? `<div class="connection-inspection-overview">${renderInspectionGradeSummary(latest)}<dl><div><dt>最近体检</dt><dd>${escapeHtml(inspectionDate(latest.completedAt))}</dd></div><div><dt>体检人</dt><dd>${escapeHtml(latest.inspectorName)}</dd></div><div><dt>下次体检</dt><dd>${escapeHtml(schedule?.nextInspectionAt || "未设置")}</dd></div><div><dt>待优化问题</dt><dd>${Number(data.pendingIssueCount || 0)}</dd></div></dl></div>` : `<div class="empty-state compact">尚未完成链接体检</div>`}
+    <div class="connection-inspection-schedule" ${stateModel.mode === "schedule" ? "" : "hidden"}><form data-inspection-schedule-form><label>周期<select name="cadenceType"><option value="manual" ${!schedule?.enabled ? "selected" : ""}>不定期</option><option value="days_30" ${schedule?.cadenceType === "days_30" ? "selected" : ""}>每30天</option><option value="days_60" ${schedule?.cadenceType === "days_60" ? "selected" : ""}>每60天</option><option value="days_90" ${schedule?.cadenceType === "days_90" ? "selected" : ""}>每90天</option><option value="custom" ${schedule?.cadenceType === "custom" ? "selected" : ""}>自定义</option></select></label><label>自定义天数<input name="intervalDays" type="number" min="1" max="3650" value="${schedule?.cadenceType === "custom" ? Number(schedule.intervalDays || 30) : 30}" /></label><label>负责人<select name="assigneeId" required>${(state.people ?? []).filter((person) => person.status === "active").map((person) => `<option value="${escapeHtml(person.id)}" ${schedule?.assigneeId === person.id || (!schedule && item.ownerId === person.id) ? "selected" : ""}>${escapeHtml(person.name)}</option>`).join("")}</select></label><button type="submit" class="primary-button">保存定期体检</button></form></div>
+    ${issues.length ? `<section class="connection-inspection-issues"><h4>待改善候选问题</h4>${issues.map((issue) => `<label><input type="checkbox" data-inspection-issue value="${escapeHtml(issue.id)}" ${selected.has(issue.id) ? "checked" : ""} ${issue.status !== "candidate" ? "disabled" : ""}/><span><strong>${escapeHtml(`${issue.itemNameSnapshot} · ${issue.criterionNameSnapshot}`)}</strong><small>${escapeHtml(`${issue.gradeSnapshot}${issue.noteSnapshot ? ` · ${issue.noteSnapshot}` : ""}`)}${issue.actionCount ? " · 已发起行动" : ""}</small></span></label>`).join("")}${canManage() ? `<form data-inspection-action-form><input name="title" placeholder="行动名称（不填则自动生成）"/><select name="ownerId"><option value="">沿用Link负责人</option>${(state.people ?? []).filter((person) => person.status === "active").map((person) => `<option value="${escapeHtml(person.id)}">${escapeHtml(person.name)}</option>`).join("")}</select><input name="dueDate" type="date"/><textarea name="description" rows="2" placeholder="行动说明"></textarea><label><input name="createTask" type="checkbox" value="true"/> 同时创建正式任务</label><button type="submit" class="primary-button" ${selected.size ? "" : "disabled"}>发起链接优化行动</button></form>` : ""}</section>` : ""}
+    ${stateModel.mode === "history" ? `<section class="connection-inspection-history"><h4>历史体检</h4>${(data.history || []).length ? data.history.map((history) => `<button type="button" data-inspection-history-id="${escapeHtml(history.id)}"><span><strong>${escapeHtml(inspectionDate(history.completedAt))}</strong><small>${escapeHtml(`${history.inspectorName} · ${history.templateVersion} · 问题${history.issueCount}项 · 行动${history.actionCount}个`)}</small></span><em>A ${history.gradeACount} / B ${history.gradeBCount} / C ${history.gradeCCount} / D ${history.gradeDCount}</em></button>`).join("") : `<div class="empty-state compact">暂无历史体检</div>`}</section>` : ""}
+  </section>`;
+}
+
 function renderDetail() {
   const detailProfile = pageState.coreDetail?.profile;
   const listItem = pageState.items.find((candidate) => candidate.id === pageState.selectedId)
@@ -1114,7 +1167,7 @@ function renderDetail() {
   let body = "";
   if (pageState.coreDetailLoading) body = `<div class="empty-state">正在读取链接经营详情…</div>`;
   else if (pageState.detailTab === "business") body = renderUiModule("link_business_summary", {
-    metricsHtml: `${renderConnectionBusinessPositioning(pageState.coreDetail)}${renderConnectionBusinessGoals(pageState.coreDetail)}${renderCoreOperatingOverview(item, pageState.coreDetail)}`,
+    metricsHtml: `${renderConnectionBusinessPositioning(pageState.coreDetail)}${renderConnectionBusinessGoals(pageState.coreDetail)}${renderConnectionInspection(item)}${renderActions(item)}${renderCoreOperatingOverview(item, pageState.coreDetail)}`,
     trendHtml: renderCorePlatform(pageState.coreDetail),
     healthHtml: `<section class="connection-v3-panel"><h3>经营趋势</h3><div class="connection-v3-metrics"><div><span>销售趋势</span><strong>${growthText(item.salesGrowth)}</strong></div><div><span>利润趋势</span><strong>${growthText(item.profitGrowth)}</strong></div></div></section>`,
     productHtml: renderCoreProducts(pageState.coreDetail),
@@ -1495,9 +1548,20 @@ function loadConnectionGoalModules(id, render) {
   });
 }
 
-async function openConnection(id, render) {
-  if (window.location.hash !== `#connectionCenter/${encodeURIComponent(id)}`) window.history.replaceState(null, "", `#connectionCenter/${encodeURIComponent(id)}`);
-  pageState.selectedId = id; pageState.detailTab = "business"; pageState.detailLoaded = new Set(["business"]); pageState.coreDetail = null; pageState.coreDetailLoading = true; pageState.dailySales = { data: null, loading: false, loaded: false, rangePreset: "30d", startDate: "", endDate: "", error: "" }; pageState.actions = []; pageState.periodSnapshots = []; pageState.growthAnalysis = null; pageState.benchmarks = { items: [], candidates: [], comparison: null, comparisonId: "", loading: false }; render();
+async function reloadConnectionInspection(render) {
+  if (!pageState.selectedId) return;
+  const data = await loadConnectionInspections(pageState.selectedId);
+  pageState.inspection = { ...pageState.inspection, data, active: data.draft || null, loading: false, error: "", selectedIssues: new Set() };
+  const actions = await loadConnectionActions(pageState.selectedId);
+  pageState.actions = actions.items ?? [];
+  render();
+}
+
+async function openConnection(id, render, inspectionTaskId = "") {
+  const detailHash = `#connectionCenter/${encodeURIComponent(id)}${inspectionTaskId ? `?inspectionTaskId=${encodeURIComponent(inspectionTaskId)}` : ""}`;
+  if (window.location.hash !== detailHash) window.history.replaceState(null, "", detailHash);
+  pageState.inspectionTaskId = inspectionTaskId;
+  pageState.selectedId = id; pageState.detailTab = "business"; pageState.detailLoaded = new Set(["business"]); pageState.coreDetail = null; pageState.coreDetailLoading = true; pageState.inspection = { data: null, active: null, historyDetail: null, loading: true, error: "", mode: "summary", selectedIssues: new Set() }; pageState.dailySales = { data: null, loading: false, loaded: false, rangePreset: "30d", startDate: "", endDate: "", error: "" }; pageState.actions = []; pageState.periodSnapshots = []; pageState.growthAnalysis = null; pageState.benchmarks = { items: [], candidates: [], comparison: null, comparisonId: "", loading: false }; render();
   try {
     const detail = await withConnectionDetailTimeout(loadConnectionCoreDetail(id), "链接经营详情");
     if (pageState.selectedId !== id) return;
@@ -1505,6 +1569,16 @@ async function openConnection(id, render) {
     // 核心身份、产品关系、销售与库存先完成首屏，不再等待目标管理的附加接口。
     // 任何附加接口超时或失败，都不能让整个链接详情永久停留在加载状态。
     pageState.coreDetail = { ...detail }; pageState.coreDetailLoading = false; pageState.error = ""; render();
+    void Promise.all([loadConnectionInspections(id), loadConnectionActions(id)]).then(([inspection, actions]) => {
+      if (pageState.selectedId !== id) return;
+      pageState.inspection = { ...pageState.inspection, data: inspection, active: inspection.draft || null, loading: false, error: "" };
+      pageState.actions = actions.items ?? [];
+      render();
+    }).catch((error) => {
+      if (pageState.selectedId !== id) return;
+      pageState.inspection = { ...pageState.inspection, loading: false, error: error.message || "链接体检读取失败。" };
+      render();
+    });
     if (!detail.profile?.hasBusinessProfile) {
       pageState.coreDetail = {
         ...pageState.coreDetail,
@@ -1635,7 +1709,9 @@ export function bindConnectionCenterPageEvents(render) {
   const route = parseConnectionCenterRoute(window.location.hash);
   if (route.redirectHash) { window.location.hash = route.redirectHash; return; }
   const hasDetailRoute = Boolean(route.detailId);
-  if (pageState.loaded && hasDetailRoute && pageState.selectedId !== route.detailId) void openConnection(route.detailId, render);
+  if (pageState.loaded && hasDetailRoute && (pageState.selectedId !== route.detailId || pageState.inspectionTaskId !== route.inspectionTaskId)) {
+    void openConnection(route.detailId, render, route.inspectionTaskId);
+  }
   if (!hasDetailRoute) {
     const previousSection = pageState.section; const hadDetail = Boolean(pageState.selectedId);
     const selectedSection = selectConnectionSection(route.section || pageState.section, { updateRoute: true });
@@ -2123,6 +2199,68 @@ export function bindConnectionCenterPageEvents(render) {
   root.querySelectorAll("[data-retry-connection-goal-module]").forEach((button) => button.addEventListener("click", () => {
     void loadConnectionGoalModule(pageState.selectedId, button.dataset.retryConnectionGoalModule, render);
   }));
+  root.querySelector("[data-inspection-start]")?.addEventListener("click", async () => {
+    try {
+      const result = pageState.inspection.data?.draft || (await startConnectionInspection(pageState.selectedId, {
+        taskId: pageState.inspectionTaskId || undefined,
+      })).item;
+      pageState.inspection = { ...pageState.inspection, active: result, mode: "edit", error: "" }; render();
+    } catch (error) { pageState.inspection = { ...pageState.inspection, error: error.message }; render(); }
+  });
+  root.querySelector("[data-inspection-cancel]")?.addEventListener("click", () => { pageState.inspection = { ...pageState.inspection, mode: "summary" }; render(); });
+  root.querySelector("[data-inspection-history-back]")?.addEventListener("click", () => { pageState.inspection = { ...pageState.inspection, historyDetail: null, mode: "history" }; render(); });
+  root.querySelector("[data-inspection-history-toggle]")?.addEventListener("click", () => { pageState.inspection = { ...pageState.inspection, mode: pageState.inspection.mode === "history" ? "summary" : "history" }; render(); });
+  root.querySelector("[data-inspection-schedule-toggle]")?.addEventListener("click", () => { pageState.inspection = { ...pageState.inspection, mode: pageState.inspection.mode === "schedule" ? "summary" : "schedule" }; render(); });
+  root.querySelectorAll("[data-inspection-history-id]").forEach((button) => button.addEventListener("click", async () => {
+    try {
+      const result = await loadConnectionInspection(pageState.selectedId, button.dataset.inspectionHistoryId);
+      pageState.inspection = { ...pageState.inspection, historyDetail: result.item, mode: "history-detail" }; render();
+    } catch (error) { pageState.inspection = { ...pageState.inspection, error: error.message }; render(); }
+  }));
+  const inspectionForm = root.querySelector("[data-connection-inspection-form]");
+  const readInspectionAnswers = () => (pageState.inspection.active?.results || []).map((result) => ({
+    id: result.id,
+    grade: inspectionForm?.querySelector(`input[name="grade-${result.id}"]:checked`)?.value || "",
+    note: inspectionForm?.querySelector(`[name="note-${result.id}"]`)?.value || "",
+  }));
+  root.querySelector("[data-inspection-save-draft]")?.addEventListener("click", async () => {
+    try {
+      const result = await saveConnectionInspectionDraft(pageState.selectedId, pageState.inspection.active.id, readInspectionAnswers());
+      pageState.inspection = { ...pageState.inspection, active: result.item, mode: "edit", error: "" }; render();
+    } catch (error) { pageState.inspection = { ...pageState.inspection, error: error.message }; render(); }
+  });
+  root.querySelector("[data-inspection-complete]")?.addEventListener("click", async () => {
+    try {
+      const answers = readInspectionAnswers();
+      if (answers.some((item) => !item.grade)) throw new Error("完成体检前必须为30个核心标准全部评分。");
+      await completeConnectionInspection(pageState.selectedId, pageState.inspection.active.id, answers);
+      pageState.inspection = { ...pageState.inspection, active: null, mode: "summary", error: "" };
+      await reloadConnectionInspection(render);
+    } catch (error) { pageState.inspection = { ...pageState.inspection, error: error.message }; render(); }
+  });
+  root.querySelectorAll("[data-inspection-issue]").forEach((checkbox) => checkbox.addEventListener("change", () => {
+    const selectedIssues = new Set(pageState.inspection.selectedIssues);
+    if (checkbox.checked) selectedIssues.add(checkbox.value); else selectedIssues.delete(checkbox.value);
+    pageState.inspection = { ...pageState.inspection, selectedIssues }; render();
+  }));
+  root.querySelector("[data-inspection-action-form]")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      const input = Object.fromEntries(new FormData(event.currentTarget));
+      input.issueIds = [...pageState.inspection.selectedIssues]; input.createTask = input.createTask === "true";
+      await createConnectionInspectionAction(pageState.selectedId, input);
+      await reloadConnectionInspection(render);
+    } catch (error) { pageState.inspection = { ...pageState.inspection, error: error.message }; render(); }
+  });
+  root.querySelector("[data-inspection-schedule-form]")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      const input = Object.fromEntries(new FormData(event.currentTarget));
+      await saveConnectionInspectionSchedule(pageState.selectedId, input);
+      pageState.inspection = { ...pageState.inspection, mode: "summary" };
+      await reloadConnectionInspection(render);
+    } catch (error) { pageState.inspection = { ...pageState.inspection, error: error.message }; render(); }
+  });
   root.querySelector("[data-connection-profile-form]")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
@@ -2267,6 +2405,13 @@ export function bindConnectionCenterPageEvents(render) {
     event.preventDefault(); const form = new FormData(event.currentTarget);
     try { const result = await createConnectionAction(pageState.selectedId, Object.fromEntries(form)); pageState.actions.unshift(result.item); pageState.error = ""; render(); } catch (error) { pageState.error = error.message; render(); }
   });
+  root.querySelectorAll("[data-connection-action-status]").forEach((select) => select.addEventListener("change", async () => {
+    try {
+      const result = await updateConnectionAction(pageState.selectedId, select.dataset.connectionActionStatus, { status: select.value });
+      pageState.actions = pageState.actions.map((item) => item.id === result.item.id ? result.item : item);
+      await reloadConnectionInspection(render);
+    } catch (error) { pageState.error = error.message; render(); }
+  }));
   root.querySelectorAll("[data-delete-connection-action]").forEach((button) => button.addEventListener("click", async () => {
     if (!window.confirm("确认删除这条经营动作？")) return;
     try { await removeConnectionAction(pageState.selectedId, button.dataset.deleteConnectionAction); pageState.actions = pageState.actions.filter((item) => item.id !== button.dataset.deleteConnectionAction); render(); } catch (error) { pageState.error = error.message; render(); }
