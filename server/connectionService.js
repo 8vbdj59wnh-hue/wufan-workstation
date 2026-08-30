@@ -354,6 +354,25 @@ export function createConnectionAction(connectionProfileId, input, userId) {
   return database.prepare("SELECT * FROM connection_actions WHERE id=?").get(id);
 }
 
+export function updateConnectionAction(connectionProfileId, actionId, input = {}) {
+  const database = getDatabase();
+  const action = database.prepare("SELECT * FROM connection_actions WHERE id=? AND connectionProfileId=?")
+    .get(value(actionId), value(connectionProfileId));
+  if (!action) throw new Error("未找到经营动作。");
+  const title = input.title === undefined ? action.title : value(input.title);
+  const description = input.description === undefined ? action.description : value(input.description);
+  const ownerId = input.ownerId === undefined ? action.ownerId : value(input.ownerId) || null;
+  const status = input.status === undefined ? action.status : value(input.status);
+  const dueDate = input.dueDate === undefined ? action.dueDate : value(input.dueDate) || null;
+  if (!title) throw new Error("请填写经营动作名称。");
+  if (!actionStatuses.has(status)) throw new Error("经营动作状态无效。");
+  if (ownerId && !database.prepare("SELECT 1 FROM persons WHERE id=? AND status='active'").get(ownerId)) throw new Error("负责人不存在或已停用。");
+  const timestamp = new Date().toISOString();
+  database.prepare(`UPDATE connection_actions SET title=?,description=?,ownerId=?,status=?,dueDate=?,updatedAt=?
+    WHERE id=? AND connectionProfileId=?`).run(title, description, ownerId, status, dueDate, timestamp, action.id, action.connectionProfileId);
+  return database.prepare("SELECT * FROM connection_actions WHERE id=?").get(action.id);
+}
+
 export function deleteConnectionAction(connectionProfileId, actionId) {
   const result = getDatabase().prepare("DELETE FROM connection_actions WHERE id=? AND connectionProfileId=?").run(value(actionId), value(connectionProfileId));
   if (result.changes === 0) throw new Error("未找到经营动作。");

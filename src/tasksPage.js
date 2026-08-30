@@ -3801,6 +3801,7 @@ function renderCurrentTaskSection(task) {
         ${renderDetailField("进度提醒", escapeHtml(remaining.label))}
       </div>
       ${String(task.description ?? "").trim() ? `<p>任务说明：${escapeHtml(task.description)}</p>` : ""}
+      ${task.connectionInspectionContext?.salesLinkId ? `<p><a class="primary-button" href="#connectionCenter/${encodeURIComponent(task.connectionInspectionContext.salesLinkId)}?inspectionTaskId=${encodeURIComponent(task.id)}">打开对应Link体检</a></p>` : ""}
       <p>完成标准：${escapeHtml(task.completionStandard || "未填写")}</p>
       ${
         task.reviewStandard === undefined || task.reviewStandard === null || task.reviewStandard === ""

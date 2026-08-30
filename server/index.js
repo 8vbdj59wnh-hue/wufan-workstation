@@ -183,6 +183,7 @@ import {
   setConnectionFollow,
   assertConnectionVisible,
   readConnectionProfile,
+  updateConnectionAction,
   updateConnectionProfile,
   updateConnectionDataMapping,
   commitConnectionImportBatch,
@@ -238,6 +239,20 @@ import {
   updateConnectionGoalPilotBatch,
   updateConnectionGoalPilotMember,
 } from "./connectionGoalPilotService.js";
+import {
+  completeConnectionInspection,
+  createInspectionAction,
+  createTaskForAction,
+  ensureConnectionInspectionTemplate,
+  readConnectionInspection,
+  readConnectionInspectionOverview,
+  readConnectionInspectionTaskContext,
+  runDueConnectionInspectionSchedules,
+  saveConnectionInspectionDraft,
+  saveConnectionInspectionSchedule,
+  startConnectionInspection,
+  syncInspectionIssuesForActionStatus,
+} from "./connectionInspectionService.js";
 import { queryLinkDataTable } from "./linkDataTableService.js";
 import { queryLinkBusinessTable } from "./linkBusinessTableService.js";
 import { getLinkSalesDistribution } from "./linkSalesDistributionService.js";
@@ -396,6 +411,7 @@ initializeDatabase();
 const startupDatabaseHealth = evaluateDatabaseHealth(getDatabase());
 assertBusinessBaselineHealthy(startupDatabaseHealth);
 bootstrapTemplateVersions();
+ensureConnectionInspectionTemplate(getDatabase(), "system");
 fs.mkdirSync(imageUploadsDir, { recursive: true });
 fs.mkdirSync(fileUploadsDir, { recursive: true });
 fs.mkdirSync(standardWorkAttachmentsDir, { recursive: true });
@@ -1982,7 +1998,7 @@ app.get("/api/task-center/tasks/:id/detail", (request, response) => {
     const authorization = readTaskAuthorizationResolver([request.params.id]).get(request.params.id);
     if (authorization === null) { response.status(404).json({ success: false, message: "未找到任务。" }); return; }
     if (!canViewTask(request.user, authorization)) { rejectUnauthorizedTask(response, "你没有权限查看该任务。"); return; }
-    const task = readRouteResourceItem("tasks", request.params.id);
+    const task = { ...readRouteResourceItem("tasks", request.params.id), connectionInspectionContext: readConnectionInspectionTaskContext(request.params.id) };
     const processTasks = task.processInstanceId
       ? readResource("tasks").filter((item) => item.processInstanceId === task.processInstanceId)
       : [task];
@@ -3650,12 +3666,78 @@ app.post("/api/connections/:id/actions", requireLinkManage, requireConnectionAcc
   }
 });
 
+app.patch("/api/connections/:id/actions/:actionId", requireLinkManage, requireConnectionAccess, (request, response) => {
+  try {
+    const item = updateConnectionAction(request.params.id, request.params.actionId, request.body ?? {});
+    syncInspectionIssuesForActionStatus(item.id, item.status);
+    response.json({ success: true, item });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "经营动作更新失败。" });
+  }
+});
+
+app.post("/api/connections/:id/actions/:actionId/tasks", requireLinkManage, requireConnectionAccess, (request, response) => {
+  try {
+    response.status(201).json({ success: true, item: createTaskForAction(request.params.actionId, request.body ?? {}, {
+      userId: getUserPersonId(request.user),
+      salesLinkId: request.params.id,
+    }) });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "行动任务创建失败。" });
+  }
+});
+
 app.delete("/api/connections/:id/actions/:actionId", requireLinkManage, requireConnectionAccess, (request, response) => {
   try {
+    syncInspectionIssuesForActionStatus(request.params.actionId, "canceled");
     response.json(deleteConnectionAction(request.params.id, request.params.actionId));
   } catch (error) {
     response.status(404).json({ success: false, message: error.message || "经营动作删除失败。" });
   }
+});
+
+app.get("/api/connections/:id/inspections", requireLinkView, requireConnectionAccess, (request, response) => {
+  try { response.json({ success: true, ...readConnectionInspectionOverview(request.params.id, { userId: getUserPersonId(request.user) }) }); }
+  catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "链接体检读取失败。" }); }
+});
+
+app.post("/api/connections/:id/inspections/start", requireLinkManage, requireConnectionAccess, (request, response) => {
+  try { response.status(201).json({ success: true, item: startConnectionInspection(request.params.id, request.body ?? {}, { userId: getUserPersonId(request.user) }) }); }
+  catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "链接体检创建失败。" }); }
+});
+
+app.get("/api/connections/:id/inspections/:inspectionId", requireLinkView, requireConnectionAccess, (request, response) => {
+  try {
+    const item = readConnectionInspection(request.params.inspectionId);
+    if (item.salesLinkId !== request.params.id) throw new Error("体检记录不属于当前Link。");
+    response.json({ success: true, item });
+  } catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "体检历史读取失败。" }); }
+});
+
+app.put("/api/connections/:id/inspections/:inspectionId/draft", requireLinkManage, requireConnectionAccess, (request, response) => {
+  try {
+    const existing = readConnectionInspection(request.params.inspectionId);
+    if (existing.salesLinkId !== request.params.id) throw new Error("体检记录不属于当前Link。");
+    response.json({ success: true, item: saveConnectionInspectionDraft(request.params.inspectionId, request.body ?? {}) });
+  } catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "体检草稿保存失败。" }); }
+});
+
+app.post("/api/connections/:id/inspections/:inspectionId/complete", requireLinkManage, requireConnectionAccess, (request, response) => {
+  try {
+    const existing = readConnectionInspection(request.params.inspectionId);
+    if (existing.salesLinkId !== request.params.id) throw new Error("体检记录不属于当前Link。");
+    response.json({ success: true, item: completeConnectionInspection(request.params.inspectionId, request.body ?? {}) });
+  } catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "体检完成失败。" }); }
+});
+
+app.post("/api/connections/:id/inspection-actions", requireLinkManage, requireConnectionAccess, (request, response) => {
+  try { response.status(201).json({ success: true, ...createInspectionAction(request.params.id, request.body ?? {}, { userId: getUserPersonId(request.user) }) }); }
+  catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "链接优化行动创建失败。" }); }
+});
+
+app.put("/api/connections/:id/inspection-schedule", requireLinkManage, requireConnectionAccess, (request, response) => {
+  try { response.json({ success: true, item: saveConnectionInspectionSchedule(request.params.id, request.body ?? {}, { userId: getUserPersonId(request.user) }) }); }
+  catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "定期体检设置失败。" }); }
 });
 
 app.get("/api/connection-data-mappings", requireLinkView, (request, response) => {
@@ -4450,7 +4532,8 @@ app.get("/api/tasks/:id", (request, response) => {
     rejectUnauthorizedTask(response, "你没有权限查看该任务。");
     return;
   }
-  response.json(readRouteResourceItem("tasks", request.params.id));
+  const item = readRouteResourceItem("tasks", request.params.id);
+  response.json({ ...item, connectionInspectionContext: readConnectionInspectionTaskContext(request.params.id) });
 });
 
 app.post("/api/tasks/:id/workflow", (request, response) => {
@@ -4946,6 +5029,20 @@ const taskWaveCollectionTimer = setInterval(() => {
 }, 60_000);
 taskWaveCollectionTimer.unref();
 
+const connectionInspectionSchedulerTimer = setInterval(() => {
+  const maintenanceToken = beginReleaseManagedJob("connection_inspection_scheduler");
+  if (!maintenanceToken) return;
+  try {
+    const results = runDueConnectionInspectionSchedules();
+    for (const result of results.filter((item) => item.error)) console.error("定期链接体检任务创建失败", result.error);
+  } catch (error) {
+    console.error("定期链接体检调度失败", error);
+  } finally {
+    finishReleaseManagedJob(maintenanceToken);
+  }
+}, 60_000);
+connectionInspectionSchedulerTimer.unref();
+
 let dataSyncSchedulerRunning = false;
 const dataSyncSchedulerTimer = setInterval(async () => {
   if (dataSyncSchedulerRunning) return;
@@ -4967,6 +5064,7 @@ dataSyncSchedulerTimer.unref();
 
 function shutdown() {
   clearInterval(taskWaveCollectionTimer);
+  clearInterval(connectionInspectionSchedulerTimer);
   clearInterval(dataSyncSchedulerTimer);
   server.close(() => {
     closeDatabase();

@@ -17,11 +17,15 @@ export function parseConnectionCenterRoute(hash = "") {
   const route = String(hash || "").replace(/^#/, "");
   if (route === "connectionCenter") return { section: "", detailId: "" };
   if (!route.startsWith("connectionCenter/")) return { section: "", detailId: "" };
-  const suffix = decoded(route.slice("connectionCenter/".length));
+  const [pathPart, queryPart = ""] = route.slice("connectionCenter/".length).split("?");
+  const suffix = decoded(pathPart);
+  const inspectionTaskId = new URLSearchParams(queryPart).get("inspectionTaskId") || "";
   const section = sectionAliases.get(suffix) || suffix;
   if (section === "data-center") return { section: "", detailId: "", redirectHash: "#products" };
   if (section === "erp-usage-governance") return { section: "", detailId: "", redirectHash: "#connectionCenter/data-import" };
-  return CONNECTION_CENTER_SECTIONS.has(section) ? { section, detailId: "" } : { section: "", detailId: suffix };
+  return CONNECTION_CENTER_SECTIONS.has(section)
+    ? { section, detailId: "", inspectionTaskId: "" }
+    : { section: "", detailId: suffix, inspectionTaskId };
 }
 
 export function connectionCenterSectionHash(section = "cockpit") {

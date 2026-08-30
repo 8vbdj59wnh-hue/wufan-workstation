@@ -10,6 +10,7 @@ const assetTypes = {
 };
 
 const resourcesByAssetType = Object.fromEntries(Object.entries(assetTypes).map(([resource, type]) => [type, resource]));
+const readableAssetTypes = new Set([...Object.values(assetTypes), "inspection"]);
 const now = () => new Date().toISOString();
 const id = () => `template-version-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 const json = (value) => JSON.stringify(value ?? {});
@@ -83,7 +84,10 @@ export function bootstrapTemplateVersions(userId = "system") {
 export function listTemplateVersions(assetType = "", assetId = "") {
   ensureTemplateVersionSchema();
   const clauses = [], args = [];
-  if (assetType) { resourceForType(assetType); clauses.push("assetType = ?"); args.push(assetType); }
+  if (assetType) {
+    if (!readableAssetTypes.has(assetType)) throw new Error("不支持的模板类型。");
+    clauses.push("assetType = ?"); args.push(assetType);
+  }
   if (assetId) { clauses.push("assetId = ?"); args.push(assetId); }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   return getDatabase().prepare(`SELECT * FROM template_asset_versions ${where} ORDER BY assetType, assetId, majorVersion DESC, minorVersion DESC`).all(...args).map(decorate);

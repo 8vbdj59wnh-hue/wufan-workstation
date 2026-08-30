@@ -11393,6 +11393,45 @@ button.content-template-thumb {
 .connection-tabs button { border: 0; border-radius: 8px; padding: 8px 12px; }
 .connection-tabs button.active { background: #fff; color: var(--link-accent); box-shadow: 0 1px 4px rgb(16 24 40 / 8%); }
 .connection-v3-basic, .connection-v3-panel, .connection-actions-panel, .connection-growth-detail, .connection-benchmark-panel { padding: 20px; border: 1px solid var(--link-border); border-radius: var(--link-radius); background: #fff; box-shadow: 0 2px 8px rgb(16 24 40 / 4%); }
+
+.connection-inspection-panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.connection-inspection-panel > header > div:last-child { display: flex; flex-wrap: wrap; gap: 8px; }
+.connection-inspection-grades { display: grid; grid-template-columns: repeat(4, minmax(76px, 1fr)); gap: 10px; }
+.connection-inspection-grades > div { display: flex; align-items: baseline; gap: 6px; padding: 14px; border: 1px solid var(--link-border); border-radius: 12px; background: #f8faf9; }
+.connection-inspection-grades span { font-weight: 800; font-size: 18px; }
+.connection-inspection-grades strong { font-size: 24px; color: #163f34; }
+.connection-inspection-grades .grade-a { border-color: #9bd9bd; background: #effaf4; }
+.connection-inspection-grades .grade-b { border-color: #bad4f5; background: #f2f7fd; }
+.connection-inspection-grades .grade-c { border-color: #f2d38d; background: #fff9eb; }
+.connection-inspection-grades .grade-d { border-color: #efb3b3; background: #fff4f4; }
+.connection-inspection-overview { display: grid; grid-template-columns: minmax(320px, 1fr) minmax(360px, 1fr); gap: 18px; }
+.connection-inspection-overview dl { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 0; }
+.connection-inspection-overview dl div { padding: 12px; border-radius: 10px; background: #f7f9f8; }
+.connection-inspection-overview dt { color: var(--link-muted); font-size: 12px; }
+.connection-inspection-overview dd { margin: 5px 0 0; font-weight: 700; }
+.connection-inspection-groups { display: grid; gap: 14px; }
+.connection-inspection-groups > section { padding: 16px; border: 1px solid var(--link-border); border-radius: 14px; }
+.connection-inspection-groups > section > header h4 { margin: 0; }
+.connection-inspection-groups > section > header p { margin: 5px 0 12px; color: var(--link-muted); }
+.connection-inspection-criterion { display: grid; grid-template-columns: minmax(180px, .8fr) auto minmax(240px, 1.2fr); gap: 14px; align-items: center; padding: 12px 0; border-top: 1px solid #edf1ef; }
+.connection-inspection-criterion fieldset { display: flex; gap: 6px; padding: 0; margin: 0; border: 0; }
+.connection-inspection-criterion fieldset label input { position: absolute; opacity: 0; pointer-events: none; }
+.connection-inspection-criterion fieldset label span, .inspection-grade { display: grid; place-items: center; min-width: 36px; min-height: 34px; border: 1px solid #d8e0dd; border-radius: 9px; cursor: pointer; font-weight: 800; }
+.connection-inspection-criterion fieldset label input:checked + span { color: white; background: #177c61; border-color: #177c61; }
+.connection-inspection-criterion textarea { width: 100%; resize: vertical; }
+.connection-inspection-form-actions { position: sticky; bottom: 12px; display: flex; justify-content: flex-end; gap: 10px; padding: 14px; border: 1px solid var(--link-border); border-radius: 12px; background: rgb(255 255 255 / 94%); box-shadow: 0 8px 28px rgb(16 24 40 / 10%); }
+.connection-inspection-issues, .connection-inspection-history, .connection-inspection-schedule { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--link-border); }
+.connection-inspection-issues > label { display: flex; gap: 10px; padding: 10px 0; }
+.connection-inspection-issues > label span { display: grid; gap: 3px; }
+.connection-inspection-issues form, .connection-inspection-schedule form { display: grid; grid-template-columns: repeat(3, minmax(160px, 1fr)); gap: 10px; margin-top: 14px; }
+.connection-inspection-issues form textarea { grid-column: 1 / -1; }
+.connection-inspection-history { display: grid; gap: 8px; }
+.connection-inspection-history > button { display: flex; justify-content: space-between; gap: 14px; padding: 12px; border: 1px solid var(--link-border); border-radius: 10px; background: white; text-align: left; }
+.connection-inspection-history > button span { display: grid; gap: 3px; }
+@media (max-width: 900px) {
+  .connection-inspection-overview, .connection-inspection-criterion { grid-template-columns: 1fr; }
+  .connection-inspection-issues form, .connection-inspection-schedule form { grid-template-columns: 1fr; }
+}
 .connection-v3-metrics > div { min-height: 84px; border: 1px solid #edf0f2; border-radius: 12px; background: #f8fafc; }
 .connection-v3-product-grid > a { border-radius: 13px; box-shadow: 0 2px 7px rgb(16 24 40 / 5%); }
 
