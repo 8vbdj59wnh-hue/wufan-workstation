@@ -11471,6 +11471,11 @@ button.content-template-thumb {
 .connection-phone-address span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .connection-phone-screen iframe { display: block; width: 100%; height: min(760px, calc(100vh - 300px)); min-height: 560px; border: 0; background: #f2f2f4; }
 .connection-phone-screen footer { padding: 10px 12px 12px; color: #7a8c85; font-size: 11px; text-align: center; }
+.connection-mobile-qr-card { display: grid; justify-items: center; gap: 10px; min-height: 560px; padding: 54px 24px 30px; border: 1px solid #dce6e2; border-radius: 24px; background: linear-gradient(180deg, #fff 0%, #f4faf7 100%); text-align: center; }
+.connection-mobile-qr-card img { width: min(82%, 320px); aspect-ratio: 1; padding: 12px; border: 1px solid #d8e4df; border-radius: 18px; background: #fff; box-shadow: 0 10px 30px rgb(16 24 40 / 10%); }
+.connection-mobile-qr-card strong { margin-top: 8px; color: #173f34; font-size: 20px; }
+.connection-mobile-qr-card p { margin: 0; color: var(--link-muted); }
+.connection-mobile-qr-card small { display: block; max-width: 100%; margin-top: 12px; overflow: hidden; color: #98a2b3; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .connection-inspection-grades { display: grid; grid-template-columns: repeat(4, minmax(76px, 1fr)); gap: 10px; }
 .connection-inspection-grades > div { display: flex; align-items: baseline; gap: 6px; padding: 14px; border: 1px solid var(--link-border); border-radius: 12px; background: #f8faf9; }
 .connection-inspection-grades span { font-weight: 800; font-size: 18px; }
