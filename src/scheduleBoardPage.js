@@ -1348,6 +1348,54 @@ function getActionOverviewStatusClass(status) {
   return "is-running";
 }
 
+function getActionOverviewStepStatusLabel(step) {
+  if (step.status === TaskStatus.Done || step.status === "completed") return "已完成";
+  if (step.isCurrent) return "当前步骤";
+  if (step.status === TaskStatus.PendingAcceptance) return "待验收";
+  if (step.status === TaskStatus.Doing) return "进行中";
+  if (step.status === TaskStatus.Waiting) return "等待前置";
+  if ([TaskStatus.Canceled, "cancelled"].includes(step.status)) return "已取消";
+  return "待执行";
+}
+
+function renderActionOverviewProgress(progress) {
+  const currentStepIndex = progress.steps.findIndex((step) => step.isCurrent);
+  const currentStep = currentStepIndex === -1 ? null : progress.steps[currentStepIndex];
+  const currentStepText =
+    progress.total === 0
+      ? "暂无步骤"
+      : progress.completed === progress.total
+        ? "全部步骤已完成"
+        : currentStep === null
+          ? "等待下一步"
+          : `第 ${currentStepIndex + 1} 步 · ${currentStep.name}`;
+  const progressLabel = `已完成 ${progress.completed} 个，共 ${progress.total} 个步骤；${currentStepText}`;
+  return `
+    <div class="schedule-action-overview-progress">
+      <div class="schedule-action-overview-progress-summary">
+        <span>进度</span>
+        <span class="schedule-action-overview-current-step" title="${escapeAttribute(currentStepText)}">${escapeHtml(currentStepText)}</span>
+        <strong>${progress.completed}/${progress.total}</strong>
+      </div>
+      ${
+        progress.steps.length === 0
+          ? ""
+          : `<span class="schedule-action-overview-progress-track" role="img" aria-label="${escapeAttribute(progressLabel)}">
+              ${progress.steps.map((step, index) => {
+                const statusLabel = getActionOverviewStepStatusLabel(step);
+                const statusClass = step.status === TaskStatus.Done || step.status === "completed"
+                  ? "is-done"
+                  : step.isCurrent
+                    ? "is-current"
+                    : "is-pending";
+                return `<span class="${statusClass}" title="第 ${index + 1} 步：${escapeAttribute(step.name)}（${statusLabel}）"></span>`;
+              }).join("")}
+            </span>`
+      }
+    </div>
+  `;
+}
+
 function renderActionOverviewCard(row) {
   if (row.processInstance === null) return "";
   const title = getProcessCardTitle(row);
@@ -1390,12 +1438,7 @@ function renderActionOverviewCard(row) {
         <div class="schedule-action-overview-deadline ${deadline.overdue ? "is-overdue" : ""}">
           <strong data-action-deadline-id="${escapeAttribute(row.processInstance.id)}">截止 ${escapeHtml(formatBusinessDateTime(row.processInstance.dueDate, "未设置"))} · ${escapeHtml(deadline.label)}</strong>
         </div>
-        <div class="schedule-action-overview-progress">
-          <div>
-            <span>进度</span>
-            <strong>${progress.completed}/${progress.total}</strong>
-          </div>
-        </div>
+        ${renderActionOverviewProgress(progress)}
       </div>
     </article>
   `;

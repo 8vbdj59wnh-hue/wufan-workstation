@@ -8895,10 +8895,11 @@ button.content-template-thumb {
   }
 }
 
-.schedule-action-overview-progress > div {
+.schedule-action-overview-progress-summary {
   align-items: center;
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
   color: #64748b;
   font-size: 13px;
 }
@@ -8908,20 +8909,46 @@ button.content-template-thumb {
   font-weight: 600;
 }
 
+.schedule-action-overview-current-step {
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .schedule-action-overview-progress-track {
-  display: block;
+  display: flex;
   width: 100%;
   height: 6px;
   overflow: hidden;
+  gap: 2px;
   border-radius: 999px;
-  background: #e2e8f0;
+  background: transparent;
 }
 
 .schedule-action-overview-progress-track > span {
   display: block;
+  min-width: 2px;
+  flex: 1 1 0;
   height: 100%;
-  border-radius: inherit;
+  border-radius: 999px;
+  background: #dbe3ee;
+}
+
+.schedule-action-overview-progress-track > span.is-done {
   background: #2563eb;
+}
+
+.schedule-action-overview-progress-track > span.is-current {
+  background: #60a5fa;
 }
 
 .schedule-action-subtabs {
