@@ -3,6 +3,7 @@ import cors from "cors";
 import fs from "node:fs";
 import path from "node:path";
 import multer from "multer";
+import QRCode from "qrcode";
 import * as XLSX from "xlsx";
 import { shouldShowTaskInTaskCenter } from "../shared/taskCenterVisibility.js";
 import { configureApiCachePolicy } from "./apiCachePolicy.js";
@@ -1425,6 +1426,25 @@ app.post("/api/auth/login", (request, response) => {
 
 app.get("/api/auth/me", requireAuth, (request, response) => {
   response.json({ success: true, user: request.user });
+});
+
+app.get("/api/util/qr-code", async (request, response) => {
+  try {
+    const value = String(request.query.value || "").trim();
+    if (!value || value.length > 2048) throw new Error("二维码链接无效。");
+    const parsed = new URL(value);
+    if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("二维码链接无效。");
+    const svg = await QRCode.toString(parsed.toString(), {
+      type: "svg",
+      width: 320,
+      margin: 2,
+      errorCorrectionLevel: "M",
+      color: { dark: "#173f34", light: "#ffffff" },
+    });
+    response.type("image/svg+xml").send(svg);
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "二维码生成失败。" });
+  }
 });
 
 app.use("/api", requireAuth);

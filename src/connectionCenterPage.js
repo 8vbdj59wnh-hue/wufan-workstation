@@ -1125,9 +1125,22 @@ function mobileProductUrl(item) {
 
 function renderMobileProductPreview(item) {
   const url = mobileProductUrl(item);
+  const platform = String(item?.platform || "").trim().toLowerCase();
+  const requiresPhoneScan = platform.includes("淘宝")
+    || platform.includes("天猫")
+    || platform.includes("taobao")
+    || platform.includes("tmall")
+    || /(^|\.)taobao\.com$/i.test(url ? new URL(url).hostname : "")
+    || /(^|\.)tmall\.com$/i.test(url ? new URL(url).hostname : "");
+  const qrCodeUrl = url ? resolveAssetUrl(`/api/util/qr-code?value=${encodeURIComponent(url)}`) : "";
+  const preview = !url
+    ? `<div class="empty-state compact">当前链接没有可用的商品地址</div>`
+    : requiresPhoneScan
+      ? `<div class="connection-mobile-qr-card"><img src="${escapeHtml(qrCodeUrl)}" alt="${escapeHtml(`${item.platform || "平台"}商品链接二维码`)}" loading="lazy"/><strong>手机扫码查看商品详情</strong><p>该平台限制网页内嵌，请使用手机相机或平台 App 扫描二维码</p><small>${escapeHtml(url)}</small></div>`
+      : `<div class="connection-phone-frame"><div class="connection-phone-speaker"></div><div class="connection-phone-screen"><div class="connection-phone-toolbar"><strong>9:41</strong><span>● ● ●</span></div><div class="connection-phone-address">🔒 <span>${escapeHtml(url)}</span></div><iframe src="${escapeHtml(url)}" title="${escapeHtml(`${item.platform || "平台"}商品手机端详情`)}" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe><footer>可直接浏览；若平台限制内嵌，请使用“新窗口打开”。</footer></div></div>`;
   return `<aside class="connection-mobile-product" aria-label="手机端商品详情">
     <header><div><h3>手机端商品详情</h3><p>${escapeHtml(`${item.platform || "平台"} · ${shopName(item)}`)}</p></div>${url ? `<a class="secondary-button" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">新窗口打开</a>` : ""}</header>
-    ${url ? `<div class="connection-phone-frame"><div class="connection-phone-speaker"></div><div class="connection-phone-screen"><div class="connection-phone-toolbar"><strong>9:41</strong><span>● ● ●</span></div><div class="connection-phone-address">🔒 <span>${escapeHtml(url)}</span></div><iframe src="${escapeHtml(url)}" title="${escapeHtml(`${item.platform || "平台"}商品手机端详情`)}" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe><footer>平台如限制内嵌浏览，请使用“新窗口打开”。</footer></div></div>` : `<div class="empty-state compact">当前链接没有可用的商品地址</div>`}
+    ${preview}
   </aside>`;
 }
 
