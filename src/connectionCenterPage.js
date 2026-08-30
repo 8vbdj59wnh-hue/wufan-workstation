@@ -1104,8 +1104,35 @@ function renderConnectionInspection(item) {
   </section>`;
 }
 
+function mobileProductUrl(item) {
+  const goodsId = String(item?.platformGoodsId || "").trim();
+  const platform = String(item?.platform || "").trim().toLowerCase();
+  if (goodsId && (platform.includes("淘宝") || platform.includes("天猫") || platform.includes("taobao") || platform.includes("tmall"))) {
+    return `https://new.m.taobao.com/detail.htm?id=${encodeURIComponent(goodsId)}`;
+  }
+  if (goodsId && (platform.includes("京东") || platform.includes("jd"))) {
+    return `https://item.m.jd.com/product/${encodeURIComponent(goodsId)}.html`;
+  }
+  const canonicalUrl = String(item?.canonicalUrl || "").trim();
+  if (!canonicalUrl) return "";
+  try {
+    const parsed = new URL(canonicalUrl);
+    return ["http:", "https:"].includes(parsed.protocol) ? parsed.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
+function renderMobileProductPreview(item) {
+  const url = mobileProductUrl(item);
+  return `<aside class="connection-mobile-product" aria-label="手机端商品详情">
+    <header><div><h3>手机端商品详情</h3><p>${escapeHtml(`${item.platform || "平台"} · ${shopName(item)}`)}</p></div>${url ? `<a class="secondary-button" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">新窗口打开</a>` : ""}</header>
+    ${url ? `<div class="connection-phone-frame"><div class="connection-phone-speaker"></div><div class="connection-phone-screen"><div class="connection-phone-toolbar"><strong>9:41</strong><span>● ● ●</span></div><div class="connection-phone-address">🔒 <span>${escapeHtml(url)}</span></div><iframe src="${escapeHtml(url)}" title="${escapeHtml(`${item.platform || "平台"}商品手机端详情`)}" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe><footer>平台如限制内嵌浏览，请使用“新窗口打开”。</footer></div></div>` : `<div class="empty-state compact">当前链接没有可用的商品地址</div>`}
+  </aside>`;
+}
+
 function renderConnectionInspectionWorkspace(item) {
-  return `<section class="link-workspace-module connection-inspection-module" data-module-key="link_inspection">${renderConnectionInspection(item)}</section>`;
+  return `<section class="link-workspace-module connection-inspection-module" data-module-key="link_inspection"><div class="connection-inspection-workspace">${renderConnectionInspection(item)}${renderMobileProductPreview(item)}</div></section>`;
 }
 
 function renderDetail() {
