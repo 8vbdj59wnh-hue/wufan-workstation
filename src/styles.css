@@ -11455,6 +11455,7 @@ button.content-template-thumb {
 
 .connection-inspection-panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
 .connection-inspection-panel > header > div:last-child { display: flex; flex-wrap: wrap; gap: 8px; }
+.connection-inspection-module { padding: 0; background: transparent; }
 .connection-inspection-grades { display: grid; grid-template-columns: repeat(4, minmax(76px, 1fr)); gap: 10px; }
 .connection-inspection-grades > div { display: flex; align-items: baseline; gap: 6px; padding: 14px; border: 1px solid var(--link-border); border-radius: 12px; background: #f8faf9; }
 .connection-inspection-grades span { font-weight: 800; font-size: 18px; }

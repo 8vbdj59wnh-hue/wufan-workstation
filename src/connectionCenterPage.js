@@ -1153,6 +1153,10 @@ function renderConnectionInspection(item) {
   </section>`;
 }
 
+function renderConnectionInspectionWorkspace(item) {
+  return `<section class="link-workspace-module connection-inspection-module" data-module-key="link_inspection">${renderConnectionInspection(item)}</section>`;
+}
+
 function renderDetail() {
   const detailProfile = pageState.coreDetail?.profile;
   const listItem = pageState.items.find((candidate) => candidate.id === pageState.selectedId)
@@ -1163,11 +1167,11 @@ function renderDetail() {
     ?? { id: pageState.selectedId, name: "链接详情", salesLinkTitle: "链接详情", platform: "—", shopName: "—", products: [] };
   const item = detailProfile ? { ...listItem, ...detailProfile,
     products: detailProfile.products ?? pageState.coreDetail?.products ?? listItem.products ?? [] } : listItem;
-  const tabs = [["business", "经营概览"], ["sales", "销售分析"], ["inventory", "商品库存"], ["advanced", "高级信息"]];
+  const tabs = [["business", "经营概览"], ["sales", "销售分析"], ["inventory", "商品库存"], ["advanced", "高级信息"], ["inspection", "链接体检"]];
   let body = "";
   if (pageState.coreDetailLoading) body = `<div class="empty-state">正在读取链接经营详情…</div>`;
   else if (pageState.detailTab === "business") body = renderUiModule("link_business_summary", {
-    metricsHtml: `${renderConnectionBusinessPositioning(pageState.coreDetail)}${renderConnectionBusinessGoals(pageState.coreDetail)}${renderConnectionInspection(item)}${renderActions(item)}${renderCoreOperatingOverview(item, pageState.coreDetail)}`,
+    metricsHtml: `${renderConnectionBusinessPositioning(pageState.coreDetail)}${renderConnectionBusinessGoals(pageState.coreDetail)}${renderActions(item)}${renderCoreOperatingOverview(item, pageState.coreDetail)}`,
     trendHtml: renderCorePlatform(pageState.coreDetail),
     healthHtml: `<section class="connection-v3-panel"><h3>经营趋势</h3><div class="connection-v3-metrics"><div><span>销售趋势</span><strong>${growthText(item.salesGrowth)}</strong></div><div><span>利润趋势</span><strong>${growthText(item.profitGrowth)}</strong></div></div></section>`,
     productHtml: renderCoreProducts(pageState.coreDetail),
@@ -1177,6 +1181,7 @@ function renderDetail() {
     trendHtml: pageState.growthAnalysis ? renderCoreOperatingOverview(item, pageState.coreDetail) : `<div class="empty-state compact">正在按需读取经营趋势…</div>`,
   });
   else if (pageState.detailTab === "inventory") body = renderUiModule("link_inventory_summary", { productsHtml: renderCoreProducts(pageState.coreDetail), inventoryHtml: renderInventory(pageState.coreDetail) });
+  else if (pageState.detailTab === "inspection") body = renderConnectionInspectionWorkspace(item);
   else body = `<div class="link-workspace-stack">${renderCoreBasic(item, pageState.coreDetail)}${renderBenchmarkPanel(item)}</div>`;
   const header = renderUiModule("link_detail_header", { item, imageHtml: imageHtml(item), channel: `${item.platform} · ${shopName(item)}`, productSummary: pageState.coreDetailLoading ? "正在读取关联产品…" : productNames(item), operationHtml: renderConnectionOperationBar(item) });
   return `<section class="connection-detail link-detail-workspace">${header}<nav class="connection-tabs link-workspace-tabs">${tabs.map(([id, label]) => `<button type="button" class="${pageState.detailTab === id ? "active" : ""}" data-connection-tab="${id}">${label}</button>`).join("")}</nav>${body}</section>`;
@@ -1561,7 +1566,8 @@ async function openConnection(id, render, inspectionTaskId = "") {
   const detailHash = `#connectionCenter/${encodeURIComponent(id)}${inspectionTaskId ? `?inspectionTaskId=${encodeURIComponent(inspectionTaskId)}` : ""}`;
   if (window.location.hash !== detailHash) window.history.replaceState(null, "", detailHash);
   pageState.inspectionTaskId = inspectionTaskId;
-  pageState.selectedId = id; pageState.detailTab = "business"; pageState.detailLoaded = new Set(["business"]); pageState.coreDetail = null; pageState.coreDetailLoading = true; pageState.inspection = { data: null, active: null, historyDetail: null, loading: true, error: "", mode: "summary", selectedIssues: new Set() }; pageState.dailySales = { data: null, loading: false, loaded: false, rangePreset: "30d", startDate: "", endDate: "", error: "" }; pageState.actions = []; pageState.periodSnapshots = []; pageState.growthAnalysis = null; pageState.benchmarks = { items: [], candidates: [], comparison: null, comparisonId: "", loading: false }; render();
+  const initialDetailTab = inspectionTaskId ? "inspection" : "business";
+  pageState.selectedId = id; pageState.detailTab = initialDetailTab; pageState.detailLoaded = new Set([initialDetailTab]); pageState.coreDetail = null; pageState.coreDetailLoading = true; pageState.inspection = { data: null, active: null, historyDetail: null, loading: true, error: "", mode: "summary", selectedIssues: new Set() }; pageState.dailySales = { data: null, loading: false, loaded: false, rangePreset: "30d", startDate: "", endDate: "", error: "" }; pageState.actions = []; pageState.periodSnapshots = []; pageState.growthAnalysis = null; pageState.benchmarks = { items: [], candidates: [], comparison: null, comparisonId: "", loading: false }; render();
   try {
     const detail = await withConnectionDetailTimeout(loadConnectionCoreDetail(id), "链接经营详情");
     if (pageState.selectedId !== id) return;
