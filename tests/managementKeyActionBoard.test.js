@@ -4,6 +4,18 @@ import test from "node:test";
 
 const assessmentPageSource = fs.readFileSync(new URL("../src/assessmentPage.js", import.meta.url), "utf8");
 const stylesSource = fs.readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+const appStateSource = fs.readFileSync(new URL("../src/appState.js", import.meta.url), "utf8");
+const serverSource = fs.readFileSync(new URL("../server/index.js", import.meta.url), "utf8");
+
+test("management cockpit bootstrap includes action board resources without clearing other module state", () => {
+  const dashboardResources = serverSource.match(/dashboardManagement:\s*\[[\s\S]*?\],/u)?.[0] ?? "";
+  assert.match(dashboardResources, /"processInstances"/u);
+  assert.match(dashboardResources, /"tasks"/u);
+  assert.match(dashboardResources, /"workPlans"/u);
+  assert.match(dashboardResources, /"categories"/u);
+  const loader = appStateSource.match(/export async function ensureDashboardManagementLoaded\(\)[\s\S]*?\n\}/u)?.[0] ?? "";
+  assert.match(loader, /preserveMissingResources:\s*true/u);
+});
 
 test("management cockpit today overview renders the seven-value-chain key action board", () => {
   assert.match(assessmentPageSource, /valueModuleList\.map\(\(module\)/u);
@@ -24,7 +36,7 @@ test("management cockpit renders the matching incomplete improvement action boar
 });
 
 test("key action cards only use incomplete non-rectification actions and expose required fields", () => {
-  assert.match(assessmentPageSource, /selectProcessInstanceBusinessStatus\(instance\.id, state\)\.status !== "done"/u);
+  assert.match(assessmentPageSource, /keyActionBusinessTerminalStatuses\.has\(selectProcessInstanceBusinessStatus\(instance\.id, state\)\.status\)/u);
   assert.match(assessmentPageSource, /workPlan\.workType === WorkType\.Rectification/u);
   assert.match(assessmentPageSource, /发起人/u);
   assert.match(assessmentPageSource, /负责人/u);

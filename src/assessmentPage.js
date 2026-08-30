@@ -13,6 +13,7 @@ import { getDataScope, hasPermission } from "../shared/permissions.js";
 import {
   inferValueModuleIdFromText,
   ProcessInstanceStatus,
+  RectificationGenerationEnabled,
   TaskStatus,
   WorkPlanStatus,
   WorkType,
@@ -685,6 +686,8 @@ const keyActionTerminalStatuses = new Set([
   "terminated",
 ]);
 
+const keyActionBusinessTerminalStatuses = new Set(["done", "canceled"]);
+
 function getKeyActionTemplate(instance, tasks) {
   const templateId = instance.taskTemplateId ?? instance.standardWorkId ?? tasks.find((task) => task.taskTemplateId)?.taskTemplateId ?? "";
   return (state.taskTemplates ?? []).find((template) => template.id === templateId) ?? null;
@@ -739,7 +742,7 @@ function getIncompleteKeyActionRows() {
   return (state.processInstances ?? [])
     .filter((instance) => !rectificationProcessIds.has(instance.id))
     .filter((instance) => !keyActionTerminalStatuses.has(instance.status))
-    .filter((instance) => selectProcessInstanceBusinessStatus(instance.id, state).status !== "done")
+    .filter((instance) => !keyActionBusinessTerminalStatuses.has(selectProcessInstanceBusinessStatus(instance.id, state).status))
     .map((instance) => {
       const tasks = (state.tasks ?? []).filter((task) => task.processInstanceId === instance.id);
       const template = getKeyActionTemplate(instance, tasks);
@@ -1666,9 +1669,9 @@ function renderPersonDetailModal() {
             <thead><tr><th>任务名</th><th>所属关键行动</th><th>对齐目标</th><th>负责部门</th><th>状态</th><th>截止时间</th><th>完成时间</th><th>是否逾期</th><th>提交结果</th><th>操作</th></tr></thead>
             <tbody>${tasks.length === 0 ? `<tr><td colspan="10">暂无任务明细</td></tr>` : tasks.map((task) => {
               const process = state.processInstances.find((item) => item.id === task.processInstanceId);
-              const canLaunchRectification = isTaskAssessmentOverdue(task);
+              const isRectificationCandidate = isTaskAssessmentOverdue(task);
               const hasRectification = hasOpenRectificationWorkForTask(task.id);
-              return `<tr><td>${escapeHtml(task.name)}</td><td>${escapeHtml(process?.name ?? "无")}</td><td>${findName(state.goals, task.goalId, "未对齐目标")}</td><td>${findName(state.departments, task.departmentId)}</td><td>${taskStatusNames[task.status] ?? task.status}</td><td>${formatBusinessDateTime(task.dueDate)}</td><td>${task.completedAt ?? "未完成"}</td><td>${canLaunchRectification ? "已逾期" : "否"}</td><td>${hasSubmittedResult(task) ? "是" : "否"}</td><td>${canLaunchRectification ? `<button class="text-button" type="button" data-assessment-action="launch-rectification" data-task-id="${task.id}" ${hasRectification ? "disabled" : ""}>${hasRectification ? "已发起改善" : "发起改善工作"}</button>` : "-"}</td></tr>`;
+              return `<tr><td>${escapeHtml(task.name)}</td><td>${escapeHtml(process?.name ?? "无")}</td><td>${findName(state.goals, task.goalId, "未对齐目标")}</td><td>${findName(state.departments, task.departmentId)}</td><td>${taskStatusNames[task.status] ?? task.status}</td><td>${formatBusinessDateTime(task.dueDate)}</td><td>${task.completedAt ?? "未完成"}</td><td>${isRectificationCandidate ? "已逾期" : "否"}</td><td>${hasSubmittedResult(task) ? "是" : "否"}</td><td>${isRectificationCandidate ? (RectificationGenerationEnabled ? `<button class="text-button" type="button" data-assessment-action="launch-rectification" data-task-id="${task.id}" ${hasRectification ? "disabled" : ""}>${hasRectification ? "已发起改善" : "发起改善工作"}</button>` : "已暂停") : "-"}</td></tr>`;
             }).join("")}</tbody>
           </table></div>
         </div>

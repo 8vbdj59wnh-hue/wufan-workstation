@@ -5,6 +5,7 @@ node_modules/
 /backups/
 /backup/
 /logs/
+/.runtime/
 *.db
 *.sqlite
 .DS_Store
