@@ -686,6 +686,8 @@ const keyActionTerminalStatuses = new Set([
   "terminated",
 ]);
 
+const keyActionBusinessTerminalStatuses = new Set(["done", "canceled"]);
+
 function getKeyActionTemplate(instance, tasks) {
   const templateId = instance.taskTemplateId ?? instance.standardWorkId ?? tasks.find((task) => task.taskTemplateId)?.taskTemplateId ?? "";
   return (state.taskTemplates ?? []).find((template) => template.id === templateId) ?? null;
@@ -740,7 +742,7 @@ function getIncompleteKeyActionRows() {
   return (state.processInstances ?? [])
     .filter((instance) => !rectificationProcessIds.has(instance.id))
     .filter((instance) => !keyActionTerminalStatuses.has(instance.status))
-    .filter((instance) => selectProcessInstanceBusinessStatus(instance.id, state).status !== "done")
+    .filter((instance) => !keyActionBusinessTerminalStatuses.has(selectProcessInstanceBusinessStatus(instance.id, state).status))
     .map((instance) => {
       const tasks = (state.tasks ?? []).filter((task) => task.processInstanceId === instance.id);
       const template = getKeyActionTemplate(instance, tasks);

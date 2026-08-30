@@ -3918,6 +3918,7 @@ export function initializeDatabase({ reset = false } = {}) {
   ensureDefaultPublishingAccounts();
   ensureDefaultAdmin();
   ensureSalesAnomalyActionStandards(database);
+  reconcileAllCanceledProcessInstances();
 }
 
 export function readResource(resourceKey) {
@@ -5062,6 +5063,7 @@ export function batchUpdateTaskStatus(payload = {}) {
     const sortedTasks = getSortedBatchTasks(tasksToUpdate);
     const completedTaskIds = new Set(readResource("tasks").filter((task) => task.status === "done").map((task) => task.id));
     const affectedProcessInstanceIds = new Set();
+    const canceledProcessInstanceIds = [];
     const changedTaskIds = [];
 
     for (const selectedTask of sortedTasks) {
@@ -5100,12 +5102,23 @@ export function batchUpdateTaskStatus(payload = {}) {
       for (const processInstanceId of affectedProcessInstanceIds) {
         refreshProcessTaskReadinessInTransaction(processInstanceId, now);
       }
+    } else {
+      for (const processInstanceId of affectedProcessInstanceIds) {
+        const canceled = syncProcessInstanceCanceledFromTasksInTransaction(
+          database,
+          processInstanceId,
+          now,
+          "系统自动同步：所有未完成步骤已取消",
+        );
+        if (canceled) canceledProcessInstanceIds.push(processInstanceId);
+      }
     }
 
     return {
       status,
       taskIds,
       changedTaskIds,
+      canceledProcessInstanceIds,
       updatedAt: now,
     };
   });
@@ -5315,6 +5328,98 @@ export function cancelProcessInstance(instanceId, cancelReason = "") {
       .run({ id: instanceId, now });
   });
   cancel();
+}
+
+function syncProcessInstanceCanceledFromTasksInTransaction(database, instanceId, updatedAt, cancelReason) {
+  const instance = database
+    .prepare("SELECT id, status FROM process_instances WHERE id = @id LIMIT 1")
+    .get({ id: instanceId });
+  if (instance === undefined || ["done", "completed", "canceled", "cancelled", "stopped", "terminated"].includes(instance.status)) {
+    return false;
+  }
+
+  const taskCounts = database.prepare(`
+    SELECT
+      COUNT(*) AS totalCount,
+      SUM(CASE WHEN status IN ('canceled', 'cancelled') THEN 1 ELSE 0 END) AS canceledCount,
+      SUM(CASE WHEN status IN ('done', 'completed', 'canceled', 'cancelled') THEN 1 ELSE 0 END) AS terminalCount
+    FROM tasks
+    WHERE processInstanceId = @instanceId
+  `).get({ instanceId });
+  const totalCount = Number(taskCounts?.totalCount ?? 0);
+  const canceledCount = Number(taskCounts?.canceledCount ?? 0);
+  const terminalCount = Number(taskCounts?.terminalCount ?? 0);
+  if (totalCount === 0 || canceledCount === 0 || terminalCount !== totalCount) return false;
+
+  database.prepare(`
+    UPDATE process_instances
+    SET status = 'canceled',
+        canceledAt = COALESCE(canceledAt, @updatedAt),
+        cancelReason = COALESCE(NULLIF(cancelReason, ''), @cancelReason),
+        updatedAt = @updatedAt
+    WHERE id = @instanceId
+  `).run({ instanceId, updatedAt, cancelReason });
+  database.prepare(`
+    UPDATE work_plans
+    SET status = 'canceled',
+        canceledAt = COALESCE(canceledAt, @updatedAt),
+        updatedAt = @updatedAt
+    WHERE processInstanceId = @instanceId
+      AND status <> 'canceled'
+  `).run({ instanceId, updatedAt });
+  return true;
+}
+
+export function syncProcessInstanceCanceledFromTasks(instanceId, options = {}) {
+  const normalizedInstanceId = String(instanceId ?? "").trim();
+  if (normalizedInstanceId === "") return false;
+  const updatedAt = options.updatedAt || new Date().toISOString();
+  const cancelReason = String(options.cancelReason ?? "").trim() || "系统自动同步：所有未完成步骤已取消";
+  return syncProcessInstanceCanceledFromTasksInTransaction(
+    getDatabase(),
+    normalizedInstanceId,
+    updatedAt,
+    cancelReason,
+  );
+}
+
+export function reconcileAllCanceledProcessInstances(options = {}) {
+  const database = getDatabase();
+  const updatedAt = options.updatedAt || new Date().toISOString();
+  const cancelReason = String(options.cancelReason ?? "").trim() || "系统自动修复：所有未完成步骤已取消";
+  return database.transaction(() => {
+    const instanceIds = database.prepare(`
+      SELECT pi.id
+      FROM process_instances pi
+      WHERE pi.status NOT IN ('done', 'completed', 'canceled', 'cancelled', 'stopped', 'terminated')
+        AND EXISTS (
+          SELECT 1
+          FROM tasks t
+          WHERE t.processInstanceId = pi.id
+            AND t.status IN ('canceled', 'cancelled')
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM tasks t
+          WHERE t.processInstanceId = pi.id
+            AND t.status NOT IN ('done', 'completed', 'canceled', 'cancelled')
+        )
+      ORDER BY pi.id
+    `).all().map((row) => row.id);
+    const repairedInstanceIds = instanceIds.filter((targetInstanceId) =>
+      syncProcessInstanceCanceledFromTasksInTransaction(
+        database,
+        targetInstanceId,
+        updatedAt,
+        cancelReason,
+      ),
+    );
+    return {
+      candidateCount: instanceIds.length,
+      repairedCount: repairedInstanceIds.length,
+      repairedInstanceIds,
+    };
+  }).immediate();
 }
 
 export function startProcessInstanceExecution(instanceId, { userId = "", isAdmin = false, dueDate } = {}) {

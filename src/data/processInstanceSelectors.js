@@ -42,6 +42,10 @@ function getActiveProcessTasks(processInstanceId, appState) {
   return getTasksForProcess(processInstanceId, appState).filter((task) => !isDoneStatus(task.status) && !isCanceledStatus(task.status));
 }
 
+function isCanceledBusinessStatus(status) {
+  return isCanceledStatus(status) || ["cancelled", "stopped", "terminated"].includes(status);
+}
+
 function hasTaskExecutionEvidence(task) {
   if ([TaskStatus.Doing, TaskStatus.PendingAcceptance, TaskStatus.Done].includes(task.status)) return true;
   if (task.completedAt || task.submittedAt) return true;
@@ -68,10 +72,22 @@ export function isTaskExecutionStarted(task, appState) {
 export function getProcessInstanceBusinessStatus(processInstanceId, appState) {
   const instance = getProcessInstance(processInstanceId, appState);
   const tasks = getTasksForProcess(processInstanceId, appState);
+  const allTasksTerminal = tasks.length > 0 && tasks.every((task) =>
+    isDoneStatus(task.status) || isCanceledBusinessStatus(task.status),
+  );
+  const hasCanceledTask = tasks.some((task) => isCanceledBusinessStatus(task.status));
+  const isCanceled =
+    isCanceledBusinessStatus(instance?.status) ||
+    instance?.status === ProcessInstanceStatus.Stopped ||
+    instance?.status === ProcessInstanceStatus.Terminated ||
+    (allTasksTerminal && hasCanceledTask);
+
+  if (isCanceled) return { status: "canceled", label: "已取消" };
+
   const isDone =
     instance?.status === ProcessInstanceStatus.Done ||
     instance?.status === "completed" ||
-    (tasks.length > 0 && tasks.every((task) => isDoneStatus(task.status)));
+    allTasksTerminal;
 
   if (isDone) return { status: "done", label: "已完成" };
 

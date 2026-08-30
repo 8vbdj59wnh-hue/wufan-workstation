@@ -2,6 +2,7 @@ import {
   generateEligibleTaskWaves,
   getDatabase,
   readRouteResourceItem,
+  syncProcessInstanceCanceledFromTasks,
   updateTaskFromWorkflow as updateTaskFromWorkflowBase,
 } from "./db.js";
 
@@ -95,12 +96,18 @@ export function updateTaskFromWorkflow(taskId, action, patch = {}) {
         updatedTask.completedAt ?? updatedTask.updatedAt ?? new Date().toISOString(),
       );
     }
+    if (["canceled", "cancelled"].includes(updatedTask.status) && updatedTask.processInstanceId) {
+      syncProcessInstanceCanceledFromTasks(updatedTask.processInstanceId, {
+        updatedAt: updatedTask.updatedAt,
+      });
+    }
     return updatedTask;
   }).immediate();
   generateEligibleTaskWaves();
   return {
     task,
     processTasks: task.processInstanceId ? readProcessTasks(task.processInstanceId) : [],
+    processInstance: task.processInstanceId ? readRouteResourceItem("process-instances", task.processInstanceId) : null,
   };
 }
 

@@ -461,7 +461,9 @@ export async function ensureDashboardManagementLoaded() {
   dashboardManagementPromise = (async () => {
     const response = await authFetch(`${apiBaseUrl}/api/bootstrap?module=dashboardManagement`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    applyDataSnapshot(await response.json(), { preserveMissingResources: true }); dashboardManagementLoaded = true; return true;
+    applyDataSnapshot(await response.json(), { preserveMissingResources: true });
+    dashboardManagementLoaded = true;
+    return true;
   })().finally(() => { dashboardManagementPromise = null; });
   return dashboardManagementPromise;
 }
@@ -960,6 +962,11 @@ export async function updateTaskWorkflow(taskId, action, item) {
     const processTaskIds = new Set(data.processTasks.map((task) => task.id));
     state.tasks = [...state.tasks.filter((task) => !processTaskIds.has(task.id)), ...data.processTasks];
   }
+  if (data.processInstance?.id) {
+    state.processInstances = state.processInstances.map((instance) =>
+      instance.id === data.processInstance.id ? data.processInstance : instance,
+    );
+  }
   return data.task;
 }
 
@@ -974,7 +981,22 @@ export async function batchUpdateTaskStatus(taskIds, status) {
     throw new Error(data.message ?? data.error ?? "批量任务状态保存失败，请检查本地数据库服务。");
   }
   if (data.data !== undefined) applyDataSnapshot(data.data);
-  return data.result ?? null;
+  const result = data.result ?? null;
+  const canceledProcessInstanceIds = new Set(result?.canceledProcessInstanceIds ?? []);
+  if (canceledProcessInstanceIds.size > 0) {
+    state.processInstances = state.processInstances.map((instance) =>
+      canceledProcessInstanceIds.has(instance.id)
+        ? {
+            ...instance,
+            status: "canceled",
+            canceledAt: instance.canceledAt || result.updatedAt,
+            cancelReason: instance.cancelReason || "系统自动同步：所有未完成步骤已取消",
+            updatedAt: result.updatedAt,
+          }
+        : instance,
+    );
+  }
+  return result;
 }
 
 export async function updateCurrentUserAvatar(avatarUrl) {

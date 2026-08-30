@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  batchUpdateTaskStatus,
   closeDatabase,
   getDatabase,
   initializeDatabase,
+  reconcileAllCanceledProcessInstances,
   readRouteResource,
 } from "../server/db.js";
 import {
@@ -115,6 +117,49 @@ test("多前置任务必须全部完成才释放后继任务", () => {
     updatedAt: "2026-08-22T01:00:00.000Z",
   });
   assert.equal(readRouteResource("tasks").find((task) => task.id === "multiple-task-3").status, "todo");
+});
+
+test("全部步骤任务批量取消后同步取消关键行动", () => {
+  const database = resetFixture();
+  insertProcess(database, "batch-canceled", ["todo", "waiting", "waiting"]);
+
+  const result = batchUpdateTaskStatus({
+    taskIds: ["batch-canceled-task-1", "batch-canceled-task-2", "batch-canceled-task-3"],
+    status: "canceled",
+    updatedAt: "2026-08-22T02:00:00.000Z",
+  });
+
+  const instance = database.prepare("SELECT * FROM process_instances WHERE id = 'batch-canceled'").get();
+  assert.equal(instance.status, "canceled");
+  assert.equal(instance.canceledAt, "2026-08-22T02:00:00.000Z");
+  assert.match(instance.cancelReason, /未完成步骤已取消/u);
+  assert.deepEqual(result.canceledProcessInstanceIds, ["batch-canceled"]);
+});
+
+test("已完成与已取消步骤混合且无活动步骤时同步取消关键行动", () => {
+  const database = resetFixture();
+  insertProcess(database, "mixed-terminal", ["done", "todo", "waiting"]);
+
+  batchUpdateTaskStatus({
+    taskIds: ["mixed-terminal-task-2", "mixed-terminal-task-3"],
+    status: "canceled",
+    updatedAt: "2026-08-22T02:30:00.000Z",
+  });
+
+  assert.equal(database.prepare("SELECT status FROM process_instances WHERE id = 'mixed-terminal'").get().status, "canceled");
+});
+
+test("启动修复会清理全部步骤已取消但主状态仍运行的历史行动", () => {
+  const database = resetFixture();
+  insertProcess(database, "legacy-canceled", ["canceled", "canceled", "canceled"]);
+
+  const result = reconcileAllCanceledProcessInstances({
+    updatedAt: "2026-08-22T03:00:00.000Z",
+  });
+
+  assert.deepEqual(result.repairedInstanceIds, ["legacy-canceled"]);
+  assert.equal(database.prepare("SELECT status FROM process_instances WHERE id = 'legacy-canceled'").get().status, "canceled");
+  assert.equal(reconcileAllCanceledProcessInstances().repairedCount, 0);
 });
 
 test("历史卡住任务只修正满足条件的 waiting，并保持负责人、截止时间和已完成结果", () => {

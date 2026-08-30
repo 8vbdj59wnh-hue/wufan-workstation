@@ -1707,7 +1707,15 @@ app.get("/api/bootstrap", (request, response) => {
     const productsCommon = ["people"];
     const moduleResources = {
       dashboard: [],
-      dashboardManagement: ["goals", "weeklyReports", "weeklyReportProblems"],
+      dashboardManagement: [
+        "goals",
+        "weeklyReports",
+        "weeklyReportProblems",
+        "categories",
+        "tasks",
+        "processInstances",
+        "workPlans",
+      ],
       products: [],
       connectionCenter: ["goals", "taskTemplates", "processTemplates", "processTemplateNodes"],
       tasks: ["goals"],
