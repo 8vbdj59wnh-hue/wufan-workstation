@@ -1,1 +1,1 @@
-export { bindConnectionCenterPageEvents, renderConnectionCenterPage } from "../connectionCenterPage.js?v=inspection-module-v6";
+export { bindConnectionCenterPageEvents, renderConnectionCenterPage } from "../connectionCenterPage.js?v=inspection-module-v7";

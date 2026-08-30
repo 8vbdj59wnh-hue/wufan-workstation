@@ -11456,6 +11456,21 @@ button.content-template-thumb {
 .connection-inspection-panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
 .connection-inspection-panel > header > div:last-child { display: flex; flex-wrap: wrap; gap: 8px; }
 .connection-inspection-module { padding: 0; background: transparent; }
+.connection-inspection-workspace { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(390px, .9fr); gap: 18px; align-items: start; }
+.connection-mobile-product { position: sticky; top: 16px; min-width: 0; padding: 20px; border: 1px solid var(--link-border); border-radius: var(--link-radius); background: #f8fcfa; box-shadow: 0 2px 8px rgb(16 24 40 / 4%); }
+.connection-mobile-product > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
+.connection-mobile-product > header h3 { margin: 0; }
+.connection-mobile-product > header p { margin: 5px 0 0; color: var(--link-muted); }
+.connection-mobile-product > header a { flex: none; text-decoration: none; }
+.connection-phone-frame { width: min(100%, 430px); margin: 0 auto; padding: 18px 12px 12px; border: 10px solid #19332b; border-radius: 48px; background: #19332b; box-shadow: 0 16px 32px rgb(16 24 40 / 18%); }
+.connection-phone-speaker { width: 88px; height: 7px; margin: 0 auto 14px; border-radius: 99px; background: #71827c; }
+.connection-phone-screen { overflow: hidden; border-radius: 30px; background: #fff; }
+.connection-phone-toolbar { display: flex; justify-content: space-between; padding: 12px 18px 8px; color: #1d382f; font-size: 12px; }
+.connection-phone-toolbar span { letter-spacing: 4px; }
+.connection-phone-address { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0 12px 10px; padding: 9px 12px; border: 1px solid #dce6e2; border-radius: 14px; background: #f3f7f5; color: #667085; font-size: 12px; }
+.connection-phone-address span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.connection-phone-screen iframe { display: block; width: 100%; height: min(760px, calc(100vh - 300px)); min-height: 560px; border: 0; background: #f2f2f4; }
+.connection-phone-screen footer { padding: 10px 12px 12px; color: #7a8c85; font-size: 11px; text-align: center; }
 .connection-inspection-grades { display: grid; grid-template-columns: repeat(4, minmax(76px, 1fr)); gap: 10px; }
 .connection-inspection-grades > div { display: flex; align-items: baseline; gap: 6px; padding: 14px; border: 1px solid var(--link-border); border-radius: 12px; background: #f8faf9; }
 .connection-inspection-grades span { font-weight: 800; font-size: 18px; }
@@ -11489,6 +11504,8 @@ button.content-template-thumb {
 .connection-inspection-history > button { display: flex; justify-content: space-between; gap: 14px; padding: 12px; border: 1px solid var(--link-border); border-radius: 10px; background: white; text-align: left; }
 .connection-inspection-history > button span { display: grid; gap: 3px; }
 @media (max-width: 900px) {
+  .connection-inspection-workspace { grid-template-columns: 1fr; }
+  .connection-mobile-product { position: static; }
   .connection-inspection-overview, .connection-inspection-criterion { grid-template-columns: 1fr; }
   .connection-inspection-issues form, .connection-inspection-schedule form { grid-template-columns: 1fr; }
 }
