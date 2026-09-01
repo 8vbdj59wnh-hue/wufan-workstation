@@ -46,3 +46,36 @@ test("任务中心分页只合并局部结果，不清空关键行动和其他�
   assert.equal(state.tasks.find((item) => item.id === "existing-task")?.processInstanceId, "existing-action");
   assert.equal(state.tasks.find((item) => item.id === "existing-task")?.status, "doing");
 });
+
+test("任务波次读取会合并商品图片上下文并兼容新版响应", async () => {
+  const { state, loadTaskWaves } = await import(`../src/appState.js?task-wave-images=${Date.now()}`);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    success: true,
+    items: [{ id: "wave-with-image", taskIds: ["task-with-image"] }],
+    context: {
+      taskProductContexts: [{
+        contextId: "action-with-image",
+        erpSkuId: "erp-sku-with-image",
+        erpSkuImage: "/uploads/product-v2-imports/batch/product.webp",
+      }],
+    },
+  }), { status: 200, headers: { "content-type": "application/json" } });
+
+  try {
+    await loadTaskWaves();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(state.taskWaves.map((item) => item.id), ["wave-with-image"]);
+  assert.equal(state.taskProductContexts.length, 1);
+  assert.equal(state.taskProductContexts[0].erpSkuImage, "/uploads/product-v2-imports/batch/product.webp");
+});
+
+test("任务图片识别支持所有正式上传目录", async () => {
+  const { getActionImageUrls } = await import("../src/data/taskUtils.js");
+  assert.deepEqual(getActionImageUrls({
+    productImage: "/uploads/product-v2-imports/batch/product.webp",
+  }), ["/uploads/product-v2-imports/batch/product.webp"]);
+});

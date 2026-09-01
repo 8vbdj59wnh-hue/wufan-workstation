@@ -431,7 +431,9 @@ export async function loadPersistentData({ includeTaskWaves = null, useCache = f
       if (waveResponse.status === 403) {
         replaceArray(state.taskWaves, []);
       } else {
-        replaceArray(state.taskWaves, Array.isArray(waveData) ? waveData : []);
+        const waveItems = Array.isArray(waveData) ? waveData : waveData.items ?? [];
+        replaceArray(state.taskWaves, waveItems);
+        mergeTaskProductContexts(state.taskProductContexts, waveData.context?.taskProductContexts ?? []);
       }
       taskWavesLoaded = true;
     }
@@ -477,7 +479,9 @@ export async function loadTaskWaves() {
     return state.taskWaves;
   }
   if (!response.ok) throw new Error(data.message ?? data.error ?? "任务波次读取失败。");
-  replaceArray(state.taskWaves, Array.isArray(data) ? data : []);
+  const items = Array.isArray(data) ? data : data.items ?? [];
+  replaceArray(state.taskWaves, items);
+  mergeTaskProductContexts(state.taskProductContexts, data.context?.taskProductContexts ?? []);
   taskWavesLoaded = true;
   return state.taskWaves;
 }

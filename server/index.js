@@ -4679,11 +4679,25 @@ app.get("/api/task-waves", (request, response) => {
   generateEligibleTaskWaves();
   const visibleTaskIds = getVisibleTaskIds(request.user);
   const visibleTaskIdSet = new Set(visibleTaskIds);
-  response.json(
-    readTaskWavesForTaskIds(visibleTaskIds).filter((wave) =>
-      wave.taskIds.every((taskId) => visibleTaskIdSet.has(taskId)),
-    ),
+  const items = readTaskWavesForTaskIds(visibleTaskIds).filter((wave) =>
+    wave.taskIds.every((taskId) => visibleTaskIdSet.has(taskId)),
   );
+  const waveTaskIds = [...new Set(items.flatMap((wave) => wave.taskIds ?? []))];
+  const tasks = readResourceItems("tasks", waveTaskIds);
+  const processInstanceIds = [...new Set(tasks.map((task) => task.processInstanceId).filter(Boolean))];
+  const processInstances = readResourceItems("processInstances", processInstanceIds);
+  const actionProductIds = processInstanceIds.length === 0
+    ? []
+    : getDatabase().prepare(`SELECT id FROM action_products WHERE actionId IN (${processInstanceIds.map(() => "?").join(",")})`)
+      .all(...processInstanceIds).map((row) => row.id);
+  const actionProducts = readResourceItems("actionProducts", actionProductIds);
+  response.json({
+    success: true,
+    items,
+    context: {
+      taskProductContexts: readTaskProductContexts({ tasks, processInstances, actionProducts }),
+    },
+  });
 });
 
 app.get("/api/task-waves-regeneration/preview", (request, response) => {

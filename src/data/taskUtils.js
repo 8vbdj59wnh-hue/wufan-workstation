@@ -38,8 +38,8 @@ function normalizeImageUrl(value) {
   if (typeof value === "string" && value.trim() !== "") {
     const imageUrl = value.trim();
     if (
-      imageUrl.startsWith("/uploads/images/")
-      || imageUrl.startsWith("uploads/images/")
+      imageUrl.startsWith("/uploads/")
+      || imageUrl.startsWith("uploads/")
       || imageUrl.startsWith("https://")
       || imageUrl.startsWith("http://")
       || imageUrl.startsWith("data:image/")
