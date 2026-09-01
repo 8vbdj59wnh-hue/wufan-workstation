@@ -3421,7 +3421,7 @@ function renderTaskCard(task) {
 
   return `
     <article class="task-card ${selected} ${imageUrls.length > 0 ? "has-cover" : "has-no-cover"}" data-task-card data-row-task-id="${escapeHtml(task.id)}">
-      ${imageUrls.length > 0 ? `<div class="task-card-cover">${renderTaskCardImages(imageUrls, task)}</div>` : ""}
+      <div class="task-card-cover">${renderTaskCardImages(imageUrls, task)}</div>
       <div class="task-card-body">
         <div class="task-card-title-row">
           <h3>${escapeHtml(task.name)}</h3>
