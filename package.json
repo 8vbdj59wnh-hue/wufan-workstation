@@ -43,6 +43,6 @@
     "jszip": "^3.10.1",
     "multer": "^2.2.0",
     "qrcode": "^1.5.4",
-    "xlsx": "^0.18.5"
+    "xlsx": "file:vendor/xlsx-0.20.3.tgz"
   }
 }
