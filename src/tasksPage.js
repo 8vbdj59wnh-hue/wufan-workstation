@@ -6607,8 +6607,9 @@ function renderTaskWaveRegenerationDialog() {
 }
 
 function getTaskWaveMemberTasks(wave) {
+  const embeddedTasks = new Map((wave?.tasks ?? []).map((task) => [task.id, task]));
   return (wave?.items ?? [])
-    .map((item) => ({ item, task: state.tasks.find((task) => task.id === item.taskId) ?? null }))
+    .map((item) => ({ item, task: embeddedTasks.get(item.taskId) ?? state.tasks.find((task) => task.id === item.taskId) ?? null }))
     .filter((entry) => entry.task !== null);
 }
 
@@ -6697,7 +6698,10 @@ function getTaskWaveTimePresentation(wave) {
 }
 
 function getTaskWaveSummary(wave) {
-  const tasks = (wave.taskIds ?? []).map((id) => state.tasks.find((task) => task.id === id)).filter(Boolean);
+  const embeddedTasks = new Map((wave.tasks ?? []).map((task) => [task.id, task]));
+  const tasks = (wave.taskIds ?? [])
+    .map((id) => embeddedTasks.get(id) ?? state.tasks.find((task) => task.id === id))
+    .filter(Boolean);
   const done = tasks.filter((task) => task.status === TaskStatus.Done).length;
   const node = state.processTemplateNodes.find((item) => item.id === wave.processNodeId);
   const standard = state.taskTemplates.find((item) => item.id === wave.taskTemplateId);

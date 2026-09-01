@@ -4676,6 +4676,7 @@ function getTaskWaveSupersessionInfo(database, wave) {
 export function readTaskWavesForTaskIds(taskIds = []) {
   const visibleTaskIds = [...new Set(taskIds.map((id) => String(id ?? "").trim()).filter(Boolean))];
   if (visibleTaskIds.length === 0) return [];
+  const visibleTaskIdSet = new Set(visibleTaskIds);
   const placeholders = visibleTaskIds.map(() => "?").join(", ");
   const waves = getDatabase()
     .prepare(
@@ -4699,11 +4700,15 @@ export function readTaskWavesForTaskIds(taskIds = []) {
     const taskIds = readTaskIds
       .all({ waveId: wave.id, includeHistory: wave.status === "superseded" ? 1 : 0 })
       .map((item) => item.taskId);
-    const tasks = taskIds.map((taskId) => readExistingItem("tasks", taskId)).filter(Boolean);
+    const tasks = taskIds
+      .filter((taskId) => visibleTaskIdSet.has(taskId))
+      .map((taskId) => readExistingItem("tasks", taskId))
+      .filter(Boolean);
     return {
       ...wave,
       ...getTaskWaveTiming(wave, tasks),
       taskIds,
+      tasks,
       supersession: getTaskWaveSupersessionInfo(database, wave),
     };
   });
@@ -4734,11 +4739,13 @@ export function readTaskWaveDetailForTaskIds(waveId, taskIds = []) {
     });
   const items = allItems.filter((item) => visibleTaskIds.has(item.taskId));
   if (items.length === 0) return null;
-  const tasks = allItems.map((item) => readExistingItem("tasks", item.taskId)).filter(Boolean);
+  const timingTasks = allItems.map((item) => readExistingItem("tasks", item.taskId)).filter(Boolean);
+  const tasks = items.map((item) => readExistingItem("tasks", item.taskId)).filter(Boolean);
   return {
     ...wave,
-    ...getTaskWaveTiming(wave, tasks),
+    ...getTaskWaveTiming(wave, timingTasks),
     items,
+    tasks,
     supersession: getTaskWaveSupersessionInfo(getDatabase(), wave),
   };
 }

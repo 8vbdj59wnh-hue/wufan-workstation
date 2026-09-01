@@ -73,6 +73,34 @@ test("任务波次读取会合并商品图片上下文并兼容新版响应", as
   assert.equal(state.taskProductContexts[0].erpSkuImage, "/uploads/product-v2-imports/batch/product.webp");
 });
 
+test("任务波次列表会同步合并成员任务内容", async () => {
+  const { state, loadTaskWaves } = await import(`../src/appState.js?task-wave-members=${Date.now()}`);
+  state.tasks.splice(0, state.tasks.length);
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify([{
+    id: "wave-1",
+    businessCode: "WAVE-TEST-0001",
+    status: "doing",
+    taskCount: 2,
+    taskIds: ["wave-task-1", "wave-task-2"],
+    tasks: [
+      { id: "wave-task-1", businessCode: "TASK-TEST-0001", name: "成员任务一", status: "doing" },
+      { id: "wave-task-2", businessCode: "TASK-TEST-0002", name: "成员任务二", status: "todo" },
+    ],
+  }]), { status: 200, headers: { "content-type": "application/json" } });
+
+  try {
+    await loadTaskWaves();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(state.taskWaves.map((item) => item.id), ["wave-1"]);
+  assert.deepEqual(state.tasks.map((item) => item.id), ["wave-task-1", "wave-task-2"]);
+  assert.equal(state.tasks.find((item) => item.id === "wave-task-1")?.name, "成员任务一");
+});
+
 test("任务图片识别支持所有正式上传目录", async () => {
   const { getActionImageUrls } = await import("../src/data/taskUtils.js");
   assert.deepEqual(getActionImageUrls({

@@ -237,6 +237,12 @@ function mergeTaskProductContexts(target, items) {
   target.splice(0, target.length, ...merged.values());
 }
 
+function mergeTaskWaveMemberTasks(waves) {
+  const waveList = Array.isArray(waves) ? waves : [];
+  const memberTasks = waveList.flatMap((wave) => Array.isArray(wave?.tasks) ? wave.tasks : []);
+  mergeArrayById(state.tasks, memberTasks);
+}
+
 function normalizeDepartment(department) {
   return {
     ...department,
@@ -432,6 +438,7 @@ export async function loadPersistentData({ includeTaskWaves = null, useCache = f
         replaceArray(state.taskWaves, []);
       } else {
         const waveItems = Array.isArray(waveData) ? waveData : waveData.items ?? [];
+        mergeTaskWaveMemberTasks(waveItems);
         replaceArray(state.taskWaves, waveItems);
         mergeTaskProductContexts(state.taskProductContexts, waveData.context?.taskProductContexts ?? []);
       }
@@ -480,6 +487,7 @@ export async function loadTaskWaves() {
   }
   if (!response.ok) throw new Error(data.message ?? data.error ?? "任务波次读取失败。");
   const items = Array.isArray(data) ? data : data.items ?? [];
+  mergeTaskWaveMemberTasks(items);
   replaceArray(state.taskWaves, items);
   mergeTaskProductContexts(state.taskProductContexts, data.context?.taskProductContexts ?? []);
   taskWavesLoaded = true;
@@ -556,6 +564,7 @@ export async function loadTaskWaveDetail(waveId) {
   const response = await authFetch(`${apiBaseUrl}/api/task-waves/${waveId}`);
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.message ?? data.error ?? "任务波次详情读取失败。");
+  mergeTaskWaveMemberTasks([data]);
   state.taskWaveDetails = { ...state.taskWaveDetails, [waveId]: data };
   return data;
 }

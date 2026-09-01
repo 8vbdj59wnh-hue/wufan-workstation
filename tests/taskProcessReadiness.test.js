@@ -8,6 +8,8 @@ import {
   initializeDatabase,
   reconcileAllCanceledProcessInstances,
   readRouteResource,
+  readTaskWaveDetailForTaskIds,
+  readTaskWavesForTaskIds,
 } from "../server/db.js";
 import {
   readStuckProcessTaskReadinessCandidates,
@@ -219,6 +221,16 @@ test("真实完成链会立即释放后继任务并生成波次", () => {
   const wave = database.prepare("SELECT * FROM task_waves WHERE status = 'waiting'").get();
   assert.equal(wave.taskCount, 2);
   assert.equal(database.prepare("SELECT COUNT(*) count FROM task_wave_items WHERE waveId = ? AND isActive = 1").get(wave.id).count, 2);
+
+  const visibleTaskIds = ["live-a-task-3", "live-b-task-3"];
+  const waveListItem = readTaskWavesForTaskIds(visibleTaskIds).find((item) => item.id === wave.id);
+  assert.deepEqual(new Set(waveListItem.tasks.map((task) => task.id)), new Set(visibleTaskIds));
+
+  const partialWaveListItem = readTaskWavesForTaskIds(["live-a-task-3"]).find((item) => item.id === wave.id);
+  assert.deepEqual(partialWaveListItem.tasks.map((task) => task.id), ["live-a-task-3"]);
+
+  const waveDetail = readTaskWaveDetailForTaskIds(wave.id, visibleTaskIds);
+  assert.deepEqual(new Set(waveDetail.tasks.map((task) => task.id)), new Set(visibleTaskIds));
 });
 
 test.after(() => closeDatabase());
