@@ -166,6 +166,8 @@ export function renderActionImageGrid(
                 : `<img
                     src="${escapeHtml(resolveAssetUrl(url))}"
                     alt="${escapeHtml(alt)}${imageUrls.length === 1 ? "" : `${index + 1}`}"
+                    loading="lazy"
+                    decoding="async"
                     onerror="this.replaceWith(Object.assign(document.createElement('span'), { className: 'action-image-grid-broken', textContent: '无图' }))"
                   />`
             }

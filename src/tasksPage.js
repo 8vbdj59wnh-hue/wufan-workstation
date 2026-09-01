@@ -792,14 +792,18 @@ function renderCoverImage(task) {
   `;
 }
 
-function renderTaskCardImages(task) {
+function getTaskCardImageUrls(task) {
   const processInstance = getTaskProcessInstance(task);
   const linkedProductImages =
     processInstance === null ? [] : getActionProductImageUrls(processInstance.id);
-  const images =
+  return (
     linkedProductImages.length > 0
       ? linkedProductImages
-      : getActionImageUrls(processInstance, task);
+      : getActionImageUrls(processInstance, task)
+  );
+}
+
+function renderTaskCardImages(images, task) {
   return renderActionImageGrid(images, {
     className: "task-card-image-grid",
     alt: `${task.name}产品图片`,
@@ -3413,10 +3417,11 @@ function renderTaskCard(task) {
   const belonging = getTaskBelonging(task);
   const actionName = belonging.title || belonging.standardWorkName || "未关联关键行动";
   const workflowAction = renderTaskCardWorkflowAction(task);
+  const imageUrls = getTaskCardImageUrls(task);
 
   return `
-    <article class="task-card ${selected}" data-task-card data-row-task-id="${escapeHtml(task.id)}">
-      <div class="task-card-cover">${renderTaskCardImages(task)}</div>
+    <article class="task-card ${selected} ${imageUrls.length > 0 ? "has-cover" : "has-no-cover"}" data-task-card data-row-task-id="${escapeHtml(task.id)}">
+      ${imageUrls.length > 0 ? `<div class="task-card-cover">${renderTaskCardImages(imageUrls, task)}</div>` : ""}
       <div class="task-card-body">
         <div class="task-card-title-row">
           <h3>${escapeHtml(task.name)}</h3>
@@ -3785,8 +3790,9 @@ function renderTaskDetailProduct(task, context) {
 
 function renderTaskDetailHero(task, context) {
   const product = getTaskDetailProducts(task, context)[0] ?? null;
-  const image = product?.productImage || product?.erpSkuImage || product?.mainImage || getTaskCoverImage(task) || context.instance?.coverImageUrl || "";
-  return `<div class="task-detail-hero">${image ? `<img loading="lazy" src="${escapeHtml(resolveAssetUrl(image))}" alt="${escapeHtml(product?.name || task.name)}" onerror="this.replaceWith(Object.assign(document.createElement('span'), { className: 'task-cover-placeholder', textContent: '无图' }))" />` : `<span class="task-cover-placeholder">无图</span>`}</div>`;
+  const image = product?.productImage || product?.erpSkuImage || product?.mainImage || getTaskCoverImage(task) || "";
+  if (image === "") return "";
+  return `<div class="task-detail-hero"><img loading="lazy" decoding="async" src="${escapeHtml(resolveAssetUrl(image))}" alt="${escapeHtml(product?.name || task.name)}" onerror="this.closest('.task-detail-hero')?.remove()" /></div>`;
 }
 
 function renderCurrentTaskSection(task) {
