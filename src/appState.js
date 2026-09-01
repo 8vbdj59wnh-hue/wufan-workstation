@@ -56,6 +56,7 @@ const processExecutorInitiatorRule = "initiator";
 let persistenceAvailable = false;
 let loadedFromDatabase = false;
 let currentUser = null;
+let assetAccessToken = "";
 const pendingTemplateIterations = new Map();
 let taskWavesLoaded = false;
 let dashboardManagementLoaded = false;
@@ -384,6 +385,7 @@ export async function loadPersistentData({ includeTaskWaves = null, useCache = f
     const lightweightModules = new Set([
       "",
       "dashboard",
+      "dashboardManagement",
       "dashboard-management",
       "products",
       "connectionCenter",
@@ -649,10 +651,12 @@ export async function validateCurrentSession() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
     currentUser = data.user ?? null;
+    assetAccessToken = String(data.assetToken ?? "");
     return currentUser;
   } catch {
     setAuthToken("");
     currentUser = null;
+    assetAccessToken = "";
     return null;
   }
 }
@@ -669,6 +673,7 @@ export async function login(username, password) {
       return { success: false, message: data.message ?? "账号或密码错误" };
     }
     setAuthToken(data.token ?? "");
+    assetAccessToken = String(data.assetToken ?? "");
     currentUser = data.user ?? null;
     return { success: true, user: currentUser };
   } catch {
@@ -679,6 +684,7 @@ export async function login(username, password) {
 export function logout() {
   setAuthToken("");
   currentUser = null;
+  assetAccessToken = "";
   loadedPersistentDataRoutes.clear();
   dashboardManagementLoaded = false;
   dashboardManagementPromise = null;
@@ -696,9 +702,16 @@ function notifyPersistenceStatusChange() {
 
 export function resolveAssetUrl(url) {
   if (url === null || url === undefined || url === "") return "";
-  if (url.startsWith("http://") || url.startsWith("https:") || url.startsWith("data:")) return url;
-  if (url.startsWith("/")) return `${apiBaseUrl}${url}`;
-  return url;
+  const resolvedUrl = url.startsWith("/") ? `${apiBaseUrl}${url}` : url;
+  if (assetAccessToken === "") return resolvedUrl;
+  try {
+    const assetUrl = new URL(resolvedUrl);
+    if (assetUrl.origin !== apiBaseUrl || !assetUrl.pathname.startsWith("/uploads/")) return resolvedUrl;
+    if (!assetUrl.searchParams.has("access_token")) assetUrl.searchParams.set("access_token", assetAccessToken);
+    return assetUrl.toString();
+  } catch {
+    return resolvedUrl;
+  }
 }
 
 export async function uploadImageFile(file) {

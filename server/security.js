@@ -2,12 +2,14 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveAuthSecretPath } from "./runtimePaths.js";
 
 const passwordIterations = 120_000;
 const tokenMaxAgeMs = 7 * 24 * 60 * 60 * 1000;
+const assetTokenMaxAgeMs = 24 * 60 * 60 * 1000;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.resolve(__dirname, "..", "data");
-const authSecretPath = path.join(dataDir, "auth.secret");
+const authSecretPath = resolveAuthSecretPath({ defaultDataDir: dataDir });
 
 function base64UrlEncode(value) {
   return Buffer.from(value).toString("base64url");
@@ -45,30 +47,55 @@ export function verifyPassword(password, passwordHash) {
   return crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(storedHash));
 }
 
-export function createToken(user) {
+function createSignedToken(user, audience, maxAgeMs) {
   const header = { alg: "HS256", typ: "JWT" };
   const payload = {
     sub: user.id,
     username: user.username,
     role: user.authRole ?? "user",
-    exp: Date.now() + tokenMaxAgeMs,
+    aud: audience,
+    exp: Date.now() + maxAgeMs,
   };
   const unsigned = `${base64UrlEncode(JSON.stringify(header))}.${base64UrlEncode(JSON.stringify(payload))}`;
   return `${unsigned}.${sign(unsigned)}`;
 }
 
-export function verifyToken(token) {
+function verifySignedToken(token, audience, { allowMissingAudience = false } = {}) {
   const parts = String(token ?? "").split(".");
   if (parts.length !== 3) return null;
   const [header, payload, signature] = parts;
   const unsigned = `${header}.${payload}`;
-  if (signature !== sign(unsigned)) return null;
+  const expectedSignature = sign(unsigned);
+  if (!/^[A-Za-z0-9_-]+$/.test(signature)) return null;
+  const signatureBuffer = Buffer.from(signature);
+  const expectedSignatureBuffer = Buffer.from(expectedSignature);
+  if (signatureBuffer.length !== expectedSignatureBuffer.length) return null;
+  if (!crypto.timingSafeEqual(signatureBuffer, expectedSignatureBuffer)) return null;
 
   try {
+    const decodedHeader = JSON.parse(base64UrlDecode(header));
     const decoded = JSON.parse(base64UrlDecode(payload));
+    if (decodedHeader.alg !== "HS256" || decodedHeader.typ !== "JWT") return null;
     if (typeof decoded.exp !== "number" || decoded.exp < Date.now()) return null;
+    if (decoded.aud !== audience && !(allowMissingAudience && decoded.aud === undefined)) return null;
     return decoded;
   } catch {
     return null;
   }
+}
+
+export function createToken(user) {
+  return createSignedToken(user, "api", tokenMaxAgeMs);
+}
+
+export function verifyToken(token) {
+  return verifySignedToken(token, "api", { allowMissingAudience: true });
+}
+
+export function createAssetToken(user) {
+  return createSignedToken(user, "assets", assetTokenMaxAgeMs);
+}
+
+export function verifyAssetToken(token) {
+  return verifySignedToken(token, "assets");
 }

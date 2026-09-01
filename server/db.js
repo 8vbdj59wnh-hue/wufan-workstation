@@ -10,6 +10,7 @@ import {
   assertDatabaseResetAllowed,
   resolveDatabasePath,
 } from "./databaseSafety.js";
+import { resolveUploadsDirectory } from "./runtimePaths.js";
 import { createEmptyPermissions, mergePermissionSources, normalizePermissions, serializePermissions } from "../shared/permissions.js";
 import {
   categories,
@@ -41,7 +42,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
 export const databasePath = resolveDatabasePath({ projectRoot });
 export const dataDir = path.dirname(databasePath);
-export const uploadsDir = path.join(projectRoot, "uploads");
+export const uploadsDir = resolveUploadsDirectory({ projectRoot });
 const schemaPath = path.join(__dirname, "schema.sql");
 const standardWorkValueChainCategories = [
   "基础设施维护",

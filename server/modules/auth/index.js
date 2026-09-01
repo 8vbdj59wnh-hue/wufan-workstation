@@ -1,4 +1,4 @@
-export { createToken, verifyPassword, verifyToken } from "../../security.js";
+export { createAssetToken, createToken, verifyAssetToken, verifyPassword, verifyToken } from "../../security.js";
 import {
   canAccessModule,
   canAccessTemplateCenter,

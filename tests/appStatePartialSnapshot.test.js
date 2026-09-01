@@ -18,6 +18,9 @@ const {
   getStoreOptions,
   getStoreOptionsLoadState,
   loadPersistentData,
+  login,
+  logout,
+  resolveAssetUrl,
   state,
 } = await import("../src/appState.js");
 const { renderPublicFormFieldInput } = await import("../src/workFormEditor.js");
@@ -248,6 +251,31 @@ test("module snapshots cannot erase the dedicated action store directory", async
   }
 });
 
+test("asset URLs use the scoped token returned by login", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    success: true,
+    token: "api-token",
+    assetToken: "asset-token",
+    user: { id: "person-1", personId: "person-1" },
+  }), { status: 200, headers: { "Content-Type": "application/json" } });
+  try {
+    assert.equal((await login("user", "password")).success, true);
+    assert.equal(
+      resolveAssetUrl("/uploads/images/example.png"),
+      "http://127.0.0.1:3001/uploads/images/example.png?access_token=asset-token",
+    );
+    assert.equal(
+      resolveAssetUrl("/uploads/images/example.png?size=small#preview"),
+      "http://127.0.0.1:3001/uploads/images/example.png?size=small&access_token=asset-token#preview",
+    );
+    assert.equal(resolveAssetUrl("https://example.com/image.png"), "https://example.com/image.png");
+  } finally {
+    logout();
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("content-note account fields keep managed choices and the imported selected value", () => {
   state.publishingAccounts.splice(0, state.publishingAccounts.length);
   const html = renderPublicFormFieldInput({
@@ -286,6 +314,19 @@ test("schedule board bootstrap includes all resources required by content-note i
 test("goal action launch always refreshes store options", () => {
   const goalsPageSource = fs.readFileSync(new URL("../src/goalsPage.js", import.meta.url), "utf8");
   assert.match(goalsPageSource, /ensureStoreOptionsLoaded\(\{ force: true \}\)/);
+});
+
+test("management dashboard uses its lightweight bootstrap instead of the global snapshot", () => {
+  const stateSource = fs.readFileSync(new URL("../src/appState.js", import.meta.url), "utf8");
+  const lightweightModules = stateSource.match(/const lightweightModules = new Set\(\[[\s\S]*?\]\);/)?.[0] ?? "";
+  assert.match(lightweightModules, /"dashboardManagement"/);
+});
+
+test("reading task waves does not generate or mutate waves", () => {
+  const serverSource = fs.readFileSync(new URL("../server/index.js", import.meta.url), "utf8");
+  const route = serverSource.match(/app\.get\("\/api\/task-waves",[\s\S]*?\n\}\);/)?.[0] ?? "";
+  assert.match(route, /readTaskWavesForTaskIds/);
+  assert.doesNotMatch(route, /generateEligibleTaskWaves\(/);
 });
 
 test("content-note import accepts blank row goals after a batch goal is selected", () => {

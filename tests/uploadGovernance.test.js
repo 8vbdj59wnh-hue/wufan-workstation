@@ -170,9 +170,15 @@ test("每日配额按上海自然日重置", () => {
   });
 });
 
-test("上传读取路径保持公开，通用上传入口使用独立权限", () => {
+test("上传读取路径使用独立资产凭证，通用上传入口使用独立权限", () => {
   const serverSource = fs.readFileSync(new URL("../server/index.js", import.meta.url), "utf8");
-  assert(serverSource.indexOf('app.use("/uploads", express.static(uploadsDir))') < serverSource.indexOf('app.use("/api", requireAuth)'));
+  assert.match(serverSource, /app\.use\(cors\(resolveCorsOptions\)\)/);
+  assert.doesNotMatch(serverSource, /app\.use\(cors\(\)\)/);
+  assert.match(serverSource, /app\.use\("\/uploads", requireAssetAccess, express\.static\(uploadsDir,/);
+  assert.match(serverSource, /verifyAssetToken\(request\.query\?\.access_token\)/);
+  assert.match(serverSource, /response\.setHeader\("Referrer-Policy", "no-referrer"\)/);
+  assert.match(serverSource, /response\.setHeader\("X-Content-Type-Options", "nosniff"\)/);
+  assert.doesNotMatch(serverSource, /app\.use\("\/uploads", express\.static\(uploadsDir\)\)/);
   assert.equal([...serverSource.matchAll(/callback\(null, uploadStagingDir\)/g)].length, 3);
   assert.match(serverSource, /promoteValidatedUpload\(request, response, imageUploadsDir\)/);
   assert.match(serverSource, /app\.post\("\/api\/uploads\/image", requirePermission\("uploads\.image"\)/);

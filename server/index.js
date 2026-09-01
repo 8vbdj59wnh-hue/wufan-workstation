@@ -12,6 +12,7 @@ import {
   WorkType,
 } from "../src/data/modelOptions.js";
 import { configureApiCachePolicy } from "./apiCachePolicy.js";
+import { createLoginRateLimiter } from "./loginRateLimit.js";
 import {
   closeDatabase,
   createResource,
@@ -286,7 +287,9 @@ import {
 } from "./modules/tasks/index.js";
 import { updateTaskFromWorkflow } from "./taskProcessReadinessService.js";
 import {
+  createAssetToken,
   createToken,
+  verifyAssetToken,
   verifyPassword,
   verifyToken,
   canAccessModule,
@@ -359,6 +362,7 @@ import {
 } from "./templateVersionService.js";
 
 const app = express();
+const loginRateLimiter = createLoginRateLimiter();
 configureApiCachePolicy(app);
 const host = process.env.HOST ?? "0.0.0.0";
 const port = Number(process.env.PORT ?? 3001);
@@ -514,9 +518,54 @@ const uploadProductImport = multer({
   },
 });
 
-app.use(cors());
+function resolveCorsOptions(request, callback) {
+  const origin = String(request.get("origin") ?? "").trim();
+  if (origin === "") {
+    callback(null, { origin: false });
+    return;
+  }
+  try {
+    const originUrl = new URL(origin);
+    const explicitlyAllowed = new Set(
+      String(process.env.CORS_ALLOWED_ORIGINS ?? "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean),
+    );
+    const sameHost = originUrl.hostname === request.hostname;
+    const developmentHost = new Set(["127.0.0.1", "localhost", "::1"]).has(originUrl.hostname);
+    const allowedPort = new Set(["", "80", "443", "5173", "5174"]).has(originUrl.port);
+    const allowed = explicitlyAllowed.has(origin) || ((sameHost || developmentHost) && allowedPort);
+    callback(null, { origin: allowed ? origin : false });
+  } catch {
+    callback(null, { origin: false });
+  }
+}
+
+app.use(cors(resolveCorsOptions));
 app.use(express.json({ limit: "20mb" }));
-app.use("/uploads", express.static(uploadsDir));
+
+function requireAssetAccess(request, response, next) {
+  const tokenPayload = verifyAssetToken(request.query?.access_token);
+  if (tokenPayload === null) {
+    response.status(401).json({ success: false, message: "附件访问凭证无效或已过期" });
+    return;
+  }
+  const user = findLoginUserById(tokenPayload.sub);
+  if (user === undefined || !user.canLogin || user.status !== "active") {
+    response.status(401).json({ success: false, message: "登录状态已失效" });
+    return;
+  }
+  next();
+}
+
+app.use("/uploads", requireAssetAccess, express.static(uploadsDir, {
+  setHeaders(response) {
+    response.setHeader("Cache-Control", "private, max-age=300");
+    response.setHeader("Referrer-Policy", "no-referrer");
+    response.setHeader("X-Content-Type-Options", "nosniff");
+  },
+}));
 
 app.use("/api", (request, response, next) => {
   if (["GET", "HEAD", "OPTIONS"].includes(request.method)) {
@@ -1418,9 +1467,16 @@ app.post("/api/auth/login", (request, response) => {
   try {
     const username = String(request.body?.username ?? "").trim();
     const password = String(request.body?.password ?? "");
+    const loginLimit = loginRateLimiter.read(request.ip, username);
+    if (loginLimit.blocked) {
+      response.set("Retry-After", String(loginLimit.retryAfterSeconds));
+      response.status(429).json({ success: false, message: "登录失败次数过多，请稍后再试" });
+      return;
+    }
     const user = username === "" ? undefined : findLoginUser(username);
 
     if (user === undefined || !verifyPassword(password, user.passwordHash)) {
+      loginRateLimiter.recordFailure(request.ip, username);
       response.status(401).json({ success: false, message: "账号或密码错误" });
       return;
     }
@@ -1435,6 +1491,7 @@ app.post("/api/auth/login", (request, response) => {
       return;
     }
 
+    loginRateLimiter.clear(request.ip, username);
     touchLastLoginAt(user.id);
     const freshUser = findLoginUserById(user.id);
     const publicUser = getPublicUser(freshUser);
@@ -1442,6 +1499,7 @@ app.post("/api/auth/login", (request, response) => {
       success: true,
       user: publicUser,
       token: createToken(freshUser),
+      assetToken: createAssetToken(freshUser),
     });
   } catch (error) {
     console.error("登录失败", error);
@@ -1450,7 +1508,7 @@ app.post("/api/auth/login", (request, response) => {
 });
 
 app.get("/api/auth/me", requireAuth, (request, response) => {
-  response.json({ success: true, user: request.user });
+  response.json({ success: true, user: request.user, assetToken: createAssetToken(request.user) });
 });
 
 app.get("/api/util/qr-code", async (request, response) => {
@@ -4676,7 +4734,6 @@ app.get("/api/task-waves", (request, response) => {
     response.status(403).json({ success: false, message: "你没有权限查看任务波次。" });
     return;
   }
-  generateEligibleTaskWaves();
   const visibleTaskIds = getVisibleTaskIds(request.user);
   const visibleTaskIdSet = new Set(visibleTaskIds);
   const items = readTaskWavesForTaskIds(visibleTaskIds).filter((wave) =>
