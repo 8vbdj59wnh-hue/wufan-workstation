@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import * as XLSX from "xlsx";
 import { getDatabase } from "./db.js";
+import { readXlsxWorkbook } from "./workbookReader.js";
 
 const entryTypes = new Set(["income", "refund", "cost", "expense"]);
 
@@ -55,7 +56,7 @@ export function createFinanceImportBatch(file, userId) {
   const fileHash = crypto.createHash("sha256").update(file.buffer).digest("hex");
   const existing = database.prepare("SELECT id FROM finance_import_batches WHERE fileHash=? AND status<>'failed' ORDER BY createdAt DESC LIMIT 1").get(fileHash);
   if (existing) return readFinanceImportBatch(existing.id);
-  const workbook = XLSX.read(file.buffer, { type: "buffer", cellDates: true });
+  const workbook = readXlsxWorkbook(file.buffer, { type: "buffer", cellDates: true }, { context: "finance-import" });
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   if (!sheet) throw new Error("账单没有可读取的工作表。");
   const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });

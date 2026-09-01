@@ -6,6 +6,7 @@ import { getDatabase, uploadsDir } from "./db.js";
 import { createConnectionDataMapping, ensureBusinessAdvisorConnection } from "./connectionService.js";
 import { normalizeUploadedFileName } from "./uploadFileName.js";
 import { LINK_ASSET_SELECT_SQL } from "./linkAssetSql.js";
+import { readXlsxWorkbook } from "./workbookReader.js";
 
 const importStatuses = new Set(["draft", "parsed", "validated", "completed", "failed"]);
 const stagingDir = path.resolve(process.env.CONNECTION_IMPORT_DIR || path.join(uploadsDir, "connection-imports"));
@@ -36,7 +37,7 @@ function batchFilePath(batchId) {
 }
 
 export function parseBusinessAdvisorWorkbook(buffer) {
-  const workbook = XLSX.read(buffer, { type: "buffer", raw: true, cellDates: true });
+  const workbook = readXlsxWorkbook(buffer, { type: "buffer", raw: true, cellDates: true }, { context: "connection-import" });
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) throw new Error("Excel中没有可读取的工作表。");
   const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "", raw: false });

@@ -4,6 +4,7 @@ import { getDatabase } from "./db.js";
 import { assertCurrentDataSyncPreview, completeDataSyncBatch, createDataSyncBatch, getDataSyncBatch, getDataSyncTask, markDataSyncBatchPreviewReady } from "./dataSyncCenterService.js";
 import { canonicalizeSalesUrl } from "./productV2Import.js";
 import { getLinkOperatingSummary } from "./linkOperatingSetService.js";
+import { readXlsxWorkbook } from "./workbookReader.js";
 
 const TASK_CODE = "platform_goods_excel_import";
 const SOURCE_BATCH_TYPE = "platform_goods_excel_import";
@@ -57,7 +58,7 @@ function normalizeCell(value) {
 
 function parseWorkbook(buffer) {
   if (!buffer?.length) throw new Error("请选择平台货品Excel文件。");
-  const workbook = XLSX.read(buffer, { type: "buffer", cellDates: false, raw: false });
+  const workbook = readXlsxWorkbook(buffer, { type: "buffer", cellDates: false, raw: false }, { context: "platform-goods-excel" });
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) throw new Error("Excel中没有可读取的工作表。");
   const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "", raw: false });

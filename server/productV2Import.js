@@ -10,6 +10,7 @@ import { queryWangdianGoods } from "./wangdianClient.js";
 import { adaptWangdianGoodsResponse, canonicalGoodsRecordsToStaging } from "./wangdianGoodsAdapter.js";
 import { clearDataSyncCheckpoint, runWangdianPagedWindows } from "./dataSyncPagedExecution.js";
 import { ensureSingleLinkSkuErpMapping, resolveUniqueProductErpSku } from "./linkSkuErpMappingService.js";
+import { readXlsxWorkbook } from "./workbookReader.js";
 
 const stagingRoot = path.join(uploadsDir, "product-v2-imports");
 const goodsInfoRequiredHeaders = ["货品编号", "商家编码", "货品名称"];
@@ -51,7 +52,7 @@ function id(prefix, source) {
 
 function parseWorkbook(filePath) {
   const buffer = fs.readFileSync(filePath);
-  const workbook = XLSX.read(buffer, { type: "buffer", cellDates: false, raw: false });
+  const workbook = readXlsxWorkbook(buffer, { type: "buffer", cellDates: false, raw: false }, { context: "product-v2-import" });
   const sheetName = workbook.SheetNames.find((name) => workbook.Sheets[name]?.["!ref"]) ?? workbook.SheetNames[0];
   if (!sheetName) throw new Error("Excel 中没有可读取的工作表。");
   const matrix = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "", raw: false, blankrows: false });

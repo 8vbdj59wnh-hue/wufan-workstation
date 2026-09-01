@@ -8,6 +8,7 @@ import JSZip from "jszip";
 import { XMLParser } from "fast-xml-parser";
 import * as XLSX from "xlsx";
 import { uploadsDir } from "./db.js";
+import { readXlsxWorkbook } from "./workbookReader.js";
 
 const importRoot = path.join(uploadsDir, "product-imports");
 const xmlParser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "" });
@@ -232,7 +233,7 @@ export async function parseProductWorkbook(filePath, batchId, originalName) {
   const converted = extension === ".xls" ? await convertXlsToXlsx(filePath) : null;
   const workbookBuffer = converted?.buffer ?? sourceBuffer;
   if (converted !== null) fs.rmSync(converted.tempDir, { recursive: true, force: true });
-  const workbook = XLSX.read(workbookBuffer, { type: "buffer", cellDates: true, cellText: true });
+  const workbook = readXlsxWorkbook(workbookBuffer, { type: "buffer", cellDates: true, cellText: true }, { context: "product-import" });
   const sheetName = workbook.SheetNames.find((name) => workbook.Sheets[name]?.["!ref"]) ?? workbook.SheetNames[0];
   if (!sheetName) throw new Error("Excel 中没有可读取的工作表。");
   const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "", raw: false, blankrows: false });

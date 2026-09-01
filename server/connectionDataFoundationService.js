@@ -4,6 +4,7 @@ import { getDatabase } from "./db.js";
 import { ensureSingleLinkSkuErpMapping, inspectSingleLinkSkuErpMapping, resolveUniqueProductErpSku } from "./linkSkuErpMappingService.js";
 import { normalizeUploadedFileName } from "./uploadFileName.js";
 import { LINK_ASSET_SELECT_SQL } from "./linkAssetSql.js";
+import { readXlsxWorkbook } from "./workbookReader.js";
 
 export const connectionImportTypes = [
   "platform_link_operations",
@@ -112,7 +113,7 @@ function pickSheet(workbook, matchRules) {
 }
 
 function readWorkbook(buffer, matchRules = {}) {
-  const workbook = XLSX.read(buffer, { type: "buffer", raw: true, cellDates: true });
+  const workbook = readXlsxWorkbook(buffer, { type: "buffer", raw: true, cellDates: true }, { context: "connection-data-foundation" });
   const sheetName = pickSheet(workbook, matchRules); const sheet = workbook.Sheets[sheetName];
   if (!sheet) throw new Error("文件中没有符合模板规则的工作表。");
   const headerRow = Math.max(1, Number(matchRules.headerRow || 1));

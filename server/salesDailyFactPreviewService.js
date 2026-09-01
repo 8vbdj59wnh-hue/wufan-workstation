@@ -7,6 +7,7 @@ import { normalizeSalesDetailLine } from "./capabilities/salesDetailNormalizer.j
 import { classifySalesDetailLine } from "./capabilities/classifySalesDetailLine.js";
 import { resolveHistoricalRelationForFact } from "./salesObjectRelationHistoryService.js";
 import { invalidateProductContributionCache } from "./productContributionReadModel.js";
+import { readXlsxWorkbook } from "./workbookReader.js";
 
 const IMPORT_TYPE = "erp_sales_daily_preview";
 const PARSER_VERSION = "sales-daily-preview-v3-current-v2";
@@ -44,7 +45,7 @@ function dateValue(value) {
 }
 
 function readRows(buffer) {
-  const workbook = XLSX.read(buffer, { type: "buffer", raw: true, cellDates: true });
+  const workbook = readXlsxWorkbook(buffer, { type: "buffer", raw: true, cellDates: true }, { context: "sales-daily-preview" });
   const sheetName = workbook.SheetNames[0];
   const sheet = workbook.Sheets[sheetName];
   if (!sheet) throw new Error("Excel中没有可读取的工作表。");

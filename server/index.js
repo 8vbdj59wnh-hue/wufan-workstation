@@ -13,6 +13,7 @@ import {
 } from "../src/data/modelOptions.js";
 import { configureApiCachePolicy } from "./apiCachePolicy.js";
 import { createLoginRateLimiter } from "./loginRateLimit.js";
+import { readXlsxWorkbook } from "./workbookReader.js";
 import {
   closeDatabase,
   createResource,
@@ -4591,7 +4592,7 @@ app.post(
         response.status(400).json({ success: false, message: "请选择要导入的 Excel 或表格文件。" });
         return;
       }
-      const workbook = XLSX.read(request.file.buffer, { type: "buffer", cellDates: false });
+      const workbook = readXlsxWorkbook(request.file.buffer, { type: "buffer", cellDates: false }, { context: "content-note-import" });
       const sheetName = workbook.SheetNames[0];
       if (!sheetName) throw new Error("工作簿中没有可读取的工作表。");
       const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {

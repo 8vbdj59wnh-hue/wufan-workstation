@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import XLSX from "xlsx";
 import { getDatabase } from "./db.js";
 import { LINK_ASSET_SELECT_SQL } from "./linkAssetSql.js";
+import { readXlsxWorkbook } from "./workbookReader.js";
 
 const IMPORT_TYPE = "connection_owner_assignments";
 const PARSER_VERSION = "connection-owner-v4-link-id-owner-selection";
@@ -14,7 +15,7 @@ function now() { return new Date().toISOString(); }
 
 function readRows(buffer) {
   if (!Buffer.isBuffer(buffer) || !buffer.length) throw new Error("请选择负责人匹配Excel文件。");
-  const workbook = XLSX.read(buffer, { type: "buffer", raw: false });
+  const workbook = readXlsxWorkbook(buffer, { type: "buffer", raw: false }, { context: "connection-owner-import" });
   const sheetName = workbook.SheetNames[0];
   const sheet = workbook.Sheets[sheetName];
   if (!sheet) throw new Error("Excel中没有可读取的工作表。");
