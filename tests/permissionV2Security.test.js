@@ -54,3 +54,9 @@ test("健康记录写接口停止生成新记录", () => {
   assert.equal(route, "", "生产基线已彻底退役健康记录写接口，不应重新注册兼容路由");
   assert.doesNotMatch(route, /createConnectionHealthRecord/);
 });
+
+test("通知读取与状态写入使用不同权限门禁", () => {
+  const source = fs.readFileSync(new URL("../server/index.js", import.meta.url), "utf8");
+  assert.match(source, /notifications:\s*\{[\s\S]*?read:\s*\(\)\s*=>\s*true,[\s\S]*?hasPermission\(user, "tasks\.execute"\)/);
+  assert.match(source, /app\.post\("\/api\/notifications\/read-all", requirePermission\("tasks\.execute"\)/);
+});

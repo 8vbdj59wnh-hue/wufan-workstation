@@ -1248,6 +1248,10 @@ const resourcePermissions = {
     read: () => true,
     write: ({ user, method, body, existing }) => {
       const userId = String(user.id ?? "");
+      if (method === "DELETE") {
+        return hasPermission(user, "tasks.manage") && String(existing?.userId ?? "") === userId;
+      }
+      if (!hasPermission(user, "tasks.execute")) return false;
       if (method === "POST") return String(body.userId ?? "") === userId;
       return (
         String(existing?.userId ?? "") === userId &&
@@ -1669,7 +1673,7 @@ app.get("/api/notifications/summary", (request, response) => {
   }
 });
 
-app.post("/api/notifications/read-all", (request, response) => {
+app.post("/api/notifications/read-all", requirePermission("tasks.execute"), (request, response) => {
   try {
     response.json({ success: true, ...markAllUserNotificationsRead(request.user.id) });
   } catch (error) {
@@ -5219,6 +5223,22 @@ app.delete("/api/process-template-nodes/:id", requirePermission("actionStandards
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "删除标准节点失败，请检查本地数据库服务。" });
   }
+});
+
+app.delete("/api/notifications/:id", (request, response) => {
+  const existing = readExistingRouteResourceItem("notifications", request.params.id);
+  const context = getResourceAuthorizationContext(
+    "notifications",
+    "DELETE",
+    request.user,
+    {},
+    existing,
+  );
+  if (!authorizeResourceAction("notifications", "write", context)) {
+    response.status(403).json({ success: false, message: "你没有权限进行该操作" });
+    return;
+  }
+  response.status(405).json({ error: "当前系统不支持真实删除，请使用停用、取消或终止。" });
 });
 
 app.delete("/api/:resource/:id", (_request, response) => {

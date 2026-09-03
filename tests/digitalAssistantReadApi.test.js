@@ -102,6 +102,10 @@ test("等价company只读账号通过正式JWT读取且全部写入口403", asyn
       (id,salesLinkId,salesLinkSkuId,erpSkuId,saleDate,quantity,salesAmount,costAmount,profitAmount,factType,sourceBatchId,sourceRowNumber,rawDataJson,createdAt,updatedAt)
       VALUES(?,?,?,?,?,?,?,?,?,'normal',?,1,'{}',?,?)`)
       .run("api-read-fact", "api-read-link", "api-read-link-sku", "api-read-erp-sku", "2026-09-02", 2, 200, 120, 80, "api-read-sales-batch", stamp, stamp);
+    database.prepare(`INSERT INTO notifications
+      (id,userId,taskId,processInstanceId,type,title,message,status,severity,dueDate,readAt,createdAt,updatedAt)
+      VALUES(?,?,NULL,NULL,'task_due','只读通知','只读账号不能修改','unread','normal',NULL,NULL,?,?)`)
+      .run("api-read-notification", servicePerson.id, stamp, stamp);
 
     const serviceToken = createToken(findLoginUserById(servicePerson.id));
     const humanToken = createToken(findLoginUserById(humanPerson.id));
@@ -145,6 +149,7 @@ test("等价company只读账号通过正式JWT读取且全部写入口403", asyn
       anomalySummary: await api(baseUrl, serviceToken, "/api/data-sync-center/anomaly-summary"),
       operationDashboard: await api(baseUrl, serviceToken, "/api/operation-dashboard"),
       salesBusinessDashboard: await api(baseUrl, serviceToken, "/api/sales-business-dashboard?range=30d&page=1&pageSize=1"),
+      notifications: await api(baseUrl, serviceToken, "/api/notifications/summary?limit=1"),
     };
     for (const [name, result] of Object.entries(reads)) assert.equal(result.status, 200, `${name}: ${JSON.stringify(result.body)}`);
     assert.equal(reads.links.body.pagination.total, 1);
@@ -182,9 +187,27 @@ test("等价company只读账号通过正式JWT读取且全部写入口403", asyn
       syncRun: await api(baseUrl, serviceToken, "/api/data-sync-center/tasks/sync-task-erp-goods/run", { method: "POST", body: "{}" }),
       taskEdit: await api(baseUrl, serviceToken, "/api/tasks/not-present/workflow", { method: "POST", body: JSON.stringify({ action: "start" }) }),
       goalEdit: await api(baseUrl, serviceToken, "/api/goals/not-present", { method: "PUT", body: "{}" }),
+      notificationRead: await api(baseUrl, serviceToken, "/api/notifications/api-read-notification", {
+        method: "PUT",
+        body: JSON.stringify({ status: "read", readAt: stamp, updatedAt: stamp }),
+      }),
+      notificationReadAll: await api(baseUrl, serviceToken, "/api/notifications/read-all", { method: "POST", body: "{}" }),
+      notificationCreate: await api(baseUrl, serviceToken, "/api/notifications", {
+        method: "POST",
+        body: JSON.stringify({ id: "forbidden-notification", userId: servicePerson.id, status: "unread" }),
+      }),
+      notificationDelete: await api(baseUrl, serviceToken, "/api/notifications/api-read-notification", { method: "DELETE" }),
+      notificationClear: await api(baseUrl, serviceToken, "/api/notifications/clear", { method: "DELETE" }),
+      financeEdit: await api(baseUrl, serviceToken, "/api/finance/rules", { method: "POST", body: "{}" }),
       permissionEdit: await api(baseUrl, serviceToken, `/api/people/${servicePerson.id}`, { method: "PUT", body: "{}" }),
     };
     for (const [name, result] of Object.entries(writes)) assert.equal(result.status, 403, `${name}: ${JSON.stringify(result.body)}`);
+    const unchangedNotifications = await api(baseUrl, serviceToken, "/api/notifications/summary?limit=50");
+    assert.equal(unchangedNotifications.status, 200);
+    assert.equal(unchangedNotifications.body.unreadCount, 1);
+    assert.deepEqual(unchangedNotifications.body.items.map((item) => [item.id, item.status, item.readAt]), [
+      ["api-read-notification", "unread", null],
+    ]);
   } finally {
     if (child && child.exitCode === null) {
       child.kill("SIGTERM");
