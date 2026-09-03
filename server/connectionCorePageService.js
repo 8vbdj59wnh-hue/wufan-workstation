@@ -102,7 +102,7 @@ const connectionSortColumns = {
 };
 
 function listOptions(raw = {}) {
-  const pageSize = Math.min(200, Math.max(20, Number(raw.pageSize) || 50));
+  const pageSize = Math.min(200, Math.max(1, Number(raw.pageSize) || 50));
   const page = Math.max(1, Number(raw.page) || 1);
   return { ...raw, page, pageSize, offset: (page - 1) * pageSize };
 }

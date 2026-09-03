@@ -8,6 +8,7 @@ import {
   normalizeApiRoutePattern,
   normalizeApiUsageSource,
   recordApiUsage,
+  shouldRecordApiUsage,
 } from "../server/apiUsageLedgerService.js";
 
 function createLedgerDatabase() {
@@ -73,4 +74,10 @@ test("来源与兜底路径会限长、清洗并消除动态业务 ID", () => {
   assert.equal(normalizeApiUsageSource(" Web:产品中心 / Detail "), "web:detail");
   assert.equal(normalizeApiRoutePattern("/api/tasks/task-20260820-001?full=true"), "/api/tasks/:id");
   assert.equal(normalizeApiRoutePattern("/api/products/12345/snapshots"), "/api/products/:id/snapshots");
+});
+
+test("数据同步中心 GET 不写入 API 台账，执行动作仍记录", () => {
+  assert.equal(shouldRecordApiUsage({ method: "GET", originalUrl: "/api/data-sync-center?batchLimit=1" }), false);
+  assert.equal(shouldRecordApiUsage({ method: "HEAD", originalUrl: "/api/data-sync-center/anomaly-summary" }), false);
+  assert.equal(shouldRecordApiUsage({ method: "POST", originalUrl: "/api/data-sync-center/tasks/task-1/run" }), true);
 });

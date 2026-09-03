@@ -73,6 +73,7 @@ import {
 } from "./modules/products/index.js";
 import {
   createManualDataSyncBatch,
+  getDataSyncAnomalySummary,
   getDataSyncCenterOverview,
   resolveDataSyncException,
   setDataSyncTaskStatus,
@@ -324,7 +325,6 @@ import {
   evaluateProductHealth,
   getProductImprovementCenter,
   getProductV2Detail,
-  getProductV2Overview,
   productLifecycleStatuses,
   recordProductImprovementResult,
 } from "./productManagementV2Service.js";
@@ -345,9 +345,12 @@ import {
 import {
   createProductProfileForErpSku,
   getProductCenterV2Metadata,
+  getProductCenterV2OperatingSummary,
+  getProductCenterV2ProductSummary,
   getProductCenterV2SkuDetail,
   listActionProductOptions,
   listProductCenterV2Skus,
+  queryProductCenterV2Catalog,
   resolveActionProductOptions,
 } from "./productCenterV2Service.js";
 import { getSalesObjectComboSkuDetail, listSalesObjectComboSkus } from "./salesObjectComboSkuReadService.js";
@@ -726,6 +729,13 @@ function isAdminUser(user) {
   return user?.role === "admin" || user?.role === "system_admin" || user?.authRole === "admin";
 }
 
+// Data visibility is a permission scope, not an account role.  A non-admin
+// company-wide reader must see the same read model as any other account with
+// dataScope=all while still being blocked by every write permission guard.
+function canReadCompanyScope(user) {
+  return isAdminUser(user) || getDataScope(user) === "all";
+}
+
 function requireAdminUser(request, response, next) {
   if (isAdminUser(request.user)) { next(); return; }
   response.status(403).json({ success: false, message: "仅管理员可以执行旺店通货品同步。" });
@@ -751,7 +761,7 @@ function getUserPersonId(user) {
 function requireVisibleConnection(resolveConnectionId = (request) => request.params.id) {
   return (request, response, next) => {
     try {
-      assertConnectionVisible(resolveConnectionId(request), getUserPersonId(request.user), isAdminUser(request.user));
+      assertConnectionVisible(resolveConnectionId(request), getUserPersonId(request.user), canReadCompanyScope(request.user));
       next();
     } catch (error) {
       response.status(error.statusCode || 404).json({ success: false, message: error.message || "连接档案不存在。" });
@@ -2710,11 +2720,22 @@ app.get("/api/admin/api-usage", requirePermission("dataCenter.view"), requireAdm
   });
 });
 
-app.get("/api/data-sync-center", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+app.get("/api/data-sync-center", requirePermission("dataCenter.view"), (request, response) => {
   try {
-    response.json({ success: true, ...getDataSyncCenterOverview(request.query ?? {}) });
+    response.json({ success: true, ...getDataSyncCenterOverview({
+      ...(request.query ?? {}),
+      includeAdministrativeDetails: isAdminUser(request.user),
+    }) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "数据同步中心读取失败。" });
+  }
+});
+
+app.get("/api/data-sync-center/anomaly-summary", requirePermission("dataCenter.view"), (_request, response) => {
+  try {
+    response.json({ success: true, ...getDataSyncAnomalySummary() });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "数据同步异常摘要读取失败。" });
   }
 });
 
@@ -3059,12 +3080,13 @@ app.delete("/api/finance/rules/:id", requirePermission("finance.configureRules")
 
 app.get("/api/product-management/overview", requirePermission("products.view"), (request, response) => {
   try {
-    response.set("Deprecation", "true").set("Link", "</api/product-management/business-dashboard>; rel=successor-version");
-    const scoped = filterDataByScope(readAllData({ exclude: ["salesLinks", "salesLinkSkus"] }), request.user);
-    response.json({ success: true, overview: getProductV2Overview(), lifecycleStatuses: productLifecycleStatuses,
-      moduleData: { products: scoped.products ?? [], actionProducts: scoped.actionProducts ?? [], erpGoods: scoped.erpGoods ?? [],
-        productErpMappings: scoped.productErpMappings ?? [], salesShops: scoped.salesShops ?? [], salesShopAliases: scoped.salesShopAliases ?? [],
-        productImportBatches: scoped.productImportBatches ?? [], erpImportBatches: scoped.erpImportBatches ?? [] } });
+    response.set("Deprecation", "true").set("Link", "</api/product-center-v2/products>; rel=successor-version");
+    const catalog = queryProductCenterV2Catalog({ ...request.query, page: request.query.page || 1, pageSize: request.query.pageSize || 30 }, {
+      includeInventoryCost: hasPermission(request.user, "finance.view"),
+    });
+    response.json({ success: true, overview: { total: catalog.pagination.total, items: catalog.items,
+      pagination: catalog.pagination, summary: catalog.summary, migratedTo: "product-center-v2-products" },
+      lifecycleStatuses: productLifecycleStatuses });
   }
   catch (error) { response.status(400).json({ success: false, message: error.message || "产品经营概览读取失败。" }); }
 });
@@ -3084,6 +3106,31 @@ app.get("/api/product-center-v2/skus", requirePermission("skus.view"), (request,
 app.get("/api/product-center-v2/metadata", requirePermission("products.view"), (request, response) => {
   try { response.json({ success: true, ...getProductCenterV2Metadata() }); }
   catch (error) { response.status(400).json({ success: false, message: error.message || "ERP SKU筛选摘要读取失败。" }); }
+});
+
+app.get("/api/product-center-v2/products", requirePermission("products.view"), (request, response) => {
+  try {
+    const result = queryProductCenterV2Catalog(request.query, { includeInventoryCost: hasPermission(request.user, "finance.view") });
+    response.json({ success: true, ...result });
+  } catch (error) {
+    response.status(400).json({ success: false, message: error.message || "产品列表读取失败。" });
+  }
+});
+
+app.get("/api/product-center-v2/products/operating-summary", requirePermission("products.view"), (request, response) => {
+  try { response.json({ success: true, ...getProductCenterV2OperatingSummary(request.query) }); }
+  catch (error) { response.status(400).json({ success: false, message: error.message || "产品经营摘要读取失败。" }); }
+});
+
+app.get("/api/product-center-v2/products/:identifier", requirePermission("products.view"), (request, response) => {
+  try {
+    response.json({ success: true, ...getProductCenterV2ProductSummary(request.params.identifier, request.query, {
+      includeInventoryCost: hasPermission(request.user, "finance.view"),
+    }) });
+  } catch (error) {
+    response.status(error.code === "product_identifier_ambiguous" ? 409 : error.code === "product_not_found" ? 404 : 400)
+      .json({ success: false, code: error.code || "product_query_failed", message: error.message || "产品经营摘要读取失败。" });
+  }
 });
 
 app.get("/api/key-actions/product-options", requirePermission("keyActions.view"), (request, response) => {
@@ -3342,7 +3389,7 @@ app.post("/api/product-management/products/:id/strategy/next-steps/:itemId/actio
 app.get("/api/connections", requireLinkView, (request, response) => {
   try {
     const startedAt = performance.now();
-    const page = listConnectionCoreProfilesPage(request.query, getUserPersonId(request.user), isAdminUser(request.user));
+    const page = listConnectionCoreProfilesPage(request.query, getUserPersonId(request.user), canReadCompanyScope(request.user));
     response.set("Server-Timing", `connection-list;dur=${(performance.now() - startedAt).toFixed(1)}`);
     response.json({ success: true, ...page });
   } catch (error) {
@@ -3353,7 +3400,7 @@ app.get("/api/connections", requireLinkView, (request, response) => {
 app.get("/api/connection-assets", requireLinkView, (request, response) => {
   try {
     const startedAt = performance.now();
-    const page = listConnectionCoreProfilesPage(request.query, getUserPersonId(request.user), isAdminUser(request.user));
+    const page = listConnectionCoreProfilesPage(request.query, getUserPersonId(request.user), canReadCompanyScope(request.user));
     response.set("Server-Timing", `connection-list;dur=${(performance.now() - startedAt).toFixed(1)}`);
     response.json({ success: true, ...page });
   } catch (error) {
@@ -3409,7 +3456,7 @@ app.post("/api/connection-assets/owner-imports/:id/cancel", requireLinkManage, (
 });
 
 app.get("/api/connections/:id/core-detail", requireLinkView, requireConnectionAccess, (request, response) => {
-  try { response.json({ success: true, ...getConnectionCoreDetail(request.params.id, getUserPersonId(request.user), isAdminUser(request.user)) }); }
+  try { response.json({ success: true, ...getConnectionCoreDetail(request.params.id, getUserPersonId(request.user), canReadCompanyScope(request.user)) }); }
   catch (error) { response.status(error.message?.includes("只能查看") ? 403 : 404).json({ success: false, message: error.message || "链接经营详情读取失败。" }); }
 });
 
@@ -3417,7 +3464,7 @@ app.get("/api/connections/:id/business-positioning", requireLinkView, requireCon
   try {
     response.json({ success: true, ...readConnectionGoalFoundation(request.params.id, {
       userId: getUserPersonId(request.user),
-      isAdmin: isAdminUser(request.user),
+      isAdmin: canReadCompanyScope(request.user),
     }) });
   } catch (error) {
     response.status(error.statusCode || 400).json({ success: false, message: error.message || "链接经营定位读取失败。" });
@@ -3440,7 +3487,7 @@ app.get("/api/connections/:id/business-goals", requireLinkView, requireConnectio
   try {
     response.json({ success: true, ...readConnectionGoalPlans(request.params.id, {
       userId: getUserPersonId(request.user),
-      isAdmin: isAdminUser(request.user),
+      isAdmin: canReadCompanyScope(request.user),
     }) });
   } catch (error) {
     response.status(error.statusCode || 400).json({ success: false, message: error.message || "链接经营目标读取失败。" });
@@ -3488,7 +3535,7 @@ app.post("/api/connections/:id/business-goal-evaluation/refresh", requireLinkRat
 app.get("/api/connection-goal-workbench", requireLinkView, (request, response) => {
   try {
     response.json({ success: true, ...readConnectionGoalWorkbench(request.query, {
-      userId: getUserPersonId(request.user), isAdmin: isAdminUser(request.user),
+      userId: getUserPersonId(request.user), isAdmin: canReadCompanyScope(request.user),
     }) });
   } catch (error) {
     response.status(error.statusCode || 400).json({ success: false, message: error.message || "链接经营管理工作台读取失败。" });
@@ -3498,7 +3545,7 @@ app.get("/api/connection-goal-workbench", requireLinkView, (request, response) =
 app.get("/api/connection-goal-health-summary", requireLinkView, (request, response) => {
   try {
     response.json({ success: true, ...readConnectionGoalCockpitSummary(request.query, {
-      userId: getUserPersonId(request.user), isAdmin: isAdminUser(request.user),
+      userId: getUserPersonId(request.user), isAdmin: canReadCompanyScope(request.user),
     }) });
   } catch (error) {
     response.status(error.statusCode || 400).json({ success: false, message: error.message || "链接评级概览读取失败。" });
@@ -3537,7 +3584,7 @@ app.post("/api/connection-goal-workbench/confirm", requireLinkManage, (request, 
 
 app.get("/api/connection-goal-pilots", requireLinkView, (request, response) => {
   try { response.json({ success: true, ...readConnectionGoalPilotBatches(request.query, {
-    userId: getUserPersonId(request.user), isAdmin: isAdminUser(request.user),
+    userId: getUserPersonId(request.user), isAdmin: canReadCompanyScope(request.user),
   }) }); }
   catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "经营试点批次读取失败。" }); }
 });
@@ -3558,7 +3605,7 @@ app.patch("/api/connection-goal-pilots/:batchId", requireLinkManage, (request, r
 
 app.get("/api/connection-goal-pilots/:batchId/candidates", requireLinkView, (request, response) => {
   try { response.json({ success: true, ...readConnectionGoalPilotCandidates({ ...request.query, batchId: request.params.batchId }, {
-    userId: getUserPersonId(request.user), isAdmin: isAdminUser(request.user),
+    userId: getUserPersonId(request.user), isAdmin: canReadCompanyScope(request.user),
   }) }); }
   catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "试点候选链接读取失败。" }); }
 });
@@ -3572,7 +3619,7 @@ app.post("/api/connection-goal-pilots/:batchId/links", requireLinkManage, (reque
 
 app.get("/api/connection-goal-pilots/:batchId/links", requireLinkView, (request, response) => {
   try { response.json({ success: true, ...readConnectionGoalPilotMembers(request.params.batchId, request.query, {
-    userId: getUserPersonId(request.user), isAdmin: isAdminUser(request.user),
+    userId: getUserPersonId(request.user), isAdmin: canReadCompanyScope(request.user),
   }) }); }
   catch (error) { response.status(error.statusCode || 400).json({ success: false, message: error.message || "试点链接读取失败。" }); }
 });
@@ -3633,7 +3680,7 @@ app.get("/api/connections-workbench/mine", requireLinkView, (request, response) 
 
 app.get("/api/link-sales-ranking", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, ...getLinkSalesRanking(request.query, getUserPersonId(request.user), isAdminUser(request.user)) });
+    response.json({ success: true, ...getLinkSalesRanking(request.query, getUserPersonId(request.user), canReadCompanyScope(request.user)) });
   } catch (error) {
     response.status(error.statusCode || 400).json({ success: false, message: error.message || "链接销售额排行读取失败。" });
   }
@@ -3641,7 +3688,7 @@ app.get("/api/link-sales-ranking", requireLinkView, (request, response) => {
 
 app.get("/api/link-sales-distribution", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, ...getLinkSalesDistribution(request.query, getUserPersonId(request.user), isAdminUser(request.user)) });
+    response.json({ success: true, ...getLinkSalesDistribution(request.query, getUserPersonId(request.user), canReadCompanyScope(request.user)) });
   } catch (error) {
     response.status(error.statusCode || 400).json({ success: false, message: error.message || "链接销售额分布读取失败。" });
   }
@@ -3649,7 +3696,7 @@ app.get("/api/link-sales-distribution", requireLinkView, (request, response) => 
 
 app.get("/api/link-data-table", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, ...queryLinkDataTable(request.query, getUserPersonId(request.user), isAdminUser(request.user)) });
+    response.json({ success: true, ...queryLinkDataTable(request.query, getUserPersonId(request.user), canReadCompanyScope(request.user)) });
   } catch (error) {
     response.status(error.statusCode || 400).json({ success: false, message: error.message || "链接经营数据读取失败。" });
   }
@@ -3657,7 +3704,7 @@ app.get("/api/link-data-table", requireLinkView, (request, response) => {
 
 app.get("/api/link-business-table", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, ...queryLinkBusinessTable(request.query, getUserPersonId(request.user), isAdminUser(request.user)) });
+    response.json({ success: true, ...queryLinkBusinessTable(request.query, getUserPersonId(request.user), canReadCompanyScope(request.user)) });
   } catch (error) {
     response.status(error.statusCode || 400).json({ success: false, message: error.message || "链接经营分析读取失败。" });
   }
@@ -3665,7 +3712,7 @@ app.get("/api/link-business-table", requireLinkView, (request, response) => {
 
 app.get("/api/link-data-status", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, ...getLinkDataStatus({ includeDetails: isAdminUser(request.user), shopId: request.query.shopId || "" }) });
+    response.json({ success: true, ...getLinkDataStatus({ includeDetails: canReadCompanyScope(request.user), shopId: request.query.shopId || "" }) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "链接数据更新状态读取失败。" });
   }
@@ -3729,7 +3776,7 @@ app.get("/api/connections/:id/benchmarks", requireLinkView, requireConnectionAcc
 
 app.get("/api/connections/:id/benchmark-candidates", requireLinkView, requireConnectionAccess, (request, response) => {
   try {
-    response.json({ success: true, items: listConnectionBenchmarkCandidates(request.params.id, getUserPersonId(request.user), isAdminUser(request.user)) });
+    response.json({ success: true, items: listConnectionBenchmarkCandidates(request.params.id, getUserPersonId(request.user), canReadCompanyScope(request.user)) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "竞品候选读取失败。" });
   }
@@ -4188,7 +4235,7 @@ app.get("/api/connections/:id/growth-analysis", requireLinkView, requireConnecti
 
 app.get("/api/connection-growth-rankings", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, ...listConnectionGrowthRankings(request.query.sort, request.query.limit, getUserPersonId(request.user), isAdminUser(request.user)) });
+    response.json({ success: true, ...listConnectionGrowthRankings(request.query.sort, request.query.limit, getUserPersonId(request.user), canReadCompanyScope(request.user)) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "连接成长排行读取失败。" });
   }
@@ -4196,7 +4243,7 @@ app.get("/api/connection-growth-rankings", requireLinkView, (request, response) 
 
 app.get("/api/connection-management/overview", requireLinkView, (request, response) => {
   try {
-    response.json({ success: true, ...getConnectionManagementOverview(getUserPersonId(request.user), isAdminUser(request.user)) });
+    response.json({ success: true, ...getConnectionManagementOverview(getUserPersonId(request.user), canReadCompanyScope(request.user)) });
   } catch (error) {
     response.status(400).json({ success: false, message: error.message || "链接经营概览读取失败。" });
   }
@@ -4205,7 +4252,7 @@ app.get("/api/connection-management/overview", requireLinkView, (request, respon
 app.get("/api/connection-business-cockpit", requireLinkView, (request, response) => {
   try {
     const startedAt = performance.now();
-    const result = getConnectionBusinessCockpit(getUserPersonId(request.user), isAdminUser(request.user), request.query);
+    const result = getConnectionBusinessCockpit(getUserPersonId(request.user), canReadCompanyScope(request.user), request.query);
     const computedAt = performance.now();
     const payloadText = JSON.stringify({ success: true, ...result });
     const serializedAt = performance.now();

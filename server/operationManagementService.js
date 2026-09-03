@@ -39,10 +39,15 @@ function readProductDashboard(database) {
 
 function executionSummary(database) {
   const count = (table, condition = "1=1") => Number(database.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE ${condition}`).get().count || 0);
+  const taskColumns = new Set(database.prepare("PRAGMA table_info(tasks)").all().map((item) => item.name));
   return {
     activeGoals: count("goals", "status='active'"),
     runningActions: count("process_instances", "status='running'"),
-    importantTasks: count("tasks", "status IN ('todo','doing') AND importance IN ('high','important')"),
+    // importance was retired from the current task schema. Historical databases
+    // may still carry it, but a fresh database must not fail the read model.
+    importantTasks: taskColumns.has("importance")
+      ? count("tasks", "status IN ('todo','doing') AND importance IN ('high','important')")
+      : 0,
     doingTasks: count("tasks", "status='doing'"),
     overdueTasks: count("tasks", "status NOT IN ('done','canceled') AND dueDate IS NOT NULL AND dueDate < date('now','localtime')"),
   };

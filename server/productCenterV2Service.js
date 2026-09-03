@@ -259,12 +259,24 @@ export function listProductCenterV2Skus(options = {}) {
   const cached = productListPageCache.get(cacheKey);
   if (cached?.expiresAt > Date.now()) return cached.value;
   if (cached) productListPageCache.delete(cacheKey);
-  const database = getDatabase(); const limit = Math.min(200, Math.max(20, number(options.limit, 50))); const offset = Math.max(0, number(options.offset, 0));
+  const database = getDatabase();
+  const limit = Math.min(200, Math.max(1, number(options.pageSize ?? options.limit, 50)));
+  const page = Math.max(1, number(options.page, 1));
+  const offset = Math.max(0, options.offset === undefined ? (page - 1) * limit : number(options.offset, 0));
   const lifecycleReady = operatingLifecycleReady(database);
   const metadata = text(options.businessZone) && options.businessZone !== "all" ? productListMetadata(database) : null; const conditions = ["s.currentState='active'", wangdianOperatingSkuPredicate(database, "s")]; const params = {};
   if (lifecycleReady && !includeHistorical(options.includeHistorical)) conditions.push(currentProductOperatingSkuPredicate(database, "s", "om"));
   if (lifecycleReady && text(options.operatingLifecycleStatus)) { conditions.push("om.lifecycleStatus=@operatingLifecycleStatus"); params.operatingLifecycleStatus = text(options.operatingLifecycleStatus); }
   if (text(options.search)) { conditions.push("(s.merchantSkuCode LIKE @search OR COALESCE(s.specificationName,'') LIKE @search OR COALESCE(g.goodsName,'') LIKE @search OR COALESCE(g.goodsCode,'') LIKE @search OR COALESCE(profile.displayNameOverride,'') LIKE @search OR COALESCE(p.name,'') LIKE @search)"); params.search = `%${text(options.search)}%`; }
+  for (const [key, expression] of [
+    ["erpSkuId", "s.id"],
+    ["productId", "m.productId"],
+  ]) if (text(options[key])) { conditions.push(`${expression}=@${key}`); params[key] = text(options[key]); }
+  if (text(options.erpSkuCode)) { conditions.push("lower(s.merchantSkuCode)=lower(@erpSkuCode)"); params.erpSkuCode = text(options.erpSkuCode); }
+  if (text(options.productCode)) {
+    conditions.push("(lower(COALESCE(g.goodsCode,''))=lower(@productCode) OR lower(COALESCE(p.skuCode,''))=lower(@productCode))");
+    params.productCode = text(options.productCode);
+  }
   if (options.profileStatus === "profiled") conditions.push("profile.id IS NOT NULL");
   else if (options.profileStatus === "unprofiled") conditions.push("profile.id IS NULL");
   for (const [key, expression] of [["erpStatus", "s.erpStatus"], ["brand", "COALESCE(NULLIF(profile.brandOverride,''),NULLIF(p.brand,''),g.brand)"], ["category", "COALESCE(NULLIF(profile.categoryOverride,''),NULLIF(p.category,''),g.category)"], ["lifecycleStatus", "COALESCE(NULLIF(profile.lifecycle,''),p.status)"], ["ownerId", "COALESCE(profile.ownerId,p.ownerId)"]]) if (text(options[key])) { conditions.push(`${expression}=@${key}`); params[key] = text(options[key]); }
@@ -324,7 +336,132 @@ export function listProductCenterV2Skus(options = {}) {
       classificationStatus: usage.classificationStatus, confidence: usage.confidence, usageConflict: usage.usageConflict } : null }; });
   const profileCounts = database.prepare(`SELECT COUNT(*) total,SUM(profile.id IS NOT NULL) profiled,SUM(profile.id IS NULL) unprofiled ${from} WHERE s.currentState='active' AND ${wangdianOperatingSkuPredicate(database, "s")} ${lifecycleReady ? `AND ${currentProductOperatingSkuPredicate(database, "s", "om")}` : ""}`).get();
   const historical = lifecycleReady ? Number(database.prepare(`SELECT COUNT(*) total FROM operating_erp_set_members om JOIN erp_skus s ON s.id=om.erpSkuId WHERE om.erpSkuId IS NOT NULL AND om.lifecycleStatus IN ('archived','external_unused') AND NOT ${wangdianInSaleSkuPredicate(database, "s")} AND ${wangdianOperatingSkuPredicate(database, "s")}`).get()?.total || 0) : 0;
-  return rememberProductListPage(cacheKey, { rows: hydrated, pagination: { total, limit, offset }, summary: { total: Number(profileCounts.total || 0), profiled: Number(profileCounts.profiled || 0), unprofiled: Number(profileCounts.unprofiled || 0), historical, lifecycleReady } });
+  return rememberProductListPage(cacheKey, { rows: hydrated,
+    pagination: { page: Math.floor(offset / limit) + 1, pageSize: limit, total, totalPages: Math.max(1, Math.ceil(total / limit)), limit, offset },
+    summary: { total: Number(profileCounts.total || 0), profiled: Number(profileCounts.profiled || 0), unprofiled: Number(profileCounts.unprofiled || 0), historical, lifecycleReady } });
+}
+
+function compactProductCatalogRow(row, { includeInventoryCost = false } = {}) {
+  return {
+    id: row.erpSkuId,
+    erpSkuId: row.erpSkuId,
+    productId: row.productId || null,
+    erpSkuCode: row.merchantSkuCode,
+    productCode: row.goodsCode || null,
+    name: text(row.displayNameOverride) || text(row.productName) || text(row.goodsName) || text(row.specificationName) || row.merchantSkuCode,
+    specificationName: row.specificationName || null,
+    image: row.productImage || row.skuImage || null,
+    brand: row.displayBrand || null,
+    category: row.displayCategory || null,
+    ownerId: row.ownerId || null,
+    status: row.businessStatus || row.lifecycleStatus || row.erpStatus || row.currentState,
+    operatingLifecycleStatus: row.operatingLifecycleStatus || null,
+    profileStatus: row.profileStatus,
+    relations: { linkCount: Number(row.linkCount || 0), platformSkuCount: Number(row.platformSkuCount || 0), platforms: row.platforms || [] },
+    operating: {
+      salesQuantity: Number(row.quantity || 0),
+      salesAmount: Number(row.salesAmount || 0),
+      profitAmount: Number(row.profitAmount || 0),
+      inventoryDate: row.inventoryDate || null,
+      stockQuantity: row.stockNum === null || row.stockNum === undefined ? null : Number(row.stockNum),
+      availableStock: row.availableSendStock === null || row.availableSendStock === undefined ? null : Number(row.availableSendStock),
+      inventoryCostAmount: includeInventoryCost && row.inventoryCostAmount !== null && row.inventoryCostAmount !== undefined ? Number(row.inventoryCostAmount) : null,
+    },
+    updatedAt: row.skuUpdatedAt,
+  };
+}
+
+export function queryProductCenterV2Catalog(options = {}, context = {}) {
+  const result = listProductCenterV2Skus(options);
+  return {
+    capability: "QueryProductOperatingCatalog",
+    contractVersion: "1.0",
+    readOnly: true,
+    items: result.rows.map((row) => compactProductCatalogRow(row, context)),
+    pagination: result.pagination,
+    summary: result.summary,
+  };
+}
+
+export function resolveProductCenterV2Identifier(identifier, options = {}) {
+  const database = options.database || getDatabase();
+  const requested = text(identifier);
+  const by = text(options.by) || "auto";
+  if (!requested) throw Object.assign(new Error("产品查询标识不能为空。"), { code: "product_identifier_required" });
+  const predicates = {
+    erpSkuId: "s.id=@identifier",
+    productId: "m.productId=@identifier",
+    erpSkuCode: "lower(s.merchantSkuCode)=lower(@identifier)",
+    productCode: "lower(COALESCE(g.goodsCode,''))=lower(@identifier) OR lower(COALESCE(p.skuCode,''))=lower(@identifier)",
+    auto: "s.id=@identifier OR m.productId=@identifier OR lower(s.merchantSkuCode)=lower(@identifier) OR lower(COALESCE(g.goodsCode,''))=lower(@identifier) OR lower(COALESCE(p.skuCode,''))=lower(@identifier)",
+  };
+  if (!predicates[by]) throw Object.assign(new Error("产品查询标识类型无效。"), { code: "product_identifier_type_invalid" });
+  const rows = database.prepare(`SELECT DISTINCT s.id erpSkuId,m.productId,s.merchantSkuCode,g.goodsCode,p.skuCode productProfileCode
+    FROM erp_skus s JOIN erp_goods g ON g.id=s.erpGoodsId
+    LEFT JOIN product_erp_mappings m ON m.erpSkuId=s.id AND m.currentState='active'
+    LEFT JOIN products p ON p.id=m.productId
+    WHERE ${predicates[by]} ORDER BY CASE WHEN s.id=@identifier THEN 0 WHEN m.productId=@identifier THEN 1 ELSE 2 END,s.id LIMIT 3`).all({ identifier: requested });
+  if (!rows.length) throw Object.assign(new Error("产品不存在。"), { code: "product_not_found" });
+  if (rows.length > 1) throw Object.assign(new Error("产品标识匹配到多个ERP SKU，请指定标识类型。"), { code: "product_identifier_ambiguous" });
+  return rows[0];
+}
+
+export function getProductCenterV2OperatingSummary(options = {}) {
+  const database = options.database || getDatabase();
+  const days = Math.min(366, Math.max(1, number(options.days, 30)));
+  const dataDate = database.prepare("SELECT MAX(saleDate) value FROM connection_sku_sales_daily_facts").get()?.value || null;
+  const periodStart = dataDate ? database.prepare("SELECT date(?, ?) value").get(dataDate, `-${days - 1} days`)?.value : null;
+  const row = database.prepare(`WITH current_skus AS (
+      SELECT DISTINCT s.id FROM erp_skus s
+      LEFT JOIN operating_erp_set_members om ON om.erpSkuId=s.id
+      WHERE s.currentState='active' AND ${wangdianOperatingSkuPredicate(database, "s")}
+        ${operatingLifecycleReady(database) ? `AND ${currentProductOperatingSkuPredicate(database, "s", "om")}` : ""}
+    ), sales AS (
+      SELECT f.erpSkuId,SUM(COALESCE(f.quantity,0)) quantity,SUM(COALESCE(f.salesAmount,0)) salesAmount,SUM(COALESCE(f.profitAmount,0)) profitAmount
+      FROM connection_sku_sales_daily_facts f JOIN current_skus c ON c.id=f.erpSkuId
+      WHERE @periodStart IS NOT NULL AND f.saleDate BETWEEN @periodStart AND @dataDate GROUP BY f.erpSkuId
+    ) SELECT COUNT(*) productCount,
+      SUM(CASE WHEN profile.id IS NOT NULL THEN 1 ELSE 0 END) profiledCount,
+      SUM(CASE WHEN profile.id IS NULL THEN 1 ELSE 0 END) masterDataIncompleteCount,
+      COALESCE(SUM(sales.quantity),0) salesQuantity,COALESCE(SUM(sales.salesAmount),0) salesAmount,COALESCE(SUM(sales.profitAmount),0) profitAmount,
+      COALESCE(SUM((SELECT inventory.stockNum FROM erp_sku_inventory_daily_summaries inventory WHERE inventory.erpSkuId=s.id ORDER BY inventory.businessDate DESC,inventory.updatedAt DESC LIMIT 1)),0) stockQuantity
+    FROM current_skus c JOIN erp_skus s ON s.id=c.id
+    LEFT JOIN product_business_profiles profile ON profile.erpSkuId=s.id LEFT JOIN sales ON sales.erpSkuId=s.id`).get({ periodStart, dataDate });
+  return {
+    capability: "ProductOperatingSummary",
+    contractVersion: "1.0",
+    readOnly: true,
+    period: { days, startDate: periodStart, endDate: dataDate },
+    summary: {
+      productCount: Number(row?.productCount || 0), profiledCount: Number(row?.profiledCount || 0),
+      masterDataIncompleteCount: Number(row?.masterDataIncompleteCount || 0),
+      salesQuantity: Number(row?.salesQuantity || 0), salesAmount: Number(row?.salesAmount || 0),
+      profitAmount: Number(row?.profitAmount || 0), stockQuantity: Number(row?.stockQuantity || 0),
+    },
+  };
+}
+
+export function getProductCenterV2ProductSummary(identifier, options = {}, context = {}) {
+  const identity = resolveProductCenterV2Identifier(identifier, options);
+  const catalog = queryProductCenterV2Catalog({ erpSkuId: identity.erpSkuId, includeHistorical: true, page: 1, pageSize: 1 }, context);
+  const item = catalog.items[0];
+  if (!item) throw Object.assign(new Error("产品不存在或已退出可读产品范围。"), { code: "product_not_found" });
+  const database = options.database || getDatabase();
+  const dataDate = database.prepare("SELECT MAX(saleDate) value FROM connection_sku_sales_daily_facts WHERE erpSkuId=?").get(identity.erpSkuId)?.value || null;
+  const periodStart = dataDate ? database.prepare("SELECT date(?, '-29 days') value").get(dataDate)?.value : null;
+  const operating = database.prepare(`SELECT COUNT(*) factCount,SUM(COALESCE(quantity,0)) salesQuantity,
+      SUM(COALESCE(salesAmount,0)) salesAmount,SUM(COALESCE(profitAmount,0)) profitAmount
+    FROM connection_sku_sales_daily_facts WHERE erpSkuId=@erpSkuId
+      AND @periodStart IS NOT NULL AND saleDate BETWEEN @periodStart AND @dataDate`).get({ erpSkuId: identity.erpSkuId, periodStart, dataDate });
+  return {
+    capability: "ReadProductOperatingSummary",
+    contractVersion: "1.0",
+    readOnly: true,
+    item: { ...item, operating: { ...item.operating,
+      period: { startDate: periodStart, endDate: dataDate }, factCount: Number(operating?.factCount || 0),
+      salesQuantity: Number(operating?.salesQuantity || 0), salesAmount: Number(operating?.salesAmount || 0),
+      profitAmount: Number(operating?.profitAmount || 0) } },
+  };
 }
 
 export function getProductCenterV2SkuDetail(erpSkuId, { scope = "full" } = {}) {

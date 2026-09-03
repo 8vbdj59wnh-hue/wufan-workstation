@@ -42,8 +42,145 @@ function decodeBatch(row) {
   return row ? { ...row, scope: parseJson(row.scopeJson), progress: parseJson(row.progressJson), totalCount: Number(row.totalCount || 0), createdCount: Number(row.createdCount || 0), updatedCount: Number(row.updatedCount || 0), invalidatedCount: Number(row.invalidatedCount || 0), exceptionCount: Number(row.exceptionCount || 0) } : null;
 }
 
-export function getDataSyncCenterOverview({ batchLimit = 50, exceptionLimit = 50 } = {}) {
+export function getDataSyncAnomalySummary({ database = getDatabase() } = {}) {
+  const exceptionCounts = database.prepare(`SELECT
+      COUNT(*) recordCount,
+      COUNT(DISTINCT COALESCE(NULLIF(entityType,''),'unknown') || ':' || COALESCE(NULLIF(entityId,''),id)) businessObjectCount
+    FROM data_sync_exceptions WHERE status='open'`).get();
+  const exceptionTypes = database.prepare(`SELECT exceptionType,COUNT(*) recordCount,
+      COUNT(DISTINCT COALESCE(NULLIF(entityType,''),'unknown') || ':' || COALESCE(NULLIF(entityId,''),id)) businessObjectCount
+    FROM data_sync_exceptions WHERE status='open'
+    GROUP BY exceptionType ORDER BY recordCount DESC,exceptionType`).all();
+  const relationFacts = database.prepare(`WITH relation_status AS (
+      SELECT linkSkuId,
+        MAX(CASE WHEN status='active' THEN 1 ELSE 0 END) hasActive,
+        MAX(CASE WHEN status='conflict' THEN 1 ELSE 0 END) hasConflict
+      FROM sales_link_sku_sales_object_relations
+      WHERE status IN ('active','conflict')
+      GROUP BY linkSkuId
+    ) SELECT
+      SUM(CASE WHEN l.currentState='active' AND COALESCE(s.currentState,'active')='active'
+        AND s.matchStatus='not_applicable' THEN 1 ELSE 0 END) notApplicable,
+      SUM(CASE WHEN l.currentState='active' AND COALESCE(s.currentState,'active')='active'
+        AND COALESCE(s.matchStatus,'pending')<>'not_applicable'
+        AND COALESCE(r.hasActive,0)=0 AND COALESCE(r.hasConflict,0)=0 THEN 1 ELSE 0 END) masterDataIncomplete,
+      SUM(CASE WHEN l.currentState='active' AND COALESCE(s.currentState,'active')='active'
+        AND (COALESCE(s.matchStatus,'') IN ('conflict','relation_conflict')
+          OR COALESCE(r.hasConflict,0)=1) THEN 1 ELSE 0 END) relationConflict,
+      SUM(CASE WHEN l.currentState<>'active' OR COALESCE(s.currentState,'active')<>'active' THEN 1 ELSE 0 END) legacyHistorical
+    FROM sales_link_skus s JOIN sales_links l ON l.id=s.salesLinkId
+    LEFT JOIN relation_status r ON r.linkSkuId=s.id`).get();
+  const classification = (code, label, businessObjectCount, isAnomaly) => ({
+    code,
+    label,
+    recordCount: Number(businessObjectCount || 0),
+    businessObjectCount: Number(businessObjectCount || 0),
+    isAnomaly,
+  });
+  return {
+    capability: "DataSyncAnomalySummary",
+    contractVersion: "1.0",
+    readOnly: true,
+    openExceptions: {
+      recordCount: Number(exceptionCounts?.recordCount || 0),
+      businessObjectCount: Number(exceptionCounts?.businessObjectCount || 0),
+      byType: exceptionTypes.map((item) => ({ ...item,
+        recordCount: Number(item.recordCount || 0), businessObjectCount: Number(item.businessObjectCount || 0) })),
+    },
+    classifications: {
+      notApplicable: classification("not_applicable", "正常无需ERP关系", relationFacts?.notApplicable, false),
+      masterDataIncomplete: classification("master_data_incomplete", "当前主数据待完善", relationFacts?.masterDataIncomplete, true),
+      relationConflict: classification("relation_conflict", "当前真实关系冲突", relationFacts?.relationConflict, true),
+      legacyHistoricalAsset: classification("legacy_historical_asset", "Legacy历史资产", relationFacts?.legacyHistorical, false),
+    },
+    definitions: {
+      recordCount: "异常记录行数；同一业务对象可能出现多条记录。",
+      businessObjectCount: "按业务对象类型和对象ID去重后的数量。",
+      masterDataIncomplete: "当前经营Link SKU尚无已生效正式关系；不等同于新旧关系冲突。",
+      relationConflict: "当前经营Link SKU存在显式冲突关系或冲突状态。",
+      legacyHistoricalAsset: "已退出当前经营范围的历史Link SKU资产，不计为当前关系冲突。",
+    },
+  };
+}
+
+function getDataSyncReadStatus(database, batches, salesDailyBatches, counts) {
+  const latest = batches[0] || null;
+  const latestResult = database.prepare(`SELECT b.id,b.status,b.completedAt,b.startedAt,b.createdAt,b.totalCount,b.createdCount,b.updatedCount,b.invalidatedCount,b.exceptionCount,t.taskCode,t.name taskName
+    FROM data_sync_batches b JOIN data_sync_tasks t ON t.id=b.taskId
+    WHERE b.status IN ('succeeded','partial','failed','interrupted')
+    ORDER BY COALESCE(b.completedAt,b.startedAt,b.createdAt) DESC,b.id DESC LIMIT 1`).get() || null;
+  const latestSuccessfulAt = database.prepare(`SELECT COALESCE(completedAt,startedAt,createdAt) value
+    FROM data_sync_batches WHERE status IN ('succeeded','partial')
+    ORDER BY COALESCE(completedAt,startedAt,createdAt) DESC,id DESC LIMIT 1`).get()?.value || null;
+  const salesDataDate = database.prepare("SELECT MAX(saleDate) value FROM connection_sku_sales_daily_facts").get()?.value || null;
+  return {
+    capability: "DataSyncReadStatus",
+    contractVersion: "1.0",
+    readOnly: true,
+    latestSyncStatus: latest?.status || null,
+    latestSyncTime: latest ? (latest.completedAt || latest.startedAt || latest.createdAt || null) : null,
+    dataUpdatedAt: latestSuccessfulAt,
+    salesDataDate,
+    latestResult: latestResult ? {
+      id: latestResult.id, taskCode: latestResult.taskCode, taskName: latestResult.taskName,
+      status: latestResult.status, totalCount: Number(latestResult.totalCount || 0),
+      createdCount: Number(latestResult.createdCount || 0), updatedCount: Number(latestResult.updatedCount || 0),
+      invalidatedCount: Number(latestResult.invalidatedCount || 0), exceptionCount: Number(latestResult.exceptionCount || 0),
+    } : null,
+    latestSalesDailyResult: salesDailyBatches[0] || null,
+    currentCounts: { ...counts },
+  };
+}
+
+function getLatestSalesDailyReadResult(database) {
+  const row = database.prepare(`SELECT id,fileName,status,periodStart,periodEnd,totalRows,matchedRows,pendingRows,errorRows,
+      createdAt,updatedAt,completedAt,previewSummaryJson
+    FROM connection_import_batches WHERE importType='erp_sales_daily_preview'
+    ORDER BY createdAt DESC,id DESC LIMIT 1`).get();
+  if (!row) return null;
+  const factCommit = parseJson(row.previewSummaryJson).factCommit || null;
+  return {
+    id: row.id,
+    fileName: row.fileName,
+    status: row.status,
+    periodStart: row.periodStart,
+    periodEnd: row.periodEnd,
+    totalCount: Number(row.totalRows || 0),
+    successfulCount: factCommit
+      ? Number(factCommit.insertedCount || 0) + Number(factCommit.skippedCount || 0)
+      : Number(row.matchedRows || 0),
+    exceptionCount: Number(row.pendingRows || 0) + Number(row.errorRows || 0),
+    governanceCount: Number(row.pendingRows || 0),
+    insertedCount: Number(factCommit?.insertedCount || 0),
+    skippedCount: Number(factCommit?.skippedCount || 0),
+    updatePendingCount: Number(factCommit?.updatePendingCount || 0),
+    syncedAt: row.completedAt || row.updatedAt || row.createdAt,
+    createdAt: row.createdAt,
+  };
+}
+
+export function getDataSyncCenterOverview({ batchLimit = 50, exceptionLimit = 50, includeAdministrativeDetails = true } = {}) {
   const db = getDatabase();
+  const counts = db.prepare(`SELECT
+    (SELECT COUNT(*) FROM data_sync_tasks) taskCount,
+    (SELECT COUNT(*) FROM data_sync_tasks WHERE status='enabled') enabledTaskCount,
+    (SELECT COUNT(*) FROM data_sync_batches WHERE status IN ('queued','running','preview_ready','interrupted')) activeBatchCount,
+    (SELECT COUNT(*) FROM data_sync_exceptions WHERE status='open') openExceptionCount
+  `).get();
+  if (!includeAdministrativeDetails) {
+    const latestBatchRow = db.prepare(`SELECT b.*,t.name taskName,t.syncType,t.taskCode
+      FROM data_sync_batches b JOIN data_sync_tasks t ON t.id=b.taskId
+      ORDER BY b.createdAt DESC LIMIT 1`).get();
+    const latestSalesDailyResult = getLatestSalesDailyReadResult(db);
+    const anomalySummary = getDataSyncAnomalySummary({ database: db });
+    return {
+      capability: "DataSyncCenterOverview",
+      contractVersion: "2.0",
+      readOnly: true,
+      readStatus: getDataSyncReadStatus(db, latestBatchRow ? [decodeBatch(latestBatchRow)] : [], latestSalesDailyResult ? [latestSalesDailyResult] : [], counts),
+      anomalySummary,
+    };
+  }
   const tasks = db.prepare("SELECT * FROM data_sync_tasks ORDER BY transportType, name").all().map(decodeTask);
   const batches = db.prepare("SELECT b.*,t.name taskName,t.syncType,t.taskCode FROM data_sync_batches b JOIN data_sync_tasks t ON t.id=b.taskId ORDER BY b.createdAt DESC LIMIT ?").all(Math.min(200, Math.max(1, Number(batchLimit) || 50))).map(decodeBatch);
   const exceptions = db.prepare("SELECT e.*,t.name taskName FROM data_sync_exceptions e JOIN data_sync_tasks t ON t.id=e.taskId ORDER BY CASE e.status WHEN 'open' THEN 0 ELSE 1 END,e.createdAt DESC LIMIT ?").all(Math.min(200, Math.max(1, Number(exceptionLimit) || 50))).map((row) => ({ ...row, rawData: parseJson(row.rawDataJson) }));
@@ -86,13 +223,12 @@ export function getDataSyncCenterOverview({ batchLimit = 50, exceptionLimit = 50
   const salesShops = db.prepare("SELECT id,platform,shopName,displayName,status FROM sales_shops WHERE status='active' ORDER BY platform,displayName").all();
   const wangdianShopMappings = db.prepare(`SELECT m.*,s.platform,s.shopName,s.displayName FROM wangdian_shop_mappings m JOIN sales_shops s ON s.id=m.shopId ORDER BY m.wangdianShopNo`).all();
   const latestShopDiscoveryBatch = db.prepare(`SELECT id,status,targetShopId,currentPage,totalPages,totalRows,readRows,errorMessage,createdAt,updatedAt FROM wangdian_shop_discovery_batches ORDER BY createdAt DESC LIMIT 1`).get() ?? null;
-  const counts = db.prepare(`SELECT
-    (SELECT COUNT(*) FROM data_sync_tasks) taskCount,
-    (SELECT COUNT(*) FROM data_sync_tasks WHERE status='enabled') enabledTaskCount,
-    (SELECT COUNT(*) FROM data_sync_batches WHERE status IN ('queued','running','preview_ready','interrupted')) activeBatchCount,
-    (SELECT COUNT(*) FROM data_sync_exceptions WHERE status='open') openExceptionCount
-  `).get();
-  return { tasks, batches, exceptions, salesDailyBatches, latestSalesDailyBatch: salesDailyBatches[0] || null, legacy, counts, salesShops, wangdianShopMappings, latestShopDiscoveryBatch };
+  const anomalySummary = getDataSyncAnomalySummary({ database: db });
+  const readModel = { capability: "DataSyncCenterOverview", contractVersion: "2.0", readOnly: true,
+    readStatus: getDataSyncReadStatus(db, batches, salesDailyBatches, counts), anomalySummary };
+  return { ...readModel,
+    tasks, batches, exceptions, salesDailyBatches, latestSalesDailyBatch: salesDailyBatches[0] || null,
+    legacy, counts, salesShops, wangdianShopMappings, latestShopDiscoveryBatch };
 }
 
 export function setDataSyncTaskStatus(taskId, status) {

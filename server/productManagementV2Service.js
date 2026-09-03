@@ -115,16 +115,16 @@ export function getProductV2Detail(productId, options = {}) {
   return { product, analysis, lifecycle, healthRecords, issues, improvements };
 }
 
-export function getProductV2Overview() {
-  const readModel = getProductBusinessReadModel({ range: "30d", page: 1 }, { includeInventoryCost: false, unpaged: true });
+export function getProductV2Overview({ page = 1, pageSize = 30 } = {}) {
+  const readModel = getProductBusinessReadModel({ range: "30d", page, pageSize }, { includeInventoryCost: false });
   const items = readModel.items.map((item) => ({ ...item, skuCode: item.sku, mainImage: item.image,
     analysis: analysisFromReadModelItem(item, readModel.period), healthScore: item.health.score, healthStatus: item.healthAnalysis.overall.code }));
   const lifecycle = Object.fromEntries(productLifecycleStatuses.map((status) => [status, items.filter((item) => item.status === status).length]));
   lifecycle["待归类"] = items.filter((item) => !productLifecycleStatuses.includes(item.status)).length;
-  return { total: items.length, lifecycle, businessZones: {}, businessZoneRules: null,
+  return { total: readModel.pagination.total, lifecycle, businessZones: {}, businessZoneRules: null,
     growth: items.filter((item) => item.healthStatus === "growth").sort((a,b) => (b.healthScore ?? -1)-(a.healthScore ?? -1)).slice(0,10),
     risks: items.filter((item) => ["attention","risk"].includes(item.healthStatus)).sort((a,b) => (a.healthScore ?? 101)-(b.healthScore ?? 101)).slice(0,10), items,
-    migratedTo: "product-business-dashboard", definitions: readModel.definitions };
+    pagination: readModel.pagination, migratedTo: "product-business-dashboard", definitions: readModel.definitions };
 }
 
 export function changeProductLifecycle(productId, input, userId) {

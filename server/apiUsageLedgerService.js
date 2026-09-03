@@ -57,6 +57,10 @@ export function resolveApiUsageSource(request) {
 export function shouldRecordApiUsage(request) {
   const route = String(request?.originalUrl ?? request?.path ?? "").split("?")[0];
   if (["/api/health", "/api/release-maintenance/status"].includes(route)) return false;
+  // The data-sync status surface is a strict read model. Even technical usage
+  // accounting would turn its GET into a database write and violate that API's
+  // no-side-effect contract. Mutating data-sync actions remain recorded.
+  if (["GET", "HEAD"].includes(String(request?.method ?? "GET").toUpperCase()) && route.startsWith("/api/data-sync-center")) return false;
   return true;
 }
 
