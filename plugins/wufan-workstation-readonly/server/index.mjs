@@ -5,8 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const SERVER_NAME = "wufan-workstation-readonly";
-const SERVER_VERSION = "1.0.0";
+const SERVER_NAME = "wufan-workstation-assistant";
+const SERVER_VERSION = "2.0.0";
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_PAGE_SIZE = 100;
@@ -29,12 +29,45 @@ const readAnnotations = Object.freeze({
   openWorldHint: false,
   idempotentHint: true,
 });
+const launchAnnotations = Object.freeze({
+  readOnlyHint: false,
+  destructiveHint: false,
+  openWorldHint: false,
+  idempotentHint: false,
+});
 
-function tool(name, title, description, inputSchema, request) {
+function tool(name, title, description, inputSchema, request, annotations = readAnnotations) {
   return Object.freeze({
-    definition: Object.freeze({ name, title, description, inputSchema, annotations: readAnnotations }),
+    definition: Object.freeze({ name, title, description, inputSchema, annotations }),
     request,
   });
+}
+
+const keyActionLaunchProperties = {
+  goalId: textProperty("所属目标ID", 120),
+  taskTemplateId: textProperty("启用的关键行动标准ID", 120),
+  title: textProperty("本次关键行动标题", 240),
+  description: textProperty("行动内容", 2000),
+  dueDate: textProperty("截止时间，使用YYYY-MM-DD或ISO日期时间", 40),
+  responsiblePersonId: textProperty("负责人ID；仅用于标准中需要发起时指定负责人的步骤", 120),
+  customFields: { type: "object", description: "行动标准正式表单字段，键名必须来自可发起行动标准或预览结果", additionalProperties: true },
+  productIds: { type: "array", items: textProperty("产品ID", 120), maxItems: 100 },
+};
+
+function keyActionBody(args, includeConfirmation = false) {
+  const body = {
+    goalId: cleanText(args.goalId, "goalId", { required: true, maxLength: 120 }),
+    taskTemplateId: cleanText(args.taskTemplateId, "taskTemplateId", { required: true, maxLength: 120 }),
+    title: cleanText(args.title, "title", { required: true, maxLength: 240 }),
+    description: cleanText(args.description, "description", { required: true, maxLength: 2000 }),
+    dueDate: cleanText(args.dueDate, "dueDate", { required: true, maxLength: 40 }),
+    responsiblePersonId: cleanText(args.responsiblePersonId, "responsiblePersonId", { maxLength: 120 }),
+    customFields: args.customFields ?? {},
+    productIds: Array.isArray(args.productIds) ? [...new Set(args.productIds.map((value) => cleanText(value, "productId", { required: true, maxLength: 120 })))] : [],
+  };
+  if (!body.customFields || typeof body.customFields !== "object" || Array.isArray(body.customFields)) throw new Error("customFields必须是对象。");
+  if (includeConfirmation) body.confirmationToken = cleanText(args.confirmationToken, "confirmationToken", { required: true, maxLength: 4096 });
+  return body;
 }
 
 function clampInteger(value, fallback, minimum = 1, maximum = Number.MAX_SAFE_INTEGER) {
@@ -99,6 +132,9 @@ const TOOL_SPECS = [
   tool("get_goal_center", "读取目标中心", "读取当前账号数据范围内的目标中心正式数据。", objectSchema(), () => ({ path: "/api/goal-center/bootstrap" })),
   tool("get_goal_detail", "读取目标详情", "按目标ID读取正式目标详情。", objectSchema({ goalId: textProperty("目标ID", 100) }, ["goalId"]), (args) => ({ path: `/api/goal-center/goals/${encodeURIComponent(cleanText(args.goalId, "goalId", { required: true, maxLength: 100 }))}/detail` })),
   tool("list_key_actions", "查询关键行动", "分页、搜索当前账号可见的关键行动。", objectSchema({ ...pageProperties, keyword: textProperty("关键字", 200) }), (args) => ({ path: queryPath("/api/schedule-board/page", { ...pageArgs(args), keyword: cleanText(args.keyword, "keyword") }) })),
+  tool("list_launchable_action_standards", "查询可发起行动标准", "分页查询当前账号被授权发起的行动标准及其正式表单字段。", objectSchema({ ...pageProperties, keyword: textProperty("行动标准名称或编码", 200) }), (args) => ({ path: queryPath("/api/key-actions/launch-options", { ...pageArgs(args), keyword: cleanText(args.keyword, "keyword") }) })),
+  tool("preview_key_action_launch", "预览关键行动发起", "校验目标、行动标准、必填字段、负责人、截止时间和重复行动；不写入业务数据。返回的确认凭证仅在内容不变时有效15分钟。", objectSchema(keyActionLaunchProperties, ["goalId", "taskTemplateId", "title", "description", "dueDate"]), (args) => ({ method: "POST", path: "/api/key-actions/launch-preview", body: keyActionBody(args) })),
+  tool("launch_key_action", "确认发起关键行动", "仅在用户已经查看预览并明确同意后调用。使用预览返回的确认凭证提交完全相同的内容。", objectSchema({ ...keyActionLaunchProperties, confirmationToken: textProperty("预览返回的短时确认凭证", 4096) }, ["goalId", "taskTemplateId", "title", "description", "dueDate", "confirmationToken"]), (args) => ({ method: "POST", path: "/api/key-actions/launch", body: keyActionBody(args, true) }), launchAnnotations),
   tool("list_tasks", "查询任务", "分页查询今天、我的、逾期或全部任务。", objectSchema({
     ...pageProperties,
     view: { type: "string", enum: ["today", "mine", "overdue", "all"], default: "today" },
@@ -291,10 +327,12 @@ async function refreshAccessToken(settings, fetchImpl) {
   return activeRefresh;
 }
 
-async function requestRead(url, settings, token, fetchImpl, signal) {
+async function requestApi(url, request, settings, token, fetchImpl, signal) {
+  const method = request.method ?? "GET";
   return fetchImpl(url, {
-    method: "GET",
-    headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+    method,
+    headers: { Accept: "application/json", Authorization: `Bearer ${token}`, ...(method === "POST" ? { "Content-Type": "application/json" } : {}) },
+    ...(method === "POST" ? { body: JSON.stringify(request.body ?? {}) } : {}),
     redirect: "error",
     signal,
   });
@@ -302,10 +340,11 @@ async function requestRead(url, settings, token, fetchImpl, signal) {
 
 export async function executeTool(name, args = {}, options = {}) {
   const spec = TOOL_BY_NAME.get(name);
-  if (!spec) throw new Error(`未知只读工具：${cleanText(name, "name", { maxLength: 100 })}`);
+  if (!spec) throw new Error(`未知工作站工具：${cleanText(name, "name", { maxLength: 100 })}`);
   if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("工具参数必须是对象。");
   const request = spec.request(args);
-  if (!request || typeof request.path !== "string" || !request.path.startsWith("/api/")) throw new Error("内部只读路由配置无效。");
+  if (!request || typeof request.path !== "string" || !request.path.startsWith("/api/")) throw new Error("内部路由配置无效。");
+  if (!new Set(["GET", "POST"]).has(request.method ?? "GET")) throw new Error("内部请求方法无效。");
   const settings = options.settings || loadSettings();
   const url = new URL(request.path.replace(/^\/+/, ""), settings.baseUrl);
   const fetchImpl = options.fetchImpl || fetch;
@@ -314,11 +353,11 @@ export async function executeTool(name, args = {}, options = {}) {
   try {
     let token = settings.token;
     if (settings.refreshToken && tokenExpiresSoon(token)) token = await refreshAccessToken(settings, fetchImpl);
-    let response = await requestRead(url, settings, token, fetchImpl, controller.signal);
+    let response = await requestApi(url, request, settings, token, fetchImpl, controller.signal);
     if (response.status === 401 && settings.refreshToken) {
       try { await response.body?.cancel(); } catch {}
       token = await refreshAccessToken(settings, fetchImpl);
-      response = await requestRead(url, settings, token, fetchImpl, controller.signal);
+      response = await requestApi(url, request, settings, token, fetchImpl, controller.signal);
     }
     const raw = await readLimitedBody(response, settings.maxResponseBytes);
     let payload = {};
@@ -333,7 +372,7 @@ export async function executeTool(name, args = {}, options = {}) {
     if (!payload || typeof payload !== "object") return { value: payload };
     return payload;
   } catch (error) {
-    if (error?.name === "AbortError") throw new Error("工作站只读请求超时。");
+    if (error?.name === "AbortError") throw new Error("工作站请求超时。");
     throw new Error(redact(error?.message || error, [settings.token, settings.refreshToken]));
   } finally {
     clearTimeout(timer);
@@ -342,13 +381,13 @@ export async function executeTool(name, args = {}, options = {}) {
 
 function toolResult(name, payload) {
   return {
-    content: [{ type: "text", text: `${name}读取成功。` }],
+    content: [{ type: "text", text: `${name}执行成功。` }],
     structuredContent: payload,
   };
 }
 
 function errorToolResult(error) {
-  return { isError: true, content: [{ type: "text", text: error?.message || "工作站只读查询失败。" }] };
+  return { isError: true, content: [{ type: "text", text: error?.message || "工作站请求失败。" }] };
 }
 
 async function handleRequest(message) {
@@ -358,7 +397,7 @@ async function handleRequest(message) {
       protocolVersion: String(message.params?.protocolVersion || "2025-06-18"),
       capabilities: { tools: { listChanged: false } },
       serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
-      instructions: "极简工作站正式只读数据源。只能调用本服务器列出的查询工具；不得尝试写入、同步、审批、导入、删除、权限管理、数据库或服务器文件访问。列表先分页再按ID读取详情。异常分类必须保持正式口径：not_applicable是正常无需关系，masterDataIncomplete是当前主数据待完善，relationConflict才是真实关系冲突，legacyAssets是历史资产。",
+      instructions: "极简工作站正式受控助手。除发起关键行动外保持只读：先查重并调用预览工具，把完整预览展示给用户；只有用户在当前对话明确确认后，才可使用预览返回的短时凭证调用确认发起工具。不得执行任务、编辑、同步、审批、导入、删除、通知状态修改、权限管理、数据库或服务器文件访问。列表先分页再按ID读取详情。",
     };
   }
   if (method === "ping") return {};

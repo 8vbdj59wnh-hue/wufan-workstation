@@ -10,7 +10,7 @@ const marketplacePath = path.join(root, ".agents", "plugins", "marketplace.json"
 const manifest = JSON.parse(fs.readFileSync(path.join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
 const releaseVersion = manifest.version.split("+")[0];
 const outputDirectory = path.join(root, "release-packages");
-const outputPath = path.join(outputDirectory, `${pluginName}-${releaseVersion}.zip`);
+const outputPath = path.join(outputDirectory, `wufan-workstation-assistant-${releaseVersion}.zip`);
 
 const forbiddenNames = new Set([".env", "token.jwt", "refresh.token", "auth.secret", "workstation.db"]);
 const jwtPattern = /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/u;

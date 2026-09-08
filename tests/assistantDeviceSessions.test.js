@@ -45,7 +45,7 @@ async function request(baseUrl, pathname, { token = "", method = "GET", body } =
   return { status: response.status, body: await response.json() };
 }
 
-test("只读助手设备可长期续期、逐台撤销且不能获得业务写权限", async () => {
+test("助手设备可长期续期、逐台撤销，且仅受控发起关键行动", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "assistant-device-session-"));
   const databasePath = path.join(directory, "workstation.db");
   process.env.WUFAN_DB_PATH = databasePath;
@@ -59,18 +59,31 @@ test("只读助手设备可长期续期、逐台撤销且不能获得业务写�
   try {
     initializeDatabase({ reset: true });
     const database = getDatabase();
-    const people = database.prepare("SELECT id FROM persons WHERE lower(COALESCE(username,''))<>'admin' ORDER BY id LIMIT 2").all();
+    const people = database.prepare("SELECT id,departmentId FROM persons WHERE lower(COALESCE(username,''))<>'admin' ORDER BY id LIMIT 2").all();
     assert.equal(people.length, 2);
     const readPermissions = createEmptyPermissions("all");
-    for (const permission of ["goals", "keyActions", "tasks", "products", "skus", "links", "dataCenter", "cockpit"]) {
+    for (const permission of ["goals", "keyActions", "tasks", "products", "skus", "links", "dataCenter", "cockpit", "actionStandards"]) {
       readPermissions[permission].view = true;
     }
+    readPermissions.keyActions.launch = true;
+    readPermissions.keyActions.launchTemplateScope = "all";
     const writePermissions = structuredClone(readPermissions);
     writePermissions.tasks.execute = true;
     const update = database.prepare(`UPDATE persons SET username=?,passwordHash=?,canLogin=1,authRole='user',role='member',
       permissionTemplateId=NULL,permissionOverrides=NULL,permissions=?,status='active' WHERE id=?`);
     update.run("assistant-read-test", hashPassword("read-password"), JSON.stringify(readPermissions), people[0].id);
     update.run("assistant-write-test", hashPassword("write-password"), JSON.stringify(writePermissions), people[1].id);
+    const now = new Date().toISOString();
+    database.prepare(`INSERT INTO goals(id,name,level,type,departmentId,ownerId,status,createdAt,updatedAt)
+      VALUES('assistant-goal','助手测试目标','company','period',?,?, 'active',?,?)`).run(people[0].departmentId, people[0].id, now, now);
+    database.prepare(`INSERT INTO process_templates(id,name,applicableDepartmentIds,ownerId,status,version,createdAt,updatedAt)
+      VALUES('assistant-process','助手测试流程','[]',?,'active',1,?,?)`).run(people[0].id, now, now);
+    database.prepare(`INSERT INTO task_templates(id,name,defaultProcessTemplateId,departmentId,ownerId,description,completionStandard,needAcceptance,status,formFields,createdAt,updatedAt)
+      VALUES('assistant-standard','助手测试行动标准','assistant-process',?,?, '完成行动内容','按标准步骤完成',0,'active','[]',?,?)`).run(people[0].departmentId, people[0].id, now, now);
+    database.prepare(`INSERT INTO process_template_nodes(id,templateId,stepType,stepOrder,stageName,stageOrder,nodeOrder,name,ownerRule,durationDays,durationMinutes,defaultImportance,defaultUrgency,accepterRule,status,createdAt,updatedAt)
+      VALUES('assistant-node','assistant-process','execution',1,'执行',1,1,'执行测试行动','initiator',1,60,'medium','medium','none','active',?,?)`).run(now, now);
+    database.prepare(`INSERT INTO standard_work_forms(id,standardWorkId,formSchema,createdAt,updatedAt)
+      VALUES('assistant-form','assistant-standard',?,?,?)`).run(JSON.stringify({ fields: [{ id: "acceptance", key: "acceptanceStandard", label: "验收标准", type: "textarea", required: true, sortOrder: 1 }] }), now, now);
     closeDatabase();
 
     const port = await availablePort();
@@ -103,11 +116,71 @@ test("只读助手设备可长期续期、逐台撤销且不能获得业务写�
     assert.equal(assetPayload.mode, "assistant_read_only");
     assert.equal(assetPayload.sid, loginA.body.deviceSession.id);
 
+    const launcherLogin = await request(baseUrl, "/api/auth/login", {
+      method: "POST",
+      body: { username: "assistant-read-test", password: "read-password", assistantDeviceName: "Windows-launcher", assistantAccessProfile: "key_action_launcher" },
+    });
+    assert.equal(launcherLogin.status, 200);
+    assert.equal(launcherLogin.body.deviceSession.accessProfile, "key_action_launcher");
+    const launcherPayload = JSON.parse(Buffer.from(launcherLogin.body.token.split(".")[1], "base64url").toString("utf8"));
+    assert.equal(launcherPayload.mode, "assistant_scoped");
+    assert.equal(launcherPayload.assistantAccessProfile, "key_action_launcher");
+
+    const launchInput = {
+      goalId: "assistant-goal",
+      taskTemplateId: "assistant-standard",
+      title: "助手受控发起测试",
+      description: "验证预览、确认和服务端任务生成。",
+      dueDate: "2030-09-30",
+      responsiblePersonId: people[0].id,
+      customFields: { acceptanceStandard: "结果可复核并符合行动标准。" },
+      productIds: [],
+    };
+    const beforeLaunch = new Database(databasePath, { readonly: true });
+    const countsBefore = beforeLaunch.prepare("SELECT (SELECT COUNT(*) FROM work_plans) workPlans,(SELECT COUNT(*) FROM process_instances) instances,(SELECT COUNT(*) FROM tasks) tasks").get();
+    beforeLaunch.close();
+    assert.equal((await request(baseUrl, "/api/key-actions/launch-options", { token: launcherLogin.body.token })).status, 200);
+    assert.equal((await request(baseUrl, "/api/key-actions/launch-preview", { method: "POST", token: loginA.body.token, body: launchInput })).status, 403);
+    const missingRequired = await request(baseUrl, "/api/key-actions/launch-preview", { method: "POST", token: launcherLogin.body.token, body: { ...launchInput, customFields: {} } });
+    assert.equal(missingRequired.status, 400);
+    assert.equal(missingRequired.body.code, "key_action_required_field_missing");
+    const preview = await request(baseUrl, "/api/key-actions/launch-preview", { method: "POST", token: launcherLogin.body.token, body: launchInput });
+    assert.equal(preview.status, 200, JSON.stringify(preview.body));
+    assert.equal(preview.body.preview.canLaunch, true);
+    assert.equal(preview.body.preview.steps.length, 1);
+    assert.ok(preview.body.confirmationToken);
+    const afterPreview = new Database(databasePath, { readonly: true });
+    assert.deepEqual(afterPreview.prepare("SELECT (SELECT COUNT(*) FROM work_plans) workPlans,(SELECT COUNT(*) FROM process_instances) instances,(SELECT COUNT(*) FROM tasks) tasks").get(), countsBefore);
+    afterPreview.close();
+    assert.equal((await request(baseUrl, "/api/key-actions/launch", { method: "POST", token: launcherLogin.body.token, body: launchInput })).status, 409);
+    assert.equal((await request(baseUrl, "/api/key-actions/launch", { method: "POST", token: launcherLogin.body.token, body: { ...launchInput, title: "内容被修改", confirmationToken: preview.body.confirmationToken } })).status, 409);
+    const launched = await request(baseUrl, "/api/key-actions/launch", { method: "POST", token: launcherLogin.body.token, body: { ...launchInput, confirmationToken: preview.body.confirmationToken } });
+    assert.equal(launched.status, 201);
+    assert.equal(launched.body.action.taskCount, 1);
+    const duplicatePreview = await request(baseUrl, "/api/key-actions/launch-preview", { method: "POST", token: launcherLogin.body.token, body: launchInput });
+    assert.equal(duplicatePreview.status, 200);
+    assert.equal(duplicatePreview.body.preview.canLaunch, false);
+    assert.equal(duplicatePreview.body.confirmationToken, null);
+    for (const path of [
+      "/api/work-plans",
+      "/api/tasks",
+      "/api/products",
+      "/api/connections",
+      "/api/finance/entries",
+      "/api/data-sync-center/run",
+      "/api/notifications/read-all",
+      "/api/persons",
+    ]) {
+      const blocked = await request(baseUrl, path, { method: "POST", token: launcherLogin.body.token, body: {} });
+      assert.equal(blocked.status, 403, path);
+      assert.equal(blocked.body.code, "assistant_write_boundary", path);
+    }
+
     const businessWrite = await request(baseUrl, "/api/notifications/read-all", { method: "POST", token: loginA.body.token });
     assert.equal(businessWrite.status, 403);
     const sessions = await request(baseUrl, "/api/auth/device-sessions", { token: loginB.body.token });
     assert.equal(sessions.status, 200);
-    assert.equal(sessions.body.sessions.length, 2);
+    assert.equal(sessions.body.sessions.length, 3);
     assert.equal(Object.hasOwn(sessions.body.sessions[0], "tokenHash"), false);
     const credentialAudit = new Database(databasePath, { readonly: true });
     try {

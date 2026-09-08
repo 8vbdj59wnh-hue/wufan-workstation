@@ -3258,6 +3258,7 @@ function runLightweightMigrations() {
     )
   `);
   ensureColumn("departments", "parentDepartmentId", "TEXT");
+  ensureColumn("assistant_device_sessions", "accessProfile", "TEXT NOT NULL DEFAULT 'read_only'");
   ensureColumn("goals", "businessCode", "TEXT");
   ensureColumn("task_templates", "businessCode", "TEXT");
   ensureColumn("process_instances", "businessCode", "TEXT");

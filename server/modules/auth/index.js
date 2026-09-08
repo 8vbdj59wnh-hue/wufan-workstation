@@ -1,4 +1,16 @@
-export { createAssetToken, createReadOnlyAssistantAssetToken, createReadOnlyAssistantToken, createToken, verifyAssetToken, verifyPassword, verifyToken } from "../../security.js";
+export {
+  createAssetToken,
+  createKeyActionLaunchConfirmationToken,
+  createReadOnlyAssistantAssetToken,
+  createReadOnlyAssistantToken,
+  createScopedAssistantAssetToken,
+  createScopedAssistantToken,
+  createToken,
+  verifyAssetToken,
+  verifyKeyActionLaunchConfirmationToken,
+  verifyPassword,
+  verifyToken,
+} from "../../security.js";
 import {
   canAccessModule,
   canAccessTemplateCenter,

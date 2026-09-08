@@ -21,6 +21,9 @@ const representativeArguments = {
   get_goal_center: {},
   get_goal_detail: { goalId: "goal-1" },
   list_key_actions: { page: 1, pageSize: 10, keyword: "增长" },
+  list_launchable_action_standards: { page: 1, pageSize: 10, keyword: "增长" },
+  preview_key_action_launch: { goalId: "goal-1", taskTemplateId: "standard-1", title: "测试行动", description: "完成测试", dueDate: "2030-09-30", responsiblePersonId: "person-1", customFields: {}, productIds: [] },
+  launch_key_action: { goalId: "goal-1", taskTemplateId: "standard-1", title: "测试行动", description: "完成测试", dueDate: "2030-09-30", responsiblePersonId: "person-1", customFields: {}, productIds: [], confirmationToken: "confirmation-token" },
   list_tasks: { view: "today", page: 1, pageSize: 10, showDone: false },
   get_task_detail: { taskId: "task-1" },
   list_work_results: { days: 30 },
@@ -40,19 +43,19 @@ const representativeArguments = {
   get_notifications_summary: { limit: 10 },
 };
 
-test("插件只暴露固定只读工具并提供准确安全标注", () => {
+test("插件只暴露固定查询与受控发起工具并提供准确安全标注", () => {
   assert.equal(TOOL_DEFINITIONS.length, Object.keys(representativeArguments).length);
   assert.deepEqual(new Set(TOOL_DEFINITIONS.map((item) => item.name)), new Set(Object.keys(representativeArguments)));
   for (const definition of TOOL_DEFINITIONS) {
-    assert.equal(definition.annotations.readOnlyHint, true, definition.name);
+    assert.equal(definition.annotations.readOnlyHint, definition.name !== "launch_key_action", definition.name);
     assert.equal(definition.annotations.destructiveHint, false, definition.name);
     assert.equal(definition.annotations.openWorldHint, false, definition.name);
     assert.equal(definition.inputSchema.additionalProperties, false, definition.name);
-    assert.doesNotMatch(definition.name, /create|update|delete|write|import|sync_run|approve|execute/u);
+    if (definition.name !== "launch_key_action") assert.doesNotMatch(definition.name, /create|update|delete|write|import|sync_run|approve|execute/u);
   }
 });
 
-test("每个工具只向固定正式API发出GET请求且携带Bearer JWT", async () => {
+test("工具只访问固定正式API，且只有预览与确认使用POST", async () => {
   const requests = [];
   const fetchImpl = async (url, options) => {
     requests.push({ url: new URL(url), options });
@@ -69,12 +72,17 @@ test("每个工具只向固定正式API发出GET请求且携带Bearer JWT", asyn
 
   assert.equal(requests.length, TOOL_DEFINITIONS.length);
   for (const request of requests) {
-    assert.equal(request.options.method, "GET");
+    const expectedMethod = new Set(["/api/key-actions/launch-preview", "/api/key-actions/launch"]).has(request.url.pathname) ? "POST" : "GET";
+    assert.equal(request.options.method, expectedMethod);
     assert.equal(request.options.headers.Authorization, "Bearer test-secret-token");
     assert.equal(request.options.redirect, "error");
     assert.equal(request.url.origin, "http://127.0.0.1:39001");
     assert.match(request.url.pathname, /^\/api\//u);
   }
+  assert.deepEqual(requests.filter((item) => item.options.method === "POST").map((item) => item.url.pathname), [
+    "/api/key-actions/launch-preview",
+    "/api/key-actions/launch",
+  ]);
 });
 
 test("短期JWT到期后只调用固定认证接口续期并安全保存新JWT", async () => {
@@ -181,7 +189,7 @@ test("STDIO MCP初始化、工具枚举和未知方法符合JSON-RPC边界", asy
   child.kill("SIGTERM");
   const responses = stdout.trim().split("\n").map((line) => JSON.parse(line));
   assert.equal(responses.length, 3);
-  assert.equal(responses[0].result.serverInfo.name, "wufan-workstation-readonly");
+  assert.equal(responses[0].result.serverInfo.name, "wufan-workstation-assistant");
   assert.equal(responses[1].result.tools.length, TOOL_DEFINITIONS.length);
   assert.equal(responses[2].error.code, -32601);
   assert.equal(stderr, "");

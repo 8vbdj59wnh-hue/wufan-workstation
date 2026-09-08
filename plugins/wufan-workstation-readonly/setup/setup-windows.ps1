@@ -37,11 +37,11 @@ try {
   $password = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordPointer)
   if ([string]::IsNullOrWhiteSpace($password)) { throw "密码不能为空。" }
 
-  $loginBody = @{ username = $Username; password = $password; assistantDeviceName = $DeviceName } | ConvertTo-Json
+  $loginBody = @{ username = $Username; password = $password; assistantDeviceName = $DeviceName; assistantAccessProfile = "key_action_launcher" } | ConvertTo-Json
   try {
     $login = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/auth/login" -ContentType "application/json" -Body $loginBody
   } catch {
-    throw "助手设备授权失败，请检查账号密码、只读权限和网络。"
+    throw "助手设备授权失败，请检查账号密码、发起关键行动权限和网络。"
   }
   $token = [string]$login.token
   $refreshToken = [string]$login.refreshToken
@@ -71,7 +71,7 @@ try {
   if (-not $SkipConnectionTest) {
     Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/health" | Out-Null
     Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/notifications/summary?limit=1" -Headers @{ Authorization = "Bearer $token" } | Out-Null
-    Write-Host "工作站网络、只读访问和自动续期凭证验证成功。" -ForegroundColor Green
+    Write-Host "工作站网络、受控行动访问和自动续期凭证验证成功。" -ForegroundColor Green
   }
 } finally {
   if ($passwordPointer -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($passwordPointer) }
@@ -95,7 +95,7 @@ if (-not $SkipPluginInstall) {
     & $codex plugin marketplace add $MarketplaceRoot
     if ($LASTEXITCODE -ne 0) { throw "添加屋范内部插件源失败。若该源已添加，可继续运行：codex plugin add $PluginName@$MarketplaceName" }
     & $codex plugin add "$PluginName@$MarketplaceName"
-    if ($LASTEXITCODE -ne 0) { throw "安装极简工作站只读插件失败。" }
-    Write-Host "极简工作站只读插件安装成功。请完全退出并重启Codex，然后开始一个新任务。" -ForegroundColor Green
+    if ($LASTEXITCODE -ne 0) { throw "安装极简工作站助手插件失败。" }
+    Write-Host "极简工作站助手插件安装成功。请完全退出并重启Codex，然后开始一个新任务。" -ForegroundColor Green
   }
 }

@@ -4,6 +4,11 @@ import { findLoginUserById, getDatabase, getPublicUser } from "./db.js";
 
 const sessionIdleLifetimeMs = 180 * 24 * 60 * 60 * 1000;
 const refreshTokenPrefix = "wfr1";
+export const AssistantAccessProfile = Object.freeze({
+  ReadOnly: "read_only",
+  KeyActionLauncher: "key_action_launcher",
+});
+const allowedProfiles = new Set(Object.values(AssistantAccessProfile));
 
 function cleanText(value, maximumLength = 160) {
   return String(value ?? "").trim().slice(0, maximumLength);
@@ -34,32 +39,39 @@ function isExpired(session, at = Date.now()) {
   return !Number.isFinite(expiresAt) || expiresAt <= at;
 }
 
-function requireStrictlyReadOnlyUser(row) {
+function requireScopedAssistantUser(row, requestedProfile = AssistantAccessProfile.ReadOnly) {
   const user = getPublicUser(row);
   if (!user || ["admin", "system_admin"].includes(user.role)) {
-    throw sessionError("只有正式只读账号可以建立助手设备会话。", 403, "assistant_session_requires_read_only");
+    throw sessionError("管理员账号不能建立助手设备会话。", 403, "assistant_session_profile_rejected");
   }
+  const accessProfile = cleanText(requestedProfile, 40) || AssistantAccessProfile.ReadOnly;
+  if (!allowedProfiles.has(accessProfile)) throw sessionError("助手设备访问类型无效。", 400, "assistant_session_profile_invalid");
   const permissions = normalizePermissions(user.permissions, user.role);
   let readableCapabilityCount = 0;
   for (const group of permissionGroups) {
     for (const permission of group.permissions) {
       if (permissions[group.key]?.[permission.key] !== true) continue;
-      if (permission.key !== "view") {
-        throw sessionError("该账号包含写入或管理权限，不能用于只读助手设备会话。", 403, "assistant_session_requires_read_only");
+      const permittedAccountWrite = group.key === "keyActions" && permission.key === "launch";
+      if (permission.key !== "view" && !permittedAccountWrite) {
+        throw sessionError("该账号包含当前助手访问类型不允许的写入或管理权限。", 403, "assistant_session_profile_rejected");
       }
-      readableCapabilityCount += 1;
+      if (permission.key === "view") readableCapabilityCount += 1;
     }
   }
   if (readableCapabilityCount === 0) {
-    throw sessionError("该账号没有可供助手使用的读取权限。", 403, "assistant_session_requires_read_only");
+    throw sessionError("该账号没有可供助手使用的读取权限。", 403, "assistant_session_profile_rejected");
   }
-  return { user, permissions };
+  if (accessProfile === AssistantAccessProfile.KeyActionLauncher && permissions.keyActions.launch !== true) {
+    throw sessionError("该账号尚未获得“发起关键行动”权限。", 403, "assistant_session_launch_permission_required");
+  }
+  return { user, permissions, accessProfile };
 }
 
 function publicSession(session) {
   return {
     id: session.id,
     deviceName: session.deviceName,
+    accessProfile: session.accessProfile ?? AssistantAccessProfile.ReadOnly,
     createdAt: session.createdAt,
     lastUsedAt: session.lastUsedAt,
     expiresAt: session.expiresAt,
@@ -76,12 +88,12 @@ function readActiveSession(sessionId, expectedUserId = "") {
   if (!row || !row.canLogin || row.status !== "active") {
     throw sessionError("助手账号已停用或不允许登录。");
   }
-  const readOnly = requireStrictlyReadOnlyUser(row);
-  return { session, row, ...readOnly };
+  const scoped = requireScopedAssistantUser(row, session.accessProfile ?? AssistantAccessProfile.ReadOnly);
+  return { session, row, ...scoped };
 }
 
-export function createAssistantDeviceSession(row, deviceName) {
-  const { user } = requireStrictlyReadOnlyUser(row);
+export function createAssistantDeviceSession(row, deviceName, requestedProfile = AssistantAccessProfile.ReadOnly) {
+  const { user, accessProfile } = requireScopedAssistantUser(row, requestedProfile);
   const name = cleanText(deviceName, 120);
   if (!name) throw sessionError("请提供设备名称。", 400, "assistant_device_name_required");
   const id = crypto.randomUUID();
@@ -90,11 +102,11 @@ export function createAssistantDeviceSession(row, deviceName) {
   const createdAt = new Date().toISOString();
   const expiresAt = new Date(Date.now() + sessionIdleLifetimeMs).toISOString();
   getDatabase().prepare(`INSERT INTO assistant_device_sessions
-    (id,userId,deviceName,tokenHash,createdAt,lastUsedAt,expiresAt,revokedAt)
-    VALUES(?,?,?,?,?,?,?,NULL)`).run(id, user.id, name, hashToken(refreshToken), createdAt, createdAt, expiresAt);
+    (id,userId,deviceName,accessProfile,tokenHash,createdAt,lastUsedAt,expiresAt,revokedAt)
+    VALUES(?,?,?,?,?,?,?,?,NULL)`).run(id, user.id, name, accessProfile, hashToken(refreshToken), createdAt, createdAt, expiresAt);
   return {
     refreshToken,
-    session: { id, deviceName: name, createdAt, lastUsedAt: createdAt, expiresAt, revokedAt: null },
+    session: { id, deviceName: name, accessProfile, createdAt, lastUsedAt: createdAt, expiresAt, revokedAt: null },
   };
 }
 
@@ -118,7 +130,8 @@ export function refreshAssistantDeviceSession(refreshToken) {
 }
 
 export function validateAssistantDeviceSession(sessionId, userId) {
-  return publicSession(readActiveSession(sessionId, userId).session);
+  const result = readActiveSession(sessionId, userId);
+  return { ...publicSession(result.session), accessProfile: result.accessProfile };
 }
 
 export function restrictUserToReadOnlyAssistant(user) {
@@ -131,8 +144,18 @@ export function restrictUserToReadOnlyAssistant(user) {
   return { ...user, role: "user", permissions, assistantReadOnly: true };
 }
 
+export function restrictUserToAssistantProfile(user, accessProfile = AssistantAccessProfile.ReadOnly) {
+  const restricted = restrictUserToReadOnlyAssistant(user);
+  if (accessProfile !== AssistantAccessProfile.KeyActionLauncher) return { ...restricted, assistantAccessProfile: AssistantAccessProfile.ReadOnly };
+  const source = normalizePermissions(user.permissions, user.role);
+  restricted.permissions.keyActions.launch = source.keyActions.launch === true;
+  restricted.permissions.keyActions.launchTemplateScope = source.keyActions.launchTemplateScope;
+  restricted.permissions.keyActions.launchTemplateIds = [...source.keyActions.launchTemplateIds];
+  return { ...restricted, assistantReadOnly: false, assistantScoped: true, assistantAccessProfile: accessProfile };
+}
+
 export function listAssistantDeviceSessions(userId) {
-  return getDatabase().prepare(`SELECT id,deviceName,createdAt,lastUsedAt,expiresAt,revokedAt
+  return getDatabase().prepare(`SELECT id,deviceName,accessProfile,createdAt,lastUsedAt,expiresAt,revokedAt
     FROM assistant_device_sessions WHERE userId=? ORDER BY createdAt DESC`).all(cleanText(userId, 120)).map(publicSession);
 }
 

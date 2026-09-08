@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const [baseUrlValue, configDirectory, usernameValue, deviceNameValue] = process.argv.slice(2);
+const [baseUrlValue, configDirectory, usernameValue, deviceNameValue, accessProfileValue = "key_action_launcher"] = process.argv.slice(2);
 
 function required(value, label, maximum = 2048) {
   const text = String(value ?? "").trim();
@@ -30,12 +30,14 @@ try {
   const directory = path.resolve(required(configDirectory, "配置目录"));
   const username = required(usernameValue, "登录账号", 120);
   const assistantDeviceName = required(deviceNameValue, "设备名称", 120);
+  const assistantAccessProfile = required(accessProfileValue, "助手访问类型", 40);
+  if (assistantAccessProfile !== "key_action_launcher") throw new Error("此安装包只允许受控发起关键行动访问类型。");
   password = await readPassword();
   if (!password) throw new Error("密码不能为空。");
   const response = await fetch(baseUrl, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password, assistantDeviceName }),
+    body: JSON.stringify({ username, password, assistantDeviceName, assistantAccessProfile }),
     redirect: "error",
   });
   const raw = await response.text();

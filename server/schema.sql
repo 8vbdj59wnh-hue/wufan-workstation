@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS assistant_device_sessions (
   id TEXT PRIMARY KEY,
   userId TEXT NOT NULL,
   deviceName TEXT NOT NULL,
+  accessProfile TEXT NOT NULL DEFAULT 'read_only',
   tokenHash TEXT NOT NULL,
   createdAt TEXT NOT NULL,
   lastUsedAt TEXT NOT NULL,

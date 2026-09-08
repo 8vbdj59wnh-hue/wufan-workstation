@@ -290,10 +290,14 @@ import {
 import { updateTaskFromWorkflow } from "./taskProcessReadinessService.js";
 import {
   createAssetToken,
+  createKeyActionLaunchConfirmationToken,
   createReadOnlyAssistantAssetToken,
   createReadOnlyAssistantToken,
+  createScopedAssistantAssetToken,
+  createScopedAssistantToken,
   createToken,
   verifyAssetToken,
+  verifyKeyActionLaunchConfirmationToken,
   verifyPassword,
   verifyToken,
   canAccessModule,
@@ -306,14 +310,22 @@ import {
   validatePermissionDependencies,
 } from "./modules/auth/index.js";
 import {
+  AssistantAccessProfile,
   assistantSessionHttpStatus,
   createAssistantDeviceSession,
   listAssistantDeviceSessions,
   refreshAssistantDeviceSession,
   restrictUserToReadOnlyAssistant,
+  restrictUserToAssistantProfile,
   revokeAssistantDeviceSession,
   validateAssistantDeviceSession,
 } from "./assistantDeviceSessionService.js";
+import {
+  launchPreparedKeyAction,
+  listLaunchableActionStandards,
+  prepareKeyActionLaunch,
+  publicKeyActionLaunchPreview,
+} from "./keyActionLaunchService.js";
 import { normalizeProductSkuCode, splitProductSkuCodes } from "./modules/common/index.js";
 import { getOperationDashboard } from "./operationManagementService.js";
 import {
@@ -571,9 +583,10 @@ function requireAssetAccess(request, response, next) {
     response.status(401).json({ success: false, message: "登录状态已失效" });
     return;
   }
-  if (tokenPayload.mode === "assistant_read_only") {
+  if (tokenPayload.mode === "assistant_read_only" || tokenPayload.mode === "assistant_scoped") {
     try {
-      validateAssistantDeviceSession(tokenPayload.sid, user.id);
+      const session = validateAssistantDeviceSession(tokenPayload.sid, user.id);
+      if (tokenPayload.mode === "assistant_scoped" && session.accessProfile !== tokenPayload.assistantAccessProfile) throw new Error("助手设备访问类型不匹配。");
     } catch (error) {
       response.status(assistantSessionHttpStatus(error)).json({ success: false, message: error.message, code: error.code });
       return;
@@ -672,10 +685,16 @@ function requireAuth(request, response, next) {
   }
 
   let publicUser = getPublicUser(user);
-  if (tokenPayload.mode === "assistant_read_only") {
+  if (tokenPayload.mode === "assistant_read_only" || tokenPayload.mode === "assistant_scoped") {
     try {
-      validateAssistantDeviceSession(tokenPayload.sid, user.id);
-      publicUser = { ...restrictUserToReadOnlyAssistant(publicUser), assistantSessionId: tokenPayload.sid };
+      const session = validateAssistantDeviceSession(tokenPayload.sid, user.id);
+      if (tokenPayload.mode === "assistant_scoped" && session.accessProfile !== tokenPayload.assistantAccessProfile) throw new Error("助手设备访问类型不匹配。");
+      publicUser = {
+        ...(tokenPayload.mode === "assistant_scoped"
+          ? restrictUserToAssistantProfile(publicUser, session.accessProfile)
+          : restrictUserToReadOnlyAssistant(publicUser)),
+        assistantSessionId: tokenPayload.sid,
+      };
     } catch (error) {
       response.status(assistantSessionHttpStatus(error)).json({ success: false, message: error.message, code: error.code });
       return;
@@ -1540,15 +1559,21 @@ app.post("/api/auth/login", (request, response) => {
     const freshUser = findLoginUserById(user.id);
     const publicUser = getPublicUser(freshUser);
     const assistantDeviceName = String(request.body?.assistantDeviceName ?? "").trim();
-    const assistantSession = assistantDeviceName ? createAssistantDeviceSession(freshUser, assistantDeviceName) : null;
+    const requestedAssistantProfile = String(request.body?.assistantAccessProfile ?? AssistantAccessProfile.ReadOnly).trim();
+    const assistantSession = assistantDeviceName ? createAssistantDeviceSession(freshUser, assistantDeviceName, requestedAssistantProfile) : null;
+    const scopedAssistant = assistantSession?.session.accessProfile === AssistantAccessProfile.KeyActionLauncher;
     response.json({
       success: true,
       user: publicUser,
       token: assistantSession
-        ? createReadOnlyAssistantToken(freshUser, assistantSession.session.id)
+        ? scopedAssistant
+          ? createScopedAssistantToken(freshUser, assistantSession.session.id, assistantSession.session.accessProfile)
+          : createReadOnlyAssistantToken(freshUser, assistantSession.session.id)
         : createToken(freshUser),
       assetToken: assistantSession
-        ? createReadOnlyAssistantAssetToken(freshUser, assistantSession.session.id)
+        ? scopedAssistant
+          ? createScopedAssistantAssetToken(freshUser, assistantSession.session.id, assistantSession.session.accessProfile)
+          : createReadOnlyAssistantAssetToken(freshUser, assistantSession.session.id)
         : createAssetToken(freshUser),
       ...(assistantSession ? { refreshToken: assistantSession.refreshToken, deviceSession: assistantSession.session } : {}),
     });
@@ -1567,7 +1592,9 @@ app.post("/api/auth/device-sessions/refresh", (request, response) => {
     const refreshed = refreshAssistantDeviceSession(request.body?.refreshToken);
     response.json({
       success: true,
-      token: createReadOnlyAssistantToken(refreshed.row, refreshed.session.id),
+      token: refreshed.session.accessProfile === AssistantAccessProfile.KeyActionLauncher
+        ? createScopedAssistantToken(refreshed.row, refreshed.session.id, refreshed.session.accessProfile)
+        : createReadOnlyAssistantToken(refreshed.row, refreshed.session.id),
       deviceSession: refreshed.session,
     });
   } catch (error) {
@@ -1591,8 +1618,10 @@ app.get("/api/auth/me", requireAuth, (request, response) => {
   response.json({
     success: true,
     user: request.user,
-    assetToken: request.user.assistantReadOnly
-      ? createReadOnlyAssistantAssetToken(request.user, request.user.assistantSessionId)
+    assetToken: request.user.assistantScoped
+      ? createScopedAssistantAssetToken(request.user, request.user.assistantSessionId, request.user.assistantAccessProfile)
+      : request.user.assistantReadOnly
+        ? createReadOnlyAssistantAssetToken(request.user, request.user.assistantSessionId)
       : createAssetToken(request.user),
   });
 });
@@ -1617,6 +1646,22 @@ app.get("/api/util/qr-code", async (request, response) => {
 });
 
 app.use("/api", requireAuth);
+
+app.use("/api", (request, response, next) => {
+  if (!request.user?.assistantScoped || ["GET", "HEAD", "OPTIONS"].includes(request.method)) {
+    next();
+    return;
+  }
+  const allowed = request.method === "POST" && new Set([
+    "/key-actions/launch-preview",
+    "/key-actions/launch",
+  ]).has(request.path);
+  if (!allowed) {
+    response.status(403).json({ success: false, code: "assistant_write_boundary", message: "助手设备仅允许预览并发起关键行动。" });
+    return;
+  }
+  next();
+});
 
 app.get("/api/store-options", (request, response) => {
   if (!canUseStoreOptions(request.user)) {
@@ -4625,6 +4670,92 @@ app.put("/api/process-instances/:id/tasks/:taskId/executor", (request, response)
   } catch (error) {
     console.error("调整关键行动任务执行人失败", error);
     response.status(400).json({ success: false, message: error.message || "任务执行人保存失败，请检查本地数据库服务。" });
+  }
+});
+
+app.get("/api/key-actions/launch-options", requirePermission("keyActions.launch"), (request, response) => {
+  try {
+    const result = listLaunchableActionStandards({
+      keyword: request.query.keyword,
+      page: request.query.page,
+      pageSize: request.query.pageSize,
+      allowedTemplateIds: request.user.permissions?.keyActions?.launchTemplateScope === "all"
+        ? null
+        : request.user.permissions?.keyActions?.launchTemplateIds ?? [],
+    });
+    response.json({ success: true, ...result, returned: result.items.length });
+  } catch (error) {
+    response.status(error.status ?? 400).json({ success: false, code: error.code, message: error.message || "读取可发起关键行动失败。" });
+  }
+});
+
+function prepareScopedKeyActionLaunch(request) {
+  const goalId = String(request.body?.goalId ?? "").trim();
+  const goal = goalId ? getDatabase().prepare("SELECT id,departmentId,ownerId FROM goals WHERE id=?").get(goalId) : null;
+  const visibleGoals = goal ? filterDataByScope({ goals: [goal] }, request.user).goals ?? [] : [];
+  return prepareKeyActionLaunch(request.body ?? {}, {
+    initiatorId: getUserPersonId(request.user),
+    visibleGoalIds: new Set(visibleGoals.map((item) => item.id)),
+    dataScope: getDataScope(request.user),
+    userDepartmentId: request.user.departmentId ?? "",
+  });
+}
+
+app.post("/api/key-actions/launch-preview", requirePermission("keyActions.launch"), (request, response) => {
+  try {
+    if (!canLaunchActionTemplate(request.user, request.body?.taskTemplateId)) {
+      response.status(403).json({ success: false, message: "你没有权限发起该关键行动。" });
+      return;
+    }
+    if ((request.body?.productIds ?? []).length > 0 && !hasPermission(request.user, "products.view")) {
+      response.status(403).json({ success: false, message: "你没有权限关联产品。" });
+      return;
+    }
+    const plan = prepareScopedKeyActionLaunch(request);
+    const preview = publicKeyActionLaunchPreview(plan);
+    response.json({
+      success: true,
+      preview,
+      confirmationToken: preview.canLaunch
+        ? createKeyActionLaunchConfirmationToken(getUserPersonId(request.user), plan.fingerprint)
+        : null,
+      confirmationExpiresInMinutes: 15,
+    });
+  } catch (error) {
+    response.status(error.status ?? 400).json({ success: false, code: error.code, message: error.message || "关键行动发起预览失败。" });
+  }
+});
+
+app.post("/api/key-actions/launch", requirePermission("keyActions.launch"), (request, response) => {
+  try {
+    if (!canLaunchActionTemplate(request.user, request.body?.taskTemplateId)) {
+      response.status(403).json({ success: false, message: "你没有权限发起该关键行动。" });
+      return;
+    }
+    if ((request.body?.productIds ?? []).length > 0 && !hasPermission(request.user, "products.view")) {
+      response.status(403).json({ success: false, message: "你没有权限关联产品。" });
+      return;
+    }
+    const plan = prepareScopedKeyActionLaunch(request);
+    const confirmation = verifyKeyActionLaunchConfirmationToken(request.body?.confirmationToken);
+    if (!confirmation || confirmation.sub !== getUserPersonId(request.user) || confirmation.fingerprint !== plan.fingerprint) {
+      response.status(409).json({ success: false, code: "key_action_confirmation_invalid", message: "发起确认已失效或内容已变化，请重新预览并确认。" });
+      return;
+    }
+    const result = launchPreparedKeyAction(plan);
+    response.status(201).json({
+      success: true,
+      action: {
+        id: result.instance.id,
+        businessCode: result.instance.businessCode,
+        title: result.instance.displayTitle || result.instance.name,
+        goalId: result.instance.goalId,
+        dueDate: result.instance.dueDate,
+        taskCount: result.tasks.length,
+      },
+    });
+  } catch (error) {
+    response.status(error.status ?? 400).json({ success: false, code: error.code, message: error.message || "发起关键行动失败。" });
   }
 });
 

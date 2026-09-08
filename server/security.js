@@ -96,6 +96,24 @@ export function createReadOnlyAssistantToken(user, sessionId) {
   });
 }
 
+export function createScopedAssistantToken(user, sessionId, accessProfile = "read_only") {
+  return createSignedToken(user, "api", tokenMaxAgeMs, {
+    mode: "assistant_scoped",
+    sid: String(sessionId ?? ""),
+    assistantAccessProfile: String(accessProfile ?? "read_only"),
+  });
+}
+
+export function createKeyActionLaunchConfirmationToken(userId, fingerprint) {
+  return createSignedToken({ id: String(userId ?? ""), username: "assistant", authRole: "user" }, "key-action-launch-confirmation", 15 * 60 * 1000, {
+    fingerprint: String(fingerprint ?? ""),
+  });
+}
+
+export function verifyKeyActionLaunchConfirmationToken(token) {
+  return verifySignedToken(token, "key-action-launch-confirmation");
+}
+
 export function verifyToken(token) {
   return verifySignedToken(token, "api", { allowMissingAudience: true });
 }
@@ -108,6 +126,14 @@ export function createReadOnlyAssistantAssetToken(user, sessionId) {
   return createSignedToken(user, "assets", assetTokenMaxAgeMs, {
     mode: "assistant_read_only",
     sid: String(sessionId ?? ""),
+  });
+}
+
+export function createScopedAssistantAssetToken(user, sessionId, accessProfile = "read_only") {
+  return createSignedToken(user, "assets", assetTokenMaxAgeMs, {
+    mode: "assistant_scoped",
+    sid: String(sessionId ?? ""),
+    assistantAccessProfile: String(accessProfile ?? "read_only"),
   });
 }
 

@@ -34,7 +34,7 @@
     "check:legacy-relations": "node scripts/check-legacy-link-relation-writes.js",
     "check:v2-cleanup": "node scripts/check-link-center-v2-cleanup.js && node scripts/check-link-center-phase3-retirement.js && node scripts/check-link-center-phase4-archive.js",
     "check:link-assets": "node scripts/check-link-asset-visibility.js",
-    "check:wufan-workstation-plugin": "node --check server/assistantDeviceSessionService.js && node --check plugins/wufan-workstation-readonly/server/index.mjs && node --check plugins/wufan-workstation-readonly/setup/login-device.mjs && node --test tests/wufanWorkstationReadonlyMcp.test.js && node --test tests/assistantDeviceSessions.test.js",
+    "check:wufan-workstation-plugin": "node --check server/assistantDeviceSessionService.js && node --check server/keyActionLaunchService.js && node --check plugins/wufan-workstation-readonly/server/index.mjs && node --check plugins/wufan-workstation-readonly/setup/login-device.mjs && node --test tests/wufanWorkstationReadonlyMcp.test.js && node --test tests/assistantDeviceSessions.test.js",
     "package:wufan-workstation-plugin": "node scripts/build-wufan-workstation-plugin-package.mjs"
   },
   "dependencies": {

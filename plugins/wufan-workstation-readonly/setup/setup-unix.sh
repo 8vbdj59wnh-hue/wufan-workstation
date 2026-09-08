@@ -45,7 +45,7 @@ printf '\n' >&2
 umask 077
 mkdir -p "$config_dir"
 printf '{"baseUrl":"%s","tokenFile":"token.jwt","refreshTokenFile":"refresh.token","timeoutMs":30000,"maxResponseBytes":8388608}\n' "$base_url" > "$config_dir/config.json"
-printf '%s\n' "$password" | "$script_dir/../scripts/launch_wufan_workstation_mcp" "$script_dir/login-device.mjs" "$base_url" "$config_dir" "$username" "$device_name"
+printf '%s\n' "$password" | "$script_dir/../scripts/launch_wufan_workstation_mcp" "$script_dir/login-device.mjs" "$base_url" "$config_dir" "$username" "$device_name" "key_action_launcher"
 password=
 chmod 600 "$config_dir/token.jwt" "$config_dir/refresh.token" "$config_dir/config.json"
 
@@ -54,7 +54,7 @@ if [ "$skip_test" -eq 0 ]; then
     token=$(cat "$config_dir/token.jwt")
     curl -fsS "$base_url/api/health" >/dev/null
     curl -fsS -H "Authorization: Bearer $token" "$base_url/api/notifications/summary?limit=1" >/dev/null
-    printf '%s\n' '工作站网络、只读访问和自动续期凭证验证成功。'
+    printf '%s\n' '工作站网络、受控行动访问和自动续期凭证验证成功。'
   else
     printf '%s\n' '未找到curl，已跳过连接验证。' >&2
   fi
@@ -69,7 +69,7 @@ if [ "$skip_install" -eq 0 ]; then
   if [ -n "$codex_command" ]; then
     "$codex_command" plugin marketplace add "$marketplace_root"
     "$codex_command" plugin add "$plugin_name@$marketplace_name"
-    printf '%s\n' '极简工作站只读插件安装成功。请完全退出并重启Codex，然后开始一个新任务。'
+    printf '%s\n' '极简工作站助手插件安装成功。请完全退出并重启Codex，然后开始一个新任务。'
   else
     printf '%s\n' '未找到codex命令。配置和设备凭证已经保存；请按OpenAI官方方式安装Codex CLI后重新运行本脚本。' >&2
   fi
