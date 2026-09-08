@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import Database from "better-sqlite3";
 
 test("产品链接接口仅按V2关系解析产品归属", async () => {
   const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "product-link-v2-read-"));
@@ -10,7 +11,8 @@ test("产品链接接口仅按V2关系解析产品归属", async () => {
   process.env.WUFAN_ENV = "test";
   process.env.WUFAN_ALLOW_DB_RESET = "1";
   const { closeDatabase, getDatabase, initializeDatabase } = await import("../server/db.js");
-  const { queryProductSalesLinks, queryProductSalesSummaries, queryUnmatchedPlatformSkus } = await import("../server/productLinkV2ReadService.js");
+    const { queryProductSalesLinks, queryProductSalesSummaries, queryUnmatchedPlatformSkus } = await import("../server/productLinkV2ReadService.js");
+    const { getProductCenterV2SkuDetail } = await import("../server/productCenterV2Service.js");
   try {
     initializeDatabase({ reset: true });
     const database = getDatabase();
@@ -29,8 +31,8 @@ test("产品链接接口仅按V2关系解析产品归属", async () => {
       .run("product-map-v2", "product-v2", "erp-goods-v2", "erp-sku-v2", "ERP-SKU-V2", "exact_sku", "active", now, now);
     database.prepare("INSERT INTO sales_shops(id,platform,shopName,normalizedShopName,displayName,status,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?)")
       .run("shop-v2", "测试平台", "测试店铺", "测试店铺", "测试店铺", "active", now, now);
-    database.prepare("INSERT INTO sales_links(id,shopId,platformGoodsId,title,identityStrength,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?)")
-      .run("link-v2", "shop-v2", "goods-v2", "V2测试链接", "strong", "active", now, now);
+    database.prepare("INSERT INTO sales_links(id,shopId,platformGoodsId,title,canonicalUrl,identityStrength,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)")
+      .run("link-v2", "shop-v2", "goods-v2", "V2测试链接", "https://item.example.com/goods-v2", "strong", "active", now, now);
     database.prepare("INSERT INTO sales_link_skus(id,salesLinkId,platformSkuId,platformSkuCode,matchStatus,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?)")
       .run("link-sku-v2", "link-v2", "platform-sku-v2", "PLATFORM-SKU-V2", "matched_manual", "active", now, now);
     database.prepare("INSERT INTO sales_link_skus(id,salesLinkId,platformSkuId,platformSkuCode,matchStatus,currentState,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?)")
@@ -67,6 +69,7 @@ test("产品链接接口仅按V2关系解析产品归属", async () => {
     assert.equal(database.prepare("SELECT COUNT(*) count FROM sqlite_master WHERE type='table' AND name='sales_link_sku_erp_mappings'").get().count, 0);
     assert.equal(links[0].productId, "product-v2");
     assert.deepEqual(links[0].resolvedErpSkuIds, ["erp-sku-v2"]);
+    assert.equal(getProductCenterV2SkuDetail("erp-sku-v2", { scope: "links" }).links[0].canonicalUrl, "https://item.example.com/goods-v2");
     assert.deepEqual(queryProductSalesLinks("product-legacy", { database }), []);
   } finally {
     closeDatabase();
@@ -88,5 +91,55 @@ test("正式业务读取服务不直接查询Legacy关系资产", () => {
     const source = fs.readFileSync(new URL(`../server/${fileName}`, import.meta.url), "utf8");
     assert.doesNotMatch(source, /sales_link_sku_erp_mappings|sales_link_sku_product_structures|sales_link_sku_combo_groups|resolveLinkSkuErpRelation/,
       `${fileName} 不得绕过统一读取门面直接依赖Legacy关系`);
+  }
+});
+
+test("产品详情关联链接展示7天、15天、30天真实销量", async () => {
+  const database = new Database(":memory:");
+  database.exec(`CREATE TABLE connection_sku_sales_daily_facts (
+    id TEXT PRIMARY KEY,
+    salesLinkSkuId TEXT,
+    erpSkuId TEXT,
+    saleDate TEXT,
+    quantity REAL
+  )`);
+  const insert = database.prepare("INSERT INTO connection_sku_sales_daily_facts VALUES (?,?,?,?,?)");
+  insert.run("f-01", "link-sku-a", "erp-sku-a", "2026-08-30", 2);
+  insert.run("f-other-erp", "link-sku-a", "erp-sku-b", "2026-08-30", 40);
+  insert.run("f-02", "link-sku-a", "erp-sku-a", "2026-08-24", 1);
+  insert.run("f-03", "link-sku-a", "erp-sku-a", "2026-08-23", 5);
+  insert.run("f-04", "link-sku-a", "erp-sku-a", "2026-08-16", 4);
+  insert.run("f-05", "link-sku-a", "erp-sku-a", "2026-08-15", 7);
+  insert.run("f-06", "link-sku-a", "erp-sku-a", "2026-08-01", 3);
+  insert.run("f-outside", "link-sku-a", "erp-sku-a", "2026-07-31", 99);
+  try {
+    const { attachProductLinkSalesWindows } = await import("../server/productCenterV2Service.js");
+    const { renderUiModule } = await import("../src/uiModuleRegistry.js");
+    await import("../src/uiModules/productWorkspaceModules.js");
+    const rows = attachProductLinkSalesWindows([
+      { salesLinkSkuId: "link-sku-a", title: "有销量链接" },
+      { salesLinkSkuId: "link-sku-b", title: "无销量链接" },
+    ], { database, erpSkuId: "erp-sku-a" });
+    assert.deepEqual(rows[0].salesWindows, { dataDate: "2026-08-30", quantity7d: 3, quantity15d: 12, quantity30d: 22 });
+    assert.deepEqual(rows[1].salesWindows, { dataDate: "2026-08-30", quantity7d: 0, quantity15d: 0, quantity30d: 0 });
+    const html = renderUiModule("product_links", {
+      state: { loaded: true, loading: false, error: "", rows: [
+        { ...rows[0], platform: "天猫", shopName: "测试店铺", connectionId: "connection-a", canonicalUrl: "https://item.taobao.com/item.htm?id=goods-a" },
+        { ...rows[1], platform: "抖店", shopName: "零销量店铺", connectionId: "connection-b" },
+        { salesLinkSkuId: "link-sku-c", title: "高销量链接", platform: "淘宝", shopName: "高销量店铺", connectionId: "connection-c", salesWindows: { quantity7d: 10, quantity15d: 10, quantity30d: 10 } },
+      ] },
+      salesSort: "7d",
+      formatMetric: (value) => `销量${value}`,
+    });
+    for (const expected of ["7天销量", "15天销量", "30天销量", "销量3", "销量12", "销量22"]) assert.match(html, new RegExp(expected));
+    assert.match(html, /销量排序/);
+    assert.match(html, /data-sales-sort="7d" class="is-active"/);
+    assert.match(html, /class="product-workspace-platform-link" href="https:\/\/item\.taobao\.com\/item\.htm\?id=goods-a" target="_blank" rel="noopener noreferrer"/);
+    assert.match(html, />访问平台 <span aria-hidden="true">↗<\/span><\/a>/);
+    assert.match(html, /class="product-workspace-platform-link is-disabled" aria-disabled="true" title="平台源数据未提供访问地址">暂无地址<\/span>/);
+    assert.ok(html.indexOf("高销量链接") < html.indexOf("有销量链接"));
+    assert.ok(html.indexOf("有销量链接") < html.indexOf("无销量链接"));
+  } finally {
+    database.close();
   }
 });
