@@ -34,11 +34,14 @@ try {
   [System.IO.File]::WriteAllText($TokenPath, $token, $utf8NoBom)
 
   $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
-  $acl = New-Object System.Security.AccessControl.FileSecurity
-  $acl.SetOwner($identity)
+  $acl = Get-Acl -LiteralPath $TokenPath
+  $acl.SetAccessRuleProtection($true, $false)
+  foreach ($accessRule in @($acl.Access)) {
+    [void]$acl.RemoveAccessRuleAll($accessRule)
+  }
   $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($identity, "Read,Write", "Allow")
-  $acl.SetAccessRule($rule)
-  Set-Acl -Path $TokenPath -AclObject $acl
+  [void]$acl.AddAccessRule($rule)
+  Set-Acl -LiteralPath $TokenPath -AclObject $acl
 
   if (-not $SkipConnectionTest) {
     Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/health" | Out-Null

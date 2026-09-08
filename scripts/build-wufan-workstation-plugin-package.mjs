@@ -25,7 +25,12 @@ function addDirectory(source, archivePrefix) {
       addDirectory(absolute, archive);
       continue;
     }
-    const data = fs.readFileSync(absolute);
+    let data = fs.readFileSync(absolute);
+    // cmd.exe can misparse UTF-8 batch files extracted with Unix-only line endings.
+    // Normalize launchers in the distributable ZIP while keeping repository files portable.
+    if (archive.toLowerCase().endsWith(".cmd")) {
+      data = Buffer.from(data.toString("utf8").replace(/\r?\n/gu, "\r\n"), "utf8");
+    }
     if (jwtPattern.test(data.toString("utf8"))) throw new Error(`检测到疑似JWT，停止打包：${absolute}`);
     const executable = /(?:\.sh|\/launch_wufan_workstation_mcp)$/u.test(archive);
     zip.file(archive, data, { unixPermissions: executable ? 0o100755 : 0o100644 });

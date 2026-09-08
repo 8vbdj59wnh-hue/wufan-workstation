@@ -21,6 +21,8 @@
 2. 通过 Tailscale 或公司正式网络访问工作站 API。
 3. 为本机签发 `wufan-assistant` 的短期 JWT。不要复制其他电脑的旧 Token。
 
+公司局域网 API 地址为 `http://192.168.31.11:3001`；Tailscale 地址为 `http://100.123.85.59:3001`。`5173` 是网页端口，不应配置为插件 API 地址。
+
 Windows 如果尚无 `codex` 命令，可在 PowerShell 使用 OpenAI 官方独立安装器：
 
 ```powershell
