@@ -33,7 +33,9 @@
     "check:data-asset-map": "node --check src/dataAssetMapPage.js && node --check src/services/dataAssetMapService.js && node --check server/dataAssetMapService.js && node --check scripts/verify-data-asset-map-mvp.js && node scripts/run-isolated-node.mjs scripts/verify-data-asset-map-mvp.js",
     "check:legacy-relations": "node scripts/check-legacy-link-relation-writes.js",
     "check:v2-cleanup": "node scripts/check-link-center-v2-cleanup.js && node scripts/check-link-center-phase3-retirement.js && node scripts/check-link-center-phase4-archive.js",
-    "check:link-assets": "node scripts/check-link-asset-visibility.js"
+    "check:link-assets": "node scripts/check-link-asset-visibility.js",
+    "check:wufan-workstation-plugin": "node --check plugins/wufan-workstation-readonly/server/index.mjs && node --test tests/wufanWorkstationReadonlyMcp.test.js",
+    "package:wufan-workstation-plugin": "node scripts/build-wufan-workstation-plugin-package.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^12.11.1",

@@ -1,0 +1,20 @@
+{
+  "name": "wufan-internal",
+  "interface": {
+    "displayName": "屋范内部插件"
+  },
+  "plugins": [
+    {
+      "name": "wufan-workstation-readonly",
+      "source": {
+        "source": "local",
+        "path": "./plugins/wufan-workstation-readonly"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

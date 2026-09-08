@@ -1,0 +1,30 @@
+{
+  "name": "wufan-workstation-readonly",
+  "version": "1.0.0",
+  "description": "通过正式权限 API 只读查询极简工作站数据。",
+  "author": {
+    "name": "屋范"
+  },
+  "keywords": [
+    "wufan",
+    "workstation",
+    "readonly",
+    "operations"
+  ],
+  "interface": {
+    "displayName": "极简工作站只读助手",
+    "shortDescription": "安全读取目标、任务、产品、Link和经营数据。",
+    "longDescription": "通过极简工作站正式 API 和账号权限体系读取业务数据，不连接数据库，不提供任何写入工具。",
+    "developerName": "屋范",
+    "category": "Productivity",
+    "capabilities": [
+      "Read"
+    ],
+    "defaultPrompt": [
+      "读取今天任务并按紧急程度汇总。",
+      "查询产品经营摘要和需要关注的异常。",
+      "查询最近Link经营数据并形成简报。"
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

@@ -1,0 +1,150 @@
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+import { executeTool, TOOL_DEFINITIONS } from "../plugins/wufan-workstation-readonly/server/index.mjs";
+
+const root = fileURLToPath(new URL("..", import.meta.url));
+const serverPath = path.join(root, "plugins/wufan-workstation-readonly/server/index.mjs");
+const settings = Object.freeze({
+  baseUrl: new URL("http://127.0.0.1:39001/"),
+  token: "test-secret-token",
+  timeoutMs: 5_000,
+  maxResponseBytes: 1024 * 1024,
+});
+
+const representativeArguments = {
+  get_goal_center: {},
+  get_goal_detail: { goalId: "goal-1" },
+  list_key_actions: { page: 1, pageSize: 10, keyword: "增长" },
+  list_tasks: { view: "today", page: 1, pageSize: 10, showDone: false },
+  get_task_detail: { taskId: "task-1" },
+  list_work_results: { days: 30 },
+  list_products: { page: 1, pageSize: 10, search: "ERP-001" },
+  get_product: { identifier: "ERP-001", by: "erpSkuCode" },
+  get_product_operating_summary: { days: 30 },
+  list_erp_skus: { page: 1, pageSize: 10, search: "ERP-001" },
+  list_links: { page: 1, pageSize: 10, keyword: "花瓶", platform: "test" },
+  get_link_detail: { linkId: "link-1", detail: "core" },
+  get_link_daily_sales: { linkId: "link-1", startDate: "2026-09-01", endDate: "2026-09-08" },
+  list_link_business: { page: 1, pageSize: 10, range: "30d" },
+  get_link_data_status: {},
+  get_data_sync_status: { batchLimit: 5, exceptionLimit: 10 },
+  get_anomaly_summary: {},
+  get_operation_dashboard: {},
+  get_sales_business_dashboard: { range: "30d", page: 1, pageSize: 10 },
+  get_notifications_summary: { limit: 10 },
+};
+
+test("插件只暴露固定只读工具并提供准确安全标注", () => {
+  assert.equal(TOOL_DEFINITIONS.length, Object.keys(representativeArguments).length);
+  assert.deepEqual(new Set(TOOL_DEFINITIONS.map((item) => item.name)), new Set(Object.keys(representativeArguments)));
+  for (const definition of TOOL_DEFINITIONS) {
+    assert.equal(definition.annotations.readOnlyHint, true, definition.name);
+    assert.equal(definition.annotations.destructiveHint, false, definition.name);
+    assert.equal(definition.annotations.openWorldHint, false, definition.name);
+    assert.equal(definition.inputSchema.additionalProperties, false, definition.name);
+    assert.doesNotMatch(definition.name, /create|update|delete|write|import|sync_run|approve|execute/u);
+  }
+});
+
+test("每个工具只向固定正式API发出GET请求且携带Bearer JWT", async () => {
+  const requests = [];
+  const fetchImpl = async (url, options) => {
+    requests.push({ url: new URL(url), options });
+    return new Response(JSON.stringify({ success: true, path: new URL(url).pathname }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  for (const [name, args] of Object.entries(representativeArguments)) {
+    const result = await executeTool(name, args, { settings, fetchImpl });
+    assert.equal(result.success, true, name);
+  }
+
+  assert.equal(requests.length, TOOL_DEFINITIONS.length);
+  for (const request of requests) {
+    assert.equal(request.options.method, "GET");
+    assert.equal(request.options.headers.Authorization, "Bearer test-secret-token");
+    assert.equal(request.options.redirect, "error");
+    assert.equal(request.url.origin, "http://127.0.0.1:39001");
+    assert.match(request.url.pathname, /^\/api\//u);
+  }
+});
+
+test("分页上限、路径编码和任务筛选由适配器收口", async () => {
+  const urls = [];
+  const fetchImpl = async (url) => {
+    urls.push(new URL(url));
+    return new Response(JSON.stringify({ success: true }), { status: 200 });
+  };
+  await executeTool("list_products", { page: -8, pageSize: 9999, search: "花瓶" }, { settings, fetchImpl });
+  await executeTool("get_link_detail", { linkId: "../private/file", detail: "core" }, { settings, fetchImpl });
+  await executeTool("list_tasks", { view: "today", status: "doing", showDone: true }, { settings, fetchImpl });
+
+  assert.equal(urls[0].searchParams.get("page"), "1");
+  assert.equal(urls[0].searchParams.get("pageSize"), "100");
+  assert.match(urls[1].pathname, /\.\.%2Fprivate%2Ffile\/core-detail$/u);
+  assert.deepEqual(JSON.parse(urls[2].searchParams.get("filters")), { status: "doing", showDone: true });
+});
+
+test("超大响应会被拒绝且上游错误不会泄露JWT", async () => {
+  await assert.rejects(
+    executeTool("get_goal_center", {}, {
+      settings: { ...settings, maxResponseBytes: 64 },
+      fetchImpl: async () => new Response("x".repeat(256), { status: 200, headers: { "content-length": "256" } }),
+    }),
+    /超过64字节安全上限/u,
+  );
+
+  await assert.rejects(
+    executeTool("get_goal_center", {}, {
+      settings,
+      fetchImpl: async () => new Response(JSON.stringify({ message: `拒绝访问 ${settings.token}` }), { status: 403 }),
+    }),
+    (error) => {
+      assert.doesNotMatch(error.message, /test-secret-token/u);
+      assert.match(error.message, /\[REDACTED\]/u);
+      return true;
+    },
+  );
+});
+
+test("STDIO MCP初始化、工具枚举和未知方法符合JSON-RPC边界", async () => {
+  const child = spawn(process.execPath, [serverPath], { stdio: ["pipe", "pipe", "pipe"] });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+
+  const messages = [
+    { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } } },
+    { jsonrpc: "2.0", method: "notifications/initialized" },
+    { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
+    { jsonrpc: "2.0", id: 3, method: "unsafe/write", params: {} },
+  ];
+  child.stdin.write(messages.map((message) => JSON.stringify(message)).join("\n") + "\n");
+
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(`MCP响应超时：${stdout}\n${stderr}`)), 5_000);
+    const poll = setInterval(() => {
+      if (stdout.trim().split("\n").length >= 3) {
+        clearInterval(poll);
+        clearTimeout(timeout);
+        resolve();
+      }
+    }, 10);
+  });
+  child.kill("SIGTERM");
+  const responses = stdout.trim().split("\n").map((line) => JSON.parse(line));
+  assert.equal(responses.length, 3);
+  assert.equal(responses[0].result.serverInfo.name, "wufan-workstation-readonly");
+  assert.equal(responses[1].result.tools.length, TOOL_DEFINITIONS.length);
+  assert.equal(responses[2].error.code, -32601);
+  assert.equal(stderr, "");
+});
