@@ -8,8 +8,9 @@ const pluginName = "wufan-workstation-readonly";
 const pluginRoot = path.join(root, "plugins", pluginName);
 const marketplacePath = path.join(root, ".agents", "plugins", "marketplace.json");
 const manifest = JSON.parse(fs.readFileSync(path.join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
+const releaseVersion = manifest.version.split("+")[0];
 const outputDirectory = path.join(root, "release-packages");
-const outputPath = path.join(outputDirectory, `${pluginName}-${manifest.version}.zip`);
+const outputPath = path.join(outputDirectory, `${pluginName}-${releaseVersion}.zip`);
 
 const forbiddenNames = new Set([".env", "token.jwt", "auth.secret", "workstation.db"]);
 const jwtPattern = /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/u;
@@ -34,6 +35,7 @@ function addDirectory(source, archivePrefix) {
 addDirectory(pluginRoot, `plugins/${pluginName}`);
 zip.file(".agents/plugins/marketplace.json", fs.readFileSync(marketplacePath), { unixPermissions: 0o100644 });
 zip.file("README.md", fs.readFileSync(path.join(pluginRoot, "README.md")), { unixPermissions: 0o100644 });
+zip.file("交给Codex的安装提示词.txt", fs.readFileSync(path.join(pluginRoot, "INSTALL_PROMPT_CN.txt")), { unixPermissions: 0o100644 });
 zip.file("install-windows.ps1", [
   "$ErrorActionPreference = \"Stop\"",
   `$installer = Join-Path $PSScriptRoot \"plugins\\${pluginName}\\setup\\setup-windows.ps1\"`,

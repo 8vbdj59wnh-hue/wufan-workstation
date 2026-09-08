@@ -1,9 +1,9 @@
 {
   "name": "wufan-workstation-readonly",
-  "version": "1.0.0",
-  "description": "通过正式权限 API 只读查询极简工作站数据。",
+  "version": "1.0.0+codex.20260908074855",
+  "description": "\u901a\u8fc7\u6b63\u5f0f\u6743\u9650 API \u53ea\u8bfb\u67e5\u8be2\u6781\u7b80\u5de5\u4f5c\u7ad9\u6570\u636e\u3002",
   "author": {
-    "name": "屋范"
+    "name": "\u5c4b\u8303"
   },
   "keywords": [
     "wufan",
@@ -12,18 +12,18 @@
     "operations"
   ],
   "interface": {
-    "displayName": "极简工作站只读助手",
-    "shortDescription": "安全读取目标、任务、产品、Link和经营数据。",
-    "longDescription": "通过极简工作站正式 API 和账号权限体系读取业务数据，不连接数据库，不提供任何写入工具。",
-    "developerName": "屋范",
+    "displayName": "\u6781\u7b80\u5de5\u4f5c\u7ad9\u53ea\u8bfb\u52a9\u624b",
+    "shortDescription": "\u5b89\u5168\u8bfb\u53d6\u76ee\u6807\u3001\u4efb\u52a1\u3001\u4ea7\u54c1\u3001Link\u548c\u7ecf\u8425\u6570\u636e\u3002",
+    "longDescription": "\u901a\u8fc7\u6781\u7b80\u5de5\u4f5c\u7ad9\u6b63\u5f0f API \u548c\u8d26\u53f7\u6743\u9650\u4f53\u7cfb\u8bfb\u53d6\u4e1a\u52a1\u6570\u636e\uff0c\u4e0d\u8fde\u63a5\u6570\u636e\u5e93\uff0c\u4e0d\u63d0\u4f9b\u4efb\u4f55\u5199\u5165\u5de5\u5177\u3002",
+    "developerName": "\u5c4b\u8303",
     "category": "Productivity",
     "capabilities": [
       "Read"
     ],
     "defaultPrompt": [
-      "读取今天任务并按紧急程度汇总。",
-      "查询产品经营摘要和需要关注的异常。",
-      "查询最近Link经营数据并形成简报。"
+      "\u8bfb\u53d6\u4eca\u5929\u4efb\u52a1\u5e76\u6309\u7d27\u6025\u7a0b\u5ea6\u6c47\u603b\u3002",
+      "\u67e5\u8be2\u4ea7\u54c1\u7ecf\u8425\u6458\u8981\u548c\u9700\u8981\u5173\u6ce8\u7684\u5f02\u5e38\u3002",
+      "\u67e5\u8be2\u6700\u8fd1Link\u7ecf\u8425\u6570\u636e\u5e76\u5f62\u6210\u7b80\u62a5\u3002"
     ]
   },
   "mcpServers": "./.mcp.json"
