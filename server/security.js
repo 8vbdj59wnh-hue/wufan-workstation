@@ -47,7 +47,7 @@ export function verifyPassword(password, passwordHash) {
   return crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(storedHash));
 }
 
-function createSignedToken(user, audience, maxAgeMs) {
+function createSignedToken(user, audience, maxAgeMs, additionalClaims = {}) {
   const header = { alg: "HS256", typ: "JWT" };
   const payload = {
     sub: user.id,
@@ -55,6 +55,7 @@ function createSignedToken(user, audience, maxAgeMs) {
     role: user.authRole ?? "user",
     aud: audience,
     exp: Date.now() + maxAgeMs,
+    ...additionalClaims,
   };
   const unsigned = `${base64UrlEncode(JSON.stringify(header))}.${base64UrlEncode(JSON.stringify(payload))}`;
   return `${unsigned}.${sign(unsigned)}`;
@@ -88,12 +89,26 @@ export function createToken(user) {
   return createSignedToken(user, "api", tokenMaxAgeMs);
 }
 
+export function createReadOnlyAssistantToken(user, sessionId) {
+  return createSignedToken(user, "api", tokenMaxAgeMs, {
+    mode: "assistant_read_only",
+    sid: String(sessionId ?? ""),
+  });
+}
+
 export function verifyToken(token) {
   return verifySignedToken(token, "api", { allowMissingAudience: true });
 }
 
 export function createAssetToken(user) {
   return createSignedToken(user, "assets", assetTokenMaxAgeMs);
+}
+
+export function createReadOnlyAssistantAssetToken(user, sessionId) {
+  return createSignedToken(user, "assets", assetTokenMaxAgeMs, {
+    mode: "assistant_read_only",
+    sid: String(sessionId ?? ""),
+  });
 }
 
 export function verifyAssetToken(token) {

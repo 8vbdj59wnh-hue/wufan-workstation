@@ -190,10 +190,18 @@ export function loadSettings() {
   const tokenFile = process.env.WUFAN_WORKSTATION_TOKEN_FILE
     ? path.resolve(process.env.WUFAN_WORKSTATION_TOKEN_FILE)
     : path.resolve(directory, config.tokenFile || "token.jwt");
-  const token = cleanText(process.env.WUFAN_WORKSTATION_TOKEN || (fs.existsSync(tokenFile) ? fs.readFileSync(tokenFile, "utf8") : ""), "JWT", { required: true, maxLength: 16_384 });
+  const refreshTokenFile = process.env.WUFAN_WORKSTATION_REFRESH_TOKEN_FILE
+    ? path.resolve(process.env.WUFAN_WORKSTATION_REFRESH_TOKEN_FILE)
+    : path.resolve(directory, config.refreshTokenFile || "refresh.token");
+  const token = cleanText(process.env.WUFAN_WORKSTATION_TOKEN || (fs.existsSync(tokenFile) ? fs.readFileSync(tokenFile, "utf8") : ""), "JWT", { maxLength: 16_384 });
+  const refreshToken = cleanText(fs.existsSync(refreshTokenFile) ? fs.readFileSync(refreshTokenFile, "utf8") : "", "设备续期凭证", { maxLength: 16_384 });
+  if (!token && !refreshToken) throw new Error("缺少工作站访问凭证，请重新运行安装脚本授权这台设备。");
   return {
     baseUrl,
     token,
+    tokenFile,
+    refreshToken,
+    refreshTokenFile,
     timeoutMs: clampInteger(config.timeoutMs, DEFAULT_TIMEOUT_MS, 1_000, 120_000),
     maxResponseBytes: clampInteger(config.maxResponseBytes, DEFAULT_MAX_RESPONSE_BYTES, 64 * 1024, 32 * 1024 * 1024),
   };
@@ -228,6 +236,70 @@ async function readLimitedBody(response, maximumBytes) {
   return text + decoder.decode();
 }
 
+function tokenExpiresSoon(token, marginMs = 5 * 60 * 1000) {
+  if (!token) return true;
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return false;
+    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+    const expiry = Number(payload.exp);
+    if (!Number.isFinite(expiry)) return true;
+    const expiryMs = expiry < 1_000_000_000_000 ? expiry * 1000 : expiry;
+    return expiryMs <= Date.now() + marginMs;
+  } catch {
+    return true;
+  }
+}
+
+function saveAccessToken(settings, token) {
+  fs.mkdirSync(path.dirname(settings.tokenFile), { recursive: true });
+  fs.writeFileSync(settings.tokenFile, token, { encoding: "utf8", mode: 0o600 });
+  try { fs.chmodSync(settings.tokenFile, 0o600); } catch {}
+  settings.token = token;
+}
+
+let activeRefresh = null;
+async function refreshAccessToken(settings, fetchImpl) {
+  if (!settings.refreshToken) throw new Error("短期JWT已失效，且本机没有设备续期凭证，请重新运行安装脚本。");
+  if (activeRefresh) return activeRefresh;
+  activeRefresh = (async () => {
+    const url = new URL("api/auth/device-sessions/refresh", settings.baseUrl);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), settings.timeoutMs);
+    try {
+      const response = await fetchImpl(url, {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken: settings.refreshToken }),
+        redirect: "error",
+        signal: controller.signal,
+      });
+      const raw = await readLimitedBody(response, Math.min(settings.maxResponseBytes, 1024 * 1024));
+      let payload = {};
+      try { payload = raw ? JSON.parse(raw) : {}; }
+      catch { throw new Error(`工作站续期接口返回了无效JSON（HTTP ${response.status}）。`); }
+      if (!response.ok || typeof payload?.token !== "string" || !payload.token) {
+        throw new Error(payload?.message || `工作站设备续期失败（HTTP ${response.status}）。`);
+      }
+      saveAccessToken(settings, payload.token);
+      return payload.token;
+    } finally {
+      clearTimeout(timer);
+      activeRefresh = null;
+    }
+  })();
+  return activeRefresh;
+}
+
+async function requestRead(url, settings, token, fetchImpl, signal) {
+  return fetchImpl(url, {
+    method: "GET",
+    headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+    redirect: "error",
+    signal,
+  });
+}
+
 export async function executeTool(name, args = {}, options = {}) {
   const spec = TOOL_BY_NAME.get(name);
   if (!spec) throw new Error(`未知只读工具：${cleanText(name, "name", { maxLength: 100 })}`);
@@ -236,15 +308,18 @@ export async function executeTool(name, args = {}, options = {}) {
   if (!request || typeof request.path !== "string" || !request.path.startsWith("/api/")) throw new Error("内部只读路由配置无效。");
   const settings = options.settings || loadSettings();
   const url = new URL(request.path.replace(/^\/+/, ""), settings.baseUrl);
+  const fetchImpl = options.fetchImpl || fetch;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), settings.timeoutMs);
   try {
-    const response = await (options.fetchImpl || fetch)(url, {
-      method: "GET",
-      headers: { Accept: "application/json", Authorization: `Bearer ${settings.token}` },
-      redirect: "error",
-      signal: controller.signal,
-    });
+    let token = settings.token;
+    if (settings.refreshToken && tokenExpiresSoon(token)) token = await refreshAccessToken(settings, fetchImpl);
+    let response = await requestRead(url, settings, token, fetchImpl, controller.signal);
+    if (response.status === 401 && settings.refreshToken) {
+      try { await response.body?.cancel(); } catch {}
+      token = await refreshAccessToken(settings, fetchImpl);
+      response = await requestRead(url, settings, token, fetchImpl, controller.signal);
+    }
     const raw = await readLimitedBody(response, settings.maxResponseBytes);
     let payload = {};
     if (raw !== "") {
@@ -253,13 +328,13 @@ export async function executeTool(name, args = {}, options = {}) {
     }
     if (!response.ok) {
       const message = payload?.message || payload?.error || `工作站请求失败（HTTP ${response.status}）。`;
-      throw new Error(redact(message, [settings.token]));
+      throw new Error(redact(message, [token, settings.refreshToken]));
     }
     if (!payload || typeof payload !== "object") return { value: payload };
     return payload;
   } catch (error) {
     if (error?.name === "AbortError") throw new Error("工作站只读请求超时。");
-    throw new Error(redact(error?.message || error, [settings.token]));
+    throw new Error(redact(error?.message || error, [settings.token, settings.refreshToken]));
   } finally {
     clearTimeout(timer);
   }

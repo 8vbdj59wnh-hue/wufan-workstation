@@ -4,14 +4,14 @@
 
 ## 最简安装方式
 
-把完整 ZIP 文件交给目标电脑上的 Codex，再粘贴 ZIP 根目录中的《交给Codex的安装提示词.txt》。后续环境检查、安装、配置和验收均由 Codex 完成；用户只需在 Codex 明确询问时提供新签发的短期只读 JWT。
+把完整 ZIP 文件交给目标电脑上的 Codex，再粘贴 ZIP 根目录中的《交给Codex的安装提示词.txt》。后续环境检查、安装、配置和验收均由 Codex 完成；用户只需在本机保密窗口输入一次只读账号密码，之后短期 JWT 自动续期。
 
 ## 安全边界
 
-- 只调用固定白名单中的 `GET /api/...` 正式接口。
+- 业务工具只调用固定白名单中的 `GET /api/...` 正式接口；短期 JWT 到期时只允许调用固定的设备续期认证接口。
 - 不连接 SQLite，不使用 SSH，不读取服务器文件。
 - 不提供新增、修改、删除、审批、导入、同步执行或权限管理工具。
-- 每次请求都携带本机配置的短期 JWT，由工作站正式权限和 Data Scope 再次校验。
+- 每次请求都携带自动续期的短期 JWT，由工作站正式权限、Data Scope 和设备会话状态再次校验。
 - 所有 MCP 工具均声明 `readOnlyHint: true`、`destructiveHint: false`。
 - 单次响应默认限制为 8 MiB；产品和 Link 列表强制服务端分页，最大每页 100 条。
 
@@ -19,7 +19,7 @@
 
 1. 安装并登录 Codex 桌面端和 Codex CLI。安装脚本需要 `codex plugin` 命令完成本地插件登记。
 2. 通过 Tailscale 或公司正式网络访问工作站 API。
-3. 为本机签发 `wufan-assistant` 的短期 JWT。不要复制其他电脑的旧 Token。
+3. 准备 `wufan-assistant` 的登录密码。安装脚本只在本机保密输入中使用一次，不会显示或保存密码。
 
 公司局域网 API 地址为 `http://192.168.31.11:3001`；Tailscale 地址为 `http://100.123.85.59:3001`。`5173` 是网页端口，不应配置为插件 API 地址。
 
@@ -44,7 +44,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\plugins\wufan-workstation-readonly\setup\setup-windows.ps1 -BaseUrl "https://workstation.example.internal"
 ```
 
-JWT 保存到 `%USERPROFILE%\.codex\wufan-workstation\token.jwt`，脚本会把文件 ACL 限制为当前 Windows 用户。
+短期 JWT 和设备续期凭证分别保存到 `%USERPROFILE%\.codex\wufan-workstation\token.jwt`、`refresh.token`，脚本会把文件 ACL 限制为当前 Windows 用户。只要设备持续使用，短期 JWT 会自动续期；设备闲置超过 180 天时需重新授权。
 
 ## macOS / Linux
 
@@ -53,11 +53,11 @@ chmod +x ./plugins/wufan-workstation-readonly/setup/setup-unix.sh
 ./plugins/wufan-workstation-readonly/setup/setup-unix.sh
 ```
 
-配置和 JWT 保存到 `~/.codex/wufan-workstation/`，文件权限为 `600`。
+配置、短期 JWT 和设备续期凭证保存到 `~/.codex/wufan-workstation/`，文件权限为 `600`。
 
-## 更新短期 JWT
+## 重新授权或撤销设备
 
-重新运行对应系统的配置脚本即可覆盖旧 Token。只更新 Token 时可跳过重复安装：
+短期 JWT 由插件自动续期，不需要人工复制。更换设备或设备会话被撤销后，重新运行配置脚本即可授权；只更新凭证时可跳过重复安装：
 
 ```powershell
 .\plugins\wufan-workstation-readonly\setup\setup-windows.ps1 -SkipPluginInstall
@@ -76,6 +76,6 @@ chmod +x ./plugins/wufan-workstation-readonly/setup/setup-unix.sh
 3. 可以按产品 ID、ERP SKU 编码或产品编码精确查询。
 4. 数据中心状态查询不会触发同步。
 5. 插件工具列表中不存在任何写入工具。
-6. 使用同一 JWT 直接抽样工作站写接口时仍返回 403。
+6. 使用设备 JWT 抽样工作站业务写接口时仍返回 403，撤销当前设备会话后已有 JWT 立即失效。
 
-JWT、密码、数据库文件和服务器凭据禁止放进此插件目录或分发压缩包。
+JWT、设备续期凭证、密码、数据库文件和服务器凭据禁止放进此插件目录或分发压缩包。

@@ -290,6 +290,8 @@ import {
 import { updateTaskFromWorkflow } from "./taskProcessReadinessService.js";
 import {
   createAssetToken,
+  createReadOnlyAssistantAssetToken,
+  createReadOnlyAssistantToken,
   createToken,
   verifyAssetToken,
   verifyPassword,
@@ -303,6 +305,15 @@ import {
   getTaskWorkflowPermission,
   validatePermissionDependencies,
 } from "./modules/auth/index.js";
+import {
+  assistantSessionHttpStatus,
+  createAssistantDeviceSession,
+  listAssistantDeviceSessions,
+  refreshAssistantDeviceSession,
+  restrictUserToReadOnlyAssistant,
+  revokeAssistantDeviceSession,
+  validateAssistantDeviceSession,
+} from "./assistantDeviceSessionService.js";
 import { normalizeProductSkuCode, splitProductSkuCodes } from "./modules/common/index.js";
 import { getOperationDashboard } from "./operationManagementService.js";
 import {
@@ -560,6 +571,14 @@ function requireAssetAccess(request, response, next) {
     response.status(401).json({ success: false, message: "登录状态已失效" });
     return;
   }
+  if (tokenPayload.mode === "assistant_read_only") {
+    try {
+      validateAssistantDeviceSession(tokenPayload.sid, user.id);
+    } catch (error) {
+      response.status(assistantSessionHttpStatus(error)).json({ success: false, message: error.message, code: error.code });
+      return;
+    }
+  }
   next();
 }
 
@@ -652,7 +671,17 @@ function requireAuth(request, response, next) {
     return;
   }
 
-  request.user = getPublicUser(user);
+  let publicUser = getPublicUser(user);
+  if (tokenPayload.mode === "assistant_read_only") {
+    try {
+      validateAssistantDeviceSession(tokenPayload.sid, user.id);
+      publicUser = { ...restrictUserToReadOnlyAssistant(publicUser), assistantSessionId: tokenPayload.sid };
+    } catch (error) {
+      response.status(assistantSessionHttpStatus(error)).json({ success: false, message: error.message, code: error.code });
+      return;
+    }
+  }
+  request.user = publicUser;
   next();
 }
 
@@ -1510,20 +1539,62 @@ app.post("/api/auth/login", (request, response) => {
     touchLastLoginAt(user.id);
     const freshUser = findLoginUserById(user.id);
     const publicUser = getPublicUser(freshUser);
+    const assistantDeviceName = String(request.body?.assistantDeviceName ?? "").trim();
+    const assistantSession = assistantDeviceName ? createAssistantDeviceSession(freshUser, assistantDeviceName) : null;
     response.json({
       success: true,
       user: publicUser,
-      token: createToken(freshUser),
-      assetToken: createAssetToken(freshUser),
+      token: assistantSession
+        ? createReadOnlyAssistantToken(freshUser, assistantSession.session.id)
+        : createToken(freshUser),
+      assetToken: assistantSession
+        ? createReadOnlyAssistantAssetToken(freshUser, assistantSession.session.id)
+        : createAssetToken(freshUser),
+      ...(assistantSession ? { refreshToken: assistantSession.refreshToken, deviceSession: assistantSession.session } : {}),
     });
   } catch (error) {
+    if (Number.isInteger(error?.status)) {
+      response.status(assistantSessionHttpStatus(error)).json({ success: false, message: error.message, code: error.code });
+      return;
+    }
     console.error("登录失败", error);
     response.status(500).json({ success: false, message: "本地数据库服务未启动，请联系管理员" });
   }
 });
 
+app.post("/api/auth/device-sessions/refresh", (request, response) => {
+  try {
+    const refreshed = refreshAssistantDeviceSession(request.body?.refreshToken);
+    response.json({
+      success: true,
+      token: createReadOnlyAssistantToken(refreshed.row, refreshed.session.id),
+      deviceSession: refreshed.session,
+    });
+  } catch (error) {
+    response.status(assistantSessionHttpStatus(error)).json({ success: false, message: error.message, code: error.code });
+  }
+});
+
+app.get("/api/auth/device-sessions", requireAuth, (request, response) => {
+  response.json({ success: true, sessions: listAssistantDeviceSessions(request.user.id) });
+});
+
+app.delete("/api/auth/device-sessions/:id", requireAuth, (request, response) => {
+  try {
+    response.json({ success: true, session: revokeAssistantDeviceSession(request.user.id, request.params.id) });
+  } catch (error) {
+    response.status(assistantSessionHttpStatus(error)).json({ success: false, message: error.message, code: error.code });
+  }
+});
+
 app.get("/api/auth/me", requireAuth, (request, response) => {
-  response.json({ success: true, user: request.user, assetToken: createAssetToken(request.user) });
+  response.json({
+    success: true,
+    user: request.user,
+    assetToken: request.user.assistantReadOnly
+      ? createReadOnlyAssistantAssetToken(request.user, request.user.assistantSessionId)
+      : createAssetToken(request.user),
+  });
 });
 
 app.get("/api/util/qr-code", async (request, response) => {

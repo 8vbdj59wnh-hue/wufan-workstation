@@ -5197,6 +5197,7 @@ export function replaceAllData(data) {
   if (permissionAdminCount < 1) throw new Error("系统至少需要保留一个权限管理员。");
 
   const replace = database.transaction(() => {
+    database.prepare("DELETE FROM assistant_device_sessions").run();
     clearAllTables();
     for (const resourceKey of Object.keys(resourceConfigs)) {
       const items = resourceKey === "people" ? data.people ?? data.persons ?? [] : data[resourceKey] ?? [];

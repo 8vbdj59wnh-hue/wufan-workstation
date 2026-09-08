@@ -45,6 +45,20 @@ CREATE TABLE IF NOT EXISTS persons (
   updatedAt TEXT
 );
 
+CREATE TABLE IF NOT EXISTS assistant_device_sessions (
+  id TEXT PRIMARY KEY,
+  userId TEXT NOT NULL,
+  deviceName TEXT NOT NULL,
+  tokenHash TEXT NOT NULL,
+  createdAt TEXT NOT NULL,
+  lastUsedAt TEXT NOT NULL,
+  expiresAt TEXT NOT NULL,
+  revokedAt TEXT,
+  FOREIGN KEY(userId) REFERENCES persons(id)
+);
+CREATE INDEX IF NOT EXISTS idx_assistant_device_sessions_user ON assistant_device_sessions(userId,createdAt DESC);
+CREATE INDEX IF NOT EXISTS idx_assistant_device_sessions_expiry ON assistant_device_sessions(expiresAt,revokedAt);
+
 CREATE TABLE IF NOT EXISTS permission_templates (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,

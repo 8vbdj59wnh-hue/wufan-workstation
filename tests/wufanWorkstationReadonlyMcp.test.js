@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -73,6 +75,42 @@ test("每个工具只向固定正式API发出GET请求且携带Bearer JWT", asyn
     assert.equal(request.url.origin, "http://127.0.0.1:39001");
     assert.match(request.url.pathname, /^\/api\//u);
   }
+});
+
+test("短期JWT到期后只调用固定认证接口续期并安全保存新JWT", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "wufan-plugin-refresh-"));
+  const tokenFile = path.join(directory, "token.jwt");
+  const expiredToken = [
+    Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url"),
+    Buffer.from(JSON.stringify({ exp: 1 })).toString("base64url"),
+    "signature",
+  ].join(".");
+  const requests = [];
+  const refreshSettings = {
+    ...settings,
+    token: expiredToken,
+    tokenFile,
+    refreshToken: "wfr1.test-refresh-token",
+  };
+  const fetchImpl = async (url, options) => {
+    requests.push({ url: new URL(url), options });
+    if (new URL(url).pathname === "/api/auth/device-sessions/refresh") {
+      return new Response(JSON.stringify({ success: true, token: "renewed-access-token" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({ success: true }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  await executeTool("get_goal_center", {}, { settings: refreshSettings, fetchImpl });
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].url.pathname, "/api/auth/device-sessions/refresh");
+  assert.equal(requests[0].options.method, "POST");
+  assert.deepEqual(JSON.parse(requests[0].options.body), { refreshToken: "wfr1.test-refresh-token" });
+  assert.equal(requests[1].options.method, "GET");
+  assert.equal(requests[1].options.headers.Authorization, "Bearer renewed-access-token");
+  assert.equal(fs.readFileSync(tokenFile, "utf8"), "renewed-access-token");
 });
 
 test("分页上限、路径编码和任务筛选由适配器收口", async () => {

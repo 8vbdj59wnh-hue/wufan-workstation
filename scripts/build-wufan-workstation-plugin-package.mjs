@@ -12,8 +12,9 @@ const releaseVersion = manifest.version.split("+")[0];
 const outputDirectory = path.join(root, "release-packages");
 const outputPath = path.join(outputDirectory, `${pluginName}-${releaseVersion}.zip`);
 
-const forbiddenNames = new Set([".env", "token.jwt", "auth.secret", "workstation.db"]);
+const forbiddenNames = new Set([".env", "token.jwt", "refresh.token", "auth.secret", "workstation.db"]);
 const jwtPattern = /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/u;
+const refreshTokenPattern = /wfr1\.[0-9a-f-]{36}\.[A-Za-z0-9_-]{32,}/iu;
 const zip = new JSZip();
 
 function addDirectory(source, archivePrefix) {
@@ -31,7 +32,8 @@ function addDirectory(source, archivePrefix) {
     if (archive.toLowerCase().endsWith(".cmd")) {
       data = Buffer.from(data.toString("utf8").replace(/\r?\n/gu, "\r\n"), "utf8");
     }
-    if (jwtPattern.test(data.toString("utf8"))) throw new Error(`检测到疑似JWT，停止打包：${absolute}`);
+    const text = data.toString("utf8");
+    if (jwtPattern.test(text) || refreshTokenPattern.test(text)) throw new Error(`检测到疑似访问凭证，停止打包：${absolute}`);
     const executable = /(?:\.sh|\/launch_wufan_workstation_mcp)$/u.test(archive);
     zip.file(archive, data, { unixPermissions: executable ? 0o100755 : 0o100644 });
   }
