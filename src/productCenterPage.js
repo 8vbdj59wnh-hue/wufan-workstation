@@ -137,7 +137,7 @@ let productSkuV2State = { loading: false, loaded: false, rows: [], detail: null,
 let productSkuV2RequestId = 0;
 let productSkuV2SearchTimer = 0;
 let productSkuV2MetadataLoading = false;
-let productWorkspaceState = { activeTab: "overview", sections: {}, marketingMode: "read", marketingNotice: "", dailySales: { data: null, loading: false, loaded: false, rangePreset: "30d", error: "" } };
+let productWorkspaceState = { activeTab: "overview", sections: {}, linkSalesSort: "default", marketingMode: "read", marketingNotice: "", dailySales: { data: null, loading: false, loaded: false, rangePreset: "30d", error: "" } };
 let productBusinessDashboardState = { readModel: null, loading: false, cacheKey: "", error: "" };
 let productBusinessViewMode = "table";
 let productBusinessSearchTimer = 0;
@@ -908,7 +908,7 @@ function renderProductSkuV2Detail() {
     <section class="product-workspace-panel"><header><div><span>ERP SKU 经营事实</span><h2>近30天经营概览</h2></div></header><div class="product-card-metrics"><div><strong>${businessMoney(business?.sales?.directAmount)}</strong><span>直接销售额</span></div><div><strong>${businessValue(business?.sales?.directQuantity)}</strong><span>直接销量</span></div><div><strong>${businessValue(business?.sales?.bundleContributionQuantity)}</strong><span>组合贡献</span></div><div><strong>${businessValue(business?.inventory?.quantity)}</strong><span>当前库存</span></div></div></section>
     ${marketingSummary}
     <div class="product-workspace-grid">
-      <div>${renderUiModule("product_gallery", { ...moduleContext, images: galleryImages })}${renderUiModule("product_links", { state: section("links"), formatMetric })}</div>
+      <div>${renderUiModule("product_gallery", { ...moduleContext, images: galleryImages })}${renderUiModule("product_links", { state: section("links"), salesSort: productWorkspaceState.linkSalesSort, formatMetric })}</div>
       <div>${renderUiModule("product_ai_tools", { productId: sku.productId, notice: productWorkspaceState.marketingNotice })}${renderUiModule("product_lifecycle_strategy", moduleContext)}</div>
     </div>
   </div>`;
@@ -2259,7 +2259,7 @@ async function refreshComboSkuDetail(salesObjectId, rerender) {
 
 async function refreshProductSkuV2Detail(erpSkuId, rerender) {
   if (!erpSkuId || productSkuV2State.loading || productSkuV2State.detailId === erpSkuId) return;
-  productWorkspaceState = { activeTab: "overview", sections: {}, marketingMode: "read", marketingNotice: "", dailySales: { data: null, loading: false, loaded: false, rangePreset: "30d", error: "" } };
+  productWorkspaceState = { activeTab: "overview", sections: {}, linkSalesSort: "default", marketingMode: "read", marketingNotice: "", dailySales: { data: null, loading: false, loaded: false, rangePreset: "30d", error: "" } };
   productSkuV2State = { ...productSkuV2State, loading: true, detail: null, detailId: "", error: "" }; rerender();
   try { const result = await loadProductCenterV2SkuDetail(erpSkuId, "summary"); productSkuV2State = { ...productSkuV2State, loading: false, detail: result.detail, detailId: erpSkuId, error: "" }; }
   catch (error) { productSkuV2State = { ...productSkuV2State, loading: false, detail: null, detailId: erpSkuId, error: error.message || "ERP SKU详情读取失败。" }; }
@@ -3274,6 +3274,11 @@ export function bindProductCenterPageEvents(rerender) {
     }
     if (action === "load-product-workspace-section") {
       void loadProductWorkspaceSection(button.dataset.scope, rerender);
+      return;
+    }
+    if (action === "sort-product-workspace-links") {
+      productWorkspaceState = { ...productWorkspaceState, linkSalesSort: button.dataset.salesSort || "default" };
+      rerender();
       return;
     }
     if (action === "product-v2-page") {

@@ -76,12 +76,37 @@ registerUiModule({
   dependencies: ["product_image"],
 });
 
+const productLinkSalesSortOptions = [
+  ["default", "默认", null],
+  ["7d", "7天", "quantity7d"],
+  ["15d", "15天", "quantity15d"],
+  ["30d", "30天", "quantity30d"],
+];
+
+function sortProductLinksBySales(rows = [], salesSort = "default") {
+  const field = productLinkSalesSortOptions.find(([key]) => key === salesSort)?.[2];
+  if (!field) return rows;
+  return rows.map((item, index) => ({ item, index })).sort((left, right) => {
+    const leftRawMetric = left.item.salesWindows?.[field];
+    const rightRawMetric = right.item.salesWindows?.[field];
+    const leftMetric = leftRawMetric === null || leftRawMetric === undefined ? Number.NaN : Number(leftRawMetric);
+    const rightMetric = rightRawMetric === null || rightRawMetric === undefined ? Number.NaN : Number(rightRawMetric);
+    const leftValue = Number.isFinite(leftMetric) ? leftMetric : Number.NEGATIVE_INFINITY;
+    const rightValue = Number.isFinite(rightMetric) ? rightMetric : Number.NEGATIVE_INFINITY;
+    return rightValue - leftValue || left.index - right.index;
+  }).map(({ item }) => item);
+}
+
 registerUiModule({
   moduleKey: "product_links",
   name: "ProductLinks",
   domain: "product",
   description: "通过 V2 ERP SKU 映射展示销售链接。",
-  render: ({ state, formatMetric = (input) => Number(input || 0).toLocaleString("zh-CN") }) => `<section class="product-workspace-panel"><header><div><span>销售渠道</span><h2>关联链接</h2></div><small>${state.loaded ? `${state.rows.length} 条` : "按需加载"}</small></header>${state.loading ? `<div class="empty-state compact">正在读取销售链接…</div>` : state.error ? `<div class="form-error">${escapeHtml(state.error)}</div>` : !state.loaded ? `<button class="secondary-button" type="button" data-action="load-product-workspace-section" data-scope="links">查看销售链接</button>` : `<div class="product-workspace-links">${state.rows.length ? state.rows.map((item) => `<a href="${item.connectionId ? `#connectionCenter/${encodeURIComponent(item.connectionId)}` : "#connectionCenter"}"><div class="product-workspace-link-copy"><span>${escapeHtml(item.platform)} · ${escapeHtml(item.shopName)}</span><strong>${escapeHtml(item.title || "查看链接")}</strong></div><div class="product-workspace-link-sales" aria-label="近7天、15天、30天销量">${[["7天销量", item.salesWindows?.quantity7d], ["15天销量", item.salesWindows?.quantity15d], ["30天销量", item.salesWindows?.quantity30d]].map(([label, metric]) => `<span><small>${label}</small><strong>${metric === null || metric === undefined ? "—" : escapeHtml(formatMetric(metric))}</strong></span>`).join("")}</div></a>`).join("") : `<div class="empty-state compact">暂无销售链接</div>`}</div>`}</section>`,
+  render: ({ state, salesSort = "default", formatMetric = (input) => Number(input || 0).toLocaleString("zh-CN") }) => {
+    const rows = sortProductLinksBySales(state.rows, salesSort);
+    const headerActions = `<div class="product-workspace-link-header-actions"><small>${state.loaded ? `${state.rows.length} 条` : "按需加载"}</small>${state.loaded && state.rows.length ? `<div class="product-workspace-link-sort" aria-label="关联链接销量排序"><span>销量排序</span>${productLinkSalesSortOptions.map(([key, label]) => `<button type="button" data-action="sort-product-workspace-links" data-sales-sort="${key}" class="${salesSort === key ? "is-active" : ""}" aria-pressed="${salesSort === key}">${label}</button>`).join("")}</div>` : ""}</div>`;
+    return `<section class="product-workspace-panel"><header><div><span>销售渠道</span><h2>关联链接</h2></div>${headerActions}</header>${state.loading ? `<div class="empty-state compact">正在读取销售链接…</div>` : state.error ? `<div class="form-error">${escapeHtml(state.error)}</div>` : !state.loaded ? `<button class="secondary-button" type="button" data-action="load-product-workspace-section" data-scope="links">查看销售链接</button>` : `<div class="product-workspace-links">${rows.length ? rows.map((item) => `<a href="${item.connectionId ? `#connectionCenter/${encodeURIComponent(item.connectionId)}` : "#connectionCenter"}"><div class="product-workspace-link-copy"><span>${escapeHtml(item.platform)} · ${escapeHtml(item.shopName)}</span><strong>${escapeHtml(item.title || "查看链接")}</strong></div><div class="product-workspace-link-sales" aria-label="近7天、15天、30天销量">${[["7天销量", item.salesWindows?.quantity7d], ["15天销量", item.salesWindows?.quantity15d], ["30天销量", item.salesWindows?.quantity30d]].map(([label, metric]) => `<span><small>${label}</small><strong>${metric === null || metric === undefined ? "—" : escapeHtml(formatMetric(metric))}</strong></span>`).join("")}</div></a>`).join("") : `<div class="empty-state compact">暂无销售链接</div>`}</div>`}</section>`;
+  },
   configSchema: {},
   dependencies: [],
 });

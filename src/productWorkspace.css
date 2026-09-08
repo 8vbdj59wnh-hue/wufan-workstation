@@ -31,6 +31,12 @@
 .product-workspace-gallery { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .product-workspace-gallery-image { width: 100%; aspect-ratio: 1; border-radius: 14px; background: #f5f5f3; object-fit: cover; }
 .product-workspace-links { display: grid; gap: 8px; }
+.product-workspace-link-header-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.product-workspace-link-sort { display: flex; align-items: center; gap: 3px; padding: 3px; border-radius: 10px; background: #f4f5f3; }
+.product-workspace-link-sort > span { padding: 0 6px; color: #777; font-size: 11px; }
+.product-workspace-link-sort button { min-width: 38px; padding: 5px 7px; border: 0; border-radius: 7px; color: #666; background: transparent; font-size: 11px; cursor: pointer; }
+.product-workspace-link-sort button:hover { color: #173f35; background: rgba(255, 255, 255, .65); }
+.product-workspace-link-sort button.is-active { color: #173f35; background: #fff; box-shadow: 0 1px 4px rgba(23, 63, 53, .12); font-weight: 700; }
 .product-workspace-links a { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 12px 14px 12px 16px; border-radius: 14px; color: inherit; background: #f7f7f5; text-decoration: none; }
 .product-workspace-link-copy { display: grid; min-width: 0; gap: 4px; }
 .product-workspace-link-copy > span { color: #777; font-size: 12px; }
@@ -89,6 +95,8 @@
   .product-workspace-metrics { grid-template-columns: 1fr 1fr; }
   .product-workspace-gallery { grid-template-columns: repeat(2, 1fr); }
   .product-workspace-links a { grid-template-columns: 1fr; }
+  .product-workspace-link-header-actions { align-items: flex-start; }
+  .product-workspace-link-sort > span { display: none; }
   .product-workspace-link-sales { grid-template-columns: repeat(3, 1fr); }
   .product-workspace-link-sales > span { text-align: left; }
   .product-marketing-reading, .product-marketing-form { grid-template-columns: 1fr; }

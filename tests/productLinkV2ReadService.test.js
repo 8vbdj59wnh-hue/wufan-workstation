@@ -121,10 +121,19 @@ test("产品详情关联链接展示7天、15天、30天真实销量", async () 
     assert.deepEqual(rows[0].salesWindows, { dataDate: "2026-08-30", quantity7d: 3, quantity15d: 12, quantity30d: 22 });
     assert.deepEqual(rows[1].salesWindows, { dataDate: "2026-08-30", quantity7d: 0, quantity15d: 0, quantity30d: 0 });
     const html = renderUiModule("product_links", {
-      state: { loaded: true, loading: false, error: "", rows: [{ ...rows[0], platform: "天猫", shopName: "测试店铺", connectionId: "connection-a" }] },
+      state: { loaded: true, loading: false, error: "", rows: [
+        { ...rows[0], platform: "天猫", shopName: "测试店铺", connectionId: "connection-a" },
+        { ...rows[1], platform: "抖店", shopName: "零销量店铺", connectionId: "connection-b" },
+        { salesLinkSkuId: "link-sku-c", title: "高销量链接", platform: "淘宝", shopName: "高销量店铺", connectionId: "connection-c", salesWindows: { quantity7d: 10, quantity15d: 10, quantity30d: 10 } },
+      ] },
+      salesSort: "7d",
       formatMetric: (value) => `销量${value}`,
     });
     for (const expected of ["7天销量", "15天销量", "30天销量", "销量3", "销量12", "销量22"]) assert.match(html, new RegExp(expected));
+    assert.match(html, /销量排序/);
+    assert.match(html, /data-sales-sort="7d" class="is-active"/);
+    assert.ok(html.indexOf("高销量链接") < html.indexOf("有销量链接"));
+    assert.ok(html.indexOf("有销量链接") < html.indexOf("无销量链接"));
   } finally {
     database.close();
   }
