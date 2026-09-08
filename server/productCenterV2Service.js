@@ -129,7 +129,7 @@ function salesObjectLinkContext(database, erpSkuIds) {
   const reverse = resolveErpSkuSalesObjectLinks({ erpSkuIds }, { database, scope: "productAssociations", salesObjectOnly: true }).results;
   const linkSkuIds = [...new Set(Object.values(reverse).flatMap((relations) => relations.map((relation) => relation.salesLinkSkuId)))];
   const identities = linkSkuIds.length ? database.prepare(`SELECT x.id salesLinkSkuId,x.salesLinkId,x.platformSkuId,x.platformSkuCode,x.specificationName platformSpecification,
-      l.platformGoodsId,l.title,sh.platform,sh.displayName shopName,c.id connectionId
+      l.platformGoodsId,l.title,l.canonicalUrl,sh.platform,sh.displayName shopName,c.id connectionId
     FROM sales_link_skus x JOIN sales_links l ON l.id=x.salesLinkId JOIN sales_shops sh ON sh.id=l.shopId
     LEFT JOIN ${LINK_ASSET_SELECT_SQL} c ON c.salesLinkId=l.id WHERE x.id IN (${linkSkuIds.map(() => "?").join(",")})`).all(...linkSkuIds) : [];
   const identityBySku = new Map(identities.map((row) => [row.salesLinkSkuId, row]));
