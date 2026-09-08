@@ -4280,11 +4280,7 @@ function renderReviewTaskDetail(task) {
 }
 
 function renderTaskDetail() {
-  const selectedTaskCandidate = getTask(selectedTaskId);
-  const selectedTask =
-    selectedTaskCandidate !== null && isTaskVisibleInExecutionStage(selectedTaskCandidate)
-      ? selectedTaskCandidate
-      : getFilteredTasks()[0] ?? null;
+  const selectedTask = getTask(selectedTaskId);
 
   if (selectedTask === null) {
     return `

@@ -442,6 +442,9 @@ export async function loadPersistentData({ includeTaskWaves = null, useCache = f
         const waveItems = Array.isArray(waveData) ? waveData : waveData.items ?? [];
         mergeTaskWaveMemberTasks(waveItems);
         replaceArray(state.taskWaves, waveItems);
+        mergeArrayById(state.processInstances, waveData.context?.processInstances ?? []);
+        mergeArrayById(state.workPlans, waveData.context?.workPlans ?? []);
+        mergeArrayById(state.templates, waveData.context?.templates ?? []);
         mergeTaskProductContexts(state.taskProductContexts, waveData.context?.taskProductContexts ?? []);
       }
       taskWavesLoaded = true;
@@ -491,6 +494,9 @@ export async function loadTaskWaves() {
   const items = Array.isArray(data) ? data : data.items ?? [];
   mergeTaskWaveMemberTasks(items);
   replaceArray(state.taskWaves, items);
+  mergeArrayById(state.processInstances, data.context?.processInstances ?? []);
+  mergeArrayById(state.workPlans, data.context?.workPlans ?? []);
+  mergeArrayById(state.templates, data.context?.templates ?? []);
   mergeTaskProductContexts(state.taskProductContexts, data.context?.taskProductContexts ?? []);
   taskWavesLoaded = true;
   return state.taskWaves;

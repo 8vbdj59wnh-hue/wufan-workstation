@@ -4997,6 +4997,16 @@ app.get("/api/task-waves", (request, response) => {
   const tasks = readResourceItems("tasks", waveTaskIds);
   const processInstanceIds = [...new Set(tasks.map((task) => task.processInstanceId).filter(Boolean))];
   const processInstances = readResourceItems("processInstances", processInstanceIds);
+  const workPlanIds = processInstanceIds.length === 0
+    ? []
+    : getDatabase().prepare(`SELECT id FROM work_plans WHERE processInstanceId IN (${processInstanceIds.map(() => "?").join(",")})`)
+      .all(...processInstanceIds).map((row) => row.id);
+  const workPlans = readResourceItems("workPlans", workPlanIds);
+  const linkedTemplateIds = [...new Set([...processInstances, ...workPlans].flatMap((item) => {
+    const ids = item?.customFields?.linkedTemplateIds;
+    return Array.isArray(ids) ? ids.map((id) => String(id ?? "").trim()).filter(Boolean) : [];
+  }))];
+  const templates = readResourceItems("templates", linkedTemplateIds);
   const actionProductIds = processInstanceIds.length === 0
     ? []
     : getDatabase().prepare(`SELECT id FROM action_products WHERE actionId IN (${processInstanceIds.map(() => "?").join(",")})`)
@@ -5006,6 +5016,9 @@ app.get("/api/task-waves", (request, response) => {
     success: true,
     items,
     context: {
+      processInstances,
+      workPlans,
+      templates,
       taskProductContexts: readTaskProductContexts({ tasks, processInstances, actionProducts }),
     },
   });
