@@ -4,6 +4,7 @@ import { resolveErpSkuSalesObjectLinks } from "./capabilities/resolveLinkSkuRela
 import { classifyErpSkuUsages } from "./erpSkuUsageProfileService.js";
 import { LINK_ASSET_SELECT_SQL } from "./linkAssetSql.js";
 import { getProductBusinessReadModel } from "./productBusinessReadModel.js";
+import { latestCompleteSalesDate } from "./productSalesDistributionService.js";
 import { currentProductOperatingSkuPredicate, wangdianInSaleSkuPredicate, wangdianOperatingSkuPredicate } from "./wangdianProductStatus.js";
 
 const text = (value) => String(value ?? "").trim();
@@ -133,6 +134,36 @@ function salesObjectLinkContext(database, erpSkuIds) {
     LEFT JOIN ${LINK_ASSET_SELECT_SQL} c ON c.salesLinkId=l.id WHERE x.id IN (${linkSkuIds.map(() => "?").join(",")})`).all(...linkSkuIds) : [];
   const identityBySku = new Map(identities.map((row) => [row.salesLinkSkuId, row]));
   return new Map(erpSkuIds.map((erpSkuId) => [erpSkuId, (reverse[erpSkuId] || []).map((relation) => ({ ...identityBySku.get(relation.salesLinkSkuId), relation })).filter((row) => row.salesLinkSkuId)]));
+}
+
+export function attachProductLinkSalesWindows(links = [], options = {}) {
+  const database = options.database || getDatabase();
+  const dataDate = text(options.dataDate || latestCompleteSalesDate(database));
+  const erpSkuId = text(options.erpSkuId);
+  const salesLinkSkuIds = [...new Set(links.map((item) => text(item.salesLinkSkuId)).filter(Boolean))];
+  if (!dataDate || !erpSkuId) {
+    return links.map((item) => ({ ...item, salesWindows: { dataDate: null, quantity7d: null, quantity15d: null, quantity30d: null } }));
+  }
+  const rows = salesLinkSkuIds.length ? database.prepare(`WITH period(dataDate) AS (VALUES (?))
+    SELECT f.salesLinkSkuId,
+      SUM(CASE WHEN f.saleDate>=date(period.dataDate,'-6 days') THEN COALESCE(f.quantity,0) ELSE 0 END) quantity7d,
+      SUM(CASE WHEN f.saleDate>=date(period.dataDate,'-14 days') THEN COALESCE(f.quantity,0) ELSE 0 END) quantity15d,
+      SUM(COALESCE(f.quantity,0)) quantity30d
+    FROM connection_sku_sales_daily_facts f CROSS JOIN period
+    WHERE f.salesLinkSkuId IN (${salesLinkSkuIds.map(() => "?").join(",")})
+      AND f.erpSkuId=?
+      AND f.saleDate BETWEEN date(period.dataDate,'-29 days') AND period.dataDate
+    GROUP BY f.salesLinkSkuId`).all(dataDate, ...salesLinkSkuIds, erpSkuId) : [];
+  const salesByLinkSku = new Map(rows.map((row) => [row.salesLinkSkuId, row]));
+  return links.map((item) => {
+    const sales = salesByLinkSku.get(item.salesLinkSkuId);
+    return { ...item, salesWindows: {
+      dataDate,
+      quantity7d: Number(sales?.quantity7d || 0),
+      quantity15d: Number(sales?.quantity15d || 0),
+      quantity30d: Number(sales?.quantity30d || 0),
+    } };
+  });
 }
 
 function productListMetadata(database) {
@@ -477,7 +508,7 @@ export function getProductCenterV2SkuDetail(erpSkuId, { scope = "full" } = {}) {
     LEFT JOIN products p ON p.id=m.productId
     LEFT JOIN product_business_profiles profile ON profile.erpSkuId=s.id WHERE s.id=?`).get(text(erpSkuId));
   if (!sku) throw new Error("ERP SKU不存在。");
-  const resolvedLinks = () => (salesObjectLinkContext(database, [sku.id]).get(sku.id) || []).map((row) => ({ mappingId: null, mappingType: row.relation.relationshipShape, quantity: row.relation.mappings.find((item) => item.erpSkuId === sku.id)?.quantity ?? null, ...row }));
+  const resolvedLinks = () => attachProductLinkSalesWindows((salesObjectLinkContext(database, [sku.id]).get(sku.id) || []).map((row) => ({ mappingId: null, mappingType: row.relation.relationshipShape, quantity: row.relation.mappings.find((item) => item.erpSkuId === sku.id)?.quantity ?? null, ...row })), { database, erpSkuId: sku.id });
   if (scope === "links") {
     const links = resolvedLinks();
     return { links };

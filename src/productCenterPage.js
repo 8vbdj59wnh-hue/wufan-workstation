@@ -908,7 +908,7 @@ function renderProductSkuV2Detail() {
     <section class="product-workspace-panel"><header><div><span>ERP SKU 经营事实</span><h2>近30天经营概览</h2></div></header><div class="product-card-metrics"><div><strong>${businessMoney(business?.sales?.directAmount)}</strong><span>直接销售额</span></div><div><strong>${businessValue(business?.sales?.directQuantity)}</strong><span>直接销量</span></div><div><strong>${businessValue(business?.sales?.bundleContributionQuantity)}</strong><span>组合贡献</span></div><div><strong>${businessValue(business?.inventory?.quantity)}</strong><span>当前库存</span></div></div></section>
     ${marketingSummary}
     <div class="product-workspace-grid">
-      <div>${renderUiModule("product_gallery", { ...moduleContext, images: galleryImages })}${renderUiModule("product_links", { state: section("links") })}</div>
+      <div>${renderUiModule("product_gallery", { ...moduleContext, images: galleryImages })}${renderUiModule("product_links", { state: section("links"), formatMetric })}</div>
       <div>${renderUiModule("product_ai_tools", { productId: sku.productId, notice: productWorkspaceState.marketingNotice })}${renderUiModule("product_lifecycle_strategy", moduleContext)}</div>
     </div>
   </div>`;

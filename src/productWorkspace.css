@@ -31,8 +31,14 @@
 .product-workspace-gallery { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .product-workspace-gallery-image { width: 100%; aspect-ratio: 1; border-radius: 14px; background: #f5f5f3; object-fit: cover; }
 .product-workspace-links { display: grid; gap: 8px; }
-.product-workspace-links a { display: grid; gap: 4px; padding: 14px 16px; border-radius: 14px; color: inherit; background: #f7f7f5; text-decoration: none; }
-.product-workspace-links span { color: #777; font-size: 12px; }
+.product-workspace-links a { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 12px 14px 12px 16px; border-radius: 14px; color: inherit; background: #f7f7f5; text-decoration: none; }
+.product-workspace-link-copy { display: grid; min-width: 0; gap: 4px; }
+.product-workspace-link-copy > span { color: #777; font-size: 12px; }
+.product-workspace-link-copy > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.product-workspace-link-sales { display: grid; grid-template-columns: repeat(3, minmax(52px, auto)); gap: 6px; }
+.product-workspace-link-sales > span { display: grid; min-width: 52px; padding: 7px 9px; border-radius: 10px; background: #fff; text-align: right; }
+.product-workspace-link-sales small { color: #888; font-size: 10px; line-height: 1; }
+.product-workspace-link-sales strong { margin-top: 4px; color: #173f35; font-size: 13px; line-height: 1; }
 .product-workspace-timeline { display: grid; gap: 12px; }
 .product-workspace-timeline article { padding: 18px; border-radius: 16px; background: #f7f7f5; }
 .product-workspace-timeline p { margin: 8px 0; color: #555; }
@@ -82,6 +88,9 @@
   .product-workspace-top > .business-zone-badge { position: static; margin-bottom: 12px; }
   .product-workspace-metrics { grid-template-columns: 1fr 1fr; }
   .product-workspace-gallery { grid-template-columns: repeat(2, 1fr); }
+  .product-workspace-links a { grid-template-columns: 1fr; }
+  .product-workspace-link-sales { grid-template-columns: repeat(3, 1fr); }
+  .product-workspace-link-sales > span { text-align: left; }
   .product-marketing-reading, .product-marketing-form { grid-template-columns: 1fr; }
   .product-marketing-reading article.is-wide, .product-marketing-form label.is-wide, .product-marketing-form footer { grid-column: auto; }
   .product-marketing-summary-grid { grid-template-columns: 1fr; }

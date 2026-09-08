@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import Database from "better-sqlite3";
 
 test("产品链接接口仅按V2关系解析产品归属", async () => {
   const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "product-link-v2-read-"));
@@ -88,5 +89,43 @@ test("正式业务读取服务不直接查询Legacy关系资产", () => {
     const source = fs.readFileSync(new URL(`../server/${fileName}`, import.meta.url), "utf8");
     assert.doesNotMatch(source, /sales_link_sku_erp_mappings|sales_link_sku_product_structures|sales_link_sku_combo_groups|resolveLinkSkuErpRelation/,
       `${fileName} 不得绕过统一读取门面直接依赖Legacy关系`);
+  }
+});
+
+test("产品详情关联链接展示7天、15天、30天真实销量", async () => {
+  const database = new Database(":memory:");
+  database.exec(`CREATE TABLE connection_sku_sales_daily_facts (
+    id TEXT PRIMARY KEY,
+    salesLinkSkuId TEXT,
+    erpSkuId TEXT,
+    saleDate TEXT,
+    quantity REAL
+  )`);
+  const insert = database.prepare("INSERT INTO connection_sku_sales_daily_facts VALUES (?,?,?,?,?)");
+  insert.run("f-01", "link-sku-a", "erp-sku-a", "2026-08-30", 2);
+  insert.run("f-other-erp", "link-sku-a", "erp-sku-b", "2026-08-30", 40);
+  insert.run("f-02", "link-sku-a", "erp-sku-a", "2026-08-24", 1);
+  insert.run("f-03", "link-sku-a", "erp-sku-a", "2026-08-23", 5);
+  insert.run("f-04", "link-sku-a", "erp-sku-a", "2026-08-16", 4);
+  insert.run("f-05", "link-sku-a", "erp-sku-a", "2026-08-15", 7);
+  insert.run("f-06", "link-sku-a", "erp-sku-a", "2026-08-01", 3);
+  insert.run("f-outside", "link-sku-a", "erp-sku-a", "2026-07-31", 99);
+  try {
+    const { attachProductLinkSalesWindows } = await import("../server/productCenterV2Service.js");
+    const { renderUiModule } = await import("../src/uiModuleRegistry.js");
+    await import("../src/uiModules/productWorkspaceModules.js");
+    const rows = attachProductLinkSalesWindows([
+      { salesLinkSkuId: "link-sku-a", title: "有销量链接" },
+      { salesLinkSkuId: "link-sku-b", title: "无销量链接" },
+    ], { database, erpSkuId: "erp-sku-a" });
+    assert.deepEqual(rows[0].salesWindows, { dataDate: "2026-08-30", quantity7d: 3, quantity15d: 12, quantity30d: 22 });
+    assert.deepEqual(rows[1].salesWindows, { dataDate: "2026-08-30", quantity7d: 0, quantity15d: 0, quantity30d: 0 });
+    const html = renderUiModule("product_links", {
+      state: { loaded: true, loading: false, error: "", rows: [{ ...rows[0], platform: "天猫", shopName: "测试店铺", connectionId: "connection-a" }] },
+      formatMetric: (value) => `销量${value}`,
+    });
+    for (const expected of ["7天销量", "15天销量", "30天销量", "销量3", "销量12", "销量22"]) assert.match(html, new RegExp(expected));
+  } finally {
+    database.close();
   }
 });
