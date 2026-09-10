@@ -15,7 +15,7 @@ export function matchContentProductCodes(database, input) {
 
 // Content is a company-wide shared resource. Dedicated permissions explicitly
 // grant company-wide access; personal task/department ownership is not inferred.
-export function createContentCenterRouter({ requirePermission, hasPermission, getDatabase, dataDir, integration, store: injectedStore }) {
+export function createContentCenterRouter({ requirePermission, hasPermission, getDatabase, dataDir, integration, recommendations, store: injectedStore }) {
   const router = express.Router();
   let store = injectedStore;
   const filename = process.env.WUFAN_CONTENT_DB_PATH || path.join(dataDir, 'content-center.sqlite');
@@ -50,6 +50,12 @@ export function createContentCenterRouter({ requirePermission, hasPermission, ge
     manage: hasPermission(req.user, 'contentCenter.manage'), export: hasPermission(req.user, 'contentCenter.export'), products: hasPermission(req.user, 'products.view'),
   } }));
   route('get', '/notes', () => store.list());
+  router.get('/product-recommendations', requirePermission('products.view'), (req,res,next)=>{try{
+    const brand=store.getCatalog().units.find(u=>u.id===req.query.unitId);
+    if(!brand)throw new AppError('请先为需求选择所属品牌');
+    if(!recommendations)throw new AppError('推荐服务暂不可用',503);
+    res.json(recommendations(brand.name,req.query.kind,req.query.excludeFlowers!=='false'));
+  }catch(error){next(error);}});
   route('get', '/notes/:id', req => { const note=store.get(req.params.id); if(!note) throw new AppError('内容不存在',404); return note; });
   if (integration) {
     route('get', '/calendar-actions', req => integration.calendar(req.user,store));

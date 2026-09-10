@@ -1,3 +1,4 @@
+import { createContentRecommendations } from "./contentCenterRecommendations.js";
 import { dataDir } from "./db.js";
 import { createContentCenterIntegration } from "./contentCenterIntegration.js";
 import { createContentCenterRouter } from "./contentCenterRouter.js";
@@ -1666,7 +1667,7 @@ app.use("/api", (request, response, next) => {
   next();
 });
 
-app.use("/api/content-center", createContentCenterRouter({ requirePermission, hasPermission, getDatabase, dataDir, integration: createContentCenterIntegration({ getDatabase, readAllData, filterDataByScope, hasPermission, launchWorkPlanWithProcess, getUserPersonId, listActionProductOptions, resolveActionProductOptions, uploadsDir }) }));
+app.use("/api/content-center", createContentCenterRouter({ requirePermission, hasPermission, getDatabase, dataDir, recommendations: createContentRecommendations(getDatabase, getProductBusinessReadModel), integration: createContentCenterIntegration({ getDatabase, readAllData, filterDataByScope, hasPermission, launchWorkPlanWithProcess, getUserPersonId, listActionProductOptions, resolveActionProductOptions, uploadsDir }) }));
 
 app.get("/api/store-options", (request, response) => {
   if (!canUseStoreOptions(request.user)) {
