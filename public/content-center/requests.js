@@ -122,22 +122,31 @@ function renderRequestTemplate(n){
  return `${id?`<div class="request-template-selected">${url?`<img src="${esc(url)}" alt="${esc(t.name)}">`:'<span class="request-no-image">暂无预览图</span>'}<strong>${esc(t?.name||'原关联模板（暂不可查看）')}</strong><small>${esc(t?.businessCode||'')}</small></div>`:'<small>暂不关联模板</small>'}<div class="request-recommend-actions"><button type="button" data-request-template-open ${editable?'':'disabled'}>${id?'更换模板':'选择模板'}</button>${id?`<button type="button" data-request-template-clear ${editable?'':'disabled'}>移除</button>`:''}</div>`;
 }
 let templateRequestId='';
+const requestTemplateTags=new Set();
+function templateTagValues(t){return [...new Set(Object.values(t.tags||{}).flatMap(values=>Array.isArray(values)?values:[]).filter(v=>typeof v==='string'&&v.trim()))];}
+function matchesRequestTemplate(t,query){return `${t.name} ${t.businessCode||''}`.toLowerCase().includes(query.trim().toLowerCase())&&[...requestTemplateTags].every(tag=>templateTagValues(t).includes(tag));}
+function renderRequestTemplateTagFilters(){
+ const tags=[...new Set((window.contentRequestReferences?.templates||[]).flatMap(templateTagValues))].sort((a,b)=>a.localeCompare(b,'zh-CN'));
+ requestTemplateDialog.querySelector('[data-template-tags]').innerHTML=tags.length?`<span>标签筛选（可多选）</span><div class="request-template-tag-options"><button type="button" data-template-tags-clear aria-pressed="${!requestTemplateTags.size}">全部标签</button>${tags.map(tag=>`<button type="button" data-template-tag="${esc(tag)}" aria-pressed="${requestTemplateTags.has(tag)}">${esc(tag)}</button>`).join('')}</div>`:'<small>暂无可用标签</small>';
+}
 const requestTemplateDialog=document.createElement('dialog');requestTemplateDialog.className='content-recommend-dialog request-template-dialog';document.body.append(requestTemplateDialog);
 function renderRequestTemplateChoices(query=''){
  const n=notes.find(n=>n.id===templateRequestId);if(!n)return;
- const selected=requestValue(n).workstationTemplateId,templates=(window.contentRequestReferences?.templates||[]).filter(t=>`${t.name} ${t.businessCode||''}`.toLowerCase().includes(query.trim().toLowerCase()));
+ const selected=requestValue(n).workstationTemplateId,templates=(window.contentRequestReferences?.templates||[]).filter(t=>matchesRequestTemplate(t,query));
+ requestTemplateDialog.querySelector('[data-template-count]').textContent=`找到 ${templates.length} 个模板${requestTemplateTags.size?' · 同时匹配所选标签':''}`;
  requestTemplateDialog.querySelector('.content-recommend-grid').innerHTML=templates.length?templates.map(t=>{const url=requestTemplateImage(t);return `<article>${url?`<img loading="lazy" src="${esc(url)}" alt="${esc(t.name)}">`:'<div class="request-no-image">暂无预览图</div>'}<strong>${esc(t.name)}</strong><small>${esc(t.businessCode||'')}</small><button type="button" data-request-template-pick="${esc(t.id)}" ${selected===t.id?'disabled':''}>${selected===t.id?'已关联':'关联模板'}</button></article>`;}).join(''):'<p class="request-template-empty">暂无匹配的笔记模板。</p>';
 }
 $('#workspace').addEventListener('click',e=>{
  const b=e.target.closest('[data-request-template-open],[data-request-template-clear]');if(!b||b.disabled)return;
  const n=notes.find(n=>n.id===b.closest('[data-request-row]').dataset.requestRow);if(!n||requestSaving.has(n.id)||!window.contentRequestReferences?.canUseTemplates||!window.contentCenterPermissions?.manage)return;
  if(b.hasAttribute('data-request-template-clear')){markRequestDraft(n.id,'workstationTemplateId','');requestRow(n.id).querySelector('[data-request-template]').innerHTML=renderRequestTemplate(n);return;}
- templateRequestId=n.id;
- requestTemplateDialog.innerHTML='<header><h2>选择关联模板</h2><button type="button" data-template-close>关闭</button></header><input type="search" data-template-search aria-label="搜索模板" placeholder="搜索模板名称或编码"><p>来自模板中心的小红书笔记模板，选择后保存需求即可生效。</p><div class="content-recommend-grid"></div>';
- renderRequestTemplateChoices();requestTemplateDialog.showModal();
+ templateRequestId=n.id;requestTemplateTags.clear();
+ requestTemplateDialog.innerHTML='<header><h2>选择关联模板</h2><button type="button" data-template-close>关闭</button></header><input type="search" data-template-search aria-label="搜索模板" placeholder="搜索模板名称或编码"><div data-template-tags role="group" aria-label="模板标签筛选"></div><p>来自模板中心的小红书笔记模板，选择后保存需求即可生效。</p><p data-template-count role="status"></p><div class="content-recommend-grid"></div>';
+ renderRequestTemplateTagFilters();renderRequestTemplateChoices();requestTemplateDialog.showModal();
 });
 requestTemplateDialog.addEventListener('input',e=>{if(e.target.hasAttribute('data-template-search'))renderRequestTemplateChoices(e.target.value);});
 requestTemplateDialog.addEventListener('click',e=>{
+ const tagButton=e.target.closest('[data-template-tag],[data-template-tags-clear]');if(tagButton){if(tagButton.hasAttribute('data-template-tags-clear'))requestTemplateTags.clear();else{const tag=tagButton.dataset.templateTag;requestTemplateTags.has(tag)?requestTemplateTags.delete(tag):requestTemplateTags.add(tag);}renderRequestTemplateTagFilters();renderRequestTemplateChoices(requestTemplateDialog.querySelector('[data-template-search]').value);return;}
  if(e.target.closest('[data-template-close]'))requestTemplateDialog.close();
  const b=e.target.closest('[data-request-template-pick]');if(!b||b.disabled)return;
  const n=notes.find(n=>n.id===templateRequestId);if(!n||requestSaving.has(n.id)||!window.contentCenterPermissions?.manage||!window.contentRequestReferences?.canUseTemplates)return;
