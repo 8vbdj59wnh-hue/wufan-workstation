@@ -77,11 +77,17 @@ if(saved&&button.hasAttribute('data-request-complete'))openEditor(saved);
 });
 window.addEventListener('beforeunload',e=>{if(requestDrafts.size||requestSaving.size){e.preventDefault();e.returnValue='';}});
 
+let localRequestSequence=0;
+function createLocalRequestId(){
+ // LAN HTTP is not a secure context: randomUUID may be unavailable.
+ const random=typeof globalThis.crypto?.randomUUID==='function'?globalThis.crypto.randomUUID():`${Date.now().toString(36)}-${++localRequestSequence}`;
+ return 'new-request-'+random;
+}
 $('#workspace').addEventListener('click',e=>{
 if(!e.target.closest('[data-add-request]')||!window.contentCenterPermissions?.manage)return;
-let accountId=filters.account||'',column=filters.column||'';
-if(!accountId&&column){const matches=visibleAccounts().filter(a=>a.columns.some(c=>c.name===column));if(matches.length===1)accountId=matches[0].id;else{column='';filters.column='';}}
-const id='new-request-'+crypto.randomUUID();
+const context=newRequestContext();if(!context)return;
+const {accountId,column}=context;
+const id=createLocalRequestId();
 notes.unshift({id,isLocalRequest:true,pool:'candidate',contentStage:'request',unitId:account(accountId)?.unitId||filters.unit||'',account:accountId,column,notes:'',title:'',date:'',time:'',preferredDate:requestDay||'',preferredTime:'',updatedAt:new Date().toISOString(),workstationProductIds:[]});
 requestDrafts.set(id,{revision:0,patch:{notes:'',preferredDate:requestDay||''}});render();
 const row=requestRow(id);row?.scrollIntoView({block:'nearest'});row?.querySelector('[data-request-field="notes"]')?.focus();
