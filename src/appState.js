@@ -50,7 +50,7 @@ import { getPrimaryImageUrl } from "./data/taskUtils.js";
 import { resolvePersistentDataRoute } from "./persistentDataRouting.js";
 
 const apiPort = "3001";
-const apiBaseUrl = `${window.location.protocol}//${window.location.hostname}:${apiPort}`;
+export const apiBaseUrl = `${window.location.protocol}//${window.location.hostname}:${apiPort}`;
 const authTokenKey = "wufanAuthToken";
 const processExecutorInitiatorRule = "initiator";
 let persistenceAvailable = false;
@@ -397,6 +397,8 @@ export async function loadPersistentData({ includeTaskWaves = null, useCache = f
       "settings",
       "financeCenter",
       "finance-center",
+      "contentCenter",
+      "content-center",
       "adminDataCenter",
     ]);
     const bootstrapModule = route || "dashboard";

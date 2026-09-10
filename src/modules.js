@@ -24,6 +24,10 @@ export const modules = [
     name: "产品中心",
   },
   {
+    id: "contentCenter",
+    name: "内容中心",
+  },
+  {
     id: "financeCenter",
     name: "财务中心",
     status: "planned",

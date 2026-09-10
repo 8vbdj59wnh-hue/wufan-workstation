@@ -793,6 +793,7 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
         <h2>${escapeHtml(instance.displayTitle ?? instance.name)}</h2>
         ${editable ? `<button class="primary-button" type="submit" form="launched-process-form-${instance.id}">保存修改</button>` : `<span class="muted-action">只读</span>`}
       </div>
+      ${instance.customFields?.contentCenterSource?.noteId ? `<p class="form-note">来自内容中心策划 · 版本 ${escapeHtml(instance.customFields.contentCenterSource.revision)} <a href="#contentCenter/${encodeURIComponent(instance.customFields.contentCenterSource.noteId)}">查看来源笔记</a></p>` : ""}
       <div class="key-action-detail-summary">
         <div><span>当前状态</span><strong>${escapeHtml(businessStatus.label)}</strong></div>
         <div><span>行动负责人</span><strong>${escapeHtml(actionOwnerName)}</strong></div>

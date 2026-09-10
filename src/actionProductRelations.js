@@ -9,6 +9,7 @@ function escapeHtml(value) {
 }
 
 const selectorTimers = new WeakMap();
+const selectorLoaders = new WeakMap();
 let indexedActionProducts = null;
 let indexedActionProductCount = -1;
 let indexedTaskProductContexts = null;
@@ -235,7 +236,7 @@ async function searchOptions(selector, query) {
   const message = selector.querySelector("[data-action-product-search-message]");
   if (message) message.textContent = "正在搜索 ERP SKU…";
   try {
-    const result = await loadActionProductOptions(query);
+    const result = await (selectorLoaders.get(selector) ?? loadActionProductOptions)(query);
     if (selector.dataset.productRequestId !== requestId) return [];
     const rows = result.rows ?? [];
     mergeKnownOptions(rows);
@@ -251,7 +252,18 @@ async function searchOptions(selector, query) {
 
 function refreshSelected(selector) {
   ensureProductRelationIndexes();
-  const selectedProducts = collectActionProductIds(selector).map(findKnownProduct).filter(Boolean);
+  const selectedIds = collectActionProductIds(selector);
+  for (const identity of selectedIds) {
+    let preserved = [...selector.querySelectorAll('[data-preserved-action-product]')].find(input => input.value === identity);
+    if (!preserved) {
+      preserved = document.createElement('input');
+      preserved.type = 'checkbox'; preserved.name = 'actionProductId'; preserved.value = identity;
+      preserved.hidden = true; preserved.dataset.preservedActionProduct = '';
+      selector.append(preserved);
+    }
+    preserved.checked = true;
+  }
+  const selectedProducts = selectedIds.map(findKnownProduct).filter(Boolean);
   const host = selector.querySelector("[data-action-product-selected]");
   if (host) host.innerHTML = renderSelectedProducts(selectedProducts, selector.dataset.actionId);
   selector.querySelectorAll(".action-product-option").forEach((option) => {
@@ -259,6 +271,7 @@ function refreshSelected(selector) {
     const button = option.querySelector('[data-action="choose-action-product"]');
     if (button) button.textContent = checked ? "已关联" : "选择";
   });
+  selector.dispatchEvent(new CustomEvent("action-products-change", { bubbles: true }));
 }
 
 function renderProductConfirmation(product, isSelected = false) {
@@ -266,8 +279,9 @@ function renderProductConfirmation(product, isSelected = false) {
   return `${renderProductThumb(product)}<span><strong>${escapeHtml(product.name)}</strong><small>ERP SKU：${escapeHtml(product.erpSkuCode || product.skuCode || "—")}</small><small>经营状态：${escapeHtml(optionStatusLabel(product))}</small></span><button class="primary-button" type="button" data-action="confirm-action-product" data-product-id="${escapeHtml(identity)}" ${isSelected ? "disabled" : ""}>${isSelected ? "已关联" : "确认关联"}</button>`;
 }
 
-export function bindActionProductSelectors(root = document) {
+export function bindActionProductSelectors(root = document, { loadOptions = loadActionProductOptions } = {}) {
   root.querySelectorAll("[data-action-product-selector]").forEach((selector) => {
+    selectorLoaders.set(selector, loadOptions);
     selector.addEventListener("input", (event) => {
       if (!event.target.matches("[data-action-product-search]")) return;
       window.clearTimeout(selectorTimers.get(selector));

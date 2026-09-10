@@ -1,4 +1,6 @@
+import { getPublishContentNoteTemplates, renderContentNoteTemplateSelector, bindContentNoteTemplateSelectors } from "./contentNoteTemplateSelector.js";
 import {
+  authFetch, apiBaseUrl, prepareWorkPlanLaunchPayload,
   createPersistentResource,
   ensureStoreOptionsLoaded,
   getCurrentUser,
@@ -110,52 +112,6 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
-function getPublishContentNoteTemplates() {
-  return state.templates.filter((template) => {
-    const tags = template?.tags;
-    if (tags === null || tags === undefined || typeof tags !== "object" || Array.isArray(tags)) return false;
-    return Array.isArray(tags.platform) && tags.platform.includes("小红书")
-      && Array.isArray(tags.usage) && tags.usage.includes("笔记");
-  });
-}
-
-function getGoalTemplatePreviewUrl(template) {
-  const rawUrl = template?.previewImage?.fileUrl ?? template?.previewImage?.url ?? "";
-  return rawUrl === "" ? "" : resolveAssetUrl(rawUrl);
-}
-
-function renderContentNoteTemplateSelector(selectedTemplate) {
-  if (!canAccessTemplateCenter(getCurrentUser())) {
-    return `<div class="form-error">你没有模板中心查看权限，无法选择发布内容笔记模板。</div>`;
-  }
-  const templates = getPublishContentNoteTemplates();
-  return `
-    <fieldset class="goal-content-note-template-selector">
-      <legend>关联模板</legend>
-      <p class="form-note">仅显示平台含“小红书”且用途含“笔记”的模板；本次关键行动只能关联一个模板。</p>
-      ${
-        templates.length === 0
-          ? `<div class="empty-detail">模板中心暂无可用的发布笔记模板</div>`
-          : `<div class="goal-content-note-template-grid">
-              ${templates.map((template) => {
-                const previewUrl = getGoalTemplatePreviewUrl(template);
-                return `
-                  <label class="goal-content-note-template-option">
-                    <input type="radio" name="linkedTemplateId" value="${escapeHtml(template.id)}" ${selectedTemplate === template.id ? "checked" : ""} />
-                    <span class="goal-content-note-template-thumb" ${previewUrl === "" ? "" : `data-action-template-preview-url="${escapeHtml(previewUrl)}" data-action-template-preview-title="${escapeHtml(template.name)}"`}>${previewUrl === "" ? "无预览" : `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(template.name)}" />`}</span>
-                    <span>
-                      <strong>${escapeHtml(template.name)}</strong>
-                      <small>${escapeHtml(template.businessCode || "—")} · ${escapeHtml(template.fileType || "文件")}</small>
-                    </span>
-                  </label>
-                `;
-              }).join("")}
-            </div>`
-      }
-      <button class="text-button" type="button" data-action="clear-goal-linked-template">清除模板选择</button>
-    </fieldset>
-  `;
-}
 
 function findName(items, id, fallback) {
   if (id === null) return fallback;
@@ -354,6 +310,11 @@ function getSortedFormFields(template) {
       if (!fields.some((item) => item.key === field.key)) fields.push(field);
     });
   }
+  if (modalState?.contentCenterSource && isContentNoteTemplate(template)) fields.forEach(field => {
+    if (field.key === 'account') { field.accountIdentity = 'id'; field.accountOptions = modalState.publishingAccounts || state.publishingAccounts; }
+    if (field.key === 'publishDate') field.preciseDateTime = true;
+    if (['purpose','audience','contentText'].includes(field.key)) field.required = false;
+  });
   return fields.sort((left, right) => left.sortOrder - right.sortOrder);
 }
 
@@ -394,8 +355,8 @@ function buildLaunchAssignments(templateId, taskTemplate, initiatorId) {
 
 function renderCustomFieldsForm(template) {
   const fields = getSortedFormFields(template);
-  const editor = renderPublicFormEditor({ fields, customFields: {}, title: "本次关键行动信息" });
-  if (!isContentNoteTemplate(template)) return editor;
+  const editor = renderPublicFormEditor({ fields, customFields: modalState?.customFields ?? {}, title: "本次关键行动信息" });
+  if (!isContentNoteTemplate(template) || modalState?.contentCenterSource) return editor;
   return `
     <div class="publish-time-mode-panel" data-publish-time-mode-panel>
       <span class="publish-time-mode-title">发布时间</span>
@@ -1261,7 +1222,7 @@ function renderGoalTaskModal() {
         </div>
         <form class="modal-form goal-task-form">
           <div class="form-error" ${modalState.error === "" ? "hidden" : ""}>${modalState.error}</div>
-          <p class="form-note">自动对齐目标：${escapeHtml(goal?.name ?? "未选择目标")}</p>
+          ${modalState.contentCenterSource ? `<label>对齐目标<select name="contentCenterGoalId"><option value="">请选择本次发布对齐的目标</option>${getActiveGoals().map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join("")}</select></label>` : `<p class="form-note">自动对齐目标：${escapeHtml(goal?.name ?? "未选择目标")}</p>`}${modalState.contentCenterSource ? `<p class="form-note">来源：内容中心策划笔记。确认后创建制作、审核、发布任务；再次提交不会重复发起。参考图片随策划快照带入行动。</p>` : ""}
           <div class="form-grid">
             <label>
               <span>选择价值链模块</span>
@@ -1291,7 +1252,7 @@ function renderGoalTaskModal() {
           ${modalState.sourceContext?.source === "sales_anomaly" ? `<section class="goal-anomaly-source"><strong>来源：销售经营异常</strong><span>${escapeHtml(modalState.sourceContext.objectType)} · ${escapeHtml(modalState.sourceContext.objectId)}</span><small>${escapeHtml(modalState.sourceContext.anomalySnapshot?.anomalyType || "—")} · 当前值 ${escapeHtml(modalState.sourceContext.anomalySnapshot?.currentValue ?? "暂无数据")} · 对比值 ${escapeHtml(modalState.sourceContext.anomalySnapshot?.compareValue ?? "暂无数据")}</small><small>行动标准：${escapeHtml(modalState.recommendedActionStandard?.name || "未配置")}</small><small>标准目标：${escapeHtml(modalState.recommendedActionStandard?.target || "未维护")}</small><small>流程说明：${escapeHtml(modalState.recommendedActionStandard?.processDescription || "未维护")}</small><small>异常快照只用于追溯，保存时不会自动生成任务。</small></section>` : ""}
           ${renderTaskTemplateLockedInfo(selectedTemplate)}
           ${renderCustomFieldsForm(selectedTemplate)}
-          ${renderActionProductSelector(modalState.sourceContext?.productId ? [modalState.sourceContext.productId] : [])}
+          ${renderActionProductSelector(modalState.productIds ?? (modalState.sourceContext?.productId ? [modalState.sourceContext.productId] : []))}
           ${isPublishContentNote ? renderContentNoteTemplateSelector(modalState.linkedTemplateId ?? "") : ""}
           ${renderStandardWorkAttachmentsField()}
           <label>
@@ -1391,9 +1352,9 @@ function validateGoalTaskDraft(draft) {
   if (!canLaunchActionTemplate(getCurrentUser(), draft.template.id)) return "你没有权限发起该关键行动。";
   if (!draft.template.defaultProcessTemplateId) return "该关键行动尚未绑定关键行动标准流程，请先到关键行动库中配置。";
   if (draft.template.id === publishContentNoteTemplateId) {
-    if (!canAccessTemplateCenter(getCurrentUser())) return "你没有模板中心查看权限，无法发起发布内容笔记。";
+    if ((!modalState?.contentCenterSource || draft.linkedTemplateId) && !canAccessTemplateCenter(getCurrentUser())) return "你没有模板中心查看权限，无法关联模板。";
     const linkedTemplate = getPublishContentNoteTemplates().find((template) => template.id === draft.linkedTemplateId);
-    if (linkedTemplate === undefined) return "必须选择一个有效的发布内容笔记模板。";
+    if ((!modalState?.contentCenterSource || draft.linkedTemplateId) && linkedTemplate === undefined) return "请选择有效的发布内容笔记模板。";
     if (draft.publishTimeMode === PublishTimeMode.Deadline && !draft.dueDate) return "选择同截止时间时必须设置截止时间。";
   }
   const validationFields = draft.publishTimeMode === PublishTimeMode.Deadline
@@ -1633,12 +1594,12 @@ async function uploadSelectedStandardWorkAttachments(form) {
 }
 
 async function saveGoalTask(form, rerender) {
-  const draft = buildGoalTaskDraft(form, modalState.goalId);
+  const draft = buildGoalTaskDraft(form, modalState.contentCenterSource ? getFormValue(form,"contentCenterGoalId") : modalState.goalId);
   const productIds = collectActionProductIds(form);
   const error = validateGoalTaskDraft(draft);
 
   if (error !== "") return setModalError(error, rerender);
-  if (draft.template.id === publishContentNoteTemplateId && productIds.length === 0) {
+  if (draft.template.id === publishContentNoteTemplateId && !modalState?.contentCenterSource && productIds.length === 0) {
     return setModalError("发布内容笔记必须关联至少一个产品。", rerender);
   }
 
@@ -1695,6 +1656,16 @@ async function saveGoalTask(form, rerender) {
   };
 
   try {
+    if (modalState.contentCenterSource) {
+      const source = modalState.contentCenterSource;
+      const payload = prepareWorkPlanLaunchPayload(workPlan, { productIds, launchAssignments: buildLaunchAssignments(draft.template.defaultProcessTemplateId, draft.template, getCurrentUser()?.personId || getCurrentUser()?.id) });
+      const response = await authFetch(`${apiBaseUrl}/api/content-center/notes/${encodeURIComponent(source.noteId)}/launch`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({revision:source.revision,payload}) });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || result.message || '发起失败');
+      modalState = null;
+      window.location.hash = `contentCenter/${encodeURIComponent(source.noteId)}`;
+      return;
+    }
     await createPersistentResource("work-plans", workPlan);
   } catch (error) {
     console.error("关键行动保存失败", error);
@@ -2073,6 +2044,7 @@ export function bindGoalsPageEvents(rerender) {
   const goalsPage = document.querySelector(".goals-page");
   const goalForm = document.querySelector(".goal-form");
   const currentValueForm = document.querySelector(".current-value-form");
+  bindContentNoteTemplateSelectors();
   const goalTaskForm = document.querySelector(".goal-task-form");
 
   if (goalsPage === null) return;
@@ -2214,7 +2186,14 @@ function consumeGoalTaskPrefill() {
   const goal = getGoal(prefill?.goalId ?? selectedGoalId) ?? getActiveGoals()[0] ?? null;
   if ((!isSalesAnomaly && template === null) || goal === null || isInactiveGoal(goal)) return;
   selectedGoalId = goal.id;
+  if (prefill.contentCenterSource && Array.isArray(prefill.publishingAccounts)) state.publishingAccounts = prefill.publishingAccounts;
+  if (prefill.productOptions) state.actionProductOptions = [...(state.actionProductOptions || []), ...prefill.productOptions];
   modalState = {
+    contentCenterSource: prefill.contentCenterSource ?? null,
+    publishingAccounts: structuredClone(prefill.publishingAccounts ?? []),
+    customFields: prefill.customFields ?? {},
+    productIds: prefill.productIds ?? [],
+    linkedTemplateId: prefill.linkedTemplateId ?? "",
     kind: "goalTask",
     goalId: goal.id,
     categoryId: prefill.categoryId ?? template?.categoryId ?? "",

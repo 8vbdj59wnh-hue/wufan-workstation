@@ -50,6 +50,7 @@ function getEmptyStoreOptionLabel() {
 }
 
 function getDynamicFieldOptions(field, selectedValue = "") {
+  if (field.accountIdentity === "id") return (field.accountOptions || state.publishingAccounts).filter(account => account.status === "active").map(account => ({value:account.id,label:`${account.name}（${account.platform || "未填平台"} · ${account.id}）`}));
   if (isPublishingAccountField(field)) {
     return getPublishingAccountFieldOptions(state.publishingAccounts, field.options, selectedValue);
   }
@@ -127,7 +128,7 @@ export function renderPublicFormFieldInput(field, customFields = {}) {
     `;
   }
 
-  if (isBusinessDueDateField(field)) {
+  if (isBusinessDueDateField(field) && !field.preciseDateTime) {
     return `
       <label>
         <span>${escapeHtml(field.label)}${requiredMark}</span>
@@ -137,7 +138,7 @@ export function renderPublicFormFieldInput(field, customFields = {}) {
     `;
   }
 
-  const inputType = field.type === "date" ? "date" : field.type === "number" ? "number" : field.type === "url" ? "url" : "text";
+  const inputType = field.preciseDateTime ? "datetime-local" : field.type === "date" ? "date" : field.type === "number" ? "number" : field.type === "url" ? "url" : "text";
   return `
     <label>
       <span>${escapeHtml(field.label)}${requiredMark}</span>
@@ -163,7 +164,7 @@ export function renderPublicFormEditor({ fields = [], customFields = {}, title =
 export function collectPublicFormFields(form, fields = []) {
   const formData = new FormData(form);
   return normalizePublicFormFields(fields).reduce((result, field) => {
-    if (isBusinessDueDateField(field)) {
+    if (isBusinessDueDateField(field) && !field.preciseDateTime) {
       const dateTime = collectBusinessDateTime(form, `custom__${field.key}`, field.label);
       result[field.key] = dateTime.error === "" ? dateTime.value ?? "" : `__INVALID_BUSINESS_TIME__:${dateTime.error}`;
     } else if (isProductImageField(field)) {

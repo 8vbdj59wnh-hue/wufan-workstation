@@ -2958,3 +2958,9 @@ CREATE TRIGGER IF NOT EXISTS trg_sales_object_component_protect_active_structure
   BEFORE DELETE ON sales_object_structure_components
   WHEN (SELECT status FROM sales_object_structures WHERE id=OLD.structureId)='active'
 BEGIN SELECT RAISE(ABORT,'active sales object structure components are immutable'); END;
+
+-- Stable links between planned content and its publishing action.
+CREATE TABLE IF NOT EXISTS content_center_action_links (
+  noteId TEXT PRIMARY KEY, revision INTEGER NOT NULL, actionId TEXT NOT NULL UNIQUE,
+  workPlanId TEXT NOT NULL UNIQUE, snapshot TEXT NOT NULL, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL
+);

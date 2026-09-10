@@ -18,8 +18,9 @@ function groupKeys(groupKey) {
   return permissionGroups.find((group) => group.key === groupKey)?.permissions.map((item) => item.key) ?? [];
 }
 
-test("V2 正式目录固定为 56 项且不暴露 Legacy 或退役模块", () => {
-  assert.equal(permissionCount, 56);
+test("V2 正式目录包含内容中心且不暴露 Legacy 或退役模块", () => {
+  assert.equal(permissionCount, 59);
+  assert.deepEqual(groupKeys("contentCenter"), ["view", "manage", "export"]);
   assert.equal(PERMISSION_SCHEMA_VERSION, 2);
   assert.deepEqual(groupKeys("links"), ["view", "manage", "rating", "diagnosis", "improve", "import", "manageRelations"]);
   assert.deepEqual(groupKeys("products"), ["view", "manage", "archive", "import"]);
