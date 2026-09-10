@@ -12,7 +12,7 @@ export function rankContentRecommendations(items, metadata, {brand,kind,excludeF
   if(quantity>g.representativeQuantity){Object.assign(g,{erpSkuId:item.erpSkuId,erpSkuCode:item.sku,name:item.name,mainImage:item.image,representativeQuantity:quantity});}
  }
  return [...groups.values()].filter(g=>kind==='hot'?g.salesQuantity>0:Number.isFinite(Date.parse(g.newDate)))
- .sort((a,b)=>(kind==='hot'?b.salesQuantity-a.salesQuantity:Date.parse(b.newDate)-Date.parse(a.newDate))||a.erpSkuCode.localeCompare(b.erpSkuCode)).slice(0,20)
+ .sort((a,b)=>(kind==='hot'?b.salesQuantity-a.salesQuantity:Date.parse(b.newDate)-Date.parse(a.newDate))||a.erpSkuCode.localeCompare(b.erpSkuCode)).slice(0,kind==='new'?50:20)
  .map(({erpSkuId,erpSkuCode,name,mainImage,salesQuantity,newDate})=>({id:erpSkuId,erpSkuId,erpSkuCode,name,mainImage,salesQuantity,newDate}));
 }
 export function selectBrandShops(shops,brand){
