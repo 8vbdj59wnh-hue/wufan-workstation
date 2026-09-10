@@ -20,7 +20,20 @@ test('只统计品牌店铺销量，忽略产品品牌；未匹配店铺不退�
  INSERT INTO erp_skus VALUES('sku','goods','active','CODE','');INSERT INTO erp_goods VALUES('goods','2026-09-01','花瓶','其他品牌花瓶');`);
  let calls=0;
  const run=createContentRecommendations(()=>d,input=>{calls++;assert.deepEqual(input.salesLinkIds,['a']);return {items:[{erpSkuId:'sku',totalPhysicalContribution:12}]};},()=>({linksByErpSku:new Map([['sku',new Set(['a','b'])]])}));
- assert.equal(run('半然','hot').rows[0].salesQuantity,12);assert.equal(run('半然','new').rows[0].erpSkuId,'sku');assert.equal(run('不存在品牌','hot').rows.length,0);assert.equal(calls,1);d.close();
+ assert.equal(run('半然','hot').rows[0].salesQuantity,12);assert.equal(run('半然','new').rows[0].erpSkuId,'sku');assert.equal(run('不存在品牌','hot').rows.length,0);assert.equal(calls,1);
+ d.exec(`ALTER TABLE erp_skus ADD COLUMN createdAt;
+ UPDATE erp_skus SET createdAt='2026-08-01';
+ INSERT INTO erp_goods VALUES('unlinked','2020-01-01','花瓶','无店铺无销量新品');
+ INSERT INTO erp_skus VALUES('unlinked-sku','unlinked','active','NEW','', '2026-09-10');
+ INSERT INTO erp_goods VALUES('flower','2020-01-01','仿真花','仿真花新品');
+ INSERT INTO erp_skus VALUES('flower-sku','flower','active','FLOWER','','2026-09-11');`);
+ const catalog=createContentRecommendations(()=>d,()=>{throw Error('不应查询销量');},()=>{throw Error('不应查询店铺关联');});
+ const fresh=catalog('不存在品牌','new',true,'catalog');
+ assert.deepEqual(fresh.rows.map(p=>p.erpSkuId),['unlinked-sku','sku']);
+ assert.equal(fresh.rows[0].newDate,'2026-09-10');assert.deepEqual(fresh.shops,[]);
+ assert.equal(catalog('半然','new',false,'catalog').rows[0].erpSkuId,'flower-sku');
+ assert.throws(()=>catalog('半然','hot',true,'catalog'));
+ d.close();
 });
 
 test('新品先按日期选50款，老产品不能靠高销量挤入新品池',()=>{

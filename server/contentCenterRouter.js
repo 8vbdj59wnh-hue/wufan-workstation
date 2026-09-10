@@ -54,7 +54,7 @@ export function createContentCenterRouter({ requirePermission, hasPermission, ge
     const brand=store.getCatalog().units.find(u=>u.id===req.query.unitId);
     if(!brand)throw new AppError('请先为需求选择所属品牌');
     if(!recommendations)throw new AppError('推荐服务暂不可用',503);
-    res.json(recommendations(brand.name,req.query.kind,req.query.excludeFlowers!=='false'));
+    res.json(recommendations(brand.name,req.query.kind,req.query.excludeFlowers!=='false',req.query.source||'shops'));
   }catch(error){next(error);}});
   route('get', '/notes/:id', req => { const note=store.get(req.params.id); if(!note) throw new AppError('内容不存在',404); return note; });
   if (integration) {
