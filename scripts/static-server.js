@@ -17,6 +17,15 @@ function setHtmlNoCacheHeaders(response) {
   response.setHeader("Surrogate-Control", "no-store");
 }
 
+// Private runtime data must never be served by the static frontend.
+app.use((request, response, next) => {
+  let pathname;
+  try { pathname = decodeURIComponent(new URL(request.url, "http://localhost").pathname); }
+  catch { return response.sendStatus(400); }
+  if (/^\/(data|backups?|logs|server|node_modules)(\/|$)/i.test(pathname) || /\.(sqlite(?:-wal|-shm)?|db(?:-wal|-shm)?|secret)$/i.test(pathname)) return response.sendStatus(404);
+  next();
+});
+
 app.use(
   express.static(projectRoot, {
     etag: true,

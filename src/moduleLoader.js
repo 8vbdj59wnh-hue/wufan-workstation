@@ -267,6 +267,11 @@ const defaultLoader = createRouteModuleLoader({
     }),
     requiredExports: ["render", "bind"],
   },
+  contentCenter: {
+    loader: () => import("./pages/contentCenterPage.js"),
+    adapt: (module) => ({ moduleId: "contentCenter", render: module.renderContentCenterPage, bind: module.bindContentCenterPageEvents }),
+    requiredExports: ["render", "bind"],
+  },
   adminDataCenter: {
     loader: () => import("./dataCenterPage.js"),
     adapt: (module) => ({

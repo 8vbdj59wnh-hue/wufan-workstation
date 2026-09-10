@@ -1,3 +1,6 @@
+import { dataDir } from "./db.js";
+import { createContentCenterIntegration } from "./contentCenterIntegration.js";
+import { createContentCenterRouter } from "./contentCenterRouter.js";
 import express from "express";
 import cors from "cors";
 import fs from "node:fs";
@@ -1663,6 +1666,8 @@ app.use("/api", (request, response, next) => {
   next();
 });
 
+app.use("/api/content-center", createContentCenterRouter({ requirePermission, hasPermission, getDatabase, dataDir, integration: createContentCenterIntegration({ getDatabase, readAllData, filterDataByScope, hasPermission, launchWorkPlanWithProcess, getUserPersonId, listActionProductOptions, resolveActionProductOptions, uploadsDir }) }));
+
 app.get("/api/store-options", (request, response) => {
   if (!canUseStoreOptions(request.user)) {
     response.status(403).json({ success: false, message: "你没有权限读取关键行动的店铺选项。" });
@@ -1915,6 +1920,7 @@ app.get("/api/bootstrap", (request, response) => {
       settings: [],
       financeCenter: [],
       adminDataCenter: [],
+      contentCenter: [],
     };
     if (!(moduleName in moduleResources)) { response.status(400).json({ success: false, message: "该模块尚未接入轻量启动。" }); return; }
     const permissionModule = moduleName === "task-list" ? "tasks" : moduleName === "dashboardManagement" ? "dashboard" : moduleName;
@@ -1928,6 +1934,8 @@ app.get("/api/bootstrap", (request, response) => {
         ? scheduleBoardCommon
       : moduleName === "dashboardManagement"
         ? workResultsCommon
+      : moduleName === "contentCenter"
+        ? []
       : moduleName === "products"
         ? productsCommon
       : moduleName === "settings"

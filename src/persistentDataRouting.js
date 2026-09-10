@@ -34,6 +34,7 @@ const persistentDataRouteAliases = {
   "template-tags": "settings",
   "issues-requirements": "settings",
   "finance-center": "financeCenter",
+  "content-center": "contentCenter",
 };
 
 export function resolvePersistentDataRoute(fullRoute = "") {

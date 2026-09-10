@@ -93,6 +93,8 @@ const moduleHashMap = {
   products: "products",
   financeCenter: "financeCenter",
   "finance-center": "financeCenter",
+  contentCenter: "contentCenter",
+  "content-center": "contentCenter",
   connectionCenter: "connectionCenter",
   "connection-center": "connectionCenter",
   "template-center": "templateCenter",
@@ -169,6 +171,7 @@ function getModuleIdFromHash() {
   const hash = getRouteHash();
   if (hash.startsWith("templateCenter/")) return "templateCenter";
   if (hash.startsWith("products/")) return "products";
+  if (hash.startsWith("contentCenter/") || hash.startsWith("content-center/")) return "contentCenter";
   if (hash.startsWith("connectionCenter/")) return "connectionCenter";
   if (hash.startsWith("process-template-")) return "processes";
   if (hash.startsWith("methodology-")) return "processes";
@@ -187,7 +190,7 @@ let plannedModulesExpanded = modules.some(
 
 async function prepareRouteModule(moduleId, { showLoading = false } = {}) {
   const revision = beginRouteNavigation(moduleId);
-  if (!["dashboard", "goals", "tasks", "scheduleBoard", "processes", "templateCenter", "products", "financeCenter", "connectionCenter", "settings", "adminDataCenter"].includes(moduleId)) return { revision, loaded: true };
+  if (!["dashboard", "goals", "tasks", "scheduleBoard", "processes", "templateCenter", "products", "contentCenter", "financeCenter", "connectionCenter", "settings", "adminDataCenter"].includes(moduleId)) return { revision, loaded: true };
   try {
     const modulePromise = loadRouteModule(moduleId, { navigationRevision: revision });
     if (showLoading && getLoadedRouteModule(moduleId) === null) render({ navigation: true });
@@ -220,7 +223,7 @@ function renderPageHeaderTitle(activeModule) {
   if (activeModule.id === "goals") {
     return `<p class="page-header-goal-slogan">${escapeHtml(getCompanySlogan())}</p>`;
   }
-  if (["tasks", "scheduleBoard", "connectionCenter", "products", "templateCenter"].includes(activeModule.id)) return "";
+  if (["tasks", "scheduleBoard", "connectionCenter", "products", "contentCenter", "templateCenter"].includes(activeModule.id)) return "";
   return `<h1>${activeModule.name}</h1>`;
 }
 
@@ -536,6 +539,10 @@ function renderPage() {
     }
   }
 
+  if (canAccessActiveModule && activeModule.id === "contentCenter") {
+    content = renderLazyPageModule("contentCenter", "内容中心");
+  }
+
   if (canAccessActiveModule && activeModule.id === "adminDataCenter") {
     const adminDataCenterModule = getLoadedRouteModule("adminDataCenter");
     const adminDataCenterStatus = getRouteModuleStatus("adminDataCenter");
@@ -681,7 +688,12 @@ function restorePageScroll(scrollTop) {
   });
 }
 
+function contentCenterHasUnsavedChanges() {
+  return document.querySelector(".content-center-page iframe")?.contentWindow?.contentCenterHasUnsavedChanges?.() === true;
+}
+
 function render({ navigation = false } = {}) {
+  if (!navigation && getModuleIdFromHash() === "contentCenter" && contentCenterHasUnsavedChanges()) return;
   const previousPage = document.querySelector(".page");
   const previousScrollTop = previousPage?.scrollTop ?? 0;
   const previousModuleId = activeModuleId;
@@ -777,7 +789,7 @@ function render({ navigation = false } = {}) {
 
   document.querySelector('[data-action="retry-route-module"]')?.addEventListener("click", async (event) => {
     const moduleId = event.currentTarget.dataset.moduleId;
-    if (!["dashboard", "goals", "tasks", "scheduleBoard", "processes", "templateCenter", "products", "financeCenter", "connectionCenter", "settings", "adminDataCenter"].includes(moduleId)) return;
+    if (!["dashboard", "goals", "tasks", "scheduleBoard", "processes", "templateCenter", "products", "contentCenter", "financeCenter", "connectionCenter", "settings", "adminDataCenter"].includes(moduleId)) return;
     const retryPromise = retryRouteModule(moduleId);
     render();
     try {
@@ -822,7 +834,7 @@ function render({ navigation = false } = {}) {
     });
   });
 
-  if (["dashboard", "goals", "tasks", "scheduleBoard", "processes", "templateCenter", "financeCenter", "settings"].includes(activeModuleId)) {
+  if (["dashboard", "goals", "tasks", "scheduleBoard", "processes", "templateCenter", "contentCenter", "financeCenter", "settings"].includes(activeModuleId)) {
     getLoadedRouteModule(activeModuleId)?.bind(render);
   }
 
@@ -898,6 +910,10 @@ window.addEventListener("unhandledrejection", (event) => {
   if (app.innerHTML.trim() === "") renderStartupError(event.reason);
 });
 window.addEventListener("hashchange", async () => {
+  if (getModuleIdFromHash() !== "contentCenter" && contentCenterHasUnsavedChanges() && !window.confirm("内容中心有尚未保存的输入，确定离开并放弃这些输入吗？")) {
+    window.history.replaceState(null, "", "#contentCenter");
+    return;
+  }
   normalizeRetiredDataCenterRoute();
   const nextModuleId = getModuleIdFromHash();
   const { revision } = await prepareRouteModule(nextModuleId, { showLoading: true });

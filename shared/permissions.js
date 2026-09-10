@@ -77,6 +77,11 @@ export const permissionGroups = [
     { key: "configureRules", label: "配置财务规则" },
     { key: "approve", label: "审批财务数据" },
   ] },
+  { key: "contentCenter", title: "内容中心（公司共享）", permissions: [
+    { key: "view", label: "查看公司品牌内容、候选及图片" },
+    { key: "manage", label: "管理公司内容、排期和账号栏目" },
+    { key: "export", label: "导出公司内容备份" },
+  ] },
   { key: "dataCenter", title: "数据中心", permissions: [
     { key: "view", label: "查看数据同步状态" },
     { key: "run", label: "执行数据同步或导入" },
@@ -133,6 +138,8 @@ export const permissionDependencies = {
   "finance.maintain": ["finance.view"],
   "finance.configureRules": ["finance.view"],
   "finance.approve": ["finance.view"],
+  "contentCenter.manage": ["contentCenter.view"],
+  "contentCenter.export": ["contentCenter.view"],
   "dataCenter.run": ["dataCenter.view"],
   "dataCenter.manage": ["dataCenter.view"],
   "organization.manage": ["organization.view"],
@@ -430,6 +437,7 @@ export function canAccessModule(userOrPermissions, moduleId) {
     connectionCenter: ["links.view"],
     products: ["products.view", "skus.view", "combos.view"],
     financeCenter: ["finance.view"],
+    contentCenter: ["contentCenter.view"],
     adminDataCenter: ["dataCenter.view"],
     templateCenter: ["templates.view", "actionStandards.view"],
     processes: ["actionStandards.view"],
