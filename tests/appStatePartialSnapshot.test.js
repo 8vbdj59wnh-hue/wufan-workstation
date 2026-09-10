@@ -24,6 +24,7 @@ const {
   state,
 } = await import("../src/appState.js");
 const { renderPublicFormFieldInput } = await import("../src/workFormEditor.js");
+const { ensureStoreOptionsForLaunchedProcessDetail } = await import("../src/processInstanceDetail.js");
 const { buildContentNoteImportPreview } = await import("../src/contentSchedulePage.js");
 
 test("partial module snapshots preserve undeclared state resources", () => {
@@ -314,6 +315,76 @@ test("schedule board bootstrap includes all resources required by content-note i
 test("goal action launch always refreshes store options", () => {
   const goalsPageSource = fs.readFileSync(new URL("../src/goalsPage.js", import.meta.url), "utf8");
   assert.match(goalsPageSource, /ensureStoreOptionsLoaded\(\{ force: true \}\)/);
+});
+
+test("shared launched-action detail loads store options for editable store fields", async () => {
+  const originalFetch = globalThis.fetch;
+  let rerenderCount = 0;
+  logout();
+  globalThis.fetch = async () => new Response(JSON.stringify({ success: true, items: [
+    { id: "store-detail", name: "新品上架店铺", platform: "天猫", status: "active" },
+  ] }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+  const detail = {
+    querySelector: (selector) => selector === 'select[name="custom__storeId"]' ? {} : null,
+  };
+
+  try {
+    assert.equal(await ensureStoreOptionsForLaunchedProcessDetail(detail, () => { rerenderCount += 1; }), true);
+    assert.deepEqual(getStoreOptions(), [
+      { id: "store-detail", name: "新品上架店铺", platform: "天猫", status: "active" },
+    ]);
+    assert.equal(rerenderCount, 1);
+    assert.equal(await ensureStoreOptionsForLaunchedProcessDetail(detail, () => { rerenderCount += 1; }), false);
+    assert.equal(rerenderCount, 1);
+  } finally {
+    logout();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("logout clears account-scoped store options", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ success: true, items: [
+    { id: "store-private", name: "当前账号店铺", platform: "天猫", status: "active" },
+  ] }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+
+  try {
+    await ensureStoreOptionsLoaded({ force: true });
+    assert.equal(getStoreOptions().length, 1);
+    logout();
+    assert.deepEqual(getStoreOptions(), []);
+    assert.deepEqual(getStoreOptionsLoadState(), { status: "idle", message: "" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("an in-flight store response cannot repopulate options after logout", async () => {
+  const originalFetch = globalThis.fetch;
+  let resolveResponse;
+  globalThis.fetch = () => new Promise((resolve) => { resolveResponse = resolve; });
+
+  try {
+    const pendingLoad = ensureStoreOptionsLoaded({ force: true });
+    logout();
+    resolveResponse(new Response(JSON.stringify({ success: true, items: [
+      { id: "store-old-session", name: "旧会话店铺", platform: "天猫", status: "active" },
+    ] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    await pendingLoad;
+    assert.deepEqual(getStoreOptions(), []);
+    assert.deepEqual(getStoreOptionsLoadState(), { status: "idle", message: "" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("management dashboard uses its lightweight bootstrap instead of the global snapshot", () => {

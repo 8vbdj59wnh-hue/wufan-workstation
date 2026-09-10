@@ -1,4 +1,4 @@
-import { formatProcessStepLabel, getCurrentUser, getLatestStandardWorkFormFields, getNow, getProcessNodeStepOrder, loadBusinessImprovementResult, loadTemplates, resolveAssetUrl, state, updateActionProducts, updatePersistentResource, updateProcessTaskExecutor, uploadStandardWorkAttachment } from "./appState.js";
+import { ensureStoreOptionsLoaded, formatProcessStepLabel, getCurrentUser, getLatestStandardWorkFormFields, getNow, getProcessNodeStepOrder, getStoreOptionsLoadState, loadBusinessImprovementResult, loadTemplates, resolveAssetUrl, state, updateActionProducts, updatePersistentResource, updateProcessTaskExecutor, uploadStandardWorkAttachment } from "./appState.js";
 import { renderUiModule } from "./uiModuleRegistry.js";
 import "./uiModules/businessImprovementResult.js";
 import {
@@ -1065,6 +1065,22 @@ export function bindActionLinkedTemplatePreviewEvents(root) {
   });
 }
 
+export async function ensureStoreOptionsForLaunchedProcessDetail(detail, rerender) {
+  if (
+    detail === null ||
+    detail === undefined ||
+    detail.querySelector('select[name="custom__storeId"]') === null ||
+    getStoreOptionsLoadState().status !== "idle"
+  ) return false;
+
+  try {
+    await ensureStoreOptionsLoaded();
+  } finally {
+    rerender();
+  }
+  return true;
+}
+
 export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
   const detail = root.querySelector("[data-launched-process-detail]");
   const detailInstance = detail ? getInstance(detail.dataset.launchedProcessDetail) : null;
@@ -1073,6 +1089,15 @@ export function bindLaunchedProcessDetailEvents(root, rerender, options = {}) {
     loadBusinessImprovementResult(detailInstance.id).then((response) => { improvementResultState.set(detailInstance.id, { data: response.result, loading: false }); rerender(); }).catch((error) => { improvementResultState.set(detailInstance.id, { error: error.message || "经营改善结果读取失败。", loading: false }); rerender(); });
   }
   if (detail === null) return;
+
+  // The launched-action detail is shared by the task center, action board,
+  // goals, assessments and content scheduling. Some of those lightweight
+  // bootstraps intentionally omit the store directory, so load the scoped
+  // option endpoint whenever an editable store field is actually present.
+  // Only the idle state starts a request; the rerender after an empty or failed
+  // response therefore cannot create a retry loop.
+  void ensureStoreOptionsForLaunchedProcessDetail(detail, rerender)
+    .catch((error) => console.error("店铺选项加载失败", error));
   bindActionLinkedTemplatePreviewEvents(detail);
 
   detail.addEventListener("click", async (event) => {

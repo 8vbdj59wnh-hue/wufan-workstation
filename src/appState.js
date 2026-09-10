@@ -64,6 +64,7 @@ let dashboardManagementPromise = null;
 let notificationUnreadCount = 0;
 let storeOptionsRequest = null;
 const storeOptions = [];
+let storeOptionsLoadGeneration = 0;
 let persistentDataLoadGeneration = 0;
 let productDataRevision = 0;
 let storeOptionsLoadState = {
@@ -178,6 +179,13 @@ export function getStoreOptions() {
   return storeOptions.map(cloneItem);
 }
 
+function resetStoreOptions() {
+  storeOptionsLoadGeneration += 1;
+  storeOptionsRequest = null;
+  replaceArray(storeOptions, []);
+  storeOptionsLoadState = { status: "idle", message: "" };
+}
+
 export async function ensureStoreOptionsLoaded({ force = false } = {}) {
   if (storeOptionsRequest !== null) return storeOptionsRequest;
   if (!force && storeOptions.length > 0) {
@@ -187,9 +195,11 @@ export async function ensureStoreOptionsLoaded({ force = false } = {}) {
 
   storeOptionsLoadState = { status: "loading", message: "" };
   replaceArray(storeOptions, []);
-  storeOptionsRequest = (async () => {
+  const loadGeneration = storeOptionsLoadGeneration;
+  const request = (async () => {
     const response = await authFetch(`${apiBaseUrl}/api/store-options`);
     const payload = await response.json().catch(() => null);
+    if (loadGeneration !== storeOptionsLoadGeneration) return getStoreOptions();
     if (!response.ok) {
       if (response.status === 403) {
         throw new Error("当前账号没有读取店铺的权限，请联系管理员检查“发起关键行动”权限。");
@@ -204,6 +214,7 @@ export async function ensureStoreOptionsLoaded({ force = false } = {}) {
     return getStoreOptions();
   })()
     .catch((error) => {
+      if (loadGeneration !== storeOptionsLoadGeneration) return getStoreOptions();
       storeOptionsLoadState = {
         status: "error",
         message: error?.message || "店铺加载失败，请稍后重试。",
@@ -211,10 +222,11 @@ export async function ensureStoreOptionsLoaded({ force = false } = {}) {
       throw error;
     })
     .finally(() => {
-      storeOptionsRequest = null;
+      if (storeOptionsRequest === request) storeOptionsRequest = null;
     });
 
-  return storeOptionsRequest;
+  storeOptionsRequest = request;
+  return request;
 }
 
 function cloneItem(item) {
@@ -681,6 +693,9 @@ export async function login(username, password) {
     setAuthToken(data.token ?? "");
     assetAccessToken = String(data.assetToken ?? "");
     currentUser = data.user ?? null;
+    // Store options are scoped to the authenticated user. Never retain another
+    // session's directory when accounts are switched without a page reload.
+    resetStoreOptions();
     return { success: true, user: currentUser };
   } catch {
     return { success: false, message: "本地数据库服务未启动，请联系管理员" };
@@ -691,6 +706,7 @@ export function logout() {
   setAuthToken("");
   currentUser = null;
   assetAccessToken = "";
+  resetStoreOptions();
   loadedPersistentDataRoutes.clear();
   dashboardManagementLoaded = false;
   dashboardManagementPromise = null;
