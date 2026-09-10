@@ -9,7 +9,9 @@ export function buildContentActionCalendar(data,catalog,notes=[],links=[]){
  return (data.processInstances||[]).filter(a=>!['done','completed','stopped','canceled','cancelled'].includes(a.status)&&
   (a.taskTemplateId==='task-template-publish-content-note'||templates.get(a.taskTemplateId)?.name==='发布内容笔记')).flatMap(a=>{
    const plan=plans.get(a.id),fields={...parse(plan?.customFields),...parse(a.customFields)};
-   const when=String(getEffectivePublishTime(fields,a.dueDate||plan?.dueDate||'')||'');
+   const deadline=a.dueDate||plan?.dueDate||'';
+   // Historical publishing actions stored their schedule only in the deadline.
+   const when=String(getEffectivePublishTime(fields,deadline)||deadline);
    // Preserve business wall-clock dates; old date-only schedules remain visible in the pending-time area.
    const match=when.match(/^(\d{4}-\d{2}-\d{2})(?:[T ]([01]\d|2[0-3]):([0-5]\d))?(?:$|:|\.)/);
    if(!match||!Number.isFinite(Date.parse(match[1]))||new Date(match[1]).toISOString().slice(0,10)!==match[1])return [];

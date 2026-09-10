@@ -15,3 +15,12 @@ test('来源ID用于日历去重，账号身份优先沿用策划关联；拒绝
  const rows=buildContentActionCalendar({processInstances:[action('linked'),action('bad',{customFields:{publishDate:'2026-02-30'}})]},catalog,notes,[{noteId:'source',actionId:'linked'}]);
  assert.equal(rows.length,1);assert.equal(rows[0].sourceNoteId,'source');assert.equal(rows[0].account,'content-account');assert.equal(rows[0].column,'固定栏目');
 });
+
+test('历史空发布时间回退行动或计划截止时间，保留已有明确发布时间',()=>{
+ const rows=buildContentActionCalendar({processInstances:[
+ action('legacy',{customFields:{publishDate:'',account:'小茉'},dueDate:'2026-09-12T14:00:00+08:00'}),
+ action('plan-deadline',{customFields:{publishDate:''}}),
+ action('explicit',{dueDate:'2026-09-13T09:00'})
+ ],workPlans:[{processInstanceId:'plan-deadline',dueDate:'2026-09-14T16:00:00+08:00'}]},{accounts:[]});
+ assert.deepEqual(rows.map(r=>[r.actionId,r.date,r.time]),[['legacy','2026-09-12','14:00'],['plan-deadline','2026-09-14','16:00'],['explicit','2026-09-20','10:30']]);
+});
