@@ -79,6 +79,10 @@ export function readScheduleBoardPage(options = {}) {
     params.actorId = options.actorId;
     params.departmentId = options.departmentId || "";
   }
+  if (options.taskTemplateId) {
+    where.push("wp.taskTemplateId=@taskTemplateId");
+    params.taskTemplateId = String(options.taskTemplateId);
+  }
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const from = `FROM work_plans wp LEFT JOIN process_instances pi ON pi.id=wp.processInstanceId`;
   const total = Number(database.prepare(`SELECT COUNT(*) count ${from} ${whereSql}`).get(params)?.count || 0);

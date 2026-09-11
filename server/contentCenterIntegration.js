@@ -73,12 +73,12 @@ export function createContentCenterIntegration(deps) {
     if (note.pool==='candidate' && contentStageOf(note)==='request') throw new AppError('请先补齐完整内容并存入内容候选，再发起发布行动');
     const options = refs(user, note);
     const account = options.publishingAccounts.find(a => a.id === note.publishingAccountId);
-    if (!account) throw new AppError('请先编辑笔记，关联工作站发布账号');
+    // The native launch form lets the user select an account before submission.
     if (!note.title || !note.noteFormat || !(note.date || note.preferredDate) || !(note.time || note.preferredTime)) throw new AppError('请先补齐标题、笔记形式和计划发布时间');
     return { taskTemplateId: ACTION, launchImmediately: true, title: '从内容策划发起发布行动', actionTitle: note.title,
       description: note.notes || '', contentCenterSource: { noteId: note.id, revision: note.revision },
       productIds: note.workstationProductIds || [], productOptions: options.productOptions, linkedTemplateId: note.workstationTemplateId || '',
-      customFields: { title: note.title, contentText: note.copyText || '', hashtags: note.hashtags || '', contentType: note.noteFormat === '视频' ? '视频笔记' : '图文笔记', publishDate: `${note.date || note.preferredDate}T${note.time || note.preferredTime}`, account: account.id, publishingAccountId: account.id, contentCenterBrandId: note.unitId, contentCenterColumn: note.column } };
+      customFields: { title: note.title, contentText: note.copyText || '', hashtags: note.hashtags || '', contentType: note.noteFormat === '视频' ? '视频笔记' : '图文笔记', publishDate: `${note.date || note.preferredDate}T${note.time || note.preferredTime}`, account: account?.id || '', publishingAccountId: account?.id || '', contentCenterBrandId: note.unitId, contentCenterColumn: note.column } };
   }
   function launch(user, store, note, input) {
     if (!hasPermission(user, 'contentCenter.manage') || !canLaunchActionTemplate(user, ACTION)) throw new AppError('没有发起权限', 403);

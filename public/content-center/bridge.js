@@ -28,7 +28,6 @@ function refreshIntegration() {
   });
   const permissions = window.contentCenterPermissions;
   if (!permissions) return;
-  document.querySelector('.backup').hidden = !permissions.export;
   if (!permissions.manage) {
     document.querySelectorAll(writeSelector).forEach(element => { element.disabled = true; element.title = '仅可查看，请联系管理员开通内容管理权限'; });
     document.querySelectorAll('[draggable="true"]').forEach(element => { element.draggable = false; });
@@ -42,16 +41,6 @@ document.addEventListener('submit', event => {
 document.addEventListener('drop', event => {
   if (window.contentCenterPermissions?.manage === false) { event.preventDefault(); event.stopImmediatePropagation(); }
 }, true);
-document.querySelector('.backup').addEventListener('click', async event => {
-  event.preventDefault();
-  try {
-    const response = await window.contentCenterFetch('/api/backup');
-    if (!response.ok) { const error = await response.json(); throw new Error(error.error || error.message || '导出失败'); }
-    const url = URL.createObjectURL(await response.blob());
-    const link = document.createElement('a'); link.href = url; link.download = '内容中心备份.json'; link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  } catch (error) { const notice = document.querySelector('#load-error'); notice.hidden = false; notice.textContent = error.message; }
-});
 const productLookupRevisions = new WeakMap();
 document.addEventListener('focusout', async event => {
   const input = event.target;
@@ -78,6 +67,8 @@ try {
     const script = document.createElement('script'); script.src = new URL(file, import.meta.url).href;
     script.onload = resolve; script.onerror = () => reject(new Error('内容中心页面加载失败，请刷新重试')); document.head.append(script);
   });
+  const initialPage = new URLSearchParams(window.location.search).get('page');
+  if (['requests','candidates','configuration'].includes(initialPage)) page=initialPage==='candidates'?'requests':initialPage;
   await window.contentCenterInit();
   window.contentCenterHasUnsavedChanges = () => dirty || uploading || configDirty || configSaving || requestDrafts.size > 0 || requestSaving.size > 0;
   refreshIntegration();

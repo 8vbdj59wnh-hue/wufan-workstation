@@ -38,8 +38,9 @@ export function createContentCenterRouter({ requirePermission, hasPermission, ge
           const present = new Set(check.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map(row => row.name));
           if (required.some(table => !present.has(table))) throw new AppError('配置的文件不是完整内容中心数据库，请检查迁移路径', 503);
         } finally { check.close(); }
-        store = createStore(filename);
+        store = createStore(filename, {accountRegistryPath:getDatabase().name});
       }
+      store.syncAccounts?.();
       next();
     } catch (error) { next(error); }
   });

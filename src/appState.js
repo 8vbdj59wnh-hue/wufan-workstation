@@ -561,8 +561,8 @@ export async function loadGoalCenterDetail(goalId, { page = 1, pageSize = 50 } =
   return payload;
 }
 
-export async function loadScheduleBoardPage({ page = 1, pageSize = 50 } = {}) {
-  const response = await authFetch(`${apiBaseUrl}/api/schedule-board/page?page=${page}&pageSize=${pageSize}`);
+export async function loadScheduleBoardPage({ page = 1, pageSize = 50, taskTemplateId = "" } = {}) {
+  const response = await authFetch(`${apiBaseUrl}/api/schedule-board/page?page=${page}&pageSize=${pageSize}${taskTemplateId ? `&taskTemplateId=${encodeURIComponent(taskTemplateId)}` : ""}`);
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload.success !== true) throw new Error(payload.message ?? "关键行动排期读取失败。");
   applyDataSnapshot(payload.data ?? {}, { preserveMissingResources: true });

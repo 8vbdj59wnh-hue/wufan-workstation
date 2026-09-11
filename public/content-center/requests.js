@@ -1,10 +1,8 @@
 'use strict';
 async function beginSchedule(n){
-if(contentStageOf(n)==='request'){toast('请先补齐内容并存入内容候选');return;}
-if(n.requestKind!=='bulk'){openEditor(n,undefined,'schedule');return;}
-if(n.generationStatus!=='已生成'){toast('请先完成生成或调整，再加入排期');return;}
-if(!n.preferredDate||!n.preferredTime){openEditor(n,undefined,'schedule');return;}
-if(busy)return;busy=true;try{const saved=await api('/api/requests/'+n.id+'/schedule','POST',{revision:n.revision});anchor=saved.date;page='calendar';filters={account:'',column:'',status:''};await reload();toast('已加入排期');}catch(err){toast(err.message);await reload().catch(()=>{});}finally{busy=false;}
+if(contentStageOf(n)==='request'){toast('请先补齐内容并存入策划候选');return;}
+showDetail(n);
+toast('请在发布行动区域发起或查看行动，行动排期后会显示在内容排期中');
 }
 
 // Keep row drafts across filtering and re-rendering until explicitly saved or reset.
@@ -19,9 +17,9 @@ function renderEditableRequests(rows){
 const writable=window.contentCenterPermissions?.manage===true,refs=window.contentRequestReferences||{};
 if(!rows.length)return '<p class="empty">当前栏目暂无内容需求。</p>';
 queueMicrotask(()=>hydrateRequestProducts(rows));
-return `<div class="request-table-scroll"><table class="request-edit-table"><thead><tr><th scope="col">序号</th><th>想法</th><th>关联产品</th><th>关联模板</th><th>发布时间</th><th>操作</th></tr></thead><tbody>${rows.map((n,index)=>{
+return `<p class="request-table-hint">左侧填写需求，右侧编辑策划；可横向滚动查看全部字段。</p><div class="request-table-scroll" tabindex="0" role="region" aria-label="需求与策划编辑表格"><table class="request-edit-table"><colgroup>${[30,150,145,104,110,60,210,350,91].map(width=>`<col style="width:${width}px">`).join('')}</colgroup><thead><tr><th scope="col">序号</th><th>想法</th><th>关联产品</th><th>关联模板</th><th>发布时间</th><th>需求操作</th><th>标题 / 话题</th><th>文案</th><th>策划操作</th></tr></thead><tbody>${rows.map((n,index)=>{
 const draft=requestDrafts.get(n.id),v=requestValue(n),disabled=!writable||requestSaving.has(n.id)?'disabled':'';
-return `<tr data-request-row="${esc(n.id)}"><td class="request-row-number">${index+1}</td><td><small>${esc(account(n.account)?.name||'账号待定')} · ${esc(n.column||'栏目待定')}</small><textarea data-request-field="notes" aria-label="想法" placeholder="写下内容想法或要求" rows="3" maxlength="20000" ${disabled}>${esc(v.notes)}</textarea></td><td><div data-request-products>${requestProductTiles(n)}</div>${window.contentCenterPermissions?.products?`<div class="request-product-entry"><input type="text" data-request-code aria-label="产品编码" placeholder="输入完整产品编码" ${disabled}><button type="button" data-request-match ${disabled}>关联</button></div><small>输入编码后按回车或点击关联，匹配后显示产品图片。</small><div class="request-recommend-actions"><button type="button" data-request-recommend="hot" ${disabled}>热销</button><button type="button" data-request-recommend="new" ${disabled}>新品</button></div>`:'<small>暂无产品查看权限，已有关系保留。</small>'}<p data-request-product-error role="status"></p></td><td data-request-template>${renderRequestTemplate(n)}</td><td><input type="date" data-request-field="preferredDate" aria-label="发布日期" value="${esc(v.preferredDate)}" ${disabled}><input type="time" data-request-field="preferredTime" aria-label="发布时间" value="${esc(v.preferredTime)}" ${disabled}></td><td><span data-request-save-state>${requestSaving.has(n.id)?'正在保存…':draft?'未保存':''}</span><div class="request-row-actions"><button type="button" data-request-save ${disabled}>保存</button><button type="button" data-request-reset ${disabled}>撤销</button><button type="button" data-request-complete ${disabled}>补齐内容</button></div><p data-request-row-error role="alert">${esc(requestErrors.get(n.id)||'')}</p></td></tr>`;
+return `<tr data-request-row="${esc(n.id)}"><td class="request-row-number">${index+1}</td><td><small>${esc(account(n.account)?.name||'账号待定')} · ${esc(n.column||'栏目待定')}</small><textarea data-request-field="notes" aria-label="想法" placeholder="写下内容想法或要求" rows="3" maxlength="20000" ${disabled}>${esc(v.notes)}</textarea></td><td><div data-request-products>${requestProductTiles(n)}</div>${window.contentCenterPermissions?.products?`<div class="request-product-entry"><input type="text" data-request-code aria-label="产品编码" placeholder="产品编码" ${disabled}><button type="button" data-request-match ${disabled}>关联</button></div><div class="request-recommend-actions"><button type="button" data-request-recommend="hot" ${disabled}>热销</button><button type="button" data-request-recommend="new" ${disabled}>新品</button></div>`:'<small>暂无产品查看权限，已有关系保留。</small>'}<p data-request-product-error role="status"></p></td><td><div data-request-template>${renderRequestTemplate(n)}</div><div class="request-note-format"><select data-request-field="noteFormat" aria-label="笔记形式" ${disabled}>${options(['图文','视频'],v.noteFormat||'图文')}</select></div></td><td><input type="date" data-request-field="preferredDate" aria-label="发布日期" value="${esc(v.preferredDate)}" ${disabled}><input type="time" data-request-field="preferredTime" aria-label="发布时间" value="${esc(v.preferredTime)}" ${disabled}></td><td><span data-request-save-state>${requestSaving.has(n.id)?'正在保存…':draft?'未保存':''}</span><div class="request-row-actions"><button type="button" data-request-save ${disabled}>保存</button><button type="button" data-request-reset ${disabled}>撤销</button></div><p data-request-row-error role="alert">${esc(requestErrors.get(n.id)||'')}</p></td><td><textarea data-request-field="title" aria-label="策划标题" placeholder="填写标题" rows="3" ${disabled}>${esc(v.title)}</textarea><label class="request-topic-label">话题</label><textarea data-request-field="hashtags" aria-label="策划话题" placeholder="#话题" rows="3" ${disabled}>${esc(v.hashtags)}</textarea></td><td><textarea data-request-field="copyText" aria-label="策划文案" placeholder="填写文案" rows="6" ${disabled}>${esc(v.copyText)}</textarea></td><td><div class="request-row-actions"><button type="button" data-request-save ${disabled}>保存策划</button><button type="button" data-request-launch ${disabled}>发起行动</button></div></td></tr>`;
 }).join('')}</tbody></table></div>`;
 }
 function requestRow(id){return [...document.querySelectorAll('[data-request-row]')].find(row=>row.dataset.requestRow===id);}
@@ -62,18 +60,21 @@ if(requestSaving.has(id))return null;
 const draft=requestDrafts.get(id);if(!draft)return notes.find(n=>n.id===id);
 requestSaving.add(id);requestErrors.delete(id);render();
 try{const n=notes.find(n=>n.id===id);if(n?.isLocalRequest&&!String(draft.patch.notes||'').trim())throw Error('请先填写想法');
-const payload=n?.isLocalRequest?{pool:'candidate',contentStage:'request',unitId:n.unitId||'',account:n.account||'',column:n.column||'',...draft.patch}:{...draft.patch,revision:draft.revision,contentStage:'request'};
+const v=requestValue(n),planningReady=String(v.title||'').trim()&&String(v.copyText||'').trim();
+const planning={contentStage:planningReady?'candidate':'request',...(planningReady?{noteFormat:v.noteFormat||'图文'}:{})};
+const payload=n?.isLocalRequest?{pool:'candidate',contentStage:'request',unitId:n.unitId||'',account:n.account||'',column:n.column||'',...draft.patch,...planning}:{...draft.patch,revision:draft.revision,...planning};
 const saved=await api(n?.isLocalRequest?'/api/notes':'/api/notes/'+encodeURIComponent(id),n?.isLocalRequest?'POST':'PATCH',payload);notes=notes.map(n=>n.id===id?saved:n);requestDrafts.delete(id);toast('该条需求已保存');return saved;}
 catch(error){requestErrors.set(id,error.message);return null;}
 finally{requestSaving.delete(id);render();}
 }
 $('#workspace').addEventListener('click',async e=>{
-const button=e.target.closest('[data-request-save],[data-request-reset],[data-request-complete]');if(!button)return;
+const button=e.target.closest('[data-request-save],[data-request-reset],[data-request-complete],[data-request-launch]');if(!button)return;
 const id=button.closest('[data-request-row]').dataset.requestRow;
 if(requestSaving.has(id))return;
 if(button.hasAttribute('data-request-reset')){notes=notes.filter(n=>n.id!==id||!n.isLocalRequest);requestDrafts.delete(id);requestErrors.delete(id);render();return;}
 const saved=await saveRequestRow(id);
 if(saved&&button.hasAttribute('data-request-complete'))openEditor(saved);
+if(saved&&button.hasAttribute('data-request-launch')){try{await window.launchContentPlanning(saved);}catch(error){requestErrors.set(saved.id,error.message);render();}}
 });
 window.addEventListener('beforeunload',e=>{if(requestDrafts.size||requestSaving.size){e.preventDefault();e.returnValue='';}});
 
@@ -88,7 +89,7 @@ if(!e.target.closest('[data-add-request]')||!window.contentCenterPermissions?.ma
 const context=newRequestContext();if(!context)return;
 const {accountId,column}=context;
 const id=createLocalRequestId();
-notes.unshift({id,isLocalRequest:true,pool:'candidate',contentStage:'request',unitId:account(accountId)?.unitId||filters.unit||'',account:accountId,column,notes:'',title:'',date:'',time:'',preferredDate:requestDay||'',preferredTime:'',updatedAt:new Date().toISOString(),workstationProductIds:[]});
+notes.unshift({id,isLocalRequest:true,pool:'candidate',contentStage:'request',unitId:account(accountId)?.unitId||filters.unit||'',account:accountId,column,notes:'',title:'',copyText:'',hashtags:'',date:'',time:'',preferredDate:requestDay||'',preferredTime:'',updatedAt:new Date().toISOString(),workstationProductIds:[]});
 requestDrafts.set(id,{revision:0,patch:{notes:'',preferredDate:requestDay||''}});render();
 const row=requestRow(id);row?.scrollIntoView({block:'nearest'});row?.querySelector('[data-request-field="notes"]')?.focus();
 });

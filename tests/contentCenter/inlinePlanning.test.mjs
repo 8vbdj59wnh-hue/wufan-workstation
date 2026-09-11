@@ -1,0 +1,26 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import {readFileSync} from 'node:fs';
+import {createStore} from '../../server/contentCenter/store.mjs';
+test('同一行逐步保存策划，保持需求身份和筛选可见，撤空文案也不丢关联',async()=>{
+ const store=createStore(':memory:');
+ const node={addEventListener(){}};
+ const context=vm.createContext({console,window:{addEventListener(){}},document:{querySelector:()=>node,querySelectorAll:()=>[],createElement:()=>({addEventListener(){}}),body:{append(){}}},queueMicrotask(){},setTimeout,URLSearchParams});
+ vm.runInContext(readFileSync(new URL('../../public/content-center/app.js',import.meta.url),'utf8'),context);
+ vm.runInContext(readFileSync(new URL('../../public/content-center/requests.js',import.meta.url),'utf8'),context);
+ context.persist=(url,method,payload)=>store.save(JSON.parse(JSON.stringify(payload)),method==='PATCH'?decodeURIComponent(url.split('/').at(-1)):undefined);
+ vm.runInContext(`render=()=>{};toast=()=>{};api=async(...args)=>persist(...args);notes=[{id:'local',isLocalRequest:true,pool:'candidate',contentStage:'request',notes:''}];requestDrafts.set('local',{revision:0,patch:{notes:'想法',title:'标题',workstationProductIds:['sku']}});`,context);
+ const partial=await vm.runInContext("saveRequestRow('local')",context);
+ assert.equal(partial.contentStage,'request');
+ context.savedId=partial.id;
+ vm.runInContext("requestDrafts.set(savedId,{revision:notes[0].revision,patch:{copyText:'正文',hashtags:'#花瓶'}})",context);
+ const ready=await vm.runInContext('saveRequestRow(savedId)',context);
+ assert.equal(ready.id,partial.id);assert.equal(ready.copyText,'正文');assert.equal(ready.hashtags,'#花瓶');assert.equal(ready.contentStage,'candidate');assert.equal(store.list().length,1);
+ vm.runInContext("meta={accounts:[]};page='requests';filters={};",context);
+ assert.equal(vm.runInContext('filtered().length',context),1);
+ vm.runInContext("requestDrafts.set(savedId,{revision:notes[0].revision,patch:{copyText:''}})",context);
+ const edited=await vm.runInContext('saveRequestRow(savedId)',context);
+ assert.equal(edited.contentStage,'request');assert.deepEqual(edited.workstationProductIds,['sku']);
+ store.close();
+});

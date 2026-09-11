@@ -12,7 +12,7 @@ const boolFields = ['missingMaterial','confirmedImport'];
 const defaults = Object.fromEntries(textFields.map(k => [k,'']));
 Object.assign(defaults,{account:'1',column:catalog.accounts[0].columns[0].name,priority:'中',copyStatus:'未开始',status:'草稿',pool:'schedule',noteFormat:'',templateId:'',productIds:[],images:[],missingMaterial:false,confirmedImport:false});
 export class AppError extends Error { constructor(message, status=400){super(message);this.status=status;} }
-export function createStore(filename) {
+export function createStore(filename, { accountRegistryPath } = {}) {
   const runtimeCatalog=structuredClone(catalog);
   if (filename !== ':memory:') mkdirSync(dirname(filename),{recursive:true});
   const db = new DatabaseSync(filename);
@@ -48,11 +48,46 @@ export function createStore(filename) {
   if(seedCatalog) for(const a of catalog.accounts)db.prepare('INSERT OR IGNORE INTO account_units VALUES (?,?)').run(a.id,'banran');
   if(!db.prepare('PRAGMA table_info(products)').all().some(c=>c.name==='unitId'))db.exec("ALTER TABLE products ADD COLUMN unitId TEXT NOT NULL DEFAULT ''; UPDATE products SET unitId='banran';");
   db.exec("UPDATE metadata SET value='5' WHERE key='schema_version'");
+  let registryEnabled = false;
+  if (accountRegistryPath) {
+    db.prepare('ATTACH DATABASE ? AS registry').run(accountRegistryPath);
+    db.exec('CREATE TABLE IF NOT EXISTS account_registry_links (account_id TEXT PRIMARY KEY REFERENCES accounts(id), publishing_id TEXT NOT NULL UNIQUE)');
+    registryEnabled = true;
+  }
+  function syncAccounts() {
+    if (!registryEnabled) return;
+    db.transaction(()=>{
+      const now=new Date().toISOString();
+      for (const a of db.prepare("SELECT * FROM accounts WHERE id<>'' AND name<>''").all()) {
+        if (db.prepare('SELECT 1 FROM account_registry_links WHERE account_id=?').get(a.id)) continue;
+        const sameContent=db.prepare('SELECT COUNT(*) AS n FROM accounts WHERE name=?').get(a.name).n;
+        const matches=db.prepare('SELECT * FROM registry.publishing_accounts WHERE name=?').all(a.name);
+        const match=sameContent===1&&matches.length===1&&!db.prepare('SELECT 1 FROM account_registry_links WHERE publishing_id=?').get(matches[0].id)?matches[0]:null;
+        const id=match?.id||randomUUID();
+        if(!match) db.prepare('INSERT INTO registry.publishing_accounts (id,name,platform,status,createdAt,updatedAt) VALUES (?,?,?,?,?,?)').run(id,a.name,'小红书','active',now,now);
+        db.prepare('INSERT INTO account_registry_links VALUES (?,?)').run(a.id,id);
+      }
+      for(const a of db.prepare('SELECT * FROM registry.publishing_accounts').all()) {
+        if(db.prepare('SELECT 1 FROM account_registry_links WHERE publishing_id=?').get(a.id)) continue;
+        const id=randomUUID();
+        db.prepare('INSERT INTO accounts VALUES (?,?,?)').run(id,a.name,a.name);
+        db.prepare('INSERT INTO account_registry_links VALUES (?,?)').run(id,a.id);
+      }
+      db.exec(`UPDATE accounts SET name=(SELECT p.name FROM account_registry_links l JOIN registry.publishing_accounts p ON p.id=l.publishing_id WHERE l.account_id=accounts.id)
+        WHERE EXISTS(SELECT 1 FROM account_registry_links l JOIN registry.publishing_accounts p ON p.id=l.publishing_id WHERE l.account_id=accounts.id);`);
+    })();
+    refreshCatalog();
+  }
+  function registryAccount(id) {
+    if(!registryEnabled) return null;
+    return db.prepare('SELECT p.* FROM account_registry_links l JOIN registry.publishing_accounts p ON p.id=l.publishing_id WHERE l.account_id=?').get(id);
+  }
   function refreshCatalog(){
     runtimeCatalog.units=db.prepare('SELECT * FROM business_units ORDER BY name,id').all();
-    runtimeCatalog.accounts=db.prepare(`SELECT a.id,a.name,a.full_name AS fullName,COALESCE(u.unit_id,'') AS unitId FROM accounts a LEFT JOIN account_units u ON u.account_id=a.id WHERE a.id<>'' AND a.name<>'' ORDER BY a.rowid`).all().map(a=>({...a,columns:db.prepare('SELECT name,details FROM columns WHERE account_id=? AND name<>? ORDER BY rowid').all(a.id,'').map(c=>({...JSON.parse(c.details),name:c.name}))}));
+    runtimeCatalog.accounts=db.prepare(`SELECT a.id,a.name,a.full_name AS fullName,COALESCE(u.unit_id,'') AS unitId FROM accounts a LEFT JOIN account_units u ON u.account_id=a.id WHERE a.id<>'' AND a.name<>'' ORDER BY a.rowid`).all().map(a=>({...a,...(registryEnabled?{publishingAccountId:registryAccount(a.id)?.id||'',status:registryAccount(a.id)?.status||'inactive',platform:registryAccount(a.id)?.platform||''}:{}),columns:db.prepare('SELECT name,details FROM columns WHERE account_id=? AND name<>? ORDER BY rowid').all(a.id,'').map(c=>({...JSON.parse(c.details),name:c.name}))}));
   }
   refreshCatalog();
+  syncAccounts();
   function addConfiguration(kind,input){
     if(!input||typeof input!=='object'||Array.isArray(input))throw new AppError('配置格式不正确');
     const name=typeof input.name==='string'?input.name.trim():'';if(!name||name.length>100)throw new AppError('请填写名称（最多100字）');
@@ -73,7 +108,7 @@ export function createStore(filename) {
         if(db.prepare('SELECT name FROM columns WHERE account_id=? AND name=?').get(input.accountId,name))throw new AppError('该账号已有同名栏目',409);
         id=input.accountId;db.prepare('INSERT INTO columns VALUES (?,?,?)').run(id,name,JSON.stringify({name}));
       }else throw new AppError('配置类型不正确');
-      db.exec('RELEASE configuration');refreshCatalog();return {id,catalog:structuredClone(runtimeCatalog)};
+      syncAccounts();db.exec('RELEASE configuration');refreshCatalog();return {id,catalog:structuredClone(runtimeCatalog)};
     }catch(e){db.exec('ROLLBACK TO configuration; RELEASE configuration');throw e;}
   }
   function editConfiguration(kind,id,input){
@@ -88,6 +123,7 @@ export function createStore(filename) {
         if(input.expectedName!==account.name||input.expectedUnitId!==(account.unit_id||''))throw new AppError('账号已被修改，请关闭后刷新再试',409);
         if(typeof input.unitId!=='string'||!db.prepare('SELECT id FROM business_units WHERE id=?').get(input.unitId))throw new AppError('请选择有效品牌');
         if(db.prepare('SELECT a.id FROM accounts a JOIN account_units u ON u.account_id=a.id WHERE a.name=? AND u.unit_id=? AND a.id<>?').get(name,input.unitId,id))throw new AppError('该品牌已有同名账号',409);
+        if(registryEnabled) db.prepare('UPDATE registry.publishing_accounts SET name=?,updatedAt=? WHERE id=?').run(name,now,registryAccount(id).id);
         db.prepare('UPDATE accounts SET name=?,full_name=CASE WHEN full_name=name THEN ? ELSE full_name END WHERE id=?').run(name,name,id);
         db.prepare('INSERT INTO account_units VALUES (?,?) ON CONFLICT(account_id) DO UPDATE SET unit_id=excluded.unit_id').run(id,input.unitId);
         if(input.unitId!==account.unit_id)for(const table of ['notes','candidates'])db.prepare(`UPDATE ${table} SET body=json_set(body,'$.unitId',?),revision=revision+1,updated_at=? WHERE account_id=?`).run(input.unitId,now,id);
@@ -164,7 +200,7 @@ export function createStore(filename) {
     const mapped={'候选':'草稿','待素材':'已排期','待文案':'已排期','待审核':'已排期','已确认执行':'已确认','已复盘':'已发布'};
     const content=(n.copyText||'').replaceAll('\\n','\n');
     const match=!Object.hasOwn(n,'hashtags') && content.match(/(?:^|\n)\s*((?:#[^\s#]+\s*)+)$/);
-    return {...n,pool:n.pool||(n.status==='候选'?'candidate':'schedule'),noteFormat:n.noteFormat||'',productIds:n.productIds||[],productCodes:n.productCodes??(n.productIds||[]).map(id=>getProduct(id)?.sku||'').filter(Boolean).join('、'),templateId:n.templateId||'',title:n.title||n.initialTitle||n.topic||'',copyText:match?content.slice(0,match.index).trimEnd():content,hashtags:n.hashtags??match?.[1]?.trim()??'',images:n.images||[],...(mapped[n.status]?{legacyStatus:n.legacyStatus||n.status}:{}),status:mapped[n.status]||n.status,id:row.id,revision:row.revision,createdAt:row.created_at,updatedAt:row.updated_at};
+    return {...n,...(registryEnabled&&n.account?{publishingAccountId:registryAccount(n.account)?.id||''}:{}),pool:n.pool||(n.status==='候选'?'candidate':'schedule'),noteFormat:n.noteFormat||'',productIds:n.productIds||[],productCodes:n.productCodes??(n.productIds||[]).map(id=>getProduct(id)?.sku||'').filter(Boolean).join('、'),templateId:n.templateId||'',title:n.title||n.initialTitle||n.topic||'',copyText:match?content.slice(0,match.index).trimEnd():content,hashtags:n.hashtags??match?.[1]?.trim()??'',images:n.images||[],...(mapped[n.status]?{legacyStatus:n.legacyStatus||n.status}:{}),status:mapped[n.status]||n.status,id:row.id,revision:row.revision,createdAt:row.created_at,updatedAt:row.updated_at};
   };
   const get = id => decode(db.prepare('SELECT * FROM notes WHERE id=?').get(id)||db.prepare('SELECT * FROM candidates WHERE id=?').get(id));
   const list = () => db.prepare('SELECT * FROM notes UNION ALL SELECT * FROM candidates ORDER BY planned_date,created_at DESC').all().map(decode);
@@ -206,6 +242,7 @@ export function createStore(filename) {
     if(old && old.pool!=='candidate' && candidate)throw new AppError('正式笔记不能转回候选池');
     if(old?.pool==='candidate'&&!candidate)n.status='已排期';
     const a=runtimeCatalog.accounts.find(a=>a.id===n.account);
+    if(registryEnabled && a) { if(a.status!=='active')throw new AppError('该发布账号已停用'); n.publishingAccountId=a.publishingAccountId; }
     if(a)n.unitId=a.unitId;
     if(n.unitId&&!runtimeCatalog.units.some(u=>u.id===n.unitId))throw new AppError('请选择有效品牌');
     if(candidate ? ((n.account&&!a)||(n.column&&!a?.columns.some(c=>c.name===n.column))) : !a?.columns.some(c=>c.name===n.column))throw new AppError('请选择该账号已确认的固定栏目');
@@ -303,5 +340,5 @@ export function createStore(filename) {
   const getImage=id=>db.prepare('SELECT * FROM images WHERE id=?').get(id);
   const backupImages=()=>listImages().map(i=>({...i,data:'data:'+i.mime+';base64,'+Buffer.from(getImage(i.id).bytes).toString('base64')}));
   const rawNotes=()=>db.prepare('SELECT body FROM notes UNION ALL SELECT body FROM candidates').all().map(r=>JSON.parse(r.body));
-  return {getCatalog:()=>structuredClone(runtimeCatalog),addConfiguration,editConfiguration,getProduct,saveProduct,importProducts,getRequest,listRequests,createRequests,updateRequest,scheduleRequest,listProducts,listTemplates,addReference,get,list,save,batch,addImage,listImages,getImage,backupImages,rawNotes,close:()=>db.close()};
+  return {syncAccounts,getCatalog:()=>structuredClone(runtimeCatalog),addConfiguration,editConfiguration,getProduct,saveProduct,importProducts,getRequest,listRequests,createRequests,updateRequest,scheduleRequest,listProducts,listTemplates,addReference,get,list,save,batch,addImage,listImages,getImage,backupImages,rawNotes,close:()=>db.close()};
 }

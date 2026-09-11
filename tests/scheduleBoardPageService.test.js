@@ -92,3 +92,17 @@ test("关键行动详情只返回当前可见行动引用的视觉模板", () =>
 
   assert.deepEqual(selectLinkedVisualTemplates(visible, templates), [templates[0]]);
 });
+
+ test("内容排期在分页前筛选发布笔记行动，并携带全部未完成行动", () => {
+ const database=createDatabase();
+ for(let i=0;i<25;i++){
+ const template=i===0?'other':'task-template-publish-content-note';
+ database.prepare("INSERT INTO process_instances(id,status) VALUES (?,?)").run('p'+i,'running');
+ database.prepare("INSERT INTO work_plans(id,processInstanceId,taskTemplateId,dueDate) VALUES (?,?,?,?)").run('w'+i,'p'+i,template,'2026-09-14');
+ }
+ const result=readScheduleBoardPage({database,scope:'all',pageSize:20,taskTemplateId:'task-template-publish-content-note'});
+ assert.equal(result.total,24);assert.equal(result.data.workPlans.length,24);
+ assert.ok(result.data.workPlans.every(p=>p.taskTemplateId==='task-template-publish-content-note'));
+ assert.equal(readScheduleBoardPage({database,scope:'all'}).total,25);
+ database.close();
+ });

@@ -1,5 +1,7 @@
 import {
   batchLinkActionTemplates,
+  authFetch,
+  apiBaseUrl,
   cancelProcessInstance,
   getCurrentUser,
   loadScheduleBoardPage,
@@ -71,6 +73,7 @@ const hiddenProcessStatuses = new Set([
 ]);
 const completedProcessStatuses = new Set([ProcessInstanceStatus.Done, "done", "completed"]);
 const canceledProcessStatuses = new Set([ProcessInstanceStatus.Canceled, "canceled", "cancelled"]);
+const isContentScheduleRoute = () => window.location.hash === "#contentCenter/schedule";
 const publishContentNoteTemplateId = "task-template-publish-content-note";
 const scheduleQuickFilterAll = "all";
 const scheduleQuickFilterNoDueDate = "no-due-date";
@@ -90,8 +93,16 @@ const filters = {
   status: "",
   overdue: "",
   dueRange: scheduleQuickFilterAll,
+  noDueDateOnly: false,
+  contentAccount: "",
+  contentColumn: "",
+  contentFormat: "",
+  contentSchedule: "",
 };
 
+const defaultBoardFilters = {...filters};
+const boardContexts = new Map();
+let currentBoardContext = false;
 let activeScheduleView = "board";
 let activeScheduleSort = "";
 let activeScheduleSortDirection = "asc";
@@ -122,14 +133,30 @@ const slotCardGap = 3;
 const schedulePreviewCloseDelay = 300;
 let schedulePreviewCloseTimer = null;
 let schedulePreviewAnchor = null;
+let contentScheduleCatalog = {accounts:[], columns:[]};
+let contentSchedulePublishingAccounts = [];
+let contentScheduleCatalogError = "";
 let schedulePageState = { page: 1, totalPages: 1, total: 0, loading: false, loaded: false };
 
 async function ensureSchedulePageLoaded(rerender, page = schedulePageState.page) {
-  if (schedulePageState.loading || (schedulePageState.loaded && page === schedulePageState.page)) return;
+  const contentOnly = isContentScheduleRoute();
+  if (schedulePageState.loading || (schedulePageState.loaded && page === schedulePageState.page && schedulePageState.contentOnly === contentOnly)) return;
   schedulePageState.loading = true;
   try {
-    const payload = await loadScheduleBoardPage({ page, pageSize: 50 });
-    schedulePageState = { page: payload.page, totalPages: payload.totalPages, total: payload.total, loading: false, loaded: true };
+    if (contentOnly) {
+      try {
+        const results = await Promise.all(['meta','references'].map(async path => {
+          const response = await authFetch(`${apiBaseUrl}/api/content-center/${path}`);
+          if (!response.ok) throw new Error('账号配置读取失败，请刷新重试');
+          return response.json();
+        }));
+        contentScheduleCatalog = results[0];
+        contentSchedulePublishingAccounts = results[1].publishingAccounts || [];
+        contentScheduleCatalogError = '';
+      } catch (error) { contentScheduleCatalogError = error.message; }
+    }
+    const payload = await loadScheduleBoardPage({ page, pageSize: 50, taskTemplateId: contentOnly ? publishContentNoteTemplateId : "" });
+    schedulePageState = { page: payload.page, totalPages: payload.totalPages, total: payload.total, loading: false, loaded: true, contentOnly };
     rerender();
   } catch (error) {
     schedulePageState.loading = false;
@@ -671,7 +698,54 @@ function rowMatchesBaseFilters(row, identifierTarget = null) {
   return true;
 }
 
+function contentRowFields(row) {
+  const fields = {...row.workPlan.customFields, ...row.processInstance?.customFields};
+  const account = [...contentSchedulePublishingAccounts,...(state.publishingAccounts || [])].find(item => item.id === (fields.publishingAccountId || fields.account));
+  const sourceAccount = contentScheduleCatalog.accounts?.find(item => item.id === fields.contentCenterSource?.accountId);
+  return {
+    account: sourceAccount?.publishingAccountId || account?.id || fields.publishingAccountId || fields.account || "未指定账号",
+    column: fields.contentCenterColumn || fields.contentCenterSource?.column || "未指定栏目",
+    format: fields.contentType || "未指定形式",
+  };
+}
+
+function renderContentFilters() {
+  const rows = buildLaunchedRows().filter(row => row.workPlan.taskTemplateId === publishContentNoteTemplateId);
+  const choices = key => {
+    if(key==='account') {
+      const options=contentSchedulePublishingAccounts.map(a=>({id:a.id,name:a.name}));
+      for(const row of rows){const id=contentRowFields(row).account;if(!options.some(a=>a.id===id))options.push({id,name:id});}
+      return options;
+    }
+    const configured = key === 'account'
+      ? [...(contentScheduleCatalog.accounts || []),...contentSchedulePublishingAccounts].map(item=>item.name)
+      : key === 'column' ? (contentScheduleCatalog.accounts || []).flatMap(a=>(a.columns||[]).map(c=>c.name))
+      : ['图文笔记','视频笔记'];
+    return [...new Set([...configured,...rows.map(row=>contentRowFields(row)[key])].filter(Boolean))].sort().map(name=>({id:name,name}));
+  };
+  return `<section class="schedule-board-filters content-schedule-filters" aria-label="内容排期筛选">
+    ${contentScheduleCatalogError ? `<p role="alert">${escapeHtml(contentScheduleCatalogError)}</p>` : ''}
+    <label class="schedule-keyword-filter"><span>关键词</span><input name="keyword" value="${escapeAttribute(filters.keyword)}" placeholder="搜索笔记标题、行动编号" autocomplete="off"></label>
+    <label><span>发布账号</span><select name="contentAccount">${renderOptions(choices('account'),filters.contentAccount,'全部账号')}</select></label>
+    <label><span>栏目</span><select name="contentColumn">${renderOptions(choices('column'),filters.contentColumn,'全部栏目')}</select></label>
+    <label><span>内容形式</span><select name="contentFormat">${renderOptions(choices('format'),filters.contentFormat,'全部形式')}</select></label>
+    <label><span>负责人</span><select name="ownerId">${renderOptions(state.people.filter(p=>p.status!=='inactive'),filters.ownerId,'全部负责人')}</select></label>
+    <label><span>行动状态</span><select name="status">${renderOptions([{id:'pending',name:'待执行'},{id:'running',name:'执行中'}],filters.status,'全部未完成')}</select></label>
+    <label><span>排期</span><select name="contentSchedule">${renderOptions([{id:'scheduled',name:'已排期'},{id:'unscheduled',name:'待排期'}],filters.contentSchedule,'全部排期')}</select></label>
+  </section>`;
+}
+
 function launchedRowMatchesFilters(row, { includeQuickFilter = true } = {}) {
+  if (isContentScheduleRoute() && row.workPlan.taskTemplateId !== publishContentNoteTemplateId) return false;
+  if (isContentScheduleRoute()) {
+    if (hiddenProcessStatuses.has(row.processInstance?.status)) return false;
+    const fields = contentRowFields(row);
+    if (filters.contentAccount && fields.account !== filters.contentAccount) return false;
+    if (filters.contentColumn && fields.column !== filters.contentColumn) return false;
+    if (filters.contentFormat && fields.format !== filters.contentFormat) return false;
+    if (filters.contentSchedule === 'scheduled' && isNoDueDate(row)) return false;
+    if (filters.contentSchedule === 'unscheduled' && !isNoDueDate(row)) return false;
+  }
   const identifierTarget = getActionIdentifierSearchTarget();
   if (!rowMatchesBaseFilters(row, identifierTarget)) return false;
   if (
@@ -719,6 +793,7 @@ function renderStatusOptions() {
 }
 
 function renderFilters() {
+  if (isContentScheduleRoute()) return renderContentFilters();
   const activePeople = state.people.filter((person) => person.status !== "inactive");
   const activeDepartments = state.departments.filter((department) => department.status !== "inactive");
   const standardWorks = state.taskTemplates.filter((template) => template.status !== "inactive");
@@ -743,10 +818,10 @@ function renderFilters() {
         <span>价值链</span>
         <select name="valueModuleId">${renderOptions(valueModuleList, filters.valueModuleId, "全部价值链")}</select>
       </label>
-      <label>
+      ${isContentScheduleRoute() ? "" : `<label>
         <span>关键行动</span>
         <select name="standardWorkId">${renderOptions(standardWorks, filters.standardWorkId, "全部关键行动")}</select>
-      </label>
+      </label>`}
       <label>
         <span>负责人</span>
         <select name="ownerId">${renderOptions(activePeople, filters.ownerId, "全部负责人")}</select>
@@ -1173,7 +1248,7 @@ function renderBeyondThirtyDaysColumn(rows) {
 }
 
 function renderBoardRows(rows, days) {
-  if (rows.length === 0) {
+  if (rows.length === 0 && !isContentScheduleRoute()) {
     return `
       <div class="schedule-board-empty">
         <h2>暂无匹配关键行动</h2>
@@ -1204,13 +1279,13 @@ function renderPendingProcessList(rows) {
     String(right.processInstance?.createdAt ?? "").localeCompare(String(left.processInstance?.createdAt ?? "")),
   );
   return `
-    <aside class="schedule-pending-panel" aria-label="待执行关键行动">
+    <aside class="schedule-pending-panel" aria-label="${isContentScheduleRoute() ? '待排期发布行动' : '待执行关键行动'}">
       <div class="schedule-pending-panel-header">
-        <h3>待执行关键行动</h3>
+        <h3>${isContentScheduleRoute() ? '待排期发布行动' : '待执行关键行动'}</h3>
         <span>${sortedRows.length} 个</span>
       </div>
       <div class="schedule-pending-list">
-        ${sortedRows.length === 0 ? `<p class="schedule-pending-empty">暂无待执行关键行动</p>` : sortedRows.map(renderPendingProcessCard).join("")}
+        ${sortedRows.length === 0 ? `<p class="schedule-pending-empty">${isContentScheduleRoute() ? '暂无待排期发布行动' : '暂无待执行关键行动'}</p>` : sortedRows.map(renderPendingProcessCard).join("")}
       </div>
     </aside>
   `;
@@ -1238,7 +1313,13 @@ function renderBoardHeader(days) {
   `;
 }
 
-function renderSummary(launchedRows) {
+function renderSummary(launchedRows, days) {
+  if (isContentScheduleRoute()) {
+    const unscheduled = launchedRows.filter(isNoDueDate).length;
+    const dayKeys = new Set(days.map(day=>day.key));
+    return `<div class="schedule-board-summary"><span>未完成发布 ${launchedRows.length}</span><span>已排期 ${launchedRows.length-unscheduled}</span><span>待排期 ${unscheduled}</span><span>当前日期范围 ${launchedRows.filter(row=>isDueDateInBoard(row,dayKeys)).length}</span></div>`;
+  }
+  const dayKeys = new Set(days.map((day) => day.key));
   const noDueDateCount = launchedRows.filter(isNoDueDate).length;
   const beyondThirtyDaysCount = launchedRows.filter((row) => isBeyondThirtyDays(row)).length;
   const quickFilters = [
@@ -1277,6 +1358,7 @@ function renderSummary(launchedRows) {
 }
 
 function renderValueChainLegend() {
+  if (isContentScheduleRoute()) return '<div class="schedule-value-legend content-schedule-caption">仅显示未完成的发布内容笔记行动 · 点击查看详情，拖动调整排期</div>';
   return `
     <div class="schedule-value-legend" aria-label="价值链颜色说明">
       ${valueModuleList
@@ -1292,7 +1374,7 @@ function renderValueChainLegend() {
 function renderScheduleViewTabs() {
   return `
     <div class="settings-tabs schedule-view-tabs" aria-label="关键行动视图">
-      <button class="${activeScheduleView === "board" ? "is-active" : ""}" type="button" data-schedule-view="board">原有视图</button>
+      <button class="${activeScheduleView === "board" ? "is-active" : ""}" type="button" data-schedule-view="board">${isContentScheduleRoute() ? "时间格子" : "原有视图"}</button>
       <button class="${activeScheduleView === "list" ? "is-active" : ""}" type="button" data-schedule-view="list">列表</button>
       <button class="${activeScheduleView === "card" ? "is-active" : ""}" type="button" data-schedule-view="card">卡片</button>
     </div>
@@ -1684,6 +1766,15 @@ function renderBatchActionTemplatePicker() {
 }
 
 export function renderScheduleBoardPage() {
+  const contentOnly = isContentScheduleRoute();
+  if (currentBoardContext !== contentOnly) {
+    boardContexts.set(currentBoardContext, {filters:{...filters}, view:activeScheduleView});
+    const saved = boardContexts.get(contentOnly);
+    Object.assign(filters, saved?.filters || {...defaultBoardFilters, scope:"all"});
+    activeScheduleView = saved?.view || "board";
+    currentBoardContext = contentOnly;
+  }
+  if (contentOnly) { activeActionSubmodule = "all"; filters.standardWorkId = ""; }
   if (typeof window !== "undefined") {
     const routeHash = window.location.hash.replace(/^#/, "");
     if (["content-schedule", "contentSchedule", "contentSchedules", "schedule-board/content-note"].includes(routeHash)) {
@@ -1695,21 +1786,20 @@ export function renderScheduleBoardPage() {
   const days = buildBoardDays();
   const summaryRows = buildLaunchedRows().filter((row) => launchedRowMatchesFilters(row, { includeQuickFilter: false }));
   const launchedRows = summaryRows.filter(rowMatchesQuickFilter);
-  const pendingRows = launchedRows.filter((row) => row.statusValue === keyActionPendingStatusFilter && !isImprovementActionRow(row));
-  const scheduledRows = launchedRows.filter(
-    (row) =>
-      row.statusValue === keyActionRunningStatusFilter &&
-      (filters.dueRange === scheduleQuickFilterAll ? !isNoDueDate(row) : true),
+  const pendingRows = launchedRows.filter(row => contentOnly ? isNoDueDate(row) : row.statusValue === keyActionPendingStatusFilter && !isImprovementActionRow(row));
+  const scheduledRows = launchedRows.filter(row => contentOnly
+    ? [keyActionRunningStatusFilter,keyActionPendingStatusFilter].includes(row.statusValue) && !isNoDueDate(row)
+    : row.statusValue === keyActionRunningStatusFilter && (filters.dueRange === scheduleQuickFilterAll ? !isNoDueDate(row) : true),
   );
   const launchedListRows = buildLaunchedListRows().filter(launchedRowMatchesFilters);
   const actionOverviewRows = buildActionOverviewRows().filter(launchedRowMatchesFilters);
   const contentNoteRows = actionOverviewRows.filter((row) => row.workPlan.taskTemplateId === publishContentNoteTemplateId);
   const columnCount = filters.dueRange === scheduleQuickFilterAll ? boardDayCount + boardPastDayCount : 1;
   return `
-    <section class="schedule-board-page" style="--schedule-day-count: ${columnCount};">
-      ${renderActionSubmoduleTabs()}
+    <section class="schedule-board-page ${contentOnly ? 'content-schedule-page' : ''}" style="--schedule-day-count: ${columnCount};">
+      ${contentOnly ? "" : renderActionSubmoduleTabs()}
       ${renderFilters()}
-      ${renderSummary(summaryRows)}
+      ${renderSummary(summaryRows, days)}
       ${activeActionSubmodule === "all" ? renderScheduleViewTabs() : ""}
       ${
         activeActionSubmodule === "publish-content-note"

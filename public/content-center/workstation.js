@@ -26,9 +26,8 @@ export async function initializeWorkstation() {
       state.actionProductOptions = options.productOptions;
       host.innerHTML = `${window.contentCenterPermissions?.products ? renderActionProductSelector(note?.workstationProductIds || []) : '<p>暂无产品查看权限；已有产品关联将保留。</p>'}
         ${options.canUseTemplates ? renderContentNoteTemplateSelector(note?.workstationTemplateId || '') : '<p>暂无模板中心查看权限；已有模板关联将保留。</p>'}
-        <label>工作站发布账号<select name="publishingAccountId"><option value="">请选择发布行动使用的账号</option>${options.publishingAccounts.map(account => `<option value="${escape(account.id)}" ${note?.publishingAccountId===account.id?'selected':''}>${escape(account.name)}（${escape(account.platform || '未填平台')} · ${escape(account.id)}）</option>`).join('')}</select></label>
+        <input type="hidden" name="publishingAccountId" value="${escape(note?.publishingAccountId||'')}">
         <p class="muted">产品与模板直接使用工作站资料。策划账号属于品牌栏目，工作站发布账号用于执行行动，请核对后关联。</p>`;
-      if (note?.publishingAccountId && !options.publishingAccounts.some(a=>a.id===note.publishingAccountId)) host.querySelector('select[name="publishingAccountId"]').insertAdjacentHTML('beforeend', `<option selected value="${escape(note.publishingAccountId)}">原账号已停用，请重新选择</option>`);
       bindActionProductSelectors(host, { loadOptions: query => read('/api/product-options?search='+encodeURIComponent(query)) });
       bindContentNoteTemplateSelectors(host);
       host.querySelector('[data-action="clear-goal-linked-template"]')?.addEventListener('click', () => { host.querySelectorAll('[name="linkedTemplateId"]').forEach(input=>input.checked=false); host.dispatchEvent(new Event('input',{bubbles:true})); });
@@ -51,6 +50,13 @@ export async function initializeWorkstation() {
       const account = refs.publishingAccounts.find(a=>a.id===note.publishingAccountId);
       host.innerHTML = `<h3>关联产品</h3>${refs.productOptions.length?refs.productOptions.map(product=>`<a target="_top" href="/#products/sku/${encodeURIComponent(product.erpSkuId)}">${escape(product.name)} · ${escape(product.skuCode || product.erpSkuCode || '')}</a>`).join('<br>'):`<p>${note.workstationProductIds?.length?'已有产品关联，当前不可查看':'暂未关联产品'}</p>`}<h3>关联模板</h3><p>${escape(template?.name || (note.workstationTemplateId?'原模板已失效或无查看权限':'暂未关联模板'))}</p><h3>工作站发布账号</h3><p>${escape(account ? `${account.name}（${account.platform}）` : '尚未关联有效发布账号')}</p><p>计划发布：${escape([note.date || note.preferredDate,note.time || note.preferredTime].filter(Boolean).join(' ') || '待安排')}</p>`;
     } catch(error) { if(host.isConnected)host.textContent=error.message; }
+  };
+  window.launchContentPlanning = async note => {
+    if(!String(note.title||'').trim()||!String(note.copyText||'').trim())throw Error('请先填写策划标题和文案');
+    const prefill=await read('/api/notes/'+encodeURIComponent(note.id)+'/launch-preview');
+    if(prefill.existing){window.parent.sessionStorage.setItem('selectedProcessInstanceId',prefill.existing.actionId);window.parent.location.hash='process-progress';return;}
+    window.parent.sessionStorage.setItem('goalTaskPrefill',JSON.stringify({...prefill,publishingAccounts:optionsCache.publishingAccounts}));
+    window.parent.location.hash='goals';
   };
   window.renderContentActionPanel = async note => {
     const host = document.querySelector('#content-action-panel'); if (!host) return;
