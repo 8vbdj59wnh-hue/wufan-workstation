@@ -160,7 +160,10 @@ async function ensureSchedulePageLoaded(rerender, page = schedulePageState.page)
     rerender();
   } catch (error) {
     schedulePageState.loading = false;
+    contentScheduleCatalogError = "发布行动读取失败：" + error.message;
     console.error("关键行动排期分页读取失败", error);
+    const host = document.querySelector(".schedule-board-filters");
+    if(host && isContentScheduleRoute()){const alert=document.createElement("p");alert.setAttribute("role","alert");alert.textContent=contentScheduleCatalogError;host.append(alert);}
   }
 }
 
@@ -710,7 +713,7 @@ function contentRowFields(row) {
 }
 
 function renderContentFilters() {
-  const rows = buildLaunchedRows().filter(row => row.workPlan.taskTemplateId === publishContentNoteTemplateId);
+  const rows = buildLaunchedRows().filter(row => row.workPlan.isContentPublishingAction || row.workPlan.taskTemplateId === publishContentNoteTemplateId || row.processInstance?.taskTemplateId === publishContentNoteTemplateId || row.template?.name === '发布内容笔记');
   const choices = key => {
     if(key==='account') {
       const options=contentSchedulePublishingAccounts.map(a=>({id:a.id,name:a.name}));
@@ -736,7 +739,7 @@ function renderContentFilters() {
 }
 
 function launchedRowMatchesFilters(row, { includeQuickFilter = true } = {}) {
-  if (isContentScheduleRoute() && row.workPlan.taskTemplateId !== publishContentNoteTemplateId) return false;
+  if (isContentScheduleRoute() && !(row.workPlan.isContentPublishingAction || row.workPlan.taskTemplateId === publishContentNoteTemplateId || row.processInstance?.taskTemplateId === publishContentNoteTemplateId || row.template?.name === "发布内容笔记")) return false;
   if (isContentScheduleRoute()) {
     if (hiddenProcessStatuses.has(row.processInstance?.status)) return false;
     const fields = contentRowFields(row);

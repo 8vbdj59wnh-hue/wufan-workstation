@@ -1,3 +1,4 @@
+import {createWeeklyRhythm} from './weeklyRhythm.mjs';
 import DatabaseSync from 'better-sqlite3';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -137,6 +138,9 @@ export function createStore(filename, { accountRegistryPath } = {}) {
         for(const table of ['notes','candidates'])db.prepare(`UPDATE ${table} SET column_name=?,body=json_set(body,'$.column',?),revision=revision+1,updated_at=? WHERE account_id=? AND column_name=?`).run(name,name,now,id,input.oldName);
         db.prepare('UPDATE templates SET column_name=? WHERE account=? AND column_name=?').run(name,id,input.oldName);
         db.prepare('DELETE FROM columns WHERE account_id=? AND name=?').run(id,input.oldName);
+        const rhythm=db.prepare('SELECT body FROM weekly_rhythms WHERE account_id=?').get(id);
+        if(rhythm){const body=JSON.parse(rhythm.body);body.slots=body.slots.map(slot=>slot.column===input.oldName?{...slot,column:name}:slot);if(body.solarTerm?.column===input.oldName)body.solarTerm.column=name;db.prepare('UPDATE weekly_rhythms SET body=?,revision=revision+1 WHERE account_id=?').run(JSON.stringify(body),id);}
+
       }else throw new AppError('配置类型不正确');
     })();
     refreshCatalog();return {id,catalog:structuredClone(runtimeCatalog)};
@@ -340,5 +344,32 @@ export function createStore(filename, { accountRegistryPath } = {}) {
   const getImage=id=>db.prepare('SELECT * FROM images WHERE id=?').get(id);
   const backupImages=()=>listImages().map(i=>({...i,data:'data:'+i.mime+';base64,'+Buffer.from(getImage(i.id).bytes).toString('base64')}));
   const rawNotes=()=>db.prepare('SELECT body FROM notes UNION ALL SELECT body FROM candidates').all().map(r=>JSON.parse(r.body));
-  return {syncAccounts,getCatalog:()=>structuredClone(runtimeCatalog),addConfiguration,editConfiguration,getProduct,saveProduct,importProducts,getRequest,listRequests,createRequests,updateRequest,scheduleRequest,listProducts,listTemplates,addReference,get,list,save,batch,addImage,listImages,getImage,backupImages,rawNotes,close:()=>db.close()};
+  const weeklyRhythm=createWeeklyRhythm(db,{getCatalog:()=>structuredClone(runtimeCatalog),list,save});
+  weeklyRhythm.seedNanyu=()=>{
+    const accounts=runtimeCatalog.accounts.filter(a=>a.name==='南屿nanyu'&&runtimeCatalog.units.find(u=>u.id===a.unitId)?.name==='南屿');
+    if(accounts.length!==1)return;
+    const a=accounts[0],migrationKey='nanyu-weekly-columns-v1:'+a.id;
+    if(db.prepare('SELECT 1 FROM metadata WHERE key=?').get(migrationKey))return;
+    try{db.transaction(()=>{
+      const names=['单品分享','多品分享','插花搭配','主理人与经营片段','送礼场景','季节与情绪','互动选择'];
+      for(const name of names)db.prepare('INSERT OR IGNORE INTO columns VALUES (?,?,?)').run(a.id,name,JSON.stringify({name}));
+      // Retire the old category without deleting or guessing the category of historical content.
+      db.prepare('INSERT OR IGNORE INTO columns VALUES (?,?,?)').run(a.id,'',JSON.stringify({name:''}));
+      for(const table of ['notes','candidates'])db.prepare(`UPDATE ${table} SET column_name='',body=json_set(body,'$.column','','$.previousColumn','四宫格'),revision=revision+1,updated_at=? WHERE account_id=? AND column_name='四宫格'`).run(new Date().toISOString(),a.id);
+      db.prepare("UPDATE templates SET column_name='' WHERE account=? AND column_name='四宫格'").run(a.id);
+      db.prepare("DELETE FROM columns WHERE account_id=? AND name='四宫格'").run(a.id);
+      refreshCatalog();
+      const slots=[];
+      const evenings=[0,3,4,0,5,6,0];
+      for(let weekday=1;weekday<=7;weekday++){
+        slots.push({weekday,time:'10:30',column:names[0]});
+        if(weekday!==7)slots.push({weekday,time:'15:30',column:names[weekday%2?1:2]});
+        slots.push({weekday,time:'20:30',column:names[evenings[weekday-1]]});
+      }
+      const old=weeklyRhythm.get(a.id);
+      weeklyRhythm.put(a.id,{revision:old.revision,enabled:true,slots});
+      db.prepare('INSERT INTO metadata VALUES (?,?)').run(migrationKey,'1');
+    })();}finally{refreshCatalog();}
+  };
+  return {weeklyRhythm,syncAccounts,getCatalog:()=>structuredClone(runtimeCatalog),addConfiguration,editConfiguration,getProduct,saveProduct,importProducts,getRequest,listRequests,createRequests,updateRequest,scheduleRequest,listProducts,listTemplates,addReference,get,list,save,batch,addImage,listImages,getImage,backupImages,rawNotes,close:()=>db.close()};
 }

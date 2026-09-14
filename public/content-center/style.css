@@ -141,3 +141,8 @@
 .request-edit-table .request-product-tile img,.request-edit-table .request-product-tile .request-no-image{width:48px;height:48px}
 .request-edit-table .request-template-selected{gap:5px;overflow-wrap:anywhere;font-size:12px}
 .request-edit-table td:nth-child(4) .request-template-selected img{height:90px}
+
+.weekly-rhythm-dialog{width:min(1000px,94vw);max-height:90vh;padding:24px;border:1px solid #d8dde0;border-radius:12px}
+.weekly-rhythm-dialog::backdrop{background:#0006}.weekly-rhythm-dialog p{font-size:13px;color:#71808b;line-height:1.6}
+.rhythm-grid-scroll{overflow:auto}.weekly-rhythm-dialog table{width:100%;border-collapse:collapse;min-width:680px}.weekly-rhythm-dialog th,.weekly-rhythm-dialog td{padding:8px;border:1px solid #dce2e5}.weekly-rhythm-dialog th{background:#edf2f3;white-space:nowrap}.weekly-rhythm-dialog select{width:100%;font-size:13px;padding:6px}
+.rhythm-enabled,.rhythm-time-entry{display:flex;align-items:center;gap:10px;margin:16px 0}.rhythm-enabled input{width:auto}.rhythm-time-entry input{width:125px}.rhythm-time-entry span{margin-left:auto;font-size:13px}

@@ -7,6 +7,7 @@ import { readScheduleBoardPage, selectLinkedVisualTemplates } from "../server/wo
 function createDatabase() {
   const database = new Database(":memory:");
   database.exec(`
+    CREATE TABLE task_templates (id TEXT PRIMARY KEY,name TEXT);
     CREATE TABLE work_plans (
       id TEXT PRIMARY KEY, goalId TEXT, departmentId TEXT, taskTemplateId TEXT, title TEXT,
       workType TEXT, status TEXT, plannedWeek TEXT, dueDate TEXT, processInstanceId TEXT,
@@ -106,3 +107,16 @@ test("关键行动详情只返回当前可见行动引用的视觉模板", () =>
  assert.equal(readScheduleBoardPage({database,scope:'all'}).total,25);
  database.close();
  });
+
+test("内容排期兼容正式环境自定义模板ID及仅流程保存模板ID的历史行动",()=>{
+ const database=createDatabase();
+ database.prepare('INSERT INTO task_templates VALUES (?,?)').run('real-template-id','发布内容笔记');
+ for(const [id,wpType,piType] of [['legacy','real-template-id','real-template-id'],['process-only','','real-template-id'],['other','different','different']]){
+  database.prepare("INSERT INTO process_instances(id,taskTemplateId,status,customFields) VALUES (?,?,?,?)").run(id,piType,'running','{}');
+  database.prepare("INSERT INTO work_plans(id,taskTemplateId,processInstanceId,customFields) VALUES (?,?,?,?)").run(id,wpType,id,'{}');
+ }
+ const result=readScheduleBoardPage({database,taskTemplateId:'task-template-publish-content-note'});
+ assert.equal(result.total,2);
+ assert.deepEqual(result.data.workPlans.map(p=>p.id).sort(),['legacy','process-only']);
+ assert.ok(result.data.workPlans.every(p=>p.isContentPublishingAction));database.close();
+});

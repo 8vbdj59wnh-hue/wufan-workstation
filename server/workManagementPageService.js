@@ -80,7 +80,11 @@ export function readScheduleBoardPage(options = {}) {
     params.departmentId = options.departmentId || "";
   }
   if (options.taskTemplateId) {
-    where.push("wp.taskTemplateId=@taskTemplateId");
+    where.push(options.taskTemplateId === "task-template-publish-content-note"
+      ? `(wp.taskTemplateId=@taskTemplateId OR pi.taskTemplateId=@taskTemplateId OR EXISTS (
+          SELECT 1 FROM task_templates publishing_template WHERE publishing_template.id IN (wp.taskTemplateId,pi.taskTemplateId) AND publishing_template.name='发布内容笔记'
+        ))`
+      : "wp.taskTemplateId=@taskTemplateId");
     params.taskTemplateId = String(options.taskTemplateId);
   }
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
@@ -97,6 +101,7 @@ export function readScheduleBoardPage(options = {}) {
     ORDER BY CASE WHEN wp.dueDate IS NULL OR wp.dueDate='' THEN 1 ELSE 0 END,wp.dueDate,wp.createdAt DESC`)
     .all(params).map(compactWorkPlan);
   const plans = [...new Map([...activePlans, ...pagedPlans].map((item) => [item.id, item])).values()];
+  if (options.taskTemplateId === "task-template-publish-content-note") for (const plan of plans) plan.isContentPublishingAction = true;
   const processIds = [...new Set(plans.map((item) => item.processInstanceId).filter(Boolean))];
   const processInstances = rowsForIds(database, "process_instances", instanceColumns, processIds, compactInstance);
   const tasks = taskRowsForProcessIds(database, processIds);

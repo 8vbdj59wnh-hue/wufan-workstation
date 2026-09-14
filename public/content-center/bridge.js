@@ -63,7 +63,7 @@ document.addEventListener('focusout', async event => {
 window.addEventListener('pagehide', () => { imageObserver.disconnect(); objectUrls.forEach(url => URL.revokeObjectURL(url)); });
 try {
   await initializeWorkstation();
-  for (const file of ['app.js', 'company.js', 'requests.js']) await new Promise((resolve, reject) => {
+  for (const file of ['app.js', 'company.js', 'requests.js', 'weekly-rhythm.js']) await new Promise((resolve, reject) => {
     const script = document.createElement('script'); script.src = new URL(file, import.meta.url).href;
     script.onload = resolve; script.onerror = () => reject(new Error('内容中心页面加载失败，请刷新重试')); document.head.append(script);
   });

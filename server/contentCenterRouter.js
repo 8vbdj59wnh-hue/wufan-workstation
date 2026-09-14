@@ -41,6 +41,13 @@ export function createContentCenterRouter({ requirePermission, hasPermission, ge
         store = createStore(filename, {accountRegistryPath:getDatabase().name});
       }
       store.syncAccounts?.();
+      if (!injectedStore) {
+        store.weeklyRhythm?.seedAyYou();
+        store.weeklyRhythm?.seedXiaoMo();
+        store.weeklyRhythm?.seedBanran();
+        store.weeklyRhythm?.seedHomeFragments();
+        store.weeklyRhythm?.seedNanyu();
+      }
       next();
     } catch (error) { next(error); }
   });
@@ -50,7 +57,9 @@ export function createContentCenterRouter({ requirePermission, hasPermission, ge
   route('get', '/meta', req => ({ ...store.getCatalog(), statuses, priorities, copyStatuses, permissions: {
     manage: hasPermission(req.user, 'contentCenter.manage'), export: hasPermission(req.user, 'contentCenter.export'), products: hasPermission(req.user, 'products.view'),
   } }));
-  route('get', '/notes', () => store.list());
+  route('get', '/notes', () => { store.weeklyRhythm?.generate(); return store.list(); });
+  route('get', '/weekly-rhythm/:id', req => store.weeklyRhythm.get(req.params.id));
+  route('put', '/weekly-rhythm/:id', req => { const config=store.weeklyRhythm.put(req.params.id,req.body); return {...config,generated:store.weeklyRhythm.generate()}; });
   router.get('/product-recommendations', requirePermission('products.view'), (req,res,next)=>{try{
     const brand=store.getCatalog().units.find(u=>u.id===req.query.unitId);
     if(!brand)throw new AppError('请先为需求选择所属品牌');
