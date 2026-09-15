@@ -31,7 +31,10 @@ const row=requestRow(id);if(row){row.querySelector('[data-request-save-state]').
 async function hydrateRequestProducts(rows){
 if(!window.contentCenterPermissions?.products)return;
 for(const n of rows){
- if(!(n.workstationProductIds||[]).some(id=>!requestProductCache.has(id)))continue;
+ if(!(n.workstationProductIds||[]).some(id=>!requestProductCache.has(id))){
+  const row=requestRow(n.id);if(row)row.querySelector('[data-request-products]').innerHTML=requestProductTiles(n);
+  continue;
+ }
  const key=n.id+':'+n.revision;
  if(!requestRefLoads.has(key))requestRefLoads.set(key,api('/api/references?noteId='+encodeURIComponent(n.id)).then(refs=>{for(const p of refs.productOptions||[])requestProductCache.set(p.erpSkuId||p.id,p);}).catch(error=>{requestRefLoads.delete(key);throw error;}));
  try{await requestRefLoads.get(key);const row=requestRow(n.id);if(row)row.querySelector('[data-request-products]').innerHTML=requestProductTiles(n);}catch(error){const row=requestRow(n.id);if(row)row.querySelector('[data-request-product-error]').textContent=error.message;}
