@@ -147,6 +147,20 @@ export function saveContentRequestPlans(store,integration,user,input={}){
   return store.fillPlanningBatch(items,input.idempotencyKey);
 }
 
+export function reviseContentRequestCopy(store,integration,user,input={}){
+  if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>!['idempotencyKey','items'].includes(k))||!Array.isArray(input.items)||!input.items.length||input.items.length>100)throw new AppError('文案修订批次格式不正确');
+  const items=input.items.map((item,index)=>{
+    if(!item||typeof item!=='object'||Array.isArray(item)||Object.keys(item).some(k=>!['id','revision','title','copyText'].includes(k))||typeof item.id!=='string'||!item.id||item.id.length>120||!Number.isInteger(item.revision)||item.revision<1)throw new AppError(`第 ${index+1} 条仅允许原需求ID、版本、标题和正文`);
+    if(typeof item.title!=='string'||typeof item.copyText!=='string')throw new AppError('标题和正文必须为文字');
+    const title=cleanPlanningText(item.title,'标题',500),copyText=cleanPlanningText(item.copyText,'正文',20000);
+    if(!title||!copyText)throw new AppError('标题和正文不能为空');
+    const old=store.getRequest(item.id);
+    if(integration?.progress?.(user,old)?.linked)throw new AppError(`需求 ${item.id} 已关联行动，不能修订`,409);
+    return {id:item.id,revision:item.revision,title,copyText,actorId:String(user?.id||'')};
+  });
+  return store.reviseCopyBatch(items,input.idempotencyKey);
+}
+
 // Content is a company-wide shared resource. Dedicated permissions explicitly
 // grant company-wide access; personal task/department ownership is not inferred.
 export function createContentCenterRouter({ requirePermission, hasPermission, getDatabase, dataDir, integration, recommendations, store: injectedStore }) {
@@ -210,6 +224,7 @@ export function createContentCenterRouter({ requirePermission, hasPermission, ge
     res.json(getContentPlanningProductSelection(store, integration, req.query.brand));
   }catch(error){next(error);}});
   route('get', '/planning/schedule', req => listContentPlanningSchedule(store, req.query));
+  route('post', '/planning/requests/revise-copy', req => reviseContentRequestCopy(store,integration,req.user,req.body));
   route('post', '/planning/requests/plans', req => saveContentRequestPlans(store,integration,req.user,req.body));
   route('post', '/planning/requests/fill', req => fillContentPlanningRequests(store, integration, req.user, req.body));
   route('post', '/planning/requests', req => saveContentPlanningRequests(store, integration, req.user, req.body), 201);
