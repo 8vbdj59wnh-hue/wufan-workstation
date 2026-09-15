@@ -78,7 +78,7 @@ export function createContentCenterIntegration(deps) {
     return { taskTemplateId: ACTION, launchImmediately: true, title: '从内容策划发起发布行动', actionTitle: note.title,
       description: note.notes || '', contentCenterSource: { noteId: note.id, revision: note.revision },
       productIds: note.workstationProductIds || [], productOptions: options.productOptions, linkedTemplateId: note.workstationTemplateId || '',
-      customFields: { title: note.title, contentText: note.copyText || '', hashtags: note.hashtags || '', contentType: note.noteFormat === '视频' ? '视频笔记' : '图文笔记', publishDate: `${note.date || note.preferredDate}T${note.time || note.preferredTime}`, account: account?.id || '', publishingAccountId: account?.id || '', contentCenterBrandId: note.unitId, contentCenterColumn: note.column } };
+      customFields: { productName: options.productOptions.map(p => [p.name || p.erpSkuName || '', p.erpSkuCode || p.skuCode || ''].filter(Boolean).join(' · ')).filter(Boolean).join('、'), remark: [note.notes, note.imageScript ? '画面脚本：\n' + note.imageScript : '', note.materialNeeds ? '素材需求：\n' + note.materialNeeds : ''].filter(Boolean).join('\n\n'), title: note.title, contentText: note.copyText || '', hashtags: note.hashtags || '', contentType: note.noteFormat === '视频' ? '视频笔记' : '图文笔记', publishDate: `${note.date || note.preferredDate}T${note.time || note.preferredTime}`, account: account?.id || '', publishingAccountId: account?.id || '', contentCenterBrandId: note.unitId, contentCenterColumn: note.column } };
   }
   function launch(user, store, note, input) {
     if (!hasPermission(user, 'contentCenter.manage') || !canLaunchActionTemplate(user, ACTION)) throw new AppError('没有发起权限', 403);

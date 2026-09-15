@@ -1,3 +1,4 @@
+import { mapContentNotePrefill } from './contentNotePrefill.js';
 import { getPublishContentNoteTemplates, renderContentNoteTemplateSelector, bindContentNoteTemplateSelectors } from "./contentNoteTemplateSelector.js";
 import {
   authFetch, apiBaseUrl, prepareWorkPlanLaunchPayload,
@@ -355,6 +356,7 @@ function buildLaunchAssignments(templateId, taskTemplate, initiatorId) {
 
 function renderCustomFieldsForm(template) {
   const fields = getSortedFormFields(template);
+  if (modalState?.contentCenterSource && isContentNoteTemplate(template)) modalState.customFields = mapContentNotePrefill(fields, modalState.customFields);
   const editor = renderPublicFormEditor({ fields, customFields: modalState?.customFields ?? {}, title: "本次关键行动信息" });
   if (!isContentNoteTemplate(template) || modalState?.contentCenterSource) return editor;
   return `
