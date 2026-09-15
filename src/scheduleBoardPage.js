@@ -1320,7 +1320,7 @@ function renderSummary(launchedRows, days) {
   if (isContentScheduleRoute()) {
     const unscheduled = launchedRows.filter(isNoDueDate).length;
     const dayKeys = new Set(days.map(day=>day.key));
-    return `<div class="schedule-board-summary"><span>未完成发布 ${launchedRows.length}</span><span>已排期 ${launchedRows.length-unscheduled}</span><span>待排期 ${unscheduled}</span><span>当前日期范围 ${launchedRows.filter(row=>isDueDateInBoard(row,dayKeys)).length}</span></div>`;
+    return `<div class="schedule-board-summary"><span>未完成发布 ${launchedRows.length}</span><span>已排期 ${launchedRows.length-unscheduled}</span><span>待排期 ${unscheduled}</span><span>当前日期范围 ${launchedRows.filter(row=>dayKeys.has(row.dueDateKey)).length}</span></div>`;
   }
   const dayKeys = new Set(days.map((day) => day.key));
   const noDueDateCount = launchedRows.filter(isNoDueDate).length;
