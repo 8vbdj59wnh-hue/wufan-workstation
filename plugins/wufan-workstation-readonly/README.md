@@ -49,3 +49,5 @@ chmod +x ./plugins/wufan-workstation-readonly/setup/setup-unix.sh
 JWT、设备续期凭证、密码、数据库文件和服务器凭据禁止放进插件目录或分发压缩包。
 
 受控补填使用 fill_next_week_requests：先读取原需求ID和revision，仅补填空白需求的内容、确认产品和形式；不改账号、栏目、日期和时间，冲突整批回滚，安全重试复用幂等键。
+
+策划回填使用 save_request_plans：原需求可已有文字和产品，策划字段必须为空；提交原ID、revision、标题、正文、话题、画面脚本、素材需求。保留原需求、关联和排期，关联行动或已有策划时拒绝，整批回滚和幂等重试。

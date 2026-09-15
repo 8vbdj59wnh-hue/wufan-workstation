@@ -43,6 +43,7 @@ const representativeArguments = {
   get_notifications_summary: { limit: 10 },
   get_content_product_selection: { brand: "南屿" },
   list_content_column_schedule: { startDate: "2026-09-21", endDate: "2026-09-27", page: 1, pageSize: 50, column: "产品笔记" },
+  save_request_plans:{idempotencyKey:"plan-week-v1",items:[{id:"request-1",revision:2,title:"标题",copyText:"正文",hashtags:"",imageScript:"封面",materialNeeds:"素材"}]},
   fill_next_week_requests: {idempotencyKey:"fill-week-2026-v1",items:[{id:"request-1",revision:1,notes:"补填需求",workstationProductIds:["sku-1"],noteFormat:"图文"}]},
   save_next_week_requests: {
     idempotencyKey: "nanyu-2026-w39-v1",
@@ -54,11 +55,11 @@ test("插件只暴露固定查询与受控发起工具并提供准确安全标�
   assert.equal(TOOL_DEFINITIONS.length, Object.keys(representativeArguments).length);
   assert.deepEqual(new Set(TOOL_DEFINITIONS.map((item) => item.name)), new Set(Object.keys(representativeArguments)));
   for (const definition of TOOL_DEFINITIONS) {
-    assert.equal(definition.annotations.readOnlyHint, !new Set(["launch_key_action", "save_next_week_requests", "fill_next_week_requests"]).has(definition.name), definition.name);
+    assert.equal(definition.annotations.readOnlyHint, !new Set(["launch_key_action", "save_next_week_requests", "fill_next_week_requests", "save_request_plans"]).has(definition.name), definition.name);
     assert.equal(definition.annotations.destructiveHint, false, definition.name);
     assert.equal(definition.annotations.openWorldHint, false, definition.name);
     assert.equal(definition.inputSchema.additionalProperties, false, definition.name);
-    if (!new Set(["launch_key_action", "save_next_week_requests", "fill_next_week_requests"]).has(definition.name)) assert.doesNotMatch(definition.name, /create|update|delete|write|import|sync_run|approve|execute/u);
+    if (!new Set(["launch_key_action", "save_next_week_requests", "fill_next_week_requests", "save_request_plans"]).has(definition.name)) assert.doesNotMatch(definition.name, /create|update|delete|write|import|sync_run|approve|execute/u);
   }
 });
 
@@ -79,7 +80,7 @@ test("工具只访问固定正式API，且仅受控预览、确认与新增下�
 
   assert.equal(requests.length, TOOL_DEFINITIONS.length);
   for (const request of requests) {
-    const expectedMethod = new Set(["/api/key-actions/launch-preview", "/api/key-actions/launch", "/api/content-center/planning/requests", "/api/content-center/planning/requests/fill"]).has(request.url.pathname) ? "POST" : "GET";
+    const expectedMethod = new Set(["/api/key-actions/launch-preview", "/api/key-actions/launch", "/api/content-center/planning/requests", "/api/content-center/planning/requests/fill", "/api/content-center/planning/requests/plans"]).has(request.url.pathname) ? "POST" : "GET";
     assert.equal(request.options.method, expectedMethod);
     assert.equal(request.options.headers.Authorization, "Bearer test-secret-token");
     assert.equal(request.options.redirect, "error");
@@ -89,6 +90,7 @@ test("工具只访问固定正式API，且仅受控预览、确认与新增下�
   assert.deepEqual(requests.filter((item) => item.options.method === "POST").map((item) => item.url.pathname), [
     "/api/key-actions/launch-preview",
     "/api/key-actions/launch",
+    "/api/content-center/planning/requests/plans",
     "/api/content-center/planning/requests/fill",
     "/api/content-center/planning/requests",
   ]);

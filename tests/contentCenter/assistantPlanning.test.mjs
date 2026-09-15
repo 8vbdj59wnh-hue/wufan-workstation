@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createStore } from '../../server/contentCenter/store.mjs';
-import { getContentPlanningProductSelection, listContentPlanningSchedule, saveContentPlanningRequests, fillContentPlanningRequests } from '../../server/contentCenterRouter.js';
+import { getContentPlanningProductSelection, listContentPlanningSchedule, saveContentPlanningRequests, fillContentPlanningRequests, saveContentRequestPlans } from '../../server/contentCenterRouter.js';
 
 test('内容策划助手可读取选品与排期，并仅幂等新增已确认产品的下周需求', t => {
   const store = createStore(':memory:');
@@ -76,4 +76,24 @@ test('按ID补填空白需求：保留排期、幂等、并发保护、整批回
  assert.throws(()=>fillContentPlanningRequests(store,{...integration,progress:()=>({linked:true})},{}, {idempotencyKey:'fill-linked-1',items:[row(blank)]}),/已关联行动/);
  const planned=make();store.save({revision:planned.revision,title:'人工策划'},planned.id);
  assert.throws(()=>fillContentPlanningRequests(store,integration,{}, {idempotencyKey:'fill-manual-1',items:[{...row(planned),revision:2}]}),/已有内容/);
+});
+
+
+test('已有需求按ID回填20篇策划：保留需求和关联，幂等与整批冲突保护',t=>{
+ const store=createStore(':memory:');t.after(()=>store.close());const a=store.getCatalog().accounts[0];
+ const make=()=>store.createRequests([{account:a.id,column:a.columns[0].name,notes:'原始内容需求',workstationProductIds:['p1'],preferredDate:'2026-09-21',preferredTime:'10:30',noteFormat:'图文'}])[0];
+ const rows=Array.from({length:20},make);const integration={progress:()=>({linked:false})};
+ const row=n=>({id:n.id,revision:n.revision,title:'标题',copyText:'正文与评论互动',hashtags:'#花瓶',imageScript:'封面与逐图脚本',materialNeeds:'实拍素材'});
+ const input={idempotencyKey:'plan-week-20-v1',items:rows.map(row)};
+ const saved=saveContentRequestPlans(store,integration,{},input);assert.equal(saved.items.length,20);assert.equal(store.list().length,20);
+ for(let i=0;i<20;i++){const n=saved.items[i],old=rows[i];for(const field of ['id','notes','account','column','preferredDate','preferredTime','noteFormat','workstationProductIds'])assert.deepEqual(n[field],old[field]);assert.equal(n.title,'标题');assert.equal(n.imageScript,'封面与逐图脚本');assert.equal(n.contentStage,'candidate');assert.equal(n.generationStatus,old.generationStatus);}
+ assert.equal(saveContentRequestPlans(store,integration,{},input).duplicate,true);
+ assert.throws(()=>saveContentRequestPlans(store,integration,{}, {...input,items:[{...row(rows[0]),title:'换稿'}]}),e=>e.status===409);
+ const blank=make();
+ assert.throws(()=>saveContentRequestPlans(store,integration,{}, {idempotencyKey:'plan-conflict-1',items:[row(blank),{...row(rows[0]),revision:2}]}),/已有策划/);
+ assert.equal(store.get(blank.id).title,'');assert.equal(store.get(blank.id).revision,1);
+ for(const extra of [{notes:'覆盖需求'},{workstationProductIds:[]},{preferredDate:'2026-09-22'},{account:'other'}])assert.throws(()=>saveContentRequestPlans(store,integration,{}, {idempotencyKey:'plan-forbidden',items:[{...row(blank),...extra}]}),/仅允许策划字段/);
+ assert.throws(()=>saveContentRequestPlans(store,integration,{}, {idempotencyKey:'plan-stale-1',items:[{...row(blank),revision:99}]}),/版本/);
+ assert.throws(()=>saveContentRequestPlans(store,{progress:()=>({linked:true})},{}, {idempotencyKey:'plan-linked-1',items:[row(blank)]}),/关联行动/);
+ assert.throws(()=>saveContentRequestPlans(store,integration,{}, {idempotencyKey:'plan-empty-1',items:[{...row(blank),copyText:''}]}),/不能为空/);
 });

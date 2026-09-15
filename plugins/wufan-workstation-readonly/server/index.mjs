@@ -245,6 +245,22 @@ const TOOL_SPECS = [
     accountId: cleanText(args.accountId, "accountId", { maxLength: 120 }),
     column: cleanText(args.column, "column", { maxLength: 120 }),
   }) })),
+  tool("save_request_plans", "回填需求策划", "按原需求ID和revision，将执行稿写入尚无策划的已有需求。保留原需求文字、产品、模板、形式和排期，不发起行动。已有关联行动或策划、版本冲突均拒绝；整批原子写入和幂等重试。", objectSchema({
+    idempotencyKey:textProperty("本次策划版本稳定幂等键，相同重试复用",120),
+    items:{type:"array",minItems:1,maxItems:100,items:objectSchema({
+      id:textProperty("原需求ID",120),revision:{type:"integer",minimum:1},title:textProperty("笔记标题",500),
+      copyText:textProperty("完整正文；评论区互动可用独立小节标明",20000),hashtags:textProperty("话题",2000),
+      imageScript:textProperty("封面文案、图文结构、逐图画面脚本",20000),materialNeeds:textProperty("素材需求",20000)
+    },["id","revision","title","copyText"])}
+  },["idempotencyKey","items"]),args=>{
+    if(!Array.isArray(args.items)||!args.items.length||args.items.length>100)throw new Error('请提交1至100条策划。');
+    return {method:"POST",path:"/api/content-center/planning/requests/plans",body:{idempotencyKey:cleanText(args.idempotencyKey,'idempotencyKey',{required:true,maxLength:120}),items:args.items.map(item=>{
+      if(!item||Object.keys(item).some(k=>!['id','revision','title','copyText','hashtags','imageScript','materialNeeds'].includes(k))||!Number.isInteger(item.revision)||item.revision<1)throw new Error('仅允许原需求ID、版本和策划字段。');
+      const result={id:cleanText(item.id,'id',{required:true,maxLength:120}),revision:item.revision};
+      for(const [field,maxLength] of Object.entries({title:500,copyText:20000,hashtags:2000,imageScript:20000,materialNeeds:20000}))result[field]=cleanText(item[field],field,{required:['title','copyText'].includes(field),maxLength});
+      return result;
+    })}};
+  },contentWriteAnnotations),
   tool("fill_next_week_requests", "补填空白下周需求", "按原需求ID和读取到的revision补填空白需求，保留账号、栏目、日期和时间；只关联品牌确认产品。已有内容或版本冲突整批拒绝；稳定幂等键支持安全重试。", objectSchema({
     idempotencyKey:textProperty("稳定幂等键，相同补填重试复用",120),
     items:{type:"array",minItems:1,maxItems:100,items:objectSchema({
@@ -480,7 +496,7 @@ async function handleRequest(message) {
       protocolVersion: String(message.params?.protocolVersion || "2025-06-18"),
       capabilities: { tools: { listChanged: false } },
       serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
-      instructions: "极简工作站正式受控助手。可读取内容中心选品确认与栏目排期，并在用户当前请求明确要求或授权时幂等新增下周需求或按原ID和版本补填空白需求；只能关联选品确认中的产品。发起关键行动必须先查重并展示完整预览，只有用户在当前对话明确确认后才可提交。除受控补填空白需求外不得编辑、删除或排期内容，不得执行任务、同步、审批、导入、修改通知状态或权限，也不得访问数据库或服务器文件。列表先分页再按ID读取详情。",
+      instructions: "极简工作站正式受控助手。可读取内容中心选品确认与栏目排期，并在用户当前请求明确要求或授权时幂等新增下周需求或按原ID和版本补填空白需求、向已有需求回填空白策划字段；只能关联选品确认中的产品。发起关键行动必须先查重并展示完整预览，只有用户在当前对话明确确认后才可提交。除受控补填空白需求及回填空白策划字段外不得编辑、删除或排期内容，不得执行任务、同步、审批、导入、修改通知状态或权限，也不得访问数据库或服务器文件。列表先分页再按ID读取详情。",
     };
   }
   if (method === "ping") return {};

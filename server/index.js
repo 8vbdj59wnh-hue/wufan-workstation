@@ -1662,12 +1662,12 @@ app.use("/api", (request, response, next) => {
     "/key-actions/launch-preview",
     "/key-actions/launch",
     ...(request.user.assistantAccessProfile === AssistantAccessProfile.ContentPlanner
-      ? ["/content-center/planning/requests", "/content-center/planning/requests/fill"]
+      ? ["/content-center/planning/requests", "/content-center/planning/requests/fill", "/content-center/planning/requests/plans"]
       : []),
   ]);
   const allowed = request.method === "POST" && allowedPaths.has(request.path);
   if (!allowed) {
-    response.status(403).json({ success: false, code: "assistant_write_boundary", message: "助手设备仅允许发起关键行动，内容策划设备另可新增或受控补填空白下周需求。" });
+    response.status(403).json({ success: false, code: "assistant_write_boundary", message: "助手设备仅允许发起关键行动，内容策划设备另可新增或受控补填空白下周需求及回填策划。" });
     return;
   }
   next();

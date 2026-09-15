@@ -129,6 +129,24 @@ export function fillContentPlanningRequests(store,integration,user,input={}){
   return store.fillRequestBatch(normalized.map((item,i)=>({id:input.items[i].id,revision:input.items[i].revision,notes:item.notes,workstationProductIds:item.workstationProductIds,noteFormat:item.noteFormat})),input.idempotencyKey);
 }
 
+export function saveContentRequestPlans(store,integration,user,input={}){
+  if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>!['idempotencyKey','items'].includes(k))||!Array.isArray(input.items)||!input.items.length||input.items.length>100)throw new AppError('策划回填批次格式不正确');
+  const items=input.items.map((item,index)=>{
+    const allowed=['id','revision','title','copyText','hashtags','imageScript','materialNeeds'];
+    if(!item||typeof item!=='object'||Array.isArray(item)||Object.keys(item).some(k=>!allowed.includes(k))||typeof item.id!=='string'||!item.id||item.id.length>120||!Number.isInteger(item.revision)||item.revision<1)throw new AppError(`第 ${index+1} 条必须提供原需求ID和版本，仅允许策划字段`);
+    const old=store.getRequest(item.id);
+    if(integration?.progress?.(user,old)?.linked)throw new AppError(`需求 ${item.id} 已关联行动，不能回填`,409);
+    const result={id:item.id,revision:item.revision};
+    for(const [field,max] of Object.entries({title:500,copyText:20000,hashtags:2000,imageScript:20000,materialNeeds:20000})){
+      if(item[field]!==undefined&&typeof item[field]!=='string')throw new AppError(`第 ${index+1} 条 ${field} 必须为文字`);
+      result[field]=cleanPlanningText(item[field],field,max);
+    }
+    if(!result.title||!result.copyText)throw new AppError('策划标题和正文不能为空');
+    return result;
+  });
+  return store.fillPlanningBatch(items,input.idempotencyKey);
+}
+
 // Content is a company-wide shared resource. Dedicated permissions explicitly
 // grant company-wide access; personal task/department ownership is not inferred.
 export function createContentCenterRouter({ requirePermission, hasPermission, getDatabase, dataDir, integration, recommendations, store: injectedStore }) {
@@ -192,6 +210,7 @@ export function createContentCenterRouter({ requirePermission, hasPermission, ge
     res.json(getContentPlanningProductSelection(store, integration, req.query.brand));
   }catch(error){next(error);}});
   route('get', '/planning/schedule', req => listContentPlanningSchedule(store, req.query));
+  route('post', '/planning/requests/plans', req => saveContentRequestPlans(store,integration,req.user,req.body));
   route('post', '/planning/requests/fill', req => fillContentPlanningRequests(store, integration, req.user, req.body));
   route('post', '/planning/requests', req => saveContentPlanningRequests(store, integration, req.user, req.body), 201);
   route('get', '/notes', () => { store.weeklyRhythm?.generate(); return store.list(); });

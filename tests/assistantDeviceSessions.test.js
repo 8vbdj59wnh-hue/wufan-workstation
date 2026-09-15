@@ -161,6 +161,11 @@ test("助手设备可长期续期、逐台撤销，且仅能受控发起行动�
     for(const token of [loginA.body.token,launcherLogin.body.token]) assert.equal((await request(baseUrl,"/api/content-center/planning/requests/fill",{method:"POST",token,body:{}})).status,403);
     const rejectedFill=await request(baseUrl,"/api/content-center/planning/requests/fill",{method:"POST",token:plannerLogin.body.token,body:{idempotencyKey:"fill-existing-1",items:[{id:savedPlanning.body.items[0].id,revision:1,notes:"不应覆盖"}]}});
     assert.equal(rejectedFill.status,409,JSON.stringify(rejectedFill.body));
+    const planInput={idempotencyKey:"assistant-plan-1",items:[{id:savedPlanning.body.items[0].id,revision:1,title:"策划标题",copyText:"完整正文",imageScript:"封面和逐图结构",materialNeeds:"素材"}]};
+    for(const token of [loginA.body.token,launcherLogin.body.token])assert.equal((await request(baseUrl,"/api/content-center/planning/requests/plans",{method:"POST",token,body:planInput})).status,403);
+    const planResult=await request(baseUrl,"/api/content-center/planning/requests/plans",{method:"POST",token:plannerLogin.body.token,body:planInput});
+    assert.equal(planResult.status,200,JSON.stringify(planResult.body));assert.equal(planResult.body.items[0].notes,planningInput.items[0].notes);
+    assert.equal((await request(baseUrl,"/api/content-center/planning/requests/plans",{method:"POST",token:plannerLogin.body.token,body:planInput})).body.duplicate,true);
     const plannedSchedule = await request(baseUrl, "/api/content-center/planning/schedule?startDate=2026-09-21&endDate=2026-09-27", { token: plannerLogin.body.token });
     assert.equal(plannedSchedule.status, 200);
     assert.equal(plannedSchedule.body.total, 1);
