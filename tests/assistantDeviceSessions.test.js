@@ -158,6 +158,9 @@ test("助手设备可长期续期、逐台撤销，且仅能受控发起行动�
     const repeatedPlanning = await request(baseUrl, "/api/content-center/planning/requests", { method: "POST", token: plannerLogin.body.token, body: planningInput });
     assert.equal(repeatedPlanning.status, 201);
     assert.equal(repeatedPlanning.body.duplicate, true);
+    for(const token of [loginA.body.token,launcherLogin.body.token]) assert.equal((await request(baseUrl,"/api/content-center/planning/requests/fill",{method:"POST",token,body:{}})).status,403);
+    const rejectedFill=await request(baseUrl,"/api/content-center/planning/requests/fill",{method:"POST",token:plannerLogin.body.token,body:{idempotencyKey:"fill-existing-1",items:[{id:savedPlanning.body.items[0].id,revision:1,notes:"不应覆盖"}]}});
+    assert.equal(rejectedFill.status,409,JSON.stringify(rejectedFill.body));
     const plannedSchedule = await request(baseUrl, "/api/content-center/planning/schedule?startDate=2026-09-21&endDate=2026-09-27", { token: plannerLogin.body.token });
     assert.equal(plannedSchedule.status, 200);
     assert.equal(plannedSchedule.body.total, 1);

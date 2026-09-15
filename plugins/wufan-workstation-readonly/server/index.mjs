@@ -160,6 +160,15 @@ function planningRequestBody(args = {}) {
   };
 }
 
+function fillPlanningRequestBody(args={}) {
+  if(!Array.isArray(args.items)||!args.items.length||args.items.length>100)throw new Error('items必须包含1至100条空白需求。');
+  return {idempotencyKey:cleanText(args.idempotencyKey,'idempotencyKey',{required:true,maxLength:120}),items:args.items.map(item=>{
+    if(!item||Object.keys(item).some(k=>!['id','revision','notes','workstationProductIds','noteFormat'].includes(k))||!Number.isInteger(item.revision)||item.revision<1)throw new Error('补填必须使用原需求ID和版本，不可修改排期字段。');
+    const normalized=planningRequestBody({idempotencyKey:args.idempotencyKey,items:[{accountId:'placeholder',column:'placeholder',notes:item.notes,workstationProductIds:item.workstationProductIds,noteFormat:item.noteFormat}]}).items[0];
+    return {id:cleanText(item.id,'id',{required:true,maxLength:120}),revision:item.revision,notes:normalized.notes,workstationProductIds:normalized.workstationProductIds,noteFormat:normalized.noteFormat};
+  })};
+}
+
 const TOOL_SPECS = [
   tool("get_goal_center", "读取目标中心", "读取当前账号数据范围内的目标中心正式数据。", objectSchema(), () => ({ path: "/api/goal-center/bootstrap" })),
   tool("get_goal_detail", "读取目标详情", "按目标ID读取正式目标详情。", objectSchema({ goalId: textProperty("目标ID", 100) }, ["goalId"]), (args) => ({ path: `/api/goal-center/goals/${encodeURIComponent(cleanText(args.goalId, "goalId", { required: true, maxLength: 100 }))}/detail` })),
@@ -236,6 +245,15 @@ const TOOL_SPECS = [
     accountId: cleanText(args.accountId, "accountId", { maxLength: 120 }),
     column: cleanText(args.column, "column", { maxLength: 120 }),
   }) })),
+  tool("fill_next_week_requests", "补填空白下周需求", "按原需求ID和读取到的revision补填空白需求，保留账号、栏目、日期和时间；只关联品牌确认产品。已有内容或版本冲突整批拒绝；稳定幂等键支持安全重试。", objectSchema({
+    idempotencyKey:textProperty("稳定幂等键，相同补填重试复用",120),
+    items:{type:"array",minItems:1,maxItems:100,items:objectSchema({
+      id:textProperty("原需求ID，由栏目排期查询取得",120),revision:{type:"integer",minimum:1},
+      notes:textProperty("完整内容需求",4000),
+      workstationProductIds:{type:"array",items:textProperty("品牌选品确认中的产品ID",120),maxItems:100},
+      noteFormat:{type:"string",enum:["图文","视频"]}
+    },["id","revision","notes"])}
+  },["idempotencyKey","items"]), args=>({method:"POST",path:"/api/content-center/planning/requests/fill",body:fillPlanningRequestBody(args)}),contentWriteAnnotations),
   tool("save_next_week_requests", "保存下周需求", "将已完成策划的内容需求新增到内容中心下周需求。只允许关联品牌选品确认中的产品；幂等键防止重试重复写入。", objectSchema({
     idempotencyKey: textProperty("本次策划版本的稳定幂等键；相同内容重试必须复用", 120),
     items: {
@@ -462,7 +480,7 @@ async function handleRequest(message) {
       protocolVersion: String(message.params?.protocolVersion || "2025-06-18"),
       capabilities: { tools: { listChanged: false } },
       serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
-      instructions: "极简工作站正式受控助手。可读取内容中心选品确认与栏目排期，并在用户当前请求明确要求或授权时幂等新增下周需求；只能关联选品确认中的产品。发起关键行动必须先查重并展示完整预览，只有用户在当前对话明确确认后才可提交。不得编辑、删除或排期内容，不得执行任务、同步、审批、导入、修改通知状态或权限，也不得访问数据库或服务器文件。列表先分页再按ID读取详情。",
+      instructions: "极简工作站正式受控助手。可读取内容中心选品确认与栏目排期，并在用户当前请求明确要求或授权时幂等新增下周需求或按原ID和版本补填空白需求；只能关联选品确认中的产品。发起关键行动必须先查重并展示完整预览，只有用户在当前对话明确确认后才可提交。除受控补填空白需求外不得编辑、删除或排期内容，不得执行任务、同步、审批、导入、修改通知状态或权限，也不得访问数据库或服务器文件。列表先分页再按ID读取详情。",
     };
   }
   if (method === "ping") return {};

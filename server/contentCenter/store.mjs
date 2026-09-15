@@ -344,6 +344,31 @@ export function createStore(filename, { accountRegistryPath } = {}) {
       return {duplicate:false,items:result};
     }catch(e){db.exec('ROLLBACK');throw e;}
   }
+  function fillRequestBatch(items,idempotencyKey){
+    validateRequestItems(items);
+    const key=typeof idempotencyKey==='string'?idempotencyKey.trim():'';
+    if(!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,119}$/.test(key))throw new AppError('幂等键必须是 8–120 位字母、数字或 ._:-');
+    if(new Set(items.map(item=>item.id)).size!==items.length)throw new AppError('同一批次不能重复补填同一需求');
+    const requestHash=createHash('sha256').update(JSON.stringify({operation:'fill-blank-request',items})).digest('hex');
+    db.exec('BEGIN IMMEDIATE');
+    try{
+      const existing=db.prepare('SELECT request_hash,result FROM request_batches WHERE idempotency_key=?').get(key);
+      if(existing){
+        if(existing.request_hash!==requestHash)throw new AppError('该幂等键已用于不同内容，请更换键后重试',409);
+        db.exec('COMMIT');return {duplicate:true,items:JSON.parse(existing.result)};
+      }
+      const result=items.map(item=>{
+        const old=getRequest(item.id);
+        if(!Number.isInteger(item.revision)||item.revision!==old.revision)throw new AppError(`需求 ${item.id} 版本已变化，请重新读取`,409);
+        const textFields=['notes','title','copyText','hashtags','topic','initialTitle','materialSource','materialNeeds','imageScript','productCodes','workstationTemplateId','templateId','executionNumber','executionNotes','publishUrl','date','time'];
+        const arrays=['workstationProductIds','productIds','images'];
+        if(old.pool!=='candidate'||old.status!=='草稿'||old.generationStatus!=='待生成'||contentStageOf(old)!=='request'||textFields.some(k=>String(old[k]||'').trim())||arrays.some(k=>old[k]?.length))throw new AppError(`需求 ${item.id} 已有内容或已进入执行流程，不能补填`,409);
+        return save({revision:item.revision,notes:item.notes,workstationProductIds:item.workstationProductIds,noteFormat:item.noteFormat||old.noteFormat},old.id);
+      });
+      db.prepare('INSERT INTO request_batches VALUES (?,?,?,?)').run(key,requestHash,JSON.stringify(result),new Date().toISOString());
+      db.exec('COMMIT');return {duplicate:false,items:result};
+    }catch(e){db.exec('ROLLBACK');throw e;}
+  }
   function updateRequest(id,input){
     const old=getRequest(id);if(old.pool!=='candidate')throw new AppError('需求已加入排期，请从正式笔记编辑',409);
     const allowed=['revision','title','copyText','hashtags','generationStatus','generationError','account','column','productIds','productCodes','noteFormat','preferredDate','preferredTime','notes'];
@@ -423,5 +448,5 @@ export function createStore(filename, { accountRegistryPath } = {}) {
     })();}finally{refreshCatalog();}
   };
   const productSelection=createProductSelection(db,()=>structuredClone(runtimeCatalog));
-  return {productSelection,weeklyRhythm,syncAccounts,getCatalog:()=>structuredClone(runtimeCatalog),addConfiguration,editConfiguration,getProduct,saveProduct,importProducts,getRequest,listRequests,createRequests,createRequestBatch,updateRequest,scheduleRequest,listProducts,listTemplates,addReference,get,list,save,batch,addImage,listImages,getImage,backupImages,rawNotes,close:()=>db.close()};
+  return {productSelection,weeklyRhythm,syncAccounts,getCatalog:()=>structuredClone(runtimeCatalog),addConfiguration,editConfiguration,getProduct,saveProduct,importProducts,getRequest,listRequests,createRequests,createRequestBatch,fillRequestBatch,updateRequest,scheduleRequest,listProducts,listTemplates,addReference,get,list,save,batch,addImage,listImages,getImage,backupImages,rawNotes,close:()=>db.close()};
 }

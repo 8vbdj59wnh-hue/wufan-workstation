@@ -79,7 +79,7 @@ export function listContentPlanningSchedule(store, query = {}) {
   return { items: rows.slice(offset, offset + pageSize), total: rows.length, page, pageSize, startDate, endDate };
 }
 
-export function saveContentPlanningRequests(store, integration, user, input = {}) {
+function normalizeContentPlanningRequests(store, integration, user, input = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !['idempotencyKey', 'items'].includes(key))) {
     throw new AppError('下周需求批次格式不正确');
   }
@@ -110,7 +110,23 @@ export function saveContentPlanningRequests(store, integration, user, input = {}
       notes,
     };
   });
-  return store.createRequestBatch(normalized, input.idempotencyKey);
+  return normalized;
+}
+
+export function saveContentPlanningRequests(store, integration, user, input = {}) {
+  return store.createRequestBatch(normalizeContentPlanningRequests(store,integration,user,input),input.idempotencyKey);
+}
+
+export function fillContentPlanningRequests(store,integration,user,input={}){
+  if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>!['idempotencyKey','items'].includes(k))||!Array.isArray(input.items)||!input.items.length||input.items.length>100)throw new AppError('补填批次格式不正确');
+  const rows=input.items.map((item,index)=>{
+    if(!item||typeof item!=='object'||Array.isArray(item)||Object.keys(item).some(k=>!['id','revision','notes','workstationProductIds','noteFormat'].includes(k))||typeof item.id!=='string'||!item.id||!Number.isInteger(item.revision)||item.revision<1)throw new AppError(`第 ${index+1} 条必须提供原需求ID和版本，且不可修改排期字段`);
+    const old=store.getRequest(item.id);
+    if(integration?.progress?.(user,old)?.linked)throw new AppError(`需求 ${item.id} 已关联行动，不能补填`,409);
+    return {accountId:old.account,column:old.column,notes:item.notes,workstationProductIds:item.workstationProductIds,noteFormat:item.noteFormat||old.noteFormat};
+  });
+  const normalized=normalizeContentPlanningRequests(store,integration,user,{items:rows,idempotencyKey:input.idempotencyKey});
+  return store.fillRequestBatch(normalized.map((item,i)=>({id:input.items[i].id,revision:input.items[i].revision,notes:item.notes,workstationProductIds:item.workstationProductIds,noteFormat:item.noteFormat})),input.idempotencyKey);
 }
 
 // Content is a company-wide shared resource. Dedicated permissions explicitly
@@ -176,6 +192,7 @@ export function createContentCenterRouter({ requirePermission, hasPermission, ge
     res.json(getContentPlanningProductSelection(store, integration, req.query.brand));
   }catch(error){next(error);}});
   route('get', '/planning/schedule', req => listContentPlanningSchedule(store, req.query));
+  route('post', '/planning/requests/fill', req => fillContentPlanningRequests(store, integration, req.user, req.body));
   route('post', '/planning/requests', req => saveContentPlanningRequests(store, integration, req.user, req.body), 201);
   route('get', '/notes', () => { store.weeklyRhythm?.generate(); return store.list(); });
   route('get', '/weekly-rhythm/:id', req => store.weeklyRhythm.get(req.params.id));
