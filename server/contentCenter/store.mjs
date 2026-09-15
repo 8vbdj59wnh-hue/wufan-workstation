@@ -1,3 +1,4 @@
+import {createProductSelection} from './productSelection.mjs';
 import {createWeeklyRhythm} from './weeklyRhythm.mjs';
 import DatabaseSync from 'better-sqlite3';
 import { readFileSync, mkdirSync } from 'node:fs';
@@ -345,6 +346,24 @@ export function createStore(filename, { accountRegistryPath } = {}) {
   const backupImages=()=>listImages().map(i=>({...i,data:'data:'+i.mime+';base64,'+Buffer.from(getImage(i.id).bytes).toString('base64')}));
   const rawNotes=()=>db.prepare('SELECT body FROM notes UNION ALL SELECT body FROM candidates').all().map(r=>JSON.parse(r.body));
   const weeklyRhythm=createWeeklyRhythm(db,{getCatalog:()=>structuredClone(runtimeCatalog),list,save});
+  weeklyRhythm.seedDianyi=()=>{
+    const accounts=runtimeCatalog.accounts.filter(a=>a.name==='点意dianyi'&&runtimeCatalog.units.find(u=>u.id===a.unitId)?.name==='点意');
+    if(accounts.length!==1)return;
+    const a=accounts[0],migrationKey='dianyi-weekly-columns-v1:'+a.id;
+    if(db.prepare('SELECT 1 FROM metadata WHERE key=?').get(migrationKey))return;
+    try{db.transaction(()=>{
+      const names=['点意选瓶建议','点意单品解析','点意空间搭配','点意插花参考','点意材质与细节','点意礼赠与需求场景'];
+      for(const name of names)db.prepare('INSERT OR IGNORE INTO columns VALUES (?,?,?)').run(a.id,name,JSON.stringify({name}));
+      refreshCatalog();
+      const old=weeklyRhythm.get(a.id);
+      if(!old.revision){
+        const days=[[0,1],[2,3],[0,1],[4,2],[0,5],[3,2],[1,0]];
+        const slots=days.flatMap((row,i)=>row.map((column,j)=>({weekday:i+1,time:j?'20:30':'12:30',column:names[column]})));
+        weeklyRhythm.put(a.id,{revision:0,enabled:true,slots});
+      }
+      db.prepare('INSERT INTO metadata VALUES (?,?)').run(migrationKey,'1');
+    })();}finally{refreshCatalog();}
+  };
   weeklyRhythm.seedNanyu=()=>{
     const accounts=runtimeCatalog.accounts.filter(a=>a.name==='南屿nanyu'&&runtimeCatalog.units.find(u=>u.id===a.unitId)?.name==='南屿');
     if(accounts.length!==1)return;
@@ -371,5 +390,6 @@ export function createStore(filename, { accountRegistryPath } = {}) {
       db.prepare('INSERT INTO metadata VALUES (?,?)').run(migrationKey,'1');
     })();}finally{refreshCatalog();}
   };
-  return {weeklyRhythm,syncAccounts,getCatalog:()=>structuredClone(runtimeCatalog),addConfiguration,editConfiguration,getProduct,saveProduct,importProducts,getRequest,listRequests,createRequests,updateRequest,scheduleRequest,listProducts,listTemplates,addReference,get,list,save,batch,addImage,listImages,getImage,backupImages,rawNotes,close:()=>db.close()};
+  const productSelection=createProductSelection(db,()=>structuredClone(runtimeCatalog));
+  return {productSelection,weeklyRhythm,syncAccounts,getCatalog:()=>structuredClone(runtimeCatalog),addConfiguration,editConfiguration,getProduct,saveProduct,importProducts,getRequest,listRequests,createRequests,updateRequest,scheduleRequest,listProducts,listTemplates,addReference,get,list,save,batch,addImage,listImages,getImage,backupImages,rawNotes,close:()=>db.close()};
 }

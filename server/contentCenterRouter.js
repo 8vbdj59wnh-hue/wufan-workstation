@@ -47,6 +47,7 @@ export function createContentCenterRouter({ requirePermission, hasPermission, ge
         store.weeklyRhythm?.seedBanran();
         store.weeklyRhythm?.seedHomeFragments();
         store.weeklyRhythm?.seedNanyu();
+        store.weeklyRhythm?.seedDianyi();
       }
       next();
     } catch (error) { next(error); }
@@ -57,6 +58,20 @@ export function createContentCenterRouter({ requirePermission, hasPermission, ge
   route('get', '/meta', req => ({ ...store.getCatalog(), statuses, priorities, copyStatuses, permissions: {
     manage: hasPermission(req.user, 'contentCenter.manage'), export: hasPermission(req.user, 'contentCenter.export'), products: hasPermission(req.user, 'products.view'),
   } }));
+  router.get('/product-selection/:id', requirePermission('products.view'), (req,res,next)=>{try{
+    const selection=store.productSelection.get(req.params.id);
+    const ids=[...new Set(Object.values(selection.groups).flat().map(p=>p.productId))];
+    res.json({...selection,products:integration?.selectionProducts(ids)||[]});
+  }catch(error){next(error);}});
+  router.put('/product-selection/:id', requirePermission('products.view'), (req,res,next)=>{try{
+    const groups=req.body?.groups;
+    if(!groups||!['primary','secondary','new'].every(k=>Array.isArray(groups[k])&&groups[k].length<=100))throw new AppError('选品格式不正确');
+    const ids=[...new Set(['primary','secondary','new'].flatMap(k=>groups[k]).map(p=>p?.productId))];
+    if(ids.some(id=>typeof id!=='string'||!id.trim()||id.length>200))throw new AppError('产品无效');
+    const found=new Set((integration?.selectionProducts(ids)||[]).map(p=>p.erpSkuId||p.id));
+    if(ids.some(id=>!found.has(id)))throw new AppError('部分产品已失效，请移除后重新选择');
+    res.json(store.productSelection.put(req.params.id,req.body));
+  }catch(error){next(error);}});
   route('get', '/notes', () => { store.weeklyRhythm?.generate(); return store.list(); });
   route('get', '/weekly-rhythm/:id', req => store.weeklyRhythm.get(req.params.id));
   route('put', '/weekly-rhythm/:id', req => { const config=store.weeklyRhythm.put(req.params.id,req.body); return {...config,generated:store.weeklyRhythm.generate()}; });

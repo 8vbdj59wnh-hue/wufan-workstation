@@ -128,5 +128,5 @@ export function createContentCenterIntegration(deps) {
       return { success:true, progress:progress(user,note) };
     } catch (error) { if (!committed) for (const file of createdFiles) unlinkSync(file); throw error; }
   }
-  return { refs, validateReferences, progress, prefill, launch, calendar, productOptions: query => listActionProductOptions(query) };
+  return { selectionProducts: ids => resolveActionProductOptions(ids.map(erpSkuId=>({erpSkuId}))), refs, validateReferences, progress, prefill, launch, calendar, productOptions: query => listActionProductOptions(query) };
 }

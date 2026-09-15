@@ -1,7 +1,7 @@
 import { getCurrentUser } from "../appState.js";
 import { hasPermission } from "../../shared/permissions.js";
 import { renderScheduleBoardPage, bindScheduleBoardPageEvents } from "../scheduleBoardPage.js";
-const tabs = [["requests", "下周需求"], ["schedule", "内容排期"], ["configuration", "账号与栏目"]];
+const tabs = [["selection", "选品确认"], ["requests", "下周需求"], ["schedule", "内容排期"], ["configuration", "账号与栏目"]];
 export function renderContentCenterPage() {
   let destination = window.location.hash.split("/")[1] || "";
   try { destination = decodeURIComponent(destination); } catch { destination = ""; }

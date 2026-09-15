@@ -51,10 +51,11 @@ function card(n,full=false){return `<button class="note-card ${full?'list-card':
 function render(){
 if(page==='candidates')page='requests';
 if(page==='calendar'&&window.parent!==window){window.parent.location.hash='contentCenter/schedule';return;}
-$('#new-note').hidden=['configuration','requests'].includes(page);
+$('#new-note').hidden=['selection','configuration','requests'].includes(page);
 $('#new-note').textContent=page==='requests'?'＋ 提交下周需求':page==='candidates'?'＋ 新增完整内容':'＋ 新增笔记';
 $('#workspace').setAttribute('aria-label',page==='requests'?'下周需求':page==='candidates'?'策划候选':'内容排期');
 for(const b of document.querySelectorAll('[data-page]')) b.setAttribute('aria-pressed',b.dataset.page===page);
+if(page==='selection'){renderProductSelection();return;}
 if(page==='configuration'){renderCompany();return;}
 if(['requests','candidates'].includes(page)){renderCandidates();return;}
 if(view==='slots'){renderTimeGrid();showCalendarNotice();return;}

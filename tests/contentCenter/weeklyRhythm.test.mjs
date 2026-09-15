@@ -108,3 +108,20 @@ test('南屿移除四宫格新增7栏目，每周20条且历史内容不丢失�
  const changed=s.weeklyRhythm.put(id,{...rule,enabled:false});s.weeklyRhythm.seedNanyu();assert.deepEqual(s.weeklyRhythm.get(id),changed);assert.equal(s.get(old.id).notes,'保留原需求');
  }finally{s.close();}
 });
+
+test('点意新增6栏目并保留新品，每周14条、两周28条且不重置用户修改',()=>{
+ const s=createStore(':memory:');try{
+ const unit=s.getCatalog().units.find(u=>u.name==='点意')?.id||s.addConfiguration('units',{name:'点意',kind:'品牌'}).id;
+ const id=s.getCatalog().accounts.find(a=>a.name==='点意dianyi')?.id||s.addConfiguration('accounts',{name:'点意dianyi',unitId:unit,columns:['点意新品']}).id;
+ const old=s.save({account:id,column:'点意新品',pool:'candidate',contentStage:'request',notes:'保留原需求'});
+ s.weeklyRhythm.seedDianyi();
+ assert.ok(s.getCatalog().accounts.find(a=>a.id===id).columns.some(c=>c.name==='点意新品'));
+ const rule=s.weeklyRhythm.get(id);assert.equal(rule.slots.length,14);
+ const expected=[['点意选瓶建议','点意单品解析'],['点意空间搭配','点意插花参考'],['点意选瓶建议','点意单品解析'],['点意材质与细节','点意空间搭配'],['点意选瓶建议','点意礼赠与需求场景'],['点意插花参考','点意空间搭配'],['点意单品解析','点意选瓶建议']];
+ for(let weekday=1;weekday<=7;weekday++){
+ const slots=rule.slots.filter(x=>x.weekday===weekday);assert.deepEqual(slots.map(x=>x.column),expected[weekday-1]);assert.deepEqual(slots.map(x=>x.time),['12:30','20:30']);
+ }
+ const now=new Date('2026-09-15T03:00:00Z');assert.equal(s.weeklyRhythm.generate(now).created,28);assert.equal(s.weeklyRhythm.generate(now).created,0);
+ const changed=s.weeklyRhythm.put(id,{...rule,enabled:false});s.weeklyRhythm.seedDianyi();assert.deepEqual(s.weeklyRhythm.get(id),changed);assert.equal(s.get(old.id).notes,'保留原需求');
+ }finally{s.close();}
+});
