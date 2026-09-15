@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const [baseUrlValue, configDirectory, usernameValue, deviceNameValue, accessProfileValue = "key_action_launcher"] = process.argv.slice(2);
+const [baseUrlValue, configDirectory, usernameValue, deviceNameValue, accessProfileValue = "content_planner"] = process.argv.slice(2);
 
 function required(value, label, maximum = 2048) {
   const text = String(value ?? "").trim();
@@ -31,7 +31,7 @@ try {
   const username = required(usernameValue, "登录账号", 120);
   const assistantDeviceName = required(deviceNameValue, "设备名称", 120);
   const assistantAccessProfile = required(accessProfileValue, "助手访问类型", 40);
-  if (assistantAccessProfile !== "key_action_launcher") throw new Error("此安装包只允许受控发起关键行动访问类型。");
+  if (assistantAccessProfile !== "content_planner") throw new Error("此安装包只允许内容策划与受控发起关键行动访问类型。");
   password = await readPassword();
   if (!password) throw new Error("密码不能为空。");
   const response = await fetch(baseUrl, {

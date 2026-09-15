@@ -45,10 +45,12 @@ async function request(baseUrl, pathname, { token = "", method = "GET", body } =
   return { status: response.status, body: await response.json() };
 }
 
-test("助手设备可长期续期、逐台撤销，且仅受控发起关键行动", async () => {
+test("助手设备可长期续期、逐台撤销，且仅能受控发起行动与新增下周需求", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "assistant-device-session-"));
   const databasePath = path.join(directory, "workstation.db");
+  const contentDatabasePath = path.join(directory, "content-center.sqlite");
   process.env.WUFAN_DB_PATH = databasePath;
+  process.env.WUFAN_CONTENT_DB_PATH = contentDatabasePath;
   process.env.WUFAN_AUTH_SECRET_PATH = path.join(directory, "auth.secret");
   process.env.WUFAN_ENV = "test";
   process.env.WUFAN_ALLOW_DB_RESET = "1";
@@ -62,11 +64,12 @@ test("助手设备可长期续期、逐台撤销，且仅受控发起关键行�
     const people = database.prepare("SELECT id,departmentId FROM persons WHERE lower(COALESCE(username,''))<>'admin' ORDER BY id LIMIT 2").all();
     assert.equal(people.length, 2);
     const readPermissions = createEmptyPermissions("all");
-    for (const permission of ["goals", "keyActions", "tasks", "products", "skus", "links", "dataCenter", "cockpit", "actionStandards"]) {
+    for (const permission of ["goals", "keyActions", "tasks", "products", "skus", "links", "dataCenter", "cockpit", "actionStandards", "contentCenter"]) {
       readPermissions[permission].view = true;
     }
     readPermissions.keyActions.launch = true;
     readPermissions.keyActions.launchTemplateScope = "all";
+    readPermissions.contentCenter.manage = true;
     const writePermissions = structuredClone(readPermissions);
     writePermissions.tasks.execute = true;
     const update = database.prepare(`UPDATE persons SET username=?,passwordHash=?,canLogin=1,authRole='user',role='member',
@@ -85,6 +88,11 @@ test("助手设备可长期续期、逐台撤销，且仅受控发起关键行�
     database.prepare(`INSERT INTO standard_work_forms(id,standardWorkId,formSchema,createdAt,updatedAt)
       VALUES('assistant-form','assistant-standard',?,?,?)`).run(JSON.stringify({ fields: [{ id: "acceptance", key: "acceptanceStandard", label: "验收标准", type: "textarea", required: true, sortOrder: 1 }] }), now, now);
     closeDatabase();
+    const { createStore } = await import("../server/contentCenter/store.mjs");
+    const contentStore = createStore(contentDatabasePath);
+    const contentBrand = contentStore.getCatalog().units.find((unit) => unit.kind === "品牌");
+    const contentAccount = contentStore.getCatalog().accounts.find((account) => account.unitId === contentBrand.id && account.status !== "inactive");
+    contentStore.close();
 
     const port = await availablePort();
     const baseUrl = `http://127.0.0.1:${port}`;
@@ -125,6 +133,44 @@ test("助手设备可长期续期、逐台撤销，且仅受控发起关键行�
     const launcherPayload = JSON.parse(Buffer.from(launcherLogin.body.token.split(".")[1], "base64url").toString("utf8"));
     assert.equal(launcherPayload.mode, "assistant_scoped");
     assert.equal(launcherPayload.assistantAccessProfile, "key_action_launcher");
+
+    const plannerLogin = await request(baseUrl, "/api/auth/login", {
+      method: "POST",
+      body: { username: "assistant-read-test", password: "read-password", assistantDeviceName: "Windows-planner", assistantAccessProfile: "content_planner" },
+    });
+    assert.equal(plannerLogin.status, 200);
+    assert.equal(plannerLogin.body.deviceSession.accessProfile, "content_planner");
+    const plannerPayload = JSON.parse(Buffer.from(plannerLogin.body.token.split(".")[1], "base64url").toString("utf8"));
+    assert.equal(plannerPayload.mode, "assistant_scoped");
+    assert.equal(plannerPayload.assistantAccessProfile, "content_planner");
+    const selection = await request(baseUrl, `/api/content-center/planning/product-selection?brand=${encodeURIComponent(contentBrand.name)}`, { token: plannerLogin.body.token });
+    assert.equal(selection.status, 200, JSON.stringify(selection.body));
+    assert.equal(selection.body.brand.id, contentBrand.id);
+    const planningInput = {
+      idempotencyKey: "assistant-device-2026-w39-v1",
+      items: [{ accountId: contentAccount.id, column: contentAccount.columns[0].name, workstationProductIds: [], noteFormat: "图文", preferredDate: "2026-09-22", notes: "助手受控保存的下周内容需求。" }],
+    };
+    assert.equal((await request(baseUrl, "/api/content-center/planning/requests", { method: "POST", token: loginA.body.token, body: planningInput })).status, 403);
+    assert.equal((await request(baseUrl, "/api/content-center/planning/requests", { method: "POST", token: launcherLogin.body.token, body: planningInput })).status, 403);
+    const savedPlanning = await request(baseUrl, "/api/content-center/planning/requests", { method: "POST", token: plannerLogin.body.token, body: planningInput });
+    assert.equal(savedPlanning.status, 201, JSON.stringify(savedPlanning.body));
+    assert.equal(savedPlanning.body.duplicate, false);
+    const repeatedPlanning = await request(baseUrl, "/api/content-center/planning/requests", { method: "POST", token: plannerLogin.body.token, body: planningInput });
+    assert.equal(repeatedPlanning.status, 201);
+    assert.equal(repeatedPlanning.body.duplicate, true);
+    const plannedSchedule = await request(baseUrl, "/api/content-center/planning/schedule?startDate=2026-09-21&endDate=2026-09-27", { token: plannerLogin.body.token });
+    assert.equal(plannedSchedule.status, 200);
+    assert.equal(plannedSchedule.body.total, 1);
+    for (const pathname of ["/api/content-center/notes", "/api/content-center/configuration/units", "/api/content-center/images", "/api/content-center/batch", "/api/content-center/requests/missing/schedule"]) {
+      const blocked = await request(baseUrl, pathname, { method: "POST", token: plannerLogin.body.token, body: {} });
+      assert.equal(blocked.status, 403, pathname);
+      assert.equal(blocked.body.code, "assistant_write_boundary", pathname);
+    }
+    for (const [method, pathname] of [["PATCH", "/api/content-center/notes/missing"], ["DELETE", "/api/content-center/notes/missing"]]) {
+      const blocked = await request(baseUrl, pathname, { method, token: plannerLogin.body.token, body: {} });
+      assert.equal(blocked.status, 403, `${method} ${pathname}`);
+      assert.equal(blocked.body.code, "assistant_write_boundary", `${method} ${pathname}`);
+    }
 
     const launchInput = {
       goalId: "assistant-goal",
@@ -180,7 +226,7 @@ test("助手设备可长期续期、逐台撤销，且仅受控发起关键行�
     assert.equal(businessWrite.status, 403);
     const sessions = await request(baseUrl, "/api/auth/device-sessions", { token: loginB.body.token });
     assert.equal(sessions.status, 200);
-    assert.equal(sessions.body.sessions.length, 3);
+    assert.equal(sessions.body.sessions.length, 4);
     assert.equal(Object.hasOwn(sessions.body.sessions[0], "tokenHash"), false);
     const credentialAudit = new Database(databasePath, { readonly: true });
     try {

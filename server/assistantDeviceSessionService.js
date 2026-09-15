@@ -7,6 +7,7 @@ const refreshTokenPrefix = "wfr1";
 export const AssistantAccessProfile = Object.freeze({
   ReadOnly: "read_only",
   KeyActionLauncher: "key_action_launcher",
+  ContentPlanner: "content_planner",
 });
 const allowedProfiles = new Set(Object.values(AssistantAccessProfile));
 
@@ -51,7 +52,9 @@ function requireScopedAssistantUser(row, requestedProfile = AssistantAccessProfi
   for (const group of permissionGroups) {
     for (const permission of group.permissions) {
       if (permissions[group.key]?.[permission.key] !== true) continue;
-      const permittedAccountWrite = group.key === "keyActions" && permission.key === "launch";
+      const permittedAccountWrite =
+        (group.key === "keyActions" && permission.key === "launch") ||
+        (group.key === "contentCenter" && permission.key === "manage");
       if (permission.key !== "view" && !permittedAccountWrite) {
         throw sessionError("该账号包含当前助手访问类型不允许的写入或管理权限。", 403, "assistant_session_profile_rejected");
       }
@@ -63,6 +66,9 @@ function requireScopedAssistantUser(row, requestedProfile = AssistantAccessProfi
   }
   if (accessProfile === AssistantAccessProfile.KeyActionLauncher && permissions.keyActions.launch !== true) {
     throw sessionError("该账号尚未获得“发起关键行动”权限。", 403, "assistant_session_launch_permission_required");
+  }
+  if (accessProfile === AssistantAccessProfile.ContentPlanner && permissions.contentCenter.manage !== true) {
+    throw sessionError("该账号尚未获得“管理公司内容、排期和账号栏目”权限。", 403, "assistant_session_content_permission_required");
   }
   return { user, permissions, accessProfile };
 }
@@ -146,11 +152,16 @@ export function restrictUserToReadOnlyAssistant(user) {
 
 export function restrictUserToAssistantProfile(user, accessProfile = AssistantAccessProfile.ReadOnly) {
   const restricted = restrictUserToReadOnlyAssistant(user);
-  if (accessProfile !== AssistantAccessProfile.KeyActionLauncher) return { ...restricted, assistantAccessProfile: AssistantAccessProfile.ReadOnly };
+  if (![AssistantAccessProfile.KeyActionLauncher, AssistantAccessProfile.ContentPlanner].includes(accessProfile)) {
+    return { ...restricted, assistantAccessProfile: AssistantAccessProfile.ReadOnly };
+  }
   const source = normalizePermissions(user.permissions, user.role);
   restricted.permissions.keyActions.launch = source.keyActions.launch === true;
   restricted.permissions.keyActions.launchTemplateScope = source.keyActions.launchTemplateScope;
   restricted.permissions.keyActions.launchTemplateIds = [...source.keyActions.launchTemplateIds];
+  if (accessProfile === AssistantAccessProfile.ContentPlanner) {
+    restricted.permissions.contentCenter.manage = source.contentCenter.manage === true;
+  }
   return { ...restricted, assistantReadOnly: false, assistantScoped: true, assistantAccessProfile: accessProfile };
 }
 

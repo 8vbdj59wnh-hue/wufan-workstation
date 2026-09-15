@@ -3,7 +3,7 @@ import {createWeeklyRhythm} from './weeklyRhythm.mjs';
 import DatabaseSync from 'better-sqlite3';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 export const catalog = JSON.parse(readFileSync(new URL('./catalog.json', import.meta.url), 'utf8'));
 export const contentStageOf = n => n.contentStage || (n.title && n.copyText && n.noteFormat && (n.requestKind !== 'bulk' || n.generationStatus === '已生成') ? 'candidate' : 'request');
 export const statuses = ['草稿','已排期','已确认','已发布'];
@@ -38,6 +38,12 @@ export function createStore(filename, { accountRegistryPath } = {}) {
   }
   db.exec(`CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, name TEXT NOT NULL, mime TEXT NOT NULL, bytes BLOB NOT NULL, created_at TEXT NOT NULL); UPDATE metadata SET value='2' WHERE key='schema_version';`);
   db.exec(`CREATE TABLE IF NOT EXISTS candidates (id TEXT PRIMARY KEY, account_id TEXT NOT NULL, column_name TEXT NOT NULL, status TEXT NOT NULL, planned_date TEXT NOT NULL DEFAULT '', revision INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, body TEXT NOT NULL CHECK(json_valid(body))); UPDATE metadata SET value='3' WHERE key='schema_version';`);
+  db.exec(`CREATE TABLE IF NOT EXISTS request_batches (
+    idempotency_key TEXT PRIMARY KEY,
+    request_hash TEXT NOT NULL,
+    result TEXT NOT NULL CHECK(json_valid(result)),
+    created_at TEXT NOT NULL
+  );`);
   db.exec(`    CREATE TABLE IF NOT EXISTS products (id TEXT PRIMARY KEY, name TEXT NOT NULL, sku TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT '启用');
     CREATE TABLE IF NOT EXISTS templates (id TEXT PRIMARY KEY, name TEXT NOT NULL, account TEXT NOT NULL DEFAULT '', column_name TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '');
     UPDATE metadata SET value='3' WHERE key='schema_version';`);
@@ -302,15 +308,41 @@ export function createStore(filename, { accountRegistryPath } = {}) {
     if(state&&!['待生成','已生成','需调整'].includes(state))throw new AppError('生成状态不正确');
     return list().filter(n=>n.requestKind==='bulk'&&n.pool==='candidate'&&(!state||n.generationStatus===state));
   }
-  function createRequests(items){
+  function validateRequestItems(items){
     if(!Array.isArray(items)||!items.length||items.length>100)throw new AppError('请一次填写 1–100 条需求');
-    db.exec('BEGIN IMMEDIATE');
-    try{const result=items.map((input,i)=>{
+  }
+  function createRequestRows(items){
+    validateRequestItems(items);
+    return items.map((input,i)=>{
       if(!input||typeof input!=='object'||Array.isArray(input))throw new AppError(`第 ${i+1} 行格式不正确`);
-      const allowed=['account','column','productIds','productCodes','noteFormat','preferredDate','preferredTime','notes'];
+      const allowed=['account','column','productIds','productCodes','workstationProductIds','noteFormat','preferredDate','preferredTime','notes'];
       try{return save({...Object.fromEntries(allowed.filter(k=>Object.hasOwn(input,k)).map(k=>[k,input[k]])),pool:'candidate',requestKind:'bulk',generationStatus:'待生成'});}
       catch(e){if(e.status)e.message=`第 ${i+1} 行：${e.message}`;throw e;}
-    });db.exec('COMMIT');return result;}catch(e){db.exec('ROLLBACK');throw e;}
+    });
+  }
+  function createRequests(items){
+    validateRequestItems(items);
+    db.exec('BEGIN IMMEDIATE');
+    try{const result=createRequestRows(items);db.exec('COMMIT');return result;}catch(e){db.exec('ROLLBACK');throw e;}
+  }
+  function createRequestBatch(items,idempotencyKey){
+    validateRequestItems(items);
+    const key=typeof idempotencyKey==='string'?idempotencyKey.trim():'';
+    if(!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,119}$/.test(key))throw new AppError('幂等键必须是 8–120 位字母、数字或 ._:-');
+    const requestHash=createHash('sha256').update(JSON.stringify(items)).digest('hex');
+    db.exec('BEGIN IMMEDIATE');
+    try{
+      const existing=db.prepare('SELECT request_hash,result FROM request_batches WHERE idempotency_key=?').get(key);
+      if(existing){
+        if(existing.request_hash!==requestHash)throw new AppError('该幂等键已用于不同内容，请更换键后重试',409);
+        db.exec('COMMIT');
+        return {duplicate:true,items:JSON.parse(existing.result)};
+      }
+      const result=createRequestRows(items);
+      db.prepare('INSERT INTO request_batches VALUES (?,?,?,?)').run(key,requestHash,JSON.stringify(result),new Date().toISOString());
+      db.exec('COMMIT');
+      return {duplicate:false,items:result};
+    }catch(e){db.exec('ROLLBACK');throw e;}
   }
   function updateRequest(id,input){
     const old=getRequest(id);if(old.pool!=='candidate')throw new AppError('需求已加入排期，请从正式笔记编辑',409);
@@ -391,5 +423,5 @@ export function createStore(filename, { accountRegistryPath } = {}) {
     })();}finally{refreshCatalog();}
   };
   const productSelection=createProductSelection(db,()=>structuredClone(runtimeCatalog));
-  return {productSelection,weeklyRhythm,syncAccounts,getCatalog:()=>structuredClone(runtimeCatalog),addConfiguration,editConfiguration,getProduct,saveProduct,importProducts,getRequest,listRequests,createRequests,updateRequest,scheduleRequest,listProducts,listTemplates,addReference,get,list,save,batch,addImage,listImages,getImage,backupImages,rawNotes,close:()=>db.close()};
+  return {productSelection,weeklyRhythm,syncAccounts,getCatalog:()=>structuredClone(runtimeCatalog),addConfiguration,editConfiguration,getProduct,saveProduct,importProducts,getRequest,listRequests,createRequests,createRequestBatch,updateRequest,scheduleRequest,listProducts,listTemplates,addReference,get,list,save,batch,addImage,listImages,getImage,backupImages,rawNotes,close:()=>db.close()};
 }

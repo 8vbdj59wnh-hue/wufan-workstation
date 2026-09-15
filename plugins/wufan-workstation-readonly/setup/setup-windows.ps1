@@ -37,11 +37,11 @@ try {
   $password = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordPointer)
   if ([string]::IsNullOrWhiteSpace($password)) { throw "密码不能为空。" }
 
-  $loginBody = @{ username = $Username; password = $password; assistantDeviceName = $DeviceName; assistantAccessProfile = "key_action_launcher" } | ConvertTo-Json
+  $loginBody = @{ username = $Username; password = $password; assistantDeviceName = $DeviceName; assistantAccessProfile = "content_planner" } | ConvertTo-Json
   try {
     $login = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/auth/login" -ContentType "application/json" -Body $loginBody
   } catch {
-    throw "助手设备授权失败，请检查账号密码、发起关键行动权限和网络。"
+    throw "助手设备授权失败，请检查账号密码、内容中心权限、发起关键行动权限和网络。"
   }
   $token = [string]$login.token
   $refreshToken = [string]$login.refreshToken
@@ -71,7 +71,7 @@ try {
   if (-not $SkipConnectionTest) {
     Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/health" | Out-Null
     Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/notifications/summary?limit=1" -Headers @{ Authorization = "Bearer $token" } | Out-Null
-    Write-Host "工作站网络、受控行动访问和自动续期凭证验证成功。" -ForegroundColor Green
+    Write-Host "工作站网络、内容策划访问、受控行动访问和自动续期凭证验证成功。" -ForegroundColor Green
   }
 } finally {
   if ($passwordPointer -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($passwordPointer) }

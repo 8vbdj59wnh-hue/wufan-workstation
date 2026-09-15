@@ -13,6 +13,106 @@ export function matchContentProductCodes(database, input) {
   });
 }
 
+function cleanPlanningText(value, label, maximum = 200) {
+  const text = String(value ?? '').trim();
+  if (text.length > maximum) throw new AppError(`${label}过长`);
+  return text;
+}
+
+function cleanPlanningDate(value, label) {
+  const text = cleanPlanningText(value, label, 10);
+  const timestamp = Date.parse(`${text}T00:00:00Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text) || Number.isNaN(timestamp) || new Date(timestamp).toISOString().slice(0, 10) !== text) throw new AppError(`${label}必须使用 YYYY-MM-DD`);
+  return text;
+}
+
+function resolvePlanningBrand(store, identifier) {
+  const value = cleanPlanningText(identifier, '品牌', 120);
+  if (!value) throw new AppError('请提供品牌ID或精确名称');
+  const brands = store.getCatalog().units.filter(unit => unit.kind === '品牌' && (unit.id === value || unit.name === value));
+  if (brands.length !== 1) throw new AppError(brands.length ? '品牌名称不唯一，请使用品牌ID' : '未找到品牌', 404);
+  return brands[0];
+}
+
+export function getContentPlanningProductSelection(store, integration, brandIdentifier) {
+  const brand = resolvePlanningBrand(store, brandIdentifier);
+  const catalog = store.getCatalog();
+  const selection = store.productSelection.get(brand.id);
+  const ids = [...new Set(Object.values(selection.groups).flat().map(item => item.productId))];
+  return {
+    brand,
+    accounts: catalog.accounts
+      .filter(account => account.unitId === brand.id && account.status !== 'inactive')
+      .map(account => ({ id: account.id, name: account.name, fullName: account.fullName, columns: account.columns.map(column => column.name) })),
+    ...selection,
+    products: integration?.selectionProducts(ids) || [],
+  };
+}
+
+export function listContentPlanningSchedule(store, query = {}) {
+  const startDate = cleanPlanningDate(query.startDate, '开始日期');
+  const endDate = cleanPlanningDate(query.endDate, '结束日期');
+  const start = Date.parse(`${startDate}T00:00:00Z`);
+  const end = Date.parse(`${endDate}T00:00:00Z`);
+  if (end < start || end - start >= 62 * 24 * 60 * 60 * 1000) throw new AppError('排期查询范围必须是 1–62 个自然日');
+  const brandId = cleanPlanningText(query.brandId, '品牌ID', 120);
+  const accountId = cleanPlanningText(query.accountId, '账号ID', 120);
+  const column = cleanPlanningText(query.column, '栏目', 120);
+  const page = Math.max(1, Math.trunc(Number(query.page) || 1));
+  const pageSize = Math.min(100, Math.max(1, Math.trunc(Number(query.pageSize) || 50)));
+  const catalog = store.getCatalog();
+  if (brandId && !catalog.units.some(unit => unit.id === brandId && unit.kind === '品牌')) throw new AppError('品牌不存在', 404);
+  if (accountId && !catalog.accounts.some(account => account.id === accountId)) throw new AppError('账号不存在', 404);
+  const rows = store.list()
+    .map(item => ({
+      ...item,
+      planningBrandId: item.unitId || catalog.accounts.find(account => account.id === item.account)?.unitId || '',
+      planningDate: item.date || item.preferredDate || '',
+      planningTime: item.time || item.preferredTime || '',
+    }))
+    .filter(item => item.planningDate >= startDate && item.planningDate <= endDate)
+    .filter(item => !brandId || item.planningBrandId === brandId)
+    .filter(item => !accountId || item.account === accountId)
+    .filter(item => !column || item.column === column)
+    .sort((left, right) => left.planningDate.localeCompare(right.planningDate) || left.planningTime.localeCompare(right.planningTime) || left.column.localeCompare(right.column));
+  const offset = (page - 1) * pageSize;
+  return { items: rows.slice(offset, offset + pageSize), total: rows.length, page, pageSize, startDate, endDate };
+}
+
+export function saveContentPlanningRequests(store, integration, user, input = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !['idempotencyKey', 'items'].includes(key))) {
+    throw new AppError('下周需求批次格式不正确');
+  }
+  if (!Array.isArray(input.items) || !input.items.length || input.items.length > 100) throw new AppError('请一次提交 1–100 条下周需求');
+  const catalog = store.getCatalog();
+  const normalized = input.items.map((item, index) => {
+    const allowed = ['accountId', 'column', 'workstationProductIds', 'noteFormat', 'preferredDate', 'preferredTime', 'notes'];
+    if (!item || typeof item !== 'object' || Array.isArray(item) || Object.keys(item).some(key => !allowed.includes(key))) throw new AppError(`第 ${index + 1} 条需求字段不正确`);
+    const accountId = cleanPlanningText(item.accountId, `第 ${index + 1} 条账号`, 120);
+    const column = cleanPlanningText(item.column, `第 ${index + 1} 条栏目`, 120);
+    const notes = cleanPlanningText(item.notes, `第 ${index + 1} 条内容需求`, 4000);
+    const account = catalog.accounts.find(candidate => candidate.id === accountId && candidate.status !== 'inactive');
+    if (!account || !account.columns.some(candidate => candidate.name === column)) throw new AppError(`第 ${index + 1} 条必须选择有效账号和固定栏目`);
+    if (!notes) throw new AppError(`第 ${index + 1} 条必须填写内容需求`);
+    const productIds = Array.isArray(item.workstationProductIds) ? [...new Set(item.workstationProductIds)] : [];
+    if (productIds.length > 100 || productIds.some(id => typeof id !== 'string' || !id || id.length > 200)) throw new AppError(`第 ${index + 1} 条关联产品格式不正确`);
+    const selection = store.productSelection.get(account.unitId);
+    const confirmed = new Set(Object.values(selection.groups).flat().map(candidate => candidate.productId));
+    if (productIds.some(id => !confirmed.has(id))) throw new AppError(`第 ${index + 1} 条只能关联该品牌“选品确认”中的产品`);
+    integration?.validateReferences(user, { workstationProductIds: productIds });
+    return {
+      account: accountId,
+      column,
+      workstationProductIds: productIds,
+      noteFormat: cleanPlanningText(item.noteFormat, `第 ${index + 1} 条笔记形式`, 20),
+      preferredDate: item.preferredDate ? cleanPlanningDate(item.preferredDate, `第 ${index + 1} 条期望日期`) : '',
+      preferredTime: cleanPlanningText(item.preferredTime, `第 ${index + 1} 条期望时间`, 5),
+      notes,
+    };
+  });
+  return store.createRequestBatch(normalized, input.idempotencyKey);
+}
+
 // Content is a company-wide shared resource. Dedicated permissions explicitly
 // grant company-wide access; personal task/department ownership is not inferred.
 export function createContentCenterRouter({ requirePermission, hasPermission, getDatabase, dataDir, integration, recommendations, store: injectedStore }) {
@@ -72,6 +172,11 @@ export function createContentCenterRouter({ requirePermission, hasPermission, ge
     if(ids.some(id=>!found.has(id)))throw new AppError('部分产品已失效，请移除后重新选择');
     res.json(store.productSelection.put(req.params.id,req.body));
   }catch(error){next(error);}});
+  router.get('/planning/product-selection', requirePermission('products.view'), (req,res,next)=>{try{
+    res.json(getContentPlanningProductSelection(store, integration, req.query.brand));
+  }catch(error){next(error);}});
+  route('get', '/planning/schedule', req => listContentPlanningSchedule(store, req.query));
+  route('post', '/planning/requests', req => saveContentPlanningRequests(store, integration, req.user, req.body), 201);
   route('get', '/notes', () => { store.weeklyRhythm?.generate(); return store.list(); });
   route('get', '/weekly-rhythm/:id', req => store.weeklyRhythm.get(req.params.id));
   route('put', '/weekly-rhythm/:id', req => { const config=store.weeklyRhythm.put(req.params.id,req.body); return {...config,generated:store.weeklyRhythm.generate()}; });

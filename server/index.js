@@ -1567,7 +1567,7 @@ app.post("/api/auth/login", (request, response) => {
     const assistantDeviceName = String(request.body?.assistantDeviceName ?? "").trim();
     const requestedAssistantProfile = String(request.body?.assistantAccessProfile ?? AssistantAccessProfile.ReadOnly).trim();
     const assistantSession = assistantDeviceName ? createAssistantDeviceSession(freshUser, assistantDeviceName, requestedAssistantProfile) : null;
-    const scopedAssistant = assistantSession?.session.accessProfile === AssistantAccessProfile.KeyActionLauncher;
+    const scopedAssistant = assistantSession?.session.accessProfile !== AssistantAccessProfile.ReadOnly;
     response.json({
       success: true,
       user: publicUser,
@@ -1598,7 +1598,7 @@ app.post("/api/auth/device-sessions/refresh", (request, response) => {
     const refreshed = refreshAssistantDeviceSession(request.body?.refreshToken);
     response.json({
       success: true,
-      token: refreshed.session.accessProfile === AssistantAccessProfile.KeyActionLauncher
+      token: refreshed.session.accessProfile !== AssistantAccessProfile.ReadOnly
         ? createScopedAssistantToken(refreshed.row, refreshed.session.id, refreshed.session.accessProfile)
         : createReadOnlyAssistantToken(refreshed.row, refreshed.session.id),
       deviceSession: refreshed.session,
@@ -1658,12 +1658,16 @@ app.use("/api", (request, response, next) => {
     next();
     return;
   }
-  const allowed = request.method === "POST" && new Set([
+  const allowedPaths = new Set([
     "/key-actions/launch-preview",
     "/key-actions/launch",
-  ]).has(request.path);
+    ...(request.user.assistantAccessProfile === AssistantAccessProfile.ContentPlanner
+      ? ["/content-center/planning/requests"]
+      : []),
+  ]);
+  const allowed = request.method === "POST" && allowedPaths.has(request.path);
   if (!allowed) {
-    response.status(403).json({ success: false, code: "assistant_write_boundary", message: "助手设备仅允许预览并发起关键行动。" });
+    response.status(403).json({ success: false, code: "assistant_write_boundary", message: "助手设备仅允许发起关键行动，内容策划设备另可新增下周需求。" });
     return;
   }
   next();

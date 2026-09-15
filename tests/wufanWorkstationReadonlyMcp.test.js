@@ -41,21 +41,27 @@ const representativeArguments = {
   get_operation_dashboard: {},
   get_sales_business_dashboard: { range: "30d", page: 1, pageSize: 10 },
   get_notifications_summary: { limit: 10 },
+  get_content_product_selection: { brand: "南屿" },
+  list_content_column_schedule: { startDate: "2026-09-21", endDate: "2026-09-27", page: 1, pageSize: 50, column: "产品笔记" },
+  save_next_week_requests: {
+    idempotencyKey: "nanyu-2026-w39-v1",
+    items: [{ accountId: "account-1", column: "产品笔记", workstationProductIds: ["sku-1"], noteFormat: "图文", preferredDate: "2026-09-22", preferredTime: "10:30", notes: "围绕已确认产品策划一篇种草笔记。" }],
+  },
 };
 
 test("插件只暴露固定查询与受控发起工具并提供准确安全标注", () => {
   assert.equal(TOOL_DEFINITIONS.length, Object.keys(representativeArguments).length);
   assert.deepEqual(new Set(TOOL_DEFINITIONS.map((item) => item.name)), new Set(Object.keys(representativeArguments)));
   for (const definition of TOOL_DEFINITIONS) {
-    assert.equal(definition.annotations.readOnlyHint, definition.name !== "launch_key_action", definition.name);
+    assert.equal(definition.annotations.readOnlyHint, !new Set(["launch_key_action", "save_next_week_requests"]).has(definition.name), definition.name);
     assert.equal(definition.annotations.destructiveHint, false, definition.name);
     assert.equal(definition.annotations.openWorldHint, false, definition.name);
     assert.equal(definition.inputSchema.additionalProperties, false, definition.name);
-    if (definition.name !== "launch_key_action") assert.doesNotMatch(definition.name, /create|update|delete|write|import|sync_run|approve|execute/u);
+    if (!new Set(["launch_key_action", "save_next_week_requests"]).has(definition.name)) assert.doesNotMatch(definition.name, /create|update|delete|write|import|sync_run|approve|execute/u);
   }
 });
 
-test("工具只访问固定正式API，且只有预览与确认使用POST", async () => {
+test("工具只访问固定正式API，且仅受控预览、确认与新增下周需求使用POST", async () => {
   const requests = [];
   const fetchImpl = async (url, options) => {
     requests.push({ url: new URL(url), options });
@@ -72,7 +78,7 @@ test("工具只访问固定正式API，且只有预览与确认使用POST", asyn
 
   assert.equal(requests.length, TOOL_DEFINITIONS.length);
   for (const request of requests) {
-    const expectedMethod = new Set(["/api/key-actions/launch-preview", "/api/key-actions/launch"]).has(request.url.pathname) ? "POST" : "GET";
+    const expectedMethod = new Set(["/api/key-actions/launch-preview", "/api/key-actions/launch", "/api/content-center/planning/requests"]).has(request.url.pathname) ? "POST" : "GET";
     assert.equal(request.options.method, expectedMethod);
     assert.equal(request.options.headers.Authorization, "Bearer test-secret-token");
     assert.equal(request.options.redirect, "error");
@@ -82,7 +88,28 @@ test("工具只访问固定正式API，且只有预览与确认使用POST", asyn
   assert.deepEqual(requests.filter((item) => item.options.method === "POST").map((item) => item.url.pathname), [
     "/api/key-actions/launch-preview",
     "/api/key-actions/launch",
+    "/api/content-center/planning/requests",
   ]);
+});
+
+test("内容策划工具限制日期、分页和下周需求载荷", async () => {
+  const requests = [];
+  const fetchImpl = async (url, options) => {
+    requests.push({ url: new URL(url), options });
+    return new Response(JSON.stringify({ success: true }), { status: 200 });
+  };
+  await executeTool("list_content_column_schedule", { startDate: "2026-09-21", endDate: "2026-09-27", pageSize: 999 }, { settings, fetchImpl });
+  await executeTool("save_next_week_requests", representativeArguments.save_next_week_requests, { settings, fetchImpl });
+  assert.equal(requests[0].url.searchParams.get("pageSize"), "100");
+  assert.deepEqual(JSON.parse(requests[1].options.body), representativeArguments.save_next_week_requests);
+  await assert.rejects(
+    executeTool("save_next_week_requests", { idempotencyKey: "short", items: [] }, { settings, fetchImpl }),
+    /1至100条/u,
+  );
+  await assert.rejects(
+    executeTool("save_next_week_requests", { ...representativeArguments.save_next_week_requests, items: [{ ...representativeArguments.save_next_week_requests.items[0], preferredTime: "25:00" }] }, { settings, fetchImpl }),
+    /HH:mm/u,
+  );
 });
 
 test("短期JWT到期后只调用固定认证接口续期并安全保存新JWT", async () => {
