@@ -568,7 +568,7 @@ function renderProductBusinessTable(readModel) {
       ${businessMetricEnabled("diagnosis") ? `<th>经营状态</th>` : ""}
       <th>${businessSortHeader("pendingCount", "待处理事项")}</th><th>详情</th></tr></thead>
     <tbody>${rows.length ? rows.map((item) => `<tr>
-      <td><button type="button" class="product-business-product-button is-image" data-action="view-product-business-sku" data-erp-sku-id="${escapeHtml(item.erpSkuId || item.id)}">${renderImage({ mainImage: item.image, name: item.name }, "product-business-image")}</button></td>
+      <td><button type="button" class="product-business-product-button is-image" data-action="view-product-business-sku" data-erp-sku-id="${escapeHtml(item.erpSkuId || item.id)}">${renderImage({ mainImage: item.image, name: item.name }, "product-business-image product-business-list-preview")}</button></td>
       <td><button type="button" class="product-business-product-button" data-action="view-product-business-sku" data-erp-sku-id="${escapeHtml(item.erpSkuId || item.id)}"><strong>${escapeHtml(item.name)}</strong><small>ERP SKU ${escapeHtml(item.sku || "—")}</small><small>货品编码 ${escapeHtml(item.productCode || "—")}</small></button></td>
       <td>${escapeHtml(item.brand || "—")}</td><td>${escapeHtml(item.category || "—")}</td><td>${escapeHtml(item.ownerName || "未分配")}</td>
       <td>${businessStatus(item.lifecycle, item.lifecycle, "lifecycle")}</td><td>${businessStatus(item.status, "product")}</td>

@@ -21,6 +21,9 @@ test("产品中心默认进入产品经营并统一到 ERP SKU 详情", () => {
   assert.match(source, /state\.productErpMappings\.find\(\(item\) => item\.productId === productId/);
   assert.match(source, /window\.location\.hash = `products\/sku\/\$\{encodeURIComponent\(mappedErpSkuId\)\}`/);
   assert.match(source, /data-action="view-product-business-sku" data-erp-sku-id=/);
+  assert.match(source, /"product-business-image product-business-list-preview"/);
+  const thumbnailPreview = fs.readFileSync(new URL("../src/thumbnailPreview.js", import.meta.url), "utf8");
+  assert.match(thumbnailPreview, /"\.product-business-list-preview"/);
   assert.match(source, /products\/sku\/\$\{encodeURIComponent\(button\.dataset\.erpSkuId\)\}/);
   assert.match(detailRenderer, /\["strategy", "产品战略"\]/);
   assert.match(detailRenderer, /\["business-diagnosis", "经营诊断"\]/);

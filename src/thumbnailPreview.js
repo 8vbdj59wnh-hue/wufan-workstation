@@ -11,6 +11,7 @@ const thumbnailPreviewSelector = [
   ".work-form-image",
   ".form-renderer-image-preview",
   ".method-media",
+  ".product-business-list-preview",
   "[data-link-image-preview]",
 ].join(",");
 
