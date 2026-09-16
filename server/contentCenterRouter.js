@@ -161,6 +161,20 @@ export function reviseContentRequestCopy(store,integration,user,input={}){
   return store.reviseCopyBatch(items,input.idempotencyKey);
 }
 
+export function reviseContentRequestTopics(store,integration,user,input={}){
+  if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>!['idempotencyKey','items'].includes(k))||!Array.isArray(input.items)||!input.items.length||input.items.length>100)throw new AppError('话题更新批次格式不正确');
+  const items=input.items.map((item,index)=>{
+    if(!item||typeof item!=='object'||Array.isArray(item)||Object.keys(item).some(k=>!['id','revision','hashtags'].includes(k))||typeof item.id!=='string'||!item.id||item.id.length>120||!Number.isInteger(item.revision)||item.revision<1)throw new AppError(`第 ${index+1} 条仅允许原需求ID、版本、话题`);
+    if(typeof item.hashtags!=='string')throw new AppError('话题必须为文字');
+    const hashtags=cleanPlanningText(item.hashtags,'话题',2000);
+    if(!hashtags)throw new AppError('话题不能为空');
+    const old=store.getRequest(item.id);
+    if(integration?.progress?.(user,old)?.linked)throw new AppError(`需求 ${item.id} 已关联行动，不能修订`,409);
+    return {id:item.id,revision:item.revision,hashtags,actorId:String(user?.id||'')};
+  });
+  return store.reviseTopicsBatch(items,input.idempotencyKey);
+}
+
 // Content is a company-wide shared resource. Dedicated permissions explicitly
 // grant company-wide access; personal task/department ownership is not inferred.
 export function createContentCenterRouter({ requirePermission, hasPermission, getDatabase, dataDir, integration, recommendations, store: injectedStore }) {
@@ -225,6 +239,7 @@ export function createContentCenterRouter({ requirePermission, hasPermission, ge
   }catch(error){next(error);}});
   route('get', '/planning/schedule', req => listContentPlanningSchedule(store, req.query));
   route('post', '/planning/requests/revise-copy', req => reviseContentRequestCopy(store,integration,req.user,req.body));
+  route('post', '/planning/requests/revise-topics', req => reviseContentRequestTopics(store,integration,req.user,req.body));
   route('post', '/planning/requests/plans', req => saveContentRequestPlans(store,integration,req.user,req.body));
   route('post', '/planning/requests/fill', req => fillContentPlanningRequests(store, integration, req.user, req.body));
   route('post', '/planning/requests', req => saveContentPlanningRequests(store, integration, req.user, req.body), 201);

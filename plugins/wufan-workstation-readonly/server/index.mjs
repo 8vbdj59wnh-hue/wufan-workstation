@@ -255,6 +255,16 @@ const TOOL_SPECS = [
       return {id:cleanText(item.id,'id',{required:true,maxLength:120}),revision:item.revision,title:cleanText(item.title,'title',{required:true,maxLength:500}),copyText:cleanText(item.copyText,'copyText',{required:true,maxLength:20000})};
     })}};
   },contentWriteAnnotations),
+  tool("revise_request_topics", "修订已有策划话题", "用户授权修订后按原需求ID和最新revision更新话题。保留原需求、产品、排期和其他策划字段；记录前后话题，整批原子写入、幂等重试。已关联行动或版本变化拒绝。", objectSchema({
+    idempotencyKey:textProperty("本次修订版本稳定幂等键，相同重试复用",120),
+    items:{type:"array",minItems:1,maxItems:100,items:objectSchema({id:textProperty("原需求ID",120),revision:{type:"integer",minimum:1},hashtags:textProperty("更新后的完整话题，包含需要保留的原话题",2000)},["id","revision","hashtags"])}
+  },["idempotencyKey","items"]),args=>{
+    if(!Array.isArray(args.items)||!args.items.length||args.items.length>100)throw new Error('请提交1至100条修订。');
+    return {method:"POST",path:"/api/content-center/planning/requests/revise-topics",body:{idempotencyKey:cleanText(args.idempotencyKey,'idempotencyKey',{required:true,maxLength:120}),items:args.items.map(item=>{
+      if(!item||Object.keys(item).some(k=>!['id','revision','hashtags'].includes(k))||!Number.isInteger(item.revision)||item.revision<1)throw new Error('仅允许原需求ID、版本、话题。');
+      return {id:cleanText(item.id,'id',{required:true,maxLength:120}),revision:item.revision,hashtags:cleanText(item.hashtags,'hashtags',{required:true,maxLength:2000})};
+    })}};
+  },contentWriteAnnotations),
   tool("save_request_plans", "回填需求策划", "按原需求ID和revision，将执行稿写入尚无策划的已有需求。保留原需求文字、产品、模板、形式和排期，不发起行动。已有关联行动或策划、版本冲突均拒绝；整批原子写入和幂等重试。", objectSchema({
     idempotencyKey:textProperty("本次策划版本稳定幂等键，相同重试复用",120),
     items:{type:"array",minItems:1,maxItems:100,items:objectSchema({

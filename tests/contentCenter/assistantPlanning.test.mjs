@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createStore } from '../../server/contentCenter/store.mjs';
-import { getContentPlanningProductSelection, listContentPlanningSchedule, saveContentPlanningRequests, fillContentPlanningRequests, saveContentRequestPlans, reviseContentRequestCopy } from '../../server/contentCenterRouter.js';
+import { getContentPlanningProductSelection, listContentPlanningSchedule, saveContentPlanningRequests, fillContentPlanningRequests, saveContentRequestPlans, reviseContentRequestCopy, reviseContentRequestTopics } from '../../server/contentCenterRouter.js';
 
 test('内容策划助手可读取选品与排期，并仅幂等新增已确认产品的下周需求', t => {
   const store = createStore(':memory:');
@@ -115,4 +115,22 @@ test('受控修订仅替换标题正文，保留其他字段并持久记录前�
  assert.throws(()=>reviseContentRequestCopy(store,{progress:()=>({linked:true})},user,{idempotencyKey:'copy-linked-1',items:[item(fresh)]}),/关联行动/);
  assert.throws(()=>reviseContentRequestCopy(store,integration,user,{idempotencyKey:'copy-empty-1',items:[{...item(fresh),copyText:''}]}),/不能为空/);
  const blank=store.createRequests([{account:a.id,column:a.columns[0].name,notes:'原需求',noteFormat:'图文'}])[0];assert.throws(()=>reviseContentRequestCopy(store,integration,user,{idempotencyKey:'copy-no-plan-1',items:[item(blank)]}),/没有完整策划/);
+});
+
+test('话题更新仅改话题，整批原子、版本保护、可审计且重试不重复',t=>{
+ const store=createStore(':memory:');t.after(()=>store.close());const a=store.getCatalog().accounts[0],user={id:'planner'},integration={progress:()=>({linked:false})};
+ const make=()=>{const n=store.createRequests([{account:a.id,column:a.columns[0].name,notes:'原需求',workstationProductIds:['p1'],preferredDate:'2026-09-21',preferredTime:'10:30',noteFormat:'图文'}])[0];return store.save({revision:1,title:'标题',copyText:'正文',hashtags:'#原话题',contentStage:'candidate'},n.id)};
+ const before=make(),other=make(),item=n=>({id:n.id,revision:n.revision,hashtags:'#原话题 #花瓶 #生活 #家居 #美物 #分享'});
+ const input={idempotencyKey:'topics-update-1',items:[item(before)]};
+ const result=reviseContentRequestTopics(store,integration,user,input),saved=store.get(before.id);
+ for(const key of Object.keys(before).filter(k=>!['hashtags','revision','updatedAt'].includes(k)))assert.deepEqual(saved[key],before[key],key);
+ assert.equal(saved.hashtags,item(before).hashtags);assert.equal(result.items[0].topicsRevisionAudit.previous.hashtags,'#原话题');assert.equal(result.items[0].topicsRevisionAudit.actorId,'planner');
+ assert.equal(reviseContentRequestTopics(store,integration,user,input).duplicate,true);
+ assert.throws(()=>reviseContentRequestTopics(store,integration,user,{idempotencyKey:'topics-rollback',items:[item(other),item(before)]}),/版本/);assert.equal(store.get(other.id).hashtags,'#原话题');
+ for(const extra of [{title:'覆盖'},{copyText:'覆盖'},{preferredTime:'20:30'},{workstationProductIds:[]}])assert.throws(()=>reviseContentRequestTopics(store,integration,user,{idempotencyKey:'topics-forbidden',items:[{...item(other),...extra}]}),/仅允许/);
+ assert.throws(()=>reviseContentRequestTopics(store,{progress:()=>({linked:true})},user,{idempotencyKey:'topics-linked-1',items:[item(other)]}),/关联行动/);
+ assert.throws(()=>reviseContentRequestTopics(store,integration,user,{idempotencyKey:'topics-empty-1',items:[{...item(other),hashtags:''}]}),/不能为空/);
+ assert.throws(()=>reviseContentRequestTopics(store,integration,user,{idempotencyKey:'topics-too-long',items:[{...item(other),hashtags:'x'.repeat(2001)}]}));
+ const executing=store.save({revision:other.revision,executionNumber:'KA-test'},other.id);
+ assert.throws(()=>reviseContentRequestTopics(store,integration,user,{idempotencyKey:'topics-executing',items:[item(executing)]}),/执行流程/);
 });

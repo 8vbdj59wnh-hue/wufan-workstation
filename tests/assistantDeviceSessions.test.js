@@ -169,6 +169,9 @@ test("助手设备可长期续期、逐台撤销，且仅能受控发起行动�
     const reviseInput={idempotencyKey:"assistant-revise-1",items:[{id:planResult.body.items[0].id,revision:2,title:"生活分享",copyText:"自然短句"}]};
     for(const token of [loginA.body.token,launcherLogin.body.token])assert.equal((await request(baseUrl,"/api/content-center/planning/requests/revise-copy",{method:"POST",token,body:reviseInput})).status,403);
     const revised=await request(baseUrl,"/api/content-center/planning/requests/revise-copy",{method:"POST",token:plannerLogin.body.token,body:reviseInput});assert.equal(revised.status,200,JSON.stringify(revised.body));assert.equal(revised.body.items[0].notes,planningInput.items[0].notes);assert.equal(revised.body.items[0].copyText,"自然短句");
+    const topicsInput={idempotencyKey:"assistant-topics-1",items:[{id:revised.body.items[0].id,revision:revised.body.items[0].revision,hashtags:"#花瓶 #家居"}]};
+    for(const token of [loginA.body.token,launcherLogin.body.token])assert.equal((await request(baseUrl,"/api/content-center/planning/requests/revise-topics",{method:"POST",token,body:topicsInput})).status,403);
+    const topicsResult=await request(baseUrl,"/api/content-center/planning/requests/revise-topics",{method:"POST",token:plannerLogin.body.token,body:topicsInput});assert.equal(topicsResult.status,200,JSON.stringify(topicsResult.body));assert.equal(topicsResult.body.items[0].hashtags,"#花瓶 #家居");assert.equal(topicsResult.body.items[0].copyText,"自然短句");
     const plannedSchedule = await request(baseUrl, "/api/content-center/planning/schedule?startDate=2026-09-21&endDate=2026-09-27", { token: plannerLogin.body.token });
     assert.equal(plannedSchedule.status, 200);
     assert.equal(plannedSchedule.body.total, 1);

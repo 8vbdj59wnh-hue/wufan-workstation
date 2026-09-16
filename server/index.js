@@ -1662,7 +1662,7 @@ app.use("/api", (request, response, next) => {
     "/key-actions/launch-preview",
     "/key-actions/launch",
     ...(request.user.assistantAccessProfile === AssistantAccessProfile.ContentPlanner
-      ? ["/content-center/planning/requests", "/content-center/planning/requests/fill", "/content-center/planning/requests/plans", "/content-center/planning/requests/revise-copy"]
+      ? ["/content-center/planning/requests", "/content-center/planning/requests/fill", "/content-center/planning/requests/plans", "/content-center/planning/requests/revise-copy", "/content-center/planning/requests/revise-topics"]
       : []),
   ]);
   const allowed = request.method === "POST" && allowedPaths.has(request.path);
