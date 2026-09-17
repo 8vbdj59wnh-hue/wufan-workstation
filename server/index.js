@@ -6,6 +6,7 @@ import { createContentCenterIntegration } from "./contentCenterIntegration.js";
 import { createContentCenterRouter } from "./contentCenterRouter.js";
 import express from "express";
 import cors from "cors";
+import compression from "compression";
 import fs from "node:fs";
 import path from "node:path";
 import multer from "multer";
@@ -163,8 +164,8 @@ import {
   validateUploadMetadata,
 } from "./uploadGovernanceService.js";
 import {
+  createApiUsageBatchRecorder,
   getApiUsageLedger,
-  recordApiUsage,
   resolveApiUsageRoute,
   resolveApiUsageSource,
   shouldRecordApiUsage,
@@ -397,6 +398,9 @@ import {
 const app = express();
 const loginRateLimiter = createLoginRateLimiter();
 configureApiCachePolicy(app);
+// JSON is highly repetitive. Level 1 keeps CPU cost bounded while avoiding
+// multi-megabyte LAN transfers for schedule and compatibility snapshots.
+app.use("/api", compression({ threshold: 1_024, level: 1 }));
 const host = process.env.HOST ?? "0.0.0.0";
 const port = Number(process.env.PORT ?? 3001);
 const applicationVersion = (() => {
@@ -454,6 +458,11 @@ if (shouldEnforceBusinessBaseline()) {
 initializeDatabase();
 const startupDatabaseHealth = evaluateDatabaseHealth(getDatabase());
 assertBusinessBaselineHealthy(startupDatabaseHealth);
+const apiUsageRecorder = createApiUsageBatchRecorder(() => getDatabase(), {
+  flushIntervalMs: 5_000,
+  maxPendingEvents: 250,
+  onError: (error) => console.error("API 使用台账批量写入失败", error),
+});
 bootstrapTemplateVersions();
 ensureConnectionInspectionTemplate(getDatabase(), "system");
 fs.mkdirSync(imageUploadsDir, { recursive: true });
@@ -641,7 +650,7 @@ app.use("/api", (request, response, next) => {
     if (finalized) return;
     finalized = true;
     try {
-      recordApiUsage(getDatabase(), {
+      apiUsageRecorder.record({
         method: request.method,
         routePattern: resolveApiUsageRoute(request),
         source,
@@ -2844,6 +2853,7 @@ app.get("/api/data-asset-map/graphs/:id", requirePermission("dataAssets.view"), 
 });
 
 app.get("/api/admin/api-usage", requirePermission("dataCenter.view"), requireAdminUser, (request, response) => {
+  apiUsageRecorder.flush();
   response.json({
     success: true,
     ...getApiUsageLedger(getDatabase(), {
@@ -4576,12 +4586,16 @@ app.post("/api/process-instances/:id/cancel", requirePermission("keyActions.mana
 
 app.post("/api/process-instances/:id/start", requirePermission("keyActions.manage"), (request, response) => {
   try {
+    const startedAt = performance.now();
     startProcessInstanceExecution(request.params.id, {
       userId: getUserPersonId(request.user),
       isAdmin: isAdminUser(request.user),
       dueDate: request.body?.dueDate,
     });
-    response.json({ success: true, data: readLaunchMutationSnapshot({ processInstanceIds: [request.params.id] }, request.user) });
+    const mutationCompletedAt = performance.now();
+    const data = readLaunchMutationSnapshot({ processInstanceIds: [request.params.id] }, request.user);
+    response.set("Server-Timing", `mutation;dur=${(mutationCompletedAt - startedAt).toFixed(1)}, snapshot;dur=${(performance.now() - mutationCompletedAt).toFixed(1)}`);
+    response.json({ success: true, data });
   } catch (error) {
     console.error("开始执行关键行动失败", error);
     const message = error.message || "开始执行关键行动失败，请检查本地数据库服务。";
@@ -4651,16 +4665,13 @@ app.put("/api/process-instances/:id/tasks/:taskId/executor", (request, response)
       rejectUnauthorizedTask(response, "只有管理员、任务负责人、关键行动负责人或标准步骤负责人可以调整任务执行人。");
       return;
     }
-    const data = readAllData();
-    const instance = data.processInstances.find((item) => item.id === request.params.id);
-    if (instance === undefined) {
+    const instance = readRouteResourceItem("process-instances", request.params.id);
+    if (instance === null) {
       response.status(404).json({ success: false, message: "未找到该关键行动。" });
       return;
     }
-    const task = data.tasks.find(
-      (item) => item.id === request.params.taskId && item.processInstanceId === instance.id,
-    );
-    if (task === undefined) {
+    const task = authorization.task;
+    if (task.processInstanceId !== instance.id) {
       response.status(404).json({ success: false, message: "未找到该关键行动下的任务。" });
       return;
     }
@@ -4669,8 +4680,8 @@ app.put("/api/process-instances/:id/tasks/:taskId/executor", (request, response)
       return;
     }
     const executorId = String(request.body?.executorId ?? "").trim();
-    const executor = data.people.find((person) => person.id === executorId && person.status !== "inactive");
-    if (executor === undefined) {
+    const executor = readRouteResourceItem("persons", executorId);
+    if (executor === null || executor.status === "inactive") {
       response.status(400).json({ success: false, message: "请选择有效的执行人。" });
       return;
     }
@@ -5041,8 +5052,18 @@ app.post("/api/tasks/:id/workflow", (request, response) => {
 });
 
 function getVisibleTaskIds(user) {
-  const data = readAllData();
-  return filterTasksByScope(data.tasks ?? [], user, data).map((task) => task.id);
+  const tasks = readResource("tasks");
+  if (isAdminUser(user) || getDataScope(user) === "all") return tasks.map((task) => task.id);
+  const processInstanceIds = [...new Set(tasks.map((task) => task.processInstanceId).filter(Boolean))];
+  const processNodeIds = [...new Set(tasks.map((task) => task.processNodeId).filter(Boolean))];
+  const taskTemplateIds = [...new Set(tasks.map((task) => task.taskTemplateId).filter(Boolean))];
+  const processInstances = readResourceItems("processInstances", processInstanceIds);
+  const inheritedTemplateIds = processInstances.map((instance) => instance.taskTemplateId).filter(Boolean);
+  return filterTasksByScope(tasks, user, {
+    processInstances,
+    processTemplateNodes: readResourceItems("processTemplateNodes", processNodeIds),
+    taskTemplates: readResourceItems("taskTemplates", [...new Set([...taskTemplateIds, ...inheritedTemplateIds])]),
+  }).map((task) => task.id);
 }
 
 app.get("/api/task-waves", (request, response) => {
@@ -5585,6 +5606,8 @@ function shutdown() {
   clearInterval(connectionInspectionSchedulerTimer);
   clearInterval(dataSyncSchedulerTimer);
   server.close(() => {
+    try { apiUsageRecorder.close(); }
+    catch (error) { console.error("API 使用台账关闭前写入失败", error); }
     closeDatabase();
     process.exit(0);
   });

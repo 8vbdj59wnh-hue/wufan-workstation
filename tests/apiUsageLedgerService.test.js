@@ -4,6 +4,7 @@ import test from "node:test";
 import Database from "better-sqlite3";
 
 import {
+  createApiUsageBatchRecorder,
   getApiUsageLedger,
   normalizeApiRoutePattern,
   normalizeApiUsageSource,
@@ -67,6 +68,35 @@ test("相同方法、路由模板和来源聚合调用次数并保留最后访�
     lastStatusCode: 404,
   });
   assert.equal(getApiUsageLedger(database, { source: "integration:sync" }).summary.serverErrorCalls, 1);
+  database.close();
+});
+
+test("请求台账先在内存聚合并用一次显式刷新保持原计数语义", () => {
+  const database = createLedgerDatabase();
+  const recorder = createApiUsageBatchRecorder(() => database, {
+    flushIntervalMs: 60_000,
+    maxPendingEvents: 100,
+  });
+  recorder.record({ method: "GET", routePattern: "/api/tasks/task-1", source: "web:tasks", statusCode: 200, accessedAt: "2026-09-17T01:00:00.000Z" });
+  recorder.record({ method: "GET", routePattern: "/api/tasks/task-2", source: "web:tasks", statusCode: 499, accessedAt: "2026-09-17T01:00:01.000Z" });
+
+  assert.equal(database.prepare("SELECT COUNT(*) total FROM api_usage_ledger").get().total, 0);
+  assert.equal(recorder.pendingEventCount, 2);
+  assert.equal(recorder.pendingKeyCount, 1);
+  assert.equal(recorder.flush(), 2);
+  assert.deepEqual(getApiUsageLedger(database, { route: "/api/tasks" }).items[0], {
+    method: "GET",
+    routePattern: "/api/tasks/:id",
+    source: "web:tasks",
+    callCount: 2,
+    successCount: 1,
+    clientErrorCount: 1,
+    serverErrorCount: 0,
+    firstAccessAt: "2026-09-17T01:00:00.000Z",
+    lastAccessAt: "2026-09-17T01:00:01.000Z",
+    lastStatusCode: 499,
+  });
+  assert.equal(recorder.close(), 0);
   database.close();
 });
 

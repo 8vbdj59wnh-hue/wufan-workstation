@@ -35,3 +35,16 @@ test("launch clients merge partial responses and preserve unrelated module state
   const batchEnd = appState.indexOf("export async function parseContentNoteImport", batchStart);
   assert.match(appState.slice(batchStart, batchEnd), /applyDataMutationSnapshot\(body\.data\)/);
 });
+
+test("task executor and task-wave visibility checks avoid the global snapshot", () => {
+  const server = fs.readFileSync(path.join(root, "server/index.js"), "utf8");
+  const executorStart = server.indexOf('app.put("/api/process-instances/:id/tasks/:taskId/executor"');
+  const executorEnd = server.indexOf('app.post("/api/key-actions/launch"', executorStart);
+  assert.doesNotMatch(server.slice(executorStart, executorEnd), /readAllData\s*\(/);
+  assert.match(server.slice(executorStart, executorEnd), /readRouteResourceItem\("persons"/);
+
+  const visibilityStart = server.indexOf("function getVisibleTaskIds");
+  const visibilityEnd = server.indexOf('app.get("/api/task-waves"', visibilityStart);
+  assert.doesNotMatch(server.slice(visibilityStart, visibilityEnd), /readAllData\s*\(/);
+  assert.match(server.slice(visibilityStart, visibilityEnd), /readResourceItems\("processInstances"/);
+});

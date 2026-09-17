@@ -652,8 +652,6 @@ async function runTaskWaveAction(waveId, action, body = {}, method = "POST") {
   if (!response.ok || data.success !== true) throw new Error(data.message ?? data.error ?? "任务波次操作失败。");
   await loadTaskWaves();
   await loadTaskWaveDetail(waveId).catch(() => null);
-  const snapshotResponse = await authFetch(`${apiBaseUrl}/api/data`);
-  if (snapshotResponse.ok) applyDataSnapshot(await snapshotResponse.json());
   return data;
 }
 
@@ -2006,30 +2004,50 @@ export async function loadConnectionManagementOverview() {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connection-management/overview`), "链接经营概览读取失败。");
 }
 
-export async function loadConnectionBusinessCockpit(filters = {}) {
-  const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== "" && value !== undefined && value !== null));
+const connectionBusinessCockpitRequests = new Map();
+
+export function loadConnectionBusinessCockpit(filters = {}) {
+  const query = new URLSearchParams(Object.entries(filters)
+    .filter(([, value]) => value !== "" && value !== undefined && value !== null)
+    .sort(([left], [right]) => left.localeCompare(right)));
   const suffix = query.toString() ? `?${query}` : "";
-  const startedAt = performance.now();
-  const response = await authFetch(`${apiBaseUrl}/api/connection-business-cockpit${suffix}`);
-  const headersAt = performance.now();
-  const responseText = await response.text();
-  const bodyAt = performance.now();
-  let body = {};
-  try { body = JSON.parse(responseText || "{}"); } catch {}
-  const parsedAt = performance.now();
-  if (!response.ok) throw new Error(body.message || body.error || "链接经营驾驶舱读取失败。");
-  Object.defineProperty(body, "_clientTiming", {
-    value: {
-      fetchHeaders: Number((headersAt - startedAt).toFixed(1)),
-      bodyRead: Number((bodyAt - headersAt).toFixed(1)),
-      jsonParse: Number((parsedAt - bodyAt).toFixed(1)),
-      total: Number((parsedAt - startedAt).toFixed(1)),
-      bytes: new Blob([responseText]).size,
-      serverTiming: response.headers.get("server-timing") || "",
-    },
-    enumerable: false,
-  });
-  return body;
+  const url = `${apiBaseUrl}/api/connection-business-cockpit${suffix}`;
+  const scope = String(filters.scope || "full");
+  const existing = connectionBusinessCockpitRequests.get(scope);
+  if (existing?.url === url) return existing.promise;
+  existing?.controller.abort();
+
+  const controller = new AbortController();
+  const promise = (async () => {
+    const startedAt = performance.now();
+    const response = await authFetch(url, { signal: controller.signal });
+    const headersAt = performance.now();
+    const responseText = await response.text();
+    const bodyAt = performance.now();
+    let body = {};
+    try { body = JSON.parse(responseText || "{}"); } catch {}
+    const parsedAt = performance.now();
+    if (!response.ok) throw new Error(body.message || body.error || "链接经营驾驶舱读取失败。");
+    Object.defineProperty(body, "_clientTiming", {
+      value: {
+        fetchHeaders: Number((headersAt - startedAt).toFixed(1)),
+        bodyRead: Number((bodyAt - headersAt).toFixed(1)),
+        jsonParse: Number((parsedAt - bodyAt).toFixed(1)),
+        total: Number((parsedAt - startedAt).toFixed(1)),
+        bytes: new Blob([responseText]).size,
+        serverTiming: response.headers.get("server-timing") || "",
+      },
+      enumerable: false,
+    });
+    return body;
+  })();
+  const entry = { url, controller, promise };
+  connectionBusinessCockpitRequests.set(scope, entry);
+  void promise.then(
+    () => { if (connectionBusinessCockpitRequests.get(scope) === entry) connectionBusinessCockpitRequests.delete(scope); },
+    () => { if (connectionBusinessCockpitRequests.get(scope) === entry) connectionBusinessCockpitRequests.delete(scope); },
+  );
+  return promise;
 }
 
 export async function loadConnectionBenchmarks(connectionId) {

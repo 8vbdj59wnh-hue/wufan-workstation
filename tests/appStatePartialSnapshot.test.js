@@ -19,6 +19,7 @@ const {
   getStoreOptions,
   getStoreOptionsLoadState,
   loadPersistentData,
+  loadConnectionBusinessCockpit,
   login,
   logout,
   resolveAssetUrl,
@@ -67,6 +68,54 @@ test("mutation snapshots replace only affected process resources", () => {
   assert.deepEqual(state.tasks.map((item) => item.id), ["task-new", "task-keep"]);
   assert.deepEqual(state.workPlans.map((item) => item.id), ["plan-change", "plan-keep"]);
   assert.deepEqual(state.actionProducts.map((item) => item.id), ["relation-keep"]);
+});
+
+test("connection cockpit reuses identical in-flight reads and aborts stale same-scope reads", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = (url, options = {}) => {
+    let rejectRequest;
+    const promise = new Promise((resolve, reject) => {
+      rejectRequest = reject;
+      requests.push({ url: String(url), options, resolve });
+    });
+    options.signal?.addEventListener("abort", () => rejectRequest(new DOMException("aborted", "AbortError")), { once: true });
+    return promise;
+  };
+
+  try {
+    const first = loadConnectionBusinessCockpit({ preset: "7d", scope: "core" });
+    const duplicate = loadConnectionBusinessCockpit({ scope: "core", preset: "7d" });
+    assert.equal(requests.length, 1);
+    requests[0].resolve(new Response(JSON.stringify({ success: true, summary: { salesAmount: 1 } }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    assert.deepEqual(await first, await duplicate);
+
+    const stale = loadConnectionBusinessCockpit({ preset: "15d", scope: "core" });
+    const current = loadConnectionBusinessCockpit({ preset: "30d", scope: "core" });
+    assert.equal(requests.length, 3);
+    assert.equal(requests[1].options.signal.aborted, true);
+    await assert.rejects(stale, { name: "AbortError" });
+    requests[2].resolve(new Response(JSON.stringify({ success: true, summary: { salesAmount: 2 } }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    assert.equal((await current).summary.salesAmount, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("task wave mutations no longer fetch the full data snapshot", () => {
+  const source = fs.readFileSync(new URL("../src/appState.js", import.meta.url), "utf8");
+  const start = source.indexOf("async function runTaskWaveAction");
+  const end = source.indexOf("export function getPersistenceWarning", start);
+  const implementation = source.slice(start, end);
+  assert.doesNotMatch(implementation, /\/api\/data/);
+  assert.match(implementation, /loadTaskWaves\(\)/);
+  assert.match(implementation, /loadTaskWaveDetail\(waveId\)/);
 });
 
 test("action store options contain only valid active stores", () => {

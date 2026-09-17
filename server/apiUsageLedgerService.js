@@ -64,32 +64,64 @@ export function shouldRecordApiUsage(request) {
   return true;
 }
 
-export function recordApiUsage(database, input) {
+function normalizeApiUsageEvent(input) {
   const accessedAt = input.accessedAt instanceof Date
     ? input.accessedAt.toISOString()
     : new Date(input.accessedAt ?? Date.now()).toISOString();
   const statusCode = Math.max(0, Math.min(999, Math.floor(Number(input.statusCode) || 0)));
-  const params = {
+  return {
     method: normalizeMethod(input.method),
     routePattern: normalizeApiRoutePattern(input.routePattern),
     source: normalizeApiUsageSource(input.source),
+    callCount: Math.max(1, Math.floor(Number(input.callCount) || 1)),
     successCount: statusCode >= 100 && statusCode < 400 ? 1 : 0,
     clientErrorCount: statusCode >= 400 && statusCode < 500 ? 1 : 0,
     serverErrorCount: statusCode >= 500 ? 1 : 0,
-    accessedAt,
-    statusCode,
+    firstAccessAt: accessedAt,
+    lastAccessAt: accessedAt,
+    lastStatusCode: statusCode,
   };
+}
 
-  database.prepare(`
+function mergeApiUsageEvent(target, event) {
+  target.callCount += event.callCount;
+  target.successCount += event.successCount;
+  target.clientErrorCount += event.clientErrorCount;
+  target.serverErrorCount += event.serverErrorCount;
+  if (event.firstAccessAt < target.firstAccessAt) target.firstAccessAt = event.firstAccessAt;
+  if (event.lastAccessAt >= target.lastAccessAt) {
+    target.lastAccessAt = event.lastAccessAt;
+    target.lastStatusCode = event.lastStatusCode;
+  }
+  return target;
+}
+
+function aggregateApiUsageEvents(inputs = []) {
+  const rows = new Map();
+  for (const input of inputs) {
+    const event = input.firstAccessAt && input.lastAccessAt
+      ? { ...input }
+      : normalizeApiUsageEvent(input);
+    const key = `${event.method}\u0000${event.routePattern}\u0000${event.source}`;
+    const current = rows.get(key);
+    if (current) mergeApiUsageEvent(current, event);
+    else rows.set(key, event);
+  }
+  return [...rows.values()];
+}
+
+function upsertApiUsageRows(database, rows) {
+  if (rows.length === 0) return 0;
+  const statement = database.prepare(`
     INSERT INTO api_usage_ledger (
       method, routePattern, source, callCount, successCount, clientErrorCount, serverErrorCount,
       firstAccessAt, lastAccessAt, lastStatusCode
     ) VALUES (
-      @method, @routePattern, @source, 1, @successCount, @clientErrorCount, @serverErrorCount,
-      @accessedAt, @accessedAt, @statusCode
+      @method, @routePattern, @source, @callCount, @successCount, @clientErrorCount, @serverErrorCount,
+      @firstAccessAt, @lastAccessAt, @lastStatusCode
     )
     ON CONFLICT(method, routePattern, source) DO UPDATE SET
-      callCount = api_usage_ledger.callCount + 1,
+      callCount = api_usage_ledger.callCount + excluded.callCount,
       successCount = api_usage_ledger.successCount + excluded.successCount,
       clientErrorCount = api_usage_ledger.clientErrorCount + excluded.clientErrorCount,
       serverErrorCount = api_usage_ledger.serverErrorCount + excluded.serverErrorCount,
@@ -99,7 +131,72 @@ export function recordApiUsage(database, input) {
         ELSE api_usage_ledger.lastStatusCode
       END,
       lastAccessAt = MAX(api_usage_ledger.lastAccessAt, excluded.lastAccessAt)
-  `).run(params);
+  `);
+  database.transaction((items) => items.forEach((row) => statement.run(row)))(rows);
+  return rows.reduce((total, row) => total + row.callCount, 0);
+}
+
+export function recordApiUsageBatch(database, inputs = []) {
+  return upsertApiUsageRows(database, aggregateApiUsageEvents(inputs));
+}
+
+export function recordApiUsage(database, input) {
+  return recordApiUsageBatch(database, [input]);
+}
+
+export function createApiUsageBatchRecorder(databaseProvider, options = {}) {
+  const flushIntervalMs = Math.max(100, Number(options.flushIntervalMs) || 5_000);
+  const maxPendingEvents = Math.max(1, Number(options.maxPendingEvents) || 250);
+  const onError = typeof options.onError === "function" ? options.onError : () => {};
+  const pending = new Map();
+  let pendingEventCount = 0;
+  let timer = null;
+  let closed = false;
+
+  const schedule = () => {
+    if (timer || closed || pendingEventCount === 0) return;
+    timer = setTimeout(() => {
+      timer = null;
+      try { flush(); } catch (error) { onError(error); schedule(); }
+    }, flushIntervalMs);
+    timer.unref?.();
+  };
+  const flush = () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    if (pendingEventCount === 0) return 0;
+    const rows = [...pending.values()];
+    const written = upsertApiUsageRows(databaseProvider(), rows);
+    pending.clear();
+    pendingEventCount = 0;
+    return written;
+  };
+  const record = (input) => {
+    if (closed) return false;
+    const event = normalizeApiUsageEvent(input);
+    const key = `${event.method}\u0000${event.routePattern}\u0000${event.source}`;
+    const current = pending.get(key);
+    if (current) mergeApiUsageEvent(current, event);
+    else pending.set(key, event);
+    pendingEventCount += 1;
+    if (pendingEventCount >= maxPendingEvents) flush();
+    else schedule();
+    return true;
+  };
+  const close = () => {
+    if (closed) return 0;
+    const written = flush();
+    closed = true;
+    return written;
+  };
+
+  return {
+    record,
+    flush,
+    close,
+    get pendingEventCount() { return pendingEventCount; },
+    get pendingKeyCount() { return pending.size; },
+  };
 }
 
 function buildLedgerFilters(input = {}) {
