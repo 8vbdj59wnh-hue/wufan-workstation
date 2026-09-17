@@ -791,6 +791,8 @@ CREATE INDEX IF NOT EXISTS idx_erp_skus_current_code
   ON erp_skus(currentState, merchantSkuCode);
 CREATE INDEX IF NOT EXISTS idx_erp_skus_goods
   ON erp_skus(erpGoodsId);
+CREATE INDEX IF NOT EXISTS idx_erp_skus_merchant_sku_lower
+  ON erp_skus(LOWER(merchantSkuCode));
 
 CREATE TABLE IF NOT EXISTS erp_sku_business_usages (
   id TEXT PRIMARY KEY,
@@ -1348,6 +1350,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_links_goods_identity
   ON sales_links(shopId, platformGoodsId) WHERE platformGoodsId IS NOT NULL AND platformGoodsId <> '';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_links_url_identity
   ON sales_links(shopId, canonicalUrl) WHERE (platformGoodsId IS NULL OR platformGoodsId = '') AND canonicalUrl IS NOT NULL AND canonicalUrl <> '';
+CREATE INDEX IF NOT EXISTS idx_sales_links_shop_platform_goods
+  ON sales_links(shopId, platformGoodsId);
 
 CREATE TABLE IF NOT EXISTS sales_link_skus (
   id TEXT PRIMARY KEY,

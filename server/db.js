@@ -3,6 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
+import { ensureSalesDailyIdentityLookupIndexes } from "./performanceIndexes.js";
 import { ensureSalesAnomalyActionStandards } from "./capabilities/salesAnomalyActionStandards.js";
 import { hashPassword } from "./security.js";
 import {
@@ -3768,6 +3769,9 @@ function runLightweightMigrations() {
   retireLinkCenterLegacyRelationsPhase2();
   retireLinkCenterLegacyStructuresPhase3();
   archiveLinkCenterLegacyStructuresPhase4();
+  // Link Center Phase 3 may rebuild sales_links and therefore drops its indexes.
+  // Install the lookup indexes only after every table-rebuilding migration.
+  ensureSalesDailyIdentityLookupIndexes(getDatabase());
 }
 
 function getPermissionTemplateById(templateId) {
