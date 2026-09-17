@@ -17,9 +17,10 @@ function contributionCacheKey(identityField, periodStart, periodEnd, identityIds
 }
 
 function cachesFor(database) {
+  const revision = `${Number(database.pragma("data_version", { simple: true }) || 0)}:${Number(database.prepare("SELECT total_changes() value").get().value || 0)}`;
   let caches = contributionCaches.get(database);
-  if (!caches) {
-    caches = { results: new Map(), facts: new Map() };
+  if (!caches || caches.revision !== revision) {
+    caches = { revision, results: new Map(), facts: new Map() };
     contributionCaches.set(database, caches);
   }
   return caches;

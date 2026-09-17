@@ -149,7 +149,22 @@ function resolveRelationMap(database, salesLinkSkuIds) {
   return results;
 }
 
-function readProductAttributionContext(database, salesLinkIds) {
+function readProductMappingsForErpSkus(database, erpSkuIds) {
+  const rows = [];
+  for (let offset = 0; offset < erpSkuIds.length; offset += 500) {
+    const chunk = erpSkuIds.slice(offset, offset + 500);
+    if (!chunk.length) continue;
+    rows.push(...database.prepare(`
+      SELECT m.erpSkuId,p.id productId,p.skuCode,p.name,p.mainImage
+      FROM product_erp_mappings m
+      JOIN products p ON p.id=m.productId
+      WHERE m.currentState='active' AND m.erpSkuId IN (${chunk.map(() => "?").join(",")})
+    `).all(...chunk));
+  }
+  return rows;
+}
+
+export function readProductAttributionContext(database, salesLinkIds) {
   const placeholders = salesLinkIds.map(() => "?").join(",");
   const linkSkus = database.prepare(`
     SELECT s.id salesLinkSkuId,s.salesLinkId
@@ -157,12 +172,12 @@ function readProductAttributionContext(database, salesLinkIds) {
     WHERE s.salesLinkId IN (${placeholders}) AND COALESCE(s.currentState,'active')='active'
   `).all(...salesLinkIds);
   const relations = resolveRelationMap(database, linkSkus.map((row) => row.salesLinkSkuId));
-  const productMappings = database.prepare(`
-    SELECT m.erpSkuId,p.id productId,p.skuCode,p.name,p.mainImage
-    FROM product_erp_mappings m
-    JOIN products p ON p.id=m.productId
-    WHERE m.currentState='active' AND m.erpSkuId IS NOT NULL
-  `).all();
+  const relatedErpSkuIds = [...new Set(Object.values(relations)
+    .filter((relation) => relation?.isUsable)
+    .flatMap((relation) => relation.mappings ?? [])
+    .map((mapping) => mapping.erpSkuId)
+    .filter(Boolean))];
+  const productMappings = readProductMappingsForErpSkus(database, relatedErpSkuIds);
   const productByErpSku = new Map(productMappings.map((row) => [row.erpSkuId, row]));
   const productMeta = new Map(productMappings.map((row) => [row.productId, {
     skuCode: row.skuCode,

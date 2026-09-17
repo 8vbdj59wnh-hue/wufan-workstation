@@ -13,7 +13,10 @@ export const productBusinessInventoryStatuses = Object.freeze(["healthy", "atten
 const terminalActionStatuses = new Set(["done", "completed", "canceled", "cancelled", "stopped", "terminated"]);
 const completedTaskStatuses = new Set(["done", "completed", "canceled", "cancelled"]);
 const relationContextCacheTtlMs = 60_000;
+const productBusinessPageCacheTtlMs = 30_000;
+const productBusinessPageCacheLimit = 20;
 let relationContextCaches = new WeakMap();
+let productBusinessPageCaches = new WeakMap();
 
 function text(value) { return String(value ?? "").trim(); }
 function numeric(value) { return value === null || value === undefined ? null : Number(value); }
@@ -34,13 +37,51 @@ export function resolveProductBusinessPeriod(query = {}, database = getDatabase(
 }
 
 export function invalidateProductBusinessReadCache(database = null) {
-  if (database) relationContextCaches.delete(database);
-  else relationContextCaches = new WeakMap();
+  if (database) {
+    relationContextCaches.delete(database);
+    productBusinessPageCaches.delete(database);
+  } else {
+    relationContextCaches = new WeakMap();
+    productBusinessPageCaches = new WeakMap();
+  }
+}
+
+function productBusinessDatabaseRevision(database) {
+  return `${Number(database.pragma("data_version", { simple: true }) || 0)}:${Number(database.prepare("SELECT total_changes() value").get().value || 0)}`;
+}
+
+function productBusinessPageCacheKey(query, { includeInventoryCost, visibleErpSkuIds }) {
+  const normalizedQuery = Object.fromEntries(Object.entries(query)
+    .filter(([key]) => !["page", "pageSize", "refresh"].includes(key))
+    .sort(([left], [right]) => left.localeCompare(right)));
+  const visibility = visibleErpSkuIds ? [...new Set(visibleErpSkuIds)].sort() : null;
+  return JSON.stringify({ query: normalizedQuery, includeInventoryCost: Boolean(includeInventoryCost), visibility });
+}
+
+function cacheFullProductBusinessReadModel(database, cacheKey, revision, value) {
+  const cache = productBusinessPageCaches.get(database) || new Map();
+  cache.delete(cacheKey);
+  cache.set(cacheKey, { revision, expiresAt: Date.now() + productBusinessPageCacheTtlMs, value });
+  while (cache.size > productBusinessPageCacheLimit) cache.delete(cache.keys().next().value);
+  productBusinessPageCaches.set(database, cache);
+}
+
+function paginateProductBusinessReadModel(readModel, query) {
+  const total = readModel.items.length;
+  const pageSize = Math.min(100, normalizePage(query.pageSize, 30));
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const page = Math.min(normalizePage(query.page, 1), pages);
+  return {
+    ...readModel,
+    items: readModel.items.slice((page - 1) * pageSize, page * pageSize),
+    pagination: { page, pageSize, total, pages },
+  };
 }
 
 export function readProductBusinessRelationContext(database, { bypassCache = false } = {}) {
+  const revision = productBusinessDatabaseRevision(database);
   const cached = relationContextCaches.get(database);
-  if (!bypassCache && cached?.expiresAt > Date.now()) return cached.value;
+  if (!bypassCache && cached?.revision === revision && cached.expiresAt > Date.now()) return cached.value;
   const linkSkus = database.prepare(`
     SELECT s.id salesLinkSkuId,s.salesLinkId
     FROM sales_link_skus s JOIN sales_links l ON l.id=s.salesLinkId
@@ -76,7 +117,7 @@ export function readProductBusinessRelationContext(database, { bypassCache = fal
     }
   }
   const value = { attributionsBySku, linksByProduct: linksByErpSku, linksByErpSku, resolvedLinkSkuCount: attributionsBySku.size };
-  relationContextCaches.set(database, { value, expiresAt: Date.now() + relationContextCacheTtlMs });
+  relationContextCaches.set(database, { value, revision, expiresAt: Date.now() + relationContextCacheTtlMs });
   return value;
 }
 
@@ -346,10 +387,28 @@ function operatingProductLifecycleMap(database) {
   return result;
 }
 
-export function getProductBusinessReadModel(query = {}, { includeInventoryCost = false, visibleErpSkuIds = null, unpaged = false, bypassCache = false } = {}) {
+export function getProductBusinessReadModel(query = {}, { includeInventoryCost = false, visibleErpSkuIds = null, unpaged = false, bypassCache = false, skipPageCache = false } = {}) {
   const database = getDatabase();
   const period = resolveProductBusinessPeriod(query, database);
   const requestedErpSkuId = text(query.erpSkuId) || (text(query.productId) ? text(database.prepare("SELECT erpSkuId FROM product_erp_mappings WHERE productId=? AND currentState='active' ORDER BY updatedAt DESC,id DESC LIMIT 1").get(text(query.productId))?.erpSkuId) : "");
+  if (!unpaged && !skipPageCache && !requestedErpSkuId) {
+    const cacheKey = productBusinessPageCacheKey(query, { includeInventoryCost, visibleErpSkuIds });
+    const revision = productBusinessDatabaseRevision(database);
+    const cache = productBusinessPageCaches.get(database);
+    const cached = cache?.get(cacheKey);
+    if (!bypassCache && cached?.revision === revision && cached.expiresAt > Date.now()) {
+      return paginateProductBusinessReadModel(cached.value, query);
+    }
+    const fullReadModel = getProductBusinessReadModel(query, {
+      includeInventoryCost,
+      visibleErpSkuIds,
+      unpaged: true,
+      bypassCache,
+      skipPageCache: true,
+    });
+    cacheFullProductBusinessReadModel(database, cacheKey, revision, fullReadModel);
+    return paginateProductBusinessReadModel(fullReadModel, query);
+  }
   const products = database.prepare(`
     SELECT s.id erpSkuId,s.merchantSkuCode,s.specificationName,s.mainImage,s.erpStatus,s.currentState,s.rawSourceData,s.createdAt,s.updatedAt,
       g.goodsCode,g.goodsName,g.brand,g.category,

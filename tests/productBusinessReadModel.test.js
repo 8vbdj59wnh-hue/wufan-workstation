@@ -134,6 +134,12 @@ test("产品经营读取层复用销售、库存、SKU、健康与行动事实",
       .run("task-board-1", "测试任务", "goal-board-1", "process", "action-board-1", "department-board-1", "person-board-1", "person-board-1", "doing", now, now);
 
     const result = getProductBusinessReadModel({ range: "custom", periodStart: "2026-08-01", periodEnd: "2026-08-07" }, { includeInventoryCost: true });
+    const firstPage = getProductBusinessReadModel({ range: "custom", periodStart: "2026-08-01", periodEnd: "2026-08-07", page: 1, pageSize: 2 }, { includeInventoryCost: true });
+    const secondPage = getProductBusinessReadModel({ range: "custom", periodStart: "2026-08-01", periodEnd: "2026-08-07", page: 2, pageSize: 2 }, { includeInventoryCost: true });
+    assert.equal(firstPage.pagination.total, result.pagination.total);
+    assert.equal(secondPage.pagination.total, result.pagination.total);
+    assert.deepEqual([...firstPage.items, ...secondPage.items].map((entry) => entry.erpSkuId), result.items.slice(0, 4).map((entry) => entry.erpSkuId));
+    assert.equal(new Set([...firstPage.items, ...secondPage.items].map((entry) => entry.erpSkuId)).size, firstPage.items.length + secondPage.items.length);
     const item = result.items.find((entry) => entry.erpSkuId === "erp-sku-board-1");
     assert.ok(item);
     assert.equal(item.legacyProductId, "product-board-1");
