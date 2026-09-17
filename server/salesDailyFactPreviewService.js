@@ -104,6 +104,122 @@ function cached(cache, key, read) {
   return cache.get(key);
 }
 
+const IDENTITY_PREFETCH_PARAMETER_LIMIT = 900;
+
+function ensureIdentityCache(cache = {}) {
+  for (const key of ["shops", "links", "skus", "erpSkus"]) {
+    if (!(cache[key] instanceof Map)) cache[key] = new Map();
+  }
+  return cache;
+}
+
+function missingRequests(values, target, build) {
+  const requests = new Map();
+  for (const value of values) {
+    const request = build(value);
+    if (!request || target.has(request.cacheKey) || requests.has(request.cacheKey)) continue;
+    requests.set(request.cacheKey, request);
+  }
+  return [...requests.values()];
+}
+
+function queryInChunks(database, requests, parameterCount, query) {
+  const rows = [];
+  const chunkSize = Math.max(1, Math.floor(IDENTITY_PREFETCH_PARAMETER_LIMIT / parameterCount));
+  for (let offset = 0; offset < requests.length; offset += chunkSize) {
+    rows.push(...query(database, requests.slice(offset, offset + chunkSize)));
+  }
+  return rows;
+}
+
+function populateUniqueResults(target, requests, rows) {
+  const grouped = new Map();
+  for (const row of rows) {
+    const { cacheKey, ...value } = row;
+    const candidates = grouped.get(cacheKey) || [];
+    candidates.push(value);
+    grouped.set(cacheKey, candidates);
+  }
+  for (const request of requests) target.set(request.cacheKey, uniqueResult(grouped.get(request.cacheKey) || []));
+}
+
+function prefetchShops(database, items, cache) {
+  const requests = missingRequests(items, cache.shops, (item) => {
+    const raw = text(item.normalized?.shopName);
+    return raw ? { cacheKey: raw.toLowerCase(), raw } : null;
+  });
+  const rows = queryInChunks(database, requests, 2, (connection, chunk) => {
+    const values = chunk.map(() => "(?,LOWER(?))").join(",");
+    const params = chunk.flatMap((request) => [request.cacheKey, request.raw]);
+    return connection.prepare(`WITH requested(cacheKey,matchValue) AS (VALUES ${values})
+      SELECT DISTINCT requested.cacheKey,s.id,s.shopName,s.displayName,s.platform
+      FROM requested JOIN sales_shops s ON
+        LOWER(s.shopName)=requested.matchValue OR LOWER(s.displayName)=requested.matchValue OR EXISTS (
+          SELECT 1 FROM sales_shop_aliases a WHERE a.shopId=s.id AND LOWER(a.rawName)=requested.matchValue
+        )`).all(...params);
+  });
+  populateUniqueResults(cache.shops, requests, rows);
+}
+
+function prefetchLinks(database, items, cache) {
+  const requests = missingRequests(items, cache.links, (item) => {
+    const data = item.normalized || {};
+    const shop = cache.shops.get(text(data.shopName).toLowerCase())?.row;
+    if (!shop || !text(data.platformGoodsId)) return null;
+    return { cacheKey: `${shop.id}|${data.platformGoodsId}`, shopId: shop.id, platformGoodsId: data.platformGoodsId };
+  });
+  const rows = queryInChunks(database, requests, 3, (connection, chunk) => {
+    const values = chunk.map(() => "(?,?,?)").join(",");
+    const params = chunk.flatMap((request) => [request.cacheKey, request.shopId, request.platformGoodsId]);
+    return connection.prepare(`WITH requested(cacheKey,shopId,platformGoodsId) AS (VALUES ${values})
+      SELECT requested.cacheKey,l.id,l.title FROM requested
+      JOIN sales_links l ON l.shopId=requested.shopId AND l.platformGoodsId=requested.platformGoodsId`).all(...params);
+  });
+  populateUniqueResults(cache.links, requests, rows);
+}
+
+function prefetchPlatformSkus(database, items, cache) {
+  const requests = missingRequests(items, cache.skus, (item) => {
+    const data = item.normalized || {};
+    const shop = cache.shops.get(text(data.shopName).toLowerCase())?.row;
+    const link = shop ? cache.links.get(`${shop.id}|${data.platformGoodsId}`)?.row : null;
+    if (!link || !text(data.platformSkuId)) return null;
+    return { cacheKey: `${link.id}|${data.platformSkuId}`, salesLinkId: link.id, platformSkuId: data.platformSkuId };
+  });
+  const rows = queryInChunks(database, requests, 3, (connection, chunk) => {
+    const values = chunk.map(() => "(?,?,?)").join(",");
+    const params = chunk.flatMap((request) => [request.cacheKey, request.salesLinkId, request.platformSkuId]);
+    return connection.prepare(`WITH requested(cacheKey,salesLinkId,platformSkuId) AS (VALUES ${values})
+      SELECT requested.cacheKey,s.id,s.systemGoodsType FROM requested
+      JOIN sales_link_skus s ON s.salesLinkId=requested.salesLinkId AND s.platformSkuId=requested.platformSkuId`).all(...params);
+  });
+  populateUniqueResults(cache.skus, requests, rows);
+}
+
+function prefetchErpSkus(database, items, cache) {
+  const requests = missingRequests(items, cache.erpSkus, (item) => {
+    const raw = text(item.normalized?.merchantSkuCode);
+    return raw ? { cacheKey: raw.toLowerCase(), raw } : null;
+  });
+  const rows = queryInChunks(database, requests, 2, (connection, chunk) => {
+    const values = chunk.map(() => "(?,LOWER(?))").join(",");
+    const params = chunk.flatMap((request) => [request.cacheKey, request.raw]);
+    return connection.prepare(`WITH requested(cacheKey,merchantSkuCode) AS (VALUES ${values})
+      SELECT requested.cacheKey,s.id,s.merchantSkuCode FROM requested
+      JOIN erp_skus s ON LOWER(s.merchantSkuCode)=requested.merchantSkuCode`).all(...params);
+  });
+  populateUniqueResults(cache.erpSkus, requests, rows);
+}
+
+export function prefetchSalesDailyIdentityCache(database, items, cache = {}) {
+  const target = ensureIdentityCache(cache);
+  prefetchShops(database, items, target);
+  prefetchLinks(database, items, target);
+  prefetchPlatformSkus(database, items, target);
+  prefetchErpSkus(database, items, target);
+  return target;
+}
+
 function identifyRow(database, item, cache = null) {
   const data = item.normalized;
   const missing = [["shopName", "店铺"], ["platformGoodsId", "平台货品ID"], ["platformSkuId", "平台规格ID"], ["merchantSkuCode", "商家编码"], ["saleDate", "日期"]].filter(([field]) => !text(data[field])).map(([, label]) => label);
@@ -173,12 +289,17 @@ export function classifySalesDailyPreviewRows(database, items, {
   onRelationQuery = null,
   onUsageQuery = null,
 } = {}) {
-  if (cache && ignoreExistingDailyFacts) cache.ignoreExistingDailyFacts = true;
-  const prepared = items.map((item) => {
+  const normalizedItems = items.map((item) => {
     const standard = item.standard || normalizeSalesDetailLine(item.raw, { sourceRowNumber: item.rowNumber });
     const normalized = item.normalized || normalizedFromStandard(standard);
+    return { ...item, standard, normalized };
+  });
+  const identityCache = prefetchSalesDailyIdentityCache(database, normalizedItems.filter((item) => item.standard.normalizationStatus === "valid"), cache || {});
+  if (ignoreExistingDailyFacts) identityCache.ignoreExistingDailyFacts = true;
+  const prepared = normalizedItems.map((item) => {
+    const { standard, normalized } = item;
     if (standard.normalizationStatus !== "valid") return { ...item, standard, normalized, result: null };
-    return { ...item, standard, normalized, result: identifyRow(database, { ...item, normalized }, cache) };
+    return { ...item, standard, normalized, result: identifyRow(database, { ...item, normalized }, identityCache) };
   });
   const identityReady = applyDuplicateIdentityRules(prepared.filter((item) => item.result));
   const identityByRow = new Map(identityReady.map((item) => [item.rowNumber, item]));

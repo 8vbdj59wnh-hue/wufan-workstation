@@ -5,6 +5,12 @@ const parseJson = (value, fallback = {}) => { try { return JSON.parse(value || "
 const number = (value) => Number(value || 0);
 const qualityCacheByDatabase = new WeakMap();
 
+export function readSalesDailyQualityCacheRevision(database) {
+  const dataVersion = Number(database.pragma("data_version", { simple: true }) || 0);
+  const totalChanges = Number(database.prepare("SELECT total_changes() value").get().value || 0);
+  return `${dataVersion}:${totalChanges}`;
+}
+
 function metric() { return { rows: 0, salesAmount: 0, profitAmount: 0 }; }
 function add(target, data = {}) {
   target.rows += 1;
@@ -35,8 +41,12 @@ export function querySalesDailyDataQuality(options = {}) {
   const batch = latestCommittedBatch(database);
   if (!batch) return { capability: "QuerySalesDailyDataQuality", contractVersion: "1.0", hasData: false, health: { status: "error", reasons: ["NO_COMMITTED_BATCH"] } };
   const cacheTtlMs = Math.max(0, Number(options.cacheTtlMs || 0));
+  // data_version catches writes from other connections; total_changes catches
+  // writes made through this long-lived connection. Together they prevent a
+  // relation correction in the same batch from waiting for the TTL to expire.
+  const cacheRevision = readSalesDailyQualityCacheRevision(database);
   const cached = qualityCacheByDatabase.get(database);
-  if (cacheTtlMs > 0 && cached?.batchId === batch.id && Date.now() - cached.createdAt < cacheTtlMs) return cached.value;
+  if (cacheTtlMs > 0 && cached?.batchId === batch.id && cached.cacheRevision === cacheRevision && Date.now() - cached.createdAt < cacheTtlMs) return cached.value;
   const summary = parseJson(batch.previewSummaryJson);
   const factCommit = commitAudit(summary) || {};
   const storedRows = database.prepare("SELECT rowNumber,rawDataJson FROM connection_import_rows WHERE batchId=? ORDER BY rowNumber").all(batch.id)
@@ -92,7 +102,7 @@ export function querySalesDailyDataQuality(options = {}) {
     health: { status: healthStatus, reasons, exceptionCount, lastUpdatedAt: factCommit.confirmedAt || batch.completedAt || batch.updatedAt },
     source: "sales_daily_batch_and_facts_v2",
   };
-  if (cacheTtlMs > 0) qualityCacheByDatabase.set(database, { batchId: batch.id, createdAt: Date.now(), value: result });
+  if (cacheTtlMs > 0) qualityCacheByDatabase.set(database, { batchId: batch.id, cacheRevision, createdAt: Date.now(), value: result });
   return result;
 }
 
