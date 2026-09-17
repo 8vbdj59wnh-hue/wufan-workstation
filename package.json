@@ -37,7 +37,8 @@
     "check:wufan-workstation-plugin": "node --check server/assistantDeviceSessionService.js && node --check server/contentCenterRouter.js && node --check server/contentCenter/store.mjs && node --check server/keyActionLaunchService.js && node --check plugins/wufan-workstation-readonly/server/index.mjs && node --check plugins/wufan-workstation-readonly/setup/login-device.mjs && node --test tests/contentCenter/assistantPlanning.test.mjs && node --test tests/wufanWorkstationReadonlyMcp.test.js && node --test tests/assistantDeviceSessions.test.js",
     "package:wufan-workstation-plugin": "node scripts/build-wufan-workstation-plugin-package.mjs",
     "check:content-center": "node --check server/contentCenterRouter.js && node --check server/contentCenter/store.mjs && node --check public/content-center/bridge.js && node --check public/content-center/app.js && node --check public/content-center/company.js && node --check public/content-center/requests.js && node --check src/pages/contentCenterPage.js && node --check scripts/migrate-content-center.mjs && node --check server/contentCenterCalendar.js && node --check server/contentCenterIntegration.js && node --check public/content-center/workstation.js && node --check src/contentNoteTemplateSelector.js && node --check src/goalsPage.js && node --check src/workFormEditor.js && node --check src/actionProductRelations.js",
-    "test:content-center": "node --test tests/contentCenter/*.test.mjs"
+    "test:content-center": "node --test tests/contentCenter/*.test.mjs",
+    "benchmark:hotspots": "node scripts/benchmark-workstation-hotspots.js"
   },
   "dependencies": {
     "better-sqlite3": "^12.11.1",
