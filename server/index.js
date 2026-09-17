@@ -4567,7 +4567,7 @@ app.post("/api/products/platform-skus/:id/mark", requirePermission("skus.manage"
 app.post("/api/process-instances/:id/cancel", requirePermission("keyActions.manage"), (request, response) => {
   try {
     cancelProcessInstance(request.params.id, request.body?.cancelReason ?? "");
-    response.json({ success: true, data: filterDataByScope(readAllData(), request.user) });
+    response.json({ success: true, data: readLaunchMutationSnapshot({ processInstanceIds: [request.params.id] }, request.user) });
   } catch (error) {
     console.error("取消关键行动失败", error);
     response.status(400).json({ success: false, message: error.message || "取消关键行动失败，请检查本地数据库服务。" });
@@ -4581,7 +4581,7 @@ app.post("/api/process-instances/:id/start", requirePermission("keyActions.manag
       isAdmin: isAdminUser(request.user),
       dueDate: request.body?.dueDate,
     });
-    response.json({ success: true, data: filterDataByScope(readAllData(), request.user) });
+    response.json({ success: true, data: readLaunchMutationSnapshot({ processInstanceIds: [request.params.id] }, request.user) });
   } catch (error) {
     console.error("开始执行关键行动失败", error);
     const message = error.message || "开始执行关键行动失败，请检查本地数据库服务。";
@@ -4591,8 +4591,8 @@ app.post("/api/process-instances/:id/start", requirePermission("keyActions.manag
 
 app.put("/api/process-instances/:id/products", requirePermission("keyActions.manage"), requirePermission("products.view"), (request, response) => {
   try {
-    const instance = readAllData().processInstances.find((item) => item.id === request.params.id);
-    if (instance === undefined) {
+    const instance = readRouteResourceItem("process-instances", request.params.id);
+    if (instance === null) {
       response.status(404).json({ success: false, message: "未找到该关键行动。" });
       return;
     }
@@ -4601,7 +4601,7 @@ app.put("/api/process-instances/:id/products", requirePermission("keyActions.man
       return;
     }
     replaceActionProducts(instance.id, request.body?.productIds ?? []);
-    response.json({ success: true, data: filterDataByScope(readAllData(), request.user) });
+    response.json({ success: true, data: readLaunchMutationSnapshot({ processInstanceIds: [instance.id] }, request.user) });
   } catch (error) {
     console.error("关键行动关联产品保存失败", error);
     response.status(400).json({ success: false, message: error.message || "关联产品保存失败。" });
@@ -4615,7 +4615,7 @@ app.post("/api/process-instances/batch-link-templates", requirePermission("keyAc
       response.status(400).json({ success: false, message: "请选择需要关联模板的关键行动。" });
       return;
     }
-    const instanceMap = new Map(readAllData().processInstances.map((instance) => [instance.id, instance]));
+    const instanceMap = new Map(readResourceItems("processInstances", processInstanceIds).map((instance) => [instance.id, instance]));
     const instances = processInstanceIds.map((id) => instanceMap.get(id));
     if (instances.some((instance) => instance === undefined)) {
       response.status(404).json({ success: false, message: "存在未找到的关键行动。" });
@@ -4629,7 +4629,7 @@ app.post("/api/process-instances/batch-link-templates", requirePermission("keyAc
       processInstanceIds,
       templateIds: request.body?.templateIds,
     });
-    response.json({ success: true, result, data: filterDataByScope(readAllData(), request.user) });
+    response.json({ success: true, result, data: readLaunchMutationSnapshot({ processInstanceIds }, request.user) });
   } catch (error) {
     console.error("批量关联关键行动模板失败", error);
     response.status(400).json({ success: false, message: error.message || "批量关联模板失败，请检查本地数据库服务。" });
@@ -4774,13 +4774,46 @@ app.post("/api/key-actions/launch", requirePermission("keyActions.launch"), (req
   }
 });
 
+function readLaunchMutationSnapshot({ workPlanIds = [], processInstanceIds = [] }, user) {
+  const normalizedInstanceIds = [...new Set(processInstanceIds.filter(Boolean))];
+  const relatedWorkPlanIds = normalizedInstanceIds.length > 0
+    ? getDatabase().prepare(`SELECT id FROM work_plans WHERE processInstanceId IN (${normalizedInstanceIds.map(() => "?").join(",")})`)
+      .all(...normalizedInstanceIds).map((item) => item.id)
+    : [];
+  const normalizedWorkPlanIds = [...new Set([...workPlanIds, ...relatedWorkPlanIds].filter(Boolean))];
+  const workPlans = readResourceItems("workPlans", normalizedWorkPlanIds);
+  const processInstances = readResourceItems("processInstances", normalizedInstanceIds);
+  let tasks = [];
+  let actionProducts = [];
+  if (normalizedInstanceIds.length > 0) {
+    const placeholders = normalizedInstanceIds.map(() => "?").join(",");
+    const taskIds = getDatabase().prepare(`SELECT id FROM tasks WHERE processInstanceId IN (${placeholders}) ORDER BY createdAt,id`)
+      .all(...normalizedInstanceIds).map((item) => item.id);
+    const actionProductIds = getDatabase().prepare(`SELECT id FROM action_products WHERE actionId IN (${placeholders}) ORDER BY createdAt,id`)
+      .all(...normalizedInstanceIds).map((item) => item.id);
+    tasks = readResourceItems("tasks", taskIds);
+    actionProducts = readResourceItems("actionProducts", actionProductIds);
+  }
+  const scopedWorkPlans = filterByScope(workPlans, user);
+  const scopedInstances = filterByScope(processInstances, user);
+  const scopedTasks = filterTasksByScope(tasks, user, { processInstances });
+  const visibleInstanceIds = new Set(scopedInstances.map((item) => item.id));
+  return applyPermissionResourceBoundary({
+    mutationScope: { processInstanceIds: normalizedInstanceIds, workPlanIds: normalizedWorkPlanIds },
+    workPlans: scopedWorkPlans,
+    processInstances: scopedInstances,
+    tasks: scopedTasks,
+    actionProducts: actionProducts.filter((item) => visibleInstanceIds.has(item.actionId)),
+  }, user);
+}
+
 app.post("/api/work-plans/:id/launch", requirePermission("keyActions.launch"), (request, response) => {
   try {
     if ((request.body?.productIds ?? []).length > 0 && !hasPermission(request.user, "products.view")) {
       response.status(403).json({ success: false, message: "你没有权限关联产品。" });
       return;
     }
-    const existingWorkPlan = readAllData().workPlans.find((item) => item.id === request.params.id);
+    const existingWorkPlan = readRouteResourceItem("work-plans", request.params.id);
     if (
       rejectPausedRectificationLaunch(
         "work-plans",
@@ -4797,11 +4830,17 @@ app.post("/api/work-plans/:id/launch", requirePermission("keyActions.launch"), (
         existingWorkPlan?.taskTemplateId ?? "",
       )
     ) return;
-    launchWorkPlanWithProcess(request.params.id, {
+    const launched = launchWorkPlanWithProcess(request.params.id, {
       ...(request.body ?? {}),
       initiatorId: getUserPersonId(request.user),
     });
-    response.json({ success: true, data: filterDataByScope(readAllData(), request.user) });
+    response.json({
+      success: true,
+      data: readLaunchMutationSnapshot({
+        workPlanIds: [launched.workPlan.id],
+        processInstanceIds: [launched.instance.id],
+      }, request.user),
+    });
   } catch (error) {
     console.error("发起关键行动失败", error);
     response.status(400).json({ success: false, message: error.message || "发起关键行动失败，请检查本地数据库服务。" });
@@ -4836,7 +4875,15 @@ app.post("/api/work-plans/batch-launch", requirePermission("keyActions.launch"),
       )
     ) return;
     const results = batchLaunchWorkPlans(rows, { userId: getUserPersonId(request.user) });
-    response.json({ success: true, results, data: filterDataByScope(readAllData(), request.user) });
+    const successful = results.filter((item) => item.status === "success");
+    response.json({
+      success: true,
+      results,
+      data: readLaunchMutationSnapshot({
+        workPlanIds: successful.map((item) => item.workPlanId),
+        processInstanceIds: successful.map((item) => item.processInstanceId),
+      }, request.user),
+    });
   } catch (error) {
     console.error("批量发起发布内容笔记失败", error);
     response.status(400).json({ success: false, message: error.message || "批量发起失败，请检查本地数据库服务。" });

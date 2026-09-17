@@ -13,6 +13,7 @@ globalThis.window = {
 };
 
 const {
+  applyDataMutationSnapshot,
   applyDataSnapshot,
   ensureStoreOptionsLoaded,
   getStoreOptions,
@@ -38,6 +39,34 @@ test("partial module snapshots preserve undeclared state resources", () => {
 
   assert.deepEqual(state.goals, [{ id: "goal-partial", name: "独立目标模块数据" }]);
   assert.deepEqual(state.methodologies, existingMethodologies);
+});
+
+test("mutation snapshots replace only affected process resources", () => {
+  state.processInstances.splice(0, state.processInstances.length,
+    { id: "action-keep", status: "doing" },
+    { id: "action-change", status: "draft" });
+  state.tasks.splice(0, state.tasks.length,
+    { id: "task-keep", processInstanceId: "action-keep", status: "doing" },
+    { id: "task-old", processInstanceId: "action-change", status: "todo" });
+  state.workPlans.splice(0, state.workPlans.length,
+    { id: "plan-keep", processInstanceId: "action-keep", status: "launched" },
+    { id: "plan-change", processInstanceId: "action-change", status: "future" });
+  state.actionProducts.splice(0, state.actionProducts.length,
+    { id: "relation-keep", actionId: "action-keep", productId: "product-1" },
+    { id: "relation-old", actionId: "action-change", productId: "product-old" });
+
+  applyDataMutationSnapshot({
+    mutationScope: { processInstanceIds: ["action-change"], workPlanIds: ["plan-change"] },
+    processInstances: [{ id: "action-change", status: "running" }],
+    tasks: [{ id: "task-new", processInstanceId: "action-change", status: "doing" }],
+    workPlans: [{ id: "plan-change", processInstanceId: "action-change", status: "launched" }],
+    actionProducts: [],
+  });
+
+  assert.deepEqual(state.processInstances.map((item) => item.id), ["action-change", "action-keep"]);
+  assert.deepEqual(state.tasks.map((item) => item.id), ["task-new", "task-keep"]);
+  assert.deepEqual(state.workPlans.map((item) => item.id), ["plan-change", "plan-keep"]);
+  assert.deepEqual(state.actionProducts.map((item) => item.id), ["relation-keep"]);
 });
 
 test("action store options contain only valid active stores", () => {

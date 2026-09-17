@@ -387,6 +387,37 @@ export function applyDataSnapshot(data, { preserveMissingResources = false } = {
   ensureDefaultStandardWorkLibrary();
 }
 
+function replaceMutationScope(target, incoming, inScope) {
+  const incomingIds = new Set(incoming.map((item) => item.id).filter(Boolean));
+  replaceArray(target, [
+    ...incoming,
+    ...target.filter((item) => !incomingIds.has(item.id) && !inScope(item)),
+  ]);
+}
+
+export function applyDataMutationSnapshot(data = {}) {
+  const processInstanceIds = new Set(data.mutationScope?.processInstanceIds ?? []);
+  const workPlanIds = new Set(data.mutationScope?.workPlanIds ?? []);
+  isApplyingRemoteData = true;
+  try {
+    if (Array.isArray(data.processInstances)) {
+      replaceMutationScope(state.processInstances, data.processInstances, (item) => processInstanceIds.has(item.id));
+    }
+    if (Array.isArray(data.tasks)) {
+      replaceMutationScope(state.tasks, data.tasks, (item) => processInstanceIds.has(item.processInstanceId));
+    }
+    if (Array.isArray(data.workPlans)) {
+      replaceMutationScope(state.workPlans, data.workPlans.map((item) => normalizeWorkPlan(item)), (item) =>
+        workPlanIds.has(item.id) || processInstanceIds.has(item.processInstanceId));
+    }
+    if (Array.isArray(data.actionProducts)) {
+      replaceMutationScope(state.actionProducts, data.actionProducts, (item) => processInstanceIds.has(item.actionId));
+    }
+  } finally {
+    isApplyingRemoteData = false;
+  }
+}
+
 const loadedPersistentDataRoutes = new Set();
 
 export async function loadPersistentData({ includeTaskWaves = null, useCache = false } = {}) {
@@ -822,7 +853,7 @@ export async function cancelProcessInstance(instanceId, cancelReason = "") {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.message ?? "取消关键行动失败，请检查本地数据库服务。");
-  if (data.data !== undefined) applyDataSnapshot(data.data);
+  if (data.data !== undefined) applyDataMutationSnapshot(data.data);
   return data;
 }
 
@@ -837,7 +868,7 @@ export async function startProcessInstanceExecution(instanceId, { dueDate } = {}
   if (!response.ok || data.success !== true) {
     throw new Error(data.message ?? data.error ?? "开始执行关键行动失败，请检查本地数据库服务。");
   }
-  if (data.data !== undefined) applyDataSnapshot(data.data);
+  if (data.data !== undefined) applyDataMutationSnapshot(data.data);
   return data.data;
 }
 
@@ -851,7 +882,7 @@ export async function batchLinkActionTemplates(processInstanceIds, templateIds) 
   if (!response.ok || data.success !== true) {
     throw new Error(data.message ?? data.error ?? "批量关联模板失败，请检查本地数据库服务。");
   }
-  if (data.data !== undefined) applyDataSnapshot(data.data);
+  if (data.data !== undefined) applyDataMutationSnapshot(data.data);
   return data.result ?? null;
 }
 
@@ -3643,7 +3674,7 @@ export async function launchWorkPlanAsProcess(
     if (!response.ok || data.success !== true) {
       throw new Error(data.message ?? data.error ?? "发起关键行动失败，请检查本地数据库服务。");
     }
-    if (data.data !== undefined) applyDataSnapshot(data.data);
+    if (data.data !== undefined) applyDataMutationSnapshot(data.data);
     return { instance: launchedInstance, workPlan: launchedWorkPlan, tasks: generatedTasks };
   } catch (error) {
     state.processInstances = previousProcessInstances;
@@ -3661,7 +3692,7 @@ export async function updateActionProducts(processInstanceId, productIds = []) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.success !== true) throw new Error(data.message ?? data.error ?? "关联产品保存失败。");
-  if (data.data !== undefined) applyDataSnapshot(data.data);
+  if (data.data !== undefined) applyDataMutationSnapshot(data.data);
   return data;
 }
 
@@ -3760,7 +3791,7 @@ export async function batchLaunchWorkPlanDrafts(rows = []) {
   if (!response.ok || body.success !== true) {
     throw new Error(body.message ?? body.error ?? "批量发起关键行动失败。");
   }
-  if (body.data !== undefined) applyDataSnapshot(body.data);
+  if (body.data !== undefined) applyDataMutationSnapshot(body.data);
   return body;
 }
 
