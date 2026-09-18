@@ -1,3 +1,4 @@
+import { isContentNoteBodyField } from '../shared/contentNoteFields.js';
 import {
   advanceProcessAfterTaskDone,
   batchUpdateTaskStatus as batchUpdateTaskStatusResource,
@@ -492,6 +493,7 @@ function getSortedFormFields(template) {
   if (template?.id === "task-template-publish-content-note" || template?.taskTemplateId === "task-template-publish-content-note" || template?.name === "发布内容笔记") {
     sourceFields.forEach((field) => {
       if (field.key === "publishDate") field.type = "datetime_hour";
+      if (isContentNoteBodyField(field)) field.required = false;
     });
     [
       { id: "content-note-product-name", label: "对应产品", key: "productName", type: "text", required: false, placeholder: "请输入对应产品", options: [], showInList: true, sortOrder: 7 },

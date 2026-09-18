@@ -14,7 +14,7 @@ test('内容需求补齐后显式存入内容候选，保留身份和关联资�
   assert.equal(contentStageOf(candidate),'candidate');assert.equal(candidate.id,request.id);
   assert.equal(candidate.notes,request.notes);assert.deepEqual(candidate.workstationProductIds,['sku-test']);
   assert.equal(store.list().length,1);
-  assert.throws(()=>store.save({revision:candidate.revision,copyText:''},candidate.id),/补齐/);
+  const empty=store.save({revision:candidate.revision,copyText:''},candidate.id);assert.equal(empty.copyText,'');assert.equal(contentStageOf(empty),'candidate');
  }finally{store.close();}
 });
 test('历史不完整内容归入需求，完整内容归入候选，读取不改写记录',()=>{

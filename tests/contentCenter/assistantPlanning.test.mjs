@@ -95,7 +95,7 @@ test('已有需求按ID回填20篇策划：保留需求和关联，幂等与整�
  for(const extra of [{notes:'覆盖需求'},{workstationProductIds:[]},{preferredDate:'2026-09-22'},{account:'other'}])assert.throws(()=>saveContentRequestPlans(store,integration,{}, {idempotencyKey:'plan-forbidden',items:[{...row(blank),...extra}]}),/仅允许策划字段/);
  assert.throws(()=>saveContentRequestPlans(store,integration,{}, {idempotencyKey:'plan-stale-1',items:[{...row(blank),revision:99}]}),/版本/);
  assert.throws(()=>saveContentRequestPlans(store,{progress:()=>({linked:true})},{}, {idempotencyKey:'plan-linked-1',items:[row(blank)]}),/关联行动/);
- assert.throws(()=>saveContentRequestPlans(store,integration,{}, {idempotencyKey:'plan-empty-1',items:[{...row(blank),copyText:''}]}),/不能为空/);
+ assert.throws(()=>saveContentRequestPlans(store,integration,{}, {idempotencyKey:'plan-empty-1',items:[{...row(blank),title:''}]}),/不能为空/);
 });
 
 
@@ -113,7 +113,7 @@ test('受控修订仅替换标题正文，保留其他字段并持久记录前�
  const fresh=make();assert.throws(()=>reviseContentRequestCopy(store,integration,user,{idempotencyKey:'copy-stale-batch',items:[item(fresh),item(before)]}),/版本/);assert.equal(store.get(fresh.id).title,'旧标题');
  for(const extra of [{notes:'改需求'},{preferredTime:'20:30'},{workstationProductIds:[]},{hashtags:'#改话题'}])assert.throws(()=>reviseContentRequestCopy(store,integration,user,{idempotencyKey:'copy-forbidden',items:[{...item(fresh),...extra}]}),/仅允许/);
  assert.throws(()=>reviseContentRequestCopy(store,{progress:()=>({linked:true})},user,{idempotencyKey:'copy-linked-1',items:[item(fresh)]}),/关联行动/);
- assert.throws(()=>reviseContentRequestCopy(store,integration,user,{idempotencyKey:'copy-empty-1',items:[{...item(fresh),copyText:''}]}),/不能为空/);
+ assert.throws(()=>reviseContentRequestCopy(store,integration,user,{idempotencyKey:'copy-empty-1',items:[{...item(fresh),title:''}]}),/不能为空/);
  const blank=store.createRequests([{account:a.id,column:a.columns[0].name,notes:'原需求',noteFormat:'图文'}])[0];assert.throws(()=>reviseContentRequestCopy(store,integration,user,{idempotencyKey:'copy-no-plan-1',items:[item(blank)]}),/没有完整策划/);
 });
 

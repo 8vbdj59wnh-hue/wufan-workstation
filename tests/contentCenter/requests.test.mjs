@@ -16,7 +16,7 @@ test('批量需求：3 行、原子校验、空文案、状态与版本保护、
  let rows=store.createRequests([{...requirement,productIds:[p.id],preferredDate:'2026-09-23',preferredTime:'08:00'},{...requirement,preferredDate:'2026-10-08'},requirement]);
  assert.equal(rows.length,3);assert.equal(store.listRequests('待生成').length,3);for(const n of rows){assert.equal(n.title,'');assert.equal(n.copyText,'');assert.equal(n.pool,'candidate');}
  const id=rows[0].id;assert.deepEqual(store.getRequest(id),rows[0]);
- assert.throws(()=>store.scheduleRequest(id,{revision:1}),/先完成/);assert.throws(()=>store.updateRequest(id,{revision:1,generationStatus:'已生成'}),/标题、正文和话题/);
+ assert.throws(()=>store.scheduleRequest(id,{revision:1}),/先完成/);assert.throws(()=>store.updateRequest(id,{revision:1,generationStatus:'已生成'}),/标题、已确认的正文选择和话题/);
  let n=store.updateRequest(id,{revision:1,...generated});assert.equal(n.revision,2);assert.equal(store.listRequests('待生成').length,2);
  assert.throws(()=>store.updateRequest(id,{revision:1,title:'旧版本'}),e=>e.status===409);
  n=store.updateRequest(id,{revision:n.revision,notes:'调整为窗边场景'});assert.equal(n.generationStatus,'需调整');

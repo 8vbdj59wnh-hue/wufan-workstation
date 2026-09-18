@@ -63,3 +63,12 @@ test('发起预填包含笔记正文、话题、产品文字和素材说明',()=
  assert.equal(fields.remark,'需求说明\n\n画面脚本：\n封面构图\n\n素材需求：\n产品照片');
  db.close();
 });
+
+test('无正文候选可预填发布表单，标题形式时间要求仍保留（不发起行动）',()=>{
+ const {db,integration,user,note}=setup();
+ const empty={...note,pool:'candidate',contentStage:'candidate',copyText:'',hashtags:'#花瓶'};
+ assert.equal(integration.prefill(user,empty).customFields.contentText,'');
+ for(const field of ['title','noteFormat','date','time'])assert.throws(()=>integration.prefill(user,{...empty,[field]:''}),/补齐/);
+ assert.throws(()=>integration.prefill(user,{...empty,contentStage:'request'}),/候选/);
+ assert.equal(db.prepare('SELECT COUNT(*) n FROM launched').get().n,0);db.close();
+});

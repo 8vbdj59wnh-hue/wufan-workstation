@@ -52,7 +52,7 @@ export async function initializeWorkstation() {
     } catch(error) { if(host.isConnected)host.textContent=error.message; }
   };
   window.launchContentPlanning = async note => {
-    if(!String(note.title||'').trim()||!String(note.copyText||'').trim())throw Error('请先填写策划标题和文案');
+    if(!String(note.title||'').trim()||contentStageOf(note)!=='candidate')throw Error('请先保存策划标题，并填写正文或选择不设正文');
     const prefill=await read('/api/notes/'+encodeURIComponent(note.id)+'/launch-preview');
     if(prefill.existing){window.parent.sessionStorage.setItem('selectedProcessInstanceId',prefill.existing.actionId);window.parent.location.hash='process-progress';return;}
     window.parent.sessionStorage.setItem('goalTaskPrefill',JSON.stringify({...prefill,publishingAccounts:optionsCache.publishingAccounts}));

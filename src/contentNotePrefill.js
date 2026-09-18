@@ -15,3 +15,5 @@ export function mapContentNotePrefill(fields, values = {}) {
   }
   return result;
 }
+
+export { isContentNoteBodyField } from '../shared/contentNoteFields.js';

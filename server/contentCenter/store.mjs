@@ -14,6 +14,13 @@ const boolFields = ['missingMaterial','confirmedImport'];
 const defaults = Object.fromEntries(textFields.map(k => [k,'']));
 Object.assign(defaults,{account:'1',column:catalog.accounts[0].columns[0].name,priority:'中',copyStatus:'未开始',status:'草稿',pool:'schedule',noteFormat:'',templateId:'',productIds:[],images:[],missingMaterial:false,confirmedImport:false});
 export class AppError extends Error { constructor(message, status=400){super(message);this.status=status;} }
+// Empty string is an explicit body choice; absence and whitespace are not.
+export function validateCopyText(value) {
+  if(typeof value!=='string')throw new AppError('必须明确传入字符串 copyText；不设正文请传入空字符串');
+  if(value.length>20000)throw new AppError('正文过长');
+  if(value!==''&&!value.trim())throw new AppError('正文不能仅含空白；不设正文请明确传入空字符串');
+  return value.trim();
+}
 export function createStore(filename, { accountRegistryPath } = {}) {
   const runtimeCatalog=structuredClone(catalog);
   if (filename !== ':memory:') mkdirSync(dirname(filename),{recursive:true});
@@ -222,8 +229,11 @@ export function createStore(filename, { accountRegistryPath } = {}) {
     if(!old && input.status==='候选') Object.assign(n,{account:'',column:'',date:'',time:'',pool:'candidate'});
     for(const k of textFields) if(Object.hasOwn(input,k)) {
       if(typeof input[k]!=='string' || input[k].length>20000) throw new AppError('字段格式不正确或过长：'+k);
-      n[k]=input[k].trim();
+      n[k]=k==='copyText'?validateCopyText(input[k]):input[k].trim();
     }
+    // Preserve the already-established candidate stage when clearing legacy bodies.
+    if(old && !old.contentStage && contentStageOf(old)==='candidate' && Object.hasOwn(input,'copyText') && n.copyText==='')n.contentStage='candidate';
+    const bodyConfirmed=typeof n.copyText==='string' && (Boolean(n.copyText.trim()) || Object.hasOwn(input,'copyText') || old?.contentStage==='candidate' || old?.generationStatus==='已生成');
     if(Object.hasOwn(input,'productCodes')){n.productCodes=[...new Set(n.productCodes.split(/[、,，;；\s]+/).filter(Boolean))].join('、');if(old&&n.productCodes!==old.productCodes)n.productIds=[];}
     for(const k of boolFields) if(Object.hasOwn(input,k)) {
       if(typeof input[k]!=='boolean') throw new AppError('字段需要是勾选值：'+k);
@@ -236,7 +246,7 @@ export function createStore(filename, { accountRegistryPath } = {}) {
       if(!old && !n.generationStatus)n.generationStatus='待生成';
       if(!['待生成','已生成','需调整'].includes(n.generationStatus))throw new AppError('生成状态不正确');
       if(old?.generationStatus==='已生成' && !Object.hasOwn(input,'generationStatus') && ['account','column','productIds','productCodes','noteFormat','notes'].some(k=>Object.hasOwn(input,k)&&JSON.stringify(input[k])!==JSON.stringify(old[k])))n.generationStatus='需调整';
-      if(n.generationStatus==='已生成' && (!n.title||!n.copyText||!n.hashtags))throw new AppError('已生成需求必须有标题、正文和话题');
+      if(n.generationStatus==='已生成' && (!n.title||!bodyConfirmed||!n.hashtags))throw new AppError('已生成需求必须有标题、已确认的正文选择和话题');
       if(n.preferredDate && (!/^\d{4}-\d{2}-\d{2}$/.test(n.preferredDate)||!Number.isFinite(Date.parse(n.preferredDate))||new Date(n.preferredDate).toISOString().slice(0,10)!==n.preferredDate))throw new AppError('期望日期不正确');
       if(n.preferredTime && (!n.preferredDate||!/^([01]\d|2[0-3]):[0-5]\d$/.test(n.preferredTime)))throw new AppError('请填写有效的期望日期和时间');
       if(old?.pool==='candidate'&&n.pool==='schedule'){
@@ -246,7 +256,7 @@ export function createStore(filename, { accountRegistryPath } = {}) {
       }
     }
     if(n.contentStage && !['request','candidate'].includes(n.contentStage)) throw new AppError('内容阶段不正确');
-    if(n.contentStage==='candidate' && (!n.title||!n.copyText||!n.noteFormat)) throw new AppError('请补齐标题、正文和笔记形式，再存入内容候选');
+    if(n.contentStage==='candidate' && (!n.title||!bodyConfirmed||!n.noteFormat)) throw new AppError('请补齐标题和笔记形式，并填写正文或明确选择不设正文，再存入策划候选');
     if(n.pool==='schedule' && n.contentStage==='request') throw new AppError('请先将完整内容存入内容候选，再加入排期');
     const candidate=n.pool==='candidate';
     if(!['candidate','schedule'].includes(n.pool))throw new AppError('内容归属不正确');
@@ -261,9 +271,10 @@ export function createStore(filename, { accountRegistryPath } = {}) {
     if(candidate)n.status='草稿';
     if(!statuses.includes(n.status))throw new AppError('状态不正确');
     if(!n.title&&!(candidate&&n.contentStage==='request'&&n.notes)&&!(request&&candidate&&n.generationStatus!=='已生成'))throw new AppError('请填写标题');
-    for(const [key,label] of [['copyText','正文'],['date','排期日期'],['time','排期时间']]) {
+    for(const [key,label] of [['date','排期日期'],['time','排期时间']]) {
       if(!candidate && (!old || old.pool==='candidate' || Object.hasOwn(input,key)) && !n[key])throw new AppError('请填写'+label);
     }
+    if(!candidate && (!old || old.pool==='candidate' || Object.hasOwn(input,'copyText')) && !bodyConfirmed)throw new AppError('请填写正文或明确选择不设正文');
     if(candidate){n.date='';n.time='';n.status='草稿';}
     if(!['','图文','视频'].includes(n.noteFormat))throw new AppError('笔记形式不正确');
     if(Object.hasOwn(input,'workstationProductIds')) {
@@ -361,12 +372,12 @@ export function createStore(filename, { accountRegistryPath } = {}) {
         const old=getRequest(item.id);
         if(!Number.isInteger(item.revision)||item.revision!==old.revision)throw new AppError(`需求 ${item.id} 版本已变化，请重新读取`,409);
         if(mode==='copy'){
-          if(old.pool!=='candidate'||old.status!=='草稿'||contentStageOf(old)!=='candidate'||!old.title?.trim()||!old.copyText?.trim()||old.executionNumber||old.publishUrl||old.date||old.time)throw new AppError(`需求 ${item.id} 没有完整策划或已进入执行流程，不能修订`,409);
+          if(old.pool!=='candidate'||old.status!=='草稿'||contentStageOf(old)!=='candidate'||!old.title?.trim()||typeof old.copyText!=='string'||old.executionNumber||old.publishUrl||old.date||old.time)throw new AppError(`需求 ${item.id} 没有完整策划或已进入执行流程，不能修订`,409);
           const saved=save({revision:item.revision,title:item.title,copyText:item.copyText},old.id);
           return {...saved,copyRevisionAudit:{actorId:item.actorId,previous:{revision:old.revision,title:old.title,copyText:old.copyText},updated:{revision:saved.revision,title:saved.title,copyText:saved.copyText}}};
         }
         if(mode==='topics'){
-          if(old.pool!=='candidate'||old.status!=='草稿'||contentStageOf(old)!=='candidate'||!old.title?.trim()||!old.copyText?.trim()||old.executionNumber||old.publishUrl||old.date||old.time)throw new AppError(`需求 ${item.id} 没有完整策划或已进入执行流程，不能修订`,409);
+          if(old.pool!=='candidate'||old.status!=='草稿'||contentStageOf(old)!=='candidate'||!old.title?.trim()||typeof old.copyText!=='string'||old.executionNumber||old.publishUrl||old.date||old.time)throw new AppError(`需求 ${item.id} 没有完整策划或已进入执行流程，不能修订`,409);
           const saved=save({revision:item.revision,hashtags:item.hashtags},old.id);
           return {...saved,topicsRevisionAudit:{actorId:item.actorId,previous:{revision:old.revision,hashtags:old.hashtags},updated:{revision:saved.revision,hashtags:saved.hashtags}}};
         }
@@ -374,7 +385,7 @@ export function createStore(filename, { accountRegistryPath } = {}) {
           const planningFields=['title','copyText','hashtags','imageScript','materialNeeds'];
           if(old.pool!=='candidate'||old.status!=='草稿'||contentStageOf(old)!=='request'||old.generationStatus!=='待生成'||!String(old.notes||'').trim()||planningFields.some(k=>String(old[k]||'').trim())||old.executionNumber||old.publishUrl||old.date||old.time)throw new AppError(`需求 ${item.id} 已有策划、未填写需求或已进入执行流程，不能回填`,409);
           if(!old.noteFormat)throw new AppError(`需求 ${item.id} 尚未选择内容形式`,409);
-          return save({revision:item.revision,...Object.fromEntries(planningFields.map(k=>[k,item[k]||''])),contentStage:'candidate'},old.id);
+          return save({revision:item.revision,...Object.fromEntries(planningFields.map(k=>[k,k==='copyText'?validateCopyText(item[k]):item[k]||''])),contentStage:'candidate'},old.id);
         }
         const textFields=['notes','title','copyText','hashtags','topic','initialTitle','materialSource','materialNeeds','imageScript','productCodes','workstationTemplateId','templateId','executionNumber','executionNotes','publishUrl','date','time'];
         const arrays=['workstationProductIds','productIds','images'];

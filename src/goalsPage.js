@@ -1,4 +1,4 @@
-import { mapContentNotePrefill } from './contentNotePrefill.js';
+import { mapContentNotePrefill, isContentNoteBodyField } from './contentNotePrefill.js';
 import { getPublishContentNoteTemplates, renderContentNoteTemplateSelector, bindContentNoteTemplateSelectors } from "./contentNoteTemplateSelector.js";
 import {
   authFetch, apiBaseUrl, prepareWorkPlanLaunchPayload,
@@ -306,6 +306,7 @@ function getSortedFormFields(template) {
   if (isContentNoteTemplate(template)) {
     fields.forEach((field) => {
       if (field.key === "publishDate") field.type = "datetime_hour";
+      if (isContentNoteBodyField(field)) field.required = false;
     });
     contentNoteRequiredFields.forEach((field) => {
       if (!fields.some((item) => item.key === field.key)) fields.push(field);
@@ -314,7 +315,7 @@ function getSortedFormFields(template) {
   if (modalState?.contentCenterSource && isContentNoteTemplate(template)) fields.forEach(field => {
     if (field.key === 'account') { field.accountIdentity = 'id'; field.accountOptions = modalState.publishingAccounts || state.publishingAccounts; }
     if (field.key === 'publishDate') field.preciseDateTime = true;
-    if (['purpose','audience','contentText'].includes(field.key)) field.required = false;
+    if (['purpose','audience'].includes(field.key) || isContentNoteBodyField(field)) field.required = false;
   });
   return fields.sort((left, right) => left.sortOrder - right.sortOrder);
 }

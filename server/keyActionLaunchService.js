@@ -1,3 +1,4 @@
+import { isContentNoteBodyField } from '../shared/contentNoteFields.js';
 import crypto from "node:crypto";
 import { getDatabase, launchWorkPlanWithProcess } from "./db.js";
 
@@ -51,7 +52,7 @@ function readFormFields(database, taskTemplate) {
     ORDER BY COALESCE(updatedAt,createdAt,'') DESC,id DESC LIMIT 1`).get(taskTemplate.id);
   const latest = parseJson(row?.formSchema, {})?.fields;
   const source = Array.isArray(latest) && latest.length ? latest : parseJson(taskTemplate.formFields, []);
-  return (Array.isArray(source) ? source : []).map(normalizeField).sort((a, b) => a.sortOrder - b.sortOrder);
+  return (Array.isArray(source) ? source : []).map(normalizeField).map(field => taskTemplate.id === 'task-template-publish-content-note' && isContentNoteBodyField(field) ? {...field,required:false} : field).sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
 function isEmpty(value) {

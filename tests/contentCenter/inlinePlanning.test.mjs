@@ -21,6 +21,6 @@ test('同一行逐步保存策划，保持需求身份和筛选可见，撤空�
  assert.equal(vm.runInContext('filtered().length',context),1);
  vm.runInContext("requestDrafts.set(savedId,{revision:notes[0].revision,patch:{copyText:''}})",context);
  const edited=await vm.runInContext('saveRequestRow(savedId)',context);
- assert.equal(edited.contentStage,'request');assert.deepEqual(edited.workstationProductIds,['sku']);
+ assert.equal(edited.contentStage,'candidate');assert.equal(edited.copyText,'');assert.deepEqual(edited.workstationProductIds,['sku']);
  store.close();
 });

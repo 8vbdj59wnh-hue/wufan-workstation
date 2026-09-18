@@ -2,7 +2,7 @@ import express from 'express';
 import Database from 'better-sqlite3';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { createStore, statuses, priorities, copyStatuses, AppError } from './contentCenter/store.mjs';
+import { createStore, statuses, priorities, copyStatuses, AppError, validateCopyText } from './contentCenter/store.mjs';
 
 export function matchContentProductCodes(database, input) {
   const codes = [...new Set(String(input ?? '').split(/[、，,\n]+/).map(code => code.trim()).filter(Boolean))];
@@ -139,9 +139,9 @@ export function saveContentRequestPlans(store,integration,user,input={}){
     const result={id:item.id,revision:item.revision};
     for(const [field,max] of Object.entries({title:500,copyText:20000,hashtags:2000,imageScript:20000,materialNeeds:20000})){
       if(item[field]!==undefined&&typeof item[field]!=='string')throw new AppError(`第 ${index+1} 条 ${field} 必须为文字`);
-      result[field]=cleanPlanningText(item[field],field,max);
+      result[field]=field==='copyText'?validateCopyText(item[field]):cleanPlanningText(item[field],field,max);
     }
-    if(!result.title||!result.copyText)throw new AppError('策划标题和正文不能为空');
+    if(!result.title)throw new AppError('策划标题不能为空');
     return result;
   });
   return store.fillPlanningBatch(items,input.idempotencyKey);
@@ -152,8 +152,8 @@ export function reviseContentRequestCopy(store,integration,user,input={}){
   const items=input.items.map((item,index)=>{
     if(!item||typeof item!=='object'||Array.isArray(item)||Object.keys(item).some(k=>!['id','revision','title','copyText'].includes(k))||typeof item.id!=='string'||!item.id||item.id.length>120||!Number.isInteger(item.revision)||item.revision<1)throw new AppError(`第 ${index+1} 条仅允许原需求ID、版本、标题和正文`);
     if(typeof item.title!=='string'||typeof item.copyText!=='string')throw new AppError('标题和正文必须为文字');
-    const title=cleanPlanningText(item.title,'标题',500),copyText=cleanPlanningText(item.copyText,'正文',20000);
-    if(!title||!copyText)throw new AppError('标题和正文不能为空');
+    const title=cleanPlanningText(item.title,'标题',500),copyText=validateCopyText(item.copyText);
+    if(!title)throw new AppError('标题不能为空');
     const old=store.getRequest(item.id);
     if(integration?.progress?.(user,old)?.linked)throw new AppError(`需求 ${item.id} 已关联行动，不能修订`,409);
     return {id:item.id,revision:item.revision,title,copyText,actorId:String(user?.id||'')};
