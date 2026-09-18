@@ -55,3 +55,5 @@ JWT、设备续期凭证、密码、数据库文件和服务器凭据禁止放�
 已有策划标题正文修订：用户授权后使用 revise_request_copy，先读取原ID和最新revision，只更新完整标题及正文，保留其他字段。记录前后文案；冲突或已关联行动整批拒绝。
 
 已有策划话题更新：使用 revise_request_topics，按原ID和最新revision仅更新完整hashtags；记录前后话题，保留其他字段。更新插件后开启新会话。
+
+已有栏目提示/需求文字使用 expand_next_week_requests 受控扩写并添加确认产品；仅更新需求文字和产品，保留原账号、栏目、形式、模板与排期。成功后重新读取revision，再用 save_request_plans 回填空白策划。已有策划或行动整批拒绝。

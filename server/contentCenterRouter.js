@@ -129,6 +129,21 @@ export function fillContentPlanningRequests(store,integration,user,input={}){
   return store.fillRequestBatch(normalized.map((item,i)=>({id:input.items[i].id,revision:input.items[i].revision,notes:item.notes,workstationProductIds:item.workstationProductIds,noteFormat:item.noteFormat})),input.idempotencyKey);
 }
 
+// Separate from blank-fill: only expand request text and add confirmed products.
+export function expandContentPlanningRequests(store,integration,user,input={}){
+  if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>!['idempotencyKey','items'].includes(k))||!Array.isArray(input.items)||!input.items.length||input.items.length>100)throw new AppError('需求扩写批次格式不正确');
+  const items=input.items.map((item,index)=>{
+    if(!item||typeof item!=='object'||Array.isArray(item)||Object.keys(item).some(k=>!['id','revision','notes','workstationProductIds'].includes(k))||typeof item.id!=='string'||!item.id||item.id.length>120||!Number.isInteger(item.revision)||item.revision<1)throw new AppError(`第 ${index+1} 条仅允许原需求ID、版本、需求文字和新增关联产品`);
+    if(typeof item.notes!=='string'||!item.notes.trim()||item.notes.length>4000)throw new AppError('需求文字必须为1–4000字的非空文字');
+    if(!Array.isArray(item.workstationProductIds)||item.workstationProductIds.length>100||item.workstationProductIds.some(id=>typeof id!=='string'||!id.trim()||id.length>200))throw new AppError('请明确提供新增关联产品ID数组，无新增时传空数组');
+    const old=store.getRequest(item.id);
+    if(integration?.progress?.(user,old)?.linked)throw new AppError(`需求 ${item.id} 已关联行动，不能扩写`,409);
+    const normalized=normalizeContentPlanningRequests(store,integration,user,{items:[{accountId:old.account,column:old.column,notes:item.notes,workstationProductIds:item.workstationProductIds,noteFormat:old.noteFormat}]} )[0];
+    return {id:item.id,revision:item.revision,notes:normalized.notes,workstationProductIds:normalized.workstationProductIds,actorId:String(user?.id||'')};
+  });
+  return store.expandRequestBatch(items,input.idempotencyKey);
+}
+
 export function saveContentRequestPlans(store,integration,user,input={}){
   if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>!['idempotencyKey','items'].includes(k))||!Array.isArray(input.items)||!input.items.length||input.items.length>100)throw new AppError('策划回填批次格式不正确');
   const items=input.items.map((item,index)=>{
@@ -241,6 +256,7 @@ export function createContentCenterRouter({ requirePermission, hasPermission, ge
   route('post', '/planning/requests/revise-copy', req => reviseContentRequestCopy(store,integration,req.user,req.body));
   route('post', '/planning/requests/revise-topics', req => reviseContentRequestTopics(store,integration,req.user,req.body));
   route('post', '/planning/requests/plans', req => saveContentRequestPlans(store,integration,req.user,req.body));
+  route('post', '/planning/requests/expand', req => expandContentPlanningRequests(store,integration,req.user,req.body));
   route('post', '/planning/requests/fill', req => fillContentPlanningRequests(store, integration, req.user, req.body));
   route('post', '/planning/requests', req => saveContentPlanningRequests(store, integration, req.user, req.body), 201);
   route('get', '/notes', () => { store.weeklyRhythm?.generate(); return store.list(); });

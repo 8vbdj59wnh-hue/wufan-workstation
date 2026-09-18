@@ -46,6 +46,7 @@ const representativeArguments = {
   revise_request_topics:{idempotencyKey:"topics-20-notes",items:[{id:"request-1",revision:2,hashtags:"#花瓶 #美物"}]},
   revise_request_copy:{idempotencyKey:"copy-v2-20-notes",items:[{id:"request-1",revision:2,title:"新标题",copyText:"新正文"}]},
   save_request_plans:{idempotencyKey:"plan-week-v1",items:[{id:"request-1",revision:2,title:"标题",copyText:"正文",hashtags:"",imageScript:"封面",materialNeeds:"素材"}]},
+  expand_next_week_requests: {idempotencyKey:"expand-week-2026-v1",items:[{id:"request-1",revision:1,notes:"扩写需求",workstationProductIds:["sku-1"]}]},
   fill_next_week_requests: {idempotencyKey:"fill-week-2026-v1",items:[{id:"request-1",revision:1,notes:"补填需求",workstationProductIds:["sku-1"],noteFormat:"图文"}]},
   save_next_week_requests: {
     idempotencyKey: "nanyu-2026-w39-v1",
@@ -57,11 +58,11 @@ test("插件只暴露固定查询与受控发起工具并提供准确安全标�
   assert.equal(TOOL_DEFINITIONS.length, Object.keys(representativeArguments).length);
   assert.deepEqual(new Set(TOOL_DEFINITIONS.map((item) => item.name)), new Set(Object.keys(representativeArguments)));
   for (const definition of TOOL_DEFINITIONS) {
-    assert.equal(definition.annotations.readOnlyHint, !new Set(["launch_key_action", "save_next_week_requests", "fill_next_week_requests", "save_request_plans", "revise_request_copy", "revise_request_topics"]).has(definition.name), definition.name);
+    assert.equal(definition.annotations.readOnlyHint, !new Set(["launch_key_action", "save_next_week_requests", "fill_next_week_requests", "expand_next_week_requests", "save_request_plans", "revise_request_copy", "revise_request_topics"]).has(definition.name), definition.name);
     assert.equal(definition.annotations.destructiveHint, false, definition.name);
     assert.equal(definition.annotations.openWorldHint, false, definition.name);
     assert.equal(definition.inputSchema.additionalProperties, false, definition.name);
-    if (!new Set(["launch_key_action", "save_next_week_requests", "fill_next_week_requests", "save_request_plans", "revise_request_copy", "revise_request_topics"]).has(definition.name)) assert.doesNotMatch(definition.name, /create|update|delete|write|import|sync_run|approve|execute/u);
+    if (!new Set(["launch_key_action", "save_next_week_requests", "fill_next_week_requests", "expand_next_week_requests", "save_request_plans", "revise_request_copy", "revise_request_topics"]).has(definition.name)) assert.doesNotMatch(definition.name, /create|update|delete|write|import|sync_run|approve|execute/u);
   }
 });
 
@@ -82,7 +83,7 @@ test("工具只访问固定正式API，且仅受控预览、确认与新增下�
 
   assert.equal(requests.length, TOOL_DEFINITIONS.length);
   for (const request of requests) {
-    const expectedMethod = new Set(["/api/key-actions/launch-preview", "/api/key-actions/launch", "/api/content-center/planning/requests", "/api/content-center/planning/requests/fill", "/api/content-center/planning/requests/plans", "/api/content-center/planning/requests/revise-copy", "/api/content-center/planning/requests/revise-topics"]).has(request.url.pathname) ? "POST" : "GET";
+    const expectedMethod = new Set(["/api/key-actions/launch-preview", "/api/key-actions/launch", "/api/content-center/planning/requests", "/api/content-center/planning/requests/expand", "/api/content-center/planning/requests/fill", "/api/content-center/planning/requests/plans", "/api/content-center/planning/requests/revise-copy", "/api/content-center/planning/requests/revise-topics"]).has(request.url.pathname) ? "POST" : "GET";
     assert.equal(request.options.method, expectedMethod);
     assert.equal(request.options.headers.Authorization, "Bearer test-secret-token");
     assert.equal(request.options.redirect, "error");
@@ -94,7 +95,7 @@ test("工具只访问固定正式API，且仅受控预览、确认与新增下�
     "/api/key-actions/launch",
     "/api/content-center/planning/requests/revise-topics", "/api/content-center/planning/requests/revise-copy",
     "/api/content-center/planning/requests/plans",
-    "/api/content-center/planning/requests/fill",
+    "/api/content-center/planning/requests/expand", "/api/content-center/planning/requests/fill",
     "/api/content-center/planning/requests",
   ]);
 });
@@ -227,4 +228,16 @@ test("STDIO MCP初始化、工具枚举和未知方法符合JSON-RPC边界", asy
   assert.equal(responses[1].result.tools.length, TOOL_DEFINITIONS.length);
   assert.equal(responses[2].error.code, -32601);
   assert.equal(stderr, "");
+});
+
+test('需求扩写工具字段收口，以及空正文能力不退化',async()=>{
+ const requests=[];const fetchImpl=async(url,options)=>{requests.push(JSON.parse(options.body));return new Response('{}',{status:200,headers:{'content-type':'application/json'}});};
+ const row={id:'n1',revision:1,notes:'原栏目提示扩写',workstationProductIds:['p1']};
+ for(const extra of [{preferredTime:'12:30'},{notes:null},{workstationProductIds:null},{workstationProductIds:[42]}])await assert.rejects(()=>executeTool('expand_next_week_requests',{idempotencyKey:'expand-mcp-test',items:[{...row,...extra}]},{settings,fetchImpl}));
+ assert.equal(requests.length,0);
+ await executeTool('expand_next_week_requests',{idempotencyKey:'expand-mcp-test',items:[row]},{settings,fetchImpl});assert.deepEqual(requests[0].items[0],row);
+ for(const name of ['save_request_plans','revise_request_copy']){
+  await executeTool(name,{idempotencyKey:'empty-mcp-test',items:[{id:'n1',revision:1,title:'标题',copyText:''}]},{settings,fetchImpl});assert.equal(requests.at(-1).items[0].copyText,'');
+  for(const copyText of [undefined,null,4,' \n '])await assert.rejects(()=>executeTool(name,{idempotencyKey:'empty-mcp-test',items:[{id:'n1',revision:1,title:'标题',copyText}]},{settings,fetchImpl}));
+ }
 });

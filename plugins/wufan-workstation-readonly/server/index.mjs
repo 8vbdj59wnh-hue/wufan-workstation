@@ -169,6 +169,13 @@ function fillPlanningRequestBody(args={}) {
   })};
 }
 
+function cleanCopyText(value){
+  if(typeof value!=='string')throw new Error('copyText必须显式传入字符串；不设正文请传空字符串。');
+  if(value.length>20000)throw new Error('copyText过长。');
+  if(value!==''&&!value.trim())throw new Error('正文不能只包含空白；不设正文请明确传入空字符串。');
+  return value.trim();
+}
+
 const TOOL_SPECS = [
   tool("get_goal_center", "读取目标中心", "读取当前账号数据范围内的目标中心正式数据。", objectSchema(), () => ({ path: "/api/goal-center/bootstrap" })),
   tool("get_goal_detail", "读取目标详情", "按目标ID读取正式目标详情。", objectSchema({ goalId: textProperty("目标ID", 100) }, ["goalId"]), (args) => ({ path: `/api/goal-center/goals/${encodeURIComponent(cleanText(args.goalId, "goalId", { required: true, maxLength: 100 }))}/detail` })),
@@ -252,7 +259,7 @@ const TOOL_SPECS = [
     if(!Array.isArray(args.items)||!args.items.length||args.items.length>100)throw new Error('请提交1至100条修订。');
     return {method:"POST",path:"/api/content-center/planning/requests/revise-copy",body:{idempotencyKey:cleanText(args.idempotencyKey,'idempotencyKey',{required:true,maxLength:120}),items:args.items.map(item=>{
       if(!item||Object.keys(item).some(k=>!['id','revision','title','copyText'].includes(k))||!Number.isInteger(item.revision)||item.revision<1)throw new Error('仅允许原需求ID、版本、标题和正文。');
-      return {id:cleanText(item.id,'id',{required:true,maxLength:120}),revision:item.revision,title:cleanText(item.title,'title',{required:true,maxLength:500}),copyText:cleanText(item.copyText,'copyText',{required:true,maxLength:20000})};
+      return {id:cleanText(item.id,'id',{required:true,maxLength:120}),revision:item.revision,title:cleanText(item.title,'title',{required:true,maxLength:500}),copyText:cleanCopyText(item.copyText)};
     })}};
   },contentWriteAnnotations),
   tool("revise_request_topics", "修订已有策划话题", "用户授权修订后按原需求ID和最新revision更新话题。保留原需求、产品、排期和其他策划字段；记录前后话题，整批原子写入、幂等重试。已关联行动或版本变化拒绝。", objectSchema({
@@ -277,8 +284,22 @@ const TOOL_SPECS = [
     return {method:"POST",path:"/api/content-center/planning/requests/plans",body:{idempotencyKey:cleanText(args.idempotencyKey,'idempotencyKey',{required:true,maxLength:120}),items:args.items.map(item=>{
       if(!item||Object.keys(item).some(k=>!['id','revision','title','copyText','hashtags','imageScript','materialNeeds'].includes(k))||!Number.isInteger(item.revision)||item.revision<1)throw new Error('仅允许原需求ID、版本和策划字段。');
       const result={id:cleanText(item.id,'id',{required:true,maxLength:120}),revision:item.revision};
-      for(const [field,maxLength] of Object.entries({title:500,copyText:20000,hashtags:2000,imageScript:20000,materialNeeds:20000}))result[field]=cleanText(item[field],field,{required:['title','copyText'].includes(field),maxLength});
+      for(const [field,maxLength] of Object.entries({title:500,copyText:20000,hashtags:2000,imageScript:20000,materialNeeds:20000}))result[field]=field==='copyText'?cleanCopyText(item[field]):cleanText(item[field],field,{required:field==='title',maxLength});
       return result;
+    })}};
+  },contentWriteAnnotations),
+  tool("expand_next_week_requests", "扩写已有下周需求", "按原ID和最新revision扩写已有栏目提示或需求文字，并添加品牌确认产品；保留已有产品及账号、栏目、形式、模板和排期。仅限未策划、未关联行动的草稿需求，整批原子性与幂等重试。", objectSchema({
+    idempotencyKey:textProperty("稳定幂等键，同内容重试复用",120),
+    items:{type:"array",minItems:1,maxItems:100,items:objectSchema({
+      id:textProperty("原需求ID",120),revision:{type:"integer",minimum:1},
+      notes:textProperty("扩写后的完整需求，保留原需求约束",4000),
+      workstationProductIds:{type:"array",items:textProperty("要新增关联的品牌确认产品ID，不移除已有产品",120),maxItems:100}
+    },["id","revision","notes","workstationProductIds"])}
+  },["idempotencyKey","items"]), args=>{
+    if(!Array.isArray(args.items)||!args.items.length||args.items.length>100)throw new Error('请提交1至100条需求。');
+    return {method:"POST",path:"/api/content-center/planning/requests/expand",body:{idempotencyKey:cleanText(args.idempotencyKey,'idempotencyKey',{required:true,maxLength:120}),items:args.items.map(item=>{
+      if(!item||typeof item!=='object'||Array.isArray(item)||Object.keys(item).some(k=>!['id','revision','notes','workstationProductIds'].includes(k))||!Number.isInteger(item.revision)||item.revision<1||typeof item.notes!=='string'||!Array.isArray(item.workstationProductIds)||item.workstationProductIds.length>100||item.workstationProductIds.some(id=>typeof id!=='string'))throw new Error('扩写仅允许原需求ID、版本、需求文字和新增产品ID数组。');
+      return {id:cleanText(item.id,'id',{required:true,maxLength:120}),revision:item.revision,notes:cleanText(item.notes,'notes',{required:true,maxLength:4000}),workstationProductIds:[...new Set(item.workstationProductIds.map(id=>cleanText(id,'productId',{required:true,maxLength:120})))]};
     })}};
   },contentWriteAnnotations),
   tool("fill_next_week_requests", "补填空白下周需求", "按原需求ID和读取到的revision补填空白需求，保留账号、栏目、日期和时间；只关联品牌确认产品。已有内容或版本冲突整批拒绝；稳定幂等键支持安全重试。", objectSchema({
@@ -516,7 +537,7 @@ async function handleRequest(message) {
       protocolVersion: String(message.params?.protocolVersion || "2025-06-18"),
       capabilities: { tools: { listChanged: false } },
       serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
-      instructions: "极简工作站正式受控助手。可读取内容中心选品确认与栏目排期，并在用户当前请求明确要求或授权时幂等新增下周需求或按原ID和版本补填空白需求、向已有需求回填空白策划字段或受控修订已有策划标题正文；只能关联选品确认中的产品。发起关键行动必须先查重并展示完整预览，只有用户在当前对话明确确认后才可提交。除受控补填空白需求、回填空白策划字段及受控修订标题正文外不得编辑、删除或排期内容，不得执行任务、同步、审批、导入、修改通知状态或权限，也不得访问数据库或服务器文件。列表先分页再按ID读取详情。",
+      instructions: "极简工作站正式受控助手。可读取内容中心选品确认与栏目排期，并在用户当前请求明确要求或授权时幂等新增下周需求或按原ID和版本补填空白需求、向已有需求回填空白策划字段或受控修订已有策划标题正文；只能关联选品确认中的产品。发起关键行动必须先查重并展示完整预览，只有用户在当前对话明确确认后才可提交。除受控扩写未策划需求文字并添加确认产品、补填空白需求、回填空白策划字段及受控修订标题正文外不得编辑、删除或排期内容，不得执行任务、同步、审批、导入、修改通知状态或权限，也不得访问数据库或服务器文件。列表先分页再按ID读取详情。",
     };
   }
   if (method === "ping") return {};
