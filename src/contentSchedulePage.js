@@ -1415,6 +1415,23 @@ function renderScheduleModal() {
 
 function renderImportModal() {
   if (modalState === null || modalState.kind !== "import") return "";
+  if (modalState.phase === "processing") {
+    return `
+      <div class="modal-backdrop" role="presentation">
+        <div class="modal-panel" role="dialog" aria-modal="true" aria-label="正在上传并解析批量导入文件">
+          <div class="modal-header"><h2>发布内容笔记批量导入</h2></div>
+          <div class="modal-form">
+            <div class="app-loading-progress is-compact" role="status" aria-live="polite" aria-busy="true">
+              <strong class="app-loading-progress-label">正在上传并解析文件…</strong>
+              <span class="app-loading-progress-note">已选择 ${escapeHtml(modalState.fileName)}，完成后会自动展示导入预览。</span>
+              <progress class="content-note-import-progress" aria-label="文件上传和解析处理中"></progress>
+              <span class="app-loading-progress-note">文件较大时可能需要几秒，请不要重复选择文件。</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
   const results = modalState.result ?? [];
   const successCount = results.filter((item) => item.status === "success").length;
   const failedCount = results.filter((item) => item.status === "failed").length;
@@ -2321,6 +2338,17 @@ export function getContentNoteImportTemplateColumns() {
 }
 
 async function handleImportFile(file, rerender) {
+  modalState = {
+    kind: "import",
+    phase: "processing",
+    fileName: file.name,
+    records: [],
+    batchGoalId: "",
+    rows: [],
+    error: "",
+    result: null,
+  };
+  rerender();
   try {
     const parsed = await parseContentNoteImport(file);
     importProductMatchIndex = new Map(
@@ -2331,24 +2359,26 @@ async function handleImportFile(file, rerender) {
     const requiredHeaders = getBatchTemplateColumns();
     const missingHeaders = [...new Set(requiredHeaders)].filter((header) => !headers.includes(header));
     if (missingHeaders.length > 0) {
-      modalState = { kind: "import", fileName: file.name, rows: [], error: `缺少必要表头：${missingHeaders.join("、")}` };
+      modalState = { kind: "import", phase: "ready", fileName: file.name, records: [], batchGoalId: "", rows: [], error: `缺少必要表头：${missingHeaders.join("、")}`, result: null };
       rerender();
       return;
     }
 
+    const records = rowsToRecords(rows);
     modalState = {
       kind: "import",
+      phase: "ready",
       fileName: file.name,
-      records: rowsToRecords(rows),
+      records,
       batchGoalId: "",
-      rows: buildImportPreviewRows(rowsToRecords(rows), ""),
+      rows: buildImportPreviewRows(records, ""),
       error: "",
       result: null,
     };
     rerender();
   } catch (error) {
     importProductMatchIndex = null;
-    modalState = { kind: "import", fileName: file.name, rows: [], error: error.message || "文件解析失败，请使用系统模板，或 .xlsx/.xls/.csv/.tsv 文件。" };
+    modalState = { kind: "import", phase: "ready", fileName: file.name, records: [], batchGoalId: "", rows: [], error: error.message || "文件解析失败，请使用系统模板，或 .xlsx/.xls/.csv/.tsv 文件。", result: null };
     rerender();
   }
 }

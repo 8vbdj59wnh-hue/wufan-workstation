@@ -10,7 +10,6 @@ let dashboard = null;
 let salesDashboard = null;
 let salesDashboardLoading = false;
 let salesDashboardError = "";
-let initialSalesDashboardTimer = 0;
 let salesRange = { preset: "7d", startDate: "", endDate: "" };
 const salesDashboardCache = new Map();
 let salesDashboardRequestVersion = 0;
@@ -108,14 +107,11 @@ async function refreshSales(rerender, range = salesRange, { renderLoading = true
   if (document.querySelector(".operation-dashboard") !== null) rerender();
 }
 
-function scheduleInitialSalesDashboard(rerender) {
-  if (initialSalesDashboardTimer || salesDashboard || salesDashboardLoading) return;
-  initialSalesDashboardTimer = window.setTimeout(() => {
-    initialSalesDashboardTimer = 0;
-    const route = window.location.hash.replace(/^#/, "").split("/")[0];
-    if (!["", "dashboard", "operationDashboard", "operation-dashboard"].includes(route)) return;
-    void refreshSales(rerender);
-  }, 2_500);
+function startInitialSalesDashboard(rerender) {
+  if (salesDashboard || salesDashboardLoading) return;
+  const route = window.location.hash.replace(/^#/, "").split("/")[0];
+  if (!["", "dashboard", "operationDashboard", "operation-dashboard"].includes(route)) return;
+  void refreshSales(rerender);
 }
 
 async function refreshAnomalies(rerender) {
@@ -126,12 +122,9 @@ async function refreshAnomalies(rerender) {
 }
 
 export function bindOperationDashboardPageEvents(rerender) {
-  // Only the sales dashboard is rendered on this page. The two legacy reads
-  // below used to execute invisibly and occupied the synchronous SQLite API
-  // thread after the user had already navigated to another module. Delay the
-  // visible dashboard read briefly and start it only while this route remains
-  // active, so a direct module switch is never queued behind hidden work.
-  scheduleInitialSalesDashboard(rerender);
+  // Only the visible sales dashboard read starts here. The route guard prevents
+  // a stale render from starting work after the user has already navigated away.
+  startInitialSalesDashboard(rerender);
   document.querySelectorAll("[data-anomaly-select]").forEach((button) => button.addEventListener("click", () => { selectedAnomalyKey = button.dataset.anomalySelect; rerender(); }));
   document.querySelectorAll("[data-launch-anomaly-action]").forEach((button) => button.addEventListener("click", () => {
     if (!hasPermission(getCurrentUser(), "keyActions.launch")) return;
