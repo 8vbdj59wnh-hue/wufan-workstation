@@ -494,6 +494,12 @@ body {
   font-weight: 700;
 }
 
+.content-note-import-progress {
+  width: 100%;
+  height: 9px;
+  accent-color: #17795d;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .app-loading-progress-fill { transition: none; }
 }

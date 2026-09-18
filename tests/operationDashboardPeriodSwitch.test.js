@@ -55,9 +55,14 @@ test("dashboard reuses the expensive data quality result briefly while switching
 });
 
 test("leaving the dashboard does not start hidden legacy reads that block the next module", () => {
-  assert.match(operationPageSource, /function scheduleInitialSalesDashboard\(rerender\)/u);
+  assert.match(operationPageSource, /function startInitialSalesDashboard\(rerender\)/u);
   assert.match(operationPageSource, /if \(!\["", "dashboard", "operationDashboard", "operation-dashboard"\]\.includes\(route\)\) return/u);
-  assert.match(operationPageSource, /export function bindOperationDashboardPageEvents\(rerender\) \{\s*[\s\S]*?scheduleInitialSalesDashboard\(rerender\);/u);
+  assert.match(operationPageSource, /export function bindOperationDashboardPageEvents\(rerender\) \{\s*[\s\S]*?startInitialSalesDashboard\(rerender\);/u);
   assert.doesNotMatch(operationPageSource, /if \(!dashboard && !loading\) refresh\(rerender\)/u);
   assert.doesNotMatch(operationPageSource, /if \(!anomalies && !anomaliesLoading\) refreshAnomalies\(rerender\)/u);
+});
+
+test("initial sales dashboard loading has no fixed delay", () => {
+  assert.doesNotMatch(operationPageSource, /initialSalesDashboardTimer/u);
+  assert.doesNotMatch(operationPageSource, /setTimeout\([\s\S]{0,300}?2_500/u);
 });

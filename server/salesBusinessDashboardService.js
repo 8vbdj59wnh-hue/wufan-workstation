@@ -4,6 +4,11 @@ import { querySalesDailyDataQuality } from "./salesDailyDataQualityService.js";
 
 const DASHBOARD_CONTRACT_VERSION = "2.0";
 const PRESET_DAYS = Object.freeze({ yesterday: 1, "7d": 7, "15d": 15, "30d": 30, "45d": 45, "60d": 60 });
+const DASHBOARD_RANKING_LIMIT = 30;
+const DASHBOARD_RANKING_FIELDS = Object.freeze([
+  { current: "currentSalesAmount", growth: "salesGrowth", status: "salesComparisonStatus" },
+  { current: "currentProfitAmount", growth: "profitGrowth", status: "profitComparisonStatus" },
+]);
 
 function addDays(date, amount) {
   const value = new Date(`${date}T00:00:00Z`);
@@ -76,6 +81,22 @@ function decorateComparison(item) {
     salesComparisonStatus: comparisonStatus(currentSalesAmount, compareSalesAmount), profitComparisonStatus: comparisonStatus(currentProfitAmount, compareProfitAmount) };
 }
 
+export function compactDashboardRankingItems(items, limit = DASHBOARD_RANKING_LIMIT) {
+  const candidates = new Set();
+  for (const fields of DASHBOARD_RANKING_FIELDS) {
+    [...items]
+      .sort((left, right) => Number(right[fields.current] || 0) - Number(left[fields.current] || 0))
+      .slice(0, limit)
+      .forEach((item) => candidates.add(item));
+    items
+      .filter((item) => item[fields.status] === "comparable" && Number.isFinite(Number(item[fields.growth])))
+      .sort((left, right) => Number(right[fields.growth]) - Number(left[fields.growth]) || Number(right[fields.current]) - Number(left[fields.current]))
+      .slice(0, limit)
+      .forEach((item) => candidates.add(item));
+  }
+  return items.filter((item) => candidates.has(item));
+}
+
 function readShopComparison(database, range) {
   return database.prepare(`SELECT s.id targetId,COALESCE(NULLIF(s.displayName,''),s.shopName,'未命名店铺') targetName,s.platform targetCode,
     SUM(CASE WHEN f.saleDate BETWEEN @startDate AND @endDate THEN f.salesAmount ELSE 0 END) currentSalesAmount,
@@ -91,7 +112,7 @@ function readShopComparison(database, range) {
 function readComparison(dimension, range, database) {
   const result = queryDailySalesSummaryComparison({ dimension, currentStart: range.startDate, currentEnd: range.endDate,
     compareStart: range.previousStartDate, compareEnd: range.previousEndDate }, { database });
-  const items = result.items.map(decorateComparison);
+  const items = compactDashboardRankingItems(result.items.map(decorateComparison));
   const table = dimension === "salesLink" ? "sales_links" : dimension === "product" ? "products" : "";
   const ids = [...new Set(items.map((item) => item.targetId).filter(Boolean))];
   if (!table || !ids.length) return items;
