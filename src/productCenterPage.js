@@ -1,3 +1,4 @@
+import { clearanceSortOptions, sortClearancePlans } from "./utils/productClearanceSort.js";
 import {
   createId,
   changeProductSku,
@@ -738,7 +739,7 @@ function renderClearanceProgress(label, value, detail, tone = "inventory") {
 }
 
 function renderProductClearanceCards(center) {
-  const items = center?.items ?? [];
+  const items = sortClearancePlans(center?.items ?? [], productClearancePlanState.sortKey, productClearancePlanState.sortDirection);
   if (!items.length) return `<div class="product-card-empty">当前范围暂无清仓计划。</div>`;
   return `<div class="product-card-grid product-clearance-card-grid">${items.map((item) => {
     const inventoryDetail = item.currentInventoryQuantity === null
@@ -778,7 +779,10 @@ function renderProductClearancePage() {
       <article><span>平均清仓进度</span><strong>${summary.averageInventoryProgress === null ? `<span class="business-no-data">暂无数据</span>` : `${clearancePercent(summary.averageInventoryProgress)}%`}</strong><small>按库存消化进度</small></article>
       <article class="${summary.overduePlanCount ? "is-risk" : ""}"><span>逾期计划</span><strong>${businessValue(summary.overduePlanCount)}</strong><small>仅提示，不自动完成</small></article>
     </div></section>` : ""}
-    <section class="product-clearance-controls"><div class="product-clearance-status-filter" aria-label="清仓计划状态">${[["active", "进行中"], ["completed", "已完成"], ["all", "全部"]].map(([value, label]) => `<button type="button" data-action="product-clearance-status" data-status="${value}" class="${productClearancePlanState.status === value ? "is-active" : ""}">${label}</button>`).join("")}</div>${renderProductClearancePeriodControl(center)}</section>
+    <section class="product-clearance-controls"><div class="product-clearance-sort-controls"><div class="product-clearance-status-filter" aria-label="清仓计划状态">${[["active", "进行中"], ["completed", "已完成"], ["all", "全部"]].map(([value, label]) => `<button type="button" data-action="product-clearance-status" data-status="${value}" class="${productClearancePlanState.status === value ? "is-active" : ""}">${label}</button>`).join("")}</div>
+      <div class="product-clearance-status-filter" role="group" aria-label="清仓计划排序">${clearanceSortOptions.map(([key, label]) => `<button type="button" data-clearance-sort="${key}" aria-pressed="${(productClearancePlanState.sortKey || "default") === key}" class="${(productClearancePlanState.sortKey || "default") === key ? "is-active" : ""}">${label}</button>`).join("")}</div>
+      <button type="button" class="secondary-button" data-clearance-sort-direction ${!productClearancePlanState.sortKey || productClearancePlanState.sortKey === "default" ? "disabled" : ""}>${productClearancePlanState.sortDirection === "asc" ? "升序 ↑" : "降序 ↓"}</button>
+    </div>${renderProductClearancePeriodControl(center)}</section>
     ${productClearancePlanState.loading && !center ? `<div class="empty-state">正在读取清仓计划与经营数据…</div>` : renderProductClearanceCards(center)}
   </section>`;
 }
@@ -2861,6 +2865,14 @@ export function bindProductCenterPageEvents(rerender) {
     invalidateProductModuleCaches("product-sandbox");
     productShopSandboxState = { ...productShopSandboxState, loaded: false };
     if (productSubmodule === "product-sandbox") void refreshProductShopSandbox(rerender, { force: true });
+  });
+  document.querySelectorAll("[data-clearance-sort]").forEach((button) => button.addEventListener("click", () => {
+    productClearancePlanState = { ...productClearancePlanState, sortKey: button.dataset.clearanceSort, sortDirection: productClearancePlanState.sortDirection || "desc" };
+    rerender();
+  }));
+  document.querySelector("[data-clearance-sort-direction]")?.addEventListener("click", () => {
+    productClearancePlanState = { ...productClearancePlanState, sortDirection: productClearancePlanState.sortDirection === "asc" ? "desc" : "asc" };
+    rerender();
   });
   ensureAuthorizedProductSubmodule();
   if (isComboSkuRoute()) productSubmodule = "combo-skus";

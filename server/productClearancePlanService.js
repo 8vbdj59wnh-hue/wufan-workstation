@@ -127,6 +127,7 @@ export function getProductClearancePlanCenter(input = {}, { visibleProductIds = 
     const periodContribution = periodContributions.get(plan.erpSkuId);
     const sinceStart = sinceStartByPlan.get(plan.id);
     return { ...plan, initialInventoryQuantity: initialInventory, targetInventoryQuantity: targetInventory, currentInventoryQuantity: inventoryQuantity,
+      currentInventoryAmount: inventory.get(plan.erpSkuId)?.summary?.inventoryCostAmount ?? null,
       inventoryReducedQuantity: inventoryQuantity === null || initialInventory === null ? null : Math.max(0, initialInventory - inventoryQuantity),
       inventoryProgress, timeProgress, elapsedDays, remainingDays: Math.max(0, differenceDays(todayDate, plan.targetEndDate) + 1),
       overdueDays, overdue: overdueDays > 0,
