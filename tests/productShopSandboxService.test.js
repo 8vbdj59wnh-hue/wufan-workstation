@@ -5,6 +5,8 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { getProductShopSandbox } from "../server/productShopSandboxService.js";
+import { productShopPlanSchema } from "../server/productShopPlanSchema.js";
+import { addProductShopPlans, removeProductShopPlan } from "../server/productShopPlanService.js";
 import { renderProductShopSandbox } from "../src/uiModules/productShopSandbox.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -79,8 +81,30 @@ function fixture() {
       ('fact-b','2026-08-20','link-2','link-sku-b',3,30,18,12,'batch-1'),
       ('fact-a2','2026-08-20','link-3','link-sku-a2',7,70,42,28,'batch-1');
   `);
+  database.exec(productShopPlanSchema);
   return database;
 }
+
+test("预备下架从本店正常销售区及统计排除，移出恢复，不影响其他店铺或事实", () => {
+  const database = fixture();
+  const input = { preset: "custom", startDate: "2026-08-20", endDate: "2026-08-20", shopId: "shop-1" };
+  const snapshot = () => ["erp_skus", "sales_links", "connection_sku_sales_daily_facts", "sales_link_sku_sales_object_relations"]
+    .map((table) => database.prepare(`SELECT * FROM ${table} ORDER BY id`).all());
+  const facts = snapshot();
+  const before = getProductShopSandbox(input, { database });
+  addProductShopPlans({ shopId: "shop-1", direction: "withdrawal", erpSkuIds: ["erp-a"] }, "tester", database);
+  const after = getProductShopSandbox({ ...input, limit: 1 }, { database });
+  assert.equal(after.items[0].erpSkuId, "erp-b");
+  assert.equal(after.pagination.total, 3);
+  assert.equal(after.summary.productsWithSales, 1);
+  assert.equal(after.summary.outOfStockProducts, 0);
+  assert.equal(after.summary.totalSalesQuantity, 3);
+  assert.equal(getProductShopSandbox({ ...input, shopId: "shop-2" }, { database }).items[0].erpSkuId, "erp-a");
+  removeProductShopPlan({ shopId: "shop-1", direction: "withdrawal", erpSkuId: "erp-a" }, database);
+  assert.deepEqual(getProductShopSandbox(input, { database }), before);
+  assert.deepEqual(snapshot(), facts);
+  database.close();
+});
 
 test("产品沙盘按店铺隔离产品销量且不修改销售事实", () => {
   const database = fixture();

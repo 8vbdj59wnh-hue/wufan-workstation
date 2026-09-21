@@ -13,7 +13,7 @@ export function renderProductShopPlans(shop, canManage) {
 }
 
 const image=item=>item.mainImage?`<img loading="lazy" src="${esc(resolveAssetUrl(item.mainImage))}" alt="${esc(item.productName)}"/>`:'<span class="product-sandbox-image-placeholder">无图</span>';
-export function bindProductShopPlans() {
+export function bindProductShopPlans(onChange = () => {}) {
  document.querySelectorAll('[data-shop-plans]').forEach(root=>{
   if(root.dataset.bound)return;root.dataset.bound='true';
   const shopId=root.dataset.shopId,canManage=root.dataset.canManage==='true';
@@ -26,7 +26,7 @@ export function bindProductShopPlans() {
     try{const result=await productShopPlanRequest({shopId,direction});if(!panel.isConnected)return;
      select('[data-plan-count]').textContent=`${result.items.length} 个`;
      select('[data-plan-items]').innerHTML=result.items.length?`<div class="product-plan-grid">${result.items.map(item=>`<article><a href="#products/sku/${encodeURIComponent(item.erpSkuId)}">${image(item)}<strong>${esc(item.productName)}</strong><small>${esc(item.skuCode)}</small></a>${canManage?`<button type="button" class="secondary-button" data-plan-remove="${esc(item.erpSkuId)}">移出计划</button>`:''}</article>`).join('')}</div>`:'<p class="empty-state">暂无计划产品</p>';
-     panel.querySelectorAll('[data-plan-remove]').forEach(button=>button.onclick=async()=>{if(busy)return;busy=true;button.disabled=true;try{await productShopPlanRequest({shopId,direction,erpSkuId:button.dataset.planRemove},'DELETE');error(null);await load();}catch(e){error(e);button.disabled=false;}finally{busy=false;}});
+     panel.querySelectorAll('[data-plan-remove]').forEach(button=>button.onclick=async()=>{if(busy)return;busy=true;button.disabled=true;try{await productShopPlanRequest({shopId,direction,erpSkuId:button.dataset.planRemove},'DELETE');error(null);onChange({shopId,direction});if(panel.isConnected)await load();}catch(e){error(e);button.disabled=false;}finally{busy=false;}});
     }catch(e){error(e);select('[data-plan-items]').textContent='计划读取失败，请刷新重试。';}
    }
    async function search(){
@@ -44,7 +44,7 @@ export function bindProductShopPlans() {
     select('[data-plan-prev]').onclick=()=>{offset=Math.max(0,offset-50);void search();};
     select('[data-plan-next]').onclick=()=>{offset+=50;void search();};
     select('[data-plan-select]').onsubmit=async e=>{e.preventDefault();if(busy)return;const erpSkuIds=[...panel.querySelectorAll('[name="erpSkuIds"]:checked')].map(x=>x.value);if(!erpSkuIds.length){error(new Error('请先选择产品。'));return;}busy=true;select('[data-plan-save]').disabled=true;
-     try{await productShopPlanRequest({shopId,direction,erpSkuIds},'POST');error(null);await load();if(panel.isConnected){offset=0;await search();}}catch(e){error(e);}finally{busy=false;if(panel.isConnected)select('[data-plan-save]').disabled=false;}
+     try{await productShopPlanRequest({shopId,direction,erpSkuIds},'POST');error(null);onChange({shopId,direction});if(panel.isConnected){await load();offset=0;await search();}}catch(e){error(e);}finally{busy=false;if(panel.isConnected)select('[data-plan-save]').disabled=false;}
     };
    }
    void load();

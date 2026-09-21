@@ -2848,7 +2848,6 @@ function bindProductDistributionTooltips() {
 }
 
 export function bindProductCenterPageEvents(rerender) {
-  bindProductShopPlans();
   const rerenderApp = rerender;
   rerender = () => {
     const root = document.querySelector("[data-product-center-root]");
@@ -2857,6 +2856,12 @@ export function bindProductCenterPageEvents(rerender) {
     bindProductCenterPageEvents(rerenderApp);
     attachThumbnailHoverPreview();
   };
+  bindProductShopPlans(({ direction }) => {
+    if (direction !== "withdrawal") return;
+    invalidateProductModuleCaches("product-sandbox");
+    productShopSandboxState = { ...productShopSandboxState, loaded: false };
+    if (productSubmodule === "product-sandbox") void refreshProductShopSandbox(rerender, { force: true });
+  });
   ensureAuthorizedProductSubmodule();
   if (isComboSkuRoute()) productSubmodule = "combo-skus";
   const routeErpSkuId = getRouteErpSkuId();

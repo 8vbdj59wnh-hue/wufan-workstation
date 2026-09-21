@@ -55,6 +55,9 @@ export function getProductShopSandbox(input = {}, options = {}) {
     JOIN sales_object_structure_components component ON component.structureId=structure.id AND component.status='active'
     WHERE link.shopId=? AND COALESCE(link.currentState,'active')='active'
   `).all(selectedShop.id).map((row) => row.erpSkuId));
+  const withdrawalSkuIds = new Set(database.prepare(
+    "SELECT erpSkuId FROM product_shop_plans WHERE shopId=? AND direction='withdrawal'",
+  ).all(selectedShop.id).map((row) => row.erpSkuId));
   const visible = options.visibleErpSkuIds === undefined
     ? null
     : new Set((options.visibleErpSkuIds || []).map(text).filter(Boolean));
@@ -74,7 +77,7 @@ export function getProductShopSandbox(input = {}, options = {}) {
     LEFT JOIN products product ON product.id=mapping.productId
     WHERE ${wangdianOperatingSkuPredicate(database, "sku")}
     ORDER BY sku.id
-  `).all().filter((product) => linkedErpSkuIds.has(product.erpSkuId) && (!visible || visible.has(product.erpSkuId)));
+  `).all().filter((product) => linkedErpSkuIds.has(product.erpSkuId) && !withdrawalSkuIds.has(product.erpSkuId) && (!visible || visible.has(product.erpSkuId)));
   const contribution = products.length ? queryErpSkuContributions({
     periodStart: range.startDate,
     periodEnd: range.endDate,
