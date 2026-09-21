@@ -81,6 +81,7 @@ import "./uiModules/productMarketingAsset.js";
 import "./uiModules/productDailySales.js";
 import { renderProductSalesPresetButtons } from "./uiModules/productSalesDistribution.js";
 import "./uiModules/productShopSandbox.js";
+import { renderProductShopPlans, bindProductShopPlans } from "./uiModules/productShopPlans.js";
 
 function ensureProductClearancePlanStyles() {
   if (document.querySelector('link[data-product-clearance-plan-styles]')) return;
@@ -638,6 +639,7 @@ function renderProductShopSandboxPage() {
   return `<section class="product-center-page product-shop-sandbox-page">
     ${renderProductWorkspaceTabs()}
     ${renderUiModule("product_shop_sandbox", { state: productShopSandboxState, resolveUrl: resolveAssetUrl })}
+    ${productShopSandboxState.loaded && !productShopSandboxState.loading && !productShopSandboxState.error ? renderProductShopPlans(productShopSandboxState.selectedShop, hasPermission(getCurrentUser(), "products.manage")) : ""}
   </section>`;
 }
 
@@ -2846,6 +2848,7 @@ function bindProductDistributionTooltips() {
 }
 
 export function bindProductCenterPageEvents(rerender) {
+  bindProductShopPlans();
   const rerenderApp = rerender;
   rerender = () => {
     const root = document.querySelector("[data-product-center-root]");

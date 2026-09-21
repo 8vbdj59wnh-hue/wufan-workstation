@@ -1443,6 +1443,13 @@ export async function loadProductShopSandbox(params = {}) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/shop-sandbox${query.size ? `?${query}` : ""}`), "产品沙盘读取失败。");
 }
 
+export async function productShopPlanRequest(params = {}, method = 'GET') {
+  const query = method === 'GET' ? `?${new URLSearchParams(params)}` : '';
+  return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/shop-plans${query}`, {
+    method, ...(method === 'GET' ? {} : {headers: {'Content-Type':'application/json'},body:JSON.stringify(params)}),
+  }), '店铺计划操作失败。');
+}
+
 export async function loadProductClearancePlans(params = {}) {
   const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== "" && value !== undefined && value !== null));
   return readApiJson(await authFetch(`${apiBaseUrl}/api/product-management/clearance-plans${query.size ? `?${query}` : ""}`), "清仓计划读取失败。");

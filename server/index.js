@@ -361,6 +361,7 @@ import {
 import { getProductBusinessReadModel, getProductHealthAnalysis } from "./productBusinessReadModel.js";
 import { getProductSalesDistribution } from "./productSalesDistributionService.js";
 import { getProductShopSandbox } from "./productShopSandboxService.js";
+import { readProductShopPlans, addProductShopPlans, removeProductShopPlan } from "./productShopPlanService.js";
 import { getProductClearancePlanCenter, saveProductClearancePlan, updateProductClearancePlan } from "./productClearancePlanService.js";
 import { getProductNewDevelopmentCenter } from "./productNewDevelopmentService.js";
 import { attachProductDiagnosisSummaries, getProductBusinessDiagnosis } from "./productBusinessDiagnosisService.js";
@@ -3355,6 +3356,19 @@ app.get("/api/product-management/shop-sandbox", requirePermission("products.view
   } catch (error) {
     response.status(error.statusCode || 400).json({ success: false, message: error.message || "产品沙盘读取失败。" });
   }
+});
+
+app.get('/api/product-management/shop-plans', requirePermission('products.view'), (request,response)=>{
+  try { response.json({success:true,...readProductShopPlans({...request.query,candidates:request.query.candidates==='true'})}); }
+  catch(error){response.status(400).json({success:false,message:error.message});}
+});
+app.post('/api/product-management/shop-plans', requirePermission('products.manage'), (request,response)=>{
+  try {response.json({success:true,...addProductShopPlans(request.body,getUserPersonId(request.user))});}
+  catch(error){response.status(400).json({success:false,message:error.message});}
+});
+app.delete('/api/product-management/shop-plans', requirePermission('products.manage'), (request,response)=>{
+  try {response.json({success:true,...removeProductShopPlan(request.body)});}
+  catch(error){response.status(400).json({success:false,message:error.message});}
 });
 
 app.get("/api/product-management/clearance-plans", requirePermission("products.view"), (request, response) => {
