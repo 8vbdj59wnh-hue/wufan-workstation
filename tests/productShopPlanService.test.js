@@ -25,6 +25,7 @@ test('店铺上下架计划独立保存、校验真实关联，并支持幂等�
  INSERT INTO sales_link_sku_sales_object_relations VALUES('ls','object','active');
  INSERT INTO sales_object_structures VALUES('st','object','active');
  INSERT INTO sales_object_structure_components VALUES('st','one','active');`);
+ db.exec('ALTER TABLE erp_skus ADD COLUMN rawSourceData TEXT');
  db.exec(productShopPlanSchema);db.exec(productShopPlanSchema);
  assert.deepEqual(readProductShopPlans({shopId:'a',direction:'listing',candidates:true},db).items.map(x=>x.erpSkuId),['two']);
  assert.deepEqual(readProductShopPlans({shopId:'a',direction:'withdrawal',candidates:true},db).items.map(x=>x.erpSkuId),['one']);
@@ -41,5 +42,17 @@ test('店铺上下架计划独立保存、校验真实关联，并支持幂等�
  assert.equal(db.prepare('SELECT count(*) n FROM erp_skus').get().n,2);
  assert.equal(db.prepare('SELECT count(*) n FROM sales_links').get().n,1);
  assert.deepEqual(db.pragma('foreign_key_check'),[]);
+ db.exec(`CREATE TABLE operating_erp_set_members(erpSkuId TEXT,lifecycleStatus TEXT);
+ INSERT INTO operating_erp_set_members VALUES('one','active'),('two','archived');
+ INSERT INTO erp_skus(id,merchantSkuCode,erpGoodsId,currentState,rawSourceData) VALUES
+ ('new','ZZ-NEW','g','active','{"prop7":"在售"}'),
+ ('down','AA-DOWN','g','active','{"prop7":"已下架"}'),
+ ('label-down','AA-LABEL','g','active','{"goods_label":"已同步，已下架"}');
+ INSERT INTO operating_erp_set_members VALUES('down','active'),('label-down','sales_active');`);
+ assert.deepEqual(readProductShopPlans({shopId:'b',direction:'listing',candidates:true},db).items.map(x=>x.erpSkuId),['new','one']);
+ assert.equal(readProductShopPlans({shopId:'b',direction:'listing',candidates:true,query:'HP2'},db).items.length,0);
+ for(const id of ['two','down','label-down'])assert.throws(()=>addProductShopPlans({shopId:'b',direction:'listing',erpSkuIds:[id]},'actor',db),/当前经营范围/);
+ assert.equal(addProductShopPlans({shopId:'b',direction:'listing',erpSkuIds:['new']},'actor',db).added,1);
+ assert.equal(readProductShopPlans({shopId:'a',direction:'withdrawal'},db).items[0].erpSkuId,'one');
  }finally{db.close();}
 });

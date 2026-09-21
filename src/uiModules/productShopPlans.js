@@ -7,7 +7,7 @@ export function renderProductShopPlans(shop, canManage) {
  <header><div><h3>${direction==='listing'?'预备上架':'预备下架'} <small data-plan-count></small></h3><p>${esc(shop.name)} · ${direction==='listing'?'准备在本店上架的产品':'准备从本店撤出的产品'}</p></div>${canManage?'<button type="button" class="secondary-button" data-plan-open>添加产品</button>':''}</header>
  <div role="status" data-plan-error></div><div data-plan-items>正在读取计划…</div>
  <div data-plan-picker hidden><form data-plan-search><input name="query" type="search" placeholder="搜索产品名称 / SKU编码" aria-label="搜索计划产品"/><button class="secondary-button">搜索</button><button type="button" class="secondary-button" data-plan-close>关闭</button></form>
- <p>${direction==='listing'?'从尚未关联本店的产品中选择':'从本店已关联产品中选择'}；计划保存后不会自动执行平台上下架。</p>
+ <p>${direction==='listing'?'从尚未关联本店的当前经营产品中选择，旺店通在售产品优先，已下架产品不展示':'从本店已关联产品中选择'}；计划保存后不会自动执行平台上下架。</p>
  <form data-plan-select><div data-plan-candidates></div><footer><button type="button" class="secondary-button" data-plan-prev>上一页</button><button type="button" class="secondary-button" data-plan-next>下一页</button><button class="primary-button" data-plan-save>加入计划</button><span>每次可多选当前页产品</span></footer></form></div>
  </section>`).join('')}</div>`;
 }

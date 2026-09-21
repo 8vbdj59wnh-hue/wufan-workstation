@@ -1,5 +1,12 @@
 import crypto from 'node:crypto';
 import { getDatabase } from './db.js';
+import { wangdianOperatingSkuPredicate, wangdianInSaleSkuPredicate, currentProductOperatingSkuPredicate } from './wangdianProductStatus.js';
+
+function listingEligible(db) {
+ const ready = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='operating_erp_set_members'").get()
+  && db.prepare('SELECT 1 FROM operating_erp_set_members LIMIT 1').get();
+ return `${wangdianOperatingSkuPredicate(db, 's')}${ready ? ` AND (${wangdianInSaleSkuPredicate(db, 's')} OR EXISTS(SELECT 1 FROM operating_erp_set_members om WHERE om.erpSkuId=s.id AND ${currentProductOperatingSkuPredicate(db, 's', 'om')}))` : ''}`;
+}
 
 function validate(db, shopId, direction) {
  if (!['listing','withdrawal'].includes(direction)) throw new Error('计划类型无效。');
@@ -21,10 +28,11 @@ export function readProductShopPlans({shopId,direction='listing',query='',candid
  if (candidates) {
   const pageOffset=Math.max(0,Math.floor(Number(offset)||0));
   const rows=db.prepare(`${productSelect} WHERE COALESCE(s.currentState,'active')='active'
+   ${direction==='listing' ? `AND ${listingEligible(db)}` : ''}
    AND NOT EXISTS(SELECT 1 FROM product_shop_plans plan WHERE plan.shopId=@shopId AND plan.erpSkuId=s.id)
    AND ${direction==='withdrawal'?linked:`NOT ${linked}`}
    AND (s.merchantSkuCode LIKE @query OR g.goodsName LIKE @query OR p.displayNameOverride LIKE @query)
-   ORDER BY s.merchantSkuCode,s.id LIMIT 51 OFFSET @offset`).all({shopId,query:`%${String(query).trim().slice(0,100)}%`,offset:pageOffset});
+   ORDER BY ${direction==='listing' ? `${wangdianInSaleSkuPredicate(db, 's')} DESC,` : ''} s.merchantSkuCode,s.id LIMIT 51 OFFSET @offset`).all({shopId,query:`%${String(query).trim().slice(0,100)}%`,offset:pageOffset});
   return {items:rows.slice(0,50),hasMore:rows.length>50,offset:pageOffset};
  }
  return {items:db.prepare(`${productSelect} JOIN product_shop_plans plan ON plan.erpSkuId=s.id
@@ -41,6 +49,7 @@ export function addProductShopPlans({shopId,direction,erpSkuIds}={},actor='',db=
    if(!sku)throw new Error('产品不存在或已停用。');
    const old=db.prepare('SELECT direction FROM product_shop_plans WHERE shopId=? AND erpSkuId=?').get(shopId,id);
    if(old){if(old.direction!==direction)throw new Error('产品已加入另一类计划，请先移出。');continue;}
+   if(direction==='listing'&&!db.prepare(`SELECT s.id FROM erp_skus s WHERE s.id=? AND ${listingEligible(db)}`).get(id))throw new Error('产品已下架或不属于当前经营范围，请刷新后重新选择。');
    if(direction==='withdrawal'&&!sku.linked)throw new Error('预备下架只能选择当前店铺已关联的产品。');
    if(direction==='listing'&&sku.linked)throw new Error('产品已关联当前店铺，无需预备上架。');
    added+=insert.run(crypto.randomUUID(),shopId,id,direction,actor,new Date().toISOString()).changes;
