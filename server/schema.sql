@@ -98,6 +98,43 @@ CREATE TABLE IF NOT EXISTS upload_audits (
 CREATE INDEX IF NOT EXISTS idx_upload_audits_user_created ON upload_audits(userId,createdAt DESC);
 CREATE INDEX IF NOT EXISTS idx_upload_audits_status_created ON upload_audits(status,createdAt DESC);
 
+CREATE TABLE IF NOT EXISTS key_action_reference_attachments (
+  id TEXT PRIMARY KEY,
+  ownerUserId TEXT NOT NULL,
+  ownerSessionId TEXT NOT NULL,
+  idempotencyKey TEXT NOT NULL,
+  originalName TEXT NOT NULL,
+  storedName TEXT NOT NULL UNIQUE,
+  filePath TEXT NOT NULL UNIQUE,
+  mimeType TEXT NOT NULL,
+  byteSize INTEGER NOT NULL,
+  sha256 TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'staged',
+  createdAt TEXT NOT NULL,
+  expiresAt TEXT,
+  updatedAt TEXT NOT NULL,
+  removedAt TEXT,
+  UNIQUE(ownerUserId,ownerSessionId,idempotencyKey),
+  CHECK(status IN ('staged','active','discarded','expired')),
+  CHECK(byteSize > 0),
+  FOREIGN KEY(ownerUserId) REFERENCES persons(id)
+);
+CREATE INDEX IF NOT EXISTS idx_key_action_reference_owner ON key_action_reference_attachments(ownerUserId,ownerSessionId,status,createdAt DESC);
+CREATE INDEX IF NOT EXISTS idx_key_action_reference_expiry ON key_action_reference_attachments(status,expiresAt);
+CREATE INDEX IF NOT EXISTS idx_key_action_reference_hash ON key_action_reference_attachments(ownerUserId,ownerSessionId,sha256,status);
+
+CREATE TABLE IF NOT EXISTS key_action_reference_attachment_links (
+  attachmentId TEXT NOT NULL,
+  processInstanceId TEXT NOT NULL,
+  workPlanId TEXT NOT NULL,
+  createdAt TEXT NOT NULL,
+  PRIMARY KEY(attachmentId,processInstanceId),
+  FOREIGN KEY(attachmentId) REFERENCES key_action_reference_attachments(id),
+  FOREIGN KEY(processInstanceId) REFERENCES process_instances(id),
+  FOREIGN KEY(workPlanId) REFERENCES work_plans(id)
+);
+CREATE INDEX IF NOT EXISTS idx_key_action_reference_links_process ON key_action_reference_attachment_links(processInstanceId,attachmentId);
+
 CREATE TABLE IF NOT EXISTS api_usage_ledger (
   method TEXT NOT NULL,
   routePattern TEXT NOT NULL,

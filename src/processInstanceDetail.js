@@ -42,6 +42,7 @@ import { standardWorkAttachmentAccept, validateStandardWorkAttachmentFiles } fro
 const goals = state.goals;
 const people = state.people;
 const standardWorkAttachmentsKey = "standardWorkAttachments";
+const referenceImageAttachmentsKey = "referenceImageAttachments";
 const linkedActionTemplateIdsKey = "linkedTemplateIds";
 const returnRecordsKey = "returnRecords";
 const executorEditableTaskStatuses = new Set([TaskStatus.Waiting, TaskStatus.Todo, TaskStatus.Doing]);
@@ -185,6 +186,30 @@ function getFormValue(form, name) {
 function getStandardWorkAttachments(instance) {
   const attachments = instance.customFields?.[standardWorkAttachmentsKey];
   return Array.isArray(attachments) ? attachments : [];
+}
+
+function getReferenceImageAttachments(source = {}) {
+  const customFields = source?.customFields ?? source ?? {};
+  const attachments = customFields?.[referenceImageAttachmentsKey];
+  return Array.isArray(attachments) ? attachments : [];
+}
+
+function renderReferenceImages(instance) {
+  const images = getReferenceImageAttachments(instance);
+  if (images.length === 0) return "";
+  return `
+    <div class="detail-block key-action-reference-images">
+      <h3>参考图片</h3>
+      <p class="form-note">以下图片是发起人随关键行动提供的执行参考，不是产品图。</p>
+      <div class="attachment-preview-grid">
+        ${images.map((image) => {
+          const href = resolveAssetUrl(image.url ?? image.filePath ?? "");
+          const name = image.originalName ?? "参考图片";
+          return `<a class="attachment-preview-card is-image" href="${escapeHtml(href)}" target="_blank" rel="noreferrer"><img loading="lazy" src="${escapeHtml(href)}" alt="${escapeHtml(name)}" /><span class="attachment-preview-name">${escapeHtml(name)}</span></a>`;
+        }).join("")}
+      </div>
+    </div>
+  `;
 }
 
 export function getLinkedActionTemplateIds(source) {
@@ -847,6 +872,7 @@ export function renderLaunchedProcessDetail(instanceId, options = {}) {
           <h3>关键行动表单</h3>
           ${renderCustomFields(instance, editable)}
         </div>
+        ${renderReferenceImages(instance)}
         <div class="detail-block">
           <h3>关联产品</h3>
           ${canManageActionProducts(instance) ? renderActionProductSelector(getActionProductIds(instance.id), { label: "选择产品", actionId: instance.id }) : renderLinkedActionProducts(instance.id)}

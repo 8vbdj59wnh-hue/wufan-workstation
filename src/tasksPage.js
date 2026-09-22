@@ -142,6 +142,7 @@ const goals = state.goals;
 const people = state.people;
 const stores = state.stores;
 const standardWorkAttachmentsKey = "standardWorkAttachments";
+const referenceImageAttachmentsKey = "referenceImageAttachments";
 const returnRecordsKey = "returnRecords";
 const latestReturnReasonKey = "latestReturnReason";
 
@@ -1036,6 +1037,11 @@ function getTaskProcessTemplateName(task) {
 
 function getStandardWorkAttachments(customFields = {}) {
   const attachments = customFields?.[standardWorkAttachmentsKey];
+  return Array.isArray(attachments) ? attachments : [];
+}
+
+function getReferenceImageAttachments(customFields = {}) {
+  const attachments = customFields?.[referenceImageAttachmentsKey];
   return Array.isArray(attachments) ? attachments : [];
 }
 
@@ -3627,7 +3633,7 @@ function renderProcessProgressTable() {
 function renderProcessCustomFields(instance) {
   const customFields = instance.customFields ?? {};
   const entries = Object.entries(customFields).filter(([key, value]) => {
-    if (key === standardWorkAttachmentsKey) return false;
+    if (key === standardWorkAttachmentsKey || key === referenceImageAttachmentsKey) return false;
     if (Array.isArray(value)) return value.length > 0;
     return value !== null && value !== undefined && value !== "";
   });
@@ -4034,6 +4040,7 @@ function renderPreviousTaskFilesBlock(task) {
 
 function renderTaskRelatedInfoSection(task, context) {
   const actionAttachments = getStandardWorkAttachments(context.customFields);
+  const referenceImages = getReferenceImageAttachments(context.customFields);
 
   return `
     <details class="detail-block">
@@ -4051,6 +4058,7 @@ function renderTaskRelatedInfoSection(task, context) {
       ${renderTaskLinkedTemplateSummary(task.templateId, "detail")}
       <h4>关键行动附件</h4>
       ${renderAttachmentPreviewList(actionAttachments, "暂无关键行动附件")}
+      ${referenceImages.length === 0 ? "" : `<h4>参考图片</h4><p class="form-note">发起人提供的执行参考，不是产品图。</p>${renderAttachmentPreviewList(referenceImages, "暂无参考图片")}`}
       <h4>退回记录</h4>
       ${renderReturnRecordsContent(task)}
     </details>

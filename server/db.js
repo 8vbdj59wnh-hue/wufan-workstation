@@ -892,7 +892,7 @@ function insertItem(resourceKey, item) {
   }
 }
 
-const preservedCustomFieldKeys = ["standardWorkAttachments"];
+const preservedCustomFieldKeys = ["standardWorkAttachments", "referenceImageAttachments"];
 
 function readExistingItem(resourceKey, id) {
   const config = resourceConfigs[resourceKey];
@@ -5492,7 +5492,7 @@ export function startProcessInstanceExecution(instanceId, { userId = "", isAdmin
 
 export function launchWorkPlanWithProcess(
   workPlanId,
-  { processInstance, tasks: generatedTasks = [], workPlan: launchedWorkPlan, productIds = [], initiatorId = "" },
+  { processInstance, tasks: generatedTasks = [], workPlan: launchedWorkPlan, productIds = [], initiatorId = "", onPersisted = null },
 ) {
   const database = getDatabase();
   const trustedInitiatorId = String(initiatorId ?? "").trim();
@@ -5602,6 +5602,10 @@ export function launchWorkPlanWithProcess(
     for (const task of nextTasks) insertItem("tasks", task);
     insertItem("workPlans", nextWorkPlan);
     replaceActionProductsInTransaction(nextProcessInstance.id, productIds, now);
+    if (onPersisted !== null) {
+      if (typeof onPersisted !== "function") throw new Error("行动关联回调无效。");
+      onPersisted({ database, processInstance: nextProcessInstance, workPlan: nextWorkPlan, tasks: nextTasks, now });
+    }
   });
   launch();
   generateEligibleTaskWaves();

@@ -71,7 +71,7 @@ try {
   if (-not $SkipConnectionTest) {
     Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/health" | Out-Null
     Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/notifications/summary?limit=1" -Headers @{ Authorization = "Bearer $token" } | Out-Null
-    Write-Host "工作站网络、内容策划访问、受控行动访问和自动续期凭证验证成功。" -ForegroundColor Green
+    Write-Host "工作站网络、内容策划访问、受控行动及参考图能力和自动续期凭证验证成功。" -ForegroundColor Green
   }
 } finally {
   if ($passwordPointer -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($passwordPointer) }
@@ -96,6 +96,6 @@ if (-not $SkipPluginInstall) {
     if ($LASTEXITCODE -ne 0) { throw "添加屋范内部插件源失败。若该源已添加，可继续运行：codex plugin add $PluginName@$MarketplaceName" }
     & $codex plugin add "$PluginName@$MarketplaceName"
     if ($LASTEXITCODE -ne 0) { throw "安装极简工作站助手插件失败。" }
-    Write-Host "极简工作站助手插件安装成功。请完全退出并重启Codex，然后开始一个新任务。" -ForegroundColor Green
+    Write-Host "极简工作站助手插件安装成功（含受控参考图能力）。请完全退出并重启Codex，然后开始一个新任务。" -ForegroundColor Green
   }
 }

@@ -1,6 +1,11 @@
 import { isContentNoteBodyField } from '../shared/contentNoteFields.js';
 import crypto from "node:crypto";
 import { getDatabase, launchWorkPlanWithProcess } from "./db.js";
+import {
+  keyActionReferenceImagesKey,
+  linkKeyActionReferenceImagesInTransaction,
+  resolveOwnedKeyActionReferenceImages,
+} from "./keyActionReferenceAttachmentService.js";
 
 const maximumTextLength = 2_000;
 const legacyFieldPrefixes = ["发布内容笔记-", "新品上新-", "新品上架链接-", "库存清仓-"];
@@ -138,6 +143,7 @@ function canonicalInput(plan) {
     responsiblePersonId: plan.responsiblePerson.id,
     customFields: plan.customFields,
     productIds: plan.productIds,
+    referenceImages: plan.referenceImages.map((attachment) => ({ id: attachment.id, sha256: attachment.sha256 })),
     processTemplateId: plan.processTemplate.id,
     processTemplateVersion: plan.processTemplate.version,
     nodeIds: plan.nodes.map((node) => node.id),
@@ -154,7 +160,13 @@ export function fingerprintKeyActionLaunch(plan) {
   return crypto.createHash("sha256").update(JSON.stringify(stableValue(canonicalInput(plan)))).digest("hex");
 }
 
-export function prepareKeyActionLaunch(input, { initiatorId, visibleGoalIds = null, dataScope = "self", userDepartmentId = "" } = {}) {
+export function prepareKeyActionLaunch(input, {
+  initiatorId,
+  assistantSessionId = "",
+  visibleGoalIds = null,
+  dataScope = "self",
+  userDepartmentId = "",
+} = {}) {
   const database = getDatabase();
   const goalId = text(input?.goalId, "所属目标", { required: true, maximum: 120 });
   const taskTemplateId = text(input?.taskTemplateId, "关键行动标准", { required: true, maximum: 120 });
@@ -189,7 +201,21 @@ export function prepareKeyActionLaunch(input, { initiatorId, visibleGoalIds = nu
   const productIds = [...new Set((Array.isArray(input?.productIds) ? input.productIds : []).map((value) => text(value, "产品ID", { maximum: 120 })).filter(Boolean))].sort();
   if (productIds.length > 100) throw launchError("一次最多关联100个产品。");
   for (const productId of productIds) if (!database.prepare("SELECT 1 FROM products WHERE id=?").get(productId)) throw launchError(`产品不存在：${productId}`);
-  const plan = { goal, taskTemplate, processTemplate, nodes, initiator, responsiblePerson, title, description, dueDate, customFields, productIds, fields };
+  if (input?.referenceAttachmentIds !== undefined && !Array.isArray(input.referenceAttachmentIds)) {
+    throw launchError("参考图附件ID必须是数组。", 400, "key_action_reference_image_invalid");
+  }
+  const referenceAttachmentIds = input?.referenceAttachmentIds ?? [];
+  const referenceImages = referenceAttachmentIds.length === 0
+    ? []
+    : resolveOwnedKeyActionReferenceImages(referenceAttachmentIds, {
+      ownerUserId: actualInitiatorId,
+      ownerSessionId: assistantSessionId,
+    });
+  const plan = {
+    goal, taskTemplate, processTemplate, nodes, initiator, responsiblePerson, title, description, dueDate,
+    customFields, productIds, fields, referenceAttachmentIds: referenceImages.map((attachment) => attachment.id),
+    referenceImages, assistantSessionId,
+  };
   for (let index = 0; index < nodes.length; index += 1) {
     const node = nodes[index];
     const review = (node.stepType ?? "execution") === "review";
@@ -218,6 +244,7 @@ export function publicKeyActionLaunchPreview(plan) {
     customFields: plan.customFields,
     formFields: plan.fields,
     productIds: plan.productIds,
+    referenceImages: plan.referenceImages,
     steps: plan.nodes.map((node, index) => ({
       order: index + 1,
       name: node.name,
@@ -241,6 +268,10 @@ export function launchPreparedKeyAction(plan) {
   const now = new Date().toISOString();
   const processInstanceId = id("process-instance");
   const workPlanId = id("work-plan");
+  const referenceImages = plan.referenceImages.map((attachment) => ({ ...attachment, status: "active", expiresAt: null }));
+  const launchCustomFields = referenceImages.length === 0
+    ? plan.customFields
+    : { ...plan.customFields, [keyActionReferenceImagesKey]: referenceImages };
   const tasks = [];
   for (let index = 0; index < plan.nodes.length; index += 1) {
     const node = plan.nodes[index];
@@ -257,7 +288,7 @@ export function launchPreparedKeyAction(plan) {
       resultAttachments: [], submitType: review ? "none" : (node.submitType || "none"),
       submitDescription: review ? "" : (node.submitDescription ?? ""), submitFields: review ? [] : parseJson(node.submitFields, []),
       submitFormData: {}, submitFiles: [], submitLinks: [], submittedAt: null, submittedBy: null,
-      taskTemplateId: null, customFields: {}, displayTitle: null, coverImageUrl: null,
+      taskTemplateId: null, customFields: referenceImages.length === 0 ? {} : { [keyActionReferenceImagesKey]: referenceImages }, displayTitle: null, coverImageUrl: null,
       reviewTargetTaskId: review ? previousExecution?.id ?? null : null, reviewTargetSnapshot: null,
       returnToNodeId: review ? node.returnToNodeId ?? previousExecution?.processNodeId ?? null : null,
       reviewStatus: review ? "pending" : null, reviewComment: null, reviewedAt: null,
@@ -269,19 +300,36 @@ export function launchPreparedKeyAction(plan) {
     id: processInstanceId, templateId: plan.processTemplate.id, taskTemplateId: plan.taskTemplate.id,
     templateVersion: plan.processTemplate.version, name: plan.title, goalId: plan.goal.id, initiatorId: plan.initiator.id,
     description: plan.description, status: "running", startedAt: null, dueDate: plan.dueDate,
-    completedAt: null, stoppedAt: null, canceledAt: null, cancelReason: null, customFields: plan.customFields,
+    completedAt: null, stoppedAt: null, canceledAt: null, cancelReason: null, customFields: launchCustomFields,
     displayTitle: plan.title, coverImageUrl: null, createdAt: now, updatedAt: now,
   };
   const workPlan = {
     id: workPlanId, goalId: plan.goal.id, departmentId: plan.taskTemplate.departmentId,
-    taskTemplateId: plan.taskTemplate.id, title: plan.title, customFields: plan.customFields,
+    taskTemplateId: plan.taskTemplate.id, title: plan.title, customFields: launchCustomFields,
     coverImageUrl: null, workType: "normal", status: "launched", plannedWeek: null,
     dueDate: plan.dueDate, description: plan.description, processInstanceId, createdAt: now,
     updatedAt: now, launchedAt: now, canceledAt: null,
   };
   return launchWorkPlanWithProcess(workPlanId, {
     processInstance, tasks, workPlan, productIds: plan.productIds, initiatorId: plan.initiator.id,
+    onPersisted: referenceImages.length === 0 ? null : () => {
+      linkKeyActionReferenceImagesInTransaction({
+        attachmentIds: plan.referenceAttachmentIds,
+        ownerUserId: plan.initiator.id,
+        ownerSessionId: plan.assistantSessionId,
+        processInstanceId,
+        workPlanId,
+      });
+    },
   });
+}
+
+export function readExistingPreparedKeyAction(plan) {
+  if (!plan?.duplicate?.processInstanceId) return null;
+  const instance = getDatabase().prepare("SELECT * FROM process_instances WHERE id=? LIMIT 1").get(plan.duplicate.processInstanceId);
+  if (!instance) return null;
+  const taskCount = Number(getDatabase().prepare("SELECT COUNT(*) count FROM tasks WHERE processInstanceId=?").get(instance.id)?.count ?? 0);
+  return { instance, taskCount };
 }
 
 export function listLaunchableActionStandards({ keyword = "", page = 1, pageSize = 20, allowedTemplateIds = null } = {}) {

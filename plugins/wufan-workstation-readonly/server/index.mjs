@@ -1,15 +1,18 @@
 #!/usr/bin/env node
 
 import fs from "node:fs";
+import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SERVER_NAME = "wufan-workstation-assistant";
-const SERVER_VERSION = "2.1.0";
+const SERVER_VERSION = "2.2.0";
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_PAGE_SIZE = 100;
+const MAX_REFERENCE_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_REFERENCE_IMAGE_COUNT = 9;
 
 const objectSchema = (properties = {}, required = []) => ({
   type: "object",
@@ -33,7 +36,7 @@ const launchAnnotations = Object.freeze({
   readOnlyHint: false,
   destructiveHint: false,
   openWorldHint: false,
-  idempotentHint: false,
+  idempotentHint: true,
 });
 const contentWriteAnnotations = Object.freeze({
   readOnlyHint: false,
@@ -49,6 +52,13 @@ function tool(name, title, description, inputSchema, request, annotations = read
   });
 }
 
+function customTool(name, title, description, inputSchema, execute, annotations = contentWriteAnnotations) {
+  return Object.freeze({
+    definition: Object.freeze({ name, title, description, inputSchema, annotations }),
+    execute,
+  });
+}
+
 const keyActionLaunchProperties = {
   goalId: textProperty("所属目标ID", 120),
   taskTemplateId: textProperty("启用的关键行动标准ID", 120),
@@ -58,6 +68,7 @@ const keyActionLaunchProperties = {
   responsiblePersonId: textProperty("负责人ID；仅用于标准中需要发起时指定负责人的步骤", 120),
   customFields: { type: "object", description: "行动标准正式表单字段，键名必须来自可发起行动标准或预览结果", additionalProperties: true },
   productIds: { type: "array", items: textProperty("产品ID", 120), maxItems: 100 },
+  referenceAttachmentIds: { type: "array", items: textProperty("通过受控参考图上传工具取得的附件ID", 120), maxItems: MAX_REFERENCE_IMAGE_COUNT },
 };
 
 function keyActionBody(args, includeConfirmation = false) {
@@ -70,10 +81,79 @@ function keyActionBody(args, includeConfirmation = false) {
     responsiblePersonId: cleanText(args.responsiblePersonId, "responsiblePersonId", { maxLength: 120 }),
     customFields: args.customFields ?? {},
     productIds: Array.isArray(args.productIds) ? [...new Set(args.productIds.map((value) => cleanText(value, "productId", { required: true, maxLength: 120 })))] : [],
+    referenceAttachmentIds: Array.isArray(args.referenceAttachmentIds)
+      ? [...new Set(args.referenceAttachmentIds.map((value) => cleanText(value, "referenceAttachmentId", { required: true, maxLength: 120 })))]
+      : [],
   };
   if (!body.customFields || typeof body.customFields !== "object" || Array.isArray(body.customFields)) throw new Error("customFields必须是对象。");
+  if (body.referenceAttachmentIds.length > MAX_REFERENCE_IMAGE_COUNT) throw new Error(`参考图片不能超过${MAX_REFERENCE_IMAGE_COUNT}张。`);
   if (includeConfirmation) body.confirmationToken = cleanText(args.confirmationToken, "confirmationToken", { required: true, maxLength: 4096 });
   return body;
+}
+
+const referenceImageTypes = Object.freeze({
+  ".jpg": { mimeType: "image/jpeg", matches: (bytes) => bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff },
+  ".jpeg": { mimeType: "image/jpeg", matches: (bytes) => bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff },
+  ".png": { mimeType: "image/png", matches: (bytes) => bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) },
+  ".webp": { mimeType: "image/webp", matches: (bytes) => bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP" },
+});
+
+function readReferenceImage(localPath) {
+  const selectedPath = cleanText(localPath, "filePath", { required: true, maxLength: 4096 });
+  const resolvedPath = path.resolve(selectedPath);
+  let stat;
+  try { stat = fs.lstatSync(resolvedPath); }
+  catch { throw new Error("无法读取所选参考图片，请确认文件仍存在且当前用户有权读取。"); }
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("参考图片必须是用户明确选择的普通本地文件，不能是目录或符号链接。");
+  if (stat.size < 1 || stat.size > MAX_REFERENCE_IMAGE_BYTES) throw new Error("每张参考图片必须大于0字节且不超过5MB。");
+  const extension = path.extname(resolvedPath).toLowerCase();
+  const policy = referenceImageTypes[extension];
+  if (!policy) throw new Error("参考图片只支持JPG、PNG和WebP。");
+  let bytes;
+  try { bytes = fs.readFileSync(resolvedPath); }
+  catch { throw new Error("无法读取所选参考图片，请确认文件未被移动且当前用户有权读取。"); }
+  if (!policy.matches(bytes)) throw new Error("参考图片实际内容与扩展名不符或文件已损坏。");
+  return {
+    bytes,
+    name: path.basename(resolvedPath),
+    mimeType: policy.mimeType,
+    sha256: crypto.createHash("sha256").update(bytes).digest("hex"),
+  };
+}
+
+async function uploadReferenceImages(args, context) {
+  const idempotencyKey = cleanText(args.idempotencyKey, "idempotencyKey", { required: true, maxLength: 120 });
+  if (!Array.isArray(args.filePaths) || args.filePaths.length < 1 || args.filePaths.length > MAX_REFERENCE_IMAGE_COUNT) {
+    throw new Error(`filePaths必须包含1至${MAX_REFERENCE_IMAGE_COUNT}张用户明确选择的图片。`);
+  }
+  const images = args.filePaths.map(readReferenceImage);
+  const createdIds = [];
+  const attachments = [];
+  try {
+    for (const [index, image] of images.entries()) {
+      const formData = new FormData();
+      formData.append("idempotencyKey", `${idempotencyKey}-${index + 1}-${image.sha256.slice(0, 24)}`);
+      formData.append("image", new Blob([image.bytes], { type: image.mimeType }), image.name);
+      const payload = await context.executeRequest({ method: "POST", path: "/api/key-actions/reference-images", formData });
+      if (!payload?.attachment?.id) throw new Error("工作站未返回有效的参考图片附件ID。");
+      attachments.push(payload.attachment);
+      if (payload.created === true) createdIds.push(payload.attachment.id);
+    }
+  } catch (error) {
+    if (createdIds.length > 0) {
+      try {
+        await context.executeRequest({ method: "POST", path: "/api/key-actions/reference-images/discard", body: { attachmentIds: createdIds } });
+      } catch {}
+    }
+    throw error;
+  }
+  return {
+    success: true,
+    attachments,
+    attachmentIds: attachments.map((attachment) => attachment.id),
+    uploadedCount: createdIds.length,
+    reusedCount: attachments.length - createdIds.length,
+  };
 }
 
 function clampInteger(value, fallback, minimum = 1, maximum = Number.MAX_SAFE_INTEGER) {
@@ -181,6 +261,16 @@ const TOOL_SPECS = [
   tool("get_goal_detail", "读取目标详情", "按目标ID读取正式目标详情。", objectSchema({ goalId: textProperty("目标ID", 100) }, ["goalId"]), (args) => ({ path: `/api/goal-center/goals/${encodeURIComponent(cleanText(args.goalId, "goalId", { required: true, maxLength: 100 }))}/detail` })),
   tool("list_key_actions", "查询关键行动", "分页、搜索当前账号可见的关键行动。", objectSchema({ ...pageProperties, keyword: textProperty("关键字", 200) }), (args) => ({ path: queryPath("/api/schedule-board/page", { ...pageArgs(args), keyword: cleanText(args.keyword, "keyword") }) })),
   tool("list_launchable_action_standards", "查询可发起行动标准", "分页查询当前账号被授权发起的行动标准及其正式表单字段。", objectSchema({ ...pageProperties, keyword: textProperty("行动标准名称或编码", 200) }), (args) => ({ path: queryPath("/api/key-actions/launch-options", { ...pageArgs(args), keyword: cleanText(args.keyword, "keyword") }) })),
+  customTool("upload_key_action_reference_images", "上传关键行动参考图片", "仅上传用户在当前对话中明确提供或选择的JPG、PNG或WebP图片，最多9张、每张不超过5MB。返回的附件ID用于关键行动预览和确认发起；不会创建行动、流程或任务。", objectSchema({
+    idempotencyKey: textProperty("本次图片集合的稳定幂等键；重试时保持不变", 120),
+    filePaths: { type: "array", items: textProperty("用户明确提供或选择的本地图片绝对路径", 4096), minItems: 1, maxItems: MAX_REFERENCE_IMAGE_COUNT },
+  }, ["idempotencyKey", "filePaths"]), uploadReferenceImages),
+  tool("discard_key_action_reference_images", "清理未使用的关键行动参考图片", "在用户取消发起或替换图片时，清理当前设备会话拥有且尚未被任何行动引用的暂存参考图片；已关联图片不会被删除。", objectSchema({
+    attachmentIds: { type: "array", items: textProperty("待清理附件ID", 120), minItems: 1, maxItems: MAX_REFERENCE_IMAGE_COUNT },
+  }, ["attachmentIds"]), (args) => {
+    if (!Array.isArray(args.attachmentIds) || args.attachmentIds.length < 1 || args.attachmentIds.length > MAX_REFERENCE_IMAGE_COUNT) throw new Error(`attachmentIds必须包含1至${MAX_REFERENCE_IMAGE_COUNT}项。`);
+    return { method: "POST", path: "/api/key-actions/reference-images/discard", body: { attachmentIds: [...new Set(args.attachmentIds.map((value) => cleanText(value, "attachmentId", { required: true, maxLength: 120 })))] } };
+  }, contentWriteAnnotations),
   tool("preview_key_action_launch", "预览关键行动发起", "校验目标、行动标准、必填字段、负责人、截止时间和重复行动；不写入业务数据。返回的确认凭证仅在内容不变时有效15分钟。", objectSchema(keyActionLaunchProperties, ["goalId", "taskTemplateId", "title", "description", "dueDate"]), (args) => ({ method: "POST", path: "/api/key-actions/launch-preview", body: keyActionBody(args) })),
   tool("launch_key_action", "确认发起关键行动", "仅在用户已经查看预览并明确同意后调用。使用预览返回的确认凭证提交完全相同的内容。", objectSchema({ ...keyActionLaunchProperties, confirmationToken: textProperty("预览返回的短时确认凭证", 4096) }, ["goalId", "taskTemplateId", "title", "description", "dueDate", "confirmationToken"]), (args) => ({ method: "POST", path: "/api/key-actions/launch", body: keyActionBody(args, true) }), launchAnnotations),
   tool("list_tasks", "查询任务", "分页查询今天、我的、逾期或全部任务。", objectSchema({
@@ -469,25 +559,20 @@ async function refreshAccessToken(settings, fetchImpl) {
 
 async function requestApi(url, request, settings, token, fetchImpl, signal) {
   const method = request.method ?? "GET";
+  const multipart = request.formData instanceof FormData;
   return fetchImpl(url, {
     method,
-    headers: { Accept: "application/json", Authorization: `Bearer ${token}`, ...(method === "POST" ? { "Content-Type": "application/json" } : {}) },
-    ...(method === "POST" ? { body: JSON.stringify(request.body ?? {}) } : {}),
+    headers: { Accept: "application/json", Authorization: `Bearer ${token}`, ...(method === "POST" && !multipart ? { "Content-Type": "application/json" } : {}) },
+    ...(method === "POST" ? { body: multipart ? request.formData : JSON.stringify(request.body ?? {}) } : {}),
     redirect: "error",
     signal,
   });
 }
 
-export async function executeTool(name, args = {}, options = {}) {
-  const spec = TOOL_BY_NAME.get(name);
-  if (!spec) throw new Error(`未知工作站工具：${cleanText(name, "name", { maxLength: 100 })}`);
-  if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("工具参数必须是对象。");
-  const request = spec.request(args);
+async function executeApiRequest(request, settings, fetchImpl) {
   if (!request || typeof request.path !== "string" || !request.path.startsWith("/api/")) throw new Error("内部路由配置无效。");
   if (!new Set(["GET", "POST"]).has(request.method ?? "GET")) throw new Error("内部请求方法无效。");
-  const settings = options.settings || loadSettings();
   const url = new URL(request.path.replace(/^\/+/, ""), settings.baseUrl);
-  const fetchImpl = options.fetchImpl || fetch;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), settings.timeoutMs);
   try {
@@ -517,6 +602,17 @@ export async function executeTool(name, args = {}, options = {}) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+export async function executeTool(name, args = {}, options = {}) {
+  const spec = TOOL_BY_NAME.get(name);
+  if (!spec) throw new Error(`未知工作站工具：${cleanText(name, "name", { maxLength: 100 })}`);
+  if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("工具参数必须是对象。");
+  const settings = options.settings || loadSettings();
+  const fetchImpl = options.fetchImpl || fetch;
+  const executeRequest = (request) => executeApiRequest(request, settings, fetchImpl);
+  if (typeof spec.execute === "function") return spec.execute(args, { settings, fetchImpl, executeRequest });
+  return executeRequest(spec.request(args));
 }
 
 function toolResult(name, payload) {

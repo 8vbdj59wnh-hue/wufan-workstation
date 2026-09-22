@@ -332,7 +332,16 @@ import {
   listLaunchableActionStandards,
   prepareKeyActionLaunch,
   publicKeyActionLaunchPreview,
+  readExistingPreparedKeyAction,
 } from "./keyActionLaunchService.js";
+import {
+  cleanupExpiredKeyActionReferenceImages,
+  discardOwnedKeyActionReferenceImages,
+  getKeyActionReferenceAttachmentByStoredName,
+  keyActionReferenceImageLimits,
+  listKeyActionReferenceAttachmentLinks,
+  registerKeyActionReferenceImage,
+} from "./keyActionReferenceAttachmentService.js";
 import { normalizeProductSkuCode, splitProductSkuCodes } from "./modules/common/index.js";
 import { getOperationDashboard } from "./operationManagementService.js";
 import {
@@ -414,6 +423,7 @@ const applicationVersion = (() => {
 const imageUploadsDir = path.join(uploadsDir, "images");
 const fileUploadsDir = path.join(uploadsDir, "files");
 const standardWorkAttachmentsDir = path.join(uploadsDir, "standard-work-attachments");
+const keyActionReferenceImagesDir = path.join(uploadsDir, "key-action-reference-images");
 const productImportUploadsDir = path.join(uploadsDir, "product-import-uploads");
 const uploadStagingDir = path.join(path.dirname(databasePath), ".upload-staging");
 const uploadContentNoteWorkbook = multer({
@@ -469,6 +479,7 @@ ensureConnectionInspectionTemplate(getDatabase(), "system");
 fs.mkdirSync(imageUploadsDir, { recursive: true });
 fs.mkdirSync(fileUploadsDir, { recursive: true });
 fs.mkdirSync(standardWorkAttachmentsDir, { recursive: true });
+fs.mkdirSync(keyActionReferenceImagesDir, { recursive: true });
 fs.mkdirSync(productImportUploadsDir, { recursive: true });
 fs.mkdirSync(uploadStagingDir, { recursive: true });
 
@@ -489,6 +500,18 @@ const uploadImage = multer({
     const validation = validateUploadMetadata(file, "image");
     if (!validation.valid) {
       callback(new Error(`${validation.reason}只支持 JPG、PNG、WebP 图片。`));
+      return;
+    }
+    callback(null, true);
+  },
+});
+const uploadKeyActionReferenceImage = multer({
+  storage: imageStorage,
+  limits: { fileSize: keyActionReferenceImageLimits.maxBytes, files: 1 },
+  fileFilter: (_request, file, callback) => {
+    const validation = validateUploadMetadata(file, "image");
+    if (!validation.valid) {
+      callback(new Error(`${validation.reason}参考图只支持 JPG、PNG、WebP 图片。`));
       return;
     }
     callback(null, true);
@@ -605,6 +628,26 @@ function requireAssetAccess(request, response, next) {
       if (tokenPayload.mode === "assistant_scoped" && session.accessProfile !== tokenPayload.assistantAccessProfile) throw new Error("助手设备访问类型不匹配。");
     } catch (error) {
       response.status(assistantSessionHttpStatus(error)).json({ success: false, message: error.message, code: error.code });
+      return;
+    }
+  }
+  if (request.path.startsWith("/key-action-reference-images/")) {
+    const storedName = path.basename(request.path);
+    const attachment = getKeyActionReferenceAttachmentByStoredName(storedName);
+    const publicUser = getPublicUser(user);
+    const sameOwner = attachment?.ownerUserId === publicUser.id;
+    const assistantAssetToken = tokenPayload.mode === "assistant_scoped" || tokenPayload.mode === "assistant_read_only";
+    const sameAssistantSession = assistantAssetToken && attachment?.ownerSessionId === tokenPayload.sid;
+    let allowed = Boolean(attachment && sameOwner && (attachment.status === "active" || (attachment.status === "staged" && sameAssistantSession)));
+    if (!allowed && attachment?.status === "active" && hasPermission(publicUser, "keyActions.view")) {
+      const links = listKeyActionReferenceAttachmentLinks(attachment.id);
+      const instances = links
+        .map((link) => getDatabase().prepare("SELECT * FROM process_instances WHERE id=? LIMIT 1").get(link.processInstanceId))
+        .filter(Boolean);
+      allowed = (filterDataByScope({ processInstances: instances }, publicUser).processInstances ?? []).length > 0;
+    }
+    if (!allowed) {
+      response.status(403).json({ success: false, message: "你没有权限访问该关键行动参考图。" });
       return;
     }
   }
@@ -1671,13 +1714,15 @@ app.use("/api", (request, response, next) => {
   const allowedPaths = new Set([
     "/key-actions/launch-preview",
     "/key-actions/launch",
+    "/key-actions/reference-images",
+    "/key-actions/reference-images/discard",
     ...(request.user.assistantAccessProfile === AssistantAccessProfile.ContentPlanner
       ? ["/content-center/planning/requests", "/content-center/planning/requests/fill", "/content-center/planning/requests/expand", "/content-center/planning/requests/plans", "/content-center/planning/requests/revise-copy", "/content-center/planning/requests/revise-topics"]
       : []),
   ]);
   const allowed = request.method === "POST" && allowedPaths.has(request.path);
   if (!allowed) {
-    response.status(403).json({ success: false, code: "assistant_write_boundary", message: "助手设备仅允许发起关键行动，内容策划设备另可新增或受控补填空白下周需求、回填策划及修订标题正文。" });
+    response.status(403).json({ success: false, code: "assistant_write_boundary", message: "助手设备仅允许受控暂存关键行动参考图、预览和确认发起关键行动；内容策划设备另可新增或受控补填空白下周需求、回填策划及修订标题正文。" });
     return;
   }
   next();
@@ -2480,6 +2525,77 @@ app.post("/api/uploads/standard-work-attachment", requirePermission("uploads.sta
     });
   });
 });
+
+function requireAssistantReferenceImageSession(request, response, next) {
+  if (
+    request.user?.assistantScoped !== true ||
+    ![AssistantAccessProfile.KeyActionLauncher, AssistantAccessProfile.ContentPlanner].includes(request.user.assistantAccessProfile) ||
+    !request.user.assistantSessionId
+  ) {
+    response.status(403).json({ success: false, code: "assistant_reference_image_boundary", message: "只有已授权的关键行动助手设备可以暂存参考图。" });
+    return;
+  }
+  next();
+}
+
+app.post(
+  "/api/key-actions/reference-images",
+  requirePermission("keyActions.launch"),
+  requireAssistantReferenceImageSession,
+  (request, response) => {
+    uploadKeyActionReferenceImage.single("image")(request, response, (error) => {
+      if (error !== undefined) {
+        const message = error.code === "LIMIT_FILE_SIZE" ? "参考图单张不能超过5MB。" : error.message || "参考图上传失败。";
+        request.uploadAuditFailure = { code: error.code ?? "KEY_ACTION_REFERENCE_IMAGE_REJECTED", message };
+        response.status(error.code === "LIMIT_FILE_SIZE" ? 413 : 400).json({ success: false, error: message, code: request.uploadAuditFailure.code });
+        return;
+      }
+      if (request.file === undefined) {
+        request.uploadAuditFailure = { code: "UPLOAD_FILE_REQUIRED", message: "请选择要上传的参考图。" };
+        response.status(400).json({ success: false, error: "请选择要上传的参考图。", code: "UPLOAD_FILE_REQUIRED" });
+        return;
+      }
+      if (rejectInvalidStoredUpload(request, response, "image")) return;
+      try {
+        const originalName = normalizeUploadedFileName(request.file.originalname);
+        const result = registerKeyActionReferenceImage({
+          ownerUserId: getUserPersonId(request.user),
+          ownerSessionId: request.user.assistantSessionId,
+          idempotencyKey: request.body?.idempotencyKey,
+          stagedPath: request.file.path,
+          originalName,
+          mimeType: request.file.mimetype,
+          byteSize: request.file.size,
+          extension: path.extname(originalName),
+          referenceImagesDirectory: keyActionReferenceImagesDir,
+        });
+        response.status(result.duplicate ? 200 : 201).json({ success: true, ...result });
+      } catch (registrationError) {
+        removeStagedUpload(request.file.path);
+        request.uploadAuditFailure = { code: registrationError.code ?? "KEY_ACTION_REFERENCE_IMAGE_FAILED", message: registrationError.message };
+        response.status(registrationError.status ?? 400).json({ success: false, code: request.uploadAuditFailure.code, message: registrationError.message || "参考图暂存失败。" });
+      }
+    });
+  },
+);
+
+app.post(
+  "/api/key-actions/reference-images/discard",
+  requirePermission("keyActions.launch"),
+  requireAssistantReferenceImageSession,
+  (request, response) => {
+    try {
+      const result = discardOwnedKeyActionReferenceImages(request.body?.attachmentIds ?? [], {
+        ownerUserId: getUserPersonId(request.user),
+        ownerSessionId: request.user.assistantSessionId,
+        referenceImagesDirectory: keyActionReferenceImagesDir,
+      });
+      response.json({ success: true, ...result });
+    } catch (error) {
+      response.status(error.status ?? 400).json({ success: false, code: error.code, message: error.message || "参考图暂存清理失败。" });
+    }
+  },
+);
 
 app.use("/api/products/import", requirePermission("products.import"), (_request, response) => {
   response.status(410).json({
@@ -4730,11 +4846,13 @@ app.get("/api/key-actions/launch-options", requirePermission("keyActions.launch"
 });
 
 function prepareScopedKeyActionLaunch(request) {
+  cleanupExpiredKeyActionReferenceImages(keyActionReferenceImagesDir);
   const goalId = String(request.body?.goalId ?? "").trim();
   const goal = goalId ? getDatabase().prepare("SELECT id,departmentId,ownerId FROM goals WHERE id=?").get(goalId) : null;
   const visibleGoals = goal ? filterDataByScope({ goals: [goal] }, request.user).goals ?? [] : [];
   return prepareKeyActionLaunch(request.body ?? {}, {
     initiatorId: getUserPersonId(request.user),
+    assistantSessionId: request.user.assistantSessionId ?? "",
     visibleGoalIds: new Set(visibleGoals.map((item) => item.id)),
     dataScope: getDataScope(request.user),
     userDepartmentId: request.user.departmentId ?? "",
@@ -4782,6 +4900,27 @@ app.post("/api/key-actions/launch", requirePermission("keyActions.launch"), (req
       response.status(409).json({ success: false, code: "key_action_confirmation_invalid", message: "发起确认已失效或内容已变化，请重新预览并确认。" });
       return;
     }
+    if (plan.duplicate) {
+      const existing = readExistingPreparedKeyAction(plan);
+      const attachmentLinksValid = existing !== null && plan.referenceAttachmentIds.every((attachmentId) =>
+        listKeyActionReferenceAttachmentLinks(attachmentId).some((link) => link.processInstanceId === existing.instance.id));
+      if (existing !== null && attachmentLinksValid) {
+        response.status(200).json({
+          success: true,
+          duplicate: true,
+          action: {
+            id: existing.instance.id,
+            businessCode: existing.instance.businessCode,
+            title: existing.instance.displayTitle || existing.instance.name,
+            goalId: existing.instance.goalId,
+            dueDate: existing.instance.dueDate,
+            taskCount: existing.taskCount,
+            referenceImages: plan.referenceImages,
+          },
+        });
+        return;
+      }
+    }
     const result = launchPreparedKeyAction(plan);
     response.status(201).json({
       success: true,
@@ -4792,6 +4931,7 @@ app.post("/api/key-actions/launch", requirePermission("keyActions.launch"), (req
         goalId: result.instance.goalId,
         dueDate: result.instance.dueDate,
         taskCount: result.tasks.length,
+        referenceImages: plan.referenceImages.map((attachment) => ({ ...attachment, status: "active", expiresAt: null })),
       },
     });
   } catch (error) {

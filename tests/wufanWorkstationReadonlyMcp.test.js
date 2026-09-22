@@ -16,14 +16,19 @@ const settings = Object.freeze({
   timeoutMs: 5_000,
   maxResponseBytes: 1024 * 1024,
 });
+const referenceImageFixtureDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "wufan-reference-image-"));
+const referenceImageFixturePath = path.join(referenceImageFixtureDirectory, "reference.png");
+fs.writeFileSync(referenceImageFixturePath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"));
 
 const representativeArguments = {
   get_goal_center: {},
   get_goal_detail: { goalId: "goal-1" },
   list_key_actions: { page: 1, pageSize: 10, keyword: "增长" },
   list_launchable_action_standards: { page: 1, pageSize: 10, keyword: "增长" },
-  preview_key_action_launch: { goalId: "goal-1", taskTemplateId: "standard-1", title: "测试行动", description: "完成测试", dueDate: "2030-09-30", responsiblePersonId: "person-1", customFields: {}, productIds: [] },
-  launch_key_action: { goalId: "goal-1", taskTemplateId: "standard-1", title: "测试行动", description: "完成测试", dueDate: "2030-09-30", responsiblePersonId: "person-1", customFields: {}, productIds: [], confirmationToken: "confirmation-token" },
+  upload_key_action_reference_images: { idempotencyKey: "reference-set-v1", filePaths: [referenceImageFixturePath] },
+  discard_key_action_reference_images: { attachmentIds: ["attachment-1"] },
+  preview_key_action_launch: { goalId: "goal-1", taskTemplateId: "standard-1", title: "测试行动", description: "完成测试", dueDate: "2030-09-30", responsiblePersonId: "person-1", customFields: {}, productIds: [], referenceAttachmentIds: ["attachment-1"] },
+  launch_key_action: { goalId: "goal-1", taskTemplateId: "standard-1", title: "测试行动", description: "完成测试", dueDate: "2030-09-30", responsiblePersonId: "person-1", customFields: {}, productIds: [], referenceAttachmentIds: ["attachment-1"], confirmationToken: "confirmation-token" },
   list_tasks: { view: "today", page: 1, pageSize: 10, showDone: false },
   get_task_detail: { taskId: "task-1" },
   list_work_results: { days: 30 },
@@ -58,11 +63,11 @@ test("插件只暴露固定查询与受控发起工具并提供准确安全标�
   assert.equal(TOOL_DEFINITIONS.length, Object.keys(representativeArguments).length);
   assert.deepEqual(new Set(TOOL_DEFINITIONS.map((item) => item.name)), new Set(Object.keys(representativeArguments)));
   for (const definition of TOOL_DEFINITIONS) {
-    assert.equal(definition.annotations.readOnlyHint, !new Set(["launch_key_action", "save_next_week_requests", "fill_next_week_requests", "expand_next_week_requests", "save_request_plans", "revise_request_copy", "revise_request_topics"]).has(definition.name), definition.name);
+    assert.equal(definition.annotations.readOnlyHint, !new Set(["upload_key_action_reference_images", "discard_key_action_reference_images", "launch_key_action", "save_next_week_requests", "fill_next_week_requests", "expand_next_week_requests", "save_request_plans", "revise_request_copy", "revise_request_topics"]).has(definition.name), definition.name);
     assert.equal(definition.annotations.destructiveHint, false, definition.name);
     assert.equal(definition.annotations.openWorldHint, false, definition.name);
     assert.equal(definition.inputSchema.additionalProperties, false, definition.name);
-    if (!new Set(["launch_key_action", "save_next_week_requests", "fill_next_week_requests", "expand_next_week_requests", "save_request_plans", "revise_request_copy", "revise_request_topics"]).has(definition.name)) assert.doesNotMatch(definition.name, /create|update|delete|write|import|sync_run|approve|execute/u);
+    if (!new Set(["upload_key_action_reference_images", "discard_key_action_reference_images", "launch_key_action", "save_next_week_requests", "fill_next_week_requests", "expand_next_week_requests", "save_request_plans", "revise_request_copy", "revise_request_topics"]).has(definition.name)) assert.doesNotMatch(definition.name, /create|update|delete|write|import|sync_run|approve|execute/u);
   }
 });
 
@@ -70,7 +75,10 @@ test("工具只访问固定正式API，且仅受控预览、确认与新增下�
   const requests = [];
   const fetchImpl = async (url, options) => {
     requests.push({ url: new URL(url), options });
-    return new Response(JSON.stringify({ success: true, path: new URL(url).pathname }), {
+    const payload = new URL(url).pathname === "/api/key-actions/reference-images"
+      ? { success: true, created: true, attachment: { id: "attachment-1", purpose: "reference_image", url: "/uploads/key-action-reference-images/attachment-1.png" } }
+      : { success: true, path: new URL(url).pathname };
+    return new Response(JSON.stringify(payload), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
@@ -83,7 +91,7 @@ test("工具只访问固定正式API，且仅受控预览、确认与新增下�
 
   assert.equal(requests.length, TOOL_DEFINITIONS.length);
   for (const request of requests) {
-    const expectedMethod = new Set(["/api/key-actions/launch-preview", "/api/key-actions/launch", "/api/content-center/planning/requests", "/api/content-center/planning/requests/expand", "/api/content-center/planning/requests/fill", "/api/content-center/planning/requests/plans", "/api/content-center/planning/requests/revise-copy", "/api/content-center/planning/requests/revise-topics"]).has(request.url.pathname) ? "POST" : "GET";
+    const expectedMethod = new Set(["/api/key-actions/reference-images", "/api/key-actions/reference-images/discard", "/api/key-actions/launch-preview", "/api/key-actions/launch", "/api/content-center/planning/requests", "/api/content-center/planning/requests/expand", "/api/content-center/planning/requests/fill", "/api/content-center/planning/requests/plans", "/api/content-center/planning/requests/revise-copy", "/api/content-center/planning/requests/revise-topics"]).has(request.url.pathname) ? "POST" : "GET";
     assert.equal(request.options.method, expectedMethod);
     assert.equal(request.options.headers.Authorization, "Bearer test-secret-token");
     assert.equal(request.options.redirect, "error");
@@ -91,6 +99,8 @@ test("工具只访问固定正式API，且仅受控预览、确认与新增下�
     assert.match(request.url.pathname, /^\/api\//u);
   }
   assert.deepEqual(requests.filter((item) => item.options.method === "POST").map((item) => item.url.pathname), [
+    "/api/key-actions/reference-images",
+    "/api/key-actions/reference-images/discard",
     "/api/key-actions/launch-preview",
     "/api/key-actions/launch",
     "/api/content-center/planning/requests/revise-topics", "/api/content-center/planning/requests/revise-copy",
@@ -98,6 +108,34 @@ test("工具只访问固定正式API，且仅受控预览、确认与新增下�
     "/api/content-center/planning/requests/expand", "/api/content-center/planning/requests/fill",
     "/api/content-center/planning/requests",
   ]);
+});
+
+test("参考图片工具只读取明确文件、校验真实内容并在批次失败时清理已暂存图片", async () => {
+  const secondPath = path.join(referenceImageFixtureDirectory, "second.png");
+  fs.copyFileSync(referenceImageFixturePath, secondPath);
+  const requests = [];
+  const fetchImpl = async (url, options) => {
+    requests.push({ url: new URL(url), options });
+    if (new URL(url).pathname.endsWith("/discard")) return new Response(JSON.stringify({ success: true, discarded: ["created-1"] }), { status: 200 });
+    if (requests.filter((item) => item.url.pathname === "/api/key-actions/reference-images").length === 2) {
+      return new Response(JSON.stringify({ message: "第二张上传失败" }), { status: 400 });
+    }
+    return new Response(JSON.stringify({ success: true, created: true, attachment: { id: "created-1", purpose: "reference_image", url: "/uploads/key-action-reference-images/created-1.png" } }), { status: 201 });
+  };
+  await assert.rejects(executeTool("upload_key_action_reference_images", { idempotencyKey: "partial-v1", filePaths: [referenceImageFixturePath, secondPath] }, { settings, fetchImpl }), /第二张上传失败/u);
+  assert.deepEqual(requests.map((item) => item.url.pathname), [
+    "/api/key-actions/reference-images",
+    "/api/key-actions/reference-images",
+    "/api/key-actions/reference-images/discard",
+  ]);
+  assert.ok(requests[0].options.body instanceof FormData);
+  assert.equal(requests[0].options.headers["Content-Type"], undefined);
+  assert.deepEqual(JSON.parse(requests[2].options.body), { attachmentIds: ["created-1"] });
+
+  const fakePng = path.join(referenceImageFixtureDirectory, "fake.png");
+  fs.writeFileSync(fakePng, "not an image");
+  await assert.rejects(executeTool("upload_key_action_reference_images", { idempotencyKey: "fake-v1", filePaths: [fakePng] }, { settings, fetchImpl }), /实际内容/u);
+  await assert.rejects(executeTool("upload_key_action_reference_images", { idempotencyKey: "scan-v1", filePaths: [referenceImageFixtureDirectory] }, { settings, fetchImpl }), /普通本地文件/u);
 });
 
 test("内容策划工具限制日期、分页和下周需求载荷", async () => {

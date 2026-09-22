@@ -45,6 +45,18 @@ async function request(baseUrl, pathname, { token = "", method = "GET", body } =
   return { status: response.status, body: await response.json() };
 }
 
+async function uploadReferenceImage(baseUrl, token, { bytes, filename = "reference.png", mimeType = "image/png", idempotencyKey }) {
+  const body = new FormData();
+  body.append("idempotencyKey", idempotencyKey);
+  body.append("image", new Blob([bytes], { type: mimeType }), filename);
+  const response = await fetch(`${baseUrl}/api/key-actions/reference-images`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body,
+  });
+  return { status: response.status, body: await response.json() };
+}
+
 test("助手设备可长期续期、逐台撤销，且仅能受控发起行动与新增下周需求", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "assistant-device-session-"));
   const databasePath = path.join(directory, "workstation.db");
@@ -55,10 +67,19 @@ test("助手设备可长期续期、逐台撤销，且仅能受控发起行动�
   process.env.WUFAN_ENV = "test";
   process.env.WUFAN_ALLOW_DB_RESET = "1";
   const { closeDatabase, getDatabase, initializeDatabase } = await import("../server/db.js");
-  const { hashPassword } = await import("../server/security.js");
+  const { createKeyActionLaunchConfirmationToken, hashPassword, verifyKeyActionLaunchConfirmationToken } = await import("../server/security.js");
   const { createEmptyPermissions } = await import("../shared/permissions.js");
   let child;
   try {
+    const originalNow = Date.now;
+    try {
+      let currentTime = new Date("2026-09-22T00:00:00Z").getTime();
+      Date.now = () => currentTime;
+      const expiringConfirmation = createKeyActionLaunchConfirmationToken("assistant-expiry-test", "fingerprint");
+      assert.ok(verifyKeyActionLaunchConfirmationToken(expiringConfirmation));
+      currentTime += 16 * 60 * 1000;
+      assert.equal(verifyKeyActionLaunchConfirmationToken(expiringConfirmation), null);
+    } finally { Date.now = originalNow; }
     initializeDatabase({ reset: true });
     const database = getDatabase();
     const people = database.prepare("SELECT id,departmentId FROM persons WHERE lower(COALESCE(username,''))<>'admin' ORDER BY id LIMIT 2").all();
@@ -202,6 +223,41 @@ test("助手设备可长期续期、逐台撤销，且仅能受控发起行动�
       customFields: { acceptanceStandard: "结果可复核并符合行动标准。" },
       productIds: [],
     };
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+    const firstUpload = await uploadReferenceImage(baseUrl, launcherLogin.body.token, { bytes: png, idempotencyKey: "assistant-reference-set-1" });
+    assert.equal(firstUpload.status, 201, JSON.stringify(firstUpload.body));
+    assert.equal(firstUpload.body.attachment.purpose, "reference_image");
+    assert.match(firstUpload.body.attachment.url, /^\/uploads\/key-action-reference-images\//u);
+    const repeatedUpload = await uploadReferenceImage(baseUrl, launcherLogin.body.token, { bytes: png, idempotencyKey: "assistant-reference-set-1" });
+    assert.equal(repeatedUpload.status, 200);
+    assert.equal(repeatedUpload.body.attachment.id, firstUpload.body.attachment.id);
+    assert.equal(repeatedUpload.body.duplicate, true);
+    const secondUpload = await uploadReferenceImage(baseUrl, launcherLogin.body.token, { bytes: Buffer.concat([png, Buffer.from([1])]), filename: "second.png", idempotencyKey: "assistant-reference-set-2" });
+    assert.equal(secondUpload.status, 201, JSON.stringify(secondUpload.body));
+    assert.notEqual(secondUpload.body.attachment.id, firstUpload.body.attachment.id);
+    assert.equal((await uploadReferenceImage(baseUrl, launcherLogin.body.token, { bytes: Buffer.from("not-an-image"), idempotencyKey: "assistant-reference-invalid" })).status, 400);
+    assert.equal((await uploadReferenceImage(baseUrl, launcherLogin.body.token, { bytes: png, filename: "reference.txt", mimeType: "text/plain", idempotencyKey: "assistant-reference-type" })).status, 400);
+    assert.equal((await uploadReferenceImage(baseUrl, launcherLogin.body.token, { bytes: Buffer.concat([png.subarray(0, 8), Buffer.alloc(5 * 1024 * 1024)]), idempotencyKey: "assistant-reference-oversize" })).status, 413);
+    assert.equal((await uploadReferenceImage(baseUrl, loginA.body.token, { bytes: png, idempotencyKey: "assistant-reference-readonly" })).status, 403);
+    const disposableUpload = await uploadReferenceImage(baseUrl, launcherLogin.body.token, { bytes: Buffer.concat([png, Buffer.from([2])]), filename: "disposable.png", idempotencyKey: "assistant-reference-discard" });
+    assert.equal(disposableUpload.status, 201);
+    const discarded = await request(baseUrl, "/api/key-actions/reference-images/discard", { method: "POST", token: launcherLogin.body.token, body: { attachmentIds: [disposableUpload.body.attachment.id] } });
+    assert.deepEqual(discarded.body.discarded, [disposableUpload.body.attachment.id]);
+    const expiringUpload = await uploadReferenceImage(baseUrl, launcherLogin.body.token, { bytes: Buffer.concat([png, Buffer.from([3])]), filename: "expiring.png", idempotencyKey: "assistant-reference-expiring" });
+    assert.equal(expiringUpload.status, 201);
+    const expireDatabase = new Database(databasePath);
+    try { expireDatabase.prepare("UPDATE key_action_reference_attachments SET expiresAt=? WHERE id=?").run("2000-01-01T00:00:00.000Z", expiringUpload.body.attachment.id); }
+    finally { expireDatabase.close(); }
+    const stagedAssetUrl = `${baseUrl}${firstUpload.body.attachment.url}?access_token=${encodeURIComponent(loginB.body.assetToken)}`;
+    assert.equal((await fetch(stagedAssetUrl)).status, 403);
+    const crossSessionPreview = await request(baseUrl, "/api/key-actions/launch-preview", {
+      method: "POST",
+      token: plannerLogin.body.token,
+      body: { ...launchInput, referenceAttachmentIds: [firstUpload.body.attachment.id] },
+    });
+    assert.equal(crossSessionPreview.status, 403);
+    assert.equal(crossSessionPreview.body.code, "key_action_reference_image_forbidden");
+    launchInput.referenceAttachmentIds = [firstUpload.body.attachment.id, secondUpload.body.attachment.id];
     const beforeLaunch = new Database(databasePath, { readonly: true });
     const countsBefore = beforeLaunch.prepare("SELECT (SELECT COUNT(*) FROM work_plans) workPlans,(SELECT COUNT(*) FROM process_instances) instances,(SELECT COUNT(*) FROM tasks) tasks").get();
     beforeLaunch.close();
@@ -210,19 +266,60 @@ test("助手设备可长期续期、逐台撤销，且仅能受控发起行动�
     const missingRequired = await request(baseUrl, "/api/key-actions/launch-preview", { method: "POST", token: launcherLogin.body.token, body: { ...launchInput, customFields: {} } });
     assert.equal(missingRequired.status, 400);
     assert.equal(missingRequired.body.code, "key_action_required_field_missing");
+    const expiredAudit = new Database(databasePath, { readonly: true });
+    try { assert.equal(expiredAudit.prepare("SELECT status FROM key_action_reference_attachments WHERE id=?").get(expiringUpload.body.attachment.id).status, "expired"); }
+    finally { expiredAudit.close(); }
+    const tooManyReferences = await request(baseUrl, "/api/key-actions/launch-preview", { method: "POST", token: launcherLogin.body.token, body: { ...launchInput, referenceAttachmentIds: Array.from({ length: 10 }, (_, index) => `attachment-${index}`) } });
+    assert.equal(tooManyReferences.status, 400);
     const preview = await request(baseUrl, "/api/key-actions/launch-preview", { method: "POST", token: launcherLogin.body.token, body: launchInput });
     assert.equal(preview.status, 200, JSON.stringify(preview.body));
     assert.equal(preview.body.preview.canLaunch, true);
     assert.equal(preview.body.preview.steps.length, 1);
+    assert.equal(preview.body.preview.referenceImages.length, 2);
     assert.ok(preview.body.confirmationToken);
     const afterPreview = new Database(databasePath, { readonly: true });
     assert.deepEqual(afterPreview.prepare("SELECT (SELECT COUNT(*) FROM work_plans) workPlans,(SELECT COUNT(*) FROM process_instances) instances,(SELECT COUNT(*) FROM tasks) tasks").get(), countsBefore);
     afterPreview.close();
     assert.equal((await request(baseUrl, "/api/key-actions/launch", { method: "POST", token: launcherLogin.body.token, body: launchInput })).status, 409);
     assert.equal((await request(baseUrl, "/api/key-actions/launch", { method: "POST", token: launcherLogin.body.token, body: { ...launchInput, title: "内容被修改", confirmationToken: preview.body.confirmationToken } })).status, 409);
+    assert.equal((await request(baseUrl, "/api/key-actions/launch", { method: "POST", token: launcherLogin.body.token, body: { ...launchInput, referenceAttachmentIds: [firstUpload.body.attachment.id], confirmationToken: preview.body.confirmationToken } })).status, 409);
+    const failAssociation = new Database(databasePath);
+    try {
+      failAssociation.exec("CREATE TRIGGER reject_reference_link BEFORE INSERT ON key_action_reference_attachment_links BEGIN SELECT RAISE(ABORT, 'test association failure'); END;");
+    } finally { failAssociation.close(); }
+    const failedLaunch = await request(baseUrl, "/api/key-actions/launch", { method: "POST", token: launcherLogin.body.token, body: { ...launchInput, confirmationToken: preview.body.confirmationToken } });
+    assert.equal(failedLaunch.status, 400);
+    const afterFailedAssociation = new Database(databasePath);
+    try {
+      assert.deepEqual(afterFailedAssociation.prepare("SELECT (SELECT COUNT(*) FROM work_plans) workPlans,(SELECT COUNT(*) FROM process_instances) instances,(SELECT COUNT(*) FROM tasks) tasks").get(), countsBefore);
+      assert.equal(afterFailedAssociation.prepare("SELECT status FROM key_action_reference_attachments WHERE id=?").get(firstUpload.body.attachment.id).status, "staged");
+      afterFailedAssociation.exec("DROP TRIGGER reject_reference_link");
+    } finally { afterFailedAssociation.close(); }
     const launched = await request(baseUrl, "/api/key-actions/launch", { method: "POST", token: launcherLogin.body.token, body: { ...launchInput, confirmationToken: preview.body.confirmationToken } });
     assert.equal(launched.status, 201);
     assert.equal(launched.body.action.taskCount, 1);
+    assert.equal(launched.body.action.referenceImages.length, 2);
+    assert.equal((await fetch(`${baseUrl}${firstUpload.body.attachment.url}?access_token=${encodeURIComponent(loginB.body.assetToken)}`)).status, 200);
+    const retriedLaunch = await request(baseUrl, "/api/key-actions/launch", { method: "POST", token: launcherLogin.body.token, body: { ...launchInput, confirmationToken: preview.body.confirmationToken } });
+    assert.equal(retriedLaunch.status, 200);
+    assert.equal(retriedLaunch.body.duplicate, true);
+    const referenceAudit = new Database(databasePath, { readonly: true });
+    try {
+      const linkedRows = referenceAudit.prepare("SELECT attachmentId,processInstanceId FROM key_action_reference_attachment_links WHERE processInstanceId=? ORDER BY attachmentId").all(launched.body.action.id);
+      assert.equal(linkedRows.length, 2);
+      const actionRow = referenceAudit.prepare("SELECT customFields FROM process_instances WHERE id=?").get(launched.body.action.id);
+      const taskRow = referenceAudit.prepare("SELECT customFields FROM tasks WHERE processInstanceId=? LIMIT 1").get(launched.body.action.id);
+      assert.equal(JSON.parse(actionRow.customFields).referenceImageAttachments.length, 2);
+      assert.equal(JSON.parse(taskRow.customFields).referenceImageAttachments.length, 2);
+      assert.deepEqual(referenceAudit.prepare("SELECT (SELECT COUNT(*) FROM work_plans) workPlans,(SELECT COUNT(*) FROM process_instances) instances,(SELECT COUNT(*) FROM tasks) tasks").get(), {
+        workPlans: countsBefore.workPlans + 1,
+        instances: countsBefore.instances + 1,
+        tasks: countsBefore.tasks + 1,
+      });
+    } finally { referenceAudit.close(); }
+    const linkedDiscard = await request(baseUrl, "/api/key-actions/reference-images/discard", { method: "POST", token: launcherLogin.body.token, body: { attachmentIds: [firstUpload.body.attachment.id] } });
+    assert.equal(linkedDiscard.status, 200);
+    assert.deepEqual(linkedDiscard.body.retained, [firstUpload.body.attachment.id]);
     const duplicatePreview = await request(baseUrl, "/api/key-actions/launch-preview", { method: "POST", token: launcherLogin.body.token, body: launchInput });
     assert.equal(duplicatePreview.status, 200);
     assert.equal(duplicatePreview.body.preview.canLaunch, false);
