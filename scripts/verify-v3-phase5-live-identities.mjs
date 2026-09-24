@@ -3,7 +3,8 @@ import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 
-const projectRoot = process.env.WUFAN_PROJECT_ROOT || "/Users/meiyounaichatouyuna/Projects/goal-execution-system";
+const projectRoot = process.env.WUFAN_PROJECT_DIR || process.env.WUFAN_PROJECT_ROOT;
+if (!projectRoot) throw new Error("WUFAN_PROJECT_DIR_required");
 const targetsPath = process.env.TARGETS_PATH || "/private/tmp/v3-phase5-live-targets.json";
 const outputPath = process.env.OUTPUT_PATH || "/private/tmp/v3-phase5-live-observations.json";
 const require = createRequire(`${projectRoot}/package.json`);

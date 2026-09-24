@@ -2,7 +2,8 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 
 const sourceDb = process.argv[2] || "/private/tmp/wangdian-bom-authority-phase3.db";
-const platformFile = process.argv[3] || "/Users/mac/Downloads/8.19平台货品.xlsx";
+const platformFile = process.argv[3];
+if (!platformFile) throw new Error("platform_file_argument_required");
 const livePath = process.argv[4] || "/private/tmp/v3-phase5-live-observations.json";
 const outputDb = process.argv[5] || "/private/tmp/v3-relation-main-chain-phase5-live.db";
 const outputPath = process.argv[6] || "/private/tmp/v3-relation-main-chain-phase5-live-result.json";

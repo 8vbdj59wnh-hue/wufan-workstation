@@ -4,7 +4,7 @@ set -euo pipefail
 echo "Deprecated: use scripts/release-package.sh on Dev-01 and scripts/release-from-package.sh on Server-01." >&2
 exit 1
 
-REMOTE_PATH="/Users/meiyounaichatouyuna/Projects/goal-execution-system"
+REMOTE_PATH="${WUFAN_PROJECT_DIR:?WUFAN_PROJECT_DIR is required}"
 MODE="dry-run"
 REMOTE_HOST=""
 REMOTE_USER=""
@@ -17,7 +17,7 @@ Usage:
 
 Options:
   --path <remote-path>      Company Mac project path.
-                            Default: /Users/meiyounaichatouyuna/Projects/goal-execution-system
+                            Required: WUFAN_PROJECT_DIR or --remote-path
   --execute                 Actually rsync code and restart pm2. Default is dry-run only.
   --dry-run                 Preview rsync changes without modifying the company Mac.
   --legacy-confirm          Explicitly acknowledge use of this deprecated script.

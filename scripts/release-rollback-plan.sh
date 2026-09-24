@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-EXPECTED_PROJECT_DIR="/Users/meiyounaichatouyuna/Projects/goal-execution-system"
-RELEASE_ROOT="/Users/meiyounaichatouyuna/WufanWorkstationReleases"
+EXPECTED_PROJECT_DIR="${WUFAN_PROJECT_DIR:?WUFAN_PROJECT_DIR is required}"
+RELEASE_ROOT="${WUFAN_RELEASE_ROOT:?WUFAN_RELEASE_ROOT is required}"
 NODE22_BIN="/opt/homebrew/opt/node@22/bin"
 
 RELEASE_DIR=""
@@ -40,7 +40,7 @@ MANIFEST="$RELEASE_DIR/release-manifest.json"
 [[ -f "$MANIFEST" ]] || fail "release manifest missing"
 
 CURRENT_COMMIT="$(git -C "$PROJECT_DIR" rev-parse HEAD)"
-CURRENT_DATABASE="$PROJECT_DIR/data/workstation.db"
+CURRENT_DATABASE="${WUFAN_DB_PATH:?WUFAN_DB_PATH is required}"
 CURRENT_DATABASE_SHA=""
 [[ -f "$CURRENT_DATABASE" ]] && CURRENT_DATABASE_SHA="$(shasum -a 256 "$CURRENT_DATABASE" | awk '{print $1}')"
 

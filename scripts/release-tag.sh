@@ -4,8 +4,8 @@ set -euo pipefail
 echo "Deprecated: production tags are created by scripts/release-from-package.sh." >&2
 exit 1
 
-EXPECTED_PROJECT_DIR="/Users/meiyounaichatouyuna/Projects/goal-execution-system"
-RELEASE_ROOT="/Users/meiyounaichatouyuna/WufanWorkstationReleases"
+EXPECTED_PROJECT_DIR="${WUFAN_PROJECT_DIR:?WUFAN_PROJECT_DIR is required}"
+RELEASE_ROOT="${WUFAN_RELEASE_ROOT:?WUFAN_RELEASE_ROOT is required}"
 NODE22_BIN="/opt/homebrew/opt/node@22/bin"
 
 RELEASE_DIR=""

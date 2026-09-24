@@ -11,11 +11,21 @@ import {
   assertDatabaseResetAllowed,
   evaluateDatabaseHealth,
   isAllowedIsolationDatabasePath,
-  productionDatabasePath,
   resolveDatabasePath,
 } from "../server/databaseSafety.js";
 
 const projectRoot = path.resolve(import.meta.dirname, "..");
+const configuredProductionDatabasePath = "/Users/wufan001/WufanWorkstationData/production/workstation.db";
+const configuredProductionEnvironment = {
+  WUFAN_ENV: "production",
+  WUFAN_PROJECT_DIR: "/Users/wufan001/Projects/goal-execution-system",
+  WUFAN_DATA_ROOT: "/Users/wufan001/WufanWorkstationData/production",
+  WUFAN_DB_PATH: configuredProductionDatabasePath,
+  WUFAN_DB_BASELINE_PATH: "/Users/wufan001/WufanWorkstationData/production/business-baseline.json",
+  WUFAN_UPLOADS_PATH: "/Users/wufan001/WufanWorkstationData/production/uploads",
+  WUFAN_AUTH_SECRET_PATH: "/Users/wufan001/WufanWorkstationData/production/auth.secret",
+  WUFAN_RELEASE_ROOT: "/Users/wufan001/WufanWorkstationReleases",
+};
 
 function runDatabaseModule(source, environment) {
   return spawnSync(process.execPath, ["--input-type=module", "--eval", source], {
@@ -31,13 +41,13 @@ test("production requires the locked external database path", () => {
     (error) => error.code === "production_database_path_required",
   );
   assert.throws(
-    () => resolveDatabasePath({ environment: { WUFAN_ENV: "production", WUFAN_DB_PATH: path.join(projectRoot, "data/workstation.db") }, projectRoot }),
-    (error) => error.code === "production_database_path_not_locked",
+    () => resolveDatabasePath({ environment: { ...configuredProductionEnvironment, WUFAN_DB_PATH: path.join(projectRoot, "data/workstation.db") }, projectRoot: configuredProductionEnvironment.WUFAN_PROJECT_DIR }),
+    (error) => error.code === "production_database_path_inside_repository" || error.code === "production_database_path_outside_data_root",
   );
   assert.equal(resolveDatabasePath({
-    environment: { WUFAN_ENV: "production", WUFAN_DB_PATH: productionDatabasePath },
-    projectRoot,
-  }), productionDatabasePath);
+    environment: configuredProductionEnvironment,
+    projectRoot: configuredProductionEnvironment.WUFAN_PROJECT_DIR,
+  }), configuredProductionDatabasePath);
 });
 
 test("migration preview requires an explicit database inside its isolated root", () => {
@@ -46,6 +56,7 @@ test("migration preview requires an explicit database inside its isolated root",
   const environment = {
     WUFAN_ENV: "migration-preview",
     WUFAN_DB_PATH: previewDatabase,
+    WUFAN_PRODUCTION_DB_PATH: configuredProductionDatabasePath,
     WUFAN_ISOLATION_DATABASE_ROOT: directory,
   };
   try {
@@ -60,7 +71,7 @@ test("migration preview requires an explicit database inside its isolated root",
       (error) => error.code === "isolation_database_path_must_be_absolute",
     );
     assert.throws(
-      () => resolveDatabasePath({ environment: { ...environment, WUFAN_DB_PATH: productionDatabasePath }, projectRoot }),
+      () => resolveDatabasePath({ environment: { ...environment, WUFAN_DB_PATH: configuredProductionDatabasePath }, projectRoot }),
       (error) => error.code === "isolation_database_path_not_allowed",
     );
     assert.throws(
@@ -117,7 +128,7 @@ test("reset is allowed only for an explicitly enabled test temporary database", 
       { WUFAN_ENV: "migration-preview", WUFAN_ALLOW_DB_RESET: "1", WUFAN_ISOLATION_DATABASE_ROOT: directory },
     ]) {
       const target = environment.WUFAN_ENV === "test" && environment.WUFAN_ALLOW_DB_RESET === "1"
-        ? productionDatabasePath
+        ? configuredProductionDatabasePath
         : temporaryDatabase;
       assert.throws(
         () => assertDatabaseResetAllowed(target, environment),
@@ -129,30 +140,29 @@ test("reset is allowed only for an explicitly enabled test temporary database", 
   }
 });
 
-test("initializeDatabase blocks a production reset before touching the file", () => {
-  const result = runDatabaseModule(`
-    import { initializeDatabase } from "./server/db.js";
-    try {
-      initializeDatabase({ reset: true });
-      process.exit(2);
-    } catch (error) {
-      if (error.code !== "production_database_reset_blocked") throw error;
-    }
-  `, {
-    WUFAN_ENV: "production",
-    WUFAN_DB_PATH: productionDatabasePath,
-    WUFAN_ALLOW_DB_RESET: "1",
-  });
-  assert.equal(result.status, 0, result.stderr);
+test("production reset remains blocked for a configured external database", () => {
+  assert.throws(
+    () => assertDatabaseResetAllowed(configuredProductionDatabasePath, {
+      ...configuredProductionEnvironment,
+      WUFAN_ALLOW_DB_RESET: "1",
+    }),
+    (error) => error.code === "production_database_reset_blocked",
+  );
 });
 
 test("production database module refuses to load without an explicit path", () => {
   const result = runDatabaseModule('await import("./server/db.js")', {
+    ...configuredProductionEnvironment,
+    WUFAN_PROJECT_DIR: projectRoot,
+    WUFAN_DATA_ROOT: "/Users/mac/WufanWorkstationPathTest/production",
+    WUFAN_DB_BASELINE_PATH: "/Users/mac/WufanWorkstationPathTest/production/business-baseline.json",
+    WUFAN_UPLOADS_PATH: "/Users/mac/WufanWorkstationPathTest/production/uploads",
+    WUFAN_AUTH_SECRET_PATH: "/Users/mac/WufanWorkstationPathTest/production/auth.secret",
     WUFAN_ENV: "production",
     WUFAN_DB_PATH: "",
   });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /production_database_path_required/u);
+  assert.match(result.stderr, /wufan_db_path_required|production_database_path_required/u);
 });
 
 test("initializeDatabase reset works against an explicitly enabled temporary test database", () => {

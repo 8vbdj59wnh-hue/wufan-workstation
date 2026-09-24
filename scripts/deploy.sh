@@ -11,7 +11,7 @@ if [[ "${1:-}" != "--legacy-confirm" ]]; then
 fi
 shift
 
-PROJECT_DIR="/Users/meiyounaichatouyuna/Projects/goal-execution-system"
+PROJECT_DIR="${WUFAN_PROJECT_DIR:?WUFAN_PROJECT_DIR is required}"
 
 cd "$PROJECT_DIR"
 

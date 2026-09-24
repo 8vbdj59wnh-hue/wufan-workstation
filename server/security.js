@@ -10,6 +10,7 @@ const assetTokenMaxAgeMs = 24 * 60 * 60 * 1000;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.resolve(__dirname, "..", "data");
 const authSecretPath = resolveAuthSecretPath({ defaultDataDir: dataDir });
+const productionEnvironment = String(process.env.WUFAN_ENV ?? "").trim().toLowerCase() === "production";
 
 function base64UrlEncode(value) {
   return Buffer.from(value).toString("base64url");
@@ -20,8 +21,13 @@ function base64UrlDecode(value) {
 }
 
 function getAuthSecret() {
-  fs.mkdirSync(dataDir, { recursive: true });
   if (!fs.existsSync(authSecretPath)) {
+    if (productionEnvironment) {
+      const error = new Error("production_auth_secret_missing");
+      error.code = "production_auth_secret_missing";
+      throw error;
+    }
+    fs.mkdirSync(path.dirname(authSecretPath), { recursive: true });
     fs.writeFileSync(authSecretPath, crypto.randomBytes(48).toString("base64url"), { mode: 0o600 });
   }
   return fs.readFileSync(authSecretPath, "utf8").trim();

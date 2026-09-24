@@ -6,7 +6,8 @@ import path from "node:path";
 import XLSX from "xlsx";
 
 const sourceDb = process.env.WUFAN_SOURCE_DB || "/private/tmp/wufan-combo-design-analysis.db";
-const sourceFile = process.env.SALES_DAILY_FILE || "/Users/mac/Downloads/7.9-8.9链接利润报表（SKU明细）.xlsx";
+const sourceFile = process.env.SALES_DAILY_FILE;
+if (!sourceFile) throw new Error("SALES_DAILY_FILE_required");
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "wufan-sales-daily-preview-"));
 const databasePath = path.join(root, "isolated.db");
 fs.copyFileSync(sourceDb, databasePath);

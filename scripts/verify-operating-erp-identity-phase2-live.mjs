@@ -3,8 +3,10 @@ import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 
-const projectRoot = process.env.WUFAN_PROJECT_ROOT || "/Users/meiyounaichatouyuna/Projects/goal-execution-system";
-const databasePath = process.env.WUFAN_DB_PATH || "/Users/meiyounaichatouyuna/WufanWorkstationData/production/workstation.db";
+const projectRoot = process.env.WUFAN_PROJECT_DIR || process.env.WUFAN_PROJECT_ROOT;
+const databasePath = process.env.WUFAN_DB_PATH;
+if (!projectRoot) throw new Error("WUFAN_PROJECT_DIR_required");
+if (!databasePath) throw new Error("WUFAN_DB_PATH_required");
 const outputPath = process.env.OUTPUT_PATH || "/private/tmp/operating-erp-phase2-live.json";
 const require = createRequire(`${projectRoot}/package.json`);
 const Database = require("better-sqlite3");

@@ -5,8 +5,8 @@ echo "Deprecated: release preparation is now built into scripts/release-from-pac
 exit 1
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-EXPECTED_PROJECT_DIR="/Users/meiyounaichatouyuna/Projects/goal-execution-system"
-RELEASE_ROOT="/Users/meiyounaichatouyuna/WufanWorkstationReleases"
+EXPECTED_PROJECT_DIR="${WUFAN_PROJECT_DIR:?WUFAN_PROJECT_DIR is required}"
+RELEASE_ROOT="${WUFAN_RELEASE_ROOT:?WUFAN_RELEASE_ROOT is required}"
 NODE22_BIN="/opt/homebrew/opt/node@22/bin"
 
 COMMIT_SHA=""

@@ -10,7 +10,8 @@ import { resolveLinkSkuErpRelation } from "../server/capabilities/resolveLinkSku
 
 const databasePath = process.env.WUFAN_SOURCE_DB
   || "/var/folders/g0/xgk8_zrn415b60zcqfw3tnxh0000gn/T/sales-daily-relation-resolver-migration-lQmbDv/isolated.db";
-const sourceFile = process.env.SALES_DAILY_FILE || "/Users/mac/Downloads/7.9-8.9链接利润报表（SKU明细）.xlsx";
+const sourceFile = process.env.SALES_DAILY_FILE;
+if (!sourceFile) throw new Error("SALES_DAILY_FILE_required");
 if (!fs.existsSync(databasePath)) throw new Error(`隔离数据库不存在：${databasePath}`);
 if (!fs.existsSync(sourceFile)) throw new Error(`真实销售日报不存在：${sourceFile}`);
 

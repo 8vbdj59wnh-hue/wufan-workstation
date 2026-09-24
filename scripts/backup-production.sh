@@ -2,13 +2,17 @@
 set -u
 set -o pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/production-paths.sh"
+wufan_load_production_paths --require-backup-root
+
 export LANG="${LANG:-en_US.UTF-8}"
 export LC_ALL="${LC_ALL:-en_US.UTF-8}"
 
-PROJECT_DIR="/Users/meiyounaichatouyuna/Projects/goal-execution-system"
-BACKUP_ROOT="/Users/meiyounaichatouyuna/WufanWorkstationBackups"
-DB_SRC="$PROJECT_DIR/data/workstation.db"
-UPLOADS_SRC="$PROJECT_DIR/uploads"
+PROJECT_DIR="${WUFAN_PROJECT_DIR:?WUFAN_PROJECT_DIR is required}"
+BACKUP_ROOT="${WUFAN_BACKUP_ROOT:?WUFAN_BACKUP_ROOT is required}"
+DB_SRC="${WUFAN_DB_PATH:?WUFAN_DB_PATH is required}"
+UPLOADS_SRC="${WUFAN_UPLOADS_PATH:?WUFAN_UPLOADS_PATH is required}"
 
 TS="$(date +%Y%m%d-%H%M%S)"
 DB_DIR="$BACKUP_ROOT/database"
@@ -69,13 +73,13 @@ verify_git_bundle() {
   return 1
 }
 
-cleanup_old_backups() {
-  local dir="$1"
-  local pattern="$2"
-  local label="$3"
-  local deleted
-  deleted="$(find "$dir" -type f -name "$pattern" -mtime +30 -print -delete 2>> "$LOG_FILE" | wc -l | tr -d ' ')"
-  log "CLEAN $label deleted=${deleted:-0}"
+verify_database_backup() {
+  local integrity foreign_keys
+  integrity="$(sqlite3 "$DB_DEST" 'PRAGMA integrity_check;' 2>> "$LOG_FILE")" || return 1
+  [[ "$integrity" == "ok" ]] || { log "FAIL database integrity: $integrity"; return 1; }
+  foreign_keys="$(sqlite3 "$DB_DEST" 'PRAGMA foreign_key_check;' 2>> "$LOG_FILE")" || return 1
+  [[ -z "$foreign_keys" ]] || { log "FAIL database foreign keys"; return 1; }
+  log "OK verify database integrity and foreign keys: $DB_DEST"
 }
 
 status=0
@@ -90,13 +94,14 @@ if [[ ! -f "$DB_SRC" ]]; then
 else
   run_step "database backup: $DB_DEST" sqlite3 "$DB_SRC" ".backup '$DB_DEST'" || status=1
   require_file "$DB_DEST" "database backup" || status=1
+  verify_database_backup || status=1
 fi
 
 if [[ ! -d "$UPLOADS_SRC" ]]; then
   log "FAIL uploads source missing: $UPLOADS_SRC"
   status=1
 else
-  run_step "uploads archive: $UPLOADS_DEST" tar -czf "$UPLOADS_DEST" -C "$PROJECT_DIR" uploads || status=1
+  run_step "uploads archive: $UPLOADS_DEST" tar -czf "$UPLOADS_DEST" -C "$(dirname "$UPLOADS_SRC")" "$(basename "$UPLOADS_SRC")" || status=1
   require_file "$UPLOADS_DEST" "uploads archive" || status=1
   verify_uploads_archive || status=1
 fi
@@ -109,10 +114,6 @@ else
   require_file "$BUNDLE_DEST" "git bundle" || status=1
   verify_git_bundle || status=1
 fi
-
-cleanup_old_backups "$DB_DIR" "workstation-*.db" "database"
-cleanup_old_backups "$UPLOADS_DIR" "uploads-*.tar.gz" "uploads"
-cleanup_old_backups "$BUNDLE_DIR" "wufan-workstation-main-*.bundle" "git-bundles"
 
 log "DB_DEST=$DB_DEST"
 log "UPLOADS_DEST=$UPLOADS_DEST"

@@ -4,13 +4,13 @@ set -euo pipefail
 echo "Deprecated: preflight is now built into scripts/release-from-package.sh." >&2
 exit 1
 
-EXPECTED_PROJECT_DIR="/Users/meiyounaichatouyuna/Projects/goal-execution-system"
-EXPECTED_USER="meiyounaichatouyuna"
-EXPECTED_HOSTNAME="MacBook-Air-2.local"
-EXPECTED_LOCAL_HOSTNAME="MacBook-Air-2"
+EXPECTED_PROJECT_DIR="${WUFAN_PROJECT_DIR:?WUFAN_PROJECT_DIR is required}"
+EXPECTED_USER="${WUFAN_SERVER_USER:-$(id -un)}"
+EXPECTED_HOSTNAME="${WUFAN_SERVER_HOSTNAME:-$(hostname)}"
+EXPECTED_LOCAL_HOSTNAME="${WUFAN_SERVER_LOCAL_HOSTNAME:-${EXPECTED_HOSTNAME%%.*}}"
 NODE22_BIN="/opt/homebrew/opt/node@22/bin"
-DATABASE_PATH="$EXPECTED_PROJECT_DIR/data/workstation.db"
-UPLOADS_PATH="$EXPECTED_PROJECT_DIR/uploads"
+DATABASE_PATH="${WUFAN_DB_PATH:?WUFAN_DB_PATH is required}"
+UPLOADS_PATH="${WUFAN_UPLOADS_PATH:?WUFAN_UPLOADS_PATH is required}"
 MINIMUM_SAFETY_BYTES=$((10 * 1024 * 1024 * 1024))
 NPM_TEMP_BYTES=$((2 * 1024 * 1024 * 1024))
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_DIR="${PROJECT_DIR:-/Users/meiyounaichatouyuna/Projects/goal-execution-system}"
+PROJECT_DIR="${PROJECT_DIR:-${WUFAN_PROJECT_DIR:?WUFAN_PROJECT_DIR is required}}"
 CURRENT_COMMIT=""
 TARGET_COMMIT=""
 CHANGE_TYPE=""

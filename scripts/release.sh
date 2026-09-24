@@ -5,7 +5,7 @@ echo "Deprecated: use scripts/release-package.sh on Dev-01 and scripts/release-f
 exit 1
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="/Users/meiyounaichatouyuna/Projects/goal-execution-system"
+PROJECT_DIR="${WUFAN_PROJECT_DIR:?WUFAN_PROJECT_DIR is required}"
 NODE22_BIN="/opt/homebrew/opt/node@22/bin"
 
 COMMIT_SHA=""

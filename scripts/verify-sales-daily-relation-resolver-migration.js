@@ -5,7 +5,8 @@ import os from "node:os";
 import path from "node:path";
 
 const sourceDatabase = process.env.WUFAN_SOURCE_DB || "/private/tmp/wufan-combo-design-analysis.db";
-const sourceFile = process.env.SALES_DAILY_FILE || "/Users/mac/Downloads/7.9-8.9链接利润报表（SKU明细）.xlsx";
+const sourceFile = process.env.SALES_DAILY_FILE;
+if (!sourceFile) throw new Error("SALES_DAILY_FILE_required");
 if (!fs.existsSync(sourceDatabase)) throw new Error(`隔离验证源数据库不存在：${sourceDatabase}`);
 if (!fs.existsSync(sourceFile)) throw new Error(`真实销售日报不存在：${sourceFile}`);
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "sales-daily-relation-resolver-migration-"));

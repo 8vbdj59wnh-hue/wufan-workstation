@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-EXPECTED_PROJECT_DIR="/Users/meiyounaichatouyuna/Projects/goal-execution-system"
-RELEASE_ROOT="/Users/meiyounaichatouyuna/WufanWorkstationReleases"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/production-paths.sh"
+wufan_load_production_paths
+
+EXPECTED_PROJECT_DIR="${WUFAN_PROJECT_DIR:?WUFAN_PROJECT_DIR is required}"
+RELEASE_ROOT="${WUFAN_RELEASE_ROOT:?WUFAN_RELEASE_ROOT is required}"
 NODE22_BIN="/opt/homebrew/opt/node@22/bin"
 
 COMMIT_SHA=""

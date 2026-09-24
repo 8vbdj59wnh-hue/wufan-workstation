@@ -1,8 +1,20 @@
 "use strict";
 
-const projectDir = "/Users/meiyounaichatouyuna/Projects/goal-execution-system";
-const node22 = "/opt/homebrew/opt/node@22/bin/node";
-const pm2Logs = "/Users/meiyounaichatouyuna/.pm2/logs";
+const { resolveProductionPaths } = require("./server/productionPaths.cjs");
+
+const paths = resolveProductionPaths(process.env);
+const projectDir = paths.projectDir;
+const node22 = process.env.WUFAN_NODE22_BIN || "/opt/homebrew/opt/node@22/bin/node";
+const pm2Logs = paths.pm2LogRoot;
+const productionPathEnvironment = {
+  WUFAN_PROJECT_DIR: paths.projectDir,
+  WUFAN_DATA_ROOT: paths.dataRoot,
+  WUFAN_DB_PATH: paths.databasePath,
+  WUFAN_DB_BASELINE_PATH: paths.baselinePath,
+  WUFAN_UPLOADS_PATH: paths.uploadsPath,
+  WUFAN_AUTH_SECRET_PATH: paths.authSecretPath,
+  WUFAN_RELEASE_ROOT: paths.releaseRoot,
+};
 
 module.exports = {
   apps: [
@@ -14,6 +26,7 @@ module.exports = {
       env: {
         HOST: "0.0.0.0",
         PORT: "5173",
+        ...productionPathEnvironment,
       },
       autorestart: true,
       restart_delay: 1000,
@@ -32,8 +45,7 @@ module.exports = {
         HOST: "0.0.0.0",
         PORT: "3001",
         WUFAN_ENV: "production",
-        WUFAN_DB_PATH: "/Users/meiyounaichatouyuna/WufanWorkstationData/production/workstation.db",
-        WUFAN_DB_BASELINE_PATH: "/Users/meiyounaichatouyuna/WufanWorkstationData/production/business-baseline.json",
+        ...productionPathEnvironment,
         V3_AUTO_PROJECTION: "off",
         V3_SHADOW_ENABLED: "off",
         V3_AUTO_RELATION_WRITE: "off",

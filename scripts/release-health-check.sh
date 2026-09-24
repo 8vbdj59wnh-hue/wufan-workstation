@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-EXPECTED_PROJECT_DIR="/Users/meiyounaichatouyuna/Projects/goal-execution-system"
-RELEASE_ROOT="/Users/meiyounaichatouyuna/WufanWorkstationReleases"
-NODE22_BIN="/opt/homebrew/opt/node@22/bin"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DATABASE_PATH="/Users/meiyounaichatouyuna/WufanWorkstationData/production/workstation.db"
-BASELINE_PATH="/Users/meiyounaichatouyuna/WufanWorkstationData/production/business-baseline.json"
+source "$SCRIPT_DIR/lib/production-paths.sh"
+wufan_load_production_paths
+
+EXPECTED_PROJECT_DIR="${WUFAN_PROJECT_DIR:?WUFAN_PROJECT_DIR is required}"
+RELEASE_ROOT="${WUFAN_RELEASE_ROOT:?WUFAN_RELEASE_ROOT is required}"
+NODE22_BIN="/opt/homebrew/opt/node@22/bin"
+DATABASE_PATH="${WUFAN_DB_PATH:?WUFAN_DB_PATH is required}"
+BASELINE_PATH="${WUFAN_DB_BASELINE_PATH:?WUFAN_DB_BASELINE_PATH is required}"
 
 COMMIT_SHA=""
 RELEASE_DIR=""
@@ -194,8 +197,8 @@ done
 DATABASE_INTEGRITY="$(sqlite3 "file:$DATABASE_PATH?mode=ro" 'PRAGMA integrity_check;')"
 [[ "$DATABASE_INTEGRITY" == "ok" ]] || fail "database integrity check failed"
 
-CLIENT_ERROR_LOG="$HOME/.pm2/logs/wufan-client-error.log"
-SERVER_ERROR_LOG="$HOME/.pm2/logs/wufan-server-error.log"
+CLIENT_ERROR_LOG="$WUFAN_PM2_LOG_ROOT/wufan-client-error.log"
+SERVER_ERROR_LOG="$WUFAN_PM2_LOG_ROOT/wufan-server-error.log"
 CLIENT_ERROR_LOG_SIZE="$(stat -f '%z' "$CLIENT_ERROR_LOG" 2>/dev/null || echo 0)"
 SERVER_ERROR_LOG_SIZE="$(stat -f '%z' "$SERVER_ERROR_LOG" 2>/dev/null || echo 0)"
 NEW_FATAL_ERRORS=false

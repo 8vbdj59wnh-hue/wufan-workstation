@@ -1,9 +1,10 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
 
-export const productionDatabasePath = "/Users/meiyounaichatouyuna/WufanWorkstationData/production/workstation.db";
-export const productionBaselinePath = "/Users/meiyounaichatouyuna/WufanWorkstationData/production/business-baseline.json";
+const require = createRequire(import.meta.url);
+const { canonicalizePath, resolveProductionPaths } = require("./productionPaths.cjs");
 
 export const coreBusinessTables = Object.freeze({
   erpSkus: "erp_skus",
@@ -53,18 +54,24 @@ export function isAllowedIsolationDatabasePath(databasePath, environment = proce
   const isolationRoot = clean(environment.WUFAN_ISOLATION_DATABASE_ROOT);
   if (isolationRoot === "" || !path.isAbsolute(isolationRoot)) return false;
   const resolved = path.resolve(databasePath);
-  return resolved !== productionDatabasePath && pathIsInside(resolved, isolationRoot);
+  const configuredProductionPath = clean(environment.WUFAN_PRODUCTION_DB_PATH);
+  return (configuredProductionPath === "" || resolved !== path.resolve(configuredProductionPath))
+    && pathIsInside(resolved, isolationRoot);
 }
 
 export function resolveDatabasePath({ environment = process.env, projectRoot } = {}) {
   const configuredPath = clean(environment.WUFAN_DB_PATH);
   if (isProduction(environment)) {
     if (configuredPath === "") throw safetyError("production_database_path_required");
-    if (!path.isAbsolute(configuredPath)) throw safetyError("production_database_path_must_be_absolute");
-    const resolved = path.resolve(configuredPath);
-    if (resolved !== productionDatabasePath) throw safetyError("production_database_path_not_locked");
-    if (pathIsInside(resolved, projectRoot)) throw safetyError("production_database_path_inside_repository");
-    return resolved;
+    try {
+      const paths = resolveProductionPaths(environment);
+      const resolvedProject = canonicalizePath(projectRoot, "PROJECT_ROOT");
+      if (paths.projectDir !== resolvedProject) throw safetyError("production_project_path_mismatch");
+      return paths.databasePath;
+    } catch (error) {
+      if (error.code === "wufan_db_path_must_be_absolute") throw safetyError("production_database_path_must_be_absolute");
+      throw error;
+    }
   }
   if (isTest(environment)) {
     if (configuredPath === "" || !path.isAbsolute(configuredPath)) {
@@ -93,7 +100,8 @@ export function resolveDatabasePath({ environment = process.env, projectRoot } =
 
 export function assertDatabaseCanOpen(databasePath, environment = process.env) {
   if (isProduction(environment)) {
-    if (path.resolve(databasePath) !== productionDatabasePath) {
+    const configured = resolveProductionPaths(environment).databasePath;
+    if (canonicalizePath(databasePath, "WUFAN_DB_PATH") !== configured) {
       throw safetyError("production_database_path_not_locked");
     }
     if (!fs.existsSync(databasePath)) throw safetyError("production_database_missing");
@@ -122,12 +130,12 @@ export function shouldEnforceBusinessBaseline(environment = process.env) {
 }
 
 export function resolveBusinessBaselinePath(environment = process.env) {
+  if (isProduction(environment)) return resolveProductionPaths(environment).baselinePath;
   const configuredPath = clean(environment.WUFAN_DB_BASELINE_PATH);
   if (configuredPath !== "") {
     if (!path.isAbsolute(configuredPath)) throw safetyError("database_baseline_path_must_be_absolute");
     return path.resolve(configuredPath);
   }
-  if (isProduction(environment)) throw safetyError("production_database_baseline_required");
   return "";
 }
 

@@ -87,6 +87,9 @@ git -C "$PROJECT_DIR" archive "$TOOLING_COMMIT" \
   scripts/release-wait-for-health.sh \
   scripts/release-migration-preview.sh \
   scripts/release-migration-runner.mjs \
+  scripts/resolve-production-paths.mjs \
+  scripts/lib/production-paths.sh \
+  server/productionPaths.cjs \
   server/releaseMaintenanceService.js \
   | tar -x -C "$PACKAGE_DIR"
 chmod +x "$PACKAGE_DIR"/scripts/*.sh

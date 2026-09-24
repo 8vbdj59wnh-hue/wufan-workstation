@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-EXPECTED_PROJECT_DIR="/Users/meiyounaichatouyuna/Projects/goal-execution-system"
-RELEASE_ROOT="/Users/meiyounaichatouyuna/WufanWorkstationReleases"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/production-paths.sh"
+wufan_load_production_paths
+
+EXPECTED_PROJECT_DIR="${WUFAN_PROJECT_DIR:?WUFAN_PROJECT_DIR is required}"
+RELEASE_ROOT="${WUFAN_RELEASE_ROOT:?WUFAN_RELEASE_ROOT is required}"
 NODE22_BIN="/opt/homebrew/opt/node@22/bin"
 export PATH="$NODE22_BIN:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 PACKAGE_REF="refs/wufan-package/offline-target"
@@ -20,9 +24,9 @@ SOURCE_STAGING=""
 CHECK_DATABASE_DIR=""
 MAINTENANCE_ENTERED=false
 BOOTSTRAP_SERVER_STOPPED=false
-PRODUCTION_DATABASE_PATH="/Users/meiyounaichatouyuna/WufanWorkstationData/production/workstation.db"
-PRODUCTION_BASELINE_PATH="/Users/meiyounaichatouyuna/WufanWorkstationData/production/business-baseline.json"
-RELEASE_MAINTENANCE_PATH="/Users/meiyounaichatouyuna/WufanWorkstationData/production/release-maintenance.json"
+PRODUCTION_DATABASE_PATH="${WUFAN_DB_PATH:?WUFAN_DB_PATH is required}"
+PRODUCTION_BASELINE_PATH="${WUFAN_DB_BASELINE_PATH:?WUFAN_DB_BASELINE_PATH is required}"
+RELEASE_MAINTENANCE_PATH="${WUFAN_DATA_ROOT:?WUFAN_DATA_ROOT is required}/release-maintenance.json"
 
 fail() {
   echo "RELEASE_FROM_PACKAGE_FAIL: $*" >&2
@@ -37,7 +41,7 @@ cleanup() {
     MAINTENANCE_ENTERED=false
   fi
   if [[ "$BOOTSTRAP_SERVER_STOPPED" == true ]] && command -v pm2 >/dev/null 2>&1; then
-    pm2 restart wufan-server >/dev/null 2>&1 || true
+    pm2 restart wufan-server --update-env >/dev/null 2>&1 || true
     BOOTSTRAP_SERVER_STOPPED=false
   fi
   git -C "$EXPECTED_PROJECT_DIR" update-ref -d "$PACKAGE_REF" >/dev/null 2>&1 || true
@@ -75,6 +79,9 @@ REQUIRED_FILES=(
   scripts/release-wait-for-health.sh
   scripts/release-migration-preview.sh
   scripts/release-migration-runner.mjs
+  scripts/resolve-production-paths.mjs
+  scripts/lib/production-paths.sh
+  server/productionPaths.cjs
   server/releaseMaintenanceService.js
 )
 for required in "${REQUIRED_FILES[@]}"; do
@@ -125,10 +132,11 @@ BUNDLE_ADVERTISED_TARGET="$(
 NODE_COMMAND="$NODE22_BIN/node"
 NPM_COMMAND="$NODE22_BIN/npm"
 [[ -x "$NODE_COMMAND" && -x "$NPM_COMMAND" ]] || fail "Node 22 runtime is unavailable"
+[[ "$("$NODE_COMMAND" -p 'process.versions.node.split(".")[0]')" == "22" ]] || fail "Node.js major version must be 22"
 
 PROJECT_DIR="$EXPECTED_PROJECT_DIR"
 [[ -d "$PROJECT_DIR/.git" ]] || fail "production Git repository is missing"
-[[ "$(id -un)" == "meiyounaichatouyuna" ]] || fail "must run as the production user"
+[[ -O "$PROJECT_DIR" ]] || fail "production project must be owned by the current server account"
 [[ "$(cd "$PROJECT_DIR" && pwd -P)" == "$PROJECT_DIR" ]] || fail "production path mismatch"
 [[ "$(git -C "$PROJECT_DIR" branch --show-current)" == "main" ]] || fail "production branch must be main"
 git -C "$PROJECT_DIR" diff --quiet || fail "production worktree contains unstaged changes"
@@ -160,6 +168,8 @@ ARCHIVE_CHECK_SHA="$(
 DATABASE_PATH="$PRODUCTION_DATABASE_PATH"
 [[ -f "$DATABASE_PATH" ]] || fail "production database is missing"
 [[ -f "$PRODUCTION_BASELINE_PATH" ]] || fail "production business baseline is missing"
+[[ -d "$WUFAN_UPLOADS_PATH" ]] || fail "production uploads directory is missing"
+[[ -s "$WUFAN_AUTH_SECRET_PATH" ]] || fail "production auth secret is missing or empty"
 DATABASE_SIZE="$(stat -f '%z' "$DATABASE_PATH")"
 DISK_FREE_BYTES="$(df -Pk "$PROJECT_DIR" | awk 'NR==2 {printf "%.0f\n", $4 * 1024}')"
 REQUIRED_FREE_BYTES=$((DATABASE_SIZE + NPM_TEMP_BYTES + MINIMUM_SAFETY_BYTES))
@@ -422,9 +432,9 @@ rm -rf "$CHECK_DATABASE_DIR"
 CHECK_DATABASE_DIR=""
 
 STAGE="service-restart"
-[[ "$REQUIRES_CLIENT_RESTART" != "true" ]] || pm2 restart wufan-client
+[[ "$REQUIRES_CLIENT_RESTART" != "true" ]] || pm2 restart wufan-client --update-env
 if [[ "$BOOTSTRAP_SERVER_STOPPED" == true || "$REQUIRES_SERVER_RESTART" == "true" ]]; then
-  pm2 restart wufan-server
+  pm2 restart wufan-server --update-env
   BOOTSTRAP_SERVER_STOPPED=false
 fi
 

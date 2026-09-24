@@ -4,7 +4,7 @@ set -euo pipefail
 echo "Deprecated: release manifests are created by scripts/release-from-package.sh." >&2
 exit 1
 
-EXPECTED_PROJECT_DIR="/Users/meiyounaichatouyuna/Projects/goal-execution-system"
+EXPECTED_PROJECT_DIR="${WUFAN_PROJECT_DIR:?WUFAN_PROJECT_DIR is required}"
 NODE22_BIN="/opt/homebrew/opt/node@22/bin"
 
 COMMIT_SHA=""
@@ -69,7 +69,7 @@ if [[ -n "${RELEASE_TEST_PROJECT_DIR:-}" ]]; then
   NODE_COMMAND="$(command -v node || true)"
 else
   PROJECT_DIR="$EXPECTED_PROJECT_DIR"
-  DATABASE_PATH="$PROJECT_DIR/data/workstation.db"
+  DATABASE_PATH="${WUFAN_DB_PATH:?WUFAN_DB_PATH is required}"
   NODE_COMMAND="$NODE22_BIN/node"
 fi
 

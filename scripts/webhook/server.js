@@ -9,7 +9,7 @@ process.exit(1);
 
 const app = express();
 const port = Number(process.env.WEBHOOK_PORT || 9000);
-const deployScript = '/Users/meiyounaichatouyuna/Projects/goal-execution-system/scripts/deploy.sh';
+const deployScript = `${process.env.WUFAN_PROJECT_DIR || ""}/scripts/deploy.sh`;
 
 app.use(express.json());
 

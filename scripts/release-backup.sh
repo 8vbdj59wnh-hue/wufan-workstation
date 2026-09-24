@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-EXPECTED_PROJECT_DIR="/Users/meiyounaichatouyuna/Projects/goal-execution-system"
-RELEASE_ROOT="/Users/meiyounaichatouyuna/WufanWorkstationReleases"
-DATABASE_PATH="/Users/meiyounaichatouyuna/WufanWorkstationData/production/workstation.db"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/production-paths.sh"
+wufan_load_production_paths
+
+EXPECTED_PROJECT_DIR="${WUFAN_PROJECT_DIR:?WUFAN_PROJECT_DIR is required}"
+RELEASE_ROOT="${WUFAN_RELEASE_ROOT:?WUFAN_RELEASE_ROOT is required}"
+DATABASE_PATH="${WUFAN_DB_PATH:?WUFAN_DB_PATH is required}"
 
 COMMIT_SHA=""
 CHANGE_TYPE=""
@@ -129,6 +133,8 @@ sqlite3 "$DATABASE_PATH" ".timeout 5000" ".backup '$BACKUP_PATH'"
 
 BACKUP_INTEGRITY="$(sqlite3 "$BACKUP_PATH" "PRAGMA integrity_check;")"
 [[ "$BACKUP_INTEGRITY" == "ok" ]] || fail "backup integrity_check failed: $BACKUP_INTEGRITY"
+BACKUP_FOREIGN_KEYS="$(sqlite3 "$BACKUP_PATH" "PRAGMA foreign_key_check;")"
+[[ -z "$BACKUP_FOREIGN_KEYS" ]] || fail "backup foreign_key_check failed"
 BACKUP_SIZE="$(stat -f '%z' "$BACKUP_PATH")"
 BACKUP_SHA256="$(shasum -a 256 "$BACKUP_PATH" | awk '{print $1}')"
 TABLE_COUNT="$(sqlite3 "$BACKUP_PATH" "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")"
@@ -139,4 +145,5 @@ echo "DATABASE_BACKUP_PATH=$BACKUP_PATH"
 echo "DATABASE_BACKUP_SIZE=$BACKUP_SIZE"
 echo "DATABASE_BACKUP_SHA256=$BACKUP_SHA256"
 echo "DATABASE_BACKUP_INTEGRITY=$BACKUP_INTEGRITY"
+echo "DATABASE_BACKUP_FOREIGN_KEY_CHECK=ok"
 echo "DATABASE_BACKUP_TABLE_COUNT=$TABLE_COUNT"
