@@ -3,12 +3,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/production-paths.sh"
+source "$SCRIPT_DIR/lib/node-runtime.sh"
 wufan_load_production_paths
+wufan_resolve_node_runtime
 
 EXPECTED_PROJECT_DIR="${WUFAN_PROJECT_DIR:?WUFAN_PROJECT_DIR is required}"
 RELEASE_ROOT="${WUFAN_RELEASE_ROOT:?WUFAN_RELEASE_ROOT is required}"
-NODE22_BIN="/opt/homebrew/opt/node@22/bin"
-export PATH="$NODE22_BIN:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 PACKAGE_REF="refs/wufan-package/offline-target"
 MINIMUM_SAFETY_BYTES=$((10 * 1024 * 1024 * 1024))
 NPM_TEMP_BYTES=$((2 * 1024 * 1024 * 1024))
@@ -86,6 +86,7 @@ REQUIRED_FILES=(
   scripts/release-migration-preview.sh
   scripts/release-migration-runner.mjs
   scripts/resolve-production-paths.mjs
+  scripts/lib/node-runtime.sh
   scripts/lib/production-paths.sh
   server/productionPaths.cjs
   server/releaseMaintenanceService.js
@@ -99,9 +100,6 @@ done
   shasum -a 256 -c SHA256SUMS
 ) >/dev/null || fail "SHA256SUMS verification failed"
 
-NODE_COMMAND="$NODE22_BIN/node"
-[[ -x "$NODE_COMMAND" ]] || NODE_COMMAND="$(command -v node || true)"
-[[ -x "$NODE_COMMAND" ]] || fail "Node is unavailable for metadata validation"
 "$NODE_COMMAND" -e "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'))" \
   "$PACKAGE_DIR/release-metadata.json" || fail "release metadata is invalid"
 
@@ -134,11 +132,6 @@ BUNDLE_ADVERTISED_TARGET="$(
 )"
 [[ "$BUNDLE_ADVERTISED_TARGET" == "$TARGET_COMMIT" ]] \
   || fail "metadata target commit is not advertised by source bundle"
-
-NODE_COMMAND="$NODE22_BIN/node"
-NPM_COMMAND="$NODE22_BIN/npm"
-[[ -x "$NODE_COMMAND" && -x "$NPM_COMMAND" ]] || fail "Node 22 runtime is unavailable"
-[[ "$("$NODE_COMMAND" -p 'process.versions.node.split(".")[0]')" == "22" ]] || fail "Node.js major version must be 22"
 
 PROJECT_DIR="$EXPECTED_PROJECT_DIR"
 [[ -d "$PROJECT_DIR/.git" ]] || fail "production Git repository is missing"

@@ -88,6 +88,7 @@ git -C "$PROJECT_DIR" archive "$TOOLING_COMMIT" \
   scripts/release-migration-preview.sh \
   scripts/release-migration-runner.mjs \
   scripts/resolve-production-paths.mjs \
+  scripts/lib/node-runtime.sh \
   scripts/lib/production-paths.sh \
   server/productionPaths.cjs \
   server/releaseMaintenanceService.js \

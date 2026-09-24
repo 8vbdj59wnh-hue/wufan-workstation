@@ -4,7 +4,9 @@ const { resolveProductionPaths } = require("./server/productionPaths.cjs");
 
 const paths = resolveProductionPaths(process.env);
 const projectDir = paths.projectDir;
-const node22 = process.env.WUFAN_NODE22_BIN || "/opt/homebrew/opt/node@22/bin/node";
+const node22 = process.env.WUFAN_NODE_COMMAND
+  || process.env.WUFAN_NODE22_BIN
+  || "/opt/homebrew/opt/node@22/bin/node";
 const pm2Logs = paths.pm2LogRoot;
 const productionPathEnvironment = {
   WUFAN_PROJECT_DIR: paths.projectDir,

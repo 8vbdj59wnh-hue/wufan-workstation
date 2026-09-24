@@ -43,3 +43,10 @@ test("dry-run retains read-only service and data gates", () => {
   assert.match(prefix, /release-business-baseline-check\.sh/u);
   assert.match(prefix, /release-classify\.sh/u);
 });
+
+test("release resolves the configured Node 22 runtime instead of requiring a Homebrew location", () => {
+  assert.match(source, /source "\$SCRIPT_DIR\/lib\/node-runtime\.sh"/u);
+  assert.match(source, /wufan_resolve_node_runtime/u);
+  assert.doesNotMatch(source, /NODE_COMMAND="\$NODE22_BIN\/node"/u);
+  assert.doesNotMatch(source, /NPM_COMMAND="\$NODE22_BIN\/npm"/u);
+});
