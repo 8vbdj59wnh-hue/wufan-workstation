@@ -22,6 +22,8 @@ MANIFEST=""
 STAGE="argument-validation"
 SOURCE_STAGING=""
 CHECK_DATABASE_DIR=""
+BUNDLE_INSPECTION_DIR=""
+PACKAGE_REF_IMPORTED=false
 MAINTENANCE_ENTERED=false
 BOOTSTRAP_SERVER_STOPPED=false
 PRODUCTION_DATABASE_PATH="${WUFAN_DB_PATH:?WUFAN_DB_PATH is required}"
@@ -44,9 +46,13 @@ cleanup() {
     pm2 restart wufan-server --update-env >/dev/null 2>&1 || true
     BOOTSTRAP_SERVER_STOPPED=false
   fi
-  git -C "$EXPECTED_PROJECT_DIR" update-ref -d "$PACKAGE_REF" >/dev/null 2>&1 || true
+  if [[ "$PACKAGE_REF_IMPORTED" == true ]]; then
+    git -C "$EXPECTED_PROJECT_DIR" update-ref -d "$PACKAGE_REF" >/dev/null 2>&1 || true
+    PACKAGE_REF_IMPORTED=false
+  fi
   [[ -z "$SOURCE_STAGING" || ! -d "$SOURCE_STAGING" ]] || rm -rf "$SOURCE_STAGING"
   [[ -z "$CHECK_DATABASE_DIR" || ! -d "$CHECK_DATABASE_DIR" ]] || rm -rf "$CHECK_DATABASE_DIR"
+  [[ -z "$BUNDLE_INSPECTION_DIR" || ! -d "$BUNDLE_INSPECTION_DIR" ]] || rm -rf "$BUNDLE_INSPECTION_DIR"
 }
 trap cleanup EXIT
 
@@ -145,21 +151,35 @@ git -C "$PROJECT_DIR" diff --cached --quiet || fail "production index contains s
   || fail "production worktree contains modified or untracked files"
 
 CURRENT_COMMIT="$(git -C "$PROJECT_DIR" rev-parse HEAD)"
-git -C "$PROJECT_DIR" bundle verify "$PACKAGE_DIR/source.bundle" >/dev/null 2>&1 \
-  || fail "source bundle verification failed"
-git -C "$PROJECT_DIR" update-ref -d "$PACKAGE_REF" >/dev/null 2>&1 || true
-git -C "$PROJECT_DIR" bundle unbundle "$PACKAGE_DIR/source.bundle" >/dev/null 2>&1 \
-  || fail "unable to import verified bundle objects"
-git -C "$PROJECT_DIR" cat-file -e "$TARGET_COMMIT^{commit}" \
+GIT_INSPECTION_DIR="$PROJECT_DIR"
+if [[ "$DRY_RUN" == true ]]; then
+  BUNDLE_INSPECTION_DIR="$(mktemp -d /tmp/wufan-bundle-inspection.XXXXXX)"
+  git -C "$BUNDLE_INSPECTION_DIR" init --quiet
+  git -C "$BUNDLE_INSPECTION_DIR" bundle verify "$PACKAGE_DIR/source.bundle" >/dev/null 2>&1 \
+    || fail "source bundle verification failed"
+  git -C "$BUNDLE_INSPECTION_DIR" bundle unbundle "$PACKAGE_DIR/source.bundle" >/dev/null 2>&1 \
+    || fail "unable to inspect verified bundle objects"
+  GIT_INSPECTION_DIR="$BUNDLE_INSPECTION_DIR"
+else
+  git -C "$PROJECT_DIR" bundle verify "$PACKAGE_DIR/source.bundle" >/dev/null 2>&1 \
+    || fail "source bundle verification failed"
+  git -C "$PROJECT_DIR" update-ref -d "$PACKAGE_REF" >/dev/null 2>&1 || true
+  git -C "$PROJECT_DIR" bundle unbundle "$PACKAGE_DIR/source.bundle" >/dev/null 2>&1 \
+    || fail "unable to import verified bundle objects"
+  git -C "$PROJECT_DIR" update-ref "$PACKAGE_REF" "$TARGET_COMMIT"
+  PACKAGE_REF_IMPORTED=true
+  [[ "$(git -C "$PROJECT_DIR" rev-parse "$PACKAGE_REF^{commit}")" == "$TARGET_COMMIT" ]] \
+    || fail "imported target commit mismatch"
+fi
+git -C "$GIT_INSPECTION_DIR" cat-file -e "$TARGET_COMMIT^{commit}" \
   || fail "bundle does not contain metadata target commit"
-git -C "$PROJECT_DIR" update-ref "$PACKAGE_REF" "$TARGET_COMMIT"
-[[ "$(git -C "$PROJECT_DIR" rev-parse "$PACKAGE_REF^{commit}")" == "$TARGET_COMMIT" ]] \
-  || fail "imported target commit mismatch"
-git -C "$PROJECT_DIR" merge-base --is-ancestor "$CURRENT_COMMIT" "$TARGET_COMMIT" \
+[[ "$(git -C "$GIT_INSPECTION_DIR" rev-parse "$TARGET_COMMIT^")" == "$PARENT_COMMIT" ]] \
+  || fail "metadata parent commit does not match target commit"
+git -C "$GIT_INSPECTION_DIR" merge-base --is-ancestor "$CURRENT_COMMIT" "$TARGET_COMMIT" \
   || fail "target commit is not a descendant of current production HEAD"
 
 ARCHIVE_CHECK_SHA="$(
-  git -C "$PROJECT_DIR" archive --format=tar.gz --prefix=wufan-workstation/ "$TARGET_COMMIT" \
+  git -C "$GIT_INSPECTION_DIR" archive --format=tar.gz --prefix=wufan-workstation/ "$TARGET_COMMIT" \
     | shasum -a 256 \
     | awk '{print $1}'
 )"
@@ -198,27 +218,6 @@ curl --fail --silent --show-error -H 'x-wufan-api-source: system:release' http:/
   | "$NODE_COMMAND" -e \
     'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const h=JSON.parse(s);const current=h.status==="ok"&&h.technicalHealth?.status==="ok"&&["ok","not_enforced"].includes(h.businessDataHealth?.status);const legacy=h.status==="ok"&&h.database==="ok"||h.ok===true;if(!current&&!legacy)process.exit(1)})'
 
-WUFAN_ENV=production WUFAN_DB_PATH="$PRODUCTION_DATABASE_PATH" \
-  WUFAN_RELEASE_MAINTENANCE_PATH="$RELEASE_MAINTENANCE_PATH" \
-  "$NODE_COMMAND" "$PACKAGE_DIR/scripts/release-maintenance-mode.mjs" enter \
-    --reason phase9_release --release-id "preflight-${TARGET_COMMIT:0:8}" >/dev/null
-MAINTENANCE_ENTERED=true
-
-if ! WUFAN_ENV=production WUFAN_DB_PATH="$PRODUCTION_DATABASE_PATH" \
-  WUFAN_RELEASE_MAINTENANCE_PATH="$RELEASE_MAINTENANCE_PATH" \
-  "$NODE_COMMAND" "$PACKAGE_DIR/scripts/release-maintenance-mode.mjs" wait \
-    --timeout-ms 120000 >/dev/null 2>&1; then
-  # One-time bootstrap: the pre-Hotfix server cannot report maintenance status.
-  # PM2 sends SIGTERM and the server drains requests before closing SQLite.
-  pm2 stop wufan-server >/dev/null
-  BOOTSTRAP_SERVER_STOPPED=true
-  for attempt in {1..60}; do
-    [[ -z "$(lsof "$DATABASE_PATH" 2>/dev/null || true)" ]] && break
-    [[ "$attempt" -lt 60 ]] || fail "bootstrap maintenance could not drain database users"
-    sleep 1
-  done
-fi
-
 DATABASE_INTEGRITY="$(sqlite3 "file:$DATABASE_PATH?mode=ro" 'PRAGMA integrity_check;')"
 [[ "$DATABASE_INTEGRITY" == "ok" ]] || fail "production database integrity check failed"
 for baseline_attempt in 1 2 3; do
@@ -233,7 +232,7 @@ for baseline_attempt in 1 2 3; do
 done
 
 CLASSIFICATION_JSON="$(
-  PROJECT_DIR="$PROJECT_DIR" NODE_COMMAND="$NODE_COMMAND" \
+  PROJECT_DIR="$GIT_INSPECTION_DIR" NODE_COMMAND="$NODE_COMMAND" \
     "$PACKAGE_DIR/scripts/release-classify.sh" \
       --current "$CURRENT_COMMIT" \
       --target "$TARGET_COMMIT" \
@@ -272,6 +271,27 @@ if [[ "$DRY_RUN" == true ]]; then
   echo "SERVICE_RESTARTED=false"
   echo "TAG_CREATED=false"
   exit 0
+fi
+
+WUFAN_ENV=production WUFAN_DB_PATH="$PRODUCTION_DATABASE_PATH" \
+  WUFAN_RELEASE_MAINTENANCE_PATH="$RELEASE_MAINTENANCE_PATH" \
+  "$NODE_COMMAND" "$PACKAGE_DIR/scripts/release-maintenance-mode.mjs" enter \
+    --reason phase9_release --release-id "preflight-${TARGET_COMMIT:0:8}" >/dev/null
+MAINTENANCE_ENTERED=true
+
+if ! WUFAN_ENV=production WUFAN_DB_PATH="$PRODUCTION_DATABASE_PATH" \
+  WUFAN_RELEASE_MAINTENANCE_PATH="$RELEASE_MAINTENANCE_PATH" \
+  "$NODE_COMMAND" "$PACKAGE_DIR/scripts/release-maintenance-mode.mjs" wait \
+    --timeout-ms 120000 >/dev/null 2>&1; then
+  # One-time bootstrap: the pre-Hotfix server cannot report maintenance status.
+  # PM2 sends SIGTERM and the server drains requests before closing SQLite.
+  pm2 stop wufan-server >/dev/null
+  BOOTSTRAP_SERVER_STOPPED=true
+  for attempt in {1..60}; do
+    [[ -z "$(lsof "$DATABASE_PATH" 2>/dev/null || true)" ]] && break
+    [[ "$attempt" -lt 60 ]] || fail "bootstrap maintenance could not drain database users"
+    sleep 1
+  done
 fi
 
 TIMESTAMP="$(date '+%Y%m%d-%H%M%S')"

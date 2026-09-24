@@ -45,6 +45,7 @@ module.exports = {
         HOST: "0.0.0.0",
         PORT: "3001",
         WUFAN_ENV: "production",
+        WUFAN_BACKGROUND_JOBS: process.env.WUFAN_BACKGROUND_JOBS || "on",
         ...productionPathEnvironment,
         V3_AUTO_PROJECTION: "off",
         V3_SHADOW_ENABLED: "off",

@@ -13,7 +13,7 @@
     "test:operating-erp-set": "node scripts/run-isolated-node.mjs --test tests/operatingErpSetService.test.js",
     "test:erp-operating-lifecycle": "node scripts/run-isolated-node.mjs --test tests/operatingErpSetService.test.js tests/erpOperatingLifecycleService.test.js tests/erpOperatingLifecycleMigration.test.js",
     "test:erp-usage-profile": "node scripts/run-isolated-node.mjs --test tests/erpSkuUsageProfileService.test.js",
-    "test:release-safety": "node scripts/run-isolated-node.mjs --test tests/databaseSafety.test.js tests/productionPaths.test.js tests/runtimePaths.test.js tests/releaseMigrationPreview.test.js tests/releaseSafetyHotfix003.test.js tests/releaseHealthWait.test.js",
+    "test:release-safety": "node scripts/run-isolated-node.mjs --test tests/databaseSafety.test.js tests/productionPaths.test.js tests/runtimePaths.test.js tests/backgroundJobPolicy.test.js tests/releaseDryRunSafety.test.js tests/releaseMigrationPreview.test.js tests/releaseSafetyHotfix003.test.js tests/releaseHealthWait.test.js",
     "test:operating-erp-identity": "node scripts/run-isolated-node.mjs --test tests/operatingErpIdentityShadowService.test.js",
     "test:wangdian-bom-authority": "node scripts/run-isolated-node.mjs --test tests/wangdianBomAuthorityService.test.js",
     "test:sales-object-projection": "node scripts/run-isolated-node.mjs --test tests/salesObjectAutoProjectionService.test.js",

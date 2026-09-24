@@ -19,6 +19,7 @@ import {
   WorkType,
 } from "../src/data/modelOptions.js";
 import { configureApiCachePolicy } from "./apiCachePolicy.js";
+import { areBackgroundJobsEnabled } from "./backgroundJobPolicy.js";
 import { createLoginRateLimiter } from "./loginRateLimit.js";
 import { readXlsxWorkbook } from "./workbookReader.js";
 import {
@@ -462,6 +463,8 @@ const uploadFinanceWorkbook = multer({
     callback(null, true);
   },
 });
+
+const backgroundJobsEnabled = areBackgroundJobsEnabled();
 
 if (shouldEnforceBusinessBaseline()) {
   assertBusinessBaselineHealthy(evaluateDatabaseHealth(getDatabase()));
@@ -5701,15 +5704,17 @@ const server = app.listen(port, host, () => {
   console.log(`Local API server running at http://${host}:${port}`);
   console.log(`Local access: http://127.0.0.1:${port}`);
   console.log(`SQLite database: ${databasePath}`);
-  if (!isReleaseMaintenanceModeActive()) scheduleV3ShadowObservation({ type: "service_restart", objectId: process.pid });
+  if (backgroundJobsEnabled && !isReleaseMaintenanceModeActive()) {
+    scheduleV3ShadowObservation({ type: "service_restart", objectId: process.pid });
+  }
 });
 
-if (!isReleaseMaintenanceModeActive()) {
+if (backgroundJobsEnabled && !isReleaseMaintenanceModeActive()) {
   resumePendingWangdianShopDiscoveryBatches();
   resumeConnectionBulkPlatformImports();
 }
 
-const taskWaveCollectionTimer = setInterval(() => {
+const taskWaveCollectionTimer = backgroundJobsEnabled ? setInterval(() => {
   const maintenanceToken = beginReleaseManagedJob("task_wave_collection");
   if (!maintenanceToken) return;
   try {
@@ -5719,10 +5724,10 @@ const taskWaveCollectionTimer = setInterval(() => {
   } finally {
     finishReleaseManagedJob(maintenanceToken);
   }
-}, 60_000);
-taskWaveCollectionTimer.unref();
+}, 60_000) : null;
+taskWaveCollectionTimer?.unref();
 
-const connectionInspectionSchedulerTimer = setInterval(() => {
+const connectionInspectionSchedulerTimer = backgroundJobsEnabled ? setInterval(() => {
   const maintenanceToken = beginReleaseManagedJob("connection_inspection_scheduler");
   if (!maintenanceToken) return;
   try {
@@ -5733,11 +5738,11 @@ const connectionInspectionSchedulerTimer = setInterval(() => {
   } finally {
     finishReleaseManagedJob(maintenanceToken);
   }
-}, 60_000);
-connectionInspectionSchedulerTimer.unref();
+}, 60_000) : null;
+connectionInspectionSchedulerTimer?.unref();
 
 let dataSyncSchedulerRunning = false;
-const dataSyncSchedulerTimer = setInterval(async () => {
+const dataSyncSchedulerTimer = backgroundJobsEnabled ? setInterval(async () => {
   if (dataSyncSchedulerRunning) return;
   const maintenanceToken = beginReleaseManagedJob("data_sync_scheduler");
   if (!maintenanceToken) return;
@@ -5752,13 +5757,13 @@ const dataSyncSchedulerTimer = setInterval(async () => {
     dataSyncSchedulerRunning = false;
     finishReleaseManagedJob(maintenanceToken);
   }
-}, 60_000);
-dataSyncSchedulerTimer.unref();
+}, 60_000) : null;
+dataSyncSchedulerTimer?.unref();
 
 function shutdown() {
-  clearInterval(taskWaveCollectionTimer);
-  clearInterval(connectionInspectionSchedulerTimer);
-  clearInterval(dataSyncSchedulerTimer);
+  if (taskWaveCollectionTimer !== null) clearInterval(taskWaveCollectionTimer);
+  if (connectionInspectionSchedulerTimer !== null) clearInterval(connectionInspectionSchedulerTimer);
+  if (dataSyncSchedulerTimer !== null) clearInterval(dataSyncSchedulerTimer);
   server.close(() => {
     try { apiUsageRecorder.close(); }
     catch (error) { console.error("API 使用台账关闭前写入失败", error); }
