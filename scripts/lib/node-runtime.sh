@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 wufan_resolve_node_runtime() {
-  local configured_node configured_npm node_dir node_major
+  local configured_node configured_npm configured_pm2 node_dir node_major
 
   configured_node="${WUFAN_NODE_COMMAND:-${WUFAN_NODE22_BIN:-}}"
   if [[ -n "$configured_node" && -d "$configured_node" ]]; then
@@ -31,7 +31,15 @@ wufan_resolve_node_runtime() {
   [[ -n "$configured_npm" && -x "$configured_npm" ]] \
     || { echo "NODE_RUNTIME_FAIL: npm for Node.js 22 is unavailable" >&2; return 1; }
 
+  configured_pm2="${WUFAN_PM2_COMMAND:-}"
+  if [[ -z "$configured_pm2" ]]; then
+    configured_pm2="$(PATH="$node_dir:$PATH" command -v pm2 || true)"
+  fi
+  [[ -n "$configured_pm2" && -x "$configured_pm2" ]] \
+    || { echo "NODE_RUNTIME_FAIL: PM2 is unavailable" >&2; return 1; }
+
   export NODE_COMMAND="$configured_node"
   export NPM_COMMAND="$configured_npm"
+  export PM2_COMMAND="$configured_pm2"
   export PATH="$node_dir:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 }

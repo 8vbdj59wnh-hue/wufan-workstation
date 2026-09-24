@@ -36,7 +36,7 @@ test("production package ref cleanup only runs after a formal import", () => {
 test("dry-run retains read-only service and data gates", () => {
   const dryRunExit = source.indexOf('if [[ "$DRY_RUN" == true ]]; then\n  echo "DATABASE_BACKUP_CREATED=false"');
   const prefix = source.slice(0, dryRunExit);
-  assert.match(prefix, /PM2_JSON="\$\(pm2 jlist\)"/u);
+  assert.match(prefix, /PM2_JSON="\$\("\$PM2_COMMAND" jlist\)"/u);
   assert.match(prefix, /port in 5173 3001/u);
   assert.match(prefix, /api\/health/u);
   assert.match(prefix, /PRAGMA integrity_check/u);
@@ -49,4 +49,5 @@ test("release resolves the configured Node 22 runtime instead of requiring a Hom
   assert.match(source, /wufan_resolve_node_runtime/u);
   assert.doesNotMatch(source, /NODE_COMMAND="\$NODE22_BIN\/node"/u);
   assert.doesNotMatch(source, /NPM_COMMAND="\$NODE22_BIN\/npm"/u);
+  assert.doesNotMatch(source, /\bpm2 (jlist|stop|restart|save)\b/u);
 });

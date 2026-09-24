@@ -42,8 +42,8 @@ cleanup() {
       "$NODE_COMMAND" "$PACKAGE_DIR/scripts/release-maintenance-mode.mjs" exit >/dev/null 2>&1 || true
     MAINTENANCE_ENTERED=false
   fi
-  if [[ "$BOOTSTRAP_SERVER_STOPPED" == true ]] && command -v pm2 >/dev/null 2>&1; then
-    pm2 restart wufan-server --update-env >/dev/null 2>&1 || true
+  if [[ "$BOOTSTRAP_SERVER_STOPPED" == true && -x "${PM2_COMMAND:-}" ]]; then
+    "$PM2_COMMAND" restart wufan-server --update-env >/dev/null 2>&1 || true
     BOOTSTRAP_SERVER_STOPPED=false
   fi
   if [[ "$PACKAGE_REF_IMPORTED" == true ]]; then
@@ -194,7 +194,7 @@ if [[ -z "$LSOF_BIN" && -x /usr/sbin/lsof ]]; then
 fi
 [[ -n "$LSOF_BIN" && -x "$LSOF_BIN" ]] || fail "lsof is unavailable for port checks"
 
-PM2_JSON="$(pm2 jlist)"
+PM2_JSON="$("$PM2_COMMAND" jlist)"
 PROJECT_DIR="$PROJECT_DIR" PM2_JSON="$PM2_JSON" "$NODE_COMMAND" <<'NODE' >/dev/null
 const apps = JSON.parse(process.env.PM2_JSON);
 for (const name of ["wufan-client", "wufan-server"]) {
@@ -278,7 +278,7 @@ if ! WUFAN_ENV=production WUFAN_DB_PATH="$PRODUCTION_DATABASE_PATH" \
     --timeout-ms 120000 >/dev/null 2>&1; then
   # One-time bootstrap: the pre-Hotfix server cannot report maintenance status.
   # PM2 sends SIGTERM and the server drains requests before closing SQLite.
-  pm2 stop wufan-server >/dev/null
+  "$PM2_COMMAND" stop wufan-server >/dev/null
   BOOTSTRAP_SERVER_STOPPED=true
   for attempt in {1..60}; do
     [[ -z "$(lsof "$DATABASE_PATH" 2>/dev/null || true)" ]] && break
@@ -329,7 +329,7 @@ NODE
 {
   echo "node=$NODE_COMMAND"
   echo "npm=$NPM_COMMAND"
-  echo "pm2=$(command -v pm2)"
+  echo "pm2=$PM2_COMMAND"
   echo "sqlite3=$(command -v sqlite3)"
 } > "$RELEASE_DIR/config/runtime-paths.txt"
 [[ ! -f "$PROJECT_DIR/.node-version" ]] \
@@ -445,9 +445,9 @@ rm -rf "$CHECK_DATABASE_DIR"
 CHECK_DATABASE_DIR=""
 
 STAGE="service-restart"
-[[ "$REQUIRES_CLIENT_RESTART" != "true" ]] || pm2 restart wufan-client --update-env
+[[ "$REQUIRES_CLIENT_RESTART" != "true" ]] || "$PM2_COMMAND" restart wufan-client --update-env
 if [[ "$BOOTSTRAP_SERVER_STOPPED" == true || "$REQUIRES_SERVER_RESTART" == "true" ]]; then
-  pm2 restart wufan-server --update-env
+  "$PM2_COMMAND" restart wufan-server --update-env
   BOOTSTRAP_SERVER_STOPPED=false
 fi
 
@@ -483,7 +483,7 @@ curl --fail --silent --show-error -H 'x-wufan-api-source: system:release' \
   http://127.0.0.1:3001/api/health >/dev/null
 
 STAGE="manifest-finalize"
-PM2_AFTER="$(pm2 jlist)"
+PM2_AFTER="$("$PM2_COMMAND" jlist)"
 PM2_AFTER="$PM2_AFTER" MANIFEST="$MANIFEST" "$NODE_COMMAND" <<'NODE'
 const fs = require("fs");
 const manifest = JSON.parse(fs.readFileSync(process.env.MANIFEST, "utf8"));
@@ -497,7 +497,7 @@ manifest.serviceStatusAfter = apps.map(a => ({
 }));
 fs.writeFileSync(process.env.MANIFEST, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
-pm2 save
+"$PM2_COMMAND" save
 
 STAGE="production-tag"
 TAG_NAME="production-$(date '+%Y-%m-%d-%H%M')"
