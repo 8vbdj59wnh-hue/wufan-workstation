@@ -40,7 +40,10 @@ function comparisonStatus(current, previous) {
 }
 
 function resolveRange(input, latestDate) {
-  const requestedPreset = String(input.preset ?? "7d").trim();
+  // `preset` is the canonical API parameter. Keep accepting the former
+  // assistant adapter's `range` parameter so already-installed clients do not
+  // silently fall back to seven days while they are being upgraded.
+  const requestedPreset = String(input.preset ?? input.range ?? "7d").trim();
   const preset = requestedPreset === "custom" || PRESET_DAYS[requestedPreset] ? requestedPreset : "7d";
   let endDate = latestDate; let startDate;
   if (preset === "custom") {

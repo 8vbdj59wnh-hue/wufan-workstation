@@ -108,6 +108,9 @@ test("工具只访问固定正式API，且仅受控预览、确认与新增下�
     "/api/content-center/planning/requests/expand", "/api/content-center/planning/requests/fill",
     "/api/content-center/planning/requests",
   ]);
+  const salesDashboardRequest = requests.find((item) => item.url.pathname === "/api/sales-business-dashboard");
+  assert.equal(salesDashboardRequest.url.searchParams.get("preset"), "30d");
+  assert.equal(salesDashboardRequest.url.searchParams.has("range"), false);
 });
 
 test("参考图片工具只读取明确文件、校验真实内容并在批次失败时清理已暂存图片", async () => {

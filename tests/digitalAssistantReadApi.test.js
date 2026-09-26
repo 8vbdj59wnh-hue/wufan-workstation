@@ -98,6 +98,8 @@ test("等价company只读账号通过正式JWT读取且全部写入口403", asyn
       .run("api-read-map", "api-read-product", "api-read-goods", "api-read-erp-sku", "API-ERP-SKU-001", "exact_sku", "active", stamp, stamp);
     database.prepare("INSERT INTO connection_import_batches(id,sourceType,externalShopId,fileName,fileHash,businessDate,periodStart,periodEnd,status,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
       .run("api-read-sales-batch", "erp_sales", "", "api-sales.xlsx", "api-sales-hash", "2026-09-02", "2026-09-02", "2026-09-02", "completed", stamp, stamp);
+    database.prepare("UPDATE connection_import_batches SET importType='erp_sales_daily_preview',totalRows=1,previewSummaryJson=?,completedAt=? WHERE id=?")
+      .run(JSON.stringify({ factCommit: { confirmedAt: stamp } }), stamp, "api-read-sales-batch");
     database.prepare(`INSERT INTO connection_sku_sales_daily_facts
       (id,salesLinkId,salesLinkSkuId,erpSkuId,saleDate,quantity,salesAmount,costAmount,profitAmount,factType,sourceBatchId,sourceRowNumber,rawDataJson,createdAt,updatedAt)
       VALUES(?,?,?,?,?,?,?,?,?,'normal',?,1,'{}',?,?)`)
@@ -162,6 +164,10 @@ test("等价company只读账号通过正式JWT读取且全部写入口403", asyn
     assert.equal(reads.productByErpCode.body.item.erpSkuId, "api-read-erp-sku");
     assert.equal(reads.productByCode.body.item.erpSkuId, "api-read-erp-sku");
     assert.equal(reads.anomalySummary.body.classifications.masterDataIncomplete.label, "当前主数据待完善");
+    assert.equal(reads.salesBusinessDashboard.body.dashboard.preset, "30d");
+    assert.equal(reads.salesBusinessDashboard.body.dashboard.windowDays, 30);
+    assert.equal(reads.salesBusinessDashboard.body.dashboard.startDate, "2026-08-04");
+    assert.equal(reads.salesBusinessDashboard.body.dashboard.endDate, "2026-09-02");
 
     const serviceLinks = await api(baseUrl, serviceToken, "/api/connections?page=1&pageSize=20&keyword=API公司Link");
     const humanLinks = await api(baseUrl, humanToken, "/api/connections?page=1&pageSize=20&keyword=API公司Link");
