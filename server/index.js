@@ -4,6 +4,7 @@ import { createContentRecommendations } from "./contentCenterRecommendations.js"
 import { dataDir } from "./db.js";
 import { createContentCenterIntegration } from "./contentCenterIntegration.js";
 import { createContentCenterRouter } from "./contentCenterRouter.js";
+import { createSystemMonitor } from "./systemMonitorService.js";
 import express from "express";
 import cors from "cors";
 import compression from "compression";
@@ -472,6 +473,13 @@ if (shouldEnforceBusinessBaseline()) {
 initializeDatabase();
 const startupDatabaseHealth = evaluateDatabaseHealth(getDatabase());
 assertBusinessBaselineHealthy(startupDatabaseHealth);
+const systemMonitor = createSystemMonitor({
+  monitoringPath: path.join(dataDir, "monitoring.db"),
+  databasePath,
+  getBusinessDatabase: getDatabase,
+  applicationVersion,
+  databaseHealth: startupDatabaseHealth,
+});
 const apiUsageRecorder = createApiUsageBatchRecorder(() => getDatabase(), {
   flushIntervalMs: 5_000,
   maxPendingEvents: 250,
@@ -613,6 +621,19 @@ function resolveCorsOptions(request, callback) {
 
 app.use(cors(resolveCorsOptions));
 app.use(express.json({ limit: "20mb" }));
+app.use("/api", (request, response, next) => {
+  const startedAt = process.hrtime.bigint();
+  let recorded = false;
+  const record = () => {
+    if (recorded) return;
+    recorded = true;
+    const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+    systemMonitor.recordApiRequest(request, response, durationMs);
+  };
+  response.once("finish", record);
+  response.once("close", record);
+  next();
+});
 
 function requireAssetAccess(request, response, next) {
   const tokenPayload = verifyAssetToken(request.query?.access_token);
@@ -849,6 +870,11 @@ function canReadCompanyScope(user) {
 function requireAdminUser(request, response, next) {
   if (isAdminUser(request.user)) { next(); return; }
   response.status(403).json({ success: false, message: "仅管理员可以执行旺店通货品同步。" });
+}
+
+function requireSystemAdministrator(request, response, next) {
+  if (isAdminUser(request.user)) { next(); return; }
+  response.status(403).json({ success: false, message: "仅系统管理员可以查看服务器监控。" });
 }
 
 function requireAdminForWangdianBatch(request, response, next) {
@@ -1729,6 +1755,17 @@ app.use("/api", (request, response, next) => {
     return;
   }
   next();
+});
+
+app.get("/api/system-monitor/overview", requireSystemAdministrator, (request, response) => {
+  try {
+    const range = String(request.query.range ?? "6h");
+    const hours = ({ "1h": 1, "6h": 6, "24h": 24 })[range] ?? 6;
+    response.json({ success: true, overview: systemMonitor.readOverview({ hours }) });
+  } catch (error) {
+    console.error("系统监控读取失败", error);
+    response.status(500).json({ success: false, message: "系统监控数据读取失败。" });
+  }
 });
 
 app.use("/api/content-center", createContentCenterRouter({ requirePermission, hasPermission, getDatabase, dataDir, recommendations: createContentRecommendations(getDatabase, contentRecommendationContributions, contentRecommendationRelations), integration: createContentCenterIntegration({ getDatabase, readAllData, filterDataByScope, hasPermission, launchWorkPlanWithProcess, getUserPersonId, listActionProductOptions, resolveActionProductOptions, uploadsDir }) }));
@@ -5767,6 +5804,8 @@ function shutdown() {
   server.close(() => {
     try { apiUsageRecorder.close(); }
     catch (error) { console.error("API 使用台账关闭前写入失败", error); }
+    try { systemMonitor.close(); }
+    catch (error) { console.error("系统监控关闭失败", error); }
     closeDatabase();
     process.exit(0);
   });

@@ -136,6 +136,7 @@ const moduleHashMap = {
   "issues-requirements": "settings",
   "settings/issues-requirements": "settings",
   "settings/data-asset-map": "settings",
+  "settings/system-monitor": "settings",
   "settings/admin-data-center": "adminDataCenter",
 };
 

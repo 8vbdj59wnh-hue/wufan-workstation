@@ -13,6 +13,7 @@ import {
 } from "../shared/permissions.js";
 import { rerenderPreservingInputFocus } from "./inputFocus.js";
 import { bindDataAssetMapEvents, renderDataAssetMap } from "./dataAssetMapPage.js";
+import { bindSystemMonitorEvents, renderSystemMonitor } from "./systemMonitorPage.js";
 import {
   CategoryType,
   PersonRole,
@@ -290,6 +291,11 @@ function canManageAdminDataCenter() {
   const user = getCurrentUser();
   return (["admin", "system_admin"].includes(user?.role) || user?.authRole === "admin")
     && canCurrentUser("dataCenter.view");
+}
+
+function canViewSystemMonitor() {
+  const user = getCurrentUser();
+  return ["admin", "system_admin"].includes(user?.role) || user?.authRole === "admin";
 }
 
 function getPersonPermissions(person) {
@@ -3431,6 +3437,7 @@ function reorderFormDesignerField(draggedId, targetId) {
 
 export function bindSettingsPageEvents(rerender) {
   if (window.location.hash.replace(/^#/, "") === "settings/data-asset-map") bindDataAssetMapEvents(rerender);
+  if (window.location.hash.replace(/^#/, "") === "settings/system-monitor") bindSystemMonitorEvents(rerender);
   const settingsPage = document.querySelector(".settings-page");
   const form = document.querySelector(".modal-form");
   const companySloganForm = document.querySelector("[data-company-slogan-form]");
@@ -3913,6 +3920,15 @@ function getSettingsSubmodules() {
       description: "收集系统问题和优化需求，并跟进处理状态。",
       canView: () => canCurrentUser("actionStandards.manage"),
       render: renderIssuesRequirementsSection,
+    },
+    {
+      id: "system-monitor",
+      title: "系统监控",
+      group: "系统设置",
+      icon: "监",
+      description: "查看服务器资源、API 性能、数据库与数据同步健康状态。",
+      canView: canViewSystemMonitor,
+      render: renderSystemMonitor,
     },
   ];
 }
