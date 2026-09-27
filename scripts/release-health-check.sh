@@ -3,11 +3,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/production-paths.sh"
+source "$SCRIPT_DIR/lib/node-runtime.sh"
 wufan_load_production_paths
 
 EXPECTED_PROJECT_DIR="${WUFAN_PROJECT_DIR:?WUFAN_PROJECT_DIR is required}"
 RELEASE_ROOT="${WUFAN_RELEASE_ROOT:?WUFAN_RELEASE_ROOT is required}"
-NODE22_BIN="/opt/homebrew/opt/node@22/bin"
 DATABASE_PATH="${WUFAN_DB_PATH:?WUFAN_DB_PATH is required}"
 BASELINE_PATH="${WUFAN_DB_BASELINE_PATH:?WUFAN_DB_BASELINE_PATH is required}"
 
@@ -51,12 +51,14 @@ if [[ "${RELEASE_TEST_MODE:-}" == "1" ]]; then
   BASELINE_PATH="${RELEASE_TEST_BASELINE_PATH:-$PROJECT_DIR/data/business-baseline.json}"
   case "$RELEASE_DIR" in /tmp/*|/private/tmp/*) ;; *) basic_fail "test release directory must be under /tmp" ;; esac
   NODE_COMMAND="${RELEASE_TEST_NODE_COMMAND:-$(command -v node)}"
+  PM2_COMMAND="${RELEASE_TEST_PM2_COMMAND:-$(command -v pm2)}"
 else
   case "$RELEASE_DIR" in "$RELEASE_ROOT"/release-*) ;; *) basic_fail "release directory must be under $RELEASE_ROOT" ;; esac
-  NODE_COMMAND="$NODE22_BIN/node"
+  wufan_resolve_node_runtime || basic_fail "Node.js 22 runtime unavailable"
 fi
 
 [[ -x "$NODE_COMMAND" ]] || basic_fail "Node 22 unavailable"
+[[ -x "$PM2_COMMAND" ]] || basic_fail "PM2 unavailable"
 mkdir -p "$RELEASE_DIR/checks" "$RELEASE_DIR/logs"
 RESULT_PATH="$RELEASE_DIR/checks/health-$PHASE.json"
 LOG_PATH="$RELEASE_DIR/logs/health-$PHASE.log"
@@ -106,7 +108,7 @@ if [[ "$PHASE" == "after" ]]; then
   [[ "$CURRENT_COMMIT" == "$COMMIT_SHA" ]] || fail "after health check requires HEAD=$COMMIT_SHA"
 fi
 
-PM2_RAW="$(PATH="$NODE22_BIN:/opt/homebrew/bin:/usr/bin:/bin" pm2 jlist)" \
+PM2_RAW="$("$PM2_COMMAND" jlist)" \
   || fail "unable to read PM2 process list"
 PM2_SAFE_PATH="$RELEASE_DIR/checks/pm2-health-$PHASE.json"
 if ! PROJECT_DIR="$PROJECT_DIR" PM2_RAW="$PM2_RAW" "$NODE_COMMAND" > "$PM2_SAFE_PATH" 2>> "$LOG_PATH" <<'NODE'

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 
 const source = fs.readFileSync(new URL("../scripts/release-from-package.sh", import.meta.url), "utf8");
+const healthCheckSource = fs.readFileSync(new URL("../scripts/release-health-check.sh", import.meta.url), "utf8");
 
 test("ordinary dry-run exits before maintenance and release creation", () => {
   const dryRunExit = source.indexOf('if [[ "$DRY_RUN" == true ]]; then\n  echo "DATABASE_BACKUP_CREATED=false"');
@@ -50,4 +51,12 @@ test("release resolves the configured Node 22 runtime instead of requiring a Hom
   assert.doesNotMatch(source, /NODE_COMMAND="\$NODE22_BIN\/node"/u);
   assert.doesNotMatch(source, /NPM_COMMAND="\$NODE22_BIN\/npm"/u);
   assert.doesNotMatch(source, /\bpm2 (jlist|stop|restart|save)\b/u);
+});
+
+test("post-release health check uses the same configured Node and PM2 runtime", () => {
+  assert.match(healthCheckSource, /source "\$SCRIPT_DIR\/lib\/node-runtime\.sh"/u);
+  assert.match(healthCheckSource, /wufan_resolve_node_runtime/u);
+  assert.match(healthCheckSource, /PM2_RAW="\$\("\$PM2_COMMAND" jlist\)"/u);
+  assert.doesNotMatch(healthCheckSource, /NODE22_BIN/u);
+  assert.doesNotMatch(healthCheckSource, /\bpm2 jlist\b/u);
 });
