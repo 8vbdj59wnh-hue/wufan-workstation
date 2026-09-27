@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import Database from "better-sqlite3";
-import { createSystemMonitor } from "../server/systemMonitorService.js";
+import { createSystemMonitor, memorySnapshot, parseMacVmStatMemory } from "../server/systemMonitorService.js";
 
 function createFixture() {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "wufan-system-monitor-"));
@@ -84,4 +84,37 @@ test("system monitor overview never exposes the database path", (context) => {
 test("system monitor route is protected by the administrator guard", () => {
   const source = fs.readFileSync(new URL("../server/index.js", import.meta.url), "utf8");
   assert.match(source, /app\.get\("\/api\/system-monitor\/overview", requireSystemAdministrator,/u);
+});
+
+test("macOS memory usage treats inactive and speculative pages as reclaimable", () => {
+  const gibibyte = 1024 ** 3;
+  const snapshot = parseMacVmStatMemory(`Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages free: 16384.
+Pages active: 425984.
+Pages inactive: 425984.
+Pages speculative: 16384.
+Pages wired down: 98304.
+Pages occupied by compressor: 49152.
+`, 16 * gibibyte);
+  assert.ok(snapshot);
+  assert.equal(snapshot.source, "macos-vm-stat");
+  assert.equal(snapshot.freeBytes, 7 * gibibyte);
+  assert.equal(snapshot.usedBytes, 9 * gibibyte);
+  assert.equal(snapshot.usedPercent, 56.25);
+});
+
+test("memory usage keeps the portable fallback when macOS counters are unavailable", () => {
+  const snapshot = memorySnapshot({
+    platform: "darwin",
+    totalBytes: 1_000,
+    freeBytes: 250,
+    readMacVmStat: () => { throw new Error("unavailable"); },
+  });
+  assert.deepEqual(snapshot, {
+    totalBytes: 1_000,
+    freeBytes: 250,
+    usedBytes: 750,
+    usedPercent: 75,
+    source: "node-os",
+  });
 });

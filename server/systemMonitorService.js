@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import Database from "better-sqlite3";
 
 const DEFAULT_INTERVAL_MS = 15_000;
@@ -19,6 +20,54 @@ function percentile(values, ratio) {
 
 function readFileSize(filePath) {
   try { return fs.statSync(filePath).size; } catch { return 0; }
+}
+
+export function parseMacVmStatMemory(output, totalBytes = os.totalmem()) {
+  const pageSize = Number(String(output).match(/page size of\s+(\d+)\s+bytes/i)?.[1] || 0);
+  if (!pageSize || !Number.isFinite(totalBytes) || totalBytes <= 0) return null;
+  const pages = Object.fromEntries([...String(output).matchAll(/^([^:\n]+):\s+(\d+)\.?$/gm)]
+    .map((match) => [match[1].trim(), Number(match[2])]));
+  const availablePages = Number(pages["Pages free"] || 0)
+    + Number(pages["Pages inactive"] || 0)
+    + Number(pages["Pages speculative"] || 0);
+  if (!Number.isFinite(availablePages) || availablePages <= 0) return null;
+  const availableBytes = Math.min(totalBytes, availablePages * pageSize);
+  const usedBytes = Math.max(0, totalBytes - availableBytes);
+  return {
+    totalBytes,
+    freeBytes: availableBytes,
+    usedBytes,
+    usedPercent: totalBytes ? usedBytes / totalBytes * 100 : 0,
+    source: "macos-vm-stat",
+  };
+}
+
+export function memorySnapshot({
+  platform = os.platform(),
+  totalBytes = os.totalmem(),
+  freeBytes = os.freemem(),
+  readMacVmStat = () => execFileSync("/usr/bin/vm_stat", [], {
+    encoding: "utf8",
+    timeout: 2_000,
+    stdio: ["ignore", "pipe", "ignore"],
+  }),
+} = {}) {
+  if (platform === "darwin") {
+    try {
+      const macSnapshot = parseMacVmStatMemory(readMacVmStat(), totalBytes);
+      if (macSnapshot) return macSnapshot;
+    } catch {
+      // Fall back to Node's portable counters if vm_stat is unavailable.
+    }
+  }
+  const usedBytes = Math.max(0, totalBytes - freeBytes);
+  return {
+    totalBytes,
+    freeBytes,
+    usedBytes,
+    usedPercent: totalBytes ? usedBytes / totalBytes * 100 : 0,
+    source: "node-os",
+  };
 }
 
 function diskSnapshot(targetPath) {
@@ -150,8 +199,9 @@ export function createSystemMonitor({
     const totalDelta = Math.max(1, currentCpu.total - previousCpu.total);
     const idleDelta = Math.max(0, currentCpu.idle - previousCpu.idle);
     previousCpu = currentCpu;
-    const memoryTotalBytes = os.totalmem();
-    const memoryUsedBytes = Math.max(0, memoryTotalBytes - os.freemem());
+    const hostMemory = memorySnapshot();
+    const memoryTotalBytes = hostMemory.totalBytes;
+    const memoryUsedBytes = hostMemory.usedBytes;
     const disk = diskSnapshot(path.dirname(databasePath));
     const memory = process.memoryUsage();
     insertSample.run({
