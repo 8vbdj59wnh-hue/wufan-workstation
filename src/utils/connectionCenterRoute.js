@@ -21,6 +21,10 @@ export function parseConnectionCenterRoute(hash = "") {
   const suffix = decoded(pathPart);
   const inspectionTaskId = new URLSearchParams(queryPart).get("inspectionTaskId") || "";
   const section = sectionAliases.get(suffix) || suffix;
+  if (section.startsWith("data-import/")) {
+    const importPage = section.slice("data-import/".length);
+    return { section: "data-import", detailId: "", importPage: ["platform-goods", "platform-operations", "sales-profit", "owners"].includes(importPage) ? importPage : "platform-goods" };
+  }
   if (section === "data-center") return { section: "", detailId: "", redirectHash: "#products" };
   if (section === "erp-usage-governance") return { section: "", detailId: "", redirectHash: "#connectionCenter/data-import" };
   return CONNECTION_CENTER_SECTIONS.has(section)

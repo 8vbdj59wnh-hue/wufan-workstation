@@ -1,5 +1,6 @@
 import { registerUiModule, renderUiModule } from "../uiModuleRegistry.js";
 import { escapeHtml } from "../utils/html.js";
+import { renderLinkContributionName } from "./linkContributionBadge.js";
 
 export const LINK_DATA_COLUMNS = [
   { key: "image", label: "主图" }, { key: "name", label: "链接名称", sortable: true },
@@ -28,7 +29,7 @@ export function renderLinkDataTable({ items = [], pagination = {}, fields = DEFA
   const definitions = new Map(columns.map((item) => [item.key, item]));
   const cell = (item, key) => ({
     image: renderUiModule("link_image", { src: item.imageUrl, alt: item.name, size: "compact" }),
-    name: `<button type="button" class="link-data-name" data-open-connection="${escapeHtml(item.id)}"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.platformGoodsId || "")}</small></button>`,
+    name: `<button type="button" class="link-data-name" data-open-connection="${escapeHtml(item.id)}">${renderLinkContributionName(item)}<small>${escapeHtml(item.platformGoodsId || "")}</small></button>`,
     platform: escapeHtml(item.platform || "—"), shop: escapeHtml(item.shopName || "—"), goodsId: escapeHtml(item.platformGoodsId || "—"),
     owner: escapeHtml(item.ownerName || "未分配"), yesterdaySales: money(item.sales?.yesterday), sales7d: money(item.sales?.sevenDays),
     sales30d: money(item.sales?.thirtyDays), selectedSales: money(item.sales?.selected),

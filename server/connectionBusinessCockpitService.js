@@ -88,21 +88,19 @@ export function readShopOperations(database, window, operatingScope, personId, i
       WHERE ${previousPredicate}
       GROUP BY ol.shopId
     ), current_evaluations AS (
-      SELECT goalPlanId,evaluationStatus,grade FROM (
-        SELECT goalPlanId,evaluationStatus,grade,
-          ROW_NUMBER() OVER (PARTITION BY goalPlanId ORDER BY periodEnd DESC,createdAt DESC,id DESC) evaluationRank
-        FROM connection_goal_evaluations
-        WHERE periodEnd<=@shopEvaluationEnd
-      ) WHERE evaluationRank=1
+      SELECT salesLinkId,grade,CASE WHEN grade IS NULL THEN 'error' ELSE 'evaluated' END evaluationStatus
+      FROM link_contribution_results WHERE runId=(SELECT id FROM link_contribution_runs ORDER BY ratingDate DESC LIMIT 1)
     ), link_summary AS (
       SELECT ol.shopId,COUNT(*) totalLinks,
-        SUM(CASE WHEN e.evaluationStatus='evaluated' AND e.grade='excellent' THEN 1 ELSE 0 END) excellentLinks,
-        SUM(CASE WHEN e.evaluationStatus='evaluated' AND e.grade='good' THEN 1 ELSE 0 END) goodLinks,
-        SUM(CASE WHEN e.evaluationStatus='evaluated' AND e.grade='on_target' THEN 1 ELSE 0 END) onTargetLinks,
-        SUM(CASE WHEN e.evaluationStatus='evaluated' AND e.grade='underperforming' THEN 1 ELSE 0 END) underperformingLinks
+        SUM(CASE WHEN e.grade='S' THEN 1 ELSE 0 END) excellentLinks,
+        SUM(CASE WHEN e.grade='A' THEN 1 ELSE 0 END) goodLinks,
+        SUM(CASE WHEN e.grade IN ('B','C') THEN 1 ELSE 0 END) onTargetLinks,
+        SUM(CASE WHEN e.grade='D' THEN 1 ELSE 0 END) underperformingLinks,
+        SUM(CASE WHEN e.grade='B' THEN 1 ELSE 0 END) bLinks,
+        SUM(CASE WHEN e.grade='C' THEN 1 ELSE 0 END) cLinks,
+        SUM(CASE WHEN e.grade='N' THEN 1 ELSE 0 END) nLinks
       FROM operating_links ol
-      LEFT JOIN connection_goal_plans p ON p.connectionId=ol.connectionId AND p.status='active'
-      LEFT JOIN current_evaluations e ON e.goalPlanId=p.id
+      LEFT JOIN current_evaluations e ON e.salesLinkId=ol.salesLinkId
       GROUP BY ol.shopId
     )
     SELECT s.id shopId,s.platform,COALESCE(NULLIF(s.displayName,''),s.shopName) shopName,
@@ -133,7 +131,7 @@ export function readShopOperations(database, window, operatingScope, personId, i
       goodLinks,
       onTargetLinks,
       underperformingLinks,
-      evaluatedLinks: excellentLinks + goodLinks + onTargetLinks + underperformingLinks,
+      evaluatedLinks: excellentLinks + goodLinks + onTargetLinks + underperformingLinks + Number(row.nLinks||0),
       salesTrend: window?.previousPeriodComplete
         ? ratio(Number(row.salesAmount || 0), Number(row.previousSalesAmount || 0))
         : null,
@@ -320,15 +318,8 @@ export function getConnectionBusinessCockpit(userId = "", isAdmin = false, input
     : new Map(salesLinkIds.map((id) => [id, { current: {}, previous: null, salesGrowth: null, profitGrowth: null, platform: null }]));
   timings.salesAndProfit = elapsed(stageStartedAt);
   stageStartedAt = performance.now();
-  const evaluationRows = connectionIds.length && salesWindow ? database.prepare(`
-    SELECT connectionId,grade FROM (
-      SELECT p.connectionId,e.grade,
-        ROW_NUMBER() OVER (PARTITION BY p.connectionId ORDER BY e.periodEnd DESC,e.createdAt DESC,e.id DESC) evaluationRank
-      FROM connection_goal_plans p JOIN connection_goal_evaluations e ON e.goalPlanId=p.id
-      WHERE p.status='active' AND e.evaluationStatus='evaluated' AND e.periodEnd<=?
-        AND p.connectionId IN (${placeholders})
-    ) WHERE evaluationRank=1
-  `).all(salesWindow.periodEnd, ...connectionIds) : [];
+  const evaluationRows = database.prepare(`SELECT salesLinkId connectionId,grade FROM link_contribution_results
+    WHERE runId=(SELECT id FROM link_contribution_runs ORDER BY ratingDate DESC LIMIT 1)`).all();
   const evaluationByConnection = new Map(evaluationRows.map((row) => [row.connectionId, row.grade]));
   timings.ratings = elapsed(stageStartedAt);
   stageStartedAt = performance.now();
@@ -341,7 +332,7 @@ export function getConnectionBusinessCockpit(userId = "", isAdmin = false, input
     const v3 = metrics.get(profile.salesLinkId);
     const salesGrowth = v3.salesGrowth; const profitGrowth = v3.profitGrowth;
     const grade = profile.connectionProfileId ? evaluationByConnection.get(profile.connectionProfileId) : null;
-    const risk = grade === "underperforming" || Number(salesGrowth) < -0.2 || Number(profitGrowth) < -0.2;
+    const risk = grade === "D" || Number(salesGrowth) < -0.2 || Number(profitGrowth) < -0.2;
     return {
       ...profile,
       products: productAttribution.productsByConnection.get(profile.salesLinkId) ?? [],
@@ -355,19 +346,21 @@ export function getConnectionBusinessCockpit(userId = "", isAdmin = false, input
   const salesPeriodStart = salesWindow?.periodStart ?? null;
   const salesPeriodEnd = salesWindow?.periodEnd ?? null;
   const salesUpdatedAt = items.map((item) => item.erpSales.updatedAt).filter(Boolean).sort().at(-1) ?? null;
-  const ratingSummary = { excellentOrGood: 0, onTarget: 0, underperforming: 0, notEvaluated: 0 };
+  const ratingSummary = { S:0,A:0,B:0,C:0,D:0,N:0,excellentOrGood: 0, onTarget: 0, underperforming: 0, notEvaluated: 0 };
   for (const item of items) {
     if (!item.evaluationGrade) ratingSummary.notEvaluated += 1;
-    else if (item.evaluationGrade === "underperforming") ratingSummary.underperforming += 1;
-    else if (item.evaluationGrade === "on_target") ratingSummary.onTarget += 1;
-    else ratingSummary.excellentOrGood += 1;
+    else { ratingSummary[item.evaluationGrade]+=1;
+      if(item.evaluationGrade==='D')ratingSummary.underperforming++;
+      else if(['B','C'].includes(item.evaluationGrade))ratingSummary.onTarget++;
+      else if(['S','A'].includes(item.evaluationGrade))ratingSummary.excellentOrGood++;
+    }
   }
   const coreLinks = items.filter((item) => item.erpSales.periodEnd).sort((a,b) => Number(b.erpSales.salesAmount||0)-Number(a.erpSales.salesAmount||0) || Number(b.erpSales.profitAmount||0)-Number(a.erpSales.profitAmount||0) || Number(b.erpSales.quantity||0)-Number(a.erpSales.quantity||0)).slice(0,10);
-  const riskLinks = items.filter((item) => item.risk).sort((a,b) => Number(a.salesGrowth??0)-Number(b.salesGrowth??0)).slice(0,10).map((item) => ({ ...item, anomalyTypes: [item.evaluationGrade==="underperforming"?"经营评价不达标":"",Number(item.salesGrowth)<-0.2?"销售下降":"",Number(item.profitGrowth)<-0.2?"利润下降":""].filter(Boolean) }));
+  const riskLinks = items.filter((item) => item.risk).sort((a,b) => Number(a.salesGrowth??0)-Number(b.salesGrowth??0)).slice(0,10).map((item) => ({ ...item, anomalyTypes: [item.evaluationGrade==="D"?"贡献级别D":"",Number(item.salesGrowth)<-0.2?"销售下降":"",Number(item.profitGrowth)<-0.2?"利润下降":""].filter(Boolean) }));
   const growthLinks = items.map((item) => ({ ...item, growthMetric: Math.max(...[item.salesGrowth,item.profitGrowth].filter((value) => value !== null).map(Number), -Infinity) })).filter((item) => Number.isFinite(item.growthMetric) && item.growthMetric > 0).sort((a,b) => b.growthMetric-a.growthMetric).slice(0,10);
   timings.riskAndGrowth = elapsed(stageStartedAt);
   stageStartedAt = performance.now();
-  const platformMap = new Map(); for (const item of items) { const row=platformMap.get(item.platform)??{platform:item.platform,connectionCount:0,salesAmount:0,profitAmount:0,riskCount:0,excellentOrGoodCount:0}; row.connectionCount++; row.salesAmount+=Number(item.erpSales.salesAmount||0); row.profitAmount+=Number(item.erpSales.profitAmount||0); if(item.risk)row.riskCount++; if(["excellent","good"].includes(item.evaluationGrade)&&!item.risk)row.excellentOrGoodCount++; platformMap.set(item.platform,row); }
+  const platformMap = new Map(); for (const item of items) { const row=platformMap.get(item.platform)??{platform:item.platform,connectionCount:0,salesAmount:0,profitAmount:0,riskCount:0,excellentOrGoodCount:0}; row.connectionCount++; row.salesAmount+=Number(item.erpSales.salesAmount||0); row.profitAmount+=Number(item.erpSales.profitAmount||0); if(item.risk)row.riskCount++; if(["S","A"].includes(item.evaluationGrade)&&!item.risk)row.excellentOrGoodCount++; platformMap.set(item.platform,row); }
   const platforms=[...platformMap.values()].map((row)=>({...row,profitMargin:row.salesAmount?row.profitAmount/row.salesAmount:null,excellentOrGoodRate:row.connectionCount?row.excellentOrGoodCount/row.connectionCount:0})).sort((a,b)=>b.salesAmount-a.salesAmount);
   const ownerMap = new Map(); for (const item of items) { const ownerId=item.ownerId||"unassigned"; const row=ownerMap.get(ownerId)??{ownerId,ownerName:item.ownerName||"未分配",connectionCount:0,salesAmount:0,profitAmount:0,growthTotal:0,growthCount:0,riskCount:0}; row.connectionCount+=1; row.salesAmount+=Number(item.erpSales.salesAmount||0); row.profitAmount+=Number(item.erpSales.profitAmount||0); if(item.salesGrowth!==null){row.growthTotal+=Number(item.salesGrowth);row.growthCount+=1;} if(item.risk)row.riskCount+=1; ownerMap.set(ownerId,row); } const ownerOperations=[...ownerMap.values()].map((row)=>({...row,averageGrowth:row.growthCount?row.growthTotal/row.growthCount:null,profitMargin:row.salesAmount?row.profitAmount/row.salesAmount:null})).sort((a,b)=>b.salesAmount-a.salesAmount||b.profitAmount-a.profitAmount);
   timings.ownerAndPlatform = elapsed(stageStartedAt);

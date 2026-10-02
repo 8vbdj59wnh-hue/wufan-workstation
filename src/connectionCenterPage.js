@@ -1,4 +1,7 @@
 import {
+  loadLinkContributions,
+  saveLinkContributionRules,
+  runLinkContributions,
   confirmConnectionFoundationImport,
   confirmConnectionFoundationBulkImport,
   createConnectionAction,
@@ -109,6 +112,22 @@ import { LINK_BUSINESS_COLUMN_GROUPS, LINK_BUSINESS_COLUMNS, DEFAULT_LINK_BUSINE
 import { LINK_TIME_RANGE_OPTIONS, linkTimeRangeDays } from "../shared/linkTimeRange.js";
 
 const connectionSectionStorageKey = "connection-center-section-v1";
+const importPages = [
+  ["platform-goods", "平台货品"],
+  ["platform-operations", "平台经营数据"],
+  ["sales-profit", "链接利润表"],
+  ["owners", "链接负责人"],
+];
+let currentImportPage = "platform-goods";
+let contributionModel = null;
+let contributionLoading = false;
+let contributionError = "";
+let contributionPage = 1;
+async function loadContributionPage(render) {
+ contributionLoading=true;render();
+ try{contributionModel=await loadLinkContributions();contributionError="";}catch(error){contributionError=error.message;}
+ finally{contributionLoading=false;render();}
+}
 
 function initialConnectionSection() {
   const route = typeof window === "undefined" ? {} : parseConnectionCenterRoute(window.location.hash);
@@ -355,7 +374,7 @@ function selectConnectionSection(section, { updateRoute = true } = {}) {
   pageState.section = normalized; pageState.selectedId = ""; pageState.coreDetail = null;
   try { window.localStorage.setItem(connectionSectionStorageKey, normalized); } catch { /* Browser preferences are optional. */ }
   if (updateRoute) {
-    const nextHash = connectionCenterSectionHash(normalized);
+    const nextHash = normalized === "data-import" ? `#connectionCenter/data-import/${currentImportPage}` : connectionCenterSectionHash(normalized);
     if (window.location.hash !== nextHash) window.history.replaceState(null, "", nextHash);
   }
   return normalized;
@@ -368,8 +387,7 @@ function ensureConnectionSectionLoaded(section, render) {
     if (!pageState.linkDataStatus.loaded && !pageState.linkDataStatus.loading) void loadMyLinkDataStatus(render);
   }
   if (section === "goal-management") {
-    if (pageState.goalManagementTab === "pilots" && !pageState.goalPilot.loaded && !pageState.goalPilot.loading) void loadGoalPilotPage(render);
-    if (pageState.goalManagementTab !== "pilots" && !pageState.goalWorkbench.loaded && !pageState.goalWorkbench.loading) void loadGoalWorkbenchPage(render);
+    if (!contributionModel && !contributionLoading && !contributionError) void loadContributionPage(render);
   }
   if (section === "my-links") {
     if (!pageState.myLinkTable.loaded && !pageState.myLinkTable.loading) void loadMyLinks(render);
@@ -526,8 +544,23 @@ function renderSectionNavigation() {
 }
 
 function renderDataUpdateWorkspace() {
-  const platformGoodsImportEntry = renderPlatformGoodsImport();
-  return `<section class="link-data-update-workspace">${platformGoodsImportEntry}${canImportBusinessData() ? renderDataFoundation() : ""}${renderUiModule("link_data_status", { state: pageState.linkDataStatus, showDailyCompleteness: true })}${renderUiModule("sales_daily_data_quality", { state: pageState.salesDailyQuality, showGovernanceEntry: canImportBusinessData() })}${canImportBusinessData() ? "" : `<div class="empty-state compact"><strong>数据由管理员统一更新</strong><p>当前账号可查看最新数据状态；如有异常，请联系数据管理员处理。</p></div>`}</section>`;
+  const navigation = `<nav class="connection-section-nav connection-import-page-nav" aria-label="数据上传类型">${importPages.map(([key, label]) => `<button type="button" data-import-page="${key}" class="${currentImportPage === key ? "active" : ""}" aria-current="${currentImportPage === key ? "page" : "false"}">${label}</button>`).join("")}</nav>`;
+  const content = currentImportPage === "platform-goods" ? renderPlatformGoodsImport() : canImportBusinessData() ? renderDataFoundation(currentImportPage) : "";
+  const quality = currentImportPage === "sales-profit" ? renderUiModule("sales_daily_data_quality", { state: pageState.salesDailyQuality, showGovernanceEntry: canImportBusinessData() }) : "";
+  const descriptions = {
+    "platform-goods": "更新店铺、Link和Link SKU基础资料；识别关系候选。不更新销售利润，不因文件缺行删除链接。",
+    "platform-operations": "更新浏览、访客、收藏、加购和转化等平台表现。不创建链接，不改变ERP关系。",
+    "sales-profit": "更新正式销量、销售额、成本和利润。不改变链接资产及正式ERP关系。",
+    owners: "分配或替换链接负责人。不改变经营数据和商品关系。",
+  };
+  const types = { "platform-operations": /platform_link_operations/, "sales-profit": /sales_daily|erp_sales/, owners: /connection_owner_assignments/ };
+  const batches = pageState.foundation.batches.filter(item => types[currentImportPage]?.test(item.importType || ""));
+  const platformHistory = pageState.platformGoodsImport.preview?.history || [];
+  const latest = currentImportPage === "platform-goods"
+    ? [...platformHistory].filter(item => ["succeeded", "partial"].includes(item.status)).sort((a,b) => String(b.analyzedAt).localeCompare(String(a.analyzedAt))).map(item => ({ fileName: item.fileName || pageState.platformGoodsImport.preview?.summary?.fileName, createdAt: item.analyzedAt }))[0]
+    : [...batches].filter(item => ["completed", "completed_with_errors", "succeeded", "partial"].includes(item.status)).sort((a,b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
+  const status = currentImportPage === "sales-profit" ? quality : `<section class="connection-foundation-panel import-current-status"><h3>当前数据状态</h3><div class="connection-import-preview-grid"><span>最近已加载的确认记录<strong>${escapeHtml(latest?.fileName || "尚未加载确认记录")}</strong></span><span>记录时间<strong>${escapeHtml(latest?.createdAt || "—")}</strong></span><span>统计口径<strong>当前上传类型</strong></span></div><small>这里展示已加载的导入记录，不代表没有历史数据，也不代表所有店铺和日期均已覆盖。</small></section>`;
+  return `<section class="link-data-update-workspace">${navigation}<header class="import-workspace-heading"><h2>${escapeHtml(importPages.find(([key]) => key === currentImportPage)?.[1] || "数据更新")}</h2><p>${descriptions[currentImportPage]}</p><small>首次使用：先同步平台货品，再上传经营数据或利润表；负责人可以独立更新。</small></header>${status}${content}${content ? "" : `<div class="empty-state compact"><strong>数据由管理员统一更新</strong><p>当前账号可查看最新数据状态；如有异常，请联系数据管理员处理。</p></div>`}</section>`;
 }
 
 function renderPlatformGoodsImport() {
@@ -545,12 +578,12 @@ function renderPlatformGoodsImport() {
   const sampleRows = (model.preview?.preview || []).slice(0, 50);
   const history = model.preview?.history || [];
   const historyPanel = history.length ? `<details class="connection-preview-fold" ${model.preview?.duplicateFile ? "open" : ""}><summary><strong>历史分析记录</strong><span>${history.length} 次</span></summary><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>分析时间</th><th>状态</th><th>数据量</th><th>操作</th></tr></thead><tbody>${history.map((item) => `<tr><td>${escapeHtml(String(item.analyzedAt || "—").replace("T", " ").slice(0, 19))}</td><td>${escapeHtml(item.isCurrent ? "待确认" : item.status === "succeeded" ? "已完成" : item.status === "partial" ? "部分完成" : item.status === "superseded" ? "已被新预览替代" : item.status || "—")}</td><td>共 ${item.totalCount || 0} · 新增 ${item.createdCount || 0} · 更新 ${item.updatedCount || 0} · 异常 ${item.exceptionCount || 0}</td><td><button type="button" class="text-button" data-view-platform-goods-history="${escapeHtml(item.id)}">查看历史结果</button><button type="button" class="text-button" data-reanalyze-platform-goods="${escapeHtml(item.id)}" ${model.loading ? "disabled" : ""}>重新分析</button></td></tr>`).join("")}</tbody></table></div></details>` : "";
-  const preview = model.preview ? `<section class="connection-import-preview ${Number(summary.exceptionCount || 0) ? "is-blocked" : ""}"><header><div><p class="eyebrow">平台资产同步预览</p><h3>${model.preview.isCurrent ? "当前有效预览" : "历史预览"}</h3><p>${escapeHtml(summary.fileName || "—")} · 共 ${summary.sourceRows || 0} 行</p></div><span class="status-pill">${model.preview.isCurrent ? "待确认" : "仅查看"}</span></header>
+  const preview = model.preview ? `<section class="connection-import-preview ${Number(summary.exceptionCount || 0) ? "is-blocked" : ""}"><header><div><p class="eyebrow">平台资产同步预览</p><h3>${model.preview.isCurrent ? "2 检查并确认" : "历史结果 · 只读"}</h3><p>${escapeHtml(summary.fileName || "—")} · 共 ${summary.sourceRows || 0} 行</p></div><span class="status-pill">${model.preview.isCurrent ? "待确认" : "仅查看"}</span></header>
     <div class="connection-table-wrap"><table class="connection-table connection-asset-preview-table"><thead><tr><th>资产</th><th>总数</th><th>新增</th><th>更新</th><th>无变化</th><th>异常</th><th>异常原因</th></tr></thead><tbody>${diffRow("店铺", summary.shops)}${diffRow("Link", summary.links)}${diffRow("Link SKU", summary.linkSkus)}${diffRow("平台规格编码（单品）", summary.platformSkuCodes?.single)}${diffRow("平台规格编码（组合）", summary.platformSkuCodes?.combo)}</tbody></table></div>
     <p class="form-note connection-asset-preview-note">无需ERP关系 ${summary.erpRelations?.notApplicable || 0} 条，不计入平台规格编码关系；非业务行已过滤 ${summary.ignoredNonBusiness || 0} 条。</p>
     <details class="connection-preview-fold"><summary><strong>查看差异明细</strong><span>前 ${sampleRows.length} 行</span></summary><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>行</th><th>店铺</th><th>货品ID</th><th>规格ID</th><th>店铺</th><th>Link</th><th>Link SKU</th><th>ERP关系</th></tr></thead><tbody>${sampleRows.map((row) => `<tr><td>${row.rowNumber}</td><td>${escapeHtml(row.sourceShopName || "—")}</td><td>${escapeHtml(row.platformGoodsId || "—")}</td><td>${escapeHtml(row.platformSkuId || "—")}</td><td>${actionLabels[row.shopAction] || "—"}</td><td>${actionLabels[row.linkAction] || "—"}</td><td>${actionLabels[row.skuAction] || "—"}</td><td>${actionLabels[row.relationAction] || "—"}${row.message ? `<small>${escapeHtml(row.message)}</small>` : ""}</td></tr>`).join("") || `<tr><td colspan="8">暂无明细</td></tr>`}</tbody></table></div></details>${historyPanel}
     <footer><small>确认后只新增或更新店铺、Link和Link SKU；ERP关系只生成待审核候选，不会改动正式关系或销售事实。</small>${model.preview.isCurrent ? `<button type="button" class="primary-button" data-confirm-platform-goods-excel="${escapeHtml(model.preview.dataSyncBatch?.id)}">确认同步资产</button>` : ""}</footer></section>` : "";
-  return `<section class="connection-foundation-panel"><header class="connection-section-heading"><div><h3>平台货品资产同步</h3><p>上传后先查看店铺、Link、Link SKU、平台规格编码（单品/组合）的差异，确认后再同步。</p></div><a class="text-button" href="#settings/admin-data-center">管理员数据中心</a></header>${model.loading && !model.loaded ? `<p class="form-note">正在加载平台资产同步能力…</p>` : model.taskId ? `<form class="connection-foundation-import-form" data-platform-goods-excel-form><label>平台货品Excel<input type="file" name="file" accept=".xlsx,.xls" required ${model.loading ? "disabled" : ""} /></label><button type="submit" class="primary-button" ${model.loading ? "disabled" : ""}>${model.loading ? "正在分析差异…" : "上传并分析差异"}</button></form>` : `<p class="form-error">${escapeHtml(model.error || "平台货品资产同步任务不可用。")}</p>`}${model.message ? `<p class="form-success">${escapeHtml(model.message)}</p>` : ""}${model.error && model.taskId ? `<p class="form-error">${escapeHtml(model.error)}</p>` : ""}${preview}</section>`;
+  return `<section class="connection-foundation-panel"><header class="connection-section-heading"><div><h3><span class="import-step-number">1</span>上传文件</h3><p>上传后先查看店铺、Link、Link SKU、平台规格编码（单品/组合）的差异，确认后再同步。</p></div><a class="text-button" href="#settings/admin-data-center">管理员数据中心</a></header>${model.loading && !model.loaded ? `<p class="form-note">正在加载平台资产同步能力…</p>` : model.taskId ? `<form class="connection-foundation-import-form" data-platform-goods-excel-form><label>平台货品Excel<input type="file" name="file" accept=".xlsx,.xls" required ${model.loading ? "disabled" : ""} /></label><button type="submit" class="primary-button" ${model.loading ? "disabled" : ""}>${model.loading ? "正在分析差异…" : "上传并检查"}</button></form>` : `<p class="form-error">${escapeHtml(model.error || "平台货品资产同步任务不可用。")}</p>`}${model.message ? `<p class="form-success">${escapeHtml(model.message)}</p>` : ""}${model.error && model.taskId ? `<p class="form-error">${escapeHtml(model.error)}</p>` : ""}${preview}</section>`;
 }
 
 const goalPositioningLabels = { sales_growth: "引流爆款", balanced_sales: "优质动销款", long_tail: "长尾动销款", profit_contribution: "高毛利款" };
@@ -609,7 +642,17 @@ function renderGoalPilotPager(kind, pagination = {}) {
 }
 
 function renderGoalManagement() {
-  return `<section class="goal-management-shell"><nav class="goal-management-tabs"><button type="button" class="${pageState.goalManagementTab === "workbench" ? "active" : ""}" data-goal-management-tab="workbench">经营管理</button><button type="button" class="${pageState.goalManagementTab === "pilots" ? "active" : ""}" data-goal-management-tab="pilots">经营试点</button></nav>${pageState.goalManagementTab === "pilots" ? renderGoalPilot() : renderGoalWorkbench()}</section>`;
+ const rule=contributionModel?.rule,run=contributionModel?.run;
+ const allResults=contributionModel?.results||[], totalPages=Math.max(1,Math.ceil(allResults.length/100));
+ contributionPage=Math.min(contributionPage,totalPages);
+ const visibleResults=allResults.slice((contributionPage-1)*100,contributionPage*100);
+ return `<section class="connection-v3-panel"><header><h2>链接贡献级别</h2><span>公司统一利润排名 · 每30天评级 · 新品90天</span></header>
+ ${contributionError?`<p role="alert">${escapeHtml(contributionError)}</p>`:""}
+ ${contributionLoading?`<p>正在读取贡献评级…</p>`:""}
+ ${isAdmin()&&canRefreshRating()?`<form data-contribution-rules class="connection-positioning-form"><label>分级指标<select name="mode"><option value="rank_percentile" ${rule?.mode==="rank_percentile"?"selected":""}>利润排名百分位</option><option value="profit_share" ${rule?.mode==="profit_share"?"selected":""}>累计利润贡献占比</option></select></label>${["S","A","B","C"].map(k=>`<label>${k}级累计边界（%）<input name="${k}" type="number" min="0.01" max="99.99" step="0.01" required value="${rule?.thresholds?.[k]??""}" /></label>`).join("")}<label>首次评级日<input name="firstRatingDate" type="date" required value="${rule?.firstRatingDate||""}" ${run?"readonly":""} /></label><button class="primary-button">保存公司级规则</button></form><button class="secondary-button" type="button" data-contribution-run>执行到期评级</button>`:""}
+ <p>边界由低到高设置，剩余归D。同利润同等级；新品不占S～D名额。上架日期缺失时提示错误，后续导入。零利润/亏损的非新品为D。规则修改只影响下一期。</p>
+ <p>${run?`最近评级 ${escapeHtml(run.ratingDate)} · 数据 ${escapeHtml(run.periodStart)} 至 ${escapeHtml(run.periodEnd)}`:"尚未生成评级"}</p>
+ <div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>链接</th><th>平台 · 店铺</th><th>近30天利润</th><th>公司利润排名</th><th>贡献级别</th><th>数据提示</th></tr></thead><tbody>${visibleResults.map(r=>`<tr><td><button class="text-button" data-open-connection="${escapeHtml(r.salesLinkId)}">${escapeHtml(r.title||r.platformGoodsId)}</button></td><td>${escapeHtml(`${r.platform} · ${r.shopName}`)}</td><td>${r.profitAmount==null?"—":coreMoney(r.profitAmount)}</td><td>${r.companyRank||"—"}</td><td>${r.grade||"—"}</td><td>${escapeHtml(r.error||"—")}</td></tr>`).join("")||`<tr><td colspan="6">${rule?"等待到期评级":"请先设置公司级评级规则"}</td></tr>`}</tbody></table></div><footer><small>共 ${allResults.length} 条 · 第 ${contributionPage}/${totalPages} 页</small><button type="button" class="text-button" data-contribution-page="${contributionPage-1}" ${contributionPage<=1?"disabled":""}>上一页</button><button type="button" class="text-button" data-contribution-page="${contributionPage+1}" ${contributionPage>=totalPages?"disabled":""}>下一页</button></footer></section>`;
 }
 
 const anomalyLabels = { identity_error: "身份异常", missing_relation: "缺失关系", relation_conflict: "关系冲突", incomplete_structure: "结构不完整" };
@@ -636,23 +679,29 @@ function renderSalesRelationGovernance() {
 
 const usageMoney = (value) => Number(value || 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-function renderDataFoundation() {
-  const foundation = pageState.foundation; const types = Object.entries(foundation.definitions);
+function renderDataFoundation(importPage = currentImportPage) {
+  const isOperations = importPage === "platform-operations";
+  const isProfit = importPage === "sales-profit";
+  const isOwners = importPage === "owners";
+  const allowedTypes = isOperations ? ["platform_link_operations"] : isOwners ? ["connection_owner_assignments"] : ["sales_daily", "sales_daily_preview", "erp_sales", "sales_daily_facts"];
+  const matchesType = (type) => allowedTypes.includes(type) || (isProfit && /sales_daily/.test(type || ""));
+  const foundation = { ...pageState.foundation, batches: pageState.foundation.batches.filter((item) => matchesType(item.importType)), errors: pageState.foundation.errors.filter((item) => matchesType(item.importType)), templates: pageState.foundation.templates.filter((item) => matchesType(item.dataType)) };
+  const types = Object.entries(foundation.definitions).filter(([key]) => matchesType(key));
   const typeLabel = (key) => importTypeText(key, foundation.definitions[key]?.label);
-  const preview = foundation.preview;
+  const preview = isOperations ? foundation.preview : null;
   const previewPanel = preview ? `<section class="connection-import-preview ${preview.blocked ? "is-blocked" : ""}"><header><div><p class="eyebrow">导入预览</p><h3>平台链接经营导入预览</h3></div><span class="status-pill">${preview.blocked ? "已阻断" : preview.batch?.status === "completed" || preview.batch?.status === "completed_with_errors" ? "已导入" : "待确认"}</span></header><div class="connection-import-preview-grid"><span>文件格式<strong>${escapeHtml(preview.preview?.templateName || "—")}</strong></span><span>平台<strong>${escapeHtml(preview.preview?.platform || "—")}</strong></span><span>店铺<strong>${escapeHtml(preview.preview?.shop || "—")}</strong></span><span>数据周期<strong>${escapeHtml(preview.preview?.periodStart && preview.preview?.periodEnd ? `${preview.preview.periodStart} 至 ${preview.preview.periodEnd}` : "多个周期 / 无法汇总")}</strong></span><span>原始行数<strong>${escapeHtml(preview.preview?.rawRows ?? 0)}</strong></span><span>有效经营数据<strong>${escapeHtml(preview.preview?.validOperationRows ?? 0)}</strong></span><span>新增/更新数据<strong>${escapeHtml(preview.preview?.operationFacts ?? 0)}</strong></span><span>已忽略下架Link<strong>${escapeHtml(preview.preview?.ignoredDelistedLinks ?? 0)}</strong></span><span>真正异常<strong>${escapeHtml(preview.preview?.errors ?? 0)}</strong></span></div>${preview.preview?.duplicateGoodsIds?.length ? `<p class="form-error">过滤后商品ID重复：${escapeHtml(preview.preview.duplicateGoodsIds.join("、"))}</p>` : ""}<footer><small>确认前不会创建链接档案或写入经营事实。</small>${canImportBusinessData() && !preview.blocked && !["completed", "completed_with_errors"].includes(preview.batch?.status) ? `<button type="button" class="primary-button" data-confirm-foundation-import="${escapeHtml(preview.batch.id)}">确认导入</button>` : ""}</footer></section>` : "";
-  const salesPreview = foundation.salesPreview;
+  const salesPreview = isProfit ? foundation.salesPreview : null;
   const salesSummary = salesPreview?.summary || {};
   const legacySourceBatchId = salesPreview?.dataSyncBatch?.sourceBatchType === "connection_sales_import" ? salesPreview.importBatch?.id : "";
   const salesPreviewPanel = legacySourceBatchId ? `<section class="connection-import-preview"><header><div><p class="eyebrow">历史归档</p><h3>旧周期利润表记录</h3></div><span class="status-pill">只读</span></header><div class="connection-import-preview-grid"><span>批次编号<strong>${escapeHtml(legacySourceBatchId)}</strong></span><span>文件<strong>${escapeHtml(salesSummary.fileName || "—")}</strong></span><span>历史成功行<strong>${salesSummary.valid || 0}</strong></span><span>历史异常<strong>${salesSummary.exceptionCount || 0}</strong></span><span>周期开始<strong>${escapeHtml(salesSummary.periodStart || "—")}</strong></span><span>周期结束<strong>${escapeHtml(salesSummary.periodEnd || "—")}</strong></span></div><footer><small>旧周期事实仅供历史归档查看；新销售数据统一通过销售日报导入并写入 daily facts。</small></footer></section>` : "";
-  const dailyPreview = foundation.dailyPreview;
+  const dailyPreview = isProfit ? foundation.dailyPreview : null;
   const dailySummary = dailyPreview?.summary || {};
   const dailyCategory = foundation.dailyCategory || "ready";
   const dailyRows = dailyPreview?.rows || [];
   const dailyCategoryLabels = { ready: "可导入日报", pending_relation: "待确认销售关系", error: "异常" };
   const dailyCoverage = (value) => value === null || value === undefined ? "暂无数据" : `${(Number(value) * 100).toFixed(2)}%`;
   const factCommit = dailySummary.factCommit;
-  const dailyPreviewPanel = dailyPreview ? `<section class="connection-import-preview ${dailySummary.errorRows ? "is-blocked" : ""}"><header><div><p class="eyebrow">销售日报预览</p><h3>销售日报导入预览</h3></div><span class="status-pill">第 ${dailySummary.previewRevision || 1} 版</span></header><div class="connection-import-preview-grid"><span>文件<strong>${escapeHtml(dailySummary.fileName || "—")}</strong></span><span>日期范围<strong>${escapeHtml(dailySummary.dateStart && dailySummary.dateEnd ? `${dailySummary.dateStart} 至 ${dailySummary.dateEnd}` : "—")}</strong></span><span>总行数<strong>${dailySummary.totalRows || 0}</strong></span><span>可导入日报<strong>${dailySummary.readyRows || 0}</strong></span><span>待确认关系<strong>${dailySummary.pendingRelationRows || 0}</strong></span><span>异常<strong>${dailySummary.errorRows || 0}</strong></span><span>商品销售额覆盖率<strong>${dailyCoverage(dailySummary.salesAmountCoverage)}</strong></span><span>商品利润覆盖率<strong>${dailyCoverage(dailySummary.profitAmountCoverage)}</strong></span></div>${dailySummary.changes ? `<p class="form-note">本次重算：新增可导入 ${Number(dailySummary.changes.readyRows || 0)} 条，减少待确认 ${Math.max(0, -Number(dailySummary.changes.pendingRelationRows || 0))} 条，异常变化 ${Number(dailySummary.changes.errorRows || 0)} 条。</p>` : ""}${dailySummary.relationRecalculationRequired ? `<p class="form-note">销售关系已更新，此预览需要人工重新计算；不会自动写入日报事实。</p>` : ""}${factCommit ? `<div class="connection-import-preview-grid"><span>新增事实<strong>${factCommit.insertedCount || 0}</strong></span><span>重复数据已跳过<strong>${factCommit.skippedCount || 0}</strong></span><span>待确认更新<strong>${factCommit.updatePendingCount || 0}</strong></span><span>未写入<strong>${factCommit.blockedCount || 0}</strong></span><span>写入销售额<strong>¥${usageMoney(factCommit.insertedSalesAmount)}</strong></span><span>写入利润<strong>¥${usageMoney(factCommit.insertedProfitAmount)}</strong></span></div>` : ""}<nav class="connection-data-center-nav" aria-label="销售日报预览分类">${Object.entries(dailyCategoryLabels).map(([key, label]) => `<button type="button" class="${dailyCategory === key ? "active" : ""}" data-daily-preview-category="${key}">${label}</button>`).join("")}</nav><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>行号</th><th>店铺</th><th>货品编号</th><th>平台规格编号</th><th>商家编码</th><th>日期</th><th>销售额</th><th>利润</th><th>结果</th></tr></thead><tbody>${dailyRows.map((row) => { const item = row.normalized || {}; return `<tr><td>${escapeHtml(row.rowNumber)}</td><td>${escapeHtml(item.shopName || "—")}</td><td>${escapeHtml(item.platformGoodsId || "—")}</td><td>${escapeHtml(item.platformSkuId || "—")}</td><td>${escapeHtml(item.merchantSkuCode || "—")}</td><td>${escapeHtml(item.saleDate || "—")}</td><td>${item.salesAmount === null || item.salesAmount === undefined ? "暂无数据" : escapeHtml(Number(item.salesAmount).toFixed(2))}</td><td>${item.profitAmount === null || item.profitAmount === undefined ? "暂无数据" : escapeHtml(Number(item.profitAmount).toFixed(2))}</td><td>${escapeHtml(importErrorMessageText(row.errorMessage || dailyCategoryLabels[row.category] || row.category))}</td></tr>`; }).join("") || `<tr><td colspan="9">当前分类暂无数据</td></tr>`}</tbody></table></div><footer><small>${factCommit ? `事实写入已确认于 ${escapeHtml(factCommit.confirmedAt)}` : "覆盖率仅统计商品销售；运费、会计辅助及其他已确认非商品用途不进入分母。确认时会重新执行分类、用途与关系校验。"}</small>${!factCommit && canImportBusinessData() ? `<button type="button" class="primary-button" data-confirm-sales-daily-facts="${escapeHtml(dailyPreview.batch?.id)}" ${foundation.dailyCommitting ? "disabled" : ""}>${foundation.dailyCommitting ? "正在写入…" : "确认写入日报事实"}</button>` : ""}${canImportBusinessData() && !factCommit && (dailySummary.relationRecalculationRequired || Number(dailySummary.previewRevision || 1) > 1) ? `<button type="button" class="secondary-button" data-recalculate-sales-daily-preview="${escapeHtml(dailyPreview.batch?.id)}" ${foundation.dailyLoading ? "disabled" : ""}>${foundation.dailyLoading ? "正在重新计算…" : "重新计算预览"}</button>` : ""}</footer></section>` : "";
+  const dailyPreviewPanel = dailyPreview ? `<section class="connection-import-preview ${dailySummary.errorRows ? "is-blocked" : ""}"><header><div><p class="eyebrow">销售日报预览</p><h3>本次链接利润表检查结果</h3></div><span class="status-pill">第 ${dailySummary.previewRevision || 1} 版</span></header><div class="connection-import-preview-grid"><span>文件<strong>${escapeHtml(dailySummary.fileName || "—")}</strong></span><span>日期范围<strong>${escapeHtml(dailySummary.dateStart && dailySummary.dateEnd ? `${dailySummary.dateStart} 至 ${dailySummary.dateEnd}` : "—")}</strong></span><span>总行数<strong>${dailySummary.totalRows || 0}</strong></span><span>可导入日报<strong>${dailySummary.readyRows || 0}</strong></span><span>待确认关系<strong>${dailySummary.pendingRelationRows || 0}</strong></span><span>异常<strong>${dailySummary.errorRows || 0}</strong></span><span>商品销售额覆盖率<strong>${dailyCoverage(dailySummary.salesAmountCoverage)}</strong></span><span>商品利润覆盖率<strong>${dailyCoverage(dailySummary.profitAmountCoverage)}</strong></span></div>${dailySummary.changes ? `<p class="form-note">本次重算：新增可导入 ${Number(dailySummary.changes.readyRows || 0)} 条，减少待确认 ${Math.max(0, -Number(dailySummary.changes.pendingRelationRows || 0))} 条，异常变化 ${Number(dailySummary.changes.errorRows || 0)} 条。</p>` : ""}${dailySummary.relationRecalculationRequired ? `<p class="form-note">销售关系已更新，此预览需要人工重新计算；不会自动写入日报事实。</p>` : ""}${factCommit ? `<div class="connection-import-preview-grid"><span>新增事实<strong>${factCommit.insertedCount || 0}</strong></span><span>重复数据已跳过<strong>${factCommit.skippedCount || 0}</strong></span><span>待确认更新<strong>${factCommit.updatePendingCount || 0}</strong></span><span>未写入<strong>${factCommit.blockedCount || 0}</strong></span><span>写入销售额<strong>¥${usageMoney(factCommit.insertedSalesAmount)}</strong></span><span>写入利润<strong>¥${usageMoney(factCommit.insertedProfitAmount)}</strong></span></div>` : ""}<nav class="connection-data-center-nav" aria-label="销售日报预览分类">${Object.entries(dailyCategoryLabels).map(([key, label]) => `<button type="button" class="${dailyCategory === key ? "active" : ""}" data-daily-preview-category="${key}">${label}</button>`).join("")}</nav><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>行号</th><th>店铺</th><th>货品编号</th><th>平台规格编号</th><th>商家编码</th><th>日期</th><th>销售额</th><th>利润</th><th>结果</th></tr></thead><tbody>${dailyRows.map((row) => { const item = row.normalized || {}; return `<tr><td>${escapeHtml(row.rowNumber)}</td><td>${escapeHtml(item.shopName || "—")}</td><td>${escapeHtml(item.platformGoodsId || "—")}</td><td>${escapeHtml(item.platformSkuId || "—")}</td><td>${escapeHtml(item.merchantSkuCode || "—")}</td><td>${escapeHtml(item.saleDate || "—")}</td><td>${item.salesAmount === null || item.salesAmount === undefined ? "暂无数据" : escapeHtml(Number(item.salesAmount).toFixed(2))}</td><td>${item.profitAmount === null || item.profitAmount === undefined ? "暂无数据" : escapeHtml(Number(item.profitAmount).toFixed(2))}</td><td>${escapeHtml(importErrorMessageText(row.errorMessage || dailyCategoryLabels[row.category] || row.category))}</td></tr>`; }).join("") || `<tr><td colspan="9">当前分类暂无数据</td></tr>`}</tbody></table></div><footer><small>${factCommit ? `事实写入已确认于 ${escapeHtml(factCommit.confirmedAt)}` : "覆盖率仅统计商品销售；运费、会计辅助及其他已确认非商品用途不进入分母。确认时会重新执行分类、用途与关系校验。"}</small>${!factCommit && canImportBusinessData() ? `<button type="button" class="primary-button" data-confirm-sales-daily-facts="${escapeHtml(dailyPreview.batch?.id)}" ${foundation.dailyCommitting ? "disabled" : ""}>${foundation.dailyCommitting ? "正在写入…" : "确认导入可用日报"}</button>` : ""}${canImportBusinessData() && !factCommit && (dailySummary.relationRecalculationRequired || Number(dailySummary.previewRevision || 1) > 1) ? `<button type="button" class="secondary-button" data-recalculate-sales-daily-preview="${escapeHtml(dailyPreview.batch?.id)}" ${foundation.dailyLoading ? "disabled" : ""}>${foundation.dailyLoading ? "正在重新计算…" : "重新计算预览"}</button>` : ""}</footer></section>` : "";
   const candidates = pageState.relationCandidates;
   const candidateSummary = candidates.summary || {};
   const selectedCandidate = candidates.selected;
@@ -665,27 +714,33 @@ function renderDataFoundation() {
     ${selectedCandidate ? `<article class="connection-import-preview"><header><div><h3>匹配证据</h3><p>${escapeHtml(selectedCandidate.item?.link?.title || "销售关系候选")}</p></div><button type="button" class="text-button" data-close-relation-candidate>关闭</button></header><div class="connection-import-preview-grid"><span>原始店铺<strong>${escapeHtml(selectedCandidate.item?.evidence?.shop?.sourceName || "—")}</strong></span><span>系统店铺<strong>${escapeHtml(selectedCandidate.item?.evidence?.shop?.systemName || "—")}</strong></span><span>平台货品编号<strong>${escapeHtml(selectedCandidate.item?.evidence?.link?.platformGoodsId || "—")}</strong></span><span>平台规格编号<strong>${escapeHtml(selectedCandidate.item?.evidence?.platformSku?.platformSkuId || "—")}</strong></span><span>商家编码<strong>${escapeHtml(selectedCandidate.item?.evidence?.erpSku?.merchantSkuCode || "—")}</strong></span><span>来源文件<strong>${escapeHtml(selectedCandidate.item?.source?.fileName || "—")}</strong></span></div><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>行号</th><th>日期</th><th>销量</th><th>销售额</th><th>利润</th></tr></thead><tbody>${(selectedCandidate.sourceRows || []).map((row) => `<tr><td>${escapeHtml(row.rowNumber)}</td><td>${escapeHtml(row.normalized?.saleDate || "—")}</td><td>${escapeHtml(row.normalized?.quantity ?? "—")}</td><td>${escapeHtml(row.normalized?.salesAmount ?? "—")}</td><td>${escapeHtml(row.normalized?.profitAmount ?? "—")}</td></tr>`).join("")}</tbody></table></div><footer><small>确认只会创建生效的单品ERP关系，不修改旧字段或销售事实。</small>${canManage() && selectedCandidate.item?.candidateType === "single" && selectedCandidate.item?.status === "pending" ? `<button type="button" class="primary-button" data-confirm-relation-candidate="${escapeHtml(selectedCandidate.item.id)}" ${candidates.confirming ? "disabled" : ""}>确认单品关系</button>` : ""}</footer></article>` : ""}
     <footer><small>组合候选不提供确认入口；所有确认操作均由服务端再次校验权限和当前关系。</small></footer>
   </section>` : "";
-  const bulkPreview = foundation.bulkPreview;
+  const bulkPreview = isOperations ? foundation.bulkPreview : null;
   const bulkStatusText = { waiting: "排队中", running: "处理中", preview_ready: "待批量确认", preview_ready_with_errors: "待确认 · 有异常", completed: "已完成", completed_with_errors: "已完成 · 有异常", failed: "处理失败" };
   const fileStatusText = { waiting: "等待", running: "解析中", preview_ready: "待确认", already_imported: "历史已导入", blocked: "已阻断", failed: "异常", completed: "已导入", completed_with_errors: "已导入 · 有异常" };
   const bulkPreviewPanel = bulkPreview ? `<section class="connection-import-preview ${bulkPreview.batch?.failedCount ? "is-blocked" : ""}"><header><div><p class="eyebrow">批量导入预览</p><h3>平台链接数据批量预览</h3></div><span class="status-pill">${escapeHtml(bulkStatusText[bulkPreview.batch?.status] || bulkPreview.batch?.status)}</span></header><div class="connection-import-preview-grid"><span>文件总数<strong>${escapeHtml(bulkPreview.batch?.fileCount || 0)}</strong></span><span>已处理<strong>${escapeHtml(bulkPreview.batch?.processedCount || 0)}</strong></span><span>原始行数<strong>${escapeHtml(bulkPreview.summary?.rawRows || 0)}</strong></span><span>有效经营数据<strong>${escapeHtml(bulkPreview.summary?.validOperationRows || 0)}</strong></span><span>新增/更新数据<strong>${escapeHtml(bulkPreview.summary?.operationFacts || 0)}</strong></span><span>已忽略下架Link<strong>${escapeHtml(bulkPreview.summary?.ignoredDelistedLinks || 0)}</strong></span><span>真正异常<strong>${escapeHtml(bulkPreview.summary?.errors || 0)}</strong></span></div><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>文件</th><th>平台</th><th>店铺</th><th>有效经营数据</th><th>忽略下架Link</th><th>真正异常</th><th>状态</th></tr></thead><tbody>${(bulkPreview.files || []).map((file) => `<tr><td>${escapeHtml(file.fileName)}</td><td>${escapeHtml(file.platform || "识别中")}</td><td>${escapeHtml(file.shop || "—")}</td><td>${escapeHtml(file.summary?.validOperationRows || 0)}</td><td>${escapeHtml(file.summary?.ignoredDelistedLinks || 0)}</td><td>${escapeHtml(file.summary?.errors || 0)}</td><td>${escapeHtml(fileStatusText[file.status] || file.status)}${file.errorMessage ? `<small>${escapeHtml(file.errorMessage)}</small>` : ""}</td></tr>`).join("")}</tbody></table></div><footer><small>后台按文件顺序处理；确认前不创建链接或写入经营事实。</small>${canImportBusinessData() && ["preview_ready", "preview_ready_with_errors"].includes(bulkPreview.batch?.status) ? `<button type="button" class="primary-button" data-confirm-foundation-bulk-import="${escapeHtml(bulkPreview.batch.id)}">批量确认导入</button>` : ""}</footer></section>` : "";
   const businessImportForms = canImportBusinessData() ? `<div class="connection-business-import-grid">
-    <form class="connection-foundation-import-form" data-foundation-bulk-import-form><label>平台链接每日数据表（按链接ID和日期识别，可多选）<input type="file" name="files" accept=".xls,.xlsx" multiple required /></label><button type="submit" class="primary-button">批量上传并后台预览</button></form>
-    <form class="connection-foundation-import-form" data-sales-daily-import-form novalidate><label>链接利润表<input type="file" name="file" accept=".xls,.xlsx" ${foundation.dailyLoading ? "disabled" : ""} data-sales-daily-file /></label>${foundation.dailyFileName ? `<small>已选择：${escapeHtml(foundation.dailyFileName)}</small>` : ""}<button type="submit" class="primary-button" ${foundation.dailyLoading ? "disabled aria-busy=\"true\"" : ""}>${foundation.dailyLoading ? "正在生成日报预览…" : "上传利润表并生成日报预览"}</button><div class="connection-import-feedback" aria-live="polite">${foundation.dailyError ? `<span class="form-error">${escapeHtml(foundation.dailyError)}</span>` : foundation.dailyMessage ? `<span class="form-success">${escapeHtml(foundation.dailyMessage)}</span>` : ""}</div></form>
-    ${renderOwnerImportUploader()}
+    ${isOperations ? `<form class="connection-foundation-import-form" data-foundation-bulk-import-form><label>平台链接每日数据表（按链接ID和日期识别，可多选）<input type="file" name="files" accept=".xls,.xlsx" multiple required /></label><button type="submit" class="primary-button">上传并检查</button></form>` : ""}
+    ${isProfit ? `<form class="connection-foundation-import-form" data-sales-daily-import-form novalidate><label>链接利润表<input type="file" name="file" accept=".xls,.xlsx" ${foundation.dailyLoading ? "disabled" : ""} data-sales-daily-file /></label>${foundation.dailyFileName ? `<small>已选择：${escapeHtml(foundation.dailyFileName)}</small>` : ""}<button type="submit" class="primary-button" ${foundation.dailyLoading ? "disabled aria-busy=\"true\"" : ""}>${foundation.dailyLoading ? "正在生成日报预览…" : "上传并检查"}</button><div class="connection-import-feedback" aria-live="polite">${foundation.dailyError ? `<span class="form-error">${escapeHtml(foundation.dailyError)}</span>` : foundation.dailyMessage ? `<span class="form-success">${escapeHtml(foundation.dailyMessage)}</span>` : ""}</div></form>` : ""}
+    ${isOwners ? renderOwnerImportUploader() : ""}
   </div>` : "";
   return `<section class="connection-foundation-page">
-    <header class="connection-section-heading"><div><h2>业务数据导入</h2></div></header>
-    ${businessImportForms}
-    ${isAdmin() ? `<p class="form-note">未识别店铺已迁移至管理员店铺治理。请在<a href="#products">产品中心</a>的平台货品导入中确认店铺名称或别名。</p>` : ""}
-    ${renderOwnerImport()}
+    <section class="connection-foundation-panel import-upload-step"><h3><span class="import-step-number">1</span>上传文件</h3>${businessImportForms}<p class="form-note">选择对应类型的Excel文件，上传后先检查，确认前不写入正式业务数据。</p></section>
+    <div class="import-review-heading"><h3><span class="import-step-number">2</span>检查并确认</h3><small>只展示本次文件；历史异常在下方单独查看。</small></div>
+    ${!dailyPreviewPanel && !bulkPreviewPanel && !previewPanel && (!isOwners || !pageState.ownerImport.result) ? `<section class="connection-foundation-panel import-review-empty">上传文件后，这里显示识别结果、可导入数据和待处理原因。</section>` : ""}
+    ${previewPanel}
+    ${isOwners ? renderOwnerImport() : ""}
     ${bulkPreviewPanel ? `<details class="connection-preview-fold" ${["waiting", "running", "preview_ready", "preview_ready_with_errors", "failed"].includes(bulkPreview.batch?.status) ? "open" : ""}><summary><strong>平台链接数据导入</strong><span>${escapeHtml(bulkStatusText[bulkPreview.batch?.status] || bulkPreview.batch?.status)} · ${escapeHtml(bulkPreview.batch?.fileCount || 0)} 个文件</span></summary>${bulkPreviewPanel}</details>` : ""}
-    ${dailyPreviewPanel ? `<details class="connection-preview-fold" ${!factCommit || dailySummary.relationRecalculationRequired ? "open" : ""}><summary><strong>链接利润表日报预览</strong><span>${escapeHtml(dailySummary.dateStart && dailySummary.dateEnd ? `${dailySummary.dateStart} 至 ${dailySummary.dateEnd}` : dailySummary.fileName || "—")} · 待确认 ${dailySummary.pendingRelationRows || 0} · 异常 ${dailySummary.errorRows || 0}</span></summary>${dailyPreviewPanel}</details>` : ""}
+    ${dailyPreviewPanel ? `<div class="import-current-preview">${renderImportAmountReconciliation(dailySummary)}${dailySummary.pendingRelationRows || dailySummary.errorRows ? `<div class="import-issue-guidance"><strong>本次待处理</strong><p>关系待确认 ${dailySummary.pendingRelationRows || 0} 行 · 真正异常 ${dailySummary.errorRows || 0} 行。可用行仍按现有导入规则确认。</p><button type="button" class="text-button" data-workbench-go="sales-relation-governance">处理正式销售关系 →</button><button type="button" class="text-button" data-workbench-go="sales-data-quality-governance">处理身份和结构异常 →</button></div>` : ""}${dailyPreviewPanel}</div>` : ""}
     ${salesPreviewPanel ? `<details class="connection-preview-fold"><summary><strong>旧周期利润表历史记录</strong><span>${escapeHtml(salesSummary.fileName || "—")}</span></summary>${salesPreviewPanel}</details>` : ""}
-    ${canManage() ? `<details class="connection-foundation-panel connection-collapsible-panel"><summary><strong>管理员解析模板</strong><span>${foundation.templates.length} 个模板</span></summary><form data-foundation-template-form class="connection-foundation-template-form"><input name="name" placeholder="模板名称" required /><select name="dataType">${types.map(([key, definition]) => `<option value="${escapeHtml(key)}">${escapeHtml(typeLabel(key))}</option>`).join("")}</select><input name="sourcePlatform" placeholder="来源平台" /><textarea name="fieldMappingsJson" placeholder='字段映射，例如 {"商品ID":"platformGoodsId"}' required></textarea><input name="changeNote" placeholder="版本说明" /><button type="submit" class="secondary-button">新增模板第1版</button></form><div class="connection-template-list">${foundation.templates.map((item) => `<article><div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(typeLabel(item.dataType))} · 第${escapeHtml(item.version)}版 · ${escapeHtml(dataUpdateStatusText(item.status))}</span></div><button type="button" class="text-button" data-iterate-foundation-template="${escapeHtml(item.id)}">迭代版本</button></article>`).join("") || "<p>暂无解析模板。</p>"}</div></details>` : ""}
-    <details class="connection-foundation-panel connection-collapsible-panel"><summary><strong>导入记录</strong><span>最近 ${Math.min(foundation.batches.length, 10)} 条</span></summary><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>文件</th><th>类型</th><th>时间</th><th>成功</th><th>异常</th><th>状态</th></tr></thead><tbody>${foundation.batches.slice(0, 10).map((item) => `<tr><td>${escapeHtml(item.fileName)}</td><td>${escapeHtml(typeLabel(item.importType))}</td><td>${escapeHtml(item.createdAt)}</td><td>${escapeHtml(item.matchedRows)}</td><td>${escapeHtml(item.errorRows)}</td><td>${escapeHtml(dataUpdateStatusText(item.status))}</td></tr>`).join("") || `<tr><td colspan="6">暂无导入记录</td></tr>`}</tbody></table></div></details>
-    ${foundation.errors.length ? `<details class="connection-foundation-panel connection-collapsible-panel"><summary><strong>导入异常明细</strong><span>${foundation.errors.length} 条</span></summary><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>文件</th><th>行号</th><th>外部标识</th><th>异常类型</th><th>说明</th></tr></thead><tbody>${foundation.errors.slice(0, 50).map((item) => `<tr><td>${escapeHtml(item.fileName)}</td><td>${escapeHtml(item.rowNumber)}</td><td>${escapeHtml(item.externalKey || "—")}</td><td>${escapeHtml(importErrorText(item.errorType))}</td><td>${escapeHtml(importErrorMessageText(item.errorMessage))}</td></tr>`).join("")}</tbody></table></div><small>仅展示最近 50 条，完整记录请在数据中心查看。</small></details>` : ""}
+    <details class="connection-foundation-panel connection-collapsible-panel"><summary><strong>3 导入历史</strong><span>最近 ${Math.min(foundation.batches.length, 10)} 条</span></summary><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>文件</th><th>类型</th><th>时间</th><th>成功</th><th>异常</th><th>状态</th></tr></thead><tbody>${foundation.batches.slice(0, 10).map((item) => `<tr><td>${escapeHtml(item.fileName)}</td><td>${escapeHtml(typeLabel(item.importType))}</td><td>${escapeHtml(item.createdAt)}</td><td>${escapeHtml(item.matchedRows)}</td><td>${escapeHtml(item.errorRows)}</td><td>${escapeHtml(dataUpdateStatusText(item.status))}</td></tr>`).join("") || `<tr><td colspan="6">暂无导入记录</td></tr>`}</tbody></table></div></details>
+    ${foundation.errors.length ? `<details class="connection-foundation-panel connection-collapsible-panel"><summary><strong>历史导入异常记录</strong><span>已加载 ${foundation.errors.length} 条</span></summary><p class="form-note">这是历史导入记录，不等于当前未解决问题数量，也不等于本次上传异常数量。</p><div class="connection-table-wrap"><table class="connection-table"><thead><tr><th>文件</th><th>行号</th><th>外部标识</th><th>异常类型</th><th>说明</th></tr></thead><tbody>${foundation.errors.slice(0, 50).map((item) => `<tr><td>${escapeHtml(item.fileName)}</td><td>${escapeHtml(item.rowNumber)}</td><td>${escapeHtml(item.externalKey || "—")}</td><td>${escapeHtml(importErrorText(item.errorType))}</td><td>${escapeHtml(importErrorMessageText(item.errorMessage))}</td></tr>`).join("")}</tbody></table></div><small>仅展示最近 50 条，完整记录请在数据中心查看。</small></details>` : ""}
   </section>`;
+}
+
+function renderImportAmountReconciliation(summary) {
+  const line = (label, source, ready) => source === undefined || ready === undefined ? "" : `<tr><th>${label}</th><td>文件统计 ¥${usageMoney(source)}</td><td>→ 可导入 ¥${usageMoney(ready)}</td><td>→ 未纳入可导入金额 ¥${usageMoney(Number(source) - Number(ready))}</td></tr>`;
+  const rows = line("销售额", summary.sourceSalesAmount, summary.readySalesAmount) + line("利润", summary.sourceProfitAmount, summary.readyProfitAmount);
+  return rows ? `<section class="connection-foundation-panel import-amount-reconciliation"><h4>本次金额对账</h4><div class="connection-table-wrap"><table class="connection-table"><tbody>${rows}</tbody></table></div><small>金额来自服务端预览；未纳入部分可能包含待确认、异常及辅助核算，不能全部视为数据丢失。负利润下覆盖率不代表完整程度，请同时核对金额。</small></section>` : "";
 }
 
 function trendLabel(item) {
@@ -804,7 +859,7 @@ function renderOwnerImportUploader() {
   return `<form data-connection-owner-import-form class="connection-foundation-import-form">
     <label>链接编号表<input type="file" name="file" accept=".xls,.xlsx" required /><small>表格文件仅需一列：链接编号</small></label>
     <label>匹配负责人<select name="ownerId" required><option value="">请选择负责人</option>${people.map((person) => `<option value="${escapeHtml(person.id)}">${escapeHtml(person.name)}</option>`).join("")}</select></label>
-    <button type="submit" class="secondary-button" ${pageState.ownerImport.loading ? "disabled" : ""}>${pageState.ownerImport.loading ? "正在解析…" : "读取链接并预览"}</button>
+    <button type="submit" class="secondary-button" ${pageState.ownerImport.loading ? "disabled" : ""}>${pageState.ownerImport.loading ? "正在解析…" : "上传并检查"}</button>
   </form>`;
 }
 
@@ -844,14 +899,14 @@ function cockpitSalesPeriodText(summary) {
   return summary.salesPeriodAligned ? `统计周期 ${range}` : `各链接最新周期 ${range}（共 ${summary.salesPeriodCount || 0} 个周期）`;
 }
 function renderGoalHealthCockpit() {
-  if (pageState.cockpitGoalHealthLoading) return `<section class="cockpit-panel connection-goal-health-cockpit cockpit-module-skeleton" aria-busy="true"><header><div><h3>链接评级概览</h3><span>正在按需读取评级汇总…</span></div></header><div class="cockpit-skeleton-lines"><i></i><i></i><i></i></div></section>`;
+  if (pageState.cockpitGoalHealthLoading) return `<section class="cockpit-panel connection-goal-health-cockpit cockpit-module-skeleton" aria-busy="true"><header><div><h3>链接贡献级别概览</h3><span>正在按需读取评级汇总…</span></div></header><div class="cockpit-skeleton-lines"><i></i><i></i><i></i></div></section>`;
   const model = pageState.goalHealth || {}; const grades = model.gradeSummary || {}; const period = model.evaluationPeriod || {};
   const selectedEnd = pageState.cockpitRange.endDate;
-  const periodText = period.periodEnd ? `截至 ${selectedEnd || period.periodEnd} 的最新滚动30天评价${Number(period.periodCount || 0) > 1 ? ` · ${period.periodCount}个评价周期` : ""}` : `截至 ${selectedEnd || "所选日期"} 暂无已完成评价`;
-  const gradeItems = [["excellent","优秀"],["good","良好"],["on_target","达标"],["underperforming","不达标"]];
-  return `<section class="cockpit-panel connection-goal-health-cockpit"><header><div><h3>链接评级概览</h3><span>${escapeHtml(periodText)}</span></div><button type="button" class="text-button" data-goal-health-drill="all">进入链接经营管理 →</button></header>
-    <div class="connection-goal-health-coverage"><article><span>管理覆盖</span><strong>${model.totalLinks || 0}</strong><small>已设置定位 ${model.positionedLinks || 0} · 未设置 ${model.unpositionedLinks || 0}</small></article><article><span>目标覆盖</span><strong>${model.activeGoalLinks || 0}</strong><small>待设置 ${model.pendingGoalLinks || 0}</small><button type="button" class="text-button" data-goal-health-drill="goal-pending">查看待设置目标</button></article><article><span>评级覆盖</span><strong>${model.evaluatedLinks || 0}</strong><small>待评级 ${model.pendingEvaluationLinks || 0}</small></article></div>
-    <div class="connection-goal-grade-summary"><div><strong>链接评级分布</strong><small>仅统计已评级链接 ${model.evaluatedLinks || 0} 条</small></div>${gradeItems.map(([code,label]) => `<button type="button" data-goal-health-drill="grade" data-evaluation-status="${code}" class="goal-grade-${code}"><span>${label}</span><strong>${grades[code] || 0}</strong></button>`).join("")}</div>
+  const periodText = period.periodEnd ? `评级周期 ${period.periodStart} 至 ${period.periodEnd} · 每30天固定评级，不随页面日期变化` : "尚未生成贡献评级";
+  const gradeItems = ["S","A","B","C","D","N"].map(k=>[k,`${k}级`]);
+  return `<section class="cockpit-panel connection-goal-health-cockpit"><header><div><h3>链接贡献级别概览</h3><span>${escapeHtml(periodText)}</span></div><button type="button" class="text-button" data-goal-health-drill="all">进入链接经营管理 →</button></header>
+    <div class="connection-goal-health-coverage"><article><span>当前有效链接</span><strong>${model.totalLinks || 0}</strong></article><article><span>已分级</span><strong>${model.evaluatedLinks || 0}</strong></article><article><span>数据缺失/待评级</span><strong>${model.pendingEvaluationLinks || 0}</strong></article></div>
+    <div class="connection-goal-grade-summary"><div><strong>链接贡献级别分布</strong><small>仅统计已评级链接 ${model.evaluatedLinks || 0} 条</small></div>${gradeItems.map(([code,label]) => `<button type="button" data-goal-health-drill="grade" data-evaluation-status="${code}" class="goal-grade-${code}"><span>${label}</span><strong>${grades[code] || 0}</strong></button>`).join("")}</div>
     <div class="connection-goal-positioning-summary">${(model.positioningSummary || []).map((item) => `<article><header><strong>${escapeHtml(item.positioningName)}</strong><small>${item.totalLinks || 0} 条 · 已评级 ${item.evaluatedLinks || 0}</small></header><div>${gradeItems.map(([code,label]) => code === "underperforming" ? `<button type="button" data-goal-health-drill="grade" data-positioning="${escapeHtml(item.positioningType)}" data-evaluation-status="${code}"><span>${label}</span><b>${item[code] || 0}</b></button>` : `<span><em>${label}</em><b>${item[code] || 0}</b></span>`).join("")}</div></article>`).join("")}</div>
   </section>`;
 }
@@ -882,7 +937,7 @@ function shopOperationTrend(shop, summary) {
 }
 function renderShopOperationCard(shop, summary, { className = "", shareLabel = "", shareValue = 0 } = {}) {
   const trend = shopOperationTrend(shop, summary);
-  return `<article class="shop-operation-card${className ? ` ${className}` : ""}"><header><strong>${escapeHtml(`${shop.platform} · ${shop.shopName}`)}</strong><span>${shop.totalLinks || 0} 条当前经营 Link</span></header><div class="shop-operation-metrics"><div><span>当前周期销售额</span><strong>${coreMoney(shop.salesAmount)}</strong><small class="is-${trend.className}">${trend.className === "better" ? "↗" : trend.className === "worse" ? "↘" : "→"} ${escapeHtml(trend.text)}</small></div><div><span>当前周期毛利</span><strong>${coreMoney(shop.profitAmount)}</strong><small>毛利率 ${corePercent(shop.profitMargin)}</small></div></div><div class="shop-operation-grades"><span><em>优秀</em><b>${shop.excellentLinks || 0}</b></span><span><em>良好</em><b>${shop.goodLinks || 0}</b></span><span><em>达标</em><b>${shop.onTargetLinks || 0}</b></span><span><em>不达标</em><b>${shop.underperformingLinks || 0}</b></span></div><footer>${shareLabel ? `${escapeHtml(shareLabel)}占比 ${corePercent(shareValue)} · ` : ""}参与评价 ${shop.evaluatedLinks || 0} / 总链接 ${shop.totalLinks || 0}</footer></article>`;
+  return `<article class="shop-operation-card${className ? ` ${className}` : ""}"><header><strong>${escapeHtml(`${shop.platform} · ${shop.shopName}`)}</strong><span>${shop.totalLinks || 0} 条当前经营 Link</span></header><div class="shop-operation-metrics"><div><span>当前周期销售额</span><strong>${coreMoney(shop.salesAmount)}</strong><small class="is-${trend.className}">${trend.className === "better" ? "↗" : trend.className === "worse" ? "↘" : "→"} ${escapeHtml(trend.text)}</small></div><div><span>当前周期毛利</span><strong>${coreMoney(shop.profitAmount)}</strong><small>毛利率 ${corePercent(shop.profitMargin)}</small></div></div><div class="shop-operation-grades">${[["S",shop.excellentLinks],["A",shop.goodLinks],["B",shop.bLinks],["C",shop.cLinks],["D",shop.underperformingLinks],["N",shop.nLinks]].map(([grade,count])=>`<span><em>${grade}级</em><b>${count||0}</b></span>`).join("")}</div><footer>${shareLabel ? `${escapeHtml(shareLabel)}占比 ${corePercent(shareValue)} · ` : ""}参与评价 ${shop.evaluatedLinks || 0} / 总链接 ${shop.totalLinks || 0}</footer></article>`;
 }
 function renderShopOperations(cockpit) {
   const shops = cockpit.shopOperations ?? [];
@@ -958,7 +1013,7 @@ function renderBusinessCockpit() {
     <section class="cockpit-summary"><div><span>当前经营 Link</span><strong>${summary.connectionCount||0}</strong><small>当前资产口径，不随日期变化</small></div><div class="is-sales"><span>当前周期ERP销售额</span><strong>${coreMoney(summary.salesAmount)}</strong><small>${escapeHtml(salesPeriodText)}</small><small>${summary.previousPeriodComplete ? `较上一同长度周期 ${growthText(summary.salesGrowth)}` : `上一同长度周期数据仅${summary.previousPeriodDateCount||0}/${windowDays}天，暂不比较`}</small></div><div><span>当前周期毛利</span><strong>${coreMoney(summary.profitAmount)}</strong><small>毛利率 ${corePercent(summary.profitMargin)}</small></div><div class="is-risk"><span>需要关注</span><strong>${summary.riskCount||0}</strong><small>按所选周期经营变化识别</small></div></section>
     ${shopHtml}
     ${coreTrendHtml}
-    <section class="cockpit-health"><header><h3>链接评级分布</h3><span>沿用正式目标评价结果</span></header><div><span>优秀/良好 <b>${ratings.excellentOrGood||0}</b><em>${ratingRate(ratings.excellentOrGood)}</em></span><span>达标 <b>${ratings.onTarget||0}</b><em>${ratingRate(ratings.onTarget)}</em></span><span>不达标 <b>${ratings.underperforming||0}</b><em>${ratingRate(ratings.underperforming)}</em></span><span>待评级 <b>${ratings.notEvaluated||0}</b><em>${ratingRate(ratings.notEvaluated)}</em></span></div></section>
+    <section class="cockpit-health"><header><h3>链接贡献级别分布</h3><span>最近一次公司统一评级</span></header><div>${["S","A","B","C","D","N"].map(k=>`<span>${k}级 <b>${ratings[k]||0}</b></span>`).join("")}<span>数据错误/待评级 <b>${ratings.notEvaluated||0}</b></span></div></section>
     ${goalHtml}
     ${distributionHtml}
     ${pageState.cockpitExpanded ? `
@@ -1037,21 +1092,6 @@ function renderCoreOperatingOverview(item, core) {
   return `<section class="connection-v3-panel"><h3>经营概览</h3><p>核心经营指标来自 ERP 真实销售事实。</p><div class="connection-v3-metrics"><div><span>发货销量</span><strong>${coreNumber(sales.shippedQuantity)}</strong></div><div><span>销售金额</span><strong>${coreMoney(sales.salesAmount)}</strong></div><div><span>成本</span><strong>${coreMoney(sales.costAmount)}</strong></div><div><span>利润</span><strong>${coreMoney(sales.profitAmount)}</strong></div><div><span>利润率</span><strong>${corePercent(sales.profitMargin)}</strong></div></div><small>${sales.periodStart ? escapeHtml(`${sales.periodStart} 至 ${sales.periodEnd}`) : "暂无ERP销售周期"}</small></section>`;
 }
 
-function renderConnectionBusinessPositioning(core) {
-  const model = core?.businessPositioning;
-  if (!model) return `<section class="connection-v3-panel"><h3>经营定位</h3><div class="empty-state compact">正在读取经营定位…</div></section>`;
-  if (model.loadError) return `<section class="connection-v3-panel"><h3>经营定位</h3><div class="empty-state compact">${escapeHtml(model.loadError)}<button type="button" class="secondary-button" data-retry-connection-goal-module="businessPositioning">重试</button></div></section>`;
-  const current = model.current;
-  const template = model.currentTemplate;
-  const metrics = template?.metrics ?? [];
-  const history = model.history ?? [];
-  const metricText = metrics.map((metric) => `${metric.metricName} ${Math.round(Number(metric.weight || 0) * 100)}%`).join(" · ");
-  return `<section class="connection-v3-panel connection-positioning-panel"><header><div><h3>经营定位</h3><p>定位由人工确认，系统不会根据销售数据自动判断。</p></div>${current ? `<span class="status-pill">${escapeHtml(current.positioningName)}</span>` : `<span class="status-pill">未设置</span>`}</header>
-    <div class="connection-positioning-summary"><div><span>当前定位</span><strong>${escapeHtml(current?.positioningName || "未设置")}</strong></div><div><span>目标模板</span><strong>${escapeHtml(template?.name || "设置定位后自动关联")}</strong><small>${template ? `${template.windowDays}天 · V${template.version}` : "—"}</small></div><div><span>指标权重</span><strong>${escapeHtml(metricText || "—")}</strong></div></div>
-    ${model.permissions?.canEdit ? `<form class="connection-positioning-form" data-connection-positioning-form><label>经营定位<select name="positioningType" required><option value="">请选择</option>${model.options.map((option) => `<option value="${escapeHtml(option.value)}" ${current?.positioningType === option.value ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select></label><button type="submit" class="primary-button">保存定位</button></form>` : `<p class="form-note">普通运营可查看定位；仅管理员或当前链接负责人可以修改。</p>`}
-    ${history.length ? `<details class="connection-positioning-history"><summary>定位历史（${history.length}）</summary><div class="connection-template-list">${history.map((row) => `<article><div><strong>${escapeHtml(row.positioningName)}</strong><span>${escapeHtml(row.status === "active" ? "当前生效" : `${row.effectiveFrom} 至 ${row.effectiveTo || "—"}`)}</span><small>${escapeHtml(row.decisionReason)} · ${escapeHtml(row.decidedByName || "未知操作人")}</small></div></article>`).join("")}</div></details>` : ""}
-  </section>`;
-}
 function goalMetric(plan, code) { return plan?.metrics?.find((metric) => metric.metricCode === code) ?? null; }
 function currentGoalMonth() {
   const value = new Date();
@@ -1059,15 +1099,12 @@ function currentGoalMonth() {
 }
 function goalModeText(mode) { return ({ system_suggested: "系统建议", manual: "人工设置", hybrid: "人工调整" })[mode] || mode || "—"; }
 function goalStatusText(status) { return ({ draft: "待人工设置", pending_confirm: "待确认", active: "生效中", expired: "已到期", cancelled: "已取消" })[status] || status || "—"; }
-function goalGradeText(grade) { return ({ excellent: "优秀", good: "良好", on_target: "达标", underperforming: "不达标" })[grade] || "—"; }
+function goalGradeText(grade) { return ["S","A","B","C","D","N"].includes(grade)?`${grade}级`:"—"; }
 function renderConnectionGoalEvaluation(core) {
-  const evaluation = core?.businessGoalEvaluation;
-  if (!evaluation) return `<div class="empty-state compact">正在计算月度目标达成…</div>`;
-  if (evaluation.evaluationStatus !== "evaluated") {
-    const dataPeriod = evaluation.periodStart ? ` · 数据周期 ${evaluation.periodStart} 至 ${evaluation.periodEnd}` : "";
-    return `<div class="connection-goal-evaluation pending"><strong>待评价</strong><span>${escapeHtml(evaluation.reason || "暂不满足评价条件")}${escapeHtml(dataPeriod)}</span>${canRefreshRating() ? `<button class="secondary-button" type="button" data-refresh-link-rating>刷新评级</button>` : ""}</div>`;
-  }
-  return `<div class="connection-goal-evaluation"><header><div><strong>月度目标达成</strong><small>${escapeHtml(`${evaluation.periodStart} 至 ${evaluation.periodEnd}`)}</small></div><div>${canRefreshRating() ? `<button class="text-button" type="button" data-refresh-link-rating>刷新评级</button>` : ""}<span class="status-pill goal-grade-${escapeHtml(evaluation.grade)}">${escapeHtml(goalGradeText(evaluation.grade))}</span></div></header><div class="connection-goal-evaluation-grid"><div><span>销售目标</span><strong>${coreMoney(evaluation.salesTarget)}</strong><small>实际 ${coreMoney(evaluation.salesActual)} · 完成 ${corePercent(evaluation.salesAchievement)}</small></div><div><span>利润目标</span><strong>${coreMoney(evaluation.profitTarget)}</strong><small>实际 ${coreMoney(evaluation.profitActual)} · 完成 ${corePercent(evaluation.profitAchievement)}</small></div><div><span>综合完成率</span><strong>${corePercent(evaluation.totalAchievement)}</strong><small>销售权重 ${corePercent(evaluation.salesWeight)} · 利润权重 ${corePercent(evaluation.profitWeight)}</small></div></div></div>`;
+ const r=core?.businessGoalEvaluation;
+ if(!r)return `<div class="empty-state compact">正在读取贡献评级…</div>`;
+ if(!r.grade)return `<div class="empty-state compact">${escapeHtml(r.reason||r.loadError||"评级数据缺失")}</div>`;
+ return `<div class="connection-positioning-summary"><div><span>贡献级别</span><strong>${escapeHtml(r.grade)}级</strong></div><div><span>评级周期</span><strong>${escapeHtml(`${r.periodStart} 至 ${r.periodEnd}`)}</strong></div><div><span>利润</span><strong>${coreMoney(r.profitAmount)}</strong></div><div><span>公司利润排名</span><strong>${r.companyRank||"—"}</strong></div></div>`;
 }
 function renderConnectionBusinessGoals(core) {
   const model = core?.businessGoals;
@@ -1211,7 +1248,7 @@ function renderDetail() {
   let body = "";
   if (pageState.coreDetailLoading) body = `<div class="empty-state">正在读取链接经营详情…</div>`;
   else if (pageState.detailTab === "business") body = renderUiModule("link_business_summary", {
-    metricsHtml: `${renderConnectionBusinessPositioning(pageState.coreDetail)}${renderConnectionBusinessGoals(pageState.coreDetail)}${renderActions(item)}${renderCoreOperatingOverview(item, pageState.coreDetail)}`,
+    metricsHtml: `<section class="connection-v3-panel"><h3>链接贡献级别</h3>${renderConnectionGoalEvaluation(pageState.coreDetail)}</section>${renderActions(item)}${renderCoreOperatingOverview(item, pageState.coreDetail)}`,
     trendHtml: renderCorePlatform(pageState.coreDetail),
     healthHtml: `<section class="connection-v3-panel"><h3>经营趋势</h3><div class="connection-v3-metrics"><div><span>销售趋势</span><strong>${growthText(item.salesGrowth)}</strong></div><div><span>利润趋势</span><strong>${growthText(item.profitGrowth)}</strong></div></div></section>`,
     productHtml: renderCoreProducts(pageState.coreDetail),
@@ -1557,8 +1594,6 @@ function withConnectionDetailTimeout(request, label, timeoutMs = 20000) {
 }
 
 const connectionGoalModuleLoaders = Object.freeze({
-  businessPositioning: { label: "经营定位", load: loadConnectionBusinessPositioning },
-  businessGoals: { label: "经营目标", load: loadConnectionBusinessGoals },
   businessGoalEvaluation: { label: "经营评价", load: loadConnectionBusinessGoalEvaluation },
 });
 
@@ -1734,6 +1769,28 @@ async function pollConnectionBulkPreview(batchId, render) {
 export function bindConnectionCenterPageEvents(render) {
   const root = document.querySelector(".connection-center-page");
   if (!root) return;
+  root.querySelectorAll(".link-data-update-workspace .connection-foundation-import-form").forEach((form) => {
+    const input = form.querySelector('input[type="file"]');
+    if (!input) return;
+    const hint = document.createElement("small");
+    hint.className = "import-drop-hint";
+    hint.textContent = "可拖拽Excel到此区域，或点击选择文件；选好后点击上传并检查。";
+    form.append(hint);
+    form.addEventListener("dragover", event => { event.preventDefault(); if (!input.disabled) form.classList.add("is-dragging"); });
+    form.addEventListener("dragleave", () => form.classList.remove("is-dragging"));
+    form.addEventListener("drop", event => {
+      event.preventDefault(); form.classList.remove("is-dragging");
+      if (input.disabled || !event.dataTransfer?.files.length) return;
+      const files = [...event.dataTransfer.files];
+      if (files.some(file => !/\.(xls|xlsx)$/i.test(file.name)) || (!input.multiple && files.length > 1)) {
+        hint.textContent = input.multiple ? "请选择Excel文件（.xls或.xlsx）。" : "此类型每次上传一个Excel文件（.xls或.xlsx）。";
+        hint.setAttribute("role", "alert"); return;
+      }
+      input.files = event.dataTransfer.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      hint.textContent = `已选择：${files.map(file => file.name).join("、")}`;
+    });
+  });
   const currentUserId = String(getCurrentUser()?.personId ?? getCurrentUser()?.id ?? "");
   if (pageState.loaded && pageState.loadedUserId !== currentUserId) {
     pageState.loaded = false;
@@ -1754,6 +1811,7 @@ export function bindConnectionCenterPageEvents(render) {
   if (!pageState.loaded && !pageState.loading) void loadPage(render);
   const route = parseConnectionCenterRoute(window.location.hash);
   if (route.redirectHash) { window.location.hash = route.redirectHash; return; }
+  if (route.importPage && currentImportPage !== route.importPage) { currentImportPage = route.importPage; render(); return; }
   const hasDetailRoute = Boolean(route.detailId);
   if (pageState.loaded && hasDetailRoute && (pageState.selectedId !== route.detailId || pageState.inspectionTaskId !== route.inspectionTaskId)) {
     void openConnection(route.detailId, render, route.inspectionTaskId);
@@ -1766,6 +1824,12 @@ export function bindConnectionCenterPageEvents(render) {
   }
   root.querySelectorAll("[data-connection-section]").forEach((button) => button.addEventListener("click", () => {
     const section = selectConnectionSection(button.dataset.connectionSection); render(); ensureConnectionSectionLoaded(section, render);
+  }));
+  root.querySelectorAll("[data-import-page]").forEach((button) => button.addEventListener("click", () => {
+    currentImportPage = button.dataset.importPage;
+    selectConnectionSection("data-import");
+    render();
+    ensureConnectionSectionLoaded("data-import", render);
   }));
   root.querySelector("[data-link-data-status-shop]")?.addEventListener("change", (event) => {
     void loadMyLinkDataStatus(render, event.currentTarget.value || "");
@@ -2164,6 +2228,17 @@ export function bindConnectionCenterPageEvents(render) {
     if (!window.confirm("按系统建议批量确认目标并使其生效？仅待确认建议会被处理。")) return;
     void runGoalWorkbenchBatch(render, (connectionIds) => batchConfirmConnectionGoals({ connectionIds, approvalReason: "链接经营管理工作台批量确认" }));
   });
+  root.querySelectorAll("[data-contribution-page]").forEach(button=>button.addEventListener("click",()=>{contributionPage=Number(button.dataset.contributionPage);render();}));
+  root.querySelector("[data-contribution-rules]")?.addEventListener("submit",async(event)=>{
+    event.preventDefault();const form=new FormData(event.currentTarget);
+    try{await saveLinkContributionRules({mode:form.get("mode"),firstRatingDate:form.get("firstRatingDate"),thresholds:Object.fromEntries(["S","A","B","C"].map(k=>[k,Number(form.get(k))]))});await loadContributionPage(render);}
+    catch(error){contributionError=error.message;render();}
+  });
+  root.querySelector("[data-contribution-run]")?.addEventListener("click",async(event)=>{
+    event.currentTarget.disabled=true;
+    try{const result=await runLinkContributions();await loadContributionPage(render);if(result.skipped){contributionError=result.skipped;render();}}
+    catch(error){contributionError=error.message;render();}
+  });
   root.querySelectorAll("[data-goal-management-tab]").forEach((button) => button.addEventListener("click", () => {
     pageState.goalManagementTab = button.dataset.goalManagementTab;
     if (pageState.goalManagementTab === "pilots") void loadGoalPilotPage(render); else void loadGoalWorkbenchPage(render);
@@ -2315,17 +2390,6 @@ export function bindConnectionCenterPageEvents(render) {
       pageState.error = ""; render();
     } catch (error) { pageState.error = error.message; render(); }
   });
-  root.querySelector("[data-connection-positioning-form]")?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget; const button = form.querySelector("button[type='submit']");
-    if (button) button.disabled = true;
-    try {
-      const result = await updateConnectionBusinessPositioning(pageState.selectedId, Object.fromEntries(new FormData(form)));
-      const businessGoalEvaluation = await loadConnectionBusinessGoalEvaluation(pageState.selectedId);
-      pageState.coreDetail = { ...pageState.coreDetail, businessPositioning: result, businessGoalEvaluation };
-      pageState.error = ""; render();
-    } catch (error) { pageState.error = error.message; if (button) button.disabled = false; render(); }
-  });
   root.querySelector("[data-create-connection-goal]")?.addEventListener("click", async (event) => {
     const button = event.currentTarget; button.disabled = true;
     try {
@@ -2416,7 +2480,7 @@ export function bindConnectionCenterPageEvents(render) {
     if (button.dataset.goalHealthDrill === "goal-pending") filters.goalStatus = "pending";
     if (button.dataset.goalHealthDrill === "grade") filters.evaluationStatus = button.dataset.evaluationStatus || "underperforming";
     selectConnectionSection("goal-management");
-    void loadGoalWorkbenchPage(render, { filters, pagination: { page: 1 } });
+    void loadContributionPage(render);
   }));
   root.querySelector("[data-benchmark-settings]")?.addEventListener("submit", async (event) => {
     event.preventDefault(); const payload = Object.fromEntries(new FormData(event.currentTarget));

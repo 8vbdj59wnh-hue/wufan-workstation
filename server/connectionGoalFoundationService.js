@@ -114,10 +114,6 @@ export function setConnectionBusinessPositioning(connectionId, input = {}, conte
   if (decisionReason.length > 500) throw new Error("修改原因不能超过500个字符。");
   if (!decidedBy || !database.prepare("SELECT 1 FROM persons WHERE id=? AND status='active'").get(decidedBy)) throw new Error("操作人不存在或已停用。");
 
-  const template = loadTemplates(database).find((item) => item.positioningType === positioningType);
-  if (!template) throw new Error("当前经营定位没有生效中的目标模板。");
-  if (!template.weightValid || template.metrics.length !== 2) throw new Error("目标模板指标权重配置不完整。");
-
   const result = database.transaction(() => {
     const current = database.prepare("SELECT * FROM connection_business_profiles WHERE connectionId=? AND status='active'").get(id);
     if (current?.positioningType === positioningType) return { changed: false, idempotent: true };

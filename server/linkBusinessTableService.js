@@ -221,6 +221,7 @@ export function queryLinkBusinessTable(raw = {}, userId = "", isAdmin = false) {
       CASE WHEN ${operatingScope.predicate} THEN 'operating' ELSE 'historical' END operatingState,
       COALESCE(c.updatedAt,l.updatedAt) updatedAt,
       l.platformGoodsId,l.canonicalUrl,l.category,l.status platformStatus,sh.id shopId,sh.platform,COALESCE(sh.displayName,sh.shopName) shopName,p.name ownerName,
+      cr.grade contributionGrade,cr.error contributionError,
       fa.salesAmount,fa.salesCount,fa.quantity,fa.quantityCount,fa.costAmount,fa.costCount,fa.profitAmount,fa.profitCount,
       pa.periodStart,pa.periodEnd,pa.statisticsDate,pa.productType,pa.productStatus,pa.productTags,
       pa.payAmount,pa.payAmountCount,pa.payQuantity,pa.payQuantityCount,
@@ -241,6 +242,8 @@ export function queryLinkBusinessTable(raw = {}, userId = "", isAdmin = false) {
     FROM sales_links l JOIN sales_shops sh ON sh.id=l.shopId
     LEFT JOIN ${LINK_ASSET_SELECT_SQL} c ON c.salesLinkId=l.id
     LEFT JOIN persons p ON p.id=c.ownerId LEFT JOIN fact_aggregate fa ON fa.salesLinkId=l.id
+    LEFT JOIN link_contribution_results cr ON cr.salesLinkId=l.id
+      AND cr.runId=(SELECT id FROM link_contribution_runs ORDER BY ratingDate DESC LIMIT 1)
     LEFT JOIN platform_aggregate pa ON pa.salesLinkId=l.id WHERE ${where.join(" AND ")}
   `).all(params);
   const ids = rows.map((row) => row.connectionProfileId).filter(Boolean);
@@ -251,6 +254,7 @@ export function queryLinkBusinessTable(raw = {}, userId = "", isAdmin = false) {
       ? metric(Number(row.profitAmount || 0) / Number(row.salesAmount), 1) : metric(null, 0);
     return {
       id: row.id, salesLinkId: row.salesLinkId, name: row.name, mainImage: row.mainImage, ownerId: row.ownerId,
+      contributionGrade: row.contributionGrade || null, contributionError: row.contributionError || null,
       ownerName: row.ownerName, platform: row.platform, shopId: row.shopId, shopName: row.shopName,
       platformGoodsId: row.platformGoodsId, canonicalUrl: row.canonicalUrl, category: row.category, platformStatus: row.platformStatus,
       platformPeriodStart: row.periodStart, platformPeriodEnd: row.periodEnd,

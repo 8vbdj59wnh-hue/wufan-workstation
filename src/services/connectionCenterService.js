@@ -1,4 +1,7 @@
 export {
+  loadLinkContributions,
+  saveLinkContributionRules,
+  runLinkContributions,
   confirmConnectionFoundationImport,
   confirmConnectionFoundationBulkImport,
   createConnection,

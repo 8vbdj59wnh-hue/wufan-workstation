@@ -1,5 +1,6 @@
 import { registerUiModule, renderUiModule } from "../uiModuleRegistry.js";
 import { escapeHtml } from "../utils/html.js";
+import { renderLinkContributionName } from "./linkContributionBadge.js";
 import "./linkImage.js";
 
 export const LINK_BUSINESS_COLUMN_GROUPS = [
@@ -101,7 +102,7 @@ export function renderLinkBusinessTable({ items = [], pagination = {}, fields = 
   const visible = fields.filter((field) => definitions.has(field));
   const cell = (item, key) => ({
     image: renderUiModule("link_image", { src: item.imageUrl, alt: item.name, size: "compact", hoverPreview: true }),
-    name: `<button type="button" class="link-data-name" data-open-connection="${escapeHtml(item.id)}"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.platformGoodsId || "")}</small></button>`,
+    name: `<button type="button" class="link-data-name" data-open-connection="${escapeHtml(item.id)}">${renderLinkContributionName(item)}<small>${escapeHtml(item.platformGoodsId || "")}</small></button>`,
     platform: escapeHtml(item.platform || "—"), shop: escapeHtml(item.shopName || "—"), goodsId: escapeHtml(item.platformGoodsId || "—"),
     url: externalLink(item.canonicalUrl), category: escapeHtml(item.category || "—"), platformStatus: escapeHtml(item.platformStatus || "—"),
     statisticsDate: escapeHtml(item.platformMetrics?.statisticsDate || "暂无数据"),

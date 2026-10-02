@@ -3,6 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
+import { linkContributionSchema } from "./linkContributionService.js";
 import { productShopPlanSchema } from "./productShopPlanSchema.js";
 import { ensureSalesDailyIdentityLookupIndexes } from "./performanceIndexes.js";
 import { ensureSalesAnomalyActionStandards } from "./capabilities/salesAnomalyActionStandards.js";
@@ -3912,6 +3913,7 @@ export function initializeDatabase({ reset = false } = {}) {
   const database = getDatabase();
   database.exec(fs.readFileSync(schemaPath, "utf8"));
   runLightweightMigrations();
+  database.exec(linkContributionSchema);
   database.exec(productShopPlanSchema);
   backfillMethodologiesForProcessNodes();
 

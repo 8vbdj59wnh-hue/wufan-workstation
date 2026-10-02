@@ -236,9 +236,9 @@ import {
   previewConnectionDataImport,
 } from "./connectionDataFoundationService.js";
 import { getConnectionCoreDetail, listConnectionCoreProfiles, listConnectionCoreProfilesPage } from "./connectionCorePageService.js";
-import { readConnectionGoalFoundation, setConnectionBusinessPositioning } from "./connectionGoalFoundationService.js";
+import { readConnectionGoalFoundation } from "./connectionGoalFoundationService.js";
 import { confirmConnectionGoalPlan, createConnectionGoalSuggestion, readConnectionGoalPlans } from "./connectionGoalPlanService.js";
-import { evaluateConnectionGoal, readConnectionGoalEvaluation } from "./connectionGoalEvaluationService.js";
+import { readContribution, saveContributionRule, runDueContribution, readLinkContribution } from "./linkContributionService.js";
 import {
   batchConfirmConnectionGoals,
   batchGenerateConnectionGoalSuggestions,
@@ -3787,17 +3787,14 @@ app.get("/api/connections/:id/business-positioning", requireLinkView, requireCon
 });
 
 app.put("/api/connections/:id/business-positioning", requireLinkManage, requireConnectionAccess, (request, response) => {
-  try {
-    response.json({ success: true, ...setConnectionBusinessPositioning(request.params.id, request.body, {
-      userId: getUserPersonId(request.user),
-      isAdmin: isAdminUser(request.user),
-    }) });
-  } catch (error) {
-    response.status(error.statusCode || (/不存在/.test(error.message || "") ? 404 : 400))
-      .json({ success: false, message: error.message || "链接经营定位修改失败。" });
-  }
+  response.status(410).json({success:false,message:"经营定位设置功能已退出。"});
 });
 
+app.use((request,response,next)=>{
+  if(['POST','PATCH','PUT'].includes(request.method) && (/^\/api\/connections\/[^/]+\/business-goals\//.test(request.path)||/^\/api\/connection-goal-workbench\/(positioning|suggestions|confirm)$/.test(request.path)||/^\/api\/connection-goal-pilots/.test(request.path)))
+    return response.status(410).json({success:false,message:"链接经营目标设置已退出，请使用链接贡献级别。"});
+  next();
+});
 app.get("/api/connections/:id/business-goals", requireLinkView, requireConnectionAccess, (request, response) => {
   try {
     response.json({ success: true, ...readConnectionGoalPlans(request.params.id, {
@@ -3831,9 +3828,21 @@ app.post("/api/connections/:id/business-goals/:planId/confirm", requireLinkManag
   }
 });
 
+app.get("/api/link-contributions", requireLinkView, (request,response) => {
+  try { const model=readContribution(); model.results=model.results.filter(r=>canReadCompanyScope(request.user)||r.ownerId===getUserPersonId(request.user)); response.json({success:true,...model}); }
+  catch(error){response.status(400).json({success:false,message:error.message});}
+});
+app.post("/api/link-contributions/rules", requireLinkRating, requireAdminUser, (request,response) => {
+  try {response.json({success:true,...saveContributionRule(request.body,getUserPersonId(request.user))});}
+  catch(error){response.status(400).json({success:false,message:error.message});}
+});
+app.post("/api/link-contributions/run", requireLinkRating, requireAdminUser, (_request,response) => {
+  try {response.json({success:true,...runDueContribution()});}
+  catch(error){response.status(400).json({success:false,message:error.message});}
+});
 app.get("/api/connections/:id/business-goal-evaluation", requireLinkView, requireConnectionAccess, (request, response) => {
   try {
-    response.json({ success: true, ...readConnectionGoalEvaluation(request.params.id) });
+    response.json({ success: true, ...readLinkContribution(request.params.id) });
   } catch (error) {
     response.status(error.statusCode || 400).json({ success: false, message: error.message || "经营目标评价读取失败。" });
   }
@@ -3841,7 +3850,7 @@ app.get("/api/connections/:id/business-goal-evaluation", requireLinkView, requir
 
 app.post("/api/connections/:id/business-goal-evaluation/refresh", requireLinkRating, requireConnectionAccess, (request, response) => {
   try {
-    response.json({ success: true, ...evaluateConnectionGoal(request.params.id) });
+    response.json({ success: false, message: "贡献评级由公司统一每30天执行，不支持单链接重算。" });
   } catch (error) {
     response.status(error.statusCode || 400).json({ success: false, message: error.message || "经营目标评价刷新失败。" });
   }
@@ -5777,6 +5786,12 @@ const connectionInspectionSchedulerTimer = backgroundJobsEnabled ? setInterval((
   }
 }, 60_000) : null;
 connectionInspectionSchedulerTimer?.unref();
+
+const linkContributionTimer=backgroundJobsEnabled?setInterval(()=>{
+  const token=beginReleaseManagedJob("link_contribution_rating");if(!token)return;
+  try{runDueContribution();}catch(error){console.error("链接贡献评级失败",error);}finally{finishReleaseManagedJob(token);}
+},60_000):null;
+linkContributionTimer?.unref();
 
 let dataSyncSchedulerRunning = false;
 const dataSyncSchedulerTimer = backgroundJobsEnabled ? setInterval(async () => {

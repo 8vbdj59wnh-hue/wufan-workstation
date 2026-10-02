@@ -11084,6 +11084,8 @@ button.content-template-thumb {
 .my-links-workbench { display: grid; gap: 16px; }.my-links-workbench > header h2, .my-links-workbench > header p { margin: 0; }.my-links-workbench > header > div > p:last-child { margin-top: 5px; color: #667085; }
 .company-links-workspace, .link-data-update-workspace, .link-workspace-stack, .link-hospital-overview-module { display: grid; gap: 16px; }
 .link-data-update-workspace .eyebrow { display: none; }
+.connection-import-page-nav { justify-self: start; flex-wrap: wrap; }
+.link-data-update-workspace .connection-business-import-grid { grid-template-columns: minmax(0, 640px); }
 .connection-preview-fold { overflow: hidden; border: 1px solid #dfe8e4; border-radius: 14px; background: #fff; }
 .connection-preview-fold > summary, .connection-collapsible-panel > summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; cursor: pointer; list-style: none; }
 .connection-preview-fold > summary::-webkit-details-marker, .connection-collapsible-panel > summary::-webkit-details-marker, .sales-daily-quality-details > summary::-webkit-details-marker { display: none; }
@@ -11885,6 +11887,15 @@ button.content-template-thumb {
 .link-business-table-module > footer div { display: flex; gap: 8px; }
 .link-data-name { display: grid; gap: 3px; max-width: 220px; padding: 0; border: 0; background: transparent; text-align: left; cursor: pointer; }
 .link-data-name strong, .link-data-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-name-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.link-name-line .link-name-text { min-width: 0; }
+.link-contribution-badge { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 22px; height: 22px; border-radius: 5px; font-size: 12px; font-weight: 800; line-height: 1; background: #f1f5f9; color: #64748b; }
+.link-contribution-badge.is-S { background: #fff2ce; color: #8a5900; }
+.link-contribution-badge.is-A { background: #e8e2ff; color: #6243a9; }
+.link-contribution-badge.is-B { background: #dceefe; color: #25628c; }
+.link-contribution-badge.is-C { background: #e2f2eb; color: #247653; }
+.link-contribution-badge.is-D { background: #ffe8ed; color: #a8435b; }
+.link-contribution-badge.is-N { background: #d7f8ed; color: #127759; }
 .link-image-module { position: relative; display: inline-grid; place-items: center; width: 48px; height: 48px; overflow: hidden; border-radius: 10px; background: #f2f4f7; color: #98a2b3; }
 .link-image-module img { position: relative; z-index: 1; width: 100%; height: 100%; object-fit: cover; }
 .link-image-placeholder { position: absolute; inset: 0; display: grid; place-items: center; font-size: 12px; }
@@ -12386,3 +12397,25 @@ button.content-template-thumb {
 .content-schedule-filters .schedule-keyword-filter{flex:2 1 220px}
 .content-schedule-filters input,.content-schedule-filters select{width:100%}
 .content-schedule-caption{font-size:12px;color:#71808b;padding:10px 12px}
+.import-workspace-heading { margin: 4px 0 18px; }
+.import-workspace-heading h2 { margin: 0 0 8px; color: #194c40; }
+.import-workspace-heading p { margin: 0 0 8px; color: #526170; }
+.import-workspace-heading small, .import-current-status small { color: #738194; }
+.import-step-number { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin-right: 10px; border-radius: 50%; background: #19765f; color: white; font-size: 14px; }
+.import-upload-step h3, .import-review-heading h3 { display: flex; align-items: center; margin: 0 0 16px; }
+.import-upload-step .connection-business-import-grid { grid-template-columns: minmax(0, 1fr); }
+.import-upload-step .connection-foundation-import-form { box-shadow: none; background: #f8fafb; border: 1px dashed #bdced5; }
+.link-data-update-workspace .import-upload-step .connection-foundation-import-form { grid-template-columns: minmax(240px, 1fr) auto; align-items: end; }
+.import-drop-hint, .import-upload-step .connection-import-feedback { grid-column: 1 / -1; }
+.link-data-update-workspace .connection-foundation-import-form.is-dragging { border-color: #19765f; background: #edf8f3; }
+.import-drop-hint { color: #738194; }
+@media (max-width: 700px) { .link-data-update-workspace .import-upload-step .connection-foundation-import-form { grid-template-columns: 1fr; } }
+.import-review-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 0; }
+.import-review-heading small, .import-review-empty { color: #738194; }
+.import-issue-guidance { border: 1px solid #f0d5a5; border-radius: 12px; background: #fff9ee; padding: 16px; margin-bottom: 12px; }
+.import-issue-guidance .text-button { margin-right: 18px; }
+.import-current-preview .connection-import-preview footer { position: sticky; bottom: 12px; z-index: 3; background: #fff; border: 1px solid #dce7e4; border-radius: 10px; padding: 14px; box-shadow: 0 3px 16px #173d3210; }
+.import-amount-reconciliation { margin-bottom: 12px; }
+.import-amount-reconciliation h4 { margin: 0 0 12px; }
+.link-data-update-workspace > .sales-daily-quality { margin-bottom: 18px; }
+@media (max-width: 700px) { .import-current-preview .connection-import-preview footer { position: static; } .import-review-heading { display: block; } }

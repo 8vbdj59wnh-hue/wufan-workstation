@@ -1673,6 +1673,16 @@ export async function loadConnectionBusinessGoalEvaluation(connectionId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/business-goal-evaluation`), "经营目标评价读取失败。");
 }
 
+export async function loadLinkContributions() {
+ return readApiJson(await authFetch(`${apiBaseUrl}/api/link-contributions`),"贡献评级读取失败。");
+}
+export async function saveLinkContributionRules(input) {
+ return readApiJson(await authFetch(`${apiBaseUrl}/api/link-contributions/rules`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(input)}),"贡献规则保存失败。");
+}
+export async function runLinkContributions() {
+ return readApiJson(await authFetch(`${apiBaseUrl}/api/link-contributions/run`,{method:"POST"}),"贡献评级执行失败。");
+}
+
 export async function refreshConnectionBusinessGoalEvaluation(connectionId) {
   return readApiJson(await authFetch(`${apiBaseUrl}/api/connections/${encodeURIComponent(connectionId)}/business-goal-evaluation/refresh`, {
     method: "POST",
