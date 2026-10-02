@@ -950,6 +950,17 @@ function getTaskBelonging(task) {
   };
 }
 
+function getTaskActionBusinessCode(task, belonging = getTaskBelonging(task)) {
+  const taskFields = getTaskCustomFields(task);
+  return String(belonging.instance?.businessCode ?? taskFields.actionCode ?? "").trim();
+}
+
+function renderTaskActionCode(task, belonging = getTaskBelonging(task), className = "") {
+  const actionCode = getTaskActionBusinessCode(task, belonging);
+  if (actionCode === "") return "";
+  return `<button class="copyable-code task-action-business-code ${className}" type="button" data-copy-task-action-code="${escapeAttribute(actionCode)}" title="点击复制行动编码">行动编码：${escapeHtml(actionCode)}</button>`;
+}
+
 function renderTaskBelonging(task) {
   const belonging = getTaskBelonging(task);
   const secondLine =
@@ -962,6 +973,7 @@ function renderTaskBelonging(task) {
     <div class="task-belonging${mutedClass}">
       <strong>${escapeHtml(belonging.objectName)}</strong>
       ${secondLine}
+      ${renderTaskActionCode(task, belonging)}
     </div>
   `;
 }
@@ -3437,6 +3449,7 @@ function renderTaskCard(task) {
         </div>
         <button class="copyable-code task-card-business-code" type="button" data-copy-task-code="${escapeAttribute(task.businessCode ?? "")}" ${task.businessCode ? "" : "disabled"} title="${task.businessCode ? "点击复制任务编码" : "任务编码缺失"}">${escapeHtml(task.businessCode || "未编号")}</button>
         <p class="task-card-action-title">${escapeHtml(actionName)}</p>
+        ${renderTaskActionCode(task, belonging, "task-card-action-code")}
         <div class="task-card-status-row">
           ${renderTaskStatus(task)}
           <span class="task-card-remaining ${remaining.overdue ? "is-overdue" : ""}" data-task-remaining-task-id="${escapeHtml(task.id)}">${escapeHtml(remaining.label)}</span>
@@ -6031,10 +6044,11 @@ export function bindTasksPageEvents(rerender) {
       rerender();
     });
   }
-  tasksPage.querySelectorAll("[data-copy-task-code]").forEach((button) => button.addEventListener("click", async (event) => {
+  tasksPage.querySelectorAll("[data-copy-task-code], [data-copy-task-action-code]").forEach((button) => button.addEventListener("click", async (event) => {
     event.preventDefault();
     event.stopImmediatePropagation();
-    const code = button.dataset.copyTaskCode ?? "";
+    const isActionCode = button.hasAttribute("data-copy-task-action-code");
+    const code = isActionCode ? button.dataset.copyTaskActionCode ?? "" : button.dataset.copyTaskCode ?? "";
     if (code === "") return;
     const originalText = button.textContent;
     try {
@@ -6053,7 +6067,7 @@ export function bindTasksPageEvents(rerender) {
       button.textContent = "已复制";
       window.setTimeout(() => { if (button.isConnected) button.textContent = originalText; }, 1200);
     } catch (error) {
-      console.error("任务编码复制失败", error);
+      console.error(`${isActionCode ? "行动" : "任务"}编码复制失败`, error);
       button.textContent = "复制失败";
       window.setTimeout(() => { if (button.isConnected) button.textContent = originalText; }, 1200);
     }
