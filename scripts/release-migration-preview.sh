@@ -3,11 +3,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/production-paths.sh"
+source "$SCRIPT_DIR/lib/node-runtime.sh"
 wufan_load_production_paths
 
 EXPECTED_PROJECT_DIR="${WUFAN_PROJECT_DIR:?WUFAN_PROJECT_DIR is required}"
 RELEASE_ROOT="${WUFAN_RELEASE_ROOT:?WUFAN_RELEASE_ROOT is required}"
-NODE22_BIN="/opt/homebrew/opt/node@22/bin"
 
 COMMIT_SHA=""
 RELEASE_DIR=""
@@ -49,7 +49,7 @@ if [[ "${RELEASE_TEST_MODE:-}" == "1" ]]; then
   NODE_COMMAND="${RELEASE_TEST_NODE_COMMAND:-$(command -v node)}"
 else
   case "$RELEASE_DIR" in "$RELEASE_ROOT"/release-*) ;; *) fail "release directory must be under $RELEASE_ROOT" ;; esac
-  NODE_COMMAND="$NODE22_BIN/node"
+  wufan_resolve_node_runtime
 fi
 
 [[ -x "$NODE_COMMAND" ]] || fail "Node 22 is unavailable"
